@@ -1,0 +1,62 @@
+#lang rhombus
+// Checks the canonical HardwareType abstraction and Bits-specific predicates.
+
+import:
+  "../../rhdl/core/main.rhm" open
+
+class ExtensionType(name):
+  implements HardwareType
+  override method describe(): "extension<" ++ name ++ ">"
+  override method type_equal(other):
+    other is_a ExtensionType && name == other.name
+
+def bits8 = Bits(8)
+def another_bits8 = Bits(8)
+def bits4 = Bits(4)
+def extension = ExtensionType("packet")
+def same_extension = ExtensionType("packet")
+def other_extension = ExtensionType("control")
+
+check:
+  bits8 is_a HardwareType ~is #true
+  hardware_type(bits8) ~is #true
+  type_well_formed(bits8) ~is #true
+  bits_type(bits8) ~is #true
+  bits1_type(bits8) ~is #false
+  bits1_type(Bits(1)) ~is #true
+  type_equal(bits8, another_bits8) ~is #true
+  type_equal(bits8, bits4) ~is #false
+  hardware_type(extension) ~is #true
+  type_well_formed(extension) ~is #true
+  bits_type(extension) ~is #false
+  type_equal(extension, same_extension) ~is #true
+  type_equal(extension, other_extension) ~is #false
+  type_equal(extension, bits8) ~is #false
+  schema_for("rtl.add").type_rule ~is "bits_same_width_binary"
+  schema_for("rtl.mux").type_rule ~is "hardware_mux"
+  schema_for("rtl.register").type_rule ~is "hardware_register"
+  schema_for("rtl.register_reset").type_rule ~is "hardware_register_reset"
+  schema_for("rtl.drive").type_rule ~is "type_equal_drive"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("LayeredType")
+  def clock = builder.input(module_def, "clock", Bits(1))
+  def reset = builder.input(module_def, "reset", Bits(1))
+  def source = builder.input(module_def, "source", extension)
+  def alternate = builder.input(module_def, "alternate", same_extension)
+  def target = builder.output(module_def, "target", same_extension)
+  def selected = builder.mux(module_def, clock, source, alternate)
+  def state = builder.register(module_def,
+                               "state",
+                               same_extension,
+                               clock,
+                               reset,
+                               source)
+  builder.drive(state.next, selected)
+  builder.drive(target, state.current)
+  check:
+    builder.add(module_def, source, source) ~throws "same Bits width"
+  def finished = builder.finish(module_def)
+  verify_design(design)

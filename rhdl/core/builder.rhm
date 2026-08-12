@@ -3,6 +3,7 @@
 
 import:
   rhombus/rx open
+  "types.rhm" open
   "ir.rhm" open
 
 export:
@@ -11,14 +12,14 @@ export:
 fun fail(who, message):
   error(~who: who, message)
 
-fun ensure_bits(type, who):
-  unless type is_a Bits
-  | fail(who, "expected a Bits type")
-  unless type.width is_a Int && type.width > 0
-  | fail(who, "Bits width must be a positive host Int")
+fun ensure_hardware_type(type, who):
+  unless type_well_formed(type)
+  | fail(who, "expected a well-formed HardwareType")
 
-fun same_type(left, right):
-  left is_a Bits && right is_a Bits && left.width == right.width
+fun ensure_bits(type, who):
+  ensure_hardware_type(type, who)
+  unless bits_type(type)
+  | fail(who, "expected a Bits type")
 
 def hardware_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
@@ -89,20 +90,20 @@ fun build_value_operation(design,
   module_def.add_operation(operation)
   value
 
-fun build_same_width_binary(design,
-                            module_def,
-                            opcode,
-                            left,
-                            right,
-                            name,
-                            location,
-                            origin,
-                            who):
+fun build_bits_same_width_binary(design,
+                                 module_def,
+                                 opcode,
+                                 left,
+                                 right,
+                                 name,
+                                 location,
+                                 origin,
+                                 who):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, left, who)
   ensure_value_in(module_def, right, who)
-  unless same_type(left.type, right.type)
+  unless bits_type(left.type) && bits_type(right.type) && type_equal(left.type, right.type)
   | fail(who,
          opcode ++ " operands must have exactly the same Bits width")
   build_value_operation(design,
@@ -128,7 +129,7 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'input)
     ensure_open(module_def, #'input)
     ensure_hardware_name(name, #'input)
-    ensure_bits(type, #'input)
+    ensure_hardware_type(type, #'input)
     ensure_unique_hardware_name(module_def, name, #'input)
     def operation_id = design.fresh_id()
     def value = Value(design.fresh_id(), name, type, module_def, operation_id)
@@ -150,7 +151,7 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'output)
     ensure_open(module_def, #'output)
     ensure_hardware_name(name, #'output)
-    ensure_bits(type, #'output)
+    ensure_hardware_type(type, #'output)
     ensure_unique_hardware_name(module_def, name, #'output)
     def operation_id = design.fresh_id()
     def place = Place(design.fresh_id(), name, type, module_def, operation_id)
@@ -206,15 +207,15 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("add")):
-    build_same_width_binary(design,
-                            module_def,
-                            "rtl.add",
-                            left,
-                            right,
-                            name,
-                            location,
-                            origin,
-                            #'add)
+    build_bits_same_width_binary(design,
+                                 module_def,
+                                 "rtl.add",
+                                 left,
+                                 right,
+                                 name,
+                                 location,
+                                 origin,
+                                 #'add)
 
   method bit_not(module_def,
                  operand,
@@ -224,6 +225,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'bit_not)
     ensure_open(module_def, #'bit_not)
     ensure_value_in(module_def, operand, #'bit_not)
+    unless bits_type(operand.type)
+    | fail(#'bit_not, "bit_not operand must have a Bits type")
     build_value_operation(design,
                           module_def,
                           "rtl.not",
@@ -240,8 +243,8 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("and")):
-    build_same_width_binary(design, module_def, "rtl.and", left, right,
-                            name, location, origin, #'bit_and)
+    build_bits_same_width_binary(design, module_def, "rtl.and", left, right,
+                                 name, location, origin, #'bit_and)
 
   method bit_or(module_def,
                 left,
@@ -249,8 +252,8 @@ class Builder(design):
                 name = #false,
                 location = Location(),
                 origin = Origin("or")):
-    build_same_width_binary(design, module_def, "rtl.or", left, right,
-                            name, location, origin, #'bit_or)
+    build_bits_same_width_binary(design, module_def, "rtl.or", left, right,
+                                 name, location, origin, #'bit_or)
 
   method bit_xor(module_def,
                  left,
@@ -258,8 +261,8 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("xor")):
-    build_same_width_binary(design, module_def, "rtl.xor", left, right,
-                            name, location, origin, #'bit_xor)
+    build_bits_same_width_binary(design, module_def, "rtl.xor", left, right,
+                                 name, location, origin, #'bit_xor)
 
   method sub(module_def,
              left,
@@ -267,8 +270,8 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("sub")):
-    build_same_width_binary(design, module_def, "rtl.sub", left, right,
-                            name, location, origin, #'sub)
+    build_bits_same_width_binary(design, module_def, "rtl.sub", left, right,
+                                 name, location, origin, #'sub)
 
   method eq(module_def,
             left,
@@ -280,7 +283,7 @@ class Builder(design):
     ensure_open(module_def, #'eq)
     ensure_value_in(module_def, left, #'eq)
     ensure_value_in(module_def, right, #'eq)
-    unless same_type(left.type, right.type)
+    unless bits_type(left.type) && bits_type(right.type) && type_equal(left.type, right.type)
     | fail(#'eq, "eq operands must have exactly the same Bits width")
     build_value_operation(design,
                           module_def,
@@ -304,10 +307,10 @@ class Builder(design):
     ensure_value_in(module_def, condition, #'mux)
     ensure_value_in(module_def, true_value, #'mux)
     ensure_value_in(module_def, false_value, #'mux)
-    unless condition.type is_a Bits && condition.type.width == 1
+    unless bits1_type(condition.type)
     | fail(#'mux, "mux condition must be Bits(1)")
-    unless same_type(true_value.type, false_value.type)
-    | fail(#'mux, "mux data operands must have exactly the same Bits width")
+    unless type_equal(true_value.type, false_value.type)
+    | fail(#'mux, "mux data operands must have exactly the same hardware type")
     build_value_operation(design,
                           module_def,
                           "rtl.mux",
@@ -332,6 +335,8 @@ class Builder(design):
     def mutable result_width = 0
     for (value in operands):
       ensure_value_in(module_def, value, #'concat)
+      unless bits_type(value.type)
+      | fail(#'concat, "concat operands must have Bits types")
       result_width := result_width + value.type.width
     build_value_operation(design,
                           module_def,
@@ -353,6 +358,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'extract)
     ensure_open(module_def, #'extract)
     ensure_value_in(module_def, value, #'extract)
+    unless bits_type(value.type)
+    | fail(#'extract, "extract operand must have a Bits type")
     unless high is_a Int && low is_a Int
     | fail(#'extract, "extract indices must be host Int values")
     unless 0 <= low && low <= high && high < value.type.width
@@ -378,6 +385,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'zext)
     ensure_open(module_def, #'zext)
     ensure_value_in(module_def, value, #'zext)
+    unless bits_type(value.type)
+    | fail(#'zext, "zext operand must have a Bits type")
     unless target_width is_a Int && target_width > 0
     | fail(#'zext, "zext target width must be a positive host Int")
     unless target_width > value.type.width
@@ -402,6 +411,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'trunc)
     ensure_open(module_def, #'trunc)
     ensure_value_in(module_def, value, #'trunc)
+    unless bits_type(value.type)
+    | fail(#'trunc, "trunc operand must have a Bits type")
     unless target_width is_a Int && target_width > 0
     | fail(#'trunc, "trunc target width must be a positive host Int")
     unless target_width < value.type.width
@@ -428,9 +439,9 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'register)
     ensure_open(module_def, #'register)
     ensure_hardware_name(name, #'register)
-    ensure_bits(type, #'register)
+    ensure_hardware_type(type, #'register)
     ensure_value_in(module_def, clock, #'register)
-    unless clock.type is_a Bits && clock.type.width == 1
+    unless bits1_type(clock.type)
     | fail(#'register, "register clock must be Bits(1)")
     unless (reset && reset_value) || (!reset && !reset_value)
     | fail(#'register,
@@ -438,10 +449,10 @@ class Builder(design):
     when reset
     | ensure_value_in(module_def, reset, #'register)
       ensure_value_in(module_def, reset_value, #'register)
-      unless reset.type is_a Bits && reset.type.width == 1
+      unless bits1_type(reset.type)
       | fail(#'register, "register reset must be Bits(1)")
-      unless same_type(type, reset_value.type)
-      | fail(#'register, "register reset value has the wrong width")
+      unless type_equal(type, reset_value.type)
+      | fail(#'register, "register reset value has the wrong hardware type")
     ensure_unique_hardware_name(module_def, name, #'register)
     ensure_unique_hardware_name(module_def, name ++ ".next", #'register)
     def operation_id = design.fresh_id()
@@ -532,8 +543,8 @@ class Builder(design):
     ensure_open(module_def, #'drive)
     ensure_place_in(module_def, place, #'drive)
     ensure_value_in(module_def, value, #'drive)
-    unless same_type(place.type, value.type)
-    | fail(#'drive, "place and driver must have exactly the same Bits width")
+    unless type_equal(place.type, value.type)
+    | fail(#'drive, "place and driver must have exactly the same hardware type")
     when place.driver
     | fail(#'drive, "place " ++ place.name ++ " already has a driver")
     place.driver := value

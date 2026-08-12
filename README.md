@@ -198,9 +198,13 @@ emit_circt(design)
 
 The initial combinational Builder methods are `bit_not`, `bit_and`, `bit_or`,
 `bit_xor`, `add`, `sub`, `eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`.
-All operands have explicit `Bits(width)` types. `eq` returns `Bits(1)`;
-same-width logic and arithmetic preserve their data width; and width-changing
-operations compute or require their result width explicitly.
+Bit-vector operations have explicit `Bits(width)` operands. `eq` returns
+`Bits(1)`; same-width logic and arithmetic preserve their data width; and
+width-changing operations compute or require their result width explicitly.
+Mux data and register state may use any `HardwareType` when their corresponding
+types satisfy `type_equal`; mux conditions, clocks, and resets remain
+`Bits(1)`. The current CIRCT backend lowers `Bits`; layered aggregate types
+must lower to supported core types before CIRCT emission.
 
 `concat(module, [a, b, ...])` places the first operand in the most-significant
 bits. `extract(module, value, high, low)` uses inclusive host-`Int` indices.

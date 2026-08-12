@@ -2,6 +2,7 @@
 // Verifies RHDL schemas, ownership, use-def links, types, drivers, and graph invariants.
 
 import:
+  "types.rhm" open
   "ir.rhm" open
   "ops.rhm" open
 
@@ -14,12 +15,6 @@ fun fail(message):
 
 fun fail_operation(operation, message):
   fail(operation.location.describe() ++ ": " ++ message)
-
-fun valid_bits(type):
-  type is_a Bits && type.width is_a Int && type.width > 0
-
-fun same_type(left, right):
-  valid_bits(left) && valid_bits(right) && left.width == right.width
 
 fun contains_identity(items, item):
   items.find(fun (candidate): candidate === item)
@@ -45,109 +40,110 @@ fun check_schema(operation):
 
 fun check_operation_types(module_def, operation, schema):
   match schema.type_rule
-  | "input_port":
-      unless valid_bits(operation.results[0].type)
-      | fail_operation(operation, "input port must have a valid Bits type")
-  | "output_port":
-      unless valid_bits(operation.places[0].type)
-      | fail_operation(operation, "output port must have a valid Bits type")
-  | "constant":
+  | "hardware_input_port":
+      unless type_well_formed(operation.results[0].type)
+      | fail_operation(operation, "input port must have a well-formed HardwareType")
+  | "hardware_output_port":
+      unless type_well_formed(operation.places[0].type)
+      | fail_operation(operation, "output port must have a well-formed HardwareType")
+  | "bits_constant":
       def result = operation.results[0]
       def integer = operation.attribute("value", #false)
-      unless valid_bits(result.type)
+      unless bits_type(result.type)
       | fail_operation(operation, "constant result must have a valid Bits type")
       unless integer is_a Int && integer >= 0 && integer < (1 bits.(<<) result.type.width)
       | fail_operation(operation, "constant does not fit its result width")
-  | "same_width_unary":
+  | "bits_same_width_unary":
       def operand = operation.operands[0]
       def result = operation.results[0]
-      unless same_type(operand.type, result.type)
+      unless bits_type(operand.type) && bits_type(result.type) && type_equal(operand.type, result.type)
       | fail_operation(operation,
                        operation.opcode ++ " operand and result must have the same Bits width")
-  | "same_width_binary":
+  | "bits_same_width_binary":
       def left = operation.operands[0]
       def right = operation.operands[1]
       def result = operation.results[0]
-      unless same_type(left.type, right.type) && same_type(left.type, result.type)
+      def bits_operands = bits_type(left.type) && bits_type(right.type) && bits_type(result.type)
+      unless bits_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
       | fail_operation(operation,
                        operation.opcode ++ " operands and result must have the same Bits width")
-  | "same_width_compare":
+  | "bits_same_width_compare":
       def left = operation.operands[0]
       def right = operation.operands[1]
       def result = operation.results[0]
-      unless same_type(left.type, right.type)
+      unless bits_type(left.type) && bits_type(right.type) && type_equal(left.type, right.type)
       | fail_operation(operation,
                        operation.opcode ++ " operands must have the same Bits width")
-      unless valid_bits(result.type) && result.type.width == 1
+      unless bits1_type(result.type)
       | fail_operation(operation,
                        operation.opcode ++ " result must be Bits(1)")
-  | "mux":
+  | "hardware_mux":
       def condition = operation.operands[0]
       def true_value = operation.operands[1]
       def false_value = operation.operands[2]
       def result = operation.results[0]
-      unless valid_bits(condition.type) && condition.type.width == 1
+      unless bits1_type(condition.type)
       | fail_operation(operation, "mux condition must be Bits(1)")
-      def data_types_match = same_type(true_value.type, false_value.type) && same_type(true_value.type, result.type)
+      def data_types_match = type_equal(true_value.type, false_value.type) && type_equal(true_value.type, result.type)
       unless data_types_match
       | fail_operation(operation,
-                       "mux data operands and result must have the same Bits width")
-  | "concat":
+                       "mux data operands and result must have the same hardware type")
+  | "bits_concat":
       unless operation.operands.length() >= 2
       | fail_operation(operation, "concat requires at least two operands")
       def mutable expected_width = 0
       for (operand in operation.operands):
-        unless valid_bits(operand.type)
+        unless bits_type(operand.type)
         | fail_operation(operation, "concat operands must have valid Bits types")
         expected_width := expected_width + operand.type.width
       def result = operation.results[0]
-      unless valid_bits(result.type) && result.type.width == expected_width
+      unless bits_type(result.type) && result.type.width == expected_width
       | fail_operation(operation,
                        "concat result width must equal the sum of its operand widths")
-  | "extract":
+  | "bits_extract":
       def operand = operation.operands[0]
       def result = operation.results[0]
       def high = operation.attribute("high", #false)
       def low = operation.attribute("low", #false)
       unless high is_a Int && low is_a Int
       | fail_operation(operation, "extract indices must be host Int values")
-      unless valid_bits(operand.type) && 0 <= low && low <= high && high < operand.type.width
+      unless bits_type(operand.type) && 0 <= low && low <= high && high < operand.type.width
       | fail_operation(operation,
                        "extract indices must satisfy 0 <= low <= high < source width")
-      unless valid_bits(result.type) && result.type.width == high - low + 1
+      unless bits_type(result.type) && result.type.width == high - low + 1
       | fail_operation(operation, "extract result width does not match its indices")
-  | "zext" || "trunc":
+  | "bits_zext" || "bits_trunc":
       def operand = operation.operands[0]
       def result = operation.results[0]
       def target_width = operation.attribute("target_width", #false)
       unless target_width is_a Int && target_width > 0
       | fail_operation(operation, operation.opcode ++ " target width must be a positive host Int")
-      unless valid_bits(operand.type) && valid_bits(result.type) && result.type.width == target_width
+      unless bits_type(operand.type) && bits_type(result.type) && result.type.width == target_width
       | fail_operation(operation, operation.opcode ++ " result must match its target width")
-      when schema.type_rule == "zext" && target_width <= operand.type.width
+      when schema.type_rule == "bits_zext" && target_width <= operand.type.width
       | fail_operation(operation, "zext target width must be larger than the source width")
-      when schema.type_rule == "trunc" && target_width >= operand.type.width
+      when schema.type_rule == "bits_trunc" && target_width >= operand.type.width
       | fail_operation(operation, "trunc target width must be smaller than the source width")
-  | "register" || "register_reset":
+  | "hardware_register" || "hardware_register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]
       def next = operation.places[0]
-      unless valid_bits(clock.type) && clock.type.width == 1
+      unless bits1_type(clock.type)
       | fail_operation(operation, "register clock must be Bits(1)")
-      unless same_type(current.type, next.type)
-      | fail_operation(operation, "register current and next-state widths differ")
-      when schema.type_rule == "register_reset"
+      unless type_equal(current.type, next.type)
+      | fail_operation(operation, "register current and next-state types differ")
+      when schema.type_rule == "hardware_register_reset"
       | def reset = operation.operands[1]
         def reset_value = operation.operands[2]
-        unless valid_bits(reset.type) && reset.type.width == 1
+        unless bits1_type(reset.type)
         | fail_operation(operation, "register reset must be Bits(1)")
-        unless same_type(current.type, reset_value.type)
-        | fail_operation(operation, "register reset value has the wrong width")
-  | "drive":
+        unless type_equal(current.type, reset_value.type)
+        | fail_operation(operation, "register reset value has the wrong hardware type")
+  | "type_equal_drive":
       def value = operation.operands[0]
       def place = operation.places[0]
-      unless same_type(place.type, value.type)
-      | fail_operation(operation, "drive source and target widths differ")
+      unless type_equal(place.type, value.type)
+      | fail_operation(operation, "drive source and target types differ")
       unless place.driver && place.driver.id == value.id
       | fail_operation(operation, "drive operation disagrees with the place driver")
   | "instance":
@@ -163,12 +159,12 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "instance output count does not match its module")
       for (place in operation.places,
            port in child.inputs):
-        unless same_type(place.type, port.type)
-        | fail_operation(operation, "instance input width does not match its port")
+        unless type_equal(place.type, port.type)
+        | fail_operation(operation, "instance input type does not match its port")
       for (value in operation.results,
            port in child.outputs):
-        unless same_type(value.type, port.type)
-        | fail_operation(operation, "instance output width does not match its port")
+        unless type_equal(value.type, port.type)
+        | fail_operation(operation, "instance output type does not match its port")
   | ~else:
       #void
 
@@ -192,11 +188,11 @@ fun verify_module(module_def):
   unless module_def.finished
   | fail("module " ++ module_def.name ++ " has not been finished")
   for (port in module_def.inputs):
-    def input_valid = valid_bits(port.type) && port.value && !port.place && port.value.module_def === module_def && contains_identity(module_def.values, port.value)
+    def input_valid = type_well_formed(port.type) && port.value && !port.place && port.value.module_def === module_def && contains_identity(module_def.values, port.value)
     unless input_valid
     | fail("input " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (port in module_def.outputs):
-    def output_valid = valid_bits(port.type) && port.place && !port.value && port.place.module_def === module_def && contains_identity(module_def.places, port.place)
+    def output_valid = type_well_formed(port.type) && port.place && !port.value && port.place.module_def === module_def && contains_identity(module_def.places, port.place)
     unless output_valid
     | fail("output " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (operation in module_def.operations):
@@ -226,15 +222,15 @@ fun verify_module(module_def):
     def owner = module_def.find_operation(place.owner_op_id)
     unless owner && contains_identity(owner.places, place)
     | fail("place " ++ place.name ++ " has an invalid owner")
-    unless valid_bits(place.type)
-    | fail("place " ++ place.name ++ " does not have a valid Bits type")
+    unless type_well_formed(place.type)
+    | fail("place " ++ place.name ++ " does not have a well-formed HardwareType")
     unless place.driver
     | fail("place " ++ place.name ++ " is undriven")
     def driver_owned = place.driver.module_def === module_def && contains_identity(module_def.values, place.driver)
     unless driver_owned
     | fail("place " ++ place.name ++ " is driven from a different module")
-    unless same_type(place.type, place.driver.type)
-    | fail("place " ++ place.name ++ " and its driver have different widths")
+    unless type_equal(place.type, place.driver.type)
+    | fail("place " ++ place.name ++ " and its driver have different types")
     def drive_count:
       module_def.operations.filter(~keep: fun (operation): is_drive_to(operation, place.id)).length()
     unless drive_count == 1
@@ -249,8 +245,8 @@ fun verify_module(module_def):
       def user = module_def.find_operation(user_id)
       unless user && contains_identity(user.operands, value)
       | fail("value " ++ value.name ++ " has an invalid user")
-    unless valid_bits(value.type)
-    | fail("value " ++ value.name ++ " does not have a valid Bits type")
+    unless type_well_formed(value.type)
+    | fail("value " ++ value.name ++ " does not have a well-formed HardwareType")
     when value_has_combinational_cycle(module_def, value, [])
     | fail("combinational cycle reaches value " ++ value.name)
   #void

@@ -6,7 +6,7 @@ check-boundaries:
 	bash tools/check-boundaries.sh
 
 unit-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test tests/core/verify-test.rhm tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/backend/circt-test.rhm
+	env PLTCOLLECTS=$(CURDIR): raco test tests/core/types-test.rhm tests/core/verify-test.rhm tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/backend/circt-test.rhm
 	bash tests/frontend/run-negative.sh
 
 circt-test:
