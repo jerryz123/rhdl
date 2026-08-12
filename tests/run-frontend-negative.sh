@@ -8,7 +8,7 @@ expect_failure() {
   local source_file="$1"
   local expected="$2"
   local output
-  if output="$(racket -S "$repo_dir" "$repo_dir/tests/frontend/$source_file" 2>&1)"; then
+  if output="$(racket -S "$repo_dir" "$repo_dir/tests/invalid/$source_file" 2>&1)"; then
     echo "$source_file unexpectedly succeeded" >&2
     exit 1
   fi

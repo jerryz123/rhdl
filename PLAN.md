@@ -655,8 +655,11 @@ The frontend implements:
   host conditions.
 - CIRCT lowering and Verilator simulation of frontend-authored adder, ALU,
   width-changing, counter, and hierarchy designs.
-- Frontend-authored canonical examples and positive IR, printer, CIRCT, and
-  simulation fixtures. Builder construction remains only for lower-layer API,
+- One canonical source for every valid frontend program under `examples/`.
+  Examples export reusable generators and a default design, so positive IR,
+  printer, CIRCT, and simulation tests import or re-elaborate them instead of
+  maintaining separate fixtures. Intentionally invalid programs live under
+  `tests/invalid/`. Builder construction remains only for lower-layer API,
   verifier, malformed-IR, and backend-name tests.
 
 The kernel remains intentionally smaller than the standard layer. Grouped

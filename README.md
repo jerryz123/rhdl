@@ -70,9 +70,12 @@ example and tests run. To invoke a `.rhdl` file directly from the checkout:
 racket -S "$(pwd)" examples/adder.rhdl
 ```
 
-All canonical examples are `.rhdl` programs. Builder construction remains in
-the tests only where the lower-level Builder or malformed public IR is itself
-under test.
+All valid frontend programs used by the test suite live under `examples/`.
+They export both reusable circuit generators and a default elaborated `design`,
+so tests can re-elaborate the same source with different host parameters.
+Intentionally invalid `.rhdl` fixtures live under `tests/invalid/`. Builder
+construction remains in tests only where the lower-level Builder or malformed
+public IR is itself under test.
 
 ## Frontend
 
@@ -124,10 +127,12 @@ fun add_pair(left, right):
   hw_add(left, right)
 ```
 
-Importing that library from a `.rhdl` program requires no changes to the RHDL
-reader, IR, verifier, or backend. Higher-level conveniences such as grouped
-`IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
-this same layering rule.
+The complete library-and-circuit example is
+`examples/add-pair.rhm` plus `examples/layered-adder.rhdl`. Importing that
+library from a `.rhdl` program requires no changes to the RHDL reader, IR,
+verifier, or backend. Higher-level conveniences such as grouped `IO`,
+`RegInit`, protocol interfaces, and pipeline generators should follow this
+same layering rule.
 
 ## Builder API
 

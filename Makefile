@@ -20,3 +20,5 @@ examples:
 	racket -S $(CURDIR) examples/width-ops.rhdl
 	racket -S $(CURDIR) examples/counter.rhdl
 	racket -S $(CURDIR) examples/hierarchy.rhdl
+	racket -S $(CURDIR) examples/layered-adder.rhdl
+	racket -S $(CURDIR) examples/fresh-generators.rhdl
