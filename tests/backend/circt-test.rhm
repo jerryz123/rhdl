@@ -10,6 +10,7 @@ import:
   "../../examples/width-ops.rhdl" as width_fixture
   "../../examples/counter.rhdl" as counter_fixture
   "../../examples/hierarchy.rhdl" as hierarchy_fixture
+  "../../examples/layered-adder.rhdl" as layered_fixture
 
 def adder_circt = emit_circt(adder_fixture.design)
 
@@ -78,3 +79,24 @@ check:
   width_circt.contains("hw.constant 0 : i4") ~is #true
   width_circt.contains("comb.concat %__rhdl_zext_zero_") ~is #true
   width_circt.contains("comb.extract %a from 0 : (i8) -> i4") ~is #true
+
+def layered_circt = emit_circt(layered_fixture.design)
+
+check:
+  layered_circt.contains("comb.mux %bypass") ~is #true
+  layered_circt.contains("__rhdl_mux_key_") ~is #false
+
+def conversion_design = Design()
+def conversion_builder = Builder(conversion_design)
+def conversion_module = conversion_builder.module("Conversion")
+def raw_control = conversion_builder.input(conversion_module, "raw_control", Bits(1))
+def bool_output = conversion_builder.output(conversion_module, "bool_output", Bool)
+def converted = conversion_builder.as_bool(conversion_module, raw_control)
+conversion_builder.drive(bool_output, converted)
+def finished_conversion_module = conversion_builder.finish(conversion_module)
+def conversion_circt = emit_circt(conversion_design)
+
+check:
+  conversion_circt.contains("out bool_output : i1") ~is #true
+  conversion_circt.contains("hw.output %raw_control : i1") ~is #true
+  conversion_circt.contains("rtl.as_bool") ~is #false

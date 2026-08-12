@@ -43,17 +43,17 @@ block:
   def design = Design()
   def builder = Builder(design)
   def module_def = builder.module("BadCombinationalWidths")
-  def one_bit = builder.input(module_def, "one_bit", Bits(1))
+  def select = builder.input(module_def, "select", Bool)
   def four_bits = builder.input(module_def, "four_bits", Bits(4))
   def eight_bits = builder.input(module_def, "eight_bits", Bits(8))
   check:
-    builder.bit_and(module_def, four_bits, eight_bits) ~throws "same Bits width"
-    builder.bit_or(module_def, four_bits, eight_bits) ~throws "same Bits width"
-    builder.bit_xor(module_def, four_bits, eight_bits) ~throws "same Bits width"
+    builder.bit_and(module_def, four_bits, eight_bits) ~throws "same logic type"
+    builder.bit_or(module_def, four_bits, eight_bits) ~throws "same logic type"
+    builder.bit_xor(module_def, four_bits, eight_bits) ~throws "same logic type"
     builder.sub(module_def, four_bits, eight_bits) ~throws "same Bits width"
     builder.eq(module_def, four_bits, eight_bits) ~throws "same Bits width"
-    builder.mux(module_def, four_bits, four_bits, four_bits) ~throws "condition must be Bits(1)"
-    builder.mux(module_def, one_bit, four_bits, eight_bits) ~throws "same hardware type"
+    builder.mux(module_def, four_bits, four_bits, four_bits) ~throws "condition must be Bool"
+    builder.mux(module_def, select, four_bits, eight_bits) ~throws "same DataType"
 
 block:
   def design = Design()
@@ -75,6 +75,20 @@ block:
 block:
   def design = Design()
   def builder = Builder(design)
+  def module_def = builder.module("BadMuxLookup")
+  def selector = builder.input(module_def, "selector", Bits(2))
+  def value = builder.input(module_def, "value", Bits(4))
+  def clock = builder.input(module_def, "clock", Clock)
+  check:
+    builder.mux_lookup(module_def, selector, value, []) ~throws "at least one case"
+    builder.mux_lookup(module_def, selector, value, [["zero", value]]) ~throws "host Int"
+    builder.mux_lookup(module_def, selector, value, [[4, value]]) ~throws "does not fit"
+    builder.mux_lookup(module_def, selector, value, [[1, value], [1, value]]) ~throws "unique"
+    builder.mux_lookup(module_def, selector, clock, [[0, clock]]) ~throws "DataType"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
   def module_def = builder.module("MalformedExtract")
   def operand = builder.input(module_def, "operand", Bits(8))
   def operation_id = design.fresh_id()
@@ -92,6 +106,31 @@ block:
   def finished = builder.finish(module_def)
   check:
     verify_design(design) ~throws "extract result width does not match its indices"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("MalformedMuxLookup")
+  def selector = builder.input(module_def, "selector", Bits(2))
+  def default_value = builder.input(module_def, "default_value", Bits(4))
+  def first = builder.input(module_def, "first", Bits(4))
+  def second = builder.input(module_def, "second", Bits(4))
+  def operation_id = design.fresh_id()
+  def result = Value(design.fresh_id(), "result", Bits(4), module_def, operation_id)
+  def operation = Operation(operation_id,
+                            "rtl.mux_lookup",
+                            module_def,
+                            [selector, default_value, first, second],
+                            [result],
+                            [],
+                            {"name": "result", "keys": [1, 0]})
+  for (operand in operation.operands):
+    operand.add_user(operation_id)
+  module_def.add_value(result)
+  module_def.add_operation(operation)
+  def finished = builder.finish(module_def)
+  check:
+    verify_design(design) ~throws "unique and increasing"
 
 block:
   def design = Design()
@@ -203,8 +242,10 @@ block:
   def builder = Builder(design)
   def module_def = builder.module("BadClock")
   def clock = builder.input(module_def, "clock", Bits(2))
+  def real_clock = builder.input(module_def, "real_clock", Clock)
   check:
-    builder.register(module_def, "state", Bits(8), clock) ~throws "clock must be Bits(1)"
+    builder.register(module_def, "state", Bits(8), clock) ~throws "clock must be Clock"
+    builder.register(module_def, "clock_state", Clock, real_clock) ~throws "expected a DataType"
 
 block:
   def design = Design()

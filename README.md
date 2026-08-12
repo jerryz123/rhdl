@@ -4,7 +4,8 @@
 
 RHDL is an experimental Rhombus-hosted hardware description system. The first
 cut implements a small public hardware IR with explicit readable values,
-driveable places, fixed-width bit vectors, primitive registers, module
+driveable places, fixed-width bit vectors, native Boolean and control types,
+primitive registers, module
 instances, identity-based ownership, namespaced operation schemas,
 verification, deterministic IR printing, CIRCT lowering, and an embedded
 `#lang rhdl` frontend built as a thin layer over ordinary Rhombus.
@@ -112,23 +113,25 @@ export:
 ```
 
 Every circuit call creates a fresh module definition. Circuit parameters are
-host `Int` values, while ports and hardware values use explicit `Bits(width)`
+host `Int` values, while ports and hardware values use explicit hardware
 types. `input a: Bits(width)` and `output y: Bits(width)` derive hardware names
 from their bindings; parentheses group same-typed ports, as in
 `input(a, b): Bits(width)`. Outputs, instance inputs, and register next state
 are connected with `<==`. Registers use
-`reg("state", Bits(width), clk, reset, reset_value)`. Instances use
+`reg("state", Bits(width), clk, reset, reset_value)`, where `clk` is `Clock`
+and `reset` is `Reset`. Instances use
 `inst("u0", child_definition)`, with ports accessed through
 `u0.input("a")` and `u0.output("sum")`.
 
 The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
 and `===`, plus the named functions `bit_not`, `bit_and`, `bit_or`, `bit_xor`,
-`hw_add`, `hw_sub`, `hw_eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`.
-`mux_lookup(selector, ~default: value)` builds a priority mux from host-`Int`
-keys, deriving each literal's width from the selector. Constants use
-`literal(Bits(width), integer)`. Explicit function forms accept an optional IR
-name, while operator-produced temporary values receive deterministic generated
-names.
+`hw_add`, `hw_sub`, `hw_eq`, `mux`, `mux_lookup`, `concat`, `extract`, `zext`,
+and `trunc`. `mux_lookup(selector, ~default: value)` constructs a canonical
+N-way lookup from unique host-`Int` keys. Binary `mux` requires a `Bool`
+selector and becomes a one-case `rtl.mux_lookup`; there is no binary mux IR
+operation. Constants use `literal(Bits(width), integer)`. Explicit function
+forms accept an optional IR name, while operator-produced temporary values
+receive deterministic generated names.
 
 ```rhombus
 result <== mux_lookup(op, ~default: not a):
@@ -161,7 +164,7 @@ The complete library-and-circuit example is
 `examples/add-pair.rhm` plus `examples/layered-adder.rhdl`. Importing that
 library from a `.rhdl` program requires no changes to the RHDL reader, IR,
 verifier, or backend. The circuit uses host recursion and a host `stages`
-parameter to generate repeated hardware while a `Bits(1)` `bypass` input
+parameter to generate repeated hardware while a `Bool` `bypass` input
 selects runtime hardware behavior. Higher-level conveniences such as grouped
 `IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
 this same layering rule.
@@ -197,14 +200,16 @@ emit_circt(design)
 ```
 
 The initial combinational Builder methods are `bit_not`, `bit_and`, `bit_or`,
-`bit_xor`, `add`, `sub`, `eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`.
-Bit-vector operations have explicit `Bits(width)` operands. `eq` returns
-`Bits(1)`; same-width logic and arithmetic preserve their data width; and
+`bit_xor`, `add`, `sub`, `eq`, `mux`, `mux_lookup`, `concat`, `extract`, `zext`,
+and `trunc`. Bit-vector operations have explicit `Bits(width)` operands. `eq`
+returns `Bool`; same-width logic and arithmetic preserve their data type; and
 width-changing operations compute or require their result width explicitly.
-Mux data and register state may use any `HardwareType` when their corresponding
-types satisfy `type_equal`; mux conditions, clocks, and resets remain
-`Bits(1)`. The current CIRCT backend lowers `Bits`; layered aggregate types
-must lower to supported core types before CIRCT emission.
+Mux lookup values and register state may use any `DataType` when their types
+satisfy `type_equal`. Register clocks use `Clock`, synchronous resets use
+`Reset`, and binary mux selectors use `Bool`. `as_bool`, `as_bits`, `as_clock`,
+and `as_reset` make one-bit data/control crossings explicit. The current CIRCT
+backend lowers the native scalar types; layered aggregate types must lower to
+supported core types before CIRCT emission.
 
 `concat(module, [a, b, ...])` places the first operand in the most-significant
 bits. `extract(module, value, high, low)` uses inclusive host-`Int` indices.

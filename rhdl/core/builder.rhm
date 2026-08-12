@@ -21,6 +21,11 @@ fun ensure_bits(type, who):
   unless bits_type(type)
   | fail(who, "expected a Bits type")
 
+fun ensure_data_type(type, who):
+  ensure_hardware_type(type, who)
+  unless data_type(type)
+  | fail(who, "expected a DataType")
+
 def hardware_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
 fun ensure_hardware_name(name, who):
@@ -111,6 +116,107 @@ fun build_bits_same_width_binary(design,
                         opcode,
                         [left, right],
                         left.type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
+fun build_logic_same_type_binary(design,
+                                 module_def,
+                                 opcode,
+                                 left,
+                                 right,
+                                 name,
+                                 location,
+                                 origin,
+                                 who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, left, who)
+  ensure_value_in(module_def, right, who)
+  unless logic_type(left.type) && logic_type(right.type) && type_equal(left.type, right.type)
+  | fail(who,
+         opcode ++ " operands must have exactly the same logic type")
+  build_value_operation(design,
+                        module_def,
+                        opcode,
+                        [left, right],
+                        left.type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
+fun build_mux_lookup(design,
+                     module_def,
+                     selector,
+                     default_value,
+                     cases,
+                     name,
+                     location,
+                     origin,
+                     who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, selector, who)
+  ensure_value_in(module_def, default_value, who)
+  unless mux_selector_type(selector.type)
+  | fail(who, "mux lookup selector must be Bool or Bits")
+  unless data_type(default_value.type)
+  | fail(who, "mux lookup values must have a DataType")
+  unless cases is_a List && cases.length() >= 1
+  | fail(who, "mux lookup requires at least one case")
+  def width = selector_width(selector.type)
+  for (case in cases):
+    unless case is_a List && case.length() == 2
+    | fail(who, "mux lookup cases must be [key, value] pairs")
+    def key = case[0]
+    def value = case[1]
+    unless key is_a Int
+    | fail(who, "mux lookup keys must be host Int values")
+    unless key >= 0 && key < (1 bits.(<<) width)
+    | fail(who, "mux lookup key does not fit its selector type")
+    ensure_value_in(module_def, value, who)
+    unless data_type(value.type) && type_equal(default_value.type, value.type)
+    | fail(who, "mux lookup cases and default must have exactly the same DataType")
+  def normalized_cases = cases.sort(fun (left, right): left[0] < right[0])
+  def mutable previous_key = #false
+  for (case in normalized_cases):
+    when previous_key != #false && previous_key == case[0]
+    | fail(who, "mux lookup keys must be unique")
+    previous_key := case[0]
+  build_value_operation(design,
+                        module_def,
+                        "rtl.mux_lookup",
+                        [selector, default_value] ++ normalized_cases.map(fun (case): case[1]),
+                        default_value.type,
+                        name,
+                        location,
+                        origin,
+                        who,
+                        {"keys": normalized_cases.map(fun (case): case[0])})
+
+fun build_conversion(design,
+                     module_def,
+                     opcode,
+                     value,
+                     target_type,
+                     source_ok,
+                     source_description,
+                     name,
+                     location,
+                     origin,
+                     who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, value, who)
+  unless source_ok(value.type)
+  | fail(who, opcode ++ " source must be " ++ source_description)
+  build_value_operation(design,
+                        module_def,
+                        opcode,
+                        [value],
+                        target_type,
                         name,
                         location,
                         origin,
@@ -225,8 +331,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'bit_not)
     ensure_open(module_def, #'bit_not)
     ensure_value_in(module_def, operand, #'bit_not)
-    unless bits_type(operand.type)
-    | fail(#'bit_not, "bit_not operand must have a Bits type")
+    unless logic_type(operand.type)
+    | fail(#'bit_not, "bit_not operand must have a logic type")
     build_value_operation(design,
                           module_def,
                           "rtl.not",
@@ -243,7 +349,7 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("and")):
-    build_bits_same_width_binary(design, module_def, "rtl.and", left, right,
+    build_logic_same_type_binary(design, module_def, "rtl.and", left, right,
                                  name, location, origin, #'bit_and)
 
   method bit_or(module_def,
@@ -252,7 +358,7 @@ class Builder(design):
                 name = #false,
                 location = Location(),
                 origin = Origin("or")):
-    build_bits_same_width_binary(design, module_def, "rtl.or", left, right,
+    build_logic_same_type_binary(design, module_def, "rtl.or", left, right,
                                  name, location, origin, #'bit_or)
 
   method bit_xor(module_def,
@@ -261,7 +367,7 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("xor")):
-    build_bits_same_width_binary(design, module_def, "rtl.xor", left, right,
+    build_logic_same_type_binary(design, module_def, "rtl.xor", left, right,
                                  name, location, origin, #'bit_xor)
 
   method sub(module_def,
@@ -289,11 +395,28 @@ class Builder(design):
                           module_def,
                           "rtl.eq",
                           [left, right],
-                          Bits(1),
+                          Bool,
                           name,
                           location,
                           origin,
                           #'eq)
+
+  method mux_lookup(module_def,
+                    selector,
+                    default_value,
+                    cases,
+                    name = #false,
+                    location = Location(),
+                    origin = Origin("mux_lookup")):
+    build_mux_lookup(design,
+                     module_def,
+                     selector,
+                     default_value,
+                     cases,
+                     name,
+                     location,
+                     origin,
+                     #'mux_lookup)
 
   method mux(module_def,
              condition,
@@ -305,21 +428,53 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'mux)
     ensure_open(module_def, #'mux)
     ensure_value_in(module_def, condition, #'mux)
-    ensure_value_in(module_def, true_value, #'mux)
-    ensure_value_in(module_def, false_value, #'mux)
-    unless bits1_type(condition.type)
-    | fail(#'mux, "mux condition must be Bits(1)")
-    unless type_equal(true_value.type, false_value.type)
-    | fail(#'mux, "mux data operands must have exactly the same hardware type")
-    build_value_operation(design,
-                          module_def,
-                          "rtl.mux",
-                          [condition, true_value, false_value],
-                          true_value.type,
-                          name,
-                          location,
-                          origin,
-                          #'mux)
+    unless bool_type(condition.type)
+    | fail(#'mux, "mux condition must be Bool")
+    build_mux_lookup(design,
+                     module_def,
+                     condition,
+                     false_value,
+                     [[1, true_value]],
+                     name,
+                     location,
+                     origin,
+                     #'mux)
+
+  method as_bool(module_def,
+                 value,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("as_bool")):
+    build_conversion(design, module_def, "rtl.as_bool", value, Bool,
+                     fun (type): bits1_type(type) || clock_type(type) || reset_type(type),
+                     "Bits(1), Clock, or Reset", name, location, origin, #'as_bool)
+
+  method as_bits(module_def,
+                 value,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("as_bits")):
+    build_conversion(design, module_def, "rtl.as_bits", value, Bits(1),
+                     fun (type): bool_type(type) || clock_type(type) || reset_type(type),
+                     "Bool, Clock, or Reset", name, location, origin, #'as_bits)
+
+  method as_clock(module_def,
+                  value,
+                  name = #false,
+                  location = Location(),
+                  origin = Origin("as_clock")):
+    build_conversion(design, module_def, "rtl.as_clock", value, Clock,
+                     fun (type): bool_type(type) || bits1_type(type),
+                     "Bool or Bits(1)", name, location, origin, #'as_clock)
+
+  method as_reset(module_def,
+                  value,
+                  name = #false,
+                  location = Location(),
+                  origin = Origin("as_reset")):
+    build_conversion(design, module_def, "rtl.as_reset", value, Reset,
+                     fun (type): bool_type(type) || bits1_type(type),
+                     "Bool or Bits(1)", name, location, origin, #'as_reset)
 
   method concat(module_def,
                 operands,
@@ -439,19 +594,19 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'register)
     ensure_open(module_def, #'register)
     ensure_hardware_name(name, #'register)
-    ensure_hardware_type(type, #'register)
+    ensure_data_type(type, #'register)
     ensure_value_in(module_def, clock, #'register)
-    unless bits1_type(clock.type)
-    | fail(#'register, "register clock must be Bits(1)")
+    unless clock_type(clock.type)
+    | fail(#'register, "register clock must be Clock")
     unless (reset && reset_value) || (!reset && !reset_value)
     | fail(#'register,
            "synchronous reset and reset value must be supplied together")
     when reset
     | ensure_value_in(module_def, reset, #'register)
       ensure_value_in(module_def, reset_value, #'register)
-      unless bits1_type(reset.type)
-      | fail(#'register, "register reset must be Bits(1)")
-      unless type_equal(type, reset_value.type)
+      unless reset_type(reset.type)
+      | fail(#'register, "register reset must be Reset")
+      unless data_type(reset_value.type) && type_equal(type, reset_value.type)
       | fail(#'register, "register reset value has the wrong hardware type")
     ensure_unique_hardware_name(module_def, name, #'register)
     ensure_unique_hardware_name(module_def, name ++ ".next", #'register)

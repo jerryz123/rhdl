@@ -2,6 +2,7 @@
 // Lowers the public RHDL hardware IR to textual CIRCT HW, Comb, and Seq MLIR.
 
 import:
+  "../core/types.rhm" open
   "../core/ir.rhm" open
   "../core/ops.rhm" open
   "../core/verify.rhm" open
@@ -11,14 +12,24 @@ export:
   emit_module_circt
 
 fun circt_type(type):
-  "i" ++ to_string(type.width)
+  if bits_type(type)
+  | "i" ++ to_string(type.width)
+  | if bool_type(type) || clock_type(type) || reset_type(type)
+    | "i1"
+    | error(~who: #'emit_circt,
+            "CIRCT lowering does not support hardware type " ++ type_text(type))
+
+fun circt_width(type):
+  if bits_type(type) | type.width | 1
 
 fun value_ref(value):
   def defining_operation = value.module_def.find_operation(value.defining_op_id)
   def schema = defining_operation && schema_for(defining_operation.opcode)
-  if schema && (schema.print_form == "input_port" || schema.circt_lowering == "seq.firreg")
-  | "%" ++ value.name
-  | "%__rhdl_value_" ++ to_string(value.id)
+  if schema && schema.circt_lowering == "alias"
+  | value_ref(defining_operation.operands[0])
+  | if schema && (schema.print_form == "input_port" || schema.circt_lowering == "seq.firreg")
+    | "%" ++ value.name
+    | "%__rhdl_value_" ++ to_string(value.id)
 
 fun emit_constant(operation):
   def result = operation.results[0]
@@ -37,7 +48,7 @@ fun emit_not(operation):
   def operand = operation.operands[0]
   def result = operation.results[0]
   def mask_ref = "%__rhdl_not_mask_" ++ to_string(operation.id)
-  def mask = (1 bits.(<<) result.type.width) - 1
+  def mask = (1 bits.(<<) circt_width(result.type)) - 1
   String.append("    ", mask_ref, " = hw.constant ", to_string(mask),
                 " : ", circt_type(result.type), "\n",
                 "    ", value_ref(result), " = comb.xor ",
@@ -51,13 +62,41 @@ fun emit_eq(operation):
                 value_ref(operation.operands[1]), " : ",
                 circt_type(operation.operands[0].type))
 
-fun emit_mux(operation):
+fun emit_mux_lookup(operation):
+  def selector = operation.operands[0]
+  def default_value = operation.operands[1]
+  def case_values = operation.operands.drop(2)
+  def keys = operation.attribute("keys")
   def result = operation.results[0]
-  String.append("    ", value_ref(result), " = comb.mux ",
-                value_ref(operation.operands[0]), ", ",
-                value_ref(operation.operands[1]), ", ",
-                value_ref(operation.operands[2]), " : ",
-                circt_type(result.type))
+  if bool_type(selector.type) && keys == [1]
+  | String.append("    ", value_ref(result), " = comb.mux ",
+                  value_ref(selector), ", ", value_ref(case_values[0]), ", ",
+                  value_ref(default_value), " : ", circt_type(result.type))
+  | block:
+      def mutable selected_ref = value_ref(default_value)
+      def mutable remaining = keys.length()
+      def mutable lines = []
+      for (key in keys.reverse(), case_value in case_values.reverse()):
+        remaining := remaining - 1
+        def suffix = to_string(remaining)
+        def key_ref = "%__rhdl_mux_key_" ++ to_string(operation.id) ++ "_" ++ suffix
+        def compare_ref = "%__rhdl_mux_cmp_" ++ to_string(operation.id) ++ "_" ++ suffix
+        def step_ref:
+          if remaining == 0
+          | value_ref(result)
+          | "%__rhdl_mux_step_" ++ to_string(operation.id) ++ "_" ++ suffix
+        lines := lines ++ [String.append("    ", key_ref, " = hw.constant ",
+                                         to_string(key), " : ",
+                                         circt_type(selector.type)),
+                           String.append("    ", compare_ref, " = comb.icmp eq ",
+                                         value_ref(selector), ", ", key_ref, " : ",
+                                         circt_type(selector.type)),
+                           String.append("    ", step_ref, " = comb.mux ",
+                                         compare_ref, ", ", value_ref(case_value),
+                                         ", ", selected_ref, " : ",
+                                         circt_type(result.type))]
+        selected_ref := step_ref
+      String.join(lines, "\n")
 
 fun emit_concat(operation):
   def result = operation.results[0]
@@ -101,7 +140,7 @@ fun emit_register(operation):
   def clock_ref = "%__rhdl_clock_" ++ to_string(operation.id)
   def schema = schema_for(operation.opcode)
   def reset_text:
-    if schema.type_rule == "hardware_register_reset"
+    if schema.type_rule == "data_register_reset"
     | String.append(" reset sync ",
                     value_ref(operation.operands[1]), ", ",
                     value_ref(operation.operands[2]))
@@ -147,8 +186,10 @@ fun emit_operation(operation):
       emit_not(operation)
   | "eq":
       emit_eq(operation)
-  | "mux":
-      emit_mux(operation)
+  | "mux_lookup":
+      emit_mux_lookup(operation)
+  | "alias":
+      ""
   | "concat":
       emit_concat(operation)
   | "extract":

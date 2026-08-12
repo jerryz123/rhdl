@@ -2,6 +2,7 @@
 // Prints deterministic, human-readable text for the public RHDL hardware IR.
 
 import:
+  "types.rhm" open
   "ir.rhm" open
   "ops.rhm" open
 
@@ -20,38 +21,47 @@ fun print_operation(operation):
   match schema && schema.print_form
   | "input_port":
       String.append("    ", operation.results[0].ref(), " = rtl.input ",
-                    bits_text(operation.results[0].type))
+                    type_text(operation.results[0].type))
   | "output_port":
       String.append("    ", operation.places[0].ref(), " = rtl.output ",
-                    bits_text(operation.places[0].type))
+                    type_text(operation.places[0].type))
   | "constant":
       String.append("    ", operation.results[0].ref(), " = rtl.constant ",
                     to_string(operation.attribute("value")), " : ",
-                    bits_text(operation.results[0].type))
+                    type_text(operation.results[0].type))
   | "value":
       String.append("    ", operation.results[0].ref(), " = ", operation.opcode, " ",
                     value_refs(operation.operands), " : ",
-                    bits_text(operation.results[0].type))
+                    type_text(operation.results[0].type))
+  | "mux_lookup":
+      def cases:
+        for List (key in operation.attribute("keys"),
+                  value in operation.operands.drop(2)):
+          to_string(key) ++ ": " ++ value.ref()
+      String.append("    ", operation.results[0].ref(), " = rtl.mux_lookup ",
+                    operation.operands[0].ref(), " [", String.join(cases, ", "),
+                    "] default ", operation.operands[1].ref(), " : ",
+                    type_text(operation.results[0].type))
   | "extract":
       String.append("    ", operation.results[0].ref(), " = rtl.extract ",
                     operation.operands[0].ref(), " ",
                     to_string(operation.attribute("high")), ":",
                     to_string(operation.attribute("low")), " : ",
-                    bits_text(operation.results[0].type))
+                    type_text(operation.results[0].type))
   | "resize":
       String.append("    ", operation.results[0].ref(), " = ", operation.opcode, " ",
                     operation.operands[0].ref(), " to ",
-                    bits_text(operation.results[0].type))
+                    type_text(operation.results[0].type))
   | "register":
       String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
                     " = rtl.register clock ", operation.operands[0].ref(),
-                    " : ", bits_text(operation.results[0].type))
+                    " : ", type_text(operation.results[0].type))
   | "register_reset":
       String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
                     " = rtl.register clock ", operation.operands[0].ref(),
                     " reset ", operation.operands[1].ref(),
                     " to ", operation.operands[2].ref(),
-                    " : ", bits_text(operation.results[0].type))
+                    " : ", type_text(operation.results[0].type))
   | "instance":
       def child = operation.attribute("module")
       def results = if operation.results == [] | "" | value_refs(operation.results) ++ " = "
@@ -67,9 +77,9 @@ fun print_operation(operation):
 fun dump_module_ir(module_def):
   def ports:
     module_def.inputs.map(
-      fun (port): "in " ++ port.value.ref() ++ ": " ++ bits_text(port.type)
+      fun (port): "in " ++ port.value.ref() ++ ": " ++ type_text(port.type)
     ) ++ module_def.outputs.map(
-      fun (port): "out " ++ port.place.ref() ++ ": " ++ bits_text(port.type)
+      fun (port): "out " ++ port.place.ref() ++ ": " ++ type_text(port.type)
     )
   def body = String.join(module_def.operations.map(print_operation), "\n")
   String.append("rhdl.module @", module_def.name, "(",

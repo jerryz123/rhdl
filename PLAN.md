@@ -7,16 +7,17 @@
 The first manually constructed vertical slice is implemented. It currently
 provides:
 
-- `Design`, `Module`, `Operation`, `Value`, `Place`, `Bits`, `Location`, and
-  `Origin` handles with stable IDs and explicit owning-object relationships.
+- `Design`, `Module`, `Operation`, `Value`, `Place`, `HardwareType`, `DataType`,
+  `Bits`, `Bool`, `Clock`, `Reset`, `Location`, and `Origin` handles with stable
+  IDs and explicit owning-object relationships.
 - A static namespaced operation-schema table that records arity, required
   attributes, type rules, printing forms, and CIRCT lowering targets.
 - Builder support for ports, constants, same-width bitwise logic, modular
-  addition and subtraction, equality, muxes, explicit width-changing
+  addition and subtraction, equality, canonical mux lookups, explicit width-changing
   operations, primitive registers, module instances, and single-driver
   relationships.
 - Active-high synchronous register reset.
-- Whole-design verification, including ownership, widths, driver counts,
+- Whole-design verification, including ownership, types, lookup keys, driver counts,
   register operands, instance interfaces, and combinational-cycle detection.
 - Deterministic public IR printing and design walking.
 - Deterministic lowering to textual CIRCT MLIR using the `hw`, `comb`, and
@@ -31,9 +32,9 @@ provides:
   kernel, permits host-language abstraction, creates fresh circuit
   definitions, and uses the same CIRCT and Verilator backend path.
 
-The next semantic refactor described by this plan is not yet implemented:
-native `Bool`, `Clock`, and `Reset` types plus a canonical N-way
-`rtl.mux_lookup` operation replacing the binary `rtl.mux` IR operation.
+Native `Bool`, `Clock`, and `Reset` types and the canonical N-way
+`rtl.mux_lookup` operation are implemented across the core, frontend, printer,
+and CIRCT backend.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
 The complete initial frontend surface is implemented and is the canonical path
@@ -367,6 +368,10 @@ add
 sub
 eq
 mux_lookup
+as_bool
+as_bits
+as_clock
+as_reset
 concat
 extract
 zext
@@ -625,6 +630,7 @@ rtl.and/or/xor          comb.and/or/xor
 rtl.add/sub             comb.add/sub
 rtl.eq                  comb.icmp eq producing Bool
 rtl.mux_lookup          comb.icmp plus comb.mux tree
+rtl.as_*                erased one-bit representation cast
 rtl.concat              comb.concat
 rtl.extract             comb.extract
 rtl.zext                comb.concat with a zero high part
@@ -748,7 +754,7 @@ conveniences should be libraries over the kernel whenever they do not require
 new hardware semantics. Static-information-based ergonomics can be added while
 retaining runtime checks where static information is unavailable.
 
-### Phase 3.5: native control types and canonical selection — next
+### Phase 3.5: native control types and canonical selection — complete
 
 - Add nominal `Bool`, `Clock`, and `Reset` implementations of `HardwareType`;
   add `DataType` for values accepted as ordinary combinational and register
@@ -846,7 +852,7 @@ The design surface and canonical examples are complete. Comprehensive
 source-location coverage for whole-graph verifier diagnostics is deferred to
 Phase 5 and does not block inspection or rewriting.
 
-### Milestone E: native types and canonical selection
+### Milestone E: native types and canonical selection — complete
 
 RHDL can:
 
