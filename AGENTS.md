@@ -18,3 +18,16 @@
 
 - Run `make test` after behavioral changes.
 - Keep generated Racket and Verilator build output out of version control.
+
+## Package boundaries
+
+- Keep frontend-independent IR, Builder, verification, and printing code under
+  `rhdl/core/`; core modules must not import the frontend or backend.
+- Keep elaboration and language macros under `rhdl/frontend/`; frontend modules
+  must not import backends.
+- Keep CIRCT lowering under `rhdl/backend/`; backend modules must not import
+  frontend syntax or elaboration.
+- Use `rhdl/language.rhm` as the composition layer and reserve `rhdl/main.rkt`
+  for the `#lang rhdl` reader shim.
+- Preserve the mirrored `tests/core/`, `tests/frontend/`, and `tests/backend/`
+  organization. Run `make check-boundaries` after moving or adding modules.

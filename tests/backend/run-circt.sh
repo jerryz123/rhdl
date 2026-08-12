@@ -2,7 +2,7 @@
 # Verifies RHDL-produced CIRCT IR, exports it with CIRCT, and simulates the result.
 set -euo pipefail
 
-repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 test_tmp_dir="$(mktemp -d /tmp/rhdl-circt.XXXXXX)"
 trap 'rm -rf "$test_tmp_dir"' EXIT
 
@@ -25,12 +25,12 @@ run_fixture() {
   local verilog="$test_tmp_dir/$fixture.sv"
   local object_dir="$test_tmp_dir/${fixture}_obj"
 
-  racket -S "$repo_dir" "tests/emit-$fixture.rhm" > "$mlir"
+  racket -S "$repo_dir" "tests/backend/emit-$fixture.rhm" > "$mlir"
   "$circt_opt" "$mlir" -o /dev/null
   "$circt_opt" --lower-seq-to-sv --export-verilog "$mlir" -o /dev/null > "$verilog"
   verilator --binary --timing --build-jobs 0 --top-module "$top" \
     --Mdir "$object_dir" \
-    "$verilog" "tests/verilog/${fixture}_tb.sv"
+    "$verilog" "tests/backend/verilog/${fixture}_tb.sv"
   "$object_dir/V$top"
 }
 

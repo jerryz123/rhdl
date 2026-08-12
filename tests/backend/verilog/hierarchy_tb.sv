@@ -1,3 +1,4 @@
+// Simulates the CIRCT-exported explicitly reused module hierarchy.
 module hierarchy_tb;
     logic [7:0] a;
     logic [7:0] b;

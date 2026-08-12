@@ -2,13 +2,13 @@
 # Runs isolated #lang rhdl programs and checks their required frontend diagnostics.
 set -euo pipefail
 
-repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 
 expect_failure() {
   local source_file="$1"
   local expected="$2"
   local output
-  if output="$(racket -S "$repo_dir" "$repo_dir/tests/invalid/$source_file" 2>&1)"; then
+  if output="$(racket -S "$repo_dir" "$repo_dir/tests/frontend/invalid/$source_file" 2>&1)"; then
     echo "$source_file unexpectedly succeeded" >&2
     exit 1
   fi

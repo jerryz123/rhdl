@@ -1,3 +1,4 @@
+// Simulates the CIRCT-exported synchronous-reset counter module.
 module counter_tb;
     logic clk = 1'b0;
     logic reset = 1'b1;

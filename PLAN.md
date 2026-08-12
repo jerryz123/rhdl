@@ -116,7 +116,25 @@ Binding-derived port declarations, hardware bitwise operators, and
 `mux_lookup` are standard-layer conveniences that lower to the same kernel
 primitives; they do not add IR operations.
 
-### 3.2 Elaboration
+### 3.2 Package boundaries
+
+Source layout enforces a one-way dependency graph:
+
+```text
+frontend/standard -> frontend/kernel -> core
+backend/circt -----------------------> core
+language -> frontend/standard + core
+main.rkt -> language
+```
+
+`core/` contains the public IR, schemas, Builder, verifier, and IR printer and
+must not import the frontend or backend. The frontend cannot import the
+backend, and the backend cannot import frontend syntax or elaboration. The
+top-level language module is the only composition layer. A test-time boundary
+audit enforces these imports and reserves `.rhdl` for examples and frontend
+fixtures and `.rkt` for the reader shim.
+
+### 3.3 Elaboration
 
 Elaboration executes Rhombus code to decide what hardware exists.
 
@@ -136,7 +154,7 @@ host `if`, `when`, `unless`, `cond`, `&&`, `||`, or host iteration must produce
 an error during expansion or elaboration; it must never be accepted through
 Rhombus truthiness.
 
-### 3.3 IR
+### 3.4 IR
 
 Elaboration constructs one public RHDL hardware IR. The initial system will not
 introduce a separate high-level RHDL IR and canonical RTL IR. A second IR level
@@ -661,7 +679,7 @@ The frontend implements:
   Examples export reusable generators and a default design, so positive IR,
   printer, CIRCT, and simulation tests import or re-elaborate them instead of
   maintaining separate fixtures. Intentionally invalid programs live under
-  `tests/invalid/`. Builder construction remains only for lower-layer API,
+  `tests/frontend/invalid/`. Builder construction remains only for lower-layer API,
   verifier, malformed-IR, and backend-name tests.
 
 The kernel remains intentionally smaller than the standard layer. Grouped

@@ -1,4 +1,5 @@
 // Simulates every operation in the eight-bit RHDL ALU after CIRCT export.
+// Simulates the CIRCT-exported canonical ALU module.
 module alu_tb;
     logic [7:0] a;
     logic [7:0] b;

@@ -1,4 +1,5 @@
 // Simulates concatenation, extraction, zero extension, and truncation after CIRCT export.
+// Simulates the CIRCT-exported width-changing datapath module.
 module width_ops_tb;
     logic [7:0] a;
     logic [3:0] b;

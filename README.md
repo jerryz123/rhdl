@@ -15,6 +15,23 @@ and owns SystemVerilog export.
 
 The architecture and staged roadmap are described in [PLAN.md](PLAN.md).
 
+## Source layout
+
+The implementation enforces one-way package boundaries:
+
+```text
+rhdl/main.rkt                 # #lang reader shim
+rhdl/language.rhm             # language composition
+rhdl/core/                    # IR, Builder, verification, and IR printing
+rhdl/frontend/                # elaboration kernel and standard macros
+rhdl/backend/                 # CIRCT lowering
+```
+
+`.rhdl` is reserved for `#lang rhdl` programs and frontend fixtures, `.rhm`
+contains Rhombus implementation and library modules, and `rhdl/main.rkt` is the
+only `.rkt` source because Racket collection lookup requires that reader entry
+point. `make check-boundaries` rejects imports that violate the layer graph.
+
 ## Requirements
 
 - Racket 9.2 or a compatible current release.
@@ -73,9 +90,10 @@ racket -S "$(pwd)" examples/adder.rhdl
 All valid frontend programs used by the test suite live under `examples/`.
 They export both reusable circuit generators and a default elaborated `design`,
 so tests can re-elaborate the same source with different host parameters.
-Intentionally invalid `.rhdl` fixtures live under `tests/invalid/`. Builder
-construction remains in tests only where the lower-level Builder or malformed
-public IR is itself under test.
+Intentionally invalid `.rhdl` fixtures live under `tests/frontend/invalid/`.
+Tests mirror the implementation layers under `tests/core/`, `tests/frontend/`,
+and `tests/backend/`. Builder construction remains only where the lower-level
+Builder or malformed public IR is itself under test.
 
 ## Frontend
 
@@ -133,7 +151,7 @@ An ordinary Rhombus library can define reusable hardware construction:
 #lang rhombus
 
 import:
-  lib("rhdl/frontend-runtime.rhm") open
+  lib("rhdl/frontend/kernel.rhm") open
 
 fun add_pair(left, right):
   hw_add(left, right)
@@ -147,6 +165,9 @@ verifier, or backend. Higher-level conveniences such as grouped `IO`,
 same layering rule.
 
 ## Builder API
+
+The core API is exported by `rhdl/core/main.rhm`; CIRCT emission is a separate
+backend API exported by `rhdl/backend/circt.rhm`.
 
 ```text
 design = Design()

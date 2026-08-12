@@ -1,13 +1,16 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test unit-test circt-test setup-circt examples
+.PHONY: test check-boundaries unit-test circt-test setup-circt examples
 
-unit-test:
-	env PLTCOLLECTS=$(CURDIR): raco test tests/ir-test.rhm tests/verify-test.rhm tests/printer-test.rhm tests/circt-test.rhm tests/frontend-test.rhm tests/frontend-fresh-test.rhm
-	bash tests/run-frontend-negative.sh
+check-boundaries:
+	bash tools/check-boundaries.sh
+
+unit-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test tests/core/verify-test.rhm tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/backend/circt-test.rhm
+	bash tests/frontend/run-negative.sh
 
 circt-test:
-	bash tests/run-circt.sh
+	bash tests/backend/run-circt.sh
 
 test: unit-test circt-test
 

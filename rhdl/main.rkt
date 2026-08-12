@@ -2,4 +2,4 @@
 // Selects the ordinary Rhombus reader and the embedded RHDL language bindings.
 
 module reader ~lang rhombus/reader:
-  ~lang: "frontend.rkt"
+  ~lang: "language.rhm"
