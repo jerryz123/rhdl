@@ -8,8 +8,8 @@ The first manually constructed vertical slice is implemented. It currently
 provides:
 
 - `Design`, `Module`, `Operation`, `Value`, `Place`, `HardwareType`, `DataType`,
-  `Bits`, `Bool`, `Clock`, `Reset`, `Location`, and `Origin` handles with stable
-  IDs and explicit owning-object relationships.
+  `FlatDataType`, `BitwiseType`, `Bits`, `Clock`, `Reset`, `Location`, and
+  `Origin` handles with stable IDs and explicit owning-object relationships.
 - A static namespaced operation-schema table that records arity, required
   attributes, type rules, printing forms, and CIRCT lowering targets.
 - Builder support for ports, constants, same-width bitwise logic, modular
@@ -32,9 +32,9 @@ provides:
   kernel, permits host-language abstraction, creates fresh circuit
   definitions, and uses the same CIRCT and Verilator backend path.
 
-Native `Bool`, `Clock`, and `Reset` types and the canonical N-way
-`rtl.mux_lookup` operation are implemented across the core, frontend, printer,
-and CIRCT backend.
+Native core `Clock` and `Reset` types, an extension-defined frontend `Bool`,
+and the canonical N-way `rtl.mux_lookup` operation are implemented. Core and
+the CIRCT backend depend on open type capabilities rather than on `Bool`.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
 The complete initial frontend surface is implemented and is the canonical path
@@ -126,7 +126,7 @@ the canonical `rtl.mux_lookup` core operation.
 Source layout enforces a one-way dependency graph:
 
 ```text
-frontend/standard -> frontend/kernel -> core
+frontend/standard -> frontend/bool -> frontend/kernel -> core
 backend/circt -----------------------> core
 language -> frontend/standard + core
 main.rkt -> language
@@ -258,35 +258,37 @@ illegal cross-hierarchy references are verifier errors.
 
 ## 5. Hardware types and selection
 
-Core supplies four initial hardware types:
+Core supplies these concrete hardware types:
 
 ```text
 Bits(width)
-Bool
 Clock
 Reset
 ```
 
-All implement the public `HardwareType` abstraction. `Bits` and `Bool` also
-implement the `DataType` capability; future data aggregates may implement that
-capability without making clocks or resets ordinary data. Core
-well-formedness and structural equality remain centralized in
+The open core protocol is `HardwareType`, with progressively stronger
+capabilities: `DataType` marks ordinary combinational and register data,
+`FlatDataType` supplies a physical `bit_width`, and `BitwiseType` opts a flat
+type into same-type bitwise operations. `Bits` implements `BitwiseType`.
+Future types may implement these capabilities outside core; core
+well-formedness and nominal structural equality remain centralized in
 `type_well_formed` and `type_equal`.
 
-`Bool`, `Clock`, and `Reset` each have a one-bit physical representation but
-are nominally distinct types. In particular, `type_equal(Bool, Bits(1))` is
-false. Intentional crossings use explicit conversion operations such as
-`as_bool`, `as_bits`, `as_clock`, and `as_reset`. `Reset` initially means an
-active-high reset signal; the consuming register operation determines that its
-behavior is synchronous. Clock selection requires a dedicated clock operation
-and is never an ordinary data mux.
+The standard frontend supplies `Bool` as an extension-defined nominal
+`BitwiseType` with width one. It is distinct from `Bits(1)`, and neither core
+nor the CIRCT backend imports or special-cases it. Equal-width flat types may
+cross explicitly through representation-transparent `reinterpret` operations.
+`Clock` and `Reset` are nominal core control types rather than `DataType`s;
+their explicit conversions pass through `Bits(1)`. `Reset` initially means an
+active-high reset signal, while the consuming register operation determines
+that its behavior is synchronous. Clock selection requires a dedicated clock
+operation and is never an ordinary data mux.
 
 Rules:
 
 - `width` is an explicit positive host `Int`.
 - All widths are known during elaboration.
-- There are no implicit conversions among `Bits(1)`, `Bool`, `Clock`, and
-  `Reset`.
+- There are no implicit conversions among nominal flat or control types.
 - Narrowing and extension use explicit operations.
 - Integer bit-vector constants must specify a width and fit that width.
 - Arithmetic is unsigned modular bit-vector arithmetic for now.
@@ -295,27 +297,27 @@ Rules:
 Initial operation type rules:
 
 ```text
-not(Bits(w))                              -> Bits(w)
-and/or/xor(Bits(w), Bits(w))              -> Bits(w)
-not(Bool)                                 -> Bool
-and/or/xor(Bool, Bool)                    -> Bool
+not(T: BitwiseType)                       -> T
+and/or/xor(T: BitwiseType, T)             -> T
 add/sub(Bits(w), Bits(w))                 -> Bits(w)
-eq(Bits(w), Bits(w))                      -> Bool
-mux_lookup(S, cases: Key -> T, default:T) -> T
+eq(Bits(w), Bits(w))                      -> Bits(1)
+mux_lookup(Bits(w), cases: Key -> T,
+           default:T)                    -> T
+reinterpret(A: FlatDataType,
+            B: FlatDataType of same width) -> B
 concat(Bits(a), Bits(b), ...)             -> Bits(a + b + ...)
 extract(Bits(w), high, low)               -> Bits(high - low + 1)
 zext(Bits(a), target_width)               -> Bits(target_width)
 trunc(Bits(a), target_width)              -> Bits(target_width)
 ```
 
-For `mux_lookup`, `S` is `Bool` or `Bits(w)`, and `T` is any `DataType` whose
+For `mux_lookup`, the selector is `Bits(w)`, and `T` is any `DataType` whose
 case and default values satisfy `type_equal`. IR keys are normalized host
-integers: `Bool` has width one with false and true represented by keys zero and
-one; a `Bits(w)` key must be nonnegative and fit `w`. Keys are unique and
-stored in increasing order, making lookup semantics independent of source
-order. Every lookup has an explicit default and at least one case. Duplicate
-keys are errors rather than priority semantics; a separate priority-mux
-abstraction can be layered later if needed.
+integers that must be nonnegative and fit `w`. Keys are unique and stored in
+increasing order, making lookup semantics independent of source order. Every
+lookup has an explicit default and at least one case. Duplicate keys are
+errors rather than priority semantics; a separate priority-mux abstraction can
+be layered later if needed.
 
 The canonical operation shape is:
 
@@ -327,14 +329,17 @@ A binary Boolean mux is exactly the one-case specialization:
 
 ```text
 mux(sel: Bool, when_true: T, when_false: T)
-  == mux_lookup(sel, default: when_false) {1: when_true}
+  == mux_lookup(as_bits(sel), default: when_false) {1: when_true}
 ```
 
-There is no separate `rtl.mux` operation. The frontend may retain `mux` as
-ergonomic syntax, while the Builder immediately constructs `rtl.mux_lookup`.
-The backend lowers a Boolean one-case lookup directly to `comb.mux` and lowers
-larger lookups to comparisons plus a mux tree. Dense lookup optimizations can
-be introduced without changing source or core IR semantics.
+There is no separate `rtl.mux` operation. The `Bool` extension retains `mux`
+as ergonomic syntax, reinterprets the selector as `Bits(1)`, and constructs
+`rtl.mux_lookup`. It similarly layers Boolean `===` over core equality by
+reinterpreting the `Bits(1)` result as `Bool`. The backend erases these
+representation-transparent conversions, lowers a one-bit one-case lookup
+directly to `comb.mux`, and lowers larger lookups to comparisons plus a mux
+tree. Dense lookup optimizations can be introduced without changing source or
+core IR semantics.
 
 `zext` requires a larger target width, `trunc` requires a smaller target width,
 and `extract` indices are inclusive explicit host integers checked during
@@ -368,7 +373,7 @@ add
 sub
 eq
 mux_lookup
-as_bool
+reinterpret
 as_bits
 as_clock
 as_reset
@@ -605,12 +610,14 @@ SystemVerilog
 ```
 
 The initial backend lowers directly to CIRCT's `hw`, `comb`, and `seq`
-dialects. `Bits(width)` becomes a signless integer type; `Bool` and `Reset`
-lower to one-bit values; and `Clock` lowers through the backend's clock
-representation. Modules and instances become `hw` operations, combinational
-values become `comb` operations, and primitive registers become `seq`
-operations. Active-high synchronous reset is preserved explicitly with
-`seq.firreg` and `reset sync`.
+dialects. Every `FlatDataType` becomes a signless integer of its declared bit
+width, without requiring the backend to know its concrete type; this includes
+core `Bits` and the frontend's extension-defined `Bool`. `Reset` lowers to a
+one-bit value, and `Clock` lowers through the backend's clock representation.
+Modules and instances become `hw` operations, combinational values become
+`comb` operations, and primitive registers become `seq` operations.
+Active-high synchronous reset is preserved explicitly with `seq.firreg` and
+`reset sync`.
 
 RHDL does not contain a direct SystemVerilog emitter. CIRCT owns lowering from
 its IR to SystemVerilog, including any required `seq`-to-`sv` conversion and
@@ -628,9 +635,10 @@ rtl.constant            hw.constant
 rtl.not                 comb.xor with an all-ones constant
 rtl.and/or/xor          comb.and/or/xor
 rtl.add/sub             comb.add/sub
-rtl.eq                  comb.icmp eq producing Bool
+rtl.eq                  comb.icmp eq producing Bits(1)
 rtl.mux_lookup          comb.icmp plus comb.mux tree
-rtl.as_*                erased one-bit representation cast
+rtl.reinterpret         erased equal-width flat-data cast
+rtl.as_*                erased one-bit data/control cast
 rtl.concat              comb.concat
 rtl.extract             comb.extract
 rtl.zext                comb.concat with a zero high part
@@ -754,22 +762,24 @@ conveniences should be libraries over the kernel whenever they do not require
 new hardware semantics. Static-information-based ergonomics can be added while
 retaining runtime checks where static information is unavailable.
 
-### Phase 3.5: native control types and canonical selection — complete
+### Phase 3.5: extensible scalar types and canonical selection — complete
 
-- Add nominal `Bool`, `Clock`, and `Reset` implementations of `HardwareType`;
-  add `DataType` for values accepted as ordinary combinational and register
-  data.
-- Add explicit conversions among one-bit data and control types. Change
-  equality to return `Bool`, and require `Clock` and `Reset` at register
-  boundaries.
+- Add nominal core `Clock` and `Reset` implementations of `HardwareType`, plus
+  open `DataType`, `FlatDataType`, and `BitwiseType` capabilities for types
+  defined outside core.
+- Define `Bool` in the standard frontend as a nominal, one-bit `BitwiseType`.
+  Keep core equality's result and mux lookup's selector in `Bits`, then layer
+  Boolean equality and binary selection over explicit equal-width
+  reinterpretation. Require `Clock` and `Reset` at register boundaries.
 - Replace `rtl.mux` with variable-arity `rtl.mux_lookup`, including normalized
   unique keys, an explicit default, selector-key validation, and equal
   `DataType` results.
-- Lower the binary `mux` surface form to the one-case Boolean lookup and lower
-  the existing `mux_lookup` surface form directly to the same IR operation.
+- Lower the binary `mux` surface form to a reinterpretation plus one-case
+  `Bits(1)` lookup, and lower the existing `mux_lookup` surface form directly
+  to the same IR operation.
 - Update deterministic printing, verification, CIRCT lowering, examples, and
-  focused negative tests. Preserve direct `comb.mux` lowering for the Boolean
-  one-case form.
+  focused negative tests. Preserve direct `comb.mux` lowering for the one-bit
+  one-case form, without teaching the backend about `Bool`.
 
 ### Phase 4: inspection and rewriting
 
@@ -852,19 +862,22 @@ The design surface and canonical examples are complete. Comprehensive
 source-location coverage for whole-graph verifier diagnostics is deferred to
 Phase 5 and does not block inspection or rewriting.
 
-### Milestone E: native types and canonical selection — complete
+### Milestone E: extensible scalar types and canonical selection — complete
 
 RHDL can:
 
-1. Distinguish `Bool`, `Clock`, `Reset`, and `Bits(1)` through `type_equal`.
-2. Require `Bool` for Boolean selection, `Clock` for register clocks, and
-   `Reset` for synchronous register resets.
+1. Define a nominal `Bool` outside core and distinguish it from `Clock`,
+   `Reset`, and `Bits(1)` through `type_equal`.
+2. Require extension `Bool` for the binary selection surface, core `Bits` for
+   canonical lookup selection, `Clock` for register clocks, and `Reset` for
+   synchronous register resets.
 3. Represent binary and N-way selection with only `rtl.mux_lookup` in the
    public IR.
 4. Reject duplicate or out-of-range lookup keys and mismatched case/default
    data types.
-5. Lower Boolean binary lookup to `comb.mux`, lower wider lookup through CIRCT,
-   and pass focused simulation tests.
+5. Lower extension-defined flat types without backend special cases, lower
+   one-bit binary lookup to `comb.mux`, lower wider lookup through CIRCT, and
+   pass focused simulation tests.
 
 ### Milestone F: inspection and rewriting
 

@@ -121,22 +121,22 @@ fun build_bits_same_width_binary(design,
                         origin,
                         who)
 
-fun build_logic_same_type_binary(design,
-                                 module_def,
-                                 opcode,
-                                 left,
-                                 right,
-                                 name,
-                                 location,
-                                 origin,
-                                 who):
+fun build_bitwise_same_type_binary(design,
+                                   module_def,
+                                   opcode,
+                                   left,
+                                   right,
+                                   name,
+                                   location,
+                                   origin,
+                                   who):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, left, who)
   ensure_value_in(module_def, right, who)
-  unless logic_type(left.type) && logic_type(right.type) && type_equal(left.type, right.type)
+  unless bitwise_type(left.type) && bitwise_type(right.type) && type_equal(left.type, right.type)
   | fail(who,
-         opcode ++ " operands must have exactly the same logic type")
+         opcode ++ " operands must have exactly the same bitwise type")
   build_value_operation(design,
                         module_def,
                         opcode,
@@ -161,7 +161,7 @@ fun build_mux_lookup(design,
   ensure_value_in(module_def, selector, who)
   ensure_value_in(module_def, default_value, who)
   unless mux_selector_type(selector.type)
-  | fail(who, "mux lookup selector must be Bool or Bits")
+  | fail(who, "mux lookup selector must be Bits")
   unless data_type(default_value.type)
   | fail(who, "mux lookup values must have a DataType")
   unless cases is_a List && cases.length() >= 1
@@ -331,8 +331,8 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'bit_not)
     ensure_open(module_def, #'bit_not)
     ensure_value_in(module_def, operand, #'bit_not)
-    unless logic_type(operand.type)
-    | fail(#'bit_not, "bit_not operand must have a logic type")
+    unless bitwise_type(operand.type)
+    | fail(#'bit_not, "bit_not operand must have a bitwise type")
     build_value_operation(design,
                           module_def,
                           "rtl.not",
@@ -349,8 +349,8 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("and")):
-    build_logic_same_type_binary(design, module_def, "rtl.and", left, right,
-                                 name, location, origin, #'bit_and)
+    build_bitwise_same_type_binary(design, module_def, "rtl.and", left, right,
+                                   name, location, origin, #'bit_and)
 
   method bit_or(module_def,
                 left,
@@ -358,8 +358,8 @@ class Builder(design):
                 name = #false,
                 location = Location(),
                 origin = Origin("or")):
-    build_logic_same_type_binary(design, module_def, "rtl.or", left, right,
-                                 name, location, origin, #'bit_or)
+    build_bitwise_same_type_binary(design, module_def, "rtl.or", left, right,
+                                   name, location, origin, #'bit_or)
 
   method bit_xor(module_def,
                  left,
@@ -367,8 +367,8 @@ class Builder(design):
                  name = #false,
                  location = Location(),
                  origin = Origin("xor")):
-    build_logic_same_type_binary(design, module_def, "rtl.xor", left, right,
-                                 name, location, origin, #'bit_xor)
+    build_bitwise_same_type_binary(design, module_def, "rtl.xor", left, right,
+                                   name, location, origin, #'bit_xor)
 
   method sub(module_def,
              left,
@@ -395,7 +395,7 @@ class Builder(design):
                           module_def,
                           "rtl.eq",
                           [left, right],
-                          Bool,
+                          Bits(1),
                           name,
                           location,
                           origin,
@@ -418,36 +418,19 @@ class Builder(design):
                      origin,
                      #'mux_lookup)
 
-  method mux(module_def,
-             condition,
-             true_value,
-             false_value,
-             name = #false,
-             location = Location(),
-             origin = Origin("mux")):
-    ensure_module_in_design(design, module_def, #'mux)
-    ensure_open(module_def, #'mux)
-    ensure_value_in(module_def, condition, #'mux)
-    unless bool_type(condition.type)
-    | fail(#'mux, "mux condition must be Bool")
-    build_mux_lookup(design,
-                     module_def,
-                     condition,
-                     false_value,
-                     [[1, true_value]],
-                     name,
-                     location,
-                     origin,
-                     #'mux)
-
-  method as_bool(module_def,
-                 value,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("as_bool")):
-    build_conversion(design, module_def, "rtl.as_bool", value, Bool,
-                     fun (type): bits1_type(type) || clock_type(type) || reset_type(type),
-                     "Bits(1), Clock, or Reset", name, location, origin, #'as_bool)
+  method reinterpret(module_def,
+                     value,
+                     target_type,
+                     name = #false,
+                     location = Location(),
+                     origin = Origin("reinterpret")):
+    ensure_data_type(target_type, #'reinterpret)
+    unless flat_data_type(target_type)
+    | fail(#'reinterpret, "reinterpret target must have a FlatDataType")
+    build_conversion(design, module_def, "rtl.reinterpret", value, target_type,
+                     fun (type): flat_data_type(type) && data_width(type) == data_width(target_type),
+                     "a FlatDataType with the target width", name, location, origin,
+                     #'reinterpret)
 
   method as_bits(module_def,
                  value,
@@ -455,8 +438,8 @@ class Builder(design):
                  location = Location(),
                  origin = Origin("as_bits")):
     build_conversion(design, module_def, "rtl.as_bits", value, Bits(1),
-                     fun (type): bool_type(type) || clock_type(type) || reset_type(type),
-                     "Bool, Clock, or Reset", name, location, origin, #'as_bits)
+                     fun (type): clock_type(type) || reset_type(type),
+                     "Clock or Reset", name, location, origin, #'as_bits)
 
   method as_clock(module_def,
                   value,
@@ -464,8 +447,8 @@ class Builder(design):
                   location = Location(),
                   origin = Origin("as_clock")):
     build_conversion(design, module_def, "rtl.as_clock", value, Clock,
-                     fun (type): bool_type(type) || bits1_type(type),
-                     "Bool or Bits(1)", name, location, origin, #'as_clock)
+                     fun (type): bits1_type(type),
+                     "Bits(1)", name, location, origin, #'as_clock)
 
   method as_reset(module_def,
                   value,
@@ -473,8 +456,8 @@ class Builder(design):
                   location = Location(),
                   origin = Origin("as_reset")):
     build_conversion(design, module_def, "rtl.as_reset", value, Reset,
-                     fun (type): bool_type(type) || bits1_type(type),
-                     "Bool or Bits(1)", name, location, origin, #'as_reset)
+                     fun (type): bits1_type(type),
+                     "Bits(1)", name, location, origin, #'as_reset)
 
   method concat(module_def,
                 operands,

@@ -21,9 +21,8 @@ export:
   hw_add
   hw_sub
   hw_eq
-  mux
   hw_mux_lookup
-  as_bool
+  reinterpret
   as_bits
   as_clock
   as_reset
@@ -192,21 +191,12 @@ fun hw_sub(left, right, name = #false, location = Location()):
 fun hw_eq(left, right, name = #false, location = Location()):
   binary("eq", left, right, name, location)
 
-fun mux(condition, true_value, false_value, name = #false, location = Location()):
-  def context = require_context(location)
-  context.builder.mux(require_module(location),
-                      read(condition, location),
-                      read(true_value, location),
-                      read(false_value, location),
-                      name,
-                      location,
-                      Origin("embedded mux", name || ""))
-
 fun hw_mux_lookup(selector,
                   default_value,
                   cases,
                   name = #false,
-                  location = Location()):
+                  location = Location(),
+                  origin = #false):
   def context = require_context(location)
   context.builder.mux_lookup(
     require_module(location),
@@ -215,28 +205,48 @@ fun hw_mux_lookup(selector,
     cases.map(fun (case): [case[0], read(case[1], location)]),
     name,
     location,
-    Origin("embedded mux lookup", name || "")
+    origin || Origin("embedded mux lookup", name || "")
   )
 
-fun as_bool(entity, name = #false, location = Location()):
+fun reinterpret(entity, target_type, name = #false, location = Location()):
   def context = require_context(location)
-  context.builder.as_bool(require_module(location), read(entity, location),
-                          name, location, Origin("embedded as_bool", name || ""))
+  context.builder.reinterpret(require_module(location), read(entity, location),
+                              target_type, name, location,
+                              Origin("embedded reinterpret", name || ""))
 
 fun as_bits(entity, name = #false, location = Location()):
   def context = require_context(location)
-  context.builder.as_bits(require_module(location), read(entity, location),
-                          name, location, Origin("embedded as_bits", name || ""))
+  def module_def = require_module(location)
+  def value = read(entity, location)
+  if flat_data_type(value.type) && data_width(value.type) == 1
+  | context.builder.reinterpret(module_def, value, Bits(1), name, location,
+                                Origin("embedded as_bits", name || ""))
+  | context.builder.as_bits(module_def, value, name, location,
+                            Origin("embedded as_bits", name || ""))
 
 fun as_clock(entity, name = #false, location = Location()):
   def context = require_context(location)
-  context.builder.as_clock(require_module(location), read(entity, location),
-                           name, location, Origin("embedded as_clock", name || ""))
+  def module_def = require_module(location)
+  def value = read(entity, location)
+  def bits_value:
+    if bits1_type(value.type)
+    | value
+    | context.builder.reinterpret(module_def, value, Bits(1), #false, location,
+                                  Origin("embedded as_clock bits"))
+  context.builder.as_clock(module_def, bits_value, name, location,
+                           Origin("embedded as_clock", name || ""))
 
 fun as_reset(entity, name = #false, location = Location()):
   def context = require_context(location)
-  context.builder.as_reset(require_module(location), read(entity, location),
-                           name, location, Origin("embedded as_reset", name || ""))
+  def module_def = require_module(location)
+  def value = read(entity, location)
+  def bits_value:
+    if bits1_type(value.type)
+    | value
+    | context.builder.reinterpret(module_def, value, Bits(1), #false, location,
+                                  Origin("embedded as_reset bits"))
+  context.builder.as_reset(module_def, bits_value, name, location,
+                           Origin("embedded as_reset", name || ""))
 
 fun concat(entities, name = #false, location = Location()):
   def context = require_context(location)

@@ -4,9 +4,9 @@
 
 RHDL is an experimental Rhombus-hosted hardware description system. The first
 cut implements a small public hardware IR with explicit readable values,
-driveable places, fixed-width bit vectors, native Boolean and control types,
-primitive registers, module
-instances, identity-based ownership, namespaced operation schemas,
+driveable places, fixed-width bit vectors, native control types, extensible
+flat data types, primitive registers, module instances, identity-based
+ownership, namespaced operation schemas,
 verification, deterministic IR printing, CIRCT lowering, and an embedded
 `#lang rhdl` frontend built as a thin layer over ordinary Rhombus.
 
@@ -24,7 +24,7 @@ The implementation enforces one-way package boundaries:
 rhdl/main.rkt                 # #lang reader shim
 rhdl/language.rhm             # language composition
 rhdl/core/                    # IR, Builder, verification, and IR printing
-rhdl/frontend/                # elaboration kernel and standard macros
+rhdl/frontend/                # elaboration kernel, extension types, and standard macros
 rhdl/backend/                 # CIRCT lowering
 ```
 
@@ -129,9 +129,11 @@ and `===`, plus the named functions `bit_not`, `bit_and`, `bit_or`, `bit_xor`,
 and `trunc`. `mux_lookup(selector, ~default: value)` constructs a canonical
 N-way lookup from unique host-`Int` keys. Binary `mux` requires a `Bool`
 selector and becomes a one-case `rtl.mux_lookup`; there is no binary mux IR
-operation. Constants use `literal(Bits(width), integer)`. Explicit function
-forms accept an optional IR name, while operator-produced temporary values
-receive deterministic generated names.
+operation. `Bool` is supplied by the standard frontend as a nominal,
+one-bit `BitwiseType`; it is not hard-coded into core. Constants use
+`literal(Bits(width), integer)`. Explicit function forms accept an optional IR
+name, while operator-produced temporary values receive deterministic generated
+names.
 
 ```rhombus
 result <== mux_lookup(op, ~default: not a):
@@ -200,16 +202,24 @@ emit_circt(design)
 ```
 
 The initial combinational Builder methods are `bit_not`, `bit_and`, `bit_or`,
-`bit_xor`, `add`, `sub`, `eq`, `mux`, `mux_lookup`, `concat`, `extract`, `zext`,
-and `trunc`. Bit-vector operations have explicit `Bits(width)` operands. `eq`
-returns `Bool`; same-width logic and arithmetic preserve their data type; and
-width-changing operations compute or require their result width explicitly.
-Mux lookup values and register state may use any `DataType` when their types
-satisfy `type_equal`. Register clocks use `Clock`, synchronous resets use
-`Reset`, and binary mux selectors use `Bool`. `as_bool`, `as_bits`, `as_clock`,
-and `as_reset` make one-bit data/control crossings explicit. The current CIRCT
-backend lowers the native scalar types; layered aggregate types must lower to
-supported core types before CIRCT emission.
+`bit_xor`, `add`, `sub`, `eq`, `mux_lookup`, `reinterpret`, `concat`, `extract`,
+`zext`, and `trunc`. Core equality compares same-width `Bits` operands and
+returns `Bits(1)`. Same-type bitwise operations accept any `BitwiseType` and
+preserve that type; arithmetic remains specific to `Bits`. Width-changing
+operations compute or require their result width explicitly. Mux lookup values
+and register state may use any `DataType` when their types satisfy
+`type_equal`; core mux selectors are `Bits` values. Register clocks use
+`Clock`, and synchronous resets use `Reset`.
+
+The standard frontend defines `Bool` outside core and layers Boolean equality
+and binary `mux` over those primitives: `===` explicitly reinterprets the
+one-bit equality result as `Bool`, while binary `mux` reinterprets its `Bool`
+selector as `Bits(1)` before constructing `rtl.mux_lookup`. `reinterpret`
+permits an explicit representation-transparent crossing between equal-width
+`FlatDataType` implementations. The CIRCT backend lowers any `FlatDataType`
+through its declared bit width, so extension-defined scalar types such as
+`Bool` require no backend case. Aggregates will require a later lowering
+protocol or pass.
 
 `concat(module, [a, b, ...])` places the first operand in the most-significant
 bits. `extract(module, value, high, low)` uses inclusive host-`Int` indices.

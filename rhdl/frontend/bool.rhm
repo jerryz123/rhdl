@@ -1,0 +1,52 @@
+#lang rhombus
+// Defines Bool as a representation-transparent frontend extension over Bits(1).
+
+import:
+  "../core/ir.rhm" open
+  "kernel.rhm" as kernel
+
+export:
+  Bool
+  bool_type
+  as_bool
+  bool_eq
+  mux
+
+class _BoolType():
+  implements BitwiseType
+  override method describe(): "bool"
+  override method type_equal(other): bool_type(other)
+  override method bit_width(): 1
+
+def Bool = _BoolType()
+
+fun bool_type(type):
+  type is_a _BoolType
+
+fun as_bool(entity, name = #false, location = Location()):
+  def value = kernel.read(entity, location)
+  if bool_type(value.type)
+  | entity
+  | block:
+      unless flat_data_type(value.type) && data_width(value.type) == 1
+      | error(~who: #'as_bool,
+              location.describe() ++ ": as_bool requires a one-bit FlatDataType")
+      kernel.reinterpret(entity, Bool, name, location)
+
+fun bool_eq(left, right, name = #false, location = Location()):
+  as_bool(kernel.hw_eq(left, right, #false, location), name, location)
+
+fun mux(condition,
+        true_value,
+        false_value,
+        name = #false,
+        location = Location()):
+  def condition_value = kernel.read(condition, location)
+  unless bool_type(condition_value.type)
+  | error(~who: #'mux, location.describe() ++ ": mux condition must be Bool")
+  kernel.hw_mux_lookup(kernel.as_bits(condition, #false, location),
+                       false_value,
+                       [[1, true_value]],
+                       name,
+                       location,
+                       Origin("embedded mux", name || ""))

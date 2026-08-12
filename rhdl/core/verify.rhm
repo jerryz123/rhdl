@@ -53,20 +53,20 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "constant result must have a valid Bits type")
       unless integer is_a Int && integer >= 0 && integer < (1 bits.(<<) result.type.width)
       | fail_operation(operation, "constant does not fit its result width")
-  | "logic_same_type_unary":
+  | "bitwise_same_type_unary":
       def operand = operation.operands[0]
       def result = operation.results[0]
-      unless logic_type(operand.type) && logic_type(result.type) && type_equal(operand.type, result.type)
+      unless bitwise_type(operand.type) && bitwise_type(result.type) && type_equal(operand.type, result.type)
       | fail_operation(operation,
-                       operation.opcode ++ " operand and result must have the same logic type")
-  | "logic_same_type_binary":
+                       operation.opcode ++ " operand and result must have the same bitwise type")
+  | "bitwise_same_type_binary":
       def left = operation.operands[0]
       def right = operation.operands[1]
       def result = operation.results[0]
-      def logic_operands = logic_type(left.type) && logic_type(right.type) && logic_type(result.type)
-      unless logic_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
+      def bitwise_operands = bitwise_type(left.type) && bitwise_type(right.type) && bitwise_type(result.type)
+      unless bitwise_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
       | fail_operation(operation,
-                       operation.opcode ++ " operands and result must have the same logic type")
+                       operation.opcode ++ " operands and result must have the same bitwise type")
   | "bits_same_width_binary":
       def left = operation.operands[0]
       def right = operation.operands[1]
@@ -82,9 +82,9 @@ fun check_operation_types(module_def, operation, schema):
       unless bits_type(left.type) && bits_type(right.type) && type_equal(left.type, right.type)
       | fail_operation(operation,
                        operation.opcode ++ " operands must have the same Bits width")
-      unless bool_type(result.type)
+      unless bits1_type(result.type)
       | fail_operation(operation,
-                       operation.opcode ++ " result must be Bool")
+                       operation.opcode ++ " result must be Bits(1)")
   | "data_mux_lookup":
       unless operation.operands.length() >= 3
       | fail_operation(operation, "mux lookup requires a selector, default, and at least one case")
@@ -94,7 +94,7 @@ fun check_operation_types(module_def, operation, schema):
       def result = operation.results[0]
       def keys = operation.attribute("keys", #false)
       unless mux_selector_type(selector.type)
-      | fail_operation(operation, "mux lookup selector must be Bool or Bits")
+      | fail_operation(operation, "mux lookup selector must be Bits")
       unless keys is_a List && keys.length() == case_values.length()
       | fail_operation(operation, "mux lookup keys must match its case values")
       def width = selector_width(selector.type)
@@ -112,28 +112,28 @@ fun check_operation_types(module_def, operation, schema):
       for (case_value in case_values):
         unless data_type(case_value.type) && type_equal(case_value.type, result.type)
         | fail_operation(operation, "mux lookup cases and result must have the same DataType")
-  | "to_bool":
+  | "flat_reinterpret":
       def source = operation.operands[0]
       def result = operation.results[0]
-      def source_ok = bits1_type(source.type) || clock_type(source.type) || reset_type(source.type)
-      unless source_ok && bool_type(result.type)
-      | fail_operation(operation, "as_bool requires Bits(1), Clock, or Reset and produces Bool")
-  | "to_bits":
+      def flat_types = flat_data_type(source.type) && flat_data_type(result.type)
+      unless flat_types && data_width(source.type) == data_width(result.type)
+      | fail_operation(operation, "reinterpret requires equal-width FlatDataType values")
+  | "control_to_bits":
       def source = operation.operands[0]
       def result = operation.results[0]
-      def source_ok = bool_type(source.type) || clock_type(source.type) || reset_type(source.type)
+      def source_ok = clock_type(source.type) || reset_type(source.type)
       unless source_ok && bits1_type(result.type)
-      | fail_operation(operation, "as_bits requires Bool, Clock, or Reset and produces Bits(1)")
+      | fail_operation(operation, "as_bits requires Clock or Reset and produces Bits(1)")
   | "to_clock":
       def source = operation.operands[0]
       def result = operation.results[0]
-      unless (bool_type(source.type) || bits1_type(source.type)) && clock_type(result.type)
-      | fail_operation(operation, "as_clock requires Bool or Bits(1) and produces Clock")
+      unless bits1_type(source.type) && clock_type(result.type)
+      | fail_operation(operation, "as_clock requires Bits(1) and produces Clock")
   | "to_reset":
       def source = operation.operands[0]
       def result = operation.results[0]
-      unless (bool_type(source.type) || bits1_type(source.type)) && reset_type(result.type)
-      | fail_operation(operation, "as_reset requires Bool or Bits(1) and produces Reset")
+      unless bits1_type(source.type) && reset_type(result.type)
+      | fail_operation(operation, "as_reset requires Bits(1) and produces Reset")
   | "bits_concat":
       unless operation.operands.length() >= 2
       | fail_operation(operation, "concat requires at least two operands")

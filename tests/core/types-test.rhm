@@ -10,12 +10,21 @@ class ExtensionType(name):
   override method type_equal(other):
     other is_a ExtensionType && name == other.name
 
+class ExtensionBits(name):
+  implements BitwiseType
+  override method describe(): "extension-bits<" ++ name ++ ">"
+  override method type_equal(other):
+    other is_a ExtensionBits && name == other.name
+  override method bit_width(): 1
+
 def bits8 = Bits(8)
 def another_bits8 = Bits(8)
 def bits4 = Bits(4)
 def extension = ExtensionType("packet")
 def same_extension = ExtensionType("packet")
 def other_extension = ExtensionType("control")
+def extension_bits = ExtensionBits("flag")
+def same_extension_bits = ExtensionBits("flag")
 
 check:
   bits8 is_a HardwareType ~is #true
@@ -24,14 +33,18 @@ check:
   bits_type(bits8) ~is #true
   bits1_type(bits8) ~is #false
   bits1_type(Bits(1)) ~is #true
-  bool_type(Bool) ~is #true
   clock_type(Clock) ~is #true
   reset_type(Reset) ~is #true
-  data_type(Bool) ~is #true
+  flat_data_type(bits8) ~is #true
+  bitwise_type(bits8) ~is #true
   data_type(Clock) ~is #false
   data_type(Reset) ~is #false
-  type_equal(Bool, Bits(1)) ~is #false
-  type_equal(Bool, Bool) ~is #true
+  data_type(extension_bits) ~is #true
+  flat_data_type(extension_bits) ~is #true
+  bitwise_type(extension_bits) ~is #true
+  data_width(extension_bits) ~is 1
+  type_equal(extension_bits, same_extension_bits) ~is #true
+  type_equal(extension_bits, Bits(1)) ~is #false
   type_equal(Clock, Clock) ~is #true
   type_equal(Reset, Reset) ~is #true
   type_equal(bits8, another_bits8) ~is #true
@@ -46,7 +59,7 @@ check:
   schema_for("rtl.mux_lookup").type_rule ~is "data_mux_lookup"
   schema_for("rtl.register").type_rule ~is "data_register"
   schema_for("rtl.register_reset").type_rule ~is "data_register_reset"
-  schema_for("rtl.as_bool").type_rule ~is "to_bool"
+  schema_for("rtl.reinterpret").type_rule ~is "flat_reinterpret"
   schema_for("rtl.as_clock").circt_lowering ~is "alias"
   schema_for("rtl.drive").type_rule ~is "type_equal_drive"
 
@@ -56,19 +69,20 @@ block:
   def module_def = builder.module("LayeredType")
   def clock = builder.input(module_def, "clock", Clock)
   def reset = builder.input(module_def, "reset", Reset)
-  def select = builder.input(module_def, "select", Bool)
+  def select = builder.input(module_def, "select", Bits(1))
   def raw_control = builder.input(module_def, "raw_control", Bits(1))
+  def extension_control = builder.input(module_def, "extension_control", extension_bits)
   def lookup_select = builder.input(module_def, "lookup_select", Bits(2))
   def source = builder.input(module_def, "source", extension)
   def alternate = builder.input(module_def, "alternate", same_extension)
   def target = builder.output(module_def, "target", same_extension)
-  def selected = builder.mux(module_def, select, source, alternate)
-  def converted_bool = builder.as_bool(module_def, raw_control)
-  def converted_clock = builder.as_clock(module_def, converted_bool)
-  def converted_reset = builder.as_reset(module_def, converted_bool)
+  def selected = builder.mux_lookup(module_def, select, source, [[1, alternate]])
+  def converted_flat = builder.reinterpret(module_def, raw_control, extension_bits)
+  def converted_clock = builder.as_clock(module_def, raw_control)
+  def converted_reset = builder.as_reset(module_def, raw_control)
   def converted_bits = builder.as_bits(module_def, converted_reset)
-  def inverted = builder.bit_not(module_def, select)
-  def combined = builder.bit_and(module_def, select, converted_bool)
+  def inverted = builder.bit_not(module_def, extension_control)
+  def combined = builder.bit_and(module_def, extension_control, converted_flat)
   def lookup = builder.mux_lookup(module_def,
                                   lookup_select,
                                   source,
@@ -85,11 +99,11 @@ block:
     builder.add(module_def, source, source) ~throws "same Bits width"
     lookup.module_def.find_operation(lookup.defining_op_id).attribute("keys") ~is [0, 2]
     lookup.module_def.find_operation(lookup.defining_op_id).opcode ~is "rtl.mux_lookup"
-    bool_type(converted_bool.type) ~is #true
+    type_equal(converted_flat.type, extension_bits) ~is #true
     clock_type(converted_clock.type) ~is #true
     reset_type(converted_reset.type) ~is #true
     bits1_type(converted_bits.type) ~is #true
-    bool_type(inverted.type) ~is #true
-    bool_type(combined.type) ~is #true
+    type_equal(inverted.type, extension_bits) ~is #true
+    type_equal(combined.type, extension_bits) ~is #true
   def finished = builder.finish(module_def)
   verify_design(design)

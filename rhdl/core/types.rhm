@@ -4,21 +4,23 @@
 export:
   HardwareType
   DataType
+  FlatDataType
+  BitwiseType
   Bits
-  Bool
   Clock
   Reset
   hardware_type
   data_type
+  flat_data_type
+  bitwise_type
+  data_width
   type_well_formed
   type_equal
   bits_type
   bits1_type
-  bool_type
   clock_type
   reset_type
   one_bit_type
-  logic_type
   mux_selector_type
   selector_width
   bits_text
@@ -31,8 +33,15 @@ interface HardwareType:
 interface DataType:
   extends HardwareType
 
+interface FlatDataType:
+  extends DataType
+  method bit_width()
+
+interface BitwiseType:
+  extends FlatDataType
+
 class Bits(width):
-  implements DataType
+  implements BitwiseType
   constructor (width):
     unless width is_a Int && width > 0
     | error(~who: #'Bits, "width must be a positive host Int")
@@ -44,10 +53,8 @@ class Bits(width):
   override method type_equal(other):
     bits_type(other) && width == other.width
 
-class _BoolType():
-  implements DataType
-  override method describe(): "bool"
-  override method type_equal(other): bool_type(other)
+  override method bit_width():
+    width
 
 class _ClockType():
   implements HardwareType
@@ -59,7 +66,6 @@ class _ResetType():
   override method describe(): "reset"
   override method type_equal(other): reset_type(other)
 
-def Bool = _BoolType()
 def Clock = _ClockType()
 def Reset = _ResetType()
 
@@ -69,14 +75,20 @@ fun hardware_type(type):
 fun data_type(type):
   type is_a DataType
 
+fun flat_data_type(type):
+  type is_a FlatDataType
+
+fun bitwise_type(type):
+  type is_a BitwiseType
+
+fun data_width(type):
+  if flat_data_type(type) | type.bit_width() | #false
+
 fun bits_type(type):
   type is_a Bits && type.width is_a Int && type.width > 0
 
 fun bits1_type(type):
   bits_type(type) && type.width == 1
-
-fun bool_type(type):
-  type is_a _BoolType
 
 fun clock_type(type):
   type is_a _ClockType
@@ -85,20 +97,13 @@ fun reset_type(type):
   type is_a _ResetType
 
 fun one_bit_type(type):
-  bits1_type(type) || bool_type(type) || clock_type(type) || reset_type(type)
-
-fun logic_type(type):
-  bits_type(type) || bool_type(type)
+  bits1_type(type) || clock_type(type) || reset_type(type)
 
 fun mux_selector_type(type):
-  bits_type(type) || bool_type(type)
+  bits_type(type)
 
 fun selector_width(type):
-  if bits_type(type)
-  | type.width
-  | if bool_type(type)
-    | 1
-    | #false
+  if bits_type(type) | type.width | #false
 
 fun type_well_formed(type):
   hardware_type(type)
