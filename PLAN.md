@@ -11,22 +11,24 @@ provides:
   `Origin` handles with stable IDs and explicit owning-object relationships.
 - A static namespaced operation-schema table that records arity, required
   attributes, type rules, printing forms, and CIRCT lowering targets.
-- Builder support for ports, constants, modular addition, primitive registers,
-  module instances, and single-driver relationships.
+- Builder support for ports, constants, same-width bitwise logic, modular
+  addition and subtraction, equality, muxes, primitive registers, module
+  instances, and single-driver relationships.
 - Active-high synchronous register reset.
 - Whole-design verification, including ownership, widths, driver counts,
   register operands, instance interfaces, and combinational-cycle detection.
 - Deterministic public IR printing and design walking.
 - Deterministic lowering to textual CIRCT MLIR using the `hw`, `comb`, and
+  `seq` dialects.
 - Collision-free CIRCT SSA names derived from stable IR IDs, with validated
   user-facing module, port, register, and instance names.
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
-  SystemVerilog export, and Verilator simulations for an adder, counter, and
-  explicitly reused module definition.
+  SystemVerilog export, and Verilator simulations for an adder, ALU, counter,
+  and explicitly reused module definition.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
-The `#lang rhdl` frontend, user rewrite transactions, remaining initial
-operations, and broader CIRCT lowering coverage remain future work.
+The `#lang rhdl` frontend, user rewrite transactions, width-changing initial
+operations, and their CIRCT lowering remain future work.
 
 ## 1. Goal
 
@@ -603,19 +605,20 @@ uses immutable host values for attributes and validated strings for symbols;
 they should become distinct objects only when parameterized attributes,
 renaming, or symbol references require them.
 
-### Phase 2: manually built vertical slice — first slice complete
+### Phase 2: manually built vertical slice — same-width slice complete
 
-- Implement constants and modular addition for the first slice.
+- Implement constants, bitwise logic, modular addition and subtraction,
+  equality, and muxes.
 - Implement modules, ports, drives, instances, and registers.
-- Construct the adder and counter directly through the builder API.
+- Construct the adder, host-width-parameterized ALU, and counter directly
+  through the builder API.
 - Lower them to CIRCT MLIR.
 - Have CIRCT generate SystemVerilog and simulate it with Verilator.
 
 This phase must produce working hardware before frontend syntax work expands.
 
-The remaining Phase 2 work is to add the rest of the initial combinational
-operations and exercise them in a host-parameterized ALU through Builder,
-CIRCT verification, CIRCT SystemVerilog export, and Verilator simulation.
+The remaining Phase 2 work is the width-changing group: `concat`, `extract`,
+`zext`, and `trunc`, including canonical CIRCT lowering and simulation.
 
 ### Phase 3: Rhombus frontend
 
@@ -675,15 +678,15 @@ RHDL can:
    drive, illegal cross-module or cross-design use, forged ownership, and
    combinational cycles through Builder or verifier diagnostics.
 
-### Milestone B: complete manual IR surface
+### Milestone B: complete manual IR surface — in progress
 
-RHDL can:
+The same-width portion is complete: RHDL constructs, verifies, lowers, and
+simulates `not`, `and`, `or`, `xor`, `add`, `sub`, `eq`, and `mux` in a
+host-width-parameterized ALU. Completion still requires:
 
-1. Construct and verify every initial combinational operation listed in
-   Section 6.2.
-2. Lower each operation to its canonical CIRCT representation.
-3. Build a host-parameterized ALU using the public Builder API.
-4. Differentially simulate representative ALU operations through CIRCT and
+1. Construct and verify `concat`, `extract`, `zext`, and `trunc`.
+2. Lower those operations to their canonical CIRCT representations.
+3. Simulate representative width-changing datapaths through CIRCT and
    Verilator.
 
 ### Milestone C: frontend and rewriting

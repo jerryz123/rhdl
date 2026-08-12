@@ -59,6 +59,61 @@ fun ensure_unique_instance_name(module_def, name, who):
   )
   | fail(who, "duplicate instance name " ++ name)
 
+fun build_value_operation(design,
+                          module_def,
+                          opcode,
+                          operands,
+                          result_type,
+                          name,
+                          location,
+                          origin,
+                          who):
+  def operation_id = design.fresh_id()
+  def value_name = name || "v" ++ to_string(operation_id)
+  ensure_hardware_name(value_name, who)
+  ensure_unique_hardware_name(module_def, value_name, who)
+  def value = Value(design.fresh_id(), value_name, result_type, module_def, operation_id)
+  def operation = Operation(operation_id,
+                            opcode,
+                            module_def,
+                            operands,
+                            [value],
+                            [],
+                            {"name": value_name},
+                            location,
+                            origin)
+  for (operand in operands):
+    operand.add_user(operation_id)
+  module_def.add_value(value)
+  module_def.add_operation(operation)
+  value
+
+fun build_same_width_binary(design,
+                            module_def,
+                            opcode,
+                            left,
+                            right,
+                            name,
+                            location,
+                            origin,
+                            who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, left, who)
+  ensure_value_in(module_def, right, who)
+  unless same_type(left.type, right.type)
+  | fail(who,
+         opcode ++ " operands must have exactly the same Bits width")
+  build_value_operation(design,
+                        module_def,
+                        opcode,
+                        [left, right],
+                        left.type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
 class Builder(design):
   method module(name):
     ensure_hardware_name(name, #'module)
@@ -150,32 +205,117 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("add")):
-    ensure_module_in_design(design, module_def, #'add)
-    ensure_open(module_def, #'add)
-    ensure_value_in(module_def, left, #'add)
-    ensure_value_in(module_def, right, #'add)
+    build_same_width_binary(design,
+                            module_def,
+                            "rtl.add",
+                            left,
+                            right,
+                            name,
+                            location,
+                            origin,
+                            #'add)
+
+  method bit_not(module_def,
+                 operand,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("not")):
+    ensure_module_in_design(design, module_def, #'bit_not)
+    ensure_open(module_def, #'bit_not)
+    ensure_value_in(module_def, operand, #'bit_not)
+    build_value_operation(design,
+                          module_def,
+                          "rtl.not",
+                          [operand],
+                          operand.type,
+                          name,
+                          location,
+                          origin,
+                          #'bit_not)
+
+  method bit_and(module_def,
+                 left,
+                 right,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("and")):
+    build_same_width_binary(design, module_def, "rtl.and", left, right,
+                            name, location, origin, #'bit_and)
+
+  method bit_or(module_def,
+                left,
+                right,
+                name = #false,
+                location = Location(),
+                origin = Origin("or")):
+    build_same_width_binary(design, module_def, "rtl.or", left, right,
+                            name, location, origin, #'bit_or)
+
+  method bit_xor(module_def,
+                 left,
+                 right,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("xor")):
+    build_same_width_binary(design, module_def, "rtl.xor", left, right,
+                            name, location, origin, #'bit_xor)
+
+  method sub(module_def,
+             left,
+             right,
+             name = #false,
+             location = Location(),
+             origin = Origin("sub")):
+    build_same_width_binary(design, module_def, "rtl.sub", left, right,
+                            name, location, origin, #'sub)
+
+  method eq(module_def,
+            left,
+            right,
+            name = #false,
+            location = Location(),
+            origin = Origin("eq")):
+    ensure_module_in_design(design, module_def, #'eq)
+    ensure_open(module_def, #'eq)
+    ensure_value_in(module_def, left, #'eq)
+    ensure_value_in(module_def, right, #'eq)
     unless same_type(left.type, right.type)
-    | fail(#'add,
-           "add operands must have exactly the same Bits width")
-    def operation_id = design.fresh_id()
-    def value_name = name || "v" ++ to_string(operation_id)
-    ensure_hardware_name(value_name, #'add)
-    ensure_unique_hardware_name(module_def, value_name, #'add)
-    def value = Value(design.fresh_id(), value_name, left.type, module_def, operation_id)
-    def operation = Operation(operation_id,
-                              "rtl.add",
-                              module_def,
-                              [left, right],
-                              [value],
-                              [],
-                              {"name": value_name},
-                              location,
-                              origin)
-    left.add_user(operation_id)
-    right.add_user(operation_id)
-    module_def.add_value(value)
-    module_def.add_operation(operation)
-    value
+    | fail(#'eq, "eq operands must have exactly the same Bits width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.eq",
+                          [left, right],
+                          Bits(1),
+                          name,
+                          location,
+                          origin,
+                          #'eq)
+
+  method mux(module_def,
+             condition,
+             true_value,
+             false_value,
+             name = #false,
+             location = Location(),
+             origin = Origin("mux")):
+    ensure_module_in_design(design, module_def, #'mux)
+    ensure_open(module_def, #'mux)
+    ensure_value_in(module_def, condition, #'mux)
+    ensure_value_in(module_def, true_value, #'mux)
+    ensure_value_in(module_def, false_value, #'mux)
+    unless condition.type is_a Bits && condition.type.width == 1
+    | fail(#'mux, "mux condition must be Bits(1)")
+    unless same_type(true_value.type, false_value.type)
+    | fail(#'mux, "mux data operands must have exactly the same Bits width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.mux",
+                          [condition, true_value, false_value],
+                          true_value.type,
+                          name,
+                          location,
+                          origin,
+                          #'mux)
 
   method register(module_def,
                   name,

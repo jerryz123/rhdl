@@ -33,6 +33,32 @@ fun emit_binary(operation, circt_opcode):
                 value_ref(operation.operands[1]), " : ",
                 circt_type(result.type))
 
+fun emit_not(operation):
+  def operand = operation.operands[0]
+  def result = operation.results[0]
+  def mask_ref = "%__rhdl_not_mask_" ++ to_string(operation.id)
+  def mask = (1 bits.(<<) result.type.width) - 1
+  String.append("    ", mask_ref, " = hw.constant ", to_string(mask),
+                " : ", circt_type(result.type), "\n",
+                "    ", value_ref(result), " = comb.xor ",
+                value_ref(operand), ", ", mask_ref,
+                " : ", circt_type(result.type))
+
+fun emit_eq(operation):
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = comb.icmp eq ",
+                value_ref(operation.operands[0]), ", ",
+                value_ref(operation.operands[1]), " : ",
+                circt_type(operation.operands[0].type))
+
+fun emit_mux(operation):
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = comb.mux ",
+                value_ref(operation.operands[0]), ", ",
+                value_ref(operation.operands[1]), ", ",
+                value_ref(operation.operands[2]), " : ",
+                circt_type(result.type))
+
 fun emit_register(operation):
   def current = operation.results[0]
   def next = operation.places[0]
@@ -80,8 +106,14 @@ fun emit_operation(operation):
       ""
   | "hw.constant":
       emit_constant(operation)
-  | "comb.add":
+  | "comb.and" || "comb.or" || "comb.xor" || "comb.add" || "comb.sub":
       emit_binary(operation, schema.circt_lowering)
+  | "not":
+      emit_not(operation)
+  | "eq":
+      emit_eq(operation)
+  | "mux":
+      emit_mux(operation)
   | "seq.firreg":
       emit_register(operation)
   | "hw.instance":

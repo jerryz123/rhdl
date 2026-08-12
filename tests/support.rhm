@@ -1,11 +1,12 @@
 #lang rhombus
-// Constructs shared adder, counter, and hierarchy fixtures for RHDL tests.
+// Constructs shared arithmetic, sequential, and hierarchy fixtures for RHDL tests.
 
 import:
   "../rhdl/main.rhm" open
 
 export:
   make_adder_design
+  make_alu_design
   make_counter_design
   make_hierarchy_design
 
@@ -20,6 +21,46 @@ fun make_adder_design(width = 8):
   builder.drive(sum, result)
   def finished = builder.finish(adder)
   [design, builder, adder, a, b, sum, result]
+
+fun make_alu_design(width = 8):
+  def design = Design()
+  def builder = Builder(design)
+  def alu = builder.module("ALU" ++ to_string(width))
+  def a = builder.input(alu, "a", Bits(width))
+  def b = builder.input(alu, "b", Bits(width))
+  def op = builder.input(alu, "op", Bits(3))
+  def result = builder.output(alu, "result", Bits(width))
+  def equal = builder.output(alu, "equal", Bits(1))
+
+  def and_result = builder.bit_and(alu, a, b, "and_result")
+  def or_result = builder.bit_or(alu, a, b, "or_result")
+  def xor_result = builder.bit_xor(alu, a, b, "xor_result")
+  def add_result = builder.add(alu, a, b, "add_result")
+  def sub_result = builder.sub(alu, a, b, "sub_result")
+  def not_result = builder.bit_not(alu, a, "not_result")
+  def equal_result = builder.eq(alu, a, b, "equal_result")
+
+  def op_and = builder.constant(alu, Bits(3), 0, "op_and")
+  def op_or = builder.constant(alu, Bits(3), 1, "op_or")
+  def op_xor = builder.constant(alu, Bits(3), 2, "op_xor")
+  def op_add = builder.constant(alu, Bits(3), 3, "op_add")
+  def op_sub = builder.constant(alu, Bits(3), 4, "op_sub")
+  def is_and = builder.eq(alu, op, op_and, "is_and")
+  def is_or = builder.eq(alu, op, op_or, "is_or")
+  def is_xor = builder.eq(alu, op, op_xor, "is_xor")
+  def is_add = builder.eq(alu, op, op_add, "is_add")
+  def is_sub = builder.eq(alu, op, op_sub, "is_sub")
+
+  def select_sub = builder.mux(alu, is_sub, sub_result, not_result, "select_sub")
+  def select_add = builder.mux(alu, is_add, add_result, select_sub, "select_add")
+  def select_xor = builder.mux(alu, is_xor, xor_result, select_add, "select_xor")
+  def select_or = builder.mux(alu, is_or, or_result, select_xor, "select_or")
+  def selected = builder.mux(alu, is_and, and_result, select_or, "selected")
+
+  builder.drive(result, selected)
+  builder.drive(equal, equal_result)
+  def finished = builder.finish(alu)
+  [design, builder, alu, a, b, op, result, equal]
 
 fun make_counter_design(width = 8):
   def design = Design()

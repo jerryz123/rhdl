@@ -45,10 +45,12 @@ make test
 ```
 
 This runs the Rhombus unit and negative-verification tests, emits and verifies
-CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, builds three
+CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, builds four
 Verilator testbenches, and simulates:
 
 - An 8-bit modular adder.
+- A host-width-parameterized ALU covering bitwise logic, modular arithmetic,
+  equality, and mux selection.
 - An 8-bit counter with active-high synchronous reset.
 - Two instances that explicitly reuse one adder module definition.
 
@@ -78,6 +80,11 @@ dump_ir(design)
 emit_circt(design)
 ```
 
+The initial same-width combinational Builder methods are `bit_not`, `bit_and`,
+`bit_or`, `bit_xor`, `add`, `sub`, `eq`, and `mux`. All operands have explicit
+`Bits(width)` types; `eq` returns `Bits(1)`, while the others preserve their
+data width.
+
 `emit_circt` is the backend boundary. The RHDL library has no direct
 SystemVerilog emitter; generated RTL is always produced by CIRCT. The frontend
-language, richer operations, and rewriting API remain later milestones.
+language, width-changing operations, and rewriting API remain later milestones.
