@@ -1,0 +1,157 @@
+#lang rhombus
+
+import:
+  "ir.rhm" open
+  "ops.rhm" open
+
+export:
+  verify_design
+  verify_module
+
+fun fail(message):
+  error(~who: #'verify, message)
+
+fun fail_operation(operation, message):
+  fail(operation.location.describe() ++ ": " ++ message)
+
+fun valid_bits(type):
+  type is_a Bits && type.width is_a Int && type.width > 0
+
+fun same_type(left, right):
+  valid_bits(left) && valid_bits(right) && left.width == right.width
+
+fun check_schema(operation):
+  def schema = schema_for(operation.opcode)
+  unless schema
+  | fail_operation(operation, "unknown operation " ++ operation.opcode)
+  when schema.operand_count != #false && operation.operands.length() != schema.operand_count
+  | fail_operation(operation,
+                   operation.opcode ++ " has the wrong number of operands")
+  when schema.result_count != #false && operation.results.length() != schema.result_count
+  | fail_operation(operation,
+                   operation.opcode ++ " has the wrong number of results")
+  when schema.place_count != #false && operation.places.length() != schema.place_count
+  | fail_operation(operation,
+                   operation.opcode ++ " has the wrong number of places")
+
+fun check_operation_types(module_def, operation):
+  match operation.opcode
+  | "constant":
+      def result = operation.results[0]
+      def integer = operation.attribute("value", #false)
+      unless valid_bits(result.type)
+      | fail_operation(operation, "constant result must have a valid Bits type")
+      unless integer is_a Int && integer >= 0 && integer < (1 bits.(<<) result.type.width)
+      | fail_operation(operation, "constant does not fit its result width")
+  | "add":
+      def left = operation.operands[0]
+      def right = operation.operands[1]
+      def result = operation.results[0]
+      unless same_type(left.type, right.type) && same_type(left.type, result.type)
+      | fail_operation(operation, "add operands and result must have the same Bits width")
+  | "register" || "register_reset":
+      def clock = operation.operands[0]
+      def current = operation.results[0]
+      def next = operation.places[0]
+      unless valid_bits(clock.type) && clock.type.width == 1
+      | fail_operation(operation, "register clock must be Bits(1)")
+      unless same_type(current.type, next.type)
+      | fail_operation(operation, "register current and next-state widths differ")
+      when operation.opcode == "register_reset"
+      | def reset = operation.operands[1]
+        def reset_value = operation.operands[2]
+        unless valid_bits(reset.type) && reset.type.width == 1
+        | fail_operation(operation, "register reset must be Bits(1)")
+        unless same_type(current.type, reset_value.type)
+        | fail_operation(operation, "register reset value has the wrong width")
+  | "drive":
+      def value = operation.operands[0]
+      def place = operation.places[0]
+      unless same_type(place.type, value.type)
+      | fail_operation(operation, "drive source and target widths differ")
+      unless place.driver && place.driver.id == value.id
+      | fail_operation(operation, "drive operation disagrees with the place driver")
+  | "instance":
+      def child = operation.attribute("module", #false)
+      unless child is_a Module && child.finished
+      | fail_operation(operation, "instance target is not a finished module")
+      unless operation.places.length() == child.inputs.length()
+      | fail_operation(operation, "instance input count does not match its module")
+      unless operation.results.length() == child.outputs.length()
+      | fail_operation(operation, "instance output count does not match its module")
+      for (place in operation.places,
+           port in child.inputs):
+        unless same_type(place.type, port.type)
+        | fail_operation(operation, "instance input width does not match its port")
+      for (value in operation.results,
+           port in child.outputs):
+        unless same_type(value.type, port.type)
+        | fail_operation(operation, "instance output width does not match its port")
+  | ~else:
+      #void
+
+fun value_has_combinational_cycle(module_def, value, path):
+  if value.id in path
+  | #true
+  | block:
+      def operation = module_def.find_operation(value.defining_op_id)
+      if !operation || !combinational_opcode(operation.opcode)
+      | #false
+      | for any (operand in operation.operands):
+          value_has_combinational_cycle(module_def, operand, path ++ [value.id])
+
+fun is_drive_to(operation, place_id):
+  operation.opcode == "drive" && operation.places.length() == 1 && operation.places[0].id == place_id
+
+fun verify_module(module_def):
+  unless module_def.finished
+  | fail("module " ++ module_def.name ++ " has not been finished")
+  for (port in module_def.inputs):
+    unless valid_bits(port.type) && port.value && !port.place
+    | fail("input " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
+  for (port in module_def.outputs):
+    unless valid_bits(port.type) && port.place && !port.value
+    | fail("output " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
+  for (operation in module_def.operations):
+    check_schema(operation)
+    for (operand in operation.operands):
+      unless operand is_a Value && operand.module_id == module_def.id
+      | fail_operation(operation, "operand belongs to a different module")
+    for (result in operation.results):
+      unless result is_a Value && result.module_id == module_def.id
+      | fail_operation(operation, "result belongs to a different module")
+      unless result.defining_op_id == operation.id
+      | fail_operation(operation, "result has the wrong defining operation")
+    for (place in operation.places):
+      unless place is_a Place && place.module_id == module_def.id
+      | fail_operation(operation, "place belongs to a different module")
+    check_operation_types(module_def, operation)
+  for (place in module_def.places):
+    unless valid_bits(place.type)
+    | fail("place " ++ place.name ++ " does not have a valid Bits type")
+    unless place.driver
+    | fail("place " ++ place.name ++ " is undriven")
+    unless place.driver.module_id == module_def.id
+    | fail("place " ++ place.name ++ " is driven from a different module")
+    unless same_type(place.type, place.driver.type)
+    | fail("place " ++ place.name ++ " and its driver have different widths")
+    def drive_count:
+      module_def.operations.filter(~keep: fun (operation): is_drive_to(operation, place.id)).length()
+    unless drive_count == 1
+    | fail("place " ++ place.name ++ " must have exactly one drive operation")
+  for (value in module_def.values):
+    unless valid_bits(value.type)
+    | fail("value " ++ value.name ++ " does not have a valid Bits type")
+    when value_has_combinational_cycle(module_def, value, [])
+    | fail("combinational cycle reaches value " ++ value.name)
+  #void
+
+fun verify_design(design):
+  unless design is_a Design
+  | fail("expected an IR.Design")
+  for (module_def in design.modules):
+    def same_names = design.modules.filter(~keep: fun (other): other.name == module_def.name)
+    unless same_names.length() == 1
+    | fail("duplicate module name " ++ module_def.name)
+    verify_module(module_def)
+  #void

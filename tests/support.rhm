@@ -1,0 +1,56 @@
+#lang rhombus
+
+import:
+  "../rhdl/main.rhm" open
+
+export:
+  make_adder_design
+  make_counter_design
+  make_hierarchy_design
+
+fun make_adder_design(width = 8):
+  def design = Design()
+  def builder = Builder(design)
+  def adder = builder.module("Adder" ++ to_string(width))
+  def a = builder.input(adder, "a", Bits(width))
+  def b = builder.input(adder, "b", Bits(width))
+  def sum = builder.output(adder, "sum", Bits(width))
+  def result = builder.add(adder, a, b, "result")
+  builder.drive(sum, result)
+  def finished = builder.finish(adder)
+  [design, builder, adder, a, b, sum, result]
+
+fun make_counter_design(width = 8):
+  def design = Design()
+  def builder = Builder(design)
+  def counter = builder.module("Counter" ++ to_string(width))
+  def clk = builder.input(counter, "clk", Bits(1))
+  def reset = builder.input(counter, "reset", Bits(1))
+  def count = builder.output(counter, "count", Bits(width))
+  def zero = builder.constant(counter, Bits(width), 0, "zero")
+  def one = builder.constant(counter, Bits(width), 1, "one")
+  def state = builder.register(counter, "state", Bits(width), clk, reset, zero)
+  def next = builder.add(counter, state.current, one, "next")
+  builder.drive(state.next, next)
+  builder.drive(count, state.current)
+  def finished = builder.finish(counter)
+  [design, builder, counter, count, state]
+
+fun make_hierarchy_design(width = 8):
+  def [design, builder, adder, _, _, _, _] = make_adder_design(width)
+  def top = builder.module("TwoAdders")
+  def a = builder.input(top, "a", Bits(width))
+  def b = builder.input(top, "b", Bits(width))
+  def c = builder.input(top, "c", Bits(width))
+  def sum0 = builder.output(top, "sum0", Bits(width))
+  def sum1 = builder.output(top, "sum1", Bits(width))
+  def u0 = builder.instance(top, adder, "u0")
+  def u1 = builder.instance(top, adder, "u1")
+  builder.drive(u0.input("a"), a)
+  builder.drive(u0.input("b"), b)
+  builder.drive(u1.input("a"), a)
+  builder.drive(u1.input("b"), c)
+  builder.drive(sum0, u0.output("sum"))
+  builder.drive(sum1, u1.output("sum"))
+  def finished = builder.finish(top)
+  [design, builder, adder, top, u0, u1]

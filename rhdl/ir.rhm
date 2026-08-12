@@ -1,0 +1,142 @@
+#lang rhombus
+
+export:
+  Bits
+  Location
+  Origin
+  Value
+  Place
+  Operation
+  Port
+  Register
+  Instance
+  Module
+  Design
+  bits_text
+
+class Bits(width):
+  constructor (width):
+    unless width is_a Int && width > 0
+    | error(~who: #'Bits, "width must be a positive host Int")
+    super(width)
+
+  method describe():
+    bits_text(this)
+
+class Location(path = "<unknown>", line = #false, column = #false):
+  method describe():
+    if line
+    | path ++ ":" ++ to_string(line) ++ (if column | ":" ++ to_string(column) | "")
+    | path
+
+class Origin(kind = "unknown", description = "", parents = []):
+  method describe():
+    if description == ""
+    | kind
+    | kind ++ ": " ++ description
+
+class Value(id, name, type, module_id, defining_op_id, mutable user_ids = []):
+  method add_user(operation_id):
+    user_ids := user_ids ++ [operation_id]
+
+  method users():
+    user_ids
+
+  method ref():
+    "%" ++ name
+
+class Place(id, name, type, module_id, owner_op_id, mutable driver = #false):
+  method ref():
+    "&" ++ name
+
+class Operation(id,
+                opcode,
+                operands = [],
+                results = [],
+                places = [],
+                attributes = {},
+                location = Location(),
+                origin = Origin()):
+  method attribute(name, default = #false):
+    attributes.get(name, default)
+
+class Port(name, direction, type, value = #false, place = #false)
+
+class Register(operation, current, next)
+
+class Instance(operation, module_def, input_bindings, output_bindings):
+  method input(name):
+    def binding = input_bindings.find(fun (candidate): candidate.name == name)
+    unless binding
+    | error(~who: #'input,
+            "instance has no input named " ++ name)
+    binding.place
+
+  method output(name):
+    def binding = output_bindings.find(fun (candidate): candidate.name == name)
+    unless binding
+    | error(~who: #'output,
+            "instance has no output named " ++ name)
+    binding.value
+
+class Module(id,
+             name,
+             mutable operations = [],
+             mutable inputs = [],
+             mutable outputs = [],
+             mutable values = [],
+             mutable places = [],
+             mutable finished = #false):
+  method add_operation(operation):
+    operations := operations ++ [operation]
+
+  method add_value(value):
+    values := values ++ [value]
+
+  method add_place(place):
+    places := places ++ [place]
+
+  method add_input(port):
+    inputs := inputs ++ [port]
+
+  method add_output(port):
+    outputs := outputs ++ [port]
+
+  method find_operation(id):
+    operations.find(fun (operation): operation.id == id)
+
+  method find_value(id):
+    values.find(fun (value): value.id == id)
+
+  method find_place(id):
+    places.find(fun (place): place.id == id)
+
+  method find_input(name):
+    inputs.find(fun (port): port.name == name)
+
+  method find_output(name):
+    outputs.find(fun (port): port.name == name)
+
+  method walk():
+    operations
+
+class Design(mutable modules = [], mutable next_id = 0):
+  method fresh_id():
+    def id = next_id
+    next_id := next_id + 1
+    id
+
+  method add_module(module_def):
+    modules := modules ++ [module_def]
+
+  method find_module(id):
+    modules.find(fun (module_def): module_def.id == id)
+
+  method walk():
+    def mutable all_operations = []
+    for (module_def in modules):
+      all_operations := all_operations ++ module_def.operations
+    all_operations
+
+fun bits_text(type):
+  "bits<" ++ to_string(type.width) ++ ">"

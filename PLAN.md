@@ -1,5 +1,26 @@
 # RHDL Initial Architecture and Implementation Plan
 
+## Current implementation status
+
+The first manually constructed vertical slice is implemented. It currently
+provides:
+
+- `Design`, `Module`, `Operation`, `Value`, `Place`, `Bits`, `Location`, and
+  `Origin` handles with stable IDs.
+- A static operation-schema table.
+- Builder support for ports, constants, modular addition, primitive registers,
+  module instances, and single-driver relationships.
+- Active-high synchronous register reset.
+- Whole-design verification, including ownership, widths, driver counts,
+  register operands, instance interfaces, and combinational-cycle detection.
+- Deterministic public IR printing and design walking.
+- A small direct SystemVerilog emitter used as validation scaffolding.
+- Rhombus unit and negative tests plus Verilator simulations for an adder,
+  counter, and explicitly reused module definition.
+
+The `#lang rhdl` frontend, user rewrite transactions, the remaining initial
+operations, and the CIRCT backend decision are not part of this first cut.
+
 ## 1. Goal
 
 RHDL is a Rhombus-hosted language for elaborating, inspecting, transforming,

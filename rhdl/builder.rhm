@@ -1,0 +1,282 @@
+#lang rhombus
+
+import:
+  "ir.rhm" open
+
+export:
+  Builder
+
+fun fail(who, message):
+  error(~who: who, message)
+
+fun ensure_bits(type, who):
+  unless type is_a Bits
+  | fail(who, "expected a Bits type")
+  unless type.width is_a Int && type.width > 0
+  | fail(who, "Bits width must be a positive host Int")
+
+fun same_type(left, right):
+  left is_a Bits && right is_a Bits && left.width == right.width
+
+fun ensure_open(module_def, who):
+  when module_def.finished
+  | fail(who, "module " ++ module_def.name ++ " is already finished")
+
+fun ensure_value_in(module_def, value, who):
+  unless value is_a Value
+  | fail(who, "expected a readable hardware Value")
+  unless value.module_id == module_def.id
+  | fail(who, "hardware value belongs to a different module")
+
+fun ensure_unique_hardware_name(module_def, name, who):
+  when module_def.values.find(fun (value): value.name == name) || module_def.places.find(fun (place): place.name == name)
+  | fail(who, "duplicate hardware name " ++ name)
+
+fun ensure_unique_instance_name(module_def, name, who):
+  when module_def.operations.find(
+    fun (operation): operation.opcode == "instance" && operation.attribute("name", #false) == name
+  )
+  | fail(who, "duplicate instance name " ++ name)
+
+class Builder(design):
+  method module(name):
+    when design.modules.find(fun (candidate): candidate.name == name)
+    | fail(#'module, "duplicate module name " ++ name)
+    def module_def = Module(design.fresh_id(), name)
+    design.add_module(module_def)
+    module_def
+
+  method input(module_def, name, type, location = Location(), origin = Origin("input", name)):
+    ensure_open(module_def, #'input)
+    ensure_bits(type, #'input)
+    ensure_unique_hardware_name(module_def, name, #'input)
+    def operation_id = design.fresh_id()
+    def value = Value(design.fresh_id(), name, type, module_def.id, operation_id)
+    def operation = Operation(operation_id,
+                              "input_port",
+                              [],
+                              [value],
+                              [],
+                              {"name": name},
+                              location,
+                              origin)
+    module_def.add_value(value)
+    module_def.add_operation(operation)
+    module_def.add_input(Port(name, "input", type, value, #false))
+    value
+
+  method output(module_def, name, type, location = Location(), origin = Origin("output", name)):
+    ensure_open(module_def, #'output)
+    ensure_bits(type, #'output)
+    ensure_unique_hardware_name(module_def, name, #'output)
+    def operation_id = design.fresh_id()
+    def place = Place(design.fresh_id(), name, type, module_def.id, operation_id)
+    def operation = Operation(operation_id,
+                              "output_port",
+                              [],
+                              [],
+                              [place],
+                              {"name": name},
+                              location,
+                              origin)
+    module_def.add_place(place)
+    module_def.add_operation(operation)
+    module_def.add_output(Port(name, "output", type, #false, place))
+    place
+
+  method constant(module_def,
+                  type,
+                  integer,
+                  name = #false,
+                  location = Location(),
+                  origin = Origin("constant")):
+    ensure_open(module_def, #'constant)
+    ensure_bits(type, #'constant)
+    unless integer is_a Int
+    | fail(#'constant, "constant value must be a host Int")
+    unless integer >= 0 && integer < (1 bits.(<<) type.width)
+    | fail(#'constant,
+           "constant " ++ to_string(integer) ++ " does not fit " ++ type.describe())
+    def operation_id = design.fresh_id()
+    def value_name = name || "v" ++ to_string(operation_id)
+    ensure_unique_hardware_name(module_def, value_name, #'constant)
+    def value = Value(design.fresh_id(), value_name, type, module_def.id, operation_id)
+    def operation = Operation(operation_id,
+                              "constant",
+                              [],
+                              [value],
+                              [],
+                              {"value": integer, "name": value_name},
+                              location,
+                              origin)
+    module_def.add_value(value)
+    module_def.add_operation(operation)
+    value
+
+  method add(module_def,
+             left,
+             right,
+             name = #false,
+             location = Location(),
+             origin = Origin("add")):
+    ensure_open(module_def, #'add)
+    ensure_value_in(module_def, left, #'add)
+    ensure_value_in(module_def, right, #'add)
+    unless same_type(left.type, right.type)
+    | fail(#'add,
+           "add operands must have exactly the same Bits width")
+    def operation_id = design.fresh_id()
+    def value_name = name || "v" ++ to_string(operation_id)
+    ensure_unique_hardware_name(module_def, value_name, #'add)
+    def value = Value(design.fresh_id(), value_name, left.type, module_def.id, operation_id)
+    def operation = Operation(operation_id,
+                              "add",
+                              [left, right],
+                              [value],
+                              [],
+                              {"name": value_name},
+                              location,
+                              origin)
+    left.add_user(operation_id)
+    right.add_user(operation_id)
+    module_def.add_value(value)
+    module_def.add_operation(operation)
+    value
+
+  method register(module_def,
+                  name,
+                  type,
+                  clock,
+                  reset = #false,
+                  reset_value = #false,
+                  location = Location(),
+                  origin = Origin("register", name)):
+    ensure_open(module_def, #'register)
+    ensure_bits(type, #'register)
+    ensure_value_in(module_def, clock, #'register)
+    unless clock.type is_a Bits && clock.type.width == 1
+    | fail(#'register, "register clock must be Bits(1)")
+    unless (reset && reset_value) || (!reset && !reset_value)
+    | fail(#'register,
+           "synchronous reset and reset value must be supplied together")
+    when reset
+    | ensure_value_in(module_def, reset, #'register)
+      ensure_value_in(module_def, reset_value, #'register)
+      unless reset.type is_a Bits && reset.type.width == 1
+      | fail(#'register, "register reset must be Bits(1)")
+      unless same_type(type, reset_value.type)
+      | fail(#'register, "register reset value has the wrong width")
+    ensure_unique_hardware_name(module_def, name, #'register)
+    ensure_unique_hardware_name(module_def, name ++ ".next", #'register)
+    def operation_id = design.fresh_id()
+    def current = Value(design.fresh_id(), name, type, module_def.id, operation_id)
+    def next = Place(design.fresh_id(), name ++ ".next", type, module_def.id, operation_id)
+    def operands = if reset | [clock, reset, reset_value] | [clock]
+    def operation = Operation(operation_id,
+                              if reset | "register_reset" | "register",
+                              operands,
+                              [current],
+                              [next],
+                              {"name": name},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    module_def.add_value(current)
+    module_def.add_place(next)
+    module_def.add_operation(operation)
+    Register(operation, current, next)
+
+  method instance(module_def,
+                  child,
+                  name,
+                  location = Location(),
+                  origin = Origin("instance", name)):
+    ensure_open(module_def, #'instance)
+    unless child is_a Module && child.finished
+    | fail(#'instance, "instance target must be a finished module definition")
+    unless design.find_module(child.id)
+    | fail(#'instance, "instance target belongs to a different design")
+    ensure_unique_instance_name(module_def, name, #'instance)
+    for (port in child.inputs):
+      ensure_unique_hardware_name(module_def, name ++ "." ++ port.name, #'instance)
+    for (port in child.outputs):
+      ensure_unique_hardware_name(module_def, name ++ "." ++ port.name, #'instance)
+    def operation_id = design.fresh_id()
+    def mutable input_bindings = []
+    def mutable output_bindings = []
+    def mutable places = []
+    def mutable results = []
+    for (port in child.inputs):
+      def place = Place(design.fresh_id(),
+                        name ++ "." ++ port.name,
+                        port.type,
+                        module_def.id,
+                        operation_id)
+      module_def.add_place(place)
+      places := places ++ [place]
+      input_bindings := input_bindings ++ [Port(port.name, "input", port.type, #false, place)]
+    for (port in child.outputs):
+      def value = Value(design.fresh_id(),
+                        name ++ "." ++ port.name,
+                        port.type,
+                        module_def.id,
+                        operation_id)
+      module_def.add_value(value)
+      results := results ++ [value]
+      output_bindings := output_bindings ++ [Port(port.name, "output", port.type, value, #false)]
+    def operation = Operation(operation_id,
+                              "instance",
+                              [],
+                              results,
+                              places,
+                              {"name": name, "module": child},
+                              location,
+                              origin)
+    module_def.add_operation(operation)
+    Instance(operation, child, input_bindings, output_bindings)
+
+  method drive(place,
+               value,
+               location = Location(),
+               origin = Origin("drive")):
+    unless place is_a Place
+    | fail(#'drive, "drive target must be a hardware Place")
+    unless value is_a Value
+    | fail(#'drive, "drive source must be a hardware Value")
+    def module_def = design.find_module(place.module_id)
+    unless module_def
+    | fail(#'drive, "drive target belongs to a different design")
+    ensure_open(module_def, #'drive)
+    ensure_value_in(module_def, value, #'drive)
+    unless same_type(place.type, value.type)
+    | fail(#'drive, "place and driver must have exactly the same Bits width")
+    when place.driver
+    | fail(#'drive, "place " ++ place.name ++ " already has a driver")
+    place.driver := value
+    def operation_id = design.fresh_id()
+    def operation = Operation(operation_id,
+                              "drive",
+                              [value],
+                              [],
+                              [place],
+                              {},
+                              location,
+                              origin)
+    value.add_user(operation_id)
+    module_def.add_operation(operation)
+    #void
+
+  method read(place):
+    unless place is_a Place
+    | fail(#'read, "read target must be a hardware Place")
+    unless design.find_module(place.module_id)
+    | fail(#'read, "read target belongs to a different design")
+    unless place.driver
+    | fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
+    place.driver
+
+  method finish(module_def):
+    ensure_open(module_def, #'finish)
+    module_def.finished := #true
+    module_def

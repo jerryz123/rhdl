@@ -1,0 +1,67 @@
+#lang rhombus
+
+import:
+  "ir.rhm" open
+
+export:
+  dump_ir
+  dump_module_ir
+
+fun value_refs(value_list):
+  String.join(value_list.map(fun (value): value.ref()), ", ")
+
+fun place_refs(place_list):
+  String.join(place_list.map(fun (place): place.ref()), ", ")
+
+fun print_operation(operation):
+  match operation.opcode
+  | "input_port":
+      String.append("    ", operation.results[0].ref(), " = rtl.input ",
+                    bits_text(operation.results[0].type))
+  | "output_port":
+      String.append("    ", operation.places[0].ref(), " = rtl.output ",
+                    bits_text(operation.places[0].type))
+  | "constant":
+      String.append("    ", operation.results[0].ref(), " = rtl.constant ",
+                    to_string(operation.attribute("value")), " : ",
+                    bits_text(operation.results[0].type))
+  | "add":
+      String.append("    ", operation.results[0].ref(), " = rtl.add ",
+                    value_refs(operation.operands), " : ",
+                    bits_text(operation.results[0].type))
+  | "register":
+      String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
+                    " = rtl.register clock ", operation.operands[0].ref(),
+                    " : ", bits_text(operation.results[0].type))
+  | "register_reset":
+      String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
+                    " = rtl.register clock ", operation.operands[0].ref(),
+                    " reset ", operation.operands[1].ref(),
+                    " to ", operation.operands[2].ref(),
+                    " : ", bits_text(operation.results[0].type))
+  | "instance":
+      def child = operation.attribute("module")
+      def results = if operation.results == [] | "" | value_refs(operation.results) ++ " = "
+      def inputs = if operation.places == [] | "" | " inputs " ++ place_refs(operation.places)
+      String.append("    ", results, "rtl.instance @", child.name,
+                    " as ", operation.attribute("name"), inputs)
+  | "drive":
+      String.append("    rtl.drive ", operation.places[0].ref(),
+                    ", ", operation.operands[0].ref())
+  | ~else:
+      "    \"" ++ operation.opcode ++ "\""
+
+fun dump_module_ir(module_def):
+  def ports:
+    module_def.inputs.map(
+      fun (port): "in " ++ port.value.ref() ++ ": " ++ bits_text(port.type)
+    ) ++ module_def.outputs.map(
+      fun (port): "out " ++ port.place.ref() ++ ": " ++ bits_text(port.type)
+    )
+  def body = String.join(module_def.operations.map(print_operation), "\n")
+  String.append("rhdl.module @", module_def.name, "(",
+                String.join(ports, ", "), ") {\n",
+                body, "\n}\n")
+
+fun dump_ir(design):
+  String.join(design.modules.map(dump_module_ir), "\n")

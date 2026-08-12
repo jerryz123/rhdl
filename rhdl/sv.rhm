@@ -1,0 +1,103 @@
+#lang rhombus
+
+import:
+  "ir.rhm" open
+  "verify.rhm" open
+
+export:
+  emit_systemverilog
+  emit_module_systemverilog
+
+fun sv_name(name):
+  String.replace(name, ".", "_", ~all: #true)
+
+fun sv_width(type):
+  if type.width == 1
+  | ""
+  | "[" ++ to_string(type.width - 1) ++ ":0] "
+
+fun sv_type(type):
+  "logic " ++ sv_width(type)
+
+fun value_name(value):
+  sv_name(value.name)
+
+fun declaration(value):
+  "    " ++ sv_type(value.type) ++ value_name(value) ++ ";"
+
+fun emit_operation(operation):
+  match operation.opcode
+  | "input_port" || "output_port" || "drive":
+      ""
+  | "constant":
+      def result = operation.results[0]
+      String.append(declaration(result), "\n",
+                    "    assign ", value_name(result), " = ",
+                    to_string(result.type.width), "'d",
+                    to_string(operation.attribute("value")), ";")
+  | "add":
+      def result = operation.results[0]
+      String.append(declaration(result), "\n",
+                    "    assign ", value_name(result), " = ",
+                    value_name(operation.operands[0]), " + ",
+                    value_name(operation.operands[1]), ";")
+  | "register" || "register_reset":
+      def current = operation.results[0]
+      def next = operation.places[0]
+      def mutable lines = [declaration(current),
+                           "    always_ff @(posedge " ++ value_name(operation.operands[0]) ++ ") begin"]
+      when operation.opcode == "register_reset"
+      | lines := List.append(
+          lines,
+          ["        if (" ++ value_name(operation.operands[1]) ++ ")",
+           "            " ++ value_name(current) ++ " <= " ++ value_name(operation.operands[2]) ++ ";",
+           "        else"]
+        )
+      def assignment_indent = if operation.opcode == "register_reset" | "            " | "        "
+      lines := List.append(
+        lines,
+        [String.append(assignment_indent, value_name(current), " <= ", value_name(next.driver), ";"),
+         "    end"]
+      )
+      String.join(lines, "\n")
+  | "instance":
+      def child = operation.attribute("module")
+      def instance_name = sv_name(operation.attribute("name"))
+      def declarations = operation.results.map(declaration)
+      def mutable connections = []
+      for (port in child.inputs,
+           place in operation.places):
+        connections := connections ++ ["        ." ++ sv_name(port.name) ++ "(" ++ value_name(place.driver) ++ ")"]
+      for (port in child.outputs,
+           value in operation.results):
+        connections := connections ++ ["        ." ++ sv_name(port.name) ++ "(" ++ value_name(value) ++ ")"]
+      def instance_text:
+        String.append("    ", sv_name(child.name), " ", instance_name, " (\n",
+                      String.join(connections, ",\n"), "\n    );")
+      String.join(declarations ++ [instance_text], "\n")
+  | ~else:
+      error(~who: #'emit_systemverilog,
+            "no SystemVerilog emitter for operation " ++ operation.opcode)
+
+fun emit_module_systemverilog(module_def):
+  def ports:
+    module_def.inputs.map(
+      fun (port): "    input " ++ sv_type(port.type) ++ sv_name(port.name)
+    ) ++ module_def.outputs.map(
+      fun (port): "    output " ++ sv_type(port.type) ++ sv_name(port.name)
+    )
+  def operation_texts:
+    module_def.operations.map(emit_operation).filter(~keep: fun (text): text != "")
+  def output_drives:
+    module_def.outputs.map(
+      fun (port):
+        "    assign " ++ sv_name(port.name) ++ " = " ++ value_name(port.place.driver) ++ ";"
+    )
+  String.append("module ", sv_name(module_def.name), " (\n",
+                String.join(ports, ",\n"), "\n);\n\n",
+                String.join(operation_texts ++ output_drives, "\n\n"),
+                "\n\nendmodule\n")
+
+fun emit_systemverilog(design):
+  verify_design(design)
+  String.join(design.modules.map(emit_module_systemverilog), "\n")
