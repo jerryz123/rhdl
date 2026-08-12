@@ -1,3 +1,5 @@
+<!-- Defines RHDL's agreed semantics, backend boundary, and staged implementation plan. -->
+
 # RHDL Initial Architecture and Implementation Plan
 
 ## Current implementation status
@@ -14,12 +16,14 @@ provides:
 - Whole-design verification, including ownership, widths, driver counts,
   register operands, instance interfaces, and combinational-cycle detection.
 - Deterministic public IR printing and design walking.
-- A small direct SystemVerilog emitter used as validation scaffolding.
-- Rhombus unit and negative tests plus Verilator simulations for an adder,
-  counter, and explicitly reused module definition.
+- Deterministic lowering to textual CIRCT MLIR using the `hw`, `comb`, and
+  `seq` dialects.
+- Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
+  SystemVerilog export, and Verilator simulations for an adder, counter, and
+  explicitly reused module definition.
 
 The `#lang rhdl` frontend, user rewrite transactions, the remaining initial
-operations, and the CIRCT backend decision are not part of this first cut.
+operations, and broader CIRCT lowering coverage are not part of this first cut.
 
 ## 1. Goal
 
@@ -48,6 +52,12 @@ public RHDL hardware IR
     |
     v
 backend lowering
+    |
+    v
+CIRCT hw/comb/seq MLIR
+    |
+    v
+CIRCT lowering and ExportVerilog
     |
     v
 SystemVerilog
@@ -470,24 +480,29 @@ The public RHDL IR remains independent of backend representation:
 ```text
 RHDL hardware IR
     |
-    +-- FIRRTL/CIRCT lowering
+    v
+CIRCT hw/comb/seq MLIR
     |
-    +-- or CIRCT hw/comb/seq lowering
+    v
+CIRCT lowering passes
+    |
+    v
+CIRCT ExportVerilog
     |
     v
 SystemVerilog
 ```
 
-The first backend is selected through a small spike that implements the same
-combinational module, synchronous-reset register, and module instance through
-both plausible CIRCT routes. The comparison should evaluate:
+The initial backend lowers directly to CIRCT's `hw`, `comb`, and `seq`
+dialects. `Bits(width)` becomes a signless integer type, modules and instances
+become `hw` operations, combinational values become `comb` operations, and
+primitive registers become `seq` operations. Active-high synchronous reset is
+preserved explicitly with `seq.firreg` and `reset sync`.
 
-- Lowering complexity.
-- Preservation of source locations and names.
-- Diagnostic quality.
-- Tool installation and version pinning.
-- Generated SystemVerilog quality.
-- Compatibility with Verilator.
+RHDL does not contain a direct SystemVerilog emitter. CIRCT owns lowering from
+its IR to SystemVerilog, including any required `seq`-to-`sv` conversion and
+`ExportVerilog`. Backend tests must first parse and verify the emitted CIRCT IR,
+then use CIRCT to generate the RTL supplied to Verilator.
 
 Backend-specific IR must not leak into the frontend value and place APIs.
 
@@ -517,8 +532,8 @@ These can be added only with explicit semantics and tests.
 - Establish a repeatable development environment.
 - Write expected IR for an ALU, a synchronous-reset counter, and a module
   instance.
-- Complete the FIRRTL-versus-CIRCT-direct backend spike.
-- Record the backend decision and invocation contract.
+- Record and test the direct `hw`/`comb`/`seq` lowering and CIRCT invocation
+  contract.
 
 ### Phase 1: IR kernel
 
@@ -549,8 +564,8 @@ cycle detection, and invalid handle behavior.
 - Implement the initial combinational operations.
 - Implement modules, ports, drives, instances, and registers.
 - Construct the ALU and counter directly through the builder API.
-- Lower them through the selected backend.
-- Generate SystemVerilog and simulate it with Verilator.
+- Lower them to CIRCT MLIR.
+- Have CIRCT generate SystemVerilog and simulate it with Verilator.
 
 This phase must produce working hardware before frontend syntax work expands.
 
@@ -586,7 +601,9 @@ host conditional path against hardware values.
 ### Phase 5: hardening
 
 - Add negative diagnostic tests.
-- Add deterministic golden IR and SystemVerilog tests.
+- Add deterministic golden RHDL IR and CIRCT MLIR tests.
+- Test CIRCT-exported SystemVerilog through simulation rather than maintaining
+  a second RHDL-owned RTL printer.
 - Add randomized or property-based bit-vector tests.
 - Differentially simulate generated modules against an elaboration-time
   reference model where practical.
@@ -603,7 +620,8 @@ The first milestone is complete when RHDL can:
 4. Read an already-driven module output within its defining module.
 5. Dump and walk the public IR.
 6. Apply a user-authored `x + 0 -> x` rewrite and reverify the design.
-7. Generate SystemVerilog and pass Verilator simulation.
+7. Generate valid CIRCT MLIR, have CIRCT export SystemVerilog, and pass
+   Verilator simulation.
 8. Produce source-located errors for width mismatch, driving an input,
    undriven and multiply-driven places, reading an output before driving it,
    illegal cross-module use, a combinational cycle, and a hardware value used

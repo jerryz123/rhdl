@@ -6,7 +6,11 @@ RHDL is an experimental Rhombus-hosted hardware description system. The first
 cut implements a small public hardware IR with explicit readable values,
 driveable places, fixed-width bit vectors, primitive registers, module
 instances, verification, deterministic IR printing, and a validation-oriented
-SystemVerilog emitter.
+CIRCT lowering.
+
+RHDL does not emit SystemVerilog. It lowers its public IR to CIRCT MLIR using
+the `hw`, `comb`, and `seq` dialects. CIRCT then lowers sequential operations
+and owns SystemVerilog export.
 
 The architecture and staged roadmap are described in [PLAN.md](PLAN.md).
 
@@ -14,6 +18,7 @@ The architecture and staged roadmap are described in [PLAN.md](PLAN.md).
 
 - Racket 9.2 or a compatible current release.
 - The Rhombus package.
+- CIRCT; the repository pins `firtool-1.155.0` for backend tests.
 - Verilator for generated-hardware simulations.
 
 On a Homebrew-based macOS setup:
@@ -23,14 +28,25 @@ brew install minimal-racket
 raco pkg install --auto rhombus
 ```
 
+On Apple Silicon macOS, install the pinned CIRCT release into the ignored
+`.tools` directory with:
+
+```sh
+make setup-circt
+```
+
+On another platform, install CIRCT separately and set `CIRCT_OPT` to the path
+of `circt-opt` when running the tests.
+
 ## Run the tests
 
 ```sh
 make test
 ```
 
-This runs the Rhombus unit and negative-verification tests, emits
-SystemVerilog, builds three Verilator testbenches, and simulates:
+This runs the Rhombus unit and negative-verification tests, emits and verifies
+CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, builds three
+Verilator testbenches, and simulates:
 
 - An 8-bit modular adder.
 - An 8-bit counter with active-high synchronous reset.
@@ -59,9 +75,9 @@ builder.finish(module_def)
 
 verify_design(design)
 dump_ir(design)
-emit_systemverilog(design)
+emit_circt(design)
 ```
 
-The direct SystemVerilog emitter is validation scaffolding for this first cut,
-not the final backend decision. The frontend language, richer operations,
-rewriting API, and CIRCT lowering remain later milestones.
+`emit_circt` is the backend boundary. The RHDL library has no direct
+SystemVerilog emitter; generated RTL is always produced by CIRCT. The frontend
+language, richer operations, and rewriting API remain later milestones.

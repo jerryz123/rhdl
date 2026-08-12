@@ -1,0 +1,36 @@
+#lang rhombus
+// Checks deterministic lowering from representative RHDL designs to CIRCT MLIR.
+
+import:
+  "../rhdl/main.rhm" open
+  "support.rhm" open
+
+def [adder_design, _, _, _, _, _, _] = make_adder_design()
+def adder_circt = emit_circt(adder_design)
+
+check:
+  adder_circt.contains("hw.module @Adder8(in %a : i8, in %b : i8, out sum : i8)") ~is #true
+  adder_circt.contains("%result = comb.add %a, %b : i8") ~is #true
+  adder_circt.contains("hw.output %result : i8") ~is #true
+  adder_circt ~is emit_circt(adder_design)
+
+def [counter_design, _, _, _, _] = make_counter_design()
+def counter_circt = emit_circt(counter_design)
+
+check:
+  counter_circt.contains("%state_clock = seq.to_clock %clk") ~is #true
+  counter_circt.contains(
+    "%state = seq.firreg %next clock %state_clock reset sync %reset, %zero : i8"
+  ) ~is #true
+  counter_circt.contains("hw.output %state : i8") ~is #true
+
+def [hierarchy_design, _, _, _, _, _] = make_hierarchy_design()
+def hierarchy_circt = emit_circt(hierarchy_design)
+
+check:
+  hierarchy_circt.contains(
+    "%u0_sum = hw.instance \"u0\" @Adder8(a: %a: i8, b: %b: i8) -> (sum: i8)"
+  ) ~is #true
+  hierarchy_circt.contains(
+    "%u1_sum = hw.instance \"u1\" @Adder8(a: %a: i8, b: %c: i8) -> (sum: i8)"
+  ) ~is #true

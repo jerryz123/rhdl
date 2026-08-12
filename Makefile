@@ -1,12 +1,17 @@
-.PHONY: test unit-test verilator-test examples
+# Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
+
+.PHONY: test unit-test circt-test setup-circt examples
 
 unit-test:
-	raco test tests/ir-test.rhm tests/verify-test.rhm tests/printer-test.rhm tests/sv-test.rhm
+	raco test tests/ir-test.rhm tests/verify-test.rhm tests/printer-test.rhm tests/circt-test.rhm
 
-verilator-test:
-	bash tests/run-verilator.sh
+circt-test:
+	bash tests/run-circt.sh
 
-test: unit-test verilator-test
+test: unit-test circt-test
+
+setup-circt:
+	bash tools/install-circt.sh
 
 examples:
 	racket examples/adder.rhm
