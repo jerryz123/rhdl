@@ -117,7 +117,16 @@ host `Int` values, while ports and hardware values use explicit hardware
 types. `input a: Bits(width)` and `output y: Bits(width)` derive hardware names
 from their bindings; parentheses group same-typed ports, as in
 `input(a, b): Bits(width)`. Outputs, instance inputs, and register next state
-are connected with `<==`. Registers use
+are connected with `<==`. Standard-layer registers derive their hardware names
+from bindings:
+
+```rhombus
+reg state(Bits(width), ~clock: clk, ~reset: reset, ~init: zero)
+```
+
+The resetless form is `reg state(Bits(width), ~clock: clk)`. Here `~init`
+means the active synchronous-reset value; it does not introduce a separate IR
+initialization mechanism. The underlying kernel form remains
 `reg("state", Bits(width), clk, reset, reset_value)`, where `clk` is `Clock`
 and `reset` is `Reset`. Instances use
 `inst("u0", child_definition)`, with ports accessed through

@@ -423,7 +423,7 @@ value:
 
 ```text
 def zero = bits(0, ~width: 8)
-def r = reg("r", Bits(8), clk, rst, zero)
+reg r(Bits(8), ~clock: clk, ~reset: rst, ~init: zero)
 r.next <== r + bits(1, ~width: 8)
 ```
 
