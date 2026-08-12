@@ -1,228 +1,291 @@
 #lang rhombus
-// Provides guarded elaboration state and source-located Builder adapters for #lang rhdl.
+// Implements the small context-based elaboration kernel used by embedded RHDL programs.
 
 import:
   "main.rhm" open
 
 export:
   FrontendContext
-  ModuleGenerator
   frontend_run
+  run_elaboration
+  build_circuit
+  input
+  output
+  literal
+  bit_not
+  bit_and
+  bit_or
+  bit_xor
+  hw_add
+  hw_sub
+  hw_eq
+  mux
+  concat
+  extract
+  zext
+  trunc
+  reg
+  inst
+  connect
+  read
+  hardware_entity
+  host_condition
 
-fun frontend_fail(location, message):
+fun frontend_fail(message, location = Location()):
   error(~who: #'rhdl, location.describe() ++ ": " ++ message)
 
 fun same_bits(left, right):
   left is_a Bits && right is_a Bits && left.width == right.width
 
+fun hardware_entity(value):
+  value is_a Value || value is_a Place || value is_a Register
+
 class FrontendContext(design,
                       builder,
                       mutable active = #true,
-                      mutable active_generators = [],
+                      mutable active_circuits = [],
                       mutable allocated_symbols = []):
-  method allocate_symbol(generator_name, arguments):
-    def base = generator_name ++ String.join(arguments.map(to_string), "_")
+  method allocate_symbol(circuit_name, arguments):
+    def suffix = String.join(arguments.map(to_string), "_")
+    def base = circuit_name ++ suffix
     def count = allocated_symbols.filter(~keep: fun (symbol): symbol == base).length()
     allocated_symbols := allocated_symbols ++ [base]
     if count == 0
     | base
     | base ++ "_" ++ to_string(count)
 
-  method input(module_def, name, type, location):
-    builder.input(module_def,
-                  name,
-                  type,
-                  location,
-                  Origin("frontend input", name))
+Parameter.def current_context = #false
+Parameter.def current_module = #false
 
-  method output(module_def, name, type, location):
-    builder.output(module_def,
-                   name,
-                   type,
-                   location,
-                   Origin("frontend output", name))
+fun require_context(location = Location()):
+  def context = current_context()
+  unless context is_a FrontendContext && context.active
+  | frontend_fail("circuit generators may only be called during elaborate", location)
+  context
 
-  method read_value(entity, location):
-    cond
-    | entity is_a Value: entity
-    | entity is_a Register: entity.current
-    | entity is_a Place:
-        unless entity.driver
-        | frontend_fail(location,
-                        "output " ++ entity.name ++ " must be driven before it is read")
-        builder.read(entity)
-    | ~else:
-        frontend_fail(location, "expected readable hardware data")
+fun require_module(location = Location()):
+  def module_def = current_module()
+  unless module_def is_a Module
+  | frontend_fail("hardware construction requires an active circuit", location)
+  module_def
 
-  method field(entity, name, location):
-    cond
-    | entity is_a Register && name == "next": entity.next
-    | entity is_a Instance:
-        def output_binding = entity.module_def.find_output(name)
-        if output_binding
-        | entity.output(name)
-        | block:
-            def input_binding = entity.module_def.find_input(name)
-            if input_binding
-            | entity.input(name)
-            | frontend_fail(location, "instance has no port named " ++ name)
-    | ~else:
-        frontend_fail(location, "field access is not valid for this hardware entity")
+fun read(entity, location = Location()):
+  def context = require_context(location)
+  cond
+  | entity is_a Value: entity
+  | entity is_a Register: entity.current
+  | entity is_a Place:
+      unless entity.driver
+      | frontend_fail("place " ++ entity.name ++ " must be driven before it is read",
+                      location)
+      context.builder.read(entity)
+  | ~else:
+      frontend_fail("expected readable hardware data", location)
 
-  method constant(module_def, type, integer, name, location):
-    builder.constant(module_def,
-                     type,
-                     integer,
-                     name,
-                     location,
-                     Origin("frontend constant", name))
+fun build_circuit(name, arguments, implementation, location = Location()):
+  def context = require_context(location)
+  unless name is_a String
+  | frontend_fail("circuit name must be a String", location)
+  unless arguments is_a List
+  | frontend_fail("circuit arguments must be supplied as a List", location)
+  for (argument in arguments):
+    unless argument is_a Int
+    | frontend_fail("circuit parameters must be host Int values", location)
+  when context.active_circuits.find(fun (active_name): active_name == name)
+  | frontend_fail("recursive elaboration of circuit " ++ name, location)
+  context.active_circuits := context.active_circuits ++ [name]
+  def module_def = context.builder.module(context.allocate_symbol(name, arguments))
+  parameterize { current_module: module_def }:
+    implementation()
+  context.builder.finish(module_def)
+  context.active_circuits := context.active_circuits.filter(
+    ~keep: fun (active_name): active_name != name
+  )
+  module_def
 
-  method unary(module_def, opcode, operand_entity, name, location):
-    def operand = read_value(operand_entity, location)
-    match opcode
-    | "not":
-        builder.bit_not(module_def, operand, name, location,
-                        Origin("frontend not", name))
-    | ~else:
-        frontend_fail(location, "unknown unary operation " ++ opcode)
+fun input(name, type, location = Location()):
+  def context = require_context(location)
+  context.builder.input(require_module(location),
+                        name,
+                        type,
+                        location,
+                        Origin("embedded input", name))
 
-  method binary(module_def, opcode, left_entity, right_entity, name, location):
-    def left = read_value(left_entity, location)
-    def right = read_value(right_entity, location)
-    unless same_bits(left.type, right.type)
-    | frontend_fail(location, opcode ++ " operands must have exactly the same Bits width")
-    match opcode
-    | "and":
-        builder.bit_and(module_def, left, right, name, location,
-                        Origin("frontend and", name))
-    | "or":
-        builder.bit_or(module_def, left, right, name, location,
-                       Origin("frontend or", name))
-    | "xor":
-        builder.bit_xor(module_def, left, right, name, location,
-                        Origin("frontend xor", name))
-    | "add":
-        builder.add(module_def, left, right, name, location,
-                    Origin("frontend add", name))
-    | "sub":
-        builder.sub(module_def, left, right, name, location,
-                    Origin("frontend sub", name))
-    | "eq":
-        builder.eq(module_def, left, right, name, location,
-                   Origin("frontend eq", name))
-    | ~else:
-        frontend_fail(location, "unknown binary operation " ++ opcode)
+fun output(name, type, location = Location()):
+  def context = require_context(location)
+  context.builder.output(require_module(location),
+                         name,
+                         type,
+                         location,
+                         Origin("embedded output", name))
 
-  method add(module_def, left_entity, right_entity, name, location):
-    binary(module_def, "add", left_entity, right_entity, name, location)
+fun literal(type, integer, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.constant(require_module(location),
+                           type,
+                           integer,
+                           name,
+                           location,
+                           Origin("embedded literal", name || ""))
 
-  method mux(module_def, condition_entity, true_entity, false_entity, name, location):
-    builder.mux(module_def,
-                read_value(condition_entity, location),
-                read_value(true_entity, location),
-                read_value(false_entity, location),
-                name,
-                location,
-                Origin("frontend mux", name))
+fun unary(opcode, entity, name = #false, location = Location()):
+  def context = require_context(location)
+  def module_def = require_module(location)
+  def value = read(entity, location)
+  match opcode
+  | "not":
+      context.builder.bit_not(module_def,
+                              value,
+                              name,
+                              location,
+                              Origin("embedded not", name || ""))
+  | ~else: frontend_fail("unknown unary operation " ++ opcode, location)
 
-  method concat(module_def, entities, name, location):
-    builder.concat(module_def,
-                   entities.map(fun (entity): read_value(entity, location)),
-                   name,
-                   location,
-                   Origin("frontend concat", name))
+fun binary(opcode, left_entity, right_entity, name = #false, location = Location()):
+  def context = require_context(location)
+  def module_def = require_module(location)
+  def left = read(left_entity, location)
+  def right = read(right_entity, location)
+  unless same_bits(left.type, right.type)
+  | frontend_fail(opcode ++ " operands must have exactly the same Bits width",
+                  location)
+  match opcode
+  | "and":
+      context.builder.bit_and(module_def, left, right, name, location,
+                              Origin("embedded and", name || ""))
+  | "or":
+      context.builder.bit_or(module_def, left, right, name, location,
+                             Origin("embedded or", name || ""))
+  | "xor":
+      context.builder.bit_xor(module_def, left, right, name, location,
+                              Origin("embedded xor", name || ""))
+  | "add":
+      context.builder.add(module_def, left, right, name, location,
+                          Origin("embedded add", name || ""))
+  | "sub":
+      context.builder.sub(module_def, left, right, name, location,
+                          Origin("embedded sub", name || ""))
+  | "eq":
+      context.builder.eq(module_def, left, right, name, location,
+                         Origin("embedded eq", name || ""))
+  | ~else: frontend_fail("unknown binary operation " ++ opcode, location)
 
-  method extract(module_def, entity, high, low, name, location):
-    builder.extract(module_def,
-                    read_value(entity, location),
-                    high,
-                    low,
-                    name,
-                    location,
-                    Origin("frontend extract", name))
+fun bit_not(entity, name = #false, location = Location()):
+  unary("not", entity, name, location)
 
-  method zext(module_def, entity, target_width, name, location):
-    builder.zext(module_def,
-                 read_value(entity, location),
-                 target_width,
-                 name,
-                 location,
-                 Origin("frontend zext", name))
+fun bit_and(left, right, name = #false, location = Location()):
+  binary("and", left, right, name, location)
 
-  method trunc(module_def, entity, target_width, name, location):
-    builder.trunc(module_def,
-                  read_value(entity, location),
-                  target_width,
-                  name,
-                  location,
-                  Origin("frontend trunc", name))
+fun bit_or(left, right, name = #false, location = Location()):
+  binary("or", left, right, name, location)
 
-  method register(module_def, name, type, clock_entity,
-                  reset_entity, reset_value_entity, location):
-    builder.register(module_def,
-                     name,
-                     type,
-                     read_value(clock_entity, location),
-                     if reset_entity | read_value(reset_entity, location) | #false,
-                     if reset_value_entity | read_value(reset_value_entity, location) | #false,
-                     location,
-                     Origin("frontend register", name))
+fun bit_xor(left, right, name = #false, location = Location()):
+  binary("xor", left, right, name, location)
 
-  method instance(module_def, child, name, location):
-    builder.instance(module_def,
-                     child,
-                     name,
-                     location,
-                     Origin("frontend instance", name))
+fun hw_add(left, right, name = #false, location = Location()):
+  binary("add", left, right, name, location)
 
-  method drive(place, value_entity, location):
-    unless place is_a Place
-    | frontend_fail(location, "inputs are read only")
-    def value = read_value(value_entity, location)
-    unless same_bits(place.type, value.type)
-    | frontend_fail(location, "place and driver must have exactly the same Bits width")
-    builder.drive(place, value, location, Origin("frontend drive", place.name))
+fun hw_sub(left, right, name = #false, location = Location()):
+  binary("sub", left, right, name, location)
 
-  method elaborate(module_def, location):
-    unless module_def is_a Module && module_def.design === design
-    | frontend_fail(location, "elaborate expects a module generator call")
-    module_def
+fun hw_eq(left, right, name = #false, location = Location()):
+  binary("eq", left, right, name, location)
 
-class ModuleGenerator(context,
+fun mux(condition, true_value, false_value, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.mux(require_module(location),
+                      read(condition, location),
+                      read(true_value, location),
+                      read(false_value, location),
                       name,
-                      parameter_names,
-                      implementation):
-  method instantiate(arguments, call_location):
-    unless context.active
-    | frontend_fail(call_location,
-                    "module generators may only be called during elaboration")
-    unless arguments is_a List && arguments.length() == parameter_names.length()
-    | frontend_fail(call_location,
-                    "module generator " ++ name ++ " received the wrong number of arguments")
-    for (argument in arguments,
-         parameter_name in parameter_names):
-      unless argument is_a Int
-      | frontend_fail(call_location,
-                      "generator parameter " ++ parameter_name ++ " must be a host Int")
-    when context.active_generators.find(fun (generator): generator === this)
-    | frontend_fail(call_location,
-                    "recursive elaboration of module generator " ++ name)
-    context.active_generators := context.active_generators ++ [this]
-    def module_name = context.allocate_symbol(name, arguments)
-    def module_def = context.builder.module(module_name)
-    implementation(module_def, arguments)
-    context.builder.finish(module_def)
-    context.active_generators := context.active_generators.filter(
-      ~keep: fun (generator): !(generator === this)
-    )
-    module_def
+                      location,
+                      Origin("embedded mux", name || ""))
+
+fun concat(entities, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.concat(require_module(location),
+                         entities.map(fun (entity): read(entity, location)),
+                         name,
+                         location,
+                         Origin("embedded concat", name || ""))
+
+fun extract(entity, high, low, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.extract(require_module(location),
+                          read(entity, location),
+                          high,
+                          low,
+                          name,
+                          location,
+                          Origin("embedded extract", name || ""))
+
+fun zext(entity, target_width, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.zext(require_module(location),
+                       read(entity, location),
+                       target_width,
+                       name,
+                       location,
+                       Origin("embedded zext", name || ""))
+
+fun trunc(entity, target_width, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.trunc(require_module(location),
+                        read(entity, location),
+                        target_width,
+                        name,
+                        location,
+                        Origin("embedded trunc", name || ""))
+
+fun reg(name, type, clock, reset = #false, reset_value = #false,
+        location = Location()):
+  def context = require_context(location)
+  context.builder.register(require_module(location),
+                           name,
+                           type,
+                           read(clock, location),
+                           if reset | read(reset, location) | #false,
+                           if reset_value | read(reset_value, location) | #false,
+                           location,
+                           Origin("embedded register", name))
+
+fun inst(name, child, location = Location()):
+  def context = require_context(location)
+  context.builder.instance(require_module(location),
+                           child,
+                           name,
+                           location,
+                           Origin("embedded instance", name))
+
+fun connect(place, entity, location = Location()):
+  def context = require_context(location)
+  unless place is_a Place
+  | frontend_fail("connection target must be an output, instance input, or register next state",
+                  location)
+  def value = read(entity, location)
+  unless same_bits(place.type, value.type)
+  | frontend_fail("connection source and target must have exactly the same Bits width",
+                  location)
+  context.builder.drive(place,
+                        value,
+                        location,
+                        Origin("embedded connect", place.name))
+
+fun host_condition(value, location = Location()):
+  when hardware_entity(value)
+  | frontend_fail("hardware values cannot control host conditions", location)
+  value
 
 fun frontend_run(program):
   def design = Design()
   def context = FrontendContext(design, Builder(design))
-  def top = program(context)
+  def top = parameterize { current_context: context }:
+              program()
   context.active := #false
   unless top is_a Module
-  | error(~who: #'rhdl, "elaboration did not select a top module")
+  | error(~who: #'rhdl, "elaboration did not select a top circuit")
   verify_design(design)
   design
+
+fun run_elaboration(program):
+  frontend_run(program)

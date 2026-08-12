@@ -26,8 +26,9 @@ provides:
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
   SystemVerilog export, and Verilator simulations for an adder, ALU,
   width-changing datapath, counter, and explicitly reused module definition.
-- A constrained `#lang rhdl` frontend that elaborates a host-parameterized
-  adder, preserves source locations and origins, creates fresh generator
+- An embedded `#lang rhdl` frontend that uses the ordinary Rhombus reader,
+  layers circuit and hardware-operator macros over an importable elaboration
+  kernel, permits host-language abstraction, creates fresh circuit
   definitions, and uses the same CIRCT and Verilator backend path.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
@@ -89,29 +90,29 @@ use-def relationships, and transform it through controlled rewriting APIs.
 
 ## 3. Syntax, elaboration, and IR
 
-RHDL keeps three layers separate.
+RHDL keeps four layers separate: ordinary Rhombus parsing and expansion, a
+small embedded elaboration kernel, optional surface and library layers, and the
+public hardware IR.
 
 ### 3.1 Syntax
 
 Rhombus supplies parsing, hygienic macros, binding spaces, operators, dot
 syntax, assignment syntax, static information, and source locations.
 
-The initial surface language should support conventional forms such as:
+The initial standard layer supports conventional forms such as:
 
 ```text
-module ALU(width: Int):
-    input:
-        a: Bits(width)
-        b: Bits(width)
-
-    output:
-        y: Bits(width)
-
-    y := a + b
+circuit ALU(width):
+    def a = input("a", Bits(width))
+    def b = input("b", Bits(width))
+    def y = output("y", Bits(width))
+    y <== a + b
 ```
 
-Surface syntax expands to calls into the elaboration and builder APIs. Macro
-expansion is not itself the hardware IR.
+`#lang rhdl` uses the ordinary Rhombus reader. Surface syntax expands to calls
+into the elaboration kernel and Builder; macro expansion is not itself the
+hardware IR. Libraries may define new functions, macros, and operators by
+importing the kernel or standard layer, without modifying the language reader.
 
 ### 3.2 Elaboration
 
@@ -331,15 +332,16 @@ validated by the register schema rather than represented by distinct types.
 The next-state place must be driven exactly once. Holding state is explicit:
 
 ```text
-r.next := r.current
+r.next <== r
 ```
 
 Surface syntax may allow the register handle itself to be read as its current
 value:
 
 ```text
-r = Reg(Bits(8), clock = clk, reset = rst, reset_value = Bits(8)(0))
-r.next := r + Bits(8)(1)
+def zero = literal(Bits(8), 0)
+def r = reg("r", Bits(8), clk, rst, zero)
+r.next <== r + literal(Bits(8), 1)
 ```
 
 A register breaks a temporal feedback cycle. Cycles consisting only of
@@ -347,17 +349,17 @@ combinational operations remain illegal.
 
 ## 7. Modules, generators, and instances
 
-A module declaration defines a Rhombus generator.
+A circuit declaration defines a Rhombus generator.
 
 ```text
-module ALU(width: Int):
+circuit ALU(width):
     ...
 ```
 
 Calling the generator with host values produces a fresh module definition:
 
 ```text
-ALU32 = ALU(32)
+def ALU32 = ALU(32)
 ```
 
 There is no automatic specialization deduplication initially. Calling
@@ -365,9 +367,9 @@ There is no automatic specialization deduplication initially. Calling
 reuse one definition for multiple instances:
 
 ```text
-ALU32 = ALU(32)
-u0 = instance(ALU32)
-u1 = instance(ALU32)
+def ALU32 = ALU(32)
+def u0 = inst("u0", ALU32)
+def u1 = inst("u1", ALU32)
 ```
 
 Fresh definitions and instances receive deterministic symbols based on their
@@ -469,20 +471,21 @@ The current IR Builder and verifier enforce:
 9. Module instances reference a completed module definition.
 10. Purely combinational cycles are rejected.
 
-The future generator and frontend layers must additionally reject recursive
-generator elaboration and prevent hardware values from controlling host
-conditionals or iteration. Those checks do not belong to the manual IR
-verifier because the host computation is no longer present once IR exists.
+The frontend additionally rejects recursive generator elaboration and prevents
+hardware values from controlling host conditionals. Those checks do not belong
+to the manual IR verifier because the host computation is no longer present
+once IR exists.
 
-Diagnostics should identify both the invalid operation and the relevant
-declaration or driver when two locations are involved.
+Complete source-location and multi-location diagnostic reporting is useful but
+is not a gate for the initial language or rewriting work. It is deferred to
+hardening.
 
 ## 10. Provenance and naming
 
 Every operation, value, and place carries or can recover:
 
 ```text
-location       immediate user source span
+location       immediate user source span when captured, otherwise unknown
 origin         immutable link to the construct that produced it
 name_hint      optional semantic name for diagnostics and generated RTL
 ```
@@ -632,16 +635,21 @@ and Verilator simulation.
 
 The frontend implements:
 
-- A real `#lang rhdl` reader and Rhombus language bridge.
-- Host-`Int`-parameterized module generators with deterministic fresh module
+- A thin `#lang rhdl` bridge using the ordinary Rhombus reader instead of a
+  closed line-oriented parser.
+- An importable context-based elaboration kernel and a separate standard layer
+  containing `circuit`, `elaborate`, hardware operators, and `<==`.
+- Host-`Int`-parameterized circuit generators with deterministic fresh module
   symbols and active-generator recursion checks.
-- `input` and `output` declarations with explicit `Bits(width)` types.
-- Explicit-width constants, the full initial combinational operation surface,
-  named hardware expressions, drive through `:=`, and `elaborate(...)`.
-- Primitive registers, synchronous reset, `.next`, reusable generated module
-  definitions, instances, and instance port access.
-- Original source paths and lines on frontend-created operations plus explicit
-  frontend origins.
+- Explicit `input` and `output` construction with `Bits(width)` types.
+- Explicit-width literals, the full initial combinational operation surface,
+  primitive registers, synchronous reset, reusable definitions, instances,
+  and instance port access.
+- Ordinary Rhombus definitions, functions, imports, host conditionals, and
+  iteration within and around circuit generators.
+- A separately imported user combinator test proving that new construction
+  abstractions do not require reader, IR, verifier, or backend changes.
+- Explicit embedded-frontend origins on constructed operations.
 - Diagnostics for non-host parameters, recursive elaboration, generator calls
   outside elaboration, driving inputs, width mismatch, and hardware-controlled
   host conditions.
@@ -651,13 +659,20 @@ The frontend implements:
   simulation fixtures. Builder construction remains only for lower-layer API,
   verifier, malformed-IR, and backend-name tests.
 
-Add static-information-based ergonomics, but retain runtime elaboration checks
-where Rhombus static information may be unavailable. Explicitly guard every
-host conditional path against hardware values.
+The kernel remains intentionally smaller than the standard layer. Grouped
+`IO`, `RegInit`, protocol interfaces, pipelines, and similar Chisel-like
+conveniences should be libraries over the kernel whenever they do not require
+new hardware semantics. Static-information-based ergonomics can be added while
+retaining runtime checks where static information is unavailable.
 
 ### Phase 4: inspection and rewriting
 
-- Stabilize `walk`, `users`, `defining_op`, and IR printing.
+- Stabilize inspection first: make `walk` return documented snapshots, expose
+  `Value.defining_op` as an operation handle, make `Value.users()` return
+  operation handles instead of internal IDs, and expose a place's owning
+  operation without leaking its internal ID.
+- Update the verifier, CIRCT lowering, and tests to use the public inspection
+  contract where appropriate.
 - Implement rewrite transactions and handle invalidation.
 - Add a user pass that replaces `x + 0` with `x`.
 - Verify automatically after every user pass.
@@ -665,7 +680,8 @@ host conditional path against hardware values.
 
 ### Phase 5: hardening
 
-- Add negative diagnostic tests.
+- Expand negative diagnostic coverage and improve source-location and
+  multi-location diagnostic quality when prioritized.
 - Add deterministic golden RHDL IR and CIRCT MLIR tests.
 - Test CIRCT-exported SystemVerilog through simulation rather than maintaining
   a second RHDL-owned RTL printer.
@@ -706,14 +722,15 @@ RHDL can:
 1. Elaborate a parameterized adder whose width parameter is a host `Int`.
 2. Create fresh definitions for repeated generator calls without automatic
    deduplication and reject active recursive elaboration.
-3. Preserve source paths, lines, and origins through the public IR.
+3. Preserve origins through the public IR and elaborate an imported user
+   hardware combinator without changing the language reader.
 4. Reject driving an input, a width mismatch, a non-`Int` parameter, a
    generator call outside elaboration, and a hardware-controlled host
    condition.
 5. Lower the frontend-produced design through CIRCT and pass the existing
    adder Verilator testbench.
 
-### Milestone D: complete initial frontend surface — in progress
+### Milestone D: complete initial frontend surface — complete
 
 RHDL can:
 
@@ -721,14 +738,13 @@ RHDL can:
 2. Elaborate a counter with a primitive register and active-high synchronous
    reset.
 3. Instantiate and access ports of an explicitly reused module definition.
-4. Produce source-located errors for width mismatch, driving an input,
-   undriven and multiply-driven places, reading an output before driving it,
-   illegal cross-module use, a combinational cycle, and a hardware value used
-   as a host condition.
+4. Reject malformed surface forms, invalid local hardware operations,
+   recursive generators, and hardware values used as host conditions through
+   the frontend, Builder, or verifier boundary as appropriate.
 
-The design surface and all positive examples are complete. Completion still
-requires source-locating the remaining whole-graph verifier diagnostics listed
-in item 4.
+The design surface and canonical examples are complete. Comprehensive
+source-location coverage for whole-graph verifier diagnostics is deferred to
+Phase 5 and does not block inspection or rewriting.
 
 ### Milestone E: inspection and rewriting
 

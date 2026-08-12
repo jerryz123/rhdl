@@ -20,8 +20,8 @@ expect_failure() {
 }
 
 expect_failure bad-condition.rhdl "hardware values cannot control host conditions"
-expect_failure bad-input-drive.rhdl "inputs are read only"
-expect_failure bad-parameter.rhdl "generator parameter width must be a host Int"
-expect_failure bad-recursion.rhdl "recursive elaboration of module generator Recursive"
-expect_failure bad-top-call.rhdl "module generators may only be called from elaborate"
-expect_failure bad-width.rhdl "bad-width.rhdl:10:0: add operands must have exactly the same Bits width"
+expect_failure bad-input-drive.rhdl "connection target must be an output, instance input, or register next state"
+expect_failure bad-parameter.rhdl "circuit parameters must be host Int values"
+expect_failure bad-recursion.rhdl "recursive elaboration of circuit Recursive"
+expect_failure bad-top-call.rhdl "circuit generators may only be called during elaborate"
+expect_failure bad-width.rhdl "add operands must have exactly the same Bits width"
