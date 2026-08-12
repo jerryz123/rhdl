@@ -12,8 +12,9 @@ provides:
 - A static namespaced operation-schema table that records arity, required
   attributes, type rules, printing forms, and CIRCT lowering targets.
 - Builder support for ports, constants, same-width bitwise logic, modular
-  addition and subtraction, equality, muxes, primitive registers, module
-  instances, and single-driver relationships.
+  addition and subtraction, equality, muxes, explicit width-changing
+  operations, primitive registers, module instances, and single-driver
+  relationships.
 - Active-high synchronous register reset.
 - Whole-design verification, including ownership, widths, driver counts,
   register operands, instance interfaces, and combinational-cycle detection.
@@ -23,12 +24,11 @@ provides:
 - Collision-free CIRCT SSA names derived from stable IR IDs, with validated
   user-facing module, port, register, and instance names.
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
-  SystemVerilog export, and Verilator simulations for an adder, ALU, counter,
-  and explicitly reused module definition.
+  SystemVerilog export, and Verilator simulations for an adder, ALU,
+  width-changing datapath, counter, and explicitly reused module definition.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
-The `#lang rhdl` frontend, user rewrite transactions, width-changing initial
-operations, and their CIRCT lowering remain future work.
+The `#lang rhdl` frontend and user rewrite transactions remain future work.
 
 ## 1. Goal
 
@@ -257,7 +257,10 @@ trunc(Bits(a), target_width)         -> Bits(target_width)
 ```
 
 `zext` requires a larger target width, `trunc` requires a smaller target width,
-and `extract` indices are explicit host integers checked during elaboration.
+and `extract` indices are inclusive explicit host integers checked during
+elaboration. `concat` requires at least two operands and places its first
+operand in the most-significant bits. Zero extension adds zeroes on the
+most-significant side, and truncation retains the least-significant bits.
 Multiplication and shifts can be added after their width rules are specified.
 
 ## 6. Initial operations
@@ -605,7 +608,7 @@ uses immutable host values for attributes and validated strings for symbols;
 they should become distinct objects only when parameterized attributes,
 renaming, or symbol references require them.
 
-### Phase 2: manually built vertical slice — same-width slice complete
+### Phase 2: manually built vertical slice — complete
 
 - Implement constants, bitwise logic, modular addition and subtraction,
   equality, and muxes.
@@ -615,10 +618,10 @@ renaming, or symbol references require them.
 - Lower them to CIRCT MLIR.
 - Have CIRCT generate SystemVerilog and simulate it with Verilator.
 
-This phase must produce working hardware before frontend syntax work expands.
-
-The remaining Phase 2 work is the width-changing group: `concat`, `extract`,
-`zext`, and `trunc`, including canonical CIRCT lowering and simulation.
+This phase produces working hardware before frontend syntax work expands. The
+width-changing group—`concat`, `extract`, `zext`, and `trunc`—is implemented
+with schema verification, deterministic printing, canonical CIRCT lowering,
+and Verilator simulation.
 
 ### Phase 3: Rhombus frontend
 
@@ -678,16 +681,12 @@ RHDL can:
    drive, illegal cross-module or cross-design use, forged ownership, and
    combinational cycles through Builder or verifier diagnostics.
 
-### Milestone B: complete manual IR surface — in progress
+### Milestone B: complete manual IR surface — complete
 
-The same-width portion is complete: RHDL constructs, verifies, lowers, and
-simulates `not`, `and`, `or`, `xor`, `add`, `sub`, `eq`, and `mux` in a
-host-width-parameterized ALU. Completion still requires:
-
-1. Construct and verify `concat`, `extract`, `zext`, and `trunc`.
-2. Lower those operations to their canonical CIRCT representations.
-3. Simulate representative width-changing datapaths through CIRCT and
-   Verilator.
+RHDL constructs, verifies, lowers, and simulates the full initial manual
+combinational surface. A host-width-parameterized ALU covers `not`, `and`,
+`or`, `xor`, `add`, `sub`, `eq`, and `mux`; a width-changing datapath covers
+`concat`, `extract`, `zext`, and `trunc` through CIRCT and Verilator.
 
 ### Milestone C: frontend and rewriting
 

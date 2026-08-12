@@ -16,5 +16,6 @@ setup-circt:
 examples:
 	racket examples/adder.rhm
 	racket examples/alu.rhm
+	racket examples/width-ops.rhm
 	racket examples/counter.rhm
 	racket examples/hierarchy.rhm

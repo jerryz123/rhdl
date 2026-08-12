@@ -67,7 +67,8 @@ fun build_value_operation(design,
                           name,
                           location,
                           origin,
-                          who):
+                          who,
+                          attributes = {}):
   def operation_id = design.fresh_id()
   def value_name = name || "v" ++ to_string(operation_id)
   ensure_hardware_name(value_name, who)
@@ -79,7 +80,7 @@ fun build_value_operation(design,
                             operands,
                             [value],
                             [],
-                            {"name": value_name},
+                            attributes ++ {"name": value_name},
                             location,
                             origin)
   for (operand in operands):
@@ -316,6 +317,105 @@ class Builder(design):
                           location,
                           origin,
                           #'mux)
+
+  method concat(module_def,
+                operands,
+                name = #false,
+                location = Location(),
+                origin = Origin("concat")):
+    ensure_module_in_design(design, module_def, #'concat)
+    ensure_open(module_def, #'concat)
+    unless operands is_a List
+    | fail(#'concat, "concat operands must be supplied as a List")
+    unless operands.length() >= 2
+    | fail(#'concat, "concat requires at least two operands")
+    def mutable result_width = 0
+    for (value in operands):
+      ensure_value_in(module_def, value, #'concat)
+      result_width := result_width + value.type.width
+    build_value_operation(design,
+                          module_def,
+                          "rtl.concat",
+                          operands,
+                          Bits(result_width),
+                          name,
+                          location,
+                          origin,
+                          #'concat)
+
+  method extract(module_def,
+                 value,
+                 high,
+                 low,
+                 name = #false,
+                 location = Location(),
+                 origin = Origin("extract")):
+    ensure_module_in_design(design, module_def, #'extract)
+    ensure_open(module_def, #'extract)
+    ensure_value_in(module_def, value, #'extract)
+    unless high is_a Int && low is_a Int
+    | fail(#'extract, "extract indices must be host Int values")
+    unless 0 <= low && low <= high && high < value.type.width
+    | fail(#'extract,
+           "extract indices must satisfy 0 <= low <= high < source width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.extract",
+                          [value],
+                          Bits(high - low + 1),
+                          name,
+                          location,
+                          origin,
+                          #'extract,
+                          {"high": high, "low": low})
+
+  method zext(module_def,
+              value,
+              target_width,
+              name = #false,
+              location = Location(),
+              origin = Origin("zext")):
+    ensure_module_in_design(design, module_def, #'zext)
+    ensure_open(module_def, #'zext)
+    ensure_value_in(module_def, value, #'zext)
+    unless target_width is_a Int && target_width > 0
+    | fail(#'zext, "zext target width must be a positive host Int")
+    unless target_width > value.type.width
+    | fail(#'zext, "zext target width must be larger than the source width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.zext",
+                          [value],
+                          Bits(target_width),
+                          name,
+                          location,
+                          origin,
+                          #'zext,
+                          {"target_width": target_width})
+
+  method trunc(module_def,
+               value,
+               target_width,
+               name = #false,
+               location = Location(),
+               origin = Origin("trunc")):
+    ensure_module_in_design(design, module_def, #'trunc)
+    ensure_open(module_def, #'trunc)
+    ensure_value_in(module_def, value, #'trunc)
+    unless target_width is_a Int && target_width > 0
+    | fail(#'trunc, "trunc target width must be a positive host Int")
+    unless target_width < value.type.width
+    | fail(#'trunc, "trunc target width must be smaller than the source width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.trunc",
+                          [value],
+                          Bits(target_width),
+                          name,
+                          location,
+                          origin,
+                          #'trunc,
+                          {"target_width": target_width})
 
   method register(module_def,
                   name,

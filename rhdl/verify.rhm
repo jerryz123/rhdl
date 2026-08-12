@@ -92,6 +92,42 @@ fun check_operation_types(module_def, operation, schema):
       unless data_types_match
       | fail_operation(operation,
                        "mux data operands and result must have the same Bits width")
+  | "concat":
+      unless operation.operands.length() >= 2
+      | fail_operation(operation, "concat requires at least two operands")
+      def mutable expected_width = 0
+      for (operand in operation.operands):
+        unless valid_bits(operand.type)
+        | fail_operation(operation, "concat operands must have valid Bits types")
+        expected_width := expected_width + operand.type.width
+      def result = operation.results[0]
+      unless valid_bits(result.type) && result.type.width == expected_width
+      | fail_operation(operation,
+                       "concat result width must equal the sum of its operand widths")
+  | "extract":
+      def operand = operation.operands[0]
+      def result = operation.results[0]
+      def high = operation.attribute("high", #false)
+      def low = operation.attribute("low", #false)
+      unless high is_a Int && low is_a Int
+      | fail_operation(operation, "extract indices must be host Int values")
+      unless valid_bits(operand.type) && 0 <= low && low <= high && high < operand.type.width
+      | fail_operation(operation,
+                       "extract indices must satisfy 0 <= low <= high < source width")
+      unless valid_bits(result.type) && result.type.width == high - low + 1
+      | fail_operation(operation, "extract result width does not match its indices")
+  | "zext" || "trunc":
+      def operand = operation.operands[0]
+      def result = operation.results[0]
+      def target_width = operation.attribute("target_width", #false)
+      unless target_width is_a Int && target_width > 0
+      | fail_operation(operation, operation.opcode ++ " target width must be a positive host Int")
+      unless valid_bits(operand.type) && valid_bits(result.type) && result.type.width == target_width
+      | fail_operation(operation, operation.opcode ++ " result must match its target width")
+      when schema.type_rule == "zext" && target_width <= operand.type.width
+      | fail_operation(operation, "zext target width must be larger than the source width")
+      when schema.type_rule == "trunc" && target_width >= operand.type.width
+      | fail_operation(operation, "trunc target width must be smaller than the source width")
   | "register" || "register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]

@@ -45,12 +45,14 @@ make test
 ```
 
 This runs the Rhombus unit and negative-verification tests, emits and verifies
-CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, builds four
+CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, builds five
 Verilator testbenches, and simulates:
 
 - An 8-bit modular adder.
 - A host-width-parameterized ALU covering bitwise logic, modular arithmetic,
   equality, and mux selection.
+- A width-changing datapath covering concatenation, extraction, zero
+  extension, and truncation.
 - An 8-bit counter with active-high synchronous reset.
 - Two instances that explicitly reuse one adder module definition.
 
@@ -80,11 +82,18 @@ dump_ir(design)
 emit_circt(design)
 ```
 
-The initial same-width combinational Builder methods are `bit_not`, `bit_and`,
-`bit_or`, `bit_xor`, `add`, `sub`, `eq`, and `mux`. All operands have explicit
-`Bits(width)` types; `eq` returns `Bits(1)`, while the others preserve their
-data width.
+The initial combinational Builder methods are `bit_not`, `bit_and`, `bit_or`,
+`bit_xor`, `add`, `sub`, `eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`.
+All operands have explicit `Bits(width)` types. `eq` returns `Bits(1)`;
+same-width logic and arithmetic preserve their data width; and width-changing
+operations compute or require their result width explicitly.
+
+`concat(module, [a, b, ...])` places the first operand in the most-significant
+bits. `extract(module, value, high, low)` uses inclusive host-`Int` indices.
+`zext` adds zeroes on the most-significant side, while `trunc` retains the
+least-significant bits. Extension must be strictly wider and truncation must be
+strictly narrower.
 
 `emit_circt` is the backend boundary. The RHDL library has no direct
 SystemVerilog emitter; generated RTL is always produced by CIRCT. The frontend
-language, width-changing operations, and rewriting API remain later milestones.
+language and rewriting API remain later milestones.
