@@ -124,16 +124,18 @@ and `reset` is `Reset`. Instances use
 `u0.input("a")` and `u0.output("sum")`.
 
 The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
-and `===`, plus the named functions `bit_not`, `bit_and`, `bit_or`, `bit_xor`,
-`hw_add`, `hw_sub`, `hw_eq`, `mux`, `mux_lookup`, `concat`, `extract`, `zext`,
-and `trunc`. `mux_lookup(selector, ~default: value)` constructs a canonical
-N-way lookup from unique host-`Int` keys. Binary `mux` requires a `Bool`
+and `===`, plus the named functions `bits`, `bit_not`, `bit_and`, `bit_or`,
+`bit_xor`, `hw_add`, `hw_sub`, `hw_eq`, `mux`, `mux_lookup`, `concat`,
+`extract`, `zext`, and `trunc`. `bits(value, ~width: width)` is the concise
+standard-layer spelling of the kernel's `literal(Bits(width), value)`.
+`mux_lookup(selector, ~default: value)` constructs a canonical N-way lookup
+from unique host-`Int` keys. Binary `mux` requires a `Bool`
 selector and becomes a one-case `rtl.mux_lookup`; there is no binary mux IR
 operation. `Bool` is supplied by the standard frontend as a nominal,
-one-bit `BitwiseType`; it is not hard-coded into core. Constants use
-`literal(Bits(width), integer)`. Explicit function forms accept an optional IR
-name, while operator-produced temporary values receive deterministic generated
-names.
+one-bit `BitwiseType`; it is not hard-coded into core. Kernel-level constants
+remain available as `literal(Bits(width), integer)`. Explicit function forms
+accept an optional IR name, while operator-produced temporary values receive
+deterministic generated names.
 
 ```rhombus
 result <== mux_lookup(op, ~default: not a):

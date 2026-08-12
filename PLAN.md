@@ -422,9 +422,9 @@ Surface syntax may allow the register handle itself to be read as its current
 value:
 
 ```text
-def zero = literal(Bits(8), 0)
+def zero = bits(0, ~width: 8)
 def r = reg("r", Bits(8), clk, rst, zero)
-r.next <== r + literal(Bits(8), 1)
+r.next <== r + bits(1, ~width: 8)
 ```
 
 A register breaks a temporal feedback cycle. Cycles consisting only of
