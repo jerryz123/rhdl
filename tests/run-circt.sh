@@ -25,7 +25,7 @@ run_fixture() {
   local verilog="$test_tmp_dir/$fixture.sv"
   local object_dir="$test_tmp_dir/${fixture}_obj"
 
-  racket "tests/emit-$fixture.rhm" > "$mlir"
+  racket -S "$repo_dir" "tests/emit-$fixture.rhm" > "$mlir"
   "$circt_opt" "$mlir" -o /dev/null
   "$circt_opt" --lower-seq-to-sv --export-verilog "$mlir" -o /dev/null > "$verilog"
   verilator --binary --timing --build-jobs 0 --top-module "$top" \

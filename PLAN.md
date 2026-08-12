@@ -26,9 +26,14 @@ provides:
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
   SystemVerilog export, and Verilator simulations for an adder, ALU,
   width-changing datapath, counter, and explicitly reused module definition.
+- A constrained `#lang rhdl` frontend that elaborates a host-parameterized
+  adder, preserves source locations and origins, creates fresh generator
+  definitions, and uses the same CIRCT and Verilator backend path.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
-The `#lang rhdl` frontend and user rewrite transactions remain future work.
+The complete initial frontend surface is implemented and is the canonical path
+for examples and positive integration fixtures. User rewrite transactions
+remain future work.
 
 ## 1. Goal
 
@@ -623,22 +628,28 @@ width-changing group—`concat`, `extract`, `zext`, and `trunc`—is implemented
 with schema verification, deterministic printing, canonical CIRCT lowering,
 and Verilator simulation.
 
-### Phase 3: Rhombus frontend
+### Phase 3: Rhombus frontend — complete
 
-Implement:
+The frontend implements:
 
-```text
-#lang rhdl
-module
-input/output declarations
-Bits(width)
-Reg
-instance
-:=
-initial operators
-field and port access
-elaborate(...)
-```
+- A real `#lang rhdl` reader and Rhombus language bridge.
+- Host-`Int`-parameterized module generators with deterministic fresh module
+  symbols and active-generator recursion checks.
+- `input` and `output` declarations with explicit `Bits(width)` types.
+- Explicit-width constants, the full initial combinational operation surface,
+  named hardware expressions, drive through `:=`, and `elaborate(...)`.
+- Primitive registers, synchronous reset, `.next`, reusable generated module
+  definitions, instances, and instance port access.
+- Original source paths and lines on frontend-created operations plus explicit
+  frontend origins.
+- Diagnostics for non-host parameters, recursive elaboration, generator calls
+  outside elaboration, driving inputs, width mismatch, and hardware-controlled
+  host conditions.
+- CIRCT lowering and Verilator simulation of frontend-authored adder, ALU,
+  width-changing, counter, and hierarchy designs.
+- Frontend-authored canonical examples and positive IR, printer, CIRCT, and
+  simulation fixtures. Builder construction remains only for lower-layer API,
+  verifier, malformed-IR, and backend-name tests.
 
 Add static-information-based ergonomics, but retain runtime elaboration checks
 where Rhombus static information may be unavailable. Explicitly guard every
@@ -688,18 +699,41 @@ combinational surface. A host-width-parameterized ALU covers `not`, `and`,
 `or`, `xor`, `add`, `sub`, `eq`, and `mux`; a width-changing datapath covers
 `concat`, `extract`, `zext`, and `trunc` through CIRCT and Verilator.
 
-### Milestone C: frontend and rewriting
+### Milestone C: frontend foundation — complete
+
+RHDL can:
+
+1. Elaborate a parameterized adder whose width parameter is a host `Int`.
+2. Create fresh definitions for repeated generator calls without automatic
+   deduplication and reject active recursive elaboration.
+3. Preserve source paths, lines, and origins through the public IR.
+4. Reject driving an input, a width mismatch, a non-`Int` parameter, a
+   generator call outside elaboration, and a hardware-controlled host
+   condition.
+5. Lower the frontend-produced design through CIRCT and pass the existing
+   adder Verilator testbench.
+
+### Milestone D: complete initial frontend surface — in progress
 
 RHDL can:
 
 1. Elaborate a parameterized ALU whose width parameter is a host `Int`.
 2. Elaborate a counter with a primitive register and active-high synchronous
    reset.
-3. Apply a user-authored `x + 0 -> x` rewrite and reverify the design.
+3. Instantiate and access ports of an explicitly reused module definition.
 4. Produce source-located errors for width mismatch, driving an input,
    undriven and multiply-driven places, reading an output before driving it,
    illegal cross-module use, a combinational cycle, and a hardware value used
    as a host condition.
+
+The design surface and all positive examples are complete. Completion still
+requires source-locating the remaining whole-graph verifier diagnostics listed
+in item 4.
+
+### Milestone E: inspection and rewriting
+
+RHDL can apply a user-authored `x + 0 -> x` rewrite, preserve provenance,
+invalidate replaced handles, and automatically reverify the design.
 
 These milestones keep the manual IR/backend contract, surface language, and
 mutation model independently testable.

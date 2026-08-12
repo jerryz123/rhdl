@@ -1,40 +1,36 @@
 #lang rhombus
-// Checks deterministic lowering from representative RHDL designs to CIRCT MLIR.
+// Checks deterministic CIRCT lowering primarily from frontend-elaborated designs.
 
 import:
   "../rhdl/main.rhm" open
-  "support.rhm" open
+  "../examples/adder.rhdl" as adder_fixture
+  "../examples/alu.rhdl" as alu_fixture
+  "frontend/alu5.rhdl" as alu5_fixture
+  "../examples/width-ops.rhdl" as width_fixture
+  "../examples/counter.rhdl" as counter_fixture
+  "../examples/hierarchy.rhdl" as hierarchy_fixture
 
-def [adder_design, _, _, _, _, _, _] = make_adder_design()
-def adder_circt = emit_circt(adder_design)
+def adder_circt = emit_circt(adder_fixture.design)
 
 check:
   adder_circt.contains("hw.module @Adder8(in %a : i8, in %b : i8, out sum : i8)") ~is #true
-  adder_circt.contains("%__rhdl_value_8 = comb.add %a, %b : i8") ~is #true
-  adder_circt.contains("hw.output %__rhdl_value_8 : i8") ~is #true
-  adder_circt ~is emit_circt(adder_design)
+  adder_circt.contains("comb.add %a, %b : i8") ~is #true
+  adder_circt ~is emit_circt(adder_fixture.design)
 
-def [counter_design, _, _, _, _] = make_counter_design()
-def counter_circt = emit_circt(counter_design)
+def counter_circt = emit_circt(counter_fixture.design)
 
 check:
-  counter_circt.contains("%__rhdl_clock_11 = seq.to_clock %clk") ~is #true
-  counter_circt.contains(
-    "%state = seq.firreg %__rhdl_value_15 clock %__rhdl_clock_11 reset sync %reset, %__rhdl_value_8 : i8"
-  ) ~is #true
+  counter_circt.contains("seq.to_clock %clk") ~is #true
+  counter_circt.contains("reset sync %reset") ~is #true
   counter_circt.contains("hw.output %state : i8") ~is #true
 
-def [hierarchy_design, _, _, _, _, _] = make_hierarchy_design()
-def hierarchy_circt = emit_circt(hierarchy_design)
+def hierarchy_circt = emit_circt(hierarchy_fixture.design)
 
 check:
-  hierarchy_circt.contains(
-    "%__rhdl_value_24 = hw.instance \"u0\" @Adder8(a: %a: i8, b: %b: i8) -> (sum: i8)"
-  ) ~is #true
-  hierarchy_circt.contains(
-    "%__rhdl_value_28 = hw.instance \"u1\" @Adder8(a: %a: i8, b: %c: i8) -> (sum: i8)"
-  ) ~is #true
+  hierarchy_circt.contains("hw.instance \"u0\" @Adder8(a: %a: i8, b: %b: i8)") ~is #true
+  hierarchy_circt.contains("hw.instance \"u1\" @Adder8(a: %a: i8, b: %c: i8)") ~is #true
 
+// Direct construction remains to test collision-free backend names independently.
 def collision_design = Design()
 def collision_builder = Builder(collision_design)
 def collision_module = collision_builder.module("CollisionFree")
@@ -53,8 +49,7 @@ check:
   collision_circt.contains("in %v6 : i1") ~is #true
   collision_circt.contains("%__rhdl_value_6 = comb.add %v6, %v6 : i1") ~is #true
 
-def [alu_design, _, _, _, _, _, _, _] = make_alu_design()
-def alu_circt = emit_circt(alu_design)
+def alu_circt = emit_circt(alu_fixture.design)
 
 check:
   alu_circt.contains("comb.and") ~is #true
@@ -67,15 +62,13 @@ check:
   alu_circt.contains("comb.mux") ~is #true
   alu_circt.contains("out equal : i1") ~is #true
 
-def [alu5_design, _, _, _, _, _, _, _] = make_alu_design(5)
-def alu5_circt = emit_circt(alu5_design)
+def alu5_circt = emit_circt(alu5_fixture.design)
 
 check:
   alu5_circt.contains("hw.module @ALU5(in %a : i5") ~is #true
   alu5_circt.contains("hw.constant 31 : i5") ~is #true
 
-def [width_design, _, _, _, _, _, _, _, _] = make_width_ops_design()
-def width_circt = emit_circt(width_design)
+def width_circt = emit_circt(width_fixture.design)
 
 check:
   width_circt.contains("comb.concat %a, %b : i8, i4") ~is #true

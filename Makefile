@@ -3,7 +3,8 @@
 .PHONY: test unit-test circt-test setup-circt examples
 
 unit-test:
-	raco test tests/ir-test.rhm tests/verify-test.rhm tests/printer-test.rhm tests/circt-test.rhm
+	env PLTCOLLECTS=$(CURDIR): raco test tests/ir-test.rhm tests/verify-test.rhm tests/printer-test.rhm tests/circt-test.rhm tests/frontend-test.rhm tests/frontend-fresh-test.rhm
+	bash tests/run-frontend-negative.sh
 
 circt-test:
 	bash tests/run-circt.sh
@@ -14,8 +15,8 @@ setup-circt:
 	bash tools/install-circt.sh
 
 examples:
-	racket examples/adder.rhm
-	racket examples/alu.rhm
-	racket examples/width-ops.rhm
-	racket examples/counter.rhm
-	racket examples/hierarchy.rhm
+	racket -S $(CURDIR) examples/adder.rhdl
+	racket -S $(CURDIR) examples/alu.rhdl
+	racket -S $(CURDIR) examples/width-ops.rhdl
+	racket -S $(CURDIR) examples/counter.rhdl
+	racket -S $(CURDIR) examples/hierarchy.rhdl

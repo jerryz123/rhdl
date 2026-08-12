@@ -1,0 +1,228 @@
+#lang rhombus
+// Provides guarded elaboration state and source-located Builder adapters for #lang rhdl.
+
+import:
+  "main.rhm" open
+
+export:
+  FrontendContext
+  ModuleGenerator
+  frontend_run
+
+fun frontend_fail(location, message):
+  error(~who: #'rhdl, location.describe() ++ ": " ++ message)
+
+fun same_bits(left, right):
+  left is_a Bits && right is_a Bits && left.width == right.width
+
+class FrontendContext(design,
+                      builder,
+                      mutable active = #true,
+                      mutable active_generators = [],
+                      mutable allocated_symbols = []):
+  method allocate_symbol(generator_name, arguments):
+    def base = generator_name ++ String.join(arguments.map(to_string), "_")
+    def count = allocated_symbols.filter(~keep: fun (symbol): symbol == base).length()
+    allocated_symbols := allocated_symbols ++ [base]
+    if count == 0
+    | base
+    | base ++ "_" ++ to_string(count)
+
+  method input(module_def, name, type, location):
+    builder.input(module_def,
+                  name,
+                  type,
+                  location,
+                  Origin("frontend input", name))
+
+  method output(module_def, name, type, location):
+    builder.output(module_def,
+                   name,
+                   type,
+                   location,
+                   Origin("frontend output", name))
+
+  method read_value(entity, location):
+    cond
+    | entity is_a Value: entity
+    | entity is_a Register: entity.current
+    | entity is_a Place:
+        unless entity.driver
+        | frontend_fail(location,
+                        "output " ++ entity.name ++ " must be driven before it is read")
+        builder.read(entity)
+    | ~else:
+        frontend_fail(location, "expected readable hardware data")
+
+  method field(entity, name, location):
+    cond
+    | entity is_a Register && name == "next": entity.next
+    | entity is_a Instance:
+        def output_binding = entity.module_def.find_output(name)
+        if output_binding
+        | entity.output(name)
+        | block:
+            def input_binding = entity.module_def.find_input(name)
+            if input_binding
+            | entity.input(name)
+            | frontend_fail(location, "instance has no port named " ++ name)
+    | ~else:
+        frontend_fail(location, "field access is not valid for this hardware entity")
+
+  method constant(module_def, type, integer, name, location):
+    builder.constant(module_def,
+                     type,
+                     integer,
+                     name,
+                     location,
+                     Origin("frontend constant", name))
+
+  method unary(module_def, opcode, operand_entity, name, location):
+    def operand = read_value(operand_entity, location)
+    match opcode
+    | "not":
+        builder.bit_not(module_def, operand, name, location,
+                        Origin("frontend not", name))
+    | ~else:
+        frontend_fail(location, "unknown unary operation " ++ opcode)
+
+  method binary(module_def, opcode, left_entity, right_entity, name, location):
+    def left = read_value(left_entity, location)
+    def right = read_value(right_entity, location)
+    unless same_bits(left.type, right.type)
+    | frontend_fail(location, opcode ++ " operands must have exactly the same Bits width")
+    match opcode
+    | "and":
+        builder.bit_and(module_def, left, right, name, location,
+                        Origin("frontend and", name))
+    | "or":
+        builder.bit_or(module_def, left, right, name, location,
+                       Origin("frontend or", name))
+    | "xor":
+        builder.bit_xor(module_def, left, right, name, location,
+                        Origin("frontend xor", name))
+    | "add":
+        builder.add(module_def, left, right, name, location,
+                    Origin("frontend add", name))
+    | "sub":
+        builder.sub(module_def, left, right, name, location,
+                    Origin("frontend sub", name))
+    | "eq":
+        builder.eq(module_def, left, right, name, location,
+                   Origin("frontend eq", name))
+    | ~else:
+        frontend_fail(location, "unknown binary operation " ++ opcode)
+
+  method add(module_def, left_entity, right_entity, name, location):
+    binary(module_def, "add", left_entity, right_entity, name, location)
+
+  method mux(module_def, condition_entity, true_entity, false_entity, name, location):
+    builder.mux(module_def,
+                read_value(condition_entity, location),
+                read_value(true_entity, location),
+                read_value(false_entity, location),
+                name,
+                location,
+                Origin("frontend mux", name))
+
+  method concat(module_def, entities, name, location):
+    builder.concat(module_def,
+                   entities.map(fun (entity): read_value(entity, location)),
+                   name,
+                   location,
+                   Origin("frontend concat", name))
+
+  method extract(module_def, entity, high, low, name, location):
+    builder.extract(module_def,
+                    read_value(entity, location),
+                    high,
+                    low,
+                    name,
+                    location,
+                    Origin("frontend extract", name))
+
+  method zext(module_def, entity, target_width, name, location):
+    builder.zext(module_def,
+                 read_value(entity, location),
+                 target_width,
+                 name,
+                 location,
+                 Origin("frontend zext", name))
+
+  method trunc(module_def, entity, target_width, name, location):
+    builder.trunc(module_def,
+                  read_value(entity, location),
+                  target_width,
+                  name,
+                  location,
+                  Origin("frontend trunc", name))
+
+  method register(module_def, name, type, clock_entity,
+                  reset_entity, reset_value_entity, location):
+    builder.register(module_def,
+                     name,
+                     type,
+                     read_value(clock_entity, location),
+                     if reset_entity | read_value(reset_entity, location) | #false,
+                     if reset_value_entity | read_value(reset_value_entity, location) | #false,
+                     location,
+                     Origin("frontend register", name))
+
+  method instance(module_def, child, name, location):
+    builder.instance(module_def,
+                     child,
+                     name,
+                     location,
+                     Origin("frontend instance", name))
+
+  method drive(place, value_entity, location):
+    unless place is_a Place
+    | frontend_fail(location, "inputs are read only")
+    def value = read_value(value_entity, location)
+    unless same_bits(place.type, value.type)
+    | frontend_fail(location, "place and driver must have exactly the same Bits width")
+    builder.drive(place, value, location, Origin("frontend drive", place.name))
+
+  method elaborate(module_def, location):
+    unless module_def is_a Module && module_def.design === design
+    | frontend_fail(location, "elaborate expects a module generator call")
+    module_def
+
+class ModuleGenerator(context,
+                      name,
+                      parameter_names,
+                      implementation):
+  method instantiate(arguments, call_location):
+    unless context.active
+    | frontend_fail(call_location,
+                    "module generators may only be called during elaboration")
+    unless arguments is_a List && arguments.length() == parameter_names.length()
+    | frontend_fail(call_location,
+                    "module generator " ++ name ++ " received the wrong number of arguments")
+    for (argument in arguments,
+         parameter_name in parameter_names):
+      unless argument is_a Int
+      | frontend_fail(call_location,
+                      "generator parameter " ++ parameter_name ++ " must be a host Int")
+    when context.active_generators.find(fun (generator): generator === this)
+    | frontend_fail(call_location,
+                    "recursive elaboration of module generator " ++ name)
+    context.active_generators := context.active_generators ++ [this]
+    def module_name = context.allocate_symbol(name, arguments)
+    def module_def = context.builder.module(module_name)
+    implementation(module_def, arguments)
+    context.builder.finish(module_def)
+    context.active_generators := context.active_generators.filter(
+      ~keep: fun (generator): !(generator === this)
+    )
+    module_def
+
+fun frontend_run(program):
+  def design = Design()
+  def context = FrontendContext(design, Builder(design))
+  def top = program(context)
+  context.active := #false
+  unless top is_a Module
+  | error(~who: #'rhdl, "elaboration did not select a top module")
+  verify_design(design)
+  design
