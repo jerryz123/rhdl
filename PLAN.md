@@ -681,6 +681,9 @@ The frontend implements:
   maintaining separate fixtures. Intentionally invalid programs live under
   `tests/frontend/invalid/`. Builder construction remains only for lower-layer API,
   verifier, malformed-IR, and backend-name tests.
+- Concise standard-layer syntax throughout the canonical `.rhdl` examples,
+  with `examples/kernel-adder.rhdl` retained as an explicit kernel-style
+  `#lang rhdl` equivalent that exposes the construction underneath the macros.
 
 The kernel remains intentionally smaller than the standard layer. Grouped
 `IO`, `RegInit`, protocol interfaces, pipelines, and similar Chisel-like

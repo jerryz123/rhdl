@@ -25,3 +25,4 @@ examples:
 	racket -S $(CURDIR) examples/hierarchy.rhdl
 	racket -S $(CURDIR) examples/layered-adder.rhdl
 	racket -S $(CURDIR) examples/fresh-generators.rhdl
+	racket -S $(CURDIR) examples/kernel-adder.rhdl

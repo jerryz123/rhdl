@@ -151,10 +151,10 @@ An ordinary Rhombus library can define reusable hardware construction:
 #lang rhombus
 
 import:
-  lib("rhdl/frontend/kernel.rhm") open
+  lib("rhdl/frontend/standard.rhm") open
 
 fun add_pair(left, right):
-  hw_add(left, right)
+  left + right
 ```
 
 The complete library-and-circuit example is
@@ -165,6 +165,13 @@ parameter to generate repeated hardware while a `Bits(1)` `bypass` input
 selects runtime hardware behavior. Higher-level conveniences such as grouped
 `IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
 this same layering rule.
+
+All canonical examples except `examples/kernel-adder.rhdl` use the concise
+standard layer. That example remains a `#lang rhdl` program, but constructs the
+same adder shape explicitly with `build_circuit`, string-named ports, `hw_add`,
+`connect`, and `run_elaboration`. It shows that both styles are available in
+the same language and that the concise forms layer over the small elaboration
+kernel.
 
 ## Builder API
 
