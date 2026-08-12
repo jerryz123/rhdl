@@ -16,7 +16,11 @@
 
 ## Verification
 
-- Run `make test` after behavioral changes.
+- After changes, run the minimum focused set of tests that directly covers the
+  modified behavior; do not run the full test suite by default.
+- Run broader targets such as `make test` only when changes span multiple
+  layers, affect shared test or build infrastructure, or otherwise cannot be
+  covered confidently by focused tests.
 - Keep generated Racket and Verilator build output out of version control.
 
 ## Package boundaries
