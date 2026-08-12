@@ -160,9 +160,11 @@ fun add_pair(left, right):
 The complete library-and-circuit example is
 `examples/add-pair.rhm` plus `examples/layered-adder.rhdl`. Importing that
 library from a `.rhdl` program requires no changes to the RHDL reader, IR,
-verifier, or backend. Higher-level conveniences such as grouped `IO`,
-`RegInit`, protocol interfaces, and pipeline generators should follow this
-same layering rule.
+verifier, or backend. The circuit uses host recursion and a host `stages`
+parameter to generate repeated hardware while a `Bits(1)` `bypass` input
+selects runtime hardware behavior. Higher-level conveniences such as grouped
+`IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
+this same layering rule.
 
 ## Builder API
 
