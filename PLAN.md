@@ -103,9 +103,8 @@ The initial standard layer supports conventional forms such as:
 
 ```text
 circuit ALU(width):
-    def a = input("a", Bits(width))
-    def b = input("b", Bits(width))
-    def y = output("y", Bits(width))
+    input(a, b): Bits(width)
+    output y: Bits(width)
     y <== a + b
 ```
 
@@ -113,6 +112,9 @@ circuit ALU(width):
 into the elaboration kernel and Builder; macro expansion is not itself the
 hardware IR. Libraries may define new functions, macros, and operators by
 importing the kernel or standard layer, without modifying the language reader.
+Binding-derived port declarations, hardware bitwise operators, and
+`mux_lookup` are standard-layer conveniences that lower to the same kernel
+primitives; they do not add IR operations.
 
 ### 3.2 Elaboration
 

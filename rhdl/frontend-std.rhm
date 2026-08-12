@@ -8,14 +8,51 @@ import:
 
 export:
   all_from("frontend-runtime.rhm")
+  input
+  output
   +
   -
   &
   ^
+  and
+  or
+  xor
+  not
   ===
   <==
   circuit
   elaborate
+  mux_lookup
+
+defn.macro 'input $bindings: $type':
+  match bindings
+  | '$(name :: Identifier)':
+      def port_name = name.to_source_string()
+      'def $name = input($port_name, $type)'
+  | '($(name :: Identifier), ...)':
+      let [port_name, ...] = [name.to_source_string(), ...]
+      '«
+         def $name = input($port_name, $type)
+         ...
+       »'
+  | ~else:
+      syntax_meta.error("expected a port binding or parenthesized port bindings",
+                        bindings)
+
+defn.macro 'output $bindings: $type':
+  match bindings
+  | '$(name :: Identifier)':
+      def port_name = name.to_source_string()
+      'def $name = output($port_name, $type)'
+  | '($(name :: Identifier), ...)':
+      let [port_name, ...] = [name.to_source_string(), ...]
+      '«
+         def $name = output($port_name, $type)
+         ...
+       »'
+  | ~else:
+      syntax_meta.error("expected a port binding or parenthesized port bindings",
+                        bindings)
 
 defn.macro 'circuit $(name :: Identifier)($argument, ...): $body; ...':
   def circuit_name = name.to_source_string()
@@ -27,6 +64,21 @@ defn.macro 'circuit $(name :: Identifier)($argument, ...): $body; ...':
 
 expr.macro 'elaborate($body)':
   'run_elaboration(fun (): $body)'
+
+fun build_mux_lookup(selector, default_value, cases):
+  def selector_value = read(selector)
+  for values(selected = default_value) (case in cases.reverse()):
+    match case
+    | [key, case_value]:
+        def key_value = literal(selector_value.type, key)
+        mux(hw_eq(selector_value, key_value), case_value, selected)
+
+expr.macro 'mux_lookup($selector, ~default: $default_value):
+              $key: $case_value
+              ...':
+  'build_mux_lookup($selector,
+                    $default_value,
+                    [[$key, $case_value], ...])'
 
 operator (left + right):
   if hardware_entity(left) || hardware_entity(right)
@@ -43,6 +95,30 @@ operator (left & right):
 
 operator (left ^ right):
   bit_xor(left, right)
+
+operator (left and right):
+  ~order: bitwise_conjunction
+  if hardware_entity(left) || hardware_entity(right)
+  | bit_and(left, right)
+  | left bits.and right
+
+operator (left or right):
+  ~order: bitwise_disjunction
+  if hardware_entity(left) || hardware_entity(right)
+  | bit_or(left, right)
+  | left bits.or right
+
+operator (left xor right):
+  ~order: bitwise_disjunction
+  if hardware_entity(left) || hardware_entity(right)
+  | bit_xor(left, right)
+  | left bits.xor right
+
+operator (not entity):
+  ~order: bitwise_negation
+  if hardware_entity(entity)
+  | bit_not(entity)
+  | bits.not entity
 
 operator (left === right):
   hw_eq(left, right)

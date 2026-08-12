@@ -83,9 +83,8 @@ public IR is itself under test.
 #lang rhdl
 
 circuit Adder(width):
-  def a = input("a", Bits(width))
-  def b = input("b", Bits(width))
-  def sum = output("sum", Bits(width))
+  input(a, b): Bits(width)
+  output sum: Bits(width)
   sum <== a + b
 
 def design = elaborate(Adder(8))
@@ -96,18 +95,31 @@ export:
 
 Every circuit call creates a fresh module definition. Circuit parameters are
 host `Int` values, while ports and hardware values use explicit `Bits(width)`
-types. Outputs, instance inputs, and register next state are connected with
-`<==`. Registers use
+types. `input a: Bits(width)` and `output y: Bits(width)` derive hardware names
+from their bindings; parentheses group same-typed ports, as in
+`input(a, b): Bits(width)`. Outputs, instance inputs, and register next state
+are connected with `<==`. Registers use
 `reg("state", Bits(width), clk, reset, reset_value)`. Instances use
 `inst("u0", child_definition)`, with ports accessed through
 `u0.input("a")` and `u0.output("sum")`.
 
-The embedded surface includes `+`, `-`, `&`, `^`, and `===`, plus the named
-functions `bit_not`, `bit_and`, `bit_or`, `bit_xor`, `hw_add`, `hw_sub`,
-`hw_eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`. Constants use
+The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
+and `===`, plus the named functions `bit_not`, `bit_and`, `bit_or`, `bit_xor`,
+`hw_add`, `hw_sub`, `hw_eq`, `mux`, `concat`, `extract`, `zext`, and `trunc`.
+`mux_lookup(selector, ~default: value)` builds a priority mux from host-`Int`
+keys, deriving each literal's width from the selector. Constants use
 `literal(Bits(width), integer)`. Explicit function forms accept an optional IR
 name, while operator-produced temporary values receive deterministic generated
 names.
+
+```rhombus
+result <== mux_lookup(op, ~default: not a):
+  0: a and b
+  1: a or b
+  2: a xor b
+  3: a + b
+  4: a - b
+```
 
 Module bodies are ordinary Rhombus. Host functions, imports, collections,
 `if`, and iteration can decide generated structure; a hardware value used as
