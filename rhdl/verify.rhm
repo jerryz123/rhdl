@@ -1,4 +1,5 @@
 #lang rhombus
+// Verifies RHDL schemas, ownership, use-def links, types, drivers, and graph invariants.
 
 import:
   "ir.rhm" open
@@ -20,6 +21,9 @@ fun valid_bits(type):
 fun same_type(left, right):
   valid_bits(left) && valid_bits(right) && left.width == right.width
 
+fun contains_identity(items, item):
+  items.find(fun (candidate): candidate === item)
+
 fun check_schema(operation):
   def schema = schema_for(operation.opcode)
   unless schema
@@ -33,9 +37,20 @@ fun check_schema(operation):
   when schema.place_count != #false && operation.places.length() != schema.place_count
   | fail_operation(operation,
                    operation.opcode ++ " has the wrong number of places")
+  for (attribute_name in schema.required_attributes):
+    unless attribute_name in operation.attributes
+    | fail_operation(operation,
+                     operation.opcode ++ " requires attribute " ++ attribute_name)
+  schema
 
-fun check_operation_types(module_def, operation):
-  match operation.opcode
+fun check_operation_types(module_def, operation, schema):
+  match schema.type_rule
+  | "input_port":
+      unless valid_bits(operation.results[0].type)
+      | fail_operation(operation, "input port must have a valid Bits type")
+  | "output_port":
+      unless valid_bits(operation.places[0].type)
+      | fail_operation(operation, "output port must have a valid Bits type")
   | "constant":
       def result = operation.results[0]
       def integer = operation.attribute("value", #false)
@@ -43,12 +58,13 @@ fun check_operation_types(module_def, operation):
       | fail_operation(operation, "constant result must have a valid Bits type")
       unless integer is_a Int && integer >= 0 && integer < (1 bits.(<<) result.type.width)
       | fail_operation(operation, "constant does not fit its result width")
-  | "add":
+  | "same_width_binary":
       def left = operation.operands[0]
       def right = operation.operands[1]
       def result = operation.results[0]
       unless same_type(left.type, right.type) && same_type(left.type, result.type)
-      | fail_operation(operation, "add operands and result must have the same Bits width")
+      | fail_operation(operation,
+                       operation.opcode ++ " operands and result must have the same Bits width")
   | "register" || "register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]
@@ -57,7 +73,7 @@ fun check_operation_types(module_def, operation):
       | fail_operation(operation, "register clock must be Bits(1)")
       unless same_type(current.type, next.type)
       | fail_operation(operation, "register current and next-state widths differ")
-      when operation.opcode == "register_reset"
+      when schema.type_rule == "register_reset"
       | def reset = operation.operands[1]
         def reset_value = operation.operands[2]
         unless valid_bits(reset.type) && reset.type.width == 1
@@ -75,6 +91,9 @@ fun check_operation_types(module_def, operation):
       def child = operation.attribute("module", #false)
       unless child is_a Module && child.finished
       | fail_operation(operation, "instance target is not a finished module")
+      def child_owned = child.design === module_def.design && contains_identity(module_def.design.modules, child)
+      unless child_owned
+      | fail_operation(operation, "instance target belongs to a different design")
       unless operation.places.length() == child.inputs.length()
       | fail_operation(operation, "instance input count does not match its module")
       unless operation.results.length() == child.outputs.length()
@@ -101,37 +120,55 @@ fun value_has_combinational_cycle(module_def, value, path):
           value_has_combinational_cycle(module_def, operand, path ++ [value.id])
 
 fun is_drive_to(operation, place_id):
-  operation.opcode == "drive" && operation.places.length() == 1 && operation.places[0].id == place_id
+  operation.opcode == "rtl.drive" && operation.places.length() == 1 && operation.places[0].id == place_id
 
 fun verify_module(module_def):
+  def module_owned = module_def is_a Module && module_def.design is_a Design && contains_identity(module_def.design.modules, module_def)
+  unless module_owned
+  | fail("module belongs to a different design")
   unless module_def.finished
   | fail("module " ++ module_def.name ++ " has not been finished")
   for (port in module_def.inputs):
-    unless valid_bits(port.type) && port.value && !port.place
+    def input_valid = valid_bits(port.type) && port.value && !port.place && port.value.module_def === module_def && contains_identity(module_def.values, port.value)
+    unless input_valid
     | fail("input " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (port in module_def.outputs):
-    unless valid_bits(port.type) && port.place && !port.value
+    def output_valid = valid_bits(port.type) && port.place && !port.value && port.place.module_def === module_def && contains_identity(module_def.places, port.place)
+    unless output_valid
     | fail("output " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (operation in module_def.operations):
-    check_schema(operation)
+    unless operation is_a Operation && operation.module_def === module_def
+    | fail("operation belongs to a different module")
+    def schema = check_schema(operation)
     for (operand in operation.operands):
-      unless operand is_a Value && operand.module_id == module_def.id
+      def operand_owned = operand is_a Value && operand.module_def === module_def && contains_identity(module_def.values, operand)
+      unless operand_owned
       | fail_operation(operation, "operand belongs to a different module")
+      unless operand.users().find(fun (user_id): user_id == operation.id)
+      | fail_operation(operation, "operand is missing its use-def link")
     for (result in operation.results):
-      unless result is_a Value && result.module_id == module_def.id
+      def result_owned = result is_a Value && result.module_def === module_def && contains_identity(module_def.values, result)
+      unless result_owned
       | fail_operation(operation, "result belongs to a different module")
       unless result.defining_op_id == operation.id
       | fail_operation(operation, "result has the wrong defining operation")
     for (place in operation.places):
-      unless place is_a Place && place.module_id == module_def.id
+      def place_owned = place is_a Place && place.module_def === module_def && contains_identity(module_def.places, place)
+      unless place_owned
       | fail_operation(operation, "place belongs to a different module")
-    check_operation_types(module_def, operation)
+    check_operation_types(module_def, operation, schema)
   for (place in module_def.places):
+    unless place.module_def === module_def
+    | fail("place " ++ place.name ++ " belongs to a different module")
+    def owner = module_def.find_operation(place.owner_op_id)
+    unless owner && contains_identity(owner.places, place)
+    | fail("place " ++ place.name ++ " has an invalid owner")
     unless valid_bits(place.type)
     | fail("place " ++ place.name ++ " does not have a valid Bits type")
     unless place.driver
     | fail("place " ++ place.name ++ " is undriven")
-    unless place.driver.module_id == module_def.id
+    def driver_owned = place.driver.module_def === module_def && contains_identity(module_def.values, place.driver)
+    unless driver_owned
     | fail("place " ++ place.name ++ " is driven from a different module")
     unless same_type(place.type, place.driver.type)
     | fail("place " ++ place.name ++ " and its driver have different widths")
@@ -140,6 +177,15 @@ fun verify_module(module_def):
     unless drive_count == 1
     | fail("place " ++ place.name ++ " must have exactly one drive operation")
   for (value in module_def.values):
+    unless value.module_def === module_def
+    | fail("value " ++ value.name ++ " belongs to a different module")
+    def defining_operation = module_def.find_operation(value.defining_op_id)
+    unless defining_operation && contains_identity(defining_operation.results, value)
+    | fail("value " ++ value.name ++ " has an invalid defining operation")
+    for (user_id in value.users()):
+      def user = module_def.find_operation(user_id)
+      unless user && contains_identity(user.operands, value)
+      | fail("value " ++ value.name ++ " has an invalid user")
     unless valid_bits(value.type)
     | fail("value " ++ value.name ++ " does not have a valid Bits type")
     when value_has_combinational_cycle(module_def, value, [])
@@ -150,8 +196,17 @@ fun verify_design(design):
   unless design is_a Design
   | fail("expected an IR.Design")
   for (module_def in design.modules):
+    unless module_def is_a Module && module_def.design === design
+    | fail("module belongs to a different design")
     def same_names = design.modules.filter(~keep: fun (other): other.name == module_def.name)
     unless same_names.length() == 1
     | fail("duplicate module name " ++ module_def.name)
     verify_module(module_def)
+  def mutable entities = []
+  for (module_def in design.modules):
+    entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places
+  for (entity in entities):
+    def same_ids = entities.filter(~keep: fun (other): other.id == entity.id)
+    unless same_ids.length() == 1
+    | fail("duplicate IR id " ++ to_string(entity.id))
   #void

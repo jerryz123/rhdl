@@ -1,4 +1,5 @@
 #lang rhombus
+// Defines the public RHDL hardware IR objects and their ownership relationships.
 
 export:
   Bits
@@ -35,7 +36,10 @@ class Origin(kind = "unknown", description = "", parents = []):
     | kind
     | kind ++ ": " ++ description
 
-class Value(id, name, type, module_id, defining_op_id, mutable user_ids = []):
+class Value(id, name, type, module_def, defining_op_id, mutable user_ids = []):
+  property module_id: module_def.id
+  property design: module_def.design
+
   method add_user(operation_id):
     user_ids := user_ids ++ [operation_id]
 
@@ -45,18 +49,25 @@ class Value(id, name, type, module_id, defining_op_id, mutable user_ids = []):
   method ref():
     "%" ++ name
 
-class Place(id, name, type, module_id, owner_op_id, mutable driver = #false):
+class Place(id, name, type, module_def, owner_op_id, mutable driver = #false):
+  property module_id: module_def.id
+  property design: module_def.design
+
   method ref():
     "&" ++ name
 
 class Operation(id,
                 opcode,
+                module_def,
                 operands = [],
                 results = [],
                 places = [],
                 attributes = {},
                 location = Location(),
                 origin = Origin()):
+  property module_id: module_def.id
+  property design: module_def.design
+
   method attribute(name, default = #false):
     attributes.get(name, default)
 
@@ -79,7 +90,8 @@ class Instance(operation, module_def, input_bindings, output_bindings):
             "instance has no output named " ++ name)
     binding.value
 
-class Module(id,
+class Module(design,
+             id,
              name,
              mutable operations = [],
              mutable inputs = [],
@@ -88,12 +100,18 @@ class Module(id,
              mutable places = [],
              mutable finished = #false):
   method add_operation(operation):
+    unless operation is_a Operation && operation.module_def === this
+    | error(~who: #'add_operation, "operation belongs to a different module")
     operations := operations ++ [operation]
 
   method add_value(value):
+    unless value is_a Value && value.module_def === this
+    | error(~who: #'add_value, "value belongs to a different module")
     values := values ++ [value]
 
   method add_place(place):
+    unless place is_a Place && place.module_def === this
+    | error(~who: #'add_place, "place belongs to a different module")
     places := places ++ [place]
 
   method add_input(port):
@@ -127,6 +145,8 @@ class Design(mutable modules = [], mutable next_id = 0):
     id
 
   method add_module(module_def):
+    unless module_def is_a Module && module_def.design === this
+    | error(~who: #'add_module, "module belongs to a different design")
     modules := modules ++ [module_def]
 
   method find_module(id):

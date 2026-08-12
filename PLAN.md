@@ -8,8 +8,9 @@ The first manually constructed vertical slice is implemented. It currently
 provides:
 
 - `Design`, `Module`, `Operation`, `Value`, `Place`, `Bits`, `Location`, and
-  `Origin` handles with stable IDs.
-- A static operation-schema table.
+  `Origin` handles with stable IDs and explicit owning-object relationships.
+- A static namespaced operation-schema table that records arity, required
+  attributes, type rules, printing forms, and CIRCT lowering targets.
 - Builder support for ports, constants, modular addition, primitive registers,
   module instances, and single-driver relationships.
 - Active-high synchronous register reset.
@@ -17,13 +18,15 @@ provides:
   register operands, instance interfaces, and combinational-cycle detection.
 - Deterministic public IR printing and design walking.
 - Deterministic lowering to textual CIRCT MLIR using the `hw`, `comb`, and
-  `seq` dialects.
+- Collision-free CIRCT SSA names derived from stable IR IDs, with validated
+  user-facing module, port, register, and instance names.
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
   SystemVerilog export, and Verilator simulations for an adder, counter, and
   explicitly reused module definition.
 
-The `#lang rhdl` frontend, user rewrite transactions, the remaining initial
-operations, and broader CIRCT lowering coverage are not part of this first cut.
+The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
+The `#lang rhdl` frontend, user rewrite transactions, remaining initial
+operations, and broader CIRCT lowering coverage remain future work.
 
 ## 1. Goal
 
@@ -111,7 +114,8 @@ Elaboration executes Rhombus code to decide what hardware exists.
 HOST                         HARDWARE
 
 Int                          Bits(width)
-Boolean                      Bits(1), when used as data
+Boolean                      host value only
+Bits(1)                      explicit one-bit hardware data
 if                           no initial hardware equivalent
 for over a host collection   repeated generated structure
 generator call               fresh module definition
@@ -161,7 +165,8 @@ Operation
     origin
 ```
 
-Operations are described by namespaced schemas instead of a closed hierarchy
+Operations use `rtl.*` namespaced opcodes and are described by schemas instead
+of a closed hierarchy
 such as `AddNode`, `MuxNode`, and `RegisterNode`. The first implementation may
 use a static built-in schema registry. Runtime dialect loading and schema
 versioning are deferred.
@@ -384,19 +389,23 @@ boundary occurs only through ports.
 The builder is the only normal mechanism for constructing structural IR:
 
 ```text
-builder.design(...)
 builder.module(...)
-builder.input(...)
-builder.output(...)
-builder.emit(...)
+builder.input(module, ...)
+builder.output(module, ...)
+builder.constant(module, ...)
+builder.add(module, ...)
 builder.drive(...)
-builder.register(...)
-builder.instance(...)
+builder.read(...)
+builder.register(module, ...)
+builder.instance(module, ...)
+builder.finish(module)
 ```
 
-It maintains the active design, module, insertion point, source location, and
-origin. It rejects locally impossible operations immediately, while whole-graph
-checks run at verification boundaries.
+The initial Builder owns one design, while the module being edited is passed
+explicitly to construction methods. Operations accept source locations and
+origins. The Builder rejects locally impossible operations immediately, while
+whole-graph checks run at verification boundaries. An insertion-point API is
+deferred until regions or rewriting require one.
 
 ### 8.2 Rewriter
 
@@ -435,7 +444,7 @@ stage.
 
 ## 9. Verification invariants
 
-The initial verifier enforces:
+The current IR Builder and verifier enforce:
 
 1. Every value and place belongs to exactly one design.
 2. Values are used only where their module scope permits.
@@ -448,9 +457,12 @@ The initial verifier enforces:
 8. A reset value is present exactly when reset is present and matches the
    register width.
 9. Module instances reference a completed module definition.
-10. Recursive generator elaboration is rejected.
-11. Purely combinational cycles are rejected.
-12. Hardware values never control host computation.
+10. Purely combinational cycles are rejected.
+
+The future generator and frontend layers must additionally reject recursive
+generator elaboration and prevent hardware values from controlling host
+conditionals or iteration. Those checks do not belong to the manual IR
+verifier because the host computation is no longer present once IR exists.
 
 Diagnostics should identify both the invalid operation and the relevant
 declaration or driver when two locations are involved.
@@ -472,6 +484,12 @@ multiple parent origins.
 
 IR identity and user-facing names are separate. Names may be changed or made
 unique without changing value, operation, or module identity.
+
+Initial user-facing hardware names are ASCII identifiers beginning with a
+letter or underscore and continuing with letters, digits, or underscores. The
+`__rhdl_` prefix is reserved for compiler-generated names. CIRCT SSA values use
+stable numeric IR IDs where a semantic port or register name is not required,
+so no lossy name legalization step can create collisions.
 
 ## 11. Backend boundary
 
@@ -506,6 +524,27 @@ then use CIRCT to generate the RTL supplied to Verilator.
 
 Backend-specific IR must not leak into the frontend value and place APIs.
 
+The planned combinational mappings are:
+
+```text
+RHDL                    CIRCT
+
+rtl.constant            hw.constant
+rtl.not                 comb.xor with an all-ones constant
+rtl.and/or/xor          comb.and/or/xor
+rtl.add/sub             comb.add/sub
+rtl.eq                  comb.icmp eq
+rtl.mux                 comb.mux
+rtl.concat              comb.concat
+rtl.extract             comb.extract
+rtl.zext                comb.concat with a zero high part
+rtl.trunc               comb.extract from bit zero
+```
+
+These mappings are part of the backend contract. RHDL should not introduce
+same-named pseudo-CIRCT operations when CIRCT expresses the canonical form as a
+composition.
+
 ## 12. Initial non-goals
 
 The first implementation deliberately excludes:
@@ -526,16 +565,16 @@ These can be added only with explicit semantics and tests.
 
 ## 13. Implementation sequence
 
-### Phase 0: executable semantic examples and toolchain
+### Phase 0: executable semantic examples and toolchain — complete
 
 - Pin compatible Racket/Rhombus and CIRCT versions.
 - Establish a repeatable development environment.
-- Write expected IR for an ALU, a synchronous-reset counter, and a module
+- Write expected IR for an adder, a synchronous-reset counter, and a module
   instance.
 - Record and test the direct `hw`/`comb`/`seq` lowering and CIRCT invocation
   contract.
 
-### Phase 1: IR kernel
+### Phase 1: IR kernel — core first-cut subset complete
 
 Implement:
 
@@ -546,8 +585,6 @@ Operation
 Value
 Place
 Bits(width)
-Attribute
-Symbol
 Location
 Origin
 schema registry
@@ -556,18 +593,29 @@ Verifier
 deterministic printer
 ```
 
-Unit-test ownership, use-def tracking, single-driver behavior, type checks,
-cycle detection, and invalid handle behavior.
+Ownership, actual repository membership, use-def tracking, single-driver
+behavior, type checks, cycle detection, schema attributes, cross-design ID
+collisions, and emitted-name safety are unit tested. Handle invalidation is
+deferred with rewriting.
 
-### Phase 2: manually built vertical slice
+Dedicated `Attribute` and `Symbol` object models are deferred. The first cut
+uses immutable host values for attributes and validated strings for symbols;
+they should become distinct objects only when parameterized attributes,
+renaming, or symbol references require them.
 
-- Implement the initial combinational operations.
+### Phase 2: manually built vertical slice — first slice complete
+
+- Implement constants and modular addition for the first slice.
 - Implement modules, ports, drives, instances, and registers.
-- Construct the ALU and counter directly through the builder API.
+- Construct the adder and counter directly through the builder API.
 - Lower them to CIRCT MLIR.
 - Have CIRCT generate SystemVerilog and simulate it with Verilator.
 
 This phase must produce working hardware before frontend syntax work expands.
+
+The remaining Phase 2 work is to add the rest of the initial combinational
+operations and exercise them in a host-parameterized ALU through Builder,
+CIRCT verification, CIRCT SystemVerilog export, and Verilator simulation.
 
 ### Phase 3: Rhombus frontend
 
@@ -609,23 +657,47 @@ host conditional path against hardware values.
   reference model where practical.
 - Document the public IR compatibility policy.
 
-## 14. First acceptance milestone
+## 14. Acceptance milestones
 
-The first milestone is complete when RHDL can:
+### Milestone A: Builder and backend slice — complete
 
-1. Elaborate a parameterized ALU whose width parameter is a host `Int`.
-2. Elaborate a counter with a primitive register and active-high synchronous
+RHDL can:
+
+1. Construct a host-width-parameterized adder through the Builder.
+2. Construct a counter with a primitive register and active-high synchronous
    reset.
 3. Instantiate one explicitly reused module definition twice.
 4. Read an already-driven module output within its defining module.
 5. Dump and walk the public IR.
-6. Apply a user-authored `x + 0 -> x` rewrite and reverify the design.
-7. Generate valid CIRCT MLIR, have CIRCT export SystemVerilog, and pass
+6. Generate valid CIRCT MLIR, have CIRCT export SystemVerilog, and pass
    Verilator simulation.
-8. Produce source-located errors for width mismatch, driving an input,
+7. Reject width mismatch, undriven and multiply-driven places, reads before a
+   drive, illegal cross-module or cross-design use, forged ownership, and
+   combinational cycles through Builder or verifier diagnostics.
+
+### Milestone B: complete manual IR surface
+
+RHDL can:
+
+1. Construct and verify every initial combinational operation listed in
+   Section 6.2.
+2. Lower each operation to its canonical CIRCT representation.
+3. Build a host-parameterized ALU using the public Builder API.
+4. Differentially simulate representative ALU operations through CIRCT and
+   Verilator.
+
+### Milestone C: frontend and rewriting
+
+RHDL can:
+
+1. Elaborate a parameterized ALU whose width parameter is a host `Int`.
+2. Elaborate a counter with a primitive register and active-high synchronous
+   reset.
+3. Apply a user-authored `x + 0 -> x` rewrite and reverify the design.
+4. Produce source-located errors for width mismatch, driving an input,
    undriven and multiply-driven places, reading an output before driving it,
    illegal cross-module use, a combinational cycle, and a hardware value used
    as a host condition.
 
-That milestone establishes the defining RHDL architecture without committing
-to the deferred language features.
+These milestones keep the manual IR/backend contract, surface language, and
+mutation model independently testable.

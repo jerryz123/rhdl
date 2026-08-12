@@ -3,20 +3,22 @@
 
 import:
   "ir.rhm" open
+  "ops.rhm" open
   "verify.rhm" open
 
 export:
   emit_circt
   emit_module_circt
 
-fun circt_name(name):
-  String.replace(name, ".", "_", ~all: #true)
-
 fun circt_type(type):
   "i" ++ to_string(type.width)
 
 fun value_ref(value):
-  "%" ++ circt_name(value.name)
+  def defining_operation = value.module_def.find_operation(value.defining_op_id)
+  def schema = defining_operation && schema_for(defining_operation.opcode)
+  if schema && (schema.print_form == "input_port" || schema.circt_lowering == "seq.firreg")
+  | "%" ++ value.name
+  | "%__rhdl_value_" ++ to_string(value.id)
 
 fun emit_constant(operation):
   def result = operation.results[0]
@@ -24,9 +26,9 @@ fun emit_constant(operation):
                 to_string(operation.attribute("value")), " : ",
                 circt_type(result.type))
 
-fun emit_add(operation):
+fun emit_binary(operation, circt_opcode):
   def result = operation.results[0]
-  String.append("    ", value_ref(result), " = comb.add ",
+  String.append("    ", value_ref(result), " = ", circt_opcode, " ",
                 value_ref(operation.operands[0]), ", ",
                 value_ref(operation.operands[1]), " : ",
                 circt_type(result.type))
@@ -35,9 +37,10 @@ fun emit_register(operation):
   def current = operation.results[0]
   def next = operation.places[0]
   def clock = operation.operands[0]
-  def clock_ref = "%" ++ circt_name(current.name) ++ "_clock"
+  def clock_ref = "%__rhdl_clock_" ++ to_string(operation.id)
+  def schema = schema_for(operation.opcode)
   def reset_text:
-    if operation.opcode == "register_reset"
+    if schema.type_rule == "register_reset"
     | String.append(" reset sync ",
                     value_ref(operation.operands[1]), ", ",
                     value_ref(operation.operands[2]))
@@ -49,38 +52,39 @@ fun emit_register(operation):
 
 fun emit_instance(operation):
   def child = operation.attribute("module")
-  def instance_name = circt_name(operation.attribute("name"))
+  def instance_name = operation.attribute("name")
   def mutable inputs = []
   def mutable outputs = []
   for (port in child.inputs,
        place in operation.places):
     def input_text:
-      String.append(circt_name(port.name), ": ",
+      String.append(port.name, ": ",
                     value_ref(place.driver), ": ",
                     circt_type(port.type))
     inputs := inputs ++ [input_text]
   for (port in child.outputs):
-    outputs := outputs ++ [circt_name(port.name) ++ ": " ++ circt_type(port.type)]
+    outputs := outputs ++ [port.name ++ ": " ++ circt_type(port.type)]
   def result_prefix:
     if operation.results.length() == 0
     | ""
     | String.join(operation.results.map(value_ref), ", ") ++ " = "
   String.append("    ", result_prefix,
-                "hw.instance \"", instance_name, "\" @", circt_name(child.name),
+                "hw.instance \"", instance_name, "\" @", child.name,
                 "(", String.join(inputs, ", "), ") -> (",
                 String.join(outputs, ", "), ")")
 
 fun emit_operation(operation):
-  match operation.opcode
-  | "input_port" || "output_port" || "drive":
+  def schema = schema_for(operation.opcode)
+  match schema && schema.circt_lowering
+  | "boundary":
       ""
-  | "constant":
+  | "hw.constant":
       emit_constant(operation)
-  | "add":
-      emit_add(operation)
-  | "register" || "register_reset":
+  | "comb.add":
+      emit_binary(operation, schema.circt_lowering)
+  | "seq.firreg":
       emit_register(operation)
-  | "instance":
+  | "hw.instance":
       emit_instance(operation)
   | ~else:
       error(~who: #'emit_circt,
@@ -90,10 +94,10 @@ fun emit_module_circt(module_def):
   def ports:
     module_def.inputs.map(
       fun (port):
-        "in %" ++ circt_name(port.name) ++ " : " ++ circt_type(port.type)
+        "in %" ++ port.name ++ " : " ++ circt_type(port.type)
     ) ++ module_def.outputs.map(
       fun (port):
-        "out " ++ circt_name(port.name) ++ " : " ++ circt_type(port.type)
+        "out " ++ port.name ++ " : " ++ circt_type(port.type)
     )
   def operations:
     module_def.operations.map(emit_operation).filter(~keep: fun (text): text != "")
@@ -104,7 +108,7 @@ fun emit_module_circt(module_def):
     | "    hw.output"
     | String.append("    hw.output ", String.join(output_values, ", "),
                     " : ", String.join(output_types, ", "))
-  String.append("  hw.module @", circt_name(module_def.name),
+  String.append("  hw.module @", module_def.name,
                 "(", String.join(ports, ", "), ") {\n",
                 String.join(operations ++ [output], "\n"),
                 "\n  }")

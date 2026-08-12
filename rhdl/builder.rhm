@@ -1,6 +1,8 @@
 #lang rhombus
+// Builds well-owned RHDL IR while enforcing local type, naming, and driver rules.
 
 import:
+  rhombus/rx open
   "ir.rhm" open
 
 export:
@@ -18,6 +20,19 @@ fun ensure_bits(type, who):
 fun same_type(left, right):
   left is_a Bits && right is_a Bits && left.width == right.width
 
+def hardware_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
+
+fun ensure_hardware_name(name, who):
+  unless name is_a String && hardware_identifier.is_match(name)
+  | fail(who, "hardware name must be an ASCII identifier")
+  when name.starts_with("__rhdl_")
+  | fail(who, "hardware names beginning with __rhdl_ are reserved")
+
+fun ensure_module_in_design(design, module_def, who):
+  def owned = module_def is_a Module && module_def.design === design && design.modules.find(fun (candidate): candidate === module_def)
+  unless owned
+  | fail(who, "module belongs to a different design")
+
 fun ensure_open(module_def, who):
   when module_def.finished
   | fail(who, "module " ++ module_def.name ++ " is already finished")
@@ -25,8 +40,14 @@ fun ensure_open(module_def, who):
 fun ensure_value_in(module_def, value, who):
   unless value is_a Value
   | fail(who, "expected a readable hardware Value")
-  unless value.module_id == module_def.id
+  def owned = value.module_def === module_def && module_def.values.find(fun (candidate): candidate === value)
+  unless owned
   | fail(who, "hardware value belongs to a different module")
+
+fun ensure_place_in(module_def, place, who):
+  def owned = place is_a Place && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+  unless owned
+  | fail(who, "hardware place belongs to a different module")
 
 fun ensure_unique_hardware_name(module_def, name, who):
   when module_def.values.find(fun (value): value.name == name) || module_def.places.find(fun (place): place.name == name)
@@ -34,26 +55,30 @@ fun ensure_unique_hardware_name(module_def, name, who):
 
 fun ensure_unique_instance_name(module_def, name, who):
   when module_def.operations.find(
-    fun (operation): operation.opcode == "instance" && operation.attribute("name", #false) == name
+    fun (operation): operation.opcode == "rtl.instance" && operation.attribute("name", #false) == name
   )
   | fail(who, "duplicate instance name " ++ name)
 
 class Builder(design):
   method module(name):
+    ensure_hardware_name(name, #'module)
     when design.modules.find(fun (candidate): candidate.name == name)
     | fail(#'module, "duplicate module name " ++ name)
-    def module_def = Module(design.fresh_id(), name)
+    def module_def = Module(design, design.fresh_id(), name)
     design.add_module(module_def)
     module_def
 
   method input(module_def, name, type, location = Location(), origin = Origin("input", name)):
+    ensure_module_in_design(design, module_def, #'input)
     ensure_open(module_def, #'input)
+    ensure_hardware_name(name, #'input)
     ensure_bits(type, #'input)
     ensure_unique_hardware_name(module_def, name, #'input)
     def operation_id = design.fresh_id()
-    def value = Value(design.fresh_id(), name, type, module_def.id, operation_id)
+    def value = Value(design.fresh_id(), name, type, module_def, operation_id)
     def operation = Operation(operation_id,
-                              "input_port",
+                              "rtl.input_port",
+                              module_def,
                               [],
                               [value],
                               [],
@@ -66,13 +91,16 @@ class Builder(design):
     value
 
   method output(module_def, name, type, location = Location(), origin = Origin("output", name)):
+    ensure_module_in_design(design, module_def, #'output)
     ensure_open(module_def, #'output)
+    ensure_hardware_name(name, #'output)
     ensure_bits(type, #'output)
     ensure_unique_hardware_name(module_def, name, #'output)
     def operation_id = design.fresh_id()
-    def place = Place(design.fresh_id(), name, type, module_def.id, operation_id)
+    def place = Place(design.fresh_id(), name, type, module_def, operation_id)
     def operation = Operation(operation_id,
-                              "output_port",
+                              "rtl.output_port",
+                              module_def,
                               [],
                               [],
                               [place],
@@ -90,6 +118,7 @@ class Builder(design):
                   name = #false,
                   location = Location(),
                   origin = Origin("constant")):
+    ensure_module_in_design(design, module_def, #'constant)
     ensure_open(module_def, #'constant)
     ensure_bits(type, #'constant)
     unless integer is_a Int
@@ -99,10 +128,12 @@ class Builder(design):
            "constant " ++ to_string(integer) ++ " does not fit " ++ type.describe())
     def operation_id = design.fresh_id()
     def value_name = name || "v" ++ to_string(operation_id)
+    ensure_hardware_name(value_name, #'constant)
     ensure_unique_hardware_name(module_def, value_name, #'constant)
-    def value = Value(design.fresh_id(), value_name, type, module_def.id, operation_id)
+    def value = Value(design.fresh_id(), value_name, type, module_def, operation_id)
     def operation = Operation(operation_id,
-                              "constant",
+                              "rtl.constant",
+                              module_def,
                               [],
                               [value],
                               [],
@@ -119,6 +150,7 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("add")):
+    ensure_module_in_design(design, module_def, #'add)
     ensure_open(module_def, #'add)
     ensure_value_in(module_def, left, #'add)
     ensure_value_in(module_def, right, #'add)
@@ -127,10 +159,12 @@ class Builder(design):
            "add operands must have exactly the same Bits width")
     def operation_id = design.fresh_id()
     def value_name = name || "v" ++ to_string(operation_id)
+    ensure_hardware_name(value_name, #'add)
     ensure_unique_hardware_name(module_def, value_name, #'add)
-    def value = Value(design.fresh_id(), value_name, left.type, module_def.id, operation_id)
+    def value = Value(design.fresh_id(), value_name, left.type, module_def, operation_id)
     def operation = Operation(operation_id,
-                              "add",
+                              "rtl.add",
+                              module_def,
                               [left, right],
                               [value],
                               [],
@@ -151,7 +185,9 @@ class Builder(design):
                   reset_value = #false,
                   location = Location(),
                   origin = Origin("register", name)):
+    ensure_module_in_design(design, module_def, #'register)
     ensure_open(module_def, #'register)
+    ensure_hardware_name(name, #'register)
     ensure_bits(type, #'register)
     ensure_value_in(module_def, clock, #'register)
     unless clock.type is_a Bits && clock.type.width == 1
@@ -169,11 +205,12 @@ class Builder(design):
     ensure_unique_hardware_name(module_def, name, #'register)
     ensure_unique_hardware_name(module_def, name ++ ".next", #'register)
     def operation_id = design.fresh_id()
-    def current = Value(design.fresh_id(), name, type, module_def.id, operation_id)
-    def next = Place(design.fresh_id(), name ++ ".next", type, module_def.id, operation_id)
+    def current = Value(design.fresh_id(), name, type, module_def, operation_id)
+    def next = Place(design.fresh_id(), name ++ ".next", type, module_def, operation_id)
     def operands = if reset | [clock, reset, reset_value] | [clock]
     def operation = Operation(operation_id,
-                              if reset | "register_reset" | "register",
+                              if reset | "rtl.register_reset" | "rtl.register",
+                              module_def,
                               operands,
                               [current],
                               [next],
@@ -192,10 +229,13 @@ class Builder(design):
                   name,
                   location = Location(),
                   origin = Origin("instance", name)):
+    ensure_module_in_design(design, module_def, #'instance)
     ensure_open(module_def, #'instance)
+    ensure_hardware_name(name, #'instance)
     unless child is_a Module && child.finished
     | fail(#'instance, "instance target must be a finished module definition")
-    unless design.find_module(child.id)
+    def child_owned = child.design === design && design.modules.find(fun (candidate): candidate === child)
+    unless child_owned
     | fail(#'instance, "instance target belongs to a different design")
     ensure_unique_instance_name(module_def, name, #'instance)
     for (port in child.inputs):
@@ -211,7 +251,7 @@ class Builder(design):
       def place = Place(design.fresh_id(),
                         name ++ "." ++ port.name,
                         port.type,
-                        module_def.id,
+                        module_def,
                         operation_id)
       module_def.add_place(place)
       places := places ++ [place]
@@ -220,13 +260,14 @@ class Builder(design):
       def value = Value(design.fresh_id(),
                         name ++ "." ++ port.name,
                         port.type,
-                        module_def.id,
+                        module_def,
                         operation_id)
       module_def.add_value(value)
       results := results ++ [value]
       output_bindings := output_bindings ++ [Port(port.name, "output", port.type, value, #false)]
     def operation = Operation(operation_id,
-                              "instance",
+                              "rtl.instance",
+                              module_def,
                               [],
                               results,
                               places,
@@ -245,9 +286,11 @@ class Builder(design):
     unless value is_a Value
     | fail(#'drive, "drive source must be a hardware Value")
     def module_def = design.find_module(place.module_id)
-    unless module_def
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+    unless target_owned
     | fail(#'drive, "drive target belongs to a different design")
     ensure_open(module_def, #'drive)
+    ensure_place_in(module_def, place, #'drive)
     ensure_value_in(module_def, value, #'drive)
     unless same_type(place.type, value.type)
     | fail(#'drive, "place and driver must have exactly the same Bits width")
@@ -256,7 +299,8 @@ class Builder(design):
     place.driver := value
     def operation_id = design.fresh_id()
     def operation = Operation(operation_id,
-                              "drive",
+                              "rtl.drive",
+                              module_def,
                               [value],
                               [],
                               [place],
@@ -270,13 +314,16 @@ class Builder(design):
   method read(place):
     unless place is_a Place
     | fail(#'read, "read target must be a hardware Place")
-    unless design.find_module(place.module_id)
+    def module_def = design.find_module(place.module_id)
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+    unless target_owned
     | fail(#'read, "read target belongs to a different design")
     unless place.driver
     | fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
     place.driver
 
   method finish(module_def):
+    ensure_module_in_design(design, module_def, #'finish)
     ensure_open(module_def, #'finish)
     module_def.finished := #true
     module_def

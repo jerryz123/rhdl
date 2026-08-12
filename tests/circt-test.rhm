@@ -10,17 +10,17 @@ def adder_circt = emit_circt(adder_design)
 
 check:
   adder_circt.contains("hw.module @Adder8(in %a : i8, in %b : i8, out sum : i8)") ~is #true
-  adder_circt.contains("%result = comb.add %a, %b : i8") ~is #true
-  adder_circt.contains("hw.output %result : i8") ~is #true
+  adder_circt.contains("%__rhdl_value_8 = comb.add %a, %b : i8") ~is #true
+  adder_circt.contains("hw.output %__rhdl_value_8 : i8") ~is #true
   adder_circt ~is emit_circt(adder_design)
 
 def [counter_design, _, _, _, _] = make_counter_design()
 def counter_circt = emit_circt(counter_design)
 
 check:
-  counter_circt.contains("%state_clock = seq.to_clock %clk") ~is #true
+  counter_circt.contains("%__rhdl_clock_11 = seq.to_clock %clk") ~is #true
   counter_circt.contains(
-    "%state = seq.firreg %next clock %state_clock reset sync %reset, %zero : i8"
+    "%state = seq.firreg %__rhdl_value_15 clock %__rhdl_clock_11 reset sync %reset, %__rhdl_value_8 : i8"
   ) ~is #true
   counter_circt.contains("hw.output %state : i8") ~is #true
 
@@ -29,8 +29,26 @@ def hierarchy_circt = emit_circt(hierarchy_design)
 
 check:
   hierarchy_circt.contains(
-    "%u0_sum = hw.instance \"u0\" @Adder8(a: %a: i8, b: %b: i8) -> (sum: i8)"
+    "%__rhdl_value_24 = hw.instance \"u0\" @Adder8(a: %a: i8, b: %b: i8) -> (sum: i8)"
   ) ~is #true
   hierarchy_circt.contains(
-    "%u1_sum = hw.instance \"u1\" @Adder8(a: %a: i8, b: %c: i8) -> (sum: i8)"
+    "%__rhdl_value_28 = hw.instance \"u1\" @Adder8(a: %a: i8, b: %c: i8) -> (sum: i8)"
   ) ~is #true
+
+def collision_design = Design()
+def collision_builder = Builder(collision_design)
+def collision_module = collision_builder.module("CollisionFree")
+def collision_input = collision_builder.input(collision_module, "v6", Bits(1))
+def collision_output = collision_builder.output(collision_module, "result", Bits(1))
+def collision_result = collision_builder.add(collision_module,
+                                             collision_input,
+                                             collision_input,
+                                             "sum")
+collision_builder.drive(collision_output, collision_result)
+def finished_collision_module = collision_builder.finish(collision_module)
+def collision_circt = emit_circt(collision_design)
+
+check:
+  collision_result.id ~is 6
+  collision_circt.contains("in %v6 : i1") ~is #true
+  collision_circt.contains("%__rhdl_value_6 = comb.add %v6, %v6 : i1") ~is #true

@@ -5,8 +5,8 @@
 RHDL is an experimental Rhombus-hosted hardware description system. The first
 cut implements a small public hardware IR with explicit readable values,
 driveable places, fixed-width bit vectors, primitive registers, module
-instances, verification, deterministic IR printing, and a validation-oriented
-CIRCT lowering.
+instances, identity-based ownership, namespaced operation schemas,
+verification, deterministic IR printing, and CIRCT lowering.
 
 RHDL does not emit SystemVerilog. It lowers its public IR to CIRCT MLIR using
 the `hw`, `comb`, and `seq` dialects. CIRCT then lowers sequential operations

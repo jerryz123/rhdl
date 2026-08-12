@@ -1,4 +1,5 @@
 #lang rhombus
+// Covers builder rejection and whole-design verification of malformed RHDL IR.
 
 import:
   "../rhdl/main.rhm" open
@@ -80,11 +81,17 @@ block:
 
 block:
   def design = Design()
-  def module_def = Module(design.fresh_id(), "Cycle")
+  def module_def = Module(design, design.fresh_id(), "Cycle")
   design.add_module(module_def)
   def operation_id = design.fresh_id()
-  def result = Value(design.fresh_id(), "result", Bits(8), module_def.id, operation_id)
-  def add_operation = Operation(operation_id, "add", [result, result], [result])
+  def result = Value(design.fresh_id(), "result", Bits(8), module_def, operation_id)
+  def add_operation = Operation(operation_id,
+                                "rtl.add",
+                                module_def,
+                                [result, result],
+                                [result],
+                                [],
+                                {"name": "result"})
   result.add_user(operation_id)
   result.add_user(operation_id)
   module_def.add_value(result)
@@ -116,3 +123,67 @@ block:
   def finished_top = builder.finish(top)
   check:
     verify_design(design) ~throws "place u.in is undriven"
+
+block:
+  def source_design = Design()
+  def source_builder = Builder(source_design)
+  def source_module = source_builder.module("Source")
+  def foreign_value = source_builder.input(source_module, "value", Bits(1))
+  def target_design = Design()
+  def target_builder = Builder(target_design)
+  def target_module = target_builder.module("Target")
+  def target = target_builder.output(target_module, "target", Bits(1))
+  check:
+    source_module.id ~is target_module.id
+    (source_module === target_module) ~is #false
+    target_builder.drive(target, foreign_value) ~throws "different module"
+
+block:
+  def source_design = Design()
+  def source_builder = Builder(source_design)
+  def child = source_builder.module("Child")
+  def child_input = source_builder.input(child, "input", Bits(1))
+  def child_output = source_builder.output(child, "output", Bits(1))
+  source_builder.drive(child_output, child_input)
+  def finished_child = source_builder.finish(child)
+  def target_design = Design()
+  def target_builder = Builder(target_design)
+  def top = target_builder.module("Top")
+  check:
+    child.id ~is top.id
+    target_builder.instance(top, child, "u") ~throws "different design"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("Membership")
+  def real = builder.input(module_def, "real", Bits(1))
+  def forged = Value(design.fresh_id(), "forged", Bits(1), module_def, real.defining_op_id)
+  check:
+    builder.add(module_def, real, forged) ~throws "different module"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  check:
+    builder.module("Bad.Name") ~throws "ASCII identifier"
+    builder.module("__rhdl_internal") ~throws "reserved"
+
+block:
+  def design = Design()
+  def module_def = Module(design, design.fresh_id(), "MissingAttribute")
+  design.add_module(module_def)
+  def operation_id = design.fresh_id()
+  def result = Value(design.fresh_id(), "constant", Bits(1), module_def, operation_id)
+  def operation = Operation(operation_id,
+                            "rtl.constant",
+                            module_def,
+                            [],
+                            [result],
+                            [],
+                            {"name": "constant"})
+  module_def.add_value(result)
+  module_def.add_operation(operation)
+  module_def.finished := #true
+  check:
+    verify_design(design) ~throws "requires attribute value"
