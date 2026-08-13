@@ -70,6 +70,44 @@ fun emit_binary(operation, circt_opcode):
                 value_ref(operation.operands[1]), " : ",
                 circt_type(result.type))
 
+// CIRCT shifts require equal-width operands. RHDL permits an independently
+// sized amount, so normalize without changing fixed-width overshift behavior.
+fun emit_shift(operation, circt_opcode):
+  def value = operation.operands[0]
+  def amount = operation.operands[1]
+  def result = operation.results[0]
+  def value_width = value.type.width
+  def amount_width = amount.type.width
+  if value_width == amount_width
+  | emit_binary(operation, circt_opcode)
+  | if amount_width < value_width
+    | block:
+        def zero_width = value_width - amount_width
+        def zero_ref = "%__rhdl_shift_zero_" ++ to_string(operation.id)
+        def normalized_amount_ref = "%__rhdl_shift_amount_" ++ to_string(operation.id)
+        String.append("    ", zero_ref, " = hw.constant 0 : i", to_string(zero_width), "\n",
+                      "    ", normalized_amount_ref, " = comb.concat ", zero_ref, ", ",
+                      value_ref(amount), " : i", to_string(zero_width), ", ",
+                      circt_type(amount.type), "\n",
+                      "    ", value_ref(result), " = ", circt_opcode, " ",
+                      value_ref(value), ", ", normalized_amount_ref, " : ",
+                      circt_type(result.type))
+    | block:
+        def zero_width = amount_width - value_width
+        def zero_ref = "%__rhdl_shift_zero_" ++ to_string(operation.id)
+        def widened_value_ref = "%__rhdl_shift_value_" ++ to_string(operation.id)
+        def wide_result_ref = "%__rhdl_shift_wide_" ++ to_string(operation.id)
+        String.append("    ", zero_ref, " = hw.constant 0 : i", to_string(zero_width), "\n",
+                      "    ", widened_value_ref, " = comb.concat ", zero_ref, ", ",
+                      value_ref(value), " : i", to_string(zero_width), ", ",
+                      circt_type(value.type), "\n",
+                      "    ", wide_result_ref, " = ", circt_opcode, " ",
+                      widened_value_ref, ", ", value_ref(amount), " : ",
+                      circt_type(amount.type), "\n",
+                      "    ", value_ref(result), " = comb.extract ", wide_result_ref,
+                      " from 0 : (", circt_type(amount.type), ") -> ",
+                      circt_type(result.type))
+
 fun emit_not(operation):
   def operand = operation.operands[0]
   def result = operation.results[0]
@@ -256,6 +294,10 @@ fun emit_operation(operation):
         emit_binary(operation, "comb.add")
     | "rtl.sub":
         emit_binary(operation, "comb.sub")
+    | "rtl.shl":
+        emit_shift(operation, "comb.shl")
+    | "rtl.shru":
+        emit_shift(operation, "comb.shru")
     | "rtl.not":
         emit_not(operation)
     | "rtl.eq":

@@ -83,7 +83,7 @@ A concept belongs in a frontend extension when it is notation, organization,
 or policy over existing semantics. Current examples include:
 
 - The extension-defined `Bool` type and Boolean syntax.
-- Arithmetic, bitwise, literal, mux, and width-operation notation.
+- Arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
 - Role-based and recursively nested interfaces over record-typed ports.
@@ -123,7 +123,7 @@ The optional frontend modules are:
 | Module | Contribution |
 |---|---|
 | `extensions/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
-| `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, and named width operations |
+| `extensions/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
 | `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
 | `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
@@ -299,9 +299,9 @@ def zero = bits(0, ~width: width)
 def one = bits(1, ~width: width)
 ```
 
-The standard language provides `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
-and `===`, plus named construction functions. Arithmetic is currently unsigned
-modular bit-vector arithmetic.
+The standard language provides `+`, `-`, `<<`, `>>`, `&`, `^`, `and`, `or`,
+`xor`, `not`, and `===`, plus named construction functions. Arithmetic is
+currently unsigned modular bit-vector arithmetic.
 
 ```rhombus
 output result: Bits(width)
@@ -310,6 +310,21 @@ output equal: Bool
 result <== (a & b) + bits(1, ~width: width)
 equal <== a === b
 ```
+
+Logical shifts use a hardware `Bits` amount, preserve the shifted value's
+width, and produce zero when the amount is at least that width:
+
+```rhombus
+input value: Bits(8)
+input amount: Bits(3)
+output(left, right): Bits(8)
+
+left <== value << amount
+right <== value >> amount
+```
+
+The amount width is independent of the value width. On host integers the same
+operators retain their ordinary Rhombus bit-shift meaning.
 
 The canonical selection operation is N-way `mux_lookup`:
 
@@ -983,6 +998,7 @@ type or operation it cannot represent.
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub` | `comb.add/sub` |
+| `rtl.shl/shru` | `comb.shl/shru`, with lossless operand-width normalization around the shift |
 | `rtl.eq` | `comb.icmp eq` |
 | `rtl.mux_lookup` | `comb.icmp` plus a `comb.mux` tree |
 | `rtl.cast` | Erased for identical lowered types; otherwise `hw.bitcast` |
@@ -996,10 +1012,11 @@ type or operation it cannot represent.
 | `rtl.vector_get` | `hw.array_get` with a host-constant index |
 | `rtl.wire` | Erased; references resolve to the wire's driver |
 
-Core `rtl.shl` and `rtl.shru` operations are implemented and verified, but
-frontend syntax and CIRCT lowering are not yet implemented. Passing a design
-containing either operation to the current backend reports an unsupported-op
-error.
+When a shift amount is narrower than its value, lowering zero-extends the
+amount. When it is wider, lowering zero-extends the value, performs the wider
+shift, and truncates the result back to the declared value width. This
+preserves RHDL's fixed-width overflow and overshift semantics while satisfying
+CIRCT's equal-width shift operands.
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. Backend tests first parse and verify emitted MLIR, then use
@@ -1083,12 +1100,13 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs thirteen simulations:
+`make circt-test` currently runs fourteen simulations:
 
 - An 8-bit modular adder.
 - A four-bit ripple-carry adder.
 - An eight-bit ripple-carry adder generated from a host Array of instances.
 - A host-width-parameterized ALU.
+- Logical left and unsigned-right shifts with narrow and wide hardware amounts.
 - A width-changing datapath.
 - A fixed-vector datapath.
 - An element-wise assembled vector wire.
@@ -1152,8 +1170,7 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.
 - Runtime-loaded operation dialects.
-- Multiplication, frontend shift syntax, shift backend lowering, and arithmetic
-  right shift until signed types exist.
+- Multiplication and arithmetic right shift until signed types exist.
 - Multi-role protocols, optional interface fields, and protocol behavior such
   as arbitration.
 - IR mutation and rewriting until a concrete transformation use case requires
