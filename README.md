@@ -119,7 +119,7 @@ The optional frontend modules are:
 
 | Module | Contribution |
 |---|---|
-| `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and width operations |
+| `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and named width operations |
 | `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
 | `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
@@ -129,6 +129,11 @@ The optional frontend modules are:
 `frontend/standard.rhm` only aggregates the base and optional modules. It does
 not implement features itself. Neither language profile implicitly exports the
 core Builder or raw elaboration kernel.
+
+The shared base marks hardware bindings with frontend static information for
+field access and host-range indexing. Consequently, `value[i]` and
+`value[low..high]` are common frontend notation over the kernel's explicit
+`extract` operation rather than new core semantics.
 
 ### Executable equivalence ladder
 
@@ -316,9 +321,21 @@ Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 Width changes are explicit:
 
 - `concat` puts its first operand in the most-significant bits.
-- `extract(value, high, low)` uses inclusive host-integer indices.
+- `value[index]` selects one bit and produces `Bits(1)`.
+- `value[low..high]` selects a half-open host range; for example, `a[2..6]`
+  is the concise form of `extract(a, 5, 2)`.
+- `value[low..=high]` accepts the corresponding inclusive host range.
+- Explicit `extract(value, high, low)` remains the kernel form and uses
+  inclusive host-integer indices.
 - `zext` adds zeroes on the most-significant side.
 - `trunc` retains the least-significant bits.
+
+Indices and range endpoints are host `Int` values known during elaboration.
+Any bounded, nonempty host range is normalized to its selected low and high
+bit; unbounded and empty ranges are rejected. Selection is read-only and
+returns a hardware value rather than a connection place. A selected `Bits(1)`
+remains `Bits(1)`—conversion to the frontend-defined `Bool` is explicit with
+`as_bool`.
 
 ### Registers
 

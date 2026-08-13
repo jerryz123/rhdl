@@ -53,7 +53,7 @@ Existing frontend behavior is grouped into independently importable modules:
 
 | Module | Existing behavior it contributes |
 |---|---|
-| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, and basic public types |
+| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, basic public types, and common hardware indexing |
 | [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and width operations |
 | [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
 | [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
@@ -86,6 +86,8 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `bundle Pair(T): ...` | A function constructing a core `RecordType` |
 | `record(Pair(T)): ...` | `rtl.record_create` |
 | `value.field` | `rtl.record_get` or construction-time place projection |
+| `value[index]` | `rtl.extract(value, index, index)` |
+| `value[low..high]` | `rtl.extract(value, high - 1, low)` |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -109,7 +111,10 @@ same record IR and CIRCT MLIR. Likewise,
 [`lop/interface-records.rhdl`](lop/interface-records.rhdl) expresses a
 ready-valid adapter as raw directional record ports, while
 [`interface.rhdl`](interface.rhdl) expresses it using roles and `<=>`; their
-outputs are identical.
+outputs are identical. The explicit
+[`lop/width-ops-kernel.rhm`](lop/width-ops-kernel.rhm) and concise
+[`width-ops.rhdl`](width-ops.rhdl) pair similarly demonstrates that host-range
+indexing is only frontend notation for the existing kernel `extract` operation.
 
 ## Feature showcases
 
@@ -124,7 +129,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
-| [`width-ops.rhdl`](width-ops.rhdl) | Explicit width-changing operations whose semantics remain in the kernel/core |
+| [`width-ops.rhdl`](width-ops.rhdl) | Host-range bit selection and other width-changing operations whose semantics remain in the kernel/core |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, nested bundles, aggregate mux/register state, and record-typed instances |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |

@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Provides generic static dot information for record-valued hardware entities.
+// Provides generic field and bit-selection syntax for hardware entities.
 
 import:
   rhombus/meta open
@@ -7,6 +7,7 @@ import:
 
 export:
   HardwareFields
+  hardware_index
 
 fun hardware_fields(value):
   kernel.hardware_entity(value)
@@ -14,8 +15,28 @@ fun hardware_fields(value):
 annot.macro 'HardwareFields':
   annot_meta.pack_predicate(
     'hardware_fields',
-    '(($(statinfo_meta.dot_provider_key), hardware_field_dot))'
+    '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
   )
+
+fun hardware_index(value, index) :: HardwareFields:
+  cond
+  | index is_a Int:
+      kernel.extract(value, index, index)
+  | index is_a Range:
+      def start = index.start()
+      def end = index.end()
+      unless start is_a Int && end is_a Int
+      | error(~who: #'extract,
+              "hardware slice indices must form a bounded host Int range")
+      def low = start + (if index.includes_start() | 0 | 1)
+      def high = end - (if index.includes_end() | 0 | 1)
+      unless low <= high
+      | error(~who: #'extract,
+              "hardware slice range must select at least one bit")
+      kernel.extract(value, high, low)
+  | ~else:
+      error(~who: #'extract,
+            "hardware index must be a host Int or bounded host Int range")
 
 dot.macro 'hardware_field_dot $left $dot $right':
   match right

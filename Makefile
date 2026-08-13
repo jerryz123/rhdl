@@ -3,7 +3,7 @@
 .PHONY: test check-boundaries base-test backend-test unit-test lop-test circt-test setup-circt examples
 
 CORE_TESTS = tests/core/types-test.rhm tests/core/verify-test.rhm
-FRONTEND_TESTS = tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/aggregate-equivalence-test.rhm
+FRONTEND_TESTS = tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/indexing-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/aggregate-equivalence-test.rhm
 BACKEND_TESTS = tests/backend/circt-test.rhm tests/backend/equivalence-test.rhm
 
 check-boundaries:
@@ -35,6 +35,7 @@ examples:
 	racket -S $(CURDIR) examples/lop/adder-kernel.rhm
 	racket -S $(CURDIR) examples/lop/adder-composed.rhdl
 	racket -S $(CURDIR) examples/lop/adder-standard.rhdl
+	racket -S $(CURDIR) examples/lop/width-ops-kernel.rhm
 	racket -S $(CURDIR) examples/lop/bundle-kernel.rhdl
 	racket -S $(CURDIR) examples/lop/bundle-standard.rhdl
 	racket -S $(CURDIR) examples/lop/interface-records.rhdl

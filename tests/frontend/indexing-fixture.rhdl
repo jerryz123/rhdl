@@ -1,0 +1,87 @@
+#lang rhdl
+// Defines valid and invalid circuits used to test host-range hardware indexing.
+
+circuit Indexed(width, low, high):
+  input source: Bits(width)
+  output bit: Bits(1)
+  output half_open: Bits(high - low)
+  output inclusive: Bits((high - low) + 1)
+  output exclusive_start: Bits((high - low) - 1)
+  output chained: Bits(1)
+
+  bit <== source[low]
+  half_open <== source[low..high]
+  inclusive <== source[low..=high]
+  exclusive_start <== source[low <.. high]
+  chained <== source[low..high][1]
+
+bundle Pair(T):
+  left: T
+  right: T
+
+circuit SliceChild():
+  input source: Bits(8)
+  output result: Bits(8)
+  result <== source
+
+circuit IndexedMembers():
+  input source: Pair(Bits(8))
+  input clk: Clock
+  output record_bit: Bits(1)
+  output instance_bit: Bits(1)
+  output register_bit: Bits(1)
+
+  inst child(SliceChild())
+  child.source <== source.left
+  record_bit <== source.left[0]
+  instance_bit <== child.result[1]
+
+  reg state(Bits(8), ~clock: clk)
+  state.next <== source.right
+  register_bit <== state[2]
+
+circuit DynamicIndex():
+  input source: Bits(8)
+  input index: Bits(3)
+  output result: Bits(1)
+  result <== source[index]
+
+circuit UnboundedIndex():
+  input source: Bits(8)
+  output result: Bits(6)
+  result <== source[2..]
+
+circuit EmptyIndex():
+  input source: Bits(8)
+  output result: Bits(1)
+  result <== source[3..3]
+
+circuit OutOfBoundsIndex():
+  input source: Bits(8)
+  output result: Bits(2)
+  result <== source[7..9]
+
+circuit NonBitsIndex():
+  input source: Bool
+  output result: Bits(1)
+  result <== source[0]
+
+circuit SelectedPlace():
+  input source: Bits(8)
+  input driver: Bits(1)
+  source[0] <== driver
+
+def design = elaborate(Indexed(8, 2, 6))
+def member_design = elaborate(IndexedMembers())
+
+export:
+  Indexed
+  IndexedMembers
+  DynamicIndex
+  UnboundedIndex
+  EmptyIndex
+  OutOfBoundsIndex
+  NonBitsIndex
+  SelectedPlace
+  design
+  member_design
