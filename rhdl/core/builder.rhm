@@ -92,6 +92,11 @@ fun ensure_unique_instance_name(module_def, name, who):
   )
   | fail(who, "duplicate instance name " ++ name)
 
+fun instance_name_used(module_def, name):
+  module_def.operations.find(
+    fun (operation): operation.opcode == "rtl.instance" && operation.attribute("name", #false) == name
+  )
+
 fun build_value_operation(design,
                           module_def,
                           opcode,
@@ -231,6 +236,22 @@ class Builder(design):
     def module_def = Module(design, design.fresh_id(), name)
     design.add_module(module_def)
     module_def
+
+  // Allocates a stable name from a suggested base without weakening the IR's
+  // invariant that every final instance name is unique within its parent.
+  method fresh_instance_name(module_def, base_name):
+    ensure_module_in_design(design, module_def, #'fresh_instance_name)
+    ensure_open(module_def, #'fresh_instance_name)
+    ensure_hardware_name(base_name, #'fresh_instance_name)
+    fun find_available(suffix):
+      def candidate:
+        if suffix == 0
+        | base_name
+        | base_name ++ "_" ++ to_string(suffix)
+      if instance_name_used(module_def, candidate)
+      | find_available(suffix + 1)
+      | candidate
+    find_available(0)
 
   method input(module_def, name, type, location = Location(), origin = Origin("input", name)):
     ensure_module_in_design(design, module_def, #'input)
@@ -895,6 +916,19 @@ class Builder(design):
                               origin)
     module_def.add_operation(operation)
     Instance(operation, child, input_bindings, output_bindings)
+
+  // Treats the supplied name as a suggestion while `instance` itself retains
+  // exact-name behavior for low-level callers that want collision errors.
+  method suggested_instance(module_def,
+                            child,
+                            base_name,
+                            location = Location(),
+                            origin = Origin("instance", base_name)):
+    this.instance(module_def,
+                  child,
+                  this.fresh_instance_name(module_def, base_name),
+                  location,
+                  origin)
 
   method drive(place,
                value,

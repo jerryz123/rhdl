@@ -129,7 +129,7 @@ The optional frontend modules are:
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `extensions/wire.rhm` | Binding-derived single-driver internal wires |
 | `extensions/sequential.rhm` | Binding-derived registers |
-| `extensions/hierarchy.rhm` | Named or expression-level instances and child-member access |
+| `extensions/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
 | `extensions/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
 `frontend/standard.rhm` only aggregates the base and optional modules. It does
@@ -402,16 +402,17 @@ u0.b <== b
 sum0 <== u0.sum
 ```
 
-For host-generated structure, expression-level `instance(name, Child)` returns
-an instance handle that can be stored in an ordinary Rhombus collection. The
-element annotation below preserves concise port-dot syntax through host array
-indexing. The collection remains host data; only the constructed instances
-enter the IR:
+An `inst` declaration may also appear in repeated host code. Its binding name
+is a suggested hardware name; collisions are deterministically suffixed within
+the parent module. The element annotation below preserves concise port-dot
+syntax through host array indexing. The collection remains host data; only the
+constructed instances enter the IR:
 
 ```rhombus
 def adders :: Array.later_of(InstancePorts):
-  for Array (i in 0..n):
-    instance("fa" ++ to_string(i), FullAdderModule)
+  for Array (ignored in 0..n):
+    inst adder(FullAdderModule)
+    adder
 
 for (i in 0..n):
   adders[i].a <== A[i].into(Bool)
@@ -878,6 +879,11 @@ The Builder owns one design; the module being edited is explicit. It rejects
 locally impossible construction immediately, while whole-graph checks run at
 verification boundaries. Construction methods accept locations and origins.
 
+`Builder.instance` treats its name as exact and rejects collisions.
+`Builder.suggested_instance` deterministically allocates the base name, then
+delegates to the exact operation; frontend `inst` uses this suggested-name
+path. Verification always requires the final names to be unique.
+
 The core API is exported by `rhdl/core/main.rhm`. The optional CIRCT backend is
 imported separately from `rhdl/backend/circt.rhm`; core construction,
 verification, printing, and inspection do not import it.
@@ -920,7 +926,8 @@ The Builder and whole-design verifier enforce:
 9. Register clocks are `Clock`; synchronous reset operands are `Reset`.
 10. Reset value presence matches reset presence and its type equals the state
     type.
-11. Instances reference completed definitions in the same design.
+11. Instances reference completed definitions in the same design and have
+    unique final names within their parent module.
 12. Purely combinational cycles are rejected.
 
 The frontend additionally rejects active recursive generator elaboration,

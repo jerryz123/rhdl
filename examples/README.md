@@ -61,7 +61,7 @@ Existing frontend behavior is grouped into independently importable modules:
 | [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`extensions/wire.rhm`](../rhdl/frontend/extensions/wire.rhm) | Binding-derived single-driver internal wires |
 | [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
-| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Named or expression-level instances and child-port dot access |
+| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
 | [`extensions/vector.rhm`](../rhdl/frontend/extensions/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
@@ -84,8 +84,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `a + b` | `hw_add(a, b)` |
 | `bits(1, ~width: w)` | `literal(Bits(w), 1)` |
 | `reg state(T, ...)` | `reg("state", T, ...)` |
-| `inst u(Child)` | `inst("u", Child)` with instance static information |
-| `instance(name, Child)` | Expression-level instance construction for ordinary host collections |
+| `inst u(Child)` | A suggested-name instance using `"u"` as its deterministic base |
 | `u.port` | Lookup in the elaborated child interface |
 | `bundle Pair(T): ...` | A function constructing a core `RecordType` |
 | `record(Pair(T)): ...` | `rtl.record_create` |
