@@ -1,0 +1,33 @@
+#lang rhombus
+// Checks variadic, pack-aware concat lowering and its frontend type boundaries.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "concat-fixture.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def concatenations = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.concat"
+)
+def casts = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.cast"
+)
+
+check:
+  concatenations.length() ~is 3
+  concatenations[0].operands.map(fun (value): value.name) ~is ["high", "middle", "low"]
+  concatenations[1].operands.map(fun (value): value.name) ~is ["high", "middle", "low"]
+  concatenations[0].results[0].type.width ~is 5
+  module_def.find_output("direct").place.driver === concatenations[0].results[0] ~is #true
+  module_def.find_output("generated").place.driver === concatenations[1].results[0] ~is #true
+  casts.length() ~is 2
+  record_type(casts[0].operands[0].type) ~is #true
+  casts[0].results[0].type.width ~is 4
+  casts[1].operands[0].type.describe() ~is "bool"
+  casts[1].results[0].type.width ~is 1
+  concatenations[2].operands ~is [casts[0].results[0], casts[1].results[0]]
+  module_def.find_output("packed").place.driver === concatenations[2].results[0] ~is #true
+  verify_design(fixture.design) ~is #void
+  embedded.run_elaboration(fun (): fixture.ControlConcat()) ~throws "concat operands must have packable DataType types"
+  embedded.run_elaboration(fun (): fixture.TooFewConcat()) ~throws "concat requires at least two operands"

@@ -5,7 +5,10 @@ import:
   rhombus
   rhombus/meta open
   "../../core/types.rhm" open
-  "../kernel.rhm" open
+  "../kernel.rhm" open:
+    except concat
+  "../kernel.rhm".concat as kernel_concat
+  "../fields.rhm".HardwareFields
 
 export:
   bits
@@ -35,6 +38,28 @@ fun bits(value,
          ~width,
          name = #false):
   literal(Bits(width), value, name)
+
+// Packs frontend data operands into their canonical Bits representations and
+// constructs one kernel concat, preserving left-to-right MSB ordering.
+fun concat_operand(entity):
+  def value = read(entity)
+  def width = packed_width(value.type)
+  unless data_type(value.type) && width != #false
+  | error(~who: #'concat,
+          "concat operands must have packable DataType types")
+  if bits_type(value.type)
+  | value
+  | cast(value, Bits(width))
+
+fun concat(entity, ...) :~ HardwareFields:
+  def supplied = [entity, ...]
+  def entities:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  unless entities.length() >= 2
+  | error(~who: #'concat, "concat requires at least two operands")
+  kernel_concat(entities.map(concat_operand))
 
 fun build_mux_lookup(selector, default_value, cases):
   hw_mux_lookup(selector, default_value, cases)

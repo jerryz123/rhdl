@@ -323,7 +323,11 @@ Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 
 Width changes are explicit:
 
-- `concat` puts its first operand in the most-significant bits.
+- Frontend `concat(a, b, ...)` accepts two or more packable data values and
+  puts its first operand in the most-significant bits. Non-`Bits` data is
+  packed to its canonical representation before one core concat operation.
+- Host-generated operands can be supplied as one list, as in `concat(pieces)`.
+- Explicit kernel `concat([a, b, ...])` remains Bits-only.
 - `value[index]` selects one bit and produces `Bits(1)`.
 - `value[low..high]` selects a half-open host range; for example, `a[2..6]`
   is the concise form of `extract(a, 5, 2)`.
@@ -627,6 +631,11 @@ extract(Bits(w), high, low)                 -> Bits(high - low + 1)
 zext(Bits(a), target_width)                 -> Bits(target_width)
 trunc(Bits(a), target_width)                -> Bits(target_width)
 ```
+
+The `concat` rule above is the core operation. The combinational frontend
+accepts any packable `DataType`, inserts canonical equal-width casts for
+non-`Bits` operands, and then constructs one core `rtl.concat`. Control types
+such as `Clock` and `Reset` are not data and are rejected by this sugar.
 
 For `mux_lookup`, keys are nonnegative host integers that fit the selector
 width. They are unique and normalized into increasing order, so lookup meaning

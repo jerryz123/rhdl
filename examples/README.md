@@ -90,6 +90,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `value[index]` | `rtl.extract(value, index, index)` |
 | `value[low..high]` | `rtl.extract(value, high - 1, low)` |
 | `value.into(T)` | `rtl.cast` preserving canonical packed width and bit order |
+| `concat(a, b, ...)` or `concat(parts)` | Canonical packing as needed, then one Bits-only `rtl.concat` |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -125,14 +126,14 @@ After the adder ladder, each remaining example has one primary lesson:
 | Example | Primary lesson |
 |---|---|
 | [`full-adder.rhdl`](full-adder.rhdl) | Nominal Boolean ports, named intermediate logic, and an unparenthesized chained carry reduction |
-| [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, `.into` casts, carry chaining, and concatenation |
+| [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
 | [`alu.rhdl`](alu.rhdl) | Extension-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register extensions over primitive registers |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
-| [`width-ops.rhdl`](width-ops.rhdl) | Host-range bit selection and other width-changing operations whose semantics remain in the kernel/core |
+| [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
