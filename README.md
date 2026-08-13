@@ -23,15 +23,17 @@ The implementation enforces one-way package boundaries:
 ```text
 rhdl/main.rkt                 # #lang reader shim
 rhdl/language.rhm             # language composition
+rhdl/base/                    # minimal compositional #lang rhdl/base profile
 rhdl/core/                    # IR, Builder, verification, and IR printing
-rhdl/frontend/                # elaboration kernel, extension types, and standard macros
+rhdl/frontend/                # base, kernel, optional extensions, and standard aggregation
 rhdl/backend/                 # CIRCT lowering
 ```
 
-`.rhdl` is reserved for `#lang rhdl` programs and frontend fixtures, `.rhm`
-contains Rhombus implementation and library modules, and `rhdl/main.rkt` is the
-only `.rkt` source because Racket collection lookup requires that reader entry
-point. `make check-boundaries` rejects imports that violate the layer graph.
+`.rhdl` is reserved for RHDL-profile programs and frontend fixtures, `.rhm`
+contains Rhombus implementation and library modules, and `.rkt` is restricted
+to the reader shims required by Racket collection lookup. `make
+check-boundaries` rejects imports that violate the layer graph or profile
+composition rules.
 
 ## Requirements
 
@@ -92,8 +94,8 @@ All valid frontend programs used by the test suite live under `examples/`.
 Feature examples export reusable circuit generators and a default elaborated
 `design`, so tests can re-elaborate the same source with different host
 parameters. The intentional `examples/lop/` equivalence ladder instead shows
-the same adder through the core Builder, elaboration kernel, and standard
-extensions.
+the same adder through the core Builder, elaboration kernel, explicitly
+composed base profile, and standard profile.
 Intentionally invalid `.rhdl` fixtures live under `tests/frontend/invalid/`.
 Tests mirror the implementation layers under `tests/core/`, `tests/frontend/`,
 and `tests/backend/`. Outside the LOP ladder, Builder construction remains only
@@ -103,19 +105,46 @@ where the lower-level Builder or malformed public IR is itself under test.
 
 The examples are organized as an executable argument for language-oriented
 hardware design. Start with [the examples guide](examples/README.md), which
-places three equivalent adders side by side:
+places four equivalent adders side by side:
 
 - Direct public IR construction through `Design` and `Builder`.
 - Explicit construction through the context-based elaboration kernel.
+- Explicit composition of `#lang rhdl/base` with combinational syntax.
 - Concise construction through standard macros and operators.
 
-`make lop-test` verifies that the three programs produce identical printed
+`make lop-test` verifies that the four programs produce identical printed
 RHDL IR and identical CIRCT MLIR. The remaining examples each focus on one
 extension boundary: Boolean types and selection, register notation, instance
 dot access, host-generated structure, ordinary imported libraries, or
 width-changing core semantics.
 
 ## Frontend
+
+RHDL provides two language profiles. `#lang rhdl` is the curated standard
+profile used by normal designs. `#lang rhdl/base` provides only circuit and
+port declarations, connections, elaboration, `Bits`, `Clock`, `Reset`, and the
+guarded host `if`; programs add existing syntax through explicit imports:
+
+```rhombus
+#lang rhdl/base
+
+import:
+  lib("rhdl/frontend/extensions/comb.rhm") open
+
+circuit Adder(width):
+  input(a, b): Bits(width)
+  output sum: Bits(width)
+  sum <== a + b
+
+def design = elaborate(Adder(8))
+```
+
+The importable optional modules are `extensions/comb.rhm`,
+`extensions/bool.rhm`, `extensions/sequential.rhm`, and
+`extensions/hierarchy.rhm`. `frontend/standard.rhm` aggregates them with
+`frontend/base.rhm`. The public core Builder and raw elaboration kernel are
+deliberately not in either language profile; lower-level code imports
+`rhdl/core/main.rhm` or `rhdl/frontend/kernel.rhm` explicitly.
 
 ```rhombus
 #lang rhdl
@@ -195,7 +224,7 @@ An ordinary Rhombus library can define reusable hardware construction:
 #lang rhombus
 
 import:
-  lib("rhdl/frontend/standard.rhm") open
+  lib("rhdl/frontend/extensions/comb.rhm") open
 
 fun add_pair(left, right):
   left + right
@@ -210,11 +239,10 @@ selects runtime hardware behavior. Higher-level conveniences such as grouped
 `IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
 this same layering rule.
 
-The three adder presentations all remain `#lang rhdl` programs because the
-language composes and exports every layer. Each presentation deliberately uses
-only the layer it teaches. The feature showcases use the concise standard
-surface, while `examples/lop/adder-core.rhdl` and
-`examples/lop/adder-kernel.rhdl` expose the construction underneath it.
+The four adder presentations make their dependencies explicit. The core and
+kernel versions are ordinary Rhombus modules with direct imports, the composed
+version uses `#lang rhdl/base` plus `frontend/extensions/comb.rhm`, and the
+standard version uses `#lang rhdl`. They lower to the same public IR.
 
 ## Builder API
 
@@ -249,8 +277,8 @@ and register state may use any `DataType` when their types satisfy
 `type_equal`; core mux selectors are `Bits` values. Register clocks use
 `Clock`, and synchronous resets use `Reset`.
 
-The standard frontend defines `Bool` outside core and layers Boolean equality
-and binary `mux` over those primitives: `===` explicitly reinterprets the
+The Boolean frontend module defines `Bool` outside core and layers Boolean
+equality and binary `mux` over those primitives: `===` explicitly reinterprets the
 one-bit equality result as `Bool`, while binary `mux` reinterprets its `Bool`
 selector as `Bits(1)` before constructing `rtl.mux_lookup`. `reinterpret`
 permits an explicit representation-transparent crossing between equal-width

@@ -7,15 +7,16 @@ The core owns hardware semantics. The elaboration kernel makes those semantics
 available as ordinary Rhombus functions. Frontend extensions then add notation,
 binding conventions, types, and reusable abstractions without changing the IR.
 
-Start with the three versions of the same 8-bit adder:
+Start with the four versions of the same 8-bit adder:
 
 | Layer | Example | What the layer contributes |
 |---|---|---|
-| Public core | [`lop/adder-core.rhdl`](lop/adder-core.rhdl) | Explicit `Design`, `Builder`, module, port, operation, drive, and verification calls |
-| Elaboration kernel | [`lop/adder-kernel.rhdl`](lop/adder-kernel.rhdl) | Implicit active design/module context and reusable generator functions |
+| Public core | [`lop/adder-core.rhm`](lop/adder-core.rhm) | Ordinary Rhombus explicitly importing `Design`, `Builder`, verification, and related core APIs |
+| Elaboration kernel | [`lop/adder-kernel.rhm`](lop/adder-kernel.rhm) | Ordinary Rhombus explicitly importing active-context construction functions |
+| Composed language | [`lop/adder-composed.rhdl`](lop/adder-composed.rhdl) | `#lang rhdl/base` plus an explicit combinational-module import |
 | Standard extensions | [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl) | `circuit`, binding-derived ports, `+`, `<==`, and `elaborate` |
 
-The sources become progressively shorter, but all three construct identical
+The sources become progressively shorter, but all four construct identical
 printed RHDL IR and identical CIRCT MLIR. The focused test makes that claim
 executable:
 
@@ -24,27 +25,50 @@ make lop-test
 ```
 
 ```text
-direct Builder       elaboration kernel       standard extensions
-       \                    |                       /
-        +-------------------+----------------------+
-                            |
-                            v
-                    public RHDL IR
-                            |
-                            v
-                       CIRCT MLIR
+direct Builder     elaboration kernel     base + comb     standard profile
+       \                  |                    |                 /
+        +-----------------+--------------------+----------------+
+                                  |
+                                  v
+                          public RHDL IR
+                                  |
+                                  v
+                             CIRCT MLIR
 ```
 
 The core version is intentionally verbose; it exposes the semantic substrate
 used by verification and transformation. The kernel version is suitable for
 libraries that want explicit construction without defining syntax. The
-standard version is the normal circuit-authoring style.
+composed version makes language assembly visible, while the standard version
+is the normal circuit-authoring style.
+
+## Language profiles and frontend modules
+
+`#lang rhdl/base` contains the shared circuit boundary: `Bits`, `Clock`,
+`Reset`, binding-derived ports, `circuit`, `elaborate`, `<==`, and the guarded
+host `if`. It intentionally does not expose the public core Builder or raw
+elaboration kernel.
+
+Existing frontend behavior is grouped into independently importable modules:
+
+| Module | Existing behavior it contributes |
+|---|---|
+| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, and basic public types |
+| [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and width operations |
+| [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
+| [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers plus clock/reset conversions |
+| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
+
+[`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
+implementation. It aggregates those modules, and `#lang rhdl` exposes that
+curated standard profile. The lower-level
+[`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
+remain explicit library imports.
 
 ## What the standard language adds
 
-The standard frontend is implemented in
-[`rhdl/frontend/standard.rhm`](../rhdl/frontend/standard.rhm). Its forms layer
-over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
+The standard frontend aggregates the modules above. Their forms layer over
+[`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 
 | Standard form | Kernel meaning |
 |---|---|
@@ -58,9 +82,9 @@ over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `inst u(Child)` | `inst("u", Child)` with instance static information |
 | `u.port` | Lookup in the elaborated child interface |
 
-[`rhdl/frontend/bool.rhm`](../rhdl/frontend/bool.rhm) is a separate type
-extension. It defines nominal `Bool`, Boolean equality, and binary mux behavior
-outside core:
+[`rhdl/frontend/extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) is
+a separate type extension. It defines nominal `Bool`, Boolean equality, and
+binary mux behavior outside core:
 
 | Boolean form | Core representation |
 |---|---|
@@ -85,8 +109,8 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`width-ops.rhdl`](width-ops.rhdl) | Explicit width-changing operations whose semantics remain in the kernel/core |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
-shows that a useful RHDL extension need not be a macro or require a language
-reader change.
+shows that a useful RHDL construction abstraction need not be a macro or
+require a language reader change.
 
 Run every example with:
 

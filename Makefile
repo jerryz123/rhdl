@@ -21,8 +21,9 @@ setup-circt:
 	bash tools/install-circt.sh
 
 examples:
-	racket -S $(CURDIR) examples/lop/adder-core.rhdl
-	racket -S $(CURDIR) examples/lop/adder-kernel.rhdl
+	racket -S $(CURDIR) examples/lop/adder-core.rhm
+	racket -S $(CURDIR) examples/lop/adder-kernel.rhm
+	racket -S $(CURDIR) examples/lop/adder-composed.rhdl
 	racket -S $(CURDIR) examples/lop/adder-standard.rhdl
 	racket -S $(CURDIR) examples/alu.rhdl
 	racket -S $(CURDIR) examples/width-ops.rhdl

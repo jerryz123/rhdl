@@ -1,0 +1,66 @@
+#lang rhombus/and_meta
+// Defines the minimal circuit, port, connection, and elaboration surface shared by RHDL profiles.
+
+import:
+  rhombus/meta open
+  "../core/types.rhm" open
+  "kernel.rhm".input as kernel_input
+  "kernel.rhm".output as kernel_output
+  "kernel.rhm".build_circuit as kernel_build_circuit
+  "kernel.rhm".run_elaboration as kernel_run_elaboration
+  "kernel.rhm".connect as kernel_connect
+
+export:
+  Bits
+  Clock
+  Reset
+  input
+  output
+  <==
+  circuit
+  elaborate
+
+defn.macro 'input $bindings: $type':
+  match bindings
+  | '$(name :: Identifier)':
+      def port_name = name.to_source_string()
+      'def $name = kernel_input($port_name, $type)'
+  | '($(name :: Identifier), ...)':
+      let [port_name, ...] = [name.to_source_string(), ...]
+      '«
+         def $name = kernel_input($port_name, $type)
+         ...
+       »'
+  | ~else:
+      syntax_meta.error("expected a port binding or parenthesized port bindings",
+                        bindings)
+
+defn.macro 'output $bindings: $type':
+  match bindings
+  | '$(name :: Identifier)':
+      def port_name = name.to_source_string()
+      'def $name = kernel_output($port_name, $type)'
+  | '($(name :: Identifier), ...)':
+      let [port_name, ...] = [name.to_source_string(), ...]
+      '«
+         def $name = kernel_output($port_name, $type)
+         ...
+       »'
+  | ~else:
+      syntax_meta.error("expected a port binding or parenthesized port bindings",
+                        bindings)
+
+defn.macro 'circuit $(name :: Identifier)($argument, ...): $body; ...':
+  def circuit_name = name.to_source_string()
+  'fun $name($argument, ...):
+     fun implementation():
+       $body
+       ...
+     kernel_build_circuit($circuit_name, [$argument, ...], implementation)'
+
+expr.macro 'elaborate($body)':
+  'kernel_run_elaboration(fun (): $body)'
+
+operator (place <== entity):
+  ~weaker_than: ~other
+  kernel_connect(place, entity)

@@ -27,10 +27,10 @@ provides:
 - Rhombus unit and negative tests plus CIRCT verification, CIRCT-owned
   SystemVerilog export, and Verilator simulations for an adder, ALU,
   width-changing datapath, counter, and explicitly reused module definition.
-- An embedded `#lang rhdl` frontend that uses the ordinary Rhombus reader,
-  layers circuit and hardware-operator macros over an importable elaboration
-  kernel, permits host-language abstraction, creates fresh circuit
-  definitions, and uses the same CIRCT and Verilator backend path.
+- Embedded `#lang rhdl` standard and `#lang rhdl/base` compositional profiles
+  that use the ordinary Rhombus reader, layer public frontend modules over an
+  importable elaboration kernel, permit host-language abstraction, create
+  fresh circuit definitions, and use the same CIRCT and Verilator backend path.
 
 Native core `Clock` and `Reset` types, an extension-defined frontend `Bool`,
 and the canonical N-way `rtl.mux_lookup` operation are implemented. Core and
@@ -113,31 +113,42 @@ circuit ALU(width):
     y <== a + b
 ```
 
-`#lang rhdl` uses the ordinary Rhombus reader. Surface syntax expands to calls
-into the elaboration kernel and Builder; macro expansion is not itself the
-hardware IR. Libraries may define new functions, macros, and operators by
-importing the kernel or standard layer, without modifying the language reader.
-Binding-derived port declarations and hardware operators remain standard-layer
-conveniences. Both binary `mux` and N-way `mux_lookup` surface forms lower to
-the canonical `rtl.mux_lookup` core operation.
+Both RHDL profiles use the ordinary Rhombus reader. `#lang rhdl/base` provides
+the circuit boundary, basic public types, ports, connections, elaboration, and
+the host-versus-hardware condition guard. Existing combinational, Boolean,
+sequential, and hierarchy syntax is available through explicit frontend-module
+imports. `#lang rhdl` aggregates those modules as the curated standard profile.
+Neither profile implicitly exports the public core Builder or raw elaboration
+kernel.
+
+Surface syntax expands to calls into the elaboration kernel and Builder; macro
+expansion is not itself the hardware IR. Libraries may define new functions,
+macros, and operators by importing a focused frontend module or the kernel,
+without modifying either language reader. Both binary `mux` and N-way
+`mux_lookup` surface forms lower to the canonical `rtl.mux_lookup` core
+operation.
 
 ### 3.2 Package boundaries
 
 Source layout enforces a one-way dependency graph:
 
 ```text
-frontend/standard -> frontend/bool -> frontend/kernel -> core
-backend/circt -----------------------> core
-language -> frontend/standard + core
-main.rkt -> language
+frontend/standard -> frontend/base + frontend/extensions/*
+frontend/{base,extensions/*} -> frontend/kernel -> core
+backend/circt -----------------------------------------------> core
+language -> frontend/standard + kernel host-condition guard
+base/language -> frontend/base + kernel host-condition guard
+reader shims -> their language compositions
 ```
 
 `core/` contains the public IR, schemas, Builder, verifier, and IR printer and
 must not import the frontend or backend. The frontend cannot import the
-backend, and the backend cannot import frontend syntax or elaboration. The
-top-level language module is the only composition layer. A test-time boundary
-audit enforces these imports and reserves `.rhdl` for examples and frontend
-fixtures and `.rkt` for the reader shim.
+backend, and the backend cannot import frontend syntax or elaboration.
+`frontend/standard.rhm` is a feature-free aggregator, while the two language
+modules compose the minimal and standard profiles. A test-time boundary audit
+enforces these imports, prevents optional features from leaking into the base
+frontend, reserves `.rhdl` for examples and frontend fixtures, and restricts
+`.rkt` to reader shims.
 
 ### 3.3 Elaboration
 
@@ -274,7 +285,7 @@ Future types may implement these capabilities outside core; core
 well-formedness and nominal structural equality remain centralized in
 `type_well_formed` and `type_equal`.
 
-The standard frontend supplies `Bool` as an extension-defined nominal
+The Boolean frontend module supplies `Bool` as an extension-defined nominal
 `BitwiseType` with width one. It is distinct from `Bits(1)`, and neither core
 nor the CIRCT backend imports or special-cases it. Equal-width flat types may
 cross explicitly through representation-transparent `reinterpret` operations.
@@ -731,10 +742,13 @@ and Verilator simulation.
 
 The frontend implements:
 
-- A thin `#lang rhdl` bridge using the ordinary Rhombus reader instead of a
-  closed line-oriented parser.
-- An importable context-based elaboration kernel and a separate standard layer
-  containing `circuit`, `elaborate`, hardware operators, and `<==`.
+- Thin `#lang rhdl` and `#lang rhdl/base` bridges using the ordinary Rhombus
+  reader instead of a closed line-oriented parser.
+- An importable context-based elaboration kernel, a minimal base frontend,
+  focused combinational, Boolean, sequential, and hierarchy modules, and a
+  feature-free standard aggregator.
+- A curated standard profile that does not implicitly expose the public core
+  Builder or raw elaboration-kernel entry points.
 - Host-`Int`-parameterized circuit generators with deterministic fresh module
   symbols and active-generator recursion checks.
 - Explicit `input` and `output` construction with `Bits(width)` types.
@@ -757,19 +771,21 @@ The frontend implements:
   separate fixtures. Intentionally invalid programs live under
   `tests/frontend/invalid/`.
 - An explicit language-oriented equivalence ladder under `examples/lop/` that
-  builds one adder through the public Builder, elaboration kernel, and concise
-  standard extensions. Focused tests prove that all three presentations create
+  builds one adder through the public Builder, elaboration kernel,
+  `#lang rhdl/base` plus an explicit combinational import, and the concise
+  standard profile. Focused tests prove that all four presentations create
   identical printed RHDL IR and identical CIRCT MLIR while retaining
   layer-appropriate provenance.
 - Concise standard-layer syntax throughout the feature showcases. Builder
   construction remains elsewhere only for lower-layer API, verifier,
   malformed-IR, and backend-name tests.
 
-The kernel remains intentionally smaller than the standard layer. Grouped
-`IO`, `RegInit`, protocol interfaces, pipelines, and similar Chisel-like
-conveniences should be libraries over the kernel whenever they do not require
-new hardware semantics. Static-information-based ergonomics can be added while
-retaining runtime checks where static information is unavailable.
+The kernel remains lower-level than every public surface module, while the
+standard module only aggregates those surfaces. Grouped `IO`, `RegInit`,
+protocol interfaces, pipelines, and similar Chisel-like conveniences should be
+libraries over the kernel whenever they do not require new hardware semantics.
+Static-information-based ergonomics can be added while retaining runtime
+checks where static information is unavailable.
 
 ### Phase 3.5: extensible scalar types and canonical selection — complete
 
@@ -789,6 +805,94 @@ retaining runtime checks where static information is unavailable.
 - Update deterministic printing, verification, CIRCT lowering, examples, and
   focused negative tests. Preserve direct `comb.mux` lowering for the one-bit
   one-case form, without teaching the backend about `Bool`.
+
+### Phase 3.6: frontend aggregate and interface prototype
+
+Prototype aggregates as a language extension before adding aggregate values
+to the core IR. The extension flattens each aggregate port into deterministic
+scalar `HardwareType` ports, retains its logical shape in frontend metadata,
+and reconstructs the same view at instance boundaries. It must not pack an
+aggregate into one `Bits` value merely to fit the current core.
+
+Keep two distinct abstractions:
+
+- A **bundle** is a named value shape whose fields all inherit the enclosing
+  port direction. It provides nesting, field projection, and structural bulk
+  connection over scalar leaves.
+- An **interface** describes communication between two explicitly named roles.
+  Each field declares which role drives it. An interface is a group of related
+  ports, not initially a `DataType` and not a value accepted by registers,
+  muxes, equality, or other core operations.
+
+The intended source model is:
+
+```text
+bundle Pair(T):
+  left: T
+  right: T
+
+interface ReadyValid(T):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+
+  consumer -> producer:
+    ready: Bool
+
+circuit Example(width):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+  interface tx: ReadyValid(Bits(width)) as producer
+  interface rx: ReadyValid(Bits(width)) as consumer
+
+  result <== source
+  tx <=> rx
+```
+
+Named roles replace a generic direction-reversing type wrapper. The local
+direction of every interface leaf follows from the selected role and the
+field's declared flow. At an instance boundary, ordinary input/output
+inversion still follows from core instance semantics; the interface role
+itself remains stable and visible. Bulk interface connection requires
+compatible interface definitions and complementary roles. This makes role
+meaning explicit in APIs and leaves room for protocols with names such as
+`requester`/`responder`, `controller`/`peripheral`, or
+`producer`/`consumer`.
+
+Implement this prototype in the following order:
+
+1. Add a frontend-only shape protocol and aggregate view over ordered scalar
+   leaves. Scalar `HardwareType` remains the base case.
+2. Add bundles, deterministic flattening, nested field projection, and atomic
+   bulk connection. Flattened names use a reserved separator and are checked
+   for collisions.
+3. Preserve logical port-group metadata on elaborated modules and use it to
+   reconstruct bundle views through concise instance dot access. Do not infer
+   aggregate structure from flattened names.
+4. Add precise structural diagnostics for missing fields, unexpected fields,
+   leaf type mismatches, illegal directions, recursive shapes, and name
+   collisions.
+5. Add two-role interfaces with named roles, per-field flow declarations, and
+   complementary-role bulk connection. Do not add a generic `Flipped` or
+   `flipped(...)` operation.
+6. Prove the extension boundary with paired examples and focused tests showing
+   that manually flattened, bundled, and interface-authored circuits produce
+   equivalent core IR and CIRCT MLIR.
+
+This phase intentionally excludes aggregate-valued literals and operations,
+aggregate registers and muxes, core grouping metadata, and general multi-role
+protocols. Fieldwise frontend helpers may be explored without claiming that
+an aggregate is a core hardware value.
+
+After the prototype settles field access, role syntax, bulk connection, and
+diagnostics, promote a structural `RecordType`, record construction, and
+record projection into core when aggregates need value semantics such as
+storage or selection. Interface roles and bulk connection remain frontend
+policy. Add neutral core grouping metadata only if inspection, rewriting, or
+module APIs must preserve source-level grouping after elaboration.
 
 ### Phase 4: inspection and rewriting
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforces RHDL source extensions and one-way core, frontend, and backend imports.
+# Enforces RHDL source conventions, layer imports, and standard/base profile composition.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,8 +24,16 @@ fail_matches "frontend must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' rhdl/frontend
 fail_matches "backend must not import frontend modules" \
   '^[[:space:]]+"[^"]*frontend/' rhdl/backend
-fail_matches "language assembly must not import backend modules" \
-  '^[[:space:]]+"[^"]*backend/' rhdl/language.rhm
+fail_matches "standard language assembly must not import core or backend modules" \
+  '^[[:space:]]+"[^"]*(core|backend)/' rhdl/language.rhm
+fail_matches "base language assembly must not import core or backend modules" \
+  '^[[:space:]]+"[^"]*(core|backend)/' rhdl/base/language.rhm
+fail_matches "the standard frontend must aggregate public modules instead of core or kernel" \
+  '^[[:space:]]+"[^"]*(core/|kernel\.rhm)' rhdl/frontend/standard.rhm
+fail_matches "the base frontend must not depend on optional frontend modules" \
+  '^[[:space:]]+"[^"]*(extensions/|standard\.rhm)' rhdl/frontend/base.rhm
+fail_matches "frontend extensions must not depend on the standard aggregator" \
+  '^[[:space:]]+"[^"]*standard\.rhm' rhdl/frontend/extensions
 
 unexpected_top_level="$(find rhdl -maxdepth 1 -type f \
   ! -name 'main.rkt' ! -name 'language.rhm' -print)"
@@ -35,9 +43,12 @@ if [[ -n "$unexpected_top_level" ]]; then
   exit 1
 fi
 
-unexpected_racket="$(find rhdl -type f -name '*.rkt' ! -path 'rhdl/main.rkt' -print)"
+unexpected_racket="$(find rhdl -type f -name '*.rkt' \
+  ! -path 'rhdl/main.rkt' \
+  ! -path 'rhdl/base/main.rkt' \
+  ! -path 'rhdl/base/lang/reader.rkt' -print)"
 if [[ -n "$unexpected_racket" ]]; then
-  echo "only the #lang reader shim may use the .rkt extension" >&2
+  echo "only #lang reader shims may use the .rkt extension" >&2
   echo "$unexpected_racket" >&2
   exit 1
 fi
