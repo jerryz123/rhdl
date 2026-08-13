@@ -85,16 +85,35 @@ The checkout itself is added as a Racket collection path when the frontend
 example and tests run. To invoke a `.rhdl` file directly from the checkout:
 
 ```sh
-racket -S "$(pwd)" examples/adder.rhdl
+racket -S "$(pwd)" examples/lop/adder-standard.rhdl
 ```
 
 All valid frontend programs used by the test suite live under `examples/`.
-They export both reusable circuit generators and a default elaborated `design`,
-so tests can re-elaborate the same source with different host parameters.
+Feature examples export reusable circuit generators and a default elaborated
+`design`, so tests can re-elaborate the same source with different host
+parameters. The intentional `examples/lop/` equivalence ladder instead shows
+the same adder through the core Builder, elaboration kernel, and standard
+extensions.
 Intentionally invalid `.rhdl` fixtures live under `tests/frontend/invalid/`.
 Tests mirror the implementation layers under `tests/core/`, `tests/frontend/`,
-and `tests/backend/`. Builder construction remains only where the lower-level
-Builder or malformed public IR is itself under test.
+and `tests/backend/`. Outside the LOP ladder, Builder construction remains only
+where the lower-level Builder or malformed public IR is itself under test.
+
+## Language-oriented walkthrough
+
+The examples are organized as an executable argument for language-oriented
+hardware design. Start with [the examples guide](examples/README.md), which
+places three equivalent adders side by side:
+
+- Direct public IR construction through `Design` and `Builder`.
+- Explicit construction through the context-based elaboration kernel.
+- Concise construction through standard macros and operators.
+
+`make lop-test` verifies that the three programs produce identical printed
+RHDL IR and identical CIRCT MLIR. The remaining examples each focus on one
+extension boundary: Boolean types and selection, register notation, instance
+dot access, host-generated structure, ordinary imported libraries, or
+width-changing core semantics.
 
 ## Frontend
 
@@ -191,12 +210,11 @@ selects runtime hardware behavior. Higher-level conveniences such as grouped
 `IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
 this same layering rule.
 
-All canonical examples except `examples/kernel-adder.rhdl` use the concise
-standard layer. That example remains a `#lang rhdl` program, but constructs the
-same adder shape explicitly with `build_circuit`, string-named ports, `hw_add`,
-`connect`, and `run_elaboration`. It shows that both styles are available in
-the same language and that the concise forms layer over the small elaboration
-kernel.
+The three adder presentations all remain `#lang rhdl` programs because the
+language composes and exports every layer. Each presentation deliberately uses
+only the layer it teaches. The feature showcases use the concise standard
+surface, while `examples/lop/adder-core.rhdl` and
+`examples/lop/adder-kernel.rhdl` expose the construction underneath it.
 
 ## Builder API
 

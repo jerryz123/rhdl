@@ -751,15 +751,19 @@ The frontend implements:
   host conditions.
 - CIRCT lowering and Verilator simulation of frontend-authored adder, ALU,
   width-changing, counter, and hierarchy designs.
-- One canonical source for every valid frontend program under `examples/`.
-  Examples export reusable generators and a default design, so positive IR,
-  printer, CIRCT, and simulation tests import or re-elaborate them instead of
-  maintaining separate fixtures. Intentionally invalid programs live under
-  `tests/frontend/invalid/`. Builder construction remains only for lower-layer API,
-  verifier, malformed-IR, and backend-name tests.
-- Concise standard-layer syntax throughout the canonical `.rhdl` examples,
-  with `examples/kernel-adder.rhdl` retained as an explicit kernel-style
-  `#lang rhdl` equivalent that exposes the construction underneath the macros.
+- One canonical source for each feature showcase under `examples/`. Examples
+  export reusable generators and a default design, so positive IR, printer,
+  CIRCT, and simulation tests import or re-elaborate them instead of maintaining
+  separate fixtures. Intentionally invalid programs live under
+  `tests/frontend/invalid/`.
+- An explicit language-oriented equivalence ladder under `examples/lop/` that
+  builds one adder through the public Builder, elaboration kernel, and concise
+  standard extensions. Focused tests prove that all three presentations create
+  identical printed RHDL IR and identical CIRCT MLIR while retaining
+  layer-appropriate provenance.
+- Concise standard-layer syntax throughout the feature showcases. Builder
+  construction remains elsewhere only for lower-layer API, verifier,
+  malformed-IR, and backend-name tests.
 
 The kernel remains intentionally smaller than the standard layer. Grouped
 `IO`, `RegInit`, protocol interfaces, pipelines, and similar Chisel-like
