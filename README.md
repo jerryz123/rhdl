@@ -411,9 +411,7 @@ information needed for concise port access. The collection remains host data;
 only the constructed instances enter the IR:
 
 ```rhombus
-def adders:
-  for InstanceArray (ignored in 0..n):
-    inst adder(FullAdderModule)
+def adders = for InstanceArray (_ in 0..n): inst adder(FullAdderModule)
 
 for (i in 0..n):
   adders[i].a <== A[i].into(Bool)
@@ -716,6 +714,8 @@ Current width rules are explicit:
 - Constants specify a width and must fit it.
 - Narrowing and extension use explicit operations.
 - Arithmetic is unsigned and modular.
+- Logical shifts preserve the value width, discard left-shift overflow, and
+  fill vacated bits with zero; shifting by the width or more produces zero.
 
 ### Operation type rules
 
@@ -723,6 +723,7 @@ Current width rules are explicit:
 not(T: BitwiseType)                         -> T
 and/or/xor(T: BitwiseType, T)               -> T
 add/sub(Bits(w), Bits(w))                   -> Bits(w)
+shl/shru(Bits(w), Bits(a))                  -> Bits(w)
 eq(Bits(w), Bits(w))                        -> Bits(1)
 mux_lookup(Bits(w), cases: Key -> T,
            default: T)                      -> T: DataType
@@ -737,6 +738,12 @@ extract(Bits(w), high, low)                 -> Bits(high - low + 1)
 zext(Bits(a), target_width)                 -> Bits(target_width)
 trunc(Bits(a), target_width)                -> Bits(target_width)
 ```
+
+`shl` and `shru` take a hardware `Bits(a)` shift amount whose width is
+independent of the shifted value. A host-static amount is represented
+explicitly by a constant of a chosen sufficient width. `shru` is logical
+unsigned right shift; arithmetic right shift is deferred until RHDL has an
+explicitly signed type.
 
 The `concat` rule above is the core operation. The combinational frontend
 accepts any packable `DataType`, inserts canonical equal-width casts for
@@ -844,7 +851,7 @@ the core schema.
 | Internal connection | wire |
 | Constants | constant |
 | Bitwise | not, and, or, xor |
-| Arithmetic | add, sub |
+| Arithmetic | add, sub, logical left shift, logical unsigned right shift |
 | Comparison | equality |
 | Selection | mux lookup |
 | Conversion | cast |
@@ -988,6 +995,11 @@ type or operation it cannot represent.
 | `rtl.vector_create` | `hw.array_create` |
 | `rtl.vector_get` | `hw.array_get` with a host-constant index |
 | `rtl.wire` | Erased; references resolve to the wire's driver |
+
+Core `rtl.shl` and `rtl.shru` operations are implemented and verified, but
+frontend syntax and CIRCT lowering are not yet implemented. Passing a design
+containing either operation to the current backend reports an unsupported-op
+error.
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. Backend tests first parse and verify emitted MLIR, then use
@@ -1140,7 +1152,8 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.
 - Runtime-loaded operation dialects.
-- Multiplication and shifts until their width rules are specified.
+- Multiplication, frontend shift syntax, shift backend lowering, and arithmetic
+  right shift until signed types exist.
 - Multi-role protocols, optional interface fields, and protocol behavior such
   as arbitration.
 - IR mutation and rewriting until a concrete transformation use case requires
