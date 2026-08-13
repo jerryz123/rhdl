@@ -7,7 +7,9 @@ import:
   "../core/verify.rhm" open
 
 export:
+  HardwareEntity
   FrontendContext
+  new_circuit_identity
   frontend_run
   run_elaboration
   build_circuit
@@ -43,17 +45,33 @@ export:
 fun frontend_fail(message, location = Location()):
   error(~who: #'rhdl, location.describe() ++ ": " ++ message)
 
+interface HardwareEntity
+
 fun hardware_entity(value):
-  value is_a Value || value is_a Place || value is_a Register
+  cond
+  | value is_a Value: #true
+  | value is_a Place: #true
+  | value is_a Register: #true
+  | value is_a Operation: #true
+  | value is_a Port: #true
+  | value is_a Instance: #true
+  | ~else: value is_a HardwareEntity
+
+class CircuitIdentity(name)
+class ActiveCircuit(identity, name)
+
+fun new_circuit_identity(name):
+  unless name is_a String
+  | frontend_fail("circuit name must be a String")
+  CircuitIdentity(name)
 
 class FrontendContext(design,
                       builder,
                       mutable active = #true,
                       mutable active_circuits = [],
                       mutable allocated_symbols = []):
-  method allocate_symbol(circuit_name, arguments):
-    def suffix = String.join(arguments.map(to_string), "_")
-    def base = circuit_name ++ suffix
+  method allocate_symbol(circuit_name):
+    def base = circuit_name
     def count = allocated_symbols.filter(~keep: fun (symbol): symbol == base).length()
     allocated_symbols := allocated_symbols ++ [base]
     if count == 0
@@ -92,24 +110,26 @@ fun read(entity, location = Location()):
   | ~else:
       frontend_fail("expected readable hardware data", location)
 
-fun build_circuit(name, arguments, implementation, location = Location()):
+fun build_circuit(identity, name, arguments, implementation, location = Location()):
   def context = require_context(location)
+  unless identity is_a CircuitIdentity
+  | frontend_fail("circuit generator must supply its declaration identity", location)
   unless name is_a String
   | frontend_fail("circuit name must be a String", location)
   unless arguments is_a List
   | frontend_fail("circuit arguments must be supplied as a List", location)
   for (argument in arguments):
-    unless argument is_a Int
-    | frontend_fail("circuit parameters must be host Int values", location)
-  when context.active_circuits.find(fun (active_name): active_name == name)
+    when hardware_entity(argument)
+    | frontend_fail("circuit parameters must be host values, not hardware values", location)
+  when context.active_circuits.find(fun (active): active.identity === identity)
   | frontend_fail("recursive elaboration of circuit " ++ name, location)
-  context.active_circuits := context.active_circuits ++ [name]
-  def module_def = context.builder.module(context.allocate_symbol(name, arguments))
+  context.active_circuits := context.active_circuits ++ [ActiveCircuit(identity, name)]
+  def module_def = context.builder.module(context.allocate_symbol(name))
   parameterize { current_module: module_def }:
     implementation()
   context.builder.finish(module_def)
   context.active_circuits := context.active_circuits.filter(
-    ~keep: fun (active_name): active_name != name
+    ~keep: fun (active): !(active.identity === identity)
   )
   module_def
 

@@ -7,7 +7,7 @@ module alu_tb;
     logic [7:0] result;
     logic equal;
 
-    ALU8 dut (
+    ALU dut (
         .a(a),
         .b(b),
         .op(op),

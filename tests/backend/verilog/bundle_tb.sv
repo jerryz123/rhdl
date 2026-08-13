@@ -12,7 +12,7 @@ module bundle_tb;
   pair_t alternate;
   pair_t result;
 
-  BundlePipeline8 dut (
+  BundlePipeline dut (
     .clk(clk),
     .reset(reset),
     .select(select),

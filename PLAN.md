@@ -174,10 +174,24 @@ for over a host collection   repeated generated structure
 generator call               fresh module definition
 ```
 
-Generator parameters must be host values. A hardware value used as the test of
-host `if`, `when`, `unless`, `cond`, `&&`, `||`, or host iteration must produce
-an error during expansion or elaboration; it must never be accepted through
-Rhombus truthiness.
+Generator parameters may be any opaque host value, including hardware-type
+descriptors, functions and closures, collections, and user-defined
+configuration objects. Runtime hardware entities such as values, places,
+registers, instances, and frontend hardware views are rejected at the circuit
+boundary. This check is intentionally shallow: RHDL neither traverses host
+containers nor inspects closure captures. Ordinary IR ownership checks remain
+responsible for rejecting hardware handles captured from an incompatible
+elaboration context.
+
+Parameters are not serialized, compared, hashed, or embedded in module names.
+Fresh module symbols use only the generator's declared name and elaboration
+order. Active recursion is tracked by a private identity belonging to the
+generator declaration, so unrelated generators with the same textual name do
+not conflict.
+
+A hardware value used as the test of host `if`, `when`, `unless`, `cond`, `&&`,
+`||`, or host iteration must produce an error during expansion or elaboration;
+it must never be accepted through Rhombus truthiness.
 
 ### 3.4 IR
 
@@ -509,8 +523,9 @@ is frontend static information over the existing core `Instance.input` and
 `Instance.output` relationships, not a distinct IR concept.
 
 Fresh definitions and instances receive deterministic symbols based on their
-generator name and elaboration order. Recursion in the active generator stack
-is diagnosed as an elaboration error.
+generator name and elaboration order. Generator arguments never participate in
+symbol construction. Recursion in the active declaration-identity stack is
+diagnosed as an elaboration error.
 
 ### 7.1 Port capabilities
 
@@ -775,8 +790,10 @@ The frontend implements:
   feature-free standard aggregator.
 - A curated standard profile that does not implicitly expose the public core
   Builder or raw elaboration-kernel entry points.
-- Host-`Int`-parameterized circuit generators with deterministic fresh module
-  symbols and active-generator recursion checks.
+- Opaque host-value-parameterized circuit generators with deterministic fresh
+  module symbols and declaration-identity recursion checks. Hardware types,
+  closures, collections, and user-defined configuration objects are supported;
+  runtime hardware entities are rejected.
 - Explicit `input` and `output` construction with `Bits(width)` types.
 - Explicit-width literals, the full initial combinational operation surface,
   primitive registers, synchronous reset, reusable definitions, instances,
@@ -786,7 +803,7 @@ The frontend implements:
 - A separately imported user combinator test proving that new construction
   abstractions do not require reader, IR, verifier, or backend changes.
 - Explicit embedded-frontend origins on constructed operations.
-- Diagnostics for non-host parameters, recursive elaboration, generator calls
+- Diagnostics for hardware parameters, recursive elaboration, generator calls
   outside elaboration, driving inputs, width mismatch, and hardware-controlled
   host conditions.
 - CIRCT lowering and Verilator simulation of frontend-authored adder, ALU,
@@ -999,12 +1016,14 @@ combinational surface. A host-width-parameterized ALU covers `not`, `and`,
 
 RHDL can:
 
-1. Elaborate a parameterized adder whose width parameter is a host `Int`.
+1. Elaborate parameterized circuits from arbitrary opaque host values,
+   including a host `Int` width, a hardware type, a closure, and a
+   configuration object.
 2. Create fresh definitions for repeated generator calls without automatic
    deduplication and reject active recursive elaboration.
 3. Preserve origins through the public IR and elaborate an imported user
    hardware combinator without changing the language reader.
-4. Reject driving an input, a width mismatch, a non-`Int` parameter, a
+4. Reject driving an input, a width mismatch, a runtime hardware parameter, a
    generator call outside elaboration, and a hardware-controlled host
    condition.
 5. Lower the frontend-produced design through CIRCT and pass the existing
@@ -1014,7 +1033,8 @@ RHDL can:
 
 RHDL can:
 
-1. Elaborate a parameterized ALU whose width parameter is a host `Int`.
+1. Elaborate a parameterized ALU whose width parameter is a host `Int`, while
+   allowing the same circuit mechanism to accept other opaque host values.
 2. Elaborate a counter with a primitive register and active-high synchronous
    reset.
 3. Instantiate and access ports of an explicitly reused module definition.

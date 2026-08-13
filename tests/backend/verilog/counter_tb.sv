@@ -4,7 +4,7 @@ module counter_tb;
     logic reset = 1'b1;
     logic [7:0] count;
 
-    Counter8 dut (
+    Counter dut (
         .clk(clk),
         .reset(reset),
         .count(count)

@@ -1,0 +1,42 @@
+#lang rhdl
+// Demonstrates opaque host configuration, hardware types, and type-producing closures as circuit parameters.
+
+class HostConfig(use_factory, labels)
+
+fun type_factory(width):
+  fun (): Bits(width)
+
+fun select_type(fallback_type, make_type, config):
+  unless config.labels.length() == 2
+  | error(~who: #'HostParameterized, "expected input and output labels")
+  if (config.use_factory)
+  | make_type()
+  | fallback_type
+
+circuit HostParameterized(fallback_type, make_type, config):
+  def T = select_type(fallback_type, make_type, config)
+  input x: T
+  output y: T
+  y <== x
+
+circuit HostWrapper(child):
+  input x: Bits(8)
+  output y: Bits(8)
+  inst u(child)
+  u.x <== x
+  y <== u.y
+
+fun top():
+  def child = HostParameterized(Bits(16),
+                                type_factory(8),
+                                HostConfig(#true, ["input", "output"]))
+  HostWrapper(child)
+
+def design = elaborate(top())
+
+export:
+  HostConfig
+  type_factory
+  HostParameterized
+  HostWrapper
+  design

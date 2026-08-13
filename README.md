@@ -164,13 +164,24 @@ export:
   design
 ```
 
-Every circuit call creates a fresh module definition. Circuit parameters are
-host `Int` values, while ports and hardware values use explicit hardware
-types. `input a: Bits(width)` and `output y: Bits(width)` derive hardware names
-from their bindings; parentheses group same-typed ports, as in
-`input(a, b): Bits(width)`. Outputs, instance inputs, and register next state
-are connected with `<==`. Standard-layer registers derive their hardware names
-from bindings:
+Every circuit call creates a fresh module definition. Circuit parameters may
+be any opaque host value: numbers, strings, collections, user-defined
+configuration objects, hardware-type descriptors such as `Bits(8)`, or
+functions and closures that return types or other configuration. Runtime
+hardware values, places, registers, instances, and frontend hardware views are
+not circuit parameters. This boundary check is shallow; RHDL does not inspect
+containers or closure captures.
+
+Module symbols use the circuit's declared name and elaboration order, not a
+printed, hashed, or compared form of its parameters. Thus repeated calls create
+`Adder`, `Adder_1`, and so on, regardless of parameter shape. Active recursion
+is tracked by generator declaration identity.
+
+Ports and hardware values use explicit hardware types. `input a: Bits(width)`
+and `output y: Bits(width)` derive hardware names from their bindings;
+parentheses group same-typed ports, as in `input(a, b): Bits(width)`. Outputs,
+instance inputs, and register next state are connected with `<==`.
+Standard-layer registers derive their hardware names from bindings:
 
 ```rhombus
 reg state(Bits(width), ~clock: clk, ~reset: reset, ~init: zero)
@@ -286,6 +297,10 @@ selects runtime hardware behavior. Higher-level conveniences such as grouped
 rule. Bundles and interfaces are concrete examples: records provide the core
 semantics, while declaration syntax, roles, bulk connection, and instance
 reconstruction live in frontend extensions.
+
+[`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) demonstrates
+passing a `HardwareType`, a type-producing closure, a host list, and a custom
+configuration object through the same circuit mechanism.
 
 The four adder presentations make their dependencies explicit. The core and
 kernel versions are ordinary Rhombus modules with direct imports, the composed

@@ -4,7 +4,7 @@ module adder_tb;
     logic [7:0] b;
     logic [7:0] sum;
 
-    Adder8 dut (
+    Adder dut (
         .a(a),
         .b(b),
         .sum(sum)

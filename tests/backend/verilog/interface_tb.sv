@@ -14,7 +14,7 @@ module interface_tb;
   backward_t ingress__consumer_to_producer;
   forward_t egress__producer_to_consumer;
 
-  ReadyValidAdapter8 dut (
+  ReadyValidAdapter dut (
     .ingress__producer_to_consumer(ingress__producer_to_consumer),
     .egress__consumer_to_producer(egress__consumer_to_producer),
     .ingress__consumer_to_producer(ingress__consumer_to_producer),
