@@ -28,6 +28,7 @@ examples:
 	racket -S $(CURDIR) examples/lop/bundle-kernel.rhdl
 	racket -S $(CURDIR) examples/lop/bundle-standard.rhdl
 	racket -S $(CURDIR) examples/lop/interface-records.rhdl
+	racket -S $(CURDIR) examples/full-adder.rhdl
 	racket -S $(CURDIR) examples/alu.rhdl
 	racket -S $(CURDIR) examples/width-ops.rhdl
 	racket -S $(CURDIR) examples/counter.rhdl
