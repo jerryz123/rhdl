@@ -50,7 +50,7 @@ ordinary Rhombus libraries and user extensions
 The layers have distinct responsibilities:
 
 - The core defines hardware types, values, places, operations, modules,
-  registers, instances, records, verification, and inspection.
+  registers, instances, structural aggregates, verification, and inspection.
 - The elaboration kernel makes core construction available inside a dynamic
   circuit context.
 - `#lang rhdl/base` provides the circuit boundary, ports, connections, basic
@@ -73,7 +73,7 @@ verifier, and backend must preserve. Current core concepts include:
 - `HardwareType` and its data capabilities.
 - Readable `Value` and driveable `Place` objects.
 - Operations and operation schemas.
-- Structural `RecordType` values and projections.
+- Structural `RecordType` and fixed-length `VectorType` values and projections.
 - Primitive registers.
 - Modules, ports, and instances.
 - Ownership, type, driver, and cycle verification.
@@ -84,6 +84,7 @@ or policy over existing semantics. Current examples include:
 - The extension-defined `Bool` type and Boolean syntax.
 - Arithmetic, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
+- `Vec` and `vec(...)` notation over `VectorType` and vector construction.
 - Role-based and recursively nested interfaces over record-typed ports.
 - Binding-derived hardware names.
 - Instance dot access and atomic bulk connection.
@@ -127,6 +128,7 @@ The optional frontend modules are:
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `extensions/sequential.rhm` | Binding-derived registers |
 | `extensions/hierarchy.rhm` | Binding-derived instances and child-member access |
+| `extensions/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
 `frontend/standard.rhm` only aggregates the base and optional modules. It does
 not implement features itself. Neither language profile implicitly exports the
@@ -328,7 +330,9 @@ Width changes are explicit:
   packed to its canonical representation before one core concat operation.
 - Host-generated operands can be supplied as one list, as in `concat(pieces)`.
 - Explicit kernel `concat([a, b, ...])` remains Bits-only.
-- `value[index]` selects one bit and produces `Bits(1)`.
+- `bits_value[index]` selects one bit and produces `Bits(1)`.
+- `vector_value[index]` uses a host `Int` to select an element. A readable
+  vector produces a value; a driveable vector produces an element place.
 - `value[low..high]` selects a half-open host range; for example, `a[2..6]`
   is the concise form of `extract(a, 5, 2)`.
 - `value[low..=high]` accepts the corresponding inclusive host range.
@@ -337,17 +341,19 @@ Width changes are explicit:
 - `zext` adds zeroes on the most-significant side.
 - `trunc` retains the least-significant bits.
 
-Indices and range endpoints are host `Int` values known during elaboration.
+Indices and range endpoints in bracket syntax are host `Int` values known
+during elaboration.
 Any bounded, nonempty host range is normalized to its selected low and high
-bit; unbounded and empty ranges are rejected. Selection is read-only and
-returns a hardware value rather than a connection place. A selected `Bits(1)`
-remains `Bits(1)`—conversion to the frontend-defined `Bool` is explicit with
-`value.into(Bool)`. The equivalent functional spelling is `cast(value, Bool)`.
+bit; unbounded and empty ranges are rejected. Bit selection is read-only. A
+selected `Bits(1)` remains `Bits(1)`—conversion to the frontend-defined `Bool`
+is explicit with `value.into(Bool)`. The equivalent functional spelling is
+`cast(value, Bool)`.
 
 `value.into(TargetType)` changes only the hardware type, never the packed bit
 pattern or width. It handles nominal flat types, `Clock`, `Reset`, and
-recursively packed records. Width changes remain separate operations. The
-member spelling is part of the base hardware-expression surface;
+recursively packed records and vectors. Width changes remain separate
+operations. The member spelling is part of the base hardware-expression
+surface;
 `cast(value, TargetType)` remains the explicit functional frontend layer over
 the same core `rtl.cast` operation.
 
@@ -429,6 +435,47 @@ def pair = record(Pair(Bits(8))):
   left: a
   right: b
 ```
+
+### Fixed-length vectors
+
+`VectorType` is a structural core `DataType` for a positive host-known length
+of one element type. The vector extension gives it the concise `Vec` and `vec`
+spellings:
+
+```rhombus
+input carries: Vec(n + 1, Bool)
+output words: Vec(3, Bits(8))
+output reversed: Vec(3, Bits(8))
+
+def initial = vec(a, b, c)
+words <== initial
+reversed[0] <== initial[2]
+reversed[1] <== initial[1]
+reversed[2] <== initial[0]
+```
+
+Unlike a host `List` of instances or hardware handles, which exists only while
+elaborating generated structure, a `Vec` is one runtime hardware value.
+Static bracket indexing is host computation and checks bounds during
+elaboration. It works on readable vectors and on driveable vector places;
+complete element-wise drives canonicalize to one `rtl.vector_create` followed
+by one whole-vector drive. Partial and mixed whole/element-wise drives are
+errors, as with records.
+
+A hardware-selected read is deliberately distinct and requires a default:
+
+```rhombus
+chosen <== initial.lookup(selector, ~default: fallback)
+```
+
+This is frontend sugar for statically projecting every element and building a
+core `rtl.mux_lookup`; there is no dynamic vector-index operation in core.
+Vectors may contain any `DataType`, including records and other vectors. A
+packable vector has no padding and places element zero in the least-significant
+packed bits, matching ordinary hardware indexing. Equal-width explicit casts
+therefore support `Vec` to `Bits` and back without changing the bit pattern.
+
+See [`examples/vector.rhdl`](examples/vector.rhdl).
 
 ### Interfaces
 
@@ -564,10 +611,10 @@ Every place must have exactly one effective driver by the end of elaboration.
 A readable place yields its driver's value and must currently be driven before
 it is read. Values and places belong to one design and one legal module scope.
 
-Record places expose recursively projected field places during construction.
-Whole-record and field-wise drive modes are mutually exclusive. A complete
-set of leaf drives canonicalizes to nested record construction and one
-whole-record drive.
+Aggregate places expose recursively projected record fields and vector
+elements during construction. Whole-value and element-wise drive modes are
+mutually exclusive. A complete set of leaf drives canonicalizes to nested
+aggregate construction and one whole-value drive.
 
 ### Hardware types
 
@@ -587,6 +634,7 @@ Bits(width)
 Clock
 Reset
 RecordType(fields)
+VectorType(length, element_type)
 ```
 
 `Bits` implements `BitwiseType`. `Clock` and `Reset` are nominal control types,
@@ -605,6 +653,12 @@ without padding. Fields are packed in declaration order with the first field
 occupying the most-significant bits; nested records apply the rule recursively.
 This layout is used only by explicit casts and is part of the record's binary
 interface contract.
+
+`VectorType` is a positive-length structural `DataType` whose elements all
+have the same `DataType`. Length and recursively equal element type participate
+in `type_equal`. Its packed width is length times element width, without
+padding, and element zero occupies the least-significant element-width bits.
+This convention applies recursively to nested vectors and record elements.
 
 Current width rules are explicit:
 
@@ -625,6 +679,8 @@ mux_lookup(Bits(w), cases: Key -> T,
            default: T)                      -> T: DataType
 record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
+vector_create(elements matching V)           -> V: VectorType
+vector_get(V, host_index)                    -> V.element_type
 cast(A: packable, B: same packed width)     -> B
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
 extract(Bits(w), high, low)                 -> Bits(high - low + 1)
@@ -743,6 +799,7 @@ the core schema.
 | Conversion | cast |
 | Width-changing | concat, extract, zext, trunc |
 | Records | record create, record get |
+| Vectors | vector create, vector get with a host-static index |
 | Sequential | register, synchronous-reset register |
 
 There is no initial wire operation, conditional-connect operation, or general
@@ -808,8 +865,9 @@ The Builder and whole-design verifier enforce:
    effective driver.
 5. A place and its driver have exactly the same hardware type.
 6. Operation operands, results, places, and attributes satisfy their schema.
-7. Record fields are ordered and unique; construction, projection, and drive
-   mode match the record type completely.
+7. Record fields and vector elements match their aggregate type completely;
+   aggregate construction, projection, and whole/element-wise drive modes are
+   consistent.
 8. Mux selectors and keys are valid, keys are unique, and every case/default
    has the result `DataType`.
 9. Register clocks are `Clock`; synchronous reset operands are `Reset`.
@@ -844,10 +902,11 @@ SystemVerilog
 
 Every `FlatDataType` lowers to a signless integer of its declared bit width;
 the backend does not need to know the concrete scalar type. `RecordType`
-lowers recursively to packed `hw.struct`, preserving field order and names. Modules
-and instances use `hw`, combinational values use `comb` or `hw`, and primitive
-registers use `seq`. Active-high synchronous reset remains explicit as
-`seq.firreg` with `reset sync`.
+lowers recursively to packed `hw.struct`, preserving field order and names.
+`VectorType` lowers recursively to `hw.array`. Modules and instances use `hw`,
+combinational values use `comb` or `hw`, and primitive registers use `seq`.
+Active-high synchronous reset remains explicit as `seq.firreg` with
+`reset sync`.
 
 All opcode dispatch, representation-transparent alias elimination, CIRCT SSA
 naming, and type lowering live in the backend. Core operation schemas contain
@@ -870,6 +929,8 @@ type or operation it cannot represent.
 | `rtl.trunc` | `comb.extract` from bit zero |
 | `rtl.record_create` | `hw.struct_create` |
 | `rtl.record_get` | `hw.struct_extract` |
+| `rtl.vector_create` | `hw.array_create` |
+| `rtl.vector_get` | `hw.array_get` with a host-constant index |
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. Backend tests first parse and verify emitted MLIR, then use
@@ -931,6 +992,7 @@ Important examples include:
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |
 | `examples/host-parameters.rhdl` | Opaque host parameters and type-producing closures |
 | `examples/bundle.rhdl` | Records, nested bundles, aggregate muxes and registers |
+| `examples/vector.rhdl` | Fixed vectors, static and hardware selection, packing, and state |
 | `examples/interface.rhdl` | Named roles, flows, bulk connection, and hierarchy |
 | `examples/nested-interface.rhdl` | Recursive interface composition and orientation |
 | `examples/inspect-ir.rhm` | Backend-independent operation and module inspection |
@@ -950,14 +1012,17 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs eight simulations:
+`make circt-test` currently runs eleven simulations:
 
 - An 8-bit modular adder.
+- A four-bit ripple-carry adder.
 - A host-width-parameterized ALU.
 - A width-changing datapath.
+- A fixed-vector datapath.
 - An 8-bit synchronous-reset counter.
 - Two instances sharing one child definition.
 - A record-valued mux and register.
+- Equal-width record/bit representation casts.
 - A ready-valid interface adapter.
 - A recursively nested interface adapter.
 
@@ -971,8 +1036,8 @@ The initial vertical slice is complete:
 - Public, inspectable IR with stable identity and ownership.
 - Static operation schemas and deterministic printing.
 - Explicit values, places, drivers, modules, instances, and registers.
-- Open hardware-type capabilities with core `Bits`, `Clock`, `Reset`, and
-  structural records.
+- Open hardware-type capabilities with core `Bits`, `Clock`, `Reset`, records,
+  and fixed-length vectors.
 - Extension-defined `Bool` without core or backend special cases.
 - Canonical lookup muxes, arithmetic, bitwise, comparison, conversion, and
   explicit width-changing operations.
@@ -980,6 +1045,8 @@ The initial vertical slice is complete:
 - Standard and compositional Rhombus language profiles.
 - Arbitrary non-hardware host parameters and generated structure.
 - Bundles over core records.
+- Concise fixed-length vectors with static indexing, hardware lookup, aggregate
+  connections, explicit packing casts, muxes, and registers.
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.
@@ -1006,7 +1073,7 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths and general width inference.
-- Arrays and memories.
+- Dynamically sized arrays and memories.
 - Asynchronous and active-low resets.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.

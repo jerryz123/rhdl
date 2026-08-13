@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Provides generic field and bit-selection syntax for hardware entities.
+// Provides generic field, cast, lookup, and indexing syntax for hardware entities.
 
 import:
   rhombus/meta open
@@ -9,6 +9,7 @@ export:
   HardwareFields
   hardware_index
   hardware_into
+  hardware_lookup
 
 fun hardware_fields(value):
   kernel.hardware_entity(value)
@@ -22,7 +23,7 @@ annot.macro 'HardwareFields':
 fun hardware_index(value, index) :: HardwareFields:
   cond
   | index is_a Int:
-      kernel.extract(value, index, index)
+      kernel.index(value, index)
   | index is_a Range:
       def start = index.start()
       def end = index.end()
@@ -44,6 +45,11 @@ fun hardware_index(value, index) :: HardwareFields:
 fun hardware_into(value, target_type) :~ HardwareFields:
   kernel.cast(value, target_type)
 
+// Implements deterministic hardware-selected vector reads through the
+// existing mux-lookup semantics and an explicit out-of-range default.
+fun hardware_lookup(value, selector, ~default: default_value) :~ HardwareFields:
+  kernel.vector_lookup(value, selector, default_value)
+
 dot.macro 'hardware_field_dot $left $dot $right':
   match right
   | 'id': #false
@@ -61,5 +67,6 @@ dot.macro 'hardware_field_dot $left $dot $right':
   | 'current': #false
   | 'next': #false
   | 'into': 'fun (target_type) :~ HardwareFields: hardware_into($left, target_type)'
+  | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
   | ~else:
       'kernel.project($left, $(right.to_source_string())) :: HardwareFields'

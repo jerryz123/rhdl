@@ -32,6 +32,11 @@ export:
   trunc
   record_create
   project
+  vector_create
+  vector_get
+  vector_project
+  vector_lookup
+  index
   reg
   inst
   connect
@@ -300,6 +305,65 @@ fun project(entity, field_name, name = #false, location = Location()):
                                name,
                                location,
                                Origin("embedded record get", field_name))
+
+fun vector_create(type, elements, name = #false, location = Location()):
+  def context = require_context(location)
+  unless elements is_a List
+  | frontend_fail("vector elements must be supplied as a List", location)
+  context.builder.vector_create(
+    require_module(location),
+    type,
+    elements.map(fun (element): read(element, location)),
+    name,
+    location,
+    Origin("embedded vector create", name || "")
+  )
+
+fun vector_get(entity, element_index, name = #false, location = Location()):
+  def context = require_context(location)
+  context.builder.vector_get(require_module(location),
+                             read(entity, location),
+                             element_index,
+                             name,
+                             location,
+                             Origin("embedded vector get", to_string(element_index)))
+
+fun vector_project(entity, element_index, location = Location()):
+  def context = require_context(location)
+  if entity is_a Place
+  | context.builder.project_vector(entity, element_index)
+  | vector_get(entity, element_index, #false, location)
+
+fun index(entity, element_index, location = Location()):
+  def type:
+    cond
+    | entity is_a Value: entity.type
+    | entity is_a Place: entity.type
+    | entity is_a Register: entity.current.type
+    | ~else: read(entity, location).type
+  cond
+  | bits_type(type): extract(entity, element_index, element_index, #false, location)
+  | vector_type(type): vector_project(entity, element_index, location)
+  // Preserve the established Bits diagnostic for unsupported data types.
+  | ~else: extract(entity, element_index, element_index, #false, location)
+
+fun vector_lookup(entity,
+                  selector,
+                  default_value,
+                  name = #false,
+                  location = Location()):
+  def vector_value = read(entity, location)
+  unless vector_type(vector_value.type)
+  | frontend_fail("vector lookup requires a VectorType value", location)
+  def cases:
+    for List (element_index in 0..vector_value.type.length):
+      [element_index, vector_get(vector_value, element_index, #false, location)]
+  hw_mux_lookup(selector,
+                default_value,
+                cases,
+                name,
+                location,
+                Origin("embedded vector lookup", name || ""))
 
 fun reg(name, type, clock, reset = #false, reset_value = #false,
         location = Location()):

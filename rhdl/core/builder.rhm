@@ -62,21 +62,25 @@ fun ensure_place_in(module_def, place, who):
   | fail(who, "hardware place belongs to a different module")
 
 fun place_has_staged_driver(place):
-  place.driver || (for any (projected in place.projected_fields): place_has_staged_driver(projected))
+  place.driver || (for any (projected in place.projected_places): place_has_staged_driver(projected))
 
 fun ancestor_has_driver(place):
   if place.parent is_a Place
   | place.parent.driver || ancestor_has_driver(place.parent)
   | #false
 
-fun record_place_complete(place):
+fun aggregate_place_complete(place):
   if place.driver
   | #true
   | if record_type(place.type)
     | for all (field in place.type.fields):
-        def projected = place.projected_field(field.name)
-        projected && record_place_complete(projected)
-    | #false
+        def projected = place.projected_place(field.name)
+        projected && aggregate_place_complete(projected)
+    | if vector_type(place.type)
+      | for all (index in 0..place.type.length):
+          def projected = place.projected_place(index)
+          projected && aggregate_place_complete(projected)
+      | #false
 
 fun ensure_unique_hardware_name(module_def, name, who):
   when module_def.values.find(fun (value): value.name == name) || module_def.places.find(fun (place): place.name == name)
@@ -616,6 +620,58 @@ class Builder(design):
                           #'record_get,
                           {"field": field_name})
 
+  method vector_create(module_def,
+                       type,
+                       elements,
+                       name = #false,
+                       location = Location(),
+                       origin = Origin("vector_create")):
+    ensure_module_in_design(design, module_def, #'vector_create)
+    ensure_open(module_def, #'vector_create)
+    unless vector_type(type) && type_well_formed(type)
+    | fail(#'vector_create, "vector_create type must be a well-formed VectorType")
+    unless elements is_a List
+    | fail(#'vector_create, "vector elements must be supplied as a List")
+    unless elements.length() == type.length
+    | fail(#'vector_create, "vector_create requires exactly one value per element")
+    for (element in elements):
+      ensure_value_in(module_def, element, #'vector_create)
+      unless type_equal(element.type, type.element_type)
+      | fail(#'vector_create, "vector element has the wrong hardware type")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.vector_create",
+                          elements,
+                          type,
+                          name,
+                          location,
+                          origin,
+                          #'vector_create)
+
+  method vector_get(module_def,
+                    vector,
+                    index,
+                    name = #false,
+                    location = Location(),
+                    origin = Origin("vector_get")):
+    ensure_module_in_design(design, module_def, #'vector_get)
+    ensure_open(module_def, #'vector_get)
+    ensure_value_in(module_def, vector, #'vector_get)
+    unless vector_type(vector.type)
+    | fail(#'vector_get, "vector_get operand must have a VectorType")
+    unless index is_a Int && 0 <= index && index < vector.type.length
+    | fail(#'vector_get, "vector index must satisfy 0 <= index < vector length")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.vector_get",
+                          [vector],
+                          vector.type.element_type,
+                          name,
+                          location,
+                          origin,
+                          #'vector_get,
+                          {"index": index})
+
   method project(place, field_name):
     unless place is_a Place
     | fail(#'project, "field projection target must be a hardware Place")
@@ -630,7 +686,7 @@ class Builder(design):
     def field = place.type.field(field_name)
     unless field
     | fail(#'project, "record has no field named " ++ field_name)
-    def existing = place.projected_field(field_name)
+    def existing = place.projected_place(field_name)
     if existing
     | existing
     | block:
@@ -642,37 +698,78 @@ class Builder(design):
                               #false,
                               place,
                               field_name)
-        place.projected_fields := place.projected_fields ++ [projected]
+        place.projected_places := place.projected_places ++ [projected]
         projected
 
-  method assemble_record_place(place, location = Location()):
-    if !record_type(place.type) || !record_place_complete(place)
-    | #false
+  method project_vector(place, index):
+    unless place is_a Place
+    | fail(#'project_vector, "vector projection target must be a hardware Place")
+    def module_def = design.find_module(place.module_id)
+    ensure_module_in_design(design, module_def, #'project_vector)
+    ensure_open(module_def, #'project_vector)
+    ensure_place_in(module_def, place, #'project_vector)
+    unless vector_type(place.type)
+    | fail(#'project_vector, "vector projection target must have a VectorType")
+    unless index is_a Int && 0 <= index && index < place.type.length
+    | fail(#'project_vector, "vector index must satisfy 0 <= index < vector length")
+    def existing = place.projected_place(index)
+    if existing
+    | existing
     | block:
-        def mutable bindings = []
-        for (field in place.type.fields):
-          def projected = place.projected_field(field.name)
-          def field_value:
-            if projected.driver
-            | projected.driver
-            | this.assemble_record_place(projected, location)
-          bindings := bindings ++ [[field.name, field_value]]
-        this.record_create(place.module_def,
-                           place.type,
-                           bindings,
-                           #false,
-                           location,
-                           Origin("record place assembly", place.name))
+        def projected = Place(#false,
+                              place.name ++ "[" ++ to_string(index) ++ "]",
+                              place.type.element_type,
+                              module_def,
+                              place.owner_op_id,
+                              #false,
+                              place,
+                              index)
+        place.projected_places := place.projected_places ++ [projected]
+        projected
 
-  method canonicalize_record_place(place, location = Location()):
-    def assembled = this.assemble_record_place(place, location)
+  method assemble_aggregate_place(place, location = Location()):
+    if !aggregate_place_complete(place)
+    | #false
+    | cond
+      | record_type(place.type):
+          def mutable bindings = []
+          for (field in place.type.fields):
+            def projected = place.projected_place(field.name)
+            def field_value:
+              if projected.driver
+              | projected.driver
+              | this.assemble_aggregate_place(projected, location)
+            bindings := bindings ++ [[field.name, field_value]]
+          this.record_create(place.module_def,
+                             place.type,
+                             bindings,
+                             #false,
+                             location,
+                             Origin("aggregate place assembly", place.name))
+      | vector_type(place.type):
+          def elements:
+            for List (index in 0..place.type.length):
+              def projected = place.projected_place(index)
+              if projected.driver
+              | projected.driver
+              | this.assemble_aggregate_place(projected, location)
+          this.vector_create(place.module_def,
+                             place.type,
+                             elements,
+                             #false,
+                             location,
+                             Origin("aggregate place assembly", place.name))
+      | ~else: #false
+
+  method canonicalize_aggregate_place(place, location = Location()):
+    def assembled = this.assemble_aggregate_place(place, location)
     if assembled
     | block:
-        place.projected_fields := []
+        place.projected_places := []
         this.drive(place,
                    assembled,
                    location,
-                   Origin("record place canonicalization", place.name))
+                   Origin("aggregate place canonicalization", place.name))
         assembled
     | #false
 
@@ -796,8 +893,8 @@ class Builder(design):
     | fail(#'drive, "place and driver must have exactly the same hardware type")
     when place.driver
     | fail(#'drive, "place " ++ place.name ++ " already has a driver")
-    when ancestor_has_driver(place) || place.projected_fields.find(place_has_staged_driver)
-    | fail(#'drive, "record places cannot mix whole-record and field-wise drivers")
+    when ancestor_has_driver(place) || place.projected_places.find(place_has_staged_driver)
+    | fail(#'drive, "aggregate places cannot mix whole-value and element-wise drivers")
     place.driver := value
     unless place.projected()
     | def operation_id = design.fresh_id()
@@ -825,21 +922,23 @@ class Builder(design):
     if place.driver
     | place.driver
     | block:
-        def assembled = this.assemble_record_place(place)
+        def assembled = this.assemble_aggregate_place(place)
         cond
         | assembled && place.projected():
             place.driver := assembled
             assembled
         | assembled:
-            place.projected_fields := []
+            place.projected_places := []
             this.drive(place,
                        assembled,
                        Location(),
-                       Origin("record place canonicalization", place.name))
+                       Origin("aggregate place canonicalization", place.name))
             assembled
         | place.projected():
             def parent_value = this.read(place.parent)
-            this.record_get(module_def, parent_value, place.field_name)
+            if record_type(place.parent.type)
+            | this.record_get(module_def, parent_value, place.projection_key)
+            | this.vector_get(module_def, parent_value, place.projection_key)
         | ~else:
             fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
 
@@ -847,11 +946,13 @@ class Builder(design):
     ensure_module_in_design(design, module_def, #'finish)
     ensure_open(module_def, #'finish)
     for (place in module_def.places):
-      when !place.driver && record_type(place.type)
-      | when place_has_staged_driver(place) && !record_place_complete(place)
+      when !place.driver && (record_type(place.type) || vector_type(place.type))
+      | when place_has_staged_driver(place) && !aggregate_place_complete(place)
         | fail(#'finish,
-               "record place " ++ place.name ++ " has incomplete field-wise drivers")
-        when record_place_complete(place)
-        | this.canonicalize_record_place(place)
+               if record_type(place.type)
+               | "record place " ++ place.name ++ " has incomplete field-wise drivers"
+               | "vector place " ++ place.name ++ " has incomplete element-wise drivers")
+        when aggregate_place_complete(place)
+        | this.canonicalize_aggregate_place(place)
     module_def.finished := #true
     module_def

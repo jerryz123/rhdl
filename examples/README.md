@@ -61,6 +61,7 @@ Existing frontend behavior is grouped into independently importable modules:
 | [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
 | [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
+| [`extensions/vector.rhm`](../rhdl/frontend/extensions/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
 implementation. It aggregates those modules, and `#lang rhdl` exposes that
@@ -87,10 +88,14 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `bundle Pair(T): ...` | A function constructing a core `RecordType` |
 | `record(Pair(T)): ...` | `rtl.record_create` |
 | `value.field` | `rtl.record_get` or construction-time place projection |
-| `value[index]` | `rtl.extract(value, index, index)` |
+| `bits_value[index]` | `rtl.extract(value, index, index)` |
 | `value[low..high]` | `rtl.extract(value, high - 1, low)` |
 | `value.into(T)` | `rtl.cast` preserving canonical packed width and bit order |
 | `concat(a, b, ...)` or `concat(parts)` | Canonical packing as needed, then one Bits-only `rtl.concat` |
+| `Vec(n, T)` | Core `VectorType(n, T)` |
+| `vec(a, b, ...)` or `vec(elements)` | `rtl.vector_create` with inferred uniform element type |
+| `vector[index]` | Static `rtl.vector_get` or construction-time element-place projection |
+| `vector.lookup(selector, ~default: value)` | Static projections plus one core `rtl.mux_lookup` |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -135,6 +140,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
 | [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
+| [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 

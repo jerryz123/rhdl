@@ -1,0 +1,54 @@
+#lang rhombus
+// Checks frontend vector syntax, aggregate behavior, and explicit lookup boundaries.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../examples/vector.rhdl" as fixture
+  "vector-invalid-fixture.rhdl" as invalid
+
+def module_def = fixture.design.modules[0]
+def vector_creates = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.vector_create"
+)
+def vector_gets = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.vector_get"
+)
+def lookups = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+def casts = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.cast"
+)
+def carry_module = fixture.carry_design.modules[0]
+
+check:
+  vector_type(module_def.find_input("alternate").type) ~is #true
+  module_def.find_input("alternate").type.length ~is 3
+  type_equal(module_def.find_input("alternate").type.element_type, Bits(4)) ~is #true
+  vector_creates.length() ~is 2
+  vector_gets.length() ~is 6
+  vector_gets.map(fun (operation): operation.attribute("index")) ~is [0, 1, 2, 2, 1, 0]
+  lookups.length() ~is 2
+  type_equal(lookups[0].results[0].type, VectorType(3, Bits(4))) ~is #true
+  type_equal(lookups[1].results[0].type, Bits(4)) ~is #true
+  lookups[1].attribute("keys") ~is [0, 1, 2]
+  casts.length() ~is 2
+  casts[0].results[0].type.width ~is 12
+  type_equal(casts[1].results[0].type, VectorType(3, Bits(4))) ~is #true
+  type_equal(module_def.find_output("reversed").place.driver.type,
+             VectorType(3, Bits(4))) ~is #true
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register_reset"
+  ).length() ~is 1
+  verify_design(fixture.design) ~is #void
+  carry_module.find_input("carries").type.length ~is 5
+  carry_module.find_input("carries").type.element_type.describe() ~is "bool"
+  packed_width(carry_module.find_input("carries").type) ~is 5
+  verify_design(fixture.carry_design) ~is #void
+  embedded.run_elaboration(fun (): invalid.OutOfBoundsVector()) ~throws "0 <= index < vector length"
+  embedded.run_elaboration(fun (): invalid.DynamicVectorIndex()) ~throws "hardware index must be a host Int or bounded host Int range"
+  embedded.run_elaboration(fun (): invalid.NarrowVectorLookup()) ~throws "mux lookup key does not fit its selector type"
+  embedded.run_elaboration(fun (): invalid.MixedVectorElements()) ~throws "wrong hardware type"
+  embedded.run_elaboration(fun (): invalid.PartialVectorDrive()) ~throws "incomplete element-wise drivers"
+  embedded.run_elaboration(fun (): invalid.MixedVectorDrive()) ~throws "cannot mix whole-value and element-wise drivers"
