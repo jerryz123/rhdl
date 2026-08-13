@@ -21,6 +21,7 @@ expect_failure() {
 
 expect_failure bad-condition.rhdl "hardware values cannot control host conditions"
 expect_failure bad-input-drive.rhdl "connection target must be an output, instance input, or register next state"
+expect_failure bad-instance-port.rhdl "instance u has no port named missing"
 expect_failure bad-mux-key-type.rhdl "mux lookup keys must be host Int values"
 expect_failure bad-mux-key-width.rhdl "mux lookup key does not fit its selector type"
 expect_failure bad-mux-duplicate-key.rhdl "mux lookup keys must be unique"

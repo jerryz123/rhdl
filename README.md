@@ -128,9 +128,18 @@ The resetless form is `reg state(Bits(width), ~clock: clk)`. Here `~init`
 means the active synchronous-reset value; it does not introduce a separate IR
 initialization mechanism. The underlying kernel form remains
 `reg("state", Bits(width), clk, reset, reset_value)`, where `clk` is `Clock`
-and `reset` is `Reset`. Instances use
-`inst("u0", child_definition)`, with ports accessed through
-`u0.input("a")` and `u0.output("sum")`.
+and `reset` is `Reset`. Standard-layer instances similarly derive their name
+from the binding and expose child ports through dot access:
+
+```rhombus
+inst u0(child_definition)
+u0.a <== a
+sum <== u0.sum
+```
+
+This expands to the kernel's `inst("u0", child_definition)`,
+`u0.input("a")`, and `u0.output("sum")` operations. Port direction and type
+checking still use the elaborated child-module interface.
 
 The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
 and `===`, plus the named functions `bits`, `bit_not`, `bit_and`, `bit_or`,

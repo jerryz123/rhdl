@@ -451,9 +451,14 @@ reuse one definition for multiple instances:
 
 ```text
 def ALU32 = ALU(32)
-def u0 = inst("u0", ALU32)
-def u1 = inst("u1", ALU32)
+inst u0(ALU32)
+inst u1(ALU32)
 ```
+
+The standard frontend derives each instance's hardware name from its binding
+and resolves `u0.port` through the elaborated child interface. This dot access
+is frontend static information over the existing core `Instance.input` and
+`Instance.output` relationships, not a distinct IR concept.
 
 Fresh definitions and instances receive deterministic symbols based on their
 generator name and elaboration order. Recursion in the active generator stack
