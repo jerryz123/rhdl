@@ -167,3 +167,19 @@ Run every example with:
 ```sh
 make examples
 ```
+
+## Verilog references
+
+Each public feature example exports a `verilog_reference` string beside its
+canonical `design`. Backend tests lower that design with the pinned CIRCT
+toolchain, discard generated version and temporary-file location comments, and
+compare the complete Verilog output exactly:
+
+```sh
+make verilog-golden-test
+```
+
+Set `FIXTURE=adder` to check one named fixture. Intentional backend-output
+changes can be recorded with `make update-verilog-goldens`, followed by normal
+review of the example-file diff. The Verilog testbenches remain separate under
+`tests/backend/verilog/`; they verify behavior rather than textual output.

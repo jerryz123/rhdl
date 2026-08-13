@@ -42,8 +42,118 @@ circuit VectorDatapath():
 def design = elaborate(VectorDatapath())
 def carry_design = elaborate(CarryEndpoints(4))
 
+def verilog_reference = @str|<<{
+
+// Include register initializers in init blocks unless synthesis is set
+`ifndef RANDOMIZE
+  `ifdef RANDOMIZE_REG_INIT
+    `define RANDOMIZE
+  `endif // RANDOMIZE_REG_INIT
+`endif // not def RANDOMIZE
+`ifndef SYNTHESIS
+  `ifndef ENABLE_INITIAL_REG_
+    `define ENABLE_INITIAL_REG_
+  `endif // not def ENABLE_INITIAL_REG_
+`endif // not def SYNTHESIS
+
+// Standard header to adapt well known macros for register randomization.
+
+// RANDOM may be set to an expression that produces a 32-bit random unsigned value.
+`ifndef RANDOM
+  `define RANDOM $random
+`endif // not def RANDOM
+
+// Users can define INIT_RANDOM as general code that gets injected into the
+// initializer block for modules with registers.
+`ifndef INIT_RANDOM
+  `define INIT_RANDOM
+`endif // not def INIT_RANDOM
+
+// If using random initialization, you can also define RANDOMIZE_DELAY to
+// customize the delay used, otherwise 0.002 is used.
+`ifndef RANDOMIZE_DELAY
+  `define RANDOMIZE_DELAY 0.002
+`endif // not def RANDOMIZE_DELAY
+
+// Define INIT_RANDOM_PROLOG_ for use in our modules below.
+`ifndef INIT_RANDOM_PROLOG_
+  `ifdef RANDOMIZE
+    `ifdef VERILATOR
+      `define INIT_RANDOM_PROLOG_ `INIT_RANDOM
+    `else  // VERILATOR
+      `define INIT_RANDOM_PROLOG_ `INIT_RANDOM #`RANDOMIZE_DELAY begin end
+    `endif // VERILATOR
+  `else  // RANDOMIZE
+    `define INIT_RANDOM_PROLOG_
+  `endif // RANDOMIZE
+`endif // not def INIT_RANDOM_PROLOG_
+module VectorDatapath(
+  input             clk,
+                    reset,
+  input  [1:0]      selector,
+  input  [3:0]      a,
+                    b,
+                    c,
+  input  [2:0][3:0] alternate,
+  output [2:0][3:0] assembled,
+                    selected,
+  output [3:0]      chosen,
+  output [11:0]     packed_0,
+  output [2:0][3:0] restored,
+                    reversed,
+                    state_out
+);
+
+  wire [2:0][3:0] _GEN = {{c}, {b}, {a}};
+  wire [2:0][3:0] _GEN_0 = selector == 2'h1 ? alternate : _GEN;
+  wire [11:0]     _GEN_1 = /*cast(bit[11:0])*/_GEN;
+  reg  [2:0][3:0] state;
+  always @(posedge clk) begin
+    if (reset)
+      state <= _GEN;
+    else
+      state <= _GEN_0;
+  end // always @(posedge)
+  `ifdef ENABLE_INITIAL_REG_
+    `ifdef FIRRTL_BEFORE_INITIAL
+      `FIRRTL_BEFORE_INITIAL
+    `endif // FIRRTL_BEFORE_INITIAL
+    initial begin
+      automatic logic [31:0] _RANDOM[0:0];
+      automatic logic [11:0] _GEN_2;
+      `ifdef INIT_RANDOM_PROLOG_
+        `INIT_RANDOM_PROLOG_
+      `endif // INIT_RANDOM_PROLOG_
+      `ifdef RANDOMIZE_REG_INIT
+        for (logic  i = 1'h0; i < 1'h1; i += 1'h1) begin
+          _RANDOM[/*Zero width*/ 1'b0] = `RANDOM;
+        end
+        _GEN_2 = _RANDOM[/*Zero width*/ 1'b0][11:0];
+        state[2'h0] = _GEN_2[11:8];
+        state[2'h1] = _GEN_2[7:4];
+        state[2'h2] = _GEN_2[3:0];
+      `endif // RANDOMIZE_REG_INIT
+    end // initial
+    `ifdef FIRRTL_AFTER_INITIAL
+      `FIRRTL_AFTER_INITIAL
+    `endif // FIRRTL_AFTER_INITIAL
+  `endif // ENABLE_INITIAL_REG_
+  assign assembled = _GEN;
+  assign selected = _GEN_0;
+  assign chosen =
+    selector == 2'h0
+      ? _GEN[2'h0]
+      : selector == 2'h1 ? _GEN[2'h1] : selector == 2'h2 ? _GEN[2'h2] : c;
+  assign packed_0 = _GEN_1;
+  assign restored = /*cast(bit[2:0][3:0])*/_GEN_1;
+  assign reversed = {{_GEN[2'h0]}, {_GEN[2'h1]}, {_GEN[2'h2]}};
+  assign state_out = state;
+endmodule
+}>>|
+
 export:
   CarryEndpoints
   VectorDatapath
   design
   carry_design
+  verilog_reference
