@@ -1,6 +1,9 @@
 #lang rhombus
 // Defines RHDL's canonical hardware-type abstraction and structural predicates.
 
+import:
+  rhombus/rx open
+
 export:
   HardwareType
   DataType
@@ -9,6 +12,8 @@ export:
   Bits
   Clock
   Reset
+  RecordField
+  RecordType
   hardware_type
   data_type
   flat_data_type
@@ -19,6 +24,7 @@ export:
   bits_type
   clock_type
   reset_type
+  record_type
   mux_selector_type
   selector_width
   bits_text
@@ -67,6 +73,48 @@ class _ResetType():
 def Clock = _ClockType()
 def Reset = _ResetType()
 
+def record_field_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
+
+class RecordField(name, type):
+  constructor (name, type):
+    unless name is_a String && record_field_identifier.is_match(name)
+    | error(~who: #'RecordField,
+            "field name must be an ASCII identifier")
+    unless type is_a DataType
+    | error(~who: #'RecordField, "field type must be a DataType")
+    super(name, type)
+
+class RecordType(fields):
+  implements DataType
+  constructor (fields):
+    unless fields is_a List && fields.length() >= 1
+    | error(~who: #'RecordType,
+            "fields must be a nonempty List of RecordField values")
+    for (field in fields):
+      unless field is_a RecordField
+      | error(~who: #'RecordType,
+              "fields must be a nonempty List of RecordField values")
+      when fields.filter(~keep: fun (candidate): candidate.name == field.name).length() != 1
+      | error(~who: #'RecordType,
+              "record field names must be unique")
+    super(fields)
+
+  method field(name):
+    fields.find(fun (candidate): candidate.name == name)
+
+  override method describe():
+    "record<" ++ String.join(
+      fields.map(fun (field): field.name ++ ": " ++ field.type.describe()),
+      ", "
+    ) ++ ">"
+
+  override method type_equal(other):
+    if !record_type(other) || fields.length() != other.fields.length()
+    | #false
+    | for all (left_field in fields,
+               right_field in other.fields):
+        left_field.name == right_field.name && left_field.type.type_equal(right_field.type) && right_field.type.type_equal(left_field.type)
+
 fun hardware_type(type):
   type is_a HardwareType
 
@@ -91,14 +139,20 @@ fun clock_type(type):
 fun reset_type(type):
   type is_a _ResetType
 
+fun record_type(type):
+  type is_a RecordType
+
 fun mux_selector_type(type):
   bits_type(type)
 
 fun selector_width(type):
   if bits_type(type) | type.width | #false
 
+fun record_fields_well_formed(fields):
+  fields.length() >= 1 && (for all (field in fields): field is_a RecordField && data_type(field.type) && type_well_formed(field.type))
+
 fun type_well_formed(type):
-  hardware_type(type)
+  hardware_type(type) && (!record_type(type) || record_fields_well_formed(type.fields))
 
 fun type_equal(left, right):
   hardware_type(left) && hardware_type(right) && left.type_equal(right) && right.type_equal(left)

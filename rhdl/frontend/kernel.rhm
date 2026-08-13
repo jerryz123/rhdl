@@ -11,6 +11,7 @@ export:
   frontend_run
   run_elaboration
   build_circuit
+  active_module
   input
   output
   literal
@@ -30,6 +31,8 @@ export:
   extract
   zext
   trunc
+  record_create
+  project
   reg
   inst
   connect
@@ -71,6 +74,10 @@ fun require_module(location = Location()):
   unless module_def is_a Module
   | frontend_fail("hardware construction requires an active circuit", location)
   module_def
+
+fun active_module(location = Location()):
+  require_context(location)
+  require_module(location)
 
 fun read(entity, location = Location()):
   def context = require_context(location)
@@ -283,6 +290,30 @@ fun trunc(entity, target_width, name = #false, location = Location()):
                         name,
                         location,
                         Origin("embedded trunc", name || ""))
+
+fun record_create(type, fields, name = #false, location = Location()):
+  def context = require_context(location)
+  unless fields is_a List
+  | frontend_fail("record fields must be supplied as a List", location)
+  context.builder.record_create(
+    require_module(location),
+    type,
+    fields.map(fun (field): [field[0], read(field[1], location)]),
+    name,
+    location,
+    Origin("embedded record create", name || "")
+  )
+
+fun project(entity, field_name, name = #false, location = Location()):
+  def context = require_context(location)
+  if entity is_a Place
+  | context.builder.project(entity, field_name)
+  | context.builder.record_get(require_module(location),
+                               read(entity, location),
+                               field_name,
+                               name,
+                               location,
+                               Origin("embedded record get", field_name))
 
 fun reg(name, type, clock, reset = #false, reset_value = #false,
         location = Location()):

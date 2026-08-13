@@ -50,10 +50,33 @@ fun ensure_value_in(module_def, value, who):
   unless owned
   | fail(who, "hardware value belongs to a different module")
 
+fun root_place(place):
+  if place is_a Place && place.parent is_a Place
+  | root_place(place.parent)
+  | place
+
 fun ensure_place_in(module_def, place, who):
-  def owned = place is_a Place && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+  def root = if place is_a Place | root_place(place) | #false
+  def owned = root && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
   unless owned
   | fail(who, "hardware place belongs to a different module")
+
+fun place_has_staged_driver(place):
+  place.driver || (for any (projected in place.projected_fields): place_has_staged_driver(projected))
+
+fun ancestor_has_driver(place):
+  if place.parent is_a Place
+  | place.parent.driver || ancestor_has_driver(place.parent)
+  | #false
+
+fun record_place_complete(place):
+  if place.driver
+  | #true
+  | if record_type(place.type)
+    | for all (field in place.type.fields):
+        def projected = place.projected_field(field.name)
+        projected && record_place_complete(projected)
+    | #false
 
 fun ensure_unique_hardware_name(module_def, name, who):
   when module_def.values.find(fun (value): value.name == name) || module_def.places.find(fun (place): place.name == name)
@@ -566,6 +589,137 @@ class Builder(design):
                           #'trunc,
                           {"target_width": target_width})
 
+  method record_create(module_def,
+                       type,
+                       field_values,
+                       name = #false,
+                       location = Location(),
+                       origin = Origin("record_create")):
+    ensure_module_in_design(design, module_def, #'record_create)
+    ensure_open(module_def, #'record_create)
+    unless record_type(type) && type_well_formed(type)
+    | fail(#'record_create, "record_create type must be a well-formed RecordType")
+    unless field_values is_a List
+    | fail(#'record_create, "record fields must be supplied as a List")
+    for (binding in field_values):
+      unless binding is_a List && binding.length() == 2 && binding[0] is_a String
+      | fail(#'record_create, "record fields must be [name, value] pairs")
+      unless type.field(binding[0])
+      | fail(#'record_create, "record has no field named " ++ binding[0])
+      when field_values.filter(~keep: fun (candidate): candidate[0] == binding[0]).length() != 1
+      | fail(#'record_create, "record field values must be unique")
+    unless field_values.length() == type.fields.length()
+    | fail(#'record_create, "record_create requires exactly one value for every field")
+    def normalized_values:
+      type.fields.map(
+        fun (field):
+          def binding = field_values.find(fun (candidate): candidate[0] == field.name)
+          unless binding
+          | fail(#'record_create, "record_create is missing field " ++ field.name)
+          ensure_value_in(module_def, binding[1], #'record_create)
+          unless type_equal(field.type, binding[1].type)
+          | fail(#'record_create,
+                 "record field " ++ field.name ++ " has the wrong hardware type")
+          binding[1]
+      )
+    build_value_operation(design,
+                          module_def,
+                          "rtl.record_create",
+                          normalized_values,
+                          type,
+                          name,
+                          location,
+                          origin,
+                          #'record_create,
+                          {"fields": type.fields.map(fun (field): field.name)})
+
+  method record_get(module_def,
+                    record,
+                    field_name,
+                    name = #false,
+                    location = Location(),
+                    origin = Origin("record_get")):
+    ensure_module_in_design(design, module_def, #'record_get)
+    ensure_open(module_def, #'record_get)
+    ensure_value_in(module_def, record, #'record_get)
+    unless record_type(record.type)
+    | fail(#'record_get, "record_get operand must have a RecordType")
+    unless field_name is_a String
+    | fail(#'record_get, "record field name must be a String")
+    def field = record.type.field(field_name)
+    unless field
+    | fail(#'record_get, "record has no field named " ++ field_name)
+    build_value_operation(design,
+                          module_def,
+                          "rtl.record_get",
+                          [record],
+                          field.type,
+                          name,
+                          location,
+                          origin,
+                          #'record_get,
+                          {"field": field_name})
+
+  method project(place, field_name):
+    unless place is_a Place
+    | fail(#'project, "field projection target must be a hardware Place")
+    def module_def = design.find_module(place.module_id)
+    ensure_module_in_design(design, module_def, #'project)
+    ensure_open(module_def, #'project)
+    ensure_place_in(module_def, place, #'project)
+    unless record_type(place.type)
+    | fail(#'project, "field projection target must have a RecordType")
+    unless field_name is_a String
+    | fail(#'project, "record field name must be a String")
+    def field = place.type.field(field_name)
+    unless field
+    | fail(#'project, "record has no field named " ++ field_name)
+    def existing = place.projected_field(field_name)
+    if existing
+    | existing
+    | block:
+        def projected = Place(#false,
+                              place.name ++ "." ++ field_name,
+                              field.type,
+                              module_def,
+                              place.owner_op_id,
+                              #false,
+                              place,
+                              field_name)
+        place.projected_fields := place.projected_fields ++ [projected]
+        projected
+
+  method assemble_record_place(place, location = Location()):
+    if !record_type(place.type) || !record_place_complete(place)
+    | #false
+    | block:
+        def mutable bindings = []
+        for (field in place.type.fields):
+          def projected = place.projected_field(field.name)
+          def field_value:
+            if projected.driver
+            | projected.driver
+            | this.assemble_record_place(projected, location)
+          bindings := bindings ++ [[field.name, field_value]]
+        this.record_create(place.module_def,
+                           place.type,
+                           bindings,
+                           #false,
+                           location,
+                           Origin("record place assembly", place.name))
+
+  method canonicalize_record_place(place, location = Location()):
+    def assembled = this.assemble_record_place(place, location)
+    if assembled
+    | block:
+        place.projected_fields := []
+        this.drive(place,
+                   assembled,
+                   location,
+                   Origin("record place canonicalization", place.name))
+        assembled
+    | #false
+
   method register(module_def,
                   name,
                   type,
@@ -675,7 +829,8 @@ class Builder(design):
     unless value is_a Value
     | fail(#'drive, "drive source must be a hardware Value")
     def module_def = design.find_module(place.module_id)
-    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+    def root = root_place(place)
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
     unless target_owned
     | fail(#'drive, "drive target belongs to a different design")
     ensure_open(module_def, #'drive)
@@ -685,34 +840,62 @@ class Builder(design):
     | fail(#'drive, "place and driver must have exactly the same hardware type")
     when place.driver
     | fail(#'drive, "place " ++ place.name ++ " already has a driver")
+    when ancestor_has_driver(place) || place.projected_fields.find(place_has_staged_driver)
+    | fail(#'drive, "record places cannot mix whole-record and field-wise drivers")
     place.driver := value
-    def operation_id = design.fresh_id()
-    def operation = Operation(operation_id,
-                              "rtl.drive",
-                              module_def,
-                              [value],
-                              [],
-                              [place],
-                              {},
-                              location,
-                              origin)
-    value.add_user(operation_id)
-    module_def.add_operation(operation)
+    unless place.projected()
+    | def operation_id = design.fresh_id()
+      def operation = Operation(operation_id,
+                                "rtl.drive",
+                                module_def,
+                                [value],
+                                [],
+                                [place],
+                                {},
+                                location,
+                                origin)
+      value.add_user(operation_id)
+      module_def.add_operation(operation)
     #void
 
   method read(place):
     unless place is_a Place
     | fail(#'read, "read target must be a hardware Place")
     def module_def = design.find_module(place.module_id)
-    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === place)
+    def root = root_place(place)
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
     unless target_owned
     | fail(#'read, "read target belongs to a different design")
-    unless place.driver
-    | fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
-    place.driver
+    if place.driver
+    | place.driver
+    | block:
+        def assembled = this.assemble_record_place(place)
+        cond
+        | assembled && place.projected():
+            place.driver := assembled
+            assembled
+        | assembled:
+            place.projected_fields := []
+            this.drive(place,
+                       assembled,
+                       Location(),
+                       Origin("record place canonicalization", place.name))
+            assembled
+        | place.projected():
+            def parent_value = this.read(place.parent)
+            this.record_get(module_def, parent_value, place.field_name)
+        | ~else:
+            fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
 
   method finish(module_def):
     ensure_module_in_design(design, module_def, #'finish)
     ensure_open(module_def, #'finish)
+    for (place in module_def.places):
+      when !place.driver && record_type(place.type)
+      | when place_has_staged_driver(place) && !record_place_complete(place)
+        | fail(#'finish,
+               "record place " ++ place.name ++ " has incomplete field-wise drivers")
+        when record_place_complete(place)
+        | this.canonicalize_record_place(place)
     module_def.finished := #true
     module_def

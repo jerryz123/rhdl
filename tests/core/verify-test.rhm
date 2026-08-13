@@ -355,3 +355,78 @@ block:
   module_def.finished := #true
   check:
     verify_design(design) ~throws "requires attribute value"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("IncompleteRecordDrive")
+  def pair_type = RecordType([RecordField("left", Bits(8)),
+                              RecordField("right", Bits(8))])
+  def source = builder.input(module_def, "source", Bits(8))
+  def target = builder.output(module_def, "target", pair_type)
+  builder.drive(builder.project(target, "left"), source)
+  check:
+    builder.finish(module_def) ~throws "incomplete field-wise drivers"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("MixedRecordDrive")
+  def pair_type = RecordType([RecordField("left", Bits(8)),
+                              RecordField("right", Bits(8))])
+  def left = builder.input(module_def, "left", Bits(8))
+  def right = builder.input(module_def, "right", Bits(8))
+  def whole = builder.record_create(module_def,
+                                    pair_type,
+                                    [["left", left], ["right", right]])
+  def target = builder.output(module_def, "target", pair_type)
+  builder.drive(builder.project(target, "left"), left)
+  check:
+    builder.drive(target, whole) ~throws "cannot mix"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("BadRecordConstruction")
+  def pair_type = RecordType([RecordField("left", Bits(8)),
+                              RecordField("right", Bits(8))])
+  def value = builder.input(module_def, "value", Bits(8))
+  def narrow = builder.input(module_def, "narrow", Bits(4))
+  check:
+    builder.record_create(module_def,
+                          pair_type,
+                          [["left", value]]) ~throws "exactly one value"
+    builder.record_create(module_def,
+                          pair_type,
+                          [["left", value], ["left", value]]) ~throws "unique"
+    builder.record_create(module_def,
+                          pair_type,
+                          [["left", value], ["missing", value]]) ~throws "no field named missing"
+    builder.record_create(module_def,
+                          pair_type,
+                          [["left", value], ["right", narrow]]) ~throws "wrong hardware type"
+    builder.record_get(module_def, value, "left") ~throws "must have a RecordType"
+    builder.record_get(module_def,
+                       builder.record_create(module_def,
+                                             pair_type,
+                                             [["left", value], ["right", value]]),
+                       "missing") ~throws "no field named missing"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("AtomicNestedRecordDrive")
+  def pair_type = RecordType([RecordField("left", Bits(8)),
+                              RecordField("right", Bits(8))])
+  def envelope_type = RecordType([RecordField("payload", pair_type),
+                                  RecordField("tag", Bits(2))])
+  def value = builder.input(module_def, "value", Bits(8))
+  def target = builder.output(module_def, "target", envelope_type)
+  def payload = builder.project(target, "payload")
+  builder.drive(builder.project(payload, "left"), value)
+  builder.drive(builder.project(payload, "right"), value)
+  check:
+    builder.finish(module_def) ~throws "incomplete field-wise drivers"
+    module_def.operations.filter(
+      ~keep: fun (operation): operation.opcode == "rtl.record_create"
+    ).length() ~is 0

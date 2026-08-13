@@ -62,6 +62,30 @@ check:
   schema_for("rtl.reinterpret").type_rule ~is "flat_reinterpret"
   schema_for("rtl.as_clock").circt_lowering ~is "alias"
   schema_for("rtl.drive").type_rule ~is "type_equal_drive"
+  schema_for("rtl.record_create").type_rule ~is "record_create"
+  schema_for("rtl.record_get").circt_lowering ~is "hw.struct_extract"
+
+def pair8 = RecordType([RecordField("left", Bits(8)),
+                        RecordField("right", Bits(8))])
+def another_pair8 = RecordType([RecordField("left", Bits(8)),
+                                RecordField("right", Bits(8))])
+def reversed_pair8 = RecordType([RecordField("right", Bits(8)),
+                                 RecordField("left", Bits(8))])
+def nested_pair = RecordType([RecordField("payload", pair8),
+                              RecordField("valid", Bits(1))])
+
+check:
+  record_type(pair8) ~is #true
+  data_type(pair8) ~is #true
+  flat_data_type(pair8) ~is #false
+  bitwise_type(pair8) ~is #false
+  type_well_formed(nested_pair) ~is #true
+  type_equal(pair8, another_pair8) ~is #true
+  type_equal(pair8, reversed_pair8) ~is #false
+  pair8.field("left").type.width ~is 8
+  RecordType([]) ~throws "nonempty List"
+  RecordType([RecordField("value", Bits(1)),
+              RecordField("value", Bits(1))]) ~throws "unique"
 
 block:
   def design = Design()
@@ -107,3 +131,48 @@ block:
     type_equal(combined.type, extension_bits) ~is #true
   def finished = builder.finish(module_def)
   verify_design(design)
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("Records")
+  def clock = builder.input(module_def, "clock", Clock)
+  def reset = builder.input(module_def, "reset", Reset)
+  def select = builder.input(module_def, "select", Bits(1))
+  def left = builder.input(module_def, "left", Bits(8))
+  def right = builder.input(module_def, "right", Bits(8))
+  def output = builder.output(module_def, "output", pair8)
+  def initial = builder.record_create(module_def,
+                                      pair8,
+                                      [["right", right], ["left", left]],
+                                      "initial")
+  def initial_left = builder.record_get(module_def, initial, "left", "initial_left")
+  def alternate = builder.record_create(module_def,
+                                        pair8,
+                                        [["left", right], ["right", left]],
+                                        "alternate")
+  def selected = builder.mux_lookup(module_def,
+                                    select,
+                                    initial,
+                                    [[1, alternate]],
+                                    "selected")
+  def state = builder.register(module_def,
+                               "state",
+                               pair8,
+                               clock,
+                               reset,
+                               initial)
+  builder.drive(state.next, selected)
+  builder.drive(builder.project(output, "left"),
+                builder.record_get(module_def, state.current, "right"))
+  builder.drive(builder.project(output, "right"), initial_left)
+  def finished = builder.finish(module_def)
+  check:
+    output.driver.type.type_equal(pair8) ~is #true
+    module_def.operations.filter(
+      ~keep: fun (operation): operation.opcode == "rtl.record_create"
+    ).length() ~is 3
+    module_def.operations.filter(
+      ~keep: fun (operation): operation.opcode == "rtl.drive" && operation.places[0] === output
+    ).length() ~is 1
+    verify_design(design) ~is #void

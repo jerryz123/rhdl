@@ -1,0 +1,50 @@
+#lang rhdl
+// Demonstrates explicit-role interfaces layered over directional record ports.
+
+interface ReadyValid(T):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+
+  consumer -> producer:
+    ready: Bool
+
+circuit ReadyValidAdapter(width):
+  interface ingress(ReadyValid(Bits(width)), ~role: consumer)
+  interface egress(ReadyValid(Bits(width)), ~role: producer)
+
+  egress <=> ingress
+
+circuit ReadyValidSource(width):
+  input valid: Bool
+  input bits_in: Bits(width)
+  output accepted: Bool
+  interface tx(ReadyValid(Bits(width)), ~role: producer)
+
+  tx.valid <== valid
+  tx.bits <== bits_in
+  accepted <== tx.ready
+
+circuit ReadyValidHierarchy(width):
+  input valid: Bool
+  input bits_in: Bits(width)
+  output accepted: Bool
+  interface tx(ReadyValid(Bits(width)), ~role: producer)
+
+  inst source(ReadyValidSource(width))
+  source.valid <== valid
+  source.bits_in <== bits_in
+  accepted <== source.accepted
+  tx <=> source.tx
+
+def design = elaborate(ReadyValidAdapter(8))
+
+export:
+  ReadyValid
+  ReadyValidAdapter
+  ReadyValidSource
+  ReadyValidHierarchy
+  design

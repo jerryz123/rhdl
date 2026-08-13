@@ -8,8 +8,9 @@ The first manually constructed vertical slice is implemented. It currently
 provides:
 
 - `Design`, `Module`, `Operation`, `Value`, `Place`, `HardwareType`, `DataType`,
-  `FlatDataType`, `BitwiseType`, `Bits`, `Clock`, `Reset`, `Location`, and
-  `Origin` handles with stable IDs and explicit owning-object relationships.
+  `FlatDataType`, `BitwiseType`, `Bits`, `Clock`, `Reset`, `RecordType`,
+  `RecordField`, `Location`, and `Origin` handles with stable IDs and explicit
+  owning-object relationships.
 - A static namespaced operation-schema table that records arity, required
   attributes, type rules, printing forms, and CIRCT lowering targets.
 - Builder support for ports, constants, same-width bitwise logic, modular
@@ -31,20 +32,26 @@ provides:
   that use the ordinary Rhombus reader, layer public frontend modules over an
   importable elaboration kernel, permit host-language abstraction, create
   fresh circuit definitions, and use the same CIRCT and Verilator backend path.
+- Core structural records with construction, projection, canonical field-wise
+  place assignment, generic mux/register support, nested `hw.struct` lowering,
+  and focused simulation.
+- Frontend bundle syntax and explicit-role two-way interfaces, including
+  atomic bulk connection and metadata-based reconstruction at instances.
 
 Native core `Clock` and `Reset` types, an extension-defined frontend `Bool`,
 and the canonical N-way `rtl.mux_lookup` operation are implemented. Core and
 the CIRCT backend depend on open type capabilities rather than on `Bool`.
 
 The first-cut Builder-to-CIRCT vertical slice and IR contract are complete.
-The complete initial frontend surface is implemented and is the canonical path
-for examples and positive integration fixtures. User rewrite transactions
-remain future work.
+The complete initial scalar frontend, core-record, bundle, and two-role
+interface surfaces are implemented and are the canonical path for examples
+and positive integration fixtures. IR mutation and rewriting are explicitly
+deferred.
 
 ## 1. Goal
 
-RHDL is a Rhombus-hosted language for elaborating, inspecting, transforming,
-and compiling digital hardware.
+RHDL is a Rhombus-hosted language for elaborating, verifying, inspecting, and
+compiling digital hardware.
 
 The initial implementation will establish one small, public hardware IR and a
 complete path from Rhombus source to generated RTL. It will favor explicit
@@ -62,9 +69,8 @@ deterministic elaboration
     |
     v
 public RHDL hardware IR
-    |             ^
-    |             |
-    +--- inspection and user rewrites
+    |
+    +--- read-only inspection
     |
     v
 backend lowering
@@ -90,8 +96,9 @@ has exactly one effective driver. Hardware values cannot control host
 conditionals or iteration. Registers are explicit state primitives. Module
 generators accept host parameters and produce fresh module definitions.
 
-The IR is a normal public programming interface. Users can inspect it, walk
-use-def relationships, and transform it through controlled rewriting APIs.
+The IR is a normal public programming interface. Users can inspect modules,
+operations, types, and use-def relationships. A mutation API may be added
+later, but it does not shape the immediate implementation sequence.
 
 ## 3. Syntax, elaboration, and IR
 
@@ -267,6 +274,13 @@ has been assigned.
 Places and values belong to one design and one module scope. Cross-design and
 illegal cross-hierarchy references are verifier errors.
 
+A place whose type is `RecordType` exposes recursively projected field places
+during construction. Driving the whole place and driving projected fields are
+mutually exclusive. Before module completion, the Builder canonicalizes a
+complete set of leaf drives into nested `rtl.record_create` operations and one
+whole-record drive. Partial or mixed driving is invalid. This rule applies
+uniformly to module outputs, instance inputs, and register next-state places.
+
 ## 5. Hardware types and selection
 
 Core supplies these concrete hardware types:
@@ -275,6 +289,7 @@ Core supplies these concrete hardware types:
 Bits(width)
 Clock
 Reset
+RecordType(fields)
 ```
 
 The open core protocol is `HardwareType`, with progressively stronger
@@ -295,6 +310,14 @@ active-high reset signal, while the consuming register operation determines
 that its behavior is synchronous. Clock selection requires a dedicated clock
 operation and is never an ordinary data mux.
 
+`RecordType` is a structural `DataType` containing an ordered, nonempty set of
+uniquely named `DataType` fields. Field names participate in type equality;
+two records are equal only when they have the same fields in the same order
+and each corresponding field type is equal. Records may nest. They are not
+implicitly packed into `Bits`, and no bit layout or `reinterpret` between a
+record and a flat type is defined. `RecordType` therefore does not implement
+`FlatDataType` or `BitwiseType`.
+
 Rules:
 
 - `width` is an explicit positive host `Int`.
@@ -314,6 +337,8 @@ add/sub(Bits(w), Bits(w))                 -> Bits(w)
 eq(Bits(w), Bits(w))                      -> Bits(1)
 mux_lookup(Bits(w), cases: Key -> T,
            default:T)                    -> T
+record_create(field values matching R)   -> R: RecordType
+record_get(R, field_name)                 -> R.field_type(field_name)
 reinterpret(A: FlatDataType,
             B: FlatDataType of same width) -> B
 concat(Bits(a), Bits(b), ...)             -> Bits(a + b + ...)
@@ -359,6 +384,16 @@ operand in the most-significant bits. Zero extension adds zeroes on the
 most-significant side, and truncation retains the least-significant bits.
 Multiplication and shifts can be added after their width rules are specified.
 
+Because `RecordType` is a `DataType`, the existing generic register and
+`mux_lookup` rules accept record values without record-specific variants.
+Record construction and projection are the only new combinational operations.
+Record places support field projection as a core construction operation: a
+record place may be driven exactly once as a whole, or all of its leaf places
+may be driven exactly once, but whole-record and field-wise driving may not be
+mixed. The Builder canonicalizes complete field-wise drives to ordinary record
+construction plus a whole-place drive. The verifier rejects any incomplete or
+noncanonical aggregate drive state that reaches a verification boundary.
+
 ## 6. Initial operations
 
 ### 6.1 Structure
@@ -392,6 +427,8 @@ concat
 extract
 zext
 trunc
+record_create
+record_get
 ```
 
 These form the canonical combinational representation. There is no initial
@@ -493,7 +530,7 @@ At an instance in its parent module:
 There are no implicit hierarchical references. Communication across a module
 boundary occurs only through ports.
 
-## 8. Public construction and transformation APIs
+## 8. Public construction, inspection, and compilation APIs
 
 ### 8.1 Builder
 
@@ -516,25 +553,9 @@ The initial Builder owns one design, while the module being edited is passed
 explicitly to construction methods. Operations accept source locations and
 origins. The Builder rejects locally impossible operations immediately, while
 whole-graph checks run at verification boundaries. An insertion-point API is
-deferred until regions or rewriting require one.
+deferred until regions require one.
 
-### 8.2 Rewriter
-
-Existing IR is structurally mutable only through a rewriter:
-
-```text
-rewriter.replace(...)
-rewriter.erase(...)
-rewriter.insert_before(...)
-rewriter.insert_after(...)
-```
-
-A rewrite transaction may temporarily contain incomplete relationships, but it
-must verify before completion. Erased operations and values invalidate their
-handles. Iteration and `users()` return documented snapshots so mutation does
-not silently corrupt traversal.
-
-### 8.3 Elaboration and compilation
+### 8.2 Elaboration, inspection, and compilation
 
 The IR boundary remains explicit:
 
@@ -547,11 +568,12 @@ design.dump_ir()
 for op in design.walk():
     ...
 
-compile(design, passes = [...])
+compile(design)
 ```
 
-Compilation verifies after elaboration and after every user transformation
-stage.
+Inspection is read-only. Compilation verifies the completed design before
+lowering. User-authored mutation passes and rewrite transactions are future
+work rather than an acceptance criterion for the aggregate/type-system work.
 
 ## 9. Verification invariants
 
@@ -564,13 +586,15 @@ The target IR Builder and verifier enforce:
    driver.
 5. A place and its driver have exactly the same hardware type.
 6. Operation operands and results satisfy their schema type rules.
-7. Lookup selectors and keys are valid, lookup keys are unique, and every case
+7. Record types have unique ordered fields, record construction and projection
+   match those fields, and every record place uses one complete drive mode.
+8. Lookup selectors and keys are valid, lookup keys are unique, and every case
    and default has the result `DataType`.
-8. Register clocks are `Clock`, and synchronous reset operands are `Reset`.
-9. A reset value is present exactly when reset is present and matches the
+9. Register clocks are `Clock`, and synchronous reset operands are `Reset`.
+10. A reset value is present exactly when reset is present and matches the
    register state type.
-10. Module instances reference a completed module definition.
-11. Purely combinational cycles are rejected.
+11. Module instances reference a completed module definition.
+12. Purely combinational cycles are rejected.
 
 The frontend additionally rejects recursive generator elaboration and prevents
 hardware values from controlling host conditionals. Those checks do not belong
@@ -578,8 +602,7 @@ to the manual IR verifier because the host computation is no longer present
 once IR exists.
 
 Complete source-location and multi-location diagnostic reporting is useful but
-is not a gate for the initial language or rewriting work. It is deferred to
-hardening.
+is not a gate for the aggregate/type-system work. It is deferred to hardening.
 
 ## 10. Provenance and naming
 
@@ -592,9 +615,8 @@ name_hint      optional semantic name for diagnostics and generated RTL
 ```
 
 Macro-introduced operations retain the user's call-site location plus an origin
-record for the expansion. Rewrites preserve the replaced operation's origin by
-default. When several operations are combined, the new origin may reference
-multiple parent origins.
+record for the expansion. When several frontend constructs contribute to one
+operation, its origin may reference multiple parent origins.
 
 IR identity and user-facing names are separate. Names may be changed or made
 unique without changing value, operation, or module identity.
@@ -628,10 +650,12 @@ SystemVerilog
 The initial backend lowers directly to CIRCT's `hw`, `comb`, and `seq`
 dialects. Every `FlatDataType` becomes a signless integer of its declared bit
 width, without requiring the backend to know its concrete type; this includes
-core `Bits` and the frontend's extension-defined `Bool`. `Reset` lowers to a
-one-bit value, and `Clock` lowers through the backend's clock representation.
-Modules and instances become `hw` operations, combinational values become
-`comb` operations, and primitive registers become `seq` operations.
+core `Bits` and the frontend's extension-defined `Bool`. `RecordType` lowers
+recursively to `hw.struct`, preserving field names and order. `Reset` lowers
+to a one-bit value, and `Clock` lowers through the backend's clock
+representation. Modules and instances become `hw` operations, combinational
+values become `comb` or `hw` operations, and primitive registers become `seq`
+operations.
 Active-high synchronous reset is preserved explicitly with `seq.firreg` and
 `reset sync`.
 
@@ -659,6 +683,8 @@ rtl.concat              comb.concat
 rtl.extract             comb.extract
 rtl.zext                comb.concat with a zero high part
 rtl.trunc               comb.extract from bit zero
+rtl.record_create       hw.struct_create
+rtl.record_get          hw.struct_extract
 ```
 
 These mappings are part of the backend contract. RHDL should not introduce
@@ -667,14 +693,14 @@ composition.
 
 ## 12. Remaining non-goals
 
-The native-type and canonical-selection refactor still deliberately excludes:
+The current record-and-interface sequence deliberately excludes:
 
 - `when` and conditional-connect semantics.
 - General wires or multiple/priority connects.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths or general width inference.
-- Arrays, structs, and memories.
+- Arrays and memories.
 - Asynchronous or active-low resets.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.
@@ -806,31 +832,69 @@ checks where static information is unavailable.
   focused negative tests. Preserve direct `comb.mux` lowering for the one-bit
   one-case form, without teaching the backend about `Bool`.
 
-### Phase 3.6: frontend aggregate and interface prototype
+### Phase 3.6: core records and frontend aggregates — complete
 
-Prototype aggregates as a language extension before adding aggregate values
-to the core IR. The extension flattens each aggregate port into deterministic
-scalar `HardwareType` ports, retains its logical shape in frontend metadata,
-and reconstructs the same view at instance boundaries. It must not pack an
-aggregate into one `Bits` value merely to fit the current core.
+Add aggregates as a complete vertical slice rather than as a flattened
+frontend experiment. A record is a real core hardware value: it can cross a
+module boundary, be constructed and projected, drive a record place, and be
+selected or stored wherever an operation accepts any `DataType`.
 
-Keep two distinct abstractions:
+Implement the slice in this order:
 
-- A **bundle** is a named value shape whose fields all inherit the enclosing
-  port direction. It provides nesting, field projection, and structural bulk
-  connection over scalar leaves.
-- An **interface** describes communication between two explicitly named roles.
-  Each field declares which role drives it. An interface is a group of related
-  ports, not initially a `DataType` and not a value accepted by registers,
-  muxes, equality, or other core operations.
+1. Add structural `RecordType` to core with ordered named fields, nesting,
+   recursive well-formedness, deterministic printing, and structural
+   `type_equal` support.
+2. Add `rtl.record_create` and `rtl.record_get`, plus readable field projection
+   on record values.
+3. Add projected record places and complete driver accounting. Support either
+   one whole-record drive or complete field-wise drives for module outputs,
+   instance inputs, and register next-state places; reject partial and mixed
+   driving, and canonicalize complete field drives to `rtl.record_create` plus
+   one whole-record drive before module completion.
+4. Confirm that the existing generic `mux_lookup` and register operations
+   accept `RecordType` without introducing `record_mux` or `record_reg`
+   operations.
+5. Lower record types, construction, projection, aggregate ports, aggregate
+   muxes, and aggregate registers through CIRCT's `hw` and `seq` dialects.
+6. Add the frontend `bundle` extension as concise syntax for defining a
+   `RecordType` plus its constructor and field accessors. Bundle ports remain
+   single record-typed core ports; they are not flattened into unrelated
+   scalar ports.
+7. Add aggregate literals/construction, nested dot access, whole-bundle bulk
+   connection, and field-wise assignment. All connection checks happen before
+   emitting a partial set of drives.
+8. Add focused core, frontend, backend, and Verilator tests covering nested
+   records, ports, instances, construction/projection, bulk and field-wise
+   connection, muxes, registers, resets, and invalid driver/type cases.
 
-The intended source model is:
+The intended bundle surface is:
 
 ```text
 bundle Pair(T):
   left: T
   right: T
 
+circuit Swap(width):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  result.left <== source.right
+  result.right <== source.left
+```
+
+The frontend syntax is an extension over core record semantics, not a parallel
+aggregate model. A lower-level `#lang rhdl/base` example must build the same
+record circuit using `RecordType`, record construction/projection, and ordinary
+core connections, and equivalence tests must compare both RHDL IR and CIRCT
+MLIR.
+
+### Phase 3.7: role-based interfaces — complete
+
+Build interfaces as a complete frontend abstraction after records work end to
+end. An interface is not itself a `DataType`: it is a typed group of record
+ports whose directions depend on an explicitly selected protocol role.
+
+```text
 interface ReadyValid(T):
   role producer
   role consumer
@@ -843,71 +907,49 @@ interface ReadyValid(T):
     ready: Bool
 
 circuit Example(width):
-  input source: Pair(Bits(width))
-  output result: Pair(Bits(width))
-  interface tx: ReadyValid(Bits(width)) as producer
-  interface rx: ReadyValid(Bits(width)) as consumer
+  interface tx(ReadyValid(Bits(width)), ~role: producer)
+  interface rx(ReadyValid(Bits(width)), ~role: consumer)
 
-  result <== source
   tx <=> rx
 ```
 
-Named roles replace a generic direction-reversing type wrapper. The local
-direction of every interface leaf follows from the selected role and the
-field's declared flow. At an instance boundary, ordinary input/output
-inversion still follows from core instance semantics; the interface role
-itself remains stable and visible. Bulk interface connection requires
-compatible interface definitions and complementary roles. This makes role
-meaning explicit in APIs and leaves room for protocols with names such as
-`requester`/`responder`, `controller`/`peripheral`, or
-`producer`/`consumer`.
+Each declared flow becomes one record-typed core port. For a `producer`
+endpoint above, `{valid, bits}` is an output record and `{ready}` is an input
+record; the `consumer` role receives the opposite directions. Named roles are
+part of the interface definition and there is no generic `Flipped` or
+`flipped(...)` type operation.
 
-Implement this prototype in the following order:
+The interface extension owns its protocol descriptor and attaches it to the
+frontend circuit definition alongside the elaborated core module. Instance dot
+access uses that descriptor to reconstruct the logical interface; it never
+infers structure from generated port names. Core and the backend see only
+ordinary typed ports and do not interpret roles or bulk-connection policy.
 
-1. Add a frontend-only shape protocol and aggregate view over ordered scalar
-   leaves. Scalar `HardwareType` remains the base case.
-2. Add bundles, deterministic flattening, nested field projection, and atomic
-   bulk connection. Flattened names use a reserved separator and are checked
-   for collisions.
-3. Preserve logical port-group metadata on elaborated modules and use it to
-   reconstruct bundle views through concise instance dot access. Do not infer
-   aggregate structure from flattened names.
-4. Add precise structural diagnostics for missing fields, unexpected fields,
-   leaf type mismatches, illegal directions, recursive shapes, and name
-   collisions.
-5. Add two-role interfaces with named roles, per-field flow declarations, and
-   complementary-role bulk connection. Do not add a generic `Flipped` or
-   `flipped(...)` operation.
-6. Prove the extension boundary with paired examples and focused tests showing
-   that manually flattened, bundled, and interface-authored circuits produce
-   equivalent core IR and CIRCT MLIR.
+This phase includes:
 
-This phase intentionally excludes aggregate-valued literals and operations,
-aggregate registers and muxes, core grouping metadata, and general multi-role
-protocols. Fieldwise frontend helpers may be explored without claiming that
-an aggregate is a core hardware value.
+1. Parameterized two-role interface definitions with ordered, nested
+   `DataType` fields and explicit field flows.
+2. Endpoint declaration, field access, and reconstruction across module
+   instances.
+3. Atomic `<=>` connection that requires the same interface definition,
+   compatible parameters, and complementary effective directions, then
+   connects both flows. Two module-boundary endpoints normally use
+   complementary roles; a module boundary and an inverted instance view
+   normally use the same declared role.
+4. Explicit one-way access for adapters and protocol logic; bulk connection is
+   convenience, not the only way to use an endpoint.
+5. Diagnostics for duplicate roles or fields, unknown roles, same-role bulk
+   connection, incompatible interface parameters, mismatched field types, and
+   incomplete underlying connections.
+6. A manually expressed pair-of-record-ports example and a role-interface
+   example that produce equivalent core IR and CIRCT MLIR, followed by CIRCT
+   verification and Verilator simulation.
 
-After the prototype settles field access, role syntax, bulk connection, and
-diagnostics, promote a structural `RecordType`, record construction, and
-record projection into core when aggregates need value semantics such as
-storage or selection. Interface roles and bulk connection remain frontend
-policy. Add neutral core grouping metadata only if inspection, rewriting, or
-module APIs must preserve source-level grouping after elaboration.
+Multi-role protocols, optional fields, arrays, and protocol behavior such as
+arbitration remain separate extensions. They are not required to make the
+two-role interface feature internally complete.
 
-### Phase 4: inspection and rewriting
-
-- Stabilize inspection first: make `walk` return documented snapshots, expose
-  `Value.defining_op` as an operation handle, make `Value.users()` return
-  operation handles instead of internal IDs, and expose a place's owning
-  operation without leaking its internal ID.
-- Update the verifier, CIRCT lowering, and tests to use the public inspection
-  contract where appropriate.
-- Implement rewrite transactions and handle invalidation.
-- Add a user pass that replaces `x + 0` with `x`.
-- Verify automatically after every user pass.
-- Check that provenance survives replacement.
-
-### Phase 5: hardening
+### Phase 4: hardening
 
 - Expand negative diagnostic coverage and improve source-location and
   multi-location diagnostic quality when prioritized.
@@ -918,6 +960,15 @@ module APIs must preserve source-level grouping after elaboration.
 - Differentially simulate generated modules against an elaboration-time
   reference model where practical.
 - Document the public IR compatibility policy.
+
+### Deferred: IR mutation and rewriting
+
+Read-only inspection remains supported, but user-authored IR mutation is not
+an immediate project goal. Rewrite transactions, insertion points, handle
+invalidation, mutation-safe traversal, optimization passes, and provenance
+rules for replacement operations should be designed together only when a
+concrete transformation use case justifies them. Aggregate implementation and
+hardening do not depend on that work.
 
 ## 14. Acceptance milestones
 
@@ -973,7 +1024,7 @@ RHDL can:
 
 The design surface and canonical examples are complete. Comprehensive
 source-location coverage for whole-graph verifier diagnostics is deferred to
-Phase 5 and does not block inspection or rewriting.
+Phase 4 and does not block aggregate types or interfaces.
 
 ### Milestone E: extensible scalar types and canonical selection — complete
 
@@ -992,10 +1043,21 @@ RHDL can:
    one-bit binary lookup to `comb.mux`, lower wider lookup through CIRCT, and
    pass focused simulation tests.
 
-### Milestone F: inspection and rewriting
+### Milestone F: records and bundles
 
-RHDL can apply a user-authored `x + 0 -> x` rewrite, preserve provenance,
-invalidate replaced handles, and automatically reverify the design.
+RHDL can construct, project, connect, select, register, reset, pass through
+module ports, lower, and simulate nested structural records. The standard
+frontend can express the same semantics through bundles, including nested dot
+access and atomic whole or field-wise connections.
 
-These milestones keep the manual IR/backend contract, surface language, and
-mutation model independently testable.
+### Milestone G: role-based interfaces
+
+RHDL can define a parameterized two-role interface, expose either role on a
+module, reconstruct it through an instance, connect direction-compatible
+endpoints atomically in both directions, and lower the result as ordinary
+record-typed core ports. Equivalent explicit-record and interface-authored
+examples produce the same core IR and CIRCT MLIR and pass simulation.
+
+These milestones keep core type/value semantics, frontend language
+extensions, and backend lowering independently testable. IR mutation is not a
+milestone for the current implementation sequence.

@@ -1,0 +1,60 @@
+#lang rhombus
+// Checks explicit-role interfaces, bulk connection, field access, and instance reconstruction.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/extensions/interface.rhm" open
+  "../../examples/interface.rhdl" as interface_fixture
+
+def adapter_design = interface_fixture.design
+def adapter = adapter_design.modules[0]
+def source_design = embedded.run_elaboration(fun (): interface_fixture.ReadyValidSource(8))
+def source = source_design.modules[0]
+def hierarchy_design = embedded.run_elaboration(
+  fun (): interface_fixture.ReadyValidHierarchy(8)
+)
+def hierarchy = hierarchy_design.modules.find(
+  fun (module_def): module_def.name.starts_with("ReadyValidHierarchy")
+)
+def hierarchy_instance = hierarchy.operations.find(
+  fun (operation): operation.opcode == "rtl.instance"
+)
+
+check:
+  adapter.inputs.map(fun (port): port.name) ~is ["ingress__producer_to_consumer", "egress__consumer_to_producer"]
+  adapter.outputs.map(fun (port): port.name) ~is ["ingress__consumer_to_producer", "egress__producer_to_consumer"]
+  adapter.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.drive"
+  ).length() ~is 2
+  source.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.record_create"
+  ).length() ~is 1
+  source.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.record_get"
+  ).length() ~is 1
+  hierarchy_instance.places.length() ~is 3
+  hierarchy_instance.results.length() ~is 2
+  hierarchy.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.drive"
+  ).length() ~is 5
+  verify_design(adapter_design) ~is #void
+  verify_design(source_design) ~is #void
+  verify_design(hierarchy_design) ~is #void
+
+block:
+  def payload = RecordType([RecordField("payload", Bits(8))])
+  def first = InterfaceType(
+    "First",
+    ["producer", "consumer"],
+    [InterfaceFlow("producer", "consumer", payload)]
+  )
+  check:
+    InterfaceType("BadRoles",
+                  ["producer", "producer"],
+                  [InterfaceFlow("producer", "consumer", payload)]) ~throws "two distinct roles"
+    InterfaceType("DuplicateFlow",
+                  ["producer", "consumer"],
+                  [InterfaceFlow("producer", "consumer", payload),
+                   InterfaceFlow("producer", "consumer", payload)]) ~throws "unique role directions"
+    first.complementary_role("producer") ~is "consumer"

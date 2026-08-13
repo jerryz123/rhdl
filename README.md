@@ -5,10 +5,11 @@
 RHDL is an experimental Rhombus-hosted hardware description system. The first
 cut implements a small public hardware IR with explicit readable values,
 driveable places, fixed-width bit vectors, native control types, extensible
-flat data types, primitive registers, module instances, identity-based
-ownership, namespaced operation schemas,
-verification, deterministic IR printing, CIRCT lowering, and an embedded
-`#lang rhdl` frontend built as a thin layer over ordinary Rhombus.
+flat data types, structural records, primitive registers, module instances,
+identity-based ownership, namespaced operation schemas, verification,
+deterministic IR printing, CIRCT lowering, and an embedded `#lang rhdl`
+frontend with bundles and role-based interfaces built as layers over ordinary
+Rhombus.
 
 RHDL does not emit SystemVerilog. It lowers its public IR to CIRCT MLIR using
 the `hw`, `comb`, and `seq` dialects. CIRCT then lowers sequential operations
@@ -66,7 +67,7 @@ make test
 ```
 
 This runs the Rhombus unit and negative-verification tests, emits and verifies
-CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, and runs five
+CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, and runs seven
 Verilator simulations:
 
 - An 8-bit modular adder.
@@ -76,6 +77,8 @@ Verilator simulations:
   extension, and truncation.
 - An 8-bit counter with active-high synchronous reset.
 - Two instances that explicitly reuse one adder module definition.
+- A record-valued mux and synchronous-reset register.
+- Both directions of a ready-valid interface adapter.
 
 Validate the canonical frontend examples with:
 
@@ -112,11 +115,11 @@ places four equivalent adders side by side:
 - Explicit composition of `#lang rhdl/base` with combinational syntax.
 - Concise construction through standard macros and operators.
 
-`make lop-test` verifies that the four programs produce identical printed
-RHDL IR and identical CIRCT MLIR. The remaining examples each focus on one
-extension boundary: Boolean types and selection, register notation, instance
-dot access, host-generated structure, ordinary imported libraries, or
-width-changing core semantics.
+`make lop-test` verifies that the four adder programs produce identical
+printed RHDL IR and identical CIRCT MLIR. It also checks equivalence pairs for
+an explicit record circuit versus concise bundles, and explicit directional
+record ports versus role-based interfaces. The remaining examples each focus
+on one extension boundary.
 
 ## Frontend
 
@@ -140,11 +143,12 @@ def design = elaborate(Adder(8))
 ```
 
 The importable optional modules are `extensions/comb.rhm`,
-`extensions/bool.rhm`, `extensions/sequential.rhm`, and
-`extensions/hierarchy.rhm`. `frontend/standard.rhm` aggregates them with
-`frontend/base.rhm`. The public core Builder and raw elaboration kernel are
-deliberately not in either language profile; lower-level code imports
-`rhdl/core/main.rhm` or `rhdl/frontend/kernel.rhm` explicitly.
+`extensions/bool.rhm`, `extensions/bundle.rhm`, `extensions/interface.rhm`,
+`extensions/sequential.rhm`, and `extensions/hierarchy.rhm`.
+`frontend/standard.rhm` aggregates them with `frontend/base.rhm`. The public
+core Builder and raw elaboration kernel are deliberately not in either
+language profile; lower-level code imports `rhdl/core/main.rhm` or
+`rhdl/frontend/kernel.rhm` explicitly.
 
 ```rhombus
 #lang rhdl
@@ -188,6 +192,48 @@ sum <== u0.sum
 This expands to the kernel's `inst("u0", child_definition)`,
 `u0.input("a")`, and `u0.output("sum")` operations. Port direction and type
 checking still use the elaborated child-module interface.
+
+Core records are structural `DataType` values and therefore work with ports,
+instances, muxes, and registers. The bundle extension supplies concise type
+declarations, construction, and field access:
+
+```rhombus
+bundle Pair(T):
+  left: T
+  right: T
+
+input source: Pair(Bits(width))
+output result: Pair(Bits(width))
+result.left <== source.right
+result.right <== source.left
+```
+
+Complete field-wise drives canonicalize to `rtl.record_create` followed by one
+whole-record drive. Partial field assignment and mixing whole-record with
+field-wise assignment are errors. The generic `record(T): ...` form constructs
+a record value explicitly.
+
+Interfaces remain a frontend protocol abstraction over directional
+record-typed ports. Roles and flows are explicit; there is no `Flipped` type
+operation:
+
+```rhombus
+interface ReadyValid(T):
+  role producer
+  role consumer
+  producer -> consumer:
+    valid: Bool
+    bits: T
+  consumer -> producer:
+    ready: Bool
+
+interface tx(ReadyValid(Bits(width)), ~role: producer)
+```
+
+`left <=> right` atomically connects every flow when the interface types and
+the two endpoint views have compatible directions. Interface metadata is
+retained by the frontend so `instance.endpoint.field` reconstructs the same
+logical protocol without inferring it from flattened names.
 
 The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
 and `===`, plus the named functions `bits`, `bit_not`, `bit_and`, `bit_or`,
@@ -236,8 +282,10 @@ library from a `.rhdl` program requires no changes to the RHDL reader, IR,
 verifier, or backend. The circuit uses host recursion and a host `stages`
 parameter to generate repeated hardware while a `Bool` `bypass` input
 selects runtime hardware behavior. Higher-level conveniences such as grouped
-`IO`, `RegInit`, protocol interfaces, and pipeline generators should follow
-this same layering rule.
+`IO`, `RegInit`, and pipeline generators should follow this same layering
+rule. Bundles and interfaces are concrete examples: records provide the core
+semantics, while declaration syntax, roles, bulk connection, and instance
+reconstruction live in frontend extensions.
 
 The four adder presentations make their dependencies explicit. The core and
 kernel versions are ordinary Rhombus modules with direct imports, the composed
@@ -268,8 +316,8 @@ emit_circt(design)
 ```
 
 The initial combinational Builder methods are `bit_not`, `bit_and`, `bit_or`,
-`bit_xor`, `add`, `sub`, `eq`, `mux_lookup`, `reinterpret`, `concat`, `extract`,
-`zext`, and `trunc`. Core equality compares same-width `Bits` operands and
+`bit_xor`, `add`, `sub`, `eq`, `mux_lookup`, `record_create`, `record_get`,
+`reinterpret`, `concat`, `extract`, `zext`, and `trunc`. Core equality compares same-width `Bits` operands and
 returns `Bits(1)`. Same-type bitwise operations accept any `BitwiseType` and
 preserve that type; arithmetic remains specific to `Bits`. Width-changing
 operations compute or require their result width explicitly. Mux lookup values
@@ -284,8 +332,9 @@ selector as `Bits(1)` before constructing `rtl.mux_lookup`. `reinterpret`
 permits an explicit representation-transparent crossing between equal-width
 `FlatDataType` implementations. The CIRCT backend lowers any `FlatDataType`
 through its declared bit width, so extension-defined scalar types such as
-`Bool` require no backend case. Aggregates will require a later lowering
-protocol or pass.
+`Bool` require no backend case. Core `RecordType` lowers recursively to
+CIRCT `hw.struct`; construction and projection lower to `hw.struct_create`
+and `hw.struct_extract`.
 
 `concat(module, [a, b, ...])` places the first operand in the most-significant
 bits. `extract(module, value, high, low)` uses inclusive host-`Int` indices.
@@ -295,4 +344,5 @@ strictly narrower.
 
 `emit_circt` is the backend boundary. The RHDL library has no direct
 SystemVerilog emitter; generated RTL is always produced by CIRCT. Frontend
-diagnostic hardening and the rewriting API remain later milestones.
+diagnostic hardening remains the next phase; an IR rewriting API is deferred
+until a concrete transformation use case justifies it.

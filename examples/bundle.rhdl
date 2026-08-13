@@ -1,0 +1,61 @@
+#lang rhdl
+// Demonstrates core record semantics through concise bundle syntax.
+
+bundle Pair(T):
+  left: T
+  right: T
+
+bundle Envelope(T):
+  payload: Pair(T)
+  tag: Bits(2)
+
+circuit Swap(width):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  result.left <== source.right
+  result.right <== source.left
+
+circuit NestedSwap(width):
+  input source: Envelope(Bits(width))
+  output result: Envelope(Bits(width))
+
+  result.payload.left <== source.payload.right
+  result.payload.right <== source.payload.left
+  result.tag <== source.tag
+
+circuit BundleHierarchy(width):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  inst swap(Swap(width))
+  swap.source <== source
+  result <== swap.result
+
+circuit BundlePipeline(width):
+  input clk: Clock
+  input reset: Reset
+  input select: Bool
+  input direct: Pair(Bits(width))
+  input alternate: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  def zero = bits(0, ~width: width)
+  def zero_pair = record(Pair(Bits(width))):
+    left: zero
+    right: zero
+  def selected = mux(select, direct, alternate)
+  reg state(Pair(Bits(width)), ~clock: clk, ~reset: reset, ~init: zero_pair)
+  state.next <== selected
+  result <== state
+
+def design = elaborate(BundlePipeline(8))
+
+export:
+  Pair
+  Envelope
+  Swap
+  NestedSwap
+  BundleHierarchy
+  BundlePipeline
+  design

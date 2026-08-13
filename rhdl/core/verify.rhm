@@ -170,6 +170,33 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "zext target width must be larger than the source width")
       when schema.type_rule == "bits_trunc" && target_width >= operand.type.width
       | fail_operation(operation, "trunc target width must be smaller than the source width")
+  | "record_create":
+      def result = operation.results[0]
+      def fields = operation.attribute("fields", #false)
+      unless record_type(result.type) && type_well_formed(result.type)
+      | fail_operation(operation, "record_create result must have a well-formed RecordType")
+      unless fields is_a List && fields == result.type.fields.map(fun (field): field.name)
+      | fail_operation(operation, "record_create fields must match its result type")
+      unless operation.operands.length() == result.type.fields.length()
+      | fail_operation(operation, "record_create requires exactly one operand per field")
+      for (operand in operation.operands,
+           field in result.type.fields):
+        unless type_equal(operand.type, field.type)
+        | fail_operation(operation,
+                         "record_create field " ++ field.name ++ " has the wrong type")
+  | "record_get":
+      def record = operation.operands[0]
+      def result = operation.results[0]
+      def field_name = operation.attribute("field", #false)
+      unless record_type(record.type)
+      | fail_operation(operation, "record_get operand must have a RecordType")
+      unless field_name is_a String
+      | fail_operation(operation, "record_get field must be a String")
+      def field = record.type.field(field_name)
+      unless field
+      | fail_operation(operation, "record_get names an unknown field")
+      unless type_equal(result.type, field.type)
+      | fail_operation(operation, "record_get result has the wrong field type")
   | "data_register" || "data_register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]

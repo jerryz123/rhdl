@@ -12,11 +12,18 @@ export:
   emit_module_circt
 
 fun circt_type(type):
-  if flat_data_type(type)
-  | "i" ++ to_string(data_width(type))
-  | if clock_type(type) || reset_type(type)
-    | "i1"
-    | error(~who: #'emit_circt,
+  cond
+  | flat_data_type(type):
+      "i" ++ to_string(data_width(type))
+  | record_type(type):
+      "!hw.struct<" ++ String.join(
+        type.fields.map(fun (field): field.name ++ ": " ++ circt_type(field.type)),
+        ", "
+      ) ++ ">"
+  | clock_type(type) || reset_type(type):
+      "i1"
+  | ~else:
+      error(~who: #'emit_circt,
             "CIRCT lowering does not support hardware type " ++ type_text(type))
 
 fun circt_width(type):
@@ -133,6 +140,19 @@ fun emit_trunc(operation):
                 value_ref(operand), " from 0 : (", circt_type(operand.type),
                 ") -> ", circt_type(result.type))
 
+fun emit_record_create(operation):
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = hw.struct_create (",
+                String.join(operation.operands.map(value_ref), ", "),
+                ") : ", circt_type(result.type))
+
+fun emit_record_get(operation):
+  def record = operation.operands[0]
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = hw.struct_extract ",
+                value_ref(record), "[\"", operation.attribute("field"),
+                "\"] : ", circt_type(record.type))
+
 fun emit_register(operation):
   def current = operation.results[0]
   def next = operation.places[0]
@@ -198,6 +218,10 @@ fun emit_operation(operation):
       emit_zext(operation)
   | "trunc":
       emit_trunc(operation)
+  | "hw.struct_create":
+      emit_record_create(operation)
+  | "hw.struct_extract":
+      emit_record_get(operation)
   | "seq.firreg":
       emit_register(operation)
   | "hw.instance":

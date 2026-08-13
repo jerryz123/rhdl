@@ -37,7 +37,7 @@ direct Builder     elaboration kernel     base + comb     standard profile
 ```
 
 The core version is intentionally verbose; it exposes the semantic substrate
-used by verification and transformation. The kernel version is suitable for
+used by verification and lowering. The kernel version is suitable for
 libraries that want explicit construction without defining syntax. The
 composed version makes language assembly visible, while the standard version
 is the normal circuit-authoring style.
@@ -56,6 +56,8 @@ Existing frontend behavior is grouped into independently importable modules:
 | [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, and basic public types |
 | [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and width operations |
 | [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
+| [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
+| [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers plus clock/reset conversions |
 | [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
 
@@ -81,6 +83,11 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `reg state(T, ...)` | `reg("state", T, ...)` |
 | `inst u(Child)` | `inst("u", Child)` with instance static information |
 | `u.port` | Lookup in the elaborated child interface |
+| `bundle Pair(T): ...` | A function constructing a core `RecordType` |
+| `record(Pair(T)): ...` | `rtl.record_create` |
+| `value.field` | `rtl.record_get` or construction-time place projection |
+| `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
+| `left <=> right` | Atomic connection of every compatible interface flow |
 
 [`rhdl/frontend/extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) is
 a separate type extension. It defines nominal `Bool`, Boolean equality, and
@@ -95,6 +102,15 @@ This division is the central language-oriented design rule: add a core concept
 only when it introduces new hardware semantics. Add notation and abstractions
 in a language or library layer when existing semantics are sufficient.
 
+The aggregate examples make that boundary executable. The explicit
+[`lop/bundle-kernel.rhdl`](lop/bundle-kernel.rhdl) and concise
+[`lop/bundle-standard.rhdl`](lop/bundle-standard.rhdl) programs produce the
+same record IR and CIRCT MLIR. Likewise,
+[`lop/interface-records.rhdl`](lop/interface-records.rhdl) expresses a
+ready-valid adapter as raw directional record ports, while
+[`interface.rhdl`](interface.rhdl) expresses it using roles and `<=>`; their
+outputs are identical.
+
 ## Feature showcases
 
 After the adder ladder, each remaining example has one primary lesson:
@@ -107,6 +123,8 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`width-ops.rhdl`](width-ops.rhdl) | Explicit width-changing operations whose semantics remain in the kernel/core |
+| [`bundle.rhdl`](bundle.rhdl) | Structural records, nested bundles, aggregate mux/register state, and record-typed instances |
+| [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
 shows that a useful RHDL construction abstraction need not be a macro or
