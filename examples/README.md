@@ -59,6 +59,7 @@ Existing frontend behavior is grouped into independently importable modules:
 | [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
 | [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
+| [`extensions/wire.rhm`](../rhdl/frontend/extensions/wire.rhm) | Binding-derived single-driver internal wires |
 | [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
 | [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
 | [`extensions/vector.rhm`](../rhdl/frontend/extensions/vector.rhm) | Concise fixed-length vector types and inferred construction |
@@ -96,6 +97,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `vec(a, b, ...)` or `vec(elements)` | `rtl.vector_create` with inferred uniform element type |
 | `vector[index]` | Static `rtl.vector_get` or construction-time element-place projection |
 | `vector.lookup(selector, ~default: value)` | Static projections plus one core `rtl.mux_lookup` |
+| `wire temporary: T` | One core `rtl.wire` place, readable after a complete single drive |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -141,6 +143,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |
+| [`wire.rhdl`](wire.rhdl) | A vector wire assembled element by element and then read as one value |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 

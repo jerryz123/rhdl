@@ -74,6 +74,7 @@ verifier, and backend must preserve. Current core concepts include:
 - Readable `Value` and driveable `Place` objects.
 - Operations and operation schemas.
 - Structural `RecordType` and fixed-length `VectorType` values and projections.
+- Single-driver internal wires.
 - Primitive registers.
 - Modules, ports, and instances.
 - Ownership, type, driver, and cycle verification.
@@ -126,6 +127,7 @@ The optional frontend modules are:
 | `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
 | `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
+| `extensions/wire.rhm` | Binding-derived single-driver internal wires |
 | `extensions/sequential.rhm` | Binding-derived registers |
 | `extensions/hierarchy.rhm` | Binding-derived instances and child-member access |
 | `extensions/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
@@ -477,6 +479,33 @@ therefore support `Vec` to `Bits` and back without changing the bit pattern.
 
 See [`examples/vector.rhdl`](examples/vector.rhdl).
 
+### Wires
+
+A wire is an internal driveable `Place` that becomes readable after it has one
+complete effective driver:
+
+```rhombus
+wire sum: Vec(n, Bool)
+
+for (i in 0..n):
+  sum[i] <== left[i] ^ right[i]
+
+result <== sum
+```
+
+The wire type may be any `HardwareType`. Aggregate wires reuse record and
+vector projection: all leaves must be driven before the wire is read or
+elaboration finishes. A whole-value drive cannot be mixed with field-wise or
+element-wise drives. Scalar and aggregate wires require exactly one effective
+driver; there is no last-connect, conditional-connect, or priority behavior.
+
+`rtl.wire` records the internal connection point in the public IR. Because its
+read value is exactly its driver, CIRCT lowering erases the declaration and
+uses the driver expression directly. It does not force a SystemVerilog wire to
+be emitted.
+
+See [`examples/wire.rhdl`](examples/wire.rhdl).
+
 ### Interfaces
 
 Interfaces are frontend protocol descriptors over directional record-typed
@@ -603,9 +632,9 @@ A `Value` is readable hardware data with one definition. It is an operation
 result or an input-like boundary value and records its type, defining
 operation, users, module, location, and origin.
 
-A `Place` is a destination that must be driven. Module outputs, instance
-inputs, and register next-state inputs are places. Driving a place creates an
-explicit `rtl.drive` relationship.
+A `Place` is a destination that must be driven. Internal wires, module outputs,
+instance inputs, and register next-state inputs are places. Driving a place
+creates an explicit `rtl.drive` relationship.
 
 Every place must have exactly one effective driver by the end of elaboration.
 A readable place yields its driver's value and must currently be driven before
@@ -677,9 +706,10 @@ add/sub(Bits(w), Bits(w))                   -> Bits(w)
 eq(Bits(w), Bits(w))                        -> Bits(1)
 mux_lookup(Bits(w), cases: Key -> T,
            default: T)                      -> T: DataType
+wire(T: HardwareType)                       -> driveable/readable Place<T>
 record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
-vector_create(elements matching V)           -> V: VectorType
+vector_create(elements matching V)          -> V: VectorType
 vector_get(V, host_index)                    -> V.element_type
 cast(A: packable, B: same packed width)     -> B
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
@@ -791,6 +821,7 @@ the core schema.
 | Group | Core operations |
 |---|---|
 | Structure | input port, output port, drive, instance |
+| Internal connection | wire |
 | Constants | constant |
 | Bitwise | not, and, or, xor |
 | Arithmetic | add, sub |
@@ -802,8 +833,7 @@ the core schema.
 | Vectors | vector create, vector get with a host-static index |
 | Sequential | register, synchronous-reset register |
 
-There is no initial wire operation, conditional-connect operation, or general
-control-flow region.
+There is no conditional-connect operation or general control-flow region.
 
 ### Builder
 
@@ -931,6 +961,7 @@ type or operation it cannot represent.
 | `rtl.record_get` | `hw.struct_extract` |
 | `rtl.vector_create` | `hw.array_create` |
 | `rtl.vector_get` | `hw.array_get` with a host-constant index |
+| `rtl.wire` | Erased; references resolve to the wire's driver |
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. Backend tests first parse and verify emitted MLIR, then use
@@ -993,6 +1024,7 @@ Important examples include:
 | `examples/host-parameters.rhdl` | Opaque host parameters and type-producing closures |
 | `examples/bundle.rhdl` | Records, nested bundles, aggregate muxes and registers |
 | `examples/vector.rhdl` | Fixed vectors, static and hardware selection, packing, and state |
+| `examples/wire.rhdl` | Internal vector wire assembled through element assignments |
 | `examples/interface.rhdl` | Named roles, flows, bulk connection, and hierarchy |
 | `examples/nested-interface.rhdl` | Recursive interface composition and orientation |
 | `examples/inspect-ir.rhm` | Backend-independent operation and module inspection |
@@ -1012,13 +1044,14 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs eleven simulations:
+`make circt-test` currently runs twelve simulations:
 
 - An 8-bit modular adder.
 - A four-bit ripple-carry adder.
 - A host-width-parameterized ALU.
 - A width-changing datapath.
 - A fixed-vector datapath.
+- An element-wise assembled vector wire.
 - An 8-bit synchronous-reset counter.
 - Two instances sharing one child definition.
 - A record-valued mux and register.
@@ -1047,6 +1080,7 @@ The initial vertical slice is complete:
 - Bundles over core records.
 - Concise fixed-length vectors with static indexing, hardware lookup, aggregate
   connections, explicit packing casts, muxes, and registers.
+- Readable, single-driver internal wires with aggregate element assignment.
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.
@@ -1069,7 +1103,7 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 ### Deferred features
 
 - `when` and conditional-connect semantics.
-- General wires and multiple or priority connects.
+- Multiple, conditional, or priority connects.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths and general width inference.
