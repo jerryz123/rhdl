@@ -911,6 +911,7 @@ Important examples include:
 |---|---|
 | `examples/lop/` | Same hardware expressed at four language layers |
 | `examples/alu.rhdl` | Boolean, bitwise, arithmetic, equality, and N-way selection |
+| `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |

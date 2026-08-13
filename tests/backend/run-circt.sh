@@ -45,6 +45,7 @@ verify_fixture() {
 }
 
 run_fixture adder adder_tb
+run_fixture adder4 adder4_tb
 run_fixture alu alu_tb
 run_fixture width-ops width_ops_tb
 run_fixture counter counter_tb
