@@ -53,8 +53,8 @@ Existing frontend behavior is grouped into independently importable modules:
 
 | Module | Existing behavior it contributes |
 |---|---|
-| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, basic public types, and common hardware indexing |
-| [`extensions/cast.rhm`](../rhdl/frontend/extensions/cast.rhm) | Generic explicit casts between equal-width packed representations |
+| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, basic public types, indexing, and `.into` casts |
+| [`extensions/cast.rhm`](../rhdl/frontend/extensions/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
 | [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
 | [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
 | [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
@@ -89,7 +89,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `value.field` | `rtl.record_get` or construction-time place projection |
 | `value[index]` | `rtl.extract(value, index, index)` |
 | `value[low..high]` | `rtl.extract(value, high - 1, low)` |
-| `cast(value, T)` | `rtl.cast` preserving canonical packed width and bit order |
+| `value.into(T)` | `rtl.cast` preserving canonical packed width and bit order |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -125,7 +125,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | Example | Primary lesson |
 |---|---|
 | [`full-adder.rhdl`](full-adder.rhdl) | Nominal Boolean ports, named intermediate logic, and an unparenthesized chained carry reduction |
-| [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, explicit casts, carry chaining, and concatenation |
+| [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, `.into` casts, carry chaining, and concatenation |
 | [`alu.rhdl`](alu.rhdl) | Extension-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register extensions over primitive registers |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |

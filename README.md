@@ -98,7 +98,8 @@ to ordinary core records and ports.
 `#lang rhdl` is the curated standard profile used by normal designs.
 
 `#lang rhdl/base` is the compositional profile. It contains only `circuit`,
-`elaborate`, ports, `<==`, `Bits`, `Clock`, `Reset`, and guarded host `if`.
+`elaborate`, ports, `<==`, `Bits`, `Clock`, `Reset`, hardware selection and
+`.into`, and guarded host `if`.
 Programs explicitly import the additional language they want:
 
 ```rhombus
@@ -119,7 +120,7 @@ The optional frontend modules are:
 
 | Module | Contribution |
 |---|---|
-| `extensions/cast.rhm` | Generic explicit casts between equal-width packed representations |
+| `extensions/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
 | `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, and named width operations |
 | `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
 | `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
@@ -132,9 +133,10 @@ not implement features itself. Neither language profile implicitly exports the
 core Builder or raw elaboration kernel.
 
 The shared base marks hardware bindings with frontend static information for
-field access and host-range indexing. Consequently, `value[i]` and
-`value[low..high]` are common frontend notation over the kernel's explicit
-`extract` operation rather than new core semantics.
+field access, host-range indexing, and `.into(TargetType)`. Consequently,
+`value[i]`, `value[low..high]`, and `value.into(TargetType)` are common frontend
+notation over the kernel's explicit `extract` and `cast` operations rather
+than new core semantics.
 
 ### Executable equivalence ladder
 
@@ -336,11 +338,14 @@ Any bounded, nonempty host range is normalized to its selected low and high
 bit; unbounded and empty ranges are rejected. Selection is read-only and
 returns a hardware value rather than a connection place. A selected `Bits(1)`
 remains `Bits(1)`—conversion to the frontend-defined `Bool` is explicit with
-`cast(value, Bool)`.
+`value.into(Bool)`. The equivalent functional spelling is `cast(value, Bool)`.
 
-`cast(value, TargetType)` changes only the hardware type, never the packed bit
+`value.into(TargetType)` changes only the hardware type, never the packed bit
 pattern or width. It handles nominal flat types, `Clock`, `Reset`, and
-recursively packed records. Width changes remain separate operations.
+recursively packed records. Width changes remain separate operations. The
+member spelling is part of the base hardware-expression surface;
+`cast(value, TargetType)` remains the explicit functional frontend layer over
+the same core `rtl.cast` operation.
 
 ### Registers
 
