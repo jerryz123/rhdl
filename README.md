@@ -129,7 +129,7 @@ The optional frontend modules are:
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `extensions/wire.rhm` | Binding-derived single-driver internal wires |
 | `extensions/sequential.rhm` | Binding-derived registers |
-| `extensions/hierarchy.rhm` | Binding-derived instances and child-member access |
+| `extensions/hierarchy.rhm` | Named or expression-level instances and child-member access |
 | `extensions/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
 `frontend/standard.rhm` only aggregates the base and optional modules. It does
@@ -401,6 +401,23 @@ u0.a <== a
 u0.b <== b
 sum0 <== u0.sum
 ```
+
+For host-generated structure, expression-level `instance(name, Child)` returns
+an instance handle that can be stored in an ordinary Rhombus collection. The
+element annotation below preserves concise port-dot syntax through host array
+indexing. The collection remains host data; only the constructed instances
+enter the IR:
+
+```rhombus
+def adders :: Array.later_of(InstancePorts):
+  for Array (i in 0..n):
+    instance("fa" ++ to_string(i), FullAdderModule)
+
+for (i in 0..n):
+  adders[i].a <== A[i].into(Bool)
+```
+
+See [`examples/generated-adder.rhdl`](examples/generated-adder.rhdl).
 
 A child input appears as a driveable place in its parent; a child output
 appears as a readable value. All communication across hierarchy occurs through
@@ -1018,6 +1035,7 @@ Important examples include:
 | `examples/lop/` | Same hardware expressed at four language layers |
 | `examples/alu.rhdl` | Boolean, bitwise, arithmetic, equality, and N-way selection |
 | `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
+| `examples/generated-adder.rhdl` | Host Array of instances plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |
@@ -1044,10 +1062,11 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs twelve simulations:
+`make circt-test` currently runs thirteen simulations:
 
 - An 8-bit modular adder.
 - A four-bit ripple-carry adder.
+- An eight-bit ripple-carry adder generated from a host Array of instances.
 - A host-width-parameterized ALU.
 - A width-changing datapath.
 - A fixed-vector datapath.

@@ -61,7 +61,7 @@ Existing frontend behavior is grouped into independently importable modules:
 | [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`extensions/wire.rhm`](../rhdl/frontend/extensions/wire.rhm) | Binding-derived single-driver internal wires |
 | [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
-| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
+| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Named or expression-level instances and child-port dot access |
 | [`extensions/vector.rhm`](../rhdl/frontend/extensions/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
@@ -85,6 +85,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `bits(1, ~width: w)` | `literal(Bits(w), 1)` |
 | `reg state(T, ...)` | `reg("state", T, ...)` |
 | `inst u(Child)` | `inst("u", Child)` with instance static information |
+| `instance(name, Child)` | Expression-level instance construction for ordinary host collections |
 | `u.port` | Lookup in the elaborated child interface |
 | `bundle Pair(T): ...` | A function constructing a core `RecordType` |
 | `record(Pair(T)): ...` | `rtl.record_create` |
@@ -134,6 +135,7 @@ After the adder ladder, each remaining example has one primary lesson:
 |---|---|
 | [`full-adder.rhdl`](full-adder.rhdl) | Nominal Boolean ports, named intermediate logic, and an unparenthesized chained carry reduction |
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
+| [`generated-adder.rhdl`](generated-adder.rhdl) | A host Array of instances wired through runtime `Vec` carry and sum wires |
 | [`alu.rhdl`](alu.rhdl) | Extension-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register extensions over primitive registers |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |

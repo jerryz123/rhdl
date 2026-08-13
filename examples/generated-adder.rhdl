@@ -1,0 +1,40 @@
+#lang rhdl
+// Builds an n-bit ripple-carry adder from a host Array of FullAdder instances.
+
+import:
+  "full-adder.rhdl".FullAdder
+
+circuit Adder(n):
+  input(A, B): Bits(n)
+  input Cin: Bits(1)
+  output Sum: Bits(n)
+  output Cout: Bits(1)
+
+  def FullAdderModule = FullAdder()
+
+  // FAs is an ordinary host Array used only while elaborating the circuit.
+  def FAs :: Array.later_of(InstancePorts):
+    for Array (i in 0..n):
+      instance("fa" ++ to_string(i), FullAdderModule)
+
+  // carry and sum are runtime hardware vectors with driveable elements.
+  wire carry: Vec(n + 1, Bits(1))
+  wire sum: Vec(n, Bool)
+
+  carry[0] <== Cin
+
+  for (i in 0..n):
+    FAs[i].a <== A[i].into(Bool)
+    FAs[i].b <== B[i].into(Bool)
+    FAs[i].cin <== carry[i].into(Bool)
+    carry[i + 1] <== FAs[i].cout.into(Bits(1))
+    sum[i] <== FAs[i].sum
+
+  Sum <== sum.into(Bits(n))
+  Cout <== carry[n]
+
+def design = elaborate(Adder(8))
+
+export:
+  Adder
+  design
