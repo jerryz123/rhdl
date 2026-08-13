@@ -10,7 +10,7 @@ import:
 
 export:
   inst
-  InstancePorts
+  InstanceArray
 
 annot.macro 'InstancePorts':
   annot_meta.pack_predicate(
@@ -27,3 +27,31 @@ dot.macro 'instance_port_dot $left $dot $right':
 defn.macro 'inst $(name :: Identifier)($child)':
   def instance_name = name.to_source_string()
   'def $name :: InstancePorts = kernel_inst($instance_name, $child)'
+
+// Builds an ordinary host Array whose indexed elements retain the static
+// instance-port provider used by concise child-port dot access.
+reducer.macro 'InstanceArray':
+  let (_, _, array_statinfo):
+    let '$(annotation :: annot_meta.Parsed)' = 'Array.later_of(InstancePorts)'
+    annot_meta.unpack_converter(annotation)
+  reducer_meta.pack(
+    '()',
+    'finish_instance_array',
+    '(instances = [])',
+    #false,
+    'add_instance_array_element',
+    #false,
+    #false,
+    'use_instance_array_element',
+    array_statinfo,
+    '[instances, next_instances]'
+  )
+
+expr.macro 'finish_instance_array $_ $instances':
+  '(Array(& $instances) :: Array.later_of(InstancePorts))'
+
+defn.macro 'add_instance_array_element [$instances, $next_instances] $element':
+  'def $next_instances = List.add($instances, $element :: InstancePorts)'
+
+expr.macro 'use_instance_array_element [$_, $next_instances]':
+  next_instances

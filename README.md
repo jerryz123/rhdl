@@ -404,18 +404,19 @@ sum0 <== u0.sum
 
 An `inst` declaration may also appear in repeated host code. Its binding name
 is a suggested hardware name; collisions are deterministically suffixed within
-the parent module. The element annotation below preserves concise port-dot
-syntax through host array indexing. The collection remains host data; only the
-constructed instances enter the IR:
+the parent module. The `InstanceArray` reducer builds an ordinary host Array
+while retaining the checked static information needed for concise port access.
+The collection remains host data; only the constructed instances enter the IR:
 
 ```rhombus
-def adders :: Array.later_of(InstancePorts):
-  for Array (ignored in 0..n):
+def adders:
+  for InstanceArray (ignored in 0..n):
     inst adder(FullAdderModule)
     adder
 
 for (i in 0..n):
   adders[i].a <== A[i].into(Bool)
+  carry[i + 1] <== adders[i].cout
 ```
 
 See [`examples/generated-adder.rhdl`](examples/generated-adder.rhdl).
@@ -1042,7 +1043,7 @@ Important examples include:
 | `examples/lop/` | Same hardware expressed at four language layers |
 | `examples/alu.rhdl` | Boolean, bitwise, arithmetic, equality, and N-way selection |
 | `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
-| `examples/generated-adder.rhdl` | Host Array of instances plus hardware vector wires |
+| `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |

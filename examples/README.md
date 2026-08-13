@@ -134,7 +134,7 @@ After the adder ladder, each remaining example has one primary lesson:
 |---|---|
 | [`full-adder.rhdl`](full-adder.rhdl) | Nominal Boolean ports, named intermediate logic, and an unparenthesized chained carry reduction |
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
-| [`generated-adder.rhdl`](generated-adder.rhdl) | A host Array of instances wired through runtime `Vec` carry and sum wires |
+| [`generated-adder.rhdl`](generated-adder.rhdl) | An `InstanceArray` host collection wired through runtime `Vec` carry and sum wires |
 | [`alu.rhdl`](alu.rhdl) | Extension-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register extensions over primitive registers |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
