@@ -126,6 +126,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`width-ops.rhdl`](width-ops.rhdl) | Explicit width-changing operations whose semantics remain in the kernel/core |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, nested bundles, aggregate mux/register state, and record-typed instances |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
+| [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
 shows that a useful RHDL construction abstraction need not be a macro or

@@ -944,8 +944,11 @@ ordinary typed ports and do not interpret roles or bulk-connection policy.
 
 This phase includes:
 
-1. Parameterized two-role interface definitions with ordered, nested
-   `DataType` fields and explicit field flows.
+1. Parameterized two-role interface definitions with ordered `DataType` or
+   recursively nested `InterfaceType` members and explicit field flows. A
+   nested member's first and second roles map respectively to the containing
+   flow's source and destination roles; placing it in the reverse flow reverses
+   that orientation.
 2. Endpoint declaration, field access, and reconstruction across module
    instances.
 3. Atomic `<=>` connection that requires the same interface definition,
@@ -961,6 +964,10 @@ This phase includes:
 6. A manually expressed pair-of-record-ports example and a role-interface
    example that produce equivalent core IR and CIRCT MLIR, followed by CIRCT
    verification and Verilator simulation.
+7. Recursive endpoint views for nested field access, nested bulk connection,
+   and instance reconstruction. Each root direction remains a single core
+   record port, while child directions become nested record fields; core and
+   the CIRCT backend require no interface-specific behavior.
 
 Multi-role protocols, optional fields, arrays, and protocol behavior such as
 arbitration remain separate extensions. They are not required to make the

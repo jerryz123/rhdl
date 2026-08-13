@@ -1,0 +1,109 @@
+#lang rhdl
+// Demonstrates recursively nested bidirectional interfaces, field access, and hierarchy reconstruction.
+
+interface ReadyValid(T):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+
+  consumer -> producer:
+    ready: Bool
+
+interface ControlPlane(T):
+  role manager
+  role device
+
+  manager -> device:
+    command: ReadyValid(T)
+    enable: Bool
+
+  device -> manager:
+    response: ReadyValid(T)
+    status: T
+
+interface SystemPlane(T):
+  role host
+  role peripheral
+
+  host -> peripheral:
+    control: ControlPlane(T)
+
+  peripheral -> host:
+    interrupt: Bool
+
+circuit NestedInterfaceAdapter(width):
+  interface ingress(ControlPlane(Bits(width)), ~role: device)
+  interface egress(ControlPlane(Bits(width)), ~role: manager)
+  egress <=> ingress
+
+circuit NestedMemberAdapter(width):
+  interface ingress(ControlPlane(Bits(width)), ~role: device)
+  interface egress(ControlPlane(Bits(width)), ~role: manager)
+
+  egress.command <=> ingress.command
+  egress.response <=> ingress.response
+  egress.enable <== ingress.enable
+  ingress.status <== egress.status
+
+circuit DeepNestedAdapter(width):
+  interface peripheral(SystemPlane(Bits(width)), ~role: peripheral)
+  interface host(SystemPlane(Bits(width)), ~role: host)
+  host <=> peripheral
+
+circuit NestedInterfaceSource(width):
+  input valid: Bool
+  input bits_in: Bits(width)
+  input enable: Bool
+  input response_ready: Bool
+  output accepted: Bool
+  output response_valid: Bool
+  output response_bits: Bits(width)
+  output status: Bits(width)
+  interface bus(ControlPlane(Bits(width)), ~role: manager)
+
+  bus.command.valid <== valid
+  bus.command.bits <== bits_in
+  bus.enable <== enable
+  bus.response.ready <== response_ready
+  accepted <== bus.command.ready
+  response_valid <== bus.response.valid
+  response_bits <== bus.response.bits
+  status <== bus.status
+
+circuit NestedInterfaceHierarchy(width):
+  input valid: Bool
+  input bits_in: Bits(width)
+  input enable: Bool
+  input response_ready: Bool
+  output accepted: Bool
+  output response_valid: Bool
+  output response_bits: Bits(width)
+  output status: Bits(width)
+  interface bus(ControlPlane(Bits(width)), ~role: manager)
+
+  inst source(NestedInterfaceSource(width))
+  source.valid <== valid
+  source.bits_in <== bits_in
+  source.enable <== enable
+  source.response_ready <== response_ready
+  accepted <== source.accepted
+  response_valid <== source.response_valid
+  response_bits <== source.response_bits
+  status <== source.status
+  bus <=> source.bus
+
+def design = elaborate(NestedInterfaceAdapter(8))
+
+export:
+  ReadyValid
+  ControlPlane
+  SystemPlane
+  NestedInterfaceAdapter
+  NestedMemberAdapter
+  DeepNestedAdapter
+  NestedInterfaceSource
+  NestedInterfaceHierarchy
+  design

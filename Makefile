@@ -37,3 +37,4 @@ examples:
 	racket -S $(CURDIR) examples/fresh-generators.rhdl
 	racket -S $(CURDIR) examples/bundle.rhdl
 	racket -S $(CURDIR) examples/interface.rhdl
+	racket -S $(CURDIR) examples/nested-interface.rhdl

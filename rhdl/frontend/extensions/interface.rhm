@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines explicit-role bidirectional interfaces over record-typed core ports.
+// Defines recursively composable explicit-role interfaces over record-typed core ports.
 
 import:
   rhombus/meta open
@@ -8,6 +8,7 @@ import:
 
 export:
   InterfaceFlow
+  InterfaceMember
   InterfaceType
   InterfaceEndpoint
   interface
@@ -24,57 +25,168 @@ class InterfaceFlow(from_role, to_role, type):
     | error(~who: #'InterfaceFlow, "interface flow type must be a well-formed RecordType")
     super(from_role, to_role, type)
 
-class InterfaceType(name, roles, flows):
-  constructor (name, roles, flows):
+class InterfaceMember(name, type, from_role, to_role)
+
+class InterfaceType(name, roles, members):
+  constructor (name, roles, declarations):
     unless name is_a String
     | error(~who: #'InterfaceType, "interface name must be a String")
     unless roles is_a List && roles.length() == 2 && roles[0] != roles[1]
     | error(~who: #'InterfaceType, "interfaces require exactly two distinct roles")
-    unless flows is_a List && flows.length() >= 1
-    | error(~who: #'InterfaceType, "interfaces require at least one flow")
-    for (flow in flows):
-      unless flow is_a InterfaceFlow && flow.from_role in roles && flow.to_role in roles
-      | error(~who: #'InterfaceType, "interface flow uses an unknown role")
-      when flows.filter(
-        ~keep: fun (candidate): candidate.from_role == flow.from_role && candidate.to_role == flow.to_role
+    unless declarations is_a List && declarations.length() >= 1
+    | error(~who: #'InterfaceType, "interfaces require at least one member")
+    def mutable members = []
+    for (declaration in declarations):
+      cond
+      | declaration is_a InterfaceMember:
+          members := members ++ [declaration]
+      | declaration is_a InterfaceFlow:
+          members := members ++ declaration.type.fields.map(
+            fun (field):
+              InterfaceMember(field.name,
+                              field.type,
+                              declaration.from_role,
+                              declaration.to_role)
+          )
+      | ~else:
+          members := members ++ [declaration]
+    for (member in members):
+      unless member is_a InterfaceMember
+      | error(~who: #'InterfaceType, "interface members must be InterfaceMember values")
+      unless member.name is_a String
+      | error(~who: #'InterfaceType, "interface member name must be a String")
+      unless member.from_role in roles && member.to_role in roles && member.from_role != member.to_role
+      | error(~who: #'InterfaceType, "interface member uses an unknown or identical role")
+      unless member.type is_a DataType || member.type is_a InterfaceType
+      | error(~who: #'InterfaceType,
+              "interface member type must be a DataType or InterfaceType")
+      when members.filter(
+        ~keep: fun (candidate): candidate.name == member.name
       ).length() != 1
-      | error(~who: #'InterfaceType, "interface flows must have unique role directions")
-    def mutable all_fields = []
-    for (flow in flows):
-      all_fields := all_fields ++ flow.type.fields.map(fun (field): field.name)
-    for (field_name in all_fields):
-      when all_fields.filter(~keep: fun (candidate): candidate == field_name).length() != 1
-      | error(~who: #'InterfaceType, "interface field names must be unique across flows")
-    super(name, roles, flows)
+      | error(~who: #'InterfaceType, "interface member names must be unique")
+    super(name, roles, members)
+
+  property flows: interface_flows(this)
 
   method flow_for_field(field_name):
-    flows.find(fun (flow): flow.type.field(field_name))
+    def member = members.find(fun (candidate): candidate.name == field_name)
+    if member
+    | flows.find(
+        fun (flow):
+          flow.from_role == member.from_role && flow.to_role == member.to_role
+      )
+    | #false
 
   method complementary_role(role):
     unless role in roles
     | error(~who: #'interface, "unknown interface role " ++ role)
     if roles[0] == role | roles[1] | roles[0]
 
+fun nested_role_to_parent(member, nested_type, nested_role):
+  if nested_role == nested_type.roles[0]
+  | member.from_role
+  | member.to_role
+
+fun nested_flow_for_parent_direction(member, parent_from, parent_to):
+  def nested_type = member.type
+  nested_type.flows.find(
+    fun (flow):
+      (nested_role_to_parent(member, nested_type, flow.from_role) == parent_from) && (nested_role_to_parent(member, nested_type, flow.to_role) == parent_to)
+  )
+
+fun interface_flow(type, from_role, to_role):
+  def mutable fields = []
+  for (member in type.members):
+    if member.type is_a DataType
+    | when member.from_role == from_role && member.to_role == to_role
+      | fields := fields ++ [RecordField(member.name, member.type)]
+    | block:
+        def nested_flow = nested_flow_for_parent_direction(member,
+                                                           from_role,
+                                                           to_role)
+        when nested_flow
+        | fields := fields ++ [RecordField(member.name, nested_flow.type)]
+  if fields.length() == 0
+  | #false
+  | InterfaceFlow(from_role, to_role, RecordType(fields))
+
+fun interface_flows(type):
+  def forward = interface_flow(type, type.roles[0], type.roles[1])
+  def backward = interface_flow(type, type.roles[1], type.roles[0])
+  [forward, backward].filter(~keep: fun (flow): flow)
+
 class InterfaceBinding(flow, port_name, entity)
 
-class InterfaceEndpoint(type, role, bindings, view):
+class InterfaceEndpoint(type, role, bindings, view, mutable nested_endpoints = []):
   implements kernel.HardwareEntity
   method field(field_name):
-    def binding = bindings.find(fun (candidate): candidate.flow.type.field(field_name))
-    unless binding
+    def member = type.members.find(fun (candidate): candidate.name == field_name)
+    unless member
     | error(~who: #'interface,
             "interface " ++ type.name ++ " has no field named " ++ field_name)
-    kernel.project(binding.entity, field_name)
+    if member.type is_a InterfaceType
+    | block:
+        def cached = nested_endpoints.find(
+          fun (candidate): candidate[0] == field_name
+        )
+        if cached
+        | cached[1]
+        | block:
+            def endpoint = nested_endpoint(this, member)
+            nested_endpoints := nested_endpoints ++ [[field_name, endpoint]]
+            endpoint
+    | block:
+        def binding = bindings.find(
+          fun (candidate):
+            candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
+        )
+        kernel.project(binding.entity, field_name)
 
 class InterfaceGroup(module_def, name, type, role, bindings)
 
 def mutable interface_groups = []
 
+fun interface_member_type_equal(left, right):
+  if left is_a InterfaceType || right is_a InterfaceType
+  | interface_type_equal(left, right)
+  | type_equal(left, right)
+
 fun interface_type_equal(left, right):
-  left is_a InterfaceType && right is_a InterfaceType && left.name == right.name && left.roles == right.roles && left.flows.length() == right.flows.length() && (for all (left_flow in left.flows, right_flow in right.flows): left_flow.from_role == right_flow.from_role && left_flow.to_role == right_flow.to_role && type_equal(left_flow.type, right_flow.type))
+  if !(left is_a InterfaceType && right is_a InterfaceType) || left.name != right.name || left.roles != right.roles || left.members.length() != right.members.length()
+  | #false
+  | for all (left_member in left.members, right_member in right.members):
+      left_member.name == right_member.name && left_member.from_role == right_member.from_role && left_member.to_role == right_member.to_role && interface_member_type_equal(left_member.type, right_member.type)
 
 fun flow_port_name(endpoint_name, flow):
   endpoint_name ++ "__" ++ flow.from_role ++ "_to_" ++ flow.to_role
+
+fun nested_endpoint(endpoint, member):
+  def nested_type = member.type
+  def nested_role:
+    if endpoint.role == member.from_role
+    | nested_type.roles[0]
+    | nested_type.roles[1]
+  def nested_bindings:
+    nested_type.flows.map(
+      fun (nested_flow):
+        def parent_from = nested_role_to_parent(member,
+                                                nested_type,
+                                                nested_flow.from_role)
+        def parent_to = nested_role_to_parent(member,
+                                              nested_type,
+                                              nested_flow.to_role)
+        def parent_binding = endpoint.bindings.find(
+          fun (binding):
+            binding.flow.from_role == parent_from && binding.flow.to_role == parent_to
+        )
+        InterfaceBinding(nested_flow,
+                         parent_binding.port_name ++ "__" ++ member.name,
+                         kernel.project(parent_binding.entity, member.name))
+    )
+  InterfaceEndpoint(nested_type,
+                    nested_role,
+                    nested_bindings,
+                    endpoint.view ++ "." ++ member.name)
 
 fun declare_interface(name, type, role):
   unless type is_a InterfaceType
@@ -219,16 +331,16 @@ defn.macro
        InterfaceType(
          $interface_name,
          [$first_role_name, $second_role_name],
-         [InterfaceFlow(
-            $first_from_name,
-            $first_to_name,
-            RecordType([RecordField($first_field_name, $first_type), ...])
-          ),
-          InterfaceFlow(
-            $second_from_name,
-            $second_to_name,
-            RecordType([RecordField($second_field_name, $second_type), ...])
-          )]
+         [InterfaceMember($first_field_name,
+                          $first_type,
+                          $first_from_name,
+                          $first_to_name),
+          ...,
+          InterfaceMember($second_field_name,
+                          $second_type,
+                          $second_from_name,
+                          $second_to_name),
+          ...]
        )'
 | 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier))':
     def endpoint_name = name.to_source_string()

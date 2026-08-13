@@ -67,7 +67,7 @@ make test
 ```
 
 This runs the Rhombus unit and negative-verification tests, emits and verifies
-CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, and runs seven
+CIRCT MLIR, asks CIRCT to lower `seq` and export SystemVerilog, and runs eight
 Verilator simulations:
 
 - An 8-bit modular adder.
@@ -79,6 +79,7 @@ Verilator simulations:
 - Two instances that explicitly reuse one adder module definition.
 - A record-valued mux and synchronous-reset register.
 - Both directions of a ready-valid interface adapter.
+- Both directions of a recursively nested interface adapter.
 
 Validate the canonical frontend examples with:
 
@@ -245,6 +246,28 @@ interface tx(ReadyValid(Bits(width)), ~role: producer)
 the two endpoint views have compatible directions. Interface metadata is
 retained by the frontend so `instance.endpoint.field` reconstructs the same
 logical protocol without inferring it from flattened names.
+
+An interface member can itself be another interface:
+
+```rhombus
+interface ControlPlane(T):
+  role manager
+  role device
+  manager -> device:
+    command: ReadyValid(T)
+    enable: Bool
+  device -> manager:
+    status: T
+```
+
+The containing flow orients the nested interface: `ReadyValid`'s first role
+(`producer`) maps to `manager`, and its second role (`consumer`) maps to
+`device`. Declaring the member under `device -> manager` would reverse that
+mapping. Nested access such as `bus.command.valid`, nested bulk connection,
+and reconstruction through `instance.bus.command` are supported recursively.
+Each top-level direction remains one core record port; nested directions become
+nested `RecordType` fields and lower normally to nested CIRCT `hw.struct`
+types. No interface concept is added to core IR.
 
 The embedded surface includes `+`, `-`, `&`, `^`, `and`, `or`, `xor`, `not`,
 and `===`, plus the named functions `bits`, `bit_not`, `bit_and`, `bit_or`,

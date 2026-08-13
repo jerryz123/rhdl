@@ -23,6 +23,7 @@ expect_failure bad-condition.rhdl "hardware values cannot control host condition
 expect_failure bad-input-drive.rhdl "connection target must be an output, instance input, or register next state"
 expect_failure bad-instance-port.rhdl "instance u has no port or interface named missing"
 expect_failure bad-interface-directions.rhdl "incompatible roles and boundary directions"
+expect_failure bad-interface-member-type.rhdl "interface member type must be a DataType or InterfaceType"
 expect_failure bad-interface-role.rhdl "unknown interface role observer"
 expect_failure bad-interface-type.rhdl "same interface type"
 expect_failure bad-mux-key-type.rhdl "mux lookup keys must be host Int values"
