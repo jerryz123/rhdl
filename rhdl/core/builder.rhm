@@ -219,32 +219,6 @@ fun build_mux_lookup(design,
                         who,
                         {"keys": normalized_cases.map(fun (case): case[0])})
 
-fun build_conversion(design,
-                     module_def,
-                     opcode,
-                     value,
-                     target_type,
-                     source_ok,
-                     source_description,
-                     name,
-                     location,
-                     origin,
-                     who):
-  ensure_module_in_design(design, module_def, who)
-  ensure_open(module_def, who)
-  ensure_value_in(module_def, value, who)
-  unless source_ok(value.type)
-  | fail(who, opcode ++ " source must be " ++ source_description)
-  build_value_operation(design,
-                        module_def,
-                        opcode,
-                        [value],
-                        target_type,
-                        name,
-                        location,
-                        origin,
-                        who)
-
 class Builder(design):
   method module(name):
     ensure_hardware_name(name, #'module)
@@ -441,46 +415,28 @@ class Builder(design):
                      origin,
                      #'mux_lookup)
 
-  method reinterpret(module_def,
-                     value,
-                     target_type,
-                     name = #false,
-                     location = Location(),
-                     origin = Origin("reinterpret")):
-    ensure_data_type(target_type, #'reinterpret)
-    unless flat_data_type(target_type)
-    | fail(#'reinterpret, "reinterpret target must have a FlatDataType")
-    build_conversion(design, module_def, "rtl.reinterpret", value, target_type,
-                     fun (type): flat_data_type(type) && data_width(type) == data_width(target_type),
-                     "a FlatDataType with the target width", name, location, origin,
-                     #'reinterpret)
-
-  method as_bits(module_def,
-                 value,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("as_bits")):
-    build_conversion(design, module_def, "rtl.as_bits", value, Bits(1),
-                     fun (type): clock_type(type) || reset_type(type),
-                     "Clock or Reset", name, location, origin, #'as_bits)
-
-  method as_clock(module_def,
-                  value,
-                  name = #false,
-                  location = Location(),
-                  origin = Origin("as_clock")):
-    build_conversion(design, module_def, "rtl.as_clock", value, Clock,
-                     fun (type): bits_type(type) && type.width == 1,
-                     "Bits(1)", name, location, origin, #'as_clock)
-
-  method as_reset(module_def,
-                  value,
-                  name = #false,
-                  location = Location(),
-                  origin = Origin("as_reset")):
-    build_conversion(design, module_def, "rtl.as_reset", value, Reset,
-                     fun (type): bits_type(type) && type.width == 1,
-                     "Bits(1)", name, location, origin, #'as_reset)
+  method cast(module_def,
+              value,
+              target_type,
+              name = #false,
+              location = Location(),
+              origin = Origin("cast")):
+    ensure_module_in_design(design, module_def, #'cast)
+    ensure_open(module_def, #'cast)
+    ensure_value_in(module_def, value, #'cast)
+    ensure_hardware_type(target_type, #'cast)
+    unless cast_compatible(value.type, target_type)
+    | fail(#'cast,
+           "cast requires source and target types with the same canonical packed width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.cast",
+                          [value],
+                          target_type,
+                          name,
+                          location,
+                          origin,
+                          #'cast)
 
   method concat(module_def,
                 operands,

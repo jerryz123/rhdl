@@ -119,11 +119,12 @@ The optional frontend modules are:
 
 | Module | Contribution |
 |---|---|
-| `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and named width operations |
+| `extensions/cast.rhm` | Generic explicit casts between equal-width packed representations |
+| `extensions/comb.rhm` | Literals, arithmetic, bitwise syntax, lookup muxes, and named width operations |
 | `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
 | `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
-| `extensions/sequential.rhm` | Binding-derived registers and clock/reset conversions |
+| `extensions/sequential.rhm` | Binding-derived registers |
 | `extensions/hierarchy.rhm` | Binding-derived instances and child-member access |
 
 `frontend/standard.rhm` only aggregates the base and optional modules. It does
@@ -335,7 +336,11 @@ Any bounded, nonempty host range is normalized to its selected low and high
 bit; unbounded and empty ranges are rejected. Selection is read-only and
 returns a hardware value rather than a connection place. A selected `Bits(1)`
 remains `Bits(1)`—conversion to the frontend-defined `Bool` is explicit with
-`as_bool`.
+`cast(value, Bool)`.
+
+`cast(value, TargetType)` changes only the hardware type, never the packed bit
+pattern or width. It handles nominal flat types, `Clock`, `Reset`, and
+recursively packed records. Width changes remain separate operations.
 
 ### Registers
 
@@ -580,14 +585,17 @@ not `DataType`s. The frontend-defined `Bool` is a nominal one-bit
 `BitwiseType`; it is distinct from `Bits(1)`. Core and the backend depend on
 the open capabilities rather than importing `Bool`.
 
-Equal-width flat types may cross only through explicit representation-
-transparent `reinterpret` operations. Clock/reset conversions are also
-explicit. Clock selection is never an ordinary data mux.
+Types with equal canonical packed widths may cross only through an explicit
+`cast`. This includes nominal flat types, `Clock`, `Reset`, and packable
+records. Clock selection is never an ordinary data mux.
 
 `RecordType` is an ordered, nonempty structural `DataType` with uniquely named
 `DataType` fields. Field names, order, and recursively equal field types all
-participate in `type_equal`. Records do not define an implicit packed-bit
-layout and cannot be reinterpreted as `Bits`.
+participate in `type_equal`. A packable record has the sum of its field widths,
+without padding. Fields are packed in declaration order with the first field
+occupying the most-significant bits; nested records apply the rule recursively.
+This layout is used only by explicit casts and is part of the record's binary
+interface contract.
 
 Current width rules are explicit:
 
@@ -608,8 +616,7 @@ mux_lookup(Bits(w), cases: Key -> T,
            default: T)                      -> T: DataType
 record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
-reinterpret(A: FlatDataType,
-            B: equal-width FlatDataType)    -> B
+cast(A: packable, B: same packed width)     -> B
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
 extract(Bits(w), high, low)                 -> Bits(high - low + 1)
 zext(Bits(a), target_width)                 -> Bits(target_width)
@@ -632,7 +639,7 @@ A binary Boolean mux is its one-case specialization:
 
 ```text
 mux(sel: Bool, when_true: T, when_false: T)
-  == mux_lookup(as_bits(sel), default: when_false) {1: when_true}
+  == mux_lookup(cast(sel, Bits(1)), default: when_false) {1: when_true}
 ```
 
 There is no `rtl.mux` operation.
@@ -719,7 +726,7 @@ the core schema.
 | Arithmetic | add, sub |
 | Comparison | equality |
 | Selection | mux lookup |
-| Conversion | reinterpret, as-bits, as-clock, as-reset |
+| Conversion | cast |
 | Width-changing | concat, extract, zext, trunc |
 | Records | record create, record get |
 | Sequential | register, synchronous-reset register |
@@ -823,7 +830,7 @@ SystemVerilog
 
 Every `FlatDataType` lowers to a signless integer of its declared bit width;
 the backend does not need to know the concrete scalar type. `RecordType`
-lowers recursively to `hw.struct`, preserving field order and names. Modules
+lowers recursively to packed `hw.struct`, preserving field order and names. Modules
 and instances use `hw`, combinational values use `comb` or `hw`, and primitive
 registers use `seq`. Active-high synchronous reset remains explicit as
 `seq.firreg` with `reset sync`.
@@ -842,8 +849,7 @@ type or operation it cannot represent.
 | `rtl.add/sub` | `comb.add/sub` |
 | `rtl.eq` | `comb.icmp eq` |
 | `rtl.mux_lookup` | `comb.icmp` plus a `comb.mux` tree |
-| `rtl.reinterpret` | Erased equal-width flat-data cast |
-| `rtl.as_*` | Erased one-bit data/control cast |
+| `rtl.cast` | Erased for identical lowered types; otherwise `hw.bitcast` |
 | `rtl.concat` | `comb.concat` |
 | `rtl.extract` | `comb.extract` |
 | `rtl.zext` | Zero constant plus `comb.concat` |

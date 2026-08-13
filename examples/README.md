@@ -54,11 +54,12 @@ Existing frontend behavior is grouped into independently importable modules:
 | Module | Existing behavior it contributes |
 |---|---|
 | [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, basic public types, and common hardware indexing |
-| [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, casts, and width operations |
+| [`extensions/cast.rhm`](../rhdl/frontend/extensions/cast.rhm) | Generic explicit casts between equal-width packed representations |
+| [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
 | [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
 | [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
-| [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers plus clock/reset conversions |
+| [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
 | [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances and child-port dot access |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
@@ -88,6 +89,7 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `value.field` | `rtl.record_get` or construction-time place projection |
 | `value[index]` | `rtl.extract(value, index, index)` |
 | `value[low..high]` | `rtl.extract(value, high - 1, low)` |
+| `cast(value, T)` | `rtl.cast` preserving canonical packed width and bit order |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
@@ -97,8 +99,8 @@ binary mux behavior outside core:
 
 | Boolean form | Core representation |
 |---|---|
-| `a === b` | `rtl.eq` producing `Bits(1)`, then `rtl.reinterpret` to `Bool` |
-| `mux(sel, a, b)` | Reinterpret `Bool` to `Bits(1)`, then one-case `rtl.mux_lookup` |
+| `a === b` | `rtl.eq` producing `Bits(1)`, then `rtl.cast` to `Bool` |
+| `mux(sel, a, b)` | Cast `Bool` to `Bits(1)`, then one-case `rtl.mux_lookup` |
 
 This division is the central language-oriented design rule: add a core concept
 only when it introduces new hardware semantics. Add notation and abstractions
@@ -130,7 +132,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
 | [`width-ops.rhdl`](width-ops.rhdl) | Host-range bit selection and other width-changing operations whose semantics remain in the kernel/core |
-| [`bundle.rhdl`](bundle.rhdl) | Structural records, nested bundles, aggregate mux/register state, and record-typed instances |
+| [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 

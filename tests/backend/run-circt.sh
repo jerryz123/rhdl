@@ -50,6 +50,7 @@ run_fixture width-ops width_ops_tb
 run_fixture counter counter_tb
 run_fixture hierarchy hierarchy_tb
 run_fixture bundle bundle_tb
+run_fixture record-cast record_cast_tb
 run_fixture interface interface_tb
 run_fixture nested-interface nested_interface_tb
 verify_fixture nested-bundle

@@ -26,12 +26,8 @@ fun circt_type(type):
 fun circt_width(type):
   if flat_data_type(type) | data_width(type) | 1
 
-fun alias_opcode(opcode):
-  match opcode
-  | "rtl.reinterpret" || "rtl.as_bits" || "rtl.as_clock" || "rtl.as_reset":
-      #true
-  | ~else:
-      #false
+fun alias_operation(operation):
+  operation.opcode == "rtl.cast" && circt_type(operation.operands[0].type) == circt_type(operation.results[0].type)
 
 fun named_result_opcode(opcode):
   match opcode
@@ -43,7 +39,7 @@ fun named_result_opcode(opcode):
 fun value_ref(value):
   def defining_operation = value.module_def.find_operation(value.defining_op_id)
   def opcode = defining_operation && defining_operation.opcode
-  if opcode && alias_opcode(opcode)
+  if defining_operation && alias_operation(defining_operation)
   | value_ref(defining_operation.operands[0])
   | if opcode && named_result_opcode(opcode)
     | "%" ++ value.name
@@ -151,6 +147,13 @@ fun emit_trunc(operation):
                 value_ref(operand), " from 0 : (", circt_type(operand.type),
                 ") -> ", circt_type(result.type))
 
+fun emit_cast(operation):
+  def source = operation.operands[0]
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = hw.bitcast ",
+                value_ref(source), " : (", circt_type(source.type),
+                ") -> ", circt_type(result.type))
+
 fun emit_record_create(operation):
   def result = operation.results[0]
   String.append("    ", value_ref(result), " = hw.struct_create (",
@@ -204,7 +207,7 @@ fun emit_instance(operation):
                 String.join(outputs, ", "), ")")
 
 fun emit_operation(operation):
-  if alias_opcode(operation.opcode)
+  if alias_operation(operation)
   | ""
   | match operation.opcode
     | "rtl.input_port" || "rtl.output_port" || "rtl.drive":
@@ -235,6 +238,8 @@ fun emit_operation(operation):
         emit_zext(operation)
     | "rtl.trunc":
         emit_trunc(operation)
+    | "rtl.cast":
+        emit_cast(operation)
     | "rtl.record_create":
         emit_record_create(operation)
     | "rtl.record_get":

@@ -59,8 +59,7 @@ check:
   schema_for("rtl.mux_lookup").type_rule ~is "data_mux_lookup"
   schema_for("rtl.register").type_rule ~is "data_register"
   schema_for("rtl.register_reset").type_rule ~is "data_register_reset"
-  schema_for("rtl.reinterpret").type_rule ~is "flat_reinterpret"
-  schema_for("rtl.as_clock").type_rule ~is "to_clock"
+  schema_for("rtl.cast").type_rule ~is "packed_cast"
   schema_for("rtl.drive").type_rule ~is "type_equal_drive"
   schema_for("rtl.record_create").type_rule ~is "record_create"
   schema_for("rtl.record_get").print_form ~is "record_get"
@@ -73,12 +72,24 @@ def reversed_pair8 = RecordType([RecordField("right", Bits(8)),
                                  RecordField("left", Bits(8))])
 def nested_pair = RecordType([RecordField("payload", pair8),
                               RecordField("valid", Bits(1))])
+def opaque_record = RecordType([RecordField("payload", extension)])
 
 check:
   record_type(pair8) ~is #true
   data_type(pair8) ~is #true
   flat_data_type(pair8) ~is #false
   bitwise_type(pair8) ~is #false
+  packed_width(bits8) ~is 8
+  packed_width(pair8) ~is 16
+  packed_width(nested_pair) ~is 17
+  packed_width(Clock) ~is 1
+  packed_width(Reset) ~is 1
+  packed_width(extension) ~is #false
+  packed_width(opaque_record) ~is #false
+  packable_type(pair8) ~is #true
+  cast_compatible(pair8, Bits(16)) ~is #true
+  cast_compatible(pair8, Bits(15)) ~is #false
+  cast_compatible(Clock, extension_bits) ~is #true
   type_well_formed(nested_pair) ~is #true
   type_equal(pair8, another_pair8) ~is #true
   type_equal(pair8, reversed_pair8) ~is #false
@@ -101,10 +112,10 @@ block:
   def alternate = builder.input(module_def, "alternate", same_extension)
   def target = builder.output(module_def, "target", same_extension)
   def selected = builder.mux_lookup(module_def, select, source, [[1, alternate]])
-  def converted_flat = builder.reinterpret(module_def, raw_control, extension_bits)
-  def converted_clock = builder.as_clock(module_def, raw_control)
-  def converted_reset = builder.as_reset(module_def, raw_control)
-  def converted_bits = builder.as_bits(module_def, converted_reset)
+  def converted_flat = builder.cast(module_def, raw_control, extension_bits)
+  def converted_clock = builder.cast(module_def, raw_control, Clock)
+  def converted_reset = builder.cast(module_def, raw_control, Reset)
+  def converted_bits = builder.cast(module_def, converted_reset, Bits(1))
   def inverted = builder.bit_not(module_def, extension_control)
   def combined = builder.bit_and(module_def, extension_control, converted_flat)
   def lookup = builder.mux_lookup(module_def,
@@ -147,6 +158,8 @@ block:
                                       [["right", right], ["left", left]],
                                       "initial")
   def initial_left = builder.record_get(module_def, initial, "left", "initial_left")
+  def packed = builder.cast(module_def, initial, Bits(16), "packed")
+  def unpacked = builder.cast(module_def, packed, pair8, "unpacked")
   def alternate = builder.record_create(module_def,
                                         pair8,
                                         [["left", right], ["right", left]],
@@ -169,6 +182,8 @@ block:
   def finished = builder.finish(module_def)
   check:
     output.driver.type.type_equal(pair8) ~is #true
+    packed.type.type_equal(Bits(16)) ~is #true
+    unpacked.type.type_equal(pair8) ~is #true
     module_def.operations.filter(
       ~keep: fun (operation): operation.opcode == "rtl.record_create"
     ).length() ~is 3
