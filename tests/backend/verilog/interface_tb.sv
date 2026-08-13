@@ -9,27 +9,27 @@ module interface_tb;
     logic ready;
   } backward_t;
 
-  forward_t ingress__producer_to_consumer;
-  backward_t egress__consumer_to_producer;
-  backward_t ingress__consumer_to_producer;
-  forward_t egress__producer_to_consumer;
+  forward_t ingress_in;
+  backward_t egress_in;
+  backward_t ingress_out;
+  forward_t egress_out;
 
   ReadyValidAdapter dut (
-    .ingress__producer_to_consumer(ingress__producer_to_consumer),
-    .egress__consumer_to_producer(egress__consumer_to_producer),
-    .ingress__consumer_to_producer(ingress__consumer_to_producer),
-    .egress__producer_to_consumer(egress__producer_to_consumer)
+    .ingress_in(ingress_in),
+    .egress_in(egress_in),
+    .ingress_out(ingress_out),
+    .egress_out(egress_out)
   );
 
   initial begin
-    ingress__producer_to_consumer = '{valid: 1'b1, bits: 8'hA5};
-    egress__consumer_to_producer = '{ready: 1'b1};
+    ingress_in = '{valid: 1'b1, bits: 8'hA5};
+    egress_in = '{ready: 1'b1};
     #1;
 
-    if (egress__producer_to_consumer.valid !== 1'b1 ||
-        egress__producer_to_consumer.bits !== 8'hA5)
+    if (egress_out.valid !== 1'b1 ||
+        egress_out.bits !== 8'hA5)
       $fatal(1, "forward interface flow failed");
-    if (ingress__consumer_to_producer.ready !== 1'b1)
+    if (ingress_out.ready !== 1'b1)
       $fatal(1, "backward interface flow failed");
 
     $display("interface simulation passed");
