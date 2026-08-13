@@ -402,17 +402,18 @@ u0.b <== b
 sum0 <== u0.sum
 ```
 
-An `inst` declaration may also appear in repeated host code. Its binding name
-is a suggested hardware name; collisions are deterministically suffixed within
-the parent module. The `InstanceArray` reducer builds an ordinary host Array
-while retaining the checked static information needed for concise port access.
-The collection remains host data; only the constructed instances enter the IR:
+An `inst` form binds its instance name in definition position and returns the
+instance in expression position. That lets it appear directly as the result of
+repeated host code. Its name is a suggested hardware name; collisions are
+deterministically suffixed within the parent module. The `InstanceArray`
+reducer builds an ordinary host Array while retaining the checked static
+information needed for concise port access. The collection remains host data;
+only the constructed instances enter the IR:
 
 ```rhombus
 def adders:
   for InstanceArray (ignored in 0..n):
     inst adder(FullAdderModule)
-    adder
 
 for (i in 0..n):
   adders[i].a <== A[i].into(Bool)
