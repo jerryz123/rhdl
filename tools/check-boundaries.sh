@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforces RHDL source conventions, layer imports, and standard/base profile composition.
+# Enforces RHDL source conventions, package imports, and standard/base profile composition.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,12 +28,27 @@ fail_matches "standard language assembly must not import core or backend modules
   '^[[:space:]]+"[^"]*(core|backend)/' rhdl/language.rhm
 fail_matches "base language assembly must not import core or backend modules" \
   '^[[:space:]]+"[^"]*(core|backend)/' rhdl/base/language.rhm
-fail_matches "the standard frontend must aggregate public modules instead of core or kernel" \
-  '^[[:space:]]+"[^"]*(core/|kernel\.rhm)' rhdl/frontend/standard.rhm
-fail_matches "the base frontend must not depend on optional frontend modules" \
-  '^[[:space:]]+"[^"]*(extensions/|standard\.rhm)' rhdl/frontend/base.rhm
-fail_matches "frontend extensions must not depend on the standard aggregator" \
-  '^[[:space:]]+"[^"]*standard\.rhm' rhdl/frontend/extensions
+fail_matches "the standard frontend must aggregate only the foundation and frontend layers" \
+  '^[[:space:]]+"[^"]*(core/|kernel\.rhm|support/)' rhdl/frontend/standard.rhm
+fail_matches "the standard frontend must not implement feature behavior" \
+  '^[[:space:]]*(def|fun|class|interface|operator|expr\.|defn\.|annot\.|dot\.|reducer\.)' rhdl/frontend/standard.rhm
+fail_matches "the frontend foundation must not depend on layers or the standard aggregator" \
+  '^[[:space:]]+"[^"]*(layers/|standard\.rhm)' rhdl/frontend/foundation.rhm
+fail_matches "frontend support must not depend on profiles or language layers" \
+  '^[[:space:]]+"[^"]*(foundation\.rhm|standard\.rhm|layers/)' rhdl/frontend/support
+fail_matches "frontend layers must not depend on profiles or the standard aggregator" \
+  '^[[:space:]]+"[^"]*(foundation\.rhm|standard\.rhm)' rhdl/frontend/layers
+fail_matches "frontend layers must not import sibling layers" \
+  '^[[:space:]]+"(bool|bundle|cast|comb|hierarchy|interface|sequential|vector|wire)\.rhm"' rhdl/frontend/layers
+
+while IFS= read -r layer_file; do
+  layer_name="$(basename "$layer_file")"
+  if ! rg -Fq "| \`$layer_name\` |" ARCHITECTURE.md; then
+    echo "frontend layer is missing from the ARCHITECTURE.md dependency table: $layer_file" >&2
+    exit 1
+  fi
+done < <(find rhdl/frontend/layers -maxdepth 1 -type f -name '*.rhm' | sort)
+
 fail_matches "core tests must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' tests/core
 fail_matches "frontend tests must not import backend modules" \

@@ -1,0 +1,86 @@
+#lang rhombus/and_meta
+// Provides shared instance-member and chained hardware-field syntax for hierarchy-aware layers.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "fields.rhm".hardware_index
+  "fields.rhm".hardware_into
+  "fields.rhm".hardware_lookup
+
+export:
+  InstanceMembers
+  instance_member
+  register_member_resolver
+
+def mutable member_resolvers = []
+
+// Lets a layer contribute virtual members, such as reconstructed interface
+// endpoints, without making the generic hierarchy layer import that layer.
+fun register_member_resolver(resolver):
+  member_resolvers := member_resolvers ++ [resolver]
+
+fun resolved_member(value, name):
+  def mutable resolved = #false
+  for (resolver in member_resolvers):
+    unless resolved
+    | resolved := resolver(value, name)
+  resolved
+
+fun instance_member(instance, name):
+  unless instance is_a Instance
+  | error(~who: #'inst, "port access requires an instance")
+  def input_binding = instance.input_bindings.find(fun (candidate): candidate.name == name)
+  if input_binding
+  | input_binding.place
+  | block:
+      def output_binding = instance.output_bindings.find(fun (candidate): candidate.name == name)
+      if output_binding
+      | output_binding.value
+      | block:
+          def resolved = resolved_member(instance, name)
+          unless resolved
+          | error(~who: #'inst,
+                  String.append("instance ",
+                                instance.operation.attribute("name"),
+                                " has no port or interface named ",
+                                name))
+          resolved
+
+fun hardware_member(value, name):
+  if value is_a Instance
+  | instance_member(value, name)
+  | block:
+      def resolved = resolved_member(value, name)
+      if resolved | resolved | kernel.project(value, name)
+
+annot.macro 'InstanceMembers':
+  annot_meta.pack_predicate(
+    'kernel.hardware_entity',
+    '(($(statinfo_meta.dot_provider_key), instance_member_dot), ($(statinfo_meta.index_get_key), hardware_index))'
+  )
+
+dot.macro 'instance_member_dot $left $dot $right':
+  match right
+  | 'id': #false
+  | 'name': #false
+  | 'type': #false
+  | 'role': #false
+  | 'bindings': #false
+  | 'view': #false
+  | 'module_def': #false
+  | 'module_id': #false
+  | 'design': #false
+  | 'defining_op_id': #false
+  | 'users': #false
+  | 'ref': #false
+  | 'owner_op_id': #false
+  | 'driver': #false
+  | 'operation': #false
+  | 'current': #false
+  | 'next': #false
+  | 'into': 'fun (target_type) :~ InstanceMembers: hardware_into($left, target_type)'
+  | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
+  | ~else:
+      'hardware_member($left, $(right.to_source_string())) :: InstanceMembers'

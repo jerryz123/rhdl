@@ -25,10 +25,19 @@
 
 ## Package boundaries
 
+- Treat `ARCHITECTURE.md` as the authoritative package and frontend-layer
+  dependency contract. Update its dependency table when adding a layer or
+  changing a layer's direct RHDL imports.
+
 - Keep frontend-independent IR, Builder, verification, and printing code under
   `rhdl/core/`; core modules must not import the frontend or backend.
 - Keep elaboration and language macros under `rhdl/frontend/`; frontend modules
   must not import backends.
+- Put the shared public authoring surface in `rhdl/frontend/foundation.rhm`,
+  independently selectable features in `rhdl/frontend/layers/`, and non-profile
+  macro/static-information machinery in `rhdl/frontend/support/`.
+- Frontend layers must not import sibling layers; move genuinely shared
+  machinery into `rhdl/frontend/support/`.
 - Keep CIRCT lowering under `rhdl/backend/`; backend modules must not import
   frontend syntax or elaboration.
 - Use `rhdl/language.rhm` as the composition layer and reserve `rhdl/main.rkt`

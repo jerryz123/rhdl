@@ -4,7 +4,7 @@
 
 RHDL treats an HDL as a family of languages built over one public hardware IR.
 The core owns hardware semantics. The elaboration kernel makes those semantics
-available as ordinary Rhombus functions. Frontend extensions then add notation,
+available as ordinary Rhombus functions. Frontend layers then add notation,
 binding conventions, types, and reusable abstractions without changing the IR.
 
 Start with the four versions of the same 8-bit adder:
@@ -14,7 +14,7 @@ Start with the four versions of the same 8-bit adder:
 | Public core | [`lop/adder-core.rhm`](lop/adder-core.rhm) | Ordinary Rhombus explicitly importing `Design`, `Builder`, verification, and related core APIs |
 | Elaboration kernel | [`lop/adder-kernel.rhm`](lop/adder-kernel.rhm) | Ordinary Rhombus explicitly importing active-context construction functions |
 | Composed language | [`lop/adder-composed.rhdl`](lop/adder-composed.rhdl) | `#lang rhdl/base` plus an explicit combinational-module import |
-| Standard extensions | [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl) | `circuit`, binding-derived ports, `+`, `<==`, and `elaborate` |
+| Standard profile | [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl) | The curated `#lang rhdl` composition |
 
 The sources become progressively shorter, but all four construct identical
 printed RHDL IR and identical CIRCT MLIR. The focused test makes that claim
@@ -42,38 +42,42 @@ libraries that want explicit construction without defining syntax. The
 composed version makes language assembly visible, while the standard version
 is the normal circuit-authoring style.
 
-## Language profiles and frontend modules
+## Language profiles and frontend layers
 
 `#lang rhdl/base` contains the shared circuit boundary: `Bits`, `Clock`,
 `Reset`, binding-derived ports, `circuit`, `elaborate`, `<==`, and the guarded
 host `if`. It intentionally does not expose the public core Builder or raw
 elaboration kernel.
 
-Existing frontend behavior is grouped into independently importable modules:
+Existing frontend behavior is grouped into a foundation and independently
+importable layers:
 
 | Module | Existing behavior it contributes |
 |---|---|
-| [`base.rhm`](../rhdl/frontend/base.rhm) | Circuit generators, ports, connections, basic public types, indexing, and `.into` casts |
-| [`extensions/cast.rhm`](../rhdl/frontend/extensions/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
-| [`extensions/comb.rhm`](../rhdl/frontend/extensions/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
-| [`extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
-| [`extensions/bundle.rhm`](../rhdl/frontend/extensions/bundle.rhm) | Bundle declarations, record construction, and field dot access |
-| [`extensions/interface.rhm`](../rhdl/frontend/extensions/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
-| [`extensions/wire.rhm`](../rhdl/frontend/extensions/wire.rhm) | Binding-derived single-driver internal wires |
-| [`extensions/sequential.rhm`](../rhdl/frontend/extensions/sequential.rhm) | Binding-derived registers |
-| [`extensions/hierarchy.rhm`](../rhdl/frontend/extensions/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
-| [`extensions/vector.rhm`](../rhdl/frontend/extensions/vector.rhm) | Concise fixed-length vector types and inferred construction |
+| [`foundation.rhm`](../rhdl/frontend/foundation.rhm) | Circuit generators, ports, connections, basic public types, indexing, and `.into` casts |
+| [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
+| [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
+| [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
+| [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
+| [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
+| [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
+| [`layers/sequential.rhm`](../rhdl/frontend/layers/sequential.rhm) | Binding-derived registers |
+| [`layers/hierarchy.rhm`](../rhdl/frontend/layers/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
+| [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
-implementation. It aggregates those modules, and `#lang rhdl` exposes that
-curated standard profile. The lower-level
+implementation. It aggregates the foundation and those layers, and
+`#lang rhdl` exposes that curated standard profile. The lower-level
 [`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
 remain explicit library imports.
 
+The package rules and exact direct dependencies of these layers are documented
+in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 ## What the standard language adds
 
-The standard frontend aggregates the modules above. Their forms layer over
-[`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
+The standard frontend aggregates the foundation and layers above. Their forms
+layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 
 | Standard form | Kernel meaning |
 |---|---|
@@ -101,8 +105,8 @@ The standard frontend aggregates the modules above. Their forms layer over
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
-[`rhdl/frontend/extensions/bool.rhm`](../rhdl/frontend/extensions/bool.rhm) is
-a separate type extension. It defines nominal `Bool`, Boolean equality, and
+[`rhdl/frontend/layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) is
+a separate type layer. It defines nominal `Bool`, Boolean equality, and
 binary mux behavior outside core:
 
 | Boolean form | Core representation |
@@ -135,9 +139,9 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`full-adder.rhdl`](full-adder.rhdl) | Nominal Boolean ports, named intermediate logic, and an unparenthesized chained carry reduction |
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
 | [`generated-adder.rhdl`](generated-adder.rhdl) | An `InstanceArray` host collection wired through runtime `Vec` carry and sum wires |
-| [`alu.rhdl`](alu.rhdl) | Extension-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
+| [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
-| [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register extensions over primitive registers |
+| [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |

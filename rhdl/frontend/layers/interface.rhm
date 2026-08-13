@@ -1,13 +1,15 @@
 #lang rhombus/and_meta
-// Defines recursively composable explicit-role interfaces over record-typed core ports.
+// Defines the recursively composable explicit-role interface frontend layer.
 
 import:
   rhombus/meta open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
-  "../fields.rhm".hardware_index
-  "../fields.rhm".hardware_into
-  "../fields.rhm".hardware_lookup
+  "../support/fields.rhm".hardware_index
+  "../support/fields.rhm".hardware_into
+  "../support/fields.rhm".hardware_lookup
+  "../support/instance-members.rhm".InstanceMembers
+  "../support/instance-members.rhm".register_member_resolver
 
 export:
   InterfaceFlow
@@ -17,8 +19,6 @@ export:
   interface
   <=>
   InterfaceFields
-  InstanceMembers
-  instance_member
 
 class InterfaceFlow(from_role, to_role, type):
   constructor (from_role, to_role, type):
@@ -232,44 +232,23 @@ fun endpoint_for_instance(instance, name):
         )
       InterfaceEndpoint(group.type, group.role, bindings, "instance")
 
-fun instance_member(instance, name):
-  unless instance is_a Instance
-  | error(~who: #'inst, "port access requires an instance")
-  def input_binding = instance.input_bindings.find(fun (candidate): candidate.name == name)
-  if input_binding
-  | input_binding.place
-  | block:
-      def output_binding = instance.output_bindings.find(fun (candidate): candidate.name == name)
-      if output_binding
-      | output_binding.value
-      | block:
-          def endpoint = endpoint_for_instance(instance, name)
-          unless endpoint
-          | error(~who: #'inst,
-                  String.append("instance ",
-                                instance.operation.attribute("name"),
-                                " has no port or interface named ",
-                                name))
-          endpoint
-
 fun interface_member(value, name):
   if value is_a InterfaceEndpoint
   | value.field(name)
   | kernel.project(value, name)
 
-fun interface_or_hardware(value):
-  value is_a InterfaceEndpoint || kernel.hardware_entity(value)
+fun resolve_interface_member(value, name):
+  cond
+  | value is_a InterfaceEndpoint: value.field(name)
+  | value is_a Instance: endpoint_for_instance(value, name)
+  | ~else: #false
+
+def registered_interface_member_resolver = register_member_resolver(resolve_interface_member)
 
 annot.macro 'InterfaceFields':
   annot_meta.pack_predicate(
     'fun (value): value is_a InterfaceEndpoint',
     '(($(statinfo_meta.dot_provider_key), interface_field_dot))'
-  )
-
-annot.macro 'InstanceMembers':
-  annot_meta.pack_predicate(
-    'interface_or_hardware',
-    '(($(statinfo_meta.dot_provider_key), interface_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
   )
 
 dot.macro 'interface_field_dot $left $dot $right':

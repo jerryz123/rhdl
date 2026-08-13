@@ -22,29 +22,20 @@ RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 RHDL separates hardware meaning from authoring convenience:
 
 ```text
-ordinary Rhombus libraries and user extensions
-                        |
-                        v
-              standard #lang rhdl
-                        |
-          +-------------+-------------+
-          |                           |
-          v                           v
-   #lang rhdl/base           optional frontend modules
-          |                           |
-          +-------------+-------------+
-                        |
-                        v
-               elaboration kernel
-                        |
-                        v
-                 public core IR
-                  /           \
-                 v             v
-       inspection tools   optional CIRCT backend
-                               |
-                               v
-                         SystemVerilog
+#lang rhdl ------> standard ------> foundation + curated layers
+#lang rhdl/base ------------------> foundation + selected layers
+                                             |
+                                             v
+                                    elaboration kernel
+                                             |
+                                             v
+                                       public core IR
+                                        /           \
+                                       v             v
+                             inspection tools   optional CIRCT backend
+                                                     |
+                                                     v
+                                               SystemVerilog
 ```
 
 The layers have distinct responsibilities:
@@ -55,9 +46,9 @@ The layers have distinct responsibilities:
   circuit context.
 - `#lang rhdl/base` provides the circuit boundary, ports, connections, basic
   types, elaboration, and guarded host conditionals.
-- Optional frontend modules add notation and abstractions without changing
+- Composable frontend layers add notation and abstractions without changing
   hardware semantics.
-- `#lang rhdl` aggregates those frontend modules into the normal authoring
+- `#lang rhdl` aggregates the curated frontend layers into the normal authoring
   language.
 - Ordinary Rhombus libraries and user macros can add further layers without
   modifying the reader, core IR, verifier, or backend.
@@ -65,7 +56,7 @@ The layers have distinct responsibilities:
 Macro expansion is not a second hardware IR. All frontend paths construct the
 same public core graph.
 
-### Core versus extension
+### Core versus frontend layer
 
 A concept belongs in core when it introduces hardware semantics that the IR,
 verifier, and backend must preserve. Current core concepts include:
@@ -79,10 +70,10 @@ verifier, and backend must preserve. Current core concepts include:
 - Modules, ports, and instances.
 - Ownership, type, driver, and cycle verification.
 
-A concept belongs in a frontend extension when it is notation, organization,
+A concept belongs in a frontend layer when it is notation, organization,
 or policy over existing semantics. Current examples include:
 
-- The extension-defined `Bool` type and Boolean syntax.
+- The layer-defined `Bool` type and Boolean syntax.
 - Arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
@@ -108,7 +99,7 @@ Programs explicitly import the additional language they want:
 #lang rhdl/base
 
 import:
-  lib("rhdl/frontend/extensions/comb.rhm") open
+  lib("rhdl/frontend/layers/comb.rhm") open
 
 circuit Adder(width):
   input(a, b): Bits(width)
@@ -118,26 +109,26 @@ circuit Adder(width):
 def design = elaborate(Adder(8))
 ```
 
-The optional frontend modules are:
+The composable frontend layers are:
 
 | Module | Contribution |
 |---|---|
-| `extensions/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
-| `extensions/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
-| `extensions/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
-| `extensions/bundle.rhm` | Bundle declarations, record construction, and field access |
-| `extensions/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
-| `extensions/wire.rhm` | Binding-derived single-driver internal wires |
-| `extensions/sequential.rhm` | Binding-derived registers |
-| `extensions/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
-| `extensions/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
+| `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
+| `layers/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
+| `layers/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
+| `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
+| `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
+| `layers/wire.rhm` | Binding-derived single-driver internal wires |
+| `layers/sequential.rhm` | Binding-derived registers |
+| `layers/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
+| `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
-`frontend/standard.rhm` only aggregates the base and optional modules. It does
-not implement features itself. Neither language profile implicitly exports the
-core Builder or raw elaboration kernel.
+`frontend/standard.rhm` only aggregates the foundation and curated layers. It
+does not implement features itself. Neither language profile implicitly
+exports the core Builder or raw elaboration kernel.
 
-The shared base marks hardware bindings with frontend static information for
-field access, host-range indexing, and `.into(TargetType)`. Consequently,
+The shared foundation marks hardware bindings with frontend static information
+for field access, host-range indexing, and `.into(TargetType)`. Consequently,
 `value[i]`, `value[low..high]`, and `value.into(TargetType)` are common frontend
 notation over the kernel's explicit `extract` and `cast` operations rather
 than new core semantics.
@@ -160,8 +151,11 @@ ports with bundles and explicit directional record ports with interfaces.
 make lop-test
 ```
 
-This is the central architectural claim of the project: extensions improve the
+This is the central architectural claim of the project: layers improve the
 language without fragmenting the hardware model.
+
+The complete package contract and per-layer dependency inventory live in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Quick start
 
@@ -443,7 +437,7 @@ ports.
 
 `RecordType` is a structural core `DataType`. Records can be passed through
 ports and instances and used as mux results or register state. The bundle
-extension adds declaration and field syntax:
+layer adds declaration and field syntax:
 
 ```rhombus
 bundle Pair(T):
@@ -474,7 +468,7 @@ def pair = record(Pair(Bits(8))):
 ### Fixed-length vectors
 
 `VectorType` is a structural core `DataType` for a positive host-known length
-of one element type. The vector extension gives it the concise `Vec` and `vec`
+of one element type. The vector layer gives it the concise `Vec` and `vec`
 spellings:
 
 ```rhombus
@@ -620,7 +614,7 @@ A reusable construction abstraction can be an ordinary Rhombus function:
 #lang rhombus
 
 import:
-  lib("rhdl/frontend/extensions/comb.rhm") open
+  lib("rhdl/frontend/layers/comb.rhm") open
 
 fun add_pair(left, right):
   left + right
@@ -1033,24 +1027,26 @@ rhdl/language.rhm             # standard language composition
 rhdl/base/                    # minimal #lang rhdl/base composition and reader
 rhdl/core/                    # IR, types, Builder, verifier, and printer
 rhdl/frontend/kernel.rhm      # context-based elaboration kernel
-rhdl/frontend/base.rhm        # minimal frontend surface
-rhdl/frontend/extensions/     # independently composable language features
-rhdl/frontend/standard.rhm    # feature-free standard aggregator
-rhdl/backend/                 # optional backend extensions, currently CIRCT
+rhdl/frontend/foundation.rhm  # shared public authoring surface
+rhdl/frontend/support/        # shared non-profile frontend machinery
+rhdl/frontend/layers/         # independently composable language layers
+rhdl/frontend/standard.rhm    # implementation-free standard aggregator
+rhdl/backend/                 # optional IR consumers, currently CIRCT
 examples/                     # canonical valid frontend programs
 tests/                        # mirrored core, frontend, and backend tests
 ```
 
-The dependency direction is enforced:
+The high-level dependency direction is:
 
 ```text
-frontend/standard -> frontend/base + frontend/extensions/*
-frontend/{base,extensions/*} -> frontend/kernel -> core
-backend/circt -----------------------------------------------> core
-language -> frontend/standard + kernel host-condition guard
-base/language -> frontend/base + kernel host-condition guard
-reader shims -> their language compositions
+language -> frontend/standard -> frontend/foundation + frontend/layers/*
+base/language ----------------> frontend/foundation
+frontend/{foundation,layers/*} -> frontend/support + frontend/kernel -> core
+backend/circt ----------------------------------------------------------> core
 ```
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the authoritative dependency
+table, including every standard frontend layer and its direct dependencies.
 
 Core must not import the frontend or backend. The frontend and its tests must
 not import the backend. The backend must not import frontend syntax or
@@ -1093,9 +1089,9 @@ Run the minimum target that covers a change:
 make check-boundaries  # package and file-type boundaries
 make examples          # all canonical frontend programs
 make lop-test          # language-layer equivalence
-make base-test          # core and frontend tests without any backend import
+make frontend-test      # core and frontend tests without any backend import
 make backend-test       # textual CIRCT lowering tests without external tools
-make unit-test          # base plus backend Rhombus tests
+make unit-test          # frontend plus backend Rhombus tests
 make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
