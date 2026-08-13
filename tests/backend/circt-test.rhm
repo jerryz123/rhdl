@@ -6,9 +6,6 @@ import:
   "../../rhdl/backend/circt.rhm" open
   "../../rhdl/frontend/extensions/bool.rhm" as bool
   "../../rhdl/frontend/kernel.rhm" as embedded
-  "../../examples/lop/adder-core.rhm" as core_adder_fixture
-  "../../examples/lop/adder-kernel.rhm" as kernel_adder_fixture
-  "../../examples/lop/adder-composed.rhdl" as composed_adder_fixture
   "../../examples/lop/adder-standard.rhdl" as adder_fixture
   "../../examples/alu.rhdl" as alu_fixture
   "../../examples/width-ops.rhdl" as width_fixture
@@ -25,9 +22,6 @@ check:
   adder_circt.contains("hw.module @Adder(in %a : i8, in %b : i8, out sum : i8)") ~is #true
   adder_circt.contains("comb.add %a, %b : i8") ~is #true
   adder_circt ~is emit_circt(adder_fixture.design)
-  emit_circt(core_adder_fixture.design) ~is adder_circt
-  emit_circt(kernel_adder_fixture.design) ~is adder_circt
-  emit_circt(composed_adder_fixture.design) ~is adder_circt
 
 def counter_circt = emit_circt(counter_fixture.design)
 
@@ -135,3 +129,21 @@ check:
   nested_interface_circt.contains("!hw.struct<command: !hw.struct<valid: i1, bits: i8>, enable: i1, response: !hw.struct<ready: i1>>") ~is #true
   nested_interface_circt.contains("!hw.struct<command: !hw.struct<ready: i1>, response: !hw.struct<valid: i1, bits: i8>, status: i8>") ~is #true
   nested_interface_circt.contains("hw.output %egress__device_to_manager, %ingress__manager_to_device") ~is #true
+
+class OpaqueData(name):
+  implements DataType
+  override method describe(): "opaque<" ++ name ++ ">"
+  override method type_equal(other):
+    other is_a OpaqueData && name == other.name
+
+def unsupported_design = Design()
+def unsupported_builder = Builder(unsupported_design)
+def unsupported_module = unsupported_builder.module("UnsupportedType")
+def opaque_type = OpaqueData("payload")
+def opaque_input = unsupported_builder.input(unsupported_module, "source", opaque_type)
+def opaque_output = unsupported_builder.output(unsupported_module, "target", opaque_type)
+unsupported_builder.drive(opaque_output, opaque_input)
+def finished_unsupported_module = unsupported_builder.finish(unsupported_module)
+
+check:
+  emit_circt(unsupported_design) ~throws "CIRCT lowering does not support hardware type opaque<payload>"

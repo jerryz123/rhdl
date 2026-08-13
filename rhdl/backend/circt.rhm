@@ -2,10 +2,7 @@
 // Lowers the public RHDL hardware IR to textual CIRCT HW, Comb, and Seq MLIR.
 
 import:
-  "../core/types.rhm" open
-  "../core/ir.rhm" open
-  "../core/ops.rhm" open
-  "../core/verify.rhm" open
+  "../core/main.rhm" open
 
 export:
   emit_circt
@@ -29,12 +26,26 @@ fun circt_type(type):
 fun circt_width(type):
   if flat_data_type(type) | data_width(type) | 1
 
+fun alias_opcode(opcode):
+  match opcode
+  | "rtl.reinterpret" || "rtl.as_bits" || "rtl.as_clock" || "rtl.as_reset":
+      #true
+  | ~else:
+      #false
+
+fun named_result_opcode(opcode):
+  match opcode
+  | "rtl.input_port" || "rtl.register" || "rtl.register_reset":
+      #true
+  | ~else:
+      #false
+
 fun value_ref(value):
   def defining_operation = value.module_def.find_operation(value.defining_op_id)
-  def schema = defining_operation && schema_for(defining_operation.opcode)
-  if schema && schema.circt_lowering == "alias"
+  def opcode = defining_operation && defining_operation.opcode
+  if opcode && alias_opcode(opcode)
   | value_ref(defining_operation.operands[0])
-  | if schema && (schema.print_form == "input_port" || schema.circt_lowering == "seq.firreg")
+  | if opcode && named_result_opcode(opcode)
     | "%" ++ value.name
     | "%__rhdl_value_" ++ to_string(value.id)
 
@@ -158,9 +169,8 @@ fun emit_register(operation):
   def next = operation.places[0]
   def clock = operation.operands[0]
   def clock_ref = "%__rhdl_clock_" ++ to_string(operation.id)
-  def schema = schema_for(operation.opcode)
   def reset_text:
-    if schema.type_rule == "data_register_reset"
+    if operation.opcode == "rtl.register_reset"
     | String.append(" reset sync ",
                     value_ref(operation.operands[1]), ", ",
                     value_ref(operation.operands[2]))
@@ -194,41 +204,48 @@ fun emit_instance(operation):
                 String.join(outputs, ", "), ")")
 
 fun emit_operation(operation):
-  def schema = schema_for(operation.opcode)
-  match schema && schema.circt_lowering
-  | "boundary":
-      ""
-  | "hw.constant":
-      emit_constant(operation)
-  | "comb.and" || "comb.or" || "comb.xor" || "comb.add" || "comb.sub":
-      emit_binary(operation, schema.circt_lowering)
-  | "not":
-      emit_not(operation)
-  | "eq":
-      emit_eq(operation)
-  | "mux_lookup":
-      emit_mux_lookup(operation)
-  | "alias":
-      ""
-  | "concat":
-      emit_concat(operation)
-  | "extract":
-      emit_extract(operation)
-  | "zext":
-      emit_zext(operation)
-  | "trunc":
-      emit_trunc(operation)
-  | "hw.struct_create":
-      emit_record_create(operation)
-  | "hw.struct_extract":
-      emit_record_get(operation)
-  | "seq.firreg":
-      emit_register(operation)
-  | "hw.instance":
-      emit_instance(operation)
-  | ~else:
-      error(~who: #'emit_circt,
-            "no CIRCT lowering for operation " ++ operation.opcode)
+  if alias_opcode(operation.opcode)
+  | ""
+  | match operation.opcode
+    | "rtl.input_port" || "rtl.output_port" || "rtl.drive":
+        ""
+    | "rtl.constant":
+        emit_constant(operation)
+    | "rtl.and":
+        emit_binary(operation, "comb.and")
+    | "rtl.or":
+        emit_binary(operation, "comb.or")
+    | "rtl.xor":
+        emit_binary(operation, "comb.xor")
+    | "rtl.add":
+        emit_binary(operation, "comb.add")
+    | "rtl.sub":
+        emit_binary(operation, "comb.sub")
+    | "rtl.not":
+        emit_not(operation)
+    | "rtl.eq":
+        emit_eq(operation)
+    | "rtl.mux_lookup":
+        emit_mux_lookup(operation)
+    | "rtl.concat":
+        emit_concat(operation)
+    | "rtl.extract":
+        emit_extract(operation)
+    | "rtl.zext":
+        emit_zext(operation)
+    | "rtl.trunc":
+        emit_trunc(operation)
+    | "rtl.record_create":
+        emit_record_create(operation)
+    | "rtl.record_get":
+        emit_record_get(operation)
+    | "rtl.register" || "rtl.register_reset":
+        emit_register(operation)
+    | "rtl.instance":
+        emit_instance(operation)
+    | ~else:
+        error(~who: #'emit_circt,
+              "no CIRCT lowering for operation " ++ operation.opcode)
 
 fun emit_module_circt(module_def):
   def ports:

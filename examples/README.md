@@ -133,6 +133,11 @@ After the adder ladder, each remaining example has one primary lesson:
 shows that a useful RHDL construction abstraction need not be a macro or
 require a language reader change.
 
+[`inspect-ir.rhm`](inspect-ir.rhm) is an intentionally non-CIRCT consumer. It
+uses only the public core API to walk an elaborated design and report module,
+operation, and addition counts. It demonstrates that compilation is one use
+of the public IR rather than the IR's defining purpose.
+
 Run every example with:
 
 ```sh

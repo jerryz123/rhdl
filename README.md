@@ -3,8 +3,9 @@
 # RHDL
 
 RHDL is an experimental Rhombus-hosted hardware description language. It uses
-ordinary Rhombus computation to elaborate a public hardware IR, verifies that
-IR, and lowers it through CIRCT to SystemVerilog.
+ordinary Rhombus computation to elaborate and verify a public hardware IR.
+Optional consumers can inspect that IR or lower it through CIRCT to
+SystemVerilog.
 
 RHDL is primarily an exploration of language-oriented programming for hardware
 design: a deliberately small semantic core supports progressively richer
@@ -38,12 +39,12 @@ ordinary Rhombus libraries and user extensions
                         |
                         v
                  public core IR
-                        |
-                        v
-               CIRCT hw/comb/seq
-                        |
-                        v
-                  SystemVerilog
+                  /           \
+                 v             v
+       inspection tools   optional CIRCT backend
+                               |
+                               v
+                         SystemVerilog
 ```
 
 The layers have distinct responsibilities:
@@ -156,7 +157,10 @@ language without fragmenting the hardware model.
 
 - Racket 9.2 or a compatible current release.
 - The Rhombus package.
-- CIRCT; the repository pins `firtool-1.155.0` for backend tests.
+
+The optional CIRCT integration tests additionally require:
+
+- CIRCT; the repository pins `firtool-1.155.0`.
 - Verilator for generated-hardware simulations.
 
 On a Homebrew-based macOS setup:
@@ -174,7 +178,7 @@ make setup-circt
 ```
 
 On other platforms, install CIRCT separately and set `CIRCT_OPT` to the path
-of `circt-opt` when running backend tests.
+of `circt-opt` when running backend integration tests.
 
 ### First circuit
 
@@ -685,7 +689,8 @@ Operation
 Operations use namespaced `rtl.*` opcodes and a static schema registry rather
 than a closed class hierarchy such as `AddNode` or `MuxNode`. Each schema
 defines arity, required attributes, type constraints, verification behavior,
-semantic category, printing form, and CIRCT lowering target.
+semantic category, and printing form. Backend lowering choices are not part of
+the core schema.
 
 ### Operation catalog
 
@@ -731,8 +736,9 @@ The Builder owns one design; the module being edited is explicit. It rejects
 locally impossible construction immediately, while whole-graph checks run at
 verification boundaries. Construction methods accept locations and origins.
 
-The core API is exported by `rhdl/core/main.rhm`. CIRCT emission is exported
-separately by `rhdl/backend/circt.rhm`.
+The core API is exported by `rhdl/core/main.rhm`. The optional CIRCT backend is
+imported separately from `rhdl/backend/circt.rhm`; core construction,
+verification, printing, and inspection do not import it.
 
 ### Inspection, provenance, and naming
 
@@ -781,9 +787,9 @@ longer present after elaboration.
 
 Compilation verifies the completed design before lowering.
 
-## CIRCT backend
+## Optional CIRCT backend
 
-The backend depends only on core IR:
+The backend is an explicit consumer of the public core IR:
 
 ```text
 RHDL hardware IR
@@ -804,6 +810,12 @@ lowers recursively to `hw.struct`, preserving field order and names. Modules
 and instances use `hw`, combinational values use `comb` or `hw`, and primitive
 registers use `seq`. Active-high synchronous reset remains explicit as
 `seq.firreg` with `reset sync`.
+
+All opcode dispatch, representation-transparent alias elimination, CIRCT SSA
+naming, and type lowering live in the backend. Core operation schemas contain
+only RHDL semantics. A core operation can therefore exist independently of
+CIRCT; `emit_circt` reports a backend error when a verified design contains a
+type or operation it cannot represent.
 
 | RHDL | CIRCT |
 |---|---|
@@ -840,7 +852,7 @@ rhdl/frontend/kernel.rhm      # context-based elaboration kernel
 rhdl/frontend/base.rhm        # minimal frontend surface
 rhdl/frontend/extensions/     # independently composable language features
 rhdl/frontend/standard.rhm    # feature-free standard aggregator
-rhdl/backend/                 # CIRCT lowering
+rhdl/backend/                 # optional backend extensions, currently CIRCT
 examples/                     # canonical valid frontend programs
 tests/                        # mirrored core, frontend, and backend tests
 ```
@@ -856,8 +868,9 @@ base/language -> frontend/base + kernel host-condition guard
 reader shims -> their language compositions
 ```
 
-Core must not import the frontend or backend. The frontend must not import the
-backend. The backend must not import frontend syntax or elaboration.
+Core must not import the frontend or backend. The frontend and its tests must
+not import the backend. The backend must not import frontend syntax or
+elaboration.
 
 `.rhdl` is reserved for RHDL-profile programs and frontend fixtures, `.rhm`
 contains Rhombus implementation and library modules, and `.rkt` is restricted
@@ -882,6 +895,7 @@ Important examples include:
 | `examples/bundle.rhdl` | Records, nested bundles, aggregate muxes and registers |
 | `examples/interface.rhdl` | Named roles, flows, bulk connection, and hierarchy |
 | `examples/nested-interface.rhdl` | Recursive interface composition and orientation |
+| `examples/inspect-ir.rhm` | Backend-independent operation and module inspection |
 
 ### Test commands
 
@@ -891,7 +905,9 @@ Run the minimum target that covers a change:
 make check-boundaries  # package and file-type boundaries
 make examples          # all canonical frontend programs
 make lop-test          # language-layer equivalence
-make unit-test         # Rhombus unit and negative tests
+make base-test          # core and frontend tests without any backend import
+make backend-test       # textual CIRCT lowering tests without external tools
+make unit-test          # base plus backend Rhombus tests
 make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```

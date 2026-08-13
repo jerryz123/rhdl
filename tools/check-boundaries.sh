@@ -10,7 +10,7 @@ fail_matches() {
   local pattern="$2"
   local directory="$3"
   local matches
-  matches="$(rg -n "$pattern" "$directory" --glob '*.rhm' || true)"
+  matches="$(rg -n "$pattern" "$directory" --glob '*.rhm' --glob '*.rhdl' || true)"
   if [[ -n "$matches" ]]; then
     echo "$description" >&2
     echo "$matches" >&2
@@ -34,6 +34,10 @@ fail_matches "the base frontend must not depend on optional frontend modules" \
   '^[[:space:]]+"[^"]*(extensions/|standard\.rhm)' rhdl/frontend/base.rhm
 fail_matches "frontend extensions must not depend on the standard aggregator" \
   '^[[:space:]]+"[^"]*standard\.rhm' rhdl/frontend/extensions
+fail_matches "core tests must not import backend modules" \
+  '^[[:space:]]+"[^"]*backend/' tests/core
+fail_matches "frontend tests must not import backend modules" \
+  '^[[:space:]]+"[^"]*backend/' tests/frontend
 
 unexpected_top_level="$(find rhdl -maxdepth 1 -type f \
   ! -name 'main.rkt' ! -name 'language.rhm' -print)"

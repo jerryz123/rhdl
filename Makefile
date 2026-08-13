@@ -1,16 +1,26 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test check-boundaries unit-test lop-test circt-test setup-circt examples
+.PHONY: test check-boundaries base-test backend-test unit-test lop-test circt-test setup-circt examples
+
+CORE_TESTS = tests/core/types-test.rhm tests/core/verify-test.rhm
+FRONTEND_TESTS = tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/aggregate-equivalence-test.rhm
+BACKEND_TESTS = tests/backend/circt-test.rhm tests/backend/equivalence-test.rhm
 
 check-boundaries:
 	bash tools/check-boundaries.sh
 
-unit-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test tests/core/types-test.rhm tests/core/verify-test.rhm tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/aggregate-equivalence-test.rhm tests/backend/circt-test.rhm
+base-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test $(CORE_TESTS) $(FRONTEND_TESTS)
 	bash tests/frontend/run-negative.sh
 
+backend-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test $(BACKEND_TESTS)
+
+unit-test: base-test backend-test
+
 lop-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test tests/frontend/lop-equivalence-test.rhm tests/frontend/aggregate-equivalence-test.rhm tests/backend/circt-test.rhm
+	env PLTCOLLECTS=$(CURDIR): raco test tests/frontend/lop-equivalence-test.rhm tests/frontend/aggregate-equivalence-test.rhm
+	env PLTCOLLECTS=$(CURDIR): raco test tests/backend/equivalence-test.rhm
 
 circt-test:
 	bash tests/backend/run-circt.sh
@@ -39,3 +49,4 @@ examples:
 	racket -S $(CURDIR) examples/bundle.rhdl
 	racket -S $(CURDIR) examples/interface.rhdl
 	racket -S $(CURDIR) examples/nested-interface.rhdl
+	racket -S $(CURDIR) examples/inspect-ir.rhm
