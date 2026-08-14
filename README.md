@@ -1402,6 +1402,7 @@ Important examples include:
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/stack.rhdl` | Host-sized stack with guarded memory writes and nested hardware control |
+| `examples/table.rhdl` | Host-generated 256-entry combinational vector table |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |

@@ -132,9 +132,12 @@ run_fixture() {
 
 verify_fixture() {
   local fixture="$1"
+  local top="${2:-}"
   local mlir="$test_tmp_dir/$fixture.mlir"
   local verilog="$test_tmp_dir/$fixture.sv"
   local memory_lowering_pass=""
+  local object_dir="$test_tmp_dir/${fixture}_obj"
+  local build_log="$test_tmp_dir/$fixture.verilator.log"
 
   fixture_selected "$fixture" || return 0
   [[ "$mode" == run ]] || return 0
@@ -148,6 +151,17 @@ verify_fixture() {
     $memory_lowering_pass \
     --lower-seq-to-sv='disable-reg-randomization=true' \
     --export-verilog "$mlir" -o /dev/null > "$verilog"
+
+  if [[ -n "$top" ]]; then
+    if ! verilator --binary --timing --build-jobs 0 --top-module "$top" \
+        --Mdir "$object_dir" \
+        "$verilog" "tests/backend/verilog/${fixture}_tb.sv" \
+        > "$build_log" 2>&1; then
+      cat "$build_log" >&2
+      return 1
+    fi
+    "$object_dir/V$top"
+  fi
 }
 
 fixture_specs=(
@@ -207,3 +221,4 @@ verify_fixture nested-bundle
 verify_fixture bundle-hierarchy
 verify_fixture interface-hierarchy
 verify_fixture aggregate-memory
+verify_fixture table table_tb
