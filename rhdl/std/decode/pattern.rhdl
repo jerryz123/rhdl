@@ -1,0 +1,59 @@
+#lang rhdl
+// Defines typed host-side bit patterns over exact hardware literal shadows.
+
+export:
+  Pattern
+
+fun literal_types_equal(left, right):
+  def left_type = left.literal_type()
+  def right_type = right.literal_type()
+  left_type.type_equal(right_type) && right_type.type_equal(left_type)
+
+fun require_literal(value, role):
+  unless value is_a HardwareLiteral
+  | error(~who: #'Pattern, role ++ " must be a HardwareLiteral")
+  def width = value.literal_width()
+  unless width is_a Int && width > 0
+  | error(~who: #'Pattern, role ++ " must have a positive packed width")
+  def packed = value.packed_value()
+  unless packed is_a Int && 0 <= packed && packed < (1 bits.(<<) width)
+  | error(~who: #'Pattern, role ++ " packed value does not fit its literal type")
+  value
+
+fun require_same_pattern_type(left, right, role):
+  unless literal_types_equal(left, right) && left.literal_width() == right.literal_width()
+  | error(~who: #'Pattern,
+          role ++ " must have exactly the same hardware type and width")
+
+// Pattern is deliberately ordinary host data, not a HardwareLiteral. It
+// denotes a set of packed values and therefore cannot be connected to hardware.
+class Pattern(value, care, type, width, value_bits, care_bits):
+  constructor (~value: supplied_value, ~care: supplied_care):
+    def value = require_literal(supplied_value, "value")
+    def care = require_literal(supplied_care, "care")
+    require_same_pattern_type(value, care, "value and care")
+    def width = value.literal_width()
+    def care_bits = care.packed_value()
+    def value_bits = value.packed_value() bits.and care_bits
+    super(value, care, value.literal_type(), width, value_bits, care_bits)
+
+  method matches(candidate):
+    def literal = require_literal(candidate, "candidate")
+    require_same_pattern_type(value, literal, "candidate")
+    (literal.packed_value() bits.and care_bits) == value_bits
+
+  method overlaps(other):
+    unless other is_a Pattern
+    | error(~who: #'Pattern, "overlap operand must be a Pattern")
+    require_same_pattern_type(value, other.value, "patterns")
+    def differing = value_bits bits.xor other.value_bits
+    def jointly_cared = care_bits bits.and other.care_bits
+    (differing bits.and jointly_cared) == 0
+
+  method subsumes(other):
+    unless other is_a Pattern
+    | error(~who: #'Pattern, "subsumption operand must be a Pattern")
+    require_same_pattern_type(value, other.value, "patterns")
+    def shared_care = care_bits bits.and other.care_bits
+    def differing = value_bits bits.xor other.value_bits
+    shared_care == care_bits && (differing bits.and care_bits) == 0

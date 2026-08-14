@@ -184,6 +184,11 @@ enum members, and other reusable host descriptions do not allocate IR merely
 by being declared or passed as circuit parameters. Once consumed, they lower
 to ordinary core values and operations.
 
+Every `HardwareLiteral` reports its hardware type, packed width, and packed
+host value. Ordinary public-surface libraries can therefore build typed static
+abstractions—such as [`../std/decode/pattern.rhdl`](../std/decode/pattern.rhdl)—
+without importing core or frontend implementation modules.
+
 The static subtype distinguishes reusable descriptions from objects already
 owned by an elaborated circuit. This is how extensions add types, literal
 forms, mux keys, field access, and annotations without adding frontend-only

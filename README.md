@@ -109,7 +109,7 @@ Detailed documentation lives with the component that owns it:
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
-| Protocols and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
+| Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
@@ -170,6 +170,8 @@ The current vertical slice includes:
 - Frontend-defined Boolean, enum, and one-hot types; combinational and
   width-changing expressions; bundles, vectors, wires, memories, hierarchy,
   ambient synchronous domains, and hardware conditional assignment.
+- Typed host-side patterns over scalar, extension-defined, and recursively
+  aggregate hardware literals.
 - Directional interfaces with nesting, refinement, supported contracts, bulk
   connection, and a reusable ready-valid flow library.
 - Deterministic CIRCT lowering, example-owned SystemVerilog references, and

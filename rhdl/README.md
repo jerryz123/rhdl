@@ -45,7 +45,7 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose Rhombus with one public RHDL profile | Standard or foundation, plus the host-condition guard |
-| [`std/`](std/README.md) | Optional reusable protocols and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
+| [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 
 The import direction is one-way. Core never imports frontend or backend code;
@@ -56,12 +56,14 @@ modules use public RHDL forms rather than importing implementation modules.
 
 ## Standard-library dependencies
 
-The flow-control aggregate is separate from its implementations, so designs
-can import one primitive without loading unrelated generators.
+Standard-library modules depend only on the public authoring surface. The
+flow-control aggregate is separate from its implementations, so designs can
+import one primitive without loading unrelated generators.
 
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
+| `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes over hardware literals | None |
 | `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and payload introspection | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
@@ -99,8 +101,9 @@ it when adding, removing, or changing a layer's direct dependencies.
 The support modules implement shared mechanisms without becoming selectable
 language profiles:
 
-- `hardware-literal.rhm` validates reusable packed host images and materializes
-  them as a `Bits` constant followed by an explicit equal-width cast.
+- `hardware-literal.rhm` validates reusable packed host images, exposes their
+  hardware type and packed width to ordinary libraries, and materializes them
+  as a `Bits` constant followed by an explicit equal-width cast.
 - `fields.rhm` owns exact hardware annotations plus readable and driveable
   field static information.
 - `instance-members.rhm` lets layers contribute virtual instance members

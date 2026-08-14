@@ -47,8 +47,8 @@ fail_matches "frontend layers must not import sibling layers" \
 
 while IFS= read -r layer_file; do
   layer_name="$(basename "$layer_file")"
-  if ! rg -Fq "| \`$layer_name\` |" ARCHITECTURE.md; then
-    echo "frontend layer is missing from the ARCHITECTURE.md dependency table: $layer_file" >&2
+  if ! rg -Fq "| \`$layer_name\` |" rhdl/README.md; then
+    echo "frontend layer is missing from the rhdl/README.md dependency table: $layer_file" >&2
     exit 1
   fi
 done < <(find rhdl/frontend/layers -maxdepth 1 -type f -name '*.rhm' | sort)
@@ -59,9 +59,9 @@ fail_matches "frontend tests must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' tests/frontend
 
 unexpected_top_level="$(find rhdl -maxdepth 1 -type f \
-  ! -name 'main.rkt' ! -name 'language.rhm' -print)"
+  ! -name 'README.md' ! -name 'main.rkt' ! -name 'language.rhm' -print)"
 if [[ -n "$unexpected_top_level" ]]; then
-  echo "rhdl root may contain only the reader shim and language assembly" >&2
+  echo "rhdl root may contain only its architecture README, reader shim, and language assembly" >&2
   echo "$unexpected_top_level" >&2
   exit 1
 fi

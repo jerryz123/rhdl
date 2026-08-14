@@ -7,6 +7,58 @@ public `#lang rhdl` language. It is not another language profile and adds no
 core IR, elaboration, or backend behavior. Its dependency contract is listed
 in [`../README.md`](../README.md).
 
+## Typed decode patterns
+
+[`decode/pattern.rhdl`](decode/pattern.rhdl) defines `Pattern`, an immutable
+host-side bit cube over two `HardwareLiteral` values:
+
+```rhombus
+import:
+  lib("rhdl/std/decode/pattern.rhdl") open
+
+bundle Instruction():
+  opcode: Bits(4)
+  operands: Vec(2, Bits(4))
+
+def instruction_value = record(Instruction()):
+  opcode: bits(0b1010, 4)
+  operands: vec(bits(2, 4), bits(0, 4))
+
+def instruction_care = record(Instruction()):
+  opcode: bits(0b1111, 4)
+  operands: vec(bits(0b1111, 4), bits(0, 4))
+
+def instruction_pattern = Pattern(
+  ~value: instruction_value,
+  ~care: instruction_care
+)
+```
+
+A care bit of one makes the corresponding value bit significant; zero makes
+it a don't-care. `value` and `care` must have exactly equal hardware types, not
+merely equal packed widths. Any `HardwareLiteral` type works, including
+`Bits`, `Bool`, enums, `OneHot`, extension-defined flat data, and recursively
+nested records and vectors. The generic `literal(T, packed_value)` form can
+express an arbitrary typed care image when a semantic constructor exposes only
+named values.
+
+`Pattern` stores the common `type` and `width`, the packed `care_bits`, and the
+canonical `value_bits = value & care`. It is ordinary host data rather than a
+`HardwareLiteral`: declaring, comparing, or passing a pattern as a generator
+parameter emits no hardware and it cannot be connected to a port.
+
+The host-only relations support decode-table validation:
+
+- `pattern.matches(literal)` tests membership.
+- `pattern.overlaps(other)` reports whether two cubes share any value.
+- `pattern.subsumes(other)` reports whether every value matched by `other` is
+  also matched by `pattern`.
+
+Pattern don't-cares describe static matching or optimization freedom. They are
+never runtime unknown or X values. `Pattern` is neutral between input matching
+and partially specified decode outputs; Espresso integration and hardware
+generation remain separate standard-library responsibilities.
+
 ## Ready-valid protocols
 
 Import the protocol family directly:
