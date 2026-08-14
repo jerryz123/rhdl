@@ -1002,6 +1002,22 @@ The same module exports `Pipe(T, stages)` and the index-zero-first
 `rhdl/std/flow/arbiter.rhdl`; `rhdl/std/flow.rhdl` is their convenience
 aggregate.
 
+The standard bounded counter is independent of ready-valid flow control:
+
+```rhombus
+import:
+  lib("rhdl/std/counter.rhdl") open
+
+inst timer(Counter(10))
+timer.enable <== tick
+expired <== timer.wrap
+```
+
+`Counter(n)` synchronously resets to zero and, while enabled, counts through
+the `n` states from zero to `n - 1`. Its `value` output has type
+`Bits(index_width(n))`. `wrap` is asserted during an enabled cycle at `n - 1`,
+immediately before the next rising edge returns `value` to zero.
+
 ### Extending the language with ordinary libraries
 
 A reusable construction abstraction can be an ordinary Rhombus function:

@@ -187,6 +187,7 @@ fixture_specs=(
   'tiny-simd|tiny_simd_tb|examples/tiny-simd.rhdl|design|verilog_reference'
   'stack|stack_tb|examples/stack.rhdl|design|verilog_reference'
   'counter|counter_tb|examples/counter.rhdl|design|verilog_reference'
+  'standard-counter|standard_counter_tb|examples/standard-counter.rhdl|design|verilog_reference'
   'multiply|multiply_tb|examples/multiply.rhdl|design|verilog_reference'
   'expanding-arithmetic|expanding_arithmetic_tb|examples/expanding-arithmetic.rhdl|design|verilog_reference'
   'unsigned-comparisons|unsigned_comparisons_tb|examples/unsigned-comparisons.rhdl|design|verilog_reference'

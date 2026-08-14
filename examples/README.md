@@ -84,7 +84,8 @@ because they use the public language without extending it. The initial
 `Decoupled`, and `Irrevocable` as opt-in nominal interface types. The
 [`flow/`](../rhdl/std/flow) directory contains separate elastic pipe, FIFO
 queue, and fixed-priority arbiter modules; [`flow.rhdl`](../rhdl/std/flow.rhdl)
-re-exports all three for convenience.
+re-exports all three for convenience. [`counter.rhdl`](../rhdl/std/counter.rhdl)
+provides an enabled bounded counter with value and wrap outputs.
 
 ## What the standard language adds
 
@@ -172,6 +173,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless unsigned addition and multiplication over unequal-width operands |
 | [`counter.rhdl`](counter.rhdl) | Host helper functions that accept hardware values, allocate an ambient register, and return hardware |
+| [`standard-counter.rhdl`](standard-counter.rhdl) | Standard-library enabled ten-state counter with explicit wrap indication |
 | [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |
 | [`reset-shift-register.rhdl`](reset-shift-register.rhdl) | Chisel-style reset-initialized registers using inferred types and an ambient sync domain |

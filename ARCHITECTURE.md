@@ -62,6 +62,7 @@ so designs can import one primitive without loading unrelated generators.
 
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
+| `std/counter.rhdl` | Enabled bounded `Counter` | None |
 | `std/ready-valid.rhdl` | `Valid`, `Decoupled`, and `Irrevocable` interfaces | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` | `std/ready-valid.rhdl` |
