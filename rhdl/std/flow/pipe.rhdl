@@ -1,0 +1,46 @@
+#lang rhdl
+// Defines the standard registered elastic ready-valid pipeline generator.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Each stage stores one item, contributes one cycle of unloaded latency, and
+// propagates readiness combinationally backward. Stored payloads remain stable
+// under backpressure.
+sync_circuit Pipe(T, stages :: Int):
+  unless stages > 0
+  | error(~who: #'Pipe, "stages must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
+
+  def initial_valid = vec(
+    for List (_ in 0..stages): Bool(#false)
+  )
+  reg stage_valid(~init: initial_valid)
+  reg stage_bits(Vec(stages, T))
+
+  def valid_sources = [ingress.valid] ++ (
+    for List (index in 0..(stages - 1)): stage_valid[index]
+  )
+  def bits_sources = [ingress.bits] ++ (
+    for List (index in 0..(stages - 1)): stage_bits[index]
+  )
+
+  def mutable ready = [egress.ready]
+  for (offset in 0..stages):
+    def index = stages - offset - 1
+    ready := [(not stage_valid[index]) or ready[0]] ++ ready
+
+  ingress.ready <== ready[0]
+  egress.valid <== stage_valid[stages - 1]
+  egress.bits <== stage_bits[stages - 1]
+
+  for (index in 0..stages):
+    when (ready[index]):
+      stage_valid.next[index] <== valid_sources[index]
+      when (valid_sources[index]):
+        stage_bits.next[index] <== bits_sources[index]
+
+export:
+  Pipe

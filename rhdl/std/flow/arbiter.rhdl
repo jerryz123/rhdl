@@ -1,0 +1,39 @@
+#lang rhdl
+// Defines the standard combinational fixed-priority ready-valid arbiter.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Lower indices have higher priority. The output uses Decoupled because a new
+// higher-priority arrival may change the selected payload while stalled.
+circuit Arbiter(T, n :: Int):
+  unless n > 0
+  | error(~who: #'Arbiter, "input count must be a positive host Int")
+
+  interface ingress[n](Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def mutable selected_bits = ingress[0].bits
+  def mutable selected_index = bits(0, index_width(n))
+  for (offset in 0..n):
+    def index = n - offset - 1
+    selected_bits := mux(ingress[index].valid,
+                         ingress[index].bits,
+                         selected_bits)
+    selected_index := mux(ingress[index].valid,
+                          bits(index, index_width(n)),
+                          selected_index)
+
+  def mutable prior_valid = Bool(#false)
+  for (index in 0..n):
+    def granted = ingress[index].valid and not prior_valid
+    ingress[index].ready <== egress.ready and granted
+    prior_valid := prior_valid or ingress[index].valid
+
+  egress.valid <== prior_valid
+  egress.bits <== selected_bits
+  chosen <== selected_index
+
+export:
+  Arbiter

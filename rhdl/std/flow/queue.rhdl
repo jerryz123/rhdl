@@ -1,0 +1,99 @@
+#lang rhdl
+// Defines the standard configurable ready-valid FIFO queue generator.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Queue uses asynchronous-read storage. A synchronous-read option belongs here
+// once RHDL has a corresponding memory primitive. Stored payloads remain stable
+// under backpressure.
+sync_circuit Queue(T,
+                   depth :: Int,
+                   ~pipe: pipe :: Boolean = #false,
+                   ~flow: flow :: Boolean = #false):
+  unless depth > 0
+  | error(~who: #'Queue, "depth must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
+  output count: Bits(index_width(depth + 1))
+
+  // Flow changes an empty queue into a combinational bypass. Pipe lets a full
+  // queue replace the item being removed without inserting a bubble.
+  fun ready_for_input(full):
+    if (pipe) | (not full) or egress.ready | not full
+  fun valid_for_output(empty):
+    if (flow) | (not empty) or ingress.valid | not empty
+  fun bits_for_output(empty, stored_bits):
+    if (flow) | mux(empty, ingress.bits, stored_bits) | stored_bits
+
+  // A flow-through transfer does not touch storage, so internal enqueue and
+  // dequeue events differ from the externally visible ready-valid handshakes.
+  fun stores_input(empty, ingress_ready):
+    def accepted = ingress.valid and ingress_ready
+    if (flow) | accepted and not (empty and egress.ready) | accepted
+  fun removes_output(empty, egress_valid):
+    def accepted = egress_valid and egress.ready
+    if (flow) | accepted and not empty | accepted
+
+  if (depth == 1)
+  | block:
+      reg occupied(~init: Bool(#false))
+      reg payload(T)
+      def empty = not occupied
+      def input_ready = ready_for_input(occupied)
+      def output_valid = valid_for_output(empty)
+      def enqueue = stores_input(empty, input_ready)
+      def dequeue = removes_output(empty, output_valid)
+
+      ingress.ready <== input_ready
+      egress.valid <== output_valid
+      egress.bits <== bits_for_output(empty, payload)
+      count <== occupied.into(Bits(1))
+
+      when (enqueue xor dequeue):
+        occupied.next <== enqueue
+      when (enqueue):
+        payload.next <== ingress.bits
+      #void
+  | block:
+      def pointer_width = index_width(depth)
+      def count_width = index_width(depth + 1)
+      mem storage(depth, T)
+      reg read_pointer(~init: bits(0, pointer_width))
+      reg write_pointer(~init: bits(0, pointer_width))
+      reg occupancy(~init: bits(0, count_width))
+
+      def empty = occupancy === bits(0, count_width)
+      def full = occupancy === bits(depth, count_width)
+      def input_ready = ready_for_input(full)
+      def output_valid = valid_for_output(empty)
+      def stored_bits = storage[read_pointer]
+      def enqueue = stores_input(empty, input_ready)
+      def dequeue = removes_output(empty, output_valid)
+
+      ingress.ready <== input_ready
+      egress.valid <== output_valid
+      egress.bits <== bits_for_output(empty, stored_bits)
+      count <== occupancy
+      storage.write(write_pointer, ingress.bits, ~enable: enqueue)
+
+      fun increment(pointer):
+        mux(pointer === bits(depth - 1, pointer_width),
+            bits(0, pointer_width),
+            pointer + bits(1, pointer_width))
+
+      when (enqueue):
+        write_pointer.next <== increment(write_pointer)
+      when (dequeue):
+        read_pointer.next <== increment(read_pointer)
+      when (enqueue xor dequeue):
+        occupancy.next <== mux(
+          enqueue,
+          occupancy + bits(1, count_width),
+          occupancy - bits(1, count_width)
+        )
+      #void
+
+export:
+  Queue

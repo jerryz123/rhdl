@@ -976,6 +976,32 @@ import:
 remain distinct interface types. Their temporal difference is currently a
 documented contract; RHDL does not yet generate protocol assertions.
 
+The flow-control library builds reusable circuits over `Decoupled`:
+
+```rhombus
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+inst buffered(
+  Queue(Bits(8), 4,
+        ~pipe: #true,
+        ~flow: #false)
+)
+```
+
+`Queue(T, depth)` defaults to a registered, non-flow-through FIFO. Setting
+`~pipe: #true` allows enqueue on the same cycle a full queue dequeues, while
+`~flow: #true` lets an empty queue present its input directly to its output.
+Every queue has a `count` output of type `Bits(index_width(depth + 1))`. Queue
+storage currently uses asynchronous reads; a synchronous-read-memory option
+will belong here once RHDL has that memory primitive.
+
+The same module exports `Pipe(T, stages)` and the index-zero-first
+`Arbiter(T, n)`. Each generator can instead be imported independently from
+`rhdl/std/flow/pipe.rhdl`, `rhdl/std/flow/queue.rhdl`, or
+`rhdl/std/flow/arbiter.rhdl`; `rhdl/std/flow.rhdl` is their convenience
+aggregate.
+
 ### Extending the language with ordinary libraries
 
 A reusable construction abstraction can be an ordinary Rhombus function:

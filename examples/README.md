@@ -82,8 +82,9 @@ Reusable protocol declarations live separately under [`rhdl/std`](../rhdl/std)
 because they use the public language without extending it. The initial
 [`ready-valid.rhdl`](../rhdl/std/ready-valid.rhdl) module provides `Valid`,
 `Decoupled`, and `Irrevocable` as opt-in nominal interface types. The
-[`flow.rhdl`](../rhdl/std/flow.rhdl) module builds reusable elastic pipes, FIFO
-queues, and fixed-priority arbiters from those interfaces.
+[`flow/`](../rhdl/std/flow) directory contains separate elastic pipe, FIFO
+queue, and fixed-priority arbiter modules; [`flow.rhdl`](../rhdl/std/flow.rhdl)
+re-exports all three for convenience.
 
 ## What the standard language adds
 
@@ -194,7 +195,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`interface.rhdl`](interface.rhdl) | Standard-library `Decoupled`, field access, bidirectional bulk connection, and instance reconstruction |
 | [`interface-array.rhdl`](interface-array.rhdl) | Host-sized `Decoupled` endpoint arrays, deterministic flattened ports, whole-array connection, and hierarchy reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
-| [`flow-control.rhdl`](flow-control.rhdl) | Standard-library elastic pipe, FIFO queue, and fixed-priority arbiter generators |
+| [`flow-control.rhdl`](flow-control.rhdl) | Standard-library elastic pipe, configurable flow/pipe FIFO queues, and fixed-priority arbiter generators |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
 shows that a useful RHDL construction abstraction need not be a macro or

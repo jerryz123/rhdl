@@ -198,6 +198,7 @@ fixture_specs=(
   'pipe|pipe_tb|examples/flow-control.rhdl|pipe_design|pipe_verilog_reference'
   'queue|queue_tb|examples/flow-control.rhdl|queue_design|queue_verilog_reference'
   'queue-one|queue_one_tb|examples/flow-control.rhdl|queue_one_design|queue_one_verilog_reference'
+  'queue-options|queue_options_tb|examples/flow-control.rhdl|queue_options_design|queue_options_verilog_reference'
   'arbiter|arbiter_tb|examples/flow-control.rhdl|arbiter_design|arbiter_verilog_reference'
   'full-adder||examples/full-adder.rhdl|design|verilog_reference'
   'layered-adder||examples/layered-adder.rhdl|design|verilog_reference'

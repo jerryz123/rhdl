@@ -5,6 +5,20 @@ import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../rhdl/std/flow.rhdl" as flow
+  "../../rhdl/std/flow/pipe.rhdl" as pipe
+  "../../rhdl/std/flow/queue.rhdl" as queue
+  "../../rhdl/std/flow/arbiter.rhdl" as arbiter
+
+// The aggregate and focused modules are both supported public import paths.
+def direct_pipe_design = embedded.run_elaboration(
+  fun (): pipe.Pipe(Bits(8), 1)
+)
+def direct_queue_design = embedded.run_elaboration(
+  fun (): queue.Queue(Bits(8), 1)
+)
+def direct_arbiter_design = embedded.run_elaboration(
+  fun (): arbiter.Arbiter(Bits(8), 1)
+)
 
 def pipe_one_design = embedded.run_elaboration(
   fun (): flow.Pipe(Bits(8), 1)
@@ -22,6 +36,19 @@ def queue_three_design = embedded.run_elaboration(
   fun (): flow.Queue(Bits(8), 3)
 )
 def queue_three = queue_three_design.modules[0]
+def queue_pipe_design = embedded.run_elaboration(
+  fun (): flow.Queue(Bits(8), 2, ~pipe: #true)
+)
+def queue_flow_design = embedded.run_elaboration(
+  fun (): flow.Queue(Bits(8), 2, ~flow: #true)
+)
+def queue_options_design = embedded.run_elaboration(
+  fun ():
+    flow.Queue(Bits(8), 2,
+               ~pipe: #true,
+               ~flow: #true)
+)
+def queue_options = queue_options_design.modules[0]
 def arbiter_one_design = embedded.run_elaboration(
   fun (): flow.Arbiter(Bits(8), 1)
 )
@@ -50,6 +77,10 @@ fun operations(module_def, opcode):
   )
 
 check:
+  verify_design(direct_pipe_design) ~is #void
+  verify_design(direct_queue_design) ~is #void
+  verify_design(direct_arbiter_design) ~is #void
+
   pipe_one.inputs.map(fun (port): port.name) ~is [
     "clock", "reset", "ingress_in", "egress_in"
   ]
@@ -68,6 +99,14 @@ check:
   operations(queue_three, "rtl.memory_read_async").length() ~is 1
   operations(queue_three, "rtl.memory_write").length() ~is 1
   operations(queue_three, "rtl.register_reset").length() ~is 3
+  queue_one.find_output("count").type.width ~is 1
+  queue_three.find_output("count").type.width ~is 2
+  queue_options.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in", "egress_in"
+  ]
+  queue_options.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_out", "count"
+  ]
 
   arbiter_one.find_output("chosen").type.width ~is 1
   arbiter_three.inputs.map(fun (port): port.name) ~is [
@@ -82,6 +121,9 @@ check:
   verify_design(pipe_three_design) ~is #void
   verify_design(queue_one_design) ~is #void
   verify_design(queue_three_design) ~is #void
+  verify_design(queue_pipe_design) ~is #void
+  verify_design(queue_flow_design) ~is #void
+  verify_design(queue_options_design) ~is #void
   verify_design(arbiter_one_design) ~is #void
   verify_design(arbiter_three_design) ~is #void
   verify_design(aggregate_pipe_design) ~is #void
@@ -96,4 +138,10 @@ check:
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), -1)) ~throws "input count must be a positive host Int"
   embedded.run_elaboration(fun (): flow.Pipe(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Queue(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(
+    fun (): flow.Queue(Bits(8), 2, ~pipe: "yes")
+  ) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(
+    fun (): flow.Queue(Bits(8), 2, ~flow: 1)
+  ) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"

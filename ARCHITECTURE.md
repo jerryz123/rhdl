@@ -55,6 +55,19 @@ needed by multiple layers belongs in `frontend/support/`. Standard-library
 modules use public RHDL forms rather than importing core, backend, or frontend
 implementation modules.
 
+## Standard-library dependencies
+
+The flow-control aggregate is intentionally separate from its implementations,
+so designs can import one primitive without loading unrelated generators.
+
+| Module | Provides | Direct RHDL dependencies |
+|---|---|---|
+| `std/ready-valid.rhdl` | `Valid`, `Decoupled`, and `Irrevocable` interfaces | None |
+| `std/flow/pipe.rhdl` | Registered elastic `Pipe` | `std/ready-valid.rhdl` |
+| `std/flow/queue.rhdl` | Configurable FIFO `Queue` | `std/ready-valid.rhdl` |
+| `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
+| `std/flow.rhdl` | Flow-control convenience aggregate | All three `std/flow/` modules |
+
 ## Frontend layer dependencies
 
 This table is the authoritative inventory of bundled frontend layers. Update it

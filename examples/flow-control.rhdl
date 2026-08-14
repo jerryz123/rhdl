@@ -7,6 +7,11 @@ import:
 def pipe_design = elaborate(Pipe(Bits(8), 2))
 def queue_design = elaborate(Queue(Bits(8), 3))
 def queue_one_design = elaborate(Queue(Bits(8), 1))
+def queue_options_design = elaborate(
+  Queue(Bits(8), 2,
+        ~pipe: #true,
+        ~flow: #true)
+)
 def arbiter_design = elaborate(Arbiter(Bits(8), 3))
 
 def pipe_verilog_reference = @str|<<{
@@ -53,7 +58,8 @@ module Queue(
   input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
   input  struct packed {logic ready; }                   egress_in,
   output struct packed {logic ready; }                   ingress_out,
-  output struct packed {logic valid; logic [7:0] bits; } egress_out
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output [1:0]                                           count
 );
 
   wire [7:0] _GEN;
@@ -70,18 +76,18 @@ module Queue(
     end
   end // always_ff @(posedge)
   reg  [1:0] read_pointer;
-  reg  [1:0] count;
-  wire       _GEN_2 = count == 2'h0;
-  wire       _GEN_3 = ~_GEN_2 & egress_in.ready;
-  wire       _GEN_4 = ~(&count) | _GEN_3;
-  assign _GEN_0 = ingress_in.valid & _GEN_4;
+  reg  [1:0] occupancy;
+  wire       _GEN_2 = occupancy == 2'h0;
+  wire       _GEN_3 = &occupancy;
+  assign _GEN_0 = ingress_in.valid & ~_GEN_3;
+  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
   assign _GEN = ingress_in.bits;
   always @(posedge clock) begin
     if (reset)
       read_pointer <= 2'h0;
     else
       read_pointer <=
-        _GEN_3 ? (read_pointer == 2'h2 ? 2'h0 : read_pointer + 2'h1) : read_pointer;
+        _GEN_4 ? (read_pointer == 2'h2 ? 2'h0 : read_pointer + 2'h1) : read_pointer;
   end // always @(posedge)
   always @(posedge clock) begin
     if (reset)
@@ -92,12 +98,14 @@ module Queue(
   end // always @(posedge)
   always @(posedge clock) begin
     if (reset)
-      count <= 2'h0;
+      occupancy <= 2'h0;
     else
-      count <= _GEN_0 & ~_GEN_3 ? count + 2'h1 : _GEN_3 & ~_GEN_0 ? count - 2'h1 : count;
+      occupancy <=
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
   end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_4};
+  assign ingress_out = '{ready: (~_GEN_3)};
   assign egress_out = '{valid: (~_GEN_2), bits: storage[read_pointer]};
+  assign count = occupancy;
 endmodule
 }>>|
 
@@ -108,22 +116,84 @@ module Queue(
   input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
   input  struct packed {logic ready; }                   egress_in,
   output struct packed {logic ready; }                   ingress_out,
-  output struct packed {logic valid; logic [7:0] bits; } egress_out
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output                                                 count
 );
 
   reg        occupied;
   reg  [7:0] payload;
-  wire       _GEN = ~occupied | egress_in.ready;
+  wire       _GEN = ingress_in.valid & ~occupied;
   always @(posedge clock) begin
     if (reset)
       occupied <= 1'h0;
     else
-      occupied <= _GEN ? ingress_in.valid : occupied;
+      occupied <= _GEN ^ ~(~occupied) & egress_in.ready ? _GEN : occupied;
   end // always @(posedge)
   always @(posedge clock)
-    payload <= ingress_in.valid & _GEN ? ingress_in.bits : payload;
-  assign ingress_out = '{ready: _GEN};
-  assign egress_out = '{valid: occupied, bits: payload};
+    payload <= _GEN ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: (~occupied)};
+  assign egress_out = '{valid: (~(~occupied)), bits: payload};
+  assign count = occupied;
+endmodule
+}>>|
+
+def queue_options_verilog_reference = @str|<<{
+module Queue(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output [1:0]                                           count
+);
+
+  wire [7:0] _GEN;
+  wire       _GEN_0;
+  reg        write_pointer;
+  wire       _GEN_1 = 1'h0;
+  reg  [7:0] storage[0:1];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[write_pointer] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg        read_pointer;
+  reg  [1:0] occupancy;
+  wire       _GEN_2 = occupancy == 2'h0;
+  wire       _GEN_3 = ~(occupancy == 2'h2) | egress_in.ready;
+  wire       _GEN_4 = ~_GEN_2 | ingress_in.valid;
+  assign _GEN_0 = ingress_in.valid & _GEN_3 & ~(_GEN_2 & egress_in.ready);
+  wire       _GEN_5 = _GEN_4 & egress_in.ready & ~_GEN_2;
+  assign _GEN = ingress_in.bits;
+  always @(posedge clock) begin
+    if (reset)
+      read_pointer <= 1'h0;
+    else
+      read_pointer <=
+        _GEN_5 ? ((&read_pointer) ? 1'h0 : read_pointer - 1'h1) : read_pointer;
+  end // always @(posedge)
+  always @(posedge clock) begin
+    if (reset)
+      write_pointer <= 1'h0;
+    else
+      write_pointer <=
+        _GEN_0 ? ((&write_pointer) ? 1'h0 : write_pointer - 1'h1) : write_pointer;
+  end // always @(posedge)
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_0 ^ _GEN_5 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_3};
+  assign egress_out =
+    '{valid: _GEN_4, bits: (_GEN_2 ? ingress_in.bits : storage[read_pointer])};
+  assign count = occupancy;
 endmodule
 }>>|
 
@@ -164,8 +234,10 @@ export:
   pipe_design
   queue_design
   queue_one_design
+  queue_options_design
   arbiter_design
   pipe_verilog_reference
   queue_verilog_reference
   queue_one_verilog_reference
+  queue_options_verilog_reference
   arbiter_verilog_reference
