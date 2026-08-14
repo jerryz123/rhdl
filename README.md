@@ -121,12 +121,12 @@ Detailed documentation lives with the component that owns it:
 The current vertical slice includes:
 
 - A public, inspectable, backend-independent IR with explicit-width types,
-  structural aggregates, primitive state, DPI simulation operations,
+  structural aggregates, primitive state and memories, DPI simulation operations,
   single-driver verification, and combinational-cycle detection.
 - Standard and compositional Rhombus profiles with host-only generation,
-  frontend-defined types, typed literals and patterns, combinational and
-  sequential constructs, hierarchy, directional interfaces, and reusable
-  protocol libraries.
+  frontend-defined types, typed literals and patterns, relational decode
+  generation, combinational and sequential constructs, hierarchy, directional
+  interfaces, and reusable protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
 

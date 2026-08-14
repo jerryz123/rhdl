@@ -19,6 +19,16 @@ fun fail_operation(operation, message):
 fun contains_identity(items, item):
   items.find(fun (candidate): candidate === item)
 
+fun packed_pattern_well_formed(value, care, width):
+  def limit = 1 bits.(<<) width
+  def integers = value is_a Int && care is_a Int
+  integers && value >= 0 && value < limit && care >= 0 && care < limit && value == (value bits.and care)
+
+fun packed_patterns_overlap(left, right):
+  def differing = left[0] bits.xor right[0]
+  def jointly_cared = left[1] bits.and right[1]
+  (differing bits.and jointly_cared) == 0
+
 fun check_schema(operation):
   def schema = schema_for(operation.opcode)
   unless schema
@@ -59,6 +69,40 @@ fun check_operation_types(module_def, operation, schema):
   | "bits_dont_care":
       unless bits_type(operation.results[0].type)
       | fail_operation(operation, "don't-care result must have a valid Bits type")
+  | "data_decode":
+      def selector = operation.operands[0]
+      def result = operation.results[0]
+      def input_width = packed_width(selector.type)
+      def output_width = packed_width(result.type)
+      unless data_type(selector.type) && input_width is_a Int && input_width > 0
+      | fail_operation(operation, "decode selector must have a packable DataType")
+      unless data_type(result.type) && output_width is_a Int && output_width > 0
+      | fail_operation(operation, "decode result must have a packable DataType")
+      def cases = operation.attribute("cases", #false)
+      unless cases is_a List
+      | fail_operation(operation, "decode cases must be a List")
+      for (case in cases, index in 0..cases.length()):
+        unless case is_a List && case.length() == 4
+        | fail_operation(operation,
+                         "decode case " ++ to_string(index) ++ " is malformed")
+        unless packed_pattern_well_formed(case[0], case[1], input_width)
+        | fail_operation(operation,
+                         "decode case " ++ to_string(index) ++ " input is malformed")
+        unless packed_pattern_well_formed(case[2], case[3], output_width)
+        | fail_operation(operation,
+                         "decode case " ++ to_string(index) ++ " output is malformed")
+      for (left_index in 0..cases.length()):
+        for (right_index in (left_index + 1)..cases.length()):
+          def left = cases[left_index]
+          def right = cases[right_index]
+          when packed_patterns_overlap(left, right)
+          | fail_operation(operation,
+                           String.append("decode cases ", to_string(left_index),
+                                         " and ", to_string(right_index), " overlap"))
+      unless packed_pattern_well_formed(operation.attribute("default_value", #false),
+                                        operation.attribute("default_care", #false),
+                                        output_width)
+      | fail_operation(operation, "decode default is malformed")
   | "bitwise_same_type_unary":
       def operand = operation.operands[0]
       def result = operation.results[0]

@@ -68,6 +68,108 @@ fun emit_dont_care(operation):
   String.append("    ", value_ref(result), " = sv.constantX : ",
                 circt_type(result.type))
 
+// Builds one partially specified packed output. X is only a CIRCT/SV carrier
+// for the synthesis freedom already represented by rtl.decode.
+fun emit_decode_value(operation, prefix, target_ref, value, care):
+  def result_type = operation.results[0].type
+  def width = packed_width(result_type)
+  def all_ones = (1 bits.(<<) width) - 1
+  def packed_ref:
+    if flat_data_type(result_type)
+    | target_ref
+    | prefix ++ "_packed"
+  def packed_lines:
+    if care == all_ones
+    | [String.append("    ", packed_ref, " = hw.constant ",
+                     to_string(value), " : i", to_string(width))]
+    | block:
+        def fixed_ref = prefix ++ "_fixed"
+        def free_mask_ref = prefix ++ "_free_mask"
+        def freedom_ref = prefix ++ "_freedom"
+        def free_bits_ref = prefix ++ "_free_bits"
+        [String.append("    ", fixed_ref, " = hw.constant ",
+                       to_string(value), " : i", to_string(width)),
+         String.append("    ", free_mask_ref, " = hw.constant ",
+                       to_string(all_ones bits.xor care), " : i", to_string(width)),
+         String.append("    ", freedom_ref, " = sv.constantX : i", to_string(width)),
+         String.append("    ", free_bits_ref, " = comb.and ", freedom_ref, ", ",
+                       free_mask_ref, " : i", to_string(width)),
+         String.append("    ", packed_ref, " = comb.or ", fixed_ref, ", ",
+                       free_bits_ref, " : i", to_string(width))]
+  def cast_lines:
+    if flat_data_type(result_type)
+    | []
+    | [String.append("    ", target_ref, " = hw.bitcast ", packed_ref,
+                     " : (i", to_string(width), ") -> ", circt_type(result_type))]
+  String.join(packed_lines ++ cast_lines, "\n")
+
+fun emit_decode(operation):
+  def selector = operation.operands[0]
+  def result = operation.results[0]
+  def cases = operation.attribute("cases")
+  def input_width = packed_width(selector.type)
+  def operation_prefix = "%__rhdl_decode_" ++ to_string(operation.id)
+  def selector_ref:
+    if flat_data_type(selector.type)
+    | value_ref(selector)
+    | operation_prefix ++ "_selector"
+  def mutable lines:
+    if flat_data_type(selector.type)
+    | []
+    | [String.append("    ", selector_ref, " = hw.bitcast ", value_ref(selector),
+                     " : (", circt_type(selector.type), ") -> i",
+                     to_string(input_width))]
+  def default_ref:
+    if cases.length() == 0
+    | value_ref(result)
+    | operation_prefix ++ "_default"
+  lines := lines ++ [emit_decode_value(operation,
+                                       operation_prefix ++ "_default_value",
+                                       default_ref,
+                                       operation.attribute("default_value"),
+                                       operation.attribute("default_care"))]
+  def mutable match_refs = []
+  def mutable case_value_refs = []
+  for (case in cases, index in 0..cases.length()):
+    def prefix = operation_prefix ++ "_case_" ++ to_string(index)
+    def care_ref = prefix ++ "_care"
+    def value_bits_ref = prefix ++ "_input_value"
+    def masked_ref = prefix ++ "_masked"
+    def match_ref = prefix ++ "_match"
+    def case_value_ref = prefix ++ "_output"
+    def case_lines:
+      [String.append("    ", care_ref, " = hw.constant ", to_string(case[1]),
+                     " : i", to_string(input_width)),
+       String.append("    ", value_bits_ref, " = hw.constant ", to_string(case[0]),
+                     " : i", to_string(input_width)),
+       String.append("    ", masked_ref, " = comb.and ", selector_ref, ", ",
+                     care_ref, " : i", to_string(input_width)),
+       String.append("    ", match_ref, " = comb.icmp eq ", masked_ref, ", ",
+                     value_bits_ref, " : i", to_string(input_width)),
+       emit_decode_value(operation,
+                         prefix ++ "_output_value",
+                         case_value_ref,
+                         case[2],
+                         case[3])]
+    lines := lines ++ case_lines
+    match_refs := match_refs ++ [match_ref]
+    case_value_refs := case_value_refs ++ [case_value_ref]
+  when cases.length() > 0
+  | block:
+      def mutable selected_ref = default_ref
+      def mutable remaining = cases.length()
+      for (match_ref in match_refs.reverse(), case_value_ref in case_value_refs.reverse()):
+        remaining := remaining - 1
+        def step_ref:
+          if remaining == 0
+          | value_ref(result)
+          | operation_prefix ++ "_step_" ++ to_string(remaining)
+        lines := lines ++ [String.append("    ", step_ref, " = comb.mux ",
+                                         match_ref, ", ", case_value_ref, ", ",
+                                         selected_ref, " : ", circt_type(result.type))]
+        selected_ref := step_ref
+  String.join(lines, "\n")
+
 fun emit_binary(operation, circt_opcode):
   def result = operation.results[0]
   String.append("    ", value_ref(result), " = ", circt_opcode, " ",
@@ -499,6 +601,8 @@ fun emit_operation(operation):
         emit_constant(operation)
     | "rtl.dont_care":
         emit_dont_care(operation)
+    | "rtl.decode":
+        emit_decode(operation)
     | "rtl.and":
         emit_binary(operation, "comb.and")
     | "rtl.or":

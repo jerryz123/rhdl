@@ -1,0 +1,82 @@
+#lang rhdl
+// Demonstrates a typed aggregate DecodeGen with input and output don't-cares.
+
+import:
+  lib("rhdl/std/decode.rhdl") open
+
+bundle Instruction():
+  opcode: Bits(4)
+  mode: Bool
+
+bundle Control():
+  alu: Bits(2)
+  write: Bool
+
+def opcode_care = literal(Instruction(), 0b11110)
+def add_input = Pattern(
+  ~value: literal(Instruction(), 0b00000),
+  ~care: opcode_care
+)
+def sub_input = Pattern(
+  ~value: literal(Instruction(), 0b00010),
+  ~care: opcode_care
+)
+
+def add_control = Pattern(
+  ~value: literal(Control(), 0b010),
+  ~care: literal(Control(), 0b111)
+)
+def sub_control = Pattern(
+  ~value: literal(Control(), 0b100),
+  ~care: literal(Control(), 0b110)
+)
+def default_control = Pattern(
+  ~value: literal(Control(), 0b000),
+  ~care: literal(Control(), 0b110)
+)
+
+def control_decode = DecodeGen(
+  [DecodeCase(add_input, add_control),
+   DecodeCase(sub_input, sub_control)],
+  ~default: default_control
+)
+
+circuit InstructionDecoder():
+  input encoded: Bits(5)
+  output alu: Bits(2)
+  output write: Bool
+
+  def instruction = encoded.into(Instruction())
+  def control = control_decode(instruction)
+  alu <== control.alu
+  write <== control.write
+
+def design = elaborate(InstructionDecoder())
+
+def verilog_reference = @str|<<{
+module InstructionDecoder(
+  input  [4:0] encoded,
+  output [1:0] alu,
+  output       write
+);
+
+  wire struct packed {logic [1:0] alu; logic write; } _GEN = '{alu: 2'h1, write: 1'h0};
+  wire [2:0] _GEN_0 = 3'bx;
+  wire struct packed {logic [1:0] alu; logic write; } _GEN_1 =
+    /*cast(bit)*/{2'h0, _GEN_0[0]};
+  wire struct packed {logic [1:0] alu; logic write; } _GEN_2 =
+    /*cast(bit)*/{2'h2, _GEN_0[0]};
+  wire struct packed {logic [1:0] alu; logic write; } _GEN_3 =
+    encoded[4:1] == 4'h0 ? _GEN : encoded[4:1] == 4'h1 ? _GEN_2 : _GEN_1;
+  assign alu = _GEN_3.alu;
+  assign write = _GEN_3.write;
+endmodule
+}>>|
+
+export:
+  Instruction
+  Control
+  control_decode
+  InstructionDecoder
+  design
+  verilog_reference

@@ -26,6 +26,24 @@ fun ensure_data_type(type, who):
   unless data_type(type)
   | fail(who, "expected a DataType")
 
+fun ensure_packable_data_type(type, who):
+  ensure_data_type(type, who)
+  unless packed_width(type) is_a Int && packed_width(type) > 0
+  | fail(who, "expected a packable DataType")
+
+fun normalize_decode_pattern(value, care, width, who, role):
+  unless value is_a Int && care is_a Int
+  | fail(who, role ++ " value and care must be host Int values")
+  def limit = 1 bits.(<<) width
+  unless value >= 0 && value < limit && care >= 0 && care < limit
+  | fail(who, role ++ " value or care does not fit its packed width")
+  [value bits.and care, care]
+
+fun decode_patterns_overlap(left, right):
+  def differing = left[0] bits.xor right[0]
+  def jointly_cared = left[1] bits.and right[1]
+  (differing bits.and jointly_cared) == 0
+
 def hardware_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
 fun ensure_hardware_name(name, who):
@@ -622,6 +640,71 @@ class Builder(design):
                           location,
                           origin,
                           #'dont_care)
+
+  // A decode preserves an incompletely specified relation for backend
+  // synthesis instead of choosing concrete values for uncared output bits.
+  method decode(module_def,
+                selector,
+                input_type,
+                result_type,
+                cases,
+                default_value,
+                default_care,
+                name = #false,
+                location = Location(),
+                origin = Origin("decode")):
+    ensure_module_in_design(design, module_def, #'decode)
+    ensure_open(module_def, #'decode)
+    ensure_value_in(module_def, selector, #'decode)
+    ensure_packable_data_type(input_type, #'decode)
+    unless type_equal(selector.type, input_type)
+    | fail(#'decode, "decode selector has the wrong DataType")
+    ensure_packable_data_type(result_type, #'decode)
+    unless cases is_a List
+    | fail(#'decode, "decode cases must be a List")
+    def input_width = packed_width(input_type)
+    def output_width = packed_width(result_type)
+    def normalized_default = normalize_decode_pattern(default_value,
+                                                      default_care,
+                                                      output_width,
+                                                      #'decode,
+                                                      "decode default")
+    def normalized_cases:
+      for List (case in cases, index in 0..cases.length()):
+        unless case is_a List && case.length() == 4
+        | fail(#'decode,
+               String.append("decode case ", to_string(index),
+                             " must be [input value, input care, output value, output care]"))
+        def input_pattern = normalize_decode_pattern(case[0],
+                                                     case[1],
+                                                     input_width,
+                                                     #'decode,
+                                                     "decode case " ++ to_string(index) ++ " input")
+        def output_pattern = normalize_decode_pattern(case[2],
+                                                      case[3],
+                                                      output_width,
+                                                      #'decode,
+                                                      "decode case " ++ to_string(index) ++ " output")
+        input_pattern ++ output_pattern
+    for (left_index in 0..normalized_cases.length()):
+      for (right_index in (left_index + 1)..normalized_cases.length()):
+        when decode_patterns_overlap(normalized_cases[left_index],
+                                     normalized_cases[right_index])
+        | fail(#'decode,
+               String.append("decode cases ", to_string(left_index), " and ",
+                             to_string(right_index), " overlap"))
+    build_value_operation(design,
+                          module_def,
+                          "rtl.decode",
+                          [selector],
+                          result_type,
+                          name,
+                          location,
+                          origin,
+                          #'decode,
+                          {"cases": normalized_cases,
+                           "default_value": normalized_default[0],
+                           "default_care": normalized_default[1]})
 
   method add(module_def,
              left,

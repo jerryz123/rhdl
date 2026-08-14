@@ -46,6 +46,7 @@ IR and lower through CIRCT type aliases.
 |---|---|
 | `rtl.constant` | `hw.constant` |
 | `rtl.dont_care` | `sv.constantX` as a synthesis-freedom carrier |
+| `rtl.decode` | packed mask comparisons, `comb.mux`, and `sv.constantX` for free output bits |
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub/mul` | `comb.add/sub/mul` |
@@ -83,12 +84,17 @@ the declared physical topology, including native 1RW mode, enables, and
 packed-lane masks, before producing its simulation SystemVerilog module. The
 older asynchronous-read `Memory` resource continues to use `seq.hlmem`.
 
-`sv.constantX` carries `rtl.dont_care` through CIRCT and Verilog export. Its
-use here does not give RHDL four-state value semantics: the public operation
-only grants synthesis freedom, and frontend operations continue to use the
-ordinary two-state hardware model. A downstream RTL simulator can display or
-propagate the carrier as X, but that behavior is a backend artifact rather
-than an RHDL language contract.
+`rtl.decode` stays relational until backend lowering. The CIRCT backend packs
+aggregate selectors, compares each canonical input cube with a mask, builds an
+unordered-equivalent mux tree, and restores the declared aggregate result
+type. Both `rtl.dont_care` and uncared decode-output bits use `sv.constantX` as
+their synthesis-freedom carrier.
+
+This carrier does not give RHDL four-state value semantics: the public
+operations only grant synthesis freedom, and frontend operations continue to
+use the ordinary two-state hardware model. A downstream RTL simulator can
+display or propagate the carrier as X, but that behavior is a backend artifact
+rather than an RHDL language contract.
 
 ## API and verification
 

@@ -1,0 +1,79 @@
+#lang rhdl
+// Defines validated, unordered host-side decode relations over typed Patterns.
+
+import:
+  lib("rhdl/std/decode/pattern.rhdl").Pattern
+
+export:
+  DecodeCase
+  DecodeTable
+
+fun exact_type_equal(left, right):
+  left.type_equal(right) && right.type_equal(left)
+
+fun require_pattern(value, role, who):
+  unless value is_a Pattern
+  | error(~who: who, role ++ " must be a Pattern")
+  value
+
+class DecodeCase(input, output):
+  constructor (input, output):
+    require_pattern(input, "decode input", #'DecodeCase)
+    require_pattern(output, "decode output", #'DecodeCase)
+    super(input, output)
+
+class DecodeTable(cases,
+                  default,
+                  input_type,
+                  output_type,
+                  input_width,
+                  output_width,
+                  packed_cases):
+  constructor (supplied_cases, ~default: supplied_default):
+    unless supplied_cases is_a List && supplied_cases.length() > 0
+    | error(~who: #'DecodeTable,
+            "decode cases must be a nonempty List of DecodeCase values")
+    def default = require_pattern(supplied_default,
+                                  "decode default",
+                                  #'DecodeTable)
+    for (case in supplied_cases, index in 0..supplied_cases.length()):
+      unless case is_a DecodeCase
+      | error(~who: #'DecodeTable,
+              "decode case " ++ to_string(index) ++ " must be a DecodeCase")
+    def first = supplied_cases[0]
+    def input_type = first.input.type
+    def output_type = default.type
+    for (case in supplied_cases, index in 0..supplied_cases.length()):
+      def input_matches = exact_type_equal(case.input.type, input_type) && case.input.width == first.input.width
+      unless input_matches
+      | error(~who: #'DecodeTable,
+              String.append("decode case ", to_string(index),
+                            " input must have exactly the table input type"))
+      def output_matches = exact_type_equal(case.output.type, output_type) && case.output.width == default.width
+      unless output_matches
+      | error(~who: #'DecodeTable,
+              String.append("decode case ", to_string(index),
+                            " output must have exactly the default output type"))
+    for (left_index in 0..supplied_cases.length()):
+      for (right_index in (left_index + 1)..supplied_cases.length()):
+        def overlap = supplied_cases[left_index].input.overlaps(supplied_cases[right_index].input)
+        if overlap
+        | error(~who: #'DecodeTable,
+                String.append("decode cases ", to_string(left_index), " and ",
+                              to_string(right_index), " overlap"))
+        | #void
+    def packed_cases:
+      supplied_cases.map(
+        fun (case):
+          [case.input.value_bits,
+           case.input.care_bits,
+           case.output.value_bits,
+           case.output.care_bits]
+      )
+    super(supplied_cases,
+          default,
+          input_type,
+          output_type,
+          first.input.width,
+          default.width,
+          packed_cases)

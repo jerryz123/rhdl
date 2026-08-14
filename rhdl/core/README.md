@@ -106,7 +106,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Bitwise | not, and, or, xor |
 | Arithmetic | add, sub, multiply, logical left and unsigned-right shift |
 | Comparison | equality, unsigned less-than |
-| Selection | mux lookup |
+| Selection | mux lookup, incompletely specified decode relation |
 | Conversion | cast |
 | Width-changing | concat, extract, zero extension, truncation |
 | Records | record create and field extraction |
@@ -125,6 +125,9 @@ add/sub/mul(Bits(w), Bits(w))               -> Bits(w)
 shl/shru(Bits(w), Bits(a))                  -> Bits(w)
 eq/ult(Bits(w), Bits(w))                    -> Bits(1)
 mux_lookup(Bits(w), keys -> T, default: T)  -> T: DataType
+decode(I: packable DataType,
+       input cubes -> output cubes,
+       default output cube)                 -> O: packable DataType
 wire(T: HardwareType)                       -> Place<T>
 record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
@@ -160,6 +163,15 @@ Verification and inspection preserve that optimization freedom, while each
 backend selects its own carrier representation. It does not alter assignment
 completeness, register hold behavior, comparisons, muxes, or simulation into
 four-state operations.
+
+`rtl.decode` preserves an unordered, non-overlapping relation between packed
+input cubes and partially specified output cubes. Every cube stores canonical
+`value & care` and `care` images. Cared output bits constrain the result;
+uncared bits grant the same per-bit synthesis freedom as `rtl.dont_care`.
+Input and output may have different packable `DataType` types, including
+records and vectors. Backends may choose any implementation satisfying the
+relation, so core does not expand a decode into a particular mux or gate
+network.
 
 ## Stateful resources
 

@@ -1,0 +1,37 @@
+#lang rhombus
+// Checks typed DecodeGen tables and single-operation frontend elaboration.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/layers/comb.rhm" open
+  "../../rhdl/std/decode.rhdl" open
+  "../../examples/decode.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def decode_operation = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.decode"
+)
+
+check:
+  decode_operation != #false ~is #true
+  type_equal(decode_operation.operands[0].type, fixture.Instruction()) ~is #true
+  type_equal(decode_operation.results[0].type, fixture.Control()) ~is #true
+  decode_operation.attribute("cases") ~is [[0b00000, 0b11110, 0b010, 0b111],
+                                           [0b00010, 0b11110, 0b100, 0b110]]
+  decode_operation.attribute("default_value") ~is 0
+  decode_operation.attribute("default_care") ~is 0b110
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.decode"
+  ).length() ~is 1
+  verify_design(fixture.design) ~is #void
+
+def in_a = Pattern(~value: bits(0b1000, 4), ~care: bits(0b1000, 4))
+def in_b = Pattern(~value: bits(0b1010, 4), ~care: bits(0b1100, 4))
+def out = Pattern(~value: bits(0, 2), ~care: bits(3, 2))
+
+check:
+  DecodeTable([DecodeCase(in_a, out), DecodeCase(in_b, out)],
+              ~default: out) ~throws "overlap"
+  DecodeTable([DecodeCase(in_a, out)],
+              ~default: Pattern(~value: bits(0, 3),
+                                ~care: bits(7, 3))) ~throws "default output type"

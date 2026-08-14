@@ -55,6 +55,12 @@ host packed value, and gives RHDL no runtime X-propagation semantics. A backend
 may expose an X carrier to downstream tools, so use it only where every
 synthesized bit choice is legal and do not rely on backend simulation of it.
 
+`hw_decode(selector, input_type, output_type, cases, default_value,
+default_care)` is the low-level authoring bridge to the core decode relation.
+Its cases use packed integer value/care images. Ordinary designs should prefer
+the typed `DecodeGen` standard-library wrapper, which constructs those images
+from `Pattern` values.
+
 The standard combinational surface includes modular `+`, `-`, `*`, logical
 `<<` and `>>`, bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. Arithmetic is
 unsigned and fixed-width. On host values these operators keep their ordinary

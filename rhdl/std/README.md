@@ -65,6 +65,40 @@ freedom from `dont_care`. Keeping this policy out of `Pattern` preserves its
 host-only architecture and allows future matching or optimization consumers
 to choose different interpretations.
 
+## Typed decode generation
+
+[`decode.rhdl`](decode.rhdl) is the public facade for `Pattern`, `DecodeCase`,
+`DecodeTable`, and `DecodeGen`. A table requires at least one case, one
+explicit default output pattern, exact common input types, and exact common
+output types. Input cubes may not overlap: the relation has no hidden row
+priority.
+
+```rhombus
+import:
+  lib("rhdl/std/decode.rhdl") open
+
+def decoder = DecodeGen(
+  [DecodeCase(add_input, add_control),
+   DecodeCase(sub_input, sub_control)],
+  ~default: default_control
+)
+
+circuit ControlPath():
+  input instruction: Instruction()
+  output control: Control()
+
+  control <== decoder(instruction)
+```
+
+`DecodeGen` is an ordinary callable host value and can be passed as a circuit
+parameter. Calling it during elaboration creates one typed `rtl.decode`
+operation; it does not invoke Espresso or pre-minimize the relation. Input and
+output patterns may use different scalar, aggregate, or extension-defined
+hardware types. CIRCT carries output freedom to downstream synthesis, which
+is responsible for selecting and optimizing a concrete implementation. See
+[`../../examples/decode.rhdl`](../../examples/decode.rhdl) for an aggregate
+input/output example.
+
 ## Ready-valid protocols
 
 Import the protocol family directly:
