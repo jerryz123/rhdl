@@ -52,20 +52,22 @@ sync_circuit Lane(width :: Int, enable_multiply :: Boolean):
 
   reg accumulator(~init: bits(0, ~width: width))
 
-  // This is a host decision. Disabling multiplication removes the multiplier
-  // operation instead of adding a runtime enable around it.
-  def multiplied:
-    if enable_multiply
-    | accumulator * instruction.operand
-    | accumulator
+  // The host condition removes the case and multiplier during elaboration.
+  def alu_cases = [
+    [Opcode.Load, instruction.operand],
+    [Opcode.Add, accumulator + instruction.operand],
+    [Opcode.Xor, accumulator xor instruction.operand],
+    [Opcode.ShiftLeft, accumulator << instruction.operand]
+  ] ++ (if enable_multiply
+        | [[Opcode.Multiply, accumulator * instruction.operand]]
+        | [])
 
-  // This is a hardware decision. The instruction can change every cycle.
-  def alu_result = mux_lookup(instruction.opcode, ~default: accumulator):
-    Opcode.Load: instruction.operand
-    Opcode.Add: accumulator + instruction.operand
-    Opcode.Xor: accumulator xor instruction.operand
-    Opcode.ShiftLeft: accumulator << instruction.operand
-    Opcode.Multiply: multiplied
+  // This remains a hardware decision. The selected case changes every cycle.
+  def alu_result = mux_lookup(
+    instruction.opcode,
+    ~default: accumulator,
+    alu_cases
+  )
 
   when load_seed:
     accumulator.next <== seed

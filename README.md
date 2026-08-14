@@ -353,6 +353,20 @@ result <== mux_lookup(op, ~default: not a):
   4: a - b
 ```
 
+Cases may instead come from an ordinary host list of `[key, value]` pairs:
+
+```rhombus
+def cases = [
+  [0, a & b],
+  [1, a or b]
+]
+result <== mux_lookup(op, ~default: not a, cases)
+```
+
+The list form allows host functions, iteration, and conditionals to generate
+the available hardware cases during elaboration. Keys follow the same rules as
+the block form, including nominal enum-member keys for enum selectors.
+
 Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 `Bool` selector. Both forms construct the core `rtl.mux_lookup` operation.
 
