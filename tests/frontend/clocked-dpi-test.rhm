@@ -1,0 +1,45 @@
+#lang rhombus
+// Checks concise ambient and explicit clocked DPI calls over the public simulation IR.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../examples/clocked-dpi.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def register = module_def.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def call = module_def.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_call"
+)
+def explicit_design = embedded.run_elaboration(
+  fun (): fixture.ExplicitClockedDPI()
+)
+def explicit_module = explicit_design.modules[0]
+def explicit_register = explicit_module.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def always_design = embedded.run_elaboration(
+  fun (): fixture.AlwaysClockedDPI()
+)
+def always_module = always_design.modules[0]
+def always_register = always_module.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def always_enable = always_module.find_operation(always_register.operands[1].defining_op_id)
+
+check:
+  fixture.design.dpi_imports.length() ~is 2
+  call.results.length() ~is 0
+  register.operands[0] === module_def.find_input("clock").value ~is #true
+  register.operands[1].type.bit_width() ~is 1
+  register.operands[2] === module_def.find_input("value").value ~is #true
+  register.results[0].name ~is "step_result"
+  type_equal(register.results[0].type, Bits(8)) ~is #true
+  explicit_register.operands[0] === explicit_module.find_input("clock").value ~is #true
+  always_enable.opcode ~is "rtl.constant"
+  always_enable.attribute("value") ~is 1
+  verify_design(fixture.design) ~is #void
+  verify_design(explicit_design) ~is #void
+  verify_design(always_design) ~is #void

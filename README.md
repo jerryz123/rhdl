@@ -133,6 +133,7 @@ The composable frontend layers are:
 | `layers/sync.rhm` | Sync circuits with ambient registers and marked-child clock/reset propagation |
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 | `layers/memory.rhm` | Binding-derived memories, async indexing, synchronous writes, and `index_width` |
+| `layers/dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
 does not implement features itself. `#lang rhdl` includes enum, one-hot, and sync syntax;
@@ -758,6 +759,48 @@ single-driver `Place` connection. See
 [`examples/multi-write-memory.rhdl`](examples/multi-write-memory.rhdl), and
 [`examples/stack.rhdl`](examples/stack.rhdl).
 
+### Clocked DPI-C procedures and registers
+
+DPI operations are explicitly unsynthesizable constructs in the public RHDL
+IR. They are useful for simulation models, scoreboards, and external
+behavioral code without introducing a separate language profile. Imports state
+whether the external symbol is a result-less procedure or a function:
+
+```rhombus
+dpi_import procedure rhdl_trace(value: Bits(8))
+dpi_import function rhdl_step(value: Bits(8)) -> result: Bits(8)
+```
+
+A procedure is invoked for its clocked side effect and produces no hardware
+value or state:
+
+```rhombus
+rhdl_trace.call(value, ~enable: enable)
+```
+
+A clocked function result necessarily persists between enabled edges. RHDL
+therefore does not expose a function call as an ordinary expression. Its state
+must be declared visibly with binding-derived `dpi_reg` syntax:
+
+```rhombus
+dpi_reg step_result = rhdl_step(value, ~enable: enable)
+result <== step_result
+```
+
+A `sync_circuit` supplies the ambient clock; either form accepts
+`~clock: clock` in an ordinary circuit. The external symbol runs on a rising
+edge when its one-bit hardware enable is asserted. A DPI register retains its
+value while disabled, has an unspecified initial value, and has no reset.
+Omitting `~enable` supplies constant true. There is deliberately no unclocked
+DPI operation or frontend form.
+
+Imports, procedure calls, and DPI registers are first-class core simulation
+semantics rather than CIRCT annotations hidden in the frontend. The CIRCT
+backend lowers both operations to the corresponding clocked
+`sim.func.dpi.call`; only the explicit DPI register produces a result and
+therefore storage. A simulation must link matching C symbols. See
+[`examples/clocked-dpi.rhdl`](examples/clocked-dpi.rhdl).
+
 ### Hardware conditional assignment
 
 The conditional layer provides hardware-only `when`. Its condition must be a
@@ -1287,6 +1330,10 @@ memory(depth: positive host Int, T: DataType) -> Memory<T>
 memory_read_async(Memory<T>, Bits(index_width(depth))) -> T
 memory_write(Memory<T>, address, T,
              Clock, enable: one-bit FlatDataType)      -> void
+dpi_call(procedure: (A, ...) -> void,
+         Clock, enable: one-bit FlatDataType, A, ...)  -> void
+dpi_register(function: (A, ...) -> R,
+             Clock, enable: one-bit FlatDataType, A, ...) -> R
 ```
 
 `shl` and `shru` take a hardware `Bits(a)` shift amount whose width is
@@ -1374,6 +1421,7 @@ The public model consists of:
 
 ```text
 Design
+DpiImport
 Module
 Operation
 Value
@@ -1399,7 +1447,7 @@ Operation
     origin
 ```
 
-Operations use namespaced `rtl.*` opcodes and a static schema registry rather
+Operations use namespaced `rtl.*` and `sim.*` opcodes and a static schema registry rather
 than a closed class hierarchy such as `AddNode` or `MuxNode`. Each schema
 defines arity, required attributes, type constraints, verification behavior,
 semantic category, and printing form. Backend lowering choices are not part of
@@ -1422,6 +1470,7 @@ the core schema.
 | Vectors | vector create, vector get with a host-static index |
 | Memories | memory allocation, asynchronous read, synchronous write |
 | Sequential | register, synchronous-reset register |
+| Simulation | result-less mandatory-clock DPI call, explicit DPI register |
 
 There is no conditional-connect operation or general control-flow region.
 Frontend hardware conditionals canonicalize to mux lookups and one final drive.
@@ -1499,9 +1548,12 @@ The Builder and whole-design verifier enforce:
 9. Register clocks are `Clock`; synchronous reset operands are `Reset`.
 10. Reset value presence matches reset presence and its type equals the state
     type.
-11. Instances reference completed definitions in the same design and have
+11. DPI operations reference a same-design import, use its exact flat
+    signature, and carry a `Clock` plus one-bit hardware enable; procedure
+    calls have no result, while DPI registers require one function result.
+12. Instances reference completed definitions in the same design and have
     unique final names within their parent module.
-12. Purely combinational cycles are rejected.
+13. Purely combinational cycles are rejected.
 
 The frontend additionally rejects active recursive generator elaboration,
 runtime hardware circuit parameters, and hardware-controlled host computation.
@@ -1565,6 +1617,8 @@ type or operation it cannot represent.
 | `rtl.memory_read_async` | latency-0 `seq.read` |
 | `rtl.memory_write` | latency-1 `seq.write` |
 | `rtl.wire` | Erased; references resolve to the wire's driver |
+| `sim.dpi_call` | result-less enabled, clocked `sim.func.dpi.call` |
+| `sim.dpi_register` | result-bearing enabled, clocked `sim.func.dpi.call` |
 
 When a shift amount is narrower than its value, lowering zero-extends the
 amount. When it is wider, lowering zero-extends the value, performs the wider
@@ -1638,6 +1692,7 @@ Important examples include:
 | `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/multi-write-memory.rhdl` | Independent same-clock physical write ports on one asynchronous-read memory |
+| `examples/clocked-dpi.rhdl` | Result-less DPI procedure calls and explicit DPI registers with ambient and explicit clocks |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/stack.rhdl` | Host-sized stack with guarded memory writes and nested hardware control |
 | `examples/table.rhdl` | Host-generated 256-entry combinational vector table |
@@ -1673,7 +1728,7 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs twenty-one simulations:
+`make circt-test` currently runs thirty-eight simulations:
 
 - An 8-bit modular adder.
 - An 8-bit modular unsigned multiplier.
@@ -1687,6 +1742,7 @@ make test              # complete unit plus CIRCT suite
 - A fixed-vector datapath.
 - An element-wise assembled vector wire.
 - An asynchronous-read, synchronous-write memory.
+- A linked clocked DPI-C function with hold while disabled.
 - A host-specialized SIMD microengine with instruction memory.
 - An 8-bit synchronous-reset counter.
 - A hardware-conditional enable shift register.
@@ -1721,6 +1777,9 @@ The initial vertical slice is complete:
 - Readable, single-driver internal wires with aggregate element assignment.
 - First-class memories with arbitrary `DataType` elements, asynchronous reads,
   and multiple same-clock synchronous write ports.
+- Design-level flat DPI-C imports, result-less procedure calls, and explicit
+  mandatory-clock DPI registers with hold-while-disabled semantics and
+  CIRCT/Verilator integration.
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.

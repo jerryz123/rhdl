@@ -69,6 +69,7 @@ importable layers:
 | [`layers/sync.rhm`](../rhdl/frontend/layers/sync.rhm) | Sync circuits, ambient registers, and marked-child clock/reset propagation |
 | [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
 | [`layers/memory.rhm`](../rhdl/frontend/layers/memory.rhm) | Binding-derived memories with async indexing and synchronous writes |
+| [`layers/dpi.rhm`](../rhdl/frontend/layers/dpi.rhm) | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
 implementation. It aggregates the foundation and the curated layers, including
@@ -128,6 +129,10 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `mem storage(depth, T)` | One core `Memory` resource and `rtl.memory` allocation |
 | `storage[address]` | `rtl.memory_read_async(storage, address)` |
 | `storage.write(address, data, ...)` | One clocked `rtl.memory_write` port |
+| `dpi_import procedure p(a: T)` | One result-less design-level DPI import |
+| `p.call(a, ~clock: clock, ~enable: enable)` | One result-less, mandatory-clock `sim.dpi_call` |
+| `dpi_import function f(a: T) -> result: R` | One result-bearing design-level DPI import |
+| `dpi_reg r = f(a, ~clock: clock, ~enable: enable)` | One visible, mandatory-clock `sim.dpi_register` state value |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `interface tx[n](..., ~role: producer)` | A host `Array` of `n` scalar endpoints flattened as `tx_0_in`, `tx_0_out`, and so on |
 | `endpoint :: Endpoint.of(protocol)` | A function boundary that retains exact interface type and field static information |
@@ -190,6 +195,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`tiny-simd.rhdl`](tiny-simd.rhdl) | Host-specialized SIMD microengine combining comprehension-generated lanes, typed instructions, expanding arithmetic with low-bit slicing, power-of-two program memory, and ambient state |
 | [`stack.rhdl`](stack.rhdl) | Host-sized stack combining async-read memory, guarded writes, nested hardware conditionals, unsigned bounds checks, and registered output |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Two independently enabled same-clock physical write ports on one asynchronous-read memory |
+| [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | Result-less procedure effects and explicit DPI register state using ambient and explicit clocks |
 | [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |

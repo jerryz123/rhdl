@@ -284,6 +284,39 @@ fun emit_memory_write(operation):
                 value_ref(operation.operands[3]),
                 " {latency = 1 : i64} : ", circt_memory_type(memory))
 
+fun emit_dpi_import(dpi_import):
+  def inputs:
+    for List (name in dpi_import.input_names, type in dpi_import.input_types):
+      "in %" ++ name ++ " : " ++ circt_type(type)
+  def arguments:
+    if dpi_import.has_result()
+    | inputs ++ ["return " ++ dpi_import.result_name ++ " : " ++ circt_type(dpi_import.result_type)]
+    | inputs
+  String.append("  sim.func.dpi @", dpi_import.name, "(",
+                String.join(arguments, ", "),
+                ")")
+
+fun emit_dpi_operation(operation):
+  def dpi_import = operation.attribute("dpi_import")
+  def clock_ref = "%__rhdl_dpi_clock_" ++ to_string(operation.id)
+  def inputs = operation.operands.drop(2)
+  def input_refs = String.join(inputs.map(value_ref), ", ")
+  def input_types = String.join(inputs.map(fun (input): circt_type(input.type)), ", ")
+  def result_prefix:
+    if operation.results == []
+    | ""
+    | value_ref(operation.results[0]) ++ " = "
+  def result_type:
+    if operation.results == []
+    | "()"
+    | circt_type(operation.results[0].type)
+  String.append("    ", clock_ref, " = seq.to_clock ",
+                value_ref(operation.operands[0]), "\n",
+                "    ", result_prefix, "sim.func.dpi.call @",
+                dpi_import.name, "(", input_refs, ") clock ", clock_ref,
+                " enable ", value_ref(operation.operands[1]),
+                " : (", input_types, ") -> ", result_type)
+
 fun emit_register(operation):
   def current = operation.results[0]
   def next = operation.places[0]
@@ -379,6 +412,8 @@ fun emit_operation(operation):
         emit_memory_read_async(operation)
     | "rtl.memory_write":
         emit_memory_write(operation)
+    | "sim.dpi_call" || "sim.dpi_register":
+        emit_dpi_operation(operation)
     | "rtl.register" || "rtl.register_reset":
         emit_register(operation)
     | "rtl.instance":
@@ -412,6 +447,7 @@ fun emit_module_circt(module_def):
 
 fun emit_circt(design):
   verify_design(design)
+  def imports = design.dpi_imports.map(emit_dpi_import)
   String.append("module {\n",
-                String.join(design.modules.map(emit_module_circt), "\n\n"),
+                String.join(imports ++ design.modules.map(emit_module_circt), "\n\n"),
                 "\n}\n")

@@ -55,6 +55,35 @@ fun ensure_memory_in(module_def, memory, who):
   unless owned
   | fail(who, "memory belongs to a different module")
 
+fun ensure_dpi_import_in(design, dpi_import, who):
+  def owned = dpi_import is_a DpiImport && dpi_import.design === design && design.dpi_imports.find(fun (candidate): candidate === dpi_import)
+  unless owned
+  | fail(who, "DPI import belongs to a different design")
+
+fun check_dpi_operands(design,
+                       module_def,
+                       dpi_import,
+                       inputs,
+                       clock,
+                       enable,
+                       who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_dpi_import_in(design, dpi_import, who)
+  unless inputs is_a List && inputs.length() == dpi_import.input_types.length()
+  | fail(who, "DPI input count does not match its import")
+  for (input in inputs, expected_type in dpi_import.input_types):
+    ensure_value_in(module_def, input, who)
+    unless type_equal(input.type, expected_type)
+    | fail(who, "DPI input has the wrong hardware type")
+  ensure_value_in(module_def, clock, who)
+  unless clock_type(clock.type)
+  | fail(who, "DPI clock must be Clock")
+  ensure_value_in(module_def, enable, who)
+  unless flat_data_type(enable.type) && data_width(enable.type) == 1
+  | fail(who, "DPI enable must be a one-bit FlatDataType")
+  [clock, enable] ++ inputs
+
 fun root_place(place):
   if place is_a Place && place.parent is_a Place
   | root_place(place.parent)
@@ -264,6 +293,117 @@ fun build_mux_lookup(design,
                         {"keys": normalized_cases.map(fun (case): case[0])})
 
 class Builder(design):
+  // Materializes a design-level declaration lazily so reusable frontend
+  // descriptors can be called from any circuit in one elaborated design.
+  method dpi_import(name,
+                    input_names,
+                    input_types,
+                    result_name = #false,
+                    result_type = #false,
+                    location = Location()):
+    ensure_hardware_name(name, #'dpi_import)
+    unless input_names is_a List && input_types is_a List && input_names.length() == input_types.length()
+    | fail(#'dpi_import, "DPI input names and types must be equal-length Lists")
+    unless input_names.length() >= 1
+    | fail(#'dpi_import, "DPI import requires at least one input")
+    for (input_name in input_names):
+      ensure_hardware_name(input_name, #'dpi_import)
+      when input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
+      | fail(#'dpi_import, "DPI input names must be unique")
+    for (input_type in input_types):
+      unless flat_data_type(input_type) && type_well_formed(input_type)
+      | fail(#'dpi_import, "DPI inputs must have well-formed FlatDataType types")
+    unless (result_name == #false && result_type == #false) || (result_name != #false && result_type != #false)
+    | fail(#'dpi_import, "DPI result name and type must be supplied together")
+    when result_type != #false
+    | ensure_hardware_name(result_name, #'dpi_import)
+      unless flat_data_type(result_type) && type_well_formed(result_type)
+      | fail(#'dpi_import, "DPI result must have a well-formed FlatDataType type")
+    def existing = design.find_dpi_import(name)
+    if existing
+    | block:
+        def same_result = existing.result_name == result_name && (if result_type == #false | existing.result_type == #false | existing.result_type != #false && type_equal(existing.result_type, result_type))
+        def same_signature = existing.input_names == input_names && existing.input_types.length() == input_types.length() && (for all (existing_type in existing.input_types, input_type in input_types): type_equal(existing_type, input_type)) && same_result
+        unless same_signature
+        | fail(#'dpi_import, "DPI import " ++ name ++ " has conflicting signatures")
+        existing
+    | block:
+        def dpi_import = DpiImport(design.fresh_id(),
+                                   name,
+                                   input_names,
+                                   input_types,
+                                   result_name,
+                                   result_type,
+                                   design,
+                                   location)
+        design.add_dpi_import(dpi_import)
+        dpi_import
+
+  // A procedure call is a clocked side effect and therefore produces no
+  // hardware value or hidden result state.
+  method dpi_call(module_def,
+                  dpi_import,
+                  inputs,
+                  clock,
+                  enable,
+                  location = Location(),
+                  origin = Origin("DPI call")):
+    ensure_dpi_import_in(design, dpi_import, #'dpi_call)
+    when dpi_import.has_result()
+    | fail(#'dpi_call, "result-bearing DPI functions must be instantiated with dpi_register")
+    def operands = check_dpi_operands(design,
+                                      module_def,
+                                      dpi_import,
+                                      inputs,
+                                      clock,
+                                      enable,
+                                      #'dpi_call)
+    def operation_id = design.fresh_id()
+    def operation = Operation(operation_id,
+                              "sim.dpi_call",
+                              module_def,
+                              operands,
+                              [],
+                              [],
+                              {"dpi_import": dpi_import},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    module_def.add_operation(operation)
+    operation
+
+  // A DPI register makes the state implied by a result-bearing clocked call
+  // explicit in both its operation name and its required hardware binding.
+  method dpi_register(module_def,
+                      name,
+                      dpi_import,
+                      inputs,
+                      clock,
+                      enable,
+                      location = Location(),
+                      origin = Origin("DPI register")):
+    ensure_dpi_import_in(design, dpi_import, #'dpi_register)
+    unless dpi_import.has_result()
+    | fail(#'dpi_register, "DPI register requires a result-bearing function")
+    def operands = check_dpi_operands(design,
+                                      module_def,
+                                      dpi_import,
+                                      inputs,
+                                      clock,
+                                      enable,
+                                      #'dpi_register)
+    build_value_operation(design,
+                          module_def,
+                          "sim.dpi_register",
+                          operands,
+                          dpi_import.result_type,
+                          name,
+                          location,
+                          origin,
+                          #'dpi_register,
+                          {"dpi_import": dpi_import})
+
   method module(name):
     ensure_hardware_name(name, #'module)
     when design.modules.find(fun (candidate): candidate.name == name)

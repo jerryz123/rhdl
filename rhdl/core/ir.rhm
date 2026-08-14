@@ -11,6 +11,7 @@ export:
   Value
   Place
   Operation
+  DpiImport
   Memory
   memory_address_width
   Port
@@ -79,6 +80,22 @@ class Operation(id,
 
   method attribute(name, default = #false):
     attributes.get(name, default)
+
+// DPI imports are design-owned simulation declarations. Calls reference them
+// from modules, but the declarations themselves are not module operations.
+class DpiImport(id,
+                name,
+                input_names,
+                input_types,
+                result_name,
+                result_type,
+                design,
+                location = Location()):
+  method has_result():
+    result_type != #false
+
+  method ref():
+    "@" ++ name
 
 // Memories are stateful module-owned resources rather than hardware Values:
 // they cannot cross ports, participate in muxes, or occupy registers.
@@ -175,7 +192,7 @@ class Module(design,
   method walk():
     operations
 
-class Design(mutable modules = [], mutable next_id = 0):
+class Design(mutable modules = [], mutable next_id = 0, mutable dpi_imports = []):
   method fresh_id():
     def id = next_id
     next_id := next_id + 1
@@ -185,6 +202,14 @@ class Design(mutable modules = [], mutable next_id = 0):
     unless module_def is_a Module && module_def.design === this
     | error(~who: #'add_module, "module belongs to a different design")
     modules := modules ++ [module_def]
+
+  method add_dpi_import(dpi_import):
+    unless dpi_import is_a DpiImport && dpi_import.design === this
+    | error(~who: #'add_dpi_import, "DPI import belongs to a different design")
+    dpi_imports := dpi_imports ++ [dpi_import]
+
+  method find_dpi_import(name):
+    dpi_imports.find(fun (dpi_import): dpi_import.name == name)
 
   method find_module(id):
     modules.find(fun (module_def): module_def.id == id)

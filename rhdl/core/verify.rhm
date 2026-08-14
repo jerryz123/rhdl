@@ -264,6 +264,32 @@ fun check_operation_types(module_def, operation, schema):
       )
       unless (for all (candidate in writes): candidate.operands[2] === clock)
       | fail_operation(operation, "memory write ports must use the same clock")
+  | "dpi_call" || "dpi_register":
+      def dpi_import = operation.attribute("dpi_import", #false)
+      unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && contains_identity(module_def.design.dpi_imports, dpi_import)
+      | fail_operation(operation, "DPI operation references an invalid import")
+      unless operation.operands.length() >= 3
+      | fail_operation(operation, "DPI operation requires a clock, enable, and input operands")
+      def clock = operation.operands[0]
+      def enable = operation.operands[1]
+      def inputs = operation.operands.drop(2)
+      unless clock_type(clock.type)
+      | fail_operation(operation, "DPI operation clock must be Clock")
+      unless flat_data_type(enable.type) && data_width(enable.type) == 1
+      | fail_operation(operation, "DPI operation enable must be a one-bit FlatDataType")
+      unless dpi_import is_a DpiImport && inputs.length() == dpi_import.input_types.length()
+      | fail_operation(operation, "DPI operation input count does not match its import")
+      when dpi_import is_a DpiImport
+      | for (input in inputs, expected_type in dpi_import.input_types):
+          unless type_equal(input.type, expected_type)
+          | fail_operation(operation, "DPI operation input has the wrong hardware type")
+        when schema.type_rule == "dpi_call" && dpi_import.has_result()
+        | fail_operation(operation, "DPI call requires a result-less procedure import")
+        when schema.type_rule == "dpi_register"
+        | unless dpi_import.has_result()
+          | fail_operation(operation, "DPI register requires a result-bearing function import")
+          unless type_equal(operation.results[0].type, dpi_import.result_type)
+          | fail_operation(operation, "DPI register result has the wrong hardware type")
   | "data_register" || "data_register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]
@@ -411,6 +437,25 @@ fun verify_module(module_def):
 fun verify_design(design):
   unless design is_a Design
   | fail("expected an IR.Design")
+  for (dpi_import in design.dpi_imports):
+    unless dpi_import is_a DpiImport && dpi_import.design === design
+    | fail("DPI import belongs to a different design")
+    def import_label:
+      if dpi_import.name is_a String | dpi_import.name | "<unnamed>"
+    unless dpi_import.name is_a String && dpi_import.input_names is_a List && dpi_import.input_types is_a List && dpi_import.input_names.length() == dpi_import.input_types.length() && dpi_import.input_names.length() >= 1
+    | fail("DPI import " ++ import_label ++ " has a malformed signature")
+    def result_absent = dpi_import.result_name == #false && dpi_import.result_type == #false
+    def result_present = dpi_import.result_name is_a String && flat_data_type(dpi_import.result_type) && type_well_formed(dpi_import.result_type)
+    unless result_absent || result_present
+    | fail("DPI import " ++ import_label ++ " has a malformed optional result")
+    for (input_name in dpi_import.input_names, input_type in dpi_import.input_types):
+      unless input_name is_a String && flat_data_type(input_type) && type_well_formed(input_type)
+      | fail("DPI import " ++ import_label ++ " has a malformed input")
+      when dpi_import.input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
+      | fail("DPI import " ++ import_label ++ " has duplicate input names")
+    def same_names = design.dpi_imports.filter(~keep: fun (other): other.name == dpi_import.name)
+    unless same_names.length() == 1
+    | fail("duplicate DPI import name " ++ import_label)
   for (module_def in design.modules):
     unless module_def is_a Module && module_def.design === design
     | fail("module belongs to a different design")
@@ -418,7 +463,7 @@ fun verify_design(design):
     unless same_names.length() == 1
     | fail("duplicate module name " ++ module_def.name)
     verify_module(module_def)
-  def mutable entities = []
+  def mutable entities = design.dpi_imports
   for (module_def in design.modules):
     entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places ++ module_def.memories
   for (entity in entities):

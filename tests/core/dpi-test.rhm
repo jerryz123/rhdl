@@ -1,0 +1,72 @@
+#lang rhombus
+// Covers design-level DPI imports and mandatory-clock stateful call construction.
+
+import:
+  "../../rhdl/core/main.rhm" open
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def procedure = builder.dpi_import("rhdl_trace", ["value"], [Bits(8)])
+  def function = builder.dpi_import("rhdl_step",
+                                    ["value"],
+                                    [Bits(8)],
+                                    "result",
+                                    Bits(8))
+  def module_def = builder.module("ClockedDPI")
+  def clock = builder.input(module_def, "clock", Clock)
+  def enable = builder.input(module_def, "enable", Bits(1))
+  def value = builder.input(module_def, "value", Bits(8))
+  def output = builder.output(module_def, "result", Bits(8))
+  def call = builder.dpi_call(module_def,
+                              procedure,
+                              [value],
+                              clock,
+                              enable)
+  def result = builder.dpi_register(module_def,
+                                    "dpi_result",
+                                    function,
+                                    [value],
+                                    clock,
+                                    enable)
+  builder.drive(output, result)
+  builder.finish(module_def)
+  check:
+    design.dpi_imports.length() ~is 2
+    call.results.length() ~is 0
+    result.type.width ~is 8
+    module_def.find_operation(result.defining_op_id).opcode ~is "sim.dpi_register"
+    dump_ir(design).contains("sim.dpi_import @rhdl_trace(input value: bits<8>)") ~is #true
+    dump_ir(design).contains("sim.dpi_import @rhdl_step(input value: bits<8>) -> return result: bits<8>") ~is #true
+    dump_ir(design).contains("sim.dpi_call @rhdl_trace(%value) clock %clock enable %enable") ~is #true
+    dump_ir(design).contains("sim.dpi_register @rhdl_step(%value) clock %clock enable %enable") ~is #true
+    verify_design(design) ~is #void
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def dpi = builder.dpi_import("rhdl_step",
+                               ["value"],
+                               [Bits(8)],
+                               "result",
+                               Bits(8))
+  def procedure = builder.dpi_import("rhdl_trace", ["value"], [Bits(8)])
+  def same = builder.dpi_import("rhdl_step",
+                                ["value"],
+                                [Bits(8)],
+                                "result",
+                                Bits(8))
+  def module_def = builder.module("BadClockedDPI")
+  def clock = builder.input(module_def, "clock", Clock)
+  def enable = builder.input(module_def, "enable", Bits(1))
+  def wide_enable = builder.input(module_def, "wide_enable", Bits(2))
+  def value = builder.input(module_def, "value", Bits(8))
+  def wrong_value = builder.input(module_def, "wrong_value", Bits(4))
+  check:
+    same === dpi ~is #true
+    builder.dpi_import("rhdl_step", ["value"], [Bits(4)], "result", Bits(8)) ~throws "conflicting signatures"
+    builder.dpi_register(module_def, "wrong", dpi, [wrong_value], clock, enable) ~throws "wrong hardware type"
+    builder.dpi_register(module_def, "clock", dpi, [value], enable, enable) ~throws "clock must be Clock"
+    builder.dpi_register(module_def, "enable", dpi, [value], clock, wide_enable) ~throws "one-bit FlatDataType"
+    builder.dpi_call(module_def, dpi, [value], clock, enable) ~throws "must be instantiated with dpi_register"
+    builder.dpi_register(module_def, "procedure", procedure, [value], clock, enable) ~throws "result-bearing function"

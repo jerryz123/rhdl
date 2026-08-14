@@ -16,6 +16,17 @@ fun value_refs(value_list):
 fun place_refs(place_list):
   String.join(place_list.map(fun (place): place.ref()), ", ")
 
+fun print_dpi_import(dpi_import):
+  def inputs:
+    for List (name in dpi_import.input_names, type in dpi_import.input_types):
+      "input " ++ name ++ ": " ++ type_text(type)
+  def result:
+    if dpi_import.has_result()
+    | " -> return " ++ dpi_import.result_name ++ ": " ++ type_text(dpi_import.result_type)
+    | ""
+  String.append("sim.dpi_import ", dpi_import.ref(), "(",
+                String.join(inputs, ", "), ")", result, "\n")
+
 fun print_operation(operation):
   def schema = schema_for(operation.opcode)
   match schema && schema.print_form
@@ -99,6 +110,20 @@ fun print_operation(operation):
                     operation.operands[1].ref(), " clock ",
                     operation.operands[2].ref(), " enable ",
                     operation.operands[3].ref())
+  | "dpi_call":
+      def dpi_import = operation.attribute("dpi_import")
+      String.append("    sim.dpi_call ", dpi_import.ref(), "(",
+                    value_refs(operation.operands.drop(2)), ") clock ",
+                    operation.operands[0].ref(), " enable ",
+                    operation.operands[1].ref())
+  | "dpi_register":
+      def dpi_import = operation.attribute("dpi_import")
+      String.append("    ", operation.results[0].ref(),
+                    " = sim.dpi_register ", dpi_import.ref(), "(",
+                    value_refs(operation.operands.drop(2)), ") clock ",
+                    operation.operands[0].ref(), " enable ",
+                    operation.operands[1].ref(), " : ",
+                    type_text(operation.results[0].type))
   | "register":
       String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
                     " = rtl.register clock ", operation.operands[0].ref(),
@@ -134,4 +159,5 @@ fun dump_module_ir(module_def):
                 body, "\n}\n")
 
 fun dump_ir(design):
-  String.join(design.modules.map(dump_module_ir), "\n")
+  def imports = String.join(design.dpi_imports.map(print_dpi_import), "")
+  imports ++ (if imports == "" | "" | "\n") ++ String.join(design.modules.map(dump_module_ir), "\n")

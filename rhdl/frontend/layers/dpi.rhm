@@ -1,0 +1,125 @@
+#lang rhombus/and_meta
+// Defines explicit procedure calls and binding-derived DPI register syntax.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/clocking.rhm".ambient_dpi_call
+  "../support/clocking.rhm".ambient_dpi_register
+  "../support/fields.rhm".HardwareFields
+
+export:
+  dpi_import
+  dpi_reg
+
+class DpiDefinition(name,
+                    input_names,
+                    input_types,
+                    result_name = #false,
+                    result_type = #false):
+  method has_result():
+    result_type != #false
+
+fun dpi_procedure(value):
+  value is_a DpiDefinition && !value.has_result()
+
+fun materialize_import(definition):
+  unless definition is_a DpiDefinition
+  | error(~who: #'dpi_import, "expected a DPI import definition")
+  kernel.dpi_import(definition.name,
+                    definition.input_names,
+                    definition.input_types,
+                    definition.result_name,
+                    definition.result_type)
+
+fun resolved_enable(enable):
+  if enable | enable | kernel.literal(Bits(1), 1)
+
+fun call_dpi_procedure(procedure,
+                       inputs,
+                       clock = #false,
+                       enable = #false):
+  unless procedure is_a DpiDefinition && !procedure.has_result()
+  | error(~who: #'dpi_import, "DPI .call requires a procedure import")
+  def imported = materialize_import(procedure)
+  def enabled = resolved_enable(enable)
+  if clock
+  | kernel.dpi_call(imported, inputs, clock, enabled)
+  | ambient_dpi_call(imported, inputs, enabled)
+
+fun make_dpi_register(name,
+                      function,
+                      inputs,
+                      clock = #false,
+                      enable = #false) :~ HardwareFields:
+  unless function is_a DpiDefinition && function.has_result()
+  | error(~who: #'dpi_reg, "dpi_reg requires a result-bearing function import")
+  def imported = materialize_import(function)
+  def enabled = resolved_enable(enable)
+  if clock
+  | kernel.dpi_register(name, imported, inputs, clock, enabled)
+  | ambient_dpi_register(name, imported, inputs, enabled)
+
+annot.macro 'DpiProcedureFields':
+  annot_meta.pack_predicate(
+    'dpi_procedure',
+    '(($(statinfo_meta.dot_provider_key), dpi_procedure_dot))'
+  )
+
+dot.macro 'dpi_procedure_dot $left $dot $right':
+  match right
+  | 'call':
+      'fun
+       | (& inputs):
+           call_dpi_procedure($left, inputs)
+       | (~enable: enable, & inputs):
+           call_dpi_procedure($left, inputs, #false, enable)
+       | (~clock: clock, & inputs):
+           call_dpi_procedure($left, inputs, clock)
+       | (~clock: clock, ~enable: enable, & inputs):
+           call_dpi_procedure($left, inputs, clock, enable)'
+  | ~else: #false
+
+defn.macro
+| 'dpi_import procedure $(name :: Identifier)($argument_name: $argument_type, ...)':
+    def import_name = name.to_source_string()
+    let [input_name, ...] = [argument_name.to_source_string(), ...]
+    'def $name :: DpiProcedureFields = DpiDefinition(
+        $import_name,
+        [$input_name, ...],
+        [$argument_type, ...]
+      )'
+| 'dpi_import function $(name :: Identifier)($argument_name: $argument_type, ...) -> $(result_name :: Identifier): $result_type':
+    def import_name = name.to_source_string()
+    def output_name = result_name.to_source_string()
+    let [input_name, ...] = [argument_name.to_source_string(), ...]
+    'def $name = DpiDefinition(
+        $import_name,
+        [$input_name, ...],
+        [$argument_type, ...],
+        $output_name,
+        $result_type
+      )'
+
+defn.macro
+| 'dpi_reg $(name :: Identifier) = $function($input, ..., ~clock: $clock, ~enable: $enable)':
+    def register_name = name.to_source_string()
+    'def $name :: HardwareFields = make_dpi_register(
+        $register_name, $function, [$input, ...], $clock, $enable
+      )'
+| 'dpi_reg $(name :: Identifier) = $function($input, ..., ~clock: $clock)':
+    def register_name = name.to_source_string()
+    'def $name :: HardwareFields = make_dpi_register(
+        $register_name, $function, [$input, ...], $clock
+      )'
+| 'dpi_reg $(name :: Identifier) = $function($input, ..., ~enable: $enable)':
+    def register_name = name.to_source_string()
+    'def $name :: HardwareFields = make_dpi_register(
+        $register_name, $function, [$input, ...], #false, $enable
+      )'
+| 'dpi_reg $(name :: Identifier) = $function($input, ...)':
+    def register_name = name.to_source_string()
+    'def $name :: HardwareFields = make_dpi_register(
+        $register_name, $function, [$input, ...]
+      )'
