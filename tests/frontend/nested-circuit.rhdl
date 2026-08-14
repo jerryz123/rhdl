@@ -1,0 +1,59 @@
+#lang rhdl
+// Defines nested combinational and synchronous circuits for lexical-scope tests.
+
+circuit LocalParent(width):
+  input value_in: Bits(width)
+  output value_out: Bits(width)
+
+  circuit LocalChild():
+    input value_in: Bits(width)
+    output value_out: Bits(width)
+    value_out <== value_in + bits(1, width)
+
+  // A declaration alone does not materialize a module.
+  circuit UnusedChild():
+    output value_out: Bits(width)
+    value_out <== bits(0, width)
+
+  inst child(LocalChild())
+  child.value_in <== value_in
+  value_out <== child.value_out
+
+circuit SpecializedParents():
+  input narrow_in: Bits(8)
+  input wide_in: Bits(16)
+  output narrow_out: Bits(8)
+  output wide_out: Bits(16)
+
+  inst narrow(LocalParent(8))
+  inst wide(LocalParent(16))
+  narrow.value_in <== narrow_in
+  wide.value_in <== wide_in
+  narrow_out <== narrow.value_out
+  wide_out <== wide.value_out
+
+sync_circuit SyncParent(width):
+  input enable: Bool
+  output value: Bits(width)
+
+  sync_circuit SyncChild():
+    input enable: Bool
+    output value: Bits(width)
+    reg state(~init: bits(0, width))
+    when (enable):
+      state.next <== state + bits(1, width)
+    value <== state
+
+  inst child(SyncChild())
+  child.enable <== enable
+  value <== child.value
+
+def design = elaborate(SpecializedParents())
+def sync_design = elaborate(SyncParent(8))
+
+export:
+  LocalParent
+  SpecializedParents
+  SyncParent
+  design
+  sync_design

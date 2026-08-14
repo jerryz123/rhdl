@@ -333,6 +333,45 @@ supplies static information rather than checking a result contract.
 See [`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) and
 [`examples/layered-adder.rhdl`](examples/layered-adder.rhdl).
 
+### Lexically nested circuits
+
+A circuit body may declare a private child generator. The nested generator can
+capture host values, including parameters of its enclosing generator:
+
+```rhombus
+circuit Incrementer(width):
+  input value_in: Bits(width)
+  output value_out: Bits(width)
+
+  circuit Increment():
+    input value_in: Bits(width)
+    output value_out: Bits(width)
+    value_out <== value_in + bits(1, width)
+
+  inst increment(Increment())
+  increment.value_in <== value_in
+  value_out <== increment.value_out
+```
+
+`Increment` is lexically visible only inside `Incrementer`, but calling it
+still materializes a separate module that must be connected through an
+explicit instance. A declaration that is never called emits no module. Each
+elaboration of the enclosing generator creates a fresh local circuit identity;
+module symbols retain normal deterministic uniquification such as `Increment`
+and `Increment_1`.
+
+Only host values may be captured. A parent `Value`, `Place`, register,
+instance, or interface endpoint belongs to the parent module and cannot be
+used directly while building the child. Parent hardware must cross the child
+boundary through ports. Core ownership checks reject accidental hardware
+captures.
+
+A nested `sync_circuit` behaves like any other synchronous child. Instantiating
+it inside a `sync_circuit` propagates the enclosing ambient clock and reset;
+an ordinary nested `circuit` does not implicitly inherit that domain. Active
+recursive elaboration remains invalid. See
+[`examples/nested-circuit.rhdl`](examples/nested-circuit.rhdl).
+
 The integrated [`examples/tiny-simd.rhdl`](examples/tiny-simd.rhdl) showcase
 uses one opaque host configuration to choose lane count, word width, program
 depth, and whether multiplier hardware exists. Ordinary Rhombus validation,

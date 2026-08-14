@@ -183,6 +183,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |
 | [`reset-shift-register.rhdl`](reset-shift-register.rhdl) | Chisel-style reset-initialized registers using inferred types and an ambient sync domain |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
+| [`nested-circuit.rhdl`](nested-circuit.rhdl) | A lexically private child generator capturing its parent's host width while communicating only through ports |
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |

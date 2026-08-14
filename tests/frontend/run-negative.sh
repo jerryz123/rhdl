@@ -51,6 +51,8 @@ expect_failure bad-sync-parent.rhdl "implicit clock/reset use requires an active
 expect_failure bad-sync-partial-override.rhdl "explicit sync child wiring requires both clock and reset"
 expect_failure bad-interface-parameter.rhdl "circuit parameters must be host values, not hardware values"
 expect_failure bad-recursion.rhdl "recursive elaboration of circuit Recursive"
+expect_failure bad-nested-circuit-capture.rhdl "hardware value belongs to a different module"
+expect_failure bad-nested-circuit-sync-inherit.rhdl "hardware value belongs to a different module"
 expect_failure bad-top-call.rhdl "circuit generators may only be called during elaborate"
 expect_failure bad-width.rhdl "add operands must have exactly the same Bits width"
 expect_failure bad-expanding-arithmetic-type.rhdl "expanding arithmetic operands must be Bits"

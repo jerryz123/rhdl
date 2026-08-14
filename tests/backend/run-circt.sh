@@ -196,6 +196,7 @@ fixture_specs=(
   'enable-shift-register|enable_shift_register_tb|examples/enable-shift-register.rhdl|design|verilog_reference'
   'reset-shift-register|reset_shift_register_tb|examples/reset-shift-register.rhdl|design|verilog_reference'
   'hierarchy|hierarchy_tb|examples/hierarchy.rhdl|design|verilog_reference'
+  'nested-circuit|nested_circuit_tb|examples/nested-circuit.rhdl|design|verilog_reference'
   'bundle|bundle_tb|examples/bundle.rhdl|design|verilog_reference'
   'record-cast|record_cast_tb|examples/bundle.rhdl|cast_design|cast_verilog_reference'
   'interface|interface_tb|examples/interface.rhdl|design|verilog_reference'
