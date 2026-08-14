@@ -177,7 +177,9 @@ outstanding slots remains, gives reads and writes equal response latency, and
 queues their responses strictly in request order. Reset clears pipeline and
 queue state but does not initialize storage. The configured region must fit
 the address width, and invalid or misaligned requests are not accepted because
-the deliberately small response payload has no error indication.
+the deliberately small response payload has no error indication. Internal
+assertions check that the outstanding count remains bounded and that every
+transferred response corresponds to an outstanding request.
 
 ## Flow-control circuits
 
@@ -229,7 +231,9 @@ can expose its input offer directly.
 `~pipe: #true` permits enqueue when a full queue dequeues in the same cycle;
 `~flow: #true` lets an empty queue present its input directly. `count` has type
 `Bits(index_width(depth + 1))`. Current queues use asynchronous reads, and
-depths greater than one compose two `Counter(depth)` pointer instances.
+depths greater than one compose two `Counter(depth)` pointer instances. Those
+queues assert that occupancy stays within the configured depth. Round-robin
+arbiters similarly assert that their rotating priority remains in range.
 
 See [`../../examples/flow-control.rhdl`](../../examples/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and
@@ -254,4 +258,5 @@ expired <== timer.wrap
 `Counter(n)` synchronously resets to zero and, while enabled, counts through
 the `n` states from zero to `n - 1`. `value` has type
 `Bits(index_width(n))`. `wrap` is asserted during an enabled cycle at
-`n - 1`, immediately before the next edge returns the value to zero.
+`n - 1`, immediately before the next edge returns the value to zero. An
+internal assertion checks that the state remains within that range.

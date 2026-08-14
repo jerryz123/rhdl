@@ -83,24 +83,33 @@ module SimpleMemoryRam(
   reg                                operation_valid;
   reg                                operation_write;
   assign _GEN_3 = port_in.request.bits.address[3:2];
+  `ifndef SYNTHESIS
+    memory_outstanding_in_range:
+      assert property (@(posedge clock) disable iff (reset) outstanding != 2'h3);
+  `endif // not def SYNTHESIS
   wire                               _GEN_4 =
     _pipe_stage_egress_out.valid & port_in.response.ready;
-  wire                               _GEN_5 =
+  wire                               _GEN_5 = ~(_GEN_4 & ~reset);
+  `ifndef SYNTHESIS
+    memory_response_has_request:
+      assert property (@(posedge clock) disable iff (_GEN_5) |outstanding);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_6 =
     port_in.request.bits.address[31] & port_in.request.bits.address < 32'h80000010
     & port_in.request.bits.address[1:0] == 2'h0 & (outstanding != 2'h2 | _GEN_4);
-  assign _GEN_2 = port_in.request.valid & _GEN_5;
+  assign _GEN_2 = port_in.request.valid & _GEN_6;
   assign _GEN_1 = port_in.request.bits.write;
   assign _GEN_0 = port_in.request.bits.data;
   assign _GEN = port_in.request.bits.mask;
-  wire struct packed {logic ready; } _GEN_6 = '{ready: _GEN_5};
-  wire struct packed {logic [31:0] data; } _GEN_7 =
+  wire struct packed {logic ready; } _GEN_7 = '{ready: _GEN_6};
+  wire struct packed {logic [31:0] data; } _GEN_8 =
     '{data: (operation_write ? 32'h0 : _storage_ext_RW0_rdata)};
-  wire struct packed {logic valid; struct packed {logic [31:0] data; } bits; } _GEN_8 =
-    '{valid: operation_valid, bits: _GEN_7};
+  wire struct packed {logic valid; struct packed {logic [31:0] data; } bits; } _GEN_9 =
+    '{valid: operation_valid, bits: _GEN_8};
   Queue responses (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_8),
+    .ingress_in  (_GEN_9),
     .egress_in   (_pipe_stage_ingress_out),
     .ingress_out (/* unused */),
     .egress_out  (_responses_egress_out),
@@ -129,7 +138,7 @@ module SimpleMemoryRam(
       operation_write <= _GEN_2 ? _GEN_1 : operation_write;
     end
   end // always @(posedge)
-  assign port_out = '{request: _GEN_6, response: _pipe_stage_egress_out};
+  assign port_out = '{request: _GEN_7, response: _pipe_stage_egress_out};
 endmodule
 
 module Queue(
@@ -158,6 +167,10 @@ module Queue(
   end // always_ff @(posedge)
   reg  [1:0] occupancy;
   wire       _GEN_2 = occupancy == 2'h0;
+  `ifndef SYNTHESIS
+    queue_occupancy_in_range:
+      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
+  `endif // not def SYNTHESIS
   wire       _GEN_3 = occupancy != 2'h2 | egress_in.ready;
   assign _GEN_0 = ingress_in.valid & _GEN_3;
   wire       _GEN_4 = ~_GEN_2 & egress_in.ready;

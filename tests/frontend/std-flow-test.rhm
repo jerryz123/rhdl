@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks standard flow-control generators, parameter validation, and public IR shape.
+// Checks standard flow generators, internal invariants, parameters, and public IR shape.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -180,6 +180,11 @@ fun operations(module_def, opcode):
     ~keep: fun (operation): operation.opcode == opcode
   )
 
+fun assertion_labels(module_def):
+  operations(module_def, "verif.assert").map(
+    fun (operation): operation.attribute("label")
+  )
+
 check:
   verify_design(direct_pipe_design) ~is #void
   verify_design(direct_queue_design) ~is #void
@@ -215,10 +220,13 @@ check:
   operations(queue_three, "rtl.memory_write").length() ~is 1
   operations(queue_three, "rtl.register_reset").length() ~is 1
   operations(queue_three, "rtl.instance").length() ~is 2
+  assertion_labels(queue_one) ~is []
+  assertion_labels(queue_three) ~is ["queue_occupancy_in_range"]
   queue_three_design.modules.length() ~is 2
   queue_three_pointer_counter.name ~is "Counter"
   queue_three_pointer_counter.find_output("value").type.width ~is 2
   operations(queue_three_pointer_counter, "rtl.register_reset").length() ~is 1
+  assertion_labels(queue_three_pointer_counter) ~is ["counter_state_in_range"]
   queue_one.find_output("count").type.width ~is 1
   queue_three.find_output("count").type.width ~is 2
   queue_options.inputs.map(fun (port): port.name) ~is [
@@ -241,6 +249,7 @@ check:
     "clock", "reset", "ingress_0_in", "ingress_1_in", "ingress_2_in", "egress_in"
   ]
   rr_arbiter_three.find_output("chosen").type.width ~is 2
+  assertion_labels(rr_arbiter_three) ~is ["rr_priority_in_range"]
   operations(rr_arbiter_three, "rtl.register_reset").length() ~is 1
 
   demux_three.inputs.map(fun (port): port.name) ~is [
@@ -276,9 +285,12 @@ check:
   operations(ctrl_queue_three, "rtl.register_reset").length() ~is 1
   operations(ctrl_queue_three, "rtl.register").length() ~is 0
   ctrl_queue_three.find_output("count").type.width ~is 2
+  assertion_labels(ctrl_queue_one) ~is []
+  assertion_labels(ctrl_queue_three) ~is ["ctrl_queue_occupancy_in_range"]
 
   ctrl_arbiter_three.find_output("chosen").type.width ~is 2
   ctrl_rr_arbiter_three.find_output("chosen").type.width ~is 2
+  assertion_labels(ctrl_rr_arbiter_three) ~is ["ctrl_rr_priority_in_range"]
   operations(ctrl_rr_arbiter_three, "rtl.register_reset").length() ~is 1
   ctrl_demux_three.find_output("egress_0_out").type.fields.map(
     fun (field): field.name
