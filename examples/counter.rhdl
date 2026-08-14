@@ -1,46 +1,59 @@
 #lang rhdl
-// Showcases literal and register syntax layered over primitive synchronous state.
+// Demonstrates ordinary host functions that accept, construct, and return hardware objects.
 
-circuit Counter(width):
-  input clk: Clock
-  input reset: Reset
-  output count: Bits(width)
+fun wrap_around(n, max) :: Bits(n.type.width):
+  def width = n.type.width
+  def comparable_max:
+    if (max.type.width == width) | max | zext(max, width)
+  mux(n > comparable_max, bits(0, width), n)
 
-  reg state(Bits(width), ~clock: clk, ~reset: reset,
-            ~init: bits(0, width))
-  state.next <== state + bits(1, width)
-  count <== state
+// This is an ordinary host function, but calling it during elaboration creates
+// a register and returns its readable hardware value.
+fun counter(max, en, amt) :: Bits(max.type.width):
+  def width = max.type.width
+  reg x(~init: bits(0, width))
 
-circuit CounterNoReset(width):
-  input clk: Clock
-  output count: Bits(width)
+  when en:
+    // Preserve the carry so the hardware comparison can detect crossing max,
+    // then return the selected result to the register's declared width.
+    x.next <== wrap_around(x +& amt, max)[0..width]
 
-  reg state(Bits(width), ~clock: clk)
-  state.next <== state + bits(1, width)
-  count <== state
+  x
 
-def design = elaborate(Counter(8))
+sync_circuit Counter():
+  input inc: Bool
+  input amt: Bits(4)
+  output tot: Bits(8)
+
+  tot <== counter(bits(255, 8), inc, amt)
+
+def design = elaborate(Counter())
 
 def verilog_reference = @str|<<{
 module Counter(
-  input        clk,
+  input        clock,
                reset,
-  output [7:0] count
+               inc,
+  input  [3:0] amt,
+  output [7:0] tot
 );
 
-  reg [7:0] state;
-  always @(posedge clk) begin
+  reg  [7:0] x;
+  wire [8:0] _GEN = {1'h0, x} + {5'h0, amt};
+  wire [8:0] _GEN_0 = {1'h0, 8'hFF} < _GEN ? 9'h0 : _GEN;
+  always @(posedge clock) begin
     if (reset)
-      state <= 8'h0;
+      x <= 8'h0;
     else
-      state <= state + 8'h1;
+      x <= inc ? _GEN_0[7:0] : x;
   end // always @(posedge)
-  assign count = state;
+  assign tot = x;
 endmodule
 }>>|
 
 export:
+  wrap_around
+  counter
   Counter
-  CounterNoReset
   design
   verilog_reference

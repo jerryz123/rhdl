@@ -293,6 +293,41 @@ runtime hardware value cannot control host `if`, `unless`, `cond`, `&&`, `||`,
 or host iteration. In RHDL profiles, `when` is reserved for the hardware-only
 conditional-assignment layer.
 
+Ordinary host functions called during elaboration may accept hardware objects,
+inspect their host-side type descriptors, construct expressions or state, and
+return hardware objects to the enclosing circuit. This is distinct from
+passing hardware as a circuit generator parameter. The helper functions in
+[`examples/counter.rhdl`](examples/counter.rhdl) derive widths from their
+hardware arguments, allocate an ambient register, and return its readable
+value. A checked `::` result annotation can use the same type spelling as a
+port declaration, including an expression that depends on the helper's host
+arguments:
+
+```rhombus
+fun low_word(value, width) :: Bits(width):
+  value[0..width]
+```
+
+`Bits`, `Clock`, `Reset`, `Bool`, `Vec`, and types declared by `bundle` or
+`hardware_enum` all work in annotation space. The annotation checks the exact
+RHDL type with `type_equal` and preserves field, indexing, casting, and lookup
+syntax on the result. Any other host expression that produces a
+`HardwareType`, including a type supplied by a user extension, can use the
+general exact annotation:
+
+```rhombus
+def Byte = Bits(8)
+
+fun identity(value) :: Hardware.of(Byte):
+  value
+```
+
+A type-declaration extension can additionally define a same-name annotation
+that expands to `Hardware.of(...)`; this is how the standard type spellings,
+bundles, and enums provide their concise forms. The broader `:~ Hardware`
+annotation remains useful for genuinely type-polymorphic helpers, but `:~`
+supplies static information rather than checking a result contract.
+
 See [`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) and
 [`examples/layered-adder.rhdl`](examples/layered-adder.rhdl).
 
@@ -1395,7 +1430,7 @@ Important examples include:
 | `examples/alu.rhdl` | Boolean, bitwise, arithmetic, equality, and N-way selection |
 | `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
-| `examples/counter.rhdl` | Primitive registers and synchronous reset |
+| `examples/counter.rhdl` | Host functions composing hardware expressions, conditional state, and returned circuit values |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
 | `examples/expanding-arithmetic.rhdl` | Lossless addition and multiplication across unequal operand widths |
 | `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
@@ -1403,6 +1438,8 @@ Important examples include:
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/stack.rhdl` | Host-sized stack with guarded memory writes and nested hardware control |
 | `examples/table.rhdl` | Host-generated 256-entry combinational vector table |
+| `examples/vec-search.rhdl` | Registered traversal of a host-defined hardware-vector pattern |
+| `examples/vec-shift-register.rhdl` | Element-wise load and shift updates to one vector register |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |

@@ -173,6 +173,7 @@ fixture_specs=(
   'shifts|shifts_tb|examples/shifts.rhdl|design|verilog_reference'
   'width-ops|width_ops_tb|examples/width-ops.rhdl|design|verilog_reference'
   'vector|vector_tb|examples/vector.rhdl|design|verilog_reference'
+  'vec-shift-register|vec_shift_register_tb|examples/vec-shift-register.rhdl|design|verilog_reference'
   'wire|wire_tb|examples/wire.rhdl|design|verilog_reference'
   'async-read-memory|async_read_memory_tb|examples/async-read-memory.rhdl|design|verilog_reference'
   'tiny-simd|tiny_simd_tb|examples/tiny-simd.rhdl|design|verilog_reference'
@@ -222,3 +223,4 @@ verify_fixture bundle-hierarchy
 verify_fixture interface-hierarchy
 verify_fixture aggregate-memory
 verify_fixture table table_tb
+verify_fixture vec-search vec_search_tb

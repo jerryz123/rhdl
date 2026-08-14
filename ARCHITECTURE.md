@@ -71,7 +71,10 @@ when adding, removing, or changing a layer's direct dependencies.
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 
-`frontend/support/fields.rhm` depends only on the kernel.
+`frontend/support/fields.rhm` depends on core IR and types plus the kernel. It
+owns the exact-hardware-type predicate exposed by the foundation as
+`Hardware.of(type)` and the static information used by readable and driveable
+hardware data.
 `frontend/support/instance-members.rhm` depends on core IR, the kernel, and
 field support. Its resolver hook lets the interface layer contribute virtual
 instance members without making hierarchy depend on interface.

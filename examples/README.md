@@ -160,7 +160,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums as typed mux selectors and values, explicit encodings, registers, and invalid-state recovery |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless unsigned addition and multiplication over unequal-width operands |
-| [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
+| [`counter.rhdl`](counter.rhdl) | Host helper functions that accept hardware values, allocate an ambient register, and return hardware |
 | [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |
 | [`reset-shift-register.rhdl`](reset-shift-register.rhdl) | Chisel-style reset-initialized registers using inferred types and an ambient sync domain |
@@ -174,6 +174,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |
 | [`table.rhdl`](table.rhdl) | Host-generated 256-byte vector contents with exhaustive eight-bit hardware lookup |
+| [`vec-search.rhdl`](vec-search.rhdl) | Host-defined pattern materialized as a hardware vector and selected by a wrapping register |
 | [`wire.rhdl`](wire.rhdl) | A vector wire assembled element by element and then read as one value |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |

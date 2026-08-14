@@ -1,31 +1,52 @@
-// Simulates the CIRCT-exported synchronous-reset counter module.
+// Simulates enable, variable increments, modular wrap, and synchronous reset.
 module counter_tb;
-    logic clk = 1'b0;
+    logic clock = 1'b0;
     logic reset = 1'b1;
-    logic [7:0] count;
+    logic inc;
+    logic [3:0] amt;
+    logic [7:0] tot;
 
     Counter dut (
-        .clk(clk),
+        .clock(clock),
         .reset(reset),
-        .count(count)
+        .inc(inc),
+        .amt(amt),
+        .tot(tot)
     );
 
-    always #5 clk = ~clk;
+    always #5 clock = ~clock;
 
     initial begin
-        repeat (2) @(posedge clk);
+        inc = 1'b0;
+        amt = 4'd3;
+        repeat (2) @(posedge clock);
         #1;
-        assert (count == 8'd0) else $fatal(1, "synchronous reset failed");
+        assert (tot == 8'd0) else $fatal(1, "synchronous reset failed");
 
         reset = 1'b0;
-        repeat (3) @(posedge clk);
+        repeat (2) @(posedge clock);
         #1;
-        assert (count == 8'd3) else $fatal(1, "counter increment failed");
+        assert (tot == 8'd0) else $fatal(1, "disabled counter did not hold");
+
+        inc = 1'b1;
+        repeat (3) @(posedge clock);
+        #1;
+        assert (tot == 8'd9) else $fatal(1, "variable increment failed");
+
+        amt = 4'd15;
+        repeat (16) @(posedge clock);
+        #1;
+        assert (tot == 8'd249) else $fatal(1, "counter accumulation failed");
+
+        amt = 4'd7;
+        @(posedge clock);
+        #1;
+        assert (tot == 8'd0) else $fatal(1, "modular wrap failed");
 
         reset = 1'b1;
-        @(posedge clk);
+        @(posedge clock);
         #1;
-        assert (count == 8'd0) else $fatal(1, "second synchronous reset failed");
+        assert (tot == 8'd0) else $fatal(1, "second synchronous reset failed");
 
         $display("counter simulation passed");
         $finish;
