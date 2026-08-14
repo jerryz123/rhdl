@@ -1,0 +1,59 @@
+#lang rhombus
+// Checks the complete RV64I catalog, representative encodings, and field metadata.
+
+import:
+  "../model/main.rhm" open
+  "../isa/rv64i.rhm" open
+
+def expected_names = [
+  "LUI", "AUIPC", "JAL", "JALR",
+  "BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU",
+  "LB", "LH", "LW", "LBU", "LHU", "LWU", "LD",
+  "SB", "SH", "SW", "SD",
+  "ADDI", "SLTI", "SLTIU", "XORI", "ORI", "ANDI",
+  "SLLI", "SRLI", "SRAI",
+  "ADDIW", "SLLIW", "SRLIW", "SRAIW",
+  "ADD", "SUB", "SLL", "SLT", "SLTU", "XOR", "SRL", "SRA", "OR", "AND",
+  "ADDW", "SUBW", "SLLW", "SRLW", "SRAW",
+  "FENCE", "ECALL", "EBREAK"
+]
+
+check:
+  RV64I.revision ~is "RV64I 2.1 over RV32I 2.1"
+  RV64I.instructions.length() ~is 52
+  RV64I.instructions.map(fun (instruction): instruction.name) ~is expected_names
+  rv64i_instruction("ADD") === ADD ~is #true
+  RV64I.matching(0x003100B3) === ADD ~is #true
+  RV64I.matching(0x403100B3) === SUB ~is #true
+  RV64I.matching(0xFFF10093) === ADDI ~is #true
+  RV64I.matching(0x03F11093) === SLLI ~is #true
+  RV64I.matching(0x43F15093) === SRAI ~is #true
+  RV64I.matching(0x00813083) === LD ~is #true
+  RV64I.matching(0x00313423) === SD ~is #true
+  RV64I.matching(0x00208063) === BEQ ~is #true
+  RV64I.matching(0x00000073) === ECALL ~is #true
+  RV64I.matching(0x00100073) === EBREAK ~is #true
+
+  ADD.encoding.value ~is 0x00000033
+  ADD.encoding.care ~is 0xFE00707F
+  SLLI.encoding.value ~is 0x00001013
+  SLLI.encoding.care ~is 0xFC00707F
+  ECALL.encoding.value ~is 0x00000073
+  ECALL.encoding.care ~is 0xFFFFFFFF
+
+  ADD.operands.map(fun (operand): operand.name) ~is ["rd", "rs1", "rs2"]
+  ADD.immediate ~is #false
+  ADDI.operands.map(fun (operand): operand.name) ~is ["rd", "rs1"]
+  ADDI.immediate === IImmediate ~is #true
+  SD.operands.map(fun (operand): operand.name) ~is ["rs1", "rs2"]
+  SD.immediate === SImmediate ~is #true
+  BEQ.immediate === BImmediate ~is #true
+  SLLI.immediate === Shift64Immediate ~is #true
+  SLLIW.immediate === Shift32Immediate ~is #true
+  FENCE.fields.map(fun (field): field.name) ~is ["fm", "pred", "succ", "rs1", "rd"]
+  ECALL.fields ~is []
+
+check:
+  rv64i_instruction("MISSING") ~throws "unknown instruction"
+  InstructionCatalog("duplicate", "test", [ADD, ADD]) ~throws "duplicate instruction name"
+  InstructionCatalog("overlap", "test", [ADD, InstructionSpec("ADD2", RFormat, ADD.requirements)]) ~throws "encodings overlap"

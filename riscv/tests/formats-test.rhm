@@ -1,0 +1,40 @@
+#lang rhombus
+// Checks RV64I register operands, immediate assembly, and format coverage.
+
+import:
+  "../model/main.rhm" open
+
+check:
+  RFormat.operands.map(fun (operand): operand.name) ~is ["rd", "rs1", "rs2"]
+  RFormat.operands.map(fun (operand): operand.role) ~is ["destination", "source", "source"]
+  RFormat.variable_mask ~is 0x01FF8F80
+  IFormat.variable_mask ~is 0xFFFF8F80
+  Shift64Format.variable_mask ~is 0x03FF8F80
+  Shift32Format.variable_mask ~is 0x01FF8F80
+  FenceFormat.variable_mask ~is 0xFFFF8F80
+  SystemFormat.variable_mask ~is 0
+
+  IImmediate.decode(0xFFFFFFFF) ~is 0xFFF
+  SImmediate.decode(0xFFFFFFFF) ~is 0xFFF
+  BImmediate.decode(0xFFFFFFFF) ~is 0x1FFE
+  UImmediate.decode(0xFFFFFFFF) ~is 0xFFFFF000
+  JImmediate.decode(0xFFFFFFFF) ~is 0x1FFFFE
+  Shift64Immediate.decode(0xFFFFFFFF) ~is 0x3F
+  Shift32Immediate.decode(0xFFFFFFFF) ~is 0x1F
+
+  IImmediate.signed ~is #true
+  UImmediate.width ~is 32
+  Shift64Immediate.signed ~is #false
+  FenceFormat.auxiliary_fields.map(fun (field): field.name) ~is ["fm", "pred", "succ", "rs1", "rd"]
+
+check:
+  RegisterOperand("bad", BitField("tiny", 1, 0), "source") ~throws "five-bit"
+  RegisterOperand("bad", rd, "read") ~throws "source or destination"
+  ImmediatePiece(BitField("two", 1, 0), 0, 0) ~throws "equal widths"
+  ImmediateLayout(
+    "missing",
+    2,
+    #false,
+    [ImmediatePiece(BitField("one", 0, 0), 0, 0)]
+  ) ~throws "cover the output width"
+  InstructionFormat("overlap", [], #false, [rd, rd]) ~throws "must not overlap"

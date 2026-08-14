@@ -1,0 +1,291 @@
+#lang rhombus
+// Defines RV64I operand fields, immediate layouts, and reusable instruction formats.
+
+import:
+  "fields.rhm" open
+
+export:
+  RegisterOperand
+  ImmediatePiece
+  ImmediateLayout
+  InstructionFormat
+  opcode
+  rd
+  funct3
+  rs1
+  rs2
+  funct7
+  funct6
+  immediate12
+  fm
+  predecessor
+  successor
+  RFormat
+  IFormat
+  SFormat
+  BFormat
+  UFormat
+  JFormat
+  Shift64Format
+  Shift32Format
+  FenceFormat
+  SystemFormat
+  IImmediate
+  SImmediate
+  BImmediate
+  UImmediate
+  JImmediate
+  Shift64Immediate
+  Shift32Immediate
+
+class RegisterOperand(name, field, role):
+  constructor (name, field, role):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'RegisterOperand,
+            "operand name must be a nonempty String")
+    unless field is_a BitField && field.width == 5
+    | error(~who: #'RegisterOperand,
+            "register operand field must be a five-bit BitField")
+    unless role == "source" || role == "destination"
+    | error(~who: #'RegisterOperand,
+            "register operand role must be source or destination")
+    super(name, field, role)
+
+class ImmediatePiece(source, output_high, output_low):
+  constructor (source, output_high, output_low):
+    unless source is_a BitField
+    | error(~who: #'ImmediatePiece, "immediate source must be a BitField")
+    unless output_high is_a Int && output_low is_a Int && 0 <= output_low && output_low <= output_high
+    | error(~who: #'ImmediatePiece,
+            "immediate output bounds must satisfy high >= low >= 0")
+    unless source.width == output_high - output_low + 1
+    | error(~who: #'ImmediatePiece,
+            "immediate source and destination slices must have equal widths")
+    super(source, output_high, output_low)
+
+  method output_mask():
+    width_mask(output_high - output_low + 1) bits.(<<) output_low
+
+class ImmediateLayout(name, width, signed, pieces, zero_bits):
+  constructor (name, width, signed, pieces, zero_bits = []):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'ImmediateLayout,
+            "immediate name must be a nonempty String")
+    unless width is_a Int && width > 0
+    | error(~who: #'ImmediateLayout, "immediate width must be positive")
+    unless signed is_a Boolean
+    | error(~who: #'ImmediateLayout, "immediate signedness must be Boolean")
+    unless pieces is_a List && pieces.length() > 0
+    | error(~who: #'ImmediateLayout,
+            "immediate pieces must be a nonempty List")
+    unless zero_bits is_a List
+    | error(~who: #'ImmediateLayout, "immediate zero bits must be a List")
+    def mutable covered = 0
+    for (piece in pieces):
+      unless piece is_a ImmediatePiece
+      | error(~who: #'ImmediateLayout,
+              "immediate pieces must contain only ImmediatePiece values")
+      unless piece.source.high < 32 && piece.output_high < width
+      | error(~who: #'ImmediateLayout,
+              "immediate piece lies outside its source or destination width")
+      when (covered bits.and piece.output_mask()) != 0
+      | error(~who: #'ImmediateLayout,
+              "immediate output pieces must not overlap")
+      covered := covered bits.or piece.output_mask()
+    for (bit in zero_bits):
+      unless bit is_a Int && 0 <= bit && bit < width
+      | error(~who: #'ImmediateLayout,
+              "immediate zero bit lies outside the output width")
+      def bit_mask = 1 bits.(<<) bit
+      when (covered bits.and bit_mask) != 0
+      | error(~who: #'ImmediateLayout,
+              "immediate zero bits and output pieces must not overlap")
+      covered := covered bits.or bit_mask
+    unless covered == width_mask(width)
+    | error(~who: #'ImmediateLayout,
+            "immediate pieces and zero bits must cover the output width")
+    super(name, width, signed, pieces, zero_bits)
+
+  method source_fields():
+    pieces.map(fun (piece): piece.source)
+
+  method decode(word):
+    unless word is_a Int && 0 <= word && word <= width_mask(32)
+    | error(~who: #'decode, "instruction word must fit 32 bits")
+    def mutable result = 0
+    for (piece in pieces):
+      result := result + (piece.source.extract(word) bits.(<<) piece.output_low)
+    result
+
+fun fields_mask(fields, who):
+  def mutable mask = 0
+  for (field in fields):
+    unless field is_a BitField
+    | error(~who: who, "format fields must contain only BitField values")
+    when (mask bits.and field.mask()) != 0
+    | error(~who: who, "instruction format fields must not overlap")
+    mask := mask bits.or field.mask()
+  mask
+
+class InstructionFormat(name,
+                        operands,
+                        immediate,
+                        auxiliary_fields,
+                        variable_fields,
+                        variable_mask):
+  constructor (name, operands, immediate = #false, auxiliary_fields = []):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'InstructionFormat,
+            "format name must be a nonempty String")
+    unless operands is_a List
+    | error(~who: #'InstructionFormat, "format operands must be a List")
+    for (operand in operands):
+      unless operand is_a RegisterOperand
+      | error(~who: #'InstructionFormat,
+              "format operands must contain only RegisterOperand values")
+    unless immediate == #false || immediate is_a ImmediateLayout
+    | error(~who: #'InstructionFormat,
+            "format immediate must be an ImmediateLayout or #false")
+    unless auxiliary_fields is_a List
+    | error(~who: #'InstructionFormat,
+            "format auxiliary fields must be a List")
+    def immediate_fields:
+      if immediate | immediate.source_fields() | []
+    def variable_fields = operands.map(fun (operand): operand.field) ++ immediate_fields ++ auxiliary_fields
+    def variable_mask = fields_mask(variable_fields, #'InstructionFormat)
+    super(name,
+          operands,
+          immediate,
+          auxiliary_fields,
+          variable_fields,
+          variable_mask)
+
+def opcode = BitField("opcode", 6, 0)
+def rd = BitField("rd", 11, 7)
+def funct3 = BitField("funct3", 14, 12)
+def rs1 = BitField("rs1", 19, 15)
+def rs2 = BitField("rs2", 24, 20)
+def funct7 = BitField("funct7", 31, 25)
+def funct6 = BitField("funct6", 31, 26)
+def immediate12 = BitField("imm[11:0]", 31, 20)
+def fm = BitField("fm", 31, 28)
+def predecessor = BitField("pred", 27, 24)
+def successor = BitField("succ", 23, 20)
+
+def rd_operand = RegisterOperand("rd", rd, "destination")
+def rs1_operand = RegisterOperand("rs1", rs1, "source")
+def rs2_operand = RegisterOperand("rs2", rs2, "source")
+
+def s_immediate_high = BitField("simm[11:5]", 31, 25)
+def s_immediate_low = BitField("simm[4:0]", 11, 7)
+def b_immediate_sign = BitField("bimm[12]", 31, 31)
+def b_immediate_10_5 = BitField("bimm[10:5]", 30, 25)
+def b_immediate_4_1 = BitField("bimm[4:1]", 11, 8)
+def b_immediate_11 = BitField("bimm[11]", 7, 7)
+def u_immediate = BitField("uimm[31:12]", 31, 12)
+def j_immediate_sign = BitField("jimm[20]", 31, 31)
+def j_immediate_10_1 = BitField("jimm[10:1]", 30, 21)
+def j_immediate_11 = BitField("jimm[11]", 20, 20)
+def j_immediate_19_12 = BitField("jimm[19:12]", 19, 12)
+def shift64 = BitField("shamt[5:0]", 25, 20)
+def shift32 = BitField("shamt[4:0]", 24, 20)
+
+def IImmediate = ImmediateLayout(
+  "I-immediate",
+  12,
+  #true,
+  [ImmediatePiece(immediate12, 11, 0)]
+)
+def SImmediate = ImmediateLayout(
+  "S-immediate",
+  12,
+  #true,
+  [ImmediatePiece(s_immediate_high, 11, 5),
+   ImmediatePiece(s_immediate_low, 4, 0)]
+)
+def BImmediate = ImmediateLayout(
+  "B-immediate",
+  13,
+  #true,
+  [ImmediatePiece(b_immediate_sign, 12, 12),
+   ImmediatePiece(b_immediate_11, 11, 11),
+   ImmediatePiece(b_immediate_10_5, 10, 5),
+   ImmediatePiece(b_immediate_4_1, 4, 1)],
+  [0]
+)
+def UImmediate = ImmediateLayout(
+  "U-immediate",
+  32,
+  #true,
+  [ImmediatePiece(u_immediate, 31, 12)],
+  for List (bit in 0..12): bit
+)
+def JImmediate = ImmediateLayout(
+  "J-immediate",
+  21,
+  #true,
+  [ImmediatePiece(j_immediate_sign, 20, 20),
+   ImmediatePiece(j_immediate_19_12, 19, 12),
+   ImmediatePiece(j_immediate_11, 11, 11),
+   ImmediatePiece(j_immediate_10_1, 10, 1)],
+  [0]
+)
+def Shift64Immediate = ImmediateLayout(
+  "RV64 shift amount",
+  6,
+  #false,
+  [ImmediatePiece(shift64, 5, 0)]
+)
+def Shift32Immediate = ImmediateLayout(
+  "RV64 word shift amount",
+  5,
+  #false,
+  [ImmediatePiece(shift32, 4, 0)]
+)
+
+def RFormat = InstructionFormat(
+  "R",
+  [rd_operand, rs1_operand, rs2_operand]
+)
+def IFormat = InstructionFormat(
+  "I",
+  [rd_operand, rs1_operand],
+  IImmediate
+)
+def SFormat = InstructionFormat(
+  "S",
+  [rs1_operand, rs2_operand],
+  SImmediate
+)
+def BFormat = InstructionFormat(
+  "B",
+  [rs1_operand, rs2_operand],
+  BImmediate
+)
+def UFormat = InstructionFormat(
+  "U",
+  [rd_operand],
+  UImmediate
+)
+def JFormat = InstructionFormat(
+  "J",
+  [rd_operand],
+  JImmediate
+)
+def Shift64Format = InstructionFormat(
+  "I-shamt6",
+  [rd_operand, rs1_operand],
+  Shift64Immediate
+)
+def Shift32Format = InstructionFormat(
+  "I-shamt5",
+  [rd_operand, rs1_operand],
+  Shift32Immediate
+)
+def FenceFormat = InstructionFormat(
+  "FENCE",
+  [],
+  #false,
+  [fm, predecessor, successor, rs1, rd]
+)
+def SystemFormat = InstructionFormat("SYSTEM", [])

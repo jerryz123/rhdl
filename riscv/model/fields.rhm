@@ -1,0 +1,44 @@
+#lang rhombus
+// Defines named instruction bit fields and fixed-value encoding constraints.
+
+export:
+  BitField
+  FieldConstraint
+  width_mask
+
+fun width_mask(width):
+  unless width is_a Int && width > 0
+  | error(~who: #'width_mask, "width must be a positive host Int")
+  (1 bits.(<<) width) - 1
+
+class BitField(name, high, low, width):
+  constructor (name, high, low):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'BitField, "field name must be a nonempty String")
+    unless high is_a Int && low is_a Int && 0 <= low && low <= high
+    | error(~who: #'BitField,
+            "field bounds must be nonnegative host Ints with high >= low")
+    super(name, high, low, high - low + 1)
+
+  method mask():
+    width_mask(width) bits.(<<) low
+
+  method extract(word):
+    unless word is_a Int && word >= 0
+    | error(~who: #'extract, "instruction word must be a nonnegative host Int")
+    (word bits.(>>) low) bits.and width_mask(width)
+
+  method constrain(value):
+    FieldConstraint(this, value)
+
+class FieldConstraint(field, value, mask, value_bits):
+  constructor (field, value):
+    unless field is_a BitField
+    | error(~who: #'FieldConstraint, "constraint field must be a BitField")
+    unless value is_a Int && 0 <= value && value <= width_mask(field.width)
+    | error(~who: #'FieldConstraint,
+            "constraint value must fit its instruction field")
+    super(field,
+          value,
+          field.mask(),
+          value bits.(<<) field.low)

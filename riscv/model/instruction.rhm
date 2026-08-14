@@ -1,0 +1,97 @@
+#lang rhombus
+// Defines validated instruction specifications and disjoint ISA catalogs.
+
+import:
+  "fields.rhm" open
+  "encoding.rhm" open
+  "formats.rhm" open
+
+export:
+  InstructionSpec
+  InstructionCatalog
+  instruction
+
+class InstructionSpec(name,
+                      format,
+                      requirements,
+                      encoding,
+                      operands,
+                      immediate,
+                      fields):
+  constructor (name, format, requirements):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'InstructionSpec,
+            "instruction name must be a nonempty String")
+    unless format is_a InstructionFormat
+    | error(~who: #'InstructionSpec,
+            "instruction format must be an InstructionFormat")
+    def encoding = InstructionEncoding(requirements)
+    when (encoding.care bits.and format.variable_mask) != 0
+    | error(~who: #'InstructionSpec,
+            "fixed encoding requirements overlap variable instruction fields")
+    unless (encoding.care bits.or format.variable_mask) == width_mask(32)
+    | error(~who: #'InstructionSpec,
+            "encoding requirements and format fields must cover 32 bits")
+    super(name,
+          format,
+          requirements,
+          encoding,
+          format.operands,
+          format.immediate,
+          format.variable_fields)
+
+  method matches(word):
+    encoding.matches(word)
+
+class InstructionCatalog(name, revision, instructions):
+  constructor (name, revision, instructions):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'InstructionCatalog,
+            "catalog name must be a nonempty String")
+    unless revision is_a String && revision.length() > 0
+    | error(~who: #'InstructionCatalog,
+            "catalog revision must be a nonempty String")
+    unless instructions is_a List && instructions.length() > 0
+    | error(~who: #'InstructionCatalog,
+            "catalog instructions must be a nonempty List")
+    for (instruction in instructions):
+      unless instruction is_a InstructionSpec
+      | error(~who: #'InstructionCatalog,
+              "catalog must contain only InstructionSpec values")
+      when instructions.filter(
+        ~keep: fun (candidate): candidate.name == instruction.name
+      ).length() != 1
+      | error(~who: #'InstructionCatalog,
+              "duplicate instruction name " ++ instruction.name)
+    for (left_index in 0..instructions.length()):
+      for (right_index in (left_index + 1)..instructions.length()):
+        def left = instructions[left_index]
+        def right = instructions[right_index]
+        when left.encoding.overlaps(right.encoding)
+        | error(~who: #'InstructionCatalog,
+                String.append("instruction encodings overlap: ",
+                              left.name,
+                              " and ",
+                              right.name))
+    super(name, revision, instructions)
+
+  method find(instruction_name):
+    unless instruction_name is_a String
+    | error(~who: #'find, "instruction name must be a String")
+    def found = instructions.find(
+      fun (candidate): candidate.name == instruction_name
+    )
+    unless found
+    | error(~who: #'find, "unknown instruction " ++ instruction_name)
+    found
+
+  method matching(word):
+    instructions.find(fun (instruction): instruction.matches(word))
+
+fun instruction(name, format, requirement, ...):
+  def supplied = [requirement, ...]
+  def requirements:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  InstructionSpec(name, format, requirements)

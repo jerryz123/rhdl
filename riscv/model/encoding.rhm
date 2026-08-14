@@ -1,0 +1,68 @@
+#lang rhombus
+// Builds validated value/care encodings from named instruction-field constraints.
+
+import:
+  "fields.rhm" open
+
+export:
+  InstructionEncoding
+  instruction_encoding
+
+fun require_word(word, width, who):
+  unless word is_a Int && 0 <= word && word <= width_mask(width)
+  | error(~who: who, "instruction word must fit the encoding width")
+  word
+
+class InstructionEncoding(width, constraints, value, care):
+  constructor (constraints, width = 32):
+    unless width is_a Int && width > 0
+    | error(~who: #'InstructionEncoding, "encoding width must be positive")
+    unless constraints is_a List && constraints.length() > 0
+    | error(~who: #'InstructionEncoding,
+            "encoding constraints must be a nonempty List")
+    def all_bits = width_mask(width)
+    def mutable value = 0
+    def mutable care = 0
+    for (constraint in constraints):
+      unless constraint is_a FieldConstraint
+      | error(~who: #'InstructionEncoding,
+              "encoding constraints must contain only FieldConstraint values")
+      unless constraint.field.high < width
+      | error(~who: #'InstructionEncoding,
+              "encoding constraint lies outside the instruction width")
+      def overlap = care bits.and constraint.mask
+      def disagreement = (value bits.xor constraint.value_bits) bits.and overlap
+      when disagreement != 0
+      | error(~who: #'InstructionEncoding,
+              "encoding constraints assign conflicting values to the same bit")
+      value := (value bits.and (all_bits bits.xor constraint.mask)) bits.or constraint.value_bits
+      care := care bits.or constraint.mask
+    super(width, constraints, value bits.and care, care)
+
+  method matches(word):
+    def candidate = require_word(word, width, #'matches)
+    (candidate bits.and care) == value
+
+  method overlaps(other):
+    unless other is_a InstructionEncoding && other.width == width
+    | error(~who: #'overlaps,
+            "encoding overlap requires an InstructionEncoding of equal width")
+    def differing = value bits.xor other.value
+    def jointly_cared = care bits.and other.care
+    (differing bits.and jointly_cared) == 0
+
+  method subsumes(other):
+    unless other is_a InstructionEncoding && other.width == width
+    | error(~who: #'subsumes,
+            "encoding subsumption requires an InstructionEncoding of equal width")
+    def shared_care = care bits.and other.care
+    def differing = value bits.xor other.value
+    shared_care == care && (differing bits.and care) == 0
+
+fun instruction_encoding(constraint, ...):
+  def supplied = [constraint, ...]
+  def constraints:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  InstructionEncoding(constraints)
