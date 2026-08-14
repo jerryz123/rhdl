@@ -125,6 +125,10 @@ functions, and closures. Circuit-bound `Value`, `Place`, `Register`,
 The check is deliberately shallow; ordinary ownership verification catches
 incompatible handles hidden in host containers or closures.
 
+Generator declarations accept positional and keyword bindings with ordinary
+Rhombus annotations and default expressions. Ordinary and sync circuits share
+the same parameter forms and host-value validation.
+
 Parameters are not serialized, hashed, compared, or embedded into module
 names. Calling a generator creates a fresh definition, with deterministic
 suffixes such as `Adder`, `Adder_1`, and `Adder_2`. Active recursion is

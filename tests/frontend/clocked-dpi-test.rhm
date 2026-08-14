@@ -6,6 +6,7 @@ import:
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../examples/clocked-dpi.rhdl" as fixture
   "../../sim/fesvr/direct-memory-htif.rhdl" as fesvr_fixture
+  "clocked-dpi-options.rhdl" as options_fixture
   "clocked-dpi-invalid.rhdl" as invalid
 
 def module_def = fixture.design.modules[0]
@@ -42,6 +43,10 @@ def fesvr_result_names = ["request_valid",
                           "start_valid",
                           "start_entry",
                           "exit"]
+def option_module = options_fixture.design.modules[0]
+def option_registers = option_module.operations.filter(
+  ~keep: fun (operation): operation.opcode == "sim.dpi_register"
+)
 
 check:
   fixture.design.dpi_imports.length() ~is 2
@@ -62,10 +67,14 @@ check:
   fesvr_import.name ~is "rhdl_htif_tick"
   fesvr_import.results.map(fun (result): result.name) ~is fesvr_result_names
   fesvr_register.results.length() ~is 8
+  option_registers.length() ~is 2
+  (for all (operation in option_registers):
+     operation.operands[0] === option_module.find_input("clock").value && operation.operands[1] === option_module.find_input("enable").value) ~is #true
   verify_design(fixture.design) ~is #void
   verify_design(fesvr_fixture.design) ~is #void
   verify_design(explicit_design) ~is #void
   verify_design(always_design) ~is #void
+  verify_design(options_fixture.design) ~is #void
   embedded.run_elaboration(fun (): invalid.SingularBinding()) ~throws "single dpi_reg binding"
   embedded.run_elaboration(fun (): invalid.WrongResultCount()) ~throws "binding count"
   embedded.run_elaboration(fun (): invalid.ConditionalProcedure()) ~throws "DPI call is not supported inside when"

@@ -118,7 +118,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, conditional assignment, and conditional memory-write effects | kernel |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
-| `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
+| `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support, generator-parameter support |
 
 The support modules implement shared mechanisms without becoming selectable
 language profiles:
@@ -132,6 +132,8 @@ language profiles:
   without creating sibling-layer dependencies.
 - `clocking.rhm` expands frontend sync policy into explicit ports, register
   operands, instance inputs, and drives.
+- `generator-parameters.rhm` extracts runtime bindings from the ordinary
+  Rhombus parameter forms shared by circuit generators.
 - `mux-lookup.rhm` lets independent layers contribute typed static keys and
   selector behavior to combinational mux syntax.
 

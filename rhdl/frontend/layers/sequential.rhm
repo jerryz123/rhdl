@@ -12,57 +12,46 @@ import:
 export:
   reg
 
-fun ambient_init_register(name, init):
-  def init_value = kernel.read(init)
-  ambient_reset_register(name, init_value.type, init_value)
+fun register_form_error():
+  error(
+    ~who: #'reg,
+    String.append(
+      "expected a type or ~next value, with optional synchronous-reset ",
+      "initialization and either an ambient or explicit clock"
+    )
+  )
 
-fun ambient_next_register(name, next, init = #false):
-  def next_value = kernel.read(next)
+fun declare_register(name,
+                     type = #false,
+                     ~next: next = #false,
+                     ~clock: clock = #false,
+                     ~reset: reset = #false,
+                     ~init: init = #false):
+  when type && next
+  | register_form_error()
+  unless type || next || init
+  | register_form_error()
+  when reset && !clock
+  | register_form_error()
+  when clock && ((reset && !init) || (!reset && init))
+  | register_form_error()
+  def next_value = if next | kernel.read(next) | #false
+  def init_value = if init | kernel.read(init) | #false
+  def state_type:
+    cond
+    | type: type
+    | next_value: next_value.type
+    | ~else: init_value.type
   def register:
-    if init
-    | ambient_reset_register(name, next_value.type, init)
-    | ambient_register(name, next_value.type)
-  kernel.connect(register.next, next_value)
-  register
-
-fun explicit_init_register(name, clock, reset, init):
-  def init_value = kernel.read(init)
-  kernel_reg(name, init_value.type, clock, reset, init_value)
-
-fun explicit_next_register(name, next, clock, reset = #false, init = #false):
-  def next_value = kernel.read(next)
-  def register = kernel_reg(name, next_value.type, clock, reset, init)
-  kernel.connect(register.next, next_value)
+    if clock
+    | kernel_reg(name, state_type, clock, reset, init_value)
+    | if init_value
+      | ambient_reset_register(name, state_type, init_value)
+      | ambient_register(name, state_type)
+  when next_value
+  | kernel.connect(register.next, next_value)
   register
 
 defn.macro 'reg $(name :: Identifier)($argument, ...)':
   def register_name = name.to_source_string()
-  match '($argument, ...)'
-  | '(~next: $next, ~clock: $clock, ~reset: $reset, ~init: $init)':
-      'def $name :: HardwareFields = explicit_next_register($register_name, $next, $clock, $reset, $init)'
-  | '(~next: $next, ~clock: $clock)':
-      'def $name :: HardwareFields = explicit_next_register($register_name, $next, $clock)'
-  | '(~clock: $clock, ~reset: $reset, ~init: $init)':
-      'def $name :: HardwareFields = explicit_init_register($register_name, $clock, $reset, $init)'
-  | '(~next: $next, ~init: $init)':
-      'def $name :: HardwareFields = ambient_next_register($register_name, $next, $init)'
-  | '(~next: $next)':
-      'def $name :: HardwareFields = ambient_next_register($register_name, $next)'
-  | '(~init: $init)':
-      'def $name :: HardwareFields = ambient_init_register($register_name, $init)'
-  | '($type, ~clock: $clock, ~reset: $reset, ~init: $init)':
-      'def $name :: HardwareFields = kernel_reg($register_name, $type, $clock, $reset, $init)'
-  | '($type, ~clock: $clock)':
-      'def $name :: HardwareFields = kernel_reg($register_name, $type, $clock)'
-  | '($type, ~init: $init)':
-      'def $name :: HardwareFields = ambient_reset_register($register_name, $type, $init)'
-  | '($type)':
-      'def $name :: HardwareFields = ambient_register($register_name, $type)'
-  | ~else:
-      syntax_meta.error(
-        String.append(
-          "expected a type or ~next value, with optional synchronous-reset ",
-          "initialization and either an ambient or explicit clock"
-        ),
-        '($argument, ...)'
-      )
+  'def $name :: HardwareFields = declare_register($register_name, $argument, ...)'

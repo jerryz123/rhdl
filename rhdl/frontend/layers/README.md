@@ -172,7 +172,8 @@ state.next <== state + one
 The type can be inferred from `~init` or `~next`. Supplying `~next` drives the
 register immediately; another drive is an error. `~init` is an active-high
 synchronous reset value, not power-up initialization. Register state may be
-any `DataType`.
+any `DataType`. Register keyword options follow ordinary Rhombus calling rules
+and may appear in any order; their existing legal combinations are unchanged.
 
 `sync_circuit` supplies real `clock: Clock` and `reset: Reset` inputs plus an
 ambient domain:
@@ -268,7 +269,8 @@ the fixed port names cannot be renamed. Address fields are
 `enable` and `write` are `Bits(1)`.
 
 Inside a `sync_circuit`, `sync_mem` uses the ambient clock. An ordinary
-`circuit` supplies `~clock: clock` in the declaration. An enabled read samples
+`circuit` supplies `~clock: clock` in the declaration. `~clock` and
+`~mask_granularity` may appear in either order. An enabled read samples
 its address on a rising edge and presents the corresponding data after that
 edge. Data while read enable is false is unspecified. The primitive has no
 reset or initialization; out-of-range addresses and same-cycle read/write
@@ -300,7 +302,8 @@ multi-result function uses parenthesized `dpi_reg` bindings in declaration
 order. The bindings are separate hardware values rather than a packed bundle.
 Each result is visible state: it holds while disabled, has unspecified initial
 value, and has no reset. A `sync_circuit` supplies the ambient clock, while
-ordinary circuits pass `~clock` explicitly. There is no unclocked DPI form,
+ordinary circuits pass `~clock` explicitly. `dpi_reg` accepts `~clock` and
+`~enable` in either order. There is no unclocked DPI form,
 `inout`, or `ref` support.
 
 ## Hardware conditional assignment
