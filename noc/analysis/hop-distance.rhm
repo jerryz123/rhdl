@@ -1,0 +1,112 @@
+#lang rhombus
+// Computes deterministic unit-hop distances and all minimal links for directed topologies.
+
+import:
+  "../model/main.rhm" open
+
+export:
+  HopDistanceEntry
+  HopDistances
+  compute_hop_distances
+
+class HopDistanceEntry(source, destination, hops):
+  opaque
+  internal _HopDistanceEntry
+  constructor ~none
+
+  method describe():
+    String.append(source.describe(), " -> ", destination.describe(), ": ",
+                  to_string(hops))
+
+fun entry_matches(entry, source, destination):
+  node_id_equal(entry.source, source) && node_id_equal(
+    entry.destination,
+    destination
+  )
+
+fun find_entry(entries, source, destination):
+  entries.find(
+    fun (entry): entry_matches(entry, source, destination)
+  )
+
+fun require_node(topology, who, subject, node):
+  unless node is_a NodeId
+  | error(~who: who, subject ++ " must be a NodeId")
+  unless topology.contains_node(node)
+  | error(~who: who, subject ++ " is not in topology: " ++ node.describe())
+
+class HopDistances(topology, entries):
+  opaque
+  internal _HopDistances
+  constructor ~none
+
+  method distance(source, destination):
+    require_node(topology, #'distance, "source", source)
+    require_node(topology, #'distance, "destination", destination)
+    def entry = find_entry(entries, source, destination)
+    if entry | entry.hops | #false
+
+  method reachable(source, destination):
+    distance(source, destination) != #false
+
+  method link_is_minimal(link_id, destination):
+    unless link_id is_a LinkId
+    | error(~who: #'link_is_minimal,
+            "link must be a LinkId")
+    require_node(
+      topology,
+      #'link_is_minimal,
+      "destination",
+      destination
+    )
+    def link = topology.find_link(link_id)
+    def source_distance = distance(link.source, destination)
+    def next_distance = distance(link.destination, destination)
+    source_distance != #false && next_distance != #false && source_distance == (
+      next_distance + 1
+    )
+
+  method minimal_outgoing_links(source, destination):
+    require_node(
+      topology,
+      #'minimal_outgoing_links,
+      "source",
+      source
+    )
+    require_node(
+      topology,
+      #'minimal_outgoing_links,
+      "destination",
+      destination
+    )
+    topology.outgoing_links(source).filter(
+      ~keep: fun (link): link_is_minimal(link.id, destination)
+    )
+
+  method describe():
+    String.join(entries.map(fun (entry): entry.describe()), "\n")
+
+fun append_destination_distances(topology, destination, entries):
+  def mutable pending = [destination]
+  def mutable result = entries ++ [
+    _HopDistanceEntry(destination, destination, 0)
+  ]
+  while pending.length() > 0:
+    def node = pending[0]
+    pending := pending.drop(1)
+    def node_entry = find_entry(result, node, destination)
+    for (link in topology.incoming_links(node)):
+      unless find_entry(result, link.source, destination)
+      | result := result ++ [
+          _HopDistanceEntry(link.source, destination, node_entry.hops + 1)
+        ]
+        pending := pending ++ [link.source]
+  result
+
+fun compute_hop_distances(topology):
+  unless topology is_a Topology
+  | error(~who: #'compute_hop_distances, "expected a Topology")
+  def mutable entries = []
+  for (destination in topology.nodes):
+    entries := append_destination_distances(topology, destination, entries)
+  _HopDistances(topology, entries)

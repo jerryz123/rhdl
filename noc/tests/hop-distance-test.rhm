@@ -1,0 +1,83 @@
+#lang rhombus
+// Checks directed hop distances, complete minimal choices, and deterministic diagnostics.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def n4 = NodeId(4)
+
+// The two arms of the diamond are equal-length routes from n0 to n3. The
+// second n0 -> n1 link checks that parallel minimal links remain distinct.
+def l0 = PhysicalLink(LinkId(0), n0, n1, 1)
+def l1 = PhysicalLink(LinkId(1), n0, n2, 1)
+def l2 = PhysicalLink(LinkId(2), n1, n3, 1)
+def l3 = PhysicalLink(LinkId(3), n2, n3, 1)
+def l4 = PhysicalLink(LinkId(4), n0, n1, 1)
+def l5 = PhysicalLink(LinkId(5), n3, n0, 1)
+def l6 = PhysicalLink(LinkId(6), n2, n2, 1)
+def topology = Topology(
+  [n4, n2, n0, n3, n1],
+  [l6, l3, l0, l5, l2, l4, l1]
+)
+def distances = compute_hop_distances(topology)
+
+check:
+  distances is_a HopDistances ~is #true
+  distances.distance(n0, n3) ~is 2
+  distances.distance(n1, n3) ~is 1
+  distances.distance(n3, n3) ~is 0
+  distances.distance(n3, n1) ~is 2
+  distances.distance(n0, n1) ~is 1
+  distances.distance(n1, n0) ~is 2
+  distances.distance(n4, n3) ~is #false
+  distances.reachable(n0, n3) ~is #true
+  distances.reachable(n4, n3) ~is #false
+
+// Both diamond arms and both parallel links are minimal. The return link and
+// self-loop are not, because they do not decrease distance to n3.
+check:
+  distances.link_is_minimal(l0.id, n3) ~is #true
+  distances.link_is_minimal(l1.id, n3) ~is #true
+  distances.link_is_minimal(l4.id, n3) ~is #true
+  distances.link_is_minimal(l5.id, n3) ~is #false
+  distances.link_is_minimal(l6.id, n3) ~is #false
+  distances.minimal_outgoing_links(n0, n3).map(
+    fun (link): link.id.value
+  ) ~is [0, 1, 4]
+  distances.minimal_outgoing_links(n2, n3).map(
+    fun (link): link.id.value
+  ) ~is [3]
+  distances.minimal_outgoing_links(n3, n3) ~is []
+  distances.minimal_outgoing_links(n4, n3) ~is []
+
+// Reordering declarations cannot change distances, minimal link order, or
+// the stable description produced by the normalized topology.
+def reordered = compute_hop_distances(
+  Topology(
+    [n1, n3, n0, n4, n2],
+    [l1, l4, l2, l5, l0, l6, l3]
+  )
+)
+
+check:
+  reordered.describe() ~is distances.describe()
+  reordered.minimal_outgoing_links(n0, n3).map(
+    fun (link): link.id.value
+  ) ~is [0, 1, 4]
+  distances.entries.map(fun (entry): entry.describe()) ~is reordered.entries.map(
+    fun (entry): entry.describe()
+  )
+
+check:
+  compute_hop_distances("not a topology") ~throws "expected a Topology"
+  distances.distance("n0", n3) ~throws "source must be a NodeId"
+  distances.distance(NodeId(99), n3) ~throws "source is not in topology: n99"
+  distances.distance(n0, NodeId(99)) ~throws "destination is not in topology: n99"
+  distances.link_is_minimal("l0", n3) ~throws "link must be a LinkId"
+  distances.link_is_minimal(LinkId(99), n3) ~throws "unknown link l99"
+  distances.minimal_outgoing_links(NodeId(99), n3) ~throws "source is not in topology: n99"

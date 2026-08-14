@@ -45,6 +45,8 @@ The current implementation provides:
 - Rejection of reachable dead ends and destinations that cannot be reached.
 - Reachable-only VC dependency graph construction with merged route provenance.
 - Deterministic dependency-graph acyclicity certificates and cycle witnesses.
+- Deterministic unit-hop distances and complete minimal-next-link sets for any
+  directed topology.
 - An opaque validated-routing artifact and deterministic host route-table rows.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
@@ -84,6 +86,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/hop-distance-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/validated-routing-test.rhm
 bash noc/check-boundaries.sh
 ```
@@ -254,6 +257,15 @@ current validator has not been weakened or bypassed.
 `NodeId`, `LinkId`, `VCId`, and `RouteClassId` are nominal identities backed by
 nonnegative host integers. A `VCId` consists of a physical link identity and a
 zero-based local VC index.
+
+`compute_hop_distances` performs reverse breadth-first search from every
+destination in a normalized directed topology. Its immutable `HopDistances`
+result reports finite unit-hop distances, unreachable pairs, whether a link
+strictly realizes the shortest-distance recurrence, and every minimal outgoing
+link. It does not select one path or enumerate complete paths, so equal-length
+alternatives and parallel physical links remain available to later adaptive
+routing policies. Self-loops are never minimal because they cannot reduce the
+remaining distance.
 
 A `PhysicalLink` is a directed edge:
 
