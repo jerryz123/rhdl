@@ -1,0 +1,124 @@
+#lang rhombus
+// Defines immutable symbolic topology specifications before numeric model identities are assigned.
+
+import:
+  "names.rhm" open
+
+export:
+  TopologyLink
+  TopologySpec
+
+fun contains_node_ref(nodes, ref):
+  nodes.find(fun (candidate): node_ref_equal(candidate, ref)) != #false
+
+fun duplicate_node_ref(nodes, ref):
+  nodes.filter(~keep: fun (candidate): node_ref_equal(candidate, ref)).length() > 1
+
+fun duplicate_link_ref(links, ref):
+  links.filter(~keep: fun (candidate): link_ref_equal(candidate.ref, ref)).length() > 1
+
+fun duplicate_vc_group(groups, name):
+  groups.filter(~keep: fun (candidate): candidate.name == name).length() > 1
+
+class TopologyLink(ref, source, destination, vc_groups):
+  constructor (ref, source, destination, vc_groups):
+    unless ref is_a LinkRef
+    | error(~who: #'TopologyLink, "topology-link reference must be a LinkRef")
+    unless source is_a NodeRef && destination is_a NodeRef
+    | error(~who: #'TopologyLink,
+            "topology-link endpoints must be NodeRef values")
+    unless vc_groups is_a List && vc_groups.length() > 0
+    | error(~who: #'TopologyLink,
+            "topology-link VC groups must be a nonempty List")
+    for (group in vc_groups):
+      unless group is_a VCGroup
+      | error(~who: #'TopologyLink,
+              "topology-link VC groups must contain only VCGroup values")
+      when duplicate_vc_group(vc_groups, group.name)
+      | error(~who: #'TopologyLink,
+              String.append("duplicate VC group ", group.name,
+                            " on link ", ref.describe()))
+    super(ref,
+          source,
+          destination,
+          vc_groups.sort(vc_group_less))
+
+  method vc_count():
+    def mutable count = 0
+    for (group in vc_groups):
+      count := count + group.count
+    count
+
+  method virtual_channels():
+    def mutable vcs = []
+    for (group in vc_groups):
+      for (index in 0..group.count):
+        vcs := vcs ++ [VCRef(ref, group.name, index)]
+    vcs
+
+  method find_vc_group(name):
+    unless name is_a String
+    | error(~who: #'find_vc_group, "VC-group name must be a String")
+    def found = vc_groups.find(fun (group): group.name == name)
+    unless found
+    | error(~who: #'find_vc_group,
+            String.append("link ", ref.describe(),
+                          " has no VC group ", name))
+    found
+
+  method describe():
+    String.append(ref.describe(), ": ", source.describe(), " -> ",
+                  destination.describe(), " (",
+                  String.join(vc_groups.map(fun (group): group.describe()), ", "),
+                  ")")
+
+class TopologySpec(nodes, links):
+  constructor (nodes, links):
+    unless nodes is_a List && nodes.length() > 0
+    | error(~who: #'TopologySpec, "topology-spec nodes must be a nonempty List")
+    unless links is_a List
+    | error(~who: #'TopologySpec, "topology-spec links must be a List")
+    for (node in nodes):
+      unless node is_a NodeRef
+      | error(~who: #'TopologySpec,
+              "topology-spec nodes must contain only NodeRef values")
+      when duplicate_node_ref(nodes, node)
+      | error(~who: #'TopologySpec,
+              "duplicate topology node " ++ node.describe())
+    for (link in links):
+      unless link is_a TopologyLink
+      | error(~who: #'TopologySpec,
+              "topology-spec links must contain only TopologyLink values")
+      when duplicate_link_ref(links, link.ref)
+      | error(~who: #'TopologySpec,
+              "duplicate topology link " ++ link.ref.describe())
+      unless contains_node_ref(nodes, link.source)
+      | error(~who: #'TopologySpec,
+              String.append("link ", link.ref.describe(),
+                            " has unknown source ", link.source.describe()))
+      unless contains_node_ref(nodes, link.destination)
+      | error(~who: #'TopologySpec,
+              String.append("link ", link.ref.describe(),
+                            " has unknown destination ",
+                            link.destination.describe()))
+    super(nodes.sort(node_ref_less),
+          links.sort(fun (left, right): link_ref_less(left.ref, right.ref)))
+
+  method find_node(ref):
+    unless ref is_a NodeRef
+    | error(~who: #'find_node, "expected a NodeRef")
+    def found = nodes.find(fun (node): node_ref_equal(node, ref))
+    unless found
+    | error(~who: #'find_node, "unknown node " ++ ref.describe())
+    found
+
+  method find_link(ref):
+    unless ref is_a LinkRef
+    | error(~who: #'find_link, "expected a LinkRef")
+    def found = links.find(fun (link): link_ref_equal(link.ref, ref))
+    unless found
+    | error(~who: #'find_link, "unknown link " ++ ref.describe())
+    found
+
+  method describe():
+    String.join(links.map(fun (link): link.describe()), "\n")

@@ -1,0 +1,142 @@
+#lang rhombus
+// Checks topology prefixing, composition, link helpers, and generated line equivalence.
+
+import:
+  "../authoring/main.rhm" open
+
+def vcs = [VCGroup("escape", 1), VCGroup("adaptive", 2)]
+def base_line = bidirectional_line(3, vcs)
+def left = prefix_topology("left", base_line)
+def right = prefix_topology("right", base_line)
+
+def left_end = prefix_node_ref("left", line_node(2))
+def right_start = prefix_node_ref("right", line_node(0))
+def cross_links = bidirectional_link(
+  LinkRef("left-to-right"),
+  LinkRef("right-to-left"),
+  left_end,
+  right_start,
+  [VCGroup("escape", 1)]
+)
+def system = compose_topologies([right, left], ~links: cross_links)
+def reversed_system = compose_topologies([left, right], ~links: cross_links.reverse())
+def lowered_system = lower_topology(system)
+def lowered_reversed_system = lower_topology(reversed_system)
+
+check:
+  base_line.nodes.map(fun (node): node.describe()) ~is [
+    "node[0]",
+    "node[1]",
+    "node[2]"
+  ]
+  base_line.links.map(fun (link): link.ref.describe()) ~is [
+    "forward[0]",
+    "forward[1]",
+    "reverse[0]",
+    "reverse[1]"
+  ]
+  left.nodes.map(fun (node): node.describe()) ~is [
+    "left/node[0]",
+    "left/node[1]",
+    "left/node[2]"
+  ]
+  left.find_link(LinkRef(["left", "forward[0]"])).source.describe() ~is "left/node[0]"
+  left.find_link(LinkRef(["left", "forward[0]"])).virtual_channels().map(
+    fun (vc): vc.describe()
+  ) ~is ["left/forward[0]/adaptive[0]",
+         "left/forward[0]/adaptive[1]",
+         "left/forward[0]/escape[0]"]
+  system.nodes.length() ~is 6
+  system.links.length() ~is 10
+  system.find_link(LinkRef("left-to-right")).source.describe() ~is "left/node[2]"
+  system.find_link(LinkRef("left-to-right")).destination.describe() ~is "right/node[0]"
+  system.find_link(LinkRef("right-to-left")).source.describe() ~is "right/node[0]"
+  lowered_system.topology.describe() ~is lowered_reversed_system.topology.describe()
+  lowered_system.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_reversed_system.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_system.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_reversed_system.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_system.vc_ref(
+    lowered_system.vc_id(
+      VCRef(LinkRef(["left", "forward[0]"]), "escape", 0)
+    )
+  ).describe() ~is "left/forward[0]/escape[0]"
+
+// The generator must normalize to exactly the same graph as an explicit line.
+def n0 = NodeRef("node[0]")
+def n1 = NodeRef("node[1]")
+def n2 = NodeRef("node[2]")
+def explicit_directed_line = TopologySpec(
+  [n2, n0, n1],
+  [directed_link(LinkRef("forward[1]"), n1, n2, vcs),
+   directed_link(LinkRef("forward[0]"), n0, n1, vcs)]
+)
+def generated_directed_line = directed_line(3, vcs)
+def lowered_explicit_line = lower_topology(explicit_directed_line)
+def lowered_generated_line = lower_topology(generated_directed_line)
+
+check:
+  lowered_explicit_line.topology.describe() ~is lowered_generated_line.topology.describe()
+  lowered_explicit_line.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_generated_line.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_explicit_line.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_generated_line.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_explicit_line.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_generated_line.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+
+// Parallel links and self-loops remain ordinary distinct directed links.
+def parallel_and_loop = compose_topologies(
+  [directed_line(2, [VCGroup("data", 1)])],
+  ~links: [
+    directed_link(LinkRef("parallel"),
+                  line_node(0),
+                  line_node(1),
+                  [VCGroup("data", 1)]),
+    directed_link(LinkRef("loop"),
+                  line_node(1),
+                  line_node(1),
+                  [VCGroup("control", 1)])
+  ]
+)
+def bad_cross_link = directed_link(
+  LinkRef("bad-cross-link"),
+  left_end,
+  NodeRef("missing"),
+  [VCGroup("escape", 1)]
+)
+
+check:
+  parallel_and_loop.links.length() ~is 3
+  lower_topology(parallel_and_loop).topology.links.length() ~is 3
+
+check:
+  prefix_topology("", base_line) ~throws "topology prefix"
+  prefix_topology("left", "not a topology") ~throws "expected a TopologySpec"
+  compose_topologies([]) ~throws "nonempty List"
+  compose_topologies(["not a topology"]) ~throws "only TopologySpec"
+  compose_topologies([left], ~links: "not links") ~throws "extra links must be a List"
+  compose_topologies([left], ~links: ["not a link"]) ~throws "only TopologyLink"
+  compose_topologies([base_line, base_line]) ~throws "duplicate topology node node[0]"
+  compose_topologies(
+    [left, right],
+    ~links: [bad_cross_link]
+  ) ~throws "unknown destination missing"
+  line_node(-1) ~throws "nonnegative host Int"
+  directed_line(0, vcs) ~throws "positive host Int"
+  bidirectional_line(2, []) ~throws "nonempty List"
+  directed_line(1, [VCGroup("same", 1), VCGroup("same", 2)]) ~throws "duplicate VC group same"

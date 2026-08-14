@@ -1,0 +1,113 @@
+#lang rhombus
+// Defines symbolic hierarchical topology handles and named virtual-channel groups.
+
+export:
+  NamePath
+  NodeRef
+  LinkRef
+  VCGroup
+  VCRef
+  name_path_equal
+  node_ref_equal
+  link_ref_equal
+  vc_ref_equal
+  name_path_less
+  node_ref_less
+  link_ref_less
+  vc_group_less
+
+fun normalize_name_path(who, value):
+  def segments = if value is_a String | [value] | value
+  unless segments is_a List && segments.length() > 0
+  | error(~who: who, "name path must be a nonempty String or List of Strings")
+  for (segment in segments):
+    unless segment is_a String && segment.length() > 0
+    | error(~who: who, "name path segments must be nonempty Strings")
+    when segment.contains("/")
+    | error(~who: who, "name path segments must not contain '/'")
+  segments
+
+fun as_name_path(who, value):
+  if value is_a NamePath
+  | value
+  | NamePath(value)
+
+class NamePath(segments):
+  constructor (segments):
+    super(normalize_name_path(#'NamePath, segments))
+
+  method child(segment):
+    unless segment is_a String && segment.length() > 0
+    | error(~who: #'child, "child name must be a nonempty String")
+    when segment.contains("/")
+    | error(~who: #'child, "child name must not contain '/'")
+    NamePath(segments ++ [segment])
+
+  method describe():
+    String.join(segments, "/")
+
+class NodeRef(path):
+  constructor (path):
+    super(as_name_path(#'NodeRef, path))
+
+  method describe():
+    path.describe()
+
+class LinkRef(path):
+  constructor (path):
+    super(as_name_path(#'LinkRef, path))
+
+  method describe():
+    path.describe()
+
+class VCGroup(name, count):
+  constructor (name, count):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'VCGroup, "VC-group name must be a nonempty String")
+    when name.contains("/")
+    | error(~who: #'VCGroup, "VC-group name must not contain '/'")
+    unless count is_a Int && count > 0
+    | error(~who: #'VCGroup, "VC-group count must be a positive host Int")
+    super(name, count)
+
+  method describe():
+    name ++ "[" ++ to_string(count) ++ "]"
+
+class VCRef(link, group, index):
+  constructor (link, group, index):
+    unless link is_a LinkRef
+    | error(~who: #'VCRef, "VC reference link must be a LinkRef")
+    unless group is_a String && group.length() > 0
+    | error(~who: #'VCRef, "VC reference group must be a nonempty String")
+    when group.contains("/")
+    | error(~who: #'VCRef, "VC reference group must not contain '/'")
+    unless index is_a Int && index >= 0
+    | error(~who: #'VCRef, "VC reference index must be a nonnegative host Int")
+    super(link, group, index)
+
+  method describe():
+    String.append(link.describe(), "/", group, "[", to_string(index), "]")
+
+fun name_path_equal(left, right):
+  left is_a NamePath && right is_a NamePath && left.segments == right.segments
+
+fun node_ref_equal(left, right):
+  left is_a NodeRef && right is_a NodeRef && name_path_equal(left.path, right.path)
+
+fun link_ref_equal(left, right):
+  left is_a LinkRef && right is_a LinkRef && name_path_equal(left.path, right.path)
+
+fun vc_ref_equal(left, right):
+  left is_a VCRef && right is_a VCRef && link_ref_equal(left.link, right.link) && left.group == right.group && left.index == right.index
+
+fun name_path_less(left, right):
+  left.describe() < right.describe()
+
+fun node_ref_less(left, right):
+  name_path_less(left.path, right.path)
+
+fun link_ref_less(left, right):
+  name_path_less(left.path, right.path)
+
+fun vc_group_less(left, right):
+  left.name < right.name

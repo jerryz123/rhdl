@@ -1,0 +1,101 @@
+#lang rhombus
+// Checks symbolic topology construction, deterministic lowering, provenance, and invalid uses.
+
+import:
+  "../model/main.rhm" open
+  "../authoring/main.rhm" open
+
+def router0 = NodeRef(["mesh", "router[0]"])
+def router1 = NodeRef(["mesh", "router[1]"])
+def monitor = NodeRef("monitor")
+
+def east = TopologyLink(
+  LinkRef(["mesh", "east"]),
+  router0,
+  router1,
+  [VCGroup("escape", 1), VCGroup("adaptive", 2)]
+)
+def west = TopologyLink(
+  LinkRef(["mesh", "west"]),
+  router1,
+  router0,
+  [VCGroup("escape", 1)]
+)
+def loopback = TopologyLink(
+  LinkRef("monitor-loop"),
+  monitor,
+  monitor,
+  [VCGroup("control", 1)]
+)
+
+// Deliberately supply every declaration out of canonical name order.
+def spec = TopologySpec(
+  [monitor, router1, router0],
+  [loopback, west, east]
+)
+def lowered = lower_topology(spec)
+
+check:
+  NamePath("mesh").child("router[0]").describe() ~is "mesh/router[0]"
+  spec.nodes.map(fun (node): node.describe()) ~is [
+    "mesh/router[0]",
+    "mesh/router[1]",
+    "monitor"
+  ]
+  spec.links.map(fun (link): link.ref.describe()) ~is [
+    "mesh/east",
+    "mesh/west",
+    "monitor-loop"
+  ]
+  east.vc_groups.map(fun (group): group.name) ~is ["adaptive", "escape"]
+  east.virtual_channels().map(fun (vc): vc.describe()) ~is [
+    "mesh/east/adaptive[0]",
+    "mesh/east/adaptive[1]",
+    "mesh/east/escape[0]"
+  ]
+  lowered.topology.nodes.map(fun (node): node.value) ~is [0, 1, 2]
+  lowered.topology.links.map(fun (link): link.id.value) ~is [0, 1, 2]
+  lowered.topology.find_link(LinkId(0)).source.value ~is 0
+  lowered.topology.find_link(LinkId(0)).destination.value ~is 1
+  lowered.topology.find_link(LinkId(0)).vc_count ~is 3
+  lowered.topology.find_link(LinkId(2)).source.value ~is 2
+  lowered.topology.find_link(LinkId(2)).destination.value ~is 2
+  lowered.node_id(NodeRef(["mesh", "router[1]"])).value ~is 1
+  lowered.node_ref(NodeId(2)).describe() ~is "monitor"
+  lowered.link_id(LinkRef(["mesh", "west"])).value ~is 1
+  lowered.link_ref(LinkId(0)).describe() ~is "mesh/east"
+  lowered.vc_id(VCRef(LinkRef(["mesh", "east"]), "adaptive", 1)).describe() ~is "l0.vc1"
+  lowered.vc_id(VCRef(LinkRef(["mesh", "east"]), "escape", 0)).describe() ~is "l0.vc2"
+  lowered.vc_ref(VCId(LinkId(2), 0)).describe() ~is "monitor-loop/control[0]"
+
+check:
+  NamePath([]) ~throws "nonempty String or List"
+  NamePath(["mesh", ""]) ~throws "nonempty Strings"
+  NamePath("mesh/router") ~throws "must not contain '/'"
+  NamePath("mesh").child("") ~throws "nonempty String"
+  VCGroup("", 1) ~throws "nonempty String"
+  VCGroup("escape", 0) ~throws "positive host Int"
+  VCRef("not a link", "escape", 0) ~throws "must be a LinkRef"
+  VCRef(LinkRef("east"), "virtual/network", 0) ~throws "must not contain '/'"
+  TopologyLink(LinkRef("empty"), router0, router1, []) ~throws "nonempty List"
+  TopologyLink(
+    LinkRef("duplicate-groups"),
+    router0,
+    router1,
+    [VCGroup("escape", 1), VCGroup("escape", 2)]
+  ) ~throws "duplicate VC group escape"
+  TopologySpec([router0, NodeRef(["mesh", "router[0]"])], []) ~throws "duplicate topology node"
+  TopologySpec(
+    [router0, router1],
+    [east,
+     TopologyLink(LinkRef(["mesh", "east"]),
+                  router1,
+                  router0,
+                  [VCGroup("escape", 1)])]
+  ) ~throws "duplicate topology link"
+  TopologySpec([router0], [east]) ~throws "unknown destination mesh/router[1]"
+  lower_topology("not a spec") ~throws "expected a TopologySpec"
+  lowered.node_id(NodeRef("unknown")) ~throws "unknown node unknown"
+  lowered.link_ref(LinkId(99)) ~throws "unknown link l99"
+  lowered.vc_id(VCRef(LinkRef(["mesh", "east"]), "escape", 1)) ~throws "unknown VC"
+  lowered.vc_ref(VCId(LinkId(0), 99)) ~throws "unknown VC l0.vc99"

@@ -1,0 +1,132 @@
+#lang rhombus
+// Lowers symbolic topology specifications deterministically and retains identity provenance.
+
+import:
+  "../model/main.rhm" open
+  "names.rhm" open
+  "topology-spec.rhm" open
+
+export:
+  NodeBinding
+  LinkBinding
+  VCBinding
+  LoweredTopology
+  lower_topology
+
+class NodeBinding(ref, id)
+class LinkBinding(ref, id)
+class VCBinding(ref, id)
+
+fun find_node_binding_by_ref(bindings, ref):
+  bindings.find(fun (binding): node_ref_equal(binding.ref, ref))
+
+fun find_node_binding_by_id(bindings, id):
+  bindings.find(fun (binding): node_id_equal(binding.id, id))
+
+fun find_link_binding_by_ref(bindings, ref):
+  bindings.find(fun (binding): link_ref_equal(binding.ref, ref))
+
+fun find_link_binding_by_id(bindings, id):
+  bindings.find(fun (binding): link_id_equal(binding.id, id))
+
+fun find_vc_binding_by_ref(bindings, ref):
+  bindings.find(fun (binding): vc_ref_equal(binding.ref, ref))
+
+fun find_vc_binding_by_id(bindings, id):
+  bindings.find(fun (binding): vc_id_equal(binding.id, id))
+
+class LoweredTopology(spec,
+                      topology,
+                      node_bindings,
+                      link_bindings,
+                      vc_bindings):
+  constructor (spec, topology, node_bindings, link_bindings, vc_bindings):
+    unless spec is_a TopologySpec && topology is_a Topology
+    | error(~who: #'LoweredTopology,
+            "lowered topology requires a TopologySpec and Topology")
+    super(spec, topology, node_bindings, link_bindings, vc_bindings)
+
+  method node_id(ref):
+    unless ref is_a NodeRef
+    | error(~who: #'node_id, "expected a NodeRef")
+    def found = find_node_binding_by_ref(node_bindings, ref)
+    unless found
+    | error(~who: #'node_id, "unknown node " ++ ref.describe())
+    found.id
+
+  method node_ref(id):
+    unless id is_a NodeId
+    | error(~who: #'node_ref, "expected a NodeId")
+    def found = find_node_binding_by_id(node_bindings, id)
+    unless found
+    | error(~who: #'node_ref, "unknown node " ++ id.describe())
+    found.ref
+
+  method link_id(ref):
+    unless ref is_a LinkRef
+    | error(~who: #'link_id, "expected a LinkRef")
+    def found = find_link_binding_by_ref(link_bindings, ref)
+    unless found
+    | error(~who: #'link_id, "unknown link " ++ ref.describe())
+    found.id
+
+  method link_ref(id):
+    unless id is_a LinkId
+    | error(~who: #'link_ref, "expected a LinkId")
+    def found = find_link_binding_by_id(link_bindings, id)
+    unless found
+    | error(~who: #'link_ref, "unknown link " ++ id.describe())
+    found.ref
+
+  method vc_id(ref):
+    unless ref is_a VCRef
+    | error(~who: #'vc_id, "expected a VCRef")
+    def found = find_vc_binding_by_ref(vc_bindings, ref)
+    unless found
+    | error(~who: #'vc_id, "unknown VC " ++ ref.describe())
+    found.id
+
+  method vc_ref(id):
+    unless id is_a VCId
+    | error(~who: #'vc_ref, "expected a VCId")
+    def found = find_vc_binding_by_id(vc_bindings, id)
+    unless found
+    | error(~who: #'vc_ref, "unknown VC " ++ id.describe())
+    found.ref
+
+fun lower_topology(spec):
+  unless spec is_a TopologySpec
+  | error(~who: #'lower_topology, "expected a TopologySpec")
+
+  def mutable node_bindings = []
+  for (ref in spec.nodes):
+    node_bindings := node_bindings ++ [NodeBinding(ref, NodeId(node_bindings.length()))]
+
+  def mutable link_bindings = []
+  def mutable vc_bindings = []
+  def mutable physical_links = []
+  for (link in spec.links):
+    def link_id = LinkId(link_bindings.length())
+    def source_binding = find_node_binding_by_ref(node_bindings, link.source)
+    def destination_binding = find_node_binding_by_ref(node_bindings, link.destination)
+    link_bindings := link_bindings ++ [LinkBinding(link.ref, link_id)]
+    physical_links := physical_links ++ [
+      PhysicalLink(link_id,
+                   source_binding.id,
+                   destination_binding.id,
+                   link.vc_count())
+    ]
+    def mutable local_index = 0
+    for (vc_ref in link.virtual_channels()):
+      vc_bindings := vc_bindings ++ [
+        VCBinding(vc_ref, VCId(link_id, local_index))
+      ]
+      local_index := local_index + 1
+
+  LoweredTopology(
+    spec,
+    Topology(node_bindings.map(fun (binding): binding.id), physical_links),
+    node_bindings,
+    link_bindings,
+    vc_bindings
+  )

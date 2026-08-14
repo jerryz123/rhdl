@@ -11,6 +11,13 @@ construction and CIRCT.
 
 The current implementation provides:
 
+- Symbolic hierarchical node and directed-link handles for topology authoring.
+- Named VC groups with deterministic local VC assignment.
+- Immutable symbolic topology specifications with early structural validation.
+- Deterministic lowering to the normalized topology model with bidirectional
+  identity-provenance lookups.
+- Hierarchical prefixing and collision-checked topology composition.
+- Explicit directed and bidirectional link helpers and line generators.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -35,15 +42,17 @@ The package does not yet lower route tables into RHDL or generate router RTL.
 
 ## Dependency boundary
 
-Files under `noc/model/`, `noc/analysis/`, and `noc/plan/` use only
-`#lang rhombus` and other modules in the pure NoC package. They must not import
-RHDL core, frontend, backend, standard-library hardware modules, or CIRCT
-integration.
+Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, and `noc/plan/`
+use only `#lang rhombus` and other modules in the pure NoC package. They must
+not import RHDL core, frontend, backend, standard-library hardware modules, or
+CIRCT integration.
 
 Run the focused checks from the repository root:
 
 ```sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-authoring-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-builders-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -51,6 +60,39 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/validated-routing-test.rhm
 bash noc/check-boundaries.sh
 ```
+
+## Topology authoring
+
+The authoring layer lets users name topology objects without allocating the
+numeric identities used by graph analysis. A `NamePath` is a nonempty list of
+path segments; `NodeRef` and `LinkRef` are nominal handles containing those
+paths. Topology composition can therefore qualify a fragment beneath a new
+path without relying on globally meaningful numeric IDs.
+
+A `TopologyLink` remains directed and owns one or more named `VCGroup` values.
+Groups are sorted by name during construction, then each group's VCs are
+assigned increasing local indices. Nodes and links are likewise sorted by
+their full paths before lowering. The same complete `TopologySpec` therefore
+always produces the same normalized IDs regardless of declaration order.
+
+`lower_topology` returns a `LoweredTopology` containing the normalized
+`Topology` and bidirectional bindings for every node, link, and VC. Routing
+authoring and diagnostics can use meaningful names such as
+`mesh/router[0]` and `mesh/east/escape[0]`, while all existing analysis
+continues to consume `NodeId`, `LinkId`, and `VCId` values.
+
+`prefix_topology` qualifies every node, link, endpoint, and derived VC beneath
+one hierarchical name. `compose_topologies` combines already qualified
+fragments and optional cross-fragment directed links, with `TopologySpec`
+validation rejecting any remaining collisions. Composition order cannot
+change normalized identities because complete symbolic paths determine the
+canonical order.
+
+`directed_link` preserves the normalized model's directed-edge semantics, and
+`bidirectional_link` expands to two separately named directed links. The first
+standard generators, `directed_line` and `bidirectional_line`, use stable
+`node[N]`, `forward[N]`, and `reverse[N]` local names and can be instantiated
+multiple times through prefixing.
 
 ## Model
 

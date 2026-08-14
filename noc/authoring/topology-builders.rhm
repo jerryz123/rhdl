@@ -1,0 +1,146 @@
+#lang rhombus
+// Composes named topology fragments and builds common directed line structures.
+
+import:
+  "names.rhm" open
+  "topology-spec.rhm" open
+
+export:
+  prefix_node_ref
+  prefix_link_ref
+  prefix_topology
+  compose_topologies
+  directed_link
+  bidirectional_link
+  line_node
+  line_forward_link
+  line_reverse_link
+  directed_line
+  bidirectional_line
+
+fun require_prefix(who, value):
+  if value is_a NamePath
+  | value
+  | block:
+      try:
+        NamePath(value)
+        ~catch _exn:
+          error(~who: who,
+                "topology prefix must be a nonempty String or List of Strings")
+
+fun prefixed_path(prefix, path):
+  NamePath(prefix.segments ++ path.segments)
+
+fun prefix_node_ref(prefix, ref):
+  unless ref is_a NodeRef
+  | error(~who: #'prefix_node_ref, "expected a NodeRef")
+  def prefix_path = require_prefix(#'prefix_node_ref, prefix)
+  NodeRef(prefixed_path(prefix_path, ref.path))
+
+fun prefix_link_ref(prefix, ref):
+  unless ref is_a LinkRef
+  | error(~who: #'prefix_link_ref, "expected a LinkRef")
+  def prefix_path = require_prefix(#'prefix_link_ref, prefix)
+  LinkRef(prefixed_path(prefix_path, ref.path))
+
+fun prefix_topology(prefix, spec):
+  unless spec is_a TopologySpec
+  | error(~who: #'prefix_topology, "expected a TopologySpec")
+  def prefix_path = require_prefix(#'prefix_topology, prefix)
+  def nodes = spec.nodes.map(
+    fun (node): prefix_node_ref(prefix_path, node)
+  )
+  def links = spec.links.map(
+    fun (link):
+      TopologyLink(
+        prefix_link_ref(prefix_path, link.ref),
+        prefix_node_ref(prefix_path, link.source),
+        prefix_node_ref(prefix_path, link.destination),
+        link.vc_groups
+      )
+  )
+  TopologySpec(nodes, links)
+
+fun compose_topologies(specs, ~links: extra_links = []):
+  unless specs is_a List && specs.length() > 0
+  | error(~who: #'compose_topologies,
+          "topologies must be a nonempty List of TopologySpec values")
+  unless extra_links is_a List
+  | error(~who: #'compose_topologies, "extra links must be a List")
+  def mutable nodes = []
+  def mutable links = []
+  for (spec in specs):
+    unless spec is_a TopologySpec
+    | error(~who: #'compose_topologies,
+            "topologies must contain only TopologySpec values")
+    nodes := nodes ++ spec.nodes
+    links := links ++ spec.links
+  for (link in extra_links):
+    unless link is_a TopologyLink
+    | error(~who: #'compose_topologies,
+            "extra links must contain only TopologyLink values")
+  TopologySpec(nodes, links ++ extra_links)
+
+fun directed_link(ref, source, destination, vc_groups):
+  TopologyLink(ref, source, destination, vc_groups)
+
+fun bidirectional_link(forward_ref,
+                       reverse_ref,
+                       source,
+                       destination,
+                       vc_groups):
+  [directed_link(forward_ref, source, destination, vc_groups),
+   directed_link(reverse_ref, destination, source, vc_groups)]
+
+fun require_line_index(who, index):
+  unless index is_a Int && index >= 0
+  | error(~who: who, "line index must be a nonnegative host Int")
+
+fun line_node(index):
+  require_line_index(#'line_node, index)
+  NodeRef("node[" ++ to_string(index) ++ "]")
+
+fun line_forward_link(index):
+  require_line_index(#'line_forward_link, index)
+  LinkRef("forward[" ++ to_string(index) ++ "]")
+
+fun line_reverse_link(index):
+  require_line_index(#'line_reverse_link, index)
+  LinkRef("reverse[" ++ to_string(index) ++ "]")
+
+fun require_line_arguments(who, node_count, vc_groups):
+  unless node_count is_a Int && node_count > 0
+  | error(~who: who, "line node count must be a positive host Int")
+  unless vc_groups is_a List && vc_groups.length() > 0
+  | error(~who: who, "line VC groups must be a nonempty List")
+  for (group in vc_groups):
+    unless group is_a VCGroup
+    | error(~who: who, "line VC groups must contain only VCGroup values")
+    when vc_groups.filter(
+      ~keep: fun (candidate): candidate.name == group.name
+    ).length() > 1
+    | error(~who: who, "duplicate VC group " ++ group.name)
+
+fun directed_line(node_count, vc_groups):
+  require_line_arguments(#'directed_line, node_count, vc_groups)
+  def nodes = for List (index in 0..node_count): line_node(index)
+  def links = for List (index in 0..(node_count - 1)):
+    directed_link(line_forward_link(index),
+                  nodes[index],
+                  nodes[index + 1],
+                  vc_groups)
+  TopologySpec(nodes, links)
+
+fun bidirectional_line(node_count, vc_groups):
+  require_line_arguments(#'bidirectional_line, node_count, vc_groups)
+  def nodes = for List (index in 0..node_count): line_node(index)
+  def mutable links = []
+  for (index in 0..(node_count - 1)):
+    links := links ++ bidirectional_link(
+      line_forward_link(index),
+      line_reverse_link(index),
+      nodes[index],
+      nodes[index + 1],
+      vc_groups
+    )
+  TopologySpec(nodes, links)
