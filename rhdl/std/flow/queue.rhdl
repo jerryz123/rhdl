@@ -3,6 +3,7 @@
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/counter.rhdl") open
 
 // Queue uses asynchronous-read storage. A synchronous-read option belongs here
 // once RHDL has a corresponding memory primitive. Stored payloads remain stable
@@ -57,18 +58,18 @@ sync_circuit Queue(T,
         payload.next <== ingress.bits
       #void
   | block:
-      def pointer_width = index_width(depth)
       def count_width = index_width(depth + 1)
       mem storage(depth, T)
-      reg read_pointer(~init: bits(0, pointer_width))
-      reg write_pointer(~init: bits(0, pointer_width))
       reg occupancy(~init: bits(0, count_width))
+      def PointerCounter = Counter(depth)
+      inst read_pointer(PointerCounter)
+      inst write_pointer(PointerCounter)
 
       def empty = occupancy === bits(0, count_width)
       def full = occupancy === bits(depth, count_width)
       def input_ready = ready_for_input(full)
       def output_valid = valid_for_output(empty)
-      def stored_bits = storage[read_pointer]
+      def stored_bits = storage[read_pointer.value]
       def enqueue = stores_input(empty, input_ready)
       def dequeue = removes_output(empty)
 
@@ -76,17 +77,10 @@ sync_circuit Queue(T,
       egress.valid <== output_valid
       egress.bits <== bits_for_output(empty, stored_bits)
       count <== occupancy
-      storage.write(write_pointer, ingress.bits, ~enable: enqueue)
+      storage.write(write_pointer.value, ingress.bits, ~enable: enqueue)
 
-      fun increment(pointer):
-        mux(pointer === bits(depth - 1, pointer_width),
-            bits(0, pointer_width),
-            pointer + bits(1, pointer_width))
-
-      when (enqueue):
-        write_pointer.next <== increment(write_pointer)
-      when (dequeue):
-        read_pointer.next <== increment(read_pointer)
+      read_pointer.enable <== dequeue
+      write_pointer.enable <== enqueue
       when (enqueue xor dequeue):
         occupancy.next <== mux(
           enqueue,

@@ -65,7 +65,7 @@ so designs can import one primitive without loading unrelated generators.
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
 | `std/ready-valid.rhdl` | `Valid`, `Decoupled`, and `Irrevocable` interfaces | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` | `std/ready-valid.rhdl` |
-| `std/flow/queue.rhdl` | Configurable FIFO `Queue` | `std/ready-valid.rhdl` |
+| `std/flow/queue.rhdl` | Configurable FIFO `Queue` | `std/ready-valid.rhdl`, `std/counter.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
 | `std/flow.rhdl` | Flow-control convenience aggregate | All three `std/flow/` modules |
 

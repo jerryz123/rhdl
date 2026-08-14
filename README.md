@@ -993,8 +993,10 @@ inst buffered(
 `~pipe: #true` allows enqueue on the same cycle a full queue dequeues, while
 `~flow: #true` lets an empty queue present its input directly to its output.
 Every queue has a `count` output of type `Bits(index_width(depth + 1))`. Queue
-storage currently uses asynchronous reads; a synchronous-read-memory option
-will belong here once RHDL has that memory primitive.
+storage currently uses asynchronous reads, and queues deeper than one compose
+two `Counter(depth)` instances for their read and write pointers. A
+synchronous-read-memory option will belong here once RHDL has that memory
+primitive.
 
 The same module exports `Pipe(T, stages)` and the index-zero-first
 `Arbiter(T, n)`. Each generator can instead be imported independently from
