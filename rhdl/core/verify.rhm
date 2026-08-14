@@ -409,20 +409,135 @@ fun check_operation_types(module_def, operation, schema):
   | ~else:
       #void
 
-fun value_has_combinational_cycle(module_def, value, path):
-  if value.id in path
-  | #true
-  | block:
-      def operation = module_def.find_operation(value.defining_op_id)
-      if !operation || !combinational_opcode(operation.opcode)
-      | #false
-      | for any (operand in operation.operands):
-          value_has_combinational_cycle(module_def, operand, path ++ [value.id])
+class ValueDependencySummary(value, input_indices)
+class ModuleDependencySummary(module_def, output_input_indices)
+
+fun identity_index(items, item):
+  def mutable result = #false
+  for (candidate in items,
+       index in 0..items.length()):
+    when result == #false && candidate === item
+    | result := index
+  result
+
+fun merge_indices(left, right):
+  def mutable result = left
+  for (index in right):
+    unless index in result
+    | result := result ++ [index]
+  result
+
+// Summarize each output by the module inputs that can reach it without
+// crossing state. Instance results then depend on only the corresponding
+// parent input drivers, preserving register boundaries and unused ports.
+fun verify_combinational_cycles(module_defs):
+  def mutable module_summaries = []
+  def mutable active_modules = []
+
+  fun summarize_module(module_def):
+    def cached = module_summaries.find(
+      fun (summary): summary.module_def === module_def
+    )
+    if cached
+    | cached
+    | block:
+        when contains_identity(active_modules, module_def)
+        | fail("recursive module instantiation involving " ++ module_def.name)
+        active_modules := active_modules ++ [module_def]
+        def mutable value_summaries = []
+        def mutable active_values = []
+
+        fun summarize_value(value, via_operation = #false):
+          def cached_value = value_summaries.find(
+            fun (summary): summary.value === value
+          )
+          if cached_value
+          | cached_value.input_indices
+          | block:
+              def active_index = identity_index(active_values, value)
+              when active_index is_a Int
+              | def cycle = active_values.drop(active_index) ++ [value]
+                def path = String.join(
+                  cycle.map(fun (candidate): candidate.name),
+                  " -> "
+                )
+                def message = String.append(
+                  "combinational cycle reaches value ",
+                  value.name,
+                  " in module ",
+                  module_def.name,
+                  ": ",
+                  path
+                )
+                if via_operation
+                | fail_operation(via_operation, message)
+                | fail(message)
+              active_values := active_values ++ [value]
+              def operation = module_def.find_operation(value.defining_op_id)
+              def input_index = identity_index(
+                module_def.inputs.map(fun (port): port.value),
+                value
+              )
+              def input_indices:
+                cond
+                | input_index is_a Int:
+                    [input_index]
+                | operation && combinational_opcode(operation.opcode):
+                    def mutable dependencies = []
+                    for (operand in operation.operands):
+                      dependencies := merge_indices(
+                        dependencies,
+                        summarize_value(operand, operation)
+                      )
+                    dependencies
+                | operation && operation.opcode == "rtl.instance":
+                    def child = operation.attribute("module")
+                    def child_summary = summarize_module(child)
+                    def output_index = identity_index(operation.results, value)
+                    def mutable dependencies = []
+                    for (child_input_index in child_summary.output_input_indices[output_index]):
+                      def input_place = operation.places[child_input_index]
+                      def drive_operation = module_def.operations.find(
+                        fun (candidate): is_drive_to(candidate, input_place.id)
+                      )
+                      dependencies := merge_indices(
+                        dependencies,
+                        summarize_value(input_place.driver,
+                                        drive_operation || operation)
+                      )
+                    dependencies
+                | ~else:
+                    []
+              active_values := active_values.filter(
+                ~keep: fun (candidate): !(candidate === value)
+              )
+              def summary = ValueDependencySummary(value, input_indices)
+              value_summaries := value_summaries ++ [summary]
+              input_indices
+
+        // Visit dead values too: an unobservable combinational loop is still
+        // invalid even when it does not reach a module output.
+        for (value in module_def.values):
+          summarize_value(value)
+        def output_input_indices:
+          for List (port in module_def.outputs):
+            summarize_value(port.place.driver)
+        def summary = ModuleDependencySummary(module_def,
+                                              output_input_indices)
+        module_summaries := module_summaries ++ [summary]
+        active_modules := active_modules.filter(
+          ~keep: fun (candidate): !(candidate === module_def)
+        )
+        summary
+
+  for (module_def in module_defs):
+    summarize_module(module_def)
+  #void
 
 fun is_drive_to(operation, place_id):
   operation.opcode == "rtl.drive" && operation.places.length() == 1 && operation.places[0].id == place_id
 
-fun verify_module(module_def):
+fun verify_module_structure(module_def):
   def module_owned = module_def is_a Module && module_def.design is_a Design && contains_identity(module_def.design.modules, module_def)
   unless module_owned
   | fail("module belongs to a different design")
@@ -512,9 +627,19 @@ fun verify_module(module_def):
       | fail("value " ++ value.name ++ " has an invalid user")
     unless type_well_formed(value.type)
     | fail("value " ++ value.name ++ " does not have a well-formed HardwareType")
-    when value_has_combinational_cycle(module_def, value, [])
-    | fail("combinational cycle reaches value " ++ value.name)
   #void
+
+fun verify_module(module_def):
+  def mutable reachable_modules = []
+  fun visit(candidate):
+    unless contains_identity(reachable_modules, candidate)
+    | verify_module_structure(candidate)
+      reachable_modules := reachable_modules ++ [candidate]
+      for (operation in candidate.operations):
+        when operation.opcode == "rtl.instance"
+        | visit(operation.attribute("module"))
+  visit(module_def)
+  verify_combinational_cycles(reachable_modules)
 
 fun verify_design(design):
   unless design is_a Design
@@ -553,7 +678,7 @@ fun verify_design(design):
     def same_names = design.modules.filter(~keep: fun (other): other.name == module_def.name)
     unless same_names.length() == 1
     | fail("duplicate module name " ++ module_def.name)
-    verify_module(module_def)
+    verify_module_structure(module_def)
   def mutable entities = design.dpi_imports
   for (module_def in design.modules):
     entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places ++ module_def.memories
@@ -561,4 +686,5 @@ fun verify_design(design):
     def same_ids = entities.filter(~keep: fun (other): other.id == entity.id)
     unless same_ids.length() == 1
     | fail("duplicate IR id " ++ to_string(entity.id))
+  verify_combinational_cycles(design.modules)
   #void

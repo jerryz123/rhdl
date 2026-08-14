@@ -280,7 +280,8 @@ The Builder and whole-design verifier enforce:
     clock and one-bit enable.
 12. Instances reference completed same-design definitions and have unique
     final names within their parent.
-13. Purely combinational cycles are rejected.
+13. Purely combinational cycles are rejected, including cycles that cross
+    instance boundaries.
 
 The frontend separately rejects active recursive generator elaboration,
 runtime hardware circuit parameters, and hardware-controlled host

@@ -23,6 +23,7 @@ expect_failure() {
 
 expect_failure bad-condition.rhdl "hardware values cannot control host conditions"
 expect_failure bad-input-drive.rhdl "connection target must be a driveable hardware place"
+expect_failure bad-instance-combinational-cycle.rhdl "combinational cycle reaches value u.y"
 expect_failure bad-instance-port.rhdl "instance u has no port or interface named missing"
 expect_failure bad-interface-directions.rhdl "incompatible roles and boundary directions"
 expect_failure bad-interface-member-type.rhdl "interface member type must be a DataType or InterfaceType"
