@@ -57,7 +57,7 @@ importable layers:
 | [`foundation.rhm`](../rhdl/frontend/foundation.rhm) | Circuit generators, ports, connections, basic public types, indexing, and `.into` casts |
 | [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
 | [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
-| [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
+| [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
 | [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
@@ -119,6 +119,9 @@ binary mux behavior outside core:
 | Boolean form | Core representation |
 |---|---|
 | `a === b` | `rtl.eq` producing `Bits(1)`, then `rtl.cast` to `Bool` |
+| `a < b` | `rtl.ult` producing `Bits(1)`, then `rtl.cast` to `Bool` |
+| `a > b` | `rtl.ult(b, a)`, then `rtl.cast` to `Bool` |
+| `a <= b` / `a >= b` | Opposite `rtl.ult`, `rtl.not`, then `rtl.cast` to `Bool` |
 | `mux(sel, a, b)` | Cast `Bool` to `Bits(1)`, then one-case `rtl.mux_lookup` |
 
 This division is the central language-oriented design rule: add a core concept
@@ -147,6 +150,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
 | [`generated-adder.rhdl`](generated-adder.rhdl) | An `InstanceArray` host collection wired through runtime `Vec` carry and sum wires |
 | [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
+| [`unsigned-comparisons.rhdl`](unsigned-comparisons.rhdl) | Four unsigned ordering forms derived from the single core `rtl.ult` primitive |
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums as typed mux selectors and values, explicit encodings, registers, and invalid-state recovery |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |

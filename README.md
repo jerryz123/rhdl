@@ -74,7 +74,7 @@ verifier, and backend must preserve. Current core concepts include:
 A concept belongs in a frontend layer when it is notation, organization,
 or policy over existing semantics. Current examples include:
 
-- The layer-defined `Bool` type and Boolean syntax.
+- The layer-defined `Bool` type, Boolean equality, and unsigned ordering syntax.
 - Nominal hardware enums lowered through explicit bit representations.
 - Arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
@@ -119,7 +119,7 @@ The composable frontend layers are:
 |---|---|
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
 | `layers/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
-| `layers/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
+| `layers/bool.rhm` | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
@@ -316,8 +316,9 @@ def one = bits(1, ~width: width)
 ```
 
 The standard language provides `+`, `-`, `*`, `<<`, `>>`, `&`, `^`, `and`, `or`,
-`xor`, `not`, and `===`, plus named construction functions. Arithmetic is
-currently unsigned modular bit-vector arithmetic.
+`xor`, `not`, `===`, `<`, `>`, `<=`, and `>=`, plus named construction
+functions. Arithmetic and ordering are currently unsigned fixed-width
+bit-vector operations.
 
 ```rhombus
 output result: Bits(width)
@@ -326,6 +327,12 @@ output equal: Bool
 result <== (a & b) + bits(1, ~width: width)
 equal <== a === b
 ```
+
+Ordering requires equal-width `Bits` operands and returns the frontend-defined
+`Bool`. Core needs only unsigned less-than: the Bool layer derives `>` by
+swapping operands and derives the inclusive forms by negating the opposite
+strict comparison. On host values, all four operators retain ordinary Rhombus
+comparison behavior.
 
 Logical shifts use a hardware `Bits` amount, preserve the shifted value's
 width, and produce zero when the amount is at least that width:
@@ -971,6 +978,7 @@ and/or/xor(T: BitwiseType, T)               -> T
 add/sub/mul(Bits(w), Bits(w))               -> Bits(w)
 shl/shru(Bits(w), Bits(a))                  -> Bits(w)
 eq(Bits(w), Bits(w))                        -> Bits(1)
+ult(Bits(w), Bits(w))                       -> Bits(1)
 mux_lookup(Bits(w), cases: Key -> T,
            default: T)                      -> T: DataType
 wire(T: HardwareType)                       -> driveable/readable Place<T>
@@ -1112,7 +1120,7 @@ the core schema.
 | Constants | constant |
 | Bitwise | not, and, or, xor |
 | Arithmetic | add, sub, multiply, logical left shift, logical unsigned right shift |
-| Comparison | equality |
+| Comparison | equality, unsigned less than |
 | Selection | mux lookup |
 | Conversion | cast |
 | Width-changing | concat, extract, zext, trunc |
@@ -1248,6 +1256,7 @@ type or operation it cannot represent.
 | `rtl.mul` | `comb.mul` |
 | `rtl.shl/shru` | `comb.shl/shru`, with lossless operand-width normalization around the shift |
 | `rtl.eq` | `comb.icmp eq` |
+| `rtl.ult` | `comb.icmp ult` |
 | `rtl.mux_lookup` | `comb.icmp` plus a `comb.mux` tree |
 | `rtl.cast` | Erased for identical lowered types; otherwise `hw.bitcast` |
 | `rtl.concat` | `comb.concat` |
@@ -1329,6 +1338,7 @@ Important examples include:
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
+| `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
@@ -1358,10 +1368,11 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs seventeen simulations:
+`make circt-test` currently runs twenty simulations:
 
 - An 8-bit modular adder.
 - An 8-bit modular unsigned multiplier.
+- Four unsigned fixed-width ordering relations.
 - A four-bit ripple-carry adder.
 - An eight-bit ripple-carry adder generated from a host Array of instances.
 - A host-width-parameterized ALU.
@@ -1370,8 +1381,10 @@ make test              # complete unit plus CIRCT suite
 - A fixed-vector datapath.
 - An element-wise assembled vector wire.
 - An asynchronous-read, synchronous-write memory.
+- A host-specialized SIMD microengine with instruction memory.
 - An 8-bit synchronous-reset counter.
 - A hardware-conditional enable shift register.
+- A reset-initialized ambient-domain shift register.
 - Two instances sharing one child definition.
 - A record-valued mux and register.
 - Equal-width record/bit representation casts.

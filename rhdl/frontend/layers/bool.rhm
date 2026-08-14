@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines the Bool, Boolean equality, and binary-selection frontend layer.
+// Defines Bool, Boolean-valued comparisons, and binary-selection syntax.
 
 import:
   "../../core/ir.rhm" open
@@ -9,8 +9,16 @@ export:
   Bool
   bool_type
   bool_eq
+  unsigned_lt
+  unsigned_gt
+  unsigned_le
+  unsigned_ge
   mux
   ===
+  <
+  >
+  <=
+  >=
 
 class _BoolType():
   implements BitwiseType
@@ -41,6 +49,70 @@ fun bool_eq(left, right, name = #false, location = Location()):
 
 operator (left === right):
   bool_eq(left, right)
+
+fun require_unsigned_bits(left, right, who, location):
+  def left_value = kernel.read(left, location)
+  def right_value = kernel.read(right, location)
+  unless bits_type(left_value.type) && bits_type(right_value.type) && type_equal(left_value.type, right_value.type)
+  | error(~who: who,
+          location.describe() ++ ": unsigned comparison operands must have exactly the same Bits width")
+  values(left_value, right_value)
+
+fun comparison_bool(value, name, location):
+  kernel.cast(value, Bool, name, location)
+
+fun unsigned_lt(left, right, name = #false, location = Location()):
+  def (left_value, right_value) = require_unsigned_bits(left, right, #'unsigned_lt, location)
+  comparison_bool(kernel.hw_ult(left_value, right_value, #false, location),
+                  name,
+                  location)
+
+fun unsigned_gt(left, right, name = #false, location = Location()):
+  unsigned_lt(right, left, name, location)
+
+fun unsigned_le(left, right, name = #false, location = Location()):
+  def (left_value, right_value) = require_unsigned_bits(left, right, #'unsigned_le, location)
+  comparison_bool(
+    kernel.bit_not(kernel.hw_ult(right_value, left_value, #false, location),
+                   #false,
+                   location),
+    name,
+    location
+  )
+
+fun unsigned_ge(left, right, name = #false, location = Location()):
+  def (left_value, right_value) = require_unsigned_bits(left, right, #'unsigned_ge, location)
+  comparison_bool(
+    kernel.bit_not(kernel.hw_ult(left_value, right_value, #false, location),
+                   #false,
+                   location),
+    name,
+    location
+  )
+
+operator (left < right):
+  ~order: order_comparison
+  if kernel.hardware_entity(left) || kernel.hardware_entity(right)
+  | unsigned_lt(left, right)
+  | (left compare_to right) .< 0
+
+operator (left > right):
+  ~order: order_comparison
+  if kernel.hardware_entity(left) || kernel.hardware_entity(right)
+  | unsigned_gt(left, right)
+  | (left compare_to right) .> 0
+
+operator (left <= right):
+  ~order: order_comparison
+  if kernel.hardware_entity(left) || kernel.hardware_entity(right)
+  | unsigned_le(left, right)
+  | (left compare_to right) .<= 0
+
+operator (left >= right):
+  ~order: order_comparison
+  if kernel.hardware_entity(left) || kernel.hardware_entity(right)
+  | unsigned_ge(left, right)
+  | (left compare_to right) .>= 0
 
 fun mux(condition,
         true_value,
