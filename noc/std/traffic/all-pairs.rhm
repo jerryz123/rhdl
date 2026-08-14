@@ -1,0 +1,57 @@
+#lang rhombus
+// Defines reusable ordered source/destination route classes for any authored topology.
+
+import:
+  "../../authoring/main.rhm" open
+
+export:
+  all_pairs_route_ref
+  all_pairs
+
+fun route_prefix_path(value):
+  if value is_a RouteClassRef
+  | value.path
+  | RouteClassRef(value).path
+
+fun encoded_node_path(node):
+  node.path.segments.map(fun (segment): "node=" ++ segment)
+
+fun all_pairs_route_ref(source,
+                        destination,
+                        ~prefix: prefix = "all-pairs"):
+  unless source is_a NodeRef && destination is_a NodeRef
+  | error(~who: #'all_pairs_route_ref,
+          "all-pairs endpoints must be NodeRef values")
+  def prefix_path = route_prefix_path(prefix)
+  def from_path = prefix_path.segments ++ ["from"]
+  def source_path = from_path ++ encoded_node_path(source)
+  def to_path = source_path ++ ["to"]
+  RouteClassRef(
+    NamePath(to_path ++ encoded_node_path(destination))
+  )
+
+fun all_pairs(topology,
+              ~include_local: include_local = #false,
+              ~prefix: prefix = "all-pairs"):
+  unless topology is_a TopologySpec
+  | error(~who: #'all_pairs, "expected a TopologySpec")
+  unless include_local is_a Boolean
+  | error(~who: #'all_pairs, "include_local must be a Boolean")
+  // Resolve the prefix even for an empty result so invalid names fail eagerly.
+  def prefix_path = route_prefix_path(prefix)
+  def mutable specs = []
+  for (source in topology.nodes):
+    for (destination in topology.nodes):
+      when include_local || !node_ref_equal(source, destination)
+      | specs := specs ++ [
+          RouteClassSpec(
+            all_pairs_route_ref(source,
+                                destination,
+                                ~prefix: prefix_path),
+            source,
+            destination
+          )
+        ]
+  specs.sort(
+    fun (left, right): route_class_ref_less(left.ref, right.ref)
+  )

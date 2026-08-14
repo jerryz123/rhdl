@@ -20,6 +20,8 @@ The current implementation provides:
 - Topology-independent directed and bidirectional link helpers.
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Separate standard definitions for line and rectangular-mesh topologies.
+- A standard all-pairs traffic definition that produces ordinary symbolic
+  route-class specifications for any authored topology.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -60,7 +62,9 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-tes
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -139,6 +143,18 @@ order, copies opaque metadata unchanged, and retains bidirectional provenance.
 This layer defines only explicit route-class semantics. Reusable traffic sets
 such as all ordered source/destination pairs belong under `noc/std/traffic/`,
 and concrete selections belong under `noc/examples/` or in user packages.
+
+## Standard traffic definitions
+
+`all_pairs` generates ordinary `RouteClassSpec` values for every ordered pair
+of symbolic nodes in any `TopologySpec`. Local routes are excluded by default
+and can be included explicitly. Route names encode marked endpoint path
+segments, so hierarchical node names remain deterministic and unambiguous
+without depending on normalized `NodeId` values.
+
+The definition performs no lowering or routing analysis. The mesh-traffic
+example independently selects the reusable example mesh, applies `all_pairs`,
+and lowers the result through that mesh's `LoweredTopology`.
 
 ## Model
 

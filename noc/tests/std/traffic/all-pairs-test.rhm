@@ -1,0 +1,96 @@
+#lang rhombus
+// Checks standard all-pairs traffic generation, naming, lowering, and topology independence.
+
+import:
+  "../../../model/main.rhm" open
+  "../../../authoring/main.rhm" open
+  "../../../std/topology/main.rhm" open
+  "../../../std/traffic/main.rhm" open
+
+def a = NodeRef("a")
+def b = NodeRef("b")
+def c = NodeRef(["group", "c"])
+def explicit_topology = TopologySpec([c, b, a], [])
+def nonlocal_pairs = all_pairs(explicit_topology)
+def pairs_with_local = all_pairs(
+  explicit_topology,
+  ~include_local: #true
+)
+
+check:
+  nonlocal_pairs.length() ~is 6
+  pairs_with_local.length() ~is 9
+  nonlocal_pairs.map(fun (spec): spec.ref.describe()) ~is [
+    "all-pairs/from/node=a/to/node=b",
+    "all-pairs/from/node=a/to/node=group/node=c",
+    "all-pairs/from/node=b/to/node=a",
+    "all-pairs/from/node=b/to/node=group/node=c",
+    "all-pairs/from/node=group/node=c/to/node=a",
+    "all-pairs/from/node=group/node=c/to/node=b"
+  ]
+  nonlocal_pairs[0].source.describe() ~is "a"
+  nonlocal_pairs[0].destination.describe() ~is "b"
+  pairs_with_local.filter(
+    ~keep: fun (spec): node_ref_equal(spec.source, spec.destination)
+  ).length() ~is 3
+
+def lowered_topology = lower_topology(explicit_topology)
+def lowered_pairs = lower_route_classes(lowered_topology, nonlocal_pairs)
+
+check:
+  lowered_pairs.route_classes.length() ~is 6
+  lowered_pairs.route_ref(RouteClassId(0)).describe() ~is nonlocal_pairs[0].ref.describe()
+  lowered_pairs.route_class(nonlocal_pairs[0].ref).source.value ~is lowered_topology.node_id(a).value
+  lowered_pairs.route_class(nonlocal_pairs[0].ref).destination.value ~is lowered_topology.node_id(b).value
+
+def singleton = TopologySpec([NodeRef("only")], [])
+
+check:
+  all_pairs(singleton) ~is []
+  all_pairs(singleton, ~include_local: #true).length() ~is 1
+  all_pairs(
+    singleton,
+    ~include_local: #true,
+    ~prefix: ["traffic", "local"]
+  )[0].ref.describe() ~is "traffic/local/from/node=only/to/node=only"
+  all_pairs_route_ref(
+    a,
+    b,
+    ~prefix: RouteClassRef(["traffic", "explicit"])
+  ).describe() ~is "traffic/explicit/from/node=a/to/node=b"
+
+// Endpoint-segment markers keep hierarchical route names unambiguous.
+def ambiguous_left = all_pairs_route_ref(
+  NodeRef(["a", "to", "b"]),
+  NodeRef("c")
+)
+def ambiguous_right = all_pairs_route_ref(
+  NodeRef("a"),
+  NodeRef(["b", "to", "c"])
+)
+
+check:
+  ambiguous_left.describe() ~is "all-pairs/from/node=a/node=to/node=b/to/node=c"
+  ambiguous_right.describe() ~is "all-pairs/from/node=a/to/node=b/node=to/node=c"
+  ambiguous_left.describe() == ambiguous_right.describe() ~is #false
+
+// A standard mesh and an explicit topology with the same symbolic nodes
+// produce identical traffic definitions; links are irrelevant to all-pairs.
+def mesh = rectangular_mesh(2, 1, [VCGroup("escape", 1)])
+def explicit_mesh_nodes = TopologySpec(
+  [NodeRef("router[1,0]"), NodeRef("router[0,0]")],
+  []
+)
+
+check:
+  all_pairs(mesh.spec).map(
+    fun (spec): spec.describe()
+  ) ~is all_pairs(explicit_mesh_nodes).map(
+    fun (spec): spec.describe()
+  )
+
+check:
+  all_pairs("not a topology") ~throws "expected a TopologySpec"
+  all_pairs(explicit_topology, ~include_local: "yes") ~throws "must be a Boolean"
+  all_pairs(singleton, ~prefix: "") ~throws "nonempty String"
+  all_pairs_route_ref("a", b) ~throws "must be NodeRef"
