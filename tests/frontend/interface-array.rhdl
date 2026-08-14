@@ -1,0 +1,48 @@
+#lang rhdl
+// Provides valid interface-array circuits for frontend elaboration tests.
+
+import:
+  lib("rhdl/std/ready-valid.rhm") open
+
+circuit InterfaceArrayAdapter(n):
+  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[n](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> ingress
+
+circuit IndexedInterfaceArrayAdapter(n):
+  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[n](Decoupled(Bits(8)), ~role: producer)
+
+  for (index in 0..n):
+    egress[index] <=> ingress[index]
+
+circuit InterfaceArrayHierarchy(n):
+  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[n](Decoupled(Bits(8)), ~role: producer)
+
+  inst adapter(InterfaceArrayAdapter(n))
+  adapter.ingress <=> ingress
+  for (index in 0..n):
+    egress[index].valid <== adapter.egress[index].valid
+    egress[index].bits <== adapter.egress[index].bits
+    adapter.egress[index].ready <== egress[index].ready
+
+circuit InterfaceArrayTypeOnce(n):
+  def mutable evaluations = 0
+  fun counted_type():
+    evaluations := evaluations + 1
+    Decoupled(Bits(8))
+
+  interface links[n](counted_type(), ~role: consumer)
+  interface peers[n](Decoupled(Bits(8)), ~role: producer)
+  peers <=> links
+  unless evaluations == 1
+  | error("interface array type expression was evaluated more than once")
+  #void
+
+export:
+  InterfaceArrayAdapter
+  IndexedInterfaceArrayAdapter
+  InterfaceArrayHierarchy
+  InterfaceArrayTypeOnce

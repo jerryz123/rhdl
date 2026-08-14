@@ -1,0 +1,46 @@
+#lang rhdl
+// Demonstrates host-sized arrays of independently flattened interface endpoints.
+
+import:
+  lib("rhdl/std/ready-valid.rhm") open
+
+circuit InterfaceArrayAdapter(n):
+  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[n](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> ingress
+
+circuit InterfaceArrayHierarchy(n):
+  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[n](Decoupled(Bits(8)), ~role: producer)
+
+  inst adapter(InterfaceArrayAdapter(n))
+  adapter.ingress <=> ingress
+  egress <=> adapter.egress
+
+def design = elaborate(InterfaceArrayAdapter(2))
+
+def verilog_reference = @str|<<{
+module InterfaceArrayAdapter(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+  input  struct packed {logic ready; }                   egress_0_in,
+                                                         egress_1_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_0_out,
+                                                         egress_1_out
+);
+
+  assign ingress_0_out = egress_0_in;
+  assign ingress_1_out = egress_1_in;
+  assign egress_0_out = ingress_0_in;
+  assign egress_1_out = ingress_1_in;
+endmodule
+}>>|
+
+export:
+  InterfaceArrayAdapter
+  InterfaceArrayHierarchy
+  design
+  verilog_reference

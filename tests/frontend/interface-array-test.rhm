@@ -1,0 +1,47 @@
+#lang rhombus
+// Checks host-sized interface arrays, flattened ports, hierarchy, and diagnostics.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "interface-array.rhdl" as fixture
+
+def array_design = embedded.run_elaboration(fun (): fixture.InterfaceArrayAdapter(3))
+def array_module = array_design.modules[0]
+def indexed_design = embedded.run_elaboration(
+  fun (): fixture.IndexedInterfaceArrayAdapter(3)
+)
+def hierarchy_design = embedded.run_elaboration(
+  fun (): fixture.InterfaceArrayHierarchy(3)
+)
+def type_once_design = embedded.run_elaboration(
+  fun (): fixture.InterfaceArrayTypeOnce(3)
+)
+def hierarchy_module = hierarchy_design.modules.find(
+  fun (module_def): module_def.name.starts_with("InterfaceArrayHierarchy")
+)
+def hierarchy_instance = hierarchy_module.operations.find(
+  fun (operation): operation.opcode == "rtl.instance"
+)
+
+check:
+  array_module.inputs.map(fun (port): port.name) ~is [
+    "ingress_0_in", "ingress_1_in", "ingress_2_in",
+    "egress_0_in", "egress_1_in", "egress_2_in"
+  ]
+  array_module.outputs.map(fun (port): port.name) ~is [
+    "ingress_0_out", "ingress_1_out", "ingress_2_out",
+    "egress_0_out", "egress_1_out", "egress_2_out"
+  ]
+  array_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.drive"
+  ).length() ~is 6
+  hierarchy_instance.places.length() ~is 6
+  hierarchy_instance.results.length() ~is 6
+  hierarchy_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.drive"
+  ).length() ~is 12
+  verify_design(array_design) ~is #void
+  verify_design(indexed_design) ~is #void
+  verify_design(hierarchy_design) ~is #void
+  type_once_design.modules[0].inputs.length() ~is 6

@@ -193,6 +193,7 @@ fixture_specs=(
   'bundle|bundle_tb|examples/bundle.rhdl|design|verilog_reference'
   'record-cast|record_cast_tb|examples/bundle.rhdl|cast_design|cast_verilog_reference'
   'interface|interface_tb|examples/interface.rhdl|design|verilog_reference'
+  'interface-array|interface_array_tb|examples/interface-array.rhdl|design|verilog_reference'
   'nested-interface|nested_interface_tb|examples/nested-interface.rhdl|design|verilog_reference'
   'full-adder||examples/full-adder.rhdl|design|verilog_reference'
   'layered-adder||examples/layered-adder.rhdl|design|verilog_reference'
