@@ -1,0 +1,49 @@
+#lang rhdl
+// Defines the standard exactly-once ready-valid broadcast buffer.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// One payload is held while a pending mask records which consumers still need
+// it. Each output can accept independently without receiving duplicates, and
+// every asserted output remains stable until its consumer accepts it.
+sync_circuit Broadcast(T, n :: Int):
+  unless n > 0
+  | error(~who: #'Broadcast, "output count must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress[n](Irrevocable(T), ~role: producer)
+
+  def initial_pending = vec(
+    for List (_ in 0..n): Bool(#false)
+  )
+  reg pending(~init: initial_pending)
+  reg payload(T)
+
+  def mutable any_pending = Bool(#false)
+  def mutable all_pending_ready = Bool(#true)
+  for (index in 0..n):
+    any_pending := any_pending or pending[index]
+    all_pending_ready := all_pending_ready and (
+      (not pending[index]) or egress[index].ready
+    )
+    egress[index].valid <== pending[index]
+    egress[index].bits <== payload
+
+  // The final recipients can drain while the next item is accepted, avoiding
+  // an input bubble without exposing the replacement payload in this cycle.
+  def input_ready = (not any_pending) or all_pending_ready
+  def accept_input = ingress.valid and input_ready
+  ingress.ready <== input_ready
+
+  when (accept_input):
+    payload.next <== ingress.bits
+
+  for (index in 0..n):
+    when (accept_input):
+      pending.next[index] <== Bool(#true)
+    elsewhen (pending[index] and egress[index].ready):
+      pending.next[index] <== Bool(#false)
+
+export:
+  Broadcast

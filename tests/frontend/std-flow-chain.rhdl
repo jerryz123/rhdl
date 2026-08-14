@@ -8,8 +8,8 @@ import:
 fun preserve_endpoint(endpoint :: Endpoint) :~ Endpoint:
   endpoint
 
-fun require_byte_decoupled(
-  endpoint :: Endpoint.of(Decoupled(Bits(8)))
+fun require_byte_irrevocable(
+  endpoint :: Endpoint.of(Irrevocable(Bits(8)))
 ) :~ Endpoint:
   endpoint
 
@@ -20,11 +20,19 @@ sync_circuit FlowChain():
   output observed_bits: Bits(8)
 
   def buffered = preserve_endpoint(ingress |> queue(_, 3, ~pipe: #true) |> pipe(_, 2))
-  def checked = require_byte_decoupled(buffered)
+  def checked = require_byte_irrevocable(buffered)
 
   observed_valid <== checked.valid
   observed_bits <== checked.bits
   egress <=> checked
+
+// Verifies that one-to-one helpers accept the stronger Pipe output contract.
+sync_circuit PipeToQueueChain():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  def buffered = ingress |> pipe(_, 1) |> queue(_, 2)
+  egress <=> buffered
 
 sync_circuit WrongProtocolChain():
   interface ingress(Valid(Bits(8)), ~role: consumer)
@@ -32,7 +40,7 @@ sync_circuit WrongProtocolChain():
 
 sync_circuit WrongEndpointType():
   interface ingress(Decoupled(Bits(16)), ~role: consumer)
-  require_byte_decoupled(ingress)
+  require_byte_irrevocable(ingress)
 
 sync_circuit NonEndpointChain():
   queue(bits(0, 8), 2)
@@ -45,6 +53,7 @@ def design = elaborate(FlowChain())
 
 export:
   FlowChain
+  PipeToQueueChain
   WrongProtocolChain
   WrongEndpointType
   NonEndpointChain

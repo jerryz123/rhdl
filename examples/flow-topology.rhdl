@@ -1,0 +1,182 @@
+#lang rhdl
+// Materializes the standard arbitration, routing, join, and broadcast primitives.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+def rr_arbiter_design = elaborate(RRArbiter(Bits(8), 3))
+def demux_design = elaborate(Demux(Bits(8), 3))
+def join_design = elaborate(Join(Bits(8), 3))
+def broadcast_design = elaborate(Broadcast(Bits(8), 3))
+
+def rr_arbiter_verilog_reference = @str|<<{
+module RRArbiter(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+                                                         ingress_2_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+                                                         ingress_2_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output [1:0]                                           chosen
+);
+
+  reg  [1:0]      next_priority;
+  wire            _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
+  wire            _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
+  wire            _GEN_1 = ingress_2_in.valid & ~_GEN_0;
+  wire            _GEN_2 = ingress_2_in.valid & ~ingress_1_in.valid;
+  wire            _GEN_3 = ingress_1_in.valid | ingress_2_in.valid;
+  wire            _GEN_4 = ingress_0_in.valid & ~_GEN_3;
+  wire            _GEN_5 = ingress_0_in.valid & ~ingress_2_in.valid;
+  wire            _GEN_6 = ingress_2_in.valid | ingress_0_in.valid;
+  wire            _GEN_7 = ingress_1_in.valid & ~_GEN_6;
+  wire            _GEN_8 =
+    next_priority == 2'h2
+      ? _GEN_6 | ingress_1_in.valid
+      : next_priority == 2'h1
+          ? _GEN_3 | ingress_0_in.valid
+          : next_priority == 2'h0 & (_GEN_0 | ingress_2_in.valid);
+  wire [3:0][7:0] _GEN_9 =
+    {{ingress_0_in.bits},
+     {_GEN_7
+        ? ingress_1_in.bits
+        : _GEN_5
+            ? ingress_0_in.bits
+            : ingress_2_in.valid ? ingress_2_in.bits : ingress_2_in.bits},
+     {_GEN_4
+        ? ingress_0_in.bits
+        : _GEN_2
+            ? ingress_2_in.bits
+            : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits},
+     {_GEN_1
+        ? ingress_2_in.bits
+        : _GEN
+            ? ingress_1_in.bits
+            : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits}};
+  wire [3:0][1:0] _GEN_10 =
+    {{2'h0},
+     {_GEN_7 ? 2'h1 : {~_GEN_5, 1'h0}},
+     {_GEN_4 ? 2'h0 : _GEN_2 ? 2'h2 : 2'h1},
+     {_GEN_1 ? 2'h2 : {1'h0, _GEN}}};
+  wire [1:0]      _GEN_11 = _GEN_10[next_priority];
+  wire            _GEN_12 = _GEN_11 == 2'h2;
+  always @(posedge clock) begin
+    if (reset)
+      next_priority <= 2'h0;
+    else
+      next_priority <=
+        _GEN_8 & egress_in.ready ? (_GEN_12 ? 2'h0 : _GEN_11 + 2'h1) : next_priority;
+  end // always @(posedge)
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_8 & _GEN_11 == 2'h0)};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_8 & _GEN_11 == 2'h1)};
+  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_8 & _GEN_12)};
+  assign egress_out = '{valid: _GEN_8, bits: _GEN_9[next_priority]};
+  assign chosen = _GEN_11;
+endmodule
+}>>|
+
+def demux_verilog_reference = @str|<<{
+module Demux(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  [1:0]                                           select,
+  input  struct packed {logic ready; }                   egress_0_in,
+                                                         egress_1_in,
+                                                         egress_2_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_0_out,
+                                                         egress_1_out,
+                                                         egress_2_out
+);
+
+  wire _GEN = select == 2'h0;
+  wire _GEN_0 = select == 2'h1;
+  wire _GEN_1 = select == 2'h2;
+  assign ingress_out =
+    '{ready:
+        (_GEN & egress_0_in.ready | _GEN_0 & egress_1_in.ready | _GEN_1
+         & egress_2_in.ready)};
+  assign egress_0_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
+  assign egress_1_out = '{valid: (ingress_in.valid & _GEN_0), bits: ingress_in.bits};
+  assign egress_2_out = '{valid: (ingress_in.valid & _GEN_1), bits: ingress_in.bits};
+endmodule
+}>>|
+
+def join_verilog_reference = @str|<<{
+module Join(
+  input  struct packed {logic valid; logic [7:0] bits; }      ingress_0_in,
+                                                              ingress_1_in,
+                                                              ingress_2_in,
+  input  struct packed {logic ready; }                        egress_in,
+  output struct packed {logic ready; }                        ingress_0_out,
+                                                              ingress_1_out,
+                                                              ingress_2_out,
+  output struct packed {logic valid; logic [2:0][7:0] bits; } egress_out
+);
+
+  assign ingress_0_out =
+    '{ready: (egress_in.ready & ingress_1_in.valid & ingress_2_in.valid)};
+  assign ingress_1_out =
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_2_in.valid)};
+  assign ingress_2_out =
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_1_in.valid)};
+  assign egress_out =
+    '{valid: (ingress_0_in.valid & ingress_1_in.valid & ingress_2_in.valid),
+      bits: ({{ingress_2_in.bits}, {ingress_1_in.bits}, {ingress_0_in.bits}})};
+endmodule
+}>>|
+
+def broadcast_verilog_reference = @str|<<{
+module Broadcast(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_0_in,
+                                                         egress_1_in,
+                                                         egress_2_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_0_out,
+                                                         egress_1_out,
+                                                         egress_2_out
+);
+
+  reg  [2:0] pending;
+  reg  [7:0] payload;
+  wire       _GEN =
+    ~(pending[2'h0] | pending[2'h1] | pending[2'h2])
+    | (~pending[2'h0] | egress_0_in.ready) & (~pending[2'h1] | egress_1_in.ready)
+    & (~pending[2'h2] | egress_2_in.ready);
+  wire       _GEN_0 = ingress_in.valid & _GEN;
+  wire       _GEN_1 = _GEN_0 | ~(pending[2'h0] & egress_0_in.ready) & pending[2'h0];
+  wire       _GEN_2 = _GEN_0 | ~(pending[2'h1] & egress_1_in.ready) & pending[2'h1];
+  wire       _GEN_3 = _GEN_0 | ~(pending[2'h2] & egress_2_in.ready) & pending[2'h2];
+  always @(posedge clock) begin
+    if (reset)
+      pending <= '{1'h0, 1'h0, 1'h0};
+    else begin
+      pending[2'h2] <= _GEN_3;
+      pending[2'h1] <= _GEN_2;
+      pending[2'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= _GEN_0 ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_0_out = '{valid: pending[2'h0], bits: payload};
+  assign egress_1_out = '{valid: pending[2'h1], bits: payload};
+  assign egress_2_out = '{valid: pending[2'h2], bits: payload};
+endmodule
+}>>|
+
+export:
+  rr_arbiter_design
+  demux_design
+  join_design
+  broadcast_design
+  rr_arbiter_verilog_reference
+  demux_verilog_reference
+  join_verilog_reference
+  broadcast_verilog_reference

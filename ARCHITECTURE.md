@@ -67,7 +67,11 @@ so designs can import one primitive without loading unrelated generators.
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
-| `std/flow.rhdl` | Flow-control convenience aggregate | All three `std/flow/` modules |
+| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter` | `std/ready-valid.rhdl` |
+| `std/flow/demux.rhdl` | Selected one-to-many `Demux` | `std/ready-valid.rhdl` |
+| `std/flow/join.rhdl` | Atomic homogeneous `Join` | `std/ready-valid.rhdl` |
+| `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast` | `std/ready-valid.rhdl` |
+| `std/flow.rhdl` | Flow-control convenience aggregate | All `std/flow/` modules |
 
 ## Frontend layer dependencies
 

@@ -5,6 +5,8 @@
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
 BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
+LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
+LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 
 check-boundaries:
@@ -20,8 +22,8 @@ backend-test: check-boundaries
 unit-test: frontend-test backend-test
 
 lop-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test tests/frontend/lop-equivalence-test.rhm tests/frontend/aggregate-equivalence-test.rhm
-	env PLTCOLLECTS=$(CURDIR): raco test tests/backend/equivalence-test.rhm
+	env PLTCOLLECTS=$(CURDIR): raco test $(LOP_FRONTEND_TESTS)
+	env PLTCOLLECTS=$(CURDIR): raco test $(LOP_BACKEND_TESTS)
 
 circt-test:
 	bash tests/backend/run-circt.sh

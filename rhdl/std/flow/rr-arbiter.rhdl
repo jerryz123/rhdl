@@ -1,0 +1,66 @@
+#lang rhdl
+// Defines the standard round-robin ready-valid arbiter.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Priority starts immediately after the most recently transferred input.
+// Selection may change while stalled, so the output deliberately remains
+// Decoupled rather than claiming an irrevocable offer.
+sync_circuit RRArbiter(T, n :: Int):
+  unless n > 0
+  | error(~who: #'RRArbiter, "input count must be a positive host Int")
+
+  interface ingress[n](Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def choice_width = index_width(n)
+  reg next_priority(~init: bits(0, choice_width))
+  def mutable selected_valid = Bool(#false)
+  def mutable selected_bits = ingress[0].bits
+  def mutable selected_index = bits(0, choice_width)
+
+  // Build one fixed-priority result for each possible starting point, then
+  // select the result named by the rotating priority register.
+  for (start in 0..n):
+    def mutable candidate_valid = Bool(#false)
+    def mutable candidate_bits = ingress[start].bits
+    def mutable candidate_index = bits(start, choice_width)
+    def priority_order = (
+      for List (index in start..n): index
+    ) ++ (
+      for List (index in 0..start): index
+    )
+    for (index in priority_order):
+      def take = ingress[index].valid and not candidate_valid
+      candidate_bits := mux(take, ingress[index].bits, candidate_bits)
+      candidate_index := mux(take,
+                             bits(index, choice_width),
+                             candidate_index)
+      candidate_valid := candidate_valid or ingress[index].valid
+
+    def starts_here = next_priority === bits(start, choice_width)
+    selected_valid := mux(starts_here, candidate_valid, selected_valid)
+    selected_bits := mux(starts_here, candidate_bits, selected_bits)
+    selected_index := mux(starts_here, candidate_index, selected_index)
+
+  for (index in 0..n):
+    def selected = selected_valid and (
+      selected_index === bits(index, choice_width)
+    )
+    ingress[index].ready <== egress.ready and selected
+
+  egress.valid <== selected_valid
+  egress.bits <== selected_bits
+  chosen <== selected_index
+
+  when (selected_valid and egress.ready):
+    next_priority.next <== mux(
+      selected_index === bits(n - 1, choice_width),
+      bits(0, choice_width),
+      selected_index + bits(1, choice_width)
+    )
+
+export:
+  RRArbiter

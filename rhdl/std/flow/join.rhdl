@@ -1,0 +1,37 @@
+#lang rhdl
+// Defines the standard atomic ready-valid many-to-one join.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// The output becomes valid only when every input is valid. Readiness is gated
+// so no input can transfer unless all peers transfer in the same cycle.
+circuit Join(T, n :: Int):
+  unless n > 0
+  | error(~who: #'Join, "input count must be a positive host Int")
+
+  interface ingress[n](Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(Vec(n, T)), ~role: producer)
+
+  def mutable all_valid = Bool(#true)
+  def payloads:
+    for List (index in 0..n):
+      all_valid := all_valid and ingress[index].valid
+      ingress[index].bits
+
+  egress.valid <== all_valid
+  egress.bits <== vec(payloads)
+
+  for (index in 0..n):
+    def mutable peers_valid = Bool(#true)
+    def peer_indices = (
+      for List (peer in 0..index): peer
+    ) ++ (
+      for List (peer in (index + 1)..n): peer
+    )
+    for (peer in peer_indices):
+      peers_valid := peers_valid and ingress[peer].valid
+    ingress[index].ready <== egress.ready and peers_valid
+
+export:
+  Join

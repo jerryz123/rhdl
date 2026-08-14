@@ -8,6 +8,10 @@ import:
   "../../rhdl/std/flow/pipe.rhdl" as pipe
   "../../rhdl/std/flow/queue.rhdl" as queue
   "../../rhdl/std/flow/arbiter.rhdl" as arbiter
+  "../../rhdl/std/flow/rr-arbiter.rhdl" as rr_arbiter
+  "../../rhdl/std/flow/demux.rhdl" as demux
+  "../../rhdl/std/flow/join.rhdl" as join
+  "../../rhdl/std/flow/broadcast.rhdl" as broadcast
 
 // The aggregate and focused modules are both supported public import paths.
 def direct_pipe_design = embedded.run_elaboration(
@@ -18,6 +22,18 @@ def direct_queue_design = embedded.run_elaboration(
 )
 def direct_arbiter_design = embedded.run_elaboration(
   fun (): arbiter.Arbiter(Bits(8), 1)
+)
+def direct_rr_arbiter_design = embedded.run_elaboration(
+  fun (): rr_arbiter.RRArbiter(Bits(8), 1)
+)
+def direct_demux_design = embedded.run_elaboration(
+  fun (): demux.Demux(Bits(8), 1)
+)
+def direct_join_design = embedded.run_elaboration(
+  fun (): join.Join(Bits(8), 1)
+)
+def direct_broadcast_design = embedded.run_elaboration(
+  fun (): broadcast.Broadcast(Bits(8), 1)
 )
 
 def pipe_one_design = embedded.run_elaboration(
@@ -58,6 +74,22 @@ def arbiter_three_design = embedded.run_elaboration(
   fun (): flow.Arbiter(Bits(8), 3)
 )
 def arbiter_three = arbiter_three_design.modules[0]
+def rr_arbiter_three_design = embedded.run_elaboration(
+  fun (): flow.RRArbiter(Bits(8), 3)
+)
+def rr_arbiter_three = rr_arbiter_three_design.modules[0]
+def demux_three_design = embedded.run_elaboration(
+  fun (): flow.Demux(Bits(8), 3)
+)
+def demux_three = demux_three_design.modules[0]
+def join_three_design = embedded.run_elaboration(
+  fun (): flow.Join(Bits(8), 3)
+)
+def join_three = join_three_design.modules[0]
+def broadcast_three_design = embedded.run_elaboration(
+  fun (): flow.Broadcast(Bits(8), 3)
+)
+def broadcast_three = broadcast_three_design.modules[0]
 def aggregate_type = RecordType([
   RecordField("tag", Bits(2)),
   RecordField("data", Bits(8))
@@ -71,6 +103,18 @@ def aggregate_queue_design = embedded.run_elaboration(
 def aggregate_arbiter_design = embedded.run_elaboration(
   fun (): flow.Arbiter(aggregate_type, 2)
 )
+def aggregate_rr_arbiter_design = embedded.run_elaboration(
+  fun (): flow.RRArbiter(aggregate_type, 2)
+)
+def aggregate_demux_design = embedded.run_elaboration(
+  fun (): flow.Demux(aggregate_type, 2)
+)
+def aggregate_join_design = embedded.run_elaboration(
+  fun (): flow.Join(aggregate_type, 2)
+)
+def aggregate_broadcast_design = embedded.run_elaboration(
+  fun (): flow.Broadcast(aggregate_type, 2)
+)
 
 fun operations(module_def, opcode):
   module_def.operations.filter(
@@ -81,6 +125,10 @@ check:
   verify_design(direct_pipe_design) ~is #void
   verify_design(direct_queue_design) ~is #void
   verify_design(direct_arbiter_design) ~is #void
+  verify_design(direct_rr_arbiter_design) ~is #void
+  verify_design(direct_demux_design) ~is #void
+  verify_design(direct_join_design) ~is #void
+  verify_design(direct_broadcast_design) ~is #void
 
   pipe_one.inputs.map(fun (port): port.name) ~is [
     "clock", "reset", "ingress_in", "egress_in"
@@ -123,6 +171,28 @@ check:
   ]
   arbiter_three.find_output("chosen").type.width ~is 2
 
+  rr_arbiter_three.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_0_in", "ingress_1_in", "ingress_2_in", "egress_in"
+  ]
+  rr_arbiter_three.find_output("chosen").type.width ~is 2
+  operations(rr_arbiter_three, "rtl.register_reset").length() ~is 1
+
+  demux_three.inputs.map(fun (port): port.name) ~is [
+    "ingress_in", "select", "egress_0_in", "egress_1_in", "egress_2_in"
+  ]
+  demux_three.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_0_out", "egress_1_out", "egress_2_out"
+  ]
+
+  join_three.find_output("egress_out").type.field("bits").type.length ~is 3
+  join_three.find_output("egress_out").type.field("bits").type.element_type.width ~is 8
+
+  broadcast_three.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in", "egress_0_in", "egress_1_in", "egress_2_in"
+  ]
+  operations(broadcast_three, "rtl.register_reset").length() ~is 1
+  operations(broadcast_three, "rtl.register").length() ~is 1
+
   verify_design(pipe_one_design) ~is #void
   verify_design(pipe_three_design) ~is #void
   verify_design(queue_one_design) ~is #void
@@ -132,9 +202,17 @@ check:
   verify_design(queue_options_design) ~is #void
   verify_design(arbiter_one_design) ~is #void
   verify_design(arbiter_three_design) ~is #void
+  verify_design(rr_arbiter_three_design) ~is #void
+  verify_design(demux_three_design) ~is #void
+  verify_design(join_three_design) ~is #void
+  verify_design(broadcast_three_design) ~is #void
   verify_design(aggregate_pipe_design) ~is #void
   verify_design(aggregate_queue_design) ~is #void
   verify_design(aggregate_arbiter_design) ~is #void
+  verify_design(aggregate_rr_arbiter_design) ~is #void
+  verify_design(aggregate_demux_design) ~is #void
+  verify_design(aggregate_join_design) ~is #void
+  verify_design(aggregate_broadcast_design) ~is #void
 
   embedded.run_elaboration(fun (): flow.Pipe(Bits(8), 0)) ~throws "stages must be a positive host Int"
   embedded.run_elaboration(fun (): flow.Pipe(Bits(8), -1)) ~throws "stages must be a positive host Int"
@@ -142,6 +220,14 @@ check:
   embedded.run_elaboration(fun (): flow.Queue(Bits(8), -1)) ~throws "depth must be a positive host Int"
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), 0)) ~throws "input count must be a positive host Int"
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), -1)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.RRArbiter(Bits(8), 0)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Demux(Bits(8), 0)) ~throws "output count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Join(Bits(8), 0)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Broadcast(Bits(8), 0)) ~throws "output count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.RRArbiter(Bits(8), -1)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Demux(Bits(8), -1)) ~throws "output count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Join(Bits(8), -1)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Broadcast(Bits(8), -1)) ~throws "output count must be a positive host Int"
   embedded.run_elaboration(fun (): flow.Pipe(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Queue(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(
@@ -151,3 +237,7 @@ check:
     fun (): flow.Queue(Bits(8), 2, ~flow: 1)
   ) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.RRArbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.Demux(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.Join(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.Broadcast(Bits(8), "two")) ~throws "argument does not satisfy annotation"

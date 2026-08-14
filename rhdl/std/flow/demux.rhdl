@@ -1,0 +1,28 @@
+#lang rhdl
+// Defines the standard selected ready-valid one-to-many demultiplexer.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Select is interpreted as part of the current Decoupled offer and may change
+// while stalled. Encodings outside 0 through n - 1 select no output and block
+// the input instead of silently discarding it.
+circuit Demux(T, n :: Int):
+  unless n > 0
+  | error(~who: #'Demux, "output count must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  input select: Bits(index_width(n))
+  interface egress[n](Decoupled(T), ~role: producer)
+
+  def mutable selected_ready = Bool(#false)
+  for (index in 0..n):
+    def selected = select === bits(index, index_width(n))
+    egress[index].valid <== ingress.valid and selected
+    egress[index].bits <== ingress.bits
+    selected_ready := selected_ready or (selected and egress[index].ready)
+
+  ingress.ready <== selected_ready
+
+export:
+  Demux

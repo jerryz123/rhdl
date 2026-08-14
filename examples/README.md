@@ -85,10 +85,11 @@ because they use the public language without extending it. The initial
 [`ready-valid.rhdl`](../rhdl/std/ready-valid.rhdl) module provides `Valid`,
 `DecoupledControl`, `IrrevocableControl`, `Decoupled`, and `Irrevocable` as
 opt-in nominal interface types, plus the common `fire` helper. The
-[`flow/`](../rhdl/std/flow) directory contains separate elastic pipe, FIFO
-queue, and fixed-priority arbiter modules; [`flow.rhdl`](../rhdl/std/flow.rhdl)
-re-exports all three for convenience. [`counter.rhdl`](../rhdl/std/counter.rhdl)
-provides an enabled bounded counter with value and wrap outputs.
+[`flow/`](../rhdl/std/flow) directory contains separate buffering,
+arbitration, routing, atomic join, and exactly-once broadcast modules;
+[`flow.rhdl`](../rhdl/std/flow.rhdl) re-exports them for convenience.
+[`counter.rhdl`](../rhdl/std/counter.rhdl) provides an enabled bounded counter
+with value and wrap outputs.
 
 ## What the standard language adds
 
@@ -217,6 +218,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`interface-array.rhdl`](interface-array.rhdl) | Host-sized `Decoupled` endpoint arrays, deterministic flattened ports, whole-array connection, and hierarchy reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 | [`flow-control.rhdl`](flow-control.rhdl) | Standard-library flow primitives plus a typed `ingress |> queue(_, ...) |> pipe(_, ...)` endpoint chain |
+| [`flow-topology.rhdl`](flow-topology.rhdl) | Round-robin arbitration, selected routing, atomic joining, and exactly-once broadcast |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
 shows that a useful RHDL construction abstraction need not be a macro or

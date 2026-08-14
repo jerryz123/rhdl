@@ -1219,11 +1219,13 @@ def buffered = ingress |> queue(_, 4, ~pipe: #true) |> pipe(_, 2)
 egress <=> buffered
 ```
 
-`queue` and `pipe` infer the payload type from the input `Decoupled` endpoint,
-instantiate in the ambient `sync_circuit` domain, bulk-connect the input, and
-return the downstream `Endpoint`. The return annotation retains interface
-static information across every pipeline stage. Use an explicit `Queue`
-instance when its `count` output or the instance handle itself is needed.
+`queue` and `pipe` infer the payload type from a `Decoupled` or `Irrevocable`
+input endpoint, instantiate in the ambient `sync_circuit` domain, bulk-connect
+the input, and return the downstream `Endpoint`. The return annotation retains
+interface static information across every pipeline stage. `Pipe` produces an
+`Irrevocable` endpoint because its registered output remains stable under
+backpressure. Use an explicit `Queue` instance when its `count` output or the
+instance handle itself is needed.
 
 `Queue(T, depth)` defaults to a registered, non-flow-through FIFO. Setting
 `~pipe: #true` allows enqueue on the same cycle a full queue dequeues, while
@@ -1234,11 +1236,13 @@ two `Counter(depth)` instances for their read and write pointers. A
 synchronous-read-memory option will belong here once RHDL has that memory
 primitive.
 
-The same module exports `Pipe(T, stages)` and the index-zero-first
-`Arbiter(T, n)`. Each generator can instead be imported independently from
-`rhdl/std/flow/pipe.rhdl`, `rhdl/std/flow/queue.rhdl`, or
-`rhdl/std/flow/arbiter.rhdl`; `rhdl/std/flow.rhdl` is their convenience
-aggregate.
+The same module exports the index-zero-first `Arbiter(T, n)`, fair
+`RRArbiter(T, n)`, selected `Demux(T, n)`, atomic `Join(T, n)`, and buffered
+exactly-once `Broadcast(T, n)`. `Demux` blocks invalid selector encodings;
+`Join` never partially consumes its inputs; and `Broadcast` tracks each
+recipient independently. Every generator can instead be imported from its
+corresponding file under `rhdl/std/flow/`; `rhdl/std/flow.rhdl` is the
+convenience aggregate.
 
 The standard bounded counter is independent of ready-valid flow control:
 
