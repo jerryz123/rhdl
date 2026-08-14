@@ -1,0 +1,183 @@
+#lang rhombus
+// Builds deterministic route tables and the opaque artifact gated by all NoC validation passes.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+
+export:
+  RouteTableRow
+  RouteTable
+  ValidationAssumptions
+  ValidatedRouting
+  compile_routing
+
+def validator_version = "vc-dependency-acyclic/v1"
+
+fun origin_equal(left, right):
+  cond
+  | left is_a Injection && right is_a Injection:
+      node_id_equal(left.node, right.node)
+  | left is_a HeldVC && right is_a HeldVC:
+      vc_id_equal(left.vc, right.vc)
+  | ~else: #false
+
+fun origin_node(materialized, origin):
+  cond
+  | origin is_a Injection: origin.node
+  | origin is_a HeldVC:
+      materialized.topology.find_vc_link(origin.vc).destination
+  | ~else:
+      error(~who: #'compile_routing,
+            "route-table origin must be an Injection or HeldVC")
+
+class RouteTableRow(route_class, origin, router_node, allowed_vcs, eject):
+  opaque
+  internal _RouteTableRow
+  constructor ~none
+
+  method allows(vc):
+    vc is_a VCId && allowed_vcs.find(
+      fun (candidate): vc_id_equal(candidate, vc)
+    ) != #false
+
+  method describe():
+    def action:
+      if eject
+      | "eject"
+      | block:
+          def vc_names = allowed_vcs.map(fun (vc): vc.describe())
+          "[" ++ String.join(vc_names, ", ") ++ "]"
+    String.append(route_class.id.describe(), " ", origin.describe(), " @ ",
+                  router_node.describe(), ": ", action)
+
+class RouteTable(topology, route_classes, rows):
+  opaque
+  internal _RouteTable
+  constructor ~none
+
+  method contains_route_class(route_class):
+    route_class is_a RouteClass && route_classes.find(
+      fun (candidate): candidate === route_class
+    ) != #false
+
+  method row(route_class, origin):
+    unless contains_route_class(route_class)
+    | error(~who: #'RouteTable,
+            "route class does not belong to this route table")
+    unless injection_origin(origin) || held_vc_origin(origin)
+    | error(~who: #'RouteTable,
+            "route-table origin must be an Injection or HeldVC")
+    def found = rows.find(
+      fun (candidate):
+        candidate.route_class === route_class && origin_equal(candidate.origin, origin)
+    )
+    unless found
+    | error(~who: #'RouteTable,
+            String.append("unknown route-table row for ",
+                          route_class.id.describe(), " ", origin.describe()))
+    found
+
+  method rows_at(node):
+    unless topology.contains_node(node)
+    | error(~who: #'RouteTable, "unknown route-table node")
+    rows.filter(
+      ~keep: fun (row): node_id_equal(row.router_node, node)
+    )
+
+  method allowed_candidates(route_class, origin):
+    row(route_class, origin).allowed_vcs
+
+  method describe():
+    String.join(rows.map(fun (row): row.describe()), "\n")
+
+class ValidationAssumptions(resource_model,
+                            deadlock_criterion,
+                            injection_holds_vc,
+                            ejection_acquires_vc):
+  opaque
+  internal _ValidationAssumptions
+  constructor ~none
+
+  method describe():
+    String.append(resource_model, "; ", deadlock_criterion,
+                  "; injection-holds-vc=", to_string(injection_holds_vc),
+                  "; ejection-acquires-vc=", to_string(ejection_acquires_vc))
+
+def initial_assumptions = _ValidationAssumptions(
+  "virtual-channel hold-and-request",
+  "reachable VC dependency union is acyclic",
+  #false,
+  #false
+)
+
+class ValidatedRouting(topology,
+                       route_classes,
+                       materialized,
+                       reachable,
+                       dependency_graph,
+                       certificate,
+                       route_table,
+                       assumptions,
+                       validator_version):
+  opaque
+  internal _ValidatedRouting
+  constructor ~none
+
+  method route_row(route_class, origin):
+    route_table.row(route_class, origin)
+
+  method describe():
+    String.append("validated routing ", validator_version,
+                  ": routes=", to_string(route_classes.length()),
+                  ", vcs=", to_string(dependency_graph.vertices.length()),
+                  ", rows=", to_string(route_table.rows.length()))
+
+fun make_row(materialized, route_class, origin):
+  def node = origin_node(materialized, origin)
+  def eject = node_id_equal(node, route_class.destination)
+  def allowed_vcs = materialized.allowed_candidates(route_class, origin)
+  when eject && allowed_vcs.length() > 0
+  | error(~who: #'compile_routing,
+          "internal error: destination row has output VCs")
+  _RouteTableRow(route_class, origin, node, allowed_vcs, eject)
+
+fun build_route_table(materialized, reachable):
+  def mutable rows = []
+  for (route in reachable.routes):
+    def route_class = route.route_class
+    rows := rows ++ [make_row(
+      materialized,
+      route_class,
+      Injection(route_class.source)
+    )]
+    for (vc in route.reachable_vcs.sort(vc_id_less)):
+      rows := rows ++ [make_row(
+        materialized,
+        route_class,
+        HeldVC(vc)
+      )]
+  _RouteTable(materialized.topology, materialized.route_classes, rows)
+
+fun compile_routing(problem):
+  unless problem is_a RoutingProblem
+  | error(~who: #'compile_routing, "expected a RoutingProblem")
+  def materialized = materialize_routing(problem)
+  def reachable = analyze_reachability(materialized)
+  def dependency_graph = build_dependency_graph(reachable)
+  def proof = check_dependency_acyclicity(dependency_graph)
+  if proof is_a DependencyCycle
+  | proof
+  | block:
+      def route_table = build_route_table(materialized, reachable)
+      _ValidatedRouting(
+        materialized.topology,
+        materialized.route_classes,
+        materialized,
+        reachable,
+        dependency_graph,
+        proof,
+        route_table,
+        initial_assumptions,
+        validator_version
+      )

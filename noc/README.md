@@ -26,18 +26,19 @@ The current implementation provides:
 - Rejection of reachable dead ends and destinations that cannot be reached.
 - Reachable-only VC dependency graph construction with merged route provenance.
 - Deterministic dependency-graph acyclicity certificates and cycle witnesses.
+- An opaque validated-routing artifact and deterministic host route-table rows.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet construct the combined validated-routing artifact or
-generate route tables.
+The package does not yet lower route tables into RHDL or generate router RTL.
 
 ## Dependency boundary
 
-Files under `noc/model/` and `noc/analysis/` use only `#lang rhombus` and other
-modules in the pure NoC package. They must not import RHDL core, frontend,
-backend, standard-library hardware modules, or CIRCT integration.
+Files under `noc/model/`, `noc/analysis/`, and `noc/plan/` use only
+`#lang rhombus` and other modules in the pure NoC package. They must not import
+RHDL core, frontend, backend, standard-library hardware modules, or CIRCT
+integration.
 
 Run the focused checks from the repository root:
 
@@ -47,6 +48,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/validated-routing-test.rhm
 bash noc/check-boundaries.sh
 ```
 
@@ -144,3 +146,23 @@ identity. This makes certificates and failure witnesses reproducible. The
 criterion proves routing deadlock freedom only under the documented VC
 hold-and-request model; it does not prove fairness, starvation freedom,
 livelock freedom, or correctness of a future RTL implementation.
+
+## Validated routing and route tables
+
+`compile_routing` is the single validation gate from `RoutingProblem` to
+hardware-consumable domain data. It runs materialization, reachability,
+dependency-graph construction, and acyclicity checking in order. An acyclic
+input produces `ValidatedRouting`; a cyclic input produces its
+`DependencyCycle`. Reachability and model errors remain explicit failures.
+
+Only the validation module can construct `ValidatedRouting`. The artifact
+retains the normalized topology, route classes, materialized and reachable
+relations, dependency graph, rank certificate, proof assumptions, validator
+version, and deterministic `RouteTable`.
+
+There is one table row for each route class's legal injection origin and each
+reachable held VC. A row records its router node, whether it ejects, and the
+allowed output VCs copied from the exact materialized snapshot that passed
+validation. Unreachable materialized origins are omitted so routing decisions
+excluded from the dependency proof cannot leak into generated hardware. No
+route-table operation can reach or re-run the user callback.

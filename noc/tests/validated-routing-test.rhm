@@ -1,0 +1,156 @@
+#lang rhombus
+// Checks the validation gate and exact route-table projection from the materialized relation.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+  "../plan/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def n4 = NodeId(4)
+
+def l0 = PhysicalLink(LinkId(0), n0, n1, 1)
+def l1 = PhysicalLink(LinkId(1), n1, n2, 1)
+def l2 = PhysicalLink(LinkId(2), n0, n2, 1)
+def l3 = PhysicalLink(LinkId(3), n3, n4, 1)
+def l4 = PhysicalLink(LinkId(4), n4, n3, 1)
+def topology = Topology([n4, n2, n0, n3, n1], [l4, l2, l0, l3, l1])
+def route0 = RouteClass(RouteClassId(0), n0, n2, "requests")
+def mutable callback_count = 0
+def validated = compile_routing(
+  RoutingProblem(
+    topology,
+    [route0],
+    RoutingRelation(
+      fun (_route_class, _origin, _candidate_vc):
+        callback_count := callback_count + 1
+        #true
+    )
+  )
+)
+def calls_after_compile = callback_count
+def row_descriptions = validated.route_table.rows.map(
+  fun (row): row.describe()
+)
+
+fun table_matches_materialized(value):
+  def mutable matches = #true
+  for (row in value.route_table.rows):
+    def decisions = value.materialized.decisions_for(
+      row.route_class,
+      row.origin
+    )
+    def allowed_count = decisions.filter(
+      ~keep: fun (decision): decision.allowed
+    ).length()
+    unless row.allowed_vcs.length() == allowed_count
+    | matches := #false
+    for (decision in decisions):
+      unless row.allows(decision.candidate_vc) == decision.allowed
+      | matches := #false
+  matches
+
+check:
+  validated is_a ValidatedRouting ~is #true
+  callback_count ~is calls_after_compile
+  validated.topology === validated.materialized.topology ~is #true
+  validated.reachable.materialized === validated.materialized ~is #true
+  validated.dependency_graph.reachable === validated.reachable ~is #true
+  validated.certificate.graph === validated.dependency_graph ~is #true
+  validated.validator_version ~is "vc-dependency-acyclic/v1"
+  validated.assumptions.resource_model ~is "virtual-channel hold-and-request"
+  validated.assumptions.deadlock_criterion ~is "reachable VC dependency union is acyclic"
+  validated.assumptions.injection_holds_vc ~is #false
+  validated.assumptions.ejection_acquires_vc ~is #false
+  validated.route_table.rows.length() ~is 4
+  table_matches_materialized(validated) ~is #true
+  callback_count ~is calls_after_compile
+  row_descriptions ~is ["r0 inject(n0) @ n0: [l0.vc0, l2.vc0]",
+                        "r0 hold(l0.vc0) @ n1: [l1.vc0]",
+                        "r0 hold(l1.vc0) @ n2: eject",
+                        "r0 hold(l2.vc0) @ n2: eject"]
+  validated.route_row(route0, Injection(n0)).allows(VCId(LinkId(0), 0)) ~is #true
+  validated.route_row(route0, HeldVC(VCId(LinkId(1), 0))).eject ~is #true
+  validated.route_table.rows_at(n2).length() ~is 2
+  validated.route_table.rows_at(n3) ~is []
+  validated.materialized.allowed(
+    route0,
+    HeldVC(VCId(LinkId(3), 0)),
+    VCId(LinkId(4), 0)
+  ) ~is #true
+  validated.describe() ~is "validated routing vc-dependency-acyclic/v1: routes=1, vcs=3, rows=4"
+
+check:
+  validated.route_table.row(
+    RouteClass(RouteClassId(0), n0, n2),
+    Injection(n0)
+  ) ~throws "does not belong"
+  validated.route_table.row(route0, Injection(n1)) ~throws "unknown route-table row"
+  validated.route_table.row(
+    route0,
+    HeldVC(VCId(LinkId(3), 0))
+  ) ~throws "unknown route-table row"
+  validated.route_table.rows_at(NodeId(99)) ~throws "unknown route-table node"
+  compile_routing("not a problem") ~throws "expected a RoutingProblem"
+
+// The reachable A -> B -> A branch has an exit to the destination but is cyclic.
+def cycle_a = PhysicalLink(LinkId(10), n0, n1, 1)
+def cycle_b = PhysicalLink(LinkId(11), n1, n0, 1)
+def cycle_exit = PhysicalLink(LinkId(12), n0, n2, 1)
+def cycle_topology = Topology([n0, n1, n2], [cycle_exit, cycle_b, cycle_a])
+def cycle_route = RouteClass(RouteClassId(10), n0, n2)
+
+fun candidate_uses(candidate_vc, link):
+  link_id_equal(candidate_vc.link_id, link.id)
+
+fun origin_holds(origin, link):
+  origin is_a HeldVC && link_id_equal(origin.vc.link_id, link.id)
+
+fun cycle_allows(_route_class, origin, candidate_vc):
+  cond
+  | origin is_a Injection: candidate_uses(candidate_vc, cycle_a)
+  | origin_holds(origin, cycle_a): candidate_uses(candidate_vc, cycle_b)
+  | origin_holds(origin, cycle_b):
+      candidate_uses(candidate_vc, cycle_a) || candidate_uses(candidate_vc, cycle_exit)
+  | ~else: #false
+
+def cyclic_result = compile_routing(
+  RoutingProblem(
+    cycle_topology,
+    [cycle_route],
+    RoutingRelation(cycle_allows)
+  )
+)
+
+check:
+  cyclic_result is_a DependencyCycle ~is #true
+  cyclic_result is_a ValidatedRouting ~is #false
+  cyclic_result.vertices().map(fun (vc): vc.describe()) ~is ["l10.vc0", "l11.vc0", "l10.vc0"]
+
+def dead_end_problem = RoutingProblem(
+  topology,
+  [route0],
+  RoutingRelation(fun (_route_class, _origin, _candidate_vc): #false)
+)
+
+check:
+  compile_routing(dead_end_problem) ~throws "reachable dead end"
+
+// A local route produces one ejecting injection row and no VC dependencies.
+def local_route = RouteClass(RouteClassId(20), n0, n0)
+def local_validated = compile_routing(
+  RoutingProblem(
+    topology,
+    [local_route],
+    RoutingRelation(fun (_route_class, _origin, _candidate_vc): #true)
+  )
+)
+
+check:
+  local_validated is_a ValidatedRouting ~is #true
+  local_validated.certificate.ordered_vcs ~is []
+  local_validated.route_table.rows.length() ~is 1
+  local_validated.route_row(local_route, Injection(n0)).eject ~is #true
