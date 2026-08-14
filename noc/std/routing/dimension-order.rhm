@@ -1,0 +1,103 @@
+#lang rhombus
+// Defines inspectable dimension-order routing policies for rectangular meshes.
+
+import:
+  "../../authoring/main.rhm" open
+  "../topology/main.rhm" open
+
+export:
+  DimensionOrderPolicy
+  dimension_order
+  xy_dimension_order
+  yx_dimension_order
+
+fun valid_dimension_order(dimensions):
+  dimensions is_a List && dimensions.length() == 2 && (
+    dimensions == ["x", "y"] || dimensions == ["y", "x"]
+  )
+
+fun duplicate_name(names, name):
+  names.filter(~keep: fun (candidate): candidate == name).length() > 1
+
+fun validate_vc_groups(mesh, vc_groups):
+  unless vc_groups == #false || (vc_groups is_a List && vc_groups.length() > 0)
+  | error(~who: #'dimension_order,
+          "dimension-order VC groups must be #false or a nonempty List")
+  when vc_groups != #false
+  | for (name in vc_groups):
+      unless name is_a String && name.length() > 0 && !name.contains("/")
+      | error(~who: #'dimension_order,
+              "dimension-order VC groups must contain names without '/'")
+      when duplicate_name(vc_groups, name)
+      | error(~who: #'dimension_order,
+              "duplicate dimension-order VC group " ++ name)
+      unless mesh.vc_groups.find(fun (group): group.name == name)
+      | error(~who: #'dimension_order,
+              "mesh has no VC group " ++ name)
+
+fun coordinate_differs(axis, current, destination):
+  if axis == "x"
+  | current.x != destination.x
+  | current.y != destination.y
+
+fun direction_toward(axis, current, destination):
+  cond
+  | axis == "x" && current.x < destination.x: mesh_east
+  | axis == "x": mesh_west
+  | current.y < destination.y: mesh_north
+  | ~else: mesh_south
+
+class DimensionOrderPolicy(mesh, dimensions, vc_groups):
+  implements RoutingPolicy
+  constructor (mesh, dimensions, vc_groups = #false):
+    unless mesh is_a RectangularMesh
+    | error(~who: #'dimension_order,
+            "dimension order requires a RectangularMesh")
+    unless valid_dimension_order(dimensions)
+    | error(~who: #'dimension_order,
+            "dimension order must be ['x', 'y'] or ['y', 'x']")
+    validate_vc_groups(mesh, vc_groups)
+    super(mesh,
+          dimensions,
+          (if vc_groups == #false
+           | #false
+           | vc_groups.sort(fun (left, right): left < right)))
+
+  override method allows(context):
+    def current = mesh.coordinate_of(context.current_node)
+    def destination = mesh.coordinate_of(context.route_class.destination)
+    def active_dimension = dimensions.find(
+      fun (axis): coordinate_differs(axis, current, destination)
+    )
+    if !active_dimension
+    | #false
+    | block:
+        def required_direction = direction_toward(
+          active_dimension,
+          current,
+          destination
+        )
+        def candidate_direction = mesh.direction_of(context.candidate_link())
+        def group_allowed = vc_groups == #false || vc_groups.find(
+          fun (name): name == context.candidate_vc.group
+        ) != #false
+        mesh_direction_equal(required_direction, candidate_direction) && group_allowed
+
+  override method describe():
+    def group_description:
+      if vc_groups == #false
+      | "all"
+      | String.join(vc_groups, ",")
+    String.append("dimension-order(", String.join(dimensions, ","),
+                  "; vc-groups=", group_description, ")")
+
+fun dimension_order(mesh,
+                    dimensions,
+                    ~vc_groups: vc_groups = #false):
+  DimensionOrderPolicy(mesh, dimensions, vc_groups)
+
+fun xy_dimension_order(mesh, ~vc_groups: vc_groups = #false):
+  dimension_order(mesh, ["x", "y"], ~vc_groups: vc_groups)
+
+fun yx_dimension_order(mesh, ~vc_groups: vc_groups = #false):
+  dimension_order(mesh, ["y", "x"], ~vc_groups: vc_groups)

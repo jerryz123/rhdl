@@ -24,6 +24,8 @@ The current implementation provides:
 - Separate standard definitions for line and rectangular-mesh topologies.
 - A standard all-pairs traffic definition that produces ordinary symbolic
   route-class specifications for any authored topology.
+- Standard XY and YX dimension-order policies defined as clients of the
+  generic routing-policy interface and rectangular-mesh view.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -66,8 +68,10 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -119,8 +123,9 @@ times through generic prefixing.
 
 A `RectangularMesh` is a typed view over an ordinary `TopologySpec`. It names
 routers by coordinate and records each link's source coordinate, destination
-coordinate, and direction. Positive x is east and positive y is north. Queries
-such as `node_at`, `coordinate_of`, `direction_of`, `outgoing_link`, and
+coordinate, direction, and the declared VC groups. Positive x is east and
+positive y is north. Queries such as `node_at`, `coordinate_of`,
+`direction_of`, `outgoing_link`, and
 `inverse_link` let future routing policies use topology semantics without
 parsing names or inspecting normalized IDs. Prefixing a mesh qualifies its
 symbolic handles while preserving the same coordinates and directions.
@@ -180,6 +185,21 @@ against one `LoweredRouteClasses` value, then returns an ordinary
 query back into a symbolic context. It does not evaluate the finite query
 domain itself, construct route tables, or bypass the existing materializer and
 validation pipeline.
+
+## Standard routing policies
+
+Reusable topology-specific policies live under `noc/std/routing/`, outside
+core authoring and analysis. `DimensionOrderPolicy` is an inspectable client of
+the generic `RoutingPolicy` interface for `RectangularMesh`. XY routing fully
+consumes x displacement before y displacement; YX reverses that order. An
+optional named VC-group restriction selects which VCs on the required link are
+legal, while omission permits every declared group.
+
+The policy uses mesh coordinates and typed link directions from the topology
+view. It does not parse symbolic names, inspect normalized IDs, materialize the
+relation, or construct route tables. The mesh-XY example applies escape-only
+XY routing to the existing concrete mesh and all-pairs traffic examples, then
+runs the ordinary validation pipeline to produce `ValidatedRouting`.
 
 ## Model
 

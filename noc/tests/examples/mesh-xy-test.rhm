@@ -1,0 +1,40 @@
+#lang rhombus
+// Checks the concrete mesh-XY example reaches validated routing and deterministic tables.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../std/topology/main.rhm" open
+  "../../examples/mesh-topology.rhm" open
+  "../../examples/mesh-traffic.rhm" open
+  "../../examples/mesh-xy.rhm" open
+
+def corner_route_ref = example_traffic.find(
+  fun (spec):
+    node_ref_equal(spec.source, example_mesh.node_at(0, 0)) && node_ref_equal(
+      spec.destination,
+      example_mesh.node_at(1, 1)
+    )
+).ref
+def corner_route = example_lowered_traffic.route_class(corner_route_ref)
+def source_id = example_topology.node_id(example_mesh.node_at(0, 0))
+def east_escape = example_topology.vc_id(
+  VCRef(
+    example_mesh.outgoing_link(example_mesh.node_at(0, 0), mesh_east),
+    "escape",
+    0
+  )
+)
+
+check:
+  example_xy_policy.describe() ~is "dimension-order(x,y; vc-groups=escape)"
+  example_xy_routing is_a ValidatedRouting ~is #true
+  example_xy_routing.route_classes.length() ~is 12
+  example_xy_routing.route_table.rows.length() ~is 28
+  example_xy_routing.route_row(
+    corner_route,
+    Injection(source_id)
+  ).allowed_vcs.map(
+    fun (vc): vc.describe()
+  ) ~is [east_escape.describe()]
