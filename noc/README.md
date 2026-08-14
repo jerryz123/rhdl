@@ -21,6 +21,8 @@ The current implementation provides:
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Inspectable routing-policy expressions with symbolic contexts and lowering to
   the existing normalized routing relation.
+- Resource-visible routing phases expressed as named VC-group transitions,
+  without hidden mutable packet state.
 - Separate standard definitions for line and rectangular-mesh topologies.
 - A standard all-pairs traffic definition that produces ordinary symbolic
   route-class specifications for any authored topology.
@@ -65,6 +67,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-authoring-test.
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-phase-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -72,6 +75,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.r
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-phased-xy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -186,6 +190,20 @@ query back into a symbolic context. It does not evaluate the finite query
 domain itself, construct route tables, or bypass the existing materializer and
 validation pipeline.
 
+Routing phases use the held VC group as explicit resource-visible history.
+`match_current_vc_groups` selects forwarding origins by that group,
+`inject_into_vc_groups` defines initial acquisition, and
+`transition_vc_groups` relates held and candidate groups. `routing_phase`
+attaches an inspectable name to a policy branch without changing its Boolean
+relation semantics. Lowering validates group references recursively through
+named phases and ordinary policy composition.
+
+This phase model deliberately adds no mutable phase field to a packet or route
+class. A phase change is a VC acquisition visible to the existing finite
+routing state and dependency graph. Unreachable phase branches are handled by
+the existing reachability pass, while a missing reachable transition remains
+a reachable-dead-end error.
+
 ## Standard routing policies
 
 Reusable topology-specific policies live under `noc/std/routing/`, outside
@@ -200,6 +218,13 @@ view. It does not parse symbolic names, inspect normalized IDs, materialize the
 relation, or construct route tables. The mesh-XY example applies escape-only
 XY routing to the existing concrete mesh and all-pairs traffic examples, then
 runs the ordinary validation pipeline to produce `ValidatedRouting`.
+
+The mesh-phased-XY example is a user-level composition rather than another
+core policy primitive. It uses `x-phase` VCs while consuming x displacement,
+irreversibly enters `y-phase` on the first y hop, and remains there. The example
+demonstrates phase inspection, raw-relation equivalence, reachable-dead-end
+diagnostics, and pruning of unreachable phase transitions under the current
+acyclic dependency proof.
 
 ## Model
 

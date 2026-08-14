@@ -22,6 +22,12 @@ fun topology_has_vc_group(topology_spec, name):
       link.vc_groups.find(fun (group): group.name == name) != #false
   ) != #false
 
+fun validate_vc_group_references(lowered_routes, names):
+  for (name in names):
+    unless topology_has_vc_group(lowered_routes.lowered_topology.spec, name)
+    | error(~who: #'lower_routing_policy,
+            "unknown VC group " ++ name)
+
 fun validate_policy_references(lowered_routes, policy):
   cond
   | policy is_a RouteClassPolicy:
@@ -30,17 +36,18 @@ fun validate_policy_references(lowered_routes, policy):
   | policy is_a CandidateLinkPolicy:
       for (ref in policy.refs):
         lowered_routes.lowered_topology.spec.find_link(ref)
+  | policy is_a CurrentVCGroupPolicy:
+      validate_vc_group_references(lowered_routes, policy.names)
   | policy is_a CandidateVCGroupPolicy:
-      for (name in policy.names):
-        unless topology_has_vc_group(lowered_routes.lowered_topology.spec, name)
-        | error(~who: #'lower_routing_policy,
-                "unknown VC group " ++ name)
+      validate_vc_group_references(lowered_routes, policy.names)
   | policy is_a UnionPolicy:
       for (child in policy.policies):
         validate_policy_references(lowered_routes, child)
   | policy is_a IntersectionPolicy:
       for (child in policy.policies):
         validate_policy_references(lowered_routes, child)
+  | policy is_a RoutingPhasePolicy:
+      validate_policy_references(lowered_routes, policy.policy)
   | ~else: #void
 
 fun symbolic_origin(lowered_topology, origin):

@@ -1,0 +1,235 @@
+#lang rhombus
+// Checks phased mesh routing, irreversible transitions, pruning, and raw equivalence.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../std/topology/main.rhm" open
+  "../../examples/mesh-phased-xy.rhm" open
+
+def x_group = "x-phase"
+def y_group = "y-phase"
+
+fun route_spec_between(source, destination):
+  phased_traffic.find(
+    fun (spec):
+      node_ref_equal(spec.source, source) && node_ref_equal(
+        spec.destination,
+        destination
+      )
+  )
+
+def corner_source = phased_mesh.node_at(0, 0)
+def corner_destination = phased_mesh.node_at(1, 1)
+def corner_spec = route_spec_between(corner_source, corner_destination)
+def corner_route = phased_routes.route_class(corner_spec.ref)
+def corner_source_id = phased_topology.node_id(corner_source)
+def east_00 = phased_mesh.outgoing_link(corner_source, mesh_east)
+def north_10 = phased_mesh.outgoing_link(
+  phased_mesh.node_at(1, 0),
+  mesh_north
+)
+def east_x = phased_topology.vc_id(VCRef(east_00, x_group, 0))
+def north_y = phased_topology.vc_id(VCRef(north_10, y_group, 0))
+
+check:
+  phased_xy_policy.describe().contains("phase(x:") ~is #true
+  phased_xy_policy.describe().contains("phase(enter-y:") ~is #true
+  phased_xy_policy.describe().contains("phase(y:") ~is #true
+  phased_routing is_a ValidatedRouting ~is #true
+  phased_routing.route_classes.length() ~is 12
+  phased_routing.route_row(
+    corner_route,
+    Injection(corner_source_id)
+  ).allowed_vcs.map(fun (vc): vc.describe()) ~is [east_x.describe()]
+  phased_routing.route_row(
+    corner_route,
+    HeldVC(east_x)
+  ).allowed_vcs.map(fun (vc): vc.describe()) ~is [north_y.describe()]
+
+// A y-phase packet at an x-misaligned node cannot return to x-phase.
+def return_context = RoutingContext(
+  corner_spec,
+  RoutingForwarding(
+    VCRef(
+      phased_mesh.outgoing_link(phased_mesh.node_at(0, 0), mesh_north),
+      y_group,
+      0
+    )
+  ),
+  phased_mesh.node_at(0, 1),
+  VCRef(
+    phased_mesh.outgoing_link(phased_mesh.node_at(0, 1), mesh_east),
+    x_group,
+    0
+  )
+)
+
+check:
+  routing_policy_result(phased_xy_policy, return_context) ~is #false
+
+// An independent raw callback must materialize exactly the same decisions and
+// produce exactly the same validated route table.
+fun raw_origin_node(origin):
+  if origin is_a Injection
+  | origin.node
+  | phased_topology.topology.find_vc_link(origin.vc).destination
+
+fun raw_current_group(origin):
+  if origin is_a Injection
+  | #false
+  | phased_topology.vc_ref(origin.vc).group
+
+fun raw_required_direction(current, destination):
+  cond
+  | current.x < destination.x: mesh_east
+  | current.x > destination.x: mesh_west
+  | current.y < destination.y: mesh_north
+  | current.y > destination.y: mesh_south
+  | ~else: #false
+
+fun raw_phased_xy(route_class, origin, candidate_vc):
+  def current = phased_mesh.coordinate_of(
+    phased_topology.node_ref(raw_origin_node(origin))
+  )
+  def destination = phased_mesh.coordinate_of(
+    phased_topology.node_ref(route_class.destination)
+  )
+  def candidate = phased_topology.vc_ref(candidate_vc)
+  def current_group = raw_current_group(origin)
+  def required = raw_required_direction(current, destination)
+  def x_active = current.x != destination.x
+  def origin_allowed:
+    if x_active
+    | origin is_a Injection || current_group == x_group
+    | origin is_a Injection || current_group == x_group || current_group == y_group
+  def candidate_group = if x_active | x_group | y_group
+  required != #false && origin_allowed && candidate.group == candidate_group && mesh_direction_equal(
+    required,
+    phased_mesh.direction_of(candidate.link)
+  )
+
+def raw_problem = RoutingProblem(
+  phased_topology.topology,
+  phased_routes.route_classes,
+  RoutingRelation(raw_phased_xy)
+)
+def raw_materialized = materialize_routing(raw_problem)
+def raw_routing = compile_routing(raw_problem)
+
+check:
+  raw_routing is_a ValidatedRouting ~is #true
+  phased_routing.materialized.describe() ~is raw_materialized.describe()
+  phased_routing.route_table.describe() ~is raw_routing.route_table.describe()
+
+def reversed_routes = lower_route_classes(
+  phased_topology,
+  phased_traffic.reverse()
+)
+def reversed_routing = compile_routing(
+  RoutingProblem(
+    phased_topology.topology,
+    reversed_routes.route_classes,
+    lower_routing_policy(reversed_routes, phased_xy_policy)
+  )
+)
+
+check:
+  reversed_routing is_a ValidatedRouting ~is #true
+  reversed_routing.route_table.describe() ~is phased_routing.route_table.describe()
+
+fun local_axis_step_policy(axis):
+  custom_policy(
+    axis ++ "-step",
+    fun (context):
+      def current = phased_mesh.coordinate_of(context.current_node)
+      def destination = phased_mesh.coordinate_of(
+        context.route_class.destination
+      )
+      def required:
+        cond
+        | axis == "x" && current.x < destination.x: mesh_east
+        | axis == "x" && current.x > destination.x: mesh_west
+        | axis == "y" && current.y < destination.y: mesh_north
+        | axis == "y" && current.y > destination.y: mesh_south
+        | ~else: #false
+      required != #false && mesh_direction_equal(
+        required,
+        phased_mesh.direction_of(context.candidate_link())
+      )
+  )
+
+def before_y = policy_union(
+  [injection_policy, match_current_vc_groups([x_group])]
+)
+def broken_x_only = routing_phase(
+  "x-only",
+  policy_intersection(
+    [before_y,
+     local_axis_step_policy("x"),
+     restrict_vc_groups([x_group])]
+  )
+)
+def corner_only_routes = lower_route_classes(
+  phased_topology,
+  [corner_spec]
+)
+
+check:
+  compile_routing(
+    RoutingProblem(
+      phased_topology.topology,
+      corner_only_routes.route_classes,
+      lower_routing_policy(corner_only_routes, broken_x_only)
+    )
+  ) ~throws "reachable dead end"
+
+// A return transition in a phase that cannot be reached is materialized but
+// excluded from reachability and therefore from the dependency proof.
+def horizontal_spec = route_spec_between(
+  phased_mesh.node_at(0, 0),
+  phased_mesh.node_at(1, 0)
+)
+def horizontal_routes = lower_route_classes(
+  phased_topology,
+  [horizontal_spec]
+)
+def x_only = routing_phase(
+  "x",
+  policy_intersection(
+    [before_y,
+     local_axis_step_policy("x"),
+     restrict_vc_groups([x_group])]
+  )
+)
+def unreachable_return = routing_phase(
+  "unreachable-return",
+  transition_vc_groups([y_group], [x_group])
+)
+def unreachable_policy = policy_union([x_only, unreachable_return])
+def unreachable_routing = compile_routing(
+  RoutingProblem(
+    phased_topology.topology,
+    horizontal_routes.route_classes,
+    lower_routing_policy(horizontal_routes, unreachable_policy)
+  )
+)
+
+fun y_to_x_decision(decision):
+  decision.origin is_a HeldVC && phased_topology.vc_ref(
+    decision.origin.vc
+  ).group == y_group && phased_topology.vc_ref(
+    decision.candidate_vc
+  ).group == x_group
+
+check:
+  unreachable_routing is_a ValidatedRouting ~is #true
+  unreachable_routing.materialized.decisions.filter(
+    ~keep:
+      fun (decision): decision.allowed && y_to_x_decision(decision)
+  ).length() > 0 ~is #true
+  unreachable_routing.reachable.routes[0].reachable_decisions.filter(
+    ~keep: y_to_x_decision
+  ) ~is []

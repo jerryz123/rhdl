@@ -17,9 +17,11 @@ export:
   InjectionPolicy
   ForwardingPolicy
   CandidateLinkPolicy
+  CurrentVCGroupPolicy
   CandidateVCGroupPolicy
   UnionPolicy
   IntersectionPolicy
+  RoutingPhasePolicy
   CustomPolicy
   allow_all
   deny_all
@@ -27,9 +29,13 @@ export:
   forwarding_policy
   match_route_classes
   select_candidate_links
+  match_current_vc_groups
   restrict_vc_groups
+  inject_into_vc_groups
+  transition_vc_groups
   policy_union
   policy_intersection
+  routing_phase
   custom_policy
   routing_policy_result
 
@@ -172,19 +178,39 @@ class CandidateLinkPolicy(refs):
       ", "
     ) ++ ")"
 
-fun require_nonempty_vc_group_names(names):
+fun require_nonempty_vc_group_names(who, subject, names):
   unless names is_a List && names.length() > 0
-  | error(~who: #'restrict_vc_groups,
-          "VC-group restriction must be a nonempty List")
+  | error(~who: who, subject ++ " must be a nonempty List")
   for (name in names):
     unless name is_a String && name.length() > 0 && !name.contains("/")
-    | error(~who: #'restrict_vc_groups,
-            "VC-group restriction must contain names without '/'")
+    | error(~who: who, subject ++ " must contain names without '/'")
+
+class CurrentVCGroupPolicy(names):
+  implements RoutingPolicy
+  constructor (names):
+    require_nonempty_vc_group_names(
+      #'match_current_vc_groups,
+      "current-VC-group match",
+      names
+    )
+    super(names.sort(fun (left, right): left < right))
+
+  override method allows(context):
+    context.origin is_a RoutingForwarding && names.find(
+      fun (name): name == context.origin.vc.group
+    ) != #false
+
+  override method describe():
+    "current-vc-group(" ++ String.join(names, ", ") ++ ")"
 
 class CandidateVCGroupPolicy(names):
   implements RoutingPolicy
   constructor (names):
-    require_nonempty_vc_group_names(names)
+    require_nonempty_vc_group_names(
+      #'restrict_vc_groups,
+      "VC-group restriction",
+      names
+    )
     super(names.sort(fun (left, right): left < right))
 
   override method allows(context):
@@ -239,6 +265,23 @@ class IntersectionPolicy(policies):
       ", "
     ) ++ ")"
 
+class RoutingPhasePolicy(name, policy):
+  implements RoutingPolicy
+  constructor (name, policy):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'routing_phase,
+            "routing-phase name must be a nonempty String")
+    unless policy is_a RoutingPolicy
+    | error(~who: #'routing_phase,
+            "routing phase must contain a RoutingPolicy")
+    super(name, policy)
+
+  override method allows(context):
+    routing_policy_result(policy, context)
+
+  override method describe():
+    "phase(" ++ name ++ ": " ++ policy.describe() ++ ")"
+
 class CustomPolicy(label, predicate):
   implements RoutingPolicy
   constructor (label, predicate):
@@ -260,7 +303,15 @@ def forwarding_policy = ForwardingPolicy()
 
 fun match_route_classes(refs): RouteClassPolicy(refs)
 fun select_candidate_links(refs): CandidateLinkPolicy(refs)
+fun match_current_vc_groups(names): CurrentVCGroupPolicy(names)
 fun restrict_vc_groups(names): CandidateVCGroupPolicy(names)
+fun inject_into_vc_groups(names):
+  policy_intersection([injection_policy, restrict_vc_groups(names)])
+fun transition_vc_groups(from_names, to_names):
+  policy_intersection(
+    [match_current_vc_groups(from_names), restrict_vc_groups(to_names)]
+  )
 fun policy_union(policies): UnionPolicy(policies)
 fun policy_intersection(policies): IntersectionPolicy(policies)
+fun routing_phase(name, policy): RoutingPhasePolicy(name, policy)
 fun custom_policy(label, predicate): CustomPolicy(label, predicate)

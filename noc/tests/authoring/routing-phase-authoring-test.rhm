@@ -1,0 +1,134 @@
+#lang rhombus
+// Checks resource-visible routing phases, VC-group transitions, and eager lowering validation.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+
+def source = NodeRef("source")
+def middle = NodeRef("middle")
+def destination = NodeRef("destination")
+def first_link = LinkRef("first")
+def second_link = LinkRef("second")
+def phase0 = "phase0"
+def phase1 = "phase1"
+def topology_spec = TopologySpec(
+  [source, middle, destination],
+  [directed_link(first_link,
+                 source,
+                 middle,
+                 [VCGroup(phase0, 1), VCGroup(phase1, 1)]),
+   directed_link(second_link,
+                 middle,
+                 destination,
+                 [VCGroup(phase0, 1), VCGroup(phase1, 1)])]
+)
+def lowered_topology = lower_topology(topology_spec)
+def route_ref = RouteClassRef("request")
+def route_spec = RouteClassSpec(route_ref, source, destination)
+def lowered_routes = lower_route_classes(lowered_topology, [route_spec])
+def route_class = lowered_routes.route_class(route_ref)
+
+def phase0_branch = routing_phase(
+  "phase0",
+  policy_union(
+    [inject_into_vc_groups([phase0]),
+     transition_vc_groups([phase0], [phase0])]
+  )
+)
+def phase1_branch = routing_phase(
+  "phase1",
+  policy_union(
+    [transition_vc_groups([phase0], [phase1]),
+     transition_vc_groups([phase1], [phase1])]
+  )
+)
+def legal_policy = policy_union([phase1_branch, phase0_branch])
+def relation = lower_routing_policy(lowered_routes, legal_policy)
+
+def source_id = lowered_topology.node_id(source)
+def first_phase0 = lowered_topology.vc_id(VCRef(first_link, phase0, 0))
+def first_phase1 = lowered_topology.vc_id(VCRef(first_link, phase1, 0))
+def second_phase0 = lowered_topology.vc_id(VCRef(second_link, phase0, 0))
+def second_phase1 = lowered_topology.vc_id(VCRef(second_link, phase1, 0))
+
+check:
+  match_current_vc_groups([phase1, phase0]).describe() ~is "current-vc-group(phase0, phase1)"
+  phase0_branch is_a RoutingPhasePolicy ~is #true
+  phase0_branch.name ~is "phase0"
+  phase0_branch.describe().contains("phase(phase0:") ~is #true
+  legal_policy.describe().contains("phase(phase0:") ~is #true
+  legal_policy.describe().contains("phase(phase1:") ~is #true
+
+// Injection selects the initial phase; forwarding transitions are determined
+// only by the held and candidate VC groups.
+check:
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    first_phase0
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    first_phase1
+  ) ~is #false
+  relation.allow(
+    route_class,
+    HeldVC(first_phase0),
+    second_phase0
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(first_phase0),
+    second_phase1
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(first_phase1),
+    second_phase1
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(first_phase1),
+    second_phase0
+  ) ~is #false
+
+def injection_context = RoutingContext(
+  route_spec,
+  RoutingInjection(source),
+  source,
+  VCRef(first_link, phase0, 0)
+)
+def forwarding_context = RoutingContext(
+  route_spec,
+  RoutingForwarding(VCRef(first_link, phase0, 0)),
+  middle,
+  VCRef(second_link, phase1, 0)
+)
+
+check:
+  routing_policy_result(match_current_vc_groups([phase0]), injection_context) ~is #false
+  routing_policy_result(match_current_vc_groups([phase0]), forwarding_context) ~is #true
+  routing_policy_result(inject_into_vc_groups([phase0]), injection_context) ~is #true
+  routing_policy_result(transition_vc_groups([phase0], [phase1]), forwarding_context) ~is #true
+
+check:
+  match_current_vc_groups([]) ~throws "nonempty List"
+  match_current_vc_groups(["bad/group"]) ~throws "names without '/'"
+  routing_phase("", allow_all) ~throws "nonempty String"
+  routing_phase("bad", "not a policy") ~throws "must contain a RoutingPolicy"
+  lower_routing_policy(
+    lowered_routes,
+    routing_phase(
+      "unknown source phase",
+      transition_vc_groups(["unknown"], [phase1])
+    )
+  ) ~throws "unknown VC group unknown"
+  lower_routing_policy(
+    lowered_routes,
+    routing_phase(
+      "unknown target phase",
+      transition_vc_groups([phase0], ["unknown"])
+    )
+  ) ~throws "unknown VC group unknown"
