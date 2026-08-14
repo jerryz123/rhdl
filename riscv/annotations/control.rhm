@@ -1,0 +1,210 @@
+#lang rhombus
+// Defines typed, composable microarchitectural control overlays for instruction catalogs.
+
+import:
+  "../model/instruction.rhm" open
+
+export:
+  ControlKey
+  ControlBinding
+  ControlRow
+  ControlLayer
+  AnnotatedInstruction
+  AnnotatedCatalog
+  control
+  annotate
+
+class _RequiredControl()
+def required_control = _RequiredControl()
+
+fun contains_identity(items, wanted):
+  items.find(fun (item): item === wanted)
+
+fun require_catalog_instruction(catalog, instruction, who):
+  unless instruction is_a InstructionSpec && contains_identity(
+    catalog.instructions,
+    instruction
+  )
+  | error(~who: who,
+          "control row instruction must belong to catalog " ++ catalog.name)
+  instruction
+
+// A key owns the validation and optional default for one independently
+// extensible control dimension. Identity, rather than its diagnostic name,
+// distinguishes keys created by unrelated extension libraries.
+class ControlKey(name, accepts, default):
+  implements Callable
+  constructor (name, accepts, ~default: default = required_control):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'ControlKey, "control key name must be a nonempty String")
+    unless accepts is_a Function
+    | error(~who: #'ControlKey, "control key validator must be a Function")
+    when !(default === required_control) && !accepts(default)
+    | error(~who: #'ControlKey,
+            "default value is invalid for control key " ++ name)
+    super(name, accepts, default)
+
+  method has_default():
+    !(default === required_control)
+
+  method require_value(value):
+    unless accepts(value)
+    | error(~who: #'ControlKey,
+            "invalid value for control key " ++ name)
+    value
+
+  override method call(value):
+    ControlBinding(this, value)
+
+class ControlBinding(key, value):
+  constructor (key, value):
+    unless key is_a ControlKey
+    | error(~who: #'ControlBinding, "control binding key must be a ControlKey")
+    super(key, key.require_value(value))
+
+class ControlRow(instruction, bindings):
+  constructor (instruction, bindings):
+    unless instruction is_a InstructionSpec
+    | error(~who: #'ControlRow,
+            "control row instruction must be an InstructionSpec")
+    unless bindings is_a List
+    | error(~who: #'ControlRow, "control row bindings must be a List")
+    for (binding in bindings):
+      unless binding is_a ControlBinding
+      | error(~who: #'ControlRow,
+              "control row must contain only ControlBinding values")
+      when bindings.filter(
+        ~keep: fun (candidate): candidate.key === binding.key
+      ).length() != 1
+      | error(~who: #'ControlRow,
+              String.append("duplicate control key ",
+                            binding.key.name,
+                            " for instruction ",
+                            instruction.name))
+    super(instruction, bindings)
+
+  method binding(key):
+    bindings.find(fun (candidate): candidate.key === key)
+
+fun control(instruction, binding, ...):
+  def supplied = [binding, ...]
+  def bindings:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  ControlRow(instruction, bindings)
+
+// A layer owns a disjoint set of keys. Rows may be sparse only where key
+// defaults make the omitted values unambiguous; bindings_for materializes a
+// complete value for every key and instruction.
+class ControlLayer(name, catalog, keys, rows):
+  constructor (name, catalog, keys, rows):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'ControlLayer,
+            "control layer name must be a nonempty String")
+    unless catalog is_a InstructionCatalog
+    | error(~who: #'ControlLayer,
+            "control layer catalog must be an InstructionCatalog")
+    unless keys is_a List && keys.length() > 0
+    | error(~who: #'ControlLayer,
+            "control layer keys must be a nonempty List")
+    for (key in keys):
+      unless key is_a ControlKey
+      | error(~who: #'ControlLayer,
+              "control layer keys must contain only ControlKey values")
+      when keys.filter(~keep: fun (candidate): candidate === key).length() != 1
+      | error(~who: #'ControlLayer,
+              "control layer repeats key " ++ key.name)
+    unless rows is_a List
+    | error(~who: #'ControlLayer, "control layer rows must be a List")
+    for (row in rows):
+      unless row is_a ControlRow
+      | error(~who: #'ControlLayer,
+              "control layer rows must contain only ControlRow values")
+      require_catalog_instruction(catalog, row.instruction, #'ControlLayer)
+      when rows.filter(
+        ~keep: fun (candidate): candidate.instruction === row.instruction
+      ).length() != 1
+      | error(~who: #'ControlLayer,
+              "duplicate control row for instruction " ++ row.instruction.name)
+      for (binding in row.bindings):
+        unless contains_identity(keys, binding.key)
+        | error(~who: #'ControlLayer,
+                "control row uses key outside layer: " ++ binding.key.name)
+    for (instruction in catalog.instructions):
+      def row = rows.find(
+        fun (candidate): candidate.instruction === instruction
+      )
+      for (key in keys):
+        unless (row && row.binding(key)) || key.has_default()
+        | error(~who: #'ControlLayer,
+                String.append("missing required control ",
+                              key.name,
+                              " for instruction ",
+                              instruction.name))
+    super(name, catalog, keys, rows)
+
+  method bindings_for(instruction):
+    require_catalog_instruction(catalog, instruction, #'bindings_for)
+    def row = rows.find(fun (candidate): candidate.instruction === instruction)
+    for List (key in keys):
+      def binding = if row | row.binding(key) | #false
+      if binding
+      | binding
+      | ControlBinding(key, key.default)
+
+class AnnotatedInstruction(instruction, controls):
+  method control(key):
+    unless key is_a ControlKey
+    | error(~who: #'control, "control lookup key must be a ControlKey")
+    def binding = controls.find(fun (candidate): candidate.key === key)
+    unless binding
+    | error(~who: #'control,
+            String.append("instruction ",
+                          instruction.name,
+                          " has no control key ",
+                          key.name))
+    binding.value
+
+// Composition is deliberately strict: layers may extend a catalog with new
+// nominal keys, but cannot silently replace controls owned by another layer.
+class AnnotatedCatalog(catalog, layers, instructions):
+  constructor (catalog, layers):
+    unless catalog is_a InstructionCatalog
+    | error(~who: #'AnnotatedCatalog,
+            "annotated catalog must wrap an InstructionCatalog")
+    unless layers is_a List && layers.length() > 0
+    | error(~who: #'AnnotatedCatalog,
+            "annotated catalog layers must be a nonempty List")
+    def mutable seen_keys = []
+    for (layer in layers):
+      unless layer is_a ControlLayer
+      | error(~who: #'AnnotatedCatalog,
+              "annotated catalog layers must contain only ControlLayer values")
+      unless layer.catalog === catalog
+      | error(~who: #'AnnotatedCatalog,
+              "all control layers must annotate the same catalog")
+      for (key in layer.keys):
+        when contains_identity(seen_keys, key)
+        | error(~who: #'AnnotatedCatalog,
+                "control key appears in multiple layers: " ++ key.name)
+        seen_keys := seen_keys ++ [key]
+    def instructions:
+      for List (instruction in catalog.instructions):
+        def mutable controls = []
+        for (layer in layers):
+          controls := controls ++ layer.bindings_for(instruction)
+        AnnotatedInstruction(instruction, controls)
+    super(catalog, layers, instructions)
+
+  method find(instruction_name):
+    def instruction = catalog.find(instruction_name)
+    instructions.find(fun (candidate): candidate.instruction === instruction)
+
+fun annotate(catalog, layer, ...):
+  def supplied = [layer, ...]
+  def layers:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  AnnotatedCatalog(catalog, layers)

@@ -5,9 +5,9 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(rg -n '^[[:space:]]+"[^"]*(rhdl/|circt)' riscv/model riscv/isa --glob '*.rhm' || true)"
+forbidden_imports="$(rg -n '^[[:space:]]+"[^"]*(rhdl/|circt)' riscv/model riscv/isa riscv/annotations --glob '*.rhm' || true)"
 if [[ -n "$forbidden_imports" ]]; then
-  echo "pure RISC-V model and ISA modules must not import RHDL or CIRCT" >&2
+  echo "pure RISC-V model, ISA, and annotation modules must not import RHDL or CIRCT" >&2
   echo "$forbidden_imports" >&2
   exit 1
 fi

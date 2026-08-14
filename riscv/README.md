@@ -2,18 +2,21 @@
 
 # RISC-V instruction model
 
-`riscv/` is a domain package for describing instruction encodings and decoded
-field layouts. It is intentionally separate from the RHDL implementation and
-standard library. The initial package contains no RTL generation, RHDL
-`Pattern`, `DecodeGen`, core IR, or CIRCT integration.
+`riscv/` is a domain package for describing instruction encodings, decoded
+field layouts, and typed host-side instruction annotations. It is intentionally
+separate from the RHDL implementation and standard library. The package
+contains no RTL generation, RHDL `Pattern`, `DecodeGen`, core IR, or CIRCT
+integration.
 
 ## Dependency boundary
 
-Files under `model/` and `isa/` use only ordinary Rhombus and modules in this
-package:
+Files under `model/`, `isa/`, and `annotations/` use only ordinary Rhombus and
+modules in this package:
 
 ```text
-riscv/isa --> riscv/model --> Rhombus
+riscv/isa ---------\
+                    > riscv/model --> Rhombus
+riscv/annotations -/
 ```
 
 Run the focused package checks from the repository root:
@@ -41,6 +44,13 @@ format. Every `InstructionSpec` proves that its fixed requirements and variable
 format fields are disjoint and together cover all 32 instruction bits. An
 `InstructionCatalog` requires unique names and pairwise-disjoint encodings.
 
+[`annotations/control.rhm`](annotations/control.rhm) attaches independently
+defined, typed control metadata without modifying the architectural catalog.
+Nominal callable `ControlKey` values validate their values and may provide
+defaults. A `ControlLayer` materializes a complete value for every owned key and
+instruction; `AnnotatedCatalog` composes layers only when their keys are
+disjoint. This deliberately prevents implicit last-layer-wins overrides.
+
 ## RV64I catalog
 
 [`isa/rv64i.rhm`](isa/rv64i.rhm) enumerates the 52 architectural instructions
@@ -54,8 +64,14 @@ add.encoding.value
 add.encoding.care
 add.operands
 add.immediate
-add.fields
+add.encoding_fields
 ```
+
+The architecture-facing `encoding_fields` are instruction bits, not generated
+control signals. Microarchitecture-specific operations, pipeline classes, and
+similar policy belong in control layers. See the executable
+[`riscv-control-annotations.rhm`](../examples/riscv-control-annotations.rhm)
+example.
 
 Assembler pseudoinstructions are deliberately excluded because they alias and
 overlap architectural encodings. Specialized aliases such as `FENCE.TSO`,

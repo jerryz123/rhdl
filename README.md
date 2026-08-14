@@ -115,7 +115,7 @@ Detailed documentation lives with the component that owns it:
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
-| Pure RISC-V instruction model and RV64I catalog | [`riscv/README.md`](riscv/README.md) |
+| Pure RISC-V instruction model, RV64I catalog, and typed control overlays | [`riscv/README.md`](riscv/README.md) |
 
 ## Current status
 
