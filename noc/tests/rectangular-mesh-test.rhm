@@ -1,0 +1,127 @@
+#lang rhombus
+// Checks rectangular-mesh generation, typed queries, prefixing, and normalized equivalence.
+
+import:
+  "../authoring/main.rhm" open
+
+def vcs = [VCGroup("escape", 1), VCGroup("adaptive", 2)]
+def mesh = rectangular_mesh(3, 2, vcs)
+def center = mesh.node_at(1, 0)
+def east = mesh.outgoing_link(center, mesh_east)
+def north = mesh.outgoing_link(center, mesh_north)
+def west = mesh.outgoing_link(center, mesh_west)
+def prefixed = mesh.prefix("cluster")
+def singleton = rectangular_mesh(1, 1, [VCGroup("escape", 1)])
+
+check:
+  mesh.width ~is 3
+  mesh.height ~is 2
+  mesh.spec.nodes.length() ~is 6
+  mesh.spec.links.length() ~is 14
+  center.describe() ~is "router[1,0]"
+  mesh.coordinate_of(center).describe() ~is "[1,0]"
+  east.describe() ~is "router[1,0]/east"
+  north.describe() ~is "router[1,0]/north"
+  west.describe() ~is "router[1,0]/west"
+  mesh.direction_of(east).describe() ~is "east"
+  mesh.direction_of(north).axis ~is "y"
+  mesh.direction_of(north).step ~is 1
+  mesh.outgoing_link(mesh.node_at(2, 0), mesh_east) ~is #false
+  mesh.outgoing_link(mesh.node_at(0, 0), mesh_west) ~is #false
+  mesh.outgoing_link(mesh.node_at(1, 1), mesh_north) ~is #false
+  mesh.outgoing_link(mesh.node_at(1, 0), mesh_south) ~is #false
+  mesh.inverse_link(east).describe() ~is "router[2,0]/west"
+  mesh.inverse_link(mesh.inverse_link(east)).describe() ~is east.describe()
+  singleton.spec.nodes.map(fun (node): node.describe()) ~is ["router[0,0]"]
+  singleton.spec.links ~is []
+  singleton.outgoing_link(singleton.node_at(0, 0), mesh_east) ~is #false
+  mesh.spec.find_link(east).vc_groups.map(
+    fun (group): group.name
+  ) ~is ["adaptive", "escape"]
+  mesh.spec.find_link(east).virtual_channels().map(
+    fun (vc): vc.describe()
+  ) ~is ["router[1,0]/east/adaptive[0]",
+         "router[1,0]/east/adaptive[1]",
+         "router[1,0]/east/escape[0]"]
+
+check:
+  prefixed.spec.nodes.length() ~is 6
+  prefixed.spec.links.length() ~is 14
+  prefixed.node_at(1, 0).describe() ~is "cluster/router[1,0]"
+  prefixed.coordinate_of(
+    NodeRef(["cluster", "router[1,0]"])
+  ).describe() ~is "[1,0]"
+  prefixed.outgoing_link(
+    prefixed.node_at(1, 0),
+    mesh_east
+  ).describe() ~is "cluster/router[1,0]/east"
+  prefixed.direction_of(
+    LinkRef(["cluster", "router[1,0]", "north"])
+  ).describe() ~is "north"
+  prefixed.inverse_link(
+    LinkRef(["cluster", "router[1,0]", "east"])
+  ).describe() ~is "cluster/router[2,0]/west"
+
+// A generated 2x1 mesh is exactly two explicitly connected routers.
+def left = NodeRef("router[0,0]")
+def right = NodeRef("router[1,0]")
+def explicit_mesh = TopologySpec(
+  [right, left],
+  bidirectional_link(
+    LinkRef(["router[0,0]", "east"]),
+    LinkRef(["router[1,0]", "west"]),
+    left,
+    right,
+    vcs
+  )
+)
+def generated_mesh = rectangular_mesh(2, 1, vcs)
+def explicit_lowered = lower_topology(explicit_mesh)
+def generated_lowered = lower_topology(generated_mesh.spec)
+
+check:
+  explicit_lowered.topology.describe() ~is generated_lowered.topology.describe()
+  explicit_lowered.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  explicit_lowered.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  explicit_lowered.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+
+// Every generated directed edge has the reverse edge promised by the view.
+def all_links_have_inverses = mesh.spec.links.filter(
+  ~keep:
+    fun (link):
+      mesh.inverse_link(mesh.inverse_link(link.ref)).describe() == link.ref.describe()
+)
+
+check:
+  all_links_have_inverses.length() ~is mesh.spec.links.length()
+
+check:
+  MeshCoordinate(-1, 0) ~throws "nonnegative host Int"
+  MeshDirection("z", 1) ~throws "axis must be 'x' or 'y'"
+  MeshDirection("x", 0) ~throws "step must be -1 or 1"
+  rectangular_mesh(0, 2, vcs) ~throws "positive host Int"
+  rectangular_mesh(2, "two", vcs) ~throws "positive host Int"
+  rectangular_mesh(1, 1, []) ~throws "nonempty List"
+  rectangular_mesh(1, 1, ["not a group"]) ~throws "only VCGroup"
+  rectangular_mesh(
+    1,
+    1,
+    [VCGroup("escape", 1), VCGroup("escape", 2)]
+  ) ~throws "duplicate VC group escape"
+  mesh.node_at(3, 0) ~throws "coordinate outside mesh [3,0]"
+  mesh.coordinate_of(NodeRef("unknown")) ~throws "node is not in mesh unknown"
+  mesh.direction_of(LinkRef("unknown")) ~throws "link is not in mesh unknown"
+  mesh.outgoing_link(center, "east") ~throws "expected a MeshDirection"
+  mesh.inverse_link(LinkRef("unknown")) ~throws "link is not in mesh unknown"

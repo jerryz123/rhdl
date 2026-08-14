@@ -18,6 +18,8 @@ The current implementation provides:
   identity-provenance lookups.
 - Hierarchical prefixing and collision-checked topology composition.
 - Explicit directed and bidirectional link helpers and line generators.
+- Rectangular meshes with typed coordinate, direction, adjacency, and inverse
+  link queries that survive hierarchical prefixing.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -53,6 +55,7 @@ Run the focused checks from the repository root:
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-builders-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -93,6 +96,14 @@ canonical order.
 standard generators, `directed_line` and `bidirectional_line`, use stable
 `node[N]`, `forward[N]`, and `reverse[N]` local names and can be instantiated
 multiple times through prefixing.
+
+A `RectangularMesh` is a typed view over an ordinary `TopologySpec`. It names
+routers by coordinate and records each link's source coordinate, destination
+coordinate, and direction. Positive x is east and positive y is north. Queries
+such as `node_at`, `coordinate_of`, `direction_of`, `outgoing_link`, and
+`inverse_link` let future routing policies use topology semantics without
+parsing names or inspecting normalized IDs. Prefixing a mesh qualifies its
+symbolic handles while preserving the same coordinates and directions.
 
 ## Model
 

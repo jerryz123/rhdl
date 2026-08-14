@@ -1,0 +1,248 @@
+#lang rhombus
+// Builds rectangular meshes with typed coordinate and directed-adjacency queries.
+
+import:
+  "names.rhm" open
+  "topology-spec.rhm" open
+  "topology-builders.rhm" open
+
+export:
+  MeshCoordinate
+  MeshDirection
+  MeshNodeBinding
+  MeshLinkBinding
+  RectangularMesh
+  mesh_east
+  mesh_west
+  mesh_north
+  mesh_south
+  mesh_coordinate_equal
+  mesh_direction_equal
+  mesh_node_ref
+  mesh_link_ref
+  rectangular_mesh
+
+class MeshCoordinate(x, y):
+  constructor (x, y):
+    unless x is_a Int && x >= 0 && y is_a Int && y >= 0
+    | error(~who: #'MeshCoordinate,
+            "mesh coordinates must be nonnegative host Int values")
+    super(x, y)
+
+  method describe():
+    "[" ++ to_string(x) ++ "," ++ to_string(y) ++ "]"
+
+class MeshDirection(axis, step):
+  constructor (axis, step):
+    unless axis == "x" || axis == "y"
+    | error(~who: #'MeshDirection, "mesh direction axis must be 'x' or 'y'")
+    unless step == -1 || step == 1
+    | error(~who: #'MeshDirection, "mesh direction step must be -1 or 1")
+    super(axis, step)
+
+  method describe():
+    cond
+    | axis == "x" && step == 1: "east"
+    | axis == "x": "west"
+    | step == 1: "north"
+    | ~else: "south"
+
+  method opposite():
+    MeshDirection(axis, -step)
+
+def mesh_east = MeshDirection("x", 1)
+def mesh_west = MeshDirection("x", -1)
+def mesh_north = MeshDirection("y", 1)
+def mesh_south = MeshDirection("y", -1)
+
+fun mesh_coordinate_equal(left, right):
+  left is_a MeshCoordinate && right is_a MeshCoordinate && left.x == right.x && left.y == right.y
+
+fun mesh_direction_equal(left, right):
+  left is_a MeshDirection && right is_a MeshDirection && left.axis == right.axis && left.step == right.step
+
+fun mesh_coordinate_less(left, right):
+  if left.x == right.x
+  | left.y < right.y
+  | left.x < right.x
+
+fun require_mesh_coordinate(who, coordinate):
+  unless coordinate is_a MeshCoordinate
+  | error(~who: who, "expected a MeshCoordinate")
+
+fun require_mesh_direction(who, direction):
+  unless direction is_a MeshDirection
+  | error(~who: who, "expected a MeshDirection")
+
+fun mesh_node_ref(x, y):
+  def coordinate = MeshCoordinate(x, y)
+  NodeRef("router" ++ coordinate.describe())
+
+fun mesh_link_ref(source, direction):
+  require_mesh_coordinate(#'mesh_link_ref, source)
+  require_mesh_direction(#'mesh_link_ref, direction)
+  LinkRef(["router" ++ source.describe(), direction.describe()])
+
+class MeshNodeBinding(coordinate, ref)
+class MeshLinkBinding(source, destination, direction, ref)
+
+fun find_mesh_node_by_coordinate(bindings, coordinate):
+  bindings.find(
+    fun (binding): mesh_coordinate_equal(binding.coordinate, coordinate)
+  )
+
+fun find_mesh_node_by_ref(bindings, ref):
+  bindings.find(fun (binding): node_ref_equal(binding.ref, ref))
+
+fun find_mesh_link_by_ref(bindings, ref):
+  bindings.find(fun (binding): link_ref_equal(binding.ref, ref))
+
+fun find_outgoing_mesh_link(bindings, source, direction):
+  bindings.find(
+    fun (binding):
+      mesh_coordinate_equal(binding.source, source) && mesh_direction_equal(binding.direction, direction)
+  )
+
+class RectangularMesh(width,
+                      height,
+                      spec,
+                      node_bindings,
+                      link_bindings):
+  method node_at(x, y):
+    def coordinate = MeshCoordinate(x, y)
+    def found = find_mesh_node_by_coordinate(node_bindings, coordinate)
+    unless found
+    | error(~who: #'node_at,
+            "coordinate outside mesh " ++ coordinate.describe())
+    found.ref
+
+  method coordinate_of(ref):
+    unless ref is_a NodeRef
+    | error(~who: #'coordinate_of, "expected a NodeRef")
+    def found = find_mesh_node_by_ref(node_bindings, ref)
+    unless found
+    | error(~who: #'coordinate_of, "node is not in mesh " ++ ref.describe())
+    found.coordinate
+
+  method direction_of(ref):
+    unless ref is_a LinkRef
+    | error(~who: #'direction_of, "expected a LinkRef")
+    def found = find_mesh_link_by_ref(link_bindings, ref)
+    unless found
+    | error(~who: #'direction_of, "link is not in mesh " ++ ref.describe())
+    found.direction
+
+  method outgoing_link(node, direction):
+    require_mesh_direction(#'outgoing_link, direction)
+    def coordinate = coordinate_of(node)
+    def found = find_outgoing_mesh_link(link_bindings, coordinate, direction)
+    if found | found.ref | #false
+
+  method inverse_link(ref):
+    unless ref is_a LinkRef
+    | error(~who: #'inverse_link, "expected a LinkRef")
+    def found = find_mesh_link_by_ref(link_bindings, ref)
+    unless found
+    | error(~who: #'inverse_link, "link is not in mesh " ++ ref.describe())
+    def inverse = find_outgoing_mesh_link(
+      link_bindings,
+      found.destination,
+      found.direction.opposite()
+    )
+    unless inverse
+    | error(~who: #'inverse_link,
+            "mesh link has no inverse " ++ ref.describe())
+    inverse.ref
+
+  method prefix(prefix):
+    def prefixed_spec = prefix_topology(prefix, spec)
+    def prefixed_nodes = node_bindings.map(
+      fun (binding):
+        MeshNodeBinding(binding.coordinate,
+                        prefix_node_ref(prefix, binding.ref))
+    )
+    def prefixed_links = link_bindings.map(
+      fun (binding):
+        MeshLinkBinding(binding.source,
+                        binding.destination,
+                        binding.direction,
+                        prefix_link_ref(prefix, binding.ref))
+    )
+    RectangularMesh(width,
+                    height,
+                    prefixed_spec,
+                    prefixed_nodes,
+                    prefixed_links)
+
+fun require_mesh_vc_groups(vc_groups):
+  unless vc_groups is_a List && vc_groups.length() > 0
+  | error(~who: #'rectangular_mesh,
+          "mesh VC groups must be a nonempty List")
+  for (group in vc_groups):
+    unless group is_a VCGroup
+    | error(~who: #'rectangular_mesh,
+            "mesh VC groups must contain only VCGroup values")
+    when vc_groups.filter(
+      ~keep: fun (candidate): candidate.name == group.name
+    ).length() > 1
+    | error(~who: #'rectangular_mesh,
+            "duplicate VC group " ++ group.name)
+
+fun rectangular_mesh(width, height, vc_groups):
+  unless width is_a Int && width > 0 && height is_a Int && height > 0
+  | error(~who: #'rectangular_mesh,
+          "mesh width and height must be positive host Int values")
+  require_mesh_vc_groups(vc_groups)
+
+  def mutable node_bindings = []
+  for (x in 0..width):
+    for (y in 0..height):
+      def coordinate = MeshCoordinate(x, y)
+      node_bindings := node_bindings ++ [
+        MeshNodeBinding(coordinate, mesh_node_ref(x, y))
+      ]
+
+  def mutable link_bindings = []
+  fun add_link(source, destination, direction):
+    link_bindings := link_bindings ++ [
+      MeshLinkBinding(source,
+                      destination,
+                      direction,
+                      mesh_link_ref(source, direction))
+    ]
+
+  for (x in 0..width):
+    for (y in 0..height):
+      def source = MeshCoordinate(x, y)
+      when x + 1 < width
+      | block:
+          def east = MeshCoordinate(x + 1, y)
+          add_link(source, east, mesh_east)
+          add_link(east, source, mesh_west)
+      when y + 1 < height
+      | block:
+          def north = MeshCoordinate(x, y + 1)
+          add_link(source, north, mesh_north)
+          add_link(north, source, mesh_south)
+
+  def links = link_bindings.map(
+    fun (binding):
+      directed_link(
+        binding.ref,
+        find_mesh_node_by_coordinate(node_bindings, binding.source).ref,
+        find_mesh_node_by_coordinate(node_bindings, binding.destination).ref,
+        vc_groups
+      )
+  )
+  RectangularMesh(
+    width,
+    height,
+    TopologySpec(node_bindings.map(fun (binding): binding.ref), links),
+    node_bindings.sort(
+      fun (left, right):
+        mesh_coordinate_less(left.coordinate, right.coordinate)
+    ),
+    link_bindings.sort(
+      fun (left, right): link_ref_less(left.ref, right.ref)
+    )
+  )
