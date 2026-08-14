@@ -1263,6 +1263,7 @@ class Builder(design):
                      clock,
                      has_read = #true,
                      has_write = #true,
+                     has_read_write = #false,
                      location = Location(),
                      origin = Origin("synchronous memory", name)):
     ensure_module_in_design(design, module_def, #'sync_memory)
@@ -1275,8 +1276,12 @@ class Builder(design):
     ensure_value_in(module_def, clock, #'sync_memory)
     unless clock_type(clock.type)
     | fail(#'sync_memory, "synchronous memory clock must be Clock")
-    unless has_read is_a Boolean && has_write is_a Boolean && (has_read || has_write)
-    | fail(#'sync_memory, "synchronous memory requires a read or write port")
+    unless has_read is_a Boolean && has_write is_a Boolean && has_read_write is_a Boolean && (has_read || has_write || has_read_write)
+    | fail(#'sync_memory,
+           "synchronous memory requires a read, write, or read-write port")
+    when has_read_write && (has_read || has_write)
+    | fail(#'sync_memory,
+           "a read-write port cannot be combined with separate read or write ports yet")
     def operation_id = design.fresh_id()
     def address_type = Bits(memory_address_width(depth))
     def mutable places = []
@@ -1324,6 +1329,42 @@ class Builder(design):
           places := places ++ [address, data, enable]
           SyncMemoryWritePort(address, data, enable)
       | #false
+    def read_write_port:
+      if has_read_write
+      | block:
+          def address = Place(design.fresh_id(),
+                              name ++ ".read_write.address",
+                              address_type,
+                              module_def,
+                              operation_id)
+          def enable = Place(design.fresh_id(),
+                             name ++ ".read_write.enable",
+                             Bits(1),
+                             module_def,
+                             operation_id)
+          def write = Place(design.fresh_id(),
+                            name ++ ".read_write.write",
+                            Bits(1),
+                            module_def,
+                            operation_id)
+          def write_data = Place(design.fresh_id(),
+                                 name ++ ".read_write.write_data",
+                                 element_type,
+                                 module_def,
+                                 operation_id)
+          def read_data = Value(design.fresh_id(),
+                                name ++ ".read_write.read_data",
+                                element_type,
+                                module_def,
+                                operation_id)
+          places := places ++ [address, enable, write, write_data]
+          results := results ++ [read_data]
+          SyncMemoryReadWritePort(address,
+                                  enable,
+                                  write,
+                                  write_data,
+                                  read_data)
+      | #false
     def operation = Operation(operation_id,
                               "rtl.sync_memory",
                               module_def,
@@ -1334,7 +1375,8 @@ class Builder(design):
                                "depth": depth,
                                "element_type": element_type,
                                "has_read": has_read,
-                               "has_write": has_write},
+                               "has_write": has_write,
+                               "has_read_write": has_read_write},
                               location,
                               origin)
     clock.add_user(operation_id)
@@ -1346,8 +1388,9 @@ class Builder(design):
                depth,
                element_type,
                clock,
-               read_port,
-               write_port)
+               if read_port | [read_port] | [],
+               if write_port | [write_port] | [],
+               if read_write_port | [read_write_port] | [])
 
   method register(module_def,
                   name,

@@ -61,7 +61,7 @@ IR and lower through CIRCT type aliases.
 | `rtl.memory` | `seq.hlmem` |
 | `rtl.memory_read_async` | latency-zero `seq.read` |
 | `rtl.memory_write` | latency-one `seq.write` |
-| `rtl.sync_memory` | one `seq.hlmem` with fixed latency-one read and write ports |
+| `rtl.sync_memory` | `seq.firmem` with native read, write, or shared read-write ports |
 | `rtl.wire` | alias to the wire's driver |
 | `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
 | `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
@@ -74,6 +74,12 @@ semantics.
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend
 error rather than leaking CIRCT decisions into core schemas.
+
+Synchronous-memory element types are packed to the integer width required by
+`seq.firmem` and bitcast back at port boundaries. CIRCT's generated-memory
+flow preserves the declared physical topology, including native 1RW mode and
+enable signals, before producing its simulation SystemVerilog module. The
+older asynchronous-read `Memory` resource continues to use `seq.hlmem`.
 
 `sv.constantX` carries `rtl.dont_care` through CIRCT and Verilog export. Its
 use here does not give RHDL four-state value semantics: the public operation

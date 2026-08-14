@@ -272,24 +272,30 @@ fun check_operation_types(module_def, operation, schema):
       def element_type = operation.attribute("element_type", #false)
       def has_read = operation.attribute("has_read", #false)
       def has_write = operation.attribute("has_write", #false)
+      def has_read_write = operation.attribute("has_read_write", #false)
       unless depth is_a Int && depth > 0
       | fail_operation(operation, "synchronous memory depth must be positive")
       unless data_type(element_type) && type_well_formed(element_type)
       | fail_operation(operation, "synchronous memory element type must be a DataType")
-      unless has_read is_a Boolean && has_write is_a Boolean && (has_read || has_write)
-      | fail_operation(operation, "synchronous memory requires a read or write port")
+      unless has_read is_a Boolean && has_write is_a Boolean && has_read_write is_a Boolean && (has_read || has_write || has_read_write)
+      | fail_operation(operation,
+                       "synchronous memory requires a read, write, or read-write port")
+      when has_read_write && (has_read || has_write)
+      | fail_operation(operation,
+                       "a read-write port cannot be combined with separate read or write ports yet")
       unless clock_type(operation.operands[0].type)
       | fail_operation(operation, "synchronous memory clock must be Clock")
-      def expected_places = (if has_read | 2 | 0) + (if has_write | 3 | 0)
-      def expected_results = if has_read | 1 | 0
+      def expected_places = (if has_read | 2 | 0) + (if has_write | 3 | 0) + (if has_read_write | 4 | 0)
+      def expected_results = (if has_read | 1 | 0) + (if has_read_write | 1 | 0)
       unless operation.places.length() == expected_places && operation.results.length() == expected_results
       | fail_operation(operation, "synchronous memory port shape is malformed")
       def address_width = memory_address_width(depth)
       def mutable place_index = 0
+      def mutable result_index = 0
       when has_read
       | def address = operation.places[place_index]
         def enable = operation.places[place_index + 1]
-        def data = operation.results[0]
+        def data = operation.results[result_index]
         unless bits_type(address.type) && address.type.width == address_width
         | fail_operation(operation, "synchronous memory read address has the wrong width")
         unless flat_data_type(enable.type) && data_width(enable.type) == 1
@@ -297,6 +303,7 @@ fun check_operation_types(module_def, operation, schema):
         unless type_equal(data.type, element_type)
         | fail_operation(operation, "synchronous memory read data has the wrong type")
         place_index := place_index + 2
+        result_index := result_index + 1
       when has_write
       | def address = operation.places[place_index]
         def data = operation.places[place_index + 1]
@@ -307,6 +314,28 @@ fun check_operation_types(module_def, operation, schema):
         | fail_operation(operation, "synchronous memory write data has the wrong type")
         unless flat_data_type(enable.type) && data_width(enable.type) == 1
         | fail_operation(operation, "synchronous memory write enable must be one bit")
+        place_index := place_index + 3
+      when has_read_write
+      | def address = operation.places[place_index]
+        def enable = operation.places[place_index + 1]
+        def write = operation.places[place_index + 2]
+        def write_data = operation.places[place_index + 3]
+        def read_data = operation.results[result_index]
+        unless bits_type(address.type) && address.type.width == address_width
+        | fail_operation(operation,
+                         "synchronous memory read-write address has the wrong width")
+        unless flat_data_type(enable.type) && data_width(enable.type) == 1
+        | fail_operation(operation,
+                         "synchronous memory read-write enable must be one bit")
+        unless flat_data_type(write.type) && data_width(write.type) == 1
+        | fail_operation(operation,
+                         "synchronous memory read-write selector must be one bit")
+        unless type_equal(write_data.type, element_type)
+        | fail_operation(operation,
+                         "synchronous memory read-write input data has the wrong type")
+        unless type_equal(read_data.type, element_type)
+        | fail_operation(operation,
+                         "synchronous memory read-write output data has the wrong type")
   | "dpi_call" || "dpi_register":
       def dpi_import = operation.attribute("dpi_import", #false)
       unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && contains_identity(module_def.design.dpi_imports, dpi_import)

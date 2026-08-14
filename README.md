@@ -188,8 +188,8 @@ implemented contracts without maintaining separate milestone lists.
 - General last-connect and unordered multiple-driver semantics
 - Automatic module-specialization deduplication
 - Distinct `UInt` and `SInt`, implicit widths, and general width inference
-- Memory initialization, masks, multi-port synchronous memories, combined
-  read/write ports, and defined collisions
+- Memory initialization, masks, general multi-port synchronous memories, and
+  defined inter-port collisions
 - Asynchronous or active-low reset and multi-domain analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects

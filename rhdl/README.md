@@ -94,7 +94,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `bundle.rhm` | Bundle declarations, runtime records, recursive record literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
-| `sync-memory.rhm` | Circuit-shaped synchronous memories with fixed explicit read and write ports | core IR, kernel, clocking support, field support |
+| `sync-memory.rhm` | Circuit-shaped synchronous memories with fixed read, write, and shared read-write ports | core IR, kernel, clocking support, field support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
 | `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |

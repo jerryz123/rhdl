@@ -290,42 +290,103 @@ fun emit_memory_write(operation):
                 " {latency = 1 : i64} : ", circt_memory_type(memory))
 
 fun sync_memory_type(operation):
-  String.append("!seq.hlmem<", to_string(operation.attribute("depth")), "x",
-                circt_type(operation.attribute("element_type")), ">")
+  def width = packed_width(operation.attribute("element_type"))
+  unless width is_a Int && width > 0
+  | error(~who: #'emit_circt,
+          "synchronous memory element type must have a packed width")
+  String.append("!seq.firmem<", to_string(operation.attribute("depth")),
+                " x ", to_string(width), ">")
 
 fun emit_sync_memory(operation):
   def clock_ref = "%__rhdl_sync_memory_clock_" ++ to_string(operation.id)
-  def reset_ref = "%__rhdl_sync_memory_reset_" ++ to_string(operation.id)
-  def memory_ref = "%__rhdl_sync_memory_" ++ to_string(operation.id)
+  def memory_ref = "%" ++ operation.attribute("name")
   def memory_type = sync_memory_type(operation)
+  def element_type = operation.attribute("element_type")
+  def packed_type = "i" ++ to_string(packed_width(element_type))
+  def flat_element = flat_data_type(element_type)
   def mutable place_index = 0
+  def mutable result_index = 0
   def mutable port_operations = []
   when operation.attribute("has_read")
   | def address = operation.places[place_index]
     def enable = operation.places[place_index + 1]
+    def result = operation.results[result_index]
+    def port_result_ref:
+      if flat_element
+      | value_ref(result)
+      | "%__rhdl_sync_memory_read_data_" ++ to_string(operation.id)
     port_operations := port_operations ++ [
-      String.append("    ", value_ref(operation.results[0]), " = seq.read ",
-                    memory_ref, "[", value_ref(address.driver), "] rden ",
-                    value_ref(enable.driver),
-                    " {latency = 1 : i64} : ", memory_type)
+      String.append("    ", port_result_ref,
+                    " = seq.firmem.read_port ", memory_ref, "[",
+                    value_ref(address.driver), "], clock ", clock_ref,
+                    " enable ", value_ref(enable.driver), " : ", memory_type)
     ]
+    unless flat_element
+    | port_operations := port_operations ++ [
+        String.append("    ", value_ref(result), " = hw.bitcast ",
+                      port_result_ref, " : (", packed_type, ") -> ",
+                      circt_type(element_type))
+      ]
     place_index := place_index + 2
+    result_index := result_index + 1
   when operation.attribute("has_write")
   | def address = operation.places[place_index]
     def data = operation.places[place_index + 1]
     def enable = operation.places[place_index + 2]
+    def port_data_ref:
+      if flat_element
+      | value_ref(data.driver)
+      | "%__rhdl_sync_memory_write_data_" ++ to_string(operation.id)
+    unless flat_element
+    | port_operations := port_operations ++ [
+        String.append("    ", port_data_ref, " = hw.bitcast ",
+                      value_ref(data.driver), " : (", circt_type(element_type),
+                      ") -> ", packed_type)
+      ]
     port_operations := port_operations ++ [
-      String.append("    seq.write ", memory_ref, "[",
-                    value_ref(address.driver), "] ", value_ref(data.driver),
-                    " wren ", value_ref(enable.driver),
-                    " {latency = 1 : i64} : ", memory_type)
+      String.append("    seq.firmem.write_port ", memory_ref, "[",
+                    value_ref(address.driver), "] = ", port_data_ref,
+                    ", clock ", clock_ref, " enable ",
+                    value_ref(enable.driver), " : ", memory_type)
     ]
+    place_index := place_index + 3
+  when operation.attribute("has_read_write")
+  | def address = operation.places[place_index]
+    def enable = operation.places[place_index + 1]
+    def write = operation.places[place_index + 2]
+    def write_data = operation.places[place_index + 3]
+    def read_data = operation.results[result_index]
+    def port_write_data_ref:
+      if flat_element
+      | value_ref(write_data.driver)
+      | "%__rhdl_sync_memory_read_write_input_" ++ to_string(operation.id)
+    def port_read_data_ref:
+      if flat_element
+      | value_ref(read_data)
+      | "%__rhdl_sync_memory_read_write_output_" ++ to_string(operation.id)
+    unless flat_element
+    | port_operations := port_operations ++ [
+        String.append("    ", port_write_data_ref, " = hw.bitcast ",
+                      value_ref(write_data.driver), " : (",
+                      circt_type(element_type), ") -> ", packed_type)
+      ]
+    port_operations := port_operations ++ [
+      String.append("    ", port_read_data_ref,
+                    " = seq.firmem.read_write_port ", memory_ref, "[",
+                    value_ref(address.driver), "] = ", port_write_data_ref,
+                    " if ", value_ref(write.driver), ", clock ", clock_ref,
+                    " enable ", value_ref(enable.driver), " : ", memory_type)
+    ]
+    unless flat_element
+    | port_operations := port_operations ++ [
+        String.append("    ", value_ref(read_data), " = hw.bitcast ",
+                      port_read_data_ref, " : (", packed_type, ") -> ",
+                      circt_type(element_type))
+      ]
   String.append("    ", clock_ref, " = seq.to_clock ",
                 value_ref(operation.operands[0]), "\n",
-                "    ", reset_ref, " = hw.constant 0 : i1\n",
-                "    ", memory_ref, " = seq.hlmem @",
-                operation.attribute("name"), " ", clock_ref, ", ", reset_ref,
-                " : ", memory_type,
+                "    ", memory_ref,
+                " = seq.firmem 1, 1, undefined, undefined : ", memory_type,
                 if port_operations.length() == 0
                 | ""
                 | "\n" ++ String.join(port_operations, "\n"))

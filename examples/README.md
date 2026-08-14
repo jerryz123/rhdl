@@ -79,6 +79,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`stack.rhdl`](stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
 | [`async-read-memory.rhdl`](async-read-memory.rhdl) | Asynchronous reads and synchronous writes |
 | [`sync-memory.rhdl`](sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
+| [`sync-memory-1rw.rhdl`](sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
 | [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
 | [`width-ops.rhdl`](width-ops.rhdl) | Concatenation, slicing, and explicit width changes |

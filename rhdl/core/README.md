@@ -138,7 +138,7 @@ memory_read_async(Memory<T>, address)       -> T
 memory_write(Memory<T>, address, T,
              Clock, one-bit enable)         -> void
 sync_memory(depth, T: DataType, Clock,
-            read?, write?)                  -> SyncMemory<T>
+            read?, write?, read_write?)     -> SyncMemory<T>
 dpi_call(procedure, Clock, enable, args...) -> void
 dpi_register(function, Clock, enable,
              args...)                       -> one or more flat result types
@@ -182,16 +182,23 @@ one clock. Address dependencies through asynchronous reads participate in
 combinational-cycle checking.
 
 A `SyncMemory` is a distinct circuit-shaped primitive, not an indexed
-`Memory`. It owns one clock and an optional fixed `read` port, `write` port, or
-both. A read port has driveable `address` and one-bit `enable` fields plus a
-readable `data` field; a write port has driveable `address`, `data`, and
-one-bit `enable` fields. Addresses are exactly `Bits(index_width(depth))`.
+`Memory`. It owns one clock and typed collections of read, write, and shared
+read-write ports. The current Builder admits 1R, 1W, 1R1W, and 1RW shapes; the
+collections preserve the physical port kinds without yet exposing general
+multi-port construction.
+
+A read port has driveable `address` and one-bit `enable` fields plus readable
+`data`. A write port has driveable `address`, `data`, and one-bit `enable`. A
+shared read-write port has driveable `address`, `enable`, one-bit `write`, and
+`write_data` fields plus readable `read_data`. With an enabled shared port,
+`write = 0` selects a read and `write = 1` selects a write. Addresses are
+exactly `Bits(index_width(depth))`.
 
 An enabled read presents its data one rising edge after its address is
-sampled. The output while read enable is false is unspecified. Initial
-contents, out-of-range addresses, and same-cycle read/write collisions are
-unspecified. The primitive has no reset, initialization, masks, inferred
-ports, or direct indexing.
+sampled. Read output while its enable is false, or after a shared-port write,
+is unspecified. Initial contents, out-of-range addresses, and collisions
+between separate ports are unspecified. The primitive has no reset,
+initialization, masks, inferred ports, or direct indexing.
 
 ### DPI simulation operations
 

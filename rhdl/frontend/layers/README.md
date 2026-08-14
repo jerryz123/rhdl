@@ -22,7 +22,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
 | [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
 | [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
-| [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed explicit ports |
+| [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed separate or shared ports |
 | [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
 | [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
@@ -220,19 +220,36 @@ storage.write.data <== write_data
 storage.write.enable <== write_enable
 ```
 
-The first cut permits one optional `read` port, one optional `write` port, or
-both; at least one must be present. Port declarations are not inferred from
-use, the primitive cannot be indexed, and the fixed port names cannot be
-renamed. Its address fields are `Bits(index_width(depth))`, its data fields
-use the element `DataType`, and its enable fields are `Bits(1)`.
+Alternatively, one shared physical port performs either a read or a write per
+cycle:
+
+```rhombus
+sync_mem storage(depth, Bits(width)):
+  read_write
+
+storage.read_write.address <== address
+storage.read_write.enable <== enable
+storage.read_write.write <== write
+storage.read_write.write_data <== write_data
+read_data <== storage.read_write.read_data
+```
+
+The supported shapes are 1R, 1W, 1R1W, and 1RW. A `read_write` declaration
+cannot yet be combined with separate `read` or `write` declarations. Port
+declarations are not inferred from use, the primitive cannot be indexed, and
+the fixed port names cannot be renamed. Address fields are
+`Bits(index_width(depth))`, data fields use the element `DataType`, and
+`enable` and `write` are `Bits(1)`.
 
 Inside a `sync_circuit`, `sync_mem` uses the ambient clock. An ordinary
 `circuit` supplies `~clock: clock` in the declaration. An enabled read samples
 its address on a rising edge and presents the corresponding data after that
 edge. Data while read enable is false is unspecified. The primitive has no
 reset or initialization; out-of-range addresses and same-cycle read/write
-collisions are also unspecified. Port arrays, masks, and combined read/write
-ports remain outside this contract.
+collisions between separate ports are also unspecified. On an enabled shared
+port, `write = 0` reads and `write = 1` writes; `read_data` after a write or
+while disabled is unspecified. Port arrays and masks remain outside this
+contract.
 
 ## Clocked DPI
 
