@@ -19,6 +19,8 @@ The current implementation provides:
 - Hierarchical prefixing and collision-checked topology composition.
 - Topology-independent directed and bidirectional link helpers.
 - Symbolic route classes with deterministic normalized IDs and provenance.
+- Inspectable routing-policy expressions with symbolic contexts and lowering to
+  the existing normalized routing relation.
 - Separate standard definitions for line and rectangular-mesh topologies.
 - A standard all-pairs traffic definition that produces ordinary symbolic
   route-class specifications for any authored topology.
@@ -60,6 +62,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -155,6 +158,28 @@ without depending on normalized `NodeId` values.
 The definition performs no lowering or routing analysis. The mesh-traffic
 example independently selects the reusable example mesh, applies `all_pairs`,
 and lowers the result through that mesh's `LoweredTopology`.
+
+## Routing-policy authoring
+
+A `RoutingPolicy` is an inspectable host-side predicate expression over a
+symbolic `RoutingContext`. Each context contains the original `RouteClassSpec`,
+a symbolic injection or forwarding origin, the current `NodeRef`, and the
+candidate `VCRef`. Topology-specific user libraries can therefore inspect the
+candidate link through the VC reference without parsing normalized IDs.
+
+The initial policy algebra can match route classes, distinguish injection from
+forwarding, select candidate links, restrict named VC groups, and combine
+predicates through unordered union or intersection. Composite children are
+stored in deterministic description order; their order never implies routing
+preference or arbitration priority. A labeled custom predicate is the explicit
+escape hatch for semantics not yet represented by standard policy nodes.
+
+`lower_routing_policy` validates symbolic route, link, and VC-group references
+against one `LoweredRouteClasses` value, then returns an ordinary
+`RoutingRelation`. Its callback translates each normalized materialization
+query back into a symbolic context. It does not evaluate the finite query
+domain itself, construct route tables, or bypass the existing materializer and
+validation pipeline.
 
 ## Model
 

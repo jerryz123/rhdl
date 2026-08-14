@@ -1,0 +1,266 @@
+#lang rhombus
+// Defines inspectable symbolic routing contexts and topology-independent policy expressions.
+
+import:
+  "names.rhm" open
+  "route-classes.rhm" open
+
+export:
+  RoutingOrigin
+  RoutingInjection
+  RoutingForwarding
+  RoutingContext
+  RoutingPolicy
+  AllowAllPolicy
+  DenyAllPolicy
+  RouteClassPolicy
+  InjectionPolicy
+  ForwardingPolicy
+  CandidateLinkPolicy
+  CandidateVCGroupPolicy
+  UnionPolicy
+  IntersectionPolicy
+  CustomPolicy
+  allow_all
+  deny_all
+  injection_policy
+  forwarding_policy
+  match_route_classes
+  select_candidate_links
+  restrict_vc_groups
+  policy_union
+  policy_intersection
+  custom_policy
+  routing_policy_result
+
+interface RoutingOrigin:
+  method describe()
+
+class RoutingInjection(node):
+  implements RoutingOrigin
+  constructor (node):
+    unless node is_a NodeRef
+    | error(~who: #'RoutingInjection,
+            "symbolic injection origin must contain a NodeRef")
+    super(node)
+
+  override method describe():
+    "inject(" ++ node.describe() ++ ")"
+
+class RoutingForwarding(vc):
+  implements RoutingOrigin
+  constructor (vc):
+    unless vc is_a VCRef
+    | error(~who: #'RoutingForwarding,
+            "symbolic forwarding origin must contain a VCRef")
+    super(vc)
+
+  override method describe():
+    "forward(" ++ vc.describe() ++ ")"
+
+class RoutingContext(route_class, origin, current_node, candidate_vc):
+  constructor (route_class, origin, current_node, candidate_vc):
+    unless route_class is_a RouteClassSpec
+    | error(~who: #'RoutingContext,
+            "routing context route class must be a RouteClassSpec")
+    unless origin is_a RoutingOrigin
+    | error(~who: #'RoutingContext,
+            "routing context origin must be a RoutingOrigin")
+    unless current_node is_a NodeRef
+    | error(~who: #'RoutingContext,
+            "routing context current node must be a NodeRef")
+    unless candidate_vc is_a VCRef
+    | error(~who: #'RoutingContext,
+            "routing context candidate must be a VCRef")
+    when origin is_a RoutingInjection && !node_ref_equal(origin.node, current_node)
+    | error(~who: #'RoutingContext,
+            "routing injection node must equal the current node")
+    super(route_class, origin, current_node, candidate_vc)
+
+  method candidate_link():
+    candidate_vc.link
+
+  method describe():
+    String.append(route_class.ref.describe(), " ", origin.describe(),
+                  " at ", current_node.describe(), " -> ",
+                  candidate_vc.describe())
+
+interface RoutingPolicy:
+  method allows(context)
+  method describe()
+
+fun routing_policy_result(policy, context):
+  unless policy is_a RoutingPolicy
+  | error(~who: #'routing_policy_result, "expected a RoutingPolicy")
+  unless context is_a RoutingContext
+  | error(~who: #'routing_policy_result, "expected a RoutingContext")
+  def result = policy.allows(context)
+  unless result is_a Boolean
+  | error(~who: #'routing_policy_result,
+          "routing policy " ++ policy.describe() ++ " must return a Boolean")
+  result
+
+class AllowAllPolicy():
+  implements RoutingPolicy
+  override method allows(_context): #true
+  override method describe(): "allow-all"
+
+class DenyAllPolicy():
+  implements RoutingPolicy
+  override method allows(_context): #false
+  override method describe(): "deny-all"
+
+fun require_nonempty_route_refs(refs):
+  unless refs is_a List && refs.length() > 0
+  | error(~who: #'match_route_classes,
+          "route-class selection must be a nonempty List")
+  for (ref in refs):
+    unless ref is_a RouteClassRef
+    | error(~who: #'match_route_classes,
+            "route-class selection must contain only RouteClassRef values")
+
+class RouteClassPolicy(refs):
+  implements RoutingPolicy
+  constructor (refs):
+    require_nonempty_route_refs(refs)
+    super(refs.sort(route_class_ref_less))
+
+  override method allows(context):
+    refs.find(
+      fun (ref): route_class_ref_equal(ref, context.route_class.ref)
+    ) != #false
+
+  override method describe():
+    "route-class(" ++ String.join(
+      refs.map(fun (ref): ref.describe()),
+      ", "
+    ) ++ ")"
+
+class InjectionPolicy():
+  implements RoutingPolicy
+  override method allows(context): context.origin is_a RoutingInjection
+  override method describe(): "origin(injection)"
+
+class ForwardingPolicy():
+  implements RoutingPolicy
+  override method allows(context): context.origin is_a RoutingForwarding
+  override method describe(): "origin(forwarding)"
+
+fun require_nonempty_link_refs(refs):
+  unless refs is_a List && refs.length() > 0
+  | error(~who: #'select_candidate_links,
+          "candidate-link selection must be a nonempty List")
+  for (ref in refs):
+    unless ref is_a LinkRef
+    | error(~who: #'select_candidate_links,
+            "candidate-link selection must contain only LinkRef values")
+
+class CandidateLinkPolicy(refs):
+  implements RoutingPolicy
+  constructor (refs):
+    require_nonempty_link_refs(refs)
+    super(refs.sort(link_ref_less))
+
+  override method allows(context):
+    refs.find(
+      fun (ref): link_ref_equal(ref, context.candidate_link())
+    ) != #false
+
+  override method describe():
+    "candidate-link(" ++ String.join(
+      refs.map(fun (ref): ref.describe()),
+      ", "
+    ) ++ ")"
+
+fun require_nonempty_vc_group_names(names):
+  unless names is_a List && names.length() > 0
+  | error(~who: #'restrict_vc_groups,
+          "VC-group restriction must be a nonempty List")
+  for (name in names):
+    unless name is_a String && name.length() > 0 && !name.contains("/")
+    | error(~who: #'restrict_vc_groups,
+            "VC-group restriction must contain names without '/'")
+
+class CandidateVCGroupPolicy(names):
+  implements RoutingPolicy
+  constructor (names):
+    require_nonempty_vc_group_names(names)
+    super(names.sort(fun (left, right): left < right))
+
+  override method allows(context):
+    names.find(fun (name): name == context.candidate_vc.group) != #false
+
+  override method describe():
+    "candidate-vc-group(" ++ String.join(names, ", ") ++ ")"
+
+fun require_policies(who, policies):
+  unless policies is_a List && policies.length() > 0
+  | error(~who: who, "policy composition must be a nonempty List")
+  for (policy in policies):
+    unless policy is_a RoutingPolicy
+    | error(~who: who,
+            "policy composition must contain only RoutingPolicy values")
+
+fun sort_policies(policies):
+  policies.sort(
+    fun (left, right): left.describe() < right.describe()
+  )
+
+class UnionPolicy(policies):
+  implements RoutingPolicy
+  constructor (policies):
+    require_policies(#'policy_union, policies)
+    super(sort_policies(policies))
+
+  override method allows(context):
+    policies.find(
+      fun (policy): routing_policy_result(policy, context)
+    ) != #false
+
+  override method describe():
+    "union(" ++ String.join(
+      policies.map(fun (policy): policy.describe()),
+      ", "
+    ) ++ ")"
+
+class IntersectionPolicy(policies):
+  implements RoutingPolicy
+  constructor (policies):
+    require_policies(#'policy_intersection, policies)
+    super(sort_policies(policies))
+
+  override method allows(context):
+    for all (policy in policies):
+      routing_policy_result(policy, context)
+
+  override method describe():
+    "intersection(" ++ String.join(
+      policies.map(fun (policy): policy.describe()),
+      ", "
+    ) ++ ")"
+
+class CustomPolicy(label, predicate):
+  implements RoutingPolicy
+  constructor (label, predicate):
+    unless label is_a String && label.length() > 0
+    | error(~who: #'custom_policy,
+            "custom routing-policy label must be a nonempty String")
+    unless predicate is_a Function.of_arity(1)
+    | error(~who: #'custom_policy,
+            "custom routing-policy predicate must accept one argument")
+    super(label, predicate)
+
+  override method allows(context): predicate(context)
+  override method describe(): "custom(" ++ label ++ ")"
+
+def allow_all = AllowAllPolicy()
+def deny_all = DenyAllPolicy()
+def injection_policy = InjectionPolicy()
+def forwarding_policy = ForwardingPolicy()
+
+fun match_route_classes(refs): RouteClassPolicy(refs)
+fun select_candidate_links(refs): CandidateLinkPolicy(refs)
+fun restrict_vc_groups(names): CandidateVCGroupPolicy(names)
+fun policy_union(policies): UnionPolicy(policies)
+fun policy_intersection(policies): IntersectionPolicy(policies)
+fun custom_policy(label, predicate): CustomPolicy(label, predicate)

@@ -1,0 +1,87 @@
+#lang rhombus
+// Lowers symbolic routing policies to the sole normalized RoutingRelation callback path.
+
+import:
+  "../model/main.rhm" open
+  "names.rhm" open
+  "topology-lowering.rhm" open
+  "route-class-lowering.rhm" open
+  "routing-policy.rhm" open
+
+export:
+  lower_routing_policy
+
+fun find_exact_route_binding(lowered_routes, route_class):
+  lowered_routes.bindings.find(
+    fun (binding): binding.route_class === route_class
+  )
+
+fun topology_has_vc_group(topology_spec, name):
+  topology_spec.links.find(
+    fun (link):
+      link.vc_groups.find(fun (group): group.name == name) != #false
+  ) != #false
+
+fun validate_policy_references(lowered_routes, policy):
+  cond
+  | policy is_a RouteClassPolicy:
+      for (ref in policy.refs):
+        lowered_routes.route_spec(ref)
+  | policy is_a CandidateLinkPolicy:
+      for (ref in policy.refs):
+        lowered_routes.lowered_topology.spec.find_link(ref)
+  | policy is_a CandidateVCGroupPolicy:
+      for (name in policy.names):
+        unless topology_has_vc_group(lowered_routes.lowered_topology.spec, name)
+        | error(~who: #'lower_routing_policy,
+                "unknown VC group " ++ name)
+  | policy is_a UnionPolicy:
+      for (child in policy.policies):
+        validate_policy_references(lowered_routes, child)
+  | policy is_a IntersectionPolicy:
+      for (child in policy.policies):
+        validate_policy_references(lowered_routes, child)
+  | ~else: #void
+
+fun symbolic_origin(lowered_topology, origin):
+  cond
+  | origin is_a Injection:
+      RoutingInjection(lowered_topology.node_ref(origin.node))
+  | origin is_a HeldVC:
+      RoutingForwarding(lowered_topology.vc_ref(origin.vc))
+  | ~else:
+      error(~who: #'lower_routing_policy,
+            "routing origin must be an Injection or HeldVC")
+
+fun current_node_ref(lowered_topology, origin):
+  cond
+  | origin is_a Injection:
+      lowered_topology.node_ref(origin.node)
+  | origin is_a HeldVC:
+      def node_id = lowered_topology.topology.find_vc_link(origin.vc).destination
+      lowered_topology.node_ref(node_id)
+  | ~else:
+      error(~who: #'lower_routing_policy,
+            "routing origin must be an Injection or HeldVC")
+
+fun lower_routing_policy(lowered_routes, policy):
+  unless lowered_routes is_a LoweredRouteClasses
+  | error(~who: #'lower_routing_policy, "expected LoweredRouteClasses")
+  unless policy is_a RoutingPolicy
+  | error(~who: #'lower_routing_policy, "expected a RoutingPolicy")
+  validate_policy_references(lowered_routes, policy)
+  def lowered_topology = lowered_routes.lowered_topology
+  RoutingRelation(
+    fun (route_class, origin, candidate_vc):
+      def binding = find_exact_route_binding(lowered_routes, route_class)
+      unless binding
+      | error(~who: #'lower_routing_policy,
+              "route class does not belong to these lowered route classes")
+      def context = RoutingContext(
+        binding.spec,
+        symbolic_origin(lowered_topology, origin),
+        current_node_ref(lowered_topology, origin),
+        lowered_topology.vc_ref(candidate_vc)
+      )
+      routing_policy_result(policy, context)
+  )
