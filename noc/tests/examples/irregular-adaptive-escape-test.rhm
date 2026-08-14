@@ -1,0 +1,186 @@
+#lang rhombus
+// Checks irregular adaptive-cycle rejection, escape acceptance, and boundary equivalence.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../std/traffic/main.rhm" open
+  "../../std/routing/main.rhm" open
+  "../../examples/irregular-adaptive-escape.rhm" open
+
+fun table_matches_materialized(validated):
+  def mutable matches = #true
+  for (row in validated.route_table.rows):
+    def decisions = validated.materialized.decisions_for(
+      row.route_class,
+      row.origin
+    )
+    def allowed_count = decisions.filter(
+      ~keep: fun (decision): decision.allowed
+    ).length()
+    unless row.allowed_vcs.length() == allowed_count
+    | matches := #false
+    for (decision in decisions):
+      unless row.allows(decision.candidate_vc) == decision.allowed
+      | matches := #false
+  matches
+
+def cycle_is_adaptive = irregular_whole_graph_result is_a DependencyCycle && for all (edge in irregular_whole_graph_result.edges):
+  irregular_topology.vc_ref(edge.source_vc).group == "adaptive" && irregular_topology.vc_ref(
+    edge.target_vc
+  ).group == "adaptive"
+
+def accepted_has_adaptive_choice = irregular_validated.route_table.rows.find(
+  fun (row):
+    row.allowed_vcs.find(
+      fun (vc): irregular_topology.vc_ref(vc).group == "adaptive"
+    ) != #false
+) != #false
+
+check:
+  irregular_spec.nodes.length() ~is 5
+  irregular_spec.links.length() ~is 10
+  irregular_routes.route_classes.length() ~is 20
+  irregular_policy is_a WithEscapePolicy ~is #true
+  irregular_policy.adaptive_policy is_a MinimalAdaptivePolicy ~is #true
+  irregular_policy.escape_policy === irregular_tree_escape ~is #true
+  irregular_whole_graph_result is_a DependencyCycle ~is #true
+  cycle_is_adaptive ~is #true
+  irregular_validated is_a ValidatedRouting ~is #true
+  irregular_validated.certificate is_a EscapeCertificate ~is #true
+  irregular_validated.certificate.request === irregular_escape_request ~is #true
+  irregular_validated.certificate.request.escape_vcs.length() ~is 10
+  irregular_validated.certificate.dependency_graph.vertices.length() ~is 8
+  table_matches_materialized(irregular_validated) ~is #true
+  accepted_has_adaptive_choice ~is #true
+
+fun raw_origin_node(origin):
+  if origin is_a Injection
+  | origin.node
+  | irregular_topology.topology.find_vc_link(origin.vc).destination
+
+fun raw_current_group(origin):
+  if origin is_a Injection
+  | #false
+  | irregular_topology.vc_ref(origin.vc).group
+
+fun raw_allows(route_class, origin, candidate_vc):
+  def current = irregular_topology.node_ref(raw_origin_node(origin))
+  def destination = irregular_topology.node_ref(route_class.destination)
+  def candidate = irregular_topology.vc_ref(candidate_vc)
+  def required_escape = irregular_escape_tree.next_link(current, destination)
+  def adaptive_candidate = candidate.group == "adaptive" && irregular_distances.link_is_minimal(
+    candidate_vc.link_id,
+    route_class.destination
+  )
+  def escape_candidate = candidate.group == "escape" && required_escape != #false && link_ref_equal(
+    required_escape,
+    candidate.link
+  )
+  def current_group = raw_current_group(origin)
+  if origin is_a Injection || current_group == "adaptive"
+  | adaptive_candidate || escape_candidate
+  | current_group == "escape" && escape_candidate
+
+def raw_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  RoutingRelation(raw_allows)
+)
+def raw_materialized = materialize_routing(raw_problem)
+def raw_whole_graph_result = compile_routing(raw_problem)
+def raw_validated = compile_routing(
+  raw_problem,
+  ~escape: irregular_escape_request
+)
+
+check:
+  raw_materialized.describe() ~is irregular_materialized.describe()
+  raw_whole_graph_result is_a DependencyCycle ~is #true
+  raw_whole_graph_result.describe() ~is irregular_whole_graph_result.describe()
+  raw_validated.route_table.describe() ~is irregular_validated.route_table.describe()
+  raw_validated.certificate.dependency_graph.describe() ~is irregular_validated.certificate.dependency_graph.describe()
+  raw_validated.certificate.acyclic_certificate.describe() ~is irregular_validated.certificate.acyclic_certificate.describe()
+
+def reordered_spec = TopologySpec(
+  irregular_spec.nodes.reverse(),
+  irregular_spec.links.reverse()
+)
+def reordered_topology = lower_topology(reordered_spec)
+def reordered_routes = lower_route_classes(
+  reordered_topology,
+  all_pairs(reordered_spec).reverse()
+)
+def reordered_policy = with_escape(
+  minimal_adaptive(
+    reordered_topology,
+    compute_hop_distances(reordered_topology.topology),
+    ["adaptive"]
+  ),
+  irregular_tree_escape,
+  ["adaptive"],
+  ["escape"]
+)
+def reordered_problem = RoutingProblem(
+  reordered_topology.topology,
+  reordered_routes.route_classes,
+  lower_routing_policy(reordered_routes, reordered_policy)
+)
+def reordered_whole_graph_result = compile_routing(reordered_problem)
+def reordered_validated = compile_routing(
+  reordered_problem,
+  ~escape: EscapeValidationRequest(
+    reordered_topology.topology,
+    reordered_topology.vc_ids_in_groups(["escape"])
+  )
+)
+
+check:
+  reordered_whole_graph_result.describe() ~is irregular_whole_graph_result.describe()
+  reordered_validated.materialized.describe() ~is irregular_validated.materialized.describe()
+  reordered_validated.route_table.describe() ~is irregular_validated.route_table.describe()
+  reordered_validated.certificate.dependency_graph.describe() ~is irregular_validated.certificate.dependency_graph.describe()
+  reordered_validated.certificate.acyclic_certificate.describe() ~is irregular_validated.certificate.acyclic_certificate.describe()
+
+def prefixed_spec = prefix_topology("cluster", irregular_spec)
+def prefixed_tree = irregular_escape_tree.prefix("cluster")
+def prefixed_topology = lower_topology(prefixed_spec)
+def prefixed_routes = lower_route_classes(
+  prefixed_topology,
+  all_pairs(prefixed_spec)
+)
+def prefixed_policy = with_escape(
+  minimal_adaptive(
+    prefixed_topology,
+    compute_hop_distances(prefixed_topology.topology),
+    ["adaptive"]
+  ),
+  irregular_tree_escape_policy(prefixed_tree),
+  ["adaptive"],
+  ["escape"]
+)
+def prefixed_problem = RoutingProblem(
+  prefixed_topology.topology,
+  prefixed_routes.route_classes,
+  lower_routing_policy(prefixed_routes, prefixed_policy)
+)
+def prefixed_whole_graph_result = compile_routing(prefixed_problem)
+def prefixed_validated = compile_routing(
+  prefixed_problem,
+  ~escape: EscapeValidationRequest(
+    prefixed_topology.topology,
+    prefixed_topology.vc_ids_in_groups(["escape"])
+  )
+)
+
+check:
+  prefixed_whole_graph_result.describe() ~is irregular_whole_graph_result.describe()
+  prefixed_validated.materialized.describe() ~is irregular_validated.materialized.describe()
+  prefixed_validated.route_table.describe() ~is irregular_validated.route_table.describe()
+  prefixed_validated.certificate.dependency_graph.describe() ~is irregular_validated.certificate.dependency_graph.describe()
+  prefixed_validated.certificate.acyclic_certificate.describe() ~is irregular_validated.certificate.acyclic_certificate.describe()
+
+check:
+  irregular_tree_escape_policy("not a tree") ~throws "expected an IrregularEscapeTree"

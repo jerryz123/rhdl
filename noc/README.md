@@ -34,6 +34,8 @@ The current implementation provides:
 - Minimal-adaptive mesh routing with irreversible XY escape transitions,
   rejected by default whole-graph acyclicity and accepted by explicit escape
   validation.
+- An irregular cyclic topology combining generic minimal adaptation with a
+  user-authored spanning-tree escape policy under both proof modes.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -90,6 +92,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-phased-xy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-adaptive-escape-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/irregular-adaptive-escape-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -275,6 +278,15 @@ adaptive choice. The independently authored raw callback, reversed route
 declarations, and prefixed topology produce equivalent materialized decisions,
 proof graphs, certificates, and route tables. Escape-only XY remains a valid
 whole-graph-acyclic comparison.
+
+The irregular-adaptive-escape example applies the same generic pieces to a
+five-node bidirectional ring with an attached leaf. Minimal adaptation derives
+its choices solely from hop distances and produces an adaptive-only dependency
+cycle. A user-defined tree view independently selects escape links; it is
+ordinary example code rather than a core topology or routing primitive. The
+escape certificate accepts the full relation and retains its adaptive choices.
+Raw callback, reversed-declaration, and prefixed forms produce equivalent
+materialized relations, cycle witnesses, proof graphs, orderings, and tables.
 
 ## Model
 

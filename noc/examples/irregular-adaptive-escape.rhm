@@ -1,0 +1,229 @@
+#lang rhombus
+// Demonstrates generic adaptive routing with a user-authored tree escape on an irregular graph.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+  "../authoring/main.rhm" open
+  "../plan/main.rhm" open
+  "../std/traffic/main.rhm" open
+  "../std/routing/main.rhm" open
+
+export:
+  irregular_a
+  irregular_b
+  irregular_c
+  irregular_d
+  irregular_e
+  irregular_a_to_b
+  irregular_b_to_a
+  irregular_b_to_c
+  irregular_c_to_b
+  irregular_c_to_d
+  irregular_d_to_c
+  irregular_d_to_a
+  irregular_a_to_d
+  irregular_b_to_e
+  irregular_e_to_b
+  IrregularEscapeTree
+  irregular_escape_tree
+  irregular_tree_escape_policy
+  irregular_spec
+  irregular_topology
+  irregular_traffic
+  irregular_routes
+  irregular_distances
+  irregular_tree_escape
+  irregular_policy
+  irregular_problem
+  irregular_materialized
+  irregular_dependency_graph
+  irregular_whole_graph_result
+  irregular_escape_request
+  irregular_validated
+
+def irregular_a = NodeRef("a")
+def irregular_b = NodeRef("b")
+def irregular_c = NodeRef("c")
+def irregular_d = NodeRef("d")
+def irregular_e = NodeRef("e")
+
+def irregular_a_to_b = LinkRef("a-to-b")
+def irregular_b_to_a = LinkRef("b-to-a")
+def irregular_b_to_c = LinkRef("b-to-c")
+def irregular_c_to_b = LinkRef("c-to-b")
+def irregular_c_to_d = LinkRef("c-to-d")
+def irregular_d_to_c = LinkRef("d-to-c")
+def irregular_d_to_a = LinkRef("d-to-a")
+def irregular_a_to_d = LinkRef("a-to-d")
+def irregular_b_to_e = LinkRef("b-to-e")
+def irregular_e_to_b = LinkRef("e-to-b")
+
+def irregular_vc_groups = [
+  VCGroup("adaptive", 1),
+  VCGroup("escape", 1)
+]
+
+def irregular_spec = TopologySpec(
+  [irregular_e, irregular_c, irregular_a, irregular_d, irregular_b],
+  bidirectional_link(
+    irregular_c_to_d,
+    irregular_d_to_c,
+    irregular_c,
+    irregular_d,
+    irregular_vc_groups
+  ) ++ bidirectional_link(
+    irregular_a_to_b,
+    irregular_b_to_a,
+    irregular_a,
+    irregular_b,
+    irregular_vc_groups
+  ) ++ bidirectional_link(
+    irregular_d_to_a,
+    irregular_a_to_d,
+    irregular_d,
+    irregular_a,
+    irregular_vc_groups
+  ) ++ bidirectional_link(
+    irregular_b_to_e,
+    irregular_e_to_b,
+    irregular_b,
+    irregular_e,
+    irregular_vc_groups
+  ) ++ bidirectional_link(
+    irregular_b_to_c,
+    irregular_c_to_b,
+    irregular_b,
+    irregular_c,
+    irregular_vc_groups
+  )
+)
+
+def irregular_topology = lower_topology(irregular_spec)
+def irregular_traffic = all_pairs(irregular_spec)
+def irregular_routes = lower_route_classes(
+  irregular_topology,
+  irregular_traffic
+)
+def irregular_distances = compute_hop_distances(
+  irregular_topology.topology
+)
+
+class IrregularEscapeTree(a,
+                          b,
+                          c,
+                          d,
+                          e,
+                          a_to_b,
+                          b_to_a,
+                          b_to_c,
+                          c_to_b,
+                          c_to_d,
+                          d_to_c,
+                          b_to_e,
+                          e_to_b):
+  method next_link(current, destination):
+    cond
+    | node_ref_equal(current, a):
+        if node_ref_equal(destination, a) | #false | a_to_b
+    | node_ref_equal(current, b):
+        cond
+        | node_ref_equal(destination, a): b_to_a
+        | node_ref_equal(destination, e): b_to_e
+        | node_ref_equal(destination, b): #false
+        | ~else: b_to_c
+    | node_ref_equal(current, c):
+        cond
+        | node_ref_equal(destination, d): c_to_d
+        | node_ref_equal(destination, c): #false
+        | ~else: c_to_b
+    | node_ref_equal(current, d):
+        if node_ref_equal(destination, d) | #false | d_to_c
+    | node_ref_equal(current, e):
+        if node_ref_equal(destination, e) | #false | e_to_b
+    | ~else:
+        error(~who: #'next_link,
+              "tree escape encountered a node outside its topology")
+
+  method prefix(prefix):
+    IrregularEscapeTree(
+      prefix_node_ref(prefix, a),
+      prefix_node_ref(prefix, b),
+      prefix_node_ref(prefix, c),
+      prefix_node_ref(prefix, d),
+      prefix_node_ref(prefix, e),
+      prefix_link_ref(prefix, a_to_b),
+      prefix_link_ref(prefix, b_to_a),
+      prefix_link_ref(prefix, b_to_c),
+      prefix_link_ref(prefix, c_to_b),
+      prefix_link_ref(prefix, c_to_d),
+      prefix_link_ref(prefix, d_to_c),
+      prefix_link_ref(prefix, b_to_e),
+      prefix_link_ref(prefix, e_to_b)
+    )
+
+def irregular_escape_tree = IrregularEscapeTree(
+  irregular_a,
+  irregular_b,
+  irregular_c,
+  irregular_d,
+  irregular_e,
+  irregular_a_to_b,
+  irregular_b_to_a,
+  irregular_b_to_c,
+  irregular_c_to_b,
+  irregular_c_to_d,
+  irregular_d_to_c,
+  irregular_b_to_e,
+  irregular_e_to_b
+)
+
+fun irregular_tree_escape_policy(tree):
+  unless tree is_a IrregularEscapeTree
+  | error(~who: #'irregular_tree_escape_policy,
+          "expected an IrregularEscapeTree")
+  custom_policy(
+    "irregular-tree-escape",
+    fun (context):
+      def required = tree.next_link(
+        context.current_node,
+        context.route_class.destination
+      )
+      required != #false && link_ref_equal(
+        required,
+        context.candidate_link()
+      )
+  )
+
+def irregular_tree_escape = irregular_tree_escape_policy(
+  irregular_escape_tree
+)
+
+def irregular_policy = with_escape(
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["adaptive"]
+  ),
+  irregular_tree_escape,
+  ["adaptive"],
+  ["escape"]
+)
+def irregular_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  lower_routing_policy(irregular_routes, irregular_policy)
+)
+def irregular_materialized = materialize_routing(irregular_problem)
+def irregular_dependency_graph = build_dependency_graph(
+  analyze_reachability(irregular_materialized)
+)
+def irregular_whole_graph_result = compile_routing(irregular_problem)
+def irregular_escape_request = EscapeValidationRequest(
+  irregular_topology.topology,
+  irregular_topology.vc_ids_in_groups(["escape"])
+)
+def irregular_validated = compile_routing(
+  irregular_problem,
+  ~escape: irregular_escape_request
+)
