@@ -28,6 +28,8 @@ The current implementation provides:
   route-class specifications for any authored topology.
 - Standard XY and YX dimension-order policies defined as clients of the
   generic routing-policy interface and rectangular-mesh view.
+- Minimal-adaptive mesh routing with irreversible XY escape transitions,
+  intentionally rejected by the current whole-graph acyclicity proof.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -72,10 +74,12 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/adaptive-minimal-escape-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-phased-xy-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-adaptive-escape-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -225,6 +229,25 @@ irreversibly enters `y-phase` on the first y hop, and remains there. The example
 demonstrates phase inspection, raw-relation equivalence, reachable-dead-end
 diagnostics, and pruning of unreachable phase transitions under the current
 acyclic dependency proof.
+
+`AdaptiveMinimalEscapePolicy` allows every Manhattan-distance-reducing
+adaptive direction, so a packet may choose either dimension while both differ.
+Injection and adaptive forwarding may instead acquire an escape VC following
+XY order. Escape forwarding is closed over the selected escape groups and may
+never return to an adaptive group. Adaptive and escape group sets are explicit,
+nonempty, disjoint, and validated against the mesh view.
+
+The mesh-adaptive-escape example deliberately does not produce
+`ValidatedRouting` for the full policy. Reachability succeeds, but the existing
+whole-graph acyclicity checker reports a stable cycle containing only adaptive
+VCs. The independently materialized raw callback, reversed declarations, and
+prefixed topology produce the same decisions and cycle witness. Restricting the
+same topology and traffic to escape-only XY produces `ValidatedRouting`.
+
+This isolates a proof-system limitation rather than an authoring or lowering
+limitation. Accepting the full adaptive policy requires a separately specified
+escape-subnetwork theorem, certificate, and implementation assumptions; the
+current validator has not been weakened or bypassed.
 
 ## Model
 

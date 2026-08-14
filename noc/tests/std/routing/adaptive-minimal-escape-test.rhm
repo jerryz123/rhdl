@@ -1,0 +1,166 @@
+#lang rhombus
+// Checks minimal adaptive choices, irreversible XY escape routing, and policy validation.
+
+import:
+  "../../../model/main.rhm" open
+  "../../../authoring/main.rhm" open
+  "../../../std/topology/main.rhm" open
+  "../../../std/routing/main.rhm" open
+
+def mesh = rectangular_mesh(
+  3,
+  3,
+  [VCGroup("adaptive", 1), VCGroup("escape", 1)]
+)
+def lowered_topology = lower_topology(mesh.spec)
+def source = mesh.node_at(0, 0)
+def destination = mesh.node_at(2, 2)
+def route_ref = RouteClassRef("diagonal")
+def route_spec = RouteClassSpec(route_ref, source, destination)
+def lowered_routes = lower_route_classes(lowered_topology, [route_spec])
+def route_class = lowered_routes.route_class(route_ref)
+def policy = adaptive_minimal_escape(mesh)
+def relation = lower_routing_policy(lowered_routes, policy)
+
+def east_00 = mesh.outgoing_link(mesh.node_at(0, 0), mesh_east)
+def north_00 = mesh.outgoing_link(mesh.node_at(0, 0), mesh_north)
+def east_10 = mesh.outgoing_link(mesh.node_at(1, 0), mesh_east)
+def north_10 = mesh.outgoing_link(mesh.node_at(1, 0), mesh_north)
+def north_20 = mesh.outgoing_link(mesh.node_at(2, 0), mesh_north)
+
+fun vc_id(link, group):
+  lowered_topology.vc_id(VCRef(link, group, 0))
+
+def source_id = lowered_topology.node_id(source)
+def east_00_adaptive = vc_id(east_00, "adaptive")
+def east_00_escape = vc_id(east_00, "escape")
+def north_00_adaptive = vc_id(north_00, "adaptive")
+def north_00_escape = vc_id(north_00, "escape")
+def east_10_adaptive = vc_id(east_10, "adaptive")
+def east_10_escape = vc_id(east_10, "escape")
+def north_10_adaptive = vc_id(north_10, "adaptive")
+def north_10_escape = vc_id(north_10, "escape")
+def north_20_adaptive = vc_id(north_20, "adaptive")
+def north_20_escape = vc_id(north_20, "escape")
+
+check:
+  policy is_a RoutingPolicy ~is #true
+  policy is_a AdaptiveMinimalEscapePolicy ~is #true
+  policy.adaptive_vc_groups ~is ["adaptive"]
+  policy.escape_vc_groups ~is ["escape"]
+  policy.describe() ~is "adaptive-minimal-escape(adaptive=adaptive; escape=escape; escape-order=x,y)"
+
+// At injection, both Manhattan-reducing adaptive directions are legal, while
+// the escape class follows only the first XY dimension.
+check:
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    east_00_adaptive
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    north_00_adaptive
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    east_00_escape
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    north_00_escape
+  ) ~is #false
+
+// Adaptive forwarding retains both minimal choices and may enter escape.
+check:
+  relation.allow(
+    route_class,
+    HeldVC(east_00_adaptive),
+    east_10_adaptive
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(east_00_adaptive),
+    north_10_adaptive
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(east_00_adaptive),
+    east_10_escape
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(east_00_adaptive),
+    north_10_escape
+  ) ~is #false
+
+// After x alignment, only north is minimal and is also the XY escape choice.
+check:
+  relation.allow(
+    route_class,
+    HeldVC(east_10_adaptive),
+    north_20_adaptive
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(east_10_adaptive),
+    north_20_escape
+  ) ~is #true
+
+// Escape forwarding remains in escape and may never return to adaptive.
+check:
+  relation.allow(
+    route_class,
+    HeldVC(east_00_escape),
+    east_10_escape
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(east_00_escape),
+    north_10_escape
+  ) ~is #false
+  relation.allow(
+    route_class,
+    HeldVC(east_00_escape),
+    east_10_adaptive
+  ) ~is #false
+
+def foreign_node_context = RoutingContext(
+  route_spec,
+  RoutingForwarding(VCRef(east_00, "adaptive", 0)),
+  NodeRef("unknown"),
+  VCRef(east_10, "adaptive", 0)
+)
+def foreign_link_context = RoutingContext(
+  route_spec,
+  RoutingInjection(source),
+  source,
+  VCRef(LinkRef("unknown"), "adaptive", 0)
+)
+
+check:
+  adaptive_minimal_escape("not a mesh") ~throws "requires a RectangularMesh"
+  adaptive_minimal_escape(mesh, ~adaptive_vc_groups: []) ~throws "nonempty List"
+  adaptive_minimal_escape(mesh, ~escape_vc_groups: []) ~throws "nonempty List"
+  adaptive_minimal_escape(
+    mesh,
+    ~adaptive_vc_groups: ["bad/group"]
+  ) ~throws "names without '/'"
+  adaptive_minimal_escape(
+    mesh,
+    ~adaptive_vc_groups: ["adaptive", "adaptive"]
+  ) ~throws "duplicate adaptive VC groups adaptive"
+  adaptive_minimal_escape(
+    mesh,
+    ~escape_vc_groups: ["unknown"]
+  ) ~throws "mesh has no VC group unknown"
+  adaptive_minimal_escape(
+    mesh,
+    ~adaptive_vc_groups: ["adaptive"],
+    ~escape_vc_groups: ["adaptive"]
+  ) ~throws "must be disjoint"
+  routing_policy_result(policy, foreign_node_context) ~throws "node is not in mesh unknown"
+  routing_policy_result(policy, foreign_link_context) ~throws "link is not in mesh unknown"

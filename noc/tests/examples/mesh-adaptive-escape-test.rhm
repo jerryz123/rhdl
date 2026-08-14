@@ -1,0 +1,137 @@
+#lang rhombus
+// Checks adaptive-escape materialization, deterministic cycle rejection, and raw equivalence.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../std/topology/main.rhm" open
+  "../../std/traffic/main.rhm" open
+  "../../std/routing/main.rhm" open
+  "../../examples/mesh-adaptive-escape.rhm" open
+
+check:
+  adaptive_escape_policy is_a AdaptiveMinimalEscapePolicy ~is #true
+  adaptive_escape_materialized.route_classes.length() ~is 12
+  adaptive_escape_reachable.routes.length() ~is 12
+  adaptive_escape_proof is_a DependencyCycle ~is #true
+  adaptive_escape_compile_result is_a DependencyCycle ~is #true
+  adaptive_escape_compile_result.describe() ~is adaptive_escape_proof.describe()
+  escape_only_routing is_a ValidatedRouting ~is #true
+  escape_only_routing.route_classes.length() ~is 12
+
+// Irreversible escape closure means every dependency in the reported cycle is
+// entirely within the adaptive class; escape VCs do not participate.
+def cycle_is_adaptive = for all (edge in adaptive_escape_proof.edges):
+  adaptive_escape_topology.vc_ref(edge.source_vc).group == "adaptive" && adaptive_escape_topology.vc_ref(
+    edge.target_vc
+  ).group == "adaptive"
+
+check:
+  cycle_is_adaptive ~is #true
+
+fun raw_origin_node(origin):
+  if origin is_a Injection
+  | origin.node
+  | adaptive_escape_topology.topology.find_vc_link(origin.vc).destination
+
+fun raw_current_group(origin):
+  if origin is_a Injection
+  | #false
+  | adaptive_escape_topology.vc_ref(origin.vc).group
+
+fun raw_minimal_direction(direction, current, destination):
+  cond
+  | mesh_direction_equal(direction, mesh_east): current.x < destination.x
+  | mesh_direction_equal(direction, mesh_west): current.x > destination.x
+  | mesh_direction_equal(direction, mesh_north): current.y < destination.y
+  | mesh_direction_equal(direction, mesh_south): current.y > destination.y
+  | ~else: #false
+
+fun raw_xy_direction(current, destination):
+  cond
+  | current.x < destination.x: mesh_east
+  | current.x > destination.x: mesh_west
+  | current.y < destination.y: mesh_north
+  | current.y > destination.y: mesh_south
+  | ~else: #false
+
+fun raw_adaptive_escape(route_class, origin, candidate_vc):
+  def current = adaptive_escape_mesh.coordinate_of(
+    adaptive_escape_topology.node_ref(raw_origin_node(origin))
+  )
+  def destination = adaptive_escape_mesh.coordinate_of(
+    adaptive_escape_topology.node_ref(route_class.destination)
+  )
+  def candidate = adaptive_escape_topology.vc_ref(candidate_vc)
+  def candidate_direction = adaptive_escape_mesh.direction_of(candidate.link)
+  def adaptive_candidate = candidate.group == "adaptive" && raw_minimal_direction(
+    candidate_direction,
+    current,
+    destination
+  )
+  def required_escape = raw_xy_direction(current, destination)
+  def escape_candidate = candidate.group == "escape" && required_escape != #false && mesh_direction_equal(
+    required_escape,
+    candidate_direction
+  )
+  def current_group = raw_current_group(origin)
+  if origin is_a Injection || current_group == "adaptive"
+  | adaptive_candidate || escape_candidate
+  | current_group == "escape" && escape_candidate
+
+def raw_problem = RoutingProblem(
+  adaptive_escape_topology.topology,
+  adaptive_escape_routes.route_classes,
+  RoutingRelation(raw_adaptive_escape)
+)
+def raw_materialized = materialize_routing(raw_problem)
+def raw_compile_result = compile_routing(raw_problem)
+
+check:
+  raw_materialized.describe() ~is adaptive_escape_materialized.describe()
+  raw_compile_result is_a DependencyCycle ~is #true
+  raw_compile_result.describe() ~is adaptive_escape_proof.describe()
+
+def reversed_routes = lower_route_classes(
+  adaptive_escape_topology,
+  adaptive_escape_traffic.reverse()
+)
+def reversed_problem = RoutingProblem(
+  adaptive_escape_topology.topology,
+  reversed_routes.route_classes,
+  lower_routing_policy(
+    reversed_routes,
+    adaptive_minimal_escape(adaptive_escape_mesh)
+  )
+)
+def reversed_materialized = materialize_routing(reversed_problem)
+def reversed_result = compile_routing(reversed_problem)
+
+check:
+  reversed_materialized.describe() ~is adaptive_escape_materialized.describe()
+  reversed_result is_a DependencyCycle ~is #true
+  reversed_result.describe() ~is adaptive_escape_proof.describe()
+
+def prefixed_mesh = adaptive_escape_mesh.prefix("cluster")
+def prefixed_topology = lower_topology(prefixed_mesh.spec)
+def prefixed_routes = lower_route_classes(
+  prefixed_topology,
+  all_pairs(prefixed_mesh.spec)
+)
+def prefixed_problem = RoutingProblem(
+  prefixed_topology.topology,
+  prefixed_routes.route_classes,
+  lower_routing_policy(
+    prefixed_routes,
+    adaptive_minimal_escape(prefixed_mesh)
+  )
+)
+def prefixed_materialized = materialize_routing(prefixed_problem)
+def prefixed_result = compile_routing(prefixed_problem)
+
+check:
+  prefixed_materialized.describe() ~is adaptive_escape_materialized.describe()
+  prefixed_result is_a DependencyCycle ~is #true
+  prefixed_result.describe() ~is adaptive_escape_proof.describe()

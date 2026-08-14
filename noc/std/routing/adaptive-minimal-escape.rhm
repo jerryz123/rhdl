@@ -1,0 +1,108 @@
+#lang rhombus
+// Defines inspectable minimal-adaptive routing with an irreversible XY escape class.
+
+import:
+  "../../authoring/main.rhm" open
+  "../topology/main.rhm" open
+
+export:
+  AdaptiveMinimalEscapePolicy
+  adaptive_minimal_escape
+
+fun duplicate_name(names, name):
+  names.filter(~keep: fun (candidate): candidate == name).length() > 1
+
+fun validate_group_set(mesh, subject, names):
+  unless names is_a List && names.length() > 0
+  | error(~who: #'adaptive_minimal_escape,
+          subject ++ " must be a nonempty List")
+  for (name in names):
+    unless name is_a String && name.length() > 0 && !name.contains("/")
+    | error(~who: #'adaptive_minimal_escape,
+            subject ++ " must contain names without '/'")
+    when duplicate_name(names, name)
+    | error(~who: #'adaptive_minimal_escape,
+            "duplicate " ++ subject ++ " " ++ name)
+    unless mesh.vc_groups.find(fun (group): group.name == name)
+    | error(~who: #'adaptive_minimal_escape,
+            "mesh has no VC group " ++ name)
+
+fun group_selected(names, group):
+  names.find(fun (name): name == group) != #false
+
+fun groups_overlap(left, right):
+  left.find(fun (name): group_selected(right, name)) != #false
+
+fun direction_is_minimal(direction, current, destination):
+  cond
+  | mesh_direction_equal(direction, mesh_east): current.x < destination.x
+  | mesh_direction_equal(direction, mesh_west): current.x > destination.x
+  | mesh_direction_equal(direction, mesh_north): current.y < destination.y
+  | mesh_direction_equal(direction, mesh_south): current.y > destination.y
+  | ~else: #false
+
+fun xy_direction(current, destination):
+  cond
+  | current.x < destination.x: mesh_east
+  | current.x > destination.x: mesh_west
+  | current.y < destination.y: mesh_north
+  | current.y > destination.y: mesh_south
+  | ~else: #false
+
+class AdaptiveMinimalEscapePolicy(mesh,
+                                  adaptive_vc_groups,
+                                  escape_vc_groups):
+  implements RoutingPolicy
+  constructor (mesh,
+               adaptive_vc_groups = ["adaptive"],
+               escape_vc_groups = ["escape"]):
+    unless mesh is_a RectangularMesh
+    | error(~who: #'adaptive_minimal_escape,
+            "adaptive-minimal escape routing requires a RectangularMesh")
+    validate_group_set(mesh, "adaptive VC groups", adaptive_vc_groups)
+    validate_group_set(mesh, "escape VC groups", escape_vc_groups)
+    when groups_overlap(adaptive_vc_groups, escape_vc_groups)
+    | error(~who: #'adaptive_minimal_escape,
+            "adaptive and escape VC groups must be disjoint")
+    super(mesh,
+          adaptive_vc_groups.sort(fun (left, right): left < right),
+          escape_vc_groups.sort(fun (left, right): left < right))
+
+  override method allows(context):
+    def current = mesh.coordinate_of(context.current_node)
+    def destination = mesh.coordinate_of(context.route_class.destination)
+    def candidate_direction = mesh.direction_of(context.candidate_link())
+    def candidate_group = context.candidate_vc.group
+    def adaptive_candidate = group_selected(
+      adaptive_vc_groups,
+      candidate_group
+    ) && direction_is_minimal(candidate_direction, current, destination)
+    def required_escape_direction = xy_direction(current, destination)
+    def escape_candidate = required_escape_direction != #false && group_selected(
+      escape_vc_groups,
+      candidate_group
+    ) && mesh_direction_equal(required_escape_direction, candidate_direction)
+    cond
+    | context.origin is_a RoutingInjection:
+        adaptive_candidate || escape_candidate
+    | context.origin is_a RoutingForwarding:
+        def current_group = context.origin.vc.group
+        cond
+        | group_selected(adaptive_vc_groups, current_group):
+            adaptive_candidate || escape_candidate
+        | group_selected(escape_vc_groups, current_group):
+            escape_candidate
+        | ~else: #false
+    | ~else: #false
+
+  override method describe():
+    String.append("adaptive-minimal-escape(adaptive=",
+                  String.join(adaptive_vc_groups, ","),
+                  "; escape=", String.join(escape_vc_groups, ","),
+                  "; escape-order=x,y)")
+
+fun adaptive_minimal_escape(
+    mesh,
+    ~adaptive_vc_groups: adaptive_vc_groups = ["adaptive"],
+    ~escape_vc_groups: escape_vc_groups = ["escape"]):
+  AdaptiveMinimalEscapePolicy(mesh, adaptive_vc_groups, escape_vc_groups)
