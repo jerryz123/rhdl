@@ -1047,7 +1047,10 @@ reconstruction never guesses from generated port names.
 
 Functions that accept or return endpoints can preserve the same field lookup
 with the public `Endpoint` annotation. Use `Endpoint.of(protocol)` when the
-function requires one exact nominal interface type:
+function requires one exact nominal interface type. Interfaces may declare one
+nominal parent with `refines`; roles are inherited and new members are flattened
+into the existing directional ports. Use `Endpoint.supports(protocol)` when a
+function accepts that protocol or any transitive refinement:
 
 ```rhombus
 fun identity(endpoint :: Endpoint) :~ Endpoint:
@@ -1055,10 +1058,17 @@ fun identity(endpoint :: Endpoint) :~ Endpoint:
 
 fun bytes(endpoint :: Endpoint.of(Decoupled(Bits(8)))) :~ Endpoint:
   endpoint
+
+fun transferred(
+  endpoint :: Endpoint.supports(DecoupledControl())
+) :~ Bool:
+  fire(endpoint)
 ```
 
 Both return annotations retain endpoint static information, so callers can
-continue to use `.valid`, `.bits`, `.ready`, nested fields, and `<=>`.
+continue to use `.valid`, `.bits`, `.ready`, nested fields, and `<=>`. Bulk
+connection remains exact-type-only; refinement does not silently discard or
+invent fields at a connection boundary.
 
 ### Nested interfaces
 
@@ -1104,12 +1114,14 @@ See [`examples/nested-interface.rhdl`](examples/nested-interface.rhdl).
 
 `rhdl/std` contains opt-in reusable hardware vocabulary written against the
 public RHDL language. It is not another language profile and does not add IR,
-elaboration, or backend behavior. The initial ready-valid module exports three
-nominal interfaces:
+elaboration, or backend behavior. The ready-valid module exports these nominal
+interfaces:
 
 | Interface | Contract |
 |---|---|
 | `Valid(T)` | Every asserted cycle carries one payload; there is no backpressure |
+| `DecoupledControl()` | An offer/accept control plane; transfer occurs when `ready` and `valid` are asserted |
+| `IrrevocableControl()` | A decoupled control plane whose indicated offer cannot be withdrawn before transfer |
 | `Decoupled(T)` | Transfer occurs when `ready` and `valid` are asserted, with no pre-transfer stability guarantee |
 | `Irrevocable(T)` | A valid payload remains asserted and stable until a `ready`/`valid` transfer |
 
@@ -1120,9 +1132,13 @@ import:
   lib("rhdl/std/ready-valid.rhdl") open
 ```
 
-`Decoupled` and `Irrevocable` intentionally have the same physical fields but
+`Decoupled` refines `DecoupledControl`; `Irrevocable` refines
+`IrrevocableControl`, which transitively refines `DecoupledControl`. The
+payload-bearing protocols intentionally have the same physical fields but
 remain distinct interface types. Their temporal difference is currently a
-documented contract; RHDL does not yet generate protocol assertions.
+documented contract; RHDL does not yet generate protocol assertions. `fire`
+accepts any endpoint that supports `DecoupledControl` and returns
+`endpoint.valid and endpoint.ready`.
 
 The flow-control library builds reusable circuits over `Decoupled`:
 

@@ -63,7 +63,7 @@ so designs can import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/ready-valid.rhdl` | `Valid`, `Decoupled`, and `Irrevocable` interfaces plus Decoupled payload introspection | None |
+| `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and Decoupled payload introspection | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
@@ -86,7 +86,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers | core IR, kernel, clocking support, field support |
-| `interface.rhm` | Roles, directional interfaces, public endpoint annotations, and bulk connection | core IR, kernel, field support, instance-member support |
+| `interface.rhm` | Roles, directional interfaces, single-parent nominal refinement, public endpoint annotations, and bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, conditional assignment, and conditional memory-write effects | kernel |

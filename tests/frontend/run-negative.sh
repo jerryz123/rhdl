@@ -8,7 +8,9 @@ expect_failure() {
   local source_file="$1"
   local expected="$2"
   local output
-  if output="$(racket -S "$repo_dir" "$repo_dir/tests/frontend/invalid/$source_file" 2>&1)"; then
+  # Invalid fixtures cannot be rebuilt with raco make, so ignore any stale
+  # source-adjacent bytecode left by an earlier frontend expansion.
+  if output="$(racket -y -S "$repo_dir" "$repo_dir/tests/frontend/invalid/$source_file" 2>&1)"; then
     echo "$source_file unexpectedly succeeded" >&2
     exit 1
   fi

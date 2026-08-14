@@ -10,6 +10,8 @@ import:
   "std-ready-valid.rhdl" as fixture
 
 def valid_type = std.Valid(Bits(8))
+def decoupled_control_type = std.DecoupledControl()
+def irrevocable_control_type = std.IrrevocableControl()
 def decoupled_type = std.Decoupled(Bits(8))
 def irrevocable_type = std.Irrevocable(Bits(8))
 
@@ -19,17 +21,36 @@ def decoupled_design = embedded.run_elaboration(fun (): fixture.DecoupledAdapter
 def decoupled_adapter = decoupled_design.modules[0]
 def irrevocable_design = embedded.run_elaboration(fun (): fixture.IrrevocableAdapter())
 def irrevocable_adapter = irrevocable_design.modules[0]
+def decoupled_control_design = embedded.run_elaboration(
+  fun (): fixture.DecoupledControlAdapter()
+)
+def irrevocable_control_design = embedded.run_elaboration(
+  fun (): fixture.IrrevocableControlAdapter()
+)
+def decoupled_fire_design = embedded.run_elaboration(fun (): fixture.DecoupledFire())
+def decoupled_fire = decoupled_fire_design.modules[0]
+def irrevocable_fire_design = embedded.run_elaboration(
+  fun (): fixture.IrrevocableFire()
+)
+def irrevocable_fire = irrevocable_fire_design.modules[0]
 
 check:
   valid_type.name ~is "Valid"
   valid_type.roles ~is ["producer", "consumer"]
   valid_type.members.map(fun (member): member.name) ~is ["valid", "bits"]
   valid_type.flows.length() ~is 1
+  decoupled_control_type.members.map(fun (member): member.name) ~is ["valid", "ready"]
+  decoupled_control_type.parent ~is #false
+  irrevocable_control_type.members.map(fun (member): member.name) ~is ["valid", "ready"]
+  irrevocable_control_type.parent.name ~is "DecoupledControl"
   decoupled_type.name ~is "Decoupled"
-  decoupled_type.members.map(fun (member): member.name) ~is ["valid", "bits", "ready"]
+  decoupled_type.members.map(fun (member): member.name) ~is ["valid", "ready", "bits"]
+  decoupled_type.parent.name ~is "DecoupledControl"
   decoupled_type.flows.length() ~is 2
   irrevocable_type.name ~is "Irrevocable"
-  irrevocable_type.members.map(fun (member): member.name) ~is ["valid", "bits", "ready"]
+  irrevocable_type.members.map(fun (member): member.name) ~is ["valid", "ready", "bits"]
+  irrevocable_type.parent.name ~is "IrrevocableControl"
+  irrevocable_type.parent.parent.name ~is "DecoupledControl"
   irrevocable_type.flows.length() ~is 2
   valid_adapter.inputs.map(fun (port): port.name) ~is ["ingress_in"]
   valid_adapter.outputs.map(fun (port): port.name) ~is ["egress_out"]
@@ -40,7 +61,23 @@ check:
   valid_adapter.find_input("ingress_in").type.field("valid").type === bool.Bool ~is #true
   valid_adapter.find_input("ingress_in").type.field("bits").type.width ~is 8
   decoupled_adapter.find_output("ingress_out").type.field("ready").type === bool.Bool ~is #true
+  decoupled_control_design.modules[0].find_input("ingress_in").type.field("valid").type === bool.Bool ~is #true
+  irrevocable_control_design.modules[0].find_output("ingress_out").type.field("ready").type === bool.Bool ~is #true
+  decoupled_fire.find_output("transferred").type === bool.Bool ~is #true
+  decoupled_fire.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.and"
+  ).length() ~is 1
+  irrevocable_fire.find_output("transferred").type === bool.Bool ~is #true
+  irrevocable_fire.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.and"
+  ).length() ~is 1
   verify_design(valid_design) ~is #void
   verify_design(decoupled_design) ~is #void
   verify_design(irrevocable_design) ~is #void
+  verify_design(decoupled_control_design) ~is #void
+  verify_design(irrevocable_control_design) ~is #void
+  verify_design(decoupled_fire_design) ~is #void
+  verify_design(irrevocable_fire_design) ~is #void
   embedded.run_elaboration(fun (): fixture.MismatchedAdapter()) ~throws "same interface type"
+  embedded.run_elaboration(fun (): fixture.UnsupportedFire()) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): fixture.RefinedIsNotExact()) ~throws "argument does not satisfy annotation"

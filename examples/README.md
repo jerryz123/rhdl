@@ -83,7 +83,8 @@ in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 Reusable protocol declarations live separately under [`rhdl/std`](../rhdl/std)
 because they use the public language without extending it. The initial
 [`ready-valid.rhdl`](../rhdl/std/ready-valid.rhdl) module provides `Valid`,
-`Decoupled`, and `Irrevocable` as opt-in nominal interface types. The
+`DecoupledControl`, `IrrevocableControl`, `Decoupled`, and `Irrevocable` as
+opt-in nominal interface types, plus the common `fire` helper. The
 [`flow/`](../rhdl/std/flow) directory contains separate elastic pipe, FIFO
 queue, and fixed-priority arbiter modules; [`flow.rhdl`](../rhdl/std/flow.rhdl)
 re-exports all three for convenience. [`counter.rhdl`](../rhdl/std/counter.rhdl)
@@ -136,6 +137,8 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `interface tx[n](..., ~role: producer)` | A host `Array` of `n` scalar endpoints flattened as `tx_0_in`, `tx_0_out`, and so on |
 | `endpoint :: Endpoint.of(protocol)` | A function boundary that retains exact interface type and field static information |
+| `interface Child(T) refines Parent(): ...` | A nominal subtype with inherited roles and flattened inherited members |
+| `endpoint :: Endpoint.supports(protocol)` | A function boundary accepting an exact protocol or any nominal refinement |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
 [`rhdl/frontend/layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) is

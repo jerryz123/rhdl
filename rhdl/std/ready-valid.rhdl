@@ -11,32 +11,40 @@ interface Valid(T):
     valid: Bool
     bits: T
 
-// Transfer occurs when ready and valid are both asserted. Before transfer,
-// either endpoint may withdraw its indication and the producer may change bits.
-interface Decoupled(T):
+// Defines the reusable offer/accept control plane. Transfer occurs whenever
+// valid and ready are both asserted in the same cycle.
+interface DecoupledControl():
   role producer
   role consumer
 
   producer -> consumer:
     valid: Bool
-    bits: T
 
   consumer -> producer:
     ready: Bool
 
-// Irrevocable has Decoupled's wire shape but a stronger temporal contract:
-// an offered payload remains valid and stable until it transfers. This
-// contract is documented but not yet enforced by generated assertions.
-interface Irrevocable(T):
-  role producer
-  role consumer
+// Once valid is asserted, the indicated offer cannot be withdrawn until a
+// transfer. What the offer denotes is defined by the refining protocol.
+interface IrrevocableControl() refines DecoupledControl()
 
+// Adds an unconstrained payload to the decoupled control plane. Before a
+// transfer, the producer may withdraw valid or change bits.
+interface Decoupled(T) refines DecoupledControl():
   producer -> consumer:
-    valid: Bool
     bits: T
 
-  consumer -> producer:
-    ready: Bool
+// Adds an explicit payload to the persistent-offer control plane. While valid
+// is waiting for ready, both valid and bits must remain asserted and stable.
+interface Irrevocable(T) refines IrrevocableControl():
+  producer -> consumer:
+    bits: T
+
+// Reports the transfer event for any endpoint that nominally refines the
+// decoupled control contract.
+fun fire(
+  endpoint :: Endpoint.supports(DecoupledControl())
+) :~ Bool:
+  endpoint.valid and endpoint.ready
 
 // Extracts the payload type used by flow-control helpers. The subsequent bulk
 // connection still performs the complete nominal type and direction check.
@@ -50,6 +58,9 @@ fun decoupled_payload_type(endpoint :: Endpoint):
 
 export:
   Valid
+  DecoupledControl
+  IrrevocableControl
   Decoupled
   Irrevocable
+  fire
   decoupled_payload_type
