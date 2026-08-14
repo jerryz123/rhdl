@@ -11,6 +11,30 @@ import:
   "../../std/routing/main.rhm" open
   "../../examples/mesh-adaptive-escape.rhm" open
 
+fun table_matches_materialized(validated):
+  def mutable matches = #true
+  for (row in validated.route_table.rows):
+    def decisions = validated.materialized.decisions_for(
+      row.route_class,
+      row.origin
+    )
+    def allowed_count = decisions.filter(
+      ~keep: fun (decision): decision.allowed
+    ).length()
+    unless row.allowed_vcs.length() == allowed_count
+    | matches := #false
+    for (decision in decisions):
+      unless row.allows(decision.candidate_vc) == decision.allowed
+      | matches := #false
+  matches
+
+def accepted_has_adaptive_choice = adaptive_escape_routing.route_table.rows.find(
+  fun (row):
+    row.allowed_vcs.find(
+      fun (vc): adaptive_escape_topology.vc_ref(vc).group == "adaptive"
+    ) != #false
+) != #false
+
 check:
   adaptive_escape_policy is_a AdaptiveMinimalEscapePolicy ~is #true
   adaptive_escape_materialized.route_classes.length() ~is 12
@@ -18,6 +42,13 @@ check:
   adaptive_escape_proof is_a DependencyCycle ~is #true
   adaptive_escape_compile_result is_a DependencyCycle ~is #true
   adaptive_escape_compile_result.describe() ~is adaptive_escape_proof.describe()
+  adaptive_escape_routing is_a ValidatedRouting ~is #true
+  adaptive_escape_routing.certificate is_a EscapeCertificate ~is #true
+  adaptive_escape_routing.certificate.request === adaptive_escape_request ~is #true
+  adaptive_escape_routing.certificate.dependency_graph.vertices.length() ~is 8
+  adaptive_escape_routing.dependency_graph.vertices.length() ~is 16
+  table_matches_materialized(adaptive_escape_routing) ~is #true
+  accepted_has_adaptive_choice ~is #true
   escape_only_routing is_a ValidatedRouting ~is #true
   escape_only_routing.route_classes.length() ~is 12
 
@@ -88,11 +119,19 @@ def raw_problem = RoutingProblem(
 )
 def raw_materialized = materialize_routing(raw_problem)
 def raw_compile_result = compile_routing(raw_problem)
+def raw_escape_result = compile_routing(
+  raw_problem,
+  ~escape: adaptive_escape_request
+)
 
 check:
   raw_materialized.describe() ~is adaptive_escape_materialized.describe()
   raw_compile_result is_a DependencyCycle ~is #true
   raw_compile_result.describe() ~is adaptive_escape_proof.describe()
+  raw_escape_result is_a ValidatedRouting ~is #true
+  raw_escape_result.route_table.describe() ~is adaptive_escape_routing.route_table.describe()
+  raw_escape_result.certificate.dependency_graph.describe() ~is adaptive_escape_routing.certificate.dependency_graph.describe()
+  raw_escape_result.certificate.acyclic_certificate.describe() ~is adaptive_escape_routing.certificate.acyclic_certificate.describe()
 
 def reversed_routes = lower_route_classes(
   adaptive_escape_topology,
@@ -108,11 +147,17 @@ def reversed_problem = RoutingProblem(
 )
 def reversed_materialized = materialize_routing(reversed_problem)
 def reversed_result = compile_routing(reversed_problem)
+def reversed_escape_result = compile_routing(
+  reversed_problem,
+  ~escape: adaptive_escape_request
+)
 
 check:
   reversed_materialized.describe() ~is adaptive_escape_materialized.describe()
   reversed_result is_a DependencyCycle ~is #true
   reversed_result.describe() ~is adaptive_escape_proof.describe()
+  reversed_escape_result.route_table.describe() ~is adaptive_escape_routing.route_table.describe()
+  reversed_escape_result.certificate.dependency_graph.describe() ~is adaptive_escape_routing.certificate.dependency_graph.describe()
 
 def prefixed_mesh = adaptive_escape_mesh.prefix("cluster")
 def prefixed_topology = lower_topology(prefixed_mesh.spec)
@@ -130,8 +175,19 @@ def prefixed_problem = RoutingProblem(
 )
 def prefixed_materialized = materialize_routing(prefixed_problem)
 def prefixed_result = compile_routing(prefixed_problem)
+def prefixed_escape_request = EscapeValidationRequest(
+  prefixed_topology.topology,
+  prefixed_topology.vc_ids_in_groups(["escape"])
+)
+def prefixed_escape_result = compile_routing(
+  prefixed_problem,
+  ~escape: prefixed_escape_request
+)
 
 check:
   prefixed_materialized.describe() ~is adaptive_escape_materialized.describe()
   prefixed_result is_a DependencyCycle ~is #true
   prefixed_result.describe() ~is adaptive_escape_proof.describe()
+  prefixed_escape_result.route_table.describe() ~is adaptive_escape_routing.route_table.describe()
+  prefixed_escape_result.certificate.dependency_graph.describe() ~is adaptive_escape_routing.certificate.dependency_graph.describe()
+  prefixed_escape_result.certificate.acyclic_certificate.describe() ~is adaptive_escape_routing.certificate.acyclic_certificate.describe()

@@ -9,6 +9,7 @@ export:
   VCDependencyEdge
   VCDependencyGraph
   build_dependency_graph
+  project_dependency_graph
 
 fun edge_matches(edge, source_vc, target_vc):
   vc_id_equal(edge.source_vc, source_vc) && vc_id_equal(edge.target_vc, target_vc)
@@ -22,6 +23,9 @@ fun append_unique_vc(vcs, vc):
   if vcs.find(fun (candidate): vc_id_equal(candidate, vc))
   | vcs
   | vcs ++ [vc]
+
+fun contains_vc(vcs, vc):
+  vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
 
 class VCDependencyEdge(source_vc, target_vc, decisions):
   opaque
@@ -122,3 +126,31 @@ fun build_dependency_graph(reachable):
     vertices.sort(vc_id_less),
     edges.sort(edge_less)
   )
+
+fun project_dependency_graph(graph, vertices):
+  unless graph is_a VCDependencyGraph
+  | error(~who: #'project_dependency_graph,
+          "expected a VCDependencyGraph")
+  unless vertices is_a List
+  | error(~who: #'project_dependency_graph,
+          "dependency-graph projection vertices must be a List")
+  for (vc in vertices):
+    unless vc is_a VCId
+    | error(~who: #'project_dependency_graph,
+            "dependency-graph projection must contain only VCId values")
+    unless graph.contains_vertex(vc)
+    | error(~who: #'project_dependency_graph,
+            "projection VC is not a dependency-graph vertex: " ++ vc.describe())
+    when vertices.filter(
+      ~keep: fun (candidate): vc_id_equal(candidate, vc)
+    ).length() > 1
+    | error(~who: #'project_dependency_graph,
+            "duplicate dependency-graph projection VC " ++ vc.describe())
+  def sorted_vertices = vertices.sort(vc_id_less)
+  def projected_edges = graph.edges.filter(
+    ~keep: fun (edge): contains_vc(sorted_vertices, edge.source_vc) && contains_vc(
+      sorted_vertices,
+      edge.target_vc
+    )
+  )
+  _VCDependencyGraph(graph.reachable, sorted_vertices, projected_edges)

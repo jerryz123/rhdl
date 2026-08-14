@@ -35,6 +35,15 @@ fun find_vc_binding_by_ref(bindings, ref):
 fun find_vc_binding_by_id(bindings, id):
   bindings.find(fun (binding): vc_id_equal(binding.id, id))
 
+fun duplicate_name(names, name):
+  names.filter(~keep: fun (candidate): candidate == name).length() > 1
+
+fun topology_has_vc_group(spec, name):
+  spec.links.find(
+    fun (link):
+      link.vc_groups.find(fun (group): group.name == name) != #false
+  ) != #false
+
 class LoweredTopology(spec,
                       topology,
                       node_bindings,
@@ -93,6 +102,26 @@ class LoweredTopology(spec,
     unless found
     | error(~who: #'vc_ref, "unknown VC " ++ id.describe())
     found.ref
+
+  method vc_ids_in_groups(names):
+    unless names is_a List && names.length() > 0
+    | error(~who: #'vc_ids_in_groups,
+            "VC-group selection must be a nonempty List")
+    for (name in names):
+      unless name is_a String && name.length() > 0 && !name.contains("/")
+      | error(~who: #'vc_ids_in_groups,
+              "VC-group selection must contain names without '/'")
+      when duplicate_name(names, name)
+      | error(~who: #'vc_ids_in_groups,
+              "duplicate VC-group selection " ++ name)
+      unless topology_has_vc_group(spec, name)
+      | error(~who: #'vc_ids_in_groups,
+              "unknown VC group " ++ name)
+    vc_bindings.filter(
+      ~keep: fun (binding): names.find(
+        fun (name): name == binding.ref.group
+      ) != #false
+    ).map(fun (binding): binding.id)
 
 fun lower_topology(spec):
   unless spec is_a TopologySpec

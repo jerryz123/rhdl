@@ -32,7 +32,8 @@ The current implementation provides:
 - Generic minimal-adaptive routing over precomputed hop distances for any
   authored directed topology.
 - Minimal-adaptive mesh routing with irreversible XY escape transitions,
-  intentionally rejected by the current whole-graph acyclicity proof.
+  rejected by default whole-graph acyclicity and accepted by explicit escape
+  validation.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -48,6 +49,8 @@ The current implementation provides:
 - Rejection of reachable dead ends and destinations that cannot be reached.
 - Reachable-only VC dependency graph construction with merged route provenance.
 - Deterministic dependency-graph acyclicity certificates and cycle witnesses.
+- Escape-subnetwork closure, viable-entry, escape-only progress, and projected
+  dependency-acyclicity validation with deterministic failure witnesses.
 - Deterministic unit-hop distances and complete minimal-next-link sets for any
   directed topology.
 - An opaque validated-routing artifact and deterministic host route-table rows.
@@ -91,6 +94,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/escape-validation-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/hop-distance-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/validated-routing-test.rhm
 bash noc/check-boundaries.sh
@@ -263,17 +267,14 @@ thin compatibility wrapper. It composes generic `MinimalAdaptivePolicy`, XY
 Manhattan or phase-transition logic. Adaptive and escape group sets remain
 explicit, nonempty, disjoint, and validated against the mesh view.
 
-The mesh-adaptive-escape example deliberately does not produce
-`ValidatedRouting` for the full policy. Reachability succeeds, but the existing
-whole-graph acyclicity checker reports a stable cycle containing only adaptive
-VCs. The independently materialized raw callback, reversed declarations, and
-prefixed topology produce the same decisions and cycle witness. Restricting the
-same topology and traffic to escape-only XY produces `ValidatedRouting`.
-
-This isolates a proof-system limitation rather than an authoring or lowering
-limitation. Accepting the full adaptive policy requires a separately specified
-escape-subnetwork theorem, certificate, and implementation assumptions; the
-current validator has not been weakened or bypassed.
+The mesh-adaptive-escape example shows both proof modes over the same full
+policy. Default whole-graph acyclicity reports a stable cycle containing only
+adaptive VCs. An explicit request classifying the XY VCs as escape produces an
+`EscapeCertificate` and `ValidatedRouting` whose table still contains every
+adaptive choice. The independently authored raw callback, reversed route
+declarations, and prefixed topology produce equivalent materialized decisions,
+proof graphs, certificates, and route tables. Escape-only XY remains a valid
+whole-graph-acyclic comparison.
 
 ## Model
 
@@ -358,7 +359,9 @@ The resulting opaque `VCDependencyGraph` includes all reachable VC vertices in
 stable identity order. Duplicate edges are merged while retaining the original
 `MaterializedDecision` values and all contributing route classes. This
 provenance is the evidence that the acyclicity pass attaches to a cycle
-witness.
+witness. `project_dependency_graph` can retain an explicit subset of those
+vertices and their induced edges without changing the originating reachable
+routing evidence; escape validation uses this operation after classifying VCs.
 
 ## Acyclicity proof
 
@@ -379,22 +382,51 @@ criterion proves routing deadlock freedom only under the documented VC
 hold-and-request model; it does not prove fairness, starvation freedom,
 livelock freedom, or correctness of a future RTL implementation.
 
+## Escape-subnetwork validation
+
+`EscapeValidationRequest(topology, escape_vcs)` binds a nonempty, normalized
+set of VC identities to one exact topology. Authored topologies can lower
+named groups with `LoweredTopology.vc_ids_in_groups`, while raw-model clients
+can supply `VCId` values directly. The request contains no routing callback and
+does not infer proof authority from the class of an authored policy.
+
+`validate_escape_subnetwork` consumes the already materialized relation, its
+full reachability result, and its full dependency graph. It checks that every
+reachable transition from an escape-held VC remains in escape, computes
+escape-only backward viability to the destination, requires a viable escape
+entry from every reachable non-destination injection or non-escape-held state,
+and proves the reachable escape dependency projection acyclic. Success retains
+opaque closure, per-route entry and progress evidence. Failure returns the
+first deterministic `EscapeClosureViolation`, `MissingEscapeEntry`,
+`MissingEscapeRoute`, or escape-projected `DependencyCycle`.
+
+The escape theorem requires an implementation to let a packet continuously
+request an available escape transition and eventually grant that persistent
+request. It does not claim general arbitration fairness, starvation freedom,
+or livelock freedom.
+
 ## Validated routing and route tables
 
 `compile_routing` is the single validation gate from `RoutingProblem` to
 hardware-consumable domain data. It runs materialization, reachability,
-dependency-graph construction, and acyclicity checking in order. An acyclic
-input produces `ValidatedRouting`; a cyclic input produces its
-`DependencyCycle`. Reachability and model errors remain explicit failures.
+and dependency-graph construction exactly once. By default it applies
+whole-graph acyclicity as before. Passing
+`~escape: EscapeValidationRequest(...)` explicitly selects escape-subnetwork
+validation. An accepted request produces an opaque `EscapeCertificate` with
+the escape reachability and closure evidence, projected dependency graph,
+topological ordering, validator version, and implementation assumptions.
+Reachability and model errors remain explicit failures.
 
 Only the validation module can construct `ValidatedRouting`. The artifact
 retains the normalized topology, route classes, materialized and reachable
-relations, dependency graph, rank certificate, proof assumptions, validator
-version, and deterministic `RouteTable`.
+relations, full dependency graph, selected certificate, proof assumptions,
+validator version, and deterministic `RouteTable`.
 
 There is one table row for each route class's legal injection origin and each
 reachable held VC. A row records its router node, whether it ejects, and the
 allowed output VCs copied from the exact materialized snapshot that passed
 validation. Unreachable materialized origins are omitted so routing decisions
 excluded from the dependency proof cannot leak into generated hardware. No
-route-table operation can reach or re-run the user callback.
+route-table operation can reach or re-run the user callback. Escape-certified
+tables are still projected from the complete materialized relation, so legal
+adaptive choices outside the escape proof graph are retained exactly.

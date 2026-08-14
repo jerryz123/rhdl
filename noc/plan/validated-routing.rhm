@@ -9,10 +9,12 @@ export:
   RouteTableRow
   RouteTable
   ValidationAssumptions
+  EscapeCertificate
   ValidatedRouting
   compile_routing
 
-def validator_version = "vc-dependency-acyclic/v1"
+def acyclic_validator_version = "vc-dependency-acyclic/v1"
+def escape_validator_version = "vc-escape-subnetwork/v1"
 
 fun origin_equal(left, right):
   cond
@@ -94,7 +96,9 @@ class RouteTable(topology, route_classes, rows):
 class ValidationAssumptions(resource_model,
                             deadlock_criterion,
                             injection_holds_vc,
-                            ejection_acquires_vc):
+                            ejection_acquires_vc,
+                            persistent_escape_request,
+                            eventual_escape_grant):
   opaque
   internal _ValidationAssumptions
   constructor ~none
@@ -102,14 +106,49 @@ class ValidationAssumptions(resource_model,
   method describe():
     String.append(resource_model, "; ", deadlock_criterion,
                   "; injection-holds-vc=", to_string(injection_holds_vc),
-                  "; ejection-acquires-vc=", to_string(ejection_acquires_vc))
+                  "; ejection-acquires-vc=", to_string(ejection_acquires_vc),
+                  "; persistent-escape-request=",
+                  to_string(persistent_escape_request),
+                  "; eventual-escape-grant=",
+                  to_string(eventual_escape_grant))
 
 def initial_assumptions = _ValidationAssumptions(
   "virtual-channel hold-and-request",
   "reachable VC dependency union is acyclic",
   #false,
+  #false,
+  #false,
   #false
 )
+
+def escape_assumptions = _ValidationAssumptions(
+  "virtual-channel hold-and-request",
+  "reachable escape VC dependency subgraph is acyclic",
+  #false,
+  #false,
+  #true,
+  #true
+)
+
+class EscapeCertificate(request,
+                        reachability,
+                        closure,
+                        dependency_graph,
+                        acyclic_certificate,
+                        assumptions,
+                        validator_version):
+  opaque
+  internal _EscapeCertificate
+  constructor ~none
+
+  method rank(vc):
+    acyclic_certificate.rank(vc)
+
+  method describe():
+    String.append("escape certificate ", validator_version, ": vcs=",
+                  to_string(request.escape_vcs.length()),
+                  ", reachable-vcs=",
+                  to_string(dependency_graph.vertices.length()))
 
 class ValidatedRouting(topology,
                        route_classes,
@@ -159,25 +198,74 @@ fun build_route_table(materialized, reachable):
       )]
   _RouteTable(materialized.topology, materialized.route_classes, rows)
 
-fun compile_routing(problem):
+fun finish_validated_routing(materialized,
+                             reachable,
+                             dependency_graph,
+                             certificate,
+                             assumptions,
+                             version):
+  def route_table = build_route_table(materialized, reachable)
+  _ValidatedRouting(
+    materialized.topology,
+    materialized.route_classes,
+    materialized,
+    reachable,
+    dependency_graph,
+    certificate,
+    route_table,
+    assumptions,
+    version
+  )
+
+fun compile_routing(problem, ~escape: escape_request = #false):
   unless problem is_a RoutingProblem
   | error(~who: #'compile_routing, "expected a RoutingProblem")
+  unless escape_request == #false || escape_request is_a EscapeValidationRequest
+  | error(~who: #'compile_routing,
+          "escape validation must be an EscapeValidationRequest")
+  when escape_request != #false && !(escape_request.topology === problem.topology)
+  | error(~who: #'compile_routing,
+          "escape validation request belongs to a different topology")
   def materialized = materialize_routing(problem)
   def reachable = analyze_reachability(materialized)
   def dependency_graph = build_dependency_graph(reachable)
-  def proof = check_dependency_acyclicity(dependency_graph)
-  if proof is_a DependencyCycle
-  | proof
+  if escape_request == #false
   | block:
-      def route_table = build_route_table(materialized, reachable)
-      _ValidatedRouting(
-        materialized.topology,
-        materialized.route_classes,
+      def proof = check_dependency_acyclicity(dependency_graph)
+      if proof is_a DependencyCycle
+      | proof
+      | finish_validated_routing(
+          materialized,
+          reachable,
+          dependency_graph,
+          proof,
+          initial_assumptions,
+          acyclic_validator_version
+        )
+  | block:
+      def evidence = validate_escape_subnetwork(
         materialized,
         reachable,
         dependency_graph,
-        proof,
-        route_table,
-        initial_assumptions,
-        validator_version
+        escape_request
       )
+      if evidence is_a EscapeValidationEvidence
+      | block:
+          def certificate = _EscapeCertificate(
+            evidence.request,
+            evidence.reachability,
+            evidence.closure,
+            evidence.dependency_graph,
+            evidence.acyclic_certificate,
+            escape_assumptions,
+            escape_validator_version
+          )
+          finish_validated_routing(
+            materialized,
+            reachable,
+            dependency_graph,
+            certificate,
+            escape_assumptions,
+            escape_validator_version
+          )
+      | evidence

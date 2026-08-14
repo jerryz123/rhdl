@@ -1,0 +1,228 @@
+#lang rhombus
+// Checks escape certificates and stable closure, entry, progress, and cycle witnesses.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+  "../plan/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def first = PhysicalLink(LinkId(0), n0, n1, 2)
+def second = PhysicalLink(LinkId(1), n1, n2, 2)
+def back = PhysicalLink(LinkId(2), n1, n0, 2)
+def topology = Topology([n2, n0, n1], [back, second, first])
+def route = RouteClass(RouteClassId(0), n0, n2)
+
+fun adaptive_vc(link): VCId(link.id, 0)
+fun escape_vc(link): VCId(link.id, 1)
+
+fun candidate_is(candidate, link, index):
+  vc_id_equal(candidate, VCId(link.id, index))
+
+fun origin_is(origin, link, index):
+  origin is_a HeldVC && vc_id_equal(origin.vc, VCId(link.id, index))
+
+def request = EscapeValidationRequest(
+  topology,
+  [escape_vc(back), escape_vc(second), escape_vc(first)]
+)
+
+def mutable callback_count = 0
+fun accepted_allows(_route_class, origin, candidate):
+  callback_count := callback_count + 1
+  cond
+  | origin is_a Injection:
+      candidate_is(candidate, first, 0) || candidate_is(candidate, first, 1)
+  | origin_is(origin, first, 0):
+      candidate_is(candidate, second, 0) || candidate_is(candidate, second, 1)
+  | origin_is(origin, first, 1): candidate_is(candidate, second, 1)
+  | ~else: #false
+
+def accepted_problem = RoutingProblem(
+  topology,
+  [route],
+  RoutingRelation(accepted_allows)
+)
+def accepted = compile_routing(accepted_problem, ~escape: request)
+def calls_after_compile = callback_count
+def accepted_route_evidence = accepted.certificate.reachability.for_route(route)
+
+check:
+  accepted is_a ValidatedRouting ~is #true
+  accepted.certificate is_a EscapeCertificate ~is #true
+  accepted.certificate.request === request ~is #true
+  accepted.certificate.request.escape_vcs.map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc1", "l1.vc1", "l2.vc1"]
+  accepted.certificate.request.describe() ~is "escape-vcs=[l0.vc1, l1.vc1, l2.vc1]"
+  accepted.certificate.dependency_graph.vertices.map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc1", "l1.vc1"]
+  accepted.certificate.acyclic_certificate.graph === accepted.certificate.dependency_graph ~is #true
+  accepted.certificate.rank(escape_vc(first)) ~is 0
+  accepted.certificate.closure.decisions.length() ~is 1
+  accepted.certificate.closure.describe() ~is "closed escape transitions=1"
+  accepted.certificate.describe() ~is "escape certificate vc-escape-subnetwork/v1: vcs=3, reachable-vcs=2"
+  accepted_route_evidence.reachable_escape_vcs.map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc1", "l1.vc1"]
+  accepted_route_evidence.viable_escape_vcs.map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc1", "l1.vc1"]
+  accepted_route_evidence.entries.length() ~is 2
+  accepted.validator_version ~is "vc-escape-subnetwork/v1"
+  accepted.describe() ~is "validated routing vc-escape-subnetwork/v1: routes=1, vcs=4, rows=5"
+  accepted.assumptions === accepted.certificate.assumptions ~is #true
+  accepted.assumptions.deadlock_criterion ~is "reachable escape VC dependency subgraph is acyclic"
+  accepted.assumptions.persistent_escape_request ~is #true
+  accepted.assumptions.eventual_escape_grant ~is #true
+  accepted.route_row(route, Injection(n0)).allows(adaptive_vc(first)) ~is #true
+  accepted.route_row(route, Injection(n0)).allows(escape_vc(first)) ~is #true
+  callback_count ~is calls_after_compile
+
+// Default compilation still uses whole-graph acyclicity and its original
+// implementation assumptions.
+def ordinary = compile_routing(accepted_problem)
+
+check:
+  ordinary is_a ValidatedRouting ~is #true
+  ordinary.certificate is_a AcyclicCertificate ~is #true
+  ordinary.validator_version ~is "vc-dependency-acyclic/v1"
+  ordinary.assumptions.persistent_escape_request ~is #false
+  ordinary.assumptions.eventual_escape_grant ~is #false
+
+// Escape closure rejects the first reachable escape-to-adaptive transition.
+fun closure_violation_allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      candidate_is(candidate, first, 0) || candidate_is(candidate, first, 1)
+  | origin_is(origin, first, 0):
+      candidate_is(candidate, second, 0) || candidate_is(candidate, second, 1)
+  | origin_is(origin, first, 1):
+      candidate_is(candidate, second, 0) || candidate_is(candidate, second, 1)
+  | ~else: #false
+
+def closure_violation = compile_routing(
+  RoutingProblem(
+    topology,
+    [route],
+    RoutingRelation(closure_violation_allows)
+  ),
+  ~escape: request
+)
+
+check:
+  closure_violation is_a EscapeClosureViolation ~is #true
+  closure_violation.route_class === route ~is #true
+  closure_violation.decision.origin.describe() ~is "hold(l0.vc1)"
+  closure_violation.decision.candidate_vc.describe() ~is "l1.vc0"
+  closure_violation.describe() ~is "escape closure violation for route class r0: hold(l0.vc1) -> l1.vc0 leaves the escape VC set"
+
+// Injection can enter escape, but the reachable adaptive state at n1 cannot.
+fun missing_entry_allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      candidate_is(candidate, first, 0) || candidate_is(candidate, first, 1)
+  | origin_is(origin, first, 0): candidate_is(candidate, second, 0)
+  | origin_is(origin, first, 1): candidate_is(candidate, second, 1)
+  | ~else: #false
+
+def missing_entry = compile_routing(
+  RoutingProblem(
+    topology,
+    [route],
+    RoutingRelation(missing_entry_allows)
+  ),
+  ~escape: request
+)
+
+check:
+  missing_entry is_a MissingEscapeEntry ~is #true
+  missing_entry.origin.describe() ~is "hold(l0.vc0)"
+  missing_entry.describe() ~is "missing viable escape entry for route class r0 at hold(l0.vc0)"
+
+// This escape branch is closed but cycles between n0 and n1 without an
+// escape-only path to the destination. The adaptive branch still reaches n2.
+fun missing_route_allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      candidate_is(candidate, first, 0) || candidate_is(candidate, first, 1)
+  | origin_is(origin, first, 0): candidate_is(candidate, second, 0)
+  | origin_is(origin, first, 1): candidate_is(candidate, back, 1)
+  | origin_is(origin, back, 1): candidate_is(candidate, first, 1)
+  | ~else: #false
+
+def missing_route = compile_routing(
+  RoutingProblem(
+    topology,
+    [route],
+    RoutingRelation(missing_route_allows)
+  ),
+  ~escape: request
+)
+
+check:
+  missing_route is_a MissingEscapeRoute ~is #true
+  missing_route.origin.describe() ~is "hold(l0.vc1)"
+  missing_route.describe() ~is "missing escape-only route for route class r0 at hold(l0.vc1); destination is n2"
+
+// Adding an escape exit makes every escape state viable, but the remaining
+// hold-and-request cycle still invalidates the escape dependency graph.
+fun escape_cycle_allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      candidate_is(candidate, first, 0) || candidate_is(candidate, first, 1)
+  | origin_is(origin, first, 0):
+      candidate_is(candidate, second, 0) || candidate_is(candidate, second, 1)
+  | origin_is(origin, first, 1):
+      candidate_is(candidate, second, 1) || candidate_is(candidate, back, 1)
+  | origin_is(origin, back, 1): candidate_is(candidate, first, 1)
+  | ~else: #false
+
+def escape_cycle = compile_routing(
+  RoutingProblem(
+    topology,
+    [route],
+    RoutingRelation(escape_cycle_allows)
+  ),
+  ~escape: request
+)
+
+check:
+  escape_cycle is_a DependencyCycle ~is #true
+  escape_cycle.vertices().map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc1", "l2.vc1", "l0.vc1"]
+
+def equivalent_topology = Topology(
+  [n0, n1, n2],
+  [PhysicalLink(LinkId(0), n0, n1, 2),
+   PhysicalLink(LinkId(1), n1, n2, 2),
+   PhysicalLink(LinkId(2), n1, n0, 2)]
+)
+
+check:
+  EscapeValidationRequest("not a topology", [escape_vc(first)]) ~throws "requires a Topology"
+  EscapeValidationRequest(topology, []) ~throws "nonempty List"
+  EscapeValidationRequest(topology, ["not a VC"]) ~throws "only VCId"
+  EscapeValidationRequest(topology, [VCId(LinkId(99), 0)]) ~throws "does not belong"
+  EscapeValidationRequest(
+    topology,
+    [escape_vc(first), escape_vc(first)]
+  ) ~throws "duplicate escape VC l0.vc1"
+  compile_routing(accepted_problem, ~escape: "not a request") ~throws "must be an EscapeValidationRequest"
+  compile_routing(
+    accepted_problem,
+    ~escape: EscapeValidationRequest(
+      equivalent_topology,
+      [VCId(LinkId(0), 1), VCId(LinkId(1), 1), VCId(LinkId(2), 1)]
+    )
+  ) ~throws "belongs to a different topology"
+  validate_escape_subnetwork(
+    "not materialized",
+    #false,
+    #false,
+    request
+  ) ~throws "expected a MaterializedRouting"
