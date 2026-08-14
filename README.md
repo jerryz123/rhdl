@@ -833,6 +833,20 @@ chosen <== initial.lookup(selector, ~default: fallback)
 
 This is frontend sugar for statically projecting every element and building a
 core `rtl.mux_lookup`; there is no dynamic vector-index operation in core.
+Hardware-selected replacement is similarly a functional frontend operation:
+
+```rhombus
+next_value <== current.updated(selector, replacement)
+```
+
+It reconstructs the vector from static projections and per-element muxes. An
+out-of-range selector returns `current` unchanged, which makes register updates
+explicit without introducing a dynamically selected mutable place:
+
+```rhombus
+state.next <== state.updated(write_index, write_value)
+```
+
 Vectors may contain any `DataType`, including records and other vectors. A
 packable vector has no padding and places element zero in the least-significant
 packed bits, matching ordinary hardware indexing. Equal-width explicit casts
@@ -1441,6 +1455,8 @@ Important examples include:
 | `examples/vec-search.rhdl` | Registered traversal of a host-defined hardware-vector pattern |
 | `examples/vec-shift-register.rhdl` | Element-wise load and shift updates to one vector register |
 | `examples/vec-shift-register-param.rhdl` | Host-parameterized, zero-initialized vector shift pipeline |
+| `examples/predicate-filter.rhdl` | Host predicate closures specialized and composed through a Valid interface |
+| `examples/vector-update.rhdl` | Functional hardware-selected vector replacement with out-of-range preservation |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |

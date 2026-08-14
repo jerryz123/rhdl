@@ -1,0 +1,89 @@
+#lang rhdl
+// Composes host-specialized predicate filters through a reusable Valid interface.
+
+interface Valid(T):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+
+circuit PredicateFilter(T, predicate):
+  interface ingress(Valid(T), ~role: consumer)
+  interface egress(Valid(T), ~role: producer)
+
+  egress.valid <== ingress.valid and predicate(ingress.bits)
+  egress.bits <== ingress.bits
+
+fun SingleFilter(T):
+  fun is_single_digit(x :: Hardware.of(T)) :: Bool:
+    x <= bits(9, T.width)
+
+  PredicateFilter(T, is_single_digit)
+
+fun EvenFilter(T):
+  // This preserves the source example's predicate: it accepts values whose
+  // low bit is set, despite the factory's original EvenFilter name.
+  fun has_low_bit_set(x :: Hardware.of(T)) :: Bool:
+    x[0].into(Bool)
+
+  PredicateFilter(T, has_low_bit_set)
+
+circuit SingleEvenFilter(T):
+  interface ingress(Valid(T), ~role: consumer)
+  interface egress(Valid(T), ~role: producer)
+
+  inst single(SingleFilter(T))
+  inst even(EvenFilter(T))
+
+  single.ingress <=> ingress
+  even.ingress <=> single.egress
+  egress <=> even.egress
+
+def design = elaborate(SingleEvenFilter(Bits(8)))
+
+def verilog_reference = @str|<<{
+module SingleEvenFilter(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  wire struct packed {logic valid; logic [7:0] bits; } _single_egress_out;
+  PredicateFilter single (
+    .ingress_in (ingress_in),
+    .egress_out (_single_egress_out)
+  );
+  PredicateFilter_1 even (
+    .ingress_in (_single_egress_out),
+    .egress_out (egress_out)
+  );
+endmodule
+
+module PredicateFilter(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  assign egress_out =
+    '{valid: (ingress_in.valid & ~(8'h9 < ingress_in.bits)), bits: ingress_in.bits};
+endmodule
+
+module PredicateFilter_1(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  assign egress_out =
+    '{valid: (ingress_in.valid & ingress_in.bits[0]), bits: ingress_in.bits};
+endmodule
+}>>|
+
+export:
+  Valid
+  PredicateFilter
+  SingleFilter
+  EvenFilter
+  SingleEvenFilter
+  design
+  verilog_reference

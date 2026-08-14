@@ -46,6 +46,7 @@ export:
   vector_get
   vector_project
   vector_lookup
+  vector_updated
   index
   reg
   inst
@@ -499,6 +500,43 @@ fun vector_lookup(entity,
                 name,
                 location,
                 Origin("embedded vector lookup", name || ""))
+
+// Constructs a new vector whose hardware-selected element is replaced. Each
+// element falls back to the original value, so an out-of-range selector leaves
+// the entire vector unchanged.
+fun vector_updated(entity,
+                   selector,
+                   replacement,
+                   name = #false,
+                   location = Location()):
+  def vector_value = read(entity, location)
+  def selector_value = read(selector, location)
+  def replacement_value = read(replacement, location)
+  unless vector_type(vector_value.type)
+  | frontend_fail("vector update requires a VectorType value", location)
+  unless bits_type(selector_value.type)
+  | frontend_fail("vector update selector must have a Bits type", location)
+  unless type_equal(replacement_value.type, vector_value.type.element_type)
+  | frontend_fail("vector update replacement must have the vector element type",
+                  location)
+  def elements:
+    for List (element_index in 0..vector_value.type.length):
+      def existing = vector_get(vector_value,
+                                element_index,
+                                #false,
+                                location)
+      def key = literal(selector_value.type,
+                        element_index,
+                        #false,
+                        location)
+      def selected = hw_eq(selector_value, key, #false, location)
+      hw_mux_lookup(selected,
+                    existing,
+                    [[1, replacement_value]],
+                    #false,
+                    location,
+                    Origin("embedded vector update", to_string(element_index)))
+  vector_create(vector_value.type, elements, name, location)
 
 fun reg(name, type, clock, reset = #false, reset_value = #false,
         location = Location()):

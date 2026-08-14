@@ -1,0 +1,48 @@
+#lang rhdl
+// Demonstrates functional hardware-selected vector replacement with out-of-range hold.
+
+circuit VectorUpdate():
+  input source: Vec(3, Bits(4))
+  input selector: Bits(2)
+  input replacement: Bits(4)
+  output result: Vec(3, Bits(4))
+
+  result <== source.updated(selector, replacement)
+
+sync_circuit IndexedVectorRegister():
+  input write_enable: Bool
+  input selector: Bits(2)
+  input replacement: Bits(4)
+  output result: Vec(3, Bits(4))
+
+  reg state(~init: vec(bits(0, 4), bits(0, 4), bits(0, 4)))
+
+  when write_enable:
+    state.next <== state.updated(selector, replacement)
+
+  result <== state
+
+def design = elaborate(VectorUpdate())
+def register_design = elaborate(IndexedVectorRegister())
+
+def verilog_reference = @str|<<{
+module VectorUpdate(
+  input  [2:0][3:0] source,
+  input  [1:0]      selector,
+  input  [3:0]      replacement,
+  output [2:0][3:0] result
+);
+
+  assign result =
+    {{selector == 2'h2 ? replacement : source[2'h2]},
+     {selector == 2'h1 ? replacement : source[2'h1]},
+     {selector == 2'h0 ? replacement : source[2'h0]}};
+endmodule
+}>>|
+
+export:
+  VectorUpdate
+  IndexedVectorRegister
+  design
+  register_design
+  verilog_reference

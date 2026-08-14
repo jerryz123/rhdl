@@ -1,0 +1,43 @@
+#lang rhombus
+// Checks one-way interfaces, host predicate specialization, and filter hierarchy.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../examples/predicate-filter.rhdl" as fixture
+
+def top = fixture.design.modules.find(
+  fun (module_def): module_def.name == "SingleEvenFilter"
+)
+def filters = fixture.design.modules.filter(
+  ~keep: fun (module_def): module_def.name.starts_with("PredicateFilter")
+)
+def instances = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def single = filters.find(
+  fun (module_def):
+    module_def.operations.find(
+      fun (operation): operation.opcode == "rtl.ult"
+    )
+)
+def low_bit = filters.find(
+  fun (module_def):
+    module_def.operations.find(
+      fun (operation): operation.opcode == "rtl.extract"
+    )
+)
+
+check:
+  fixture.design.modules.length() ~is 3
+  top.inputs.map(fun (port): port.name) ~is ["ingress_in"]
+  top.outputs.map(fun (port): port.name) ~is ["egress_out"]
+  instances.length() ~is 2
+  filters.length() ~is 2
+  single != #false ~is #true
+  low_bit != #false ~is #true
+  single.operations.find(
+    fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value") == 9
+  ) != #false ~is #true
+  (for all (filter in filters):
+     filter.inputs.map(fun (port): port.name) == ["ingress_in"] && filter.outputs.map(fun (port): port.name) == ["egress_out"]) ~is #true
+  verify_design(fixture.design) ~is #void
