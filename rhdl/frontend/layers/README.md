@@ -234,6 +234,26 @@ storage.read_write.write_data <== write_data
 read_data <== storage.read_write.read_data
 ```
 
+Write-capable memories can opt into uniform packed-lane masks:
+
+```rhombus
+sync_mem storage(depth, Bits(32), ~mask_granularity: 8):
+  read_write
+
+storage.read_write.address <== address
+storage.read_write.enable <== enable
+storage.read_write.write <== write
+storage.read_write.write_data <== write_data
+storage.read_write.write_mask <== byte_mask
+read_data <== storage.read_write.read_data
+```
+
+The granularity is a positive host `Int` that divides the packed element
+width. The mask is `Bits(packed_width / granularity)` and may select any subset
+of the fixed lanes on each write. Separate write ports expose `.mask`; shared
+ports expose `.write_mask`. Bit zero controls the least-significant packed
+lane. Omitting `~mask_granularity` preserves the unmasked port shape.
+
 The supported shapes are 1R, 1W, 1R1W, and 1RW. A `read_write` declaration
 cannot yet be combined with separate `read` or `write` declarations. Port
 declarations are not inferred from use, the primitive cannot be indexed, and
@@ -248,8 +268,9 @@ edge. Data while read enable is false is unspecified. The primitive has no
 reset or initialization; out-of-range addresses and same-cycle read/write
 collisions between separate ports are also unspecified. On an enabled shared
 port, `write = 0` reads and `write = 1` writes; `read_data` after a write or
-while disabled is unspecified. Port arrays and masks remain outside this
-contract.
+while disabled is unspecified. An all-zero write mask preserves storage but
+does not turn a shared write-mode cycle into a read. Port arrays remain outside
+this contract.
 
 ## Clocked DPI
 

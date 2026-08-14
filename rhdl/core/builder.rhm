@@ -1264,6 +1264,7 @@ class Builder(design):
                      has_read = #true,
                      has_write = #true,
                      has_read_write = #false,
+                     mask_granularity = #false,
                      location = Location(),
                      origin = Origin("synchronous memory", name)):
     ensure_module_in_design(design, module_def, #'sync_memory)
@@ -1282,8 +1283,26 @@ class Builder(design):
     when has_read_write && (has_read || has_write)
     | fail(#'sync_memory,
            "a read-write port cannot be combined with separate read or write ports yet")
+    when mask_granularity != #false
+    | unless mask_granularity is_a Int && mask_granularity > 0
+      | fail(#'sync_memory,
+             "synchronous memory mask granularity must be a positive host Int")
+      unless has_write || has_read_write
+      | fail(#'sync_memory,
+             "synchronous memory masking requires a write-capable port")
+      def element_width = packed_width(element_type)
+      unless element_width is_a Int && element_width > 0
+      | fail(#'sync_memory,
+             "masked synchronous memory element type must have a packed width")
+      unless element_width mod mask_granularity == 0
+      | fail(#'sync_memory,
+             "synchronous memory mask granularity must divide the packed element width")
     def operation_id = design.fresh_id()
     def address_type = Bits(memory_address_width(depth))
+    def mask_type:
+      if mask_granularity == #false
+      | #false
+      | Bits(packed_width(element_type) / mask_granularity)
     def mutable places = []
     def mutable results = []
     def read_port:
@@ -1326,8 +1345,16 @@ class Builder(design):
                              Bits(1),
                              module_def,
                              operation_id)
-          places := places ++ [address, data, enable]
-          SyncMemoryWritePort(address, data, enable)
+          def mask:
+            if mask_type
+            | Place(design.fresh_id(),
+                    name ++ ".write.mask",
+                    mask_type,
+                    module_def,
+                    operation_id)
+            | #false
+          places := places ++ [address, data, enable] ++ (if mask | [mask] | [])
+          SyncMemoryWritePort(address, data, enable, mask)
       | #false
     def read_write_port:
       if has_read_write
@@ -1357,13 +1384,22 @@ class Builder(design):
                                 element_type,
                                 module_def,
                                 operation_id)
-          places := places ++ [address, enable, write, write_data]
+          def write_mask:
+            if mask_type
+            | Place(design.fresh_id(),
+                    name ++ ".read_write.write_mask",
+                    mask_type,
+                    module_def,
+                    operation_id)
+            | #false
+          places := places ++ [address, enable, write, write_data] ++ (if write_mask | [write_mask] | [])
           results := results ++ [read_data]
           SyncMemoryReadWritePort(address,
                                   enable,
                                   write,
                                   write_data,
-                                  read_data)
+                                  read_data,
+                                  write_mask)
       | #false
     def operation = Operation(operation_id,
                               "rtl.sync_memory",
@@ -1376,7 +1412,8 @@ class Builder(design):
                                "element_type": element_type,
                                "has_read": has_read,
                                "has_write": has_write,
-                               "has_read_write": has_read_write},
+                               "has_read_write": has_read_write,
+                               "mask_granularity": mask_granularity},
                               location,
                               origin)
     clock.add_user(operation_id)
@@ -1390,7 +1427,8 @@ class Builder(design):
                clock,
                if read_port | [read_port] | [],
                if write_port | [write_port] | [],
-               if read_write_port | [read_write_port] | [])
+               if read_write_port | [read_write_port] | [],
+               mask_granularity)
 
   method register(module_def,
                   name,

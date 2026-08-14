@@ -138,7 +138,8 @@ memory_read_async(Memory<T>, address)       -> T
 memory_write(Memory<T>, address, T,
              Clock, one-bit enable)         -> void
 sync_memory(depth, T: DataType, Clock,
-            read?, write?, read_write?)     -> SyncMemory<T>
+            read?, write?, read_write?,
+            mask_granularity?)              -> SyncMemory<T>
 dpi_call(procedure, Clock, enable, args...) -> void
 dpi_register(function, Clock, enable,
              args...)                       -> one or more flat result types
@@ -194,11 +195,20 @@ shared read-write port has driveable `address`, `enable`, one-bit `write`, and
 `write = 0` selects a read and `write = 1` selects a write. Addresses are
 exactly `Bits(index_width(depth))`.
 
+A memory may optionally declare a positive host-known mask granularity that
+evenly divides the packed element width. Each write port then gains a required
+mask field of type `Bits(packed_width(element_type) / mask_granularity)`; the
+shared port names it `write_mask`. Mask bit zero controls the least-significant
+packed granule. A one writes that granule and a zero preserves its stored bits.
+The layout belongs to the memory and will be shared by every future
+write-capable port. Masking requires a statically packable element type.
+
 An enabled read presents its data one rising edge after its address is
 sampled. Read output while its enable is false, or after a shared-port write,
-is unspecified. Initial contents, out-of-range addresses, and collisions
-between separate ports are unspecified. The primitive has no reset,
-initialization, masks, inferred ports, or direct indexing.
+is unspecified. An all-zero mask preserves every stored bit but remains a
+write-mode cycle on a shared port. Initial contents, out-of-range addresses,
+and collisions between separate ports are unspecified. The primitive has no
+reset, initialization, inferred ports, or direct indexing.
 
 ### DPI simulation operations
 

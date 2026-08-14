@@ -76,9 +76,11 @@ a composition. An unsupported verified type or operation produces a backend
 error rather than leaking CIRCT decisions into core schemas.
 
 Synchronous-memory element types are packed to the integer width required by
-`seq.firmem` and bitcast back at port boundaries. CIRCT's generated-memory
-flow preserves the declared physical topology, including native 1RW mode and
-enable signals, before producing its simulation SystemVerilog module. The
+`seq.firmem` and bitcast back at port boundaries. A declared RHDL mask
+granularity determines the `seq.firmem` mask width, and write and read-write
+ports pass their mask operand directly. CIRCT's generated-memory flow preserves
+the declared physical topology, including native 1RW mode, enables, and
+packed-lane masks, before producing its simulation SystemVerilog module. The
 older asynchronous-read `Memory` resource continues to use `seq.hlmem`.
 
 `sv.constantX` carries `rtl.dont_care` through CIRCT and Verilog export. Its

@@ -17,7 +17,8 @@ fun declare_sync_memory(name,
                         has_read,
                         has_write,
                         has_read_write,
-                        clock = #false):
+                        clock = #false,
+                        mask_granularity = #false):
   if clock
   | kernel.sync_memory(name,
                        depth,
@@ -25,13 +26,15 @@ fun declare_sync_memory(name,
                        clock,
                        has_read,
                        has_write,
-                       has_read_write)
+                       has_read_write,
+                       mask_granularity)
   | ambient_sync_memory(name,
                         depth,
                         element_type,
                         has_read,
                         has_write,
-                        has_read_write)
+                        has_read_write,
+                        mask_granularity)
 
 fun sync_memory_value(value):
   value is_a SyncMemory
@@ -67,10 +70,20 @@ fun sync_memory_read_data(port) :~ HardwareFields: port.data
 fun sync_memory_write_address(port) :~ HardwareFields: port.address
 fun sync_memory_write_data(port) :~ HardwareFields: port.data
 fun sync_memory_write_enable(port) :~ HardwareFields: port.enable
+fun sync_memory_write_mask(port) :~ HardwareFields:
+  unless port is_a SyncMemoryWritePort && port.mask
+  | error(~who: #'mask,
+          "synchronous memory write port has no mask")
+  port.mask
 fun sync_memory_read_write_address(port) :~ HardwareFields: port.address
 fun sync_memory_read_write_enable(port) :~ HardwareFields: port.enable
 fun sync_memory_read_write_write(port) :~ HardwareFields: port.write
 fun sync_memory_read_write_write_data(port) :~ HardwareFields: port.write_data
+fun sync_memory_read_write_write_mask(port) :~ HardwareFields:
+  unless port is_a SyncMemoryReadWritePort && port.write_mask
+  | error(~who: #'write_mask,
+          "synchronous memory read-write port has no write mask")
+  port.write_mask
 fun sync_memory_read_write_read_data(port) :~ HardwareFields: port.read_data
 
 annot.macro 'SyncMemoryFields':
@@ -116,6 +129,7 @@ dot.macro 'sync_memory_write_dot $left $dot $right':
   | 'address': 'sync_memory_write_address($left)'
   | 'data': 'sync_memory_write_data($left)'
   | 'enable': 'sync_memory_write_enable($left)'
+  | 'mask': 'sync_memory_write_mask($left)'
   | ~else: #false
 
 dot.macro 'sync_memory_read_write_dot $left $dot $right':
@@ -124,6 +138,7 @@ dot.macro 'sync_memory_read_write_dot $left $dot $right':
   | 'enable': 'sync_memory_read_write_enable($left)'
   | 'write': 'sync_memory_read_write_write($left)'
   | 'write_data': 'sync_memory_read_write_write_data($left)'
+  | 'write_mask': 'sync_memory_read_write_write_mask($left)'
   | 'read_data': 'sync_memory_read_write_read_data($left)'
   | ~else: #false
 
@@ -177,4 +192,48 @@ defn.macro
     def memory_name = name.to_source_string()
     'def $name :: SyncMemoryFields = declare_sync_memory(
        $memory_name, $depth, $element_type, #false, #false, #true, $clock
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~mask_granularity: $mask_granularity):
+     read
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #true, #false,
+       #false, $mask_granularity
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~mask_granularity: $mask_granularity):
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #true, #false,
+       #false, $mask_granularity
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~mask_granularity: $mask_granularity):
+     read_write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #false, #true,
+       #false, $mask_granularity
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock, ~mask_granularity: $mask_granularity):
+     read
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #true, #false,
+       $clock, $mask_granularity
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock, ~mask_granularity: $mask_granularity):
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #true, #false,
+       $clock, $mask_granularity
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock, ~mask_granularity: $mask_granularity):
+     read_write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #false, #true,
+       $clock, $mask_granularity
      )'

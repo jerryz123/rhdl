@@ -294,8 +294,15 @@ fun sync_memory_type(operation):
   unless width is_a Int && width > 0
   | error(~who: #'emit_circt,
           "synchronous memory element type must have a packed width")
+  def mask_granularity = operation.attribute("mask_granularity", #false)
+  def mask_width:
+    if mask_granularity == #false
+    | #false
+    | width / mask_granularity
   String.append("!seq.firmem<", to_string(operation.attribute("depth")),
-                " x ", to_string(width), ">")
+                " x ", to_string(width),
+                if mask_width | ", mask " ++ to_string(mask_width) | "",
+                ">")
 
 fun emit_sync_memory(operation):
   def clock_ref = "%__rhdl_sync_memory_clock_" ++ to_string(operation.id)
@@ -304,6 +311,11 @@ fun emit_sync_memory(operation):
   def element_type = operation.attribute("element_type")
   def packed_type = "i" ++ to_string(packed_width(element_type))
   def flat_element = flat_data_type(element_type)
+  def mask_granularity = operation.attribute("mask_granularity", #false)
+  def mask_width:
+    if mask_granularity == #false
+    | #false
+    | packed_width(element_type) / mask_granularity
   def mutable place_index = 0
   def mutable result_index = 0
   def mutable port_operations = []
@@ -333,6 +345,8 @@ fun emit_sync_memory(operation):
   | def address = operation.places[place_index]
     def data = operation.places[place_index + 1]
     def enable = operation.places[place_index + 2]
+    def mask:
+      if mask_width | operation.places[place_index + 3] | #false
     def port_data_ref:
       if flat_element
       | value_ref(data.driver)
@@ -347,14 +361,19 @@ fun emit_sync_memory(operation):
       String.append("    seq.firmem.write_port ", memory_ref, "[",
                     value_ref(address.driver), "] = ", port_data_ref,
                     ", clock ", clock_ref, " enable ",
-                    value_ref(enable.driver), " : ", memory_type)
+                    value_ref(enable.driver),
+                    if mask | " mask " ++ value_ref(mask.driver) | "",
+                    " : ", memory_type,
+                    if mask_width | ", i" ++ to_string(mask_width) | "")
     ]
-    place_index := place_index + 3
+    place_index := place_index + 3 + (if mask_width | 1 | 0)
   when operation.attribute("has_read_write")
   | def address = operation.places[place_index]
     def enable = operation.places[place_index + 1]
     def write = operation.places[place_index + 2]
     def write_data = operation.places[place_index + 3]
+    def write_mask:
+      if mask_width | operation.places[place_index + 4] | #false
     def read_data = operation.results[result_index]
     def port_write_data_ref:
       if flat_element
@@ -375,7 +394,12 @@ fun emit_sync_memory(operation):
                     " = seq.firmem.read_write_port ", memory_ref, "[",
                     value_ref(address.driver), "] = ", port_write_data_ref,
                     " if ", value_ref(write.driver), ", clock ", clock_ref,
-                    " enable ", value_ref(enable.driver), " : ", memory_type)
+                    " enable ", value_ref(enable.driver),
+                    if write_mask
+                    | " mask " ++ value_ref(write_mask.driver)
+                    | "",
+                    " : ", memory_type,
+                    if mask_width | ", i" ++ to_string(mask_width) | "")
     ]
     unless flat_element
     | port_operations := port_operations ++ [

@@ -135,8 +135,8 @@ The current vertical slice includes:
 - General last-connect and unordered multiple-driver semantics
 - Automatic module-specialization deduplication
 - Distinct `UInt` and `SInt`, implicit widths, and general width inference
-- Memory initialization, masks, general multi-port synchronous memories, and
-  defined inter-port collisions
+- Memory initialization, masks on asynchronous-read memories, general
+  multi-port synchronous memories, and defined inter-port collisions
 - Asynchronous or active-low reset and multi-domain analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects

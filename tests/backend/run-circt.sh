@@ -218,6 +218,7 @@ fixture_specs=(
   'async-read-memory|async_read_memory_tb|examples/async-read-memory.rhdl|design|verilog_reference'
   'sync-memory|sync_memory_tb|examples/sync-memory.rhdl|design|verilog_reference'
   'sync-memory-1rw|sync_memory_1rw_tb|examples/sync-memory-1rw.rhdl|design|verilog_reference'
+  'sync-memory-masked|sync_memory_masked_tb|examples/sync-memory-masked.rhdl|design|verilog_reference'
   'multi-write-memory|multi_write_memory_tb|examples/multi-write-memory.rhdl|design|verilog_reference'
   'clocked-dpi|clocked_dpi_tb|examples/clocked-dpi.rhdl|design|verilog_reference'
   'tiny-simd|tiny_simd_tb|examples/tiny-simd.rhdl|design|verilog_reference'

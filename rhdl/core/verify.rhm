@@ -273,6 +273,7 @@ fun check_operation_types(module_def, operation, schema):
       def has_read = operation.attribute("has_read", #false)
       def has_write = operation.attribute("has_write", #false)
       def has_read_write = operation.attribute("has_read_write", #false)
+      def mask_granularity = operation.attribute("mask_granularity", #false)
       unless depth is_a Int && depth > 0
       | fail_operation(operation, "synchronous memory depth must be positive")
       unless data_type(element_type) && type_well_formed(element_type)
@@ -283,9 +284,24 @@ fun check_operation_types(module_def, operation, schema):
       when has_read_write && (has_read || has_write)
       | fail_operation(operation,
                        "a read-write port cannot be combined with separate read or write ports yet")
+      when mask_granularity != #false
+      | unless mask_granularity is_a Int && mask_granularity > 0
+        | fail_operation(operation,
+                         "synchronous memory mask granularity must be positive")
+        unless has_write || has_read_write
+        | fail_operation(operation,
+                         "synchronous memory masking requires a write-capable port")
+        def element_width = packed_width(element_type)
+        unless element_width is_a Int && element_width > 0
+        | fail_operation(operation,
+                         "masked synchronous memory element type must have a packed width")
+        unless element_width mod mask_granularity == 0
+        | fail_operation(operation,
+                         "synchronous memory mask granularity must divide the packed element width")
       unless clock_type(operation.operands[0].type)
       | fail_operation(operation, "synchronous memory clock must be Clock")
-      def expected_places = (if has_read | 2 | 0) + (if has_write | 3 | 0) + (if has_read_write | 4 | 0)
+      def has_mask = mask_granularity != #false
+      def expected_places = (if has_read | 2 | 0) + (if has_write | 3 + (if has_mask | 1 | 0) | 0) + (if has_read_write | 4 + (if has_mask | 1 | 0) | 0)
       def expected_results = (if has_read | 1 | 0) + (if has_read_write | 1 | 0)
       unless operation.places.length() == expected_places && operation.results.length() == expected_results
       | fail_operation(operation, "synchronous memory port shape is malformed")
@@ -314,7 +330,13 @@ fun check_operation_types(module_def, operation, schema):
         | fail_operation(operation, "synchronous memory write data has the wrong type")
         unless flat_data_type(enable.type) && data_width(enable.type) == 1
         | fail_operation(operation, "synchronous memory write enable must be one bit")
-        place_index := place_index + 3
+        when has_mask
+        | def mask = operation.places[place_index + 3]
+          def expected_mask_width = packed_width(element_type) / mask_granularity
+          unless bits_type(mask.type) && mask.type.width == expected_mask_width
+          | fail_operation(operation,
+                           "synchronous memory write mask has the wrong Bits width")
+        place_index := place_index + 3 + (if has_mask | 1 | 0)
       when has_read_write
       | def address = operation.places[place_index]
         def enable = operation.places[place_index + 1]
@@ -336,6 +358,12 @@ fun check_operation_types(module_def, operation, schema):
         unless type_equal(read_data.type, element_type)
         | fail_operation(operation,
                          "synchronous memory read-write output data has the wrong type")
+        when has_mask
+        | def write_mask = operation.places[place_index + 4]
+          def expected_mask_width = packed_width(element_type) / mask_granularity
+          unless bits_type(write_mask.type) && write_mask.type.width == expected_mask_width
+          | fail_operation(operation,
+                           "synchronous memory read-write mask has the wrong Bits width")
   | "dpi_call" || "dpi_register":
       def dpi_import = operation.attribute("dpi_import", #false)
       unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && contains_identity(module_def.design.dpi_imports, dpi_import)
