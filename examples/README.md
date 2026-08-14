@@ -78,6 +78,11 @@ remain explicit library imports.
 The package rules and exact direct dependencies of these layers are documented
 in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
+Reusable protocol declarations live separately under [`rhdl/std`](../rhdl/std)
+because they use the public language without extending it. The initial
+[`ready-valid.rhm`](../rhdl/std/ready-valid.rhm) module provides `Valid`,
+`Decoupled`, and `Irrevocable` as opt-in nominal interface types.
+
 ## What the standard language adds
 
 The standard frontend aggregates the foundation and layers above. Their forms
@@ -181,9 +186,9 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`vec-search.rhdl`](vec-search.rhdl) | Host-defined pattern materialized as a hardware vector and selected by a wrapping register |
 | [`vec-shift-register.rhdl`](vec-shift-register.rhdl) | Priority load and shift updates assembled into one aggregate vector register |
 | [`vec-shift-register-param.rhdl`](vec-shift-register-param.rhdl) | Host-selected depth and width with generated reset contents and next-state wiring |
-| [`predicate-filter.rhdl`](predicate-filter.rhdl) | One-way Valid interfaces and host-closure-specialized filter hierarchy |
+| [`predicate-filter.rhdl`](predicate-filter.rhdl) | Standard-library `Valid` interfaces and host-closure-specialized filter hierarchy |
 | [`wire.rhdl`](wire.rhdl) | A vector wire assembled element by element and then read as one value |
-| [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
+| [`interface.rhdl`](interface.rhdl) | Standard-library `Decoupled`, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It

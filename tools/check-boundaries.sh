@@ -22,8 +22,12 @@ fail_matches "core must not import frontend or backend modules" \
   '^[[:space:]]+"[^"]*(frontend|backend)/' rhdl/core
 fail_matches "frontend must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' rhdl/frontend
+fail_matches "frontend must not import the optional standard library" \
+  '^[[:space:]]+"[^"]*std/' rhdl/frontend
 fail_matches "backend must not import frontend modules" \
   '^[[:space:]]+"[^"]*frontend/' rhdl/backend
+fail_matches "standard library must not import RHDL implementation packages" \
+  '^[[:space:]]+.*(core/|backend/|frontend/)' rhdl/std
 fail_matches "standard language assembly must not import core or backend modules" \
   '^[[:space:]]+"[^"]*(core|backend)/' rhdl/language.rhm
 fail_matches "base language assembly must not import core or backend modules" \

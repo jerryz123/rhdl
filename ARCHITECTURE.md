@@ -17,6 +17,9 @@ not a second IR.
 #lang rhdl/base ---------------> frontend/foundation
 user base-profile imports -----> selected frontend/layers/*
 
+rhdl/std/* --------------------> public #lang rhdl authoring surface
+user designs ------------------> optional rhdl/std/* libraries
+
 frontend/foundation -----------+
 frontend/layers/* -------------+----> frontend/support/*
                                +----> frontend/kernel ----> core
@@ -42,12 +45,15 @@ the internal module implementing its shared frontend forms is called the
 | `frontend/layers/` | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | `frontend/standard.rhm` | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | `language.rhm`, `base/language.rhm` | Compose Rhombus with one public RHDL profile | Standard or foundation, plus the host-condition guard |
+| `std/` | Optional reusable protocols and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | `backend/` | Consume verified public IR; currently lower it through CIRCT | Core only |
 
 The import direction is one-way. Core never imports frontend or backend code;
 frontend code never imports a backend; and a backend never imports frontend
 syntax or elaboration. Layers do not import sibling layers. Shared machinery
-needed by multiple layers belongs in `frontend/support/`.
+needed by multiple layers belongs in `frontend/support/`. Standard-library
+modules use public RHDL forms rather than importing core, backend, or frontend
+implementation modules.
 
 ## Frontend layer dependencies
 

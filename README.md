@@ -893,20 +893,12 @@ Interfaces are frontend protocol descriptors over directional record-typed
 ports. An interface is not itself a core `DataType`.
 
 ```rhombus
-interface ReadyValid(T):
-  role producer
-  role consumer
-
-  producer -> consumer:
-    valid: Bool
-    bits: T
-
-  consumer -> producer:
-    ready: Bool
+import:
+  lib("rhdl/std/ready-valid.rhm") open
 
 circuit Adapter(T):
-  interface ingress(ReadyValid(T), ~role: consumer)
-  interface egress(ReadyValid(T), ~role: producer)
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
   egress <=> ingress
 ```
 
@@ -930,11 +922,11 @@ interface ControlPlane(T):
   role device
 
   manager -> device:
-    command: ReadyValid(T)
+    command: Decoupled(T)
     enable: Bool
 
   device -> manager:
-    response: ReadyValid(T)
+    response: Decoupled(T)
     status: T
 ```
 
@@ -959,6 +951,30 @@ nested `RecordType` fields and lower naturally to nested CIRCT `hw.struct`
 types. Core IR and the backend have no interface-specific cases.
 
 See [`examples/nested-interface.rhdl`](examples/nested-interface.rhdl).
+
+### Standard protocol library
+
+`rhdl/std` contains opt-in reusable hardware vocabulary written against the
+public RHDL language. It is not another language profile and does not add IR,
+elaboration, or backend behavior. The initial ready-valid module exports three
+nominal interfaces:
+
+| Interface | Contract |
+|---|---|
+| `Valid(T)` | Every asserted cycle carries one payload; there is no backpressure |
+| `Decoupled(T)` | Transfer occurs when `ready` and `valid` are asserted, with no pre-transfer stability guarantee |
+| `Irrevocable(T)` | A valid payload remains asserted and stable until a `ready`/`valid` transfer |
+
+Import the family directly:
+
+```rhombus
+import:
+  lib("rhdl/std/ready-valid.rhm") open
+```
+
+`Decoupled` and `Irrevocable` intentionally have the same physical fields but
+remain distinct interface types. Their temporal difference is currently a
+documented contract; RHDL does not yet generate protocol assertions.
 
 ### Extending the language with ordinary libraries
 
@@ -1412,6 +1428,7 @@ rhdl/frontend/foundation.rhm  # shared public authoring surface
 rhdl/frontend/support/        # shared non-profile frontend machinery
 rhdl/frontend/layers/         # independently composable language layers
 rhdl/frontend/standard.rhm    # implementation-free standard aggregator
+rhdl/std/                     # optional protocols and reusable hardware generators
 rhdl/backend/                 # optional IR consumers, currently CIRCT
 examples/                     # canonical valid frontend programs
 tests/                        # mirrored core, frontend, and backend tests
@@ -1422,6 +1439,7 @@ The high-level dependency direction is:
 ```text
 language -> frontend/standard -> frontend/foundation + frontend/layers/*
 base/language ----------------> frontend/foundation
+std/* ------------------------> public #lang rhdl language
 frontend/{foundation,layers/*} -> frontend/support + frontend/kernel -> core
 backend/circt ----------------------------------------------------------> core
 ```
