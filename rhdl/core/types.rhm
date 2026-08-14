@@ -150,7 +150,11 @@ fun bitwise_type(type):
   type is_a BitwiseType
 
 fun data_width(type):
-  if flat_data_type(type) | type.bit_width() | #false
+  if flat_data_type(type)
+  | block:
+      def width = type.bit_width()
+      if width is_a Int && width > 0 | width | #false
+  | #false
 
 // Computes the canonical packed representation width used only by explicit
 // casts. Record fields put the first field in the most-significant bits;
@@ -210,7 +214,13 @@ fun record_fields_well_formed(fields):
   fields.length() >= 1 && (for all (field in fields): field is_a RecordField && data_type(field.type) && type_well_formed(field.type))
 
 fun type_well_formed(type):
-  hardware_type(type) && (!record_type(type) || record_fields_well_formed(type.fields)) && (!vector_type(type) || (type.length is_a Int && type.length > 0 && data_type(type.element_type) && type_well_formed(type.element_type)))
+  cond
+  | !hardware_type(type): #false
+  | flat_data_type(type): data_width(type) != #false
+  | record_type(type): record_fields_well_formed(type.fields)
+  | vector_type(type):
+      type.length is_a Int && type.length > 0 && data_type(type.element_type) && type_well_formed(type.element_type)
+  | ~else: #true
 
 fun type_equal(left, right):
   hardware_type(left) && hardware_type(right) && left.type_equal(right) && right.type_equal(left)

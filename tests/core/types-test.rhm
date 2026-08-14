@@ -17,6 +17,13 @@ class ExtensionBits(name):
     other is_a ExtensionBits && name == other.name
   override method bit_width(): 1
 
+class InvalidExtensionBits(width):
+  implements BitwiseType
+  override method describe(): "invalid-extension-bits"
+  override method type_equal(other):
+    other is_a InvalidExtensionBits && width == other.width
+  override method bit_width(): width
+
 def bits8 = Bits(8)
 def another_bits8 = Bits(8)
 def bits4 = Bits(4)
@@ -25,6 +32,9 @@ def same_extension = ExtensionType("packet")
 def other_extension = ExtensionType("control")
 def extension_bits = ExtensionBits("flag")
 def same_extension_bits = ExtensionBits("flag")
+def zero_width_extension = InvalidExtensionBits(0)
+def negative_width_extension = InvalidExtensionBits(-1)
+def noninteger_width_extension = InvalidExtensionBits("wide")
 
 check:
   bits8 is_a HardwareType ~is #true
@@ -43,6 +53,12 @@ check:
   flat_data_type(extension_bits) ~is #true
   bitwise_type(extension_bits) ~is #true
   data_width(extension_bits) ~is 1
+  data_width(zero_width_extension) ~is #false
+  data_width(negative_width_extension) ~is #false
+  data_width(noninteger_width_extension) ~is #false
+  type_well_formed(zero_width_extension) ~is #false
+  type_well_formed(negative_width_extension) ~is #false
+  type_well_formed(noninteger_width_extension) ~is #false
   type_equal(extension_bits, same_extension_bits) ~is #true
   type_equal(extension_bits, Bits(1)) ~is #false
   type_equal(Clock, Clock) ~is #true
@@ -55,6 +71,9 @@ check:
   type_equal(extension, same_extension) ~is #true
   type_equal(extension, other_extension) ~is #false
   type_equal(extension, bits8) ~is #false
+  type_well_formed(
+    RecordType([RecordField("invalid", zero_width_extension)])
+  ) ~is #false
   schema_for("rtl.add").type_rule ~is "bits_same_width_binary"
   schema_for("rtl.mul").type_rule ~is "bits_same_width_binary"
   schema_for("rtl.ult").type_rule ~is "bits_same_width_compare"
@@ -114,6 +133,15 @@ check:
   RecordType([]) ~throws "nonempty List"
   RecordType([RecordField("value", Bits(1)),
               RecordField("value", Bits(1))]) ~throws "unique"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module("InvalidExtensionWidths")
+  check:
+    builder.input(module_def, "zero", zero_width_extension) ~throws "well-formed HardwareType"
+    builder.input(module_def, "negative", negative_width_extension) ~throws "well-formed HardwareType"
+    builder.input(module_def, "noninteger", noninteger_width_extension) ~throws "well-formed HardwareType"
 
 block:
   def design = Design()
