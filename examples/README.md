@@ -95,7 +95,7 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `a *& b` | `mul_expanding(a, b)` |
 | `add_expanding(a, b)` | Zero-extend to `max(width(a), width(b)) + 1`, then `hw_add` |
 | `mul_expanding(a, b)` | Zero-extend to `width(a) + width(b)`, then `hw_mul` |
-| `bits(1, ~width: w)` | `literal(Bits(w), 1)` |
+| `bits(1, w)` | `literal(Bits(w), 1)` |
 | `reg state(T, ...)` | `reg("state", T, ...)` |
 | `inst u(Child)` | A suggested-name instance using `"u"` as its deterministic base |
 | `u.port` | Lookup in the elaborated child interface |

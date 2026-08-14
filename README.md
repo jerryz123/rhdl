@@ -316,8 +316,8 @@ enable.
 Integer hardware literals always specify their width:
 
 ```rhombus
-def zero = bits(0, ~width: width)
-def one = bits(1, ~width: width)
+def zero = bits(0, width)
+def one = bits(1, width)
 ```
 
 The standard language provides `+`, `-`, `*`, `<<`, `>>`, `&`, `^`, `and`, `or`,
@@ -329,7 +329,7 @@ bit-vector operations.
 output result: Bits(width)
 output equal: Bool
 
-result <== (a & b) + bits(1, ~width: width)
+result <== (a & b) + bits(1, width)
 equal <== a === b
 ```
 
@@ -503,8 +503,8 @@ A register is a primitive with a readable current value and a driveable
 next-state place:
 
 ```rhombus
-def zero = bits(0, ~width: width)
-def one = bits(1, ~width: width)
+def zero = bits(0, width)
+def one = bits(1, width)
 
 reg state(Bits(width), ~clock: clk, ~reset: reset, ~init: zero)
 state.next <== state + one
@@ -562,9 +562,9 @@ new core operations:
 sync_circuit Counter(width):
   output count: Bits(width)
 
-  def zero = bits(0, ~width: width)
+  def zero = bits(0, width)
   reg state(Bits(width), ~init: zero)
-  state.next <== state + bits(1, ~width: width)
+  state.next <== state + bits(1, width)
   count <== state
 ```
 

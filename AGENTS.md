@@ -18,6 +18,9 @@
 
 - After changes, run the minimum focused set of tests that directly covers the
   modified behavior; do not run the full test suite by default.
+- Test supported behavior and invalid uses of supported features. Do not add
+  tests whose purpose is to prove that a removed or unimplemented feature does
+  not exist.
 - Run broader targets such as `make test` only when changes span multiple
   layers, affect shared test or build infrastructure, or otherwise cannot be
   covered confidently by focused tests.
