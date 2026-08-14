@@ -1,0 +1,91 @@
+#lang rhdl
+// Implements a host-sized 32-bit stack with async-read memory and registered output.
+
+sync_circuit Stack(depth :: Int):
+  unless depth > 0
+  | error(~who: #'Stack, "depth must be a positive host Int")
+
+  def address_width = index_width(depth)
+  def pointer_width = index_width(depth + 1)
+
+  input push: Bool
+  input pop: Bool
+  input en: Bool
+  input data_in: Bits(32)
+  output data_out: Bits(32)
+
+  mem stack_mem(depth, Bits(32))
+  reg sp(~init: bits(0, pointer_width))
+  reg out(~init: bits(0, 32))
+
+  def can_push = sp < bits(depth, pointer_width)
+  def nonempty = sp > bits(0, pointer_width)
+  def pushing = push and can_push
+  def popping = pop and nonempty
+
+  when en:
+    when pushing:
+      // The frontend lowers this effect to the memory port's hardware enable.
+      stack_mem.write(sp[0..address_width], data_in)
+      sp.next <== sp + bits(1, pointer_width)
+    elsewhen popping:
+      sp.next <== sp - bits(1, pointer_width)
+
+    // As in the Chisel source, this uses the cycle's current pointer. After a
+    // pop, the registered output shows the popped word for that cycle.
+    when nonempty:
+      out.next <== stack_mem[sp[0..address_width] - bits(1, address_width)]
+
+  data_out <== out
+
+def design = elaborate(Stack(4))
+
+def verilog_reference = @str|<<{
+module Stack(
+  input         clock,
+                reset,
+                push,
+                pop,
+                en,
+  input  [31:0] data_in,
+  output [31:0] data_out
+);
+
+  wire        _GEN;
+  wire [1:0]  _sp_1to0;
+  wire        _GEN_0 = 1'h0;
+  reg  [31:0] stack_mem[0:3];
+  always_ff @(posedge clock) begin
+    if (_GEN_0) begin
+    end
+    else begin
+      if (_GEN)
+        stack_mem[_sp_1to0] <= data_in;
+    end
+  end // always_ff @(posedge)
+  reg  [2:0]  sp;
+  reg  [31:0] out;
+  wire        _GEN_1 = 3'h0 < sp;
+  wire        _GEN_2 = push & sp < 3'h4;
+  assign _sp_1to0 = sp[1:0];
+  assign _GEN = en ? _GEN_2 : 1'h0;
+  always @(posedge clock) begin
+    if (reset)
+      sp <= 3'h0;
+    else
+      sp <= en ? (_GEN_2 ? sp + 3'h1 : pop & _GEN_1 ? sp - 3'h1 : sp) : sp;
+  end // always @(posedge)
+  always @(posedge clock) begin
+    if (reset)
+      out <= 32'h0;
+    else
+      out <= en ? (_GEN_1 ? stack_mem[sp[1:0] - 2'h1] : out) : out;
+  end // always @(posedge)
+  assign data_out = out;
+endmodule
+}>>|
+
+export:
+  Stack
+  design
+  verilog_reference

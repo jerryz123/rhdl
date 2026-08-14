@@ -67,7 +67,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `interface.rhm` | Roles, directional interfaces, and bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
-| `conditional.rhm` | Hardware `when`, priority branches, and conditional assignment | kernel |
+| `conditional.rhm` | Hardware `when`, priority branches, conditional assignment, and conditional memory-write effects | kernel |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 

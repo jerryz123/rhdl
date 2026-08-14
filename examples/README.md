@@ -169,6 +169,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
 | [`tiny-simd.rhdl`](tiny-simd.rhdl) | Host-specialized SIMD microengine combining comprehension-generated lanes, typed instructions, expanding arithmetic with low-bit slicing, power-of-two program memory, and ambient state |
+| [`stack.rhdl`](stack.rhdl) | Host-sized stack combining async-read memory, guarded writes, nested hardware conditionals, unsigned bounds checks, and registered output |
 | [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |

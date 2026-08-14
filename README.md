@@ -604,6 +604,14 @@ storage.write(write_address, write_data,
 ```
 
 Inside a `sync_circuit`, `~clock` may be omitted and the ambient clock is used.
+The enable may also be omitted for an unconditional write or when hardware
+`when` supplies the guard:
+
+```rhombus
+when write_enable:
+  storage.write(write_address, write_data)
+```
+
 The initial memory contract is deliberately precise:
 
 - `depth` is a positive host `Int`, and the element may be any `DataType`.
@@ -619,7 +627,8 @@ The initial memory contract is deliberately precise:
 
 The write method remains explicit because it is a clocked state change, not a
 single-driver `Place` connection. See
-[`examples/async-read-memory.rhdl`](examples/async-read-memory.rhdl).
+[`examples/async-read-memory.rhdl`](examples/async-read-memory.rhdl) and
+[`examples/stack.rhdl`](examples/stack.rhdl).
 
 ### Hardware conditional assignment
 
@@ -643,6 +652,12 @@ supported. The frontend resolves each conditional chain into core
 destination; there is no conditional operation or control-flow region in the
 public IR.
 
+Memory writes are conditional effects rather than `Place` assignments. The
+frontend combines branch guards with any explicit local enables and emits one
+core write port per memory. When mutually exclusive branches write the same
+memory, priority muxes select its address and data; a branch without a write
+disables the port for that branch.
+
 A register-next place may omit `otherwise`; its current value is the implicit
 hold value:
 
@@ -662,7 +677,8 @@ unconditional drive with a conditional drive.
 Reset remains a property of the primitive register. Use `~reset` and `~init`
 for active-high synchronous reset instead of expressing reset through `when`.
 
-See [`examples/enable-shift-register.rhdl`](examples/enable-shift-register.rhdl).
+See [`examples/enable-shift-register.rhdl`](examples/enable-shift-register.rhdl)
+and [`examples/stack.rhdl`](examples/stack.rhdl).
 
 ### Hierarchy
 
@@ -1385,6 +1401,7 @@ Important examples include:
 | `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
+| `examples/stack.rhdl` | Host-sized stack with guarded memory writes and nested hardware control |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |

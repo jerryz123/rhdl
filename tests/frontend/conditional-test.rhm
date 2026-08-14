@@ -23,6 +23,21 @@ def nested_muxes = nested.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
 )
 
+def conditional_memory_design = embedded.run_elaboration(
+  fun (): fixture.ConditionalMemoryWrites()
+)
+def conditional_memory = conditional_memory_design.modules[0]
+def conditional_memory_writes = conditional_memory.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.memory_write"
+)
+def conditional_memory_muxes = conditional_memory.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+def conditional_memory_write = conditional_memory_writes[0]
+
+fun defined_by_mux(module_def, value):
+  module_def.find_operation(value.defining_op_id).opcode == "rtl.mux_lookup"
+
 def shift_design = shift_fixture.design
 def shift = shift_design.modules[0]
 def shift_registers = shift.operations.filter(
@@ -40,6 +55,12 @@ check:
   priority_outer.operands[2] === priority.find_input("a").value ~is #true
   priority_inner.operands[2] === priority.find_input("b").value ~is #true
   nested_muxes.length() ~is 2
+  conditional_memory_writes.length() ~is 1
+  conditional_memory_muxes.length() ~is 6
+  (for all (operand in [conditional_memory_write.operands[0],
+                        conditional_memory_write.operands[1],
+                        conditional_memory_write.operands[3]]):
+     defined_by_mux(conditional_memory, operand)) ~is #true
   shift_registers.length() ~is 4
   shift_muxes.length() ~is 4
   composed.operations.filter(
@@ -50,6 +71,7 @@ check:
      mux.operands[1] === register.results[0] && register.places[0].driver === mux.results[0]) ~is #true
   verify_design(priority_design) ~is #void
   verify_design(nested_design) ~is #void
+  verify_design(conditional_memory_design) ~is #void
   verify_design(shift_design) ~is #void
   embedded.run_elaboration(fun (): fixture.HostCondition()) ~throws "must be a hardware value"
   embedded.run_elaboration(fun (): fixture.WideCondition()) ~throws "one-bit FlatDataType"

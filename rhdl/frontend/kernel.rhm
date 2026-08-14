@@ -114,18 +114,30 @@ Parameter.def current_module = #false
 Parameter.def current_conditional_branch = #false
 
 class ConditionalAssignment(place, value)
+class ConditionalMemoryWrite(resource, address, data, clock, enable, location)
 
-// Collects the assignments made along one mutually exclusive hardware branch.
-// Resolution later emits one muxed driver for every destination.
-class ConditionalBranch(mutable assignments = []):
+// Collects assignments and memory-write effects along one mutually exclusive
+// hardware branch. Resolution later emits muxed drivers and write ports.
+class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
   method assignment_for(place):
     assignments.find(fun (assignment): assignment.place === place)
+
+  method memory_write_for(resource):
+    memory_writes.find(fun (write): write.resource === resource)
 
   method add(place, value, location):
     when this.assignment_for(place)
     | frontend_fail("conditional branch assigns " ++ place.name ++ " more than once",
                     location)
     assignments := assignments ++ [ConditionalAssignment(place, value)]
+
+  method add_memory_write(write):
+    when this.memory_write_for(write.resource)
+    | frontend_fail(String.append("conditional branch writes memory ",
+                                  write.resource.name,
+                                  " more than once"),
+                    write.location)
+    memory_writes := memory_writes ++ [write]
 
 fun require_context(location = Location()):
   def context = current_context()
@@ -231,15 +243,24 @@ fun memory_write(memory_resource,
                  enable,
                  location = Location()):
   def context = require_context(location)
-  context.builder.memory_write(require_module(location),
-                               memory_resource,
-                               read(address, location),
-                               read(data, location),
-                               read(clock, location),
-                               read(enable, location),
-                               location,
-                               Origin("embedded memory write",
-                                      memory_resource.name))
+  def write = ConditionalMemoryWrite(memory_resource,
+                                     read(address, location),
+                                     read(data, location),
+                                     read(clock, location),
+                                     read(enable, location),
+                                     location)
+  def branch = current_conditional_branch()
+  if branch is_a ConditionalBranch
+  | branch.add_memory_write(write)
+  | context.builder.memory_write(require_module(location),
+                                 write.resource,
+                                 write.address,
+                                 write.data,
+                                 write.clock,
+                                 write.enable,
+                                 location,
+                                 Origin("embedded memory write",
+                                        memory_resource.name))
 
 fun literal(type, integer, name = #false, location = Location()):
   def context = require_context(location)
@@ -540,6 +561,21 @@ fun emit_conditional_assignment(place, value, location = Location()):
       Origin("embedded conditional connect", place.name)
     )
 
+fun emit_conditional_memory_write(write):
+  def branch = current_conditional_branch()
+  if branch is_a ConditionalBranch
+  | branch.add_memory_write(write)
+  | require_context(write.location).builder.memory_write(
+      require_module(write.location),
+      write.resource,
+      write.address,
+      write.data,
+      write.clock,
+      write.enable,
+      write.location,
+      Origin("embedded conditional memory write", write.resource.name)
+    )
+
 fun validate_conditional_value(condition, location = Location()):
   unless hardware_entity(condition)
   | frontend_fail("when condition must be a hardware value", location)
@@ -554,8 +590,8 @@ fun collect_conditional_branch(body, location = Location()):
     body()
   branch
 
-// Elaborates an ordered hardware-conditional chain into mux trees and final
-// single drivers, with implicit hold available only for register-next places.
+// Elaborates an ordered hardware-conditional chain into mux trees, final
+// single drivers, and at most one enabled write port per affected memory.
 fun conditional_chain(branches, otherwise_body = #false, location = Location()):
   unless branches is_a List && branches.length() >= 1
   | frontend_fail("conditional chain requires at least one branch", location)
@@ -614,6 +650,82 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
         Origin("embedded conditional mux", place.name)
       )
     emit_conditional_assignment(place, selected, location)
+
+  def mutable memories = []
+  fun include_branch_memories(branch_result):
+    when branch_result
+    | for (write in branch_result.memory_writes):
+        unless memories.find(fun (resource): resource === write.resource)
+        | memories := memories ++ [write.resource]
+  for (branch_result in branch_results):
+    include_branch_memories(branch_result)
+  include_branch_memories(otherwise_result)
+
+  for (resource in memories):
+    def writes:
+      (branch_results ++ (if otherwise_result | [otherwise_result] | [])).map(
+        fun (branch_result): branch_result.memory_write_for(resource)
+      ).filter(~keep: fun (write): write)
+    def representative = writes[0]
+    unless (for all (write in writes): write.clock === representative.clock)
+    | frontend_fail(String.append("conditional writes to memory ",
+                                  resource.name,
+                                  " must use the same clock"),
+                    location)
+    def disabled = literal(Bits(1), 0, #false, location)
+    def fallback_write:
+      if otherwise_result
+      | otherwise_result.memory_write_for(resource)
+      | #false
+    def mutable selected_address:
+      if fallback_write | fallback_write.address | representative.address
+    def mutable selected_data:
+      if fallback_write | fallback_write.data | representative.data
+    def mutable selected_enable:
+      if fallback_write
+      | cast(fallback_write.enable, Bits(1), #false, location)
+      | disabled
+    for (index in (branches.length() - 1) >=..= 0):
+      def write = branch_results[index].memory_write_for(resource)
+      def condition = cast(conditions[index], Bits(1), #false, location)
+      def branch_enable:
+        if write
+        | cast(write.enable, Bits(1), #false, location)
+        | disabled
+      selected_enable := hw_mux_lookup(
+        condition,
+        selected_enable,
+        [[1, branch_enable]],
+        #false,
+        location,
+        Origin("embedded conditional memory enable", resource.name)
+      )
+      when write
+      | block:
+          selected_address := hw_mux_lookup(
+            condition,
+            selected_address,
+            [[1, write.address]],
+            #false,
+            location,
+            Origin("embedded conditional memory address", resource.name)
+          )
+          selected_data := hw_mux_lookup(
+            condition,
+            selected_data,
+            [[1, write.data]],
+            #false,
+            location,
+            Origin("embedded conditional memory data", resource.name)
+          )
+    emit_conditional_memory_write(
+      ConditionalMemoryWrite(resource,
+                             selected_address,
+                             selected_data,
+                             representative.clock,
+                             selected_enable,
+                             representative.location)
+    )
   #void
 
 fun host_condition(value, location = Location()):
