@@ -1,0 +1,115 @@
+#lang rhombus
+// Computes valid reachable route states from an immutable materialized routing snapshot.
+
+import:
+  "../model/main.rhm" open
+  "materialize.rhm" open
+
+export:
+  RouteReachability
+  ReachableRouting
+  analyze_reachability
+
+fun contains_vc(vcs, vc):
+  vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
+
+fun at_destination(materialized, route_class, origin):
+  cond
+  | origin is_a Injection:
+      node_id_equal(origin.node, route_class.destination)
+  | origin is_a HeldVC:
+      def link = materialized.topology.find_vc_link(origin.vc)
+      node_id_equal(link.destination, route_class.destination)
+  | ~else:
+      error(~who: #'analyze_reachability,
+            "reachable origin must be an Injection or HeldVC")
+
+class RouteReachability(route_class, reachable_vcs, reachable_decisions):
+  opaque
+  internal _RouteReachability
+  constructor ~none
+
+  method reaches_vc(vc):
+    vc is_a VCId && contains_vc(reachable_vcs, vc)
+
+  method describe():
+    def vc_names = reachable_vcs.map(fun (vc): vc.describe())
+    String.append(route_class.id.describe(), ": [",
+                  String.join(vc_names, ", "), "]")
+
+class ReachableRouting(materialized, routes):
+  opaque
+  internal _ReachableRouting
+  constructor ~none
+
+  method for_route(route_class):
+    unless materialized.contains_route_class(route_class)
+    | error(~who: #'ReachableRouting,
+            "route class does not belong to this reachable routing")
+    def found = routes.find(
+      fun (route): route.route_class === route_class
+    )
+    unless found
+    | error(~who: #'ReachableRouting,
+            "route class has no reachability result")
+    found
+
+  method reachable_decisions():
+    def mutable decisions = []
+    for (route in routes):
+      decisions := decisions ++ route.reachable_decisions
+    decisions
+
+  method describe():
+    String.join(routes.map(fun (route): route.describe()), "\n")
+
+fun dead_end(route_class, origin):
+  error(~who: #'analyze_reachability,
+        String.append("reachable dead end for route class ",
+                      route_class.id.describe(), " at ", origin.describe(),
+                      "; destination is ",
+                      route_class.destination.describe()))
+
+fun destination_unreachable(route_class):
+  error(~who: #'analyze_reachability,
+        String.append("destination ", route_class.destination.describe(),
+                      " is unreachable for route class ",
+                      route_class.id.describe(), " from ",
+                      route_class.source.describe()))
+
+fun analyze_route(materialized, route_class):
+  def mutable pending = [Injection(route_class.source)]
+  def mutable reachable_vcs = []
+  def mutable reachable_decisions = []
+  def mutable reached_destination = #false
+
+  // Breadth-first discovery makes state and diagnostic ordering deterministic.
+  while pending.length() > 0:
+    def origin = pending[0]
+    pending := pending.drop(1)
+    if at_destination(materialized, route_class, origin)
+    | reached_destination := #true
+    | block:
+        def allowed = materialized.decisions_for(route_class, origin).filter(
+          ~keep: fun (decision): decision.allowed
+        )
+        when allowed.length() == 0
+        | dead_end(route_class, origin)
+        for (decision in allowed):
+          reachable_decisions := reachable_decisions ++ [decision]
+          unless contains_vc(reachable_vcs, decision.candidate_vc)
+          | reachable_vcs := reachable_vcs ++ [decision.candidate_vc]
+            pending := pending ++ [HeldVC(decision.candidate_vc)]
+
+  unless reached_destination
+  | destination_unreachable(route_class)
+  _RouteReachability(route_class, reachable_vcs, reachable_decisions)
+
+fun analyze_reachability(materialized):
+  unless materialized is_a MaterializedRouting
+  | error(~who: #'analyze_reachability,
+          "expected a MaterializedRouting")
+  def routes = for List (route_class in materialized.route_classes):
+    analyze_route(materialized, route_class)
+  // MaterializedRouting contains no callback, so this result cannot re-run one.
+  _ReachableRouting(materialized, routes)

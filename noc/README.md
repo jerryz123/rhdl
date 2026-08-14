@@ -22,12 +22,14 @@ The current implementation provides:
 - Deterministic, exactly-once materialization of every finite routing query.
 - Immutable decision lookup and allowed-candidate queries that never re-run the
   user callback.
+- Deterministic per-route reachability over allowed materialized decisions.
+- Rejection of reachable dead ends and destinations that cannot be reached.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet compute reachability, construct dependency graphs,
-validate deadlock freedom, or generate route tables.
+The package does not yet construct dependency graphs, validate deadlock
+freedom, or generate route tables.
 
 ## Dependency boundary
 
@@ -40,6 +42,7 @@ Run the focused checks from the repository root:
 ```sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 bash noc/check-boundaries.sh
 ```
 
@@ -89,3 +92,19 @@ callback. In stable route-class, origin, and candidate order, it evaluates each
 finite query once, requires a Boolean result, and returns `MaterializedRouting`.
 The snapshot deliberately does not retain the callback. Its decision and
 allowed-candidate methods therefore cannot re-evaluate user code.
+
+## Reachability
+
+`analyze_reachability` starts each route class at its injection origin and
+traverses only allowed decisions stored in `MaterializedRouting`. Arrival at
+the destination is automatic ejection and is terminal. The traversal rejects
+every reachable non-destination origin with no allowed continuation, even when
+another branch reaches the destination, and separately rejects cycles or other
+subgraphs from which the destination is unreachable.
+
+Successful analysis returns an opaque `ReachableRouting`. Each
+`RouteReachability` contains VCs in deterministic discovery order and the
+original `MaterializedDecision` values for reachable transitions. Decisions
+in disconnected or otherwise unreachable routing states are excluded, so the
+next dependency-graph pass will not report false cycles from unreachable
+relation entries.
