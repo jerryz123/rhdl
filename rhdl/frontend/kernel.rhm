@@ -9,6 +9,7 @@ import:
 export:
   HardwareEntity
   DeferredHardwareValue
+  StaticHardwareValue
   CircuitDefinition
   FrontendContext
   new_circuit_identity
@@ -58,6 +59,7 @@ export:
   read
   hardware_entity
   host_condition
+  frontend_fail
 
 // Lets frontend-only wrappers carry authoring metadata while still selecting
 // an ordinary core module for instances and top-level elaboration.
@@ -80,6 +82,12 @@ interface HardwareEntity
 interface DeferredHardwareValue:
   extends HardwareEntity
   method materialize_hardware(location)
+
+// Marks deferred hardware descriptions that contain no circuit-bound values.
+// Unlike Values, Places, and other live hardware entities, these host values
+// may safely cross a circuit-generator parameter boundary.
+interface StaticHardwareValue:
+  extends DeferredHardwareValue
 
 fun hardware_entity(value):
   cond
@@ -175,7 +183,7 @@ fun build_circuit(identity, name, arguments, implementation, location = Location
   unless arguments is_a List
   | frontend_fail("circuit arguments must be supplied as a List", location)
   for (argument in arguments):
-    when hardware_entity(argument)
+    when hardware_entity(argument) && !(argument is_a StaticHardwareValue)
     | frontend_fail("circuit parameters must be host values, not hardware values", location)
   when context.active_circuits.find(fun (active): active.identity === identity)
   | frontend_fail("recursive elaboration of circuit " ++ name, location)

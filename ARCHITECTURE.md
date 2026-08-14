@@ -77,13 +77,13 @@ when adding, removing, or changing a layer's direct dependencies.
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
-| `comb.rhm` | Literals, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, mux-lookup support |
+| `comb.rhm` | Static packed literals, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, host-Boolean literal construction, equality, unsigned ordering, and binary `mux` | core IR, kernel, field support |
+| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, unsigned ordering, and binary `mux` | core IR, kernel, field support, hardware-literal support |
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
 | `one-hot.rhm` | Structurally sized one-hot types, literals, typed mux keys, and `mux_onehot` | core IR, kernel, field support, mux-lookup support |
-| `bundle.rhm` | Bundle declarations, records, and field access | core IR, kernel, field support |
-| `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
+| `bundle.rhm` | Bundle declarations, runtime records, recursive record literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
+| `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers | core IR, kernel, clocking support, field support |
 | `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
@@ -93,7 +93,15 @@ when adding, removing, or changing a layer's direct dependencies.
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 
-`frontend/support/fields.rhm` depends on core IR and types plus the kernel. It
+`frontend/support/hardware-literal.rhm` depends on core IR and the kernel. It
+defines the public `HardwareLiteral` protocol, validates packed host images,
+and generically materializes them as a Bits constant followed by an explicit
+equal-width cast. Literal shadows are static host values: the kernel permits
+them as circuit parameters while continuing to reject circuit-bound values,
+places, registers, instances, and other hardware entities.
+
+`frontend/support/fields.rhm` depends on core IR and types plus the kernel and
+hardware-literal support. It
 owns the exact-hardware-type predicate exposed by the foundation as
 `Hardware.of(type)` and the static information used by readable and driveable
 hardware data.
@@ -104,15 +112,17 @@ instance members without making hierarchy depend on interface.
 it carries frontend-only sync metadata and expands ambient policy into explicit
 ports, register operands, instance inputs, and drives.
 
-`frontend/support/mux-lookup.rhm` depends only on the kernel's deferred-value
-interface. It lets independently selectable layers contribute typed selector
-and key behavior to the combinational mux syntax.
+`frontend/support/mux-lookup.rhm` depends only on hardware-literal support. It
+lets independently selectable layers contribute typed static keys and selector
+behavior to the combinational mux syntax.
 
 The kernel's deferred-value protocol lets layers retain authoring metadata
-until an operation consumes it. For example, enum members remain typed lookup
-keys until the combinational layer uses the mux-lookup protocol to normalize
-them to integer keys and a Bits selector for the core mux operation. These
-protocols do not add frontend types or operations to the public core IR.
+until an operation consumes it. Its static subtype distinguishes reusable host
+descriptions from objects already owned by an elaborated circuit. For example,
+enum members remain typed literal shadows and lookup keys until a hardware
+consumer materializes them or the combinational layer normalizes them to
+integer keys. These protocols do not add frontend types or operations to the
+public core IR.
 
 ## Enforcement
 

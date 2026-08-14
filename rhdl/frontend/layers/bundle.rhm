@@ -6,12 +6,53 @@ import:
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
+  "../support/hardware-literal.rhm" open
 
 export:
   RecordField
   RecordType
+  RecordLiteral
   bundle
   record
+
+// A record literal recursively packs its first declared field into the most
+// significant part of the canonical representation, matching core casts.
+class RecordLiteral(type, fields):
+  implements HardwareLiteral
+  constructor (type, fields):
+    unless record_type(type)
+    | error(~who: #'record, "literal type must be a RecordType")
+    unless fields is_a List && fields.length() == type.fields.length()
+    | error(~who: #'record, "literal must supply every record field exactly once")
+    for (declared in type.fields):
+      def matching = fields.filter(
+        ~keep: fun (field): field is_a List && field.length() == 2 && field[0] == declared.name
+      )
+      unless matching.length() == 1
+      | error(~who: #'record, "literal must supply every record field exactly once")
+      def field_literal = require_hardware_literal(matching[0][1], #'record)
+      unless type_equal(field_literal.literal_type(), declared.type)
+      | error(~who: #'record,
+              "literal field " ++ declared.name ++ " has the wrong hardware type")
+    super(type, fields)
+
+  override method literal_type(): type
+
+  override method packed_value():
+    def mutable packed = 0
+    for (declared in type.fields):
+      def field_literal = fields.find(
+        fun (field): field[0] == declared.name
+      )[1]
+      def shifted = packed bits.(<<) packed_width(declared.type)
+      packed := shifted + field_literal.packed_value()
+    packed
+
+fun build_record(type, fields) :~ HardwareFields:
+  if for all (field in fields):
+       field is_a List && field.length() == 2 && field[1] is_a HardwareLiteral
+  | RecordLiteral(type, fields)
+  | kernel.record_create(type, fields)
 
 defn.macro 'bundle $(name :: Identifier)($parameter, ...):
               $field_name: $field_type
@@ -28,5 +69,5 @@ expr.macro 'record($type):
               $field_name: $field_value
               ...':
   let [field_string, ...] = [field_name.to_source_string(), ...]
-  'kernel.record_create($type,
-                        [[$field_string, $field_value], ...]) :: HardwareFields'
+  'build_record($type,
+                [[$field_string, $field_value], ...]) :: HardwareFields'

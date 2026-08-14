@@ -6,24 +6,29 @@ import:
   "../../examples/table.rhdl" as fixture
 
 def module_def = fixture.design.modules[0]
-def vector_create = module_def.operations.find(
-  fun (operation): operation.opcode == "rtl.vector_create"
+def table_cast = module_def.operations.find(
+  fun (operation):
+    operation.opcode == "rtl.cast" && vector_type(operation.results[0].type)
 )
+def table_constant = module_def.find_operation(table_cast.operands[0].defining_op_id)
 def lookup = module_def.operations.find(
   fun (operation): operation.opcode == "rtl.mux_lookup"
 )
 
-fun defining_operation(value):
-  module_def.find_operation(value.defining_op_id)
+fun packed_bytes(items):
+  def mutable packed = 0
+  for (value in items, index in 0..items.length()):
+    packed := packed + (value bits.(<<) (index * 8))
+  packed
 
 check:
   module_def.name ~is "Tbl"
   type_equal(module_def.find_input("addr").type, Bits(8)) ~is #true
   type_equal(module_def.find_output("out").type, Bits(8)) ~is #true
-  type_equal(vector_create.results[0].type, VectorType(256, Bits(8))) ~is #true
-  vector_create.operands.length() ~is 256
-  defining_operation(vector_create.operands[0]).attribute("value") ~is 0
-  defining_operation(vector_create.operands[255]).attribute("value") ~is 255
+  type_equal(table_cast.results[0].type, VectorType(256, Bits(8))) ~is #true
+  table_constant.opcode ~is "rtl.constant"
+  type_equal(table_constant.results[0].type, Bits(2048)) ~is #true
+  table_constant.attribute("value") ~is packed_bytes(for List (i in 0..256): i)
   lookup.attribute("keys").length() ~is 256
   lookup.attribute("keys")[0] ~is 0
   lookup.attribute("keys")[255] ~is 255

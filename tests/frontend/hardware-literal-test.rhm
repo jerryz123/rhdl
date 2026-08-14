@@ -1,0 +1,69 @@
+#lang rhombus
+// Checks generic literal shadows, recursive packing, and literal circuit parameters.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as kernel
+  "../../rhdl/frontend/support/hardware-literal.rhm" open
+  "hardware-literal-fixture.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def constants = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.constant"
+)
+def casts = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.cast"
+)
+def aggregate_cast = casts.find(
+  fun (operation): type_equal(operation.results[0].type, fixture.Aggregate())
+)
+def aggregate_constant = module_def.find_operation(
+  aggregate_cast.operands[0].defining_op_id
+)
+
+check:
+  fixture.bits_initial is_a HardwareLiteral ~is #true
+  fixture.bool_initial is_a HardwareLiteral ~is #true
+  fixture.mode_initial is_a HardwareLiteral ~is #true
+  fixture.grant_initial is_a HardwareLiteral ~is #true
+  fixture.nibble_initial is_a HardwareLiteral ~is #true
+  fixture.raw_nibble_initial is_a HardwareLiteral ~is #true
+  fixture.pair_initial is_a HardwareLiteral ~is #true
+  fixture.lanes_initial is_a HardwareLiteral ~is #true
+  fixture.aggregate_initial is_a HardwareLiteral ~is #true
+
+  type_equal(fixture.nibble_initial.literal_type(), fixture.Nibble) ~is #true
+  fixture.nibble_initial.packed_value() ~is 10
+  type_equal(fixture.raw_nibble_initial.literal_type(), fixture.Nibble) ~is #true
+  fixture.raw_nibble_initial.packed_value() ~is 5
+  fixture.pair_initial.packed_value() ~is 0xA3
+  fixture.lanes_initial.packed_value() ~is 0x54
+  fixture.aggregate_initial.packed_value() ~is 0xA354
+
+  packed_literal(Bits(4), 16) ~throws "does not fit bits<4>"
+  packed_literal(Clock, 0) ~throws "well-formed DataType"
+
+  module_def.name ~is "LiteralParameters"
+  constants.map(fun (operation): operation.attribute("value")) ~is [9, 1, 1, 4, 10, 5, 0xA354]
+  casts.length() ~is 6
+  aggregate_constant.opcode ~is "rtl.constant"
+  aggregate_constant.attribute("value") ~is 0xA354
+  type_equal(aggregate_constant.results[0].type, Bits(16)) ~is #true
+  type_equal(aggregate_cast.results[0].type, fixture.Aggregate()) ~is #true
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.record_create"
+  ).length() ~is 0
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.vector_create"
+  ).length() ~is 0
+  verify_design(fixture.design) ~is #void
+
+  kernel.run_elaboration(
+    fun (): fixture.LiteralParameters(fixture.bits_initial,
+                                      fixture.bool_initial,
+                                      fixture.mode_initial,
+                                      fixture.grant_initial,
+                                      fixture.nibble_initial,
+                                      fixture.raw_nibble_initial,
+                                      fixture.aggregate_initial)
+  ) is_a Design ~is #true

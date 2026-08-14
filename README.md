@@ -77,6 +77,7 @@ or policy over existing semantics. Current examples include:
 - The layer-defined `Bool` type, Boolean equality, and unsigned ordering syntax.
 - Nominal hardware enums lowered through explicit bit representations.
 - Structurally sized one-hot types with typed literals and mux keys.
+- Static typed literal shadows that extensions can define for any packable data type.
 - Modular and expanding arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
@@ -119,7 +120,7 @@ The composable frontend layers are:
 | Module | Contribution |
 |---|---|
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
-| `layers/comb.rhm` | Literals, modular arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
+| `layers/comb.rhm` | Static typed literals, modular arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
 | `layers/expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | `layers/bool.rhm` | Nominal `Bool`, `Bool(#true)` literals, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
@@ -398,6 +399,25 @@ def zero = bits(0, width)
 def one = bits(1, width)
 ```
 
+These expressions create immutable host-side `HardwareLiteral` shadows. They
+do not allocate IR until a hardware operation reads them during elaboration,
+so they can be declared at module scope or passed as circuit generator
+parameters. Materialization always creates the canonical packed `Bits` constant
+and, for a non-`Bits` type, an explicit equal-width cast:
+
+```rhombus
+def reset_value = literal(State, 0)
+def design = elaborate(Machine(reset_value))
+```
+
+`HardwareLiteral` is an open frontend-support protocol. A language extension
+can define semantic host classes by implementing `literal_type()` and
+`packed_value()`; the shared default materializer supplies the ordinary core
+operations. The generic `literal(T, packed_value)` shadow represents every bit
+image of any packable `DataType`, including extension-defined flat types,
+records, and vectors. Clock, Reset, and non-data hardware types are not literal
+domains.
+
 The standard language provides `+`, `-`, `*`, `<<`, `>>`, `&`, `^`, `and`, `or`,
 `xor`, `not`, `===`, `<`, `>`, `<=`, and `>=`, plus named construction
 functions. Arithmetic and ordering are currently unsigned fixed-width
@@ -493,7 +513,8 @@ ready <== Bool(#true)
 ```
 
 The layer lowers this to a one-bit `rtl.constant` followed by `rtl.cast` to
-`Bool`; it adds no Bool-specific core operation.
+`Bool`; it adds no Bool-specific core operation. The Bool literal itself remains
+a reusable host shadow until that lowering is needed.
 
 ### Hardware enums
 
@@ -937,6 +958,11 @@ def pair = record(Pair(Bits(8))):
   right: b
 ```
 
+When every field is a `HardwareLiteral`, `record(...)` instead creates a
+recursive `RecordLiteral` host shadow. Its packed image follows declaration
+order with the first field in the most-significant bits. If any field is live
+hardware, the same syntax constructs the existing runtime `rtl.record_create`.
+
 ### Fixed-length vectors
 
 `VectorType` is a structural core `DataType` for a positive host-known length
@@ -954,6 +980,11 @@ reversed[0] <== initial[2]
 reversed[1] <== initial[1]
 reversed[2] <== initial[0]
 ```
+
+Similarly, `vec(...)` creates a recursive `VectorLiteral` when every element is
+a literal shadow and otherwise constructs the existing runtime vector value.
+Literal vector element zero occupies the least-significant element-width bits,
+matching core vector casts.
 
 Unlike a host `List` of instances or hardware handles, which exists only while
 elaborating generated structure, a `Vec` is one runtime hardware value.
