@@ -2,8 +2,8 @@
 
 .PHONY: test check-boundaries frontend-test backend-test unit-test lop-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
-CORE_TESTS = tests/core/types-test.rhm tests/core/verify-test.rhm tests/core/wire-test.rhm tests/core/shift-test.rhm
-FRONTEND_TESTS = tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/indexing-test.rhm tests/frontend/into-test.rhm tests/frontend/concat-test.rhm tests/frontend/shift-test.rhm tests/frontend/enum-test.rhm tests/frontend/vector-test.rhm tests/frontend/wire-test.rhm tests/frontend/adder4-test.rhm tests/frontend/generated-adder-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/conditional-test.rhm tests/frontend/sync-test.rhm tests/frontend/register-shorthand-test.rhm tests/frontend/aggregate-equivalence-test.rhm
+CORE_TESTS = tests/core/types-test.rhm tests/core/verify-test.rhm tests/core/wire-test.rhm tests/core/shift-test.rhm tests/core/memory-test.rhm
+FRONTEND_TESTS = tests/frontend/ir-test.rhm tests/frontend/printer-test.rhm tests/frontend/frontend-test.rhm tests/frontend/fresh-test.rhm tests/frontend/lop-equivalence-test.rhm tests/frontend/indexing-test.rhm tests/frontend/into-test.rhm tests/frontend/concat-test.rhm tests/frontend/shift-test.rhm tests/frontend/enum-test.rhm tests/frontend/vector-test.rhm tests/frontend/wire-test.rhm tests/frontend/memory-test.rhm tests/frontend/adder4-test.rhm tests/frontend/generated-adder-test.rhm tests/frontend/bundle-test.rhm tests/frontend/interface-test.rhm tests/frontend/conditional-test.rhm tests/frontend/sync-test.rhm tests/frontend/register-shorthand-test.rhm tests/frontend/aggregate-equivalence-test.rhm
 BACKEND_TESTS = tests/backend/circt-test.rhm tests/backend/equivalence-test.rhm
 
 check-boundaries:
@@ -64,6 +64,7 @@ examples:
 	racket -S $(CURDIR) examples/bundle.rhdl
 	racket -S $(CURDIR) examples/vector.rhdl
 	racket -S $(CURDIR) examples/wire.rhdl
+	racket -S $(CURDIR) examples/async-read-memory.rhdl
 	racket -S $(CURDIR) examples/interface.rhdl
 	racket -S $(CURDIR) examples/nested-interface.rhdl
 	racket -S $(CURDIR) examples/inspect-ir.rhm

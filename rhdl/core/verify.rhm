@@ -215,6 +215,55 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "vector_get index is outside its vector type")
       unless type_equal(result.type, vector.type.element_type)
       | fail_operation(operation, "vector_get result has the wrong element type")
+  | "memory":
+      def memory = operation.attribute("memory", #false)
+      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      | fail_operation(operation, "memory allocation references an invalid memory")
+      unless memory.defining_op_id == operation.id
+      | fail_operation(operation, "memory has the wrong defining operation")
+      def attribute_type = operation.attribute("element_type", #false)
+      def attributes_agree = operation.attribute("name", #false) == memory.name && operation.attribute("depth", #false) == memory.depth && type_equal(attribute_type, memory.element_type)
+      unless attributes_agree
+      | fail_operation(operation, "memory attributes disagree with the memory resource")
+      unless memory.depth is_a Int && memory.depth > 0
+      | fail_operation(operation, "memory depth must be a positive host Int")
+      unless data_type(memory.element_type) && type_well_formed(memory.element_type)
+      | fail_operation(operation, "memory element type must be a well-formed DataType")
+  | "memory_read_async":
+      def memory = operation.attribute("memory", #false)
+      def address = operation.operands[0]
+      def result = operation.results[0]
+      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      | fail_operation(operation, "memory read references an invalid memory")
+      def valid_depth = memory is_a Memory && memory.depth is_a Int && memory.depth > 0
+      def expected_width = if valid_depth | memory_address_width(memory.depth) | #false
+      unless bits_type(address.type) && address.type.width == expected_width
+      | fail_operation(operation, "memory read address has the wrong Bits width")
+      unless memory is_a Memory && data_type(result.type) && type_equal(result.type, memory.element_type)
+      | fail_operation(operation, "memory read result has the wrong DataType")
+  | "memory_write":
+      def memory = operation.attribute("memory", #false)
+      def address = operation.operands[0]
+      def data = operation.operands[1]
+      def clock = operation.operands[2]
+      def enable = operation.operands[3]
+      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      | fail_operation(operation, "memory write references an invalid memory")
+      def valid_depth = memory is_a Memory && memory.depth is_a Int && memory.depth > 0
+      def expected_width = if valid_depth | memory_address_width(memory.depth) | #false
+      unless bits_type(address.type) && address.type.width == expected_width
+      | fail_operation(operation, "memory write address has the wrong Bits width")
+      unless memory is_a Memory && data_type(data.type) && type_equal(data.type, memory.element_type)
+      | fail_operation(operation, "memory write data has the wrong DataType")
+      unless clock_type(clock.type)
+      | fail_operation(operation, "memory write clock must be Clock")
+      unless flat_data_type(enable.type) && data_width(enable.type) == 1
+      | fail_operation(operation, "memory write enable must be a one-bit FlatDataType")
+      def write_count = module_def.operations.filter(
+        ~keep: fun (candidate): candidate.opcode == "rtl.memory_write" && candidate.attribute("memory", #false) === memory
+      ).length()
+      unless write_count == 1
+      | fail_operation(operation, "memory may have at most one write port")
   | "data_register" || "data_register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]
@@ -333,6 +382,16 @@ fun verify_module(module_def):
       module_def.operations.filter(~keep: fun (operation): is_drive_to(operation, place.id)).length()
     unless drive_count == 1
     | fail("place " ++ place.name ++ " must have exactly one drive operation")
+  for (memory in module_def.memories):
+    unless memory is_a Memory && memory.module_def === module_def
+    | fail("memory belongs to a different module")
+    def defining_operation = module_def.find_operation(memory.defining_op_id)
+    unless defining_operation && defining_operation.opcode == "rtl.memory" && defining_operation.attribute("memory", #false) === memory
+    | fail("memory " ++ memory.name ++ " has an invalid defining operation")
+    def same_names:
+      module_def.memories.filter(~keep: fun (candidate): candidate.name == memory.name)
+    unless same_names.length() == 1
+    | fail("memory name " ++ memory.name ++ " is not unique")
   for (value in module_def.values):
     unless value.module_def === module_def
     | fail("value " ++ value.name ++ " belongs to a different module")
@@ -361,7 +420,7 @@ fun verify_design(design):
     verify_module(module_def)
   def mutable entities = []
   for (module_def in design.modules):
-    entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places
+    entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places ++ module_def.memories
   for (entity in entities):
     def same_ids = entities.filter(~keep: fun (other): other.id == entity.id)
     unless same_ids.length() == 1

@@ -50,6 +50,11 @@ fun ensure_value_in(module_def, value, who):
   unless owned
   | fail(who, "hardware value belongs to a different module")
 
+fun ensure_memory_in(module_def, memory, who):
+  def owned = memory is_a Memory && memory.module_def === module_def && module_def.memories.find(fun (candidate): candidate === memory)
+  unless owned
+  | fail(who, "memory belongs to a different module")
+
 fun root_place(place):
   if place is_a Place && place.parent is_a Place
   | root_place(place.parent)
@@ -83,7 +88,10 @@ fun aggregate_place_complete(place):
       | #false
 
 fun ensure_unique_hardware_name(module_def, name, who):
-  when module_def.values.find(fun (value): value.name == name) || module_def.places.find(fun (place): place.name == name)
+  def value_named = module_def.values.find(fun (value): value.name == name)
+  def place_named = module_def.places.find(fun (place): place.name == name)
+  def memory_named = module_def.memories.find(fun (memory): memory.name == name)
+  when value_named || place_named || memory_named
   | fail(who, "duplicate hardware name " ++ name)
 
 fun ensure_unique_instance_name(module_def, name, who):
@@ -877,6 +885,115 @@ class Builder(design):
                    Origin("aggregate place canonicalization", place.name))
         assembled
     | #false
+
+  // Allocates state without pretending that the memory handle is ordinary
+  // hardware data. Access operations retain an explicit resource reference.
+  method memory(module_def,
+                name,
+                depth,
+                element_type,
+                location = Location(),
+                origin = Origin("memory", name)):
+    ensure_module_in_design(design, module_def, #'memory)
+    ensure_open(module_def, #'memory)
+    ensure_hardware_name(name, #'memory)
+    unless depth is_a Int && depth > 0
+    | fail(#'memory, "memory depth must be a positive host Int")
+    ensure_data_type(element_type, #'memory)
+    ensure_unique_hardware_name(module_def, name, #'memory)
+    def operation_id = design.fresh_id()
+    def memory = Memory(design.fresh_id(),
+                        name,
+                        depth,
+                        element_type,
+                        module_def,
+                        operation_id)
+    def operation = Operation(operation_id,
+                              "rtl.memory",
+                              module_def,
+                              [],
+                              [],
+                              [],
+                              {"memory": memory,
+                               "name": name,
+                               "depth": depth,
+                               "element_type": element_type},
+                              location,
+                              origin)
+    module_def.add_memory(memory)
+    module_def.add_operation(operation)
+    memory
+
+  method memory_read_async(module_def,
+                           memory,
+                           address,
+                           name = #false,
+                           location = Location(),
+                           origin = Origin("memory read")):
+    ensure_module_in_design(design, module_def, #'memory_read_async)
+    ensure_open(module_def, #'memory_read_async)
+    ensure_memory_in(module_def, memory, #'memory_read_async)
+    ensure_value_in(module_def, address, #'memory_read_async)
+    def expected_width = memory_address_width(memory.depth)
+    unless bits_type(address.type) && address.type.width == expected_width
+    | fail(#'memory_read_async,
+           "memory address must be Bits(" ++ to_string(expected_width) ++ ")")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.memory_read_async",
+                          [address],
+                          memory.element_type,
+                          name,
+                          location,
+                          origin,
+                          #'memory_read_async,
+                          {"memory": memory})
+
+  method memory_write(module_def,
+                      memory,
+                      address,
+                      data,
+                      clock,
+                      enable,
+                      location = Location(),
+                      origin = Origin("memory write")):
+    ensure_module_in_design(design, module_def, #'memory_write)
+    ensure_open(module_def, #'memory_write)
+    ensure_memory_in(module_def, memory, #'memory_write)
+    ensure_value_in(module_def, address, #'memory_write)
+    ensure_value_in(module_def, data, #'memory_write)
+    ensure_value_in(module_def, clock, #'memory_write)
+    ensure_value_in(module_def, enable, #'memory_write)
+    def expected_width = memory_address_width(memory.depth)
+    unless bits_type(address.type) && address.type.width == expected_width
+    | fail(#'memory_write,
+           "memory address must be Bits(" ++ to_string(expected_width) ++ ")")
+    unless data_type(data.type) && type_equal(data.type, memory.element_type)
+    | fail(#'memory_write, "memory write data has the wrong DataType")
+    unless clock_type(clock.type)
+    | fail(#'memory_write, "memory write clock must be Clock")
+    unless flat_data_type(enable.type) && data_width(enable.type) == 1
+    | fail(#'memory_write, "memory write enable must be a one-bit FlatDataType")
+    when module_def.operations.find(
+      fun (operation):
+        operation.opcode == "rtl.memory_write" && operation.attribute("memory", #false) === memory
+    )
+    | fail(#'memory_write, "memory may have at most one write port")
+    def operation_id = design.fresh_id()
+    def operands = [address, data, clock, enable]
+    def operation = Operation(operation_id,
+                              "rtl.memory_write",
+                              module_def,
+                              operands,
+                              [],
+                              [],
+                              {"memory": memory},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    module_def.add_operation(operation)
+    operation
 
   method register(module_def,
                   name,

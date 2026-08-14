@@ -11,6 +11,8 @@ export:
   Value
   Place
   Operation
+  Memory
+  memory_address_width
   Port
   Register
   Instance
@@ -78,6 +80,25 @@ class Operation(id,
   method attribute(name, default = #false):
     attributes.get(name, default)
 
+// Memories are stateful module-owned resources rather than hardware Values:
+// they cannot cross ports, participate in muxes, or occupy registers.
+class Memory(id, name, depth, element_type, module_def, defining_op_id):
+  property module_id: module_def.id
+  property design: module_def.design
+
+  method ref():
+    "@" ++ name
+
+// Keeps address typing deterministic for arbitrary positive depths. Dynamic
+// encodings greater than or equal to depth have unspecified hardware behavior.
+fun memory_address_width(depth):
+  fun loop(capacity, width):
+    if capacity >= depth
+    | block:
+        if width == 0 | 1 | width
+    | loop(capacity * 2, width + 1)
+  loop(1, 0)
+
 class Port(name, direction, type, value = #false, place = #false)
 
 class Register(operation, current, next)
@@ -105,6 +126,7 @@ class Module(design,
              mutable outputs = [],
              mutable values = [],
              mutable places = [],
+             mutable memories = [],
              mutable finished = #false):
   method add_operation(operation):
     unless operation is_a Operation && operation.module_def === this
@@ -121,6 +143,11 @@ class Module(design,
     | error(~who: #'add_place, "place belongs to a different module")
     places := places ++ [place]
 
+  method add_memory(memory):
+    unless memory is_a Memory && memory.module_def === this
+    | error(~who: #'add_memory, "memory belongs to a different module")
+    memories := memories ++ [memory]
+
   method add_input(port):
     inputs := inputs ++ [port]
 
@@ -135,6 +162,9 @@ class Module(design,
 
   method find_place(id):
     places.find(fun (place): place.id == id)
+
+  method find_memory(id):
+    memories.find(fun (memory): memory.id == id)
 
   method find_input(name):
     inputs.find(fun (port): port.name == name)

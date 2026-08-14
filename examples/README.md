@@ -66,6 +66,7 @@ importable layers:
 | [`layers/hierarchy.rhm`](../rhdl/frontend/layers/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
 | [`layers/sync.rhm`](../rhdl/frontend/layers/sync.rhm) | Opt-in sync circuits, ambient registers, and marked-child clock/reset propagation |
 | [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
+| [`layers/memory.rhm`](../rhdl/frontend/layers/memory.rhm) | Binding-derived memories with async indexing and synchronous writes |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
 implementation. It aggregates the foundation and the curated layers; enum and
@@ -105,6 +106,9 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `vector[index]` | Static `rtl.vector_get` or construction-time element-place projection |
 | `vector.lookup(selector, ~default: value)` | Static projections plus one core `rtl.mux_lookup` |
 | `wire temporary: T` | One core `rtl.wire` place, readable after a complete single drive |
+| `mem storage(depth, T)` | One core `Memory` resource and `rtl.memory` allocation |
+| `storage[address]` | `rtl.memory_read_async(storage, address)` |
+| `storage.write(address, data, ...)` | One clocked `rtl.memory_write` port |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 

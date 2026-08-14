@@ -67,6 +67,7 @@ verifier, and backend must preserve. Current core concepts include:
 - Structural `RecordType` and fixed-length `VectorType` values and projections.
 - Single-driver internal wires.
 - Primitive registers.
+- Stateful memories with asynchronous reads and synchronous writes.
 - Modules, ports, and instances.
 - Ownership, type, driver, and cycle verification.
 
@@ -128,6 +129,7 @@ The composable frontend layers are:
 | `layers/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
 | `layers/sync.rhm` | Opt-in sync circuits with ambient registers and marked-child clock/reset propagation |
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
+| `layers/memory.rhm` | Binding-derived memories, async indexing, synchronous writes, and `index_width` |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
 does not implement features itself. The enum and sync layers are intentionally
@@ -516,6 +518,40 @@ ports; the names are bound in its body when explicit access is needed. `reg stat
 uses the ambient clock without reset, while `reg state(T, ~init: value)` uses
 the ambient clock and active-high synchronous reset. An initializer is never
 invented merely because the ambient reset exists.
+
+### Asynchronous-read memories
+
+A memory is a first-class core state resource, not a `HardwareType` value. It
+cannot cross an ordinary port, occupy a register, or participate directly in a
+mux. Separate core operations allocate it, read it asynchronously, and write
+it synchronously. The standard memory layer supplies binding-derived names,
+indexing, and ambient-clock convenience:
+
+```rhombus
+mem storage(depth, Bits(width))
+
+read_data <== storage[read_address]
+storage.write(write_address, write_data,
+              ~enable: write_enable, ~clock: clock)
+```
+
+Inside a `sync_circuit`, `~clock` may be omitted and the ambient clock is used.
+The initial memory contract is deliberately precise:
+
+- `depth` is a positive host `Int`, and the element may be any `DataType`.
+- Addresses are exactly `Bits(index_width(depth))`, where a depth of one still
+  uses one address bit.
+- A read expression creates an asynchronous, zero-latency physical read port;
+  any number of read ports is allowed.
+- A memory has at most one rising-edge synchronous write port. Its enable is a
+  one-bit `FlatDataType` such as `Bool`.
+- Initial contents, out-of-range dynamic addresses, and read-during-write
+  results are unspecified. Memory reset, initialization, masks, and combined
+  read/write ports are not part of this first cut.
+
+The write method remains explicit because it is a clocked state change, not a
+single-driver `Place` connection. See
+[`examples/async-read-memory.rhdl`](examples/async-read-memory.rhdl).
 
 ### Hardware conditional assignment
 
@@ -927,6 +963,10 @@ concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
 extract(Bits(w), high, low)                 -> Bits(high - low + 1)
 zext(Bits(a), target_width)                 -> Bits(target_width)
 trunc(Bits(a), target_width)                -> Bits(target_width)
+memory(depth: positive host Int, T: DataType) -> Memory<T>
+memory_read_async(Memory<T>, Bits(index_width(depth))) -> T
+memory_write(Memory<T>, address, T,
+             Clock, enable: one-bit FlatDataType)      -> void
 ```
 
 `shl` and `shru` take a hardware `Bits(a)` shift amount whose width is
@@ -977,6 +1017,16 @@ Register
 On the active clock edge, an asserted reset loads `reset_value`; otherwise the
 register loads `next`. State and reset value must have exactly equal
 `DataType`s.
+
+### Memories
+
+A `Memory` has stable identity, an owning module, a positive host-known depth,
+an element `DataType`, and an allocation operation. It is a resource rather
+than a `Value` or `Place`. `rtl.memory_read_async` produces an ordinary
+combinational `Value`; `rtl.memory_write` is a sequential side-effecting
+operation carrying address, data, clock, and enable operands. Consequently an
+address dependency through an asynchronous read participates in ordinary
+combinational-cycle checking.
 
 ### Modules and instances
 
@@ -1048,6 +1098,7 @@ the core schema.
 | Width-changing | concat, extract, zext, trunc |
 | Records | record create, record get |
 | Vectors | vector create, vector get with a host-static index |
+| Memories | memory allocation, asynchronous read, synchronous write |
 | Sequential | register, synchronous-reset register |
 
 There is no conditional-connect operation or general control-flow region.
@@ -1187,6 +1238,9 @@ type or operation it cannot represent.
 | `rtl.record_get` | `hw.struct_extract` |
 | `rtl.vector_create` | `hw.array_create` |
 | `rtl.vector_get` | `hw.array_get` with a host-constant index |
+| `rtl.memory` | `seq.hlmem` |
+| `rtl.memory_read_async` | latency-0 `seq.read` |
+| `rtl.memory_write` | latency-1 `seq.write` |
 | `rtl.wire` | Erased; references resolve to the wire's driver |
 
 When a shift amount is narrower than its value, lowering zero-extends the
@@ -1255,6 +1309,7 @@ Important examples include:
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
+| `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
@@ -1282,7 +1337,7 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs sixteen simulations:
+`make circt-test` currently runs seventeen simulations:
 
 - An 8-bit modular adder.
 - An 8-bit modular unsigned multiplier.
@@ -1293,6 +1348,7 @@ make test              # complete unit plus CIRCT suite
 - A width-changing datapath.
 - A fixed-vector datapath.
 - An element-wise assembled vector wire.
+- An asynchronous-read, synchronous-write memory.
 - An 8-bit synchronous-reset counter.
 - A hardware-conditional enable shift register.
 - Two instances sharing one child definition.
@@ -1323,6 +1379,8 @@ The initial vertical slice is complete:
 - Concise fixed-length vectors with static indexing, hardware lookup, aggregate
   connections, explicit packing casts, muxes, and registers.
 - Readable, single-driver internal wires with aggregate element assignment.
+- First-class memories with arbitrary `DataType` elements, asynchronous reads,
+  and one optional synchronous write port.
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.
@@ -1350,7 +1408,8 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths and general width inference.
-- Dynamically sized arrays and memories.
+- Dynamically sized arrays and memories, additional write ports, write masks,
+  initialization, and defined collision behavior.
 - Asynchronous and active-low resets.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.

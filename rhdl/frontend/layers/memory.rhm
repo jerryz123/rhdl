@@ -1,0 +1,61 @@
+#lang rhombus/and_meta
+// Defines binding-derived memories with async indexing and synchronous writes.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/clocking.rhm".ambient_memory_write
+  "../support/fields.rhm".HardwareFields
+
+export:
+  mem
+  index_width
+  MemoryFields
+
+fun index_width(depth):
+  unless depth is_a Int && depth > 0
+  | error(~who: #'index_width, "memory depth must be a positive host Int")
+  memory_address_width(depth)
+
+fun memory_fields(value):
+  value is_a Memory
+
+annot.macro 'MemoryFields':
+  annot_meta.pack_predicate(
+    'memory_fields',
+    '(($(statinfo_meta.dot_provider_key), memory_field_dot), ($(statinfo_meta.index_get_key), memory_index))'
+  )
+
+fun memory_index(memory, address) :~ HardwareFields:
+  kernel.memory_read_async(memory, address)
+
+fun frontend_memory_write(memory,
+                          address,
+                          data,
+                          enable,
+                          clock = #false):
+  if clock
+  | kernel.memory_write(memory, address, data, clock, enable)
+  | ambient_memory_write(memory, address, data, enable)
+
+dot.macro 'memory_field_dot $left $dot $right':
+  match right
+  | 'id': #false
+  | 'name': #false
+  | 'depth': #false
+  | 'element_type': #false
+  | 'module_def': #false
+  | 'module_id': #false
+  | 'design': #false
+  | 'defining_op_id': #false
+  | 'ref': #false
+  | 'read': 'fun (address) :~ HardwareFields: memory_index($left, address)'
+  | 'write':
+      'fun (address, data, ~enable: enable, ~clock: clock = #false):
+         frontend_memory_write($left, address, data, enable, clock)'
+  | ~else: #false
+
+defn.macro 'mem $(name :: Identifier)($depth, $element_type)':
+  def memory_name = name.to_source_string()
+  'def $name :: MemoryFields = kernel.memory($memory_name, $depth, $element_type)'

@@ -62,6 +62,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, records, and field access | core IR, kernel, field support |
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
+| `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
 | `interface.rhm` | Roles, directional interfaces, and bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |

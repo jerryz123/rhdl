@@ -237,6 +237,46 @@ fun emit_vector_get(operation):
                 value_ref(vector), "[", index_ref, "] : ",
                 circt_type(vector.type), ", i", to_string(index_width))
 
+fun circt_memory_type(memory):
+  String.append("!seq.hlmem<", to_string(memory.depth), "x",
+                circt_type(memory.element_type), ">")
+
+fun memory_ref(memory):
+  "%__rhdl_memory_" ++ to_string(memory.id)
+
+fun emit_memory(operation):
+  def memory = operation.attribute("memory")
+  def write = operation.module_def.operations.find(
+    fun (candidate):
+      candidate.opcode == "rtl.memory_write" && candidate.attribute("memory", #false) === memory
+  )
+  def clock_ref = "%__rhdl_memory_clock_" ++ to_string(memory.id)
+  def reset_ref = "%__rhdl_memory_reset_" ++ to_string(memory.id)
+  def clock_text:
+    if write
+    | String.append("    ", clock_ref, " = seq.to_clock ",
+                    value_ref(write.operands[2]))
+    | String.append("    ", clock_ref, " = seq.const_clock low")
+  String.append(clock_text, "\n",
+                "    ", reset_ref, " = hw.constant 0 : i1\n",
+                "    ", memory_ref(memory), " = seq.hlmem @", memory.name,
+                " ", clock_ref, ", ", reset_ref, " : ",
+                circt_memory_type(memory))
+
+fun emit_memory_read_async(operation):
+  def memory = operation.attribute("memory")
+  String.append("    ", value_ref(operation.results[0]), " = seq.read ",
+                memory_ref(memory), "[", value_ref(operation.operands[0]),
+                "] {latency = 0 : i64} : ", circt_memory_type(memory))
+
+fun emit_memory_write(operation):
+  def memory = operation.attribute("memory")
+  String.append("    seq.write ", memory_ref(memory), "[",
+                value_ref(operation.operands[0]), "] ",
+                value_ref(operation.operands[1]), " wren ",
+                value_ref(operation.operands[3]),
+                " {latency = 1 : i64} : ", circt_memory_type(memory))
+
 fun emit_register(operation):
   def current = operation.results[0]
   def next = operation.places[0]
@@ -324,6 +364,12 @@ fun emit_operation(operation):
         emit_vector_create(operation)
     | "rtl.vector_get":
         emit_vector_get(operation)
+    | "rtl.memory":
+        emit_memory(operation)
+    | "rtl.memory_read_async":
+        emit_memory_read_async(operation)
+    | "rtl.memory_write":
+        emit_memory_write(operation)
     | "rtl.register" || "rtl.register_reset":
         emit_register(operation)
     | "rtl.instance":
