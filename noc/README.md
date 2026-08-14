@@ -18,6 +18,7 @@ The current implementation provides:
   identity-provenance lookups.
 - Hierarchical prefixing and collision-checked topology composition.
 - Topology-independent directed and bidirectional link helpers.
+- Symbolic route classes with deterministic normalized IDs and provenance.
 - Separate standard definitions for line and rectangular-mesh topologies.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
@@ -56,6 +57,7 @@ Run the focused checks from the repository root:
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
@@ -125,6 +127,18 @@ Concrete network choices belong under `noc/examples/` or in user packages.
 The mesh-topology example selects one mesh size and VC-group configuration by
 importing only the public authoring and standard-topology APIs; reusable
 packages do not import that instance.
+
+## Route-class authoring
+
+`RouteClassRef` gives a finite route class a hierarchical symbolic name, while
+`RouteClassSpec` keeps its source and destination as `NodeRef` values. The
+generic `lower_route_classes` operation resolves those endpoints through one
+exact `LoweredTopology`, assigns route-class IDs by canonical symbolic-name
+order, copies opaque metadata unchanged, and retains bidirectional provenance.
+
+This layer defines only explicit route-class semantics. Reusable traffic sets
+such as all ordered source/destination pairs belong under `noc/std/traffic/`,
+and concrete selections belong under `noc/examples/` or in user packages.
 
 ## Model
 

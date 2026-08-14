@@ -1,0 +1,121 @@
+#lang rhombus
+// Checks symbolic route-class validation, deterministic lowering, provenance, and model integration.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+
+def source = NodeRef("source")
+def middle = NodeRef("middle")
+def destination = NodeRef("destination")
+def topology_spec = TopologySpec(
+  [middle, destination, source],
+  [directed_link(LinkRef("source-to-middle"),
+                 source,
+                 middle,
+                 [VCGroup("escape", 1)]),
+   directed_link(LinkRef("middle-to-destination"),
+                 middle,
+                 destination,
+                 [VCGroup("escape", 1)])]
+)
+def lowered_topology = lower_topology(topology_spec)
+
+def local_ref = RouteClassRef(["traffic", "local"])
+def request_ref = RouteClassRef(["traffic", "request"])
+def local_spec = RouteClassSpec(
+  local_ref,
+  source,
+  source,
+  "local metadata"
+)
+def request_spec = RouteClassSpec(
+  request_ref,
+  source,
+  destination,
+  "request metadata"
+)
+
+// Supply declarations out of canonical route-name order.
+def lowered_routes = lower_route_classes(
+  lowered_topology,
+  [request_spec, local_spec]
+)
+def reversed_routes = lower_route_classes(
+  lowered_topology,
+  [local_spec, request_spec]
+)
+
+check:
+  lowered_routes.specs.map(
+    fun (spec): spec.ref.describe()
+  ) ~is ["traffic/local", "traffic/request"]
+  lowered_routes.route_classes.map(
+    fun (route_class): route_class.id.value
+  ) ~is [0, 1]
+  lowered_routes.route_class(local_ref).source.value ~is lowered_topology.node_id(source).value
+  lowered_routes.route_class(local_ref).destination.value ~is lowered_topology.node_id(source).value
+  lowered_routes.route_class(request_ref).source.value ~is lowered_topology.node_id(source).value
+  lowered_routes.route_class(request_ref).destination.value ~is lowered_topology.node_id(destination).value
+  lowered_routes.route_class(request_ref).metadata ~is "request metadata"
+  lowered_routes.route_ref(RouteClassId(0)).describe() ~is "traffic/local"
+  lowered_routes.route_ref(RouteClassId(1)).describe() ~is "traffic/request"
+  lowered_routes.source_ref(request_ref).describe() ~is "source"
+  lowered_routes.destination_ref(request_ref).describe() ~is "destination"
+  lowered_routes.route_spec(local_ref).metadata ~is "local metadata"
+  lowered_routes.route_classes.map(
+    fun (route_class): route_class.describe()
+  ) ~is reversed_routes.route_classes.map(
+    fun (route_class): route_class.describe()
+  )
+
+def relation = RoutingRelation(
+  fun (_route_class, _origin, _candidate_vc): #true
+)
+def problem = RoutingProblem(
+  lowered_topology.topology,
+  lowered_routes.route_classes,
+  relation
+)
+
+check:
+  problem.route_classes.length() ~is 2
+  problem.candidates(
+    lowered_routes.route_class(request_ref),
+    Injection(lowered_topology.node_id(source))
+  ).map(fun (vc): vc.describe()) ~is ["l1.vc0"]
+  problem.candidates(
+    lowered_routes.route_class(local_ref),
+    Injection(lowered_topology.node_id(source))
+  ) ~is []
+
+check:
+  RouteClassRef([]) ~throws "nonempty String or List"
+  RouteClassSpec("request", source, destination) ~throws "must be a RouteClassRef"
+  RouteClassSpec(request_ref, "source", destination) ~throws "must be NodeRef"
+  lower_route_classes("not a topology", [request_spec]) ~throws "expected a LoweredTopology"
+  lower_route_classes(lowered_topology, []) ~throws "nonempty List"
+  lower_route_classes(lowered_topology, ["not a spec"]) ~throws "only RouteClassSpec"
+  lower_route_classes(
+    lowered_topology,
+    [request_spec,
+     RouteClassSpec(RouteClassRef(["traffic", "request"]),
+                    middle,
+                    destination)]
+  ) ~throws "duplicate route class traffic/request"
+  lower_route_classes(
+    lowered_topology,
+    [RouteClassSpec(RouteClassRef("unknown-source"),
+                    NodeRef("unknown"),
+                    destination)]
+  ) ~throws "unknown source unknown"
+  lower_route_classes(
+    lowered_topology,
+    [RouteClassSpec(RouteClassRef("unknown-destination"),
+                    source,
+                    NodeRef("unknown"))]
+  ) ~throws "unknown destination unknown"
+  lowered_routes.route_class("request") ~throws "expected a RouteClassRef"
+  lowered_routes.route_class(RouteClassRef("unknown")) ~throws "unknown route class unknown"
+  lowered_routes.route_ref("r0") ~throws "expected a RouteClassId"
+  lowered_routes.route_ref(RouteClassId(99)) ~throws "unknown route class r99"

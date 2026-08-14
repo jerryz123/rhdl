@@ -1,0 +1,124 @@
+#lang rhombus
+// Lowers symbolic route classes through one normalized topology and retains provenance.
+
+import:
+  "../model/main.rhm" open
+  "names.rhm" open
+  "topology-lowering.rhm" open
+  "route-classes.rhm" open
+
+export:
+  RouteClassBinding
+  LoweredRouteClasses
+  lower_route_classes
+
+class RouteClassBinding(spec, route_class)
+
+fun find_binding_by_ref(bindings, ref):
+  bindings.find(
+    fun (binding): route_class_ref_equal(binding.spec.ref, ref)
+  )
+
+fun find_binding_by_id(bindings, id):
+  bindings.find(
+    fun (binding): route_class_id_equal(binding.route_class.id, id)
+  )
+
+fun find_node_binding(lowered_topology, ref):
+  lowered_topology.node_bindings.find(
+    fun (binding): node_ref_equal(binding.ref, ref)
+  )
+
+class LoweredRouteClasses(lowered_topology,
+                          specs,
+                          route_classes,
+                          bindings):
+  constructor (lowered_topology, specs, route_classes, bindings):
+    unless lowered_topology is_a LoweredTopology
+    | error(~who: #'LoweredRouteClasses,
+            "lowered route classes require a LoweredTopology")
+    super(lowered_topology, specs, route_classes, bindings)
+
+  method route_class(ref):
+    unless ref is_a RouteClassRef
+    | error(~who: #'route_class, "expected a RouteClassRef")
+    def found = find_binding_by_ref(bindings, ref)
+    unless found
+    | error(~who: #'route_class,
+            "unknown route class " ++ ref.describe())
+    found.route_class
+
+  method route_ref(id):
+    unless id is_a RouteClassId
+    | error(~who: #'route_ref, "expected a RouteClassId")
+    def found = find_binding_by_id(bindings, id)
+    unless found
+    | error(~who: #'route_ref,
+            "unknown route class " ++ id.describe())
+    found.spec.ref
+
+  method route_spec(ref):
+    unless ref is_a RouteClassRef
+    | error(~who: #'route_spec, "expected a RouteClassRef")
+    def found = find_binding_by_ref(bindings, ref)
+    unless found
+    | error(~who: #'route_spec,
+            "unknown route class " ++ ref.describe())
+    found.spec
+
+  method source_ref(ref):
+    route_spec(ref).source
+
+  method destination_ref(ref):
+    route_spec(ref).destination
+
+fun duplicate_route_class_ref(specs, ref):
+  specs.filter(
+    ~keep: fun (candidate): route_class_ref_equal(candidate.ref, ref)
+  ).length() > 1
+
+fun lower_route_classes(lowered_topology, specs):
+  unless lowered_topology is_a LoweredTopology
+  | error(~who: #'lower_route_classes, "expected a LoweredTopology")
+  unless specs is_a List && specs.length() > 0
+  | error(~who: #'lower_route_classes,
+          "route-class specs must be a nonempty List")
+
+  for (spec in specs):
+    unless spec is_a RouteClassSpec
+    | error(~who: #'lower_route_classes,
+            "route-class specs must contain only RouteClassSpec values")
+    when duplicate_route_class_ref(specs, spec.ref)
+    | error(~who: #'lower_route_classes,
+            "duplicate route class " ++ spec.ref.describe())
+    unless find_node_binding(lowered_topology, spec.source)
+    | error(~who: #'lower_route_classes,
+            String.append("route class ", spec.ref.describe(),
+                          " has unknown source ", spec.source.describe()))
+    unless find_node_binding(lowered_topology, spec.destination)
+    | error(~who: #'lower_route_classes,
+            String.append("route class ", spec.ref.describe(),
+                          " has unknown destination ",
+                          spec.destination.describe()))
+
+  def ordered_specs = specs.sort(
+    fun (left, right): route_class_ref_less(left.ref, right.ref)
+  )
+  def mutable bindings = []
+  for (spec in ordered_specs):
+    def source = find_node_binding(lowered_topology, spec.source).id
+    def destination = find_node_binding(lowered_topology, spec.destination).id
+    def route_class = RouteClass(
+      RouteClassId(bindings.length()),
+      source,
+      destination,
+      spec.metadata
+    )
+    bindings := bindings ++ [RouteClassBinding(spec, route_class)]
+
+  LoweredRouteClasses(
+    lowered_topology,
+    ordered_specs,
+    bindings.map(fun (binding): binding.route_class),
+    bindings
+  )
