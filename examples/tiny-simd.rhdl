@@ -1,0 +1,239 @@
+#lang rhdl
+// Builds a host-specialized SIMD microengine with typed instructions and generated lanes.
+
+class EngineConfig(lanes :: Int,
+                   width :: Int,
+                   program_depth :: Int,
+                   enable_multiply :: Boolean):
+  constructor (lanes :: Int,
+               width :: Int,
+               program_depth :: Int,
+               enable_multiply :: Boolean):
+    unless lanes > 0
+    | error(~who: #'EngineConfig, "lane count must be a positive host Int")
+    unless width > 0
+    | error(~who: #'EngineConfig, "lane width must be a positive host Int")
+    unless program_depth > 0
+    | error(~who: #'EngineConfig, "program depth must be a positive host Int")
+    super(lanes, width, program_depth, enable_multiply)
+
+hardware_enum Opcode(~width: 4):
+  Load = 0
+  Add = 1
+  Xor = 2
+  ShiftLeft = 3
+  Multiply = 8
+
+bundle Instruction(T):
+  opcode: Opcode
+  operand: T
+
+interface ProgramLoader(Address, Data):
+  role host
+  role engine
+
+  host -> engine:
+    address: Address
+    data: Data
+    write: Bool
+
+  engine -> host:
+    ready: Bool
+
+sync_circuit Lane(width :: Int, enable_multiply :: Boolean):
+  unless width > 0
+  | error(~who: #'Lane, "lane width must be a positive host Int")
+
+  input load_seed: Bool
+  input step: Bool
+  input seed: Bits(width)
+  input instruction: Instruction(Bits(width))
+  output result: Bits(width)
+
+  reg accumulator(~init: bits(0, ~width: width))
+
+  // This is a host decision. Disabling multiplication removes the multiplier
+  // operation instead of adding a runtime enable around it.
+  def multiplied:
+    if enable_multiply
+    | accumulator * instruction.operand
+    | accumulator
+
+  // This is a hardware decision. The instruction can change every cycle.
+  def alu_result = mux_lookup(instruction.opcode, ~default: accumulator):
+    Opcode.Load: instruction.operand
+    Opcode.Add: accumulator + instruction.operand
+    Opcode.Xor: accumulator xor instruction.operand
+    Opcode.ShiftLeft: accumulator << instruction.operand
+    Opcode.Multiply: multiplied
+
+  when load_seed:
+    accumulator.next <== seed
+  elsewhen step:
+    accumulator.next <== alu_result
+
+  result <== accumulator
+
+sync_circuit TinySIMD(config :: EngineConfig):
+  def address_width = index_width(config.program_depth)
+  def instruction_width = config.width + enum_width(Opcode)
+  def InstructionType = Instruction(Bits(config.width))
+
+  input load_seed: Bool
+  input step: Bool
+  input seeds: Vec(config.lanes, Bits(config.width))
+  output results: Vec(config.lanes, Bits(config.width))
+  output pc_out: Bits(address_width)
+  interface loader(
+    ProgramLoader(Bits(address_width), Bits(instruction_width)),
+    ~role: engine
+  )
+
+  // Program words stay packed in memory and become structured instructions
+  // through an explicit equal-width representation cast at the read boundary.
+  mem program(config.program_depth, Bits(instruction_width))
+  reg pc(~init: bits(0, ~width: address_width))
+  def instruction = program[pc].into(InstructionType)
+  def zero_address = bits(0, ~width: address_width)
+  def one_address = bits(1, ~width: address_width)
+  def last_address = bits(config.program_depth - 1, ~width: address_width)
+
+  program.write(loader.address, loader.data, ~enable: loader.write)
+  loader.ready <== cast(bits(1, ~width: 1), Bool)
+
+  when step:
+    // Host-derived last_address makes non-power-of-two program depths wrap
+    // without ever selecting an out-of-range memory address.
+    pc.next <== mux(pc === last_address, zero_address, pc + one_address)
+
+  // The host loop determines physical lane count. The resulting Array exists
+  // only while elaborating; lane_results is runtime vector hardware.
+  def LaneModule = Lane(config.width, config.enable_multiply)
+  def lanes = for InstanceArray (_ in 0..config.lanes):
+    inst lane(LaneModule)
+  wire lane_results: Vec(config.lanes, Bits(config.width))
+
+  for (i in 0..config.lanes):
+    lanes[i].load_seed <== load_seed
+    lanes[i].step <== step
+    lanes[i].seed <== seeds[i]
+    lanes[i].instruction <== instruction
+    lane_results[i] <== lanes[i].result
+
+  results <== lane_results
+  pc_out <== pc
+
+def showcase_config = EngineConfig(2, 8, 4, #true)
+def design = elaborate(TinySIMD(showcase_config))
+def no_multiply_design = elaborate(TinySIMD(EngineConfig(2, 8, 4, #false)))
+
+def verilog_reference = @str|<<{
+module TinySIMD(
+  input                                                                        clock,
+                                                                               reset,
+                                                                               load_seed,
+                                                                               step,
+  input  [1:0][7:0]                                                            seeds,
+  input  struct packed {logic [1:0] address; logic [11:0] data; logic write; } loader_in,
+  output [1:0][7:0]                                                            results,
+  output [1:0]                                                                 pc_out,
+  output struct packed {logic ready; }                                         loader_out
+);
+
+  wire        _GEN;
+  wire [11:0] _GEN_0;
+  wire [1:0]  _GEN_1;
+  wire [7:0]  _lane_1_result;
+  wire [7:0]  _lane_result;
+  wire        _GEN_2 = 1'h0;
+  reg  [11:0] program_0[0:3];
+  always_ff @(posedge clock) begin
+    if (_GEN_2) begin
+    end
+    else begin
+      if (_GEN)
+        program_0[_GEN_1] <= _GEN_0;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0]  pc;
+  wire struct packed {logic [3:0] opcode; logic [7:0] operand; } _GEN_3 =
+    /*cast(bit)*/program_0[pc];
+  assign _GEN_1 = loader_in.address;
+  assign _GEN_0 = loader_in.data;
+  assign _GEN = loader_in.write;
+  Lane lane (
+    .clock       (clock),
+    .reset       (reset),
+    .load_seed   (load_seed),
+    .step        (step),
+    .seed        (seeds[1'h0]),
+    .instruction (_GEN_3),
+    .result      (_lane_result)
+  );
+  Lane lane_1 (
+    .clock       (clock),
+    .reset       (reset),
+    .load_seed   (load_seed),
+    .step        (step),
+    .seed        (seeds[1'h1]),
+    .instruction (_GEN_3),
+    .result      (_lane_1_result)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      pc <= 2'h0;
+    else
+      pc <= step ? ((&pc) ? 2'h0 : pc + 2'h1) : pc;
+  end // always @(posedge)
+  assign results = {{_lane_1_result}, {_lane_result}};
+  assign pc_out = pc;
+  assign loader_out = '{ready: (1'h1)};
+endmodule
+
+module Lane(
+  input                                                            clock,
+                                                                   reset,
+                                                                   load_seed,
+                                                                   step,
+  input  [7:0]                                                     seed,
+  input  struct packed {logic [3:0] opcode; logic [7:0] operand; } instruction,
+  output [7:0]                                                     result
+);
+
+  reg [7:0] accumulator;
+  always @(posedge clock) begin
+    if (reset)
+      accumulator <= 8'h0;
+    else
+      accumulator <=
+        load_seed
+          ? seed
+          : step
+              ? (instruction.opcode == 4'h0
+                   ? instruction.operand
+                   : instruction.opcode == 4'h1
+                       ? accumulator + instruction.operand
+                       : instruction.opcode == 4'h2
+                           ? accumulator ^ instruction.operand
+                           : instruction.opcode == 4'h3
+                               ? accumulator << instruction.operand
+                               : instruction.opcode == 4'h8
+                                   ? accumulator * instruction.operand
+                                   : accumulator)
+              : accumulator;
+  end // always @(posedge)
+  assign result = accumulator;
+endmodule
+}>>|
+
+export:
+  EngineConfig
+  Opcode
+  Instruction
+  ProgramLoader
+  Lane
+  TinySIMD
+  showcase_config
+  design
+  no_multiply_design
+  verilog_reference

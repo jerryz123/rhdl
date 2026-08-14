@@ -58,19 +58,19 @@ importable layers:
 | [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
 | [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
 | [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
-| [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Opt-in nominal hardware enums with automatic or explicit encodings |
+| [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
 | [`layers/sequential.rhm`](../rhdl/frontend/layers/sequential.rhm) | Binding-derived registers |
 | [`layers/hierarchy.rhm`](../rhdl/frontend/layers/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
-| [`layers/sync.rhm`](../rhdl/frontend/layers/sync.rhm) | Opt-in sync circuits, ambient registers, and marked-child clock/reset propagation |
+| [`layers/sync.rhm`](../rhdl/frontend/layers/sync.rhm) | Sync circuits, ambient registers, and marked-child clock/reset propagation |
 | [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
 | [`layers/memory.rhm`](../rhdl/frontend/layers/memory.rhm) | Binding-derived memories with async indexing and synchronous writes |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
-implementation. It aggregates the foundation and the curated layers; enum and
-sync remain opt-in. `#lang rhdl` exposes that curated standard profile. The lower-level
+implementation. It aggregates the foundation and the curated layers, including
+enum and sync. `#lang rhdl` exposes that curated standard profile. The lower-level
 [`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
 remain explicit library imports.
 
@@ -157,6 +157,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Hardware types, type-producing closures, lists, and custom host configuration as opaque circuit parameters |
+| [`tiny-simd.rhdl`](tiny-simd.rhdl) | Host-specialized SIMD microengine combining generated lanes, enum instructions, bundles, vectors, interfaces, memory, and ambient state |
 | [`width-ops.rhdl`](width-ops.rhdl) | Variadic concatenation, host-range selection, and other width-changing operations over kernel/core semantics |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, canonical record packing, aggregate mux/register state, and record-typed instances |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |

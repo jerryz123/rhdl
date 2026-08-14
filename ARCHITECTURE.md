@@ -68,7 +68,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, and conditional assignment | kernel |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
-| `sync.rhm` | Opt-in sync circuits with ambient clock and synchronous reset | kernel, clocking support |
+| `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 
 `frontend/support/fields.rhm` depends only on the kernel.
 `frontend/support/instance-members.rhm` depends on core IR, the kernel, and

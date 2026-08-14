@@ -120,21 +120,22 @@ The composable frontend layers are:
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
 | `layers/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
 | `layers/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
-| `layers/enum.rhm` | Opt-in nominal hardware enums with automatic or explicit encodings |
+| `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `layers/wire.rhm` | Binding-derived single-driver internal wires |
 | `layers/sequential.rhm` | Binding-derived registers |
 | `layers/conditional.rhm` | Hardware-only `when`, `elsewhen`, and `otherwise` assignment |
 | `layers/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
-| `layers/sync.rhm` | Opt-in sync circuits with ambient registers and marked-child clock/reset propagation |
+| `layers/sync.rhm` | Sync circuits with ambient registers and marked-child clock/reset propagation |
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 | `layers/memory.rhm` | Binding-derived memories, async indexing, synchronous writes, and `index_width` |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
-does not implement features itself. The enum and sync layers are intentionally
-opt-in; import them from either language profile. Neither language profile
-implicitly exports the core Builder or raw elaboration kernel.
+does not implement features itself. `#lang rhdl` includes enum and sync syntax;
+`#lang rhdl/base` users select those layers explicitly like any other optional
+composition. Neither language profile implicitly exports the core Builder or
+raw elaboration kernel.
 
 The shared foundation marks hardware bindings with frontend static information
 for field access, host-range indexing, and `.into(TargetType)`. Consequently,
@@ -294,6 +295,17 @@ conditional-assignment layer.
 See [`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) and
 [`examples/layered-adder.rhdl`](examples/layered-adder.rhdl).
 
+The integrated [`examples/tiny-simd.rhdl`](examples/tiny-simd.rhdl) showcase
+uses one opaque host configuration to choose lane count, word width, program
+depth, and whether multiplier hardware exists. Ordinary Rhombus validation,
+arithmetic, conditionals, and loops derive widths and generate a lane-instance
+array. Runtime RHDL then uses packed instruction memory, a structured bundle,
+an explicitly encoded opcode enum, enum-keyed `mux_lookup`, vectors, role-based
+loader ports, ambient clock/reset propagation, registers, and hardware
+conditional assignment. Its second elaboration disables multiplication and is
+tested to contain no multiply operation, demonstrating structural host
+specialization instead of a runtime enable.
+
 ### Literals and combinational expressions
 
 Integer hardware literals always specify their width:
@@ -346,13 +358,10 @@ Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 
 ### Hardware enums
 
-The opt-in enum layer defines nominal flat data without adding an enum
+The enum layer defines nominal flat data without adding an enum
 operation or backend type:
 
 ```rhombus
-import:
-  lib("rhdl/frontend/layers/enum.rhm") open
-
 hardware_enum State:
   Idle
   Running
@@ -497,13 +506,10 @@ state may use any `DataType`, and holding state is explicit:
 state.next <== state
 ```
 
-The opt-in sync layer packages the common single-domain policy without adding
+The sync layer packages the common single-domain policy without adding
 new core operations:
 
 ```rhombus
-import:
-  lib("rhdl/frontend/layers/sync.rhm") open
-
 sync_circuit Counter(width):
   output count: Bits(width)
 
@@ -1310,6 +1316,7 @@ Important examples include:
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
+| `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
