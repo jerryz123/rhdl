@@ -76,7 +76,7 @@ or policy over existing semantics. Current examples include:
 
 - The layer-defined `Bool` type, Boolean equality, and unsigned ordering syntax.
 - Nominal hardware enums lowered through explicit bit representations.
-- Arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
+- Modular and expanding arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
 - Role-based and recursively nested interfaces over record-typed ports.
@@ -118,7 +118,8 @@ The composable frontend layers are:
 | Module | Contribution |
 |---|---|
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
-| `layers/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
+| `layers/comb.rhm` | Literals, modular arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
+| `layers/expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | `layers/bool.rhm` | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
@@ -327,6 +328,29 @@ output equal: Bool
 result <== (a & b) + bits(1, ~width: width)
 equal <== a === b
 ```
+
+Ordinary operators retain modular fixed-width behavior. Named expanding
+unsigned forms preserve the carry bit of addition and the complete product,
+including when the operand widths differ:
+
+```rhombus
+input a: Bits(8)
+input b: Bits(4)
+output sum: Bits(9)
+output product: Bits(12)
+
+sum <== a +& b
+product <== a *& b
+```
+
+The `+&` and `*&` operators are sugar for `add_expanding(a, b)` and
+`mul_expanding(a, b)`. These are frontend compositions, not new IR operations.
+`add_expanding` zero-extends both operands to
+`max(a.width, b.width) + 1` before `rtl.add`; `mul_expanding` extends both to
+`a.width + b.width` before `rtl.mul`.
+Unsigned expanding subtraction is intentionally absent because a result type
+alone cannot represent underflow without choosing a borrow or signed-result
+contract.
 
 Ordering requires equal-width `Bits` operands and returns the frontend-defined
 `Bool`. Core needs only unsigned less-than: the Bool layer derives `>` by
@@ -967,6 +991,8 @@ Current width rules are explicit:
 - Constants specify a width and must fit it.
 - Narrowing and extension use explicit operations.
 - Arithmetic is unsigned and modular.
+- `add_expanding` and `mul_expanding` provide explicit lossless unsigned results
+  by composing zero extension with the modular core operations.
 - Logical shifts preserve the value width, discard left-shift overflow, and
   fill vacated bits with zero; shifting by the width or more produces zero.
 
@@ -1338,6 +1364,7 @@ Important examples include:
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
+| `examples/expanding-arithmetic.rhdl` | Lossless addition and multiplication across unequal operand widths |
 | `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
@@ -1368,10 +1395,11 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs twenty simulations:
+`make circt-test` currently runs twenty-one simulations:
 
 - An 8-bit modular adder.
 - An 8-bit modular unsigned multiplier.
+- Unequal-width expanding addition and multiplication.
 - Four unsigned fixed-width ordering relations.
 - A four-bit ripple-carry adder.
 - An eight-bit ripple-carry adder generated from a host Array of instances.

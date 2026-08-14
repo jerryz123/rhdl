@@ -1,0 +1,54 @@
+#lang rhombus
+// Defines lossless unsigned arithmetic as explicit resizing plus modular core operations.
+
+import:
+  rhombus
+  "../../core/types.rhm" open
+  "../kernel.rhm" open
+
+export:
+  add_expanding
+  mul_expanding
+  +&
+  *&
+
+fun widen_operands(left_value, right_value, result_width):
+  values(zext(left_value, result_width),
+         zext(right_value, result_width))
+
+fun add_expanding(left, right, name = #false):
+  def left_value = read(left)
+  def right_value = read(right)
+  unless bits_type(left_value.type) && bits_type(right_value.type)
+  | error(~who: #'add_expanding, "expanding arithmetic operands must be Bits")
+  def result_width:
+    if left_value.type.width > right_value.type.width
+    | left_value.type.width + 1
+    | right_value.type.width + 1
+  def (wide_left, wide_right) = widen_operands(left_value,
+                                               right_value,
+                                               result_width)
+  hw_add(wide_left, wide_right, name)
+
+fun mul_expanding(left, right, name = #false):
+  def left_value = read(left)
+  def right_value = read(right)
+  unless bits_type(left_value.type) && bits_type(right_value.type)
+  | error(~who: #'mul_expanding, "expanding arithmetic operands must be Bits")
+  def result_width = left_value.type.width + right_value.type.width
+  def (wide_left, wide_right) = widen_operands(left_value,
+                                               right_value,
+                                               result_width)
+  hw_mul(wide_left, wide_right, name)
+
+operator (left +& right):
+  ~order: addition
+  if hardware_entity(left) || hardware_entity(right)
+  | add_expanding(left, right)
+  | left rhombus.(+&) right
+
+operator (left *& right):
+  ~order: multiplication
+  if hardware_entity(left) || hardware_entity(right)
+  | mul_expanding(left, right)
+  | left rhombus.(*) right

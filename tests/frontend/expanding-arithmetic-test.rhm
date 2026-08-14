@@ -1,0 +1,31 @@
+#lang rhombus
+// Checks expanding arithmetic widths and its composition from existing core operations.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/layers/expanding-arithmetic.rhm" as expanding
+  "../../examples/expanding-arithmetic.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def extensions = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.zext"
+)
+def addition = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.add"
+)
+def multiplication = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.mul"
+)
+
+check:
+  extensions.length() ~is 4
+  extensions.map(fun (operation): operation.results[0].type.width) ~is [9, 9, 12, 12]
+  addition.operands.map(fun (value): value.type.width) ~is [9, 9]
+  addition.results[0].type.width ~is 9
+  multiplication.operands.map(fun (value): value.type.width) ~is [12, 12]
+  multiplication.results[0].type.width ~is 12
+  module_def.find_output("sum").place.driver === addition.results[0] ~is #true
+  module_def.find_output("product").place.driver === multiplication.results[0] ~is #true
+  verify_design(fixture.design) ~is #void
+  "width" expanding.(+&) 9 ~is "width9"
+  6 expanding.(*&) 7 ~is 42

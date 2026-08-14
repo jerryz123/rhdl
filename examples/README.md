@@ -56,7 +56,8 @@ importable layers:
 |---|---|
 | [`foundation.rhm`](../rhdl/frontend/foundation.rhm) | Circuit generators, ports, connections, basic public types, indexing, and `.into` casts |
 | [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
-| [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
+| [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, modular arithmetic, bitwise syntax, lookup muxes, and width operations |
+| [`layers/expanding-arithmetic.rhm`](../rhdl/frontend/layers/expanding-arithmetic.rhm) | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
 | [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
@@ -90,6 +91,10 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `sum <== value` | `connect(sum, value)` |
 | `a + b` | `hw_add(a, b)` |
 | `a * b` | `hw_mul(a, b)` |
+| `a +& b` | `add_expanding(a, b)` |
+| `a *& b` | `mul_expanding(a, b)` |
+| `add_expanding(a, b)` | Zero-extend to `max(width(a), width(b)) + 1`, then `hw_add` |
+| `mul_expanding(a, b)` | Zero-extend to `width(a) + width(b)`, then `hw_mul` |
 | `bits(1, ~width: w)` | `literal(Bits(w), 1)` |
 | `reg state(T, ...)` | `reg("state", T, ...)` |
 | `inst u(Child)` | A suggested-name instance using `"u"` as its deterministic base |
@@ -153,6 +158,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`unsigned-comparisons.rhdl`](unsigned-comparisons.rhdl) | Four unsigned ordering forms derived from the single core `rtl.ult` primitive |
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums as typed mux selectors and values, explicit encodings, registers, and invalid-state recovery |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
+| [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless unsigned addition and multiplication over unequal-width operands |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
 | [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |

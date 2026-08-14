@@ -46,6 +46,7 @@ expect_failure bad-interface-parameter.rhdl "circuit parameters must be host val
 expect_failure bad-recursion.rhdl "recursive elaboration of circuit Recursive"
 expect_failure bad-top-call.rhdl "circuit generators may only be called during elaborate"
 expect_failure bad-width.rhdl "add operands must have exactly the same Bits width"
+expect_failure bad-expanding-arithmetic-type.rhdl "expanding arithmetic operands must be Bits"
 expect_failure bad-unsigned-comparison-width.rhdl "unsigned comparison operands must have exactly the same Bits width"
 expect_failure bad-unsigned-comparison-type.rhdl "unsigned comparison operands must have exactly the same Bits width"
 expect_failure bad-shift-amount.rhdl "shift amount must be Bits"

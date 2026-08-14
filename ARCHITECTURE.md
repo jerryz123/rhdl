@@ -57,7 +57,8 @@ when adding, removing, or changing a layer's direct dependencies.
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
-| `comb.rhm` | Literals, arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, mux-lookup support |
+| `comb.rhm` | Literals, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, mux-lookup support |
+| `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel |
 | `bool.rhm` | Nominal `Bool`, equality, unsigned ordering, and binary `mux` | core IR, kernel |
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, records, and field access | core IR, kernel, field support |
