@@ -1,0 +1,138 @@
+#lang rhombus
+// Materializes every finite routing query once into a deterministic immutable snapshot.
+
+import:
+  "../model/main.rhm" open
+
+export:
+  MaterializedDecision
+  MaterializedRouting
+  materialize_routing
+
+fun origin_equal(left, right):
+  cond
+  | left is_a Injection && right is_a Injection:
+      node_id_equal(left.node, right.node)
+  | left is_a HeldVC && right is_a HeldVC:
+      vc_id_equal(left.vc, right.vc)
+  | ~else: #false
+
+fun decision_has_origin(decision, route_class, origin):
+  decision.route_class === route_class && origin_equal(decision.origin, origin)
+
+fun decision_matches(decision, route_class, origin, candidate_vc):
+  decision_has_origin(decision, route_class, origin) && vc_id_equal(decision.candidate_vc, candidate_vc)
+
+class MaterializedDecision(route_class, origin, candidate_vc, allowed):
+  constructor (route_class, origin, candidate_vc, allowed):
+    unless route_class is_a RouteClass
+    | error(~who: #'MaterializedDecision,
+            "decision route class must be a RouteClass")
+    unless injection_origin(origin) || held_vc_origin(origin)
+    | error(~who: #'MaterializedDecision,
+            "decision origin must be an Injection or HeldVC")
+    unless candidate_vc is_a VCId
+    | error(~who: #'MaterializedDecision,
+            "decision candidate must be a VCId")
+    unless allowed is_a Boolean
+    | error(~who: #'MaterializedDecision,
+            "decision result must be a Boolean")
+    super(route_class, origin, candidate_vc, allowed)
+
+  method describe():
+    String.append(route_class.id.describe(), " ", origin.describe(), " -> ",
+                  candidate_vc.describe(), ": ",
+                  (if allowed | "allow" | "deny"))
+
+class MaterializedRouting(topology, route_classes, decisions):
+  // Hiding the constructor ensures every snapshot came from the user callback.
+  opaque
+  internal _MaterializedRouting
+  constructor ~none
+
+  method contains_route_class(route_class):
+    route_class is_a RouteClass && route_classes.find(
+      fun (candidate): candidate === route_class
+    ) != #false
+
+  method validate_origin(route_class, origin):
+    unless contains_route_class(route_class)
+    | error(~who: #'MaterializedRouting,
+            "route class does not belong to this materialized routing")
+    cond
+    | origin is_a Injection:
+        unless node_id_equal(origin.node, route_class.source)
+        | error(~who: #'MaterializedRouting,
+                String.append("route class ", route_class.id.describe(),
+                              " cannot inject at ", origin.node.describe()))
+    | origin is_a HeldVC:
+        topology.find_vc_link(origin.vc)
+    | ~else:
+        error(~who: #'MaterializedRouting,
+              "routing origin must be an Injection or HeldVC")
+
+  method decisions_for(route_class, origin):
+    validate_origin(route_class, origin)
+    decisions.filter(
+      ~keep: fun (decision): decision_has_origin(decision, route_class, origin)
+    )
+
+  method allowed_candidates(route_class, origin):
+    decisions_for(route_class, origin).filter(
+      ~keep: fun (decision): decision.allowed
+    ).map(fun (decision): decision.candidate_vc)
+
+  method decision(route_class, origin, candidate_vc):
+    validate_origin(route_class, origin)
+    unless candidate_vc is_a VCId
+    | error(~who: #'MaterializedRouting, "expected a candidate VCId")
+    def found = decisions.find(
+      fun (candidate): decision_matches(candidate, route_class, origin, candidate_vc)
+    )
+    unless found
+    | error(~who: #'MaterializedRouting,
+            String.append("routing query was not materialized: ",
+                          route_class.id.describe(), " ", origin.describe(),
+                          " -> ", candidate_vc.describe()))
+    found
+
+  method allowed(route_class, origin, candidate_vc):
+    decision(route_class, origin, candidate_vc).allowed
+
+  method describe():
+    String.join(decisions.map(fun (decision): decision.describe()), "\n")
+
+fun materialize_origin(problem, route_class, origin):
+  for List (candidate_vc in problem.candidates(route_class, origin)):
+    def allowed = problem.relation.allow(route_class, origin, candidate_vc)
+    unless allowed is_a Boolean
+    | error(~who: #'materialize_routing,
+            String.append("routing relation must return a Boolean for ",
+                          route_class.id.describe(), " ", origin.describe(),
+                          " -> ", candidate_vc.describe()))
+    MaterializedDecision(route_class, origin, candidate_vc, allowed)
+
+fun materialize_routing(problem):
+  unless problem is_a RoutingProblem
+  | error(~who: #'materialize_routing,
+          "expected a RoutingProblem")
+  def mutable decisions = []
+  // This stable order also becomes the canonical order used by later passes.
+  for (route_class in problem.route_classes):
+    decisions := decisions ++ materialize_origin(
+      problem,
+      route_class,
+      Injection(route_class.source)
+    )
+    for (vc in problem.topology.virtual_channels()):
+      decisions := decisions ++ materialize_origin(
+        problem,
+        route_class,
+        HeldVC(vc)
+      )
+  // Keep no reference to the problem, which is the only object holding the callback.
+  _MaterializedRouting(
+    problem.topology,
+    problem.route_classes,
+    decisions
+  )

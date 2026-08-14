@@ -1,0 +1,69 @@
+#lang rhombus
+// Checks deterministic, exactly-once materialization of finite routing relations.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+
+def l0 = PhysicalLink(LinkId(0), n0, n1, 2)
+def l1 = PhysicalLink(LinkId(1), n1, n2, 1)
+def topology = Topology([n2, n0, n1], [l1, l0])
+
+def route0 = RouteClass(RouteClassId(0), n0, n2, "remote")
+def route1 = RouteClass(RouteClassId(1), n1, n1, "local")
+def mutable callback_count = 0
+def relation = RoutingRelation(
+  fun (route_class, _origin, candidate_vc):
+    callback_count := callback_count + 1
+    route_class === route0 && candidate_vc.index == 0
+)
+def problem = RoutingProblem(topology, [route1, route0], relation)
+def materialized = materialize_routing(problem)
+def decision_descriptions = materialized.decisions.map(
+  fun (decision): decision.describe()
+)
+
+// Only r0 has candidates: two at injection and one from each l0 VC.
+check:
+  callback_count ~is 4
+  materialized.decisions.length() ~is 4
+  decision_descriptions ~is ["r0 inject(n0) -> l0.vc0: allow",
+                             "r0 inject(n0) -> l0.vc1: deny",
+                             "r0 hold(l0.vc0) -> l1.vc0: allow",
+                             "r0 hold(l0.vc1) -> l1.vc0: allow"]
+  materialized.allowed_candidates(route0, Injection(n0)).map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc0"]
+  materialized.allowed_candidates(route0, HeldVC(VCId(LinkId(0), 1))).map(
+    fun (vc): vc.describe()
+  ) ~is ["l1.vc0"]
+  materialized.allowed(route0, Injection(n0), VCId(LinkId(0), 1)) ~is #false
+  materialized.allowed_candidates(route0, HeldVC(VCId(LinkId(1), 0))) ~is []
+  materialized.allowed_candidates(route1, Injection(n1)) ~is []
+  callback_count ~is 4
+
+check:
+  materialized.allowed(route0, Injection(n0), VCId(LinkId(1), 0)) ~throws "was not materialized"
+  materialized.allowed_candidates(route0, Injection(n1)) ~throws "cannot inject at n1"
+  materialized.allowed_candidates(
+    RouteClass(RouteClassId(0), n0, n2),
+    Injection(n0)
+  ) ~throws "does not belong"
+  materialized.allowed_candidates(
+    route0,
+    HeldVC(VCId(LinkId(1), 1))
+  ) ~throws "unknown VC l1.vc1"
+  materialize_routing("not a problem") ~throws "expected a RoutingProblem"
+
+def non_boolean_problem = RoutingProblem(
+  topology,
+  [route0],
+  RoutingRelation(fun (_route_class, _origin, _candidate_vc): "yes")
+)
+
+check:
+  materialize_routing(non_boolean_problem) ~throws "must return a Boolean"

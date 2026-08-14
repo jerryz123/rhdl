@@ -1,6 +1,6 @@
-<!-- Defines the pure host-side NoC model contract and its separation from RHDL hardware generation. -->
+<!-- Defines the pure host-side NoC model and analysis contract and their separation from RHDL. -->
 
-# Pure NoC model
+# Pure NoC model and analysis
 
 This package defines the host-side graph vocabulary that will eventually feed
 routing-relation materialization, virtual-channel dependency validation, and
@@ -9,7 +9,7 @@ construction and CIRCT.
 
 ## Current scope
 
-The first slice provides:
+The current implementation provides:
 
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
@@ -18,25 +18,28 @@ The first slice provides:
 - Finite route classes with injection and destination nodes.
 - Injection and held-VC routing origins.
 - Physically legal candidate enumeration with automatic destination ejection.
-- A host routing-relation wrapper, ready for later finite materialization.
+- A host routing-relation wrapper.
+- Deterministic, exactly-once materialization of every finite routing query.
+- Immutable decision lookup and allowed-candidate queries that never re-run the
+  user callback.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet materialize routing relations, compute reachability,
-construct dependency graphs, validate deadlock freedom, or generate route
-tables.
+The package does not yet compute reachability, construct dependency graphs,
+validate deadlock freedom, or generate route tables.
 
 ## Dependency boundary
 
-Files under `noc/model/` use only `#lang rhombus` and other modules in the pure
-NoC package. They must not import RHDL core, frontend, backend, standard-library
-hardware modules, or CIRCT integration.
+Files under `noc/model/` and `noc/analysis/` use only `#lang rhombus` and other
+modules in the pure NoC package. They must not import RHDL core, frontend,
+backend, standard-library hardware modules, or CIRCT integration.
 
 Run the focused checks from the repository root:
 
 ```sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 bash noc/check-boundaries.sh
 ```
 
@@ -81,7 +84,8 @@ RoutingRelation(allows)
 allows(route_class, origin, candidate_vc) -> Boolean
 ```
 
-The next implementation slice will be the only layer allowed to invoke this
-callback. It will evaluate each finite query once and store the results as an
-immutable materialized relation.
-
+`materialize_routing` is the only analysis operation that invokes this
+callback. In stable route-class, origin, and candidate order, it evaluates each
+finite query once, requires a Boolean result, and returns `MaterializedRouting`.
+The snapshot deliberately does not retain the callback. Its decision and
+allowed-candidate methods therefore cannot re-evaluate user code.

@@ -5,9 +5,9 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(rg -n '^[[:space:]]+\"[^\"]*(rhdl/|circt)' noc/model --glob '*.rhm' || true)"
+forbidden_imports="$(rg -n '^[[:space:]]+\"[^\"]*(rhdl/|circt)' noc/model noc/analysis --glob '*.rhm' || true)"
 if [[ -n "$forbidden_imports" ]]; then
-  echo "pure NoC model must not import RHDL or CIRCT modules" >&2
+  echo "pure NoC model and analysis must not import RHDL or CIRCT modules" >&2
   echo "$forbidden_imports" >&2
   exit 1
 fi
