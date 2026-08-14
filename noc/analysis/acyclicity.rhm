@@ -1,0 +1,140 @@
+#lang rhombus
+// Proves VC dependency acyclicity with stable ranks or returns a provenance-carrying cycle.
+
+import:
+  "../model/main.rhm" open
+  "dependency-graph.rhm" open
+
+export:
+  AcyclicCertificate
+  DependencyCycle
+  check_dependency_acyclicity
+
+fun contains_vc(vcs, vc):
+  vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
+
+fun vc_index(vcs, vc):
+  def mutable found = #false
+  for (index in 0..vcs.length()):
+    when found == #false && vc_id_equal(vcs[index], vc)
+    | found := index
+  found
+
+class AcyclicCertificate(graph, ordered_vcs):
+  opaque
+  internal _AcyclicCertificate
+  constructor ~none
+
+  method rank(vc):
+    unless vc is_a VCId
+    | error(~who: #'AcyclicCertificate, "expected a VCId")
+    def found = vc_index(ordered_vcs, vc)
+    when found == #false
+    | error(~who: #'AcyclicCertificate,
+            "VC has no certified rank: " ++ vc.describe())
+    found
+
+  method before(left, right):
+    rank(left) < rank(right)
+
+  method describe():
+    def rows = for List (index in 0..ordered_vcs.length()):
+      String.append(to_string(index), ": ", ordered_vcs[index].describe())
+    String.join(rows, "\n")
+
+class DependencyCycle(graph, edges):
+  opaque
+  internal _DependencyCycle
+  constructor ~none
+
+  method vertices():
+    if edges.length() == 0
+    | []
+    | [edges[0].source_vc] ++ edges.map(fun (edge): edge.target_vc)
+
+  method decisions():
+    def mutable provenance = []
+    for (edge in edges):
+      provenance := provenance ++ edge.decisions
+    provenance
+
+  method route_classes():
+    def mutable route_classes = []
+    for (decision in decisions()):
+      unless route_classes.find(
+        fun (route_class): route_class === decision.route_class
+      )
+      | route_classes := route_classes ++ [decision.route_class]
+    route_classes
+
+  method describe():
+    def rows = edges.map(
+      fun (edge): "  " ++ edge.describe()
+    )
+    String.append("VC dependency cycle:\n", String.join(rows, "\n"))
+
+fun has_remaining_predecessor(graph, remaining, vc):
+  graph.incoming_edges(vc).find(
+    fun (edge): contains_vc(remaining, edge.source_vc)
+  ) != #false
+
+fun stable_topological_order(graph):
+  def mutable remaining = graph.vertices
+  def mutable ordered = []
+  def mutable stuck = #false
+  while remaining.length() > 0 && !stuck:
+    def next = remaining.find(
+      fun (vc): !has_remaining_predecessor(graph, remaining, vc)
+    )
+    if next
+    | ordered := ordered ++ [next]
+      remaining := remaining.filter(
+        ~keep: fun (vc): !vc_id_equal(vc, next)
+      )
+    | stuck := #true
+  if stuck | #false | ordered
+
+fun find_cycle(graph):
+  def mutable finished = []
+
+  fun visit(vc, active_vertices, active_edges):
+    def current_vertices = active_vertices ++ [vc]
+    def mutable cycle = #false
+    for (edge in graph.outgoing_edges(vc)):
+      unless cycle
+      | block:
+          def target_index = vc_index(current_vertices, edge.target_vc)
+          if target_index != #false
+          | cycle := _DependencyCycle(
+              graph,
+              active_edges.drop(target_index) ++ [edge]
+            )
+          | unless contains_vc(finished, edge.target_vc)
+            | cycle := visit(
+                edge.target_vc,
+                current_vertices,
+                active_edges ++ [edge]
+              )
+    unless cycle
+    | finished := finished ++ [vc]
+    cycle
+
+  def mutable cycle = #false
+  for (vc in graph.vertices):
+    unless cycle || contains_vc(finished, vc)
+    | cycle := visit(vc, [], [])
+  cycle
+
+fun check_dependency_acyclicity(graph):
+  unless graph is_a VCDependencyGraph
+  | error(~who: #'check_dependency_acyclicity,
+          "expected a VCDependencyGraph")
+  def order = stable_topological_order(graph)
+  if order != #false
+  | _AcyclicCertificate(graph, order)
+  | block:
+      def cycle = find_cycle(graph)
+      unless cycle
+      | error(~who: #'check_dependency_acyclicity,
+              "internal error: cyclic graph has no cycle witness")
+      cycle

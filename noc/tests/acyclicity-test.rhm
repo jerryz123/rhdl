@@ -1,0 +1,143 @@
+#lang rhombus
+// Checks deterministic VC ranks and provenance-labeled cycle witnesses.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+
+// The direct l2 route leaves an isolated vertex beside the l0 -> l1 chain.
+def l0 = PhysicalLink(LinkId(0), n0, n1, 1)
+def l1 = PhysicalLink(LinkId(1), n1, n2, 1)
+def l2 = PhysicalLink(LinkId(2), n0, n2, 1)
+def topology = Topology([n2, n0, n1], [l2, l1, l0])
+def route0 = RouteClass(RouteClassId(0), n0, n2)
+def mutable callback_count = 0
+def acyclic_graph = build_dependency_graph(
+  analyze_reachability(
+    materialize_routing(
+      RoutingProblem(
+        topology,
+        [route0],
+        RoutingRelation(
+          fun (_route_class, _origin, _candidate_vc):
+            callback_count := callback_count + 1
+            #true
+        )
+      )
+    )
+  )
+)
+def callbacks_before_check = callback_count
+def certificate = check_dependency_acyclicity(acyclic_graph)
+
+check:
+  certificate is_a AcyclicCertificate ~is #true
+  callback_count ~is callbacks_before_check
+  certificate.ordered_vcs.map(fun (vc): vc.describe()) ~is ["l0.vc0", "l1.vc0", "l2.vc0"]
+  certificate.rank(VCId(LinkId(0), 0)) ~is 0
+  certificate.rank(VCId(LinkId(1), 0)) ~is 1
+  certificate.rank(VCId(LinkId(2), 0)) ~is 2
+  certificate.before(VCId(LinkId(0), 0), VCId(LinkId(1), 0)) ~is #true
+  certificate.describe() ~is "0: l0.vc0\n1: l1.vc0\n2: l2.vc0"
+  certificate.rank(VCId(LinkId(9), 0)) ~throws "has no certified rank"
+
+// A local route acquires no VC and therefore has an empty acyclic certificate.
+def local_route = RouteClass(RouteClassId(1), n0, n0)
+def empty_certificate = check_dependency_acyclicity(
+  build_dependency_graph(
+    analyze_reachability(
+      materialize_routing(
+        RoutingProblem(
+          topology,
+          [local_route],
+          RoutingRelation(fun (_route_class, _origin, _candidate_vc): #true)
+        )
+      )
+    )
+  )
+)
+
+check:
+  empty_certificate is_a AcyclicCertificate ~is #true
+  empty_certificate.ordered_vcs ~is []
+
+// Both routes are acyclic paths, while their union contains A -> B -> A.
+def ux = NodeId(10)
+def uy = NodeId(11)
+def uz = NodeId(12)
+def uw = NodeId(13)
+def link_a = PhysicalLink(LinkId(30), ux, uy, 1)
+def link_b = PhysicalLink(LinkId(31), uy, ux, 1)
+def link_c = PhysicalLink(LinkId(32), ux, uz, 1)
+def link_d = PhysicalLink(LinkId(33), uy, uw, 1)
+def union_topology = Topology(
+  [uw, ux, uz, uy],
+  [link_d, link_b, link_c, link_a]
+)
+def union_route0 = RouteClass(RouteClassId(20), ux, uz)
+def union_route1 = RouteClass(RouteClassId(21), uy, uw)
+
+fun candidate_uses(candidate_vc, link):
+  link_id_equal(candidate_vc.link_id, link.id)
+
+fun origin_holds(origin, link):
+  origin is_a HeldVC && link_id_equal(origin.vc.link_id, link.id)
+
+fun union_allows(route_class, origin, candidate_vc):
+  cond
+  | route_class === union_route0:
+      cond
+      | origin is_a Injection: candidate_uses(candidate_vc, link_a)
+      | origin_holds(origin, link_a): candidate_uses(candidate_vc, link_b)
+      | origin_holds(origin, link_b): candidate_uses(candidate_vc, link_c)
+      | ~else: #false
+  | route_class === union_route1:
+      cond
+      | origin is_a Injection: candidate_uses(candidate_vc, link_b)
+      | origin_holds(origin, link_b): candidate_uses(candidate_vc, link_a)
+      | origin_holds(origin, link_a): candidate_uses(candidate_vc, link_d)
+      | ~else: #false
+  | ~else: #false
+
+fun graph_for(route_classes):
+  build_dependency_graph(
+    analyze_reachability(
+      materialize_routing(
+        RoutingProblem(
+          union_topology,
+          route_classes,
+          RoutingRelation(union_allows)
+        )
+      )
+    )
+  )
+
+def route0_certificate = check_dependency_acyclicity(graph_for([union_route0]))
+def route1_certificate = check_dependency_acyclicity(graph_for([union_route1]))
+def cycle = check_dependency_acyclicity(
+  graph_for([union_route1, union_route0])
+)
+def cycle_edge_descriptions = cycle.edges.map(
+  fun (edge): edge.describe()
+)
+
+check:
+  route0_certificate is_a AcyclicCertificate ~is #true
+  route1_certificate is_a AcyclicCertificate ~is #true
+  cycle is_a DependencyCycle ~is #true
+  cycle.vertices().map(fun (vc): vc.describe()) ~is ["l30.vc0", "l31.vc0", "l30.vc0"]
+  cycle_edge_descriptions ~is ["l30.vc0 -> l31.vc0 [r20]",
+                               "l31.vc0 -> l30.vc0 [r21]"]
+  cycle.route_classes().map(
+    fun (route_class): route_class.id.value
+  ) ~is [20, 21]
+  cycle.decisions().map(
+    fun (decision): decision.describe()
+  ) ~is ["r20 hold(l30.vc0) -> l31.vc0: allow",
+         "r21 hold(l31.vc0) -> l30.vc0: allow"]
+  cycle.describe() ~is "VC dependency cycle:\n  l30.vc0 -> l31.vc0 [r20]\n  l31.vc0 -> l30.vc0 [r21]"
+  check_dependency_acyclicity("not a graph") ~throws "expected a VCDependencyGraph"

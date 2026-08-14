@@ -25,12 +25,13 @@ The current implementation provides:
 - Deterministic per-route reachability over allowed materialized decisions.
 - Rejection of reachable dead ends and destinations that cannot be reached.
 - Reachable-only VC dependency graph construction with merged route provenance.
+- Deterministic dependency-graph acyclicity certificates and cycle witnesses.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet validate dependency-graph acyclicity or generate
-route tables.
+The package does not yet construct the combined validated-routing artifact or
+generate route tables.
 
 ## Dependency boundary
 
@@ -45,6 +46,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
 bash noc/check-boundaries.sh
 ```
 
@@ -121,5 +123,24 @@ acquisition, and destination ejection acquires no resource.
 The resulting opaque `VCDependencyGraph` includes all reachable VC vertices in
 stable identity order. Duplicate edges are merged while retaining the original
 `MaterializedDecision` values and all contributing route classes. This
-provenance is the evidence that the next acyclicity pass will attach to a cycle
+provenance is the evidence that the acyclicity pass attaches to a cycle
 witness.
+
+## Acyclicity proof
+
+`check_dependency_acyclicity` applies the initial deliberately narrow deadlock
+criterion to the union of reachable VC dependencies. It returns one of two
+opaque results:
+
+- `AcyclicCertificate` contains a deterministic topological order. Its index is
+  the VC rank, and every dependency edge points from a lower rank to a higher
+  rank.
+- `DependencyCycle` contains a closed, directed sequence of the original graph
+  edges. Each edge still exposes the route classes and materialized routing
+  decisions responsible for it.
+
+Ties in the topological order and cycle search are resolved by stable VC
+identity. This makes certificates and failure witnesses reproducible. The
+criterion proves routing deadlock freedom only under the documented VC
+hold-and-request model; it does not prove fairness, starvation freedom,
+livelock freedom, or correctness of a future RTL implementation.
