@@ -77,6 +77,8 @@ prepare_example() {
     memory_lowering_pass=--lower-seq-hlmem
   fi
   "$circt_opt" --strip-debuginfo-with-pred='drop-suffix=.mlir' \
+    --canonicalize \
+    --cse \
     --prettify-verilog \
     $memory_lowering_pass \
     --lower-seq-to-sv='disable-reg-randomization=true' \
@@ -147,7 +149,9 @@ verify_fixture() {
   if grep -q 'seq.hlmem' "$mlir"; then
     memory_lowering_pass=--lower-seq-hlmem
   fi
-  "$circt_opt" --prettify-verilog \
+  "$circt_opt" --canonicalize \
+    --cse \
+    --prettify-verilog \
     $memory_lowering_pass \
     --lower-seq-to-sv='disable-reg-randomization=true' \
     --export-verilog "$mlir" -o /dev/null > "$verilog"

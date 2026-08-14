@@ -36,7 +36,7 @@ module Pipe(
     _GEN ? (stage_valid[1'h0] ? stage_bits[1'h0] : stage_bits[1'h1]) : stage_bits[1'h1];
   always @(posedge clock) begin
     if (reset)
-      stage_valid <= {{1'h0}, {1'h0}};
+      stage_valid <= '{1'h0, 1'h0};
     else begin
       stage_valid[1'h1] <= _GEN_3;
       stage_valid[1'h0] <= _GEN_1;
@@ -78,32 +78,26 @@ module Queue(
   reg  [1:0] read_pointer;
   reg  [1:0] occupancy;
   wire       _GEN_2 = occupancy == 2'h0;
-  wire       _GEN_3 = &occupancy;
-  assign _GEN_0 = ingress_in.valid & ~_GEN_3;
+  wire       _GEN_3 = occupancy != 2'h3;
+  assign _GEN_0 = ingress_in.valid & _GEN_3;
   wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
   assign _GEN = ingress_in.bits;
   always @(posedge clock) begin
-    if (reset)
+    if (reset) begin
       read_pointer <= 2'h0;
-    else
+      write_pointer <= 2'h0;
+      occupancy <= 2'h0;
+    end
+    else begin
       read_pointer <=
         _GEN_4 ? (read_pointer == 2'h2 ? 2'h0 : read_pointer + 2'h1) : read_pointer;
-  end // always @(posedge)
-  always @(posedge clock) begin
-    if (reset)
-      write_pointer <= 2'h0;
-    else
       write_pointer <=
         _GEN_0 ? (write_pointer == 2'h2 ? 2'h0 : write_pointer + 2'h1) : write_pointer;
-  end // always @(posedge)
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
       occupancy <=
         _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+    end
   end // always @(posedge)
-  assign ingress_out = '{ready: (~_GEN_3)};
+  assign ingress_out = '{ready: _GEN_3};
   assign egress_out = '{valid: (~_GEN_2), bits: storage[read_pointer]};
   assign count = occupancy;
 endmodule
@@ -127,12 +121,12 @@ module Queue(
     if (reset)
       occupied <= 1'h0;
     else
-      occupied <= _GEN ^ ~(~occupied) & egress_in.ready ? _GEN : occupied;
+      occupied <= _GEN ^ occupied & egress_in.ready ? _GEN : occupied;
   end // always @(posedge)
   always @(posedge clock)
     payload <= _GEN ? ingress_in.bits : payload;
   assign ingress_out = '{ready: (~occupied)};
-  assign egress_out = '{valid: (~(~occupied)), bits: payload};
+  assign egress_out = '{valid: occupied, bits: payload};
   assign count = occupied;
 endmodule
 }>>|
@@ -164,35 +158,26 @@ module Queue(
   reg        read_pointer;
   reg  [1:0] occupancy;
   wire       _GEN_2 = occupancy == 2'h0;
-  wire       _GEN_3 = ~(occupancy == 2'h2) | egress_in.ready;
-  wire       _GEN_4 = ~_GEN_2 | ingress_in.valid;
+  wire       _GEN_3 = occupancy != 2'h2 | egress_in.ready;
   assign _GEN_0 = ingress_in.valid & _GEN_3 & ~(_GEN_2 & egress_in.ready);
-  wire       _GEN_5 = _GEN_4 & egress_in.ready & ~_GEN_2;
+  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
   assign _GEN = ingress_in.bits;
   always @(posedge clock) begin
-    if (reset)
-      read_pointer <= 1'h0;
-    else
-      read_pointer <=
-        _GEN_5 ? ((&read_pointer) ? 1'h0 : read_pointer - 1'h1) : read_pointer;
-  end // always @(posedge)
-  always @(posedge clock) begin
-    if (reset)
-      write_pointer <= 1'h0;
-    else
-      write_pointer <=
-        _GEN_0 ? ((&write_pointer) ? 1'h0 : write_pointer - 1'h1) : write_pointer;
-  end // always @(posedge)
-  always @(posedge clock) begin
-    if (reset)
+    if (reset) begin
+      read_pointer <= _GEN_1;
+      write_pointer <= _GEN_1;
       occupancy <= 2'h0;
-    else
+    end
+    else begin
+      read_pointer <= _GEN_4 ? ~read_pointer & read_pointer - 1'h1 : read_pointer;
+      write_pointer <= _GEN_0 ? ~write_pointer & write_pointer - 1'h1 : write_pointer;
       occupancy <=
-        _GEN_0 ^ _GEN_5 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+    end
   end // always @(posedge)
   assign ingress_out = '{ready: _GEN_3};
   assign egress_out =
-    '{valid: _GEN_4, bits: (_GEN_2 ? ingress_in.bits : storage[read_pointer])};
+    '{valid: (~_GEN_2 | ingress_in.valid), bits: (_GEN_2 ? _GEN : storage[read_pointer])};
   assign count = occupancy;
 endmodule
 }>>|
@@ -210,13 +195,13 @@ module Arbiter(
   output [1:0]                                           chosen
 );
 
-  wire _GEN = 1'h0 | ingress_0_in.valid;
-  wire _GEN_0 = _GEN | ingress_1_in.valid;
-  assign ingress_0_out = '{ready: (egress_in.ready & ingress_0_in.valid & ~(1'h0))};
-  assign ingress_1_out = '{ready: (egress_in.ready & ingress_1_in.valid & ~_GEN)};
-  assign ingress_2_out = '{ready: (egress_in.ready & ingress_2_in.valid & ~_GEN_0)};
+  wire _GEN = ingress_0_in.valid | ingress_1_in.valid;
+  assign ingress_0_out = '{ready: (egress_in.ready & ingress_0_in.valid)};
+  assign ingress_1_out =
+    '{ready: (egress_in.ready & ingress_1_in.valid & ~ingress_0_in.valid)};
+  assign ingress_2_out = '{ready: (egress_in.ready & ingress_2_in.valid & ~_GEN)};
   assign egress_out =
-    '{valid: (_GEN_0 | ingress_2_in.valid),
+    '{valid: (_GEN | ingress_2_in.valid),
       bits:
         (ingress_0_in.valid
            ? ingress_0_in.bits
@@ -224,9 +209,7 @@ module Arbiter(
                ? ingress_1_in.bits
                : ingress_2_in.valid ? ingress_2_in.bits : ingress_0_in.bits)};
   assign chosen =
-    ingress_0_in.valid
-      ? 2'h0
-      : ingress_1_in.valid ? 2'h1 : ingress_2_in.valid ? 2'h2 : 2'h0;
+    ingress_0_in.valid ? 2'h0 : ingress_1_in.valid ? 2'h1 : {ingress_2_in.valid, 1'h0};
 endmodule
 }>>|
 
