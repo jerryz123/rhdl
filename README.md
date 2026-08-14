@@ -303,9 +303,13 @@ arithmetic, conditionals, and loops derive widths and generate a lane-instance
 array. Runtime RHDL then uses packed instruction memory, a structured bundle,
 an explicitly encoded opcode enum, enum-keyed `mux_lookup`, vectors, role-based
 loader ports, ambient clock/reset propagation, registers, and hardware
-conditional assignment. Its second elaboration disables multiplication and is
-tested to contain no multiply operation, demonstrating structural host
-specialization instead of a runtime enable.
+conditional assignment. The lane ALU uses expanding `+&` and `*&` followed by
+explicit low-bit slicing to state its modular result policy. The host
+configuration requires a power-of-two program depth of at least two, allowing
+the fixed-width program counter to wrap through ordinary modular addition. Its second
+elaboration disables multiplication and is tested to contain no multiply
+operation, demonstrating structural host specialization instead of a runtime
+enable.
 
 ### Literals and combinational expressions
 

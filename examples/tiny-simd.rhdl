@@ -1,6 +1,11 @@
 #lang rhdl
 // Builds a host-specialized SIMD microengine with typed instructions and generated lanes.
 
+fun power_of_two(value :: Int):
+  if (value <= 0)
+  | #false
+  | (value and (value - 1)) == 0
+
 class EngineConfig(lanes :: Int,
                    width :: Int,
                    program_depth :: Int,
@@ -15,6 +20,10 @@ class EngineConfig(lanes :: Int,
     | error(~who: #'EngineConfig, "lane width must be a positive host Int")
     unless program_depth > 0
     | error(~who: #'EngineConfig, "program depth must be a positive host Int")
+    unless program_depth > 1
+    | error(~who: #'EngineConfig, "program depth must be at least two")
+    unless power_of_two(program_depth)
+    | error(~who: #'EngineConfig, "program depth must be a power of two")
     super(lanes, width, program_depth, enable_multiply)
 
 hardware_enum Opcode(~width: 4):
@@ -53,13 +62,15 @@ sync_circuit Lane(width :: Int, enable_multiply :: Boolean):
   reg accumulator(~init: bits(0, ~width: width))
 
   // The host condition removes the case and multiplier during elaboration.
+  // Lane results stay modular: expanding operators preserve overflow, then a
+  // low-bit slice states which result bits the lane retains.
   def alu_cases = [
     [Opcode.Load, instruction.operand],
-    [Opcode.Add, accumulator + instruction.operand],
+    [Opcode.Add, (accumulator +& instruction.operand)[0..width]],
     [Opcode.Xor, accumulator xor instruction.operand],
     [Opcode.ShiftLeft, accumulator << instruction.operand]
   ] ++ (if enable_multiply
-        | [[Opcode.Multiply, accumulator * instruction.operand]]
+        | [[Opcode.Multiply, (accumulator *& instruction.operand)[0..width]]]
         | [])
 
   // This remains a hardware decision. The selected case changes every cycle.
@@ -96,17 +107,14 @@ sync_circuit TinySIMD(config :: EngineConfig):
   mem program(config.program_depth, Bits(instruction_width))
   reg pc(~init: bits(0, ~width: address_width))
   def instruction = program[pc].into(InstructionType)
-  def zero_address = bits(0, ~width: address_width)
   def one_address = bits(1, ~width: address_width)
-  def last_address = bits(config.program_depth - 1, ~width: address_width)
 
   program.write(loader.address, loader.data, ~enable: loader.write)
   loader.ready <== cast(bits(1, ~width: 1), Bool)
 
   when step:
-    // Host-derived last_address makes non-power-of-two program depths wrap
-    // without ever selecting an out-of-range memory address.
-    pc.next <== mux(pc === last_address, zero_address, pc + one_address)
+    // Power-of-two depth lets fixed-width overflow wrap directly to address 0.
+    pc.next <== pc + one_address
 
   // The host loop determines physical lane count. The resulting Array exists
   // only while elaborating; lane_results is runtime vector hardware.
@@ -185,7 +193,7 @@ module TinySIMD(
     if (reset)
       pc <= 2'h0;
     else
-      pc <= step ? ((&pc) ? 2'h0 : pc + 2'h1) : pc;
+      pc <= step ? pc + 2'h1 : pc;
   end // always @(posedge)
   assign results = {{_lane_1_result}, {_lane_result}};
   assign pc_out = pc;
@@ -202,7 +210,9 @@ module Lane(
   output [7:0]                                                     result
 );
 
-  reg [7:0] accumulator;
+  reg  [7:0]  accumulator;
+  wire [8:0]  _GEN = {1'h0, accumulator} + {1'h0, instruction.operand};
+  wire [15:0] _GEN_0 = {8'h0, accumulator} * {8'h0, instruction.operand};
   always @(posedge clock) begin
     if (reset)
       accumulator <= 8'h0;
@@ -214,14 +224,12 @@ module Lane(
               ? (instruction.opcode == 4'h0
                    ? instruction.operand
                    : instruction.opcode == 4'h1
-                       ? accumulator + instruction.operand
+                       ? _GEN[7:0]
                        : instruction.opcode == 4'h2
                            ? accumulator ^ instruction.operand
                            : instruction.opcode == 4'h3
                                ? accumulator << instruction.operand
-                               : instruction.opcode == 4'h8
-                                   ? accumulator * instruction.operand
-                                   : accumulator)
+                               : instruction.opcode == 4'h8 ? _GEN_0[7:0] : accumulator)
               : accumulator;
   end // always @(posedge)
   assign result = accumulator;
@@ -235,6 +243,7 @@ export:
   ProgramLoader
   Lane
   TinySIMD
+  power_of_two
   showcase_config
   design
   no_multiply_design
