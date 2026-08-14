@@ -1,0 +1,48 @@
+#lang rhdl/base
+// Builds the sync-counter hierarchy from only the explicitly selected frontend layers.
+
+import:
+  lib("rhdl/frontend/layers/comb.rhm") open
+  lib("rhdl/frontend/layers/sequential.rhm") open
+  lib("rhdl/frontend/layers/hierarchy.rhm") open
+  lib("rhdl/frontend/layers/sync.rhm") open
+
+sync_circuit Counter(width):
+  output count: Bits(width)
+
+  def zero = bits(0, ~width: width)
+  def one = bits(1, ~width: width)
+  reg state(Bits(width), ~init: zero)
+  state.next <== state + one
+  count <== state
+
+sync_circuit CounterTop(width):
+  output count: Bits(width)
+
+  def CounterModule = Counter(width)
+  inst counter(CounterModule)
+  count <== counter.count
+
+circuit OrdinaryControlChild():
+  input clock: Clock
+  input reset: Reset
+  output value: Bits(1)
+  value <== bits(0, ~width: 1)
+
+sync_circuit MixedTop():
+  output value: Bits(1)
+
+  def ChildModule = OrdinaryControlChild()
+  inst child(ChildModule)
+  // Ordinary circuits are wired explicitly even when their port names match.
+  child.clock <== clock
+  child.reset <== reset
+  value <== child.value
+
+def design = elaborate(CounterTop(8))
+
+export:
+  Counter
+  CounterTop
+  MixedTop
+  design

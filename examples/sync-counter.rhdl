@@ -1,0 +1,50 @@
+#lang rhdl
+// Demonstrates opt-in sync circuits, ambient registers, and nested clock/reset propagation.
+
+import:
+  lib("rhdl/frontend/layers/sync.rhm") open
+
+sync_circuit Counter(width):
+  output count: Bits(width)
+
+  def zero = bits(0, ~width: width)
+  def one = bits(1, ~width: width)
+  reg state(Bits(width), ~init: zero)
+  state.next <== state + one
+  count <== state
+
+sync_circuit CounterTop(width):
+  output count: Bits(width)
+
+  def CounterModule = Counter(width)
+  inst counter(CounterModule)
+  count <== counter.count
+
+sync_circuit ResetlessCounter(width):
+  output count: Bits(width)
+
+  def one = bits(1, ~width: width)
+  reg state(Bits(width))
+  state.next <== state + one
+  count <== state
+
+// An ordinary parent can supply a sync child's domain explicitly.
+circuit ExplicitClockTop(width):
+  input source_clock: Clock
+  input source_reset: Reset
+  output count: Bits(width)
+
+  def CounterModule = Counter(width)
+  inst counter(CounterModule,
+               ~clock: source_clock,
+               ~reset: source_reset)
+  count <== counter.count
+
+def design = elaborate(CounterTop(8))
+
+export:
+  Counter
+  CounterTop
+  ResetlessCounter
+  ExplicitClockTop
+  design

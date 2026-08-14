@@ -39,7 +39,7 @@ fail_matches "frontend support must not depend on profiles or language layers" \
 fail_matches "frontend layers must not depend on profiles or the standard aggregator" \
   '^[[:space:]]+"[^"]*(foundation\.rhm|standard\.rhm)' rhdl/frontend/layers
 fail_matches "frontend layers must not import sibling layers" \
-  '^[[:space:]]+"(bool|bundle|cast|comb|conditional|hierarchy|interface|sequential|vector|wire)\.rhm"' rhdl/frontend/layers
+  '^[[:space:]]+"(bool|bundle|cast|comb|conditional|hierarchy|interface|sequential|sync|vector|wire)\.rhm"' rhdl/frontend/layers
 
 while IFS= read -r layer_file; do
   layer_name="$(basename "$layer_file")"

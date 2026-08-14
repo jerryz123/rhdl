@@ -63,11 +63,12 @@ importable layers:
 | [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
 | [`layers/sequential.rhm`](../rhdl/frontend/layers/sequential.rhm) | Binding-derived registers |
 | [`layers/hierarchy.rhm`](../rhdl/frontend/layers/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
+| [`layers/sync.rhm`](../rhdl/frontend/layers/sync.rhm) | Opt-in sync circuits, ambient registers, and marked-child clock/reset propagation |
 | [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
-implementation. It aggregates the foundation and those layers, and
-`#lang rhdl` exposes that curated standard profile. The lower-level
+implementation. It aggregates the foundation and the curated layers; the sync
+layer remains opt-in. `#lang rhdl` exposes that curated standard profile. The lower-level
 [`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
 remain explicit library imports.
 
@@ -142,6 +143,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
+| [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |

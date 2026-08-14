@@ -8,6 +8,7 @@ import:
 
 export:
   HardwareEntity
+  CircuitDefinition
   FrontendContext
   new_circuit_identity
   frontend_run
@@ -47,6 +48,17 @@ export:
   read
   hardware_entity
   host_condition
+
+// Lets frontend-only wrappers carry authoring metadata while still selecting
+// an ordinary core module for instances and top-level elaboration.
+interface CircuitDefinition:
+  method core_module()
+
+fun circuit_module(definition):
+  cond
+  | definition is_a Module: definition
+  | definition is_a CircuitDefinition: definition.core_module()
+  | ~else: #false
 
 fun frontend_fail(message, location = Location()):
   error(~who: #'rhdl, location.describe() ++ ": " ++ message)
@@ -416,7 +428,7 @@ fun reg(name, type, clock, reset = #false, reset_value = #false,
 fun inst(name, child, location = Location()):
   def context = require_context(location)
   context.builder.suggested_instance(require_module(location),
-                                     child,
+                                     circuit_module(child) || child,
                                      name,
                                      location,
                                      Origin("embedded instance", name))
@@ -549,7 +561,8 @@ fun frontend_run(program):
   def top = parameterize { current_context: context }:
               program()
   context.active := #false
-  unless top is_a Module
+  def top_module = circuit_module(top)
+  unless top_module is_a Module
   | error(~who: #'rhdl, "elaboration did not select a top circuit")
   verify_design(design)
   design

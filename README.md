@@ -79,6 +79,7 @@ or policy over existing semantics. Current examples include:
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
 - Role-based and recursively nested interfaces over record-typed ports.
 - Hardware conditional assignment lowered to muxes and one final drive.
+- Sync circuits whose ambient clock/reset policy expands to explicit ports and drives.
 - Binding-derived hardware names.
 - Instance dot access and atomic bulk connection.
 
@@ -123,10 +124,12 @@ The composable frontend layers are:
 | `layers/sequential.rhm` | Binding-derived registers |
 | `layers/conditional.rhm` | Hardware-only `when`, `elsewhen`, and `otherwise` assignment |
 | `layers/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
+| `layers/sync.rhm` | Opt-in sync circuits with ambient registers and marked-child clock/reset propagation |
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
-does not implement features itself. Neither language profile implicitly
+does not implement features itself. The sync layer is intentionally opt-in;
+import it from either language profile. Neither language profile implicitly
 exports the core Builder or raw elaboration kernel.
 
 The shared foundation marks hardware bindings with frontend static information
@@ -398,6 +401,28 @@ state may use any `DataType`, and holding state is explicit:
 state.next <== state
 ```
 
+The opt-in sync layer packages the common single-domain policy without adding
+new core operations:
+
+```rhombus
+import:
+  lib("rhdl/frontend/layers/sync.rhm") open
+
+sync_circuit Counter(width):
+  output count: Bits(width)
+
+  def zero = bits(0, ~width: width)
+  reg state(Bits(width), ~init: zero)
+  state.next <== state + bits(1, ~width: width)
+  count <== state
+```
+
+Every `sync_circuit` has reserved, real `clock: Clock` and `reset: Reset` input
+ports; the names are bound in its body when explicit access is needed. `reg state(T)`
+uses the ambient clock without reset, while `reg state(T, ~init: value)` uses
+the ambient clock and active-high synchronous reset. An initializer is never
+invented merely because the ambient reset exists.
+
 ### Hardware conditional assignment
 
 The conditional layer provides hardware-only `when`. Its condition must be a
@@ -478,6 +503,20 @@ See [`examples/generated-adder.rhdl`](examples/generated-adder.rhdl).
 A child input appears as a driveable place in its parent; a child output
 appears as a readable value. All communication across hierarchy occurs through
 ports.
+
+Instantiating a marked sync child inside a sync parent automatically drives the
+child's clock and reset inputs from the parent's ambient domain. An ordinary
+child never participates based on port names or types. Outside a sync parent,
+both signals must be supplied explicitly:
+
+```rhombus
+inst counter(CounterModule, ~clock: source_clock, ~reset: source_reset)
+```
+
+Supplying only one signal is an error. These rules keep domain crossings
+visible while allowing the common same-domain hierarchy to remain concise.
+The resulting public IR is identical to declaring and connecting every port
+explicitly; CIRCT lowering therefore needs no sync-specific behavior.
 
 ### Records and bundles
 

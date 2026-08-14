@@ -1,0 +1,87 @@
+#lang rhombus
+// Carries sync-circuit metadata and expands ambient clock/reset policy into explicit kernel operations.
+
+import:
+  "../../core/ir.rhm" open
+  "../../core/types.rhm" open
+  "../kernel.rhm" as kernel
+  "../kernel.rhm".CircuitDefinition
+
+export:
+  build_sync_circuit
+  ambient_register
+  ambient_reset_register
+  instantiate
+
+class SyncDomain(clock, reset)
+
+// This wrapper is frontend-only. Its core module still contains ordinary
+// clock/reset ports, register operands, instance inputs, and drives.
+class SyncCircuitDefinition(module_def,
+                            clock_port = "clock",
+                            reset_port = "reset"):
+  implements CircuitDefinition
+  override method core_module(): module_def
+
+Parameter.def current_sync_domain = #false
+
+fun sync_fail(message, location = Location()):
+  error(~who: #'sync_circuit, location.describe() ++ ": " ++ message)
+
+fun require_sync_domain(location = Location()):
+  def domain = current_sync_domain()
+  unless domain is_a SyncDomain
+  | sync_fail("implicit clock/reset use requires an active sync_circuit", location)
+  domain
+
+fun build_sync_circuit(identity,
+                       name,
+                       arguments,
+                       implementation,
+                       location = Location()):
+  def module_def = kernel.build_circuit(
+    identity,
+    name,
+    arguments,
+    fun ():
+      def clock = kernel.input("clock", Clock, location)
+      def reset = kernel.input("reset", Reset, location)
+      parameterize { current_sync_domain: SyncDomain(clock, reset) }:
+        implementation(clock, reset),
+    location
+  )
+  SyncCircuitDefinition(module_def)
+
+fun ambient_register(name, type, location = Location()):
+  def domain = require_sync_domain(location)
+  kernel.reg(name, type, domain.clock, #false, #false, location)
+
+fun ambient_reset_register(name, type, reset_value, location = Location()):
+  def domain = require_sync_domain(location)
+  kernel.reg(name, type, domain.clock, domain.reset, reset_value, location)
+
+// Only marked sync children participate in propagation. Ordinary circuits are
+// never inferred to be synchronous from their port names or control types.
+fun instantiate(name,
+                child,
+                clock = #false,
+                reset = #false,
+                location = Location()):
+  if child is_a SyncCircuitDefinition
+  | block:
+      def domain:
+        if clock || reset
+        | block:
+            unless clock && reset
+            | sync_fail("explicit sync child wiring requires both clock and reset",
+                        location)
+            SyncDomain(clock, reset)
+        | require_sync_domain(location)
+      def instance = kernel.inst(name, child, location)
+      kernel.connect(instance.input(child.clock_port), domain.clock, location)
+      kernel.connect(instance.input(child.reset_port), domain.reset, location)
+      instance
+  | block:
+      when clock || reset
+      | sync_fail("clock/reset overrides require a sync_circuit child", location)
+      kernel.inst(name, child, location)

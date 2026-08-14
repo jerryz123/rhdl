@@ -1,10 +1,10 @@
 #lang rhombus/and_meta
-// Defines the binding-derived instance and typed child-port frontend layer.
+// Defines binding-derived instances, sync propagation, and typed child-port access.
 
 import:
   rhombus/meta open
   "../../core/ir.rhm" open
-  "../kernel.rhm".inst as kernel_inst
+  "../support/clocking.rhm".instantiate as clocking_inst
   "../support/instance-members.rhm".InstanceMembers
   "../support/instance-members.rhm".instance_member
 
@@ -24,19 +24,47 @@ dot.macro 'instance_port_dot $left $dot $right':
   | 'output': #false
   | ~else: 'instance_member($left, $(right.to_source_string())) :: InstanceMembers'
 
-defn.sequence_macro 'inst $(name :: Identifier)($child); $tail; ...':
+defn.sequence_macro 'inst $(name :: Identifier)($argument, ...); $tail; ...':
   def instance_name = name.to_source_string()
+  def instance:
+    match '($argument, ...)'
+    | '($child)':
+        'clocking_inst($instance_name, $child)'
+    | '($child, ~clock: $clock, ~reset: $reset)':
+        'clocking_inst($instance_name, $child, $clock, $reset)'
+    | '($child, ~clock: $clock)':
+        'clocking_inst($instance_name, $child, $clock)'
+    | '($child, ~reset: $reset)':
+        'clocking_inst($instance_name, $child, #false, $reset)'
+    | ~else:
+        syntax_meta.error(
+          "expected (child) or (child, ~clock: clock, ~reset: reset)",
+          '($argument, ...)'
+        )
   def expansion:
     if [tail, ...].length() == 0
-    | 'def $name :: InstancePorts = kernel_inst($instance_name, $child); $name'
-    | 'def $name :: InstancePorts = kernel_inst($instance_name, $child)'
+    | 'def $name :: InstancePorts = $instance; $name'
+    | 'def $name :: InstancePorts = $instance'
   values(expansion, '$tail; ...')
 
 // In expression position, the same surface form returns the new instance so
 // host reducers can collect it without repeating the temporary binding name.
-expr.macro 'inst $(name :: Identifier)($child)':
+expr.macro 'inst $(name :: Identifier)($argument, ...)':
   def instance_name = name.to_source_string()
-  'kernel_inst($instance_name, $child) :: InstancePorts'
+  match '($argument, ...)'
+  | '($child)':
+      'clocking_inst($instance_name, $child) :: InstancePorts'
+  | '($child, ~clock: $clock, ~reset: $reset)':
+      'clocking_inst($instance_name, $child, $clock, $reset) :: InstancePorts'
+  | '($child, ~clock: $clock)':
+      'clocking_inst($instance_name, $child, $clock) :: InstancePorts'
+  | '($child, ~reset: $reset)':
+      'clocking_inst($instance_name, $child, #false, $reset) :: InstancePorts'
+  | ~else:
+      syntax_meta.error(
+        "expected (child) or (child, ~clock: clock, ~reset: reset)",
+        '($argument, ...)'
+      )
 
 // Builds an ordinary host Array whose indexed elements retain the static
 // instance-port provider used by concise child-port dot access.

@@ -1,0 +1,72 @@
+#lang rhombus
+// Checks sync-circuit expansion, propagation, overrides, resetless state, and explicit IR equivalence.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../examples/sync-counter.rhdl" as implicit_fixture
+  "sync-composed.rhdl" as composed_fixture
+  "sync-explicit.rhdl" as explicit_fixture
+
+def implicit_design = implicit_fixture.design
+def top = implicit_design.modules.find(
+  fun (module_def): module_def.name == "CounterTop"
+)
+def child = implicit_design.modules.find(
+  fun (module_def): module_def.name == "Counter"
+)
+def instance = top.operations.find(
+  fun (operation): operation.opcode == "rtl.instance"
+)
+def register = child.operations.find(
+  fun (operation): operation.opcode == "rtl.register_reset"
+)
+
+def resetless_design = embedded.run_elaboration(
+  fun (): implicit_fixture.ResetlessCounter(4)
+)
+def resetless = resetless_design.modules[0]
+
+def override_design = embedded.run_elaboration(
+  fun (): implicit_fixture.ExplicitClockTop(4)
+)
+def override_top = override_design.modules.find(
+  fun (module_def): module_def.name == "ExplicitClockTop"
+)
+def override_instance = override_top.operations.find(
+  fun (operation): operation.opcode == "rtl.instance"
+)
+
+def mixed_design = embedded.run_elaboration(
+  fun (): composed_fixture.MixedTop()
+)
+def mixed_top = mixed_design.modules.find(
+  fun (module_def): module_def.name == "MixedTop"
+)
+def mixed_instance = mixed_top.operations.find(
+  fun (operation): operation.opcode == "rtl.instance"
+)
+
+check:
+  dump_ir(implicit_design) ~is dump_ir(explicit_fixture.design)
+  dump_ir(composed_fixture.design) ~is dump_ir(explicit_fixture.design)
+  top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
+  child.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
+  register.operands[0] === child.find_input("clock").value ~is #true
+  register.operands[1] === child.find_input("reset").value ~is #true
+  instance.places[0].driver === top.find_input("clock").value ~is #true
+  instance.places[1].driver === top.find_input("reset").value ~is #true
+  resetless.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register"
+  ).length() ~is 1
+  resetless.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register_reset"
+  ).length() ~is 0
+  override_instance.places[0].driver === override_top.find_input("source_clock").value ~is #true
+  override_instance.places[1].driver === override_top.find_input("source_reset").value ~is #true
+  mixed_instance.places[0].driver === mixed_top.find_input("clock").value ~is #true
+  mixed_instance.places[1].driver === mixed_top.find_input("reset").value ~is #true
+  verify_design(implicit_design) ~is #void
+  verify_design(resetless_design) ~is #void
+  verify_design(override_design) ~is #void
+  verify_design(mixed_design) ~is #void

@@ -63,14 +63,18 @@ when adding, removing, or changing a layer's direct dependencies.
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
 | `interface.rhm` | Roles, directional interfaces, and bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
-| `sequential.rhm` | Binding-derived registers | kernel, field support |
+| `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, and conditional assignment | kernel |
-| `hierarchy.rhm` | Binding-derived instances and child-member access | core IR, kernel, instance-member support |
+| `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
+| `sync.rhm` | Opt-in sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 
 `frontend/support/fields.rhm` depends only on the kernel.
 `frontend/support/instance-members.rhm` depends on core IR, the kernel, and
 field support. Its resolver hook lets the interface layer contribute virtual
 instance members without making hierarchy depend on interface.
+`frontend/support/clocking.rhm` depends on core IR and types plus the kernel;
+it carries frontend-only sync metadata and expands ambient policy into explicit
+ports, register operands, instance inputs, and drives.
 
 ## Enforcement
 
