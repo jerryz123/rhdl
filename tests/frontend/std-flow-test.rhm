@@ -1,0 +1,99 @@
+#lang rhombus
+// Checks standard flow-control generators, parameter validation, and public IR shape.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/std/flow.rhdl" as flow
+
+def pipe_one_design = embedded.run_elaboration(
+  fun (): flow.Pipe(Bits(8), 1)
+)
+def pipe_one = pipe_one_design.modules[0]
+def pipe_three_design = embedded.run_elaboration(
+  fun (): flow.Pipe(Bits(16), 3)
+)
+def pipe_three = pipe_three_design.modules[0]
+def queue_one_design = embedded.run_elaboration(
+  fun (): flow.Queue(Bits(8), 1)
+)
+def queue_one = queue_one_design.modules[0]
+def queue_three_design = embedded.run_elaboration(
+  fun (): flow.Queue(Bits(8), 3)
+)
+def queue_three = queue_three_design.modules[0]
+def arbiter_one_design = embedded.run_elaboration(
+  fun (): flow.Arbiter(Bits(8), 1)
+)
+def arbiter_one = arbiter_one_design.modules[0]
+def arbiter_three_design = embedded.run_elaboration(
+  fun (): flow.Arbiter(Bits(8), 3)
+)
+def arbiter_three = arbiter_three_design.modules[0]
+def aggregate_type = RecordType([
+  RecordField("tag", Bits(2)),
+  RecordField("data", Bits(8))
+])
+def aggregate_pipe_design = embedded.run_elaboration(
+  fun (): flow.Pipe(aggregate_type, 2)
+)
+def aggregate_queue_design = embedded.run_elaboration(
+  fun (): flow.Queue(aggregate_type, 2)
+)
+def aggregate_arbiter_design = embedded.run_elaboration(
+  fun (): flow.Arbiter(aggregate_type, 2)
+)
+
+fun operations(module_def, opcode):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == opcode
+  )
+
+check:
+  pipe_one.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in", "egress_in"
+  ]
+  pipe_one.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_out"
+  ]
+  operations(pipe_one, "rtl.register_reset").length() ~is 1
+  operations(pipe_one, "rtl.register").length() ~is 1
+  operations(pipe_three, "rtl.register_reset")[0].results[0].type.length ~is 3
+  operations(pipe_three, "rtl.register")[0].results[0].type.length ~is 3
+
+  queue_one.memories.length() ~is 0
+  operations(queue_one, "rtl.register_reset").length() ~is 1
+  operations(queue_one, "rtl.register").length() ~is 1
+  queue_three.memories[0].depth ~is 3
+  operations(queue_three, "rtl.memory_read_async").length() ~is 1
+  operations(queue_three, "rtl.memory_write").length() ~is 1
+  operations(queue_three, "rtl.register_reset").length() ~is 3
+
+  arbiter_one.find_output("chosen").type.width ~is 1
+  arbiter_three.inputs.map(fun (port): port.name) ~is [
+    "ingress_0_in", "ingress_1_in", "ingress_2_in", "egress_in"
+  ]
+  arbiter_three.outputs.map(fun (port): port.name) ~is [
+    "ingress_0_out", "ingress_1_out", "ingress_2_out", "egress_out", "chosen"
+  ]
+  arbiter_three.find_output("chosen").type.width ~is 2
+
+  verify_design(pipe_one_design) ~is #void
+  verify_design(pipe_three_design) ~is #void
+  verify_design(queue_one_design) ~is #void
+  verify_design(queue_three_design) ~is #void
+  verify_design(arbiter_one_design) ~is #void
+  verify_design(arbiter_three_design) ~is #void
+  verify_design(aggregate_pipe_design) ~is #void
+  verify_design(aggregate_queue_design) ~is #void
+  verify_design(aggregate_arbiter_design) ~is #void
+
+  embedded.run_elaboration(fun (): flow.Pipe(Bits(8), 0)) ~throws "stages must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Pipe(Bits(8), -1)) ~throws "stages must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Queue(Bits(8), 0)) ~throws "depth must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Queue(Bits(8), -1)) ~throws "depth must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), 0)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), -1)) ~throws "input count must be a positive host Int"
+  embedded.run_elaboration(fun (): flow.Pipe(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.Queue(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"

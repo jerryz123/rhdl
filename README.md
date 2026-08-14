@@ -894,7 +894,7 @@ ports. An interface is not itself a core `DataType`.
 
 ```rhombus
 import:
-  lib("rhdl/std/ready-valid.rhm") open
+  lib("rhdl/std/ready-valid.rhdl") open
 
 circuit Adapter(T):
   interface ingress(Decoupled(T), ~role: consumer)
@@ -969,7 +969,7 @@ Import the family directly:
 
 ```rhombus
 import:
-  lib("rhdl/std/ready-valid.rhm") open
+  lib("rhdl/std/ready-valid.rhdl") open
 ```
 
 `Decoupled` and `Irrevocable` intentionally have the same physical fields but

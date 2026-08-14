@@ -1,0 +1,171 @@
+#lang rhdl
+// Materializes the standard pipe, queue, and arbiter for readable Verilog references.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+def pipe_design = elaborate(Pipe(Bits(8), 2))
+def queue_design = elaborate(Queue(Bits(8), 3))
+def queue_one_design = elaborate(Queue(Bits(8), 1))
+def arbiter_design = elaborate(Arbiter(Bits(8), 3))
+
+def pipe_verilog_reference = @str|<<{
+module Pipe(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg  [1:0]      stage_valid;
+  reg  [1:0][7:0] stage_bits;
+  wire            _GEN = ~stage_valid[1'h1] | egress_in.ready;
+  wire            _GEN_0 = ~stage_valid[1'h0] | _GEN;
+  wire            _GEN_1 = _GEN_0 ? ingress_in.valid : stage_valid[1'h0];
+  wire [7:0]      _GEN_2 =
+    _GEN_0 ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  wire            _GEN_3 = _GEN ? stage_valid[1'h0] : stage_valid[1'h1];
+  wire [7:0]      _GEN_4 =
+    _GEN ? (stage_valid[1'h0] ? stage_bits[1'h0] : stage_bits[1'h1]) : stage_bits[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= {{1'h0}, {1'h0}};
+    else begin
+      stage_valid[1'h1] <= _GEN_3;
+      stage_valid[1'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  always @(posedge clock) begin
+    stage_bits[1'h1] <= _GEN_4;
+    stage_bits[1'h0] <= _GEN_2;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: stage_valid[1'h1], bits: stage_bits[1'h1]};
+endmodule
+}>>|
+
+def queue_verilog_reference = @str|<<{
+module Queue(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  wire [7:0] _GEN;
+  wire       _GEN_0;
+  reg  [1:0] write_pointer;
+  wire       _GEN_1 = 1'h0;
+  reg  [7:0] storage[0:2];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[write_pointer] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0] read_pointer;
+  reg  [1:0] count;
+  wire       _GEN_2 = count == 2'h0;
+  wire       _GEN_3 = ~_GEN_2 & egress_in.ready;
+  wire       _GEN_4 = ~(&count) | _GEN_3;
+  assign _GEN_0 = ingress_in.valid & _GEN_4;
+  assign _GEN = ingress_in.bits;
+  always @(posedge clock) begin
+    if (reset)
+      read_pointer <= 2'h0;
+    else
+      read_pointer <=
+        _GEN_3 ? (read_pointer == 2'h2 ? 2'h0 : read_pointer + 2'h1) : read_pointer;
+  end // always @(posedge)
+  always @(posedge clock) begin
+    if (reset)
+      write_pointer <= 2'h0;
+    else
+      write_pointer <=
+        _GEN_0 ? (write_pointer == 2'h2 ? 2'h0 : write_pointer + 2'h1) : write_pointer;
+  end // always @(posedge)
+  always @(posedge clock) begin
+    if (reset)
+      count <= 2'h0;
+    else
+      count <= _GEN_0 & ~_GEN_3 ? count + 2'h1 : _GEN_3 & ~_GEN_0 ? count - 2'h1 : count;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_4};
+  assign egress_out = '{valid: (~_GEN_2), bits: storage[read_pointer]};
+endmodule
+}>>|
+
+def queue_one_verilog_reference = @str|<<{
+module Queue(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg        occupied;
+  reg  [7:0] payload;
+  wire       _GEN = ~occupied | egress_in.ready;
+  always @(posedge clock) begin
+    if (reset)
+      occupied <= 1'h0;
+    else
+      occupied <= _GEN ? ingress_in.valid : occupied;
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= ingress_in.valid & _GEN ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: occupied, bits: payload};
+endmodule
+}>>|
+
+def arbiter_verilog_reference = @str|<<{
+module Arbiter(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+                                                         ingress_2_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+                                                         ingress_2_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output [1:0]                                           chosen
+);
+
+  wire _GEN = 1'h0 | ingress_0_in.valid;
+  wire _GEN_0 = _GEN | ingress_1_in.valid;
+  assign ingress_0_out = '{ready: (egress_in.ready & ingress_0_in.valid & ~(1'h0))};
+  assign ingress_1_out = '{ready: (egress_in.ready & ingress_1_in.valid & ~_GEN)};
+  assign ingress_2_out = '{ready: (egress_in.ready & ingress_2_in.valid & ~_GEN_0)};
+  assign egress_out =
+    '{valid: (_GEN_0 | ingress_2_in.valid),
+      bits:
+        (ingress_0_in.valid
+           ? ingress_0_in.bits
+           : ingress_1_in.valid
+               ? ingress_1_in.bits
+               : ingress_2_in.valid ? ingress_2_in.bits : ingress_0_in.bits)};
+  assign chosen =
+    ingress_0_in.valid
+      ? 2'h0
+      : ingress_1_in.valid ? 2'h1 : ingress_2_in.valid ? 2'h2 : 2'h0;
+endmodule
+}>>|
+
+export:
+  pipe_design
+  queue_design
+  queue_one_design
+  arbiter_design
+  pipe_verilog_reference
+  queue_verilog_reference
+  queue_one_verilog_reference
+  arbiter_verilog_reference
