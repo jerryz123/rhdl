@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines structurally sized one-hot types and typed hardware literals.
+// Defines structurally sized one-hot values, literals, and exact-match muxing.
 
 import:
   rhombus/meta open
@@ -12,6 +12,7 @@ export:
   OneHot
   one_hot_type
   one_hot_width
+  mux_onehot
 
 fun one_hot_encoding(index):
   1 bits.(<<) index
@@ -78,3 +79,37 @@ fun one_hot_width(type):
   unless one_hot_type(type)
   | error(~who: #'one_hot_width, "expected a OneHot type")
   type.width
+
+// Expands an indexed choice list into the existing exact-match lookup. The
+// explicit default defines behavior for zero and multi-hot representations.
+fun build_one_hot_mux(selector, default_value, choices) :~ HardwareFields:
+  def selector_value = kernel.read(selector)
+  unless one_hot_type(selector_value.type)
+  | error(~who: #'mux_onehot, "selector must have a OneHot type")
+  unless choices is_a List
+  | error(~who: #'mux_onehot, "choices must be supplied as a host List")
+  unless choices.length() == selector_value.type.width
+  | error(~who: #'mux_onehot,
+          "choice count must equal the OneHot selector width")
+  def selector_bits = kernel.cast(selector_value,
+                                  Bits(selector_value.type.width))
+  def cases:
+    for List (index in 0..selector_value.type.width,
+              choice in choices):
+      [one_hot_encoding(index), choice]
+  kernel.hw_mux_lookup(selector_bits,
+                       default_value,
+                       cases,
+                       #false,
+                       Location(),
+                       Origin("embedded one-hot mux", ""))
+
+expr.macro
+| 'mux_onehot($selector, ~default: $default_value, $choices)':
+    'build_one_hot_mux($selector, $default_value, $choices)'
+| 'mux_onehot($selector, ~default: $default_value):
+     $(choice :: expr_meta.Parsed)
+     ...':
+    'build_one_hot_mux($selector,
+                       $default_value,
+                       [$choice, ...])'

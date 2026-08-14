@@ -17,6 +17,16 @@ def lookup = module_def.operations.find(
 def equality = module_def.operations.find(
   fun (operation): operation.opcode == "rtl.eq"
 )
+def list_design = embedded.run_elaboration(fun (): invalid.ListMux())
+def list_module = list_design.modules[0]
+def list_lookup = list_module.operations.find(
+  fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+def aggregate_design = embedded.run_elaboration(fun (): invalid.AggregateMux())
+def aggregate_module = aggregate_design.modules[0]
+def aggregate_lookup = aggregate_module.operations.find(
+  fun (operation): operation.opcode == "rtl.mux_lookup"
+)
 
 check:
   one_hot.one_hot_type(fixture.Grant) ~is #true
@@ -37,11 +47,26 @@ check:
   type_equal(equality.operands[0].type, Bits(4)) ~is #true
   type_equal(equality.operands[1].type, Bits(4)) ~is #true
   verify_design(design) ~is #void
+  list_lookup.attribute("keys") ~is [1, 2, 4, 8]
+  type_equal(list_lookup.operands[0].type, Bits(4)) ~is #true
+  type_equal(list_lookup.results[0].type, Bits(8)) ~is #true
+  verify_design(list_design) ~is #void
+  record_type(aggregate_lookup.results[0].type) ~is #true
+  type_equal(aggregate_lookup.results[0].type, invalid.Pair()) ~is #true
+  aggregate_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.record_get"
+  ).length() ~is 1
+  verify_design(aggregate_design) ~is #void
 
   one_hot.OneHot(0) ~throws "width must be a positive host Int"
   one_hot.one_hot_width(Bits(4)) ~throws "expected a OneHot type"
   fixture.Grant(-1) ~throws "literal index must satisfy 0 <= index < width"
   fixture.Grant(4) ~throws "literal index must satisfy 0 <= index < width"
+  embedded.run_elaboration(fun (): invalid.NonOneHotSelector()) ~throws "selector must have a OneHot type"
+  embedded.run_elaboration(fun (): invalid.NonListChoices()) ~throws "choices must be supplied as a host List"
+  embedded.run_elaboration(fun (): invalid.TooFewChoices()) ~throws "choice count must equal the OneHot selector width"
+  embedded.run_elaboration(fun (): invalid.TooManyChoices()) ~throws "choice count must equal the OneHot selector width"
+  embedded.run_elaboration(fun (): invalid.MixedChoices()) ~throws "cases and default must have exactly the same DataType"
   embedded.run_elaboration(fun (): invalid.ForeignMuxKey()) ~throws "one-hot mux lookup keys must belong to the selector's OneHot type"
   embedded.run_elaboration(fun (): invalid.IntegerMuxKey()) ~throws "one-hot mux lookup keys must belong to the selector's OneHot type"
   embedded.run_elaboration(fun (): invalid.BitwiseOneHot()) ~throws "operands must have exactly the same bitwise type"

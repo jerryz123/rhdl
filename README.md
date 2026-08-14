@@ -123,7 +123,7 @@ The composable frontend layers are:
 | `layers/expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | `layers/bool.rhm` | Nominal `Bool`, `Bool(#true)` literals, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
-| `layers/one-hot.rhm` | Structurally sized `OneHot(n)` types, typed literals, and mux keys |
+| `layers/one-hot.rhm` | Structurally sized `OneHot(n)` types, typed literals, mux keys, and `mux_onehot` |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `layers/wire.rhm` | Binding-derived single-driver internal wires |
@@ -525,11 +525,11 @@ def Grant = OneHot(4)
 input current: Grant
 output next_grant: Grant
 
-next_grant <== mux_lookup(current, ~default: Grant(0)):
-  Grant(0): Grant(1)
-  Grant(1): Grant(2)
-  Grant(2): Grant(3)
-  Grant(3): Grant(0)
+next_grant <== mux_onehot(current, ~default: Grant(0)):
+  Grant(1)
+  Grant(2)
+  Grant(3)
+  Grant(0)
 ```
 
 `Grant(2)` has the physical encoding `4'b0100`. Its type remains `Grant`, and
@@ -543,12 +543,23 @@ ports, wires, registers, memories, aggregate membership, and use as mux data
 work through existing flat-data machinery. Representation access remains an
 explicit cast such as `grant.into(Bits(4))`.
 
-One-hot literals may be keys for a `mux_lookup` selected by the matching
-`OneHot(n)` type. The selector lowers to `Bits(n)` and keys lower to powers of
-two before constructing the ordinary core mux operation. The mandatory
-default handles zero, multi-hot, and other invalid values that can still enter
-through hardware ports or explicit representation casts. Like an enum,
-`OneHot` records encoding intent; it is not a runtime proof. See
+`mux_onehot(selector, ~default: fallback)` assigns block choices to selector
+indices in source order. It requires exactly `n` choices for a `OneHot(n)`
+selector. Host code can instead supply a generated list as the final argument:
+
+```rhombus
+mux_onehot(current, ~default: Grant(0), choices)
+```
+
+The helper casts the selector to `Bits(n)` and generates power-of-two keys for
+the ordinary core `rtl.mux_lookup`; it does not add an IR operation. This is
+exact-match selection rather than OR-of-all-selected-values behavior. The
+mandatory default therefore handles both zero and multi-hot representations.
+
+One-hot literals may also be written as explicit keys for an ordinary
+`mux_lookup` selected by the matching `OneHot(n)` type. Values arriving through
+hardware ports or explicit representation casts can still violate the
+encoding. Like an enum, `OneHot` records encoding intent; it is not a runtime proof. See
 [`examples/one-hot.rhdl`](examples/one-hot.rhdl).
 
 Width changes are explicit:

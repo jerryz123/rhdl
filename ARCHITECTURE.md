@@ -81,7 +81,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, host-Boolean literal construction, equality, unsigned ordering, and binary `mux` | core IR, kernel, field support |
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
-| `one-hot.rhm` | Structurally sized one-hot types, literals, and typed mux keys | core IR, kernel, field support, mux-lookup support |
+| `one-hot.rhm` | Structurally sized one-hot types, literals, typed mux keys, and `mux_onehot` | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, records, and field access | core IR, kernel, field support |
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
