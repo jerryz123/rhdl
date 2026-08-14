@@ -120,7 +120,7 @@ The composable frontend layers are:
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
 | `layers/comb.rhm` | Literals, modular arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
 | `layers/expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
-| `layers/bool.rhm` | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
+| `layers/bool.rhm` | Nominal `Bool`, `Bool(#true)` literals, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
@@ -404,6 +404,18 @@ the block form, including nominal enum-member keys for enum selectors.
 
 Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 `Bool` selector. Both forms construct the core `rtl.mux_lookup` operation.
+
+Because `Bool` is defined by this layer instead of core, it also owns its
+literal notation. Calling the type object with a host Boolean constructs a
+nominal hardware value explicitly:
+
+```rhombus
+output ready: Bool
+ready <== Bool(#true)
+```
+
+The layer lowers this to a one-bit `rtl.constant` followed by `rtl.cast` to
+`Bool`; it adds no Bool-specific core operation.
 
 ### Hardware enums
 

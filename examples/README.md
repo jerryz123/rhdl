@@ -58,7 +58,7 @@ importable layers:
 | [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
 | [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, modular arithmetic, bitwise syntax, lookup muxes, and width operations |
 | [`layers/expanding-arithmetic.rhm`](../rhdl/frontend/layers/expanding-arithmetic.rhm) | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
-| [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, unsigned ordering, and binary `mux` |
+| [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, callable host-Boolean literals, `===`, unsigned ordering, and binary `mux` |
 | [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
@@ -123,6 +123,7 @@ binary mux behavior outside core:
 
 | Boolean form | Core representation |
 |---|---|
+| `Bool(#true)` | `rtl.constant 1 : Bits(1)`, then `rtl.cast` to `Bool` |
 | `a === b` | `rtl.eq` producing `Bits(1)`, then `rtl.cast` to `Bool` |
 | `a < b` | `rtl.ult` producing `Bits(1)`, then `rtl.cast` to `Bool` |
 | `a > b` | `rtl.ult(b, a)`, then `rtl.cast` to `Bool` |
