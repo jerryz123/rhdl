@@ -140,8 +140,9 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `interface Child(T) refines Parent(): ...` | A nominal subtype with inherited roles and flattened inherited members |
 | `supports: Contract(T)` in a refined interface | An additional structurally checked nominal contract |
 | `endpoint :: Endpoint.supports(protocol)` | A function boundary accepting an exact protocol, refinement, or declared supported contract |
-| `control.extend(Target(T), ~field: value)` | A typed endpoint view formed from a direct parent plus every new member |
-| `left <=> right` | Atomic exact or producer-to-consumer compatible interface connection |
+| `child <=> (parent, extra)` | Merge a parent endpoint and its refinement delta into a richer destination |
+| `parent <=> (child, destination)` | Split a richer source into its parent endpoint and refinement-delta destinations |
+| `left <=> right` | Exact or producer-to-consumer compatible connection without routed refinement fields |
 
 [`rhdl/frontend/layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) is
 a separate type layer. It defines nominal `Bool`, Boolean equality, and
@@ -212,7 +213,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`predicate-filter.rhdl`](predicate-filter.rhdl) | Standard-library `Valid` interfaces and host-closure-specialized filter hierarchy |
 | [`wire.rhdl`](wire.rhdl) | A vector wire assembled element by element and then read as one value |
 | [`interface.rhdl`](interface.rhdl) | Standard-library `Decoupled`, field access, bidirectional bulk connection, and instance reconstruction |
-| [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe `Irrevocable` weakening, control-only connections, and control-plus-payload endpoint extension |
+| [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe `Irrevocable` weakening plus symmetric control/payload merge and split |
 | [`interface-array.rhdl`](interface-array.rhdl) | Host-sized `Decoupled` endpoint arrays, deterministic flattened ports, whole-array connection, and hierarchy reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
 | [`flow-control.rhdl`](flow-control.rhdl) | Standard-library flow primitives plus a typed `ingress |> queue(_, ...) |> pipe(_, ...)` endpoint chain |

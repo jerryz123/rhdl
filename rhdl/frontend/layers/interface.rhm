@@ -164,36 +164,30 @@ class InterfaceEndpoint(type,
                         role,
                         bindings,
                         view,
-                        mutable nested_endpoints = [],
-                        supplied_members = []):
+                        mutable nested_endpoints = []):
   implements kernel.HardwareEntity
   method field(field_name):
     def member = type.members.find(fun (candidate): candidate.name == field_name)
     unless member
     | error(~who: #'interface,
             "interface " ++ type.name ++ " has no field named " ++ field_name)
-    def supplied = supplied_members.find(
-      fun (candidate): candidate[0] == field_name
-    )
-    if supplied
-    | supplied[1]
-    | if member.type is_a InterfaceType
-      | block:
-          def cached = nested_endpoints.find(
-            fun (candidate): candidate[0] == field_name
-          )
-          if cached
-          | cached[1]
-          | block:
-              def endpoint = nested_endpoint(this, member)
-              nested_endpoints := nested_endpoints ++ [[field_name, endpoint]]
-              endpoint
-      | block:
-          def binding = bindings.find(
-            fun (candidate):
-              candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
-          )
-          kernel.project(binding.entity, field_name)
+    if member.type is_a InterfaceType
+    | block:
+        def cached = nested_endpoints.find(
+          fun (candidate): candidate[0] == field_name
+        )
+        if cached
+        | cached[1]
+        | block:
+            def endpoint = nested_endpoint(this, member)
+            nested_endpoints := nested_endpoints ++ [[field_name, endpoint]]
+            endpoint
+    | block:
+        def binding = bindings.find(
+          fun (candidate):
+            candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
+        )
+        kernel.project(binding.entity, field_name)
 
 class InterfaceGroup(module_def, name, type, role, bindings)
 class InterfaceArrayGroup(module_def, name, groups)
@@ -407,9 +401,6 @@ dot.macro 'interface_field_dot $left $dot $right':
   | 'role': #false
   | 'bindings': #false
   | 'view': #false
-  | 'extend':
-      'fun (target_type, ~& fields) :~ Endpoint:
-         extend_interface_endpoint($left, target_type, fields)'
   | 'into': 'fun (target_type) :~ InstanceMembers: hardware_into($left, target_type)'
   | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
   | ~else:
@@ -444,7 +435,7 @@ fun interface_member_connection_pairs(left, right, members):
 
 // Uses a forward-flow member to identify which endpoint supplies the offered
 // protocol. Operand order is deliberately irrelevant.
-fun compatible_interface_connection_pairs(left, right):
+fun interface_connection_direction(left, right):
   unless left.type.roles == right.type.roles
   | error(~who: #'connect_interfaces,
           "bulk-connected interface roles must match")
@@ -466,11 +457,7 @@ fun compatible_interface_connection_pairs(left, right):
       | right
       | error(~who: #'connect_interfaces,
               "interface endpoints have incompatible roles and boundary directions")
-  def destination = if source === left | right | left
-  unless interface_type_supports(source.type, destination.type)
-  | error(~who: #'connect_interfaces,
-          "producer interface does not support the consumer interface contract")
-  interface_member_connection_pairs(left, right, destination.type.members)
+  [source, if source === left | right | left]
 
 fun exact_interface_connection_pairs(left, right):
   unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
@@ -486,12 +473,102 @@ fun exact_interface_connection_pairs(left, right):
     validate_interface_entity_pair(pair[0], pair[1])
   pairs
 
-fun interface_connection_pairs(left, right):
+fun refinement_members(child_type, parent_type):
+  child_type.members.filter(
+    ~keep: fun (member): !parent_type.members.find(
+      fun (candidate): candidate.name == member.name
+    )
+  )
+
+fun supplied_refinement_members(delta_members,
+                                extra_values,
+                                extra_fields,
+                                required):
+  when extra_values.length() > 0 && extra_fields.length() > 0
+  | error(~who: #'connect_interfaces,
+          "refinement members must use either positional or named arguments")
+  def supplied:
+    if extra_values.length() > 0
+    | block:
+        unless delta_members.length() == 1 && extra_values.length() == 1
+        | error(~who: #'connect_interfaces,
+                "a positional refinement member requires exactly one unmatched field")
+        [[delta_members[0], extra_values[0]]]
+    | block:
+        def all_fields_present:
+          for all (member in delta_members):
+            extra_fields.has_key(Keyword.from_string(member.name))
+        unless extra_fields.length() == 0 || extra_fields.length() == delta_members.length() && all_fields_present
+        | error(~who: #'connect_interfaces,
+                "named refinement members must supply every unmatched field exactly once")
+        if extra_fields.length() == 0
+        | []
+        | for List (member in delta_members):
+            [member, extra_fields[Keyword.from_string(member.name)]]
+  when required && delta_members.length() > 0 && supplied.length() == 0
+  | error(~who: #'connect_interfaces,
+          "connection requires every refinement member")
+  supplied
+
+fun explicit_member_connection_pairs(endpoint, member, supplied):
+  def endpoint_entity = endpoint.field(member.name)
+  if member.type is_a InterfaceType
+  | block:
+      unless supplied is_a InterfaceEndpoint
+      | error(~who: #'connect_interfaces,
+              "supplied refinement member has the wrong interface type")
+      unless interface_type_equal(supplied.type, member.type)
+      | error(~who: #'connect_interfaces,
+              "supplied refinement member has the wrong interface type")
+      interface_member_connection_pairs(endpoint_entity,
+                                        supplied,
+                                        member.type.members)
+  | block:
+      def supplied_entity:
+        if endpoint_entity is_a Place
+        | block:
+            when supplied is_a Place
+            | error(~who: #'connect_interfaces,
+                    "supplied refinement member has the wrong direction")
+            kernel.read(supplied)
+        | block:
+            unless supplied is_a Place
+            | error(~who: #'connect_interfaces,
+                    "supplied refinement member must be a driveable hardware place")
+            supplied
+      [validate_interface_entity_pair(endpoint_entity, supplied_entity)]
+
+fun compatible_interface_connection_pairs(left, right, extra_values, extra_fields):
+  let [source, destination] = interface_connection_direction(left, right)
+  def source_supports_destination = interface_type_supports(source.type,
+                                                            destination.type)
+  // Structural refinement can assemble a richer destination only when the
+  // child actually adds fields. A fieldless refinement represents a stronger
+  // behavioral promise and cannot be manufactured by wiring alone.
+  def destination_delta:
+    if destination.type.parent is_a InterfaceType && interface_type_equal(destination.type.parent, source.type)
+    | refinement_members(destination.type, source.type)
+    | []
+  def destination_refines_source = destination_delta.length() > 0
+  unless source_supports_destination || destination_refines_source
+  | error(~who: #'connect_interfaces,
+          "producer interface does not support the consumer interface contract")
+  def richer = if source_supports_destination | source | destination
+  def poorer = if source_supports_destination | destination | source
+  def delta_members = refinement_members(richer.type, poorer.type)
+  def supplied = supplied_refinement_members(delta_members, extra_values, extra_fields, destination_refines_source)
+  def common_members = if source_supports_destination | destination.type.members | source.type.members
+  def mutable pairs = interface_member_connection_pairs(left, right, common_members)
+  for (binding in supplied):
+    pairs := pairs ++ explicit_member_connection_pairs(richer, binding[0], binding[1])
+  pairs
+
+fun interface_connection_pairs(left, right, extra_values = [], extra_fields = {}):
   unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
   | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
-  if interface_type_equal(left.type, right.type) && left.supplied_members.length() == 0 && right.supplied_members.length() == 0
+  if interface_type_equal(left.type, right.type) && extra_values.length() == 0 && extra_fields.length() == 0
   | exact_interface_connection_pairs(left, right)
-  | compatible_interface_connection_pairs(left, right)
+  | compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
 
 fun connect_interfaces(left, right):
   def pairs:
@@ -515,71 +592,16 @@ fun connect_interfaces(left, right):
     | kernel.connect(pair[1], pair[0])
   #void
 
-fun normalize_supplied_member(endpoint, member, value):
-  def representative_binding = endpoint.bindings.find(
-    fun (binding):
-      binding.flow.from_role == member.from_role && binding.flow.to_role == member.to_role
-  )
-  unless representative_binding
-  | error(~who: #'extend,
-          "extension members must augment an existing interface direction")
-  if member.type is_a InterfaceType
-  | block:
-      unless value is_a InterfaceEndpoint
-      | error(~who: #'extend,
-              "supplied extension member has the wrong interface type")
-      unless interface_type_equal(value.type, member.type)
-      | error(~who: #'extend,
-              "supplied extension member has the wrong interface type")
-      value
-  | block:
-      def normalized:
-        if representative_binding.entity is_a Place
-        | block:
-            unless value is_a Place
-            | error(~who: #'extend,
-                    "supplied extension member must be a driveable hardware place")
-            value
-        | kernel.read(value)
-      unless type_equal(normalized.type, member.type)
-      | error(~who: #'extend,
-              "supplied extension member has the wrong hardware type")
-      normalized
-
-// Forms a direct child endpoint view by supplying exactly the child's new
-// members; the view reuses the parent's existing directional bindings.
-fun extend_interface_endpoint(endpoint, target_type, fields):
-  unless endpoint is_a InterfaceEndpoint
-  | error(~who: #'extend, "extend requires an interface endpoint")
-  unless target_type is_a InterfaceType
-  | error(~who: #'extend, "extend target must be an InterfaceType")
-  unless target_type.parent is_a InterfaceType && interface_type_equal(target_type.parent,
-                                                                       endpoint.type)
-  | error(~who: #'extend,
-          "extend target must directly refine the endpoint interface type")
-  def new_members = target_type.members.filter(
-    ~keep: fun (member): !endpoint.type.members.find(
-      fun (existing): existing.name == member.name
-    )
-  )
-  def all_fields_present:
-    for all (member in new_members):
-      fields.has_key(Keyword.from_string(member.name))
-  unless fields.length() == new_members.length() && all_fields_present
-  | error(~who: #'extend,
-          "extend requires exactly one supplied value for every new interface member")
-  def supplied_members:
-    for List (member in new_members):
-      [member.name,
-       normalize_supplied_member(endpoint,
-                                 member,
-                                 fields[Keyword.from_string(member.name)])]
-  InterfaceEndpoint(target_type,
-                    endpoint.role,
-                    endpoint.bindings,
-                    endpoint.view ++ ".extend",
-                    [],
-                    endpoint.supplied_members ++ supplied_members)
+fun connect_interface_fields(left,
+                             right,
+                             & extra_values,
+                             ~& extra_fields):
+  def pairs = interface_connection_pairs(left, right, extra_values, extra_fields)
+  for (pair in pairs):
+    if pair[0] is_a Place
+    | kernel.connect(pair[0], pair[1])
+    | kernel.connect(pair[1], pair[0])
+  #void
 
 fun make_refined_interface(name, parent, declarations, supported_types = []):
   unless parent is_a InterfaceType
@@ -759,6 +781,9 @@ defn.macro
           ...]
        )'
 
-operator (left <=> right):
+expr.macro <=>:
   ~weaker_than: ~other
-  connect_interfaces(left, right)
+| '$left <=> ($right, $extra, ...)':
+    'connect_interface_fields($left, $right, $extra, ...)'
+| '$left <=> $(right :: expr_meta.AfterInfixParsed('<=>')) $()':
+    'connect_interfaces($left, $right)'

@@ -1078,16 +1078,20 @@ weakening, such as `Irrevocable(T)` to `Decoupled(T)` or `Decoupled(T)` to
 `DecoupledControl()`, while rejecting contract strengthening such as
 `Decoupled(T)` to `Irrevocable(T)`.
 
-A direct refinement can be assembled from its parent endpoint plus exactly the
-new members:
+A direct structural refinement can be assembled by connecting its parent
+endpoint alongside exactly the new members. The same form splits a richer
+source into its inherited control endpoint and destinations for those members:
 
 ```rhombus
-def request = control.extend(Decoupled(Bits(8)), ~bits: payload)
-egress <=> request
+request_out <=> (control_in, payload_in)
+control_out <=> (request_in, payload_out)
 ```
 
-`extend` checks the direct parent, field set, hardware types, and directions,
-and retains exact endpoint static information for the target protocol.
+`<=>` infers merge versus split from the endpoint directions. A positional
+extra is available when the refinement adds exactly one field; named extras
+such as `~bits: payload` make the routing explicit. It checks the direct parent,
+complete field set, hardware types, and directions. Without a parenthesized
+field bundle, `<=>` performs an ordinary exact or weakening connection.
 See
 [`examples/ready-valid-compatibility.rhdl`](examples/ready-valid-compatibility.rhdl)
 for all supported ready-valid cross-connections in one circuit.

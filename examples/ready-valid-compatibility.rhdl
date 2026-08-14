@@ -1,5 +1,5 @@
 #lang rhdl
-// Demonstrates safe ready-valid weakening and payload-bearing endpoint extension.
+// Demonstrates ready-valid weakening plus principled control/payload routing.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -7,33 +7,35 @@ import:
 circuit ReadyValidCompatibility():
   input decoupled_payload: Bits(8)
   input irrevocable_payload: Bits(8)
+  output decoupled_split_payload: Bits(8)
+  output irrevocable_split_payload: Bits(8)
 
   // A persistent offer safely satisfies the weaker Decoupled contract.
   interface irrevocable_in(Irrevocable(Bits(8)), ~role: consumer)
   interface decoupled_out(Decoupled(Bits(8)), ~role: producer)
   decoupled_out <=> irrevocable_in
 
-  // Payload-bearing protocols can expose just their inherited control plane.
+  // A control endpoint plus a payload destination splits a full protocol.
   interface decoupled_in(Decoupled(Bits(8)), ~role: consumer)
   interface decoupled_control_out(DecoupledControl(), ~role: producer)
-  decoupled_control_out <=> decoupled_in
+  decoupled_control_out <=> (decoupled_in, decoupled_split_payload)
 
   interface irrevocable_data_in(Irrevocable(Bits(8)), ~role: consumer)
   interface irrevocable_control_out(IrrevocableControl(), ~role: producer)
-  irrevocable_control_out <=> irrevocable_data_in
+  irrevocable_control_out <=> (
+    irrevocable_data_in,
+    ~bits: irrevocable_split_payload
+  )
 
-  // Supplying every new field forms the direct payload-bearing refinement.
+  // A control endpoint plus a payload source merges into the direct refinement.
   interface decoupled_control_in(DecoupledControl(), ~role: consumer)
   interface decoupled_extended_out(Decoupled(Bits(8)), ~role: producer)
-  decoupled_extended_out <=> decoupled_control_in.extend(
-    Decoupled(Bits(8)),
-    ~bits: decoupled_payload
-  )
+  decoupled_extended_out <=> (decoupled_control_in, decoupled_payload)
 
   interface irrevocable_control_in(IrrevocableControl(), ~role: consumer)
   interface irrevocable_extended_out(Irrevocable(Bits(8)), ~role: producer)
-  irrevocable_extended_out <=> irrevocable_control_in.extend(
-    Irrevocable(Bits(8)),
+  irrevocable_extended_out <=> (
+    irrevocable_control_in,
     ~bits: irrevocable_payload
   )
 
@@ -53,6 +55,8 @@ module ReadyValidCompatibility(
   input  struct packed {logic ready; }                   decoupled_extended_out_in,
   input  struct packed {logic valid; }                   irrevocable_control_in_in,
   input  struct packed {logic ready; }                   irrevocable_extended_out_in,
+  output [7:0]                                           decoupled_split_payload,
+                                                         irrevocable_split_payload,
   output struct packed {logic ready; }                   irrevocable_in_out,
   output struct packed {logic valid; logic [7:0] bits; } decoupled_out_out,
   output struct packed {logic ready; }                   decoupled_in_out,
@@ -65,6 +69,8 @@ module ReadyValidCompatibility(
   output struct packed {logic valid; logic [7:0] bits; } irrevocable_extended_out_out
 );
 
+  assign decoupled_split_payload = decoupled_in_in.bits;
+  assign irrevocable_split_payload = irrevocable_data_in_in.bits;
   assign irrevocable_in_out = decoupled_out_in;
   assign decoupled_out_out = irrevocable_in_in;
   assign decoupled_in_out = decoupled_control_out_in;

@@ -86,7 +86,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers | core IR, kernel, clocking support, field support |
-| `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, endpoint extension, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
+| `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, conditional assignment, and conditional memory-write effects | kernel |

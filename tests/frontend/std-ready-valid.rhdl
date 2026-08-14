@@ -9,11 +9,6 @@ fun require_byte_decoupled(
 ) :~ Endpoint:
   endpoint
 
-fun require_exact_byte_decoupled(
-  endpoint :: Endpoint.of(Decoupled(Bits(8)))
-) :~ Endpoint:
-  endpoint
-
 circuit ValidAdapter():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   interface egress(Valid(Bits(8)), ~role: producer)
@@ -87,21 +82,33 @@ circuit TransitiveControlCompatibility():
   interface egress(DecoupledControl(), ~role: producer)
   egress <=> ingress
 
-circuit DecoupledPayloadExtension():
+circuit DecoupledPayloadMerge():
   input payload: Bits(8)
   interface ingress(DecoupledControl(), ~role: consumer)
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  egress <=> require_exact_byte_decoupled(
-    ingress.extend(Decoupled(Bits(8)), ~bits: payload)
-  )
+  egress <=> (ingress, payload)
 
-circuit IrrevocablePayloadExtension():
+circuit IrrevocablePayloadMerge():
   input payload: Bits(8)
   interface ingress(IrrevocableControl(), ~role: consumer)
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
-  egress <=> ingress.extend(Irrevocable(Bits(8)), ~bits: payload)
+  egress <=> (ingress, ~bits: payload)
+
+circuit DecoupledPayloadSplit():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(DecoupledControl(), ~role: producer)
+  output payload: Bits(8)
+
+  egress <=> (ingress, payload)
+
+circuit IrrevocablePayloadSplit():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(IrrevocableControl(), ~role: producer)
+  output payload: Bits(8)
+
+  egress <=> (ingress, ~bits: payload)
 
 fun require_exact_control(
   endpoint :: Endpoint.of(DecoupledControl())
@@ -121,24 +128,34 @@ circuit RefinedIsNotExact():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   require_exact_control(ingress)
 
-circuit WrongExtensionParent():
+circuit WrongMergeParent():
   input payload: Bits(8)
   interface ingress(DecoupledControl(), ~role: consumer)
-  ingress.extend(Irrevocable(Bits(8)), ~bits: payload)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+  egress <=> (ingress, payload)
 
-circuit MissingExtensionMember():
+circuit MissingMergeMember():
   interface ingress(DecoupledControl(), ~role: consumer)
-  ingress.extend(Decoupled(Bits(8)))
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  egress <=> (ingress)
 
-circuit ExtraExtensionMember():
+circuit ExtraMergeMember():
   input payload: Bits(8)
   interface ingress(DecoupledControl(), ~role: consumer)
-  ingress.extend(Decoupled(Bits(8)), ~bits: payload, ~extra: payload)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  egress <=> (ingress, payload, payload)
 
-circuit WrongExtensionMemberType():
+circuit WrongMergeMemberType():
   input payload: Bits(16)
   interface ingress(DecoupledControl(), ~role: consumer)
-  ingress.extend(Decoupled(Bits(8)), ~bits: payload)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  egress <=> (ingress, payload)
+
+circuit WrongSplitMemberDirection():
+  input payload: Bits(8)
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(DecoupledControl(), ~role: producer)
+  egress <=> (ingress, payload)
 
 circuit ValidIsNotReadyValidCompatible():
   interface ingress(Valid(Bits(8)), ~role: consumer)
@@ -164,14 +181,17 @@ export:
   IrrevocableToControl
   IrrevocableControlToDecoupledControl
   TransitiveControlCompatibility
-  DecoupledPayloadExtension
-  IrrevocablePayloadExtension
+  DecoupledPayloadMerge
+  IrrevocablePayloadMerge
+  DecoupledPayloadSplit
+  IrrevocablePayloadSplit
   MismatchedAdapter
   UnsupportedFire
   RefinedIsNotExact
-  WrongExtensionParent
-  MissingExtensionMember
-  ExtraExtensionMember
-  WrongExtensionMemberType
+  WrongMergeParent
+  MissingMergeMember
+  ExtraMergeMember
+  WrongMergeMemberType
+  WrongSplitMemberDirection
   ValidIsNotReadyValidCompatible
   UnsafeControlStrengthening
