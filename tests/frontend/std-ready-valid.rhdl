@@ -4,6 +4,16 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
 
+fun require_byte_decoupled(
+  endpoint :: Endpoint.supports(Decoupled(Bits(8)))
+) :~ Endpoint:
+  endpoint
+
+fun require_exact_byte_decoupled(
+  endpoint :: Endpoint.of(Decoupled(Bits(8)))
+) :~ Endpoint:
+  endpoint
+
 circuit ValidAdapter():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   interface egress(Valid(Bits(8)), ~role: producer)
@@ -47,6 +57,52 @@ circuit IrrevocableFire():
   ingress.ready <== accept
   transferred <== fire(ingress)
 
+circuit IrrevocableToDecoupled():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  egress <=> require_byte_decoupled(ingress)
+
+circuit ReversedCompatibleSpelling():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  ingress <=> egress
+
+circuit DecoupledToControl():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(DecoupledControl(), ~role: producer)
+  egress <=> ingress
+
+circuit IrrevocableToControl():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(IrrevocableControl(), ~role: producer)
+  egress <=> ingress
+
+circuit IrrevocableControlToDecoupledControl():
+  interface ingress(IrrevocableControl(), ~role: consumer)
+  interface egress(DecoupledControl(), ~role: producer)
+  egress <=> ingress
+
+circuit TransitiveControlCompatibility():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(DecoupledControl(), ~role: producer)
+  egress <=> ingress
+
+circuit DecoupledPayloadExtension():
+  input payload: Bits(8)
+  interface ingress(DecoupledControl(), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> require_exact_byte_decoupled(
+    ingress.extend(Decoupled(Bits(8)), ~bits: payload)
+  )
+
+circuit IrrevocablePayloadExtension():
+  input payload: Bits(8)
+  interface ingress(IrrevocableControl(), ~role: consumer)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+
+  egress <=> ingress.extend(Irrevocable(Bits(8)), ~bits: payload)
+
 fun require_exact_control(
   endpoint :: Endpoint.of(DecoupledControl())
 ) :~ Endpoint:
@@ -65,6 +121,35 @@ circuit RefinedIsNotExact():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   require_exact_control(ingress)
 
+circuit WrongExtensionParent():
+  input payload: Bits(8)
+  interface ingress(DecoupledControl(), ~role: consumer)
+  ingress.extend(Irrevocable(Bits(8)), ~bits: payload)
+
+circuit MissingExtensionMember():
+  interface ingress(DecoupledControl(), ~role: consumer)
+  ingress.extend(Decoupled(Bits(8)))
+
+circuit ExtraExtensionMember():
+  input payload: Bits(8)
+  interface ingress(DecoupledControl(), ~role: consumer)
+  ingress.extend(Decoupled(Bits(8)), ~bits: payload, ~extra: payload)
+
+circuit WrongExtensionMemberType():
+  input payload: Bits(16)
+  interface ingress(DecoupledControl(), ~role: consumer)
+  ingress.extend(Decoupled(Bits(8)), ~bits: payload)
+
+circuit ValidIsNotReadyValidCompatible():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  egress <=> ingress
+
+circuit UnsafeControlStrengthening():
+  interface ingress(DecoupledControl(), ~role: consumer)
+  interface egress(IrrevocableControl(), ~role: producer)
+  egress <=> ingress
+
 export:
   ValidAdapter
   DecoupledAdapter
@@ -73,6 +158,20 @@ export:
   IrrevocableControlAdapter
   DecoupledFire
   IrrevocableFire
+  IrrevocableToDecoupled
+  ReversedCompatibleSpelling
+  DecoupledToControl
+  IrrevocableToControl
+  IrrevocableControlToDecoupledControl
+  TransitiveControlCompatibility
+  DecoupledPayloadExtension
+  IrrevocablePayloadExtension
   MismatchedAdapter
   UnsupportedFire
   RefinedIsNotExact
+  WrongExtensionParent
+  MissingExtensionMember
+  ExtraExtensionMember
+  WrongExtensionMemberType
+  ValidIsNotReadyValidCompatible
+  UnsafeControlStrengthening

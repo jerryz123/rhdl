@@ -1049,8 +1049,10 @@ Functions that accept or return endpoints can preserve the same field lookup
 with the public `Endpoint` annotation. Use `Endpoint.of(protocol)` when the
 function requires one exact nominal interface type. Interfaces may declare one
 nominal parent with `refines`; roles are inherited and new members are flattened
-into the existing directional ports. Use `Endpoint.supports(protocol)` when a
-function accepts that protocol or any transitive refinement:
+into the existing directional ports. A refined interface can additionally
+declare a structurally verified nominal contract with `supports:`. Use
+`Endpoint.supports(protocol)` when a function accepts that protocol or any
+transitive refinement or supported contract:
 
 ```rhombus
 fun identity(endpoint :: Endpoint) :~ Endpoint:
@@ -1066,9 +1068,29 @@ fun transferred(
 ```
 
 Both return annotations retain endpoint static information, so callers can
-continue to use `.valid`, `.bits`, `.ready`, nested fields, and `<=>`. Bulk
-connection remains exact-type-only; refinement does not silently discard or
-invent fields at a connection boundary.
+continue to use `.valid`, `.bits`, `.ready`, nested fields, and `<=>`.
+
+`<=>` accepts exact interface types and directed compatible types. Operand
+order is irrelevant: the producer-to-consumer hardware direction identifies
+the offered protocol. The producer type must support the consumer type, and
+only the consumer contract's members are connected. This permits safe
+weakening, such as `Irrevocable(T)` to `Decoupled(T)` or `Decoupled(T)` to
+`DecoupledControl()`, while rejecting contract strengthening such as
+`Decoupled(T)` to `Irrevocable(T)`.
+
+A direct refinement can be assembled from its parent endpoint plus exactly the
+new members:
+
+```rhombus
+def request = control.extend(Decoupled(Bits(8)), ~bits: payload)
+egress <=> request
+```
+
+`extend` checks the direct parent, field set, hardware types, and directions,
+and retains exact endpoint static information for the target protocol.
+See
+[`examples/ready-valid-compatibility.rhdl`](examples/ready-valid-compatibility.rhdl)
+for all supported ready-valid cross-connections in one circuit.
 
 ### Nested interfaces
 
@@ -1135,7 +1157,8 @@ import:
 `Decoupled` refines `DecoupledControl`; `Irrevocable` refines
 `IrrevocableControl`, which transitively refines `DecoupledControl`. The
 payload-bearing protocols intentionally have the same physical fields but
-remain distinct interface types. Their temporal difference is currently a
+remain distinct interface types. `Irrevocable(T)` also declares support for
+the weaker `Decoupled(T)` contract. Their temporal difference is currently a
 documented contract; RHDL does not yet generate protocol assertions. `fire`
 accepts any endpoint that supports `DecoupledControl` and returns
 `endpoint.valid and endpoint.ready`.

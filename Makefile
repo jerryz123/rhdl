@@ -81,6 +81,7 @@ examples:
 	racket -S $(CURDIR) examples/tiny-simd.rhdl
 	racket -S $(CURDIR) examples/stack.rhdl
 	racket -S $(CURDIR) examples/interface.rhdl
+	racket -S $(CURDIR) examples/ready-valid-compatibility.rhdl
 	racket -S $(CURDIR) examples/interface-array.rhdl
 	racket -S $(CURDIR) examples/nested-interface.rhdl
 	racket -S $(CURDIR) examples/flow-control.rhdl

@@ -210,6 +210,7 @@ fixture_specs=(
   'bundle|bundle_tb|examples/bundle.rhdl|design|verilog_reference'
   'record-cast|record_cast_tb|examples/bundle.rhdl|cast_design|cast_verilog_reference'
   'interface|interface_tb|examples/interface.rhdl|design|verilog_reference'
+  'ready-valid-compatibility||examples/ready-valid-compatibility.rhdl|design|verilog_reference'
   'interface-array|interface_array_tb|examples/interface-array.rhdl|design|verilog_reference'
   'nested-interface|nested_interface_tb|examples/nested-interface.rhdl|design|verilog_reference'
   'pipe|pipe_tb|examples/flow-control.rhdl|pipe_design|pipe_verilog_reference'

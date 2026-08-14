@@ -31,8 +31,18 @@ class InterfaceFlow(from_role, to_role, type):
 
 class InterfaceMember(name, type, from_role, to_role)
 
-class InterfaceType(name, roles, members, parent = #false):
-  constructor (name, roles, declarations, parent = #false):
+// The parent supplies inherited layout. Additional supported types declare
+// nominal behavioral substitutability and must be structural subsets.
+class InterfaceType(name,
+                    roles,
+                    members,
+                    parent = #false,
+                    supported_types = []):
+  constructor (name,
+               roles,
+               declarations,
+               parent = #false,
+               supported_types = []):
     unless name is_a String
     | error(~who: #'InterfaceType, "interface name must be a String")
     unless roles is_a List && roles.length() == 2 && roles[0] != roles[1]
@@ -46,6 +56,9 @@ class InterfaceType(name, roles, members, parent = #false):
       unless roles == parent.roles
       | error(~who: #'InterfaceType,
               "refined interface roles must match the parent roles")
+    unless supported_types is_a List
+    | error(~who: #'InterfaceType,
+            "supported interface types must be supplied as a List")
     def mutable members = if parent | parent.members | []
     for (declaration in declarations):
       cond
@@ -77,7 +90,24 @@ class InterfaceType(name, roles, members, parent = #false):
         ~keep: fun (candidate): candidate.name == member.name
       ).length() != 1
       | error(~who: #'InterfaceType, "interface member names must be unique")
-    super(name, roles, members, parent)
+    for (supported_type in supported_types):
+      unless supported_type is_a InterfaceType
+      | error(~who: #'InterfaceType,
+              "supported interface contracts must be InterfaceType values")
+      unless roles == supported_type.roles
+      | error(~who: #'InterfaceType,
+              "supported interface roles must match")
+      for (supported_member in supported_type.members):
+        def member = members.find(
+          fun (candidate): candidate.name == supported_member.name
+        )
+        unless member
+        | error(~who: #'InterfaceType,
+                "supported interface members must be present with the same type and direction")
+        unless member.from_role == supported_member.from_role && member.to_role == supported_member.to_role && interface_member_type_equal(member.type, supported_member.type)
+        | error(~who: #'InterfaceType,
+                "supported interface members must be present with the same type and direction")
+    super(name, roles, members, parent, supported_types)
 
   property flows: interface_flows(this)
 
@@ -130,30 +160,40 @@ fun interface_flows(type):
 
 class InterfaceBinding(flow, port_name, entity)
 
-class InterfaceEndpoint(type, role, bindings, view, mutable nested_endpoints = []):
+class InterfaceEndpoint(type,
+                        role,
+                        bindings,
+                        view,
+                        mutable nested_endpoints = [],
+                        supplied_members = []):
   implements kernel.HardwareEntity
   method field(field_name):
     def member = type.members.find(fun (candidate): candidate.name == field_name)
     unless member
     | error(~who: #'interface,
             "interface " ++ type.name ++ " has no field named " ++ field_name)
-    if member.type is_a InterfaceType
-    | block:
-        def cached = nested_endpoints.find(
-          fun (candidate): candidate[0] == field_name
-        )
-        if cached
-        | cached[1]
-        | block:
-            def endpoint = nested_endpoint(this, member)
-            nested_endpoints := nested_endpoints ++ [[field_name, endpoint]]
-            endpoint
-    | block:
-        def binding = bindings.find(
-          fun (candidate):
-            candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
-        )
-        kernel.project(binding.entity, field_name)
+    def supplied = supplied_members.find(
+      fun (candidate): candidate[0] == field_name
+    )
+    if supplied
+    | supplied[1]
+    | if member.type is_a InterfaceType
+      | block:
+          def cached = nested_endpoints.find(
+            fun (candidate): candidate[0] == field_name
+          )
+          if cached
+          | cached[1]
+          | block:
+              def endpoint = nested_endpoint(this, member)
+              nested_endpoints := nested_endpoints ++ [[field_name, endpoint]]
+              endpoint
+      | block:
+          def binding = bindings.find(
+            fun (candidate):
+              candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
+          )
+          kernel.project(binding.entity, field_name)
 
 class InterfaceGroup(module_def, name, type, role, bindings)
 class InterfaceArrayGroup(module_def, name, groups)
@@ -167,10 +207,14 @@ fun interface_member_type_equal(left, right):
   | type_equal(left, right)
 
 fun interface_type_equal(left, right):
-  if !(left is_a InterfaceType && right is_a InterfaceType) || left.name != right.name || left.roles != right.roles || !interface_parent_equal(left.parent, right.parent) || left.members.length() != right.members.length()
+  if !(left is_a InterfaceType && right is_a InterfaceType) || left.name != right.name || left.roles != right.roles || !interface_parent_equal(left.parent, right.parent) || left.supported_types.length() != right.supported_types.length() || left.members.length() != right.members.length()
   | #false
-  | for all (left_member in left.members, right_member in right.members):
-      left_member.name == right_member.name && left_member.from_role == right_member.from_role && left_member.to_role == right_member.to_role && interface_member_type_equal(left_member.type, right_member.type)
+  | (for all (left_supported in left.supported_types,
+              right_supported in right.supported_types):
+       interface_type_equal(left_supported, right_supported)) && (
+      for all (left_member in left.members, right_member in right.members):
+        left_member.name == right_member.name && left_member.from_role == right_member.from_role && left_member.to_role == right_member.to_role && interface_member_type_equal(left_member.type, right_member.type)
+    )
 
 fun interface_parent_equal(left, right):
   if left || right
@@ -182,6 +226,9 @@ fun interface_type_supports(type, expected_type):
     interface_type_equal(type, expected_type) || (
       type.parent is_a InterfaceType && interface_type_supports(type.parent,
                                                                 expected_type)
+    ) || type.supported_types.find(
+      fun (supported_type):
+        interface_type_supports(supported_type, expected_type)
     )
   )
 
@@ -360,16 +407,74 @@ dot.macro 'interface_field_dot $left $dot $right':
   | 'role': #false
   | 'bindings': #false
   | 'view': #false
+  | 'extend':
+      'fun (target_type, ~& fields) :~ Endpoint:
+         extend_interface_endpoint($left, target_type, fields)'
   | 'into': 'fun (target_type) :~ InstanceMembers: hardware_into($left, target_type)'
   | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
   | ~else:
       'interface_member($left, $(right.to_source_string())) :: InstanceMembers'
 
-fun interface_connection_pairs(left, right):
+fun validate_interface_entity_pair(left_entity, right_entity):
+  unless ((left_entity is_a Place && right_entity is_a Value) || (left_entity is_a Value && right_entity is_a Place))
+  | error(~who: #'connect_interfaces,
+          "interface endpoints have incompatible roles and boundary directions")
+  def place = if left_entity is_a Place | left_entity | right_entity
+  def value = if left_entity is_a Value | left_entity | right_entity
+  unless type_equal(place.type, value.type)
+  | error(~who: #'connect_interfaces, "interface member types do not match")
+  when place.driver
+  | error(~who: #'connect_interfaces, "interface destination already has a driver")
+  [left_entity, right_entity]
+
+fun interface_member_connection_pairs(left, right, members):
+  def mutable pairs = []
+  for (member in members):
+    def left_entity = left.field(member.name)
+    def right_entity = right.field(member.name)
+    if member.type is_a InterfaceType
+    | pairs := pairs ++ interface_member_connection_pairs(
+        left_entity,
+        right_entity,
+        member.type.members
+      )
+    | pairs := pairs ++ [validate_interface_entity_pair(left_entity,
+                                                        right_entity)]
+  pairs
+
+// Uses a forward-flow member to identify which endpoint supplies the offered
+// protocol. Operand order is deliberately irrelevant.
+fun compatible_interface_connection_pairs(left, right):
+  unless left.type.roles == right.type.roles
+  | error(~who: #'connect_interfaces,
+          "bulk-connected interface roles must match")
+  def forward_member = left.type.members.find(
+    fun (member):
+      member.from_role == left.type.roles[0] && right.type.members.find(
+        fun (candidate): candidate.name == member.name
+      )
+  )
+  unless forward_member
+  | error(~who: #'connect_interfaces,
+          "compatible interfaces require a shared producer-to-consumer member")
+  def left_forward = left.field(forward_member.name)
+  def right_forward = right.field(forward_member.name)
+  def source:
+    if left_forward is_a Value && right_forward is_a Place
+    | left
+    | if right_forward is_a Value && left_forward is_a Place
+      | right
+      | error(~who: #'connect_interfaces,
+              "interface endpoints have incompatible roles and boundary directions")
+  def destination = if source === left | right | left
+  unless interface_type_supports(source.type, destination.type)
+  | error(~who: #'connect_interfaces,
+          "producer interface does not support the consumer interface contract")
+  interface_member_connection_pairs(left, right, destination.type.members)
+
+fun exact_interface_connection_pairs(left, right):
   unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
   | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
-  unless interface_type_equal(left.type, right.type)
-  | error(~who: #'connect_interfaces, "bulk-connected endpoints must have the same interface type")
   def pairs:
     for List (left_binding in left.bindings):
       def right_binding = right.bindings.find(
@@ -378,18 +483,15 @@ fun interface_connection_pairs(left, right):
       )
       [left_binding.entity, right_binding.entity]
   for (pair in pairs):
-    def left_entity = pair[0]
-    def right_entity = pair[1]
-    unless ((left_entity is_a Place && right_entity is_a Value) || (left_entity is_a Value && right_entity is_a Place))
-    | error(~who: #'connect_interfaces,
-            "interface endpoints have incompatible roles and boundary directions")
-    def place = if left_entity is_a Place | left_entity | right_entity
-    def value = if left_entity is_a Value | left_entity | right_entity
-    unless type_equal(place.type, value.type)
-    | error(~who: #'connect_interfaces, "interface flow types do not match")
-    when place.driver
-    | error(~who: #'connect_interfaces, "interface destination already has a driver")
+    validate_interface_entity_pair(pair[0], pair[1])
   pairs
+
+fun interface_connection_pairs(left, right):
+  unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
+  | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
+  if interface_type_equal(left.type, right.type) && left.supplied_members.length() == 0 && right.supplied_members.length() == 0
+  | exact_interface_connection_pairs(left, right)
+  | compatible_interface_connection_pairs(left, right)
 
 fun connect_interfaces(left, right):
   def pairs:
@@ -413,13 +515,135 @@ fun connect_interfaces(left, right):
     | kernel.connect(pair[1], pair[0])
   #void
 
-fun make_refined_interface(name, parent, declarations):
+fun normalize_supplied_member(endpoint, member, value):
+  def representative_binding = endpoint.bindings.find(
+    fun (binding):
+      binding.flow.from_role == member.from_role && binding.flow.to_role == member.to_role
+  )
+  unless representative_binding
+  | error(~who: #'extend,
+          "extension members must augment an existing interface direction")
+  if member.type is_a InterfaceType
+  | block:
+      unless value is_a InterfaceEndpoint
+      | error(~who: #'extend,
+              "supplied extension member has the wrong interface type")
+      unless interface_type_equal(value.type, member.type)
+      | error(~who: #'extend,
+              "supplied extension member has the wrong interface type")
+      value
+  | block:
+      def normalized:
+        if representative_binding.entity is_a Place
+        | block:
+            unless value is_a Place
+            | error(~who: #'extend,
+                    "supplied extension member must be a driveable hardware place")
+            value
+        | kernel.read(value)
+      unless type_equal(normalized.type, member.type)
+      | error(~who: #'extend,
+              "supplied extension member has the wrong hardware type")
+      normalized
+
+// Forms a direct child endpoint view by supplying exactly the child's new
+// members; the view reuses the parent's existing directional bindings.
+fun extend_interface_endpoint(endpoint, target_type, fields):
+  unless endpoint is_a InterfaceEndpoint
+  | error(~who: #'extend, "extend requires an interface endpoint")
+  unless target_type is_a InterfaceType
+  | error(~who: #'extend, "extend target must be an InterfaceType")
+  unless target_type.parent is_a InterfaceType && interface_type_equal(target_type.parent,
+                                                                       endpoint.type)
+  | error(~who: #'extend,
+          "extend target must directly refine the endpoint interface type")
+  def new_members = target_type.members.filter(
+    ~keep: fun (member): !endpoint.type.members.find(
+      fun (existing): existing.name == member.name
+    )
+  )
+  def all_fields_present:
+    for all (member in new_members):
+      fields.has_key(Keyword.from_string(member.name))
+  unless fields.length() == new_members.length() && all_fields_present
+  | error(~who: #'extend,
+          "extend requires exactly one supplied value for every new interface member")
+  def supplied_members:
+    for List (member in new_members):
+      [member.name,
+       normalize_supplied_member(endpoint,
+                                 member,
+                                 fields[Keyword.from_string(member.name)])]
+  InterfaceEndpoint(target_type,
+                    endpoint.role,
+                    endpoint.bindings,
+                    endpoint.view ++ ".extend",
+                    [],
+                    endpoint.supplied_members ++ supplied_members)
+
+fun make_refined_interface(name, parent, declarations, supported_types = []):
   unless parent is_a InterfaceType
   | error(~who: #'interface,
           "interface refinement parent must be an InterfaceType")
-  InterfaceType(name, parent.roles, declarations, parent)
+  InterfaceType(name, parent.roles, declarations, parent, supported_types)
 
 defn.macro
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
+       supports: $supported
+       $(first_from :: Identifier) -> $(first_to :: Identifier):
+         $first_field: $first_type
+         ...
+       $(second_from :: Identifier) -> $(second_to :: Identifier):
+         $second_field: $second_type
+         ...':
+    def interface_name = name.to_source_string()
+    def first_from_name = first_from.to_source_string()
+    def first_to_name = first_to.to_source_string()
+    def second_from_name = second_from.to_source_string()
+    def second_to_name = second_to.to_source_string()
+    let [first_field_name, ...] = [first_field.to_source_string(), ...]
+    let [second_field_name, ...] = [second_field.to_source_string(), ...]
+    'fun $name($parameter, ...):
+       make_refined_interface(
+         $interface_name,
+         $parent,
+         [InterfaceMember($first_field_name,
+                          $first_type,
+                          $first_from_name,
+                          $first_to_name),
+          ...,
+          InterfaceMember($second_field_name,
+                          $second_type,
+                          $second_from_name,
+                          $second_to_name),
+          ...],
+         [$supported]
+       )'
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
+       supports: $supported
+       $(from_role :: Identifier) -> $(to_role :: Identifier):
+         $field: $field_type
+         ...':
+    def interface_name = name.to_source_string()
+    def from_role_name = from_role.to_source_string()
+    def to_role_name = to_role.to_source_string()
+    let [field_name, ...] = [field.to_source_string(), ...]
+    'fun $name($parameter, ...):
+       make_refined_interface(
+         $interface_name,
+         $parent,
+         [InterfaceMember($field_name,
+                          $field_type,
+                          $from_role_name,
+                          $to_role_name),
+          ...],
+         [$supported]
+       )'
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
+       supports: $supported':
+    def interface_name = name.to_source_string()
+    'fun $name($parameter, ...):
+       make_refined_interface($interface_name, $parent, [], [$supported])'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        $(first_from :: Identifier) -> $(first_to :: Identifier):
          $first_field: $first_type
