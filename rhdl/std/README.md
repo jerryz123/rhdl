@@ -77,18 +77,18 @@ import:
 | Interface | Contract |
 |---|---|
 | `Valid(T)` | Every asserted cycle carries one payload; no backpressure |
-| `DecoupledControl()` | Offer/accept control; transfer occurs when `ready` and `valid` are asserted |
-| `IrrevocableControl()` | A decoupled offer cannot be withdrawn before transfer |
+| `DecoupledCtrl()` | Offer/accept control; transfer occurs when `ready` and `valid` are asserted |
+| `IrrevocableCtrl()` | A decoupled offer cannot be withdrawn before transfer |
 | `Decoupled(T)` | Payload-bearing decoupled transfer without a pre-transfer stability guarantee |
 | `Irrevocable(T)` | A valid payload remains asserted and stable until transfer |
 
-`Decoupled` refines `DecoupledControl`; `Irrevocable` refines
-`IrrevocableControl`, which transitively refines `DecoupledControl`.
+`Decoupled` refines `DecoupledCtrl`; `Irrevocable` refines
+`IrrevocableCtrl`, which transitively refines `DecoupledCtrl`.
 `Irrevocable(T)` also declares support for the weaker `Decoupled(T)` contract.
 The temporal difference is currently documentation rather than generated
 protocol assertions.
 
-`fire(endpoint)` accepts any endpoint supporting `DecoupledControl` and
+`fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
 returns `endpoint.valid and endpoint.ready`.
 
 ## Flow-control circuits
@@ -96,15 +96,15 @@ returns `endpoint.valid and endpoint.ready`.
 [`flow.rhdl`](flow.rhdl) re-exports the independently importable generators
 under [`flow/`](flow/):
 
-| Generator | Behavior |
-|---|---|
-| `Pipe(T, stages)` | Registered elastic pipeline with stable output under backpressure |
-| `Queue(T, depth)` | Configurable FIFO with occupancy count |
-| `Arbiter(T, n)` | Fixed-priority, index-zero-first arbitration |
-| `RRArbiter(T, n)` | Fair round-robin arbitration |
-| `Demux(T, n)` | Selected one-to-many routing with invalid-selector blocking |
-| `Join(T, n)` | Atomic homogeneous join that never partially consumes inputs |
-| `Broadcast(T, n)` | Buffered exactly-once delivery tracked independently per recipient |
+| Payload generator | Control-only generator | Behavior |
+|---|---|---|
+| `Pipe(T, stages)` | `CtrlPipe(stages)` | Registered elastic pipeline with stable output under backpressure |
+| `Queue(T, depth)` | `CtrlQueue(depth)` | Configurable FIFO with occupancy count |
+| `Arbiter(T, n)` | `CtrlArbiter(n)` | Fixed-priority, index-zero-first arbitration |
+| `RRArbiter(T, n)` | `CtrlRRArbiter(n)` | Fair round-robin arbitration |
+| `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
+| `Join(T, n)` | `CtrlJoin(n)` | Atomic join that never partially consumes inputs |
+| `Broadcast(T, n)` | `CtrlBroadcast(n)` | Buffered exactly-once delivery tracked independently per recipient |
 
 Import the aggregate when several components are needed:
 
@@ -129,6 +129,14 @@ and return the downstream endpoint with static interface information intact.
 `Pipe` produces an `Irrevocable` endpoint. Use an explicit `Queue` instance
 when its `count` output or instance handle is needed.
 
+The corresponding `ctrl_queue` and `ctrl_pipe` helpers accept
+`DecoupledCtrl` or `IrrevocableCtrl` endpoints and retain the same static
+interface information without manufacturing a dummy payload. Control-only
+streams carry indistinguishable tokens; they are not a detachable control half
+of a payload-bearing transaction. `CtrlPipe` produces `IrrevocableCtrl`, while
+`CtrlQueue` remains conservatively `DecoupledCtrl` because flow-through mode
+can expose its input offer directly.
+
 `Queue(T, depth)` defaults to a registered, non-flow-through FIFO.
 `~pipe: #true` permits enqueue when a full queue dequeues in the same cycle;
 `~flow: #true` lets an empty queue present its input directly. `count` has type
@@ -138,7 +146,9 @@ depths greater than one compose two `Counter(depth)` pointer instances.
 See [`../../examples/flow-control.rhdl`](../../examples/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and
 [`../../examples/flow-topology.rhdl`](../../examples/flow-topology.rhdl) for
-round-robin arbitration, demux, join, and broadcast.
+round-robin arbitration, demux, join, and broadcast. The parallel token-only
+family is materialized in
+[`../../examples/ctrl-flow.rhdl`](../../examples/ctrl-flow.rhdl).
 
 ## Counter
 

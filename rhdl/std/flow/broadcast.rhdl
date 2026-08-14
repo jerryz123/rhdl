@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the standard exactly-once ready-valid broadcast buffer.
+// Defines payload-bearing and control-only exactly-once broadcast buffers.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -45,5 +45,39 @@ sync_circuit Broadcast(T, n :: Int):
     elsewhen (pending[index] and egress[index].ready):
       pending.next[index] <== Bool(#false)
 
+// Payloadless broadcast retains only the per-recipient pending mask. Each
+// output's valid offer remains asserted until that recipient accepts it.
+sync_circuit CtrlBroadcast(n :: Int):
+  unless n > 0
+  | error(~who: #'CtrlBroadcast, "output count must be a positive host Int")
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  interface egress[n](IrrevocableCtrl(), ~role: producer)
+
+  def initial_pending = vec(
+    for List (_ in 0..n): Bool(#false)
+  )
+  reg pending(~init: initial_pending)
+
+  def mutable any_pending = Bool(#false)
+  def mutable all_pending_ready = Bool(#true)
+  for (index in 0..n):
+    any_pending := any_pending or pending[index]
+    all_pending_ready := all_pending_ready and (
+      (not pending[index]) or egress[index].ready
+    )
+    egress[index].valid <== pending[index]
+
+  def input_ready = (not any_pending) or all_pending_ready
+  def accept_input = ingress.valid and input_ready
+  ingress.ready <== input_ready
+
+  for (index in 0..n):
+    when (accept_input):
+      pending.next[index] <== Bool(#true)
+    elsewhen (pending[index] and egress[index].ready):
+      pending.next[index] <== Bool(#false)
+
 export:
   Broadcast
+  CtrlBroadcast

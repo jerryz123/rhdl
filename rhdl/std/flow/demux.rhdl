@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the standard selected ready-valid one-to-many demultiplexer.
+// Defines payload-bearing and control-only selected demultiplexers.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -24,5 +24,24 @@ circuit Demux(T, n :: Int):
 
   ingress.ready <== selected_ready
 
+// Routes a payloadless token to exactly the selected output. Invalid selector
+// encodings block the token rather than consuming it.
+circuit CtrlDemux(n :: Int):
+  unless n > 0
+  | error(~who: #'CtrlDemux, "output count must be a positive host Int")
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  input select: Bits(index_width(n))
+  interface egress[n](DecoupledCtrl(), ~role: producer)
+
+  def mutable selected_ready = Bool(#false)
+  for (index in 0..n):
+    def selected = select === bits(index, index_width(n))
+    egress[index].valid <== ingress.valid and selected
+    selected_ready := selected_ready or (selected and egress[index].ready)
+
+  ingress.ready <== selected_ready
+
 export:
   Demux
+  CtrlDemux

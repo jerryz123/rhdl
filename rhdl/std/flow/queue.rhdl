@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the standard configurable ready-valid FIFO queue generator.
+// Defines payload-bearing and control-only configurable ready-valid queues.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -89,6 +89,63 @@ sync_circuit Queue(T,
         )
       #void
 
+// Tokens are indistinguishable, so the control-only queue needs occupancy
+// state but no payload memory or read/write pointers.
+sync_circuit CtrlQueue(depth :: Int,
+                       ~pipe: pipe :: Boolean = #false,
+                       ~flow: flow :: Boolean = #false):
+  unless depth > 0
+  | error(~who: #'CtrlQueue, "depth must be a positive host Int")
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  interface egress(DecoupledCtrl(), ~role: producer)
+  output count: Bits(index_width(depth + 1))
+
+  def pipe_enabled = Bool(pipe)
+  def flow_enabled = Bool(flow)
+  fun ready_for_input(full): (not full) or (pipe_enabled and egress.ready)
+  fun valid_for_output(empty): (not empty) or (flow_enabled and ingress.valid)
+  fun stores_input(empty, ingress_ready):
+    ingress.valid and ingress_ready and not (
+      flow_enabled and empty and egress.ready
+    )
+  fun removes_output(empty): (not empty) and egress.ready
+
+  if (depth == 1)
+  | block:
+      reg occupied(~init: Bool(#false))
+      def empty = not occupied
+      def input_ready = ready_for_input(occupied)
+      def enqueue = stores_input(empty, input_ready)
+      def dequeue = removes_output(empty)
+
+      ingress.ready <== input_ready
+      egress.valid <== valid_for_output(empty)
+      count <== occupied.into(Bits(1))
+
+      when (enqueue xor dequeue):
+        occupied.next <== enqueue
+      #void
+  | block:
+      def count_width = index_width(depth + 1)
+      reg occupancy(~init: bits(0, count_width))
+      def empty = occupancy === bits(0, count_width)
+      def full = occupancy === bits(depth, count_width)
+      def input_ready = ready_for_input(full)
+      def enqueue = stores_input(empty, input_ready)
+      def dequeue = removes_output(empty)
+
+      ingress.ready <== input_ready
+      egress.valid <== valid_for_output(empty)
+      count <== occupancy
+
+      when (enqueue xor dequeue):
+        occupancy.next <== mux(
+          enqueue,
+          occupancy + bits(1, count_width),
+          occupancy - bits(1, count_width)
+        )
+      #void
 // Instantiates a queue in the ambient sync domain and returns its downstream
 // endpoint. Use an explicit Queue instance when count must remain accessible.
 fun queue(source :: Endpoint,
@@ -104,6 +161,21 @@ fun queue(source :: Endpoint,
   queue_stage.ingress <=> source
   queue_stage.egress
 
+// Instantiates the payloadless token FIFO in the ambient sync domain.
+fun ctrl_queue(source :: Endpoint,
+               depth :: Int,
+               ~pipe: pipe_enabled :: Boolean = #false,
+               ~flow: flow_enabled :: Boolean = #false) :~ Endpoint:
+  def checked = ctrl_endpoint(source)
+  def CtrlQueueModule = CtrlQueue(depth,
+                                  ~pipe: pipe_enabled,
+                                  ~flow: flow_enabled)
+  inst ctrl_queue_stage(CtrlQueueModule)
+  ctrl_queue_stage.ingress <=> checked
+  ctrl_queue_stage.egress
+
 export:
   Queue
   queue
+  CtrlQueue
+  ctrl_queue

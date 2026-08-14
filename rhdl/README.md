@@ -68,15 +68,15 @@ import one primitive without loading unrelated generators.
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes over hardware literals | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
-| `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and payload introspection | None |
-| `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
-| `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
-| `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
-| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter` | `std/ready-valid.rhdl` |
-| `std/flow/demux.rhdl` | Selected one-to-many `Demux` | `std/ready-valid.rhdl` |
-| `std/flow/join.rhdl` | Atomic homogeneous `Join` | `std/ready-valid.rhdl` |
-| `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast` | `std/ready-valid.rhdl` |
-| `std/flow.rhdl` | Flow-control convenience aggregate | All `std/flow/` modules |
+| `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
+| `std/flow/pipe.rhdl` | Registered elastic `Pipe`/`CtrlPipe` and typed chaining helpers | `std/ready-valid.rhdl` |
+| `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed chaining helpers | `std/ready-valid.rhdl`, `std/counter.rhdl` |
+| `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
+| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` | `std/ready-valid.rhdl` |
+| `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` | `std/ready-valid.rhdl` |
+| `std/flow/join.rhdl` | Atomic homogeneous `Join`/`CtrlJoin` | `std/ready-valid.rhdl` |
+| `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
+| `std/flow.rhdl` | Ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
 
 ## Frontend layer dependencies
 

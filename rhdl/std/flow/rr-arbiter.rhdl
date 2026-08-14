@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the standard round-robin ready-valid arbiter.
+// Defines payload-bearing and control-only round-robin arbiters.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -62,5 +62,56 @@ sync_circuit RRArbiter(T, n :: Int):
       selected_index + bits(1, choice_width)
     )
 
+// The payloadless specialization rotates the same grant policy after each
+// transferred token and retains the selected input index.
+sync_circuit CtrlRRArbiter(n :: Int):
+  unless n > 0
+  | error(~who: #'CtrlRRArbiter, "input count must be a positive host Int")
+
+  interface ingress[n](DecoupledCtrl(), ~role: consumer)
+  interface egress(DecoupledCtrl(), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def choice_width = index_width(n)
+  reg next_priority(~init: bits(0, choice_width))
+  def mutable selected_valid = Bool(#false)
+  def mutable selected_index = bits(0, choice_width)
+
+  for (start in 0..n):
+    def mutable candidate_valid = Bool(#false)
+    def mutable candidate_index = bits(start, choice_width)
+    def priority_order = (
+      for List (index in start..n): index
+    ) ++ (
+      for List (index in 0..start): index
+    )
+    for (index in priority_order):
+      def take = ingress[index].valid and not candidate_valid
+      candidate_index := mux(take,
+                             bits(index, choice_width),
+                             candidate_index)
+      candidate_valid := candidate_valid or ingress[index].valid
+
+    def starts_here = next_priority === bits(start, choice_width)
+    selected_valid := mux(starts_here, candidate_valid, selected_valid)
+    selected_index := mux(starts_here, candidate_index, selected_index)
+
+  for (index in 0..n):
+    def selected = selected_valid and (
+      selected_index === bits(index, choice_width)
+    )
+    ingress[index].ready <== egress.ready and selected
+
+  egress.valid <== selected_valid
+  chosen <== selected_index
+
+  when (selected_valid and egress.ready):
+    next_priority.next <== mux(
+      selected_index === bits(n - 1, choice_width),
+      bits(0, choice_width),
+      selected_index + bits(1, choice_width)
+    )
+
 export:
   RRArbiter
+  CtrlRRArbiter

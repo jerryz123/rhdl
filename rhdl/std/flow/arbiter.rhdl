@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the standard combinational fixed-priority ready-valid arbiter.
+// Defines payload-bearing and control-only fixed-priority arbiters.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -35,5 +35,31 @@ circuit Arbiter(T, n :: Int):
   egress.bits <== selected_bits
   chosen <== selected_index
 
+// Lower indices have higher priority among payloadless token offers.
+circuit CtrlArbiter(n :: Int):
+  unless n > 0
+  | error(~who: #'CtrlArbiter, "input count must be a positive host Int")
+
+  interface ingress[n](DecoupledCtrl(), ~role: consumer)
+  interface egress(DecoupledCtrl(), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def mutable selected_index = bits(0, index_width(n))
+  for (offset in 0..n):
+    def index = n - offset - 1
+    selected_index := mux(ingress[index].valid,
+                          bits(index, index_width(n)),
+                          selected_index)
+
+  def mutable prior_valid = Bool(#false)
+  for (index in 0..n):
+    def granted = ingress[index].valid and not prior_valid
+    ingress[index].ready <== egress.ready and granted
+    prior_valid := prior_valid or ingress[index].valid
+
+  egress.valid <== prior_valid
+  chosen <== selected_index
+
 export:
   Arbiter
+  CtrlArbiter

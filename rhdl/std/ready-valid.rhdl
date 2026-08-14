@@ -13,18 +13,18 @@ interface Valid(T):
 
 // The ready-valid family has independent payload and stability axes:
 //
-// DecoupledControl ---- add payload ----> Decoupled(T)
-//         |                                      |
-//    strengthen                             strengthen
-//         v                                      v
-// IrrevocableControl -- add payload --> Irrevocable(T)
+// DecoupledCtrl ---- add payload ----> Decoupled(T)
+//       |                                  |
+//  strengthen                         strengthen
+//       v                                  v
+// IrrevocableCtrl -- add payload --> Irrevocable(T)
 //
 // Horizontal refinement adds `bits`; vertical strengthening promises that an
 // offered transaction cannot be withdrawn before it is accepted.
 
 // Defines the reusable offer/accept control plane. Transfer occurs whenever
 // valid and ready are both asserted in the same cycle.
-interface DecoupledControl():
+interface DecoupledCtrl():
   role producer
   role consumer
 
@@ -36,11 +36,11 @@ interface DecoupledControl():
 
 // Once valid is asserted, the indicated offer cannot be withdrawn until a
 // transfer. What the offer denotes is defined by the refining protocol.
-interface IrrevocableControl() refines DecoupledControl()
+interface IrrevocableCtrl() refines DecoupledCtrl()
 
 // Adds an unconstrained payload to the decoupled control plane. Before a
 // transfer, the producer may withdraw valid or change bits.
-interface Decoupled(T) refines DecoupledControl():
+interface Decoupled(T) refines DecoupledCtrl():
   producer -> consumer:
     bits: T
 
@@ -48,7 +48,7 @@ interface Decoupled(T) refines DecoupledControl():
 // supports the weaker Decoupled payload contract for producer-side connection.
 // While valid is waiting for ready, both valid and bits remain asserted and
 // stable.
-interface Irrevocable(T) refines IrrevocableControl():
+interface Irrevocable(T) refines IrrevocableCtrl():
   supports: Decoupled(T)
   producer -> consumer:
     bits: T
@@ -56,7 +56,7 @@ interface Irrevocable(T) refines IrrevocableControl():
 // Reports the transfer event for any endpoint that nominally refines the
 // decoupled control contract.
 fun fire(
-  endpoint :: Endpoint.supports(DecoupledControl())
+  endpoint :: Endpoint.supports(DecoupledCtrl())
 ) :~ Bool:
   endpoint.valid and endpoint.ready
 
@@ -71,11 +71,20 @@ fun decoupled_payload_type(endpoint :: Endpoint):
     fun (member): member.name == "bits"
   ).type
 
+// Validates the payloadless ready-valid family for Ctrl flow helpers while
+// retaining the endpoint itself and its static interface information.
+fun ctrl_endpoint(endpoint :: Endpoint) :~ Endpoint:
+  unless endpoint.type.name == "DecoupledCtrl" || endpoint.type.name == "IrrevocableCtrl"
+  | error(~who: #'ctrl_endpoint,
+          "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint")
+  endpoint
+
 export:
   Valid
-  DecoupledControl
-  IrrevocableControl
+  DecoupledCtrl
+  IrrevocableCtrl
   Decoupled
   Irrevocable
   fire
   decoupled_payload_type
+  ctrl_endpoint

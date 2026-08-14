@@ -1,0 +1,383 @@
+#lang rhdl
+// Materializes the standard payloadless token-flow generators and chaining helpers.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+sync_circuit CtrlBufferedLink():
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  interface egress(DecoupledCtrl(), ~role: producer)
+
+  def buffered = ingress |> ctrl_queue(_, 3, ~pipe: #true) |> ctrl_pipe(_, 2)
+  egress <=> buffered
+
+def ctrl_pipe_design = elaborate(CtrlPipe(2))
+def ctrl_queue_design = elaborate(CtrlQueue(3))
+def ctrl_queue_options_design = elaborate(
+  CtrlQueue(2, ~pipe: #true, ~flow: #true)
+)
+def ctrl_arbiter_design = elaborate(CtrlArbiter(3))
+def ctrl_rr_arbiter_design = elaborate(CtrlRRArbiter(3))
+def ctrl_demux_design = elaborate(CtrlDemux(3))
+def ctrl_join_design = elaborate(CtrlJoin(3))
+def ctrl_broadcast_design = elaborate(CtrlBroadcast(3))
+def ctrl_chain_design = elaborate(CtrlBufferedLink())
+
+def ctrl_pipe_verilog_reference = @str|<<{
+module CtrlPipe(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out
+);
+
+  reg  [1:0] stage_valid;
+  wire       _GEN = ~stage_valid[1'h1] | egress_in.ready;
+  wire       _GEN_0 = ~stage_valid[1'h0] | _GEN;
+  wire       _GEN_1 = _GEN_0 ? ingress_in.valid : stage_valid[1'h0];
+  wire       _GEN_2 = _GEN ? stage_valid[1'h0] : stage_valid[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0, 1'h0};
+    else begin
+      stage_valid[1'h1] <= _GEN_2;
+      stage_valid[1'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: stage_valid[1'h1]};
+endmodule
+}>>|
+
+def ctrl_queue_verilog_reference = @str|<<{
+module CtrlQueue(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out,
+  output [1:0]                         count
+);
+
+  reg  [1:0] occupancy;
+  wire       _GEN = occupancy == 2'h0;
+  wire       _GEN_0 = occupancy != 2'h3;
+  wire       _GEN_1 = ingress_in.valid & _GEN_0;
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_1 ^ ~_GEN & egress_in.ready
+          ? (_GEN_1 ? occupancy + 2'h1 : occupancy - 2'h1)
+          : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: (~_GEN)};
+  assign count = occupancy;
+endmodule
+}>>|
+
+def ctrl_queue_options_verilog_reference = @str|<<{
+module CtrlQueue(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out,
+  output [1:0]                         count
+);
+
+  reg  [1:0] occupancy;
+  wire       _GEN = occupancy == 2'h0;
+  wire       _GEN_0 = occupancy != 2'h2 | egress_in.ready;
+  wire       _GEN_1 = ingress_in.valid & _GEN_0 & ~(_GEN & egress_in.ready);
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_1 ^ ~_GEN & egress_in.ready
+          ? (_GEN_1 ? occupancy + 2'h1 : occupancy - 2'h1)
+          : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: (~_GEN | ingress_in.valid)};
+  assign count = occupancy;
+endmodule
+}>>|
+
+def ctrl_arbiter_verilog_reference = @str|<<{
+module CtrlArbiter(
+  input  struct packed {logic valid; } ingress_0_in,
+                                       ingress_1_in,
+                                       ingress_2_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_0_out,
+                                       ingress_1_out,
+                                       ingress_2_out,
+  output struct packed {logic valid; } egress_out,
+  output [1:0]                         chosen
+);
+
+  wire _GEN = ingress_0_in.valid | ingress_1_in.valid;
+  assign ingress_0_out = '{ready: (egress_in.ready & ingress_0_in.valid)};
+  assign ingress_1_out =
+    '{ready: (egress_in.ready & ingress_1_in.valid & ~ingress_0_in.valid)};
+  assign ingress_2_out = '{ready: (egress_in.ready & ingress_2_in.valid & ~_GEN)};
+  assign egress_out = '{valid: (_GEN | ingress_2_in.valid)};
+  assign chosen =
+    ingress_0_in.valid ? 2'h0 : ingress_1_in.valid ? 2'h1 : {ingress_2_in.valid, 1'h0};
+endmodule
+}>>|
+
+def ctrl_rr_arbiter_verilog_reference = @str|<<{
+module CtrlRRArbiter(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_0_in,
+                                       ingress_1_in,
+                                       ingress_2_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_0_out,
+                                       ingress_1_out,
+                                       ingress_2_out,
+  output struct packed {logic valid; } egress_out,
+  output [1:0]                         chosen
+);
+
+  reg  [1:0]      next_priority;
+  wire            _GEN = ingress_0_in.valid | ingress_1_in.valid;
+  wire            _GEN_0 = ingress_1_in.valid | ingress_2_in.valid;
+  wire            _GEN_1 = ingress_2_in.valid | ingress_0_in.valid;
+  wire            _GEN_2 =
+    next_priority == 2'h2
+      ? _GEN_1 | ingress_1_in.valid
+      : next_priority == 2'h1
+          ? _GEN_0 | ingress_0_in.valid
+          : next_priority == 2'h0 & (_GEN | ingress_2_in.valid);
+  wire [3:0][1:0] _GEN_3 =
+    {{2'h0},
+     {ingress_1_in.valid & ~_GEN_1
+        ? 2'h1
+        : {~(ingress_0_in.valid & ~ingress_2_in.valid), 1'h0}},
+     {ingress_0_in.valid & ~_GEN_0
+        ? 2'h0
+        : ingress_2_in.valid & ~ingress_1_in.valid ? 2'h2 : 2'h1},
+     {ingress_2_in.valid & ~_GEN
+        ? 2'h2
+        : {1'h0, ingress_1_in.valid & ~ingress_0_in.valid}}};
+  wire [1:0]      _GEN_4 = _GEN_3[next_priority];
+  wire            _GEN_5 = _GEN_4 == 2'h2;
+  always @(posedge clock) begin
+    if (reset)
+      next_priority <= 2'h0;
+    else
+      next_priority <=
+        _GEN_2 & egress_in.ready ? (_GEN_5 ? 2'h0 : _GEN_4 + 2'h1) : next_priority;
+  end // always @(posedge)
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_4 == 2'h0)};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_4 == 2'h1)};
+  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_5)};
+  assign egress_out = '{valid: _GEN_2};
+  assign chosen = _GEN_4;
+endmodule
+}>>|
+
+def ctrl_demux_verilog_reference = @str|<<{
+module CtrlDemux(
+  input  struct packed {logic valid; } ingress_in,
+  input  [1:0]                         select,
+  input  struct packed {logic ready; } egress_0_in,
+                                       egress_1_in,
+                                       egress_2_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_0_out,
+                                       egress_1_out,
+                                       egress_2_out
+);
+
+  wire _GEN = select == 2'h0;
+  wire _GEN_0 = select == 2'h1;
+  wire _GEN_1 = select == 2'h2;
+  assign ingress_out =
+    '{ready:
+        (_GEN & egress_0_in.ready | _GEN_0 & egress_1_in.ready | _GEN_1
+         & egress_2_in.ready)};
+  assign egress_0_out = '{valid: (ingress_in.valid & _GEN)};
+  assign egress_1_out = '{valid: (ingress_in.valid & _GEN_0)};
+  assign egress_2_out = '{valid: (ingress_in.valid & _GEN_1)};
+endmodule
+}>>|
+
+def ctrl_join_verilog_reference = @str|<<{
+module CtrlJoin(
+  input  struct packed {logic valid; } ingress_0_in,
+                                       ingress_1_in,
+                                       ingress_2_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_0_out,
+                                       ingress_1_out,
+                                       ingress_2_out,
+  output struct packed {logic valid; } egress_out
+);
+
+  assign ingress_0_out =
+    '{ready: (egress_in.ready & ingress_1_in.valid & ingress_2_in.valid)};
+  assign ingress_1_out =
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_2_in.valid)};
+  assign ingress_2_out =
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_1_in.valid)};
+  assign egress_out =
+    '{valid: (ingress_0_in.valid & ingress_1_in.valid & ingress_2_in.valid)};
+endmodule
+}>>|
+
+def ctrl_broadcast_verilog_reference = @str|<<{
+module CtrlBroadcast(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_0_in,
+                                       egress_1_in,
+                                       egress_2_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_0_out,
+                                       egress_1_out,
+                                       egress_2_out
+);
+
+  reg  [2:0] pending;
+  wire       _GEN =
+    ~(pending[2'h0] | pending[2'h1] | pending[2'h2])
+    | (~pending[2'h0] | egress_0_in.ready) & (~pending[2'h1] | egress_1_in.ready)
+    & (~pending[2'h2] | egress_2_in.ready);
+  wire       _GEN_0 = ingress_in.valid & _GEN;
+  wire       _GEN_1 = _GEN_0 | ~(pending[2'h0] & egress_0_in.ready) & pending[2'h0];
+  wire       _GEN_2 = _GEN_0 | ~(pending[2'h1] & egress_1_in.ready) & pending[2'h1];
+  wire       _GEN_3 = _GEN_0 | ~(pending[2'h2] & egress_2_in.ready) & pending[2'h2];
+  always @(posedge clock) begin
+    if (reset)
+      pending <= '{1'h0, 1'h0, 1'h0};
+    else begin
+      pending[2'h2] <= _GEN_3;
+      pending[2'h1] <= _GEN_2;
+      pending[2'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN};
+  assign egress_0_out = '{valid: pending[2'h0]};
+  assign egress_1_out = '{valid: pending[2'h1]};
+  assign egress_2_out = '{valid: pending[2'h2]};
+endmodule
+}>>|
+
+def ctrl_chain_verilog_reference = @str|<<{
+module CtrlBufferedLink(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out
+);
+
+  wire struct packed {logic ready; } _ctrl_pipe_stage_ingress_out;
+  wire struct packed {logic valid; } _ctrl_queue_stage_egress_out;
+  CtrlQueue ctrl_queue_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (ingress_in),
+    .egress_in   (_ctrl_pipe_stage_ingress_out),
+    .ingress_out (ingress_out),
+    .egress_out  (_ctrl_queue_stage_egress_out),
+    .count       (/* unused */)
+  );
+  CtrlPipe ctrl_pipe_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_ctrl_queue_stage_egress_out),
+    .egress_in   (egress_in),
+    .ingress_out (_ctrl_pipe_stage_ingress_out),
+    .egress_out  (egress_out)
+  );
+endmodule
+
+module CtrlQueue(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out,
+  output [1:0]                         count
+);
+
+  reg  [1:0] occupancy;
+  wire       _GEN = occupancy == 2'h0;
+  wire       _GEN_0 = occupancy != 2'h3 | egress_in.ready;
+  wire       _GEN_1 = ingress_in.valid & _GEN_0;
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_1 ^ ~_GEN & egress_in.ready
+          ? (_GEN_1 ? occupancy + 2'h1 : occupancy - 2'h1)
+          : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: (~_GEN)};
+  assign count = occupancy;
+endmodule
+
+module CtrlPipe(
+  input                                clock,
+                                       reset,
+  input  struct packed {logic valid; } ingress_in,
+  input  struct packed {logic ready; } egress_in,
+  output struct packed {logic ready; } ingress_out,
+  output struct packed {logic valid; } egress_out
+);
+
+  reg  [1:0] stage_valid;
+  wire       _GEN = ~stage_valid[1'h1] | egress_in.ready;
+  wire       _GEN_0 = ~stage_valid[1'h0] | _GEN;
+  wire       _GEN_1 = _GEN_0 ? ingress_in.valid : stage_valid[1'h0];
+  wire       _GEN_2 = _GEN ? stage_valid[1'h0] : stage_valid[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0, 1'h0};
+    else begin
+      stage_valid[1'h1] <= _GEN_2;
+      stage_valid[1'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: stage_valid[1'h1]};
+endmodule
+}>>|
+
+export:
+  ctrl_pipe_design
+  ctrl_queue_design
+  ctrl_queue_options_design
+  ctrl_arbiter_design
+  ctrl_rr_arbiter_design
+  ctrl_demux_design
+  ctrl_join_design
+  ctrl_broadcast_design
+  ctrl_chain_design
+  ctrl_pipe_verilog_reference
+  ctrl_queue_verilog_reference
+  ctrl_queue_options_verilog_reference
+  ctrl_arbiter_verilog_reference
+  ctrl_rr_arbiter_verilog_reference
+  ctrl_demux_verilog_reference
+  ctrl_join_verilog_reference
+  ctrl_broadcast_verilog_reference
+  ctrl_chain_verilog_reference

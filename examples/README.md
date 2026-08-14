@@ -97,6 +97,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`flow-control.rhdl`](flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
 | [`flow-topology.rhdl`](flow-topology.rhdl) | Round-robin arbitration, demux, atomic join, and exactly-once broadcast |
+| [`ctrl-flow.rhdl`](ctrl-flow.rhdl) | Payloadless token-flow versions of pipe, queue, arbitration, routing, join, and broadcast |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus library,
 showing that useful RHDL composition need not modify a reader or define a
