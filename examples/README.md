@@ -60,6 +60,7 @@ importable layers:
 | [`layers/expanding-arithmetic.rhm`](../rhdl/frontend/layers/expanding-arithmetic.rhm) | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, callable host-Boolean literals, `===`, unsigned ordering, and binary `mux` |
 | [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
+| [`layers/one-hot.rhm`](../rhdl/frontend/layers/one-hot.rhm) | Structurally sized exact-one-hot values, literals, and typed mux keys |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, public endpoint annotations, host-sized endpoint arrays, bulk connection, and instance reconstruction |
 | [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
@@ -71,7 +72,7 @@ importable layers:
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
 implementation. It aggregates the foundation and the curated layers, including
-enum and sync. `#lang rhdl` exposes that curated standard profile. The lower-level
+enum, one-hot, and sync. `#lang rhdl` exposes that curated standard profile. The lower-level
 [`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
 remain explicit library imports.
 
@@ -114,6 +115,7 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `bits_value[index]` | `rtl.extract(value, index, index)` |
 | `value[low..high]` | `rtl.extract(value, high - 1, low)` |
 | `value.into(T)` | `rtl.cast` preserving canonical packed width and bit order |
+| `OneHot(n)` and `OneHot(n)(index)` | A distinct flat encoding and a power-of-two constant followed by `rtl.cast` |
 | `concat(a, b, ...)` or `concat(parts)` | Canonical packing as needed, then one Bits-only `rtl.concat` |
 | `Vec(n, T)` | Core `VectorType(n, T)` |
 | `vec(a, b, ...)` or `vec(elements)` | `rtl.vector_create` with inferred uniform element type |
@@ -171,6 +173,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
 | [`unsigned-comparisons.rhdl`](unsigned-comparisons.rhdl) | Four unsigned ordering forms derived from the single core `rtl.ult` primitive |
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums as typed mux selectors and values, explicit encodings, registers, and invalid-state recovery |
+| [`one-hot.rhdl`](one-hot.rhdl) | Structurally sized one-hot literals, exact typed mux keys, equality, and explicit representation casts |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless unsigned addition and multiplication over unequal-width operands |
 | [`counter.rhdl`](counter.rhdl) | Host helper functions that accept hardware values, allocate an ambient register, and return hardware |

@@ -1,0 +1,80 @@
+#lang rhombus/and_meta
+// Defines structurally sized one-hot types and typed hardware literals.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/fields.rhm".HardwareFields
+  "../support/mux-lookup.rhm" as mux_support
+
+export:
+  OneHot
+  one_hot_type
+  one_hot_width
+
+fun one_hot_encoding(index):
+  1 bits.(<<) index
+
+class _OneHotType(width):
+  implements FlatDataType
+  implements Callable
+  implements mux_support.MuxLookupSelectorType
+
+  constructor (width):
+    unless width is_a Int && width > 0
+    | error(~who: #'OneHot, "width must be a positive host Int")
+    super(width)
+
+  override method describe():
+    "onehot<" ++ to_string(width) ++ ">"
+
+  override method type_equal(other):
+    one_hot_type(other) && width == other.width
+
+  override method bit_width():
+    width
+
+  override method call(index):
+    unless index is_a Int && 0 <= index && index < width
+    | error(~who: #'OneHot,
+            "literal index must satisfy 0 <= index < width")
+    OneHotValue(this, index)
+
+  override method normalize_mux_lookup_key(key):
+    unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
+    | error(~who: #'mux_lookup,
+            "one-hot mux lookup keys must belong to the selector's OneHot type")
+    key.mux_lookup_key_encoding()
+
+class OneHotValue(type, index):
+  implements mux_support.MuxLookupKey
+
+  override method materialize_hardware(location):
+    kernel.cast(kernel.literal(Bits(type.width),
+                               one_hot_encoding(index),
+                               #false,
+                               location),
+                type,
+                #false,
+                location)
+
+  override method mux_lookup_key_type():
+    type
+
+  override method mux_lookup_key_encoding():
+    one_hot_encoding(index)
+
+fun OneHot(width):
+  _OneHotType(width)
+
+annot.macro 'OneHot($width)':
+  'HardwareFields.of(OneHot($width))'
+
+fun one_hot_type(type):
+  type is_a _OneHotType
+
+fun one_hot_width(type):
+  unless one_hot_type(type)
+  | error(~who: #'one_hot_width, "expected a OneHot type")
+  type.width

@@ -1,0 +1,45 @@
+#lang rhdl
+// Demonstrates a typed one-hot control value, equality, casts, and mux keys.
+
+def Grant = OneHot(4)
+
+fun preserve_grant(value :: OneHot(4)) :~ OneHot(4):
+  value
+
+circuit OneHotRotate():
+  input current: Grant
+  output next_grant: Grant
+  output current_bits: Bits(4)
+  output is_last: Bool
+
+  def checked = preserve_grant(current)
+  next_grant <== mux_lookup(checked, ~default: Grant(0)):
+    Grant(0): Grant(1)
+    Grant(1): Grant(2)
+    Grant(2): Grant(3)
+    Grant(3): Grant(0)
+  current_bits <== checked.into(Bits(4))
+  is_last <== checked === Grant(3)
+
+def design = elaborate(OneHotRotate())
+
+def verilog_reference = @str|<<{
+module OneHotRotate(
+  input  [3:0] current,
+  output [3:0] next_grant,
+               current_bits,
+  output       is_last
+);
+
+  assign next_grant =
+    current == 4'h1 ? 4'h2 : current == 4'h2 ? 4'h4 : current == 4'h4 ? 4'h8 : 4'h1;
+  assign current_bits = current;
+  assign is_last = current == 4'h8;
+endmodule
+}>>|
+
+export:
+  Grant
+  OneHotRotate
+  design
+  verilog_reference

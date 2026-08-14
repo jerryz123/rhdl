@@ -76,6 +76,7 @@ or policy over existing semantics. Current examples include:
 
 - The layer-defined `Bool` type, Boolean equality, and unsigned ordering syntax.
 - Nominal hardware enums lowered through explicit bit representations.
+- Structurally sized one-hot types with typed literals and mux keys.
 - Modular and expanding arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
@@ -85,8 +86,8 @@ or policy over existing semantics. Current examples include:
 - Binding-derived hardware names.
 - Instance dot access and atomic bulk connection.
 
-This division is intentional. `Bool` demonstrates that an additional scalar
-type need not be hard-coded into core. Interfaces demonstrate that a rich,
+This division is intentional. `Bool` and `OneHot` demonstrate that additional
+scalar types need not be hard-coded into core. Interfaces demonstrate that a rich,
 bidirectional protocol abstraction can remain frontend metadata while lowering
 to ordinary core records and ports.
 
@@ -122,6 +123,7 @@ The composable frontend layers are:
 | `layers/expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication, with `+&` and `*&` sugar |
 | `layers/bool.rhm` | Nominal `Bool`, `Bool(#true)` literals, `===`, unsigned ordering, and binary `mux` |
 | `layers/enum.rhm` | Nominal hardware enums with automatic or explicit encodings |
+| `layers/one-hot.rhm` | Structurally sized `OneHot(n)` types, typed literals, and mux keys |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `layers/wire.rhm` | Binding-derived single-driver internal wires |
@@ -133,7 +135,7 @@ The composable frontend layers are:
 | `layers/memory.rhm` | Binding-derived memories, async indexing, synchronous writes, and `index_width` |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
-does not implement features itself. `#lang rhdl` includes enum and sync syntax;
+does not implement features itself. `#lang rhdl` includes enum, one-hot, and sync syntax;
 `#lang rhdl/base` users select those layers explicitly like any other optional
 composition. Neither language profile implicitly exports the core Builder or
 raw elaboration kernel.
@@ -510,6 +512,44 @@ Unused encodings remain representable at hardware boundaries, so `~default`
 remains mandatory and supplies the invalid-encoding recovery path. Named enum
 members are not treated as proof that every bit pattern is valid. See
 [`examples/enum-state.rhdl`](examples/enum-state.rhdl).
+
+### One-hot values
+
+`OneHot(n)` is a structurally sized frontend `FlatDataType` representing an
+exactly-one-hot `n`-bit value. Give the type a local name and call that type
+object with a host index to construct a typed literal:
+
+```rhombus
+def Grant = OneHot(4)
+
+input current: Grant
+output next_grant: Grant
+
+next_grant <== mux_lookup(current, ~default: Grant(0)):
+  Grant(0): Grant(1)
+  Grant(1): Grant(2)
+  Grant(2): Grant(3)
+  Grant(3): Grant(0)
+```
+
+`Grant(2)` has the physical encoding `4'b0100`. Its type remains `Grant`, and
+`OneHot(4)` values are compatible with other `OneHot(4)` values but not with
+`Bits(4)` or differently sized one-hot values. A literal index must satisfy
+`0 <= index < n`.
+
+One-hot values deliberately do not implement `BitwiseType`: bitwise AND, OR,
+XOR, and complement do not preserve the exactly-one invariant. Equality,
+ports, wires, registers, memories, aggregate membership, and use as mux data
+work through existing flat-data machinery. Representation access remains an
+explicit cast such as `grant.into(Bits(4))`.
+
+One-hot literals may be keys for a `mux_lookup` selected by the matching
+`OneHot(n)` type. The selector lowers to `Bits(n)` and keys lower to powers of
+two before constructing the ordinary core mux operation. The mandatory
+default handles zero, multi-hot, and other invalid values that can still enter
+through hardware ports or explicit representation casts. Like an enum,
+`OneHot` records encoding intent; it is not a runtime proof. See
+[`examples/one-hot.rhdl`](examples/one-hot.rhdl).
 
 Width changes are explicit:
 
