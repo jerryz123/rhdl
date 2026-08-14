@@ -24,12 +24,13 @@ The current implementation provides:
   user callback.
 - Deterministic per-route reachability over allowed materialized decisions.
 - Rejection of reachable dead ends and destinations that cannot be reached.
+- Reachable-only VC dependency graph construction with merged route provenance.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet construct dependency graphs, validate deadlock
-freedom, or generate route tables.
+The package does not yet validate dependency-graph acyclicity or generate
+route tables.
 
 ## Dependency boundary
 
@@ -43,6 +44,7 @@ Run the focused checks from the repository root:
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
 bash noc/check-boundaries.sh
 ```
 
@@ -108,3 +110,16 @@ original `MaterializedDecision` values for reachable transitions. Decisions
 in disconnected or otherwise unreachable routing states are excluded, so the
 next dependency-graph pass will not report false cycles from unreachable
 relation entries.
+
+## VC dependency graph
+
+`build_dependency_graph` projects each reachable decision of the form
+`HeldVC(A) -> B` into the resource dependency edge `A -> B`. Injection
+decisions are excluded because a packet holds no VC before its first
+acquisition, and destination ejection acquires no resource.
+
+The resulting opaque `VCDependencyGraph` includes all reachable VC vertices in
+stable identity order. Duplicate edges are merged while retaining the original
+`MaterializedDecision` values and all contributing route classes. This
+provenance is the evidence that the next acyclicity pass will attach to a cycle
+witness.

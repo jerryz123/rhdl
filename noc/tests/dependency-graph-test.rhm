@@ -1,0 +1,145 @@
+#lang rhombus
+// Checks reachable-only VC dependency projection, stable ordering, and merged provenance.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def n4 = NodeId(4)
+
+// l3 and l4 form a materialized cycle disconnected from route0's injection.
+def l0 = PhysicalLink(LinkId(0), n0, n1, 1)
+def l1 = PhysicalLink(LinkId(1), n1, n2, 1)
+def l2 = PhysicalLink(LinkId(2), n0, n2, 1)
+def l3 = PhysicalLink(LinkId(3), n3, n4, 1)
+def l4 = PhysicalLink(LinkId(4), n4, n3, 1)
+def topology = Topology([n4, n2, n0, n3, n1], [l4, l2, l0, l3, l1])
+def route0 = RouteClass(RouteClassId(0), n0, n2)
+def mutable callback_count = 0
+def reachable = analyze_reachability(
+  materialize_routing(
+    RoutingProblem(
+      topology,
+      [route0],
+      RoutingRelation(
+        fun (_route_class, _origin, _candidate_vc):
+          callback_count := callback_count + 1
+          #true
+      )
+    )
+  )
+)
+def callbacks_before_graph = callback_count
+def graph = build_dependency_graph(reachable)
+def l0_vc = VCId(LinkId(0), 0)
+def l1_vc = VCId(LinkId(1), 0)
+def l2_vc = VCId(LinkId(2), 0)
+
+check:
+  callback_count ~is callbacks_before_graph
+  graph.vertices.map(fun (vc): vc.describe()) ~is ["l0.vc0", "l1.vc0", "l2.vc0"]
+  graph.edges.map(fun (edge): edge.describe()) ~is ["l0.vc0 -> l1.vc0 [r0]"]
+  graph.contains_vertex(l2_vc) ~is #true
+  graph.contains_vertex(VCId(LinkId(3), 0)) ~is #false
+  graph.outgoing_edges(l2_vc) ~is []
+  graph.incoming_edges(l1_vc).length() ~is 1
+  graph.describe() ~is "l0.vc0 -> l1.vc0 [r0]"
+  graph.find_edge(l0_vc, l1_vc).decisions[0] === reachable.for_route(
+    route0
+  ).reachable_decisions[2] ~is #true
+
+// Two route classes using the same path contribute provenance to one edge.
+def shared_l0 = PhysicalLink(LinkId(20), n0, n1, 1)
+def shared_l1 = PhysicalLink(LinkId(21), n1, n2, 1)
+def shared_topology = Topology([n0, n1, n2], [shared_l1, shared_l0])
+def shared_route0 = RouteClass(RouteClassId(10), n0, n2, "requests")
+def shared_route1 = RouteClass(RouteClassId(11), n0, n2, "responses")
+def shared_graph = build_dependency_graph(
+  analyze_reachability(
+    materialize_routing(
+      RoutingProblem(
+        shared_topology,
+        [shared_route1, shared_route0],
+        RoutingRelation(fun (_route_class, _origin, _candidate_vc): #true)
+      )
+    )
+  )
+)
+def shared_edge = shared_graph.find_edge(
+  VCId(LinkId(20), 0),
+  VCId(LinkId(21), 0)
+)
+
+check:
+  shared_graph.edges.length() ~is 1
+  shared_edge.decisions.length() ~is 2
+  shared_edge.route_classes().map(
+    fun (route_class): route_class.id.value
+  ) ~is [10, 11]
+  shared_edge.describe() ~is "l20.vc0 -> l21.vc0 [r10, r11]"
+
+// Each route below is a path, but their union contains A -> B and B -> A.
+def ux = NodeId(10)
+def uy = NodeId(11)
+def uz = NodeId(12)
+def uw = NodeId(13)
+def link_a = PhysicalLink(LinkId(30), ux, uy, 1)
+def link_b = PhysicalLink(LinkId(31), uy, ux, 1)
+def link_c = PhysicalLink(LinkId(32), ux, uz, 1)
+def link_d = PhysicalLink(LinkId(33), uy, uw, 1)
+def union_topology = Topology(
+  [uw, ux, uz, uy],
+  [link_d, link_b, link_c, link_a]
+)
+def union_route0 = RouteClass(RouteClassId(20), ux, uz)
+def union_route1 = RouteClass(RouteClassId(21), uy, uw)
+
+fun candidate_uses(candidate_vc, link):
+  link_id_equal(candidate_vc.link_id, link.id)
+
+fun origin_holds(origin, link):
+  origin is_a HeldVC && link_id_equal(origin.vc.link_id, link.id)
+
+fun union_allows(route_class, origin, candidate_vc):
+  cond
+  | route_class === union_route0:
+      cond
+      | origin is_a Injection: candidate_uses(candidate_vc, link_a)
+      | origin_holds(origin, link_a): candidate_uses(candidate_vc, link_b)
+      | origin_holds(origin, link_b): candidate_uses(candidate_vc, link_c)
+      | ~else: #false
+  | route_class === union_route1:
+      cond
+      | origin is_a Injection: candidate_uses(candidate_vc, link_b)
+      | origin_holds(origin, link_b): candidate_uses(candidate_vc, link_a)
+      | origin_holds(origin, link_a): candidate_uses(candidate_vc, link_d)
+      | ~else: #false
+  | ~else: #false
+
+def union_graph = build_dependency_graph(
+  analyze_reachability(
+    materialize_routing(
+      RoutingProblem(
+        union_topology,
+        [union_route1, union_route0],
+        RoutingRelation(union_allows)
+      )
+    )
+  )
+)
+def union_edge_descriptions = union_graph.edges.map(
+  fun (edge): edge.describe()
+)
+
+check:
+  union_edge_descriptions ~is ["l30.vc0 -> l31.vc0 [r20]",
+                               "l30.vc0 -> l33.vc0 [r21]",
+                               "l31.vc0 -> l30.vc0 [r21]",
+                               "l31.vc0 -> l32.vc0 [r20]"]
+  build_dependency_graph("not reachable") ~throws "expected a ReachableRouting"
+  graph.find_edge(l0_vc, l2_vc) ~throws "unknown dependency edge"
+  graph.outgoing_edges(VCId(LinkId(3), 0)) ~throws "not a dependency-graph vertex"
