@@ -1,0 +1,135 @@
+#lang rhombus/and_meta
+// Defines circuit-shaped synchronous memories with fixed explicit read and write ports.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/clocking.rhm".ambient_sync_memory
+  "../support/fields.rhm".HardwareFields
+
+export:
+  sync_mem
+
+fun declare_sync_memory(name,
+                        depth,
+                        element_type,
+                        has_read,
+                        has_write,
+                        clock = #false):
+  if clock
+  | kernel.sync_memory(name,
+                       depth,
+                       element_type,
+                       clock,
+                       has_read,
+                       has_write)
+  | ambient_sync_memory(name,
+                        depth,
+                        element_type,
+                        has_read,
+                        has_write)
+
+fun sync_memory_value(value):
+  value is_a SyncMemory
+
+fun sync_memory_read_port(memory):
+  unless memory is_a SyncMemory && memory.read_port
+  | error(~who: #'read, "synchronous memory has no read port")
+  memory.read_port
+
+fun sync_memory_write_port(memory):
+  unless memory is_a SyncMemory && memory.write_port
+  | error(~who: #'write, "synchronous memory has no write port")
+  memory.write_port
+
+fun sync_memory_read_port_value(value):
+  value is_a SyncMemoryReadPort
+
+fun sync_memory_write_port_value(value):
+  value is_a SyncMemoryWritePort
+
+fun sync_memory_read_address(port) :~ HardwareFields: port.address
+fun sync_memory_read_enable(port) :~ HardwareFields: port.enable
+fun sync_memory_read_data(port) :~ HardwareFields: port.data
+fun sync_memory_write_address(port) :~ HardwareFields: port.address
+fun sync_memory_write_data(port) :~ HardwareFields: port.data
+fun sync_memory_write_enable(port) :~ HardwareFields: port.enable
+
+annot.macro 'SyncMemoryFields':
+  annot_meta.pack_predicate(
+    'sync_memory_value',
+    '(($(statinfo_meta.dot_provider_key), sync_memory_dot))'
+  )
+
+annot.macro 'SyncMemoryReadFields':
+  annot_meta.pack_predicate(
+    'sync_memory_read_port_value',
+    '(($(statinfo_meta.dot_provider_key), sync_memory_read_dot))'
+  )
+
+annot.macro 'SyncMemoryWriteFields':
+  annot_meta.pack_predicate(
+    'sync_memory_write_port_value',
+    '(($(statinfo_meta.dot_provider_key), sync_memory_write_dot))'
+  )
+
+dot.macro 'sync_memory_dot $left $dot $right':
+  match right
+  | 'read': 'sync_memory_read_port($left) :: SyncMemoryReadFields'
+  | 'write': 'sync_memory_write_port($left) :: SyncMemoryWriteFields'
+  | ~else: #false
+
+dot.macro 'sync_memory_read_dot $left $dot $right':
+  match right
+  | 'address': 'sync_memory_read_address($left)'
+  | 'enable': 'sync_memory_read_enable($left)'
+  | 'data': 'sync_memory_read_data($left)'
+  | ~else: #false
+
+dot.macro 'sync_memory_write_dot $left $dot $right':
+  match right
+  | 'address': 'sync_memory_write_address($left)'
+  | 'data': 'sync_memory_write_data($left)'
+  | 'enable': 'sync_memory_write_enable($left)'
+  | ~else: #false
+
+defn.macro
+| 'sync_mem $(name :: Identifier)($depth, $element_type):
+     read
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #true
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type):
+     read':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #false
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type):
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #true
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock):
+     read
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #true, $clock
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock):
+     read':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #true, #false, $clock
+     )'
+| 'sync_mem $(name :: Identifier)($depth, $element_type, ~clock: $clock):
+     write':
+    def memory_name = name.to_source_string()
+    'def $name :: SyncMemoryFields = declare_sync_memory(
+       $memory_name, $depth, $element_type, #false, #true, $clock
+     )'

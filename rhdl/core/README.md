@@ -111,7 +111,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Width-changing | concat, extract, zero extension, truncation |
 | Records | record create and field extraction |
 | Vectors | vector create and host-static element extraction |
-| Memories | allocation, asynchronous read, synchronous write |
+| Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
 | Sequential | register with optional synchronous reset |
 | Simulation | clocked DPI procedure call and explicit DPI result registers |
 
@@ -137,6 +137,8 @@ memory(depth, T: DataType)                  -> Memory<T>
 memory_read_async(Memory<T>, address)       -> T
 memory_write(Memory<T>, address, T,
              Clock, one-bit enable)         -> void
+sync_memory(depth, T: DataType, Clock,
+            read?, write?)                  -> SyncMemory<T>
 dpi_call(procedure, Clock, enable, args...) -> void
 dpi_register(function, Clock, enable,
              args...)                       -> one or more flat result types
@@ -179,6 +181,18 @@ enable. Multiple writes represent independent physical ports and must share
 one clock. Address dependencies through asynchronous reads participate in
 combinational-cycle checking.
 
+A `SyncMemory` is a distinct circuit-shaped primitive, not an indexed
+`Memory`. It owns one clock and an optional fixed `read` port, `write` port, or
+both. A read port has driveable `address` and one-bit `enable` fields plus a
+readable `data` field; a write port has driveable `address`, `data`, and
+one-bit `enable` fields. Addresses are exactly `Bits(index_width(depth))`.
+
+An enabled read presents its data one rising edge after its address is
+sampled. The output while read enable is false is unspecified. Initial
+contents, out-of-range addresses, and same-cycle read/write collisions are
+unspecified. The primitive has no reset, initialization, masks, inferred
+ports, or direct indexing.
+
 ### DPI simulation operations
 
 DPI imports belong to a design and have flat signatures. A function has zero
@@ -196,7 +210,7 @@ The public object model includes:
 ```text
 Design        DpiImport      DpiResult    Module       Operation
 Value         Place          Port         Register
-Memory        Instance       HardwareType Location      Origin
+Memory        SyncMemory     Instance     HardwareType  Location      Origin
 ```
 
 An operation owns operands, results, places, attributes, a location, and an
@@ -245,8 +259,8 @@ The Builder and whole-design verifier enforce:
 1. Every value and place belongs to exactly one design.
 2. Values are used only in legal module scopes.
 3. Input ports are never driven.
-4. Every output, instance input, and register next-state place has exactly one
-   effective driver.
+4. Every output, instance input, register next-state place, and synchronous
+   memory input field has exactly one effective driver.
 5. A place and its driver have exactly the same hardware type.
 6. Operation operands, results, places, and attributes satisfy their schema.
 7. Record fields and vector elements match their aggregate type completely;

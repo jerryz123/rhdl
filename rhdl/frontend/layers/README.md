@@ -22,6 +22,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
 | [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
 | [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
+| [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed explicit ports |
 | [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
 | [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
@@ -181,7 +182,7 @@ sync_circuit Counter(width):
 A resetless ambient register uses the clock only. An initializer is never
 invented merely because ambient reset exists.
 
-## Memories
+## Asynchronous-read memories
 
 ```rhombus
 mem storage(depth, Bits(width))
@@ -199,6 +200,39 @@ Initial contents, dynamic out-of-range addresses, read-during-write results,
 and simultaneous writes to one address are unspecified. Resets, masks,
 initialization, and combined read/write ports are not part of the current
 contract.
+
+## Synchronous memories
+
+Synchronous memories are separate circuit-shaped primitives with declared,
+fixed ports:
+
+```rhombus
+sync_mem storage(depth, Bits(width)):
+  read
+  write
+
+storage.read.address <== read_address
+storage.read.enable <== read_enable
+read_data <== storage.read.data
+
+storage.write.address <== write_address
+storage.write.data <== write_data
+storage.write.enable <== write_enable
+```
+
+The first cut permits one optional `read` port, one optional `write` port, or
+both; at least one must be present. Port declarations are not inferred from
+use, the primitive cannot be indexed, and the fixed port names cannot be
+renamed. Its address fields are `Bits(index_width(depth))`, its data fields
+use the element `DataType`, and its enable fields are `Bits(1)`.
+
+Inside a `sync_circuit`, `sync_mem` uses the ambient clock. An ordinary
+`circuit` supplies `~clock: clock` in the declaration. An enabled read samples
+its address on a rising edge and presents the corresponding data after that
+edge. Data while read enable is false is unspecified. The primitive has no
+reset or initialization; out-of-range addresses and same-cycle read/write
+collisions are also unspecified. Port arrays, masks, and combined read/write
+ports remain outside this contract.
 
 ## Clocked DPI
 

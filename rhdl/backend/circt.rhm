@@ -289,6 +289,47 @@ fun emit_memory_write(operation):
                 value_ref(operation.operands[3]),
                 " {latency = 1 : i64} : ", circt_memory_type(memory))
 
+fun sync_memory_type(operation):
+  String.append("!seq.hlmem<", to_string(operation.attribute("depth")), "x",
+                circt_type(operation.attribute("element_type")), ">")
+
+fun emit_sync_memory(operation):
+  def clock_ref = "%__rhdl_sync_memory_clock_" ++ to_string(operation.id)
+  def reset_ref = "%__rhdl_sync_memory_reset_" ++ to_string(operation.id)
+  def memory_ref = "%__rhdl_sync_memory_" ++ to_string(operation.id)
+  def memory_type = sync_memory_type(operation)
+  def mutable place_index = 0
+  def mutable port_operations = []
+  when operation.attribute("has_read")
+  | def address = operation.places[place_index]
+    def enable = operation.places[place_index + 1]
+    port_operations := port_operations ++ [
+      String.append("    ", value_ref(operation.results[0]), " = seq.read ",
+                    memory_ref, "[", value_ref(address.driver), "] rden ",
+                    value_ref(enable.driver),
+                    " {latency = 1 : i64} : ", memory_type)
+    ]
+    place_index := place_index + 2
+  when operation.attribute("has_write")
+  | def address = operation.places[place_index]
+    def data = operation.places[place_index + 1]
+    def enable = operation.places[place_index + 2]
+    port_operations := port_operations ++ [
+      String.append("    seq.write ", memory_ref, "[",
+                    value_ref(address.driver), "] ", value_ref(data.driver),
+                    " wren ", value_ref(enable.driver),
+                    " {latency = 1 : i64} : ", memory_type)
+    ]
+  String.append("    ", clock_ref, " = seq.to_clock ",
+                value_ref(operation.operands[0]), "\n",
+                "    ", reset_ref, " = hw.constant 0 : i1\n",
+                "    ", memory_ref, " = seq.hlmem @",
+                operation.attribute("name"), " ", clock_ref, ", ", reset_ref,
+                " : ", memory_type,
+                if port_operations.length() == 0
+                | ""
+                | "\n" ++ String.join(port_operations, "\n"))
+
 fun emit_dpi_import(dpi_import):
   def inputs:
     for List (name in dpi_import.input_names, type in dpi_import.input_types):
@@ -421,6 +462,8 @@ fun emit_operation(operation):
         emit_memory_read_async(operation)
     | "rtl.memory_write":
         emit_memory_write(operation)
+    | "rtl.sync_memory":
+        emit_sync_memory(operation)
     | "sim.dpi_call" || "sim.dpi_register":
         emit_dpi_operation(operation)
     | "rtl.register" || "rtl.register_reset":

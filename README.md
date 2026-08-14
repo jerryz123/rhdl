@@ -169,8 +169,9 @@ The current vertical slice includes:
 - Standard and compositional Rhombus language profiles with host-only generator
   parameters and deterministic fresh module construction.
 - Frontend-defined Boolean, enum, and one-hot types; combinational and
-  width-changing expressions; bundles, vectors, wires, memories, hierarchy,
-  ambient synchronous domains, and hardware conditional assignment.
+  width-changing expressions; bundles, vectors, wires, asynchronous-read and
+  circuit-shaped synchronous memories, hierarchy, ambient synchronous
+  domains, and hardware conditional assignment.
 - Typed host-side patterns over scalar, extension-defined, and recursively
   aggregate hardware literals, plus typed synthesis don't-cares and
   partially specified pattern outputs.
@@ -187,7 +188,8 @@ implemented contracts without maintaining separate milestone lists.
 - General last-connect and unordered multiple-driver semantics
 - Automatic module-specialization deduplication
 - Distinct `UInt` and `SInt`, implicit widths, and general width inference
-- Memory initialization, masks, synchronous reads, and defined collisions
+- Memory initialization, masks, multi-port synchronous memories, combined
+  read/write ports, and defined collisions
 - Asynchronous or active-low reset and multi-domain analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects

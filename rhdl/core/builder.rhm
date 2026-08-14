@@ -120,7 +120,10 @@ fun ensure_unique_hardware_name(module_def, name, who):
   def value_named = module_def.values.find(fun (value): value.name == name)
   def place_named = module_def.places.find(fun (place): place.name == name)
   def memory_named = module_def.memories.find(fun (memory): memory.name == name)
-  when value_named || place_named || memory_named
+  def sync_memory_named = module_def.operations.find(
+    fun (operation): operation.opcode == "rtl.sync_memory" && operation.attribute("name", #false) == name
+  )
+  when value_named || place_named || memory_named || sync_memory_named
   | fail(who, "duplicate hardware name " ++ name)
 
 fun ensure_unique_instance_name(module_def, name, who):
@@ -1250,6 +1253,101 @@ class Builder(design):
       operand.add_user(operation_id)
     module_def.add_operation(operation)
     operation
+
+  // Creates a fixed, circuit-shaped synchronous memory interface. Read and
+  // write ports are declared here and subsequently wired through Places.
+  method sync_memory(module_def,
+                     name,
+                     depth,
+                     element_type,
+                     clock,
+                     has_read = #true,
+                     has_write = #true,
+                     location = Location(),
+                     origin = Origin("synchronous memory", name)):
+    ensure_module_in_design(design, module_def, #'sync_memory)
+    ensure_open(module_def, #'sync_memory)
+    ensure_hardware_name(name, #'sync_memory)
+    ensure_unique_hardware_name(module_def, name, #'sync_memory)
+    unless depth is_a Int && depth > 0
+    | fail(#'sync_memory, "synchronous memory depth must be a positive host Int")
+    ensure_data_type(element_type, #'sync_memory)
+    ensure_value_in(module_def, clock, #'sync_memory)
+    unless clock_type(clock.type)
+    | fail(#'sync_memory, "synchronous memory clock must be Clock")
+    unless has_read is_a Boolean && has_write is_a Boolean && (has_read || has_write)
+    | fail(#'sync_memory, "synchronous memory requires a read or write port")
+    def operation_id = design.fresh_id()
+    def address_type = Bits(memory_address_width(depth))
+    def mutable places = []
+    def mutable results = []
+    def read_port:
+      if has_read
+      | block:
+          def address = Place(design.fresh_id(),
+                              name ++ ".read.address",
+                              address_type,
+                              module_def,
+                              operation_id)
+          def enable = Place(design.fresh_id(),
+                             name ++ ".read.enable",
+                             Bits(1),
+                             module_def,
+                             operation_id)
+          def data = Value(design.fresh_id(),
+                           name ++ ".read.data",
+                           element_type,
+                           module_def,
+                           operation_id)
+          places := places ++ [address, enable]
+          results := results ++ [data]
+          SyncMemoryReadPort(address, enable, data)
+      | #false
+    def write_port:
+      if has_write
+      | block:
+          def address = Place(design.fresh_id(),
+                              name ++ ".write.address",
+                              address_type,
+                              module_def,
+                              operation_id)
+          def data = Place(design.fresh_id(),
+                           name ++ ".write.data",
+                           element_type,
+                           module_def,
+                           operation_id)
+          def enable = Place(design.fresh_id(),
+                             name ++ ".write.enable",
+                             Bits(1),
+                             module_def,
+                             operation_id)
+          places := places ++ [address, data, enable]
+          SyncMemoryWritePort(address, data, enable)
+      | #false
+    def operation = Operation(operation_id,
+                              "rtl.sync_memory",
+                              module_def,
+                              [clock],
+                              results,
+                              places,
+                              {"name": name,
+                               "depth": depth,
+                               "element_type": element_type,
+                               "has_read": has_read,
+                               "has_write": has_write},
+                              location,
+                              origin)
+    clock.add_user(operation_id)
+    for (place in places): module_def.add_place(place)
+    for (result in results): module_def.add_value(result)
+    module_def.add_operation(operation)
+    SyncMemory(operation,
+               name,
+               depth,
+               element_type,
+               clock,
+               read_port,
+               write_port)
 
   method register(module_def,
                   name,

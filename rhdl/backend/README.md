@@ -61,6 +61,7 @@ IR and lower through CIRCT type aliases.
 | `rtl.memory` | `seq.hlmem` |
 | `rtl.memory_read_async` | latency-zero `seq.read` |
 | `rtl.memory_write` | latency-one `seq.write` |
+| `rtl.sync_memory` | one `seq.hlmem` with fixed latency-one read and write ports |
 | `rtl.wire` | alias to the wire's driver |
 | `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
 | `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
