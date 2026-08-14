@@ -23,8 +23,21 @@ def Bool = _BoolType()
 fun bool_type(type):
   type is_a _BoolType
 
+// Equality remains a Bits core operation. Frontend nominal flat types compare
+// by explicitly exposing equal-width representations first.
 fun bool_eq(left, right, name = #false, location = Location()):
-  kernel.cast(kernel.hw_eq(left, right, #false, location), Bool, name, location)
+  def left_value = kernel.read(left, location)
+  def right_value = kernel.read(right, location)
+  unless flat_data_type(left_value.type) && flat_data_type(right_value.type) && type_equal(left_value.type, right_value.type)
+  | error(~who: #'bool_eq,
+          location.describe() ++ ": === operands must have exactly the same FlatDataType")
+  def width = data_width(left_value.type)
+  def left_bits = kernel.cast(left_value, Bits(width), #false, location)
+  def right_bits = kernel.cast(right_value, Bits(width), #false, location)
+  kernel.cast(kernel.hw_eq(left_bits, right_bits, #false, location),
+              Bool,
+              name,
+              location)
 
 operator (left === right):
   bool_eq(left, right)

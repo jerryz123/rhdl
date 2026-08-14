@@ -393,6 +393,34 @@ The resetless form is:
 reg state(Bits(width), ~clock: clk)
 ```
 
+When the type is evident from a reset or next-state value, it can be inferred.
+Supplying `~next` also drives the register immediately:
+
+```rhombus
+reg initialized(~init: zero)
+initialized.next <== data_in
+
+reg delayed(~next: data_in)
+reg reset_delayed(~next: data_in, ~init: zero)
+```
+
+The direct Chisel correspondence is `Reg(type)` → `reg state(type)`,
+`RegInit(init)` → `reg state(~init: init)`, and `RegNext(next, init?)` →
+`reg state(~next: next, ~init: init?)`. The binding supplies the hardware name,
+`~init` is still a synchronous reset value, and a later drive of a `~next`
+register remains a multiple-driver error.
+
+Outside a `sync_circuit`, spell out the domain:
+
+```rhombus
+reg delayed(~next: data_in, ~clock: clk)
+reg initialized(~clock: clk, ~reset: reset, ~init: zero)
+reg reset_delayed(~next: data_in,
+                  ~clock: clk,
+                  ~reset: reset,
+                  ~init: zero)
+```
+
 Only active-high synchronous reset is currently supported. `~init` is the
 synchronous reset value, not a separate initialization mechanism. Register
 state may use any `DataType`, and holding state is explicit:

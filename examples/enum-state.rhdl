@@ -1,0 +1,63 @@
+#lang rhdl
+// Demonstrates opt-in nominal enums with automatic and explicit hardware encodings.
+
+import:
+  lib("rhdl/frontend/layers/enum.rhm") open
+
+hardware_enum State:
+  Idle
+  Running
+  Done
+
+hardware_enum Opcode(~width: 4):
+  Add = 0
+  Sub = 1
+  Load = 8
+
+circuit StateMachine():
+  input clock: Clock
+  input reset: Reset
+  output state_out: State
+
+  reg current(State, ~clock: clock, ~reset: reset, ~init: State.Idle)
+  when (current === State.Idle):
+    current.next <== State.Running
+  elsewhen (current === State.Running):
+    current.next <== State.Done
+  otherwise:
+    // This fallback also recovers from State's unused two-bit encoding.
+    current.next <== State.Idle
+  state_out <== current
+
+circuit OpcodeDecoder():
+  input opcode: Opcode
+  output is_load: Bool
+  is_load <== opcode === Opcode.Load
+
+def design = elaborate(StateMachine())
+
+def verilog_reference = @str|<<{
+module StateMachine(
+  input        clock,
+               reset,
+  output [1:0] state_out
+);
+
+  reg [1:0] current;
+  always @(posedge clock) begin
+    if (reset)
+      current <= 2'h0;
+    else
+      current <= current == 2'h0 ? 2'h1 : current == 2'h1 ? 2'h2 : 2'h0;
+  end // always @(posedge)
+  assign state_out = current;
+endmodule
+}>>|
+
+export:
+  State
+  Opcode
+  StateMachine
+  OpcodeDecoder
+  design
+  verilog_reference

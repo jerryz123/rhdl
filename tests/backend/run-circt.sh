@@ -145,6 +145,7 @@ fixture_specs=(
   'adder4|adder4_tb|examples/adder4.rhdl|design|verilog_reference'
   'generated-adder|generated_adder_tb|examples/generated-adder.rhdl|design|verilog_reference'
   'alu|alu_tb|examples/alu.rhdl|design|verilog_reference'
+  'enum-state||examples/enum-state.rhdl|design|verilog_reference'
   'shifts|shifts_tb|examples/shifts.rhdl|design|verilog_reference'
   'width-ops|width_ops_tb|examples/width-ops.rhdl|design|verilog_reference'
   'vector|vector_tb|examples/vector.rhdl|design|verilog_reference'

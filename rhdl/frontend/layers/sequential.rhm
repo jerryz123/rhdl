@@ -3,6 +3,7 @@
 
 import:
   rhombus/meta open
+  "../kernel.rhm" as kernel
   "../kernel.rhm".reg as kernel_reg
   "../support/clocking.rhm".ambient_register
   "../support/clocking.rhm".ambient_reset_register
@@ -11,9 +12,44 @@ import:
 export:
   reg
 
+fun ambient_init_register(name, init):
+  def init_value = kernel.read(init)
+  ambient_reset_register(name, init_value.type, init_value)
+
+fun ambient_next_register(name, next, init = #false):
+  def next_value = kernel.read(next)
+  def register:
+    if init
+    | ambient_reset_register(name, next_value.type, init)
+    | ambient_register(name, next_value.type)
+  kernel.connect(register.next, next_value)
+  register
+
+fun explicit_init_register(name, clock, reset, init):
+  def init_value = kernel.read(init)
+  kernel_reg(name, init_value.type, clock, reset, init_value)
+
+fun explicit_next_register(name, next, clock, reset = #false, init = #false):
+  def next_value = kernel.read(next)
+  def register = kernel_reg(name, next_value.type, clock, reset, init)
+  kernel.connect(register.next, next_value)
+  register
+
 defn.macro 'reg $(name :: Identifier)($argument, ...)':
   def register_name = name.to_source_string()
   match '($argument, ...)'
+  | '(~next: $next, ~clock: $clock, ~reset: $reset, ~init: $init)':
+      'def $name :: HardwareFields = explicit_next_register($register_name, $next, $clock, $reset, $init)'
+  | '(~next: $next, ~clock: $clock)':
+      'def $name :: HardwareFields = explicit_next_register($register_name, $next, $clock)'
+  | '(~clock: $clock, ~reset: $reset, ~init: $init)':
+      'def $name :: HardwareFields = explicit_init_register($register_name, $clock, $reset, $init)'
+  | '(~next: $next, ~init: $init)':
+      'def $name :: HardwareFields = ambient_next_register($register_name, $next, $init)'
+  | '(~next: $next)':
+      'def $name :: HardwareFields = ambient_next_register($register_name, $next)'
+  | '(~init: $init)':
+      'def $name :: HardwareFields = ambient_init_register($register_name, $init)'
   | '($type, ~clock: $clock, ~reset: $reset, ~init: $init)':
       'def $name :: HardwareFields = kernel_reg($register_name, $type, $clock, $reset, $init)'
   | '($type, ~clock: $clock)':
@@ -25,8 +61,8 @@ defn.macro 'reg $(name :: Identifier)($argument, ...)':
   | ~else:
       syntax_meta.error(
         String.append(
-          "expected (type), (type, ~init: value), (type, ~clock: clock), ",
-          "or (type, ~clock: clock, ~reset: reset, ~init: value)"
+          "expected a type or ~next value, with optional synchronous-reset ",
+          "initialization and either an ambient or explicit clock"
         ),
         '($argument, ...)'
       )

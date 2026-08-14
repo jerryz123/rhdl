@@ -1,0 +1,168 @@
+#lang rhombus/and_meta
+// Defines nominal encoded enum types and hardware member literals over flat core data.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/fields.rhm".HardwareFields
+
+export:
+  hardware_enum
+  enum_type
+  enum_width
+  enum_members
+  enum_encoding
+
+class EnumIdentity()
+class EnumMember(name, encoding)
+
+class EnumType(name, identity, members, width):
+  implements FlatDataType
+
+  override method describe():
+    "enum<" ++ name ++ ">"
+
+  override method type_equal(other):
+    enum_type(other) && identity === other.identity
+
+  override method bit_width():
+    width
+
+fun enum_type(type):
+  type is_a EnumType
+
+fun enum_width(type):
+  unless enum_type(type)
+  | error(~who: #'enum_width, "expected a hardware enum type")
+  type.width
+
+fun enum_members(type):
+  unless enum_type(type)
+  | error(~who: #'enum_members, "expected a hardware enum type")
+  type.members.map(fun (member): member.name)
+
+fun enum_encoding(type, member_name):
+  unless enum_type(type)
+  | error(~who: #'enum_encoding, "expected a hardware enum type")
+  unless member_name is_a String
+  | error(~who: #'enum_encoding, "member name must be a String")
+  def member = type.members.find(fun (candidate): candidate.name == member_name)
+  unless member
+  | error(~who: #'enum_encoding,
+          "enum " ++ type.name ++ " has no member named " ++ member_name)
+  member.encoding
+
+fun required_enum_width(maximum_encoding):
+  fun loop(width, capacity):
+    if maximum_encoding < capacity
+    | width
+    | loop(width + 1, capacity * 2)
+  loop(1, 2)
+
+fun validate_enum_declaration(name, member_names, encodings, requested_width):
+  unless name is_a String
+  | error(~who: #'hardware_enum, "enum name must be a String")
+  unless member_names is_a List && member_names.length() >= 1
+  | error(~who: #'hardware_enum, "enum requires at least one member")
+  unless encodings is_a List && encodings.length() == member_names.length()
+  | error(~who: #'hardware_enum, "enum members and encodings must have the same length")
+  for (member_name in member_names):
+    unless member_name is_a String
+    | error(~who: #'hardware_enum, "enum member names must be Strings")
+    when member_names.filter(
+      ~keep: fun (candidate): candidate == member_name
+    ).length() != 1
+    | error(~who: #'hardware_enum, "enum member names must be unique")
+  for (encoding in encodings):
+    unless encoding is_a Int && encoding >= 0
+    | error(~who: #'hardware_enum, "enum encodings must be nonnegative host Int values")
+    when encodings.filter(
+      ~keep: fun (candidate): candidate == encoding
+    ).length() != 1
+    | error(~who: #'hardware_enum, "enum encodings must be unique")
+  def mutable maximum_encoding = 0
+  for (encoding in encodings):
+    when encoding > maximum_encoding
+    | maximum_encoding := encoding
+  def minimum_width = required_enum_width(maximum_encoding)
+  def width:
+    if requested_width == #false
+    | minimum_width
+    | block:
+        unless requested_width is_a Int && requested_width > 0
+        | error(~who: #'hardware_enum, "enum width must be a positive host Int")
+        when requested_width < minimum_width
+        | error(~who: #'hardware_enum, "enum encoding does not fit the declared width")
+        requested_width
+  EnumType(name,
+           EnumIdentity(),
+           for List (member_name in member_names, encoding in encodings):
+             EnumMember(member_name, encoding),
+           width)
+
+fun make_automatic_enum(name, member_names, requested_width = #false):
+  validate_enum_declaration(name,
+                            member_names,
+                            for List (encoding in 0..member_names.length()): encoding,
+                            requested_width)
+
+fun make_explicit_enum(name, members, requested_width = #false):
+  validate_enum_declaration(name,
+                            members.map(fun (member): member[0]),
+                            members.map(fun (member): member[1]),
+                            requested_width)
+
+fun enum_value(type, member_name, location = Location()) :~ HardwareFields:
+  unless enum_type(type)
+  | error(~who: #'hardware_enum, location.describe() ++ ": member access requires an enum type")
+  def encoding = enum_encoding(type, member_name)
+  kernel.cast(kernel.literal(Bits(type.width), encoding, #false, location),
+              type,
+              #false,
+              location)
+
+annot.macro 'EnumMembers':
+  annot_meta.pack_predicate(
+    'enum_type',
+    '(($(statinfo_meta.dot_provider_key), enum_member_dot))'
+  )
+
+dot.macro 'enum_member_dot $left $dot $right':
+  'enum_value($left, $(right.to_source_string())) :: HardwareFields'
+
+defn.macro
+| 'hardware_enum $(name :: Identifier):
+     $(member :: Identifier)
+     ...':
+    def enum_name = name.to_source_string()
+    let [member_name, ...] = [member.to_source_string(), ...]
+    'def $name :: EnumMembers = make_automatic_enum($enum_name,
+                                                    [$member_name, ...])'
+| 'hardware_enum $(name :: Identifier)(~width: $width):
+     $(member :: Identifier)
+     ...':
+    def enum_name = name.to_source_string()
+    let [member_name, ...] = [member.to_source_string(), ...]
+    'def $name :: EnumMembers = make_automatic_enum($enum_name,
+                                                    [$member_name, ...],
+                                                    $width)'
+| 'hardware_enum $(name :: Identifier):
+     $(member :: Identifier) = $encoding
+     ...':
+    def enum_name = name.to_source_string()
+    let [member_name, ...] = [member.to_source_string(), ...]
+    'def $name :: EnumMembers = make_explicit_enum(
+                                  $enum_name,
+                                  [[$member_name, $encoding], ...]
+                                )'
+| 'hardware_enum $(name :: Identifier)(~width: $width):
+     $(member :: Identifier) = $encoding
+     ...':
+    def enum_name = name.to_source_string()
+    let [member_name, ...] = [member.to_source_string(), ...]
+    'def $name :: EnumMembers = make_explicit_enum(
+                                  $enum_name,
+                                  [[$member_name, $encoding], ...],
+                                  $width
+                                )'

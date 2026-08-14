@@ -1,0 +1,52 @@
+#lang rhombus
+// Checks nominal enum declarations, encodings, literals, equality, state, and composition.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/enum.rhm" as enum
+  "../../examples/enum-state.rhdl" as fixture
+  "enum-composed.rhdl" as composed_fixture
+
+def design = fixture.design
+def module_def = design.modules[0]
+def register = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.register_reset"
+)
+def equalities = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.eq"
+)
+def constants = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.constant"
+)
+
+def opcode_design = embedded.run_elaboration(fun (): fixture.OpcodeDecoder())
+def opcode_module = opcode_design.modules[0]
+def opcode_equality = opcode_module.operations.find(
+  fun (operation): operation.opcode == "rtl.eq"
+)
+
+check:
+  enum.enum_type(fixture.State) ~is #true
+  enum.enum_type(fixture.Opcode) ~is #true
+  enum.enum_width(fixture.State) ~is 2
+  enum.enum_width(fixture.Opcode) ~is 4
+  enum.enum_members(fixture.State) ~is ["Idle", "Running", "Done"]
+  enum.enum_encoding(fixture.State, "Idle") ~is 0
+  enum.enum_encoding(fixture.State, "Running") ~is 1
+  enum.enum_encoding(fixture.State, "Done") ~is 2
+  enum.enum_encoding(fixture.Opcode, "Load") ~is 8
+  type_equal(fixture.State, composed_fixture.State) ~is #false
+  type_equal(register.results[0].type, fixture.State) ~is #true
+  type_equal(register.places[0].type, fixture.State) ~is #true
+  type_equal(module_def.find_output("state_out").type, fixture.State) ~is #true
+  equalities.length() ~is 2
+  (for all (equality in equalities):
+     bits_type(equality.operands[0].type) && equality.operands[0].type.width == 2 && type_equal(equality.operands[0].type, equality.operands[1].type)) ~is #true
+  constants.map(fun (operation): operation.attribute("value")) ~is [0, 0, 1, 1, 2, 0]
+  type_equal(opcode_module.find_input("opcode").type, fixture.Opcode) ~is #true
+  opcode_equality.operands[0].type.width ~is 4
+  opcode_equality.operands[1].type.width ~is 4
+  verify_design(design) ~is #void
+  verify_design(composed_fixture.design) ~is #void
+  verify_design(opcode_design) ~is #void
