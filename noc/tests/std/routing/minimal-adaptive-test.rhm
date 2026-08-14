@@ -1,0 +1,287 @@
+#lang rhombus
+// Checks generic minimal-adaptive routing on irregular graphs and rectangular meshes.
+
+import:
+  "../../../model/main.rhm" open
+  "../../../analysis/main.rhm" open
+  "../../../authoring/main.rhm" open
+  "../../../std/topology/main.rhm" open
+  "../../../std/traffic/main.rhm" open
+  "../../../std/routing/main.rhm" open
+
+def source = NodeRef("source")
+def upper = NodeRef("upper")
+def lower = NodeRef("lower")
+def destination = NodeRef("destination")
+def dead_end = NodeRef("dead-end")
+def adaptive = [VCGroup("adaptive", 2), VCGroup("escape", 1)]
+
+fun irregular_link(name, from, to):
+  TopologyLink(LinkRef(name), from, to, adaptive)
+
+// Both diamond arms and a parallel source-to-upper link are shortest choices.
+// The upper-to-source link moves away from the destination, while the dead-end
+// branch never reaches it.
+def irregular_spec = TopologySpec(
+  [upper, dead_end, source, destination, lower],
+  [irregular_link("upper-destination", upper, destination),
+   irregular_link("source-upper-b", source, upper),
+   irregular_link("dead-return", upper, source),
+   irregular_link("source-dead", source, dead_end),
+   irregular_link("lower-destination", lower, destination),
+   irregular_link("source-lower", source, lower),
+   irregular_link("source-upper-a", source, upper)]
+)
+def irregular_topology = lower_topology(irregular_spec)
+def irregular_distances = compute_hop_distances(
+  irregular_topology.topology
+)
+def irregular_route_ref = RouteClassRef("source-to-destination")
+def irregular_routes = lower_route_classes(
+  irregular_topology,
+  [RouteClassSpec(irregular_route_ref, source, destination)]
+)
+def irregular_route = irregular_routes.route_class(irregular_route_ref)
+def irregular_policy = minimal_adaptive(
+  irregular_topology,
+  irregular_distances,
+  ["adaptive"]
+)
+def irregular_relation = lower_routing_policy(
+  irregular_routes,
+  irregular_policy
+)
+def irregular_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  irregular_relation
+)
+def irregular_materialized = materialize_routing(irregular_problem)
+
+fun irregular_vc(link_name, group = "adaptive", index = 0):
+  irregular_topology.vc_id(
+    VCRef(LinkRef(link_name), group, index)
+  )
+
+def source_id = irregular_topology.node_id(source)
+def source_upper_a = irregular_vc("source-upper-a")
+def source_upper_b = irregular_vc("source-upper-b")
+def source_lower = irregular_vc("source-lower")
+def source_dead = irregular_vc("source-dead")
+def upper_destination = irregular_vc("upper-destination")
+def upper_return = irregular_vc("dead-return")
+
+check:
+  irregular_policy is_a RoutingPolicy ~is #true
+  irregular_policy is_a MinimalAdaptivePolicy ~is #true
+  irregular_policy.vc_groups ~is ["adaptive"]
+  irregular_policy.describe() ~is "minimal-adaptive(vc-groups=adaptive)"
+
+// Injection keeps every equal-cost branch and parallel physical link, while
+// rejecting a reachable dead end and the unselected VC group.
+check:
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    source_upper_a
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    irregular_vc("source-upper-a", "adaptive", 1)
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    source_upper_b
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    source_lower
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    source_dead
+  ) ~is #false
+  irregular_relation.allow(
+    irregular_route,
+    Injection(source_id),
+    irregular_vc("source-upper-a", "escape")
+  ) ~is #false
+
+// Forwarding uses the same recurrence and does not permit a link whose source
+// differs from the current routing node.
+check:
+  irregular_relation.allow(
+    irregular_route,
+    HeldVC(source_upper_a),
+    upper_destination
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    HeldVC(irregular_vc("source-upper-a", "escape")),
+    upper_destination
+  ) ~is #true
+  irregular_relation.allow(
+    irregular_route,
+    HeldVC(source_upper_a),
+    upper_return
+  ) ~is #false
+  routing_policy_result(
+    irregular_policy,
+    RoutingContext(
+      irregular_routes.route_spec(irregular_route_ref),
+      RoutingInjection(source),
+      source,
+      VCRef(LinkRef("upper-destination"), "adaptive", 0)
+    )
+  ) ~is #false
+
+// Canonical lowering makes declaration order irrelevant to the materialized
+// relation, while computing a fresh oracle preserves the exact-topology tie.
+def reordered_spec = TopologySpec(
+  irregular_spec.nodes.reverse(),
+  irregular_spec.links.reverse()
+)
+def reordered_topology = lower_topology(reordered_spec)
+def reordered_routes = lower_route_classes(
+  reordered_topology,
+  [RouteClassSpec(irregular_route_ref, source, destination)]
+)
+def reordered_materialized = materialize_routing(
+  RoutingProblem(
+    reordered_topology.topology,
+    reordered_routes.route_classes,
+    lower_routing_policy(
+      reordered_routes,
+      minimal_adaptive(
+        reordered_topology,
+        compute_hop_distances(reordered_topology.topology),
+        ["adaptive"]
+      )
+    )
+  )
+)
+
+check:
+  reordered_materialized.describe() ~is irregular_materialized.describe()
+
+// On a rectangular mesh, generic shortest-hop choices are exactly the
+// Manhattan-distance-reducing directions selected by an independent policy.
+def mesh = rectangular_mesh(
+  2,
+  2,
+  [VCGroup("adaptive", 1), VCGroup("escape", 1)]
+)
+def mesh_topology = lower_topology(mesh.spec)
+def mesh_routes = lower_route_classes(
+  mesh_topology,
+  all_pairs(mesh.spec)
+)
+def mesh_distances = compute_hop_distances(mesh_topology.topology)
+def mesh_policy = minimal_adaptive(
+  mesh_topology,
+  mesh_distances,
+  ["adaptive"]
+)
+def mesh_problem = RoutingProblem(
+  mesh_topology.topology,
+  mesh_routes.route_classes,
+  lower_routing_policy(mesh_routes, mesh_policy)
+)
+def mesh_materialized = materialize_routing(mesh_problem)
+
+fun mesh_direction_is_minimal(direction, current, target):
+  cond
+  | mesh_direction_equal(direction, mesh_east): current.x < target.x
+  | mesh_direction_equal(direction, mesh_west): current.x > target.x
+  | mesh_direction_equal(direction, mesh_north): current.y < target.y
+  | mesh_direction_equal(direction, mesh_south): current.y > target.y
+  | ~else: #false
+
+def mesh_manhattan_policy = custom_policy(
+  "mesh-manhattan-minimal",
+  fun (context):
+    context.candidate_vc.group == "adaptive" && mesh_direction_is_minimal(
+      mesh.direction_of(context.candidate_link()),
+      mesh.coordinate_of(context.current_node),
+      mesh.coordinate_of(context.route_class.destination)
+    )
+)
+def mesh_manhattan_materialized = materialize_routing(
+  RoutingProblem(
+    mesh_topology.topology,
+    mesh_routes.route_classes,
+    lower_routing_policy(mesh_routes, mesh_manhattan_policy)
+  )
+)
+def mesh_reachable = analyze_reachability(mesh_materialized)
+def mesh_cycle = check_dependency_acyclicity(
+  build_dependency_graph(mesh_reachable)
+)
+
+check:
+  mesh_materialized.describe() ~is mesh_manhattan_materialized.describe()
+  mesh_cycle is_a DependencyCycle ~is #true
+
+// Prefixing changes symbolic names but leaves normalized shortest-path
+// decisions and the expected adaptive dependency cycle unchanged.
+def prefixed_mesh = mesh.prefix("cluster")
+def prefixed_topology = lower_topology(prefixed_mesh.spec)
+def prefixed_routes = lower_route_classes(
+  prefixed_topology,
+  all_pairs(prefixed_mesh.spec)
+)
+def prefixed_materialized = materialize_routing(
+  RoutingProblem(
+    prefixed_topology.topology,
+    prefixed_routes.route_classes,
+    lower_routing_policy(
+      prefixed_routes,
+      minimal_adaptive(
+        prefixed_topology,
+        compute_hop_distances(prefixed_topology.topology),
+        ["adaptive"]
+      )
+    )
+  )
+)
+def prefixed_cycle = check_dependency_acyclicity(
+  build_dependency_graph(analyze_reachability(prefixed_materialized))
+)
+
+check:
+  prefixed_materialized.describe() ~is mesh_materialized.describe()
+  prefixed_cycle is_a DependencyCycle ~is #true
+  prefixed_cycle.describe() ~is mesh_cycle.describe()
+
+def foreign_distances = compute_hop_distances(
+  lower_topology(irregular_spec).topology
+)
+
+check:
+  minimal_adaptive("not lowered", irregular_distances, ["adaptive"]) ~throws "requires a LoweredTopology"
+  minimal_adaptive(irregular_topology, "not distances", ["adaptive"]) ~throws "requires HopDistances"
+  minimal_adaptive(
+    irregular_topology,
+    foreign_distances,
+    ["adaptive"]
+  ) ~throws "must belong to the lowered topology"
+  minimal_adaptive(irregular_topology, irregular_distances, []) ~throws "nonempty List"
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["bad/group"]
+  ) ~throws "names without '/'"
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["adaptive", "adaptive"]
+  ) ~throws "duplicate minimal-adaptive VC group adaptive"
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["unknown"]
+  ) ~throws "topology has no VC group unknown"

@@ -28,6 +28,8 @@ The current implementation provides:
   route-class specifications for any authored topology.
 - Standard XY and YX dimension-order policies defined as clients of the
   generic routing-policy interface and rectangular-mesh view.
+- Generic minimal-adaptive routing over precomputed hop distances for any
+  authored directed topology.
 - Minimal-adaptive mesh routing with irreversible XY escape transitions,
   intentionally rejected by the current whole-graph acyclicity proof.
 - Nominal node, link, virtual-channel, and route-class identities.
@@ -76,6 +78,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/minimal-adaptive-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/adaptive-minimal-escape-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
@@ -225,6 +228,16 @@ view. It does not parse symbolic names, inspect normalized IDs, materialize the
 relation, or construct route tables. The mesh-XY example applies escape-only
 XY routing to the existing concrete mesh and all-pairs traffic examples, then
 runs the ordinary validation pipeline to produce `ValidatedRouting`.
+
+`MinimalAdaptivePolicy` is topology-independent. It translates symbolic
+routing contexts through one exact `LoweredTopology` and admits every candidate
+in an explicitly selected VC group whose physical link reduces the precomputed
+hop distance to the destination by one. The caller supplies the
+`HopDistances`, keeping shortest-path analysis separate from policy authoring
+and avoiding repeated graph traversal during materialization. Equal-cost
+branches, parallel links, injection, and forwarding all use the same rule.
+The policy does not choose an escape subnetwork or imply that its complete VC
+dependency graph is acyclic.
 
 The mesh-phased-XY example is a user-level composition rather than another
 core policy primitive. It uses `x-phase` VCs while consuming x displacement,
