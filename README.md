@@ -1440,6 +1440,7 @@ Important examples include:
 | `examples/table.rhdl` | Host-generated 256-entry combinational vector table |
 | `examples/vec-search.rhdl` | Registered traversal of a host-defined hardware-vector pattern |
 | `examples/vec-shift-register.rhdl` | Element-wise load and shift updates to one vector register |
+| `examples/vec-shift-register-param.rhdl` | Host-parameterized, zero-initialized vector shift pipeline |
 | `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
 | `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |

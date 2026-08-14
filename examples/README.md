@@ -109,6 +109,7 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `Vec(n, T)` | Core `VectorType(n, T)` |
 | `vec(a, b, ...)` or `vec(elements)` | `rtl.vector_create` with inferred uniform element type |
 | `vector[index]` | Static `rtl.vector_get` or construction-time element-place projection |
+| `state.next[index] <== value` | Element-wise drive of an aggregate register's next-state place |
 | `vector.lookup(selector, ~default: value)` | Static projections plus one core `rtl.mux_lookup` |
 | `wire temporary: T` | One core `rtl.wire` place, readable after a complete single drive |
 | `mem storage(depth, T)` | One core `Memory` resource and `rtl.memory` allocation |
@@ -175,6 +176,8 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, static and hardware selection, packing casts, aggregate drives, muxes, and registers |
 | [`table.rhdl`](table.rhdl) | Host-generated 256-byte vector contents with exhaustive eight-bit hardware lookup |
 | [`vec-search.rhdl`](vec-search.rhdl) | Host-defined pattern materialized as a hardware vector and selected by a wrapping register |
+| [`vec-shift-register.rhdl`](vec-shift-register.rhdl) | Priority load and shift updates assembled into one aggregate vector register |
+| [`vec-shift-register-param.rhdl`](vec-shift-register-param.rhdl) | Host-selected depth and width with generated reset contents and next-state wiring |
 | [`wire.rhdl`](wire.rhdl) | A vector wire assembled element by element and then read as one value |
 | [`interface.rhdl`](interface.rhdl) | Two-role ready-valid interfaces, field access, bidirectional bulk connection, and instance reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
