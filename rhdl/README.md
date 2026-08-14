@@ -78,7 +78,7 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes over hardware literals | None |
+| `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes plus recursive record/vector pattern construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
 | `std/decode/table.rhdl` | Validated unordered typed decode relations | `std/decode/pattern.rhdl` |
 | `std/decode/generator.rhdl` | Callable `DecodeGen` lowering to one core decode | `std/decode/table.rhdl` |

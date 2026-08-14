@@ -1,8 +1,12 @@
 #lang rhdl
-// Defines typed host-side bit patterns over exact hardware literal shadows.
+// Defines typed host-side patterns and recursive aggregate pattern construction.
+
+import:
+  rhombus/meta open
 
 export:
   Pattern
+  pattern
 
 fun literal_types_equal(left, right):
   def left_type = left.literal_type()
@@ -57,3 +61,119 @@ class Pattern(value, care, type, width, value_bits, care_bits):
     def shared_care = care_bits bits.and other.care_bits
     def differing = value_bits bits.xor other.value_bits
     shared_care == care_bits && (differing bits.and care_bits) == 0
+
+// The wildcard is private syntax data. It means that a host-side pattern does
+// not constrain a field; it is never materialized as hardware or interpreted
+// as a runtime unknown value.
+class _PatternWildcard()
+def pattern_wildcard = _PatternWildcard()
+
+fun pattern_type_equal(left, right):
+  left.type_equal(right) && right.type_equal(left)
+
+fun exact_pattern(value):
+  def value_literal = require_literal(value, "pattern field")
+  def width = value_literal.literal_width()
+  Pattern(
+    ~value: value_literal,
+    ~care: literal(value_literal.literal_type(),
+                   (1 bits.(<<) width) - 1)
+  )
+
+fun wildcard_pattern(type):
+  def zero = literal(type, 0)
+  Pattern(~value: zero, ~care: zero)
+
+fun normalize_pattern_component(component, expected_type, role):
+  def cube:
+    cond
+    | component is_a _PatternWildcard:
+        wildcard_pattern(expected_type)
+    | component is_a Pattern:
+        component
+    | component is_a HardwareLiteral:
+        exact_pattern(component)
+    | ~else:
+        error(~who: #'pattern,
+              role ++ " must be a hardware literal, Pattern, or _")
+  unless pattern_type_equal(cube.type, expected_type)
+  | error(~who: #'pattern, role ++ " has the wrong hardware type")
+  cube
+
+fun build_record_pattern(type, fields):
+  unless type is_a RecordType
+  | error(~who: #'pattern, "field form requires a RecordType")
+  unless fields is_a List && fields.length() == type.fields.length()
+  | error(~who: #'pattern,
+          "record pattern must supply every field exactly once")
+  def cubes = for List (declared in type.fields):
+    block:
+      def matching = fields.filter(
+        ~keep: fun (field): field is_a List && field.length() == 2 && field[0] == declared.name
+      )
+      unless matching.length() == 1
+      | error(~who: #'pattern,
+              "record pattern must supply every field exactly once")
+      normalize_pattern_component(
+        matching[0][1],
+        declared.type,
+        "pattern field " ++ declared.name
+      )
+  def value_fields = for List (declared in type.fields, cube in cubes):
+    [declared.name, literal(declared.type, cube.value_bits)]
+  def care_fields = for List (declared in type.fields, cube in cubes):
+    [declared.name, literal(declared.type, cube.care_bits)]
+  Pattern(
+    ~value: RecordLiteral(type, value_fields),
+    ~care: RecordLiteral(type, care_fields)
+  )
+
+fun build_vector_pattern(type, elements):
+  unless type is_a VectorType
+  | error(~who: #'pattern, "element form requires a VectorType")
+  unless elements is_a List && elements.length() == type.length
+  | error(~who: #'pattern,
+          "vector pattern element count must equal vector length")
+  def cubes = for List (element in elements, index in 0..elements.length()):
+    normalize_pattern_component(
+      element,
+      type.element_type,
+      "vector pattern element " ++ to_string(index)
+    )
+  def value_elements = for List (cube in cubes):
+    literal(type.element_type, cube.value_bits)
+  def care_elements = for List (cube in cubes):
+    literal(type.element_type, cube.care_bits)
+  Pattern(
+    ~value: VectorLiteral(type, value_elements),
+    ~care: VectorLiteral(type, care_elements)
+  )
+
+expr.macro
+| 'pattern_component(_)':
+    'pattern_wildcard'
+| 'pattern_component($value)':
+    '$value'
+
+// Exact literals receive full care automatically. An underscore contributes
+// zero care, while a nested Pattern contributes its existing value/care cube.
+expr.macro
+| 'pattern($type):
+     $(field_name :: Identifier): $field_value
+     ...':
+    let [field_string, ...] = [field_name.to_source_string(), ...]
+    'build_record_pattern(
+       $type,
+       [[$field_string, pattern_component($field_value)], ...]
+     )'
+| 'pattern($type, [$element, ...])':
+    'build_vector_pattern(
+       $type,
+       [pattern_component($element), ...]
+     )'
+| 'pattern($type, $component)':
+    'normalize_pattern_component(
+       pattern_component($component),
+       $type,
+       "pattern value"
+     )'

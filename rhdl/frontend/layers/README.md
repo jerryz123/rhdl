@@ -372,9 +372,10 @@ creates a reusable recursive `RecordLiteral`; otherwise it creates runtime
 
 ## Fixed-length vectors
 
-`Vec(n, T)` and `vec(...)` layer over core structural vectors. Literal-only
-construction produces a reusable `VectorLiteral`; live elements produce a
-runtime vector value. Element zero occupies the least-significant packed slot.
+`Vec(n, T)` constructs the public structural `VectorType` descriptor, while
+`vec(...)` layers concise construction over it. Literal-only construction
+produces a reusable `VectorLiteral`; live elements produce a runtime vector
+value. Element zero occupies the least-significant packed slot.
 
 Static host indexing works for readable values and driveable places. Complete
 element-wise drives canonicalize to one vector construction and whole drive.

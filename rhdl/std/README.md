@@ -20,27 +20,26 @@ bundle Instruction():
   opcode: Bits(4)
   operands: Vec(2, Bits(4))
 
-def instruction_value = record(Instruction()):
+def instruction_pattern = pattern(Instruction()):
   opcode: bits(0b1010, 4)
-  operands: vec(bits(2, 4), bits(0, 4))
-
-def instruction_care = record(Instruction()):
-  opcode: bits(0b1111, 4)
-  operands: vec(bits(0b1111, 4), bits(0, 4))
-
-def instruction_pattern = Pattern(
-  ~value: instruction_value,
-  ~care: instruction_care
-)
+  operands: pattern(Vec(2, Bits(4)), [bits(2, 4), _])
 ```
 
-A care bit of one makes the corresponding value bit significant; zero makes
-it a don't-care. `value` and `care` must have exactly equal hardware types, not
-merely equal packed widths. Any `HardwareLiteral` type works, including
-`Bits`, `Bool`, enums, `OneHot`, extension-defined flat data, and recursively
-nested records and vectors. The generic `literal(T, packed_value)` form can
-express an arbitrary typed care image when a semantic constructor exposes only
-named values.
+Within `pattern(T)`, a `HardwareLiteral` constrains the whole field, `_` leaves
+the whole field unconstrained, and a nested `Pattern` preserves partial care.
+Record fields are named, vector elements are positional, and both forms recurse
+through nested aggregates. The underscore is host pattern syntax: it neither
+creates hardware nor denotes a runtime X value.
+
+The lower-level `Pattern(~value: ..., ~care: ...)` constructor remains useful
+for partially cared scalar fields and extension libraries. A care bit of one
+makes the corresponding value bit significant; zero makes it a don't-care.
+`value` and `care` must have exactly equal hardware types, not merely equal
+packed widths. Any `HardwareLiteral` type works, including `Bits`, `Bool`,
+enums, `OneHot`, extension-defined flat data, and recursively nested records
+and vectors. The generic `literal(T, packed_value)` form remains a low-level
+escape hatch for arbitrary typed packed images; canonical aggregate examples
+use named fields instead.
 
 `Pattern` stores the common `type` and `width`, the packed `care_bits`, and the
 canonical `value_bits = value & care`. It is ordinary host data rather than a
