@@ -529,6 +529,26 @@ fun emit_dpi_import(dpi_import):
                 String.join(arguments, ", "),
                 ")")
 
+fun emit_assert(operation):
+  def condition = operation.operands[0]
+  def clock = operation.operands[1]
+  def reset = operation.operands[2]
+  def guard = operation.operands[3]
+  def prefix = "%__rhdl_assert_" ++ to_string(operation.id)
+  def true_ref = prefix ++ "_true"
+  def not_reset_ref = prefix ++ "_not_reset"
+  def effective_guard_ref = prefix ++ "_guard"
+  def label = operation.attribute("label", #false)
+  String.append("    ", true_ref, " = hw.constant 1 : i1\n",
+                "    ", not_reset_ref, " = comb.xor ", value_ref(reset), ", ",
+                true_ref, " : i1\n",
+                "    ", effective_guard_ref, " = comb.and ", value_ref(guard),
+                ", ", not_reset_ref, " : i1\n",
+                "    verif.clocked_assert ", value_ref(condition), " if ",
+                effective_guard_ref, ", posedge ", value_ref(clock),
+                if label | " label \"" ++ label ++ "\"" | "",
+                " : i1")
+
 fun emit_dpi_operation(operation):
   def dpi_import = operation.attribute("dpi_import")
   def clock_ref = "%__rhdl_dpi_clock_" ++ to_string(operation.id)
@@ -653,6 +673,8 @@ fun emit_operation(operation):
         emit_memory_write(operation)
     | "rtl.sync_memory":
         emit_sync_memory(operation)
+    | "verif.assert":
+        emit_assert(operation)
     | "sim.dpi_call" || "sim.dpi_register":
         emit_dpi_operation(operation)
     | "rtl.register" || "rtl.register_reset":

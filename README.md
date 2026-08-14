@@ -122,8 +122,9 @@ Detailed documentation lives with the component that owns it:
 The current vertical slice includes:
 
 - A public, inspectable, backend-independent IR with explicit-width types,
-  structural aggregates, primitive state and memories, DPI simulation operations,
-  single-driver verification, and combinational-cycle detection.
+  structural aggregates, primitive state and memories, clocked assertions, DPI
+  simulation operations, single-driver verification, and combinational-cycle
+  detection.
 - Standard and compositional Rhombus profiles with host-only generation,
   frontend-defined types, typed literals and patterns, relational decode
   generation, combinational and sequential constructs, hierarchy, directional

@@ -47,6 +47,10 @@ SystemVerilog testbenches remain under [`verilog/`](verilog/). They verify
 behavior rather than textual output. A same-base-name `*_dpi.cpp` file is
 linked automatically when a fixture exercises DPI-C.
 
+Verilator runs with assertion evaluation enabled. The assertion fixture also
+runs a dedicated testbench that must fail and report its expected label, so
+the suite checks reset suppression, branch suppression, and active failure.
+
 ## Additional MLIR fixtures
 
 `emit-*.rhm` modules cover backend shapes that are not owned by one canonical

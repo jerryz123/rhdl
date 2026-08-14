@@ -10,7 +10,7 @@ all CIRCT-specific opcode dispatch, type choices, SSA naming, and emission.
 RHDL hardware IR
     |
     v
-CIRCT hw/comb/seq/sim MLIR
+CIRCT hw/comb/seq/verif/sim MLIR
     |
     v
 CIRCT lowering passes and ExportVerilog
@@ -64,6 +64,7 @@ IR and lower through CIRCT type aliases.
 | `rtl.memory_write` | latency-one `seq.write` |
 | `rtl.sync_memory` | `seq.firmem` with native read, write, or shared read-write ports |
 | `rtl.wire` | alias to the wire's driver |
+| `verif.assert` | guarded, reset-suppressed rising-edge `verif.clocked_assert` |
 | `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
 | `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
 
@@ -95,6 +96,12 @@ operations only grant synthesis freedom, and frontend operations continue to
 use the ordinary two-state hardware model. A downstream RTL simulator can
 display or propagate the carrier as X, but that behavior is a backend artifact
 rather than an RHDL language contract.
+
+`verif.assert` combines its frontend-derived activation guard with the inverse
+of active-high reset and uses the result as CIRCT's assertion enable. It lowers
+to `verif.clocked_assert` on the rising clock edge. The external pipeline lowers
+this to a labeled SystemVerilog concurrent assertion, wraps it with a
+`SYNTHESIS` preprocessor guard, and enables assertion evaluation in Verilator.
 
 ## API and verification
 

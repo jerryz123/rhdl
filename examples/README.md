@@ -87,6 +87,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`simple-memory-ram.rhdl`](simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
 | [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
+| [`assertions.rhdl`](assertions.rhdl) | Reset-suppressed assertions with branch-derived activation guards |
 | [`width-ops.rhdl`](width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
 | [`dont-care.rhdl`](dont-care.rhdl) | Typed synthesis freedom and Pattern-selected fixed bits |
 | [`decode.rhdl`](decode.rhdl) | Callable typed decode relation with named aggregate fields and semantic enum values |

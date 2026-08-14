@@ -393,6 +393,46 @@ class Builder(design):
         design.add_dpi_import(dpi_import)
         dpi_import
 
+  // A clocked assertion is verification collateral, not a readable value or
+  // hidden state element. Its guard records derived lexical activation.
+  method assert(module_def,
+                condition,
+                clock,
+                reset,
+                guard,
+                label = #false,
+                location = Location(),
+                origin = Origin("clocked assertion")):
+    ensure_module_in_design(design, module_def, #'assert)
+    ensure_open(module_def, #'assert)
+    for (operand in [condition, clock, reset, guard]):
+      ensure_value_in(module_def, operand, #'assert)
+    unless flat_data_type(condition.type) && data_width(condition.type) == 1
+    | fail(#'assert, "assert condition must be a one-bit FlatDataType")
+    unless clock_type(clock.type)
+    | fail(#'assert, "assert clock must be Clock")
+    unless reset_type(reset.type)
+    | fail(#'assert, "assert reset must be Reset")
+    unless flat_data_type(guard.type) && data_width(guard.type) == 1
+    | fail(#'assert, "assert guard must be a one-bit FlatDataType")
+    when label != #false
+    | ensure_hardware_name(label, #'assert)
+    def operation_id = design.fresh_id()
+    def operands = [condition, clock, reset, guard]
+    def operation = Operation(operation_id,
+                              "verif.assert",
+                              module_def,
+                              operands,
+                              [],
+                              [],
+                              {"label": label},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    module_def.add_operation(operation)
+    operation
+
   // A procedure call is a clocked side effect and therefore produces no
   // hardware value or hidden result state.
   method dpi_call(module_def,

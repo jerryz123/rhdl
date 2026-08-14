@@ -23,6 +23,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
 | [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
 | [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed separate or shared ports |
+| [`assertion.rhm`](assertion.rhm) | Reset-suppressed, branch-guarded clocked assertions |
 | [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
 | [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
@@ -280,6 +281,31 @@ while disabled is unspecified. An all-zero write mask preserves storage but
 does not turn a shared write-mode cycle into a read. Port arrays remain outside
 this contract.
 
+## Clocked assertions
+
+```rhombus
+sync_circuit CheckedQueue():
+  input invariant: Bool
+  input request: Bits(1)
+
+  assert(invariant, "queue_invariant")
+  when request:
+    assert(invariant, "request_invariant")
+```
+
+An assertion samples a readable one-bit `FlatDataType` on each rising clock
+edge. It is disabled while the active-high reset is asserted. `sync_circuit`
+supplies the ambient clock and reset. An ordinary circuit must supply both
+`~clock` and `~reset`; supplying only one is an error. Host Booleans are not
+hardware conditions.
+
+The optional second positional argument is an ASCII identifier label. The
+current form has no formatted message operands or temporal-property syntax.
+Inside `when`, an assertion is active only when its effective priority branch
+is selected. `elsewhen` guards exclude earlier conditions, `otherwise` covers
+the unmatched case, and nested chains combine their guards. The public
+assertion form has no `~enable` option.
+
 ## Clocked DPI
 
 ```rhombus
@@ -329,9 +355,10 @@ guards combine with explicit local enables, and corresponding write positions
 across mutually exclusive branches share one physical port with muxed address
 and data. Independent chains remain independent ports.
 
-Clocked DPI calls and result registers do not participate in conditional-body
-lowering. Put them outside `when` and pass the hardware condition through
-`~enable`; placing either form inside `when` is rejected.
+Assertions participate in conditional-body lowering: each assertion receives
+the effective priority branch as a derived activation guard. Clocked DPI calls
+and DPI result registers do not participate; put those effects outside `when`
+and pass the hardware condition through `~enable`.
 
 A destination may appear once per branch, and separate chains do not implement
 last-connect semantics. Primitive register reset remains expressed through

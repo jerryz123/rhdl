@@ -26,6 +26,7 @@ export:
   sync_memory
   dpi_import
   dpi_import_results
+  assert
   dpi_call
   dpi_register
   dpi_register_results
@@ -131,10 +132,13 @@ Parameter.def current_conditional_branch = #false
 
 class ConditionalAssignment(place, value)
 class ConditionalMemoryWrite(resource, address, data, clock, enable, location)
+class ConditionalAssertion(condition, clock, reset, guard, label, location)
 
-// Collects assignments and memory-write effects along one mutually exclusive
-// hardware branch. Resolution later emits muxed drivers and write ports.
-class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
+// Collects assignments, memory writes, and assertions along one mutually
+// exclusive hardware branch for guarded resolution after elaboration.
+class ConditionalBranch(mutable assignments = [],
+                        mutable memory_writes = [],
+                        mutable assertions = []):
   method assignment_for(place):
     assignments.find(fun (assignment): assignment.place === place)
 
@@ -150,11 +154,16 @@ class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
   method add_memory_write(write):
     memory_writes := memory_writes ++ [write]
 
-// Prevents stateful effects that have no conditional-lowering protocol from
-// escaping a when branch with their original, unguarded enables.
-fun reject_unsupported_conditional_effect(effect, location = Location()):
+  method add_assertion(assertion):
+    assertions := assertions ++ [assertion]
+
+// Prevents effects with no conditional-lowering protocol from escaping a when
+// branch without an explicit hardware guard in their own semantics.
+fun reject_unsupported_conditional_effect(effect,
+                                          location = Location(),
+                                          guidance = "use ~enable for hardware control"):
   when current_conditional_branch() is_a ConditionalBranch
-  | frontend_fail(effect ++ " is not supported inside when; use ~enable for hardware control",
+  | frontend_fail(effect ++ " is not supported inside when; " ++ guidance,
                   location)
 
 fun require_context(location = Location()):
@@ -327,6 +336,20 @@ fun dpi_import_results(name,
                                      input_types,
                                      results,
                                      location)
+
+fun assert(condition,
+           clock,
+           reset,
+           label = #false,
+           location = Location()):
+  def context = require_context(location)
+  def assertion = ConditionalAssertion(read(condition, location),
+                                       read(clock, location),
+                                       read(reset, location),
+                                       #false,
+                                       label,
+                                       location)
+  emit_conditional_assertion(assertion)
 
 fun dpi_call(dpi_import,
              inputs,
@@ -767,6 +790,40 @@ fun emit_conditional_memory_write(write):
       Origin("embedded conditional memory write", write.resource.name)
     )
 
+// Combines lexical activation as assertions cross nested conditional chains.
+// A missing guard means the assertion is active throughout its current scope.
+fun combine_assertion_guards(left, right, location = Location()):
+  cond
+  | left && right: bit_and(left, right, #false, location)
+  | left: left
+  | right: right
+  | ~else: #false
+
+fun emit_conditional_assertion(assertion,
+                               branch_guard = #false):
+  def guard = combine_assertion_guards(assertion.guard,
+                                       branch_guard,
+                                       assertion.location)
+  def guarded = ConditionalAssertion(assertion.condition,
+                                     assertion.clock,
+                                     assertion.reset,
+                                     guard,
+                                     assertion.label,
+                                     assertion.location)
+  def branch = current_conditional_branch()
+  if branch is_a ConditionalBranch
+  | branch.add_assertion(guarded)
+  | require_context(assertion.location).builder.assert(
+      require_module(assertion.location),
+      assertion.condition,
+      assertion.clock,
+      assertion.reset,
+      guard || literal(Bits(1), 1, #false, assertion.location),
+      assertion.label,
+      assertion.location,
+      Origin("embedded clocked assertion", assertion.label || "")
+    )
+
 fun validate_conditional_value(condition, location = Location()):
   unless hardware_entity(condition)
   | frontend_fail("when condition must be a hardware value", location)
@@ -782,7 +839,7 @@ fun collect_conditional_branch(body, location = Location()):
   branch
 
 // Elaborates an ordered hardware-conditional chain into mux trees, final
-// single drivers, and one enabled write per conditional memory-port slot.
+// drivers, enabled memory writes, and priority-guarded assertions.
 fun conditional_chain(branches, otherwise_body = #false, location = Location()):
   unless branches is_a List && branches.length() >= 1
   | frontend_fail("conditional chain requires at least one branch", location)
@@ -796,6 +853,43 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
     if otherwise_body
     | collect_conditional_branch(otherwise_body, location)
     | #false
+
+  def mutable has_assertions = #false
+  for (branch_result in branch_results):
+    when branch_result.assertions.length() > 0
+    | has_assertions := #true
+  when otherwise_result && otherwise_result.assertions.length() > 0
+  | has_assertions := #true
+
+  // Priority-aware assertion guards describe the cycles in which each branch
+  // body is active. Nested chains combine their guards while unwinding.
+  when has_assertions
+  | block:
+      def mutable unmatched_guard = #false
+      def branch_guards:
+        for List (condition in conditions, index in 0..conditions.length()):
+          def condition_bits = cast(condition, Bits(1), #false, location)
+          def branch_guard = combine_assertion_guards(unmatched_guard,
+                                                      condition_bits,
+                                                      location)
+          def needs_unmatched:
+            if index + 1 < conditions.length()
+            | #true
+            | otherwise_result && otherwise_result.assertions.length() > 0
+          when needs_unmatched
+          | def condition_false = bit_not(condition_bits, #false, location)
+            unmatched_guard := combine_assertion_guards(unmatched_guard,
+                                                        condition_false,
+                                                        location)
+          branch_guard
+
+      for (branch_result in branch_results, branch_guard in branch_guards):
+        for (assertion in branch_result.assertions):
+          emit_conditional_assertion(assertion, branch_guard)
+      when otherwise_result
+      | for (assertion in otherwise_result.assertions):
+          emit_conditional_assertion(assertion, unmatched_guard)
+
   def mutable places = []
   for (branch_result in branch_results):
     for (assignment in branch_result.assignments):

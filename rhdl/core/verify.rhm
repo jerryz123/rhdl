@@ -2,6 +2,7 @@
 // Verifies RHDL schemas, ownership, use-def links, types, drivers, and graph invariants.
 
 import:
+  rhombus/rx open
   "types.rhm" open
   "ir.rhm" open
   "ops.rhm" open
@@ -28,6 +29,8 @@ fun packed_patterns_overlap(left, right):
   def differing = left[0] bits.xor right[0]
   def jointly_cared = left[1] bits.and right[1]
   (differing bits.and jointly_cared) == 0
+
+def assertion_label_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
 fun check_schema(operation):
   def schema = schema_for(operation.opcode)
@@ -408,6 +411,25 @@ fun check_operation_types(module_def, operation, schema):
           unless bits_type(write_mask.type) && write_mask.type.width == expected_mask_width
           | fail_operation(operation,
                            "synchronous memory read-write mask has the wrong Bits width")
+  | "clocked_assert":
+      def condition = operation.operands[0]
+      def clock = operation.operands[1]
+      def reset = operation.operands[2]
+      def guard = operation.operands[3]
+      def label = operation.attribute("label", #false)
+      unless flat_data_type(condition.type) && data_width(condition.type) == 1
+      | fail_operation(operation,
+                       "assert condition must be a one-bit FlatDataType")
+      unless clock_type(clock.type)
+      | fail_operation(operation, "assert clock must be Clock")
+      unless reset_type(reset.type)
+      | fail_operation(operation, "assert reset must be Reset")
+      unless flat_data_type(guard.type) && data_width(guard.type) == 1
+      | fail_operation(operation,
+                       "assert guard must be a one-bit FlatDataType")
+      unless label == #false || (label is_a String && assertion_label_identifier.is_match(label))
+      | fail_operation(operation,
+                       "assert label must be an ASCII identifier")
   | "dpi_call" || "dpi_register":
       def dpi_import = operation.attribute("dpi_import", #false)
       unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && contains_identity(module_def.design.dpi_imports, dpi_import)

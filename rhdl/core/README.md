@@ -93,7 +93,7 @@ nested vectors and record elements.
 
 ## Operation model
 
-Operations use namespaced `rtl.*` and `sim.*` opcodes plus a static schema
+Operations use namespaced `rtl.*`, `verif.*`, and `sim.*` opcodes plus a static schema
 registry instead of a closed node-class hierarchy. A schema defines arity,
 required attributes, type constraints, semantic category, verification, and
 printing. Backend lowering choices are not part of core schemas.
@@ -113,6 +113,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Vectors | vector create and host-static element extraction |
 | Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
 | Sequential | register with optional synchronous reset |
+| Verification | guarded, reset-suppressed clocked assertion |
 | Simulation | clocked DPI procedure call and explicit DPI result registers |
 
 Representative type rules are:
@@ -143,6 +144,8 @@ memory_write(Memory<T>, address, T,
 sync_memory(depth, T: DataType, Clock,
             read?, write?, read_write?,
             mask_granularity?)              -> SyncMemory<T>
+assert(one-bit condition, Clock, Reset,
+       one-bit guard, optional label)        -> void
 dpi_call(procedure, Clock, enable, args...) -> void
 dpi_register(function, Clock, enable,
              args...)                       -> one or more flat result types
@@ -232,6 +235,21 @@ all hold while disabled. Both operations carry an explicit clock and one-bit
 hardware enable. They are deliberately unsynthesizable core semantics rather
 than frontend-only annotations.
 
+### Clocked assertions
+
+`verif.assert` checks a readable one-bit condition on each rising clock edge
+while its one-bit guard is asserted. It is disabled while its active-high reset
+operand is asserted. Frontends use the guard to record lexical activation from
+hardware conditionals; it is not a user-facing assertion enable. The optional
+label is an ASCII identifier used to identify the check after backend lowering.
+Assertions have no results, places, or hidden state; they remain verification
+collateral in every containing module and therefore apply independently to
+every instance.
+
+The core operation is deliberately limited to a current-cycle condition. It
+does not define temporal sequences, formatted messages, assumptions, coverage,
+or immediate combinational checks.
+
 ## Public API
 
 The public object model includes:
@@ -300,9 +318,11 @@ The Builder and whole-design verifier enforce:
     state type.
 11. DPI operations reference a same-design import and exact signature, with a
     clock and one-bit enable.
-12. Instances reference completed same-design definitions and have unique
+12. Assertions have a one-bit condition and guard, a `Clock`, a `Reset`, and an
+    optional identifier label.
+13. Instances reference completed same-design definitions and have unique
     final names within their parent.
-13. Purely combinational cycles are rejected, including cycles that cross
+14. Purely combinational cycles are rejected, including cycles that cross
     instance boundaries.
 
 The frontend separately rejects active recursive generator elaboration,
