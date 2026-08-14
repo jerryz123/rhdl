@@ -1,0 +1,39 @@
+#lang rhdl
+// Demonstrates the aligned byte-masked memory protocol and alignment helper.
+
+import:
+  lib("rhdl/std/memory-port.rhdl") open
+
+circuit MemoryPortAdapter(address_width, data_bytes):
+  interface ingress(MemoryPort(address_width, data_bytes), ~role: responder)
+  interface egress(MemoryPort(address_width, data_bytes), ~role: requester)
+  egress <=> ingress
+
+circuit MemoryAlignmentCheck():
+  input address: Bits(32)
+  output word_aligned: Bool
+  output byte_aligned: Bool
+
+  word_aligned <== memory_address_aligned(address, 4)
+  byte_aligned <== memory_address_aligned(address, 1)
+
+def design = elaborate(MemoryPortAdapter(32, 4))
+
+def verilog_reference = @str|<<{
+module MemoryPortAdapter(
+  input  struct packed {logic request_valid; logic [31:0] request_address; logic request_write; logic [31:0] request_data; logic [3:0] request_mask; logic response_ready; } ingress_in,
+  input  struct packed {logic request_ready; logic response_valid; logic [31:0] response_data; }                                                                             egress_in,
+  output struct packed {logic request_ready; logic response_valid; logic [31:0] response_data; }                                                                             ingress_out,
+  output struct packed {logic request_valid; logic [31:0] request_address; logic request_write; logic [31:0] request_data; logic [3:0] request_mask; logic response_ready; } egress_out
+);
+
+  assign ingress_out = egress_in;
+  assign egress_out = ingress_in;
+endmodule
+}>>|
+
+export:
+  MemoryPortAdapter
+  MemoryAlignmentCheck
+  design
+  verilog_reference

@@ -84,6 +84,7 @@ import one primitive without loading unrelated generators.
 | `std/decode/generator.rhdl` | Callable `DecodeGen` lowering to one core decode | `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
+| `std/memory-port.rhdl` | One-outstanding aligned byte-addressed and byte-masked memory transaction protocol | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe`/`CtrlPipe` and typed chaining helpers | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed chaining helpers | `std/ready-valid.rhdl`, `std/counter.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |

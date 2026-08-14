@@ -1,0 +1,56 @@
+#lang rhombus
+// Checks memory-protocol parameters, directions, alignment logic, and elaboration.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../rhdl/std/memory-port.rhdl" as std
+  "../../examples/memory-port.rhdl" as fixture
+
+def type = std.MemoryPort(32, 4)
+def adapter_design = fixture.design
+def adapter = adapter_design.modules[0]
+def alignment_design = embedded.run_elaboration(
+  fun (): fixture.MemoryAlignmentCheck()
+)
+def alignment = alignment_design.modules[0]
+def low_extract = alignment.operations.find(
+  fun (operation): operation.opcode == "rtl.extract"
+)
+
+check:
+  type.name ~is "MemoryPort"
+  type.roles ~is ["requester", "responder"]
+  type.members.map(fun (member): member.name) ~is ["request_valid",
+                                                   "request_address",
+                                                   "request_write",
+                                                   "request_data",
+                                                   "request_mask",
+                                                   "response_ready",
+                                                   "request_ready",
+                                                   "response_valid",
+                                                   "response_data"]
+  type.members.find(fun (member): member.name == "request_address").type.width ~is 32
+  type.members.find(fun (member): member.name == "request_data").type.width ~is 32
+  type.members.find(fun (member): member.name == "request_mask").type.width ~is 4
+  type.members.find(fun (member): member.name == "response_data").type.width ~is 32
+  type.members.find(fun (member): member.name == "request_valid").type === bool.Bool ~is #true
+  type.members.find(fun (member): member.name == "request_valid").from_role ~is "requester"
+  type.members.find(fun (member): member.name == "request_ready").from_role ~is "responder"
+  adapter.inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
+  adapter.outputs.map(fun (port): port.name) ~is ["ingress_out", "egress_out"]
+  low_extract.attribute("low") ~is 0
+  low_extract.attribute("high") ~is 1
+  alignment.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.eq"
+  ).length() ~is 1
+  alignment.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value", #false) == 1
+  ).length() ~is 1
+  verify_design(adapter_design) ~is #void
+  verify_design(alignment_design) ~is #void
+  std.MemoryPort(0, 4) ~throws "address width must be a positive host Int"
+  std.MemoryPort(32, 0) ~throws "data byte count must be a positive host Int"
+  std.MemoryPort(32, 3) ~throws "data byte count must be a power of two"
+  std.MemoryPort(1, 4) ~throws "address width must cover"

@@ -125,6 +125,39 @@ protocol assertions.
 `fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
 returns `endpoint.valid and endpoint.ready`.
 
+## Memory transactions
+
+[`memory-port.rhdl`](memory-port.rhdl) defines `MemoryPort(address_width,
+data_bytes)`, a deliberately small requester/responder protocol for connecting
+a processor or host shim to memory-like hardware:
+
+```rhombus
+import:
+  lib("rhdl/std/memory-port.rhdl") open
+
+interface memory(MemoryPort(32, 8), ~role: requester)
+```
+
+`address_width` is the width of the full byte address. `data_bytes` is the
+number of bytes in each transfer, must be a power of two, and determines both
+the `Bits(data_bytes * 8)` data width and the `Bits(data_bytes)` write-mask
+width. A set mask bit enables the corresponding byte lane on a write; the mask
+is ignored on reads. An all-zero write mask is therefore a legal no-op write.
+
+Requests use `request_valid`/`request_ready`; responses use
+`response_valid`/`response_ready`. The requester must hold every request field
+stable until the request transfers, and the responder must hold response data
+stable until the response transfers. At most one accepted request may await a
+response, and every request, including a write, produces exactly one response.
+`response_data` is meaningful only for reads. This simple ordering contract
+avoids IDs, bursts, and multiple outstanding transactions.
+
+Every request address must be aligned to `data_bytes`. The protocol retains a
+full byte address so it composes directly with processor addresses and software
+images; it does not silently discard low bits. Use
+`memory_address_aligned(address, data_bytes)` for a hardware alignment check.
+The interface type validates its host parameters during construction.
+
 ## Flow-control circuits
 
 [`flow.rhdl`](flow.rhdl) re-exports the independently importable generators
