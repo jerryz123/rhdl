@@ -20,19 +20,22 @@ circuit StateMachine():
   output state_out: State
 
   reg current(State, ~clock: clock, ~reset: reset, ~init: State.Idle)
-  when (current === State.Idle):
-    current.next <== State.Running
-  elsewhen (current === State.Running):
-    current.next <== State.Done
-  otherwise:
-    // This fallback also recovers from State's unused two-bit encoding.
-    current.next <== State.Idle
+  // The mandatory default recovers from State's unused two-bit encoding.
+  current.next <== mux_lookup(current, ~default: State.Idle):
+    State.Idle: State.Running
+    State.Running: State.Done
+    State.Done: State.Idle
   state_out <== current
 
 circuit OpcodeDecoder():
   input opcode: Opcode
   output is_load: Bool
+  output next_opcode: Opcode
   is_load <== opcode === Opcode.Load
+  next_opcode <== mux_lookup(opcode, ~default: Opcode.Add):
+    Opcode.Add: Opcode.Sub
+    Opcode.Sub: Opcode.Load
+    Opcode.Load: Opcode.Add
 
 def design = elaborate(StateMachine())
 
@@ -48,7 +51,8 @@ module StateMachine(
     if (reset)
       current <= 2'h0;
     else
-      current <= current == 2'h0 ? 2'h1 : current == 2'h1 ? 2'h2 : 2'h0;
+      current <=
+        current == 2'h0 ? 2'h1 : current == 2'h1 ? 2'h2 : current == 2'h2 ? 2'h0 : 2'h0;
   end // always @(posedge)
   assign state_out = current;
 endmodule

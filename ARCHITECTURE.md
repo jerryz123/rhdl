@@ -36,8 +36,8 @@ the internal module implementing its shared frontend forms is called the
 | Area | Responsibility | May depend directly on |
 |---|---|---|
 | `core/` | Types, IR, Builder, verification, and printing | Other core modules and Rhombus libraries |
-| `frontend/kernel.rhm` | Context-sensitive elaboration over the public core | Core |
-| `frontend/support/` | Shared macro and static-information machinery; not a language profile | Kernel, approved core APIs, other support modules |
+| `frontend/kernel.rhm` | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
+| `frontend/support/` | Shared cross-layer protocols, macros, and static-information machinery; not a language profile | Kernel, approved core APIs, other support modules |
 | `frontend/foundation.rhm` | Circuits, ports, connections, elaboration, basic types, selection, and casts | Kernel, support, approved core type APIs |
 | `frontend/layers/` | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | `frontend/standard.rhm` | Aggregation only; defines no feature behavior | Foundation and all standard layers |
@@ -57,9 +57,9 @@ when adding, removing, or changing a layer's direct dependencies.
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
-| `comb.rhm` | Literals, arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support |
+| `comb.rhm` | Literals, arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, mux-lookup support |
 | `bool.rhm` | Nominal `Bool`, `===`, and binary `mux` | core IR, kernel |
-| `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support |
+| `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, records, and field access | core IR, kernel, field support |
 | `vector.rhm` | `Vec` types and inferred vector construction | core types, kernel, field support |
 | `interface.rhm` | Roles, directional interfaces, and bulk connection | core IR, kernel, field support, instance-member support |
@@ -76,6 +76,16 @@ instance members without making hierarchy depend on interface.
 `frontend/support/clocking.rhm` depends on core IR and types plus the kernel;
 it carries frontend-only sync metadata and expands ambient policy into explicit
 ports, register operands, instance inputs, and drives.
+
+`frontend/support/mux-lookup.rhm` depends only on the kernel's deferred-value
+interface. It lets independently selectable layers contribute typed selector
+and key behavior to the combinational mux syntax.
+
+The kernel's deferred-value protocol lets layers retain authoring metadata
+until an operation consumes it. For example, enum members remain typed lookup
+keys until the combinational layer uses the mux-lookup protocol to normalize
+them to integer keys and a Bits selector for the core mux operation. These
+protocols do not add frontend types or operations to the public core IR.
 
 ## Enforcement
 

@@ -6,6 +6,7 @@ import:
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
+  "../support/mux-lookup.rhm" as mux_support
 
 export:
   hardware_enum
@@ -19,6 +20,7 @@ class EnumMember(name, encoding)
 
 class EnumType(name, identity, members, width):
   implements FlatDataType
+  implements mux_support.MuxLookupSelectorType
 
   override method describe():
     "enum<" ++ name ++ ">"
@@ -28,6 +30,12 @@ class EnumType(name, identity, members, width):
 
   override method bit_width():
     width
+
+  override method normalize_mux_lookup_key(key):
+    unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
+    | error(~who: #'mux_lookup,
+            "enum mux lookup keys must be members of the selector's enum type")
+    key.mux_lookup_key_encoding()
 
 fun enum_type(type):
   type is_a EnumType
@@ -113,14 +121,26 @@ fun make_explicit_enum(name, members, requested_width = #false):
                             members.map(fun (member): member[1]),
                             requested_width)
 
-fun enum_value(type, member_name, location = Location()) :~ HardwareFields:
+class EnumValue(type, member_name, encoding):
+  implements mux_support.MuxLookupKey
+
+  override method materialize_hardware(location):
+    kernel.cast(kernel.literal(Bits(type.width), encoding, #false, location),
+                type,
+                #false,
+                location)
+
+  override method mux_lookup_key_type():
+    type
+
+  override method mux_lookup_key_encoding():
+    encoding
+
+fun enum_value(type, member_name) :~ HardwareFields:
   unless enum_type(type)
-  | error(~who: #'hardware_enum, location.describe() ++ ": member access requires an enum type")
+  | error(~who: #'hardware_enum, "member access requires an enum type")
   def encoding = enum_encoding(type, member_name)
-  kernel.cast(kernel.literal(Bits(type.width), encoding, #false, location),
-              type,
-              #false,
-              location)
+  EnumValue(type, member_name, encoding)
 
 annot.macro 'EnumMembers':
   annot_meta.pack_predicate(

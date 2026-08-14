@@ -143,7 +143,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
 | [`generated-adder.rhdl`](generated-adder.rhdl) | An `InstanceArray` host collection wired through runtime `Vec` carry and sum wires |
 | [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
-| [`enum-state.rhdl`](enum-state.rhdl) | Nominal state and opcode enums, explicit encodings, equality, registers, and invalid-state recovery |
+| [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums as typed mux selectors and values, explicit encodings, registers, and invalid-state recovery |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
 | [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |

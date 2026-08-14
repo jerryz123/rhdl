@@ -9,6 +9,7 @@ import:
     except concat
   "../kernel.rhm".concat as kernel_concat
   "../support/fields.rhm".HardwareFields
+  "../support/mux-lookup.rhm" open
 
 export:
   bits
@@ -68,10 +69,24 @@ fun concat(entity, ...) :~ HardwareFields:
   kernel_concat(entities.map(concat_operand))
 
 fun build_mux_lookup(selector, default_value, cases):
-  hw_mux_lookup(selector, default_value, cases)
+  def selector_value = read(selector)
+  cond
+  | bits_type(selector_value.type):
+      hw_mux_lookup(selector_value, default_value, cases)
+  | selector_value.type is_a MuxLookupSelectorType:
+      def selector_bits = cast(selector_value, Bits(data_width(selector_value.type)))
+      def normalized_cases = cases.map(
+        fun (case):
+          unless case is_a List && case.length() == 2
+          | error(~who: #'mux_lookup, "mux lookup cases must be [key, value] pairs")
+          [selector_value.type.normalize_mux_lookup_key(case[0]), case[1]]
+      )
+      hw_mux_lookup(selector_bits, default_value, normalized_cases)
+  | ~else:
+      hw_mux_lookup(selector_value, default_value, cases)
 
 expr.macro 'mux_lookup($selector, ~default: $default_value):
-              $key: $case_value
+              $(key :: expr_meta.Parsed): $case_value
               ...':
   'build_mux_lookup($selector,
                     $default_value,

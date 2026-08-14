@@ -1,5 +1,5 @@
 #lang rhombus
-// Implements the context-based elaboration kernel used by embedded RHDL programs.
+// Implements context-based elaboration and deferred frontend hardware values.
 
 import:
   "../core/ir.rhm" open
@@ -8,6 +8,7 @@ import:
 
 export:
   HardwareEntity
+  DeferredHardwareValue
   CircuitDefinition
   FrontendContext
   new_circuit_identity
@@ -65,6 +66,12 @@ fun frontend_fail(message, location = Location()):
   error(~who: #'rhdl, location.describe() ++ ": " ++ message)
 
 interface HardwareEntity
+
+// Lets frontend layers retain authoring metadata until a value is actually
+// consumed by hardware construction.
+interface DeferredHardwareValue:
+  extends HardwareEntity
+  method materialize_hardware(location)
 
 fun hardware_entity(value):
   cond
@@ -134,6 +141,8 @@ fun active_module(location = Location()):
 fun read(entity, location = Location()):
   def context = require_context(location)
   cond
+  | entity is_a DeferredHardwareValue:
+      entity.materialize_hardware(location)
   | entity is_a Value: entity
   | entity is_a Register: entity.current
   | entity is_a Place:

@@ -357,8 +357,10 @@ hardware_enum State:
   Done
 
 reg state(State, ~clock: clock, ~reset: reset, ~init: State.Idle)
-when (state === State.Idle):
-  state.next <== State.Running
+state.next <== mux_lookup(state, ~default: State.Idle):
+  State.Idle: State.Running
+  State.Running: State.Done
+  State.Done: State.Idle
 ```
 
 The spelling is `hardware_enum` because ordinary Rhombus already provides
@@ -389,10 +391,17 @@ representation casts. `===` accepts operands of exactly the same
 existing Bits equality operation. Conversions between an enum and
 `Bits(width)` remain explicit through `.into(...)`.
 
-Unused encodings remain representable at hardware boundaries. State machines
-must therefore retain an explicit recovery path, such as `otherwise`, rather
-than treating a list of named members as proof that every bit pattern is
-valid. See [`examples/enum-state.rhdl`](examples/enum-state.rhdl).
+An enum may also select `mux_lookup`. Its keys must be members of exactly that
+nominal enum type; raw integers and members of other enum declarations are
+rejected. The frontend replaces member keys with their declared encodings and
+casts the selector representation to `Bits(width)` before constructing the
+unchanged core `rtl.mux_lookup` operation. This applies equally to automatic
+and explicit encodings.
+
+Unused encodings remain representable at hardware boundaries, so `~default`
+remains mandatory and supplies the invalid-encoding recovery path. Named enum
+members are not treated as proof that every bit pattern is valid. See
+[`examples/enum-state.rhdl`](examples/enum-state.rhdl).
 
 Width changes are explicit:
 
