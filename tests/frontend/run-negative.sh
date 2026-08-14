@@ -21,7 +21,6 @@ expect_failure() {
   fi
 }
 
-expect_failure bad-condition.rhdl "hardware values cannot control host conditions"
 expect_failure bad-input-drive.rhdl "connection target must be a driveable hardware place"
 expect_failure bad-instance-combinational-cycle.rhdl "combinational cycle reaches value u.y"
 expect_failure bad-instance-port.rhdl "instance u has no port or interface named missing"

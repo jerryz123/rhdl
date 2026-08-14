@@ -25,7 +25,7 @@ The layers have separate responsibilities:
 - [`kernel.rhm`](kernel.rhm) provides context-sensitive construction functions
   over the core.
 - [`foundation.rhm`](foundation.rhm) defines circuits, ports, connections,
-  elaboration, basic types, selection, casts, and guarded host conditionals.
+  elaboration, basic types, selection, and casts.
 - [`support/`](support/) contains shared macro and static-information
   mechanisms, not selectable language profiles.
 - [`layers/`](layers/README.md) contains independently selectable notation and
@@ -108,9 +108,13 @@ for over a host collection   repeated generated structure
 generator call               fresh module definition
 ```
 
-Hardware values cannot control host `if`, `unless`, `cond`, Boolean operators,
-or host iteration. The hardware-only `when` form is supplied by the
-conditional layer.
+Host control retains ordinary Rhombus truthiness. A hardware value is a host
+object and is therefore truthy, so using one wherever Rhombus asks for a truth
+value—including `if`, `unless`, `cond`, host Boolean operators, and iteration
+guards—tests the presence of that object; it never observes the value carried
+by hardware at runtime. Use the hardware-only `when` form supplied by the
+conditional layer for runtime control. Its condition must be a one-bit
+hardware value; host values are rejected.
 
 ## Host parameters and helpers
 
