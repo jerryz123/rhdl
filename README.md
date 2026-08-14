@@ -299,7 +299,7 @@ def zero = bits(0, ~width: width)
 def one = bits(1, ~width: width)
 ```
 
-The standard language provides `+`, `-`, `<<`, `>>`, `&`, `^`, `and`, `or`,
+The standard language provides `+`, `-`, `*`, `<<`, `>>`, `&`, `^`, `and`, `or`,
 `xor`, `not`, and `===`, plus named construction functions. Arithmetic is
 currently unsigned modular bit-vector arithmetic.
 
@@ -817,7 +817,7 @@ Current width rules are explicit:
 ```text
 not(T: BitwiseType)                         -> T
 and/or/xor(T: BitwiseType, T)               -> T
-add/sub(Bits(w), Bits(w))                   -> Bits(w)
+add/sub/mul(Bits(w), Bits(w))               -> Bits(w)
 shl/shru(Bits(w), Bits(a))                  -> Bits(w)
 eq(Bits(w), Bits(w))                        -> Bits(1)
 mux_lookup(Bits(w), cases: Key -> T,
@@ -946,7 +946,7 @@ the core schema.
 | Internal connection | wire |
 | Constants | constant |
 | Bitwise | not, and, or, xor |
-| Arithmetic | add, sub, logical left shift, logical unsigned right shift |
+| Arithmetic | add, sub, multiply, logical left shift, logical unsigned right shift |
 | Comparison | equality |
 | Selection | mux lookup |
 | Conversion | cast |
@@ -1079,6 +1079,7 @@ type or operation it cannot represent.
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub` | `comb.add/sub` |
+| `rtl.mul` | `comb.mul` |
 | `rtl.shl/shru` | `comb.shl/shru`, with lossless operand-width normalization around the shift |
 | `rtl.eq` | `comb.icmp eq` |
 | `rtl.mux_lookup` | `comb.icmp` plus a `comb.mux` tree |
@@ -1158,6 +1159,7 @@ Important examples include:
 | `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
+| `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
 | `examples/enable-shift-register.rhdl` | Hardware conditional assignment and implicit register hold |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |
@@ -1184,9 +1186,10 @@ make circt-test        # CIRCT verification and Verilator simulation
 make test              # complete unit plus CIRCT suite
 ```
 
-`make circt-test` currently runs fourteen simulations:
+`make circt-test` currently runs sixteen simulations:
 
 - An 8-bit modular adder.
+- An 8-bit modular unsigned multiplier.
 - A four-bit ripple-carry adder.
 - An eight-bit ripple-carry adder generated from a host Array of instances.
 - A host-width-parameterized ALU.
@@ -1195,6 +1198,7 @@ make test              # complete unit plus CIRCT suite
 - A fixed-vector datapath.
 - An element-wise assembled vector wire.
 - An 8-bit synchronous-reset counter.
+- A hardware-conditional enable shift register.
 - Two instances sharing one child definition.
 - A record-valued mux and register.
 - Equal-width record/bit representation casts.
@@ -1255,7 +1259,7 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.
 - Runtime-loaded operation dialects.
-- Multiplication and arithmetic right shift until signed types exist.
+- Arithmetic right shift until signed types exist.
 - Multi-role protocols, optional interface fields, and protocol behavior such
   as arbitration.
 - IR mutation and rewriting until a concrete transformation use case requires

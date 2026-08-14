@@ -87,6 +87,7 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `output sum: T` | `output("sum", T)` |
 | `sum <== value` | `connect(sum, value)` |
 | `a + b` | `hw_add(a, b)` |
+| `a * b` | `hw_mul(a, b)` |
 | `bits(1, ~width: w)` | `literal(Bits(w), 1)` |
 | `reg state(T, ...)` | `reg("state", T, ...)` |
 | `inst u(Child)` | A suggested-name instance using `"u"` as its deterministic base |

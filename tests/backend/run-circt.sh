@@ -150,6 +150,8 @@ fixture_specs=(
   'vector|vector_tb|examples/vector.rhdl|design|verilog_reference'
   'wire|wire_tb|examples/wire.rhdl|design|verilog_reference'
   'counter|counter_tb|examples/counter.rhdl|design|verilog_reference'
+  'multiply|multiply_tb|examples/multiply.rhdl|design|verilog_reference'
+  'sync-counter||examples/sync-counter.rhdl|design|verilog_reference'
   'enable-shift-register|enable_shift_register_tb|examples/enable-shift-register.rhdl|design|verilog_reference'
   'hierarchy|hierarchy_tb|examples/hierarchy.rhdl|design|verilog_reference'
   'bundle|bundle_tb|examples/bundle.rhdl|design|verilog_reference'

@@ -52,6 +52,7 @@ examples:
 	racket -S $(CURDIR) examples/shifts.rhdl
 	racket -S $(CURDIR) examples/width-ops.rhdl
 	racket -S $(CURDIR) examples/counter.rhdl
+	racket -S $(CURDIR) examples/multiply.rhdl
 	racket -S $(CURDIR) examples/sync-counter.rhdl
 	racket -S $(CURDIR) examples/enable-shift-register.rhdl
 	racket -S $(CURDIR) examples/hierarchy.rhdl
