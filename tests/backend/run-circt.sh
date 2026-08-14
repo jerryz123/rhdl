@@ -154,6 +154,7 @@ fixture_specs=(
   'multiply|multiply_tb|examples/multiply.rhdl|design|verilog_reference'
   'sync-counter||examples/sync-counter.rhdl|design|verilog_reference'
   'enable-shift-register|enable_shift_register_tb|examples/enable-shift-register.rhdl|design|verilog_reference'
+  'reset-shift-register|reset_shift_register_tb|examples/reset-shift-register.rhdl|design|verilog_reference'
   'hierarchy|hierarchy_tb|examples/hierarchy.rhdl|design|verilog_reference'
   'bundle|bundle_tb|examples/bundle.rhdl|design|verilog_reference'
   'record-cast|record_cast_tb|examples/bundle.rhdl|cast_design|cast_verilog_reference'

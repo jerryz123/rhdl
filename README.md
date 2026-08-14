@@ -74,6 +74,7 @@ A concept belongs in a frontend layer when it is notation, organization,
 or policy over existing semantics. Current examples include:
 
 - The layer-defined `Bool` type and Boolean syntax.
+- Nominal hardware enums lowered through explicit bit representations.
 - Arithmetic, logical-shift, bitwise, literal, mux, and width-operation notation.
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
@@ -118,6 +119,7 @@ The composable frontend layers are:
 | `layers/cast.rhm` | Functional `cast(value, T)` spelling for equal-width representation casts |
 | `layers/comb.rhm` | Literals, arithmetic, logical shifts, bitwise syntax, lookup muxes, and named width operations |
 | `layers/bool.rhm` | Nominal `Bool`, `===`, and binary `mux` |
+| `layers/enum.rhm` | Opt-in nominal hardware enums with automatic or explicit encodings |
 | `layers/bundle.rhm` | Bundle declarations, record construction, and field access |
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `layers/wire.rhm` | Binding-derived single-driver internal wires |
@@ -128,9 +130,9 @@ The composable frontend layers are:
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
 `frontend/standard.rhm` only aggregates the foundation and curated layers. It
-does not implement features itself. The sync layer is intentionally opt-in;
-import it from either language profile. Neither language profile implicitly
-exports the core Builder or raw elaboration kernel.
+does not implement features itself. The enum and sync layers are intentionally
+opt-in; import them from either language profile. Neither language profile
+implicitly exports the core Builder or raw elaboration kernel.
 
 The shared foundation marks hardware bindings with frontend static information
 for field access, host-range indexing, and `.into(TargetType)`. Consequently,
@@ -340,6 +342,58 @@ result <== mux_lookup(op, ~default: not a):
 Binary `mux(sel, when_true, when_false)` is a frontend specialization for a
 `Bool` selector. Both forms construct the core `rtl.mux_lookup` operation.
 
+### Hardware enums
+
+The opt-in enum layer defines nominal flat data without adding an enum
+operation or backend type:
+
+```rhombus
+import:
+  lib("rhdl/frontend/layers/enum.rhm") open
+
+hardware_enum State:
+  Idle
+  Running
+  Done
+
+reg state(State, ~clock: clock, ~reset: reset, ~init: State.Idle)
+when (state === State.Idle):
+  state.next <== State.Running
+```
+
+The spelling is `hardware_enum` because ordinary Rhombus already provides
+`enum` for host data. A hardware enum implements `FlatDataType`, but not
+`BitwiseType`, so it can cross ports, occupy registers, and serve as mux data
+without acquiring arithmetic or bitwise operations.
+
+Automatic members use declaration-order encodings `0`, `1`, and so on. Width
+defaults to at least one bit and otherwise the minimum needed for the largest
+encoding. Protocol encodings can specify both values and a stable width:
+
+```rhombus
+hardware_enum Opcode(~width: 4):
+  Add = 0
+  Sub = 1
+  Load = 8
+```
+
+Member names and encodings must be unique, encodings must be nonnegative host
+integers, and either every member has an explicit encoding or none do. Each
+evaluated declaration has distinct nominal identity: equal widths and names do
+not make two enum types connection-compatible. Declarations therefore
+normally belong at module scope.
+
+Enum members elaborate as `Bits(width)` constants followed by explicit
+representation casts. `===` accepts operands of exactly the same
+`FlatDataType`; enum equality exposes both representations before using the
+existing Bits equality operation. Conversions between an enum and
+`Bits(width)` remain explicit through `.into(...)`.
+
+Unused encodings remain representable at hardware boundaries. State machines
+must therefore retain an explicit recovery path, such as `otherwise`, rather
+than treating a list of named members as proof that every bit pattern is
+valid. See [`examples/enum-state.rhdl`](examples/enum-state.rhdl).
+
 Width changes are explicit:
 
 - Frontend `concat(a, b, ...)` accepts two or more packable data values and
@@ -420,6 +474,9 @@ reg reset_delayed(~next: data_in,
                   ~reset: reset,
                   ~init: zero)
 ```
+
+See [`examples/reset-shift-register.rhdl`](examples/reset-shift-register.rhdl)
+for a direct `RegInit`-style four-stage example using an ambient sync domain.
 
 Only active-high synchronous reset is currently supported. `~init` is the
 synchronous reset value, not a separate initialization mechanism. Register
@@ -809,8 +866,9 @@ VectorType(length, element_type)
 
 `Bits` implements `BitwiseType`. `Clock` and `Reset` are nominal control types,
 not `DataType`s. The frontend-defined `Bool` is a nominal one-bit
-`BitwiseType`; it is distinct from `Bits(1)`. Core and the backend depend on
-the open capabilities rather than importing `Bool`.
+`BitwiseType`; hardware enums are nominal `FlatDataType`s without bitwise
+capability. Core and the backend depend on the open capabilities rather than
+importing either frontend type.
 
 Types with equal canonical packed widths may cross only through an explicit
 `cast`. This includes nominal flat types, `Clock`, `Reset`, and packable
@@ -1188,7 +1246,8 @@ Important examples include:
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
 | `examples/multiply.rhdl` | Same-width unsigned multiplication with modular overflow |
-| `examples/enable-shift-register.rhdl` | Hardware conditional assignment and implicit register hold |
+| `examples/enable-shift-register.rhdl` | Explicit-domain conditional assignment and implicit register hold |
+| `examples/reset-shift-register.rhdl` | `RegInit`-style inferred registers in an ambient sync domain |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |
 | `examples/host-parameters.rhdl` | Opaque host parameters and type-producing closures |

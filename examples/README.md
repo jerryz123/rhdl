@@ -58,6 +58,7 @@ importable layers:
 | [`layers/cast.rhm`](../rhdl/frontend/layers/cast.rhm) | Functional `cast(value, T)` spelling for equal-width representation casts |
 | [`layers/comb.rhm`](../rhdl/frontend/layers/comb.rhm) | Literals, arithmetic, bitwise syntax, lookup muxes, and width operations |
 | [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, `===`, and binary `mux` |
+| [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Opt-in nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
 | [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, bulk connection, and instance reconstruction |
 | [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
@@ -67,8 +68,8 @@ importable layers:
 | [`layers/vector.rhm`](../rhdl/frontend/layers/vector.rhm) | Concise fixed-length vector types and inferred construction |
 
 [`standard.rhm`](../rhdl/frontend/standard.rhm) contains no feature
-implementation. It aggregates the foundation and the curated layers; the sync
-layer remains opt-in. `#lang rhdl` exposes that curated standard profile. The lower-level
+implementation. It aggregates the foundation and the curated layers; enum and
+sync remain opt-in. `#lang rhdl` exposes that curated standard profile. The lower-level
 [`kernel.rhm`](../rhdl/frontend/kernel.rhm) and [`core/main.rhm`](../rhdl/core/main.rhm)
 remain explicit library imports.
 
@@ -142,10 +143,12 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`adder4.rhdl`](adder4.rhdl) | Four reused full-adder instances, bit selection, carry chaining, and pack-aware concatenation |
 | [`generated-adder.rhdl`](generated-adder.rhdl) | An `InstanceArray` host collection wired through runtime `Vec` carry and sum wires |
 | [`alu.rhdl`](alu.rhdl) | Layer-defined `Bool`, `===`, word-form bitwise operators, and canonical N-way selection |
+| [`enum-state.rhdl`](enum-state.rhdl) | Nominal state and opcode enums, explicit encodings, equality, registers, and invalid-state recovery |
 | [`shifts.rhdl`](shifts.rhdl) | Fixed-width logical shifts with narrower and wider hardware shift amounts |
 | [`counter.rhdl`](counter.rhdl) | Explicit-width literal and binding-derived register layers over primitive registers |
 | [`sync-counter.rhdl`](sync-counter.rhdl) | Opt-in implicit clock/reset ports, ambient register syntax, propagation, and explicit domain override |
 | [`enable-shift-register.rhdl`](enable-shift-register.rhdl) | Hardware `when` lowered to enable muxes with implicit register hold and synchronous reset |
+| [`reset-shift-register.rhdl`](reset-shift-register.rhdl) | Chisel-style reset-initialized registers using inferred types and an ambient sync domain |
 | [`hierarchy.rhdl`](hierarchy.rhdl) | Binding-derived instances and dot-based access to elaborated child ports |
 | [`layered-adder.rhdl`](layered-adder.rhdl) | An ordinary imported Rhombus hardware library plus recursive host-generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Host iteration creates fresh hardware definitions without automatic deduplication |
