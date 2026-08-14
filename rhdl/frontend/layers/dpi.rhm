@@ -7,6 +7,7 @@ import:
   "../kernel.rhm" as kernel
   "../support/clocking.rhm".ambient_dpi_call
   "../support/clocking.rhm".ambient_dpi_register
+  "../support/clocking.rhm".ambient_dpi_register_results
   "../support/fields.rhm".HardwareFields
 
 export:
@@ -16,10 +17,9 @@ export:
 class DpiDefinition(name,
                     input_names,
                     input_types,
-                    result_name = #false,
-                    result_type = #false):
+                    results = []):
   method has_result():
-    result_type != #false
+    results.length() != 0
 
 fun dpi_procedure(value):
   value is_a DpiDefinition && !value.has_result()
@@ -27,11 +27,10 @@ fun dpi_procedure(value):
 fun materialize_import(definition):
   unless definition is_a DpiDefinition
   | error(~who: #'dpi_import, "expected a DPI import definition")
-  kernel.dpi_import(definition.name,
-                    definition.input_names,
-                    definition.input_types,
-                    definition.result_name,
-                    definition.result_type)
+  kernel.dpi_import_results(definition.name,
+                            definition.input_names,
+                            definition.input_types,
+                            definition.results)
 
 fun resolved_enable(enable):
   if enable | enable | kernel.literal(Bits(1), 1)
@@ -55,11 +54,34 @@ fun make_dpi_register(name,
                       enable = #false) :~ HardwareFields:
   unless function is_a DpiDefinition && function.has_result()
   | error(~who: #'dpi_reg, "dpi_reg requires a result-bearing function import")
+  unless function.results.length() == 1
+  | error(~who: #'dpi_reg,
+          "a single dpi_reg binding requires exactly one function result")
   def imported = materialize_import(function)
   def enabled = resolved_enable(enable)
   if clock
   | kernel.dpi_register(name, imported, inputs, clock, enabled)
   | ambient_dpi_register(name, imported, inputs, enabled)
+
+fun make_dpi_registers(result_names,
+                       function,
+                       inputs,
+                       clock = #false,
+                       enable = #false):
+  unless function is_a DpiDefinition && function.results.length() > 1
+  | error(~who: #'dpi_reg,
+          "parenthesized dpi_reg bindings require multiple function results")
+  unless result_names.length() == function.results.length()
+  | error(~who: #'dpi_reg,
+          "DPI result binding count must match the function result count")
+  def imported = materialize_import(function)
+  def enabled = resolved_enable(enable)
+  if clock
+  | kernel.dpi_register_results(result_names, imported, inputs, clock, enabled)
+  | ambient_dpi_register_results(result_names, imported, inputs, enabled)
+
+fun find_dpi_register_result(result_values, name) :~ HardwareFields:
+  result_values.find(fun (result_value): result_value.name == name)
 
 annot.macro 'DpiProcedureFields':
   annot_meta.pack_predicate(
@@ -88,7 +110,8 @@ defn.macro
     'def $name :: DpiProcedureFields = DpiDefinition(
         $import_name,
         [$input_name, ...],
-        [$argument_type, ...]
+        [$argument_type, ...],
+        []
       )'
 | 'dpi_import function $(name :: Identifier)($argument_name: $argument_type, ...) -> $(result_name :: Identifier): $result_type':
     def import_name = name.to_source_string()
@@ -98,11 +121,57 @@ defn.macro
         $import_name,
         [$input_name, ...],
         [$argument_type, ...],
-        $output_name,
-        $result_type
+        [DpiResult($output_name, $result_type, "return")]
+      )'
+| 'dpi_import function $(name :: Identifier)($argument_name: $argument_type, ...) -> ($(result_direction :: Identifier) $(result_name :: Identifier): $result_type, ...)':
+    def import_name = name.to_source_string()
+    let [input_name, ...] = [argument_name.to_source_string(), ...]
+    let [output_name, ...] = [result_name.to_source_string(), ...]
+    let [direction_name, ...] = [result_direction.to_source_string(), ...]
+    'def $name = DpiDefinition(
+        $import_name,
+        [$input_name, ...],
+        [$argument_type, ...],
+        [DpiResult($output_name, $result_type, $direction_name), ...]
       )'
 
 defn.macro
+| 'dpi_reg ($(name :: Identifier), ...) = $function($input, ..., ~clock: $clock, ~enable: $enable)':
+    let [register_name, ...] = [name.to_source_string(), ...]
+    '«
+       def result_values = make_dpi_registers(
+         [$register_name, ...], $function, [$input, ...], $clock, $enable
+       )
+       def $name :: HardwareFields = find_dpi_register_result(result_values, $register_name)
+       ...
+     »'
+| 'dpi_reg ($(name :: Identifier), ...) = $function($input, ..., ~clock: $clock)':
+    let [register_name, ...] = [name.to_source_string(), ...]
+    '«
+       def result_values = make_dpi_registers(
+         [$register_name, ...], $function, [$input, ...], $clock
+       )
+       def $name :: HardwareFields = find_dpi_register_result(result_values, $register_name)
+       ...
+     »'
+| 'dpi_reg ($(name :: Identifier), ...) = $function($input, ..., ~enable: $enable)':
+    let [register_name, ...] = [name.to_source_string(), ...]
+    '«
+       def result_values = make_dpi_registers(
+         [$register_name, ...], $function, [$input, ...], #false, $enable
+       )
+       def $name :: HardwareFields = find_dpi_register_result(result_values, $register_name)
+       ...
+     »'
+| 'dpi_reg ($(name :: Identifier), ...) = $function($input, ...)':
+    let [register_name, ...] = [name.to_source_string(), ...]
+    '«
+       def result_values = make_dpi_registers(
+         [$register_name, ...], $function, [$input, ...]
+       )
+       def $name :: HardwareFields = find_dpi_register_result(result_values, $register_name)
+       ...
+     »'
 | 'dpi_reg $(name :: Identifier) = $function($input, ..., ~clock: $clock, ~enable: $enable)':
     def register_name = name.to_source_string()
     'def $name :: HardwareFields = make_dpi_register(

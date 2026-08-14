@@ -18,6 +18,7 @@ not a second IR.
 user base-profile imports -----> selected frontend/layers/*
 
 std/* -------------------------> public #lang rhdl authoring surface
+sim/* -------------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* libraries
 
 frontend/foundation -----------+
@@ -47,12 +48,14 @@ internal module implementing its shared frontend forms is called the
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose Rhombus with one public RHDL profile | Standard or foundation, plus the host-condition guard |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
+| [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 
 The import direction is one-way. Core never imports frontend or backend code;
 frontend code never imports a backend; and a backend never imports frontend
 syntax or elaboration. Layers do not import sibling layers. Shared machinery
 needed by multiple layers belongs in `frontend/support/`. Standard-library
-modules use public RHDL forms rather than importing implementation modules.
+modules and simulation adapters use public RHDL forms rather than importing
+implementation modules.
 
 ## Standard-library dependencies
 
@@ -90,7 +93,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `bundle.rhm` | Bundle declarations, runtime records, recursive record literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
-| `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit DPI registers | core IR, kernel, clocking support, field support |
+| `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
 | `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |

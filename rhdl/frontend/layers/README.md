@@ -22,7 +22,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
 | [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
 | [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
-| [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit DPI registers |
+| [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
 | [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
 | [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
@@ -198,16 +198,25 @@ contract.
 ```rhombus
 dpi_import procedure rhdl_trace(value: Bits(8))
 dpi_import function rhdl_step(value: Bits(8)) -> result: Bits(8)
+dpi_import function rhdl_step_pair(value: Bits(8)) -> (
+  out doubled: Bits(8),
+  return incremented: Bits(8)
+)
 
 rhdl_trace.call(value, ~enable: enable)
 dpi_reg step_result = rhdl_step(value, ~enable: enable)
+dpi_reg (doubled_result, incremented_result) = rhdl_step_pair(value, ~enable: enable)
 ```
 
-A procedure is a clocked side effect with no result. A DPI function result is
-visible state, so it must use `dpi_reg`; it holds while disabled, has
-unspecified initial value, and has no reset. A `sync_circuit` supplies the
-ambient clock, while ordinary circuits pass `~clock` explicitly. There is no
-unclocked DPI form.
+A procedure is a clocked side effect with no result. A DPI function has one C
+return and may place `out` results before it; every input and result must be a
+flat hardware type. A single-result function uses one `dpi_reg` binding. A
+multi-result function uses parenthesized `dpi_reg` bindings in declaration
+order. The bindings are separate hardware values rather than a packed bundle.
+Each result is visible state: it holds while disabled, has unspecified initial
+value, and has no reset. A `sync_circuit` supplies the ambient clock, while
+ordinary circuits pass `~clock` explicitly. There is no unclocked DPI form,
+`inout`, or `ref` support.
 
 ## Hardware conditional assignment
 

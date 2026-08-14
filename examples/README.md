@@ -79,7 +79,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`stack.rhdl`](stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
 | [`async-read-memory.rhdl`](async-read-memory.rhdl) | Asynchronous reads and synchronous writes |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
-| [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | DPI procedure effects and explicit DPI register state |
+| [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
 | [`width-ops.rhdl`](width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
 | [`bundle.rhdl`](bundle.rhdl) | Structural records, recursive literal shadows, muxes, casts, and state |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, selection, packing, aggregate drives, and state |

@@ -301,6 +301,23 @@ class Builder(design):
                     result_name = #false,
                     result_type = #false,
                     location = Location()):
+    unless (result_name == #false && result_type == #false) || (result_name != #false && result_type != #false)
+    | fail(#'dpi_import, "DPI result name and type must be supplied together")
+    def results:
+      if result_type == #false
+      | []
+      | [DpiResult(result_name, result_type, "return")]
+    this.dpi_import_results(name,
+                            input_names,
+                            input_types,
+                            results,
+                            location)
+
+  method dpi_import_results(name,
+                            input_names,
+                            input_types,
+                            results,
+                            location = Location()):
     ensure_hardware_name(name, #'dpi_import)
     unless input_names is_a List && input_types is_a List && input_names.length() == input_types.length()
     | fail(#'dpi_import, "DPI input names and types must be equal-length Lists")
@@ -313,17 +330,34 @@ class Builder(design):
     for (input_type in input_types):
       unless flat_data_type(input_type) && type_well_formed(input_type)
       | fail(#'dpi_import, "DPI inputs must have well-formed FlatDataType types")
-    unless (result_name == #false && result_type == #false) || (result_name != #false && result_type != #false)
-    | fail(#'dpi_import, "DPI result name and type must be supplied together")
-    when result_type != #false
-    | ensure_hardware_name(result_name, #'dpi_import)
-      unless flat_data_type(result_type) && type_well_formed(result_type)
-      | fail(#'dpi_import, "DPI result must have a well-formed FlatDataType type")
+    unless results is_a List
+    | fail(#'dpi_import, "DPI results must be supplied as a List")
+    for (result in results):
+      unless result is_a DpiResult
+      | fail(#'dpi_import, "DPI results must be DpiResult values")
+      ensure_hardware_name(result.name, #'dpi_import)
+      unless flat_data_type(result.type) && type_well_formed(result.type)
+      | fail(#'dpi_import, "DPI results must have well-formed FlatDataType types")
+      unless result.direction == "out" || result.direction == "return"
+      | fail(#'dpi_import, "DPI result direction must be out or return")
+    def result_names = results.map(fun (result): result.name)
+    for (result_name in result_names):
+      when result_names.filter(~keep: fun (candidate): candidate == result_name).length() != 1
+      | fail(#'dpi_import, "DPI result names must be unique")
+      when input_names.find(fun (candidate): candidate == result_name)
+      | fail(#'dpi_import, "DPI input and result names must be unique")
+    when results.length() != 0
+    | def return_results = results.filter(~keep: fun (result): result.direction == "return")
+      unless return_results.length() == 1
+      | fail(#'dpi_import, "DPI function requires exactly one return result")
+      unless results[results.length() - 1].direction == "return"
+      | fail(#'dpi_import, "DPI return result must be last")
     def existing = design.find_dpi_import(name)
     if existing
     | block:
-        def same_result = existing.result_name == result_name && (if result_type == #false | existing.result_type == #false | existing.result_type != #false && type_equal(existing.result_type, result_type))
-        def same_signature = existing.input_names == input_names && existing.input_types.length() == input_types.length() && (for all (existing_type in existing.input_types, input_type in input_types): type_equal(existing_type, input_type)) && same_result
+        def same_results:
+          existing.results.length() == results.length() && (for all (existing_result in existing.results, result in results): existing_result.name == result.name && existing_result.direction == result.direction && type_equal(existing_result.type, result.type))
+        def same_signature = existing.input_names == input_names && existing.input_types.length() == input_types.length() && (for all (existing_type in existing.input_types, input_type in input_types): type_equal(existing_type, input_type)) && same_results
         unless same_signature
         | fail(#'dpi_import, "DPI import " ++ name ++ " has conflicting signatures")
         existing
@@ -332,8 +366,7 @@ class Builder(design):
                                    name,
                                    input_names,
                                    input_types,
-                                   result_name,
-                                   result_type,
+                                   results,
                                    design,
                                    location)
         design.add_dpi_import(dpi_import)
@@ -383,6 +416,25 @@ class Builder(design):
                       enable,
                       location = Location(),
                       origin = Origin("DPI register")):
+    unless dpi_import is_a DpiImport && dpi_import.results.length() == 1
+    | fail(#'dpi_register, "dpi_register requires a function with exactly one result")
+    this.dpi_register_results(module_def,
+                              [name],
+                              dpi_import,
+                              inputs,
+                              clock,
+                              enable,
+                              location,
+                              origin)[0]
+
+  method dpi_register_results(module_def,
+                              result_names,
+                              dpi_import,
+                              inputs,
+                              clock,
+                              enable,
+                              location = Location(),
+                              origin = Origin("DPI result registers")):
     ensure_dpi_import_in(design, dpi_import, #'dpi_register)
     unless dpi_import.has_result()
     | fail(#'dpi_register, "DPI register requires a result-bearing function")
@@ -393,16 +445,38 @@ class Builder(design):
                                       clock,
                                       enable,
                                       #'dpi_register)
-    build_value_operation(design,
-                          module_def,
-                          "sim.dpi_register",
-                          operands,
-                          dpi_import.result_type,
-                          name,
-                          location,
-                          origin,
-                          #'dpi_register,
-                          {"dpi_import": dpi_import})
+    unless result_names is_a List && result_names.length() == dpi_import.results.length()
+    | fail(#'dpi_register,
+           "DPI register result names must match the function result count")
+    for (value_name in result_names):
+      ensure_hardware_name(value_name, #'dpi_register)
+      when result_names.filter(~keep: fun (candidate): candidate == value_name).length() != 1
+      | fail(#'dpi_register, "DPI register result names must be unique")
+      ensure_unique_hardware_name(module_def, value_name, #'dpi_register)
+    def operation_id = design.fresh_id()
+    def result_values:
+      for List (result in dpi_import.results,
+                value_name in result_names):
+        Value(design.fresh_id(),
+              value_name,
+              result.type,
+              module_def,
+              operation_id)
+    def operation = Operation(operation_id,
+                              "sim.dpi_register",
+                              module_def,
+                              operands,
+                              result_values,
+                              [],
+                              {"dpi_import": dpi_import, "name": result_names[0]},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    for (result in result_values):
+      module_def.add_value(result)
+    module_def.add_operation(operation)
+    result_values
 
   method module(name):
     ensure_hardware_name(name, #'module)

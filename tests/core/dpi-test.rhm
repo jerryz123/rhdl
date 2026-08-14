@@ -45,6 +45,38 @@ block:
 block:
   def design = Design()
   def builder = Builder(design)
+  def function = builder.dpi_import_results(
+    "rhdl_step_pair",
+    ["value"],
+    [Bits(8)],
+    [DpiResult("doubled", Bits(8), "out"),
+     DpiResult("incremented", Bits(8), "return")]
+  )
+  def module_def = builder.module("MultiResultDPI")
+  def clock = builder.input(module_def, "clock", Clock)
+  def enable = builder.input(module_def, "enable", Bits(1))
+  def value = builder.input(module_def, "value", Bits(8))
+  def doubled = builder.output(module_def, "doubled", Bits(8))
+  def incremented = builder.output(module_def, "incremented", Bits(8))
+  def results = builder.dpi_register_results(module_def,
+                                             ["dpi_doubled", "dpi_incremented"],
+                                             function,
+                                             [value],
+                                             clock,
+                                             enable)
+  builder.drive(doubled, results[0])
+  builder.drive(incremented, results[1])
+  builder.finish(module_def)
+  check:
+    results.map(fun (result): result.name) ~is ["dpi_doubled", "dpi_incremented"]
+    dump_ir(design).contains("sim.dpi_import @rhdl_step_pair(input value: bits<8>) -> (out doubled: bits<8>, return incremented: bits<8>)") ~is #true
+    dump_ir(design).contains("%dpi_doubled, %dpi_incremented = sim.dpi_register @rhdl_step_pair") ~is #true
+    builder.dpi_register(module_def, "single", function, [value], clock, enable) ~throws "exactly one result"
+    verify_design(design) ~is #void
+
+block:
+  def design = Design()
+  def builder = Builder(design)
   def dpi = builder.dpi_import("rhdl_step",
                                ["value"],
                                [Bits(8)],
@@ -69,4 +101,27 @@ block:
     builder.dpi_register(module_def, "clock", dpi, [value], enable, enable) ~throws "clock must be Clock"
     builder.dpi_register(module_def, "enable", dpi, [value], clock, wide_enable) ~throws "one-bit FlatDataType"
     builder.dpi_call(module_def, dpi, [value], clock, enable) ~throws "must be instantiated with dpi_register"
-    builder.dpi_register(module_def, "procedure", procedure, [value], clock, enable) ~throws "result-bearing function"
+    builder.dpi_register(module_def, "procedure", procedure, [value], clock, enable) ~throws "exactly one result"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  check:
+    builder.dpi_import_results("missing_return",
+                               ["value"],
+                               [Bits(8)],
+                               [DpiResult("output", Bits(8), "out")]) ~throws "exactly one return"
+    builder.dpi_import_results("return_first",
+                               ["value"],
+                               [Bits(8)],
+                               [DpiResult("result", Bits(8), "return"),
+                                DpiResult("output", Bits(8), "out")]) ~throws "must be last"
+    builder.dpi_import_results("duplicate_result",
+                               ["value"],
+                               [Bits(8)],
+                               [DpiResult("result", Bits(8), "out"),
+                                DpiResult("result", Bits(8), "return")]) ~throws "must be unique"
+    builder.dpi_import_results("bad_direction",
+                               ["value"],
+                               [Bits(8)],
+                               [DpiResult("result", Bits(8), "inout")]) ~throws "out or return"

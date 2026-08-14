@@ -19,11 +19,32 @@ make -C sim/fesvr setup
 make -C sim/fesvr test
 ```
 
-`direct_mem_htif_dpi.cc` provides the intended DPI-C entry point. It follows
-the conventional SystemVerilog ABI for output arguments and therefore needs
-RHDL DPI declarations with multiple outputs before it can be instantiated by
-an RHDL simulation top. The exact function signature is declared in
-`direct_mem_htif_dpi.h`. Check that adapter against the installed Verilator
+`direct_mem_htif_dpi.cc` provides the intended DPI-C entry point.
+`direct-memory-htif.rhdl` wraps it as a synchronous circuit whose ports can be
+connected to a future core simulation top. Its DPI declaration is:
+
+```rhombus
+dpi_import function rhdl_htif_tick(
+  reset: Bool,
+  request_ready: Bool,
+  response_valid: Bool,
+  response_data: Bits(32),
+  start_ready: Bool
+) -> (
+  out request_valid: Bool,
+  out request_write: Bool,
+  out request_address: Bits(32),
+  out request_data: Bits(32),
+  out response_ready: Bool,
+  out start_valid: Bool,
+  out start_entry: Bits(32),
+  return exit: Bits(32)
+)
+```
+
+The wrapper binds those ordered results directly with one parenthesized
+`dpi_reg` declaration. The exact C signature is declared in
+`direct_mem_htif_dpi.h`. Check the adapter against the installed Verilator
 headers with:
 
 ```sh

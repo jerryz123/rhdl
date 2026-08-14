@@ -148,9 +148,10 @@ sim/              optional simulation support
 tools/            repository and toolchain scripts
 ```
 
-`.rhdl` is reserved for RHDL-profile programs and frontend fixtures. `.rhm`
-contains Rhombus implementation and library modules. `.rkt` is restricted to
-reader shims and Racket interoperability where collection lookup requires it.
+`.rhdl` is reserved for RHDL-profile programs, simulation adapters, and
+frontend fixtures. `.rhm` contains Rhombus implementation and library modules.
+`.rkt` is restricted to reader shims and Racket interoperability where
+collection lookup requires it.
 
 Generated Racket, CIRCT, SystemVerilog, and Verilator output stays out of
 version control.

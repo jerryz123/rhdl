@@ -111,7 +111,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Vectors | vector create and host-static element extraction |
 | Memories | allocation, asynchronous read, synchronous write |
 | Sequential | register with optional synchronous reset |
-| Simulation | clocked DPI procedure call and explicit DPI register |
+| Simulation | clocked DPI procedure call and explicit DPI result registers |
 
 Representative type rules are:
 
@@ -136,7 +136,7 @@ memory_write(Memory<T>, address, T,
              Clock, one-bit enable)         -> void
 dpi_call(procedure, Clock, enable, args...) -> void
 dpi_register(function, Clock, enable,
-             args...)                       -> result type
+             args...)                       -> one or more flat result types
 ```
 
 Mux keys are unique nonnegative host integers that fit the selector width and
@@ -171,18 +171,20 @@ combinational-cycle checking.
 
 ### DPI simulation operations
 
-DPI imports belong to a design and have flat signatures. A result-less
-`sim.dpi_call` represents a clocked procedure effect. A result-bearing
-`sim.dpi_register` represents visible state that holds while disabled. Both
-carry an explicit clock and one-bit hardware enable. They are deliberately
-unsynthesizable core semantics rather than frontend-only annotations.
+DPI imports belong to a design and have flat signatures. A function has zero
+or more ordered `out` results followed by exactly one `return` result. A
+result-less `sim.dpi_call` represents a clocked procedure effect. A
+result-bearing `sim.dpi_register` produces one visible state value per result;
+all hold while disabled. Both operations carry an explicit clock and one-bit
+hardware enable. They are deliberately unsynthesizable core semantics rather
+than frontend-only annotations.
 
 ## Public API
 
 The public object model includes:
 
 ```text
-Design        DpiImport      Module       Operation
+Design        DpiImport      DpiResult    Module       Operation
 Value         Place          Port         Register
 Memory        Instance       HardwareType Location      Origin
 ```

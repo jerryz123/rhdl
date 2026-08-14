@@ -62,7 +62,7 @@ IR and lower through CIRCT type aliases.
 | `rtl.memory_write` | latency-one `seq.write` |
 | `rtl.wire` | alias to the wire's driver |
 | `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
-| `sim.dpi_register` | result-bearing clocked `sim.func.dpi.call` |
+| `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
 
 Shift operands require equal widths in CIRCT. A narrower amount is
 zero-extended. For a wider amount, the value is widened, shifted, and truncated

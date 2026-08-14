@@ -5,10 +5,12 @@ import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../examples/clocked-dpi.rhdl" as fixture
+  "../../sim/fesvr/direct-memory-htif.rhdl" as fesvr_fixture
+  "clocked-dpi-invalid.rhdl" as invalid
 
 def module_def = fixture.design.modules[0]
 def register = module_def.operations.find(
-  fun (operation): operation.opcode == "sim.dpi_register"
+  fun (operation): operation.opcode == "sim.dpi_register" && operation.attribute("dpi_import").name == "rhdl_step_pair"
 )
 def call = module_def.operations.find(
   fun (operation): operation.opcode == "sim.dpi_call"
@@ -28,6 +30,18 @@ def always_register = always_module.operations.find(
   fun (operation): operation.opcode == "sim.dpi_register"
 )
 def always_enable = always_module.find_operation(always_register.operands[1].defining_op_id)
+def fesvr_import = fesvr_fixture.design.dpi_imports[0]
+def fesvr_register = fesvr_fixture.design.modules[0].operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def fesvr_result_names = ["request_valid",
+                          "request_write",
+                          "request_address",
+                          "request_data",
+                          "response_ready",
+                          "start_valid",
+                          "start_entry",
+                          "exit"]
 
 check:
   fixture.design.dpi_imports.length() ~is 2
@@ -35,11 +49,20 @@ check:
   register.operands[0] === module_def.find_input("clock").value ~is #true
   register.operands[1].type.bit_width() ~is 1
   register.operands[2] === module_def.find_input("value").value ~is #true
-  register.results[0].name ~is "step_result"
+  register.results.length() ~is 2
+  register.results[0].name ~is "dpi_doubled"
+  register.results[1].name ~is "dpi_incremented"
   type_equal(register.results[0].type, Bits(8)) ~is #true
+  type_equal(register.results[1].type, Bits(8)) ~is #true
   explicit_register.operands[0] === explicit_module.find_input("clock").value ~is #true
   always_enable.opcode ~is "rtl.constant"
   always_enable.attribute("value") ~is 1
+  fesvr_import.name ~is "rhdl_htif_tick"
+  fesvr_import.results.map(fun (result): result.name) ~is fesvr_result_names
+  fesvr_register.results.length() ~is 8
   verify_design(fixture.design) ~is #void
+  verify_design(fesvr_fixture.design) ~is #void
   verify_design(explicit_design) ~is #void
   verify_design(always_design) ~is #void
+  embedded.run_elaboration(fun (): invalid.SingularBinding()) ~throws "single dpi_reg binding"
+  embedded.run_elaboration(fun (): invalid.WrongResultCount()) ~throws "binding count"

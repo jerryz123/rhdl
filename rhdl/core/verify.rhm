@@ -288,8 +288,11 @@ fun check_operation_types(module_def, operation, schema):
         when schema.type_rule == "dpi_register"
         | unless dpi_import.has_result()
           | fail_operation(operation, "DPI register requires a result-bearing function import")
-          unless type_equal(operation.results[0].type, dpi_import.result_type)
-          | fail_operation(operation, "DPI register result has the wrong hardware type")
+          unless operation.results.length() == dpi_import.results.length()
+          | fail_operation(operation, "DPI register result count does not match its import")
+          for (result in operation.results, expected in dpi_import.results):
+            unless type_equal(result.type, expected.type)
+            | fail_operation(operation, "DPI register result has the wrong hardware type")
   | "data_register" || "data_register_reset":
       def clock = operation.operands[0]
       def current = operation.results[0]
@@ -444,15 +447,24 @@ fun verify_design(design):
       if dpi_import.name is_a String | dpi_import.name | "<unnamed>"
     unless dpi_import.name is_a String && dpi_import.input_names is_a List && dpi_import.input_types is_a List && dpi_import.input_names.length() == dpi_import.input_types.length() && dpi_import.input_names.length() >= 1
     | fail("DPI import " ++ import_label ++ " has a malformed signature")
-    def result_absent = dpi_import.result_name == #false && dpi_import.result_type == #false
-    def result_present = dpi_import.result_name is_a String && flat_data_type(dpi_import.result_type) && type_well_formed(dpi_import.result_type)
-    unless result_absent || result_present
-    | fail("DPI import " ++ import_label ++ " has a malformed optional result")
+    unless dpi_import.results is_a List
+    | fail("DPI import " ++ import_label ++ " has malformed results")
     for (input_name in dpi_import.input_names, input_type in dpi_import.input_types):
       unless input_name is_a String && flat_data_type(input_type) && type_well_formed(input_type)
       | fail("DPI import " ++ import_label ++ " has a malformed input")
       when dpi_import.input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
       | fail("DPI import " ++ import_label ++ " has duplicate input names")
+    for (result in dpi_import.results):
+      unless result is_a DpiResult && result.name is_a String && flat_data_type(result.type) && type_well_formed(result.type) && (result.direction == "out" || result.direction == "return")
+      | fail("DPI import " ++ import_label ++ " has a malformed result")
+      when dpi_import.results.filter(~keep: fun (candidate): candidate.name == result.name).length() != 1
+      | fail("DPI import " ++ import_label ++ " has duplicate result names")
+      when dpi_import.input_names.find(fun (candidate): candidate == result.name)
+      | fail("DPI import " ++ import_label ++ " reuses an input name as a result")
+    when dpi_import.results.length() != 0
+    | def returns = dpi_import.results.filter(~keep: fun (result): result.direction == "return")
+      unless returns.length() == 1 && dpi_import.results[dpi_import.results.length() - 1].direction == "return"
+      | fail("DPI import " ++ import_label ++ " must have exactly one final return result")
     def same_names = design.dpi_imports.filter(~keep: fun (other): other.name == dpi_import.name)
     unless same_names.length() == 1
     | fail("duplicate DPI import name " ++ import_label)

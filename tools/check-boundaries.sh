@@ -28,6 +28,8 @@ fail_matches "backend must not import frontend modules" \
   '^[[:space:]]+"[^"]*frontend/' rhdl/backend
 fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|backend/|frontend/)' rhdl/std
+fail_matches "simulation adapters must not import RHDL implementation packages" \
+  '^[[:space:]]+.*(core/|backend/|frontend/)' sim
 fail_matches "standard language assembly must not import core or backend modules" \
   '^[[:space:]]+"[^"]*(core|backend)/' rhdl/language.rhm
 fail_matches "base language assembly must not import core or backend modules" \
@@ -78,9 +80,9 @@ fi
 
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './examples/*' ! -path './tests/frontend/*' \
-  ! -path './rhdl/std/*' -print)"
+  ! -path './rhdl/std/*' ! -path './sim/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
-  echo ".rhdl files may appear only in std, examples, and frontend fixtures" >&2
+  echo ".rhdl files may appear only in std, examples, simulation adapters, and frontend fixtures" >&2
   echo "$unexpected_rhdl" >&2
   exit 1
 fi

@@ -8,3 +8,9 @@ extern "C" void rhdl_trace(std::uint8_t value) {
 extern "C" std::uint8_t rhdl_step(std::uint8_t value) {
   return static_cast<std::uint8_t>(value + 1);
 }
+
+extern "C" std::uint8_t rhdl_step_pair(std::uint8_t value,
+                                         std::uint8_t* doubled) {
+  *doubled = static_cast<std::uint8_t>(value * 2);
+  return static_cast<std::uint8_t>(value + 1);
+}
