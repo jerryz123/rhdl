@@ -185,22 +185,22 @@ fun build_value_operation(design,
   module_def.add_operation(operation)
   value
 
-fun build_bits_same_width_binary(design,
-                                 module_def,
-                                 opcode,
-                                 left,
-                                 right,
-                                 name,
-                                 location,
-                                 origin,
-                                 who):
+fun build_arithmetic_same_type_binary(design,
+                                      module_def,
+                                      opcode,
+                                      left,
+                                      right,
+                                      name,
+                                      location,
+                                      origin,
+                                      who):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, left, who)
   ensure_value_in(module_def, right, who)
-  unless bits_type(left.type) && bits_type(right.type) && type_equal(left.type, right.type)
+  unless arithmetic_type(left.type) && arithmetic_type(right.type) && type_equal(left.type, right.type)
   | fail(who,
-         opcode ++ " operands must have exactly the same Bits width")
+         opcode ++ " operands must have exactly the same arithmetic type and width")
   build_value_operation(design,
                         module_def,
                         opcode,
@@ -252,6 +252,60 @@ fun build_bits_shift(design,
   ensure_value_in(module_def, amount, who)
   unless bits_type(value.type)
   | fail(who, opcode ++ " shifted value must be Bits")
+  unless bits_type(amount.type)
+  | fail(who, opcode ++ " shift amount must be Bits")
+  build_value_operation(design,
+                        module_def,
+                        opcode,
+                        [value, amount],
+                        value.type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
+fun build_arithmetic_shift(design,
+                           module_def,
+                           opcode,
+                           value,
+                           amount,
+                           name,
+                           location,
+                           origin,
+                           who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, value, who)
+  ensure_value_in(module_def, amount, who)
+  unless arithmetic_type(value.type)
+  | fail(who, opcode ++ " shifted value must have an ArithmeticType")
+  unless bits_type(amount.type)
+  | fail(who, opcode ++ " shift amount must be Bits")
+  build_value_operation(design,
+                        module_def,
+                        opcode,
+                        [value, amount],
+                        value.type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
+fun build_signed_arithmetic_shift(design,
+                                  module_def,
+                                  opcode,
+                                  value,
+                                  amount,
+                                  name,
+                                  location,
+                                  origin,
+                                  who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, value, who)
+  ensure_value_in(module_def, amount, who)
+  unless signed_arithmetic_type(value.type)
+  | fail(who, opcode ++ " shifted value must have a SignedArithmeticType")
   unless bits_type(amount.type)
   | fail(who, opcode ++ " shift amount must be Bits")
   build_value_operation(design,
@@ -752,15 +806,15 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("add")):
-    build_bits_same_width_binary(design,
-                                 module_def,
-                                 "rtl.add",
-                                 left,
-                                 right,
-                                 name,
-                                 location,
-                                 origin,
-                                 #'add)
+    build_arithmetic_same_type_binary(design,
+                                      module_def,
+                                      "rtl.add",
+                                      left,
+                                      right,
+                                      name,
+                                      location,
+                                      origin,
+                                      #'add)
 
   method mul(module_def,
              left,
@@ -768,15 +822,15 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("mul")):
-    build_bits_same_width_binary(design,
-                                 module_def,
-                                 "rtl.mul",
-                                 left,
-                                 right,
-                                 name,
-                                 location,
-                                 origin,
-                                 #'mul)
+    build_arithmetic_same_type_binary(design,
+                                      module_def,
+                                      "rtl.mul",
+                                      left,
+                                      right,
+                                      name,
+                                      location,
+                                      origin,
+                                      #'mul)
 
   method bit_not(module_def,
                  operand,
@@ -831,8 +885,8 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("sub")):
-    build_bits_same_width_binary(design, module_def, "rtl.sub", left, right,
-                                 name, location, origin, #'sub)
+    build_arithmetic_same_type_binary(design, module_def, "rtl.sub", left, right,
+                                      name, location, origin, #'sub)
 
   method shl(module_def,
              value,
@@ -840,8 +894,8 @@ class Builder(design):
              name = #false,
              location = Location(),
              origin = Origin("shl")):
-    build_bits_shift(design, module_def, "rtl.shl", value, amount,
-                     name, location, origin, #'shl)
+    build_arithmetic_shift(design, module_def, "rtl.shl", value, amount,
+                           name, location, origin, #'shl)
 
   method shru(module_def,
               value,
@@ -851,6 +905,15 @@ class Builder(design):
               origin = Origin("shru")):
     build_bits_shift(design, module_def, "rtl.shru", value, amount,
                      name, location, origin, #'shru)
+
+  method shrs(module_def,
+              value,
+              amount,
+              name = #false,
+              location = Location(),
+              origin = Origin("shrs")):
+    build_signed_arithmetic_shift(design, module_def, "rtl.shrs", value, amount,
+                                  name, location, origin, #'shrs)
 
   method eq(module_def,
             left,
@@ -895,6 +958,28 @@ class Builder(design):
                           location,
                           origin,
                           #'ult)
+
+  method slt(module_def,
+             left,
+             right,
+             name = #false,
+             location = Location(),
+             origin = Origin("slt")):
+    ensure_module_in_design(design, module_def, #'slt)
+    ensure_open(module_def, #'slt)
+    ensure_value_in(module_def, left, #'slt)
+    ensure_value_in(module_def, right, #'slt)
+    unless signed_arithmetic_type(left.type) && signed_arithmetic_type(right.type) && type_equal(left.type, right.type)
+    | fail(#'slt, "slt operands must have exactly the same signed arithmetic type and width")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.slt",
+                          [left, right],
+                          Bits(1),
+                          name,
+                          location,
+                          origin,
+                          #'slt)
 
   method mux_lookup(module_def,
                     selector,
@@ -1015,6 +1100,35 @@ class Builder(design):
                           location,
                           origin,
                           #'zext,
+                          {"target_width": target_width})
+
+  method sext(module_def,
+              value,
+              target_width,
+              name = #false,
+              location = Location(),
+              origin = Origin("sext")):
+    ensure_module_in_design(design, module_def, #'sext)
+    ensure_open(module_def, #'sext)
+    ensure_value_in(module_def, value, #'sext)
+    unless signed_arithmetic_type(value.type)
+    | fail(#'sext, "sext operand must have a SignedArithmeticType")
+    unless target_width is_a Int && target_width > 0
+    | fail(#'sext, "sext target width must be a positive host Int")
+    unless target_width > data_width(value.type)
+    | fail(#'sext, "sext target width must be larger than the source width")
+    def result_type = value.type.with_bit_width(target_width)
+    unless signed_arithmetic_type(result_type) && data_width(result_type) == target_width
+    | fail(#'sext, "sext operand type must preserve its signed arithmetic type when widened")
+    build_value_operation(design,
+                          module_def,
+                          "rtl.sext",
+                          [value],
+                          result_type,
+                          name,
+                          location,
+                          origin,
+                          #'sext,
                           {"target_width": target_width})
 
   method trunc(module_def,

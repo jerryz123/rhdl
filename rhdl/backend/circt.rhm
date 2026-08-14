@@ -177,14 +177,39 @@ fun emit_binary(operation, circt_opcode):
                 value_ref(operation.operands[1]), " : ",
                 circt_type(result.type))
 
+// Builds a sign extension from primitive Comb extraction and concatenation so
+// the public signed semantic operation does not depend on a backend type flag.
+fun emit_sign_extension(source_ref,
+                        source_type,
+                        result_ref,
+                        result_type,
+                        prefix):
+  def source_width = data_width(source_type)
+  def result_width = data_width(result_type)
+  def extension_width = result_width - source_width
+  def sign_ref = prefix ++ "_sign"
+  def sign_operands:
+    for List (_index in 0..extension_width):
+      sign_ref
+  def operand_refs = sign_operands ++ [source_ref]
+  def operand_types:
+    (for List (_index in 0..extension_width): "i1") ++ [circt_type(source_type)]
+  String.append("    ", sign_ref, " = comb.extract ", source_ref,
+                " from ", to_string(source_width - 1), " : (",
+                circt_type(source_type), ") -> i1\n",
+                "    ", result_ref, " = comb.concat ",
+                String.join(operand_refs, ", "), " : ",
+                String.join(operand_types, ", "))
+
 // CIRCT shifts require equal-width operands. RHDL permits an independently
 // sized amount, so normalize without changing fixed-width overshift behavior.
-fun emit_shift(operation, circt_opcode):
+// A signed value is sign-extended when a wider amount forces widening.
+fun emit_shift(operation, circt_opcode, signed_value = #false):
   def value = operation.operands[0]
   def amount = operation.operands[1]
   def result = operation.results[0]
-  def value_width = value.type.width
-  def amount_width = amount.type.width
+  def value_width = data_width(value.type)
+  def amount_width = data_width(amount.type)
   if value_width == amount_width
   | emit_binary(operation, circt_opcode)
   | if amount_width < value_width
@@ -200,14 +225,23 @@ fun emit_shift(operation, circt_opcode):
                       value_ref(value), ", ", normalized_amount_ref, " : ",
                       circt_type(result.type))
     | block:
-        def zero_width = amount_width - value_width
-        def zero_ref = "%__rhdl_shift_zero_" ++ to_string(operation.id)
         def widened_value_ref = "%__rhdl_shift_value_" ++ to_string(operation.id)
         def wide_result_ref = "%__rhdl_shift_wide_" ++ to_string(operation.id)
-        String.append("    ", zero_ref, " = hw.constant 0 : i", to_string(zero_width), "\n",
-                      "    ", widened_value_ref, " = comb.concat ", zero_ref, ", ",
-                      value_ref(value), " : i", to_string(zero_width), ", ",
-                      circt_type(value.type), "\n",
+        def widen_lines:
+          if signed_value
+          | emit_sign_extension(value_ref(value),
+                                value.type,
+                                widened_value_ref,
+                                value.type.with_bit_width(amount_width),
+                                "%__rhdl_shift_" ++ to_string(operation.id))
+          | block:
+              def zero_width = amount_width - value_width
+              def zero_ref = "%__rhdl_shift_zero_" ++ to_string(operation.id)
+              String.append("    ", zero_ref, " = hw.constant 0 : i", to_string(zero_width), "\n",
+                            "    ", widened_value_ref, " = comb.concat ", zero_ref, ", ",
+                            value_ref(value), " : i", to_string(zero_width), ", ",
+                            circt_type(value.type))
+        String.append(widen_lines, "\n",
                       "    ", wide_result_ref, " = ", circt_opcode, " ",
                       widened_value_ref, ", ", value_ref(amount), " : ",
                       circt_type(amount.type), "\n",
@@ -236,6 +270,13 @@ fun emit_eq(operation):
 fun emit_ult(operation):
   def result = operation.results[0]
   String.append("    ", value_ref(result), " = comb.icmp ult ",
+                value_ref(operation.operands[0]), ", ",
+                value_ref(operation.operands[1]), " : ",
+                circt_type(operation.operands[0].type))
+
+fun emit_slt(operation):
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = comb.icmp slt ",
                 value_ref(operation.operands[0]), ", ",
                 value_ref(operation.operands[1]), " : ",
                 circt_type(operation.operands[0].type))
@@ -303,6 +344,15 @@ fun emit_zext(operation):
                 "    ", value_ref(result), " = comb.concat ", zero_ref, ", ",
                 value_ref(operand), " : i", to_string(zero_width), ", ",
                 circt_type(operand.type))
+
+fun emit_sext(operation):
+  def operand = operation.operands[0]
+  def result = operation.results[0]
+  emit_sign_extension(value_ref(operand),
+                      operand.type,
+                      value_ref(result),
+                      result.type,
+                      "%__rhdl_sext_" ++ to_string(operation.id))
 
 fun emit_trunc(operation):
   def operand = operation.operands[0]
@@ -639,12 +689,16 @@ fun emit_operation(operation):
         emit_shift(operation, "comb.shl")
     | "rtl.shru":
         emit_shift(operation, "comb.shru")
+    | "rtl.shrs":
+        emit_shift(operation, "comb.shrs", #true)
     | "rtl.not":
         emit_not(operation)
     | "rtl.eq":
         emit_eq(operation)
     | "rtl.ult":
         emit_ult(operation)
+    | "rtl.slt":
+        emit_slt(operation)
     | "rtl.mux_lookup":
         emit_mux_lookup(operation)
     | "rtl.concat":
@@ -653,6 +707,8 @@ fun emit_operation(operation):
         emit_extract(operation)
     | "rtl.zext":
         emit_zext(operation)
+    | "rtl.sext":
+        emit_sext(operation)
     | "rtl.trunc":
         emit_trunc(operation)
     | "rtl.cast":

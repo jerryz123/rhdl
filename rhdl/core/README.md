@@ -54,9 +54,11 @@ The core type capabilities are open interfaces:
 | `DataType` | Ordinary combinational, mux, port, and register data |
 | `FlatDataType` | Data with a statically known physical bit width |
 | `BitwiseType` | Flat data supporting same-type bitwise operations |
+| `ArithmeticType` | Bitwise data supporting same-type modular arithmetic and width reconstruction |
+| `SignedArithmeticType` | Arithmetic data supporting signed comparison, right shift, and extension |
 
 Core supplies `Bits(width)`, `Clock`, `Reset`, `RecordType(fields)`, and
-`VectorType(length, element_type)`. `Bits` implements `BitwiseType`; `Clock`
+`VectorType(length, element_type)`. `Bits` implements `ArithmeticType`; `Clock`
 and `Reset` are nominal control types rather than `DataType`s. Frontend-defined
 types such as `Bool`, enums, and one-hot values implement the open capabilities
 without core special cases.
@@ -86,8 +88,10 @@ nested vectors and record elements.
   value and defines no four-state propagation semantics.
 - There are no implicit conversions.
 - Narrowing and extension use explicit operations.
-- Arithmetic is unsigned and modular.
-- Logical shifts preserve value width and produce zero for overshifts.
+- Fixed-width arithmetic is modular; signedness does not change its packed
+  add, subtract, or multiply result.
+- Logical and arithmetic shifts preserve value width. Overshifts produce zero
+  for unsigned right shift and the sign fill for signed right shift.
 - Expanding arithmetic is frontend composition over explicit extensions and
   modular core operations.
 
@@ -104,11 +108,11 @@ printing. Backend lowering choices are not part of core schemas.
 | Internal connection | wire |
 | Sources | constant, synthesis don't-care |
 | Bitwise | not, and, or, xor |
-| Arithmetic | add, sub, multiply, logical left and unsigned-right shift |
-| Comparison | equality, unsigned less-than |
+| Arithmetic | add, sub, multiply, logical left, unsigned-right, and signed-right shift |
+| Comparison | equality, unsigned less-than, signed less-than |
 | Selection | mux lookup, incompletely specified decode relation |
 | Conversion | cast |
-| Width-changing | concat, extract, zero extension, truncation |
+| Width-changing | concat, extract, zero extension, sign extension, truncation |
 | Records | record create and field extraction |
 | Vectors | vector create and host-static element extraction |
 | Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
@@ -122,9 +126,12 @@ Representative type rules are:
 not(T: BitwiseType)                         -> T
 dont_care(Bits(w))                          -> Bits(w)
 and/or/xor(T: BitwiseType, T)               -> T
-add/sub/mul(Bits(w), Bits(w))               -> Bits(w)
-shl/shru(Bits(w), Bits(a))                  -> Bits(w)
+add/sub/mul(T: ArithmeticType, T)           -> T
+shl(T: ArithmeticType, Bits(a))             -> T
+shru(Bits(w), Bits(a))                      -> Bits(w)
+shrs(S: SignedArithmeticType, Bits(a))      -> S
 eq/ult(Bits(w), Bits(w))                    -> Bits(1)
+slt(S: SignedArithmeticType, S)             -> Bits(1)
 mux_lookup(Bits(w), keys -> T, default: T)  -> T: DataType
 decode(I: packable DataType,
        input cubes -> output cubes,
@@ -137,6 +144,7 @@ vector_get(V, host_index)                    -> V.element_type
 cast(A: packable, B: same packed width)     -> B
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
 extract(Bits(w), high, low)                 -> Bits(high - low + 1)
+sext(S: SignedArithmeticType, wider width)  -> S.with_bit_width(wider width)
 memory(depth, T: DataType)                  -> Memory<T>
 memory_read_async(Memory<T>, address)       -> T
 memory_write(Memory<T>, address, T,

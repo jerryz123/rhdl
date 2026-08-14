@@ -13,6 +13,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 |---|---|
 | [`cast.rhm`](cast.rhm) | Functional equal-width representation casts |
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
+| [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
 | [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, unsigned ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal encoded hardware enums |
@@ -62,9 +63,10 @@ Its cases use packed integer value/care images. Ordinary designs should prefer
 the typed `DecodeGen` standard-library wrapper, which constructs those images
 from `Pattern` values.
 
-The standard combinational surface includes modular `+`, `-`, `*`, logical
-`<<` and `>>`, bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. Arithmetic is
-unsigned and fixed-width. On host values these operators keep their ordinary
+The standard combinational surface includes modular `+`, `-`, `*`, shifts,
+bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. `Bits` arithmetic is unsigned;
+`SInt` arithmetic uses a signed interpretation where the operation depends on
+it. Both remain fixed-width. On host values these operators keep their ordinary
 Rhombus meaning.
 
 Expanding arithmetic is explicit:
@@ -104,9 +106,36 @@ less <== a < b
 ```
 
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
-works on exactly equal flat types. Unsigned `<`, `>`, `<=`, and `>=` require
-equal-width `Bits` operands and return `Bool`; the layer derives all forms from
-the core unsigned-less-than operation.
+works on exactly equal flat types. `<`, `>`, `<=`, and `>=` require equal-width
+operands with the same numeric type and return `Bool`. `Bits` uses unsigned
+ordering while `SInt` uses signed ordering; the layer derives all forms from
+the corresponding core less-than operation.
+
+## Signed integers
+
+`SInt(width)` is a nominal frontend `SignedArithmeticType` with an explicit
+positive width. Signed literals accept only the two's-complement range for that
+width and retain a canonical packed image:
+
+```rhombus
+input(a, b): SInt(8)
+output result: SInt(8)
+
+result <== (a + sint(-3, 8)) >> bits(1, 3)
+```
+
+Fixed-width `+`, `-`, and `*` wrap modulo `2^width`, just as their packed
+two's-complement representations do. `>>` is arithmetic for `SInt`; `<<`
+preserves the signed type. Shift amounts remain unsigned `Bits`. Mixed widths
+and mixed `Bits`/`SInt` arithmetic are rejected rather than coerced.
+
+`sext(value, target_width)` explicitly sign-extends. `strunc(value,
+target_width)` explicitly retains the low bits and returns the same signed type
+at the narrower width. Equal-width representation changes between `Bits` and
+`SInt` continue to use `cast` or `.into`. Signed expanding arithmetic,
+division, remainder, and implicit width inference are not part of this layer.
+
+See [`../../../examples/signed-integers.rhdl`](../../../examples/signed-integers.rhdl).
 
 ## Hardware enums
 

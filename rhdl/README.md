@@ -104,8 +104,9 @@ it when adding, removing, or changing a layer's direct dependencies.
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
+| `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, unsigned ordering, and binary `mux` | core IR, kernel, field support, hardware-literal support |
+| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
 | `one-hot.rhm` | Structurally sized one-hot types, literals, typed mux keys, and `mux_onehot` | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, runtime records, recursive record literal shadows, and field access | core IR, kernel, field support, hardware-literal support |

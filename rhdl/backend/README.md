@@ -50,13 +50,14 @@ IR and lower through CIRCT type aliases.
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub/mul` | `comb.add/sub/mul` |
-| `rtl.shl/shru` | `comb.shl/shru` with lossless operand-width normalization |
-| `rtl.eq/ult` | `comb.icmp eq/ult` |
+| `rtl.shl/shru/shrs` | `comb.shl/shru/shrs` with lossless operand-width normalization |
+| `rtl.eq/ult/slt` | `comb.icmp eq/ult/slt` |
 | `rtl.mux_lookup` | comparisons plus a `comb.mux` tree |
 | `rtl.cast` | alias or `hw.bitcast` |
 | `rtl.concat` | `comb.concat` |
 | `rtl.extract/trunc` | `comb.extract` |
 | `rtl.zext` | zero constant plus `comb.concat` |
+| `rtl.sext` | sign-bit extraction plus `comb.concat` |
 | `rtl.record_create/get` | `hw.struct_create/extract` |
 | `rtl.vector_create/get` | `hw.array_create/get` |
 | `rtl.memory` | `seq.hlmem` |
@@ -69,9 +70,9 @@ IR and lower through CIRCT type aliases.
 | `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
 
 Shift operands require equal widths in CIRCT. A narrower amount is
-zero-extended. For a wider amount, the value is widened, shifted, and truncated
-back to its declared width. This preserves fixed-width overflow and overshift
-semantics.
+zero-extended. For a wider amount, an unsigned value is zero-extended and a
+signed value is sign-extended before shifting and truncating back to its
+declared width. This preserves fixed-width overflow and overshift semantics.
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend

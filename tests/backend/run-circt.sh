@@ -268,6 +268,7 @@ fixture_specs=(
   'multiply|multiply_tb|examples/multiply.rhdl|design|verilog_reference'
   'expanding-arithmetic|expanding_arithmetic_tb|examples/expanding-arithmetic.rhdl|design|verilog_reference'
   'unsigned-comparisons|unsigned_comparisons_tb|examples/unsigned-comparisons.rhdl|design|verilog_reference'
+  'signed-integers|signed_integers_tb|examples/signed-integers.rhdl|design|verilog_reference'
   'sync-counter||examples/sync-counter.rhdl|design|verilog_reference'
   'enable-shift-register|enable_shift_register_tb|examples/enable-shift-register.rhdl|design|verilog_reference'
   'reset-shift-register|reset_shift_register_tb|examples/reset-shift-register.rhdl|design|verilog_reference'

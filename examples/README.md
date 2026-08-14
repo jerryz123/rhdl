@@ -61,6 +61,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`generated-adder.rhdl`](generated-adder.rhdl) | Host `InstanceArray` generation plus runtime vector wiring |
 | [`alu.rhdl`](alu.rhdl) | Boolean, bitwise, arithmetic, equality, and N-way selection |
 | [`unsigned-comparisons.rhdl`](unsigned-comparisons.rhdl) | Unsigned ordering derived from one core comparison |
+| [`signed-integers.rhdl`](signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums, explicit encodings, state, and invalid recovery |
 | [`one-hot.rhdl`](one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
 | [`shifts.rhdl`](shifts.rhdl) | Logical shifts with independent amount widths |

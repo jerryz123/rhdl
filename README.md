@@ -126,9 +126,10 @@ The current vertical slice includes:
   simulation operations, single-driver verification, and combinational-cycle
   detection.
 - Standard and compositional Rhombus profiles with host-only generation,
-  frontend-defined types, typed literals and patterns, relational decode
-  generation, combinational and sequential constructs, hierarchy, directional
-  interfaces, and reusable protocol libraries.
+  frontend-defined types including explicit-width signed integers, typed
+  literals and patterns, relational decode generation, combinational and
+  sequential constructs, hierarchy, directional interfaces, and reusable
+  protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
 
@@ -136,13 +137,13 @@ The current vertical slice includes:
 
 - General last-connect and unordered multiple-driver semantics
 - Automatic module-specialization deduplication
-- Distinct `UInt` and `SInt`, implicit widths, and general width inference
+- A dedicated `UInt` distinct from raw `Bits`, implicit widths, and general
+  width inference
 - Memory initialization, masks on asynchronous-read memories, general
   multi-port synchronous memories, and defined inter-port collisions
 - Asynchronous or active-low reset and multi-domain analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects
-- Arithmetic right shift before signed types exist
 - Multi-role protocols, optional interface fields, and generated protocol
   assertions
 - User-authored IR mutation and rewriting before a concrete transformation

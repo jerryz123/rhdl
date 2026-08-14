@@ -145,8 +145,8 @@ fun low_word(value, width) :: Bits(width):
 ```
 
 Exact hardware annotations retain field, indexing, casting, and lookup static
-information. `Bits`, `Clock`, `Reset`, `Bool`, `Vec`, bundles, and hardware
-enums provide concise annotation forms. Extension-produced types can use
+information. `Bits`, `SInt`, `Clock`, `Reset`, `Bool`, `Vec`, bundles, and
+hardware enums provide concise annotation forms. Extension-produced types can use
 `Hardware.of(type)` directly.
 
 See [`../../examples/host-parameters.rhdl`](../../examples/host-parameters.rhdl)

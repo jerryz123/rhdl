@@ -120,14 +120,24 @@ fun check_operation_types(module_def, operation, schema):
       unless bitwise_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
       | fail_operation(operation,
                        operation.opcode ++ " operands and result must have the same bitwise type")
-  | "bits_same_width_binary":
+  | "arithmetic_same_type_binary":
       def left = operation.operands[0]
       def right = operation.operands[1]
       def result = operation.results[0]
-      def bits_operands = bits_type(left.type) && bits_type(right.type) && bits_type(result.type)
-      unless bits_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
+      def arithmetic_operands = arithmetic_type(left.type) && arithmetic_type(right.type) && arithmetic_type(result.type)
+      unless arithmetic_operands && type_equal(left.type, right.type) && type_equal(left.type, result.type)
       | fail_operation(operation,
-                       operation.opcode ++ " operands and result must have the same Bits width")
+                       operation.opcode ++ " operands and result must have exactly the same ArithmeticType")
+  | "arithmetic_shift":
+      def value = operation.operands[0]
+      def amount = operation.operands[1]
+      def result = operation.results[0]
+      unless arithmetic_type(value.type) && arithmetic_type(result.type) && type_equal(value.type, result.type)
+      | fail_operation(operation,
+                       operation.opcode ++ " shifted value and result must have exactly the same ArithmeticType")
+      unless bits_type(amount.type)
+      | fail_operation(operation,
+                       operation.opcode ++ " shift amount must be Bits")
   | "bits_shift":
       def value = operation.operands[0]
       def amount = operation.operands[1]
@@ -148,6 +158,39 @@ fun check_operation_types(module_def, operation, schema):
       unless bits_type(result.type) && result.type.width == 1
       | fail_operation(operation,
                        operation.opcode ++ " result must be Bits(1)")
+  | "signed_arithmetic_shift":
+      def value = operation.operands[0]
+      def amount = operation.operands[1]
+      def result = operation.results[0]
+      unless signed_arithmetic_type(value.type) && signed_arithmetic_type(result.type) && type_equal(value.type, result.type)
+      | fail_operation(operation,
+                       operation.opcode ++ " shifted value and result must have exactly the same SignedArithmeticType")
+      unless bits_type(amount.type)
+      | fail_operation(operation,
+                       operation.opcode ++ " shift amount must be Bits")
+  | "signed_arithmetic_compare":
+      def left = operation.operands[0]
+      def right = operation.operands[1]
+      def result = operation.results[0]
+      unless signed_arithmetic_type(left.type) && signed_arithmetic_type(right.type) && type_equal(left.type, right.type)
+      | fail_operation(operation,
+                       operation.opcode ++ " operands must have exactly the same SignedArithmeticType")
+      unless bits_type(result.type) && result.type.width == 1
+      | fail_operation(operation,
+                       operation.opcode ++ " result must be Bits(1)")
+  | "signed_arithmetic_sext":
+      def operand = operation.operands[0]
+      def result = operation.results[0]
+      def target_width = operation.attribute("target_width", #false)
+      unless signed_arithmetic_type(operand.type) && signed_arithmetic_type(result.type)
+      | fail_operation(operation,
+                       "rtl.sext operand and result must be SignedArithmeticType values")
+      unless target_width is_a Int && target_width > data_width(operand.type)
+      | fail_operation(operation,
+                       "rtl.sext target width must be larger than the source width")
+      unless data_width(result.type) == target_width && type_equal(result.type, operand.type.with_bit_width(target_width))
+      | fail_operation(operation,
+                       "rtl.sext result must preserve the signed arithmetic type at the target width")
   | "data_mux_lookup":
       unless operation.operands.length() >= 3
       | fail_operation(operation, "mux lookup requires a selector, default, and at least one case")

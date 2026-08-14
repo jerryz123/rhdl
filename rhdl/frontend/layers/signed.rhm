@@ -1,0 +1,114 @@
+#lang rhombus/and_meta
+// Defines explicit-width signed integers, two's-complement literals, and signed resizing.
+
+import:
+  rhombus/meta open
+  "../../core/types.rhm" open
+  "../../core/ir.rhm".Location
+  "../kernel.rhm" as kernel
+  "../support/fields.rhm".HardwareFields
+  "../support/hardware-literal.rhm".HardwareLiteral
+
+export:
+  SInt
+  SIntLiteral
+  sint_type
+  sint
+  sext
+  strunc
+
+class _SIntType(width):
+  implements SignedArithmeticType
+  implements Callable
+
+  constructor (width):
+    unless width is_a Int && width > 0
+    | error(~who: #'SInt, "width must be a positive host Int")
+    super(width)
+
+  override method describe():
+    "sint<" ++ to_string(width) ++ ">"
+
+  override method type_equal(other):
+    sint_type(other) && width == other.width
+
+  override method bit_width():
+    width
+
+  override method with_bit_width(new_width):
+    SInt(new_width)
+
+  override method call(value) :~ HardwareFields:
+    SIntLiteral(this, value)
+
+fun SInt(width):
+  _SIntType(width)
+
+annot.macro 'SInt($width)':
+  'HardwareFields.of(SInt($width))'
+
+fun sint_type(type):
+  type is_a _SIntType && type.width is_a Int && type.width > 0
+
+// Stores the packed two's-complement image expected by generic literal
+// materialization while validating the signed source value at construction.
+class SIntLiteral(type, value, name = #false):
+  implements HardwareLiteral
+
+  constructor (type, value, name = #false):
+    unless sint_type(type)
+    | error(~who: #'sint, "literal type must be SInt")
+    unless value is_a Int
+    | error(~who: #'sint, "SInt literal requires a host Int")
+    def minimum = -(1 bits.(<<) (type.width - 1))
+    def maximum = (1 bits.(<<) (type.width - 1)) - 1
+    unless minimum <= value && value <= maximum
+    | error(~who: #'sint,
+            "literal value must fit the declared signed width")
+    unless name == #false || name is_a String
+    | error(~who: #'sint, "literal name must be a String or #false")
+    super(type, value, name)
+
+  override method literal_type(): type
+
+  override method packed_value():
+    if value < 0
+    | (1 bits.(<<) type.width) + value
+    | value
+
+  override method literal_name(): name
+
+fun sint(value, width, name = #false):
+  SIntLiteral(SInt(width), value, name)
+
+fun require_signed_value(entity, who, location):
+  def value = kernel.read(entity, location)
+  unless signed_arithmetic_type(value.type)
+  | error(~who: who,
+          location.describe() ++ ": expected a signed arithmetic hardware value")
+  value
+
+fun sext(entity,
+         target_width,
+         name = #false,
+         location = Location()) :~ HardwareFields:
+  def value = require_signed_value(entity, #'sext, location)
+  kernel.sext(value, target_width, name, location)
+
+// Signed truncation retains the low bits and restores the same nominal signed
+// type at the smaller width; rtl.trunc itself remains a Bits representation op.
+fun strunc(entity,
+           target_width,
+           name = #false,
+           location = Location()) :~ HardwareFields:
+  def value = require_signed_value(entity, #'strunc, location)
+  unless target_width is_a Int && target_width > 0
+  | error(~who: #'strunc, "target width must be a positive host Int")
+  unless target_width < data_width(value.type)
+  | error(~who: #'strunc, "target width must be smaller than the source width")
+  def source_bits = kernel.cast(value, Bits(data_width(value.type)), #false, location)
+  def result_bits = kernel.trunc(source_bits, target_width, #false, location)
+  kernel.cast(result_bits,
+              value.type.with_bit_width(target_width),
+              name,
+              location)
