@@ -43,6 +43,7 @@ export:
   reg
   inst
   connect
+  conditional_chain
   read
   hardware_entity
   host_condition
@@ -85,6 +86,21 @@ class FrontendContext(design,
 
 Parameter.def current_context = #false
 Parameter.def current_module = #false
+Parameter.def current_conditional_branch = #false
+
+class ConditionalAssignment(place, value)
+
+// Collects the assignments made along one mutually exclusive hardware branch.
+// Resolution later emits one muxed driver for every destination.
+class ConditionalBranch(mutable assignments = []):
+  method assignment_for(place):
+    assignments.find(fun (assignment): assignment.place === place)
+
+  method add(place, value, location):
+    when this.assignment_for(place)
+    | frontend_fail("conditional branch assigns " ++ place.name ++ " more than once",
+                    location)
+    assignments := assignments ++ [ConditionalAssignment(place, value)]
 
 fun require_context(location = Location()):
   def context = current_context()
@@ -414,10 +430,113 @@ fun connect(place, entity, location = Location()):
   unless type_equal(place.type, value.type)
   | frontend_fail("connection source and target must have exactly the same hardware type",
                   location)
-  context.builder.drive(place,
-                        value,
-                        location,
-                        Origin("embedded connect", place.name))
+  def conditional_branch = current_conditional_branch()
+  if conditional_branch is_a ConditionalBranch
+  | conditional_branch.add(place, value, location)
+  | context.builder.drive(place,
+                          value,
+                          location,
+                          Origin("embedded connect", place.name))
+
+fun register_hold_value(place, location = Location()):
+  if place.parent
+  | block:
+      def parent_hold = register_hold_value(place.parent, location)
+      if parent_hold
+      | project(parent_hold, place.projection_key, location)
+      | #false
+  | block:
+      def operation = place.module_def.find_operation(place.owner_op_id)
+      if operation && (operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset")
+      | operation.results[0]
+      | #false
+
+fun emit_conditional_assignment(place, value, location = Location()):
+  def branch = current_conditional_branch()
+  if branch is_a ConditionalBranch
+  | branch.add(place, value, location)
+  | require_context(location).builder.drive(
+      place,
+      value,
+      location,
+      Origin("embedded conditional connect", place.name)
+    )
+
+fun validate_conditional_value(condition, location = Location()):
+  unless hardware_entity(condition)
+  | frontend_fail("when condition must be a hardware value", location)
+  def value = read(condition, location)
+  unless flat_data_type(value.type) && data_width(value.type) == 1
+  | frontend_fail("hardware condition must have a one-bit FlatDataType", location)
+  value
+
+fun collect_conditional_branch(body, location = Location()):
+  def branch = ConditionalBranch()
+  parameterize { current_conditional_branch: branch }:
+    body()
+  branch
+
+// Elaborates an ordered hardware-conditional chain into mux trees and final
+// single drivers, with implicit hold available only for register-next places.
+fun conditional_chain(branches, otherwise_body = #false, location = Location()):
+  unless branches is_a List && branches.length() >= 1
+  | frontend_fail("conditional chain requires at least one branch", location)
+  def conditions:
+    for List (branch in branches):
+      validate_conditional_value(branch[0](), location)
+  def branch_results:
+    for List (branch in branches):
+      collect_conditional_branch(branch[1], location)
+  def otherwise_result:
+    if otherwise_body
+    | collect_conditional_branch(otherwise_body, location)
+    | #false
+  def mutable places = []
+  for (branch_result in branch_results):
+    for (assignment in branch_result.assignments):
+      unless places.find(fun (place): place === assignment.place)
+      | places := places ++ [assignment.place]
+  when otherwise_result
+  | for (assignment in otherwise_result.assignments):
+      unless places.find(fun (place): place === assignment.place)
+      | places := places ++ [assignment.place]
+  for (place in places):
+    def hold = register_hold_value(place, location)
+    def mutable selected:
+      if otherwise_result
+      | block:
+          def assignment = otherwise_result.assignment_for(place)
+          unless assignment
+          | frontend_fail(String.append("conditional assignment to ",
+                                        place.name,
+                                        " is missing from otherwise"),
+                          location)
+          assignment.value
+      | if hold
+        | hold
+        | frontend_fail(String.append("conditional assignment to ",
+                                      place.name,
+                                      " requires otherwise"),
+                        location)
+    for (index in (branches.length() - 1) >=..= 0):
+      def assignment = branch_results[index].assignment_for(place)
+      def branch_value:
+        if assignment
+        | assignment.value
+        | if hold
+          | hold
+          | frontend_fail("conditional branch does not assign " ++ place.name,
+                          location)
+      selected := hw_mux_lookup(
+        cast(conditions[index], Bits(1), #false, location),
+        selected,
+        [[1, branch_value]],
+        #false,
+        location,
+        Origin("embedded conditional mux", place.name)
+      )
+    emit_conditional_assignment(place, selected, location)
+  #void
 
 fun host_condition(value, location = Location()):
   when hardware_entity(value)

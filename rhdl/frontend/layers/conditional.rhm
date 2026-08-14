@@ -1,0 +1,68 @@
+#lang rhombus/and_meta
+// Defines hardware-only when syntax that elaborates conditional assignments into muxes.
+
+import:
+  rhombus/meta open
+  "../kernel.rhm".conditional_chain
+
+export:
+  when
+
+defn.sequence_macro 'when $condition: $body; ...
+                     $tail
+                     ...':
+  fun expand_chain(condition, body_thunk, remaining):
+    match remaining
+    | 'elsewhen $next_condition: $next_body; ...
+       $rest
+       ...':
+        def (nested, tail) = expand_chain(
+          next_condition,
+          'fun ():
+             $next_body
+             ...',
+          '$rest; ...'
+        )
+        values(
+          'conditional_chain(
+             [[fun (): $condition,
+               $body_thunk]],
+             fun (): $nested
+           )',
+          tail
+        )
+    | 'otherwise: $otherwise_body; ...
+       $rest
+       ...':
+        values(
+          'conditional_chain(
+             [[fun (): $condition,
+               $body_thunk]],
+             fun ():
+               $otherwise_body
+               ...
+           )',
+          '$rest; ...'
+        )
+    | ~else:
+        values(
+          'conditional_chain(
+             [[fun (): $condition,
+               $body_thunk]]
+           )',
+          remaining
+        )
+  expand_chain(condition,
+               'fun ():
+                  $body
+                  ...',
+               '$tail; ...')
+
+expr.macro
+| 'when $condition: $body; ...':
+    'conditional_chain(
+       [[fun (): $condition,
+         fun ():
+           $body
+           ...]]
+     )'

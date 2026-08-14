@@ -1,0 +1,59 @@
+#lang rhombus
+// Checks hardware-only conditional assignment, priority muxing, nesting, holds, and diagnostics.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../examples/enable-shift-register.rhdl" as shift_fixture
+  "conditional-composed.rhdl" as composed_fixture
+  "conditional-fixture.rhdl" as fixture
+
+def priority_design = embedded.run_elaboration(fun (): fixture.PrioritySelect())
+def priority = priority_design.modules[0]
+def priority_muxes = priority.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+def priority_final = priority.find_output("selected").place.driver
+def priority_outer = priority.find_operation(priority_final.defining_op_id)
+def priority_inner = priority.find_operation(priority_outer.operands[1].defining_op_id)
+
+def nested_design = embedded.run_elaboration(fun (): fixture.NestedSelect())
+def nested = nested_design.modules[0]
+def nested_muxes = nested.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+
+def shift_design = shift_fixture.design
+def shift = shift_design.modules[0]
+def shift_registers = shift.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register_reset"
+)
+def shift_muxes = shift.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+def composed = composed_fixture.design.modules[0]
+
+check:
+  priority_muxes.length() ~is 2
+  priority_outer.operands[1] === priority_inner.results[0] ~is #true
+  priority_inner.operands[1] === priority.find_input("fallback").value ~is #true
+  priority_outer.operands[2] === priority.find_input("a").value ~is #true
+  priority_inner.operands[2] === priority.find_input("b").value ~is #true
+  nested_muxes.length() ~is 2
+  shift_registers.length() ~is 4
+  shift_muxes.length() ~is 4
+  composed.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+  ).length() ~is 1
+  (for all (register in shift_registers,
+            mux in shift_muxes):
+     mux.operands[1] === register.results[0] && register.places[0].driver === mux.results[0]) ~is #true
+  verify_design(priority_design) ~is #void
+  verify_design(nested_design) ~is #void
+  verify_design(shift_design) ~is #void
+  embedded.run_elaboration(fun (): fixture.HostCondition()) ~throws "must be a hardware value"
+  embedded.run_elaboration(fun (): fixture.WideCondition()) ~throws "one-bit FlatDataType"
+  embedded.run_elaboration(fun (): fixture.MissingOtherwise()) ~throws "requires otherwise"
+  embedded.run_elaboration(fun (): fixture.DuplicateBranch()) ~throws "more than once"
+  embedded.run_elaboration(fun (): fixture.MissingBranch()) ~throws "does not assign"
+  embedded.run_elaboration(fun (): fixture.SeparateConditionals()) ~throws "already has a driver"

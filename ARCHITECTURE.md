@@ -64,6 +64,7 @@ when adding, removing, or changing a layer's direct dependencies.
 | `interface.rhm` | Roles, directional interfaces, and bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
 | `sequential.rhm` | Binding-derived registers | kernel, field support |
+| `conditional.rhm` | Hardware `when`, priority branches, and conditional assignment | kernel |
 | `hierarchy.rhm` | Binding-derived instances and child-member access | core IR, kernel, instance-member support |
 
 `frontend/support/fields.rhm` depends only on the kernel.

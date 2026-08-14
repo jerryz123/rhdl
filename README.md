@@ -78,6 +78,7 @@ or policy over existing semantics. Current examples include:
 - Bundle declarations over `RecordType`.
 - `Vec` and `vec(...)` notation over `VectorType` and vector construction.
 - Role-based and recursively nested interfaces over record-typed ports.
+- Hardware conditional assignment lowered to muxes and one final drive.
 - Binding-derived hardware names.
 - Instance dot access and atomic bulk connection.
 
@@ -120,6 +121,7 @@ The composable frontend layers are:
 | `layers/interface.rhm` | Roles, directional flows, recursive interface composition, and `<=>` |
 | `layers/wire.rhm` | Binding-derived single-driver internal wires |
 | `layers/sequential.rhm` | Binding-derived registers |
+| `layers/conditional.rhm` | Hardware-only `when`, `elsewhen`, and `otherwise` assignment |
 | `layers/hierarchy.rhm` | Binding-derived instances, deterministic naming, and child-member access |
 | `layers/vector.rhm` | Concise `Vec` types and inferred `vec(...)` construction |
 
@@ -276,10 +278,11 @@ Fresh definitions use the generator name and elaboration order, such as
 `Adder`, `Adder_1`, and `Adder_2`. Active recursion is detected using a private
 identity attached to the generator declaration.
 
-Module bodies are ordinary Rhombus. Host functions, imports, collections,
-conditionals, iteration, and recursion can determine generated structure. A
-runtime hardware value cannot control host `if`, `when`, `unless`, `cond`,
-`&&`, `||`, or host iteration.
+Module bodies use ordinary Rhombus host functions, imports, collections,
+conditionals, iteration, and recursion to determine generated structure. A
+runtime hardware value cannot control host `if`, `unless`, `cond`, `&&`, `||`,
+or host iteration. In RHDL profiles, `when` is reserved for the hardware-only
+conditional-assignment layer.
 
 See [`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) and
 [`examples/layered-adder.rhdl`](examples/layered-adder.rhdl).
@@ -394,6 +397,49 @@ state may use any `DataType`, and holding state is explicit:
 ```rhombus
 state.next <== state
 ```
+
+### Hardware conditional assignment
+
+The conditional layer provides hardware-only `when`. Its condition must be a
+readable one-bit `FlatDataType`, such as the extension-defined `Bool`. Host
+values are rejected; use host `if`, iteration, or helper functions for
+elaboration-time decisions.
+
+```rhombus
+when load:
+  state.next <== data_in
+elsewhen clear:
+  state.next <== zero
+otherwise:
+  state.next <== fallback
+```
+
+Branches are ordered: the first true condition wins. Nested conditionals are
+supported. The frontend resolves each conditional chain into core
+`rtl.mux_lookup` operations and submits exactly one final driver for each
+destination; there is no conditional operation or control-flow region in the
+public IR.
+
+A register-next place may omit `otherwise`; its current value is the implicit
+hold value:
+
+```rhombus
+when enable:
+  state.next <== next_state
+```
+
+Outputs, wires, and instance inputs have no implicit value and therefore
+require an exhaustive `otherwise`. A destination may be assigned at most once
+in a branch; every non-register destination must be assigned in every branch.
+A register-next destination that is absent from a branch holds its current
+value. Separate conditional chains do not accumulate assignments: a second
+chain targeting an already driven place is an error, as is mixing an
+unconditional drive with a conditional drive.
+
+Reset remains a property of the primitive register. Use `~reset` and `~init`
+for active-high synchronous reset instead of expressing reset through `when`.
+
+See [`examples/enable-shift-register.rhdl`](examples/enable-shift-register.rhdl).
 
 ### Hierarchy
 
@@ -523,8 +569,9 @@ result <== sum
 The wire type may be any `HardwareType`. Aggregate wires reuse record and
 vector projection: all leaves must be driven before the wire is read or
 elaboration finishes. A whole-value drive cannot be mixed with field-wise or
-element-wise drives. Scalar and aggregate wires require exactly one effective
-driver; there is no last-connect, conditional-connect, or priority behavior.
+element-wise drives. Scalar and aggregate wires require exactly one final
+effective driver. The conditional layer may synthesize that driver from an
+exhaustive priority chain; there is no general last-connect behavior.
 
 `rtl.wire` records the internal connection point in the public IR. Because its
 read value is exactly its driver, CIRCT lowering erases the declaration and
@@ -870,6 +917,7 @@ the core schema.
 | Sequential | register, synchronous-reset register |
 
 There is no conditional-connect operation or general control-flow region.
+Frontend hardware conditionals canonicalize to mux lookups and one final drive.
 
 ### Builder
 
@@ -1071,6 +1119,7 @@ Important examples include:
 | `examples/adder4.rhdl` | Ripple-carry hierarchy built from a reusable Boolean full adder |
 | `examples/generated-adder.rhdl` | `InstanceArray` host collection plus hardware vector wires |
 | `examples/counter.rhdl` | Primitive registers and synchronous reset |
+| `examples/enable-shift-register.rhdl` | Hardware conditional assignment and implicit register hold |
 | `examples/hierarchy.rhdl` | Explicit module reuse and instance access |
 | `examples/layered-adder.rhdl` | Ordinary imported library plus host-generated structure |
 | `examples/host-parameters.rhdl` | Opaque host parameters and type-producing closures |
@@ -1138,6 +1187,8 @@ The initial vertical slice is complete:
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.
+- Hardware-only conditional assignment with priority branches, nested chains,
+  register hold defaults, and exhaustive combinational destinations.
 
 This status list is the sole completion ledger. Historical implementation
 phases and duplicated acceptance milestones are intentionally not maintained.
@@ -1156,8 +1207,7 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 
 ### Deferred features
 
-- `when` and conditional-connect semantics.
-- Multiple, conditional, or priority connects.
+- General last-connect and unordered multiple-driver semantics.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths and general width inference.
