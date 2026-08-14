@@ -1,0 +1,57 @@
+#lang rhdl
+// Demonstrates two same-clock physical write ports on one async-read memory.
+
+circuit MultiWriteMemory(depth, width):
+  input clock: Clock
+  input read_address: Bits(index_width(depth))
+  input first_address: Bits(index_width(depth))
+  input second_address: Bits(index_width(depth))
+  input first_data: Bits(width)
+  input second_data: Bits(width)
+  input first_enable: Bool
+  input second_enable: Bool
+  output read_data: Bits(width)
+
+  mem storage(depth, Bits(width))
+
+  read_data <== storage[read_address]
+  storage.write(first_address, first_data,
+                ~enable: first_enable, ~clock: clock)
+  storage.write(second_address, second_data,
+                ~enable: second_enable, ~clock: clock)
+
+def design = elaborate(MultiWriteMemory(4, 8))
+
+def verilog_reference = @str|<<{
+module MultiWriteMemory(
+  input        clock,
+  input  [1:0] read_address,
+               first_address,
+               second_address,
+  input  [7:0] first_data,
+               second_data,
+  input        first_enable,
+               second_enable,
+  output [7:0] read_data
+);
+
+  wire       _GEN = 1'h0;
+  reg  [7:0] storage[0:3];
+  always_ff @(posedge clock) begin
+    if (_GEN) begin
+    end
+    else begin
+      if (second_enable)
+        storage[second_address] <= second_data;
+      if (first_enable)
+        storage[first_address] <= first_data;
+    end
+  end // always_ff @(posedge)
+  assign read_data = storage[read_address];
+endmodule
+}>>|
+
+export:
+  MultiWriteMemory
+  design
+  verilog_reference

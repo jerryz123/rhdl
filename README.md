@@ -654,15 +654,18 @@ The initial memory contract is deliberately precise:
   uses one address bit.
 - A read expression creates an asynchronous, zero-latency physical read port;
   any number of read ports is allowed.
-- A memory has at most one rising-edge synchronous write port. Its enable is a
-  one-bit `FlatDataType` such as `Bool`.
+- A memory may have any number of rising-edge synchronous write ports. Every
+  write is an independent physical port with its own address, data, and
+  one-bit `FlatDataType` enable; all ports on one memory share one clock.
 - Initial contents, out-of-range dynamic addresses, and read-during-write
-  results are unspecified. Memory reset, initialization, masks, and combined
-  read/write ports are not part of this first cut.
+  results are unspecified. The result of simultaneous enabled writes to the
+  same address is also unspecified. Memory reset, initialization, masks, and
+  combined read/write ports are not part of this first cut.
 
 The write method remains explicit because it is a clocked state change, not a
 single-driver `Place` connection. See
-[`examples/async-read-memory.rhdl`](examples/async-read-memory.rhdl) and
+[`examples/async-read-memory.rhdl`](examples/async-read-memory.rhdl),
+[`examples/multi-write-memory.rhdl`](examples/multi-write-memory.rhdl), and
 [`examples/stack.rhdl`](examples/stack.rhdl).
 
 ### Hardware conditional assignment
@@ -688,10 +691,12 @@ destination; there is no conditional operation or control-flow region in the
 public IR.
 
 Memory writes are conditional effects rather than `Place` assignments. The
-frontend combines branch guards with any explicit local enables and emits one
-core write port per memory. When mutually exclusive branches write the same
-memory, priority muxes select its address and data; a branch without a write
-disables the port for that branch.
+frontend combines branch guards with any explicit local enables. The first
+write to a memory in each mutually exclusive branch shares physical port zero,
+the second shares port one, and so on. Priority muxes select each port's
+address and data; a branch without that numbered write disables the port for
+that branch. Independent writes outside one conditional chain remain
+independent physical ports.
 
 A register-next place may omit `otherwise`; its current value is the implicit
 hold value:
@@ -1160,8 +1165,10 @@ A `Memory` has stable identity, an owning module, a positive host-known depth,
 an element `DataType`, and an allocation operation. It is a resource rather
 than a `Value` or `Place`. `rtl.memory_read_async` produces an ordinary
 combinational `Value`; `rtl.memory_write` is a sequential side-effecting
-operation carrying address, data, clock, and enable operands. Consequently an
-address dependency through an asynchronous read participates in ordinary
+operation carrying address, data, clock, and enable operands. A memory may
+have multiple write operations, which represent independent physical ports;
+all of its write operations must use the same clock. Consequently an address
+dependency through an asynchronous read participates in ordinary
 combinational-cycle checking.
 
 ### Modules and instances
@@ -1449,6 +1456,7 @@ Important examples include:
 | `examples/expanding-arithmetic.rhdl` | Lossless addition and multiplication across unequal operand widths |
 | `examples/unsigned-comparisons.rhdl` | Unsigned ordering derived from one core comparison primitive |
 | `examples/async-read-memory.rhdl` | Host-sized memory with asynchronous reads and synchronous writes |
+| `examples/multi-write-memory.rhdl` | Independent same-clock physical write ports on one asynchronous-read memory |
 | `examples/tiny-simd.rhdl` | Integrated host-specialized SIMD microengine with program memory and generated lanes |
 | `examples/stack.rhdl` | Host-sized stack with guarded memory writes and nested hardware control |
 | `examples/table.rhdl` | Host-generated 256-entry combinational vector table |
@@ -1531,7 +1539,7 @@ The initial vertical slice is complete:
   connections, explicit packing casts, muxes, and registers.
 - Readable, single-driver internal wires with aggregate element assignment.
 - First-class memories with arbitrary `DataType` elements, asynchronous reads,
-  and one optional synchronous write port.
+  and multiple same-clock synchronous write ports.
 - Named-role interfaces, recursive interface composition, nested field access,
   bulk connection, and reconstruction through instances.
 - Deterministic lowering through CIRCT and simulation of generated RTL.
@@ -1559,8 +1567,8 @@ phases and duplicated acceptance milestones are intentionally not maintained.
 - Automatic module-specialization deduplication.
 - `UInt` and `SInt` as distinct types.
 - Implicit widths and general width inference.
-- Dynamically sized arrays and memories, additional write ports, write masks,
-  initialization, and defined collision behavior.
+- Dynamically sized arrays and memories, write masks, initialization, and
+  defined collision behavior.
 - Asynchronous and active-low resets.
 - Multiple clock/reset-domain analysis.
 - General IR regions and control-flow blocks.

@@ -179,6 +179,7 @@ fixture_specs=(
   'predicate-filter|predicate_filter_tb|examples/predicate-filter.rhdl|design|verilog_reference'
   'wire|wire_tb|examples/wire.rhdl|design|verilog_reference'
   'async-read-memory|async_read_memory_tb|examples/async-read-memory.rhdl|design|verilog_reference'
+  'multi-write-memory|multi_write_memory_tb|examples/multi-write-memory.rhdl|design|verilog_reference'
   'tiny-simd|tiny_simd_tb|examples/tiny-simd.rhdl|design|verilog_reference'
   'stack|stack_tb|examples/stack.rhdl|design|verilog_reference'
   'counter|counter_tb|examples/counter.rhdl|design|verilog_reference'

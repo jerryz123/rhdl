@@ -123,8 +123,8 @@ class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
   method assignment_for(place):
     assignments.find(fun (assignment): assignment.place === place)
 
-  method memory_write_for(resource):
-    memory_writes.find(fun (write): write.resource === resource)
+  method memory_writes_for(resource):
+    memory_writes.filter(~keep: fun (write): write.resource === resource)
 
   method add(place, value, location):
     when this.assignment_for(place)
@@ -133,11 +133,6 @@ class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
     assignments := assignments ++ [ConditionalAssignment(place, value)]
 
   method add_memory_write(write):
-    when this.memory_write_for(write.resource)
-    | frontend_fail(String.append("conditional branch writes memory ",
-                                  write.resource.name,
-                                  " more than once"),
-                    write.location)
     memory_writes := memory_writes ++ [write]
 
 fun require_context(location = Location()):
@@ -631,7 +626,7 @@ fun collect_conditional_branch(body, location = Location()):
   branch
 
 // Elaborates an ordered hardware-conditional chain into mux trees, final
-// single drivers, and at most one enabled write port per affected memory.
+// single drivers, and one enabled write per conditional memory-port slot.
 fun conditional_chain(branches, otherwise_body = #false, location = Location()):
   unless branches is_a List && branches.length() >= 1
   | frontend_fail("conditional chain requires at least one branch", location)
@@ -701,71 +696,90 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
     include_branch_memories(branch_result)
   include_branch_memories(otherwise_result)
 
+  fun memory_write_at(branch_result, resource, port_index):
+    if !branch_result
+    | #false
+    | block:
+        def writes = branch_result.memory_writes_for(resource)
+        if port_index < writes.length() | writes[port_index] | #false
+
   for (resource in memories):
-    def writes:
-      (branch_results ++ (if otherwise_result | [otherwise_result] | [])).map(
-        fun (branch_result): branch_result.memory_write_for(resource)
-      ).filter(~keep: fun (write): write)
-    def representative = writes[0]
-    unless (for all (write in writes): write.clock === representative.clock)
-    | frontend_fail(String.append("conditional writes to memory ",
-                                  resource.name,
-                                  " must use the same clock"),
-                    location)
-    def disabled = literal(Bits(1), 0, #false, location)
-    def fallback_write:
-      if otherwise_result
-      | otherwise_result.memory_write_for(resource)
-      | #false
-    def mutable selected_address:
-      if fallback_write | fallback_write.address | representative.address
-    def mutable selected_data:
-      if fallback_write | fallback_write.data | representative.data
-    def mutable selected_enable:
-      if fallback_write
-      | cast(fallback_write.enable, Bits(1), #false, location)
-      | disabled
-    for (index in (branches.length() - 1) >=..= 0):
-      def write = branch_results[index].memory_write_for(resource)
-      def condition = cast(conditions[index], Bits(1), #false, location)
-      def branch_enable:
-        if write
-        | cast(write.enable, Bits(1), #false, location)
+    def all_results = branch_results ++ (if otherwise_result | [otherwise_result] | [])
+    def mutable port_count = 0
+    for (branch_result in all_results):
+      def count = branch_result.memory_writes_for(resource).length()
+      when count > port_count
+      | port_count := count
+    for (port_index in 0..port_count):
+      def mutable representative = #false
+      for (branch_result in all_results):
+        def candidate = memory_write_at(branch_result, resource, port_index)
+        when candidate && !representative
+        | representative := candidate
+      unless (for all (branch_result in all_results):
+                def candidate = memory_write_at(branch_result,
+                                                resource,
+                                                port_index)
+                !candidate || candidate.clock === representative.clock)
+      | frontend_fail(String.append("conditional writes to memory ",
+                                    resource.name,
+                                    " must use the same clock"),
+                      location)
+      def disabled = literal(Bits(1), 0, #false, location)
+      def fallback_write = memory_write_at(otherwise_result,
+                                           resource,
+                                           port_index)
+      def mutable selected_address:
+        if fallback_write | fallback_write.address | representative.address
+      def mutable selected_data:
+        if fallback_write | fallback_write.data | representative.data
+      def mutable selected_enable:
+        if fallback_write
+        | cast(fallback_write.enable, Bits(1), #false, location)
         | disabled
-      selected_enable := hw_mux_lookup(
-        condition,
-        selected_enable,
-        [[1, branch_enable]],
-        #false,
-        location,
-        Origin("embedded conditional memory enable", resource.name)
+      for (index in (branches.length() - 1) >=..= 0):
+        def write = memory_write_at(branch_results[index],
+                                    resource,
+                                    port_index)
+        def condition = cast(conditions[index], Bits(1), #false, location)
+        def branch_enable:
+          if write
+          | cast(write.enable, Bits(1), #false, location)
+          | disabled
+        selected_enable := hw_mux_lookup(
+          condition,
+          selected_enable,
+          [[1, branch_enable]],
+          #false,
+          location,
+          Origin("embedded conditional memory enable", resource.name)
+        )
+        when write
+        | block:
+            selected_address := hw_mux_lookup(
+              condition,
+              selected_address,
+              [[1, write.address]],
+              #false,
+              location,
+              Origin("embedded conditional memory address", resource.name)
+            )
+            selected_data := hw_mux_lookup(
+              condition,
+              selected_data,
+              [[1, write.data]],
+              #false,
+              location,
+              Origin("embedded conditional memory data", resource.name)
+            )
+      emit_conditional_memory_write(
+        ConditionalMemoryWrite(resource,
+                               selected_address,
+                               selected_data,
+                               representative.clock,
+                               selected_enable,
+                               representative.location)
       )
-      when write
-      | block:
-          selected_address := hw_mux_lookup(
-            condition,
-            selected_address,
-            [[1, write.address]],
-            #false,
-            location,
-            Origin("embedded conditional memory address", resource.name)
-          )
-          selected_data := hw_mux_lookup(
-            condition,
-            selected_data,
-            [[1, write.data]],
-            #false,
-            location,
-            Origin("embedded conditional memory data", resource.name)
-          )
-    emit_conditional_memory_write(
-      ConditionalMemoryWrite(resource,
-                             selected_address,
-                             selected_data,
-                             representative.clock,
-                             selected_enable,
-                             representative.location)
-    )
   #void
 
 fun host_condition(value, location = Location()):
