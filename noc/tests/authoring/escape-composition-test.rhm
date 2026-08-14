@@ -1,0 +1,191 @@
+#lang rhombus
+// Checks generic irreversible escape composition, lowering, and invalid uses.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../plan/main.rhm" open
+
+def source = NodeRef("source")
+def middle = NodeRef("middle")
+def destination = NodeRef("destination")
+def adaptive_first = LinkRef("adaptive-first")
+def adaptive_second = LinkRef("adaptive-second")
+def escape_first = LinkRef("escape-first")
+def escape_second = LinkRef("escape-second")
+def vc_groups = [
+  VCGroup("adaptive", 1),
+  VCGroup("escape", 1),
+  VCGroup("other", 1)
+]
+def topology_spec = TopologySpec(
+  [destination, source, middle],
+  [directed_link(escape_second, middle, destination, vc_groups),
+   directed_link(adaptive_first, source, middle, vc_groups),
+   directed_link(escape_first, source, middle, vc_groups),
+   directed_link(adaptive_second, middle, destination, vc_groups)]
+)
+def lowered_topology = lower_topology(topology_spec)
+def route_ref = RouteClassRef("request")
+def route_spec = RouteClassSpec(route_ref, source, destination)
+def lowered_routes = lower_route_classes(lowered_topology, [route_spec])
+def route_class = lowered_routes.route_class(route_ref)
+
+def adaptive_policy = select_candidate_links(
+  [adaptive_second, adaptive_first]
+)
+def escape_policy = select_candidate_links(
+  [escape_second, escape_first]
+)
+def policy = with_escape(
+  adaptive_policy,
+  escape_policy,
+  ["adaptive"],
+  ["escape"]
+)
+def relation = lower_routing_policy(lowered_routes, policy)
+
+fun vc(link, group):
+  lowered_topology.vc_id(VCRef(link, group, 0))
+
+def source_id = lowered_topology.node_id(source)
+def adaptive_first_vc = vc(adaptive_first, "adaptive")
+def adaptive_second_vc = vc(adaptive_second, "adaptive")
+def escape_first_vc = vc(escape_first, "escape")
+def escape_second_vc = vc(escape_second, "escape")
+def other_first_vc = vc(adaptive_first, "other")
+
+check:
+  policy is_a RoutingPolicy ~is #true
+  policy is_a WithEscapePolicy ~is #true
+  policy.adaptive_policy === adaptive_policy ~is #true
+  policy.escape_policy === escape_policy ~is #true
+  policy.adaptive_vc_groups ~is ["adaptive"]
+  policy.escape_vc_groups ~is ["escape"]
+  policy.describe() ~is String.append(
+    "with-escape(adaptive=candidate-link(adaptive-first, adaptive-second)",
+    "; escape=candidate-link(escape-first, escape-second)",
+    "; adaptive-vc-groups=adaptive; escape-vc-groups=escape)"
+  )
+
+// Injection can enter either class, but each child policy still determines
+// which physical links are legal within that class.
+check:
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    adaptive_first_vc
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    escape_first_vc
+  ) ~is #true
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    vc(adaptive_first, "escape")
+  ) ~is #false
+  relation.allow(
+    route_class,
+    Injection(source_id),
+    vc(escape_first, "adaptive")
+  ) ~is #false
+
+// Adaptive forwarding can stay adaptive or enter escape. Once escape is held,
+// adaptive acquisition is forbidden even when the adaptive child allows it.
+check:
+  relation.allow(
+    route_class,
+    HeldVC(adaptive_first_vc),
+    adaptive_second_vc
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(adaptive_first_vc),
+    escape_second_vc
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(escape_first_vc),
+    escape_second_vc
+  ) ~is #true
+  relation.allow(
+    route_class,
+    HeldVC(escape_first_vc),
+    adaptive_second_vc
+  ) ~is #false
+  relation.allow(
+    route_class,
+    HeldVC(other_first_vc),
+    adaptive_second_vc
+  ) ~is #false
+  relation.allow(
+    route_class,
+    HeldVC(other_first_vc),
+    escape_second_vc
+  ) ~is #false
+
+// The generic combinator has no validation authority: it lowers through the
+// normal relation and compiles successfully when that full relation is acyclic.
+def problem = RoutingProblem(
+  lowered_topology.topology,
+  lowered_routes.route_classes,
+  relation
+)
+def compiled = compile_routing(problem)
+
+check:
+  compiled is_a ValidatedRouting ~is #true
+
+check:
+  with_escape("not a policy", allow_all, ["adaptive"], ["escape"]) ~throws "adaptive branch must be a RoutingPolicy"
+  with_escape(allow_all, "not a policy", ["adaptive"], ["escape"]) ~throws "escape branch must be a RoutingPolicy"
+  with_escape(allow_all, allow_all, [], ["escape"]) ~throws "adaptive VC groups must be a nonempty List"
+  with_escape(allow_all, allow_all, ["adaptive"], []) ~throws "escape VC groups must be a nonempty List"
+  with_escape(
+    allow_all,
+    allow_all,
+    ["bad/group"],
+    ["escape"]
+  ) ~throws "names without '/'"
+  with_escape(
+    allow_all,
+    allow_all,
+    ["adaptive", "adaptive"],
+    ["escape"]
+  ) ~throws "duplicate adaptive VC groups adaptive"
+  with_escape(
+    allow_all,
+    allow_all,
+    ["adaptive"],
+    ["adaptive"]
+  ) ~throws "must be disjoint"
+  lower_routing_policy(
+    lowered_routes,
+    with_escape(allow_all, allow_all, ["unknown"], ["escape"])
+  ) ~throws "unknown VC group unknown"
+  lower_routing_policy(
+    lowered_routes,
+    with_escape(
+      select_candidate_links([LinkRef("unknown")]),
+      allow_all,
+      ["adaptive"],
+      ["escape"]
+    )
+  ) ~throws "unknown link unknown"
+  routing_policy_result(
+    with_escape(
+      custom_policy("non-boolean adaptive", fun (_context): "yes"),
+      deny_all,
+      ["adaptive"],
+      ["escape"]
+    ),
+    RoutingContext(
+      route_spec,
+      RoutingInjection(source),
+      source,
+      VCRef(adaptive_first, "adaptive", 0)
+    )
+  ) ~throws "must return a Boolean"

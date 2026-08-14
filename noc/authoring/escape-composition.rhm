@@ -1,0 +1,96 @@
+#lang rhombus
+// Composes adaptive and escape policies with irreversible VC-group transitions.
+
+import:
+  "routing-policy.rhm" open
+
+export:
+  WithEscapePolicy
+  with_escape
+
+fun duplicate_name(names, name):
+  names.filter(~keep: fun (candidate): candidate == name).length() > 1
+
+fun contains_name(names, name):
+  names.find(fun (candidate): candidate == name) != #false
+
+fun validate_group_names(subject, names):
+  unless names is_a List && names.length() > 0
+  | error(~who: #'with_escape,
+          subject ++ " must be a nonempty List")
+  for (name in names):
+    unless name is_a String && name.length() > 0 && !name.contains("/")
+    | error(~who: #'with_escape,
+            subject ++ " must contain names without '/'")
+    when duplicate_name(names, name)
+    | error(~who: #'with_escape,
+            "duplicate " ++ subject ++ " " ++ name)
+
+fun policies_allow(policy, groups, context):
+  contains_name(groups, context.candidate_vc.group) && routing_policy_result(
+    policy,
+    context
+  )
+
+class WithEscapePolicy(adaptive_policy,
+                       escape_policy,
+                       adaptive_vc_groups,
+                       escape_vc_groups):
+  implements RoutingPolicy
+  constructor (adaptive_policy,
+               escape_policy,
+               adaptive_vc_groups,
+               escape_vc_groups):
+    unless adaptive_policy is_a RoutingPolicy
+    | error(~who: #'with_escape,
+            "adaptive branch must be a RoutingPolicy")
+    unless escape_policy is_a RoutingPolicy
+    | error(~who: #'with_escape,
+            "escape branch must be a RoutingPolicy")
+    validate_group_names("adaptive VC groups", adaptive_vc_groups)
+    validate_group_names("escape VC groups", escape_vc_groups)
+    when adaptive_vc_groups.find(
+      fun (name): contains_name(escape_vc_groups, name)
+    )
+    | error(~who: #'with_escape,
+            "adaptive and escape VC groups must be disjoint")
+    super(adaptive_policy,
+          escape_policy,
+          adaptive_vc_groups.sort(fun (left, right): left < right),
+          escape_vc_groups.sort(fun (left, right): left < right))
+
+  override method allows(context):
+    def adaptive_allowed = fun ():
+      policies_allow(adaptive_policy, adaptive_vc_groups, context)
+    def escape_allowed = fun ():
+      policies_allow(escape_policy, escape_vc_groups, context)
+    cond
+    | context.origin is_a RoutingInjection:
+        adaptive_allowed() || escape_allowed()
+    | context.origin is_a RoutingForwarding:
+        def current_group = context.origin.vc.group
+        cond
+        | contains_name(adaptive_vc_groups, current_group):
+            adaptive_allowed() || escape_allowed()
+        | contains_name(escape_vc_groups, current_group):
+            escape_allowed()
+        | ~else: #false
+    | ~else: #false
+
+  override method describe():
+    String.append(
+      "with-escape(adaptive=", adaptive_policy.describe(),
+      "; escape=", escape_policy.describe(),
+      "; adaptive-vc-groups=", String.join(adaptive_vc_groups, ","),
+      "; escape-vc-groups=", String.join(escape_vc_groups, ","),
+      ")"
+    )
+
+fun with_escape(adaptive_policy,
+                escape_policy,
+                adaptive_vc_groups,
+                escape_vc_groups):
+  WithEscapePolicy(adaptive_policy,
+                   escape_policy,
+                   adaptive_vc_groups,
+                   escape_vc_groups)

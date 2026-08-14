@@ -23,6 +23,7 @@ The current implementation provides:
   the existing normalized routing relation.
 - Resource-visible routing phases expressed as named VC-group transitions,
   without hidden mutable packet state.
+- Generic irreversible composition of independent adaptive and escape policies.
 - Separate standard definitions for line and rectangular-mesh topologies.
 - A standard all-pairs traffic definition that produces ordinary symbolic
   route-class specifications for any authored topology.
@@ -74,6 +75,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-tes
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-phase-authoring-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/escape-composition-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -214,6 +216,15 @@ routing state and dependency graph. Unreachable phase branches are handled by
 the existing reachability pass, while a missing reachable transition remains
 a reachable-dead-end error.
 
+`with_escape` composes independent adaptive and escape `RoutingPolicy` values
+with explicit, nonempty, disjoint VC-group sets. Injection may enter either
+set, forwarding from an adaptive VC may remain adaptive or enter escape, and
+forwarding from an escape VC may only remain in escape. A held VC outside both
+sets has no legal transition. The child policies still decide which physical
+links are legal within their class; the combinator contributes only the
+resource-visible, irreversible group transition. It lowers through the normal
+`RoutingRelation` path and grants no special authority to validation.
+
 ## Standard routing policies
 
 Reusable topology-specific policies live under `noc/std/routing/`, outside
@@ -246,12 +257,11 @@ demonstrates phase inspection, raw-relation equivalence, reachable-dead-end
 diagnostics, and pruning of unreachable phase transitions under the current
 acyclic dependency proof.
 
-`AdaptiveMinimalEscapePolicy` allows every Manhattan-distance-reducing
-adaptive direction, so a packet may choose either dimension while both differ.
-Injection and adaptive forwarding may instead acquire an escape VC following
-XY order. Escape forwarding is closed over the selected escape groups and may
-never return to an adaptive group. Adaptive and escape group sets are explicit,
-nonempty, disjoint, and validated against the mesh view.
+`AdaptiveMinimalEscapePolicy` preserves the earlier mesh-specific API as a
+thin compatibility wrapper. It composes generic `MinimalAdaptivePolicy`, XY
+`DimensionOrderPolicy`, and `with_escape`; it no longer implements separate
+Manhattan or phase-transition logic. Adaptive and escape group sets remain
+explicit, nonempty, disjoint, and validated against the mesh view.
 
 The mesh-adaptive-escape example deliberately does not produce
 `ValidatedRouting` for the full policy. Reachability succeeds, but the existing
