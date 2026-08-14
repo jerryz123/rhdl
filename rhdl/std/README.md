@@ -126,15 +126,15 @@ returns `endpoint.valid and endpoint.ready`.
 
 ## Memory transactions
 
-[`memory-port.rhdl`](memory-port.rhdl) defines `MemoryPort(address_width,
+[`simple-memory.rhdl`](simple-memory.rhdl) defines `SimpleMemory(address_width,
 data_bytes)`, a deliberately small requester/responder protocol for connecting
 a processor or host shim to memory-like hardware:
 
 ```rhombus
 import:
-  lib("rhdl/std/memory-port.rhdl") open
+  lib("rhdl/std/simple-memory.rhdl") open
 
-interface memory(MemoryPort(32, 8), ~role: requester)
+interface memory(SimpleMemory(32, 8), ~role: requester)
 ```
 
 `address_width` is the width of the full byte address. `data_bytes` is the
@@ -143,19 +143,41 @@ the `Bits(data_bytes * 8)` data width and the `Bits(data_bytes)` write-mask
 width. A set mask bit enables the corresponding byte lane on a write; the mask
 is ignored on reads. An all-zero write mask is therefore a legal no-op write.
 
-Requests use `request_valid`/`request_ready`; responses use
-`response_valid`/`response_ready`. The requester must hold every request field
-stable until the request transfers, and the responder must hold response data
-stable until the response transfers. At most one accepted request may await a
-response, and every request, including a write, produces exactly one response.
-`response_data` is meaningful only for reads. This simple ordering contract
-avoids IDs, bursts, and multiple outstanding transactions.
+`SimpleMemoryReq` bundles `address`, `write`, `data`, and `mask`.
+`SimpleMemoryResp` contains `data`, which is meaningful only for reads.
+`SimpleMemory` composes these payloads as oppositely directed nested
+`Irrevocable` channels: `request.valid`, `request.ready`, and `request.bits`
+carry requests, while the corresponding `response` members carry responses.
+The nested channels reuse the standard ready-valid compatibility and transfer
+semantics. Their irrevocable contract requires the producer to hold an offer
+and its payload stable until transfer. Import `ready-valid.rhdl` directly to
+use the ordinary `fire(port.request)` and `fire(port.response)` helpers for
+each channel.
+
+Multiple accepted requests may await responses. Every request, including a
+write, produces exactly one response, and responses must occur in request
+order. This ordering rule relates the two channels, so it remains a behavioral
+`SimpleMemory` contract rather than a property of either `Irrevocable` channel.
+Strict ordering avoids transaction IDs while allowing pipelined responders.
 
 Every request address must be aligned to `data_bytes`. The protocol retains a
 full byte address so it composes directly with processor addresses and software
 images; it does not silently discard low bits. Use
 `memory_address_aligned(address, data_bytes)` for a hardware alignment check.
 The interface type validates its host parameters during construction.
+See [`../../examples/simple-memory-flow.rhdl`](../../examples/simple-memory-flow.rhdl)
+for a bidirectional adapter that applies the ordinary `queue` and `pipe`
+helpers independently to the request and response channels.
+
+[`simple-memory/ram.rhdl`](simple-memory/ram.rhdl) defines
+`SimpleMemoryRam(address_width, data_bytes, size_bytes, ~base_address: 0)`, a
+finite concrete responder backed by one byte-masked shared 1RW synchronous
+memory port. It accepts one operation per cycle while either of its two
+outstanding slots remains, gives reads and writes equal response latency, and
+queues their responses strictly in request order. Reset clears pipeline and
+queue state but does not initialize storage. The configured region must fit
+the address width, and invalid or misaligned requests are not accepted because
+the deliberately small response payload has no error indication.
 
 ## Flow-control circuits
 

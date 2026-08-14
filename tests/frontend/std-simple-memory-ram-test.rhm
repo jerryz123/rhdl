@@ -1,0 +1,47 @@
+#lang rhombus
+// Checks SimpleMemoryRam storage, ordered pipeline composition, and parameters.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/std/simple-memory/ram.rhdl" as ram
+  "../../examples/simple-memory-ram.rhdl" as fixture
+
+def design = fixture.design
+def top = design.modules[0]
+def storage = top.operations.find(
+  fun (operation): operation.opcode == "rtl.sync_memory"
+)
+
+check:
+  top.name ~is "SimpleMemoryRam"
+  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "port_in"]
+  top.outputs.map(fun (output): output.name) ~is ["port_out"]
+  storage.attribute("depth") ~is 4
+  storage.attribute("mask_granularity") ~is 8
+  storage.attribute("has_read_write") ~is #true
+  storage.attribute("has_read") ~is #false
+  storage.attribute("has_write") ~is #false
+  storage.places.find(
+    fun (place): place.name == "storage.read_write.write_mask"
+  ).type.width ~is 4
+  top.operations.filter(
+    ~keep: fun (operation): operation.opcode.starts_with("rtl.register")
+  ).length() ~is 3
+  top.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).length() ~is 2
+  verify_design(design) ~is #void
+
+  embedded.run_elaboration(
+    fun (): ram.SimpleMemoryRam(32, 4, 0)
+  ) ~throws "size must be a positive host byte count"
+  embedded.run_elaboration(
+    fun (): ram.SimpleMemoryRam(32, 4, 10)
+  ) ~throws "size must be a multiple"
+  embedded.run_elaboration(
+    fun (): ram.SimpleMemoryRam(32, 4, 16, ~base_address: 2)
+  ) ~throws "base address must be a nonnegative aligned host Int"
+  embedded.run_elaboration(
+    fun (): ram.SimpleMemoryRam(8, 4, 16, ~base_address: 248)
+  ) ~throws "memory region must fit"

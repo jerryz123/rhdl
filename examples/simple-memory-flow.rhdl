@@ -1,0 +1,217 @@
+#lang rhdl
+// Composes both SimpleMemory channels with standard ready-valid flow control.
+
+import:
+  lib("rhdl/std/simple-memory.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+
+// A small request queue absorbs multiple ordered transactions. The following
+// pipe restores the stronger Irrevocable contract promised downstream.
+sync_circuit BufferedSimpleMemory(address_width, data_bytes):
+  interface upstream(SimpleMemory(address_width, data_bytes), ~role: responder)
+  interface downstream(SimpleMemory(address_width, data_bytes), ~role: requester)
+
+  def buffered_request = upstream.request
+                         |> queue(_, 2, ~pipe: #true)
+                         |> pipe(_, 1)
+  downstream.request <=> buffered_request
+
+  // Responses flow in the opposite direction through the same generic
+  // ready-valid vocabulary.
+  def buffered_response = downstream.response |> pipe(_, 1)
+  upstream.response <=> buffered_response
+
+def design = elaborate(BufferedSimpleMemory(32, 4))
+
+def verilog_reference = @str|<<{
+module BufferedSimpleMemory(
+  input                                                                                                                                                                                                 clock,
+                                                                                                                                                                                                        reset,
+  input  struct packed {struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } request; struct packed {logic ready; } response; } upstream_in,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; struct packed {logic [31:0] data; } bits; } response; }                                                      downstream_in,
+  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; struct packed {logic [31:0] data; } bits; } response; }                                                      upstream_out,
+  output struct packed {struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } request; struct packed {logic ready; } response; } downstream_out
+);
+
+  wire struct packed {logic ready; } _pipe_stage_1_ingress_out;
+  wire struct packed {logic valid; struct packed {logic [31:0] data; } bits; }
+    _pipe_stage_1_egress_out;
+  wire struct packed {logic ready; } _pipe_stage_ingress_out;
+  wire
+    struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; }
+    _pipe_stage_egress_out;
+  wire struct packed {logic ready; } _queue_stage_ingress_out;
+  wire
+    struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; }
+    _queue_stage_egress_out;
+  Queue queue_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (upstream_in.request),
+    .egress_in   (_pipe_stage_ingress_out),
+    .ingress_out (_queue_stage_ingress_out),
+    .egress_out  (_queue_stage_egress_out),
+    .count       (/* unused */)
+  );
+  Pipe pipe_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_queue_stage_egress_out),
+    .egress_in   (downstream_in.request),
+    .ingress_out (_pipe_stage_ingress_out),
+    .egress_out  (_pipe_stage_egress_out)
+  );
+  Pipe_1 pipe_stage_1 (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (downstream_in.response),
+    .egress_in   (upstream_in.response),
+    .ingress_out (_pipe_stage_1_ingress_out),
+    .egress_out  (_pipe_stage_1_egress_out)
+  );
+  assign upstream_out =
+    '{request: _queue_stage_ingress_out, response: _pipe_stage_1_egress_out};
+  assign downstream_out =
+    '{request: _pipe_stage_egress_out, response: _pipe_stage_1_ingress_out};
+endmodule
+
+module Queue(
+  input                                                                                                                               clock,
+                                                                                                                                      reset,
+  input  struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } ingress_in,
+  input  struct packed {logic ready; }                                                                                                egress_in,
+  output struct packed {logic ready; }                                                                                                ingress_out,
+  output struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } egress_out,
+  output [1:0]                                                                                                                        count
+);
+
+  wire
+    struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
+    _GEN;
+  wire       _GEN_0;
+  wire       _write_pointer_value;
+  wire       _read_pointer_value;
+  wire       _GEN_1 = 1'h0;
+  struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
+    storage[0:1];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[_write_pointer_value] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0] occupancy;
+  wire       _GEN_2 = occupancy == 2'h0;
+  wire       _GEN_3 = occupancy != 2'h2 | egress_in.ready;
+  assign _GEN_0 = ingress_in.valid & _GEN_3;
+  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
+  assign _GEN = ingress_in.bits;
+  Counter read_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_4),
+    .value  (_read_pointer_value),
+    .wrap   (/* unused */)
+  );
+  Counter write_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_0),
+    .value  (_write_pointer_value),
+    .wrap   (/* unused */)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_3};
+  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
+  assign count = occupancy;
+endmodule
+
+module Counter(
+  input  clock,
+         reset,
+         enable,
+  output value,
+         wrap
+);
+
+  reg state;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 1'h0;
+    else
+      state <= enable ? ~state & state - 1'h1 : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & state;
+endmodule
+
+module Pipe(
+  input                                                                                                                               clock,
+                                                                                                                                      reset,
+  input  struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } ingress_in,
+  input  struct packed {logic ready; }                                                                                                egress_in,
+  output struct packed {logic ready; }                                                                                                ingress_out,
+  output struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } egress_out
+);
+
+  reg  [0:0] stage_valid;
+  struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }[0:0]
+    stage_bits;
+  wire       _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire       _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire
+    struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
+    _GEN_1 =
+    _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0};
+    else
+      stage_valid[1'h0] <= _GEN_0;
+  end // always @(posedge)
+  always @(posedge clock)
+    stage_bits[1'h0] <= _GEN_1;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: stage_valid[1'h0], bits: stage_bits[1'h0]};
+endmodule
+
+module Pipe_1(
+  input                                                                          clock,
+                                                                                 reset,
+  input  struct packed {logic valid; struct packed {logic [31:0] data; } bits; } ingress_in,
+  input  struct packed {logic ready; }                                           egress_in,
+  output struct packed {logic ready; }                                           ingress_out,
+  output struct packed {logic valid; struct packed {logic [31:0] data; } bits; } egress_out
+);
+
+  reg  [0:0] stage_valid;
+  struct packed {logic [31:0] data; }[0:0] stage_bits;
+  wire       _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire       _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire struct packed {logic [31:0] data; } _GEN_1 =
+    _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0};
+    else
+      stage_valid[1'h0] <= _GEN_0;
+  end // always @(posedge)
+  always @(posedge clock)
+    stage_bits[1'h0] <= _GEN_1;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: stage_valid[1'h0], bits: stage_bits[1'h0]};
+endmodule
+}>>|
+
+export:
+  BufferedSimpleMemory
+  design
+  verilog_reference

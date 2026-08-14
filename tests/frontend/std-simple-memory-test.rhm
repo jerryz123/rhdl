@@ -1,0 +1,83 @@
+#lang rhombus
+// Checks memory-protocol parameters, directions, alignment logic, and elaboration.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../rhdl/std/simple-memory.rhdl" as std
+  "../../examples/simple-memory.rhdl" as fixture
+  "../../examples/simple-memory-flow.rhdl" as flow_fixture
+
+def type = std.SimpleMemory(32, 4)
+def request_member = type.members.find(fun (member): member.name == "request")
+def response_member = type.members.find(fun (member): member.name == "response")
+def request_payload = request_member.type.members.find(
+  fun (member): member.name == "bits"
+).type
+def response_payload = response_member.type.members.find(
+  fun (member): member.name == "bits"
+).type
+def adapter_design = fixture.design
+def adapter = adapter_design.modules[0]
+def alignment_design = embedded.run_elaboration(
+  fun (): fixture.MemoryAlignmentCheck()
+)
+def alignment = alignment_design.modules[0]
+def activity_design = embedded.run_elaboration(
+  fun (): fixture.SimpleMemoryActivity()
+)
+def activity = activity_design.modules[0]
+def flow_design = flow_fixture.design
+def flow_top = flow_design.modules[0]
+def low_extract = alignment.operations.find(
+  fun (operation): operation.opcode == "rtl.extract"
+)
+
+check:
+  type.name ~is "SimpleMemory"
+  type.roles ~is ["requester", "responder"]
+  type.members.map(fun (member): member.name) ~is ["request", "response"]
+  request_member.type.name ~is "Irrevocable"
+  response_member.type.name ~is "Irrevocable"
+  request_member.type.members.map(fun (member): member.name) ~is ["valid", "ready", "bits"]
+  response_member.type.members.map(fun (member): member.name) ~is ["valid", "ready", "bits"]
+  request_member.type.members.find(fun (member): member.name == "valid").type === bool.Bool ~is #true
+  request_member.from_role ~is "requester"
+  response_member.from_role ~is "responder"
+  request_payload.fields.map(fun (field): field.name) ~is ["address", "write", "data", "mask"]
+  request_payload.field("address").type.width ~is 32
+  request_payload.field("data").type.width ~is 32
+  request_payload.field("mask").type.width ~is 4
+  response_payload.fields.map(fun (field): field.name) ~is ["data"]
+  response_payload.field("data").type.width ~is 32
+  adapter.inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
+  adapter.outputs.map(fun (port): port.name) ~is ["ingress_out", "egress_out"]
+  low_extract.attribute("low") ~is 0
+  low_extract.attribute("high") ~is 1
+  alignment.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.eq"
+  ).length() ~is 1
+  alignment.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value", #false) == 1
+  ).length() ~is 1
+  activity.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.and"
+  ).length() ~is 2
+  flow_top.inputs.map(fun (port): port.name) ~is ["clock",
+                                                  "reset",
+                                                  "upstream_in",
+                                                  "downstream_in"]
+  flow_top.outputs.map(fun (port): port.name) ~is ["upstream_out",
+                                                   "downstream_out"]
+  flow_top.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).length() ~is 3
+  verify_design(adapter_design) ~is #void
+  verify_design(alignment_design) ~is #void
+  verify_design(activity_design) ~is #void
+  verify_design(flow_design) ~is #void
+  std.SimpleMemory(0, 4) ~throws "address width must be a positive host Int"
+  std.SimpleMemory(32, 0) ~throws "data byte count must be a positive host Int"
+  std.SimpleMemory(32, 3) ~throws "data byte count must be a power of two"
+  std.SimpleMemory(1, 4) ~throws "address width must cover"

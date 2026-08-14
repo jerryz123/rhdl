@@ -82,7 +82,9 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`sync-memory.rhdl`](sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
 | [`sync-memory-1rw.rhdl`](sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
 | [`sync-memory-masked.rhdl`](sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
-| [`memory-port.rhdl`](memory-port.rhdl) | Parameterized aligned byte-masked request/response protocol |
+| [`simple-memory.rhdl`](simple-memory.rhdl) | Parameterized aligned byte-masked `SimpleMemory` protocol |
+| [`simple-memory-flow.rhdl`](simple-memory-flow.rhdl) | `SimpleMemory` request and response channels composed with standard flow control |
+| [`simple-memory-ram.rhdl`](simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
 | [`clocked-dpi.rhdl`](clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
 | [`width-ops.rhdl`](width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
