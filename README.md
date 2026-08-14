@@ -912,6 +912,21 @@ directions are compatible. Individual fields remain available for protocol
 logic. Frontend metadata reconstructs logical endpoints through instances;
 reconstruction never guesses from generated port names.
 
+Functions that accept or return endpoints can preserve the same field lookup
+with the public `Endpoint` annotation. Use `Endpoint.of(protocol)` when the
+function requires one exact nominal interface type:
+
+```rhombus
+fun identity(endpoint :: Endpoint) :~ Endpoint:
+  endpoint
+
+fun bytes(endpoint :: Endpoint.of(Decoupled(Bits(8)))) :~ Endpoint:
+  endpoint
+```
+
+Both return annotations retain endpoint static information, so callers can
+continue to use `.valid`, `.bits`, `.ready`, nested fields, and `<=>`.
+
 ### Nested interfaces
 
 An interface member may itself be another interface:
@@ -988,6 +1003,20 @@ inst buffered(
         ~flow: #false)
 )
 ```
+
+For construction where the intermediate instance handles are not needed,
+lowercase helpers form a typed endpoint pipeline:
+
+```rhombus
+def buffered = ingress |> queue(_, 4, ~pipe: #true) |> pipe(_, 2)
+egress <=> buffered
+```
+
+`queue` and `pipe` infer the payload type from the input `Decoupled` endpoint,
+instantiate in the ambient `sync_circuit` domain, bulk-connect the input, and
+return the downstream `Endpoint`. The return annotation retains interface
+static information across every pipeline stage. Use an explicit `Queue`
+instance when its `count` output or the instance handle itself is needed.
 
 `Queue(T, depth)` defaults to a registered, non-flow-through FIFO. Setting
 `~pipe: #true` allows enqueue on the same cycle a full queue dequeues, while

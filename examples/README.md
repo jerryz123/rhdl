@@ -61,7 +61,7 @@ importable layers:
 | [`layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) | Nominal `Bool`, callable host-Boolean literals, `===`, unsigned ordering, and binary `mux` |
 | [`layers/enum.rhm`](../rhdl/frontend/layers/enum.rhm) | Nominal hardware enums with automatic or explicit encodings |
 | [`layers/bundle.rhm`](../rhdl/frontend/layers/bundle.rhm) | Bundle declarations, record construction, and field dot access |
-| [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, host-sized endpoint arrays, bulk connection, and instance reconstruction |
+| [`layers/interface.rhm`](../rhdl/frontend/layers/interface.rhm) | Explicit protocol roles, directional record ports, public endpoint annotations, host-sized endpoint arrays, bulk connection, and instance reconstruction |
 | [`layers/wire.rhm`](../rhdl/frontend/layers/wire.rhm) | Binding-derived single-driver internal wires |
 | [`layers/sequential.rhm`](../rhdl/frontend/layers/sequential.rhm) | Binding-derived registers |
 | [`layers/hierarchy.rhm`](../rhdl/frontend/layers/hierarchy.rhm) | Binding-derived instances, deterministic names, and child-port dot access |
@@ -127,6 +127,7 @@ layer over [`rhdl/frontend/kernel.rhm`](../rhdl/frontend/kernel.rhm):
 | `storage.write(address, data, ...)` | One clocked `rtl.memory_write` port |
 | `interface tx(..., ~role: producer)` | Directional record-typed core ports plus frontend protocol metadata |
 | `interface tx[n](..., ~role: producer)` | A host `Array` of `n` scalar endpoints flattened as `tx_0_in`, `tx_0_out`, and so on |
+| `endpoint :: Endpoint.of(protocol)` | A function boundary that retains exact interface type and field static information |
 | `left <=> right` | Atomic connection of every compatible interface flow |
 
 [`rhdl/frontend/layers/bool.rhm`](../rhdl/frontend/layers/bool.rhm) is
@@ -197,7 +198,7 @@ After the adder ladder, each remaining example has one primary lesson:
 | [`interface.rhdl`](interface.rhdl) | Standard-library `Decoupled`, field access, bidirectional bulk connection, and instance reconstruction |
 | [`interface-array.rhdl`](interface-array.rhdl) | Host-sized `Decoupled` endpoint arrays, deterministic flattened ports, whole-array connection, and hierarchy reconstruction |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition, orientation, nested field access, bulk connection, and hierarchy reconstruction |
-| [`flow-control.rhdl`](flow-control.rhdl) | Standard-library elastic pipe, configurable flow/pipe FIFO queues, and fixed-priority arbiter generators |
+| [`flow-control.rhdl`](flow-control.rhdl) | Standard-library flow primitives plus a typed `ingress |> queue(_, ...) |> pipe(_, ...)` endpoint chain |
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus module. It
 shows that a useful RHDL construction abstraction need not be a macro or

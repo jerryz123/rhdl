@@ -1,0 +1,52 @@
+#lang rhdl
+// Defines valid and invalid Queue-to-Pipe chains for endpoint static-info tests.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+
+fun preserve_endpoint(endpoint :: Endpoint) :~ Endpoint:
+  endpoint
+
+fun require_byte_decoupled(
+  endpoint :: Endpoint.of(Decoupled(Bits(8)))
+) :~ Endpoint:
+  endpoint
+
+sync_circuit FlowChain():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+  output observed_valid: Bool
+  output observed_bits: Bits(8)
+
+  def buffered = preserve_endpoint(ingress |> queue(_, 3, ~pipe: #true) |> pipe(_, 2))
+  def checked = require_byte_decoupled(buffered)
+
+  observed_valid <== checked.valid
+  observed_bits <== checked.bits
+  egress <=> checked
+
+sync_circuit WrongProtocolChain():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  queue(ingress, 2)
+
+sync_circuit WrongEndpointType():
+  interface ingress(Decoupled(Bits(16)), ~role: consumer)
+  require_byte_decoupled(ingress)
+
+sync_circuit NonEndpointChain():
+  queue(bits(0, 8), 2)
+
+circuit MissingSyncDomain():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  queue(ingress, 2)
+
+def design = elaborate(FlowChain())
+
+export:
+  FlowChain
+  WrongProtocolChain
+  WrongEndpointType
+  NonEndpointChain
+  MissingSyncDomain
+  design

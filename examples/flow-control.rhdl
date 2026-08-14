@@ -2,7 +2,15 @@
 // Materializes the standard pipe, queue, and arbiter for readable Verilog references.
 
 import:
+  lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow.rhdl") open
+
+sync_circuit BufferedLink():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  def buffered = ingress |> queue(_, 3, ~pipe: #true) |> pipe(_, 2)
+  egress <=> buffered
 
 def pipe_design = elaborate(Pipe(Bits(8), 2))
 def queue_design = elaborate(Queue(Bits(8), 3))
@@ -13,6 +21,7 @@ def queue_options_design = elaborate(
         ~flow: #true)
 )
 def arbiter_design = elaborate(Arbiter(Bits(8), 3))
+def chain_design = elaborate(BufferedLink())
 
 def pipe_verilog_reference = @str|<<{
 module Pipe(
@@ -267,14 +276,159 @@ module Arbiter(
 endmodule
 }>>|
 
+def chain_verilog_reference = @str|<<{
+module BufferedLink(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  wire struct packed {logic ready; } _pipe_stage_ingress_out;
+  wire struct packed {logic valid; logic [7:0] bits; } _queue_stage_egress_out;
+  Queue queue_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (ingress_in),
+    .egress_in   (_pipe_stage_ingress_out),
+    .ingress_out (ingress_out),
+    .egress_out  (_queue_stage_egress_out),
+    .count       (/* unused */)
+  );
+  Pipe pipe_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_queue_stage_egress_out),
+    .egress_in   (egress_in),
+    .ingress_out (_pipe_stage_ingress_out),
+    .egress_out  (egress_out)
+  );
+endmodule
+
+module Queue(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output [1:0]                                           count
+);
+
+  wire [7:0] _GEN;
+  wire       _GEN_0;
+  wire [1:0] _write_pointer_value;
+  wire [1:0] _read_pointer_value;
+  wire       _GEN_1 = 1'h0;
+  reg  [7:0] storage[0:2];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[_write_pointer_value] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0] occupancy;
+  wire       _GEN_2 = occupancy == 2'h0;
+  wire       _GEN_3 = occupancy != 2'h3 | egress_in.ready;
+  assign _GEN_0 = ingress_in.valid & _GEN_3;
+  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
+  assign _GEN = ingress_in.bits;
+  Counter read_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_4),
+    .value  (_read_pointer_value),
+    .wrap   (/* unused */)
+  );
+  Counter write_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_0),
+    .value  (_write_pointer_value),
+    .wrap   (/* unused */)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_3};
+  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
+  assign count = occupancy;
+endmodule
+
+module Counter(
+  input        clock,
+               reset,
+               enable,
+  output [1:0] value,
+  output       wrap
+);
+
+  reg  [1:0] state;
+  wire       _GEN = state == 2'h2;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 2'h0;
+    else
+      state <= enable ? (_GEN ? 2'h0 : state + 2'h1) : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & _GEN;
+endmodule
+
+module Pipe(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg  [1:0]      stage_valid;
+  reg  [1:0][7:0] stage_bits;
+  wire            _GEN = ~stage_valid[1'h1] | egress_in.ready;
+  wire            _GEN_0 = ~stage_valid[1'h0] | _GEN;
+  wire            _GEN_1 = _GEN_0 ? ingress_in.valid : stage_valid[1'h0];
+  wire [7:0]      _GEN_2 =
+    _GEN_0 ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  wire            _GEN_3 = _GEN ? stage_valid[1'h0] : stage_valid[1'h1];
+  wire [7:0]      _GEN_4 =
+    _GEN ? (stage_valid[1'h0] ? stage_bits[1'h0] : stage_bits[1'h1]) : stage_bits[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0, 1'h0};
+    else begin
+      stage_valid[1'h1] <= _GEN_3;
+      stage_valid[1'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  always @(posedge clock) begin
+    stage_bits[1'h1] <= _GEN_4;
+    stage_bits[1'h0] <= _GEN_2;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_0};
+  assign egress_out = '{valid: stage_valid[1'h1], bits: stage_bits[1'h1]};
+endmodule
+}>>|
+
 export:
   pipe_design
   queue_design
   queue_one_design
   queue_options_design
   arbiter_design
+  chain_design
   pipe_verilog_reference
   queue_verilog_reference
   queue_one_verilog_reference
   queue_options_verilog_reference
   arbiter_verilog_reference
+  chain_verilog_reference

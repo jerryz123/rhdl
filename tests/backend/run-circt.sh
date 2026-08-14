@@ -205,6 +205,7 @@ fixture_specs=(
   'queue-one|queue_one_tb|examples/flow-control.rhdl|queue_one_design|queue_one_verilog_reference'
   'queue-options|queue_options_tb|examples/flow-control.rhdl|queue_options_design|queue_options_verilog_reference'
   'arbiter|arbiter_tb|examples/flow-control.rhdl|arbiter_design|arbiter_verilog_reference'
+  'flow-chain|flow_chain_tb|examples/flow-control.rhdl|chain_design|chain_verilog_reference'
   'full-adder||examples/full-adder.rhdl|design|verilog_reference'
   'layered-adder||examples/layered-adder.rhdl|design|verilog_reference'
   'host-parameters||examples/host-parameters.rhdl|design|verilog_reference'
