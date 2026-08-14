@@ -116,72 +116,19 @@ Detailed documentation lives with the component that owns it:
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
 
-## Language-oriented equivalence
-
-The programs under [`examples/lop/`](examples/lop/) construct the same adder
-at four levels:
-
-1. Direct public IR construction with `Design` and `Builder`.
-2. Explicit construction through the elaboration kernel.
-3. `#lang rhdl/base` plus an explicit combinational import.
-4. Concise construction through standard `#lang rhdl`.
-
-The sources become progressively shorter while producing identical printed
-RHDL IR and CIRCT MLIR:
-
-```sh
-make lop-test
-```
-
-This executable equivalence is the central architectural claim: layers improve
-the authoring language without fragmenting the hardware model.
-
-## Repository conventions
-
-```text
-rhdl/             implementation and component-owned documentation
-examples/         canonical valid authoring programs
-tests/core/       backend-independent semantic tests
-tests/frontend/   frontend behavior and invalid-language fixtures
-tests/backend/    CIRCT lowering, goldens, and Verilator simulations
-sim/              optional simulation support
-tools/            repository and toolchain scripts
-```
-
-`.rhdl` is reserved for RHDL-profile programs, simulation adapters, and
-frontend fixtures. `.rhm` contains Rhombus implementation and library modules.
-`.rkt` is restricted to reader shims and Racket interoperability where
-collection lookup requires it.
-
-Generated Racket, CIRCT, SystemVerilog, and Verilator output stays out of
-version control.
-
 ## Current status
 
 The current vertical slice includes:
 
-- A public, inspectable, backend-independent IR with values, places,
-  operations, modules, instances, primitive registers, memories, and DPI
-  simulation operations.
-- Explicit-width bit vectors, open hardware-type capabilities, structural
-  records and vectors, single-driver verification, and combinational-cycle
-  detection.
-- Standard and compositional Rhombus language profiles with host-only generator
-  parameters and deterministic fresh module construction.
-- Frontend-defined Boolean, enum, and one-hot types; combinational and
-  width-changing expressions; bundles, vectors, wires, asynchronous-read and
-  circuit-shaped synchronous memories, hierarchy, ambient synchronous
-  domains, and hardware conditional assignment.
-- Typed host-side patterns over scalar, extension-defined, and recursively
-  aggregate hardware literals, plus typed synthesis don't-cares and
-  partially specified pattern outputs.
-- Directional interfaces with nesting, refinement, supported contracts, bulk
-  connection, and a reusable ready-valid flow library.
-- Deterministic CIRCT lowering, example-owned SystemVerilog references, and
+- A public, inspectable, backend-independent IR with explicit-width types,
+  structural aggregates, primitive state, DPI simulation operations,
+  single-driver verification, and combinational-cycle detection.
+- Standard and compositional Rhombus profiles with host-only generation,
+  frontend-defined types, typed literals and patterns, combinational and
+  sequential constructs, hierarchy, directional interfaces, and reusable
+  protocol libraries.
+- Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
-
-This section is the sole completion ledger; component documents explain the
-implemented contracts without maintaining separate milestone lists.
 
 ## Deferred work
 
@@ -202,15 +149,3 @@ implemented contracts without maintaining separate milestone lists.
 Hardening work remains focused on diagnostics, deterministic goldens,
 property-based and differential testing, and a future public IR compatibility
 policy.
-
-## Design commitments
-
-- Keep one public hardware IR until a concrete feature requires another.
-- Keep frontend conveniences out of core when existing hardware semantics are
-  sufficient.
-- Keep backends independent of frontend syntax and metadata.
-- Use CIRCT rather than an RHDL-owned SystemVerilog emitter.
-- Keep widths explicit and elaboration deterministic.
-- Keep generator parameters in the host language and runtime data in hardware.
-- Specify and test implicit conversion, connection, priority, or reset behavior
-  before adding it.

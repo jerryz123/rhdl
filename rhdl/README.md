@@ -57,6 +57,18 @@ needed by multiple layers belongs in `frontend/support/`. Standard-library
 modules and simulation adapters use public RHDL forms rather than importing
 implementation modules.
 
+## Design commitments
+
+- Keep one public hardware IR until a concrete feature requires another.
+- Keep frontend conveniences out of core when existing hardware semantics are
+  sufficient.
+- Keep backends independent of frontend syntax and metadata.
+- Use CIRCT rather than an RHDL-owned SystemVerilog emitter.
+- Keep widths explicit and elaboration deterministic.
+- Keep generator parameters in the host language and runtime data in hardware.
+- Specify and test implicit conversion, connection, priority, or reset behavior
+  before adding it.
+
 ## Standard-library dependencies
 
 Standard-library modules depend only on the public authoring surface. The
@@ -129,6 +141,11 @@ frontend types or operations to the public core IR.
 directions, prevents sibling-layer imports, keeps `standard.rhm` aggregation
 only, and restricts reader shims and `.rhdl` files to their intended
 locations. Run `make check-boundaries` after moving or adding modules.
+
+`.rhdl` is reserved for RHDL-profile programs, simulation adapters, and
+frontend fixtures. `.rhm` contains Rhombus implementation and library modules.
+`.rkt` is restricted to reader shims and Racket interoperability where
+collection lookup requires it.
 
 The equivalence tests under [`../tests/frontend/`](../tests/frontend/) and
 [`../tests/backend/`](../tests/backend/) check that direct core construction,
