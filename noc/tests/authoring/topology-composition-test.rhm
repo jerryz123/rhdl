@@ -1,0 +1,103 @@
+#lang rhombus
+// Checks generic topology prefixing, composition, directed links, and custom views.
+
+import:
+  "../../authoring/main.rhm" open
+
+def vcs = [VCGroup("escape", 1)]
+def start = NodeRef("start")
+def finish = NodeRef("finish")
+def fragment = TopologySpec(
+  [finish, start],
+  [directed_link(LinkRef("forward"), start, finish, vcs)]
+)
+def left = prefix_topology("left", fragment)
+def right = prefix_topology("right", fragment)
+def left_finish = prefix_node_ref("left", finish)
+def right_start = prefix_node_ref("right", start)
+def cross_links = bidirectional_link(
+  LinkRef("left-to-right"),
+  LinkRef("right-to-left"),
+  left_finish,
+  right_start,
+  vcs
+)
+def system = compose_topologies([right, left], ~links: cross_links)
+def reversed_system = compose_topologies([left, right], ~links: cross_links.reverse())
+def lowered_system = lower_topology(system)
+def lowered_reversed_system = lower_topology(reversed_system)
+
+check:
+  left.nodes.map(fun (node): node.describe()) ~is ["left/finish", "left/start"]
+  left.find_link(LinkRef(["left", "forward"])).source.describe() ~is "left/start"
+  left.find_link(LinkRef(["left", "forward"])).virtual_channels().map(
+    fun (vc): vc.describe()
+  ) ~is ["left/forward/escape[0]"]
+  system.nodes.length() ~is 4
+  system.links.length() ~is 4
+  system.find_link(LinkRef("left-to-right")).source.describe() ~is "left/finish"
+  system.find_link(LinkRef("left-to-right")).destination.describe() ~is "right/start"
+  system.find_link(LinkRef("right-to-left")).source.describe() ~is "right/start"
+  lowered_system.topology.describe() ~is lowered_reversed_system.topology.describe()
+  lowered_system.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_reversed_system.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_system.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is lowered_reversed_system.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  lowered_system.vc_ref(
+    lowered_system.vc_id(
+      VCRef(LinkRef(["left", "forward"]), "escape", 0)
+    )
+  ).describe() ~is "left/forward/escape[0]"
+
+// A user-defined view needs only to contain an ordinary TopologySpec.
+class UserTopologyView(spec, entrance, exit)
+
+def user_view = UserTopologyView(
+  fragment,
+  start,
+  finish
+)
+
+check:
+  user_view.spec is_a TopologySpec ~is #true
+  lower_topology(user_view.spec).topology.links.length() ~is 1
+  user_view.entrance.describe() ~is "start"
+  user_view.exit.describe() ~is "finish"
+
+// Parallel links and self-loops remain ordinary distinct directed links.
+def parallel_and_loop = compose_topologies(
+  [fragment],
+  ~links: [
+    directed_link(LinkRef("parallel"), start, finish, vcs),
+    directed_link(LinkRef("loop"), finish, finish, vcs)
+  ]
+)
+def bad_cross_link = directed_link(
+  LinkRef("bad-cross-link"),
+  left_finish,
+  NodeRef("missing"),
+  vcs
+)
+
+check:
+  parallel_and_loop.links.length() ~is 3
+  lower_topology(parallel_and_loop).topology.links.length() ~is 3
+
+check:
+  prefix_topology("", fragment) ~throws "topology prefix"
+  prefix_topology("left", "not a topology") ~throws "expected a TopologySpec"
+  compose_topologies([]) ~throws "nonempty List"
+  compose_topologies(["not a topology"]) ~throws "only TopologySpec"
+  compose_topologies([left], ~links: "not links") ~throws "extra links must be a List"
+  compose_topologies([left], ~links: ["not a link"]) ~throws "only TopologyLink"
+  compose_topologies([fragment, fragment]) ~throws "duplicate topology node finish"
+  compose_topologies(
+    [left, right],
+    ~links: [bad_cross_link]
+  ) ~throws "unknown destination missing"

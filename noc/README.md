@@ -17,9 +17,8 @@ The current implementation provides:
 - Deterministic lowering to the normalized topology model with bidirectional
   identity-provenance lookups.
 - Hierarchical prefixing and collision-checked topology composition.
-- Explicit directed and bidirectional link helpers and line generators.
-- Rectangular meshes with typed coordinate, direction, adjacency, and inverse
-  link queries that survive hierarchical prefixing.
+- Topology-independent directed and bidirectional link helpers.
+- Separate standard definitions for line and rectangular-mesh topologies.
 - Nominal node, link, virtual-channel, and route-class identities.
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
@@ -44,18 +43,22 @@ The package does not yet lower route tables into RHDL or generate router RTL.
 
 ## Dependency boundary
 
-Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, and `noc/plan/`
-use only `#lang rhombus` and other modules in the pure NoC package. They must
-not import RHDL core, frontend, backend, standard-library hardware modules, or
-CIRCT integration.
+Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, `noc/plan/`, and
+`noc/std/` use only `#lang rhombus` and other modules in the pure NoC package.
+They must not import RHDL core, frontend, backend, standard-library hardware
+modules, or CIRCT integration. Core model, authoring, analysis, and planning
+modules must not import `noc/std`; reusable topology and routing definitions
+depend on the core abstractions, never the reverse.
 
 Run the focused checks from the repository root:
 
 ```sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-authoring-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/topology-builders-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/rectangular-mesh-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-authoring-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
@@ -92,10 +95,18 @@ change normalized identities because complete symbolic paths determine the
 canonical order.
 
 `directed_link` preserves the normalized model's directed-edge semantics, and
-`bidirectional_link` expands to two separately named directed links. The first
-standard generators, `directed_line` and `bidirectional_line`, use stable
-`node[N]`, `forward[N]`, and `reverse[N]` local names and can be instantiated
-multiple times through prefixing.
+`bidirectional_link` expands to two separately named directed links. These
+composition operations make no assumptions about topology families,
+coordinates, directions, or routing metrics. A user-defined topology view only
+needs to contain an ordinary `TopologySpec`; it can expose any additional
+domain queries without modifying core authoring or analysis modules.
+
+## Standard topology definitions
+
+Reusable topology families live under `noc/std/topology/`, outside the core
+authoring API. `directed_line` and `bidirectional_line` use stable `node[N]`,
+`forward[N]`, and `reverse[N]` local names and can be instantiated multiple
+times through generic prefixing.
 
 A `RectangularMesh` is a typed view over an ordinary `TopologySpec`. It names
 routers by coordinate and records each link's source coordinate, destination
@@ -104,6 +115,16 @@ such as `node_at`, `coordinate_of`, `direction_of`, `outgoing_link`, and
 `inverse_link` let future routing policies use topology semantics without
 parsing names or inspecting normalized IDs. Prefixing a mesh qualifies its
 symbolic handles while preserving the same coordinates and directions.
+
+Line and mesh definitions are examples of libraries built on the authoring
+contract, not concepts understood by the finite model, graph analysis, or
+validated-routing artifact. User packages can define alternative topology
+views in exactly the same way.
+
+Concrete network choices belong under `noc/examples/` or in user packages.
+The mesh-topology example selects one mesh size and VC-group configuration by
+importing only the public authoring and standard-topology APIs; reusable
+packages do not import that instance.
 
 ## Model
 

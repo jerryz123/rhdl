@@ -1,0 +1,59 @@
+#lang rhombus
+// Checks reusable line topology definitions against explicit core authoring values.
+
+import:
+  "../../../authoring/main.rhm" open
+  "../../../std/topology/main.rhm" open
+
+def vcs = [VCGroup("escape", 1), VCGroup("adaptive", 2)]
+def line = bidirectional_line(3, vcs)
+
+check:
+  line.nodes.map(fun (node): node.describe()) ~is [
+    "node[0]",
+    "node[1]",
+    "node[2]"
+  ]
+  line.links.map(fun (link): link.ref.describe()) ~is [
+    "forward[0]",
+    "forward[1]",
+    "reverse[0]",
+    "reverse[1]"
+  ]
+
+// The standard generator must normalize to the same graph as explicit user code.
+def n0 = NodeRef("node[0]")
+def n1 = NodeRef("node[1]")
+def n2 = NodeRef("node[2]")
+def explicit_line = TopologySpec(
+  [n2, n0, n1],
+  [directed_link(LinkRef("forward[1]"), n1, n2, vcs),
+   directed_link(LinkRef("forward[0]"), n0, n1, vcs)]
+)
+def generated_line = directed_line(3, vcs)
+def explicit_lowered = lower_topology(explicit_line)
+def generated_lowered = lower_topology(generated_line)
+
+check:
+  explicit_lowered.topology.describe() ~is generated_lowered.topology.describe()
+  explicit_lowered.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  explicit_lowered.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  explicit_lowered.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is generated_lowered.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+
+check:
+  line_node(-1) ~throws "nonnegative host Int"
+  directed_line(0, vcs) ~throws "positive host Int"
+  bidirectional_line(2, []) ~throws "nonempty List"
+  directed_line(1, [VCGroup("same", 1), VCGroup("same", 2)]) ~throws "duplicate VC group same"
