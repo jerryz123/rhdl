@@ -326,6 +326,10 @@ guards combine with explicit local enables, and corresponding write positions
 across mutually exclusive branches share one physical port with muxed address
 and data. Independent chains remain independent ports.
 
+Clocked DPI calls and result registers do not participate in conditional-body
+lowering. Put them outside `when` and pass the hardware condition through
+`~enable`; placing either form inside `when` is rejected.
+
 A destination may appear once per branch, and separate chains do not implement
 last-connect semantics. Primitive register reset remains expressed through
 `~reset` and `~init`.

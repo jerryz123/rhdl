@@ -150,6 +150,13 @@ class ConditionalBranch(mutable assignments = [], mutable memory_writes = []):
   method add_memory_write(write):
     memory_writes := memory_writes ++ [write]
 
+// Prevents stateful effects that have no conditional-lowering protocol from
+// escaping a when branch with their original, unguarded enables.
+fun reject_unsupported_conditional_effect(effect, location = Location()):
+  when current_conditional_branch() is_a ConditionalBranch
+  | frontend_fail(effect ++ " is not supported inside when; use ~enable for hardware control",
+                  location)
+
 fun require_context(location = Location()):
   def context = current_context()
   unless context is_a FrontendContext && context.active
@@ -327,6 +334,7 @@ fun dpi_call(dpi_import,
              enable,
              location = Location()):
   def context = require_context(location)
+  reject_unsupported_conditional_effect("DPI call", location)
   unless inputs is_a List
   | frontend_fail("DPI call inputs must be supplied as a List", location)
   context.builder.dpi_call(require_module(location),
@@ -344,6 +352,7 @@ fun dpi_register(name,
                  enable,
                  location = Location()):
   def context = require_context(location)
+  reject_unsupported_conditional_effect("DPI register", location)
   unless inputs is_a List
   | frontend_fail("DPI register inputs must be supplied as a List", location)
   context.builder.dpi_register(require_module(location),
@@ -362,6 +371,7 @@ fun dpi_register_results(result_names,
                          enable,
                          location = Location()):
   def context = require_context(location)
+  reject_unsupported_conditional_effect("DPI register", location)
   unless inputs is_a List
   | frontend_fail("DPI register inputs must be supplied as a List", location)
   context.builder.dpi_register_results(require_module(location),
