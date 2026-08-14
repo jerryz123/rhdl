@@ -1,0 +1,123 @@
+#lang rhombus
+// Defines validated directed multigraph topologies and stable virtual-channel enumeration.
+
+import:
+  "identities.rhm" open
+
+export:
+  PhysicalLink
+  Topology
+
+fun contains_node_id(nodes, id):
+  nodes.find(fun (candidate): node_id_equal(candidate, id)) != #false
+
+fun duplicate_node_id(nodes, id):
+  nodes.filter(~keep: fun (candidate): node_id_equal(candidate, id)).length() > 1
+
+fun duplicate_link_id(links, id):
+  links.filter(~keep: fun (candidate): link_id_equal(candidate.id, id)).length() > 1
+
+class PhysicalLink(id, source, destination, vc_count):
+  constructor (id, source, destination, vc_count):
+    unless id is_a LinkId
+    | error(~who: #'PhysicalLink, "physical-link ID must be a LinkId")
+    unless source is_a NodeId && destination is_a NodeId
+    | error(~who: #'PhysicalLink,
+            "physical-link endpoints must be NodeId values")
+    unless vc_count is_a Int && vc_count > 0
+    | error(~who: #'PhysicalLink,
+            "physical-link VC count must be a positive host Int")
+    super(id, source, destination, vc_count)
+
+  method virtual_channels():
+    for List (index in 0..vc_count):
+      VCId(id, index)
+
+  method describe():
+    String.append(id.describe(), ": ", source.describe(), " -> ",
+                  destination.describe(), " (", to_string(vc_count), " VCs)")
+
+class Topology(nodes, links):
+  constructor (nodes, links):
+    unless nodes is_a List && nodes.length() > 0
+    | error(~who: #'Topology, "topology nodes must be a nonempty List")
+    unless links is_a List
+    | error(~who: #'Topology, "topology links must be a List")
+    for (node in nodes):
+      unless node is_a NodeId
+      | error(~who: #'Topology, "topology nodes must contain only NodeId values")
+      when duplicate_node_id(nodes, node)
+      | error(~who: #'Topology,
+              "duplicate topology node " ++ node.describe())
+    for (link in links):
+      unless link is_a PhysicalLink
+      | error(~who: #'Topology,
+              "topology links must contain only PhysicalLink values")
+      when duplicate_link_id(links, link.id)
+      | error(~who: #'Topology,
+              "duplicate topology link " ++ link.id.describe())
+      unless contains_node_id(nodes, link.source)
+      | error(~who: #'Topology,
+              String.append("link ", link.id.describe(),
+                            " has unknown source ", link.source.describe()))
+      unless contains_node_id(nodes, link.destination)
+      | error(~who: #'Topology,
+              String.append("link ", link.id.describe(),
+                            " has unknown destination ",
+                            link.destination.describe()))
+    super(nodes.sort(node_id_less), links.sort(fun (left, right): link_id_less(left.id, right.id)))
+
+  method contains_node(id):
+    id is_a NodeId && contains_node_id(nodes, id)
+
+  method find_link(id):
+    unless id is_a LinkId
+    | error(~who: #'find_link, "expected a LinkId")
+    def found = links.find(fun (link): link_id_equal(link.id, id))
+    unless found
+    | error(~who: #'find_link, "unknown link " ++ id.describe())
+    found
+
+  method contains_vc(id):
+    if !(id is_a VCId)
+    | #false
+    | block:
+        def link = links.find(fun (candidate): link_id_equal(candidate.id, id.link_id))
+        link && id.index < link.vc_count
+
+  method find_vc_link(id):
+    unless id is_a VCId
+    | error(~who: #'find_vc_link, "expected a VCId")
+    def link = find_link(id.link_id)
+    unless id.index < link.vc_count
+    | error(~who: #'find_vc_link, "unknown VC " ++ id.describe())
+    link
+
+  method outgoing_links(node):
+    unless contains_node(node)
+    | error(~who: #'outgoing_links,
+            String.append("unknown node ",
+                          (if node is_a NodeId | node.describe() | to_string(node))))
+    links.filter(~keep: fun (link): node_id_equal(link.source, node))
+
+  method incoming_links(node):
+    unless contains_node(node)
+    | error(~who: #'incoming_links,
+            String.append("unknown node ",
+                          (if node is_a NodeId | node.describe() | to_string(node))))
+    links.filter(~keep: fun (link): node_id_equal(link.destination, node))
+
+  method outgoing_vcs(node):
+    def mutable vcs = []
+    for (link in outgoing_links(node)):
+      vcs := vcs ++ link.virtual_channels()
+    vcs
+
+  method virtual_channels():
+    def mutable vcs = []
+    for (link in links):
+      vcs := vcs ++ link.virtual_channels()
+    vcs
+
+  method describe():
+    String.join(links.map(fun (link): link.describe()), "\n")

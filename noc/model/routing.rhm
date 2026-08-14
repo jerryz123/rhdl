@@ -1,0 +1,142 @@
+#lang rhombus
+// Defines finite route classes, routing origins, and topology-derived candidate queries.
+
+import:
+  "identities.rhm" open
+  "topology.rhm" open
+
+export:
+  RouteClass
+  Injection
+  HeldVC
+  RoutingRelation
+  RoutingProblem
+  injection_origin
+  held_vc_origin
+
+fun duplicate_route_class_id(route_classes, id):
+  route_classes.filter(
+    ~keep: fun (candidate): route_class_id_equal(candidate.id, id)
+  ).length() > 1
+
+class RouteClass(id, source, destination, metadata = #false):
+  constructor (id, source, destination, metadata = #false):
+    unless id is_a RouteClassId
+    | error(~who: #'RouteClass, "route-class ID must be a RouteClassId")
+    unless source is_a NodeId && destination is_a NodeId
+    | error(~who: #'RouteClass,
+            "route-class source and destination must be NodeId values")
+    super(id, source, destination, metadata)
+
+  method describe():
+    String.append(id.describe(), ": ", source.describe(), " -> ",
+                  destination.describe())
+
+class Injection(node):
+  constructor (node):
+    unless node is_a NodeId
+    | error(~who: #'Injection, "injection origin must contain a NodeId")
+    super(node)
+
+  method describe():
+    "inject(" ++ node.describe() ++ ")"
+
+class HeldVC(vc):
+  constructor (vc):
+    unless vc is_a VCId
+    | error(~who: #'HeldVC, "held-VC origin must contain a VCId")
+    super(vc)
+
+  method describe():
+    "hold(" ++ vc.describe() ++ ")"
+
+fun injection_origin(value):
+  value is_a Injection
+
+fun held_vc_origin(value):
+  value is_a HeldVC
+
+class RoutingRelation(allows):
+  method allow(route_class, origin, candidate_vc):
+    allows(route_class, origin, candidate_vc)
+
+class RoutingProblem(topology, route_classes, relation):
+  constructor (topology, route_classes, relation):
+    unless topology is_a Topology
+    | error(~who: #'RoutingProblem, "routing topology must be a Topology")
+    unless route_classes is_a List && route_classes.length() > 0
+    | error(~who: #'RoutingProblem,
+            "route classes must be a nonempty List")
+    unless relation is_a RoutingRelation
+    | error(~who: #'RoutingProblem,
+            "routing relation must be a RoutingRelation")
+    for (route_class in route_classes):
+      unless route_class is_a RouteClass
+      | error(~who: #'RoutingProblem,
+              "route classes must contain only RouteClass values")
+      when duplicate_route_class_id(route_classes, route_class.id)
+      | error(~who: #'RoutingProblem,
+              "duplicate route class " ++ route_class.id.describe())
+      unless topology.contains_node(route_class.source)
+      | error(~who: #'RoutingProblem,
+              String.append("route class ", route_class.id.describe(),
+                            " has unknown source ",
+                            route_class.source.describe()))
+      unless topology.contains_node(route_class.destination)
+      | error(~who: #'RoutingProblem,
+              String.append("route class ", route_class.id.describe(),
+                            " has unknown destination ",
+                            route_class.destination.describe()))
+    super(topology,
+          route_classes.sort(
+            fun (left, right): route_class_id_less(left.id, right.id)
+          ),
+          relation)
+
+  method contains_route_class(route_class):
+    route_class is_a RouteClass && route_classes.find(
+      fun (candidate): candidate === route_class
+    ) != #false
+
+  method find_route_class(id):
+    unless id is_a RouteClassId
+    | error(~who: #'find_route_class, "expected a RouteClassId")
+    def found = route_classes.find(
+      fun (route_class): route_class_id_equal(route_class.id, id)
+    )
+    unless found
+    | error(~who: #'find_route_class,
+            "unknown route class " ++ id.describe())
+    found
+
+  method origin_node(origin):
+    cond
+    | origin is_a Injection:
+        unless topology.contains_node(origin.node)
+        | error(~who: #'origin_node,
+                "injection references unknown node " ++ origin.node.describe())
+        origin.node
+    | origin is_a HeldVC:
+        topology.find_vc_link(origin.vc).destination
+    | ~else:
+        error(~who: #'origin_node,
+              "routing origin must be an Injection or HeldVC")
+
+  method at_destination(route_class, origin):
+    unless contains_route_class(route_class)
+    | error(~who: #'at_destination,
+            "route class does not belong to this routing problem")
+    node_id_equal(origin_node(origin), route_class.destination)
+
+  method candidates(route_class, origin):
+    unless contains_route_class(route_class)
+    | error(~who: #'candidates,
+            "route class does not belong to this routing problem")
+    when origin is_a Injection && !node_id_equal(origin.node, route_class.source)
+    | error(~who: #'candidates,
+            String.append("route class ", route_class.id.describe(),
+                          " cannot inject at ", origin.node.describe()))
+    def node = origin_node(origin)
+    if node_id_equal(node, route_class.destination)
+    | []
+    | topology.outgoing_vcs(node)

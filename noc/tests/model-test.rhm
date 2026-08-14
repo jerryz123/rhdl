@@ -1,0 +1,79 @@
+#lang rhombus
+// Checks valid and invalid construction of the pure directed NoC and routing model.
+
+import:
+  "../model/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+
+def l0 = PhysicalLink(LinkId(0), n0, n1, 2)
+def l1 = PhysicalLink(LinkId(1), n1, n2, 1)
+def l2 = PhysicalLink(LinkId(2), n1, n2, 3)
+def l3 = PhysicalLink(LinkId(3), n2, n2, 1)
+
+// Deliberately supply nodes and links out of order to check normalization.
+def topology = Topology([n2, n0, n1], [l3, l1, l0, l2])
+def all_vc_names = topology.virtual_channels().map(fun (vc): vc.describe())
+def n1_vc_names = topology.outgoing_vcs(n1).map(fun (vc): vc.describe())
+
+check:
+  topology.nodes.map(fun (node): node.value) ~is [0, 1, 2]
+  topology.links.map(fun (link): link.id.value) ~is [0, 1, 2, 3]
+  all_vc_names ~is ["l0.vc0", "l0.vc1", "l1.vc0",
+                    "l2.vc0", "l2.vc1", "l2.vc2", "l3.vc0"]
+  topology.outgoing_links(n1).map(fun (link): link.id.value) ~is [1, 2]
+  topology.incoming_links(n2).map(fun (link): link.id.value) ~is [1, 2, 3]
+  n1_vc_names ~is ["l1.vc0", "l2.vc0", "l2.vc1", "l2.vc2"]
+  topology.contains_vc(VCId(LinkId(2), 2)) ~is #true
+  topology.contains_vc(VCId(LinkId(2), 3)) ~is #false
+  topology.find_vc_link(VCId(LinkId(3), 0)).destination.value ~is 2
+  topology.describe().contains("n2 -> n2") ~is #true
+
+def route0 = RouteClass(RouteClassId(0), n0, n2, "requests")
+def route1 = RouteClass(RouteClassId(1), n1, n1, "local")
+def relation = RoutingRelation(
+  fun (_route_class, _origin, _candidate_vc): #true
+)
+def problem = RoutingProblem(topology, [route1, route0], relation)
+def injection_candidate_names = problem.candidates(route0, Injection(n0)).map(
+  fun (vc): vc.describe()
+)
+
+check:
+  problem.route_classes.map(fun (route_class): route_class.id.value) ~is [0, 1]
+  injection_candidate_names ~is ["l0.vc0", "l0.vc1"]
+  problem.candidates(route0, HeldVC(VCId(LinkId(0), 1))).map(
+    fun (vc): vc.describe()
+  ) ~is ["l1.vc0", "l2.vc0", "l2.vc1", "l2.vc2"]
+  problem.at_destination(route0, HeldVC(VCId(LinkId(1), 0))) ~is #true
+  problem.candidates(route0, HeldVC(VCId(LinkId(1), 0))) ~is []
+  problem.candidates(route1, Injection(n1)) ~is []
+  problem.find_route_class(RouteClassId(0)).metadata ~is "requests"
+  relation.allow(route0, Injection(n0), VCId(LinkId(0), 0)) ~is #true
+
+check:
+  NodeId(-1) ~throws "nonnegative host Int"
+  LinkId("zero") ~throws "nonnegative host Int"
+  VCId(LinkId(0), -1) ~throws "nonnegative host Int"
+  RouteClassId(-1) ~throws "nonnegative host Int"
+  PhysicalLink(LinkId(4), n0, n1, 0) ~throws "positive host Int"
+  Topology([], []) ~throws "nonempty List"
+  Topology([n0, NodeId(0)], []) ~throws "duplicate topology node n0"
+  Topology([n0, n1], [l0, PhysicalLink(LinkId(0), n1, n0, 1)]) ~throws "duplicate topology link l0"
+  Topology([n0], [PhysicalLink(LinkId(4), n0, n1, 1)]) ~throws "unknown destination n1"
+  topology.find_link(LinkId(99)) ~throws "unknown link l99"
+  topology.find_vc_link(VCId(LinkId(1), 1)) ~throws "unknown VC l1.vc1"
+  topology.outgoing_links(NodeId(99)) ~throws "unknown node n99"
+  RoutingProblem(topology, [], relation) ~throws "nonempty List"
+  RoutingProblem(topology, [route0, RouteClass(RouteClassId(0), n1, n2)], relation) ~throws "duplicate route class r0"
+  RoutingProblem(
+    topology,
+    [RouteClass(RouteClassId(2), NodeId(99), n2)],
+    relation
+  ) ~throws "unknown source n99"
+  problem.find_route_class(RouteClassId(99)) ~throws "unknown route class r99"
+  problem.candidates(RouteClass(RouteClassId(0), n1, n2), Injection(n1)) ~throws "does not belong"
+  problem.candidates(route0, Injection(n1)) ~throws "cannot inject at n1"
+  problem.origin_node(HeldVC(VCId(LinkId(1), 1))) ~throws "unknown VC l1.vc1"
