@@ -9,7 +9,9 @@ import:
     except:
       concat
       literal
+      dont_care
   "../kernel.rhm".concat as kernel_concat
+  "../kernel.rhm".dont_care as kernel_dont_care
   "../support/fields.rhm".HardwareFields
   "../support/hardware-literal.rhm" open
   "../support/mux-lookup.rhm" open
@@ -17,6 +19,7 @@ import:
 export:
   bits
   literal
+  dont_care
   bit_not
   bit_and
   bit_or
@@ -51,6 +54,35 @@ fun literal(type, value, name = #false):
 
 fun bits(value, width, name = #false):
   literal(Bits(width), value, name)
+
+// Like a literal shadow, a typed don't-care is materialized only when a
+// hardware consumer reads it. Core IR carries only its packed Bits image.
+class DontCareValue(type, name = #false):
+  implements StaticHardwareValue
+  constructor (type, name = #false):
+    unless type is_a DataType && type_well_formed(type)
+    | error(~who: #'dont_care,
+            "don't-care type must be a well-formed DataType")
+    def width = packed_width(type)
+    unless width is_a Int && width > 0
+    | error(~who: #'dont_care,
+            "don't-care type must have a packed representation")
+    unless name == #false || name is_a String
+    | error(~who: #'dont_care,
+            "don't-care name must be a String or #false")
+    super(type, name)
+
+  override method materialize_hardware(location):
+    def width = packed_width(type)
+    if bits_type(type)
+    | kernel_dont_care(type, name, location)
+    | cast(kernel_dont_care(Bits(width), #false, location),
+           type,
+           name,
+           location)
+
+fun dont_care(type, name = #false):
+  DontCareValue(type, name)
 
 // Packs frontend data operands into their canonical Bits representations and
 // constructs one kernel concat, preserving left-to-right MSB ordering.

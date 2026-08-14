@@ -227,6 +227,7 @@ fixture_specs=(
   'layered-adder||examples/layered-adder.rhdl|design|verilog_reference'
   'host-parameters||examples/host-parameters.rhdl|design|verilog_reference'
   'fresh-generators||examples/fresh-generators.rhdl|design|verilog_reference'
+  'dont-care||examples/dont-care.rhdl|design|verilog_reference'
 )
 
 materialize_args=()

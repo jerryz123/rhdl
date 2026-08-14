@@ -12,7 +12,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | Layer | Authoring feature |
 |---|---|
 | [`cast.rhm`](cast.rhm) | Functional equal-width representation casts |
-| [`comb.rhm`](comb.rhm) | Literals, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
+| [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
 | [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, unsigned ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal encoded hardware enums |
@@ -46,6 +46,13 @@ every bit image of a packable `DataType`, including frontend-defined types,
 records, and vectors. Materialization creates a canonical `Bits` constant and,
 for non-`Bits` data, an explicit equal-width cast. `Clock`, `Reset`, and other
 non-data types are not literal domains.
+
+`dont_care(T)` is the corresponding typed synthesis-freedom source for any
+packable `DataType`. It materializes a `Bits(packed_width(T))` core don't-care
+and casts it to `T` when needed. It is not a literal, cannot be inspected as a
+host packed value, and gives RHDL no runtime X-propagation semantics. A backend
+may expose an X carrier to downstream tools, so use it only where every
+synthesized bit choice is legal and do not rely on backend simulation of it.
 
 The standard combinational surface includes modular `+`, `-`, `*`, logical
 `<<` and `>>`, bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. Arithmetic is

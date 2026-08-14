@@ -45,6 +45,7 @@ IR and lower through CIRCT type aliases.
 | RHDL | CIRCT |
 |---|---|
 | `rtl.constant` | `hw.constant` |
+| `rtl.dont_care` | `sv.constantX` as a synthesis-freedom carrier |
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub/mul` | `comb.add/sub/mul` |
@@ -72,6 +73,13 @@ semantics.
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend
 error rather than leaking CIRCT decisions into core schemas.
+
+`sv.constantX` carries `rtl.dont_care` through CIRCT and Verilog export. Its
+use here does not give RHDL four-state value semantics: the public operation
+only grants synthesis freedom, and frontend operations continue to use the
+ordinary two-state hardware model. A downstream RTL simulator can display or
+propagate the carrier as X, but that behavior is a backend artifact rather
+than an RHDL language contract.
 
 ## API and verification
 

@@ -82,6 +82,8 @@ nested vectors and record elements.
 
 - Every `Bits` width is a positive host `Int` known during elaboration.
 - Constants specify a width and must fit it.
+- A don't-care grants synthesis freedom for every bit; it is not a runtime X
+  value and defines no four-state propagation semantics.
 - There are no implicit conversions.
 - Narrowing and extension use explicit operations.
 - Arithmetic is unsigned and modular.
@@ -100,7 +102,7 @@ printing. Backend lowering choices are not part of core schemas.
 |---|---|
 | Structure | input port, output port, drive, instance |
 | Internal connection | wire |
-| Constants | constant |
+| Sources | constant, synthesis don't-care |
 | Bitwise | not, and, or, xor |
 | Arithmetic | add, sub, multiply, logical left and unsigned-right shift |
 | Comparison | equality, unsigned less-than |
@@ -117,6 +119,7 @@ Representative type rules are:
 
 ```text
 not(T: BitwiseType)                         -> T
+dont_care(Bits(w))                          -> Bits(w)
 and/or/xor(T: BitwiseType, T)               -> T
 add/sub/mul(Bits(w), Bits(w))               -> Bits(w)
 shl/shru(Bits(w), Bits(a))                  -> Bits(w)
@@ -147,6 +150,13 @@ specialization of `rtl.mux_lookup`.
 There is also no conditional-connect operation or general control-flow
 region. Frontend hardware conditionals canonicalize to mux lookups and one
 final drive.
+
+`rtl.dont_care` is deliberately narrower than an unknown-value model. It is a
+zero-operand `Bits` source whose bits may be chosen independently by synthesis.
+Verification and inspection preserve that optimization freedom, while each
+backend selects its own carrier representation. It does not alter assignment
+completeness, register hold behavior, comparisons, muxes, or simulation into
+four-state operations.
 
 ## Stateful resources
 

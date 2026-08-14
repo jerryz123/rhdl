@@ -1,0 +1,47 @@
+#lang rhdl
+// Demonstrates typed synthesis freedom and Pattern-selected fixed output bits.
+
+import:
+  lib("rhdl/std/decode/pattern.rhdl") open
+  lib("rhdl/std/decode/pattern-value.rhdl") open
+
+bundle Pair():
+  upper: Bits(4)
+  lower: Bits(4)
+
+def partial = Pattern(
+  ~value: literal(Pair(), 0xA0),
+  ~care: literal(Pair(), 0xF0)
+)
+
+circuit DontCare():
+  output raw: Bits(8)
+  output typed: Pair()
+  output patterned: Pair()
+
+  raw <== dont_care(Bits(8))
+  typed <== dont_care(Pair())
+  patterned <== pattern_value(partial)
+
+def design = elaborate(DontCare())
+
+def verilog_reference = @str|<<{
+module DontCare(
+  output [7:0]                                                  raw,
+  output struct packed {logic [3:0] upper; logic [3:0] lower; } typed,
+                                                                patterned
+);
+
+  wire [7:0] _GEN = 8'bx;
+  assign raw = _GEN;
+  assign typed = /*cast(bit)*/_GEN;
+  assign patterned = /*cast(bit)*/{4'hA, _GEN[3:0]};
+endmodule
+}>>|
+
+export:
+  Pair
+  partial
+  DontCare
+  design
+  verilog_reference

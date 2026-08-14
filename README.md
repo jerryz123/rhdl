@@ -172,7 +172,8 @@ The current vertical slice includes:
   width-changing expressions; bundles, vectors, wires, memories, hierarchy,
   ambient synchronous domains, and hardware conditional assignment.
 - Typed host-side patterns over scalar, extension-defined, and recursively
-  aggregate hardware literals.
+  aggregate hardware literals, plus typed synthesis don't-cares and
+  partially specified pattern outputs.
 - Directional interfaces with nesting, refinement, supported contracts, bulk
   connection, and a reusable ready-valid flow library.
 - Deterministic CIRCT lowering, example-owned SystemVerilog references, and

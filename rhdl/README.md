@@ -67,6 +67,7 @@ import one primitive without loading unrelated generators.
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes over hardware literals | None |
+| `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and payload introspection | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
@@ -85,7 +86,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
-| `comb.rhm` | Static packed literals, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
+| `comb.rhm` | Static packed literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, unsigned ordering, and binary `mux` | core IR, kernel, field support, hardware-literal support |
 | `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |

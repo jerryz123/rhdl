@@ -55,9 +55,15 @@ The host-only relations support decode-table validation:
   also matched by `pattern`.
 
 Pattern don't-cares describe static matching or optimization freedom. They are
-never runtime unknown or X values. `Pattern` is neutral between input matching
-and partially specified decode outputs; Espresso integration and hardware
-generation remain separate standard-library responsibilities.
+never runtime unknown or X values. `Pattern` remains neutral host data between
+input matching and partially specified decode outputs.
+
+[`decode/pattern-value.rhdl`](decode/pattern-value.rhdl) is the separate output
+consumer. `pattern_value(pattern)` materializes one hardware member of the
+cube: cared bits retain `value_bits`, while uncared bits receive synthesis
+freedom from `dont_care`. Keeping this policy out of `Pattern` preserves its
+host-only architecture and allows future matching or optimization consumers
+to choose different interpretations.
 
 ## Ready-valid protocols
 
