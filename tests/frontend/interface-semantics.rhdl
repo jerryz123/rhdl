@@ -1,0 +1,64 @@
+#lang rhdl
+// Exercises declaration identity and explicit provider orientation for interface compatibility.
+
+import:
+  "interface-nominal-contract.rhdl" as foreign
+
+interface Collision(T):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    payload: T
+
+fun require_local_collision(
+  endpoint :: Endpoint.of(Collision(Bits(8)))
+) :~ Endpoint:
+  endpoint
+
+interface ReverseOnly():
+  role receiver
+  role sender
+  provider sender
+
+  sender -> receiver:
+    payload: Bits(8)
+
+interface StrongReverseOnly() refines ReverseOnly()
+
+circuit LocalNominalIdentity():
+  interface endpoint(Collision(Bits(8)), ~role: consumer)
+  require_local_collision(endpoint)
+  #void
+
+circuit ForeignNominalCollision():
+  interface endpoint(Collision(Bits(8)), ~role: consumer)
+  foreign.require_collision(endpoint)
+  #void
+
+circuit ForeignNominalBulkCollision():
+  interface local_end(Collision(Bits(8)), ~role: producer)
+  interface foreign_end(foreign.Collision(Bits(8)), ~role: consumer)
+  local_end <=> foreign_end
+
+circuit ExactReverseOnly():
+  interface receiver_end(ReverseOnly(), ~role: receiver)
+  interface sender_end(ReverseOnly(), ~role: sender)
+  receiver_end <=> sender_end
+
+circuit CompatibleReverseOnly():
+  interface strong_end(StrongReverseOnly(), ~role: receiver)
+  interface base_end(ReverseOnly(), ~role: sender)
+  strong_end <=> base_end
+
+def local_nominal_design = elaborate(LocalNominalIdentity())
+def exact_reverse_design = elaborate(ExactReverseOnly())
+def compatible_reverse_design = elaborate(CompatibleReverseOnly())
+
+export:
+  ReverseOnly
+  ForeignNominalCollision
+  ForeignNominalBulkCollision
+  local_nominal_design
+  exact_reverse_design
+  compatible_reverse_design

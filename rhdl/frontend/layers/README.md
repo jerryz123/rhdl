@@ -447,16 +447,27 @@ egress <=> ingress
 ```
 
 Each root direction becomes one record-typed core port. `<=>` atomically
-connects exact or compatible producer-to-consumer flows; operand order is
-irrelevant. Individual fields remain accessible, and frontend metadata
+connects exact flows or compatible provider-to-peer contracts; operand order
+is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
 
-`Endpoint.of(protocol)` checks one exact nominal interface type.
+Each root interface declaration has a stable nominal identity. Repeated calls
+to one parameterized declaration compare that identity plus their realized
+member structure; independently declared same-named interfaces remain
+distinct. `Endpoint.of(protocol)` checks one exact nominal specialization.
 `Endpoint.supports(protocol)` accepts that protocol, a transitive refinement,
 or a declared supported contract while retaining endpoint static information.
 
-An interface can declare one nominal parent with `refines` and additional
-structurally checked contracts with `supports:`. Parenthesized `<=>` forms
+The first declared role is the compatibility provider by default. A root
+interface whose provider is the other role declares it explicitly after its
+roles, for example `provider sender`. Endpoint provenance records whether the
+connected component is a module peer or an instance, so compatible connection
+does not infer orientation from the presence of a particular member.
+
+An interface can declare one nominal parent with `refines` and additional,
+role-qualified, structurally checked contracts such as
+`supports producer: Decoupled(T)`. The support role must be the interface's
+provider role. Parenthesized `<=>` forms
 merge a parent endpoint with its refinement delta or split a richer source
 into parent and delta destinations. The frontend checks the parent, complete
 field set, types, and directions.

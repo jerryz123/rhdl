@@ -13,7 +13,9 @@ import:
 
 export:
   InterfaceFlow
+  InterfaceIdentity
   InterfaceMember
+  InterfaceSupport
   InterfaceType
   InterfaceEndpoint
   interface
@@ -30,25 +32,37 @@ class InterfaceFlow(from_role, to_role, type):
     super(from_role, to_role, type)
 
 class InterfaceMember(name, type, from_role, to_role)
+class InterfaceSupport(role, type)
+class InterfaceIdentity()
 
 // The parent supplies inherited layout. Additional supported types declare
-// nominal behavioral substitutability and must be structural subsets.
+// behavioral substitutability for the provider role and must be structural
+// subsets. Identity distinguishes declarations while recursive structure
+// distinguishes their parameterized specializations.
 class InterfaceType(name,
+                    identity,
                     roles,
                     members,
+                    provider_role,
                     parent = #false,
-                    supported_types = []):
+                    supported_contracts = []):
   constructor (name,
                roles,
                declarations,
                parent = #false,
-               supported_types = []):
+               supported_contracts = [],
+               ~provider_role: supplied_provider_role = #false,
+               ~identity: identity = InterfaceIdentity()):
     unless name is_a String
     | error(~who: #'InterfaceType, "interface name must be a String")
     unless roles is_a List && roles.length() == 2 && roles[0] != roles[1]
     | error(~who: #'InterfaceType, "interfaces require exactly two distinct roles")
     unless declarations is_a List
     | error(~who: #'InterfaceType, "interface declarations must be a List")
+    def provider_role = supplied_provider_role || roles[0]
+    unless provider_role is_a String && provider_role in roles
+    | error(~who: #'InterfaceType,
+            "interface provider role must be one of the declared roles")
     when parent
     | unless parent is_a InterfaceType
       | error(~who: #'InterfaceType,
@@ -56,9 +70,12 @@ class InterfaceType(name,
       unless roles == parent.roles
       | error(~who: #'InterfaceType,
               "refined interface roles must match the parent roles")
-    unless supported_types is_a List
+      unless provider_role == parent.provider_role
+      | error(~who: #'InterfaceType,
+              "refined interface provider role must match the parent provider role")
+    unless supported_contracts is_a List
     | error(~who: #'InterfaceType,
-            "supported interface types must be supplied as a List")
+            "supported interface contracts must be supplied as a List")
     def mutable members = if parent | parent.members | []
     for (declaration in declarations):
       cond
@@ -90,13 +107,23 @@ class InterfaceType(name,
         ~keep: fun (candidate): candidate.name == member.name
       ).length() != 1
       | error(~who: #'InterfaceType, "interface member names must be unique")
-    for (supported_type in supported_types):
+    for (supported_contract in supported_contracts):
+      unless supported_contract is_a InterfaceSupport
+      | error(~who: #'InterfaceType,
+              "supported interface contracts must be InterfaceSupport values")
+      unless supported_contract.role == provider_role
+      | error(~who: #'InterfaceType,
+              "supported interface contract role must match the provider role")
+      def supported_type = supported_contract.type
       unless supported_type is_a InterfaceType
       | error(~who: #'InterfaceType,
               "supported interface contracts must be InterfaceType values")
       unless roles == supported_type.roles
       | error(~who: #'InterfaceType,
               "supported interface roles must match")
+      unless provider_role == supported_type.provider_role
+      | error(~who: #'InterfaceType,
+              "supported interface provider roles must match")
       for (supported_member in supported_type.members):
         def member = members.find(
           fun (candidate): candidate.name == supported_member.name
@@ -107,9 +134,17 @@ class InterfaceType(name,
         unless member.from_role == supported_member.from_role && member.to_role == supported_member.to_role && interface_member_type_equal(member.type, supported_member.type)
         | error(~who: #'InterfaceType,
                 "supported interface members must be present with the same type and direction")
-    super(name, roles, members, parent, supported_types)
+    super(name,
+          identity,
+          roles,
+          members,
+          provider_role,
+          parent,
+          supported_contracts)
 
   property flows: interface_flows(this)
+  property supported_types:
+    supported_contracts.map(fun (contract): contract.type)
 
   method flow_for_field(field_name):
     def member = members.find(fun (candidate): candidate.name == field_name)
@@ -162,6 +197,7 @@ class InterfaceBinding(flow, port_name, entity)
 
 class InterfaceEndpoint(type,
                         role,
+                        represented_role,
                         bindings,
                         view,
                         mutable nested_endpoints = []):
@@ -201,11 +237,11 @@ fun interface_member_type_equal(left, right):
   | type_equal(left, right)
 
 fun interface_type_equal(left, right):
-  if !(left is_a InterfaceType && right is_a InterfaceType) || left.name != right.name || left.roles != right.roles || !interface_parent_equal(left.parent, right.parent) || left.supported_types.length() != right.supported_types.length() || left.members.length() != right.members.length()
+  if !(left is_a InterfaceType && right is_a InterfaceType) || !(left.identity === right.identity) || left.roles != right.roles || left.provider_role != right.provider_role || !interface_parent_equal(left.parent, right.parent) || left.supported_contracts.length() != right.supported_contracts.length() || left.members.length() != right.members.length()
   | #false
-  | (for all (left_supported in left.supported_types,
-              right_supported in right.supported_types):
-       interface_type_equal(left_supported, right_supported)) && (
+  | (for all (left_supported in left.supported_contracts,
+              right_supported in right.supported_contracts):
+       left_supported.role == right_supported.role && interface_type_equal(left_supported.type, right_supported.type)) && (
       for all (left_member in left.members, right_member in right.members):
         left_member.name == right_member.name && left_member.from_role == right_member.from_role && left_member.to_role == right_member.to_role && interface_member_type_equal(left_member.type, right_member.type)
     )
@@ -220,9 +256,9 @@ fun interface_type_supports(type, expected_type):
     interface_type_equal(type, expected_type) || (
       type.parent is_a InterfaceType && interface_type_supports(type.parent,
                                                                 expected_type)
-    ) || type.supported_types.find(
-      fun (supported_type):
-        interface_type_supports(supported_type, expected_type)
+    ) || type.supported_contracts.find(
+      fun (supported_contract):
+        interface_type_supports(supported_contract.type, expected_type)
     )
   )
 
@@ -234,6 +270,10 @@ fun nested_endpoint(endpoint, member):
   def nested_type = member.type
   def nested_role:
     if endpoint.role == member.from_role
+    | nested_type.roles[0]
+    | nested_type.roles[1]
+  def nested_represented_role:
+    if endpoint.represented_role == member.from_role
     | nested_type.roles[0]
     | nested_type.roles[1]
   def nested_bindings:
@@ -255,6 +295,7 @@ fun nested_endpoint(endpoint, member):
     )
   InterfaceEndpoint(nested_type,
                     nested_role,
+                    nested_represented_role,
                     nested_bindings,
                     endpoint.view ++ "." ++ member.name)
 
@@ -284,7 +325,12 @@ fun declare_interface_unchecked(module_def, name, type, role):
     )
   def group = InterfaceGroup(module_def, name, type, role, bindings)
   interface_groups := interface_groups ++ [group]
-  [group, InterfaceEndpoint(type, role, bindings, "boundary")]
+  [group,
+   InterfaceEndpoint(type,
+                     role,
+                     type.complementary_role(role),
+                     bindings,
+                     "boundary")]
 
 fun declare_interface(name, type, role):
   validate_interface_declaration(type, role)
@@ -324,7 +370,11 @@ fun endpoint_for_group(instance, group):
           | instance.input(binding.port_name)
         InterfaceBinding(binding.flow, binding.port_name, entity)
     )
-  InterfaceEndpoint(group.type, group.role, bindings, "instance")
+  InterfaceEndpoint(group.type,
+                    group.role,
+                    group.role,
+                    bindings,
+                    "instance")
 
 fun endpoint_for_instance(instance, name):
   def group = interface_groups.find(
@@ -399,6 +449,7 @@ dot.macro 'interface_field_dot $left $dot $right':
   match right
   | 'type': #false
   | 'role': #false
+  | 'represented_role': #false
   | 'bindings': #false
   | 'view': #false
   | 'into': 'fun (target_type) :~ InstanceMembers: hardware_into($left, target_type)'
@@ -433,30 +484,26 @@ fun interface_member_connection_pairs(left, right, members):
                                                         right_entity)]
   pairs
 
-// Uses a forward-flow member to identify which endpoint supplies the offered
-// protocol. Operand order is deliberately irrelevant.
+// Endpoint provenance identifies which connected component plays the provider
+// role. Operand order and the presence of any particular flow are irrelevant.
 fun interface_connection_direction(left, right):
   unless left.type.roles == right.type.roles
   | error(~who: #'connect_interfaces,
           "bulk-connected interface roles must match")
-  def forward_member = left.type.members.find(
-    fun (member):
-      member.from_role == left.type.roles[0] && right.type.members.find(
-        fun (candidate): candidate.name == member.name
-      )
-  )
-  unless forward_member
+  unless left.type.provider_role == right.type.provider_role
   | error(~who: #'connect_interfaces,
-          "compatible interfaces require a shared producer-to-consumer member")
-  def left_forward = left.field(forward_member.name)
-  def right_forward = right.field(forward_member.name)
+          "compatible interface provider roles must match")
+  unless left.represented_role != right.represented_role && left.represented_role in left.type.roles && right.represented_role in right.type.roles
+  | error(~who: #'connect_interfaces,
+          "interface endpoints have incompatible roles and boundary directions")
+  def provider_role = left.type.provider_role
   def source:
-    if left_forward is_a Value && right_forward is_a Place
+    if left.represented_role == provider_role
     | left
-    | if right_forward is_a Value && left_forward is_a Place
+    | if right.represented_role == provider_role
       | right
       | error(~who: #'connect_interfaces,
-              "interface endpoints have incompatible roles and boundary directions")
+              "compatible interface endpoints do not represent the provider role")
   [source, if source === left | right | left]
 
 fun exact_interface_connection_pairs(left, right):
@@ -552,7 +599,7 @@ fun compatible_interface_connection_pairs(left, right, extra_values, extra_field
   def destination_refines_source = destination_delta.length() > 0
   unless source_supports_destination || destination_refines_source
   | error(~who: #'connect_interfaces,
-          "producer interface does not support the consumer interface contract")
+          "provider interface does not support the peer interface contract")
   def richer = if source_supports_destination | source | destination
   def poorer = if source_supports_destination | destination | source
   def delta_members = refinement_members(richer.type, poorer.type)
@@ -603,15 +650,100 @@ fun connect_interface_fields(left,
     | kernel.connect(pair[1], pair[0])
   #void
 
-fun make_refined_interface(name, parent, declarations, supported_types = []):
+fun make_refined_interface(identity,
+                           name,
+                           parent,
+                           declarations,
+                           supported_contracts = []):
   unless parent is_a InterfaceType
   | error(~who: #'interface,
           "interface refinement parent must be an InterfaceType")
-  InterfaceType(name, parent.roles, declarations, parent, supported_types)
+  InterfaceType(name,
+                parent.roles,
+                declarations,
+                parent,
+                supported_contracts,
+                ~provider_role: parent.provider_role,
+                ~identity: identity)
 
 defn.macro
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
-       supports: $supported
+       supports $(support_role :: Identifier): $supported
+       $(first_from :: Identifier) -> $(first_to :: Identifier):
+         $first_field: $first_type
+         ...
+       $(second_from :: Identifier) -> $(second_to :: Identifier):
+         $second_field: $second_type
+         ...':
+    def interface_name = name.to_source_string()
+    def support_role_name = support_role.to_source_string()
+    def first_from_name = first_from.to_source_string()
+    def first_to_name = first_to.to_source_string()
+    def second_from_name = second_from.to_source_string()
+    def second_to_name = second_to.to_source_string()
+    let [first_field_name, ...] = [first_field.to_source_string(), ...]
+    let [second_field_name, ...] = [second_field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(
+           interface_identity,
+           $interface_name,
+           $parent,
+           [InterfaceMember($first_field_name,
+                            $first_type,
+                            $first_from_name,
+                            $first_to_name),
+            ...,
+            InterfaceMember($second_field_name,
+                            $second_type,
+                            $second_from_name,
+                            $second_to_name),
+            ...],
+           [InterfaceSupport($support_role_name, $supported)]
+         )
+     »'
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
+       supports $(support_role :: Identifier): $supported
+       $(from_role :: Identifier) -> $(to_role :: Identifier):
+         $field: $field_type
+         ...':
+    def interface_name = name.to_source_string()
+    def support_role_name = support_role.to_source_string()
+    def from_role_name = from_role.to_source_string()
+    def to_role_name = to_role.to_source_string()
+    let [field_name, ...] = [field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(
+           interface_identity,
+           $interface_name,
+           $parent,
+           [InterfaceMember($field_name,
+                            $field_type,
+                            $from_role_name,
+                            $to_role_name),
+            ...],
+           [InterfaceSupport($support_role_name, $supported)]
+         )
+     »'
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
+       supports $(support_role :: Identifier): $supported':
+    def interface_name = name.to_source_string()
+    def support_role_name = support_role.to_source_string()
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(
+           interface_identity,
+           $interface_name,
+           $parent,
+           [],
+           [InterfaceSupport($support_role_name, $supported)]
+         )
+     »'
+| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        $(first_from :: Identifier) -> $(first_to :: Identifier):
          $first_field: $first_type
          ...
@@ -625,76 +757,25 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       make_refined_interface(
-         $interface_name,
-         $parent,
-         [InterfaceMember($first_field_name,
-                          $first_type,
-                          $first_from_name,
-                          $first_to_name),
-          ...,
-          InterfaceMember($second_field_name,
-                          $second_type,
-                          $second_from_name,
-                          $second_to_name),
-          ...],
-         [$supported]
-       )'
-| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
-       supports: $supported
-       $(from_role :: Identifier) -> $(to_role :: Identifier):
-         $field: $field_type
-         ...':
-    def interface_name = name.to_source_string()
-    def from_role_name = from_role.to_source_string()
-    def to_role_name = to_role.to_source_string()
-    let [field_name, ...] = [field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       make_refined_interface(
-         $interface_name,
-         $parent,
-         [InterfaceMember($field_name,
-                          $field_type,
-                          $from_role_name,
-                          $to_role_name),
-          ...],
-         [$supported]
-       )'
-| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
-       supports: $supported':
-    def interface_name = name.to_source_string()
-    'fun $name($parameter, ...):
-       make_refined_interface($interface_name, $parent, [], [$supported])'
-| 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
-       $(first_from :: Identifier) -> $(first_to :: Identifier):
-         $first_field: $first_type
-         ...
-       $(second_from :: Identifier) -> $(second_to :: Identifier):
-         $second_field: $second_type
-         ...':
-    def interface_name = name.to_source_string()
-    def first_from_name = first_from.to_source_string()
-    def first_to_name = first_to.to_source_string()
-    def second_from_name = second_from.to_source_string()
-    def second_to_name = second_to.to_source_string()
-    let [first_field_name, ...] = [first_field.to_source_string(), ...]
-    let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       make_refined_interface(
-         $interface_name,
-         $parent,
-         [InterfaceMember($first_field_name,
-                          $first_type,
-                          $first_from_name,
-                          $first_to_name),
-          ...,
-          InterfaceMember($second_field_name,
-                          $second_type,
-                          $second_from_name,
-                          $second_to_name),
-          ...]
-       )'
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(
+           interface_identity,
+           $interface_name,
+           $parent,
+           [InterfaceMember($first_field_name,
+                            $first_type,
+                            $first_from_name,
+                            $first_to_name),
+            ...,
+            InterfaceMember($second_field_name,
+                            $second_type,
+                            $second_from_name,
+                            $second_to_name),
+            ...]
+         )
+     »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        $(from_role :: Identifier) -> $(to_role :: Identifier):
          $field: $field_type
@@ -703,20 +784,99 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       make_refined_interface(
-         $interface_name,
-         $parent,
-         [InterfaceMember($field_name,
-                          $field_type,
-                          $from_role_name,
-                          $to_role_name),
-          ...]
-       )'
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(
+           interface_identity,
+           $interface_name,
+           $parent,
+           [InterfaceMember($field_name,
+                            $field_type,
+                            $from_role_name,
+                            $to_role_name),
+            ...]
+         )
+     »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed)':
     def interface_name = name.to_source_string()
-    'fun $name($parameter, ...):
-       make_refined_interface($interface_name, $parent, [])'
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         make_refined_interface(interface_identity,
+                                $interface_name,
+                                $parent,
+                                [])
+     »'
+| 'interface $(name :: Identifier)($parameter, ...):
+     role $(first_role :: Identifier)
+     role $(second_role :: Identifier)
+     provider $(provider_role :: Identifier)
+     $(first_from :: Identifier) -> $(first_to :: Identifier):
+       $first_field: $first_type
+       ...
+     $(second_from :: Identifier) -> $(second_to :: Identifier):
+       $second_field: $second_type
+       ...':
+    def interface_name = name.to_source_string()
+    def provider_role_name = provider_role.to_source_string()
+    def first_role_name = first_role.to_source_string()
+    def second_role_name = second_role.to_source_string()
+    def first_from_name = first_from.to_source_string()
+    def first_to_name = first_to.to_source_string()
+    def second_from_name = second_from.to_source_string()
+    def second_to_name = second_to.to_source_string()
+    let [first_field_name, ...] = [first_field.to_source_string(), ...]
+    let [second_field_name, ...] = [second_field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($first_field_name,
+                            $first_type,
+                            $first_from_name,
+                            $first_to_name),
+            ...,
+            InterfaceMember($second_field_name,
+                            $second_type,
+                            $second_from_name,
+                            $second_to_name),
+            ...],
+           ~provider_role: $provider_role_name,
+           ~identity: interface_identity
+         )
+     »'
+| 'interface $(name :: Identifier)($parameter, ...):
+     role $(first_role :: Identifier)
+     role $(second_role :: Identifier)
+     provider $(provider_role :: Identifier)
+     $(from_role :: Identifier) -> $(to_role :: Identifier):
+       $field: $field_type
+       ...':
+    def interface_name = name.to_source_string()
+    def provider_role_name = provider_role.to_source_string()
+    def first_role_name = first_role.to_source_string()
+    def second_role_name = second_role.to_source_string()
+    def from_role_name = from_role.to_source_string()
+    def to_role_name = to_role.to_source_string()
+    let [field_name, ...] = [field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($field_name,
+                            $field_type,
+                            $from_role_name,
+                            $to_role_name),
+            ...],
+           ~provider_role: $provider_role_name,
+           ~identity: interface_identity
+         )
+     »'
 | 'interface $(name :: Identifier)($parameter, ...):
               role $(first_role :: Identifier)
               role $(second_role :: Identifier)
@@ -735,21 +895,25 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       InterfaceType(
-         $interface_name,
-         [$first_role_name, $second_role_name],
-         [InterfaceMember($first_field_name,
-                          $first_type,
-                          $first_from_name,
-                          $first_to_name),
-          ...,
-          InterfaceMember($second_field_name,
-                          $second_type,
-                          $second_from_name,
-                          $second_to_name),
-          ...]
-       )'
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($first_field_name,
+                            $first_type,
+                            $first_from_name,
+                            $first_to_name),
+            ...,
+            InterfaceMember($second_field_name,
+                            $second_type,
+                            $second_from_name,
+                            $second_to_name),
+            ...],
+           ~identity: interface_identity
+         )
+     »'
 | 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier))':
     def endpoint_name = name.to_source_string()
     def role_name = role.to_source_string()
@@ -770,16 +934,20 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    'fun $name($parameter, ...):
-       InterfaceType(
-         $interface_name,
-         [$first_role_name, $second_role_name],
-         [InterfaceMember($field_name,
-                          $field_type,
-                          $from_role_name,
-                          $to_role_name),
-          ...]
-       )'
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($field_name,
+                            $field_type,
+                            $from_role_name,
+                            $to_role_name),
+            ...],
+           ~identity: interface_identity
+         )
+     »'
 
 expr.macro <=>:
   ~weaker_than: ~other
