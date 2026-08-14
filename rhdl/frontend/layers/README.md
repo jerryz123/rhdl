@@ -1,0 +1,342 @@
+<!-- Documents the independently selectable RHDL frontend layers and their authoring semantics. -->
+
+# RHDL frontend layers
+
+Frontend layers add notation, types, static information, and authoring policy
+over existing core semantics. They do not import sibling layers or backends.
+Shared machinery belongs in [`../support/`](../support/), and the authoritative
+dependency inventory is in [`../../README.md`](../../README.md).
+
+## Layer catalog
+
+| Layer | Authoring feature |
+|---|---|
+| [`cast.rhm`](cast.rhm) | Functional equal-width representation casts |
+| [`comb.rhm`](comb.rhm) | Literals, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
+| [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, unsigned ordering, and binary `mux` |
+| [`enum.rhm`](enum.rhm) | Nominal encoded hardware enums |
+| [`one-hot.rhm`](one-hot.rhm) | Structurally sized one-hot values and selection |
+| [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
+| [`vector.rhm`](vector.rhm) | `Vec`, construction, selection, and functional update |
+| [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
+| [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
+| [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
+| [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit DPI registers |
+| [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
+| [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
+| [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
+| [`interface.rhm`](interface.rhm) | Roles, directional protocols, refinement, and bulk connection |
+
+`#lang rhdl` aggregates the curated set. A `#lang rhdl/base` program can import
+only the layers it needs.
+
+## Literals and combinational expressions
+
+Integer hardware literals always state their width:
+
+```rhombus
+def zero = bits(0, width)
+def one = bits(1, width)
+```
+
+These are immutable host-side `HardwareLiteral` shadows. They allocate IR only
+when consumed by hardware. The generic `literal(T, packed_value)` form covers
+every bit image of a packable `DataType`, including frontend-defined types,
+records, and vectors. Materialization creates a canonical `Bits` constant and,
+for non-`Bits` data, an explicit equal-width cast. `Clock`, `Reset`, and other
+non-data types are not literal domains.
+
+The standard combinational surface includes modular `+`, `-`, `*`, logical
+`<<` and `>>`, bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. Arithmetic is
+unsigned and fixed-width. On host values these operators keep their ordinary
+Rhombus meaning.
+
+Expanding arithmetic is explicit:
+
+```rhombus
+sum <== a +& b
+product <== a *& b
+```
+
+`+&` widens both operands to `max(width(a), width(b)) + 1`; `*&` widens them
+to the sum of their widths. Both then use the existing modular core operation.
+Unsigned expanding subtraction remains undefined because borrow policy is not
+implied by a result width.
+
+The canonical selection form is N-way lookup:
+
+```rhombus
+result <== mux_lookup(op, ~default: not a):
+  0: a & b
+  1: a or b
+  2: a ^ b
+```
+
+Cases may come from a host list. Keys are checked and normalized during
+elaboration. Binary `mux(sel, when_true, when_false)` is a `Bool` specialization
+of the same core `rtl.mux_lookup`; there is no separate core mux operation.
+
+## Boolean and ordering
+
+`Bool` is a nominal one-bit frontend `BitwiseType`, not a core special case:
+
+```rhombus
+output ready: Bool
+ready <== Bool(#true)
+equal <== a === b
+less <== a < b
+```
+
+`Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
+works on exactly equal flat types. Unsigned `<`, `>`, `<=`, and `>=` require
+equal-width `Bits` operands and return `Bool`; the layer derives all forms from
+the core unsigned-less-than operation.
+
+## Hardware enums
+
+```rhombus
+hardware_enum Opcode(~width: 4):
+  Add = 0
+  Sub = 1
+  Load = 8
+```
+
+Hardware enums are nominal `FlatDataType`s without arithmetic or bitwise
+capability. Automatic encodings use declaration order and the minimum positive
+width. Explicit encodings require a stable width, unique names and values, and
+all-or-none explicit values.
+
+Each evaluated declaration has distinct nominal identity. Members lower to
+`Bits(width)` constants plus casts. Enum-selected `mux_lookup` requires keys
+from exactly the selector's enum and retains a mandatory default for unused
+encodings. See [`../../../examples/enum-state.rhdl`](../../../examples/enum-state.rhdl).
+
+## One-hot values
+
+`OneHot(n)` is a structurally sized `FlatDataType`. Calling the type with a
+host index produces the corresponding power-of-two literal:
+
+```rhombus
+def Grant = OneHot(4)
+next_grant <== mux_onehot(current, ~default: Grant(0)):
+  Grant(1)
+  Grant(2)
+  Grant(3)
+  Grant(0)
+```
+
+One-hot values deliberately do not implement `BitwiseType`, because bitwise
+operations do not preserve the exactly-one invariant. Equality, aggregates,
+ports, state, and explicit casts work normally. `mux_onehot` lowers to
+power-of-two keys in `rtl.mux_lookup` and keeps a default for invalid zero or
+multi-hot representations.
+
+## Packing and width operations
+
+- `concat(a, b, ...)` accepts packable data and places the first operand in
+  the most-significant bits; a host-generated list is also accepted.
+- `bits_value[index]` produces `Bits(1)`.
+- `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
+- Explicit `extract(value, high, low)` uses inclusive host indices.
+- `zext` adds most-significant zeroes; `trunc` retains low bits.
+- `.into(TargetType)` and `cast(value, TargetType)` preserve packed width and
+  bit pattern while changing the hardware type.
+
+Indices and ranges are host values known during elaboration. Width changes are
+always explicit.
+
+## Registers and synchronous circuits
+
+A register exposes readable current state and a driveable next-state place:
+
+```rhombus
+reg state(Bits(width), ~clock: clk, ~reset: reset, ~init: zero)
+state.next <== state + one
+```
+
+The type can be inferred from `~init` or `~next`. Supplying `~next` drives the
+register immediately; another drive is an error. `~init` is an active-high
+synchronous reset value, not power-up initialization. Register state may be
+any `DataType`.
+
+`sync_circuit` supplies real `clock: Clock` and `reset: Reset` inputs plus an
+ambient domain:
+
+```rhombus
+sync_circuit Counter(width):
+  output count: Bits(width)
+  reg state(~init: bits(0, width))
+  state.next <== state + bits(1, width)
+  count <== state
+```
+
+A resetless ambient register uses the clock only. An initializer is never
+invented merely because ambient reset exists.
+
+## Memories
+
+```rhombus
+mem storage(depth, Bits(width))
+read_data <== storage[read_address]
+storage.write(write_address, write_data,
+              ~enable: write_enable, ~clock: clock)
+```
+
+Inside a `sync_circuit`, the clock may be omitted. Memory depth is a positive
+host integer; elements may be any `DataType`; addresses are exactly
+`Bits(index_width(depth))`. Reads are asynchronous physical ports. Writes are
+independent rising-edge synchronous ports and share one clock per memory.
+
+Initial contents, dynamic out-of-range addresses, read-during-write results,
+and simultaneous writes to one address are unspecified. Resets, masks,
+initialization, and combined read/write ports are not part of the current
+contract.
+
+## Clocked DPI
+
+```rhombus
+dpi_import procedure rhdl_trace(value: Bits(8))
+dpi_import function rhdl_step(value: Bits(8)) -> result: Bits(8)
+
+rhdl_trace.call(value, ~enable: enable)
+dpi_reg step_result = rhdl_step(value, ~enable: enable)
+```
+
+A procedure is a clocked side effect with no result. A DPI function result is
+visible state, so it must use `dpi_reg`; it holds while disabled, has
+unspecified initial value, and has no reset. A `sync_circuit` supplies the
+ambient clock, while ordinary circuits pass `~clock` explicitly. There is no
+unclocked DPI form.
+
+## Hardware conditional assignment
+
+`when` accepts only a readable one-bit `FlatDataType`. Host values are rejected:
+
+```rhombus
+when load:
+  state.next <== data_in
+elsewhen clear:
+  state.next <== zero
+otherwise:
+  state.next <== fallback
+```
+
+The first true branch wins. Nested chains lower each destination to priority
+mux lookups plus one final drive. Register-next destinations may omit
+`otherwise` and implicitly hold current state. Outputs, wires, and instance
+inputs require exhaustive assignment.
+
+Conditional memory writes are effects rather than place assignments. Branch
+guards combine with explicit local enables, and corresponding write positions
+across mutually exclusive branches share one physical port with muxed address
+and data. Independent chains remain independent ports.
+
+A destination may appear once per branch, and separate chains do not implement
+last-connect semantics. Primitive register reset remains expressed through
+`~reset` and `~init`.
+
+## Hierarchy
+
+Every circuit call creates a fresh definition. Bind a definition once to reuse
+it across instances:
+
+```rhombus
+def AdderModule = Adder(8)
+inst u0(AdderModule)
+inst u1(AdderModule)
+```
+
+An `inst` binding supplies a suggested name; collisions receive deterministic
+suffixes. `InstanceArray` is a host collection reducer that retains checked
+static information for concise child-port access. Child inputs are places,
+child outputs are values, and all communication uses ports.
+
+A marked sync child instantiated inside a sync parent receives the ambient
+clock and reset. Ordinary children never participate implicitly. Outside a
+sync parent, both signals must be supplied explicitly.
+
+## Bundles and records
+
+The bundle layer gives concise declarations and fields over core structural
+records:
+
+```rhombus
+bundle Pair(T):
+  left: T
+  right: T
+
+result.left <== source.right
+result.right <== source.left
+```
+
+Complete field-wise drives canonicalize to nested record construction and one
+whole-record drive. Partial assignment and mixing whole with field-wise drives
+are errors. When every field of `record(...)` is a `HardwareLiteral`, the form
+creates a reusable recursive `RecordLiteral`; otherwise it creates runtime
+`rtl.record_create` hardware.
+
+## Fixed-length vectors
+
+`Vec(n, T)` and `vec(...)` layer over core structural vectors. Literal-only
+construction produces a reusable `VectorLiteral`; live elements produce a
+runtime vector value. Element zero occupies the least-significant packed slot.
+
+Static host indexing works for readable values and driveable places. Complete
+element-wise drives canonicalize to one vector construction and whole drive.
+Dynamic read and functional replacement are explicit:
+
+```rhombus
+chosen <== values.lookup(selector, ~default: fallback)
+next_value <== current.updated(selector, replacement)
+```
+
+Lookup projects all elements and builds a mux. `updated` reconstructs the
+vector with per-element muxes; an out-of-range selector leaves the original
+vector unchanged. There is no dynamic vector-index operation or dynamically
+selected mutable place in core.
+
+## Wires
+
+`wire temporary: T` creates an internal single-driver place that becomes
+readable after one complete drive. Aggregates may be assembled leaf by leaf;
+all leaves must be driven, and whole and projected drive modes cannot mix.
+Conditional assignment may synthesize one exhaustive priority driver.
+
+Core retains `rtl.wire` for inspection. CIRCT lowering aliases the read value
+to its driver, so a SystemVerilog wire is not necessarily emitted.
+
+## Interfaces
+
+Interfaces are frontend protocol descriptors over directional record ports,
+not core `DataType`s:
+
+```rhombus
+interface ingress(Decoupled(T), ~role: consumer)
+interface egress(Decoupled(T), ~role: producer)
+egress <=> ingress
+```
+
+Each root direction becomes one record-typed core port. `<=>` atomically
+connects exact or compatible producer-to-consumer flows; operand order is
+irrelevant. Individual fields remain accessible, and frontend metadata
+reconstructs endpoints through instances without guessing from port names.
+
+`Endpoint.of(protocol)` checks one exact nominal interface type.
+`Endpoint.supports(protocol)` accepts that protocol, a transitive refinement,
+or a declared supported contract while retaining endpoint static information.
+
+An interface can declare one nominal parent with `refines` and additional
+structurally checked contracts with `supports:`. Parenthesized `<=>` forms
+merge a parent endpoint with its refinement delta or split a richer source
+into parent and delta destinations. The frontend checks the parent, complete
+field set, types, and directions.
+
+Interface members may themselves be interfaces. Composition, field access,
+bulk connection, and instance reconstruction work recursively. Nested
+directions lower to nested `RecordType` fields and then CIRCT `hw.struct`
+without core or backend interface cases.
+
+Ready-valid protocols and reusable flow circuits are documented in
+[`../../std/README.md`](../../std/README.md). Canonical feature programs live
+in [`../../../examples/`](../../../examples/README.md).

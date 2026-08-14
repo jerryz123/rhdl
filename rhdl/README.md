@@ -1,6 +1,6 @@
-<!-- Defines RHDL's package responsibilities and mechanically enforced dependency directions. -->
+<!-- Defines the RHDL implementation package graph and its enforced dependency contract. -->
 
-# RHDL architecture
+# RHDL implementation architecture
 
 RHDL has one backend-independent hardware model and multiple authoring layers.
 Every frontend path elaborates into the same public core IR; frontend syntax is
@@ -17,8 +17,8 @@ not a second IR.
 #lang rhdl/base ---------------> frontend/foundation
 user base-profile imports -----> selected frontend/layers/*
 
-rhdl/std/* --------------------> public #lang rhdl authoring surface
-user designs ------------------> optional rhdl/std/* libraries
+std/* -------------------------> public #lang rhdl authoring surface
+user designs ------------------> optional std/* libraries
 
 frontend/foundation -----------+
 frontend/layers/* -------------+----> frontend/support/*
@@ -28,42 +28,41 @@ frontend/{foundation,layers,support} ---------------------> approved core APIs
 backend/circt ---------------------------------------------> core
 ```
 
-`#lang rhdl` is the ordinary curated language. `#lang rhdl/base` is the
-composition profile: it exposes the foundation and allows a program to import
-only the language layers it wants. The word *base* names this public profile;
-the internal module implementing its shared frontend forms is called the
-*foundation* to avoid overloading that name.
+`#lang rhdl` is the curated language. `#lang rhdl/base` is the composition
+profile: it exposes the foundation and allows a program to import only the
+language layers it wants. The word *base* names the public profile; the
+internal module implementing its shared frontend forms is called the
+*foundation*.
 
 ## Responsibilities
 
 | Area | Responsibility | May depend directly on |
 |---|---|---|
-| `core/` | Types, IR, Builder, verification, and printing | Other core modules and Rhombus libraries |
-| `frontend/kernel.rhm` | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
-| `frontend/support/` | Shared cross-layer protocols, macros, and static-information machinery; not a language profile | Kernel, approved core APIs, other support modules |
-| `frontend/foundation.rhm` | Circuits, ports, connections, elaboration, basic types, selection, and casts | Kernel, support, approved core type APIs |
-| `frontend/layers/` | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
-| `frontend/standard.rhm` | Aggregation only; defines no feature behavior | Foundation and all standard layers |
-| `language.rhm`, `base/language.rhm` | Compose Rhombus with one public RHDL profile | Standard or foundation, plus the host-condition guard |
-| `std/` | Optional reusable protocols and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
-| `backend/` | Consume verified public IR; currently lower it through CIRCT | Core only |
+| [`core/`](core/README.md) | Types, IR, Builder, verification, and printing | Other core modules and Rhombus libraries |
+| [`frontend/kernel.rhm`](frontend/kernel.rhm) | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
+| [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, and static-information machinery; not a language profile | Kernel, approved core APIs, other support modules |
+| [`frontend/foundation.rhm`](frontend/foundation.rhm) | Circuits, ports, connections, elaboration, basic types, selection, and casts | Kernel, support, approved core type APIs |
+| [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
+| [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
+| [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose Rhombus with one public RHDL profile | Standard or foundation, plus the host-condition guard |
+| [`std/`](std/README.md) | Optional reusable protocols and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
+| [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 
 The import direction is one-way. Core never imports frontend or backend code;
 frontend code never imports a backend; and a backend never imports frontend
 syntax or elaboration. Layers do not import sibling layers. Shared machinery
 needed by multiple layers belongs in `frontend/support/`. Standard-library
-modules use public RHDL forms rather than importing core, backend, or frontend
-implementation modules.
+modules use public RHDL forms rather than importing implementation modules.
 
 ## Standard-library dependencies
 
-The flow-control aggregate is intentionally separate from its implementations,
-so designs can import one primitive without loading unrelated generators.
+The flow-control aggregate is separate from its implementations, so designs
+can import one primitive without loading unrelated generators.
 
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and Decoupled payload introspection | None |
+| `std/ready-valid.rhdl` | `Valid`, control and payload-bearing ready-valid protocols, `fire`, and payload introspection | None |
 | `std/flow/pipe.rhdl` | Registered elastic `Pipe` and typed chaining helper | `std/ready-valid.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue` and typed chaining helper | `std/ready-valid.rhdl`, `std/counter.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter` | `std/ready-valid.rhdl` |
@@ -75,8 +74,8 @@ so designs can import one primitive without loading unrelated generators.
 
 ## Frontend layer dependencies
 
-This table is the authoritative inventory of bundled frontend layers. Update it
-when adding, removing, or changing a layer's direct dependencies.
+This table is the authoritative inventory of bundled frontend layers. Update
+it when adding, removing, or changing a layer's direct dependencies.
 
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
@@ -97,45 +96,33 @@ when adding, removing, or changing a layer's direct dependencies.
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support |
 
-`frontend/support/hardware-literal.rhm` depends on core IR and the kernel. It
-defines the public `HardwareLiteral` protocol, validates packed host images,
-and generically materializes them as a Bits constant followed by an explicit
-equal-width cast. Literal shadows are static host values: the kernel permits
-them as circuit parameters while continuing to reject circuit-bound values,
-places, registers, instances, and other hardware entities.
+The support modules implement shared mechanisms without becoming selectable
+language profiles:
 
-`frontend/support/fields.rhm` depends on core IR and types plus the kernel and
-hardware-literal support. It
-owns the exact-hardware-type predicate exposed by the foundation as
-`Hardware.of(type)` and the static information used by readable and driveable
-hardware data.
-`frontend/support/instance-members.rhm` depends on core IR, the kernel, and
-field support. Its resolver hook lets the interface layer contribute virtual
-instance members without making hierarchy depend on interface.
-`frontend/support/clocking.rhm` depends on core IR and types plus the kernel;
-it carries frontend-only sync metadata and expands ambient policy into explicit
-ports, register operands, instance inputs, and drives.
+- `hardware-literal.rhm` validates reusable packed host images and materializes
+  them as a `Bits` constant followed by an explicit equal-width cast.
+- `fields.rhm` owns exact hardware annotations plus readable and driveable
+  field static information.
+- `instance-members.rhm` lets layers contribute virtual instance members
+  without creating sibling-layer dependencies.
+- `clocking.rhm` expands frontend sync policy into explicit ports, register
+  operands, instance inputs, and drives.
+- `mux-lookup.rhm` lets independent layers contribute typed static keys and
+  selector behavior to combinational mux syntax.
 
-`frontend/support/mux-lookup.rhm` depends only on hardware-literal support. It
-lets independently selectable layers contribute typed static keys and selector
-behavior to the combinational mux syntax.
-
-The kernel's deferred-value protocol lets layers retain authoring metadata
-until an operation consumes it. Its static subtype distinguishes reusable host
-descriptions from objects already owned by an elaborated circuit. For example,
-enum members remain typed literal shadows and lookup keys until a hardware
-consumer materializes them or the combinational layer normalizes them to
-integer keys. These protocols do not add frontend types or operations to the
-public core IR.
+The kernel's deferred-value protocol retains authoring metadata until an
+operation consumes it. Reusable host descriptions remain distinct from
+objects already owned by an elaborated circuit. These protocols do not add
+frontend types or operations to the public core IR.
 
 ## Enforcement
 
-[`tools/check-boundaries.sh`](tools/check-boundaries.sh) enforces the package
+[`../tools/check-boundaries.sh`](../tools/check-boundaries.sh) enforces these
 directions, prevents sibling-layer imports, keeps `standard.rhm` aggregation
-only, and restricts reader shims and `.rhdl` files to their intended locations.
-Run `make check-boundaries` after moving or adding modules.
+only, and restricts reader shims and `.rhdl` files to their intended
+locations. Run `make check-boundaries` after moving or adding modules.
 
-The equivalence tests under `tests/frontend/` and `tests/backend/` additionally
-check that direct core construction, kernel construction, explicit layer
-composition, and the standard language produce the same public IR and CIRCT
-representation.
+The equivalence tests under [`../tests/frontend/`](../tests/frontend/) and
+[`../tests/backend/`](../tests/backend/) check that direct core construction,
+kernel construction, explicit layer composition, and the standard language
+produce the same public IR and CIRCT representation.

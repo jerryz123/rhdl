@@ -28,7 +28,7 @@
 
 ## Package boundaries
 
-- Treat `ARCHITECTURE.md` as the authoritative package and frontend-layer
+- Treat `rhdl/README.md` as the authoritative package and frontend-layer
   dependency contract. Update its dependency table when adding a layer or
   changing a layer's direct RHDL imports.
 
@@ -47,3 +47,14 @@
   for the `#lang rhdl` reader shim.
 - Preserve the mirrored `tests/core/`, `tests/frontend/`, and `tests/backend/`
   organization. Run `make check-boundaries` after moving or adding modules.
+
+## Documentation ownership
+
+- Keep the root `README.md` focused on project orientation, quick start,
+  navigation, concise status, and deferred work.
+- Put implementation architecture in `rhdl/README.md` and detailed component
+  contracts in the nearest component directory's `README.md`.
+- Keep the executable language walkthrough and example catalog in
+  `examples/README.md`; keep test workflows under `tests/`.
+- Link to an owning document instead of copying component, layer, operation,
+  example, or fixture catalogs into multiple files.
