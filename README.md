@@ -299,8 +299,9 @@ See [`examples/host-parameters.rhdl`](examples/host-parameters.rhdl) and
 The integrated [`examples/tiny-simd.rhdl`](examples/tiny-simd.rhdl) showcase
 uses one opaque host configuration to choose lane count, word width, program
 depth, and whether multiplier hardware exists. Ordinary Rhombus validation,
-arithmetic, conditionals, and loops derive widths and generate a lane-instance
-array. Runtime RHDL then uses packed instruction memory, a structured bundle,
+arithmetic, conditionals, and a single host comprehension derive widths,
+generate and wire the lanes, and collect their hardware results into a vector.
+Runtime RHDL then uses packed instruction memory, a structured bundle,
 an explicitly encoded opcode enum, enum-keyed `mux_lookup`, vectors, role-based
 loader ports, ambient clock/reset propagation, registers, and hardware
 conditional assignment. The lane ALU uses expanding `+&` and `*&` followed by

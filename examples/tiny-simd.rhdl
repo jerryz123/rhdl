@@ -115,21 +115,19 @@ sync_circuit TinySIMD(config :: EngineConfig):
     // Power-of-two depth lets fixed-width overflow wrap directly to address 0.
     pc.next <== pc + bits(1, address_width)
 
-  // The host loop determines physical lane count. The resulting Array exists
-  // only while elaborating; lane_results is runtime vector hardware.
+  // One host comprehension elaborates, wires, and collects the physical lanes.
+  // Its List exists only during elaboration; vec packs the returned hardware
+  // results directly into the runtime output vector.
   def LaneModule = Lane(config.width, config.enable_multiply)
-  def lanes = for InstanceArray (_ in 0..config.lanes):
+  def lane_results = for List (i in 0..config.lanes):
     inst lane(LaneModule)
-  wire lane_results: Vec(config.lanes, Bits(config.width))
+    lane.load_seed <== load_seed
+    lane.step <== step
+    lane.seed <== seeds[i]
+    lane.instruction <== instruction
+    lane.result
 
-  for (i in 0..config.lanes):
-    lanes[i].load_seed <== load_seed
-    lanes[i].step <== step
-    lanes[i].seed <== seeds[i]
-    lanes[i].instruction <== instruction
-    lane_results[i] <== lanes[i].result
-
-  results <== lane_results
+  results <== vec(lane_results)
   pc_out <== pc
 
 def showcase_config = EngineConfig(2, 8, 4, #true)
