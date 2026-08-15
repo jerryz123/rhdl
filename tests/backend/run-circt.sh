@@ -320,7 +320,7 @@ for spec in "${fixture_specs[@]}"; do
 done
 
 if (( ${#materialize_args[@]} > 0 )); then
-  racket -S "$repo_dir" tests/backend/load-example.rkt \
+  RHDL_ESPRESSO=off racket -S "$repo_dir" tests/backend/load-example.rkt \
     materialize "$test_tmp_dir" "${materialize_args[@]}"
 fi
 
@@ -341,6 +341,9 @@ verify_fixture bundle-hierarchy
 verify_fixture interface-hierarchy
 verify_fixture aggregate-memory
 verify_fixture one-hot-aggregate
+if espresso_path="$(command -v espresso 2>/dev/null)"; then
+  RHDL_ESPRESSO="$espresso_path" verify_fixture decode-espresso decode_espresso_tb
+fi
 verify_fixture table table_tb
 verify_fixture vec-search vec_search_tb
 verify_fixture rv64i-alu rv64i_alu_tb

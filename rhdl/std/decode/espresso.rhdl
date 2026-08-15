@@ -1,0 +1,222 @@
+#lang rhdl
+// Adapts typed decode tables to Espresso PLA covers without emitting hardware.
+
+import:
+  rhombus/envvar
+  rhombus/subprocess
+  lib("rhdl/std/decode/table.rhdl") open
+
+export:
+  DecodeFallback
+  DecodePlaTerm
+  DecodePla
+  find_decode_espresso
+  minimize_decode_table
+  make_decode_plan
+
+class DecodeFallback()
+
+class DecodePlaTerm(input_value, input_care, output_ones)
+
+class DecodePla(input_width, output_width, terms, invert_mask)
+
+fun bit_set(value, index):
+  (value bits.and (1 bits.(<<) index)) != 0
+
+fun cube_text(value, care, width):
+  String.join(
+    for List (index in (width - 1) >=..= 0):
+      if !bit_set(care, index)
+      | "-"
+      | block:
+          if bit_set(value, index) | "1" | "0",
+    ""
+  )
+
+fun output_char(output_pattern, index):
+  if !bit_set(output_pattern.care_bits, index)
+  | "-"
+  | block:
+      if bit_set(output_pattern.value_bits, index) | "1" | "0"
+
+fun normalize_output_char(char, invert):
+  if !invert
+  | char
+  | match char
+    | "0": "1"
+    | "1": "0"
+    | "-": "-"
+
+fun partition_text(table, indices, default_char):
+  def invert = default_char == "1"
+  def rows = for List (case in table.cases):
+    def outputs = String.join(
+      indices.map(
+        fun (index): normalize_output_char(output_char(case.output, index), invert)
+      ),
+      ""
+    )
+    cube_text(case.input.value_bits,
+              case.input.care_bits,
+              table.input_width) ++ " " ++ outputs
+  String.append(
+    ".i ", to_string(table.input_width), "\n",
+    ".o ", to_string(indices.length()), "\n",
+    ".type ", (if default_char == "-" | "fr" | "fd"), "\n",
+    String.join(rows, "\n"), "\n.e\n"
+  )
+
+fun parse_cube(text, expected_width, role):
+  unless text.length() == expected_width
+  | error(~who: #'DecodeGen,
+          "Espresso returned a " ++ role ++ " with the wrong width")
+  def mutable value = 0
+  def mutable care = 0
+  for (offset in 0..text.length()):
+    def index = text.length() - 1 - offset
+    match text[offset]
+    | Char"0": care := care bits.or (1 bits.(<<) index)
+    | Char"1":
+        care := care bits.or (1 bits.(<<) index)
+        value := value bits.or (1 bits.(<<) index)
+    | Char"-": #void
+    | ~else:
+        error(~who: #'DecodeGen,
+              "Espresso returned an invalid character in a " ++ role)
+  [value, care]
+
+fun parse_outputs(text, indices):
+  unless text.length() == indices.length()
+  | error(~who: #'DecodeGen,
+          "Espresso returned an output cube with the wrong width")
+  def mutable ones = 0
+  for (offset in 0..text.length()):
+    match text[offset]
+    | Char"1":
+        ones := ones bits.or (1 bits.(<<) indices[offset])
+    | Char"0": #void
+    | Char"-": #void
+    | ~else:
+        error(~who: #'DecodeGen,
+              "Espresso returned an invalid character in an output cube")
+  ones
+
+fun parse_partition(output, input_width, indices):
+  def mutable terms = []
+  def mutable saw_input_width = #false
+  def mutable saw_output_width = #false
+  for (line in output.split("\n")):
+    def fields = line.split()
+    cond
+    | fields.length() == 0: #void
+    | fields[0] == ".i":
+        unless fields.length() == 2 && fields[1].maybe_to_int() == input_width
+        | error(~who: #'DecodeGen,
+                "Espresso returned a malformed PLA input-width directive")
+        saw_input_width := #true
+    | fields[0] == ".o":
+        unless fields.length() == 2 && fields[1].maybe_to_int() == indices.length()
+        | error(~who: #'DecodeGen,
+                "Espresso returned a malformed PLA output-width directive")
+        saw_output_width := #true
+    | fields[0].starts_with("."): #void
+    | fields[0].starts_with("#"): #void
+    | fields.length() != 2:
+        error(~who: #'DecodeGen,
+              "Espresso returned a malformed PLA product")
+    | ~else:
+        def input = parse_cube(fields[0], input_width, "PLA input cube")
+        def output_ones = parse_outputs(fields[1], indices)
+        if output_ones != 0
+        | terms := terms ++ [DecodePlaTerm(input[0], input[1], output_ones)]
+        | #void
+  unless saw_input_width && saw_output_width
+  | error(~who: #'DecodeGen,
+          "Espresso returned a malformed PLA without width directives")
+  terms
+
+fun run_espresso(path, input):
+  def output = Port.Output.open_string()
+  def errors = Port.Output.open_string()
+  def process = subprocess.run(
+    path,
+    ~in: Port.Input.open_string(input),
+    ~out: output,
+    ~err: errors
+  )
+  def status = process.wait()
+  unless status == 0
+  | def detail = errors.get_string()
+    error(~who: #'DecodeGen,
+          String.append("Espresso failed with status ", to_string(status),
+                        (if detail == "" | "" | ": " ++ detail)))
+  output.get_string()
+
+fun merge_term(terms, addition):
+  def existing = terms.find(
+    fun (term):
+      term.input_value == addition.input_value && term.input_care == addition.input_care
+  )
+  if existing
+  | terms.map(
+      fun (term):
+        if term === existing
+        | DecodePlaTerm(term.input_value,
+                        term.input_care,
+                        term.output_ones bits.or addition.output_ones)
+        | term
+    )
+  | terms ++ [addition]
+
+fun minimize_decode_table(table, espresso_path):
+  unless table is_a DecodeTable
+  | error(~who: #'minimize_decode_table,
+          "expected a DecodeTable")
+  def indices = for List (index in (table.output_width - 1) >=..= 0): index
+  def mutable terms = []
+  def mutable invert_mask = 0
+  for (default_char in ["0", "1", "-"]):
+    def partition = indices.filter(
+      ~keep: fun (index): output_char(table.default, index) == default_char
+    )
+    if partition.length() > 0
+    | if default_char == "1"
+      | for (index in partition):
+          invert_mask := invert_mask bits.or (1 bits.(<<) index)
+      | #void
+      def output = run_espresso(
+        espresso_path,
+        partition_text(table, partition, default_char)
+      )
+      for (term in parse_partition(output, table.input_width, partition)):
+        terms := merge_term(terms, term)
+    | #void
+  DecodePla(table.input_width, table.output_width, terms, invert_mask)
+
+// RHDL_ESPRESSO=off is a deterministic escape hatch for portable golden
+// generation. A nonempty other value selects that executable explicitly.
+fun find_decode_espresso():
+  def configured = envvar.getenv("RHDL_ESPRESSO")
+  cond
+  | configured == "off": #false
+  | configured && configured != "auto":
+      subprocess.find_executable_path(configured) || error(
+        ~who: #'DecodeGen,
+        "configured Espresso executable was not found: " ++ configured
+      )
+  | ~else:
+      subprocess.find_executable_path("espresso")
+
+fun make_decode_plan(table, ~espresso: espresso = #'auto):
+  def path:
+    cond
+    | espresso == #'auto: find_decode_espresso()
+    | espresso == #false: #false
+    | ~else:
+        subprocess.find_executable_path(espresso) || error(
+          ~who: #'DecodeGen,
+          "Espresso executable was not found: " ++ to_string(espresso)
+        )
+  if path
+  | minimize_decode_table(table, path)
+  | DecodeFallback()

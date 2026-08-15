@@ -112,13 +112,27 @@ circuit ControlPath():
 ```
 
 `DecodeGen` is an ordinary callable host value and can be passed as a circuit
-parameter. Calling it during elaboration creates one typed `rtl.decode`
-operation; it does not invoke Espresso or pre-minimize the relation. Input and
-output patterns may use different scalar, aggregate, or extension-defined
-hardware types. CIRCT carries output freedom to downstream synthesis, which
-is responsible for selecting and optimizing a concrete implementation. See
-[`../../examples/decode.rhdl`](../../examples/decode.rhdl) for an aggregate
-input/output example.
+parameter. Construction looks for the `espresso` executable. When available,
+it minimizes the relation once and calling the generator elaborates the
+resulting shared PLA as product-term ANDs and per-output ORs. Output bits are
+partitioned by their default state, so zero, one, and don't-care defaults retain
+their intended optimization freedom. `ValidDecodeGen` minimizes its valid bit
+and payload together.
+
+When Espresso is absent, `DecodeGen` emits the existing typed `rtl.decode`
+operation and lets CIRCT lower it without local minimization. An executable
+that is found but fails or returns malformed PLA is an elaboration error; only
+absence selects the fallback. `~espresso: #false` explicitly requests fallback
+for reproducible callers. `RHDL_ESPRESSO=off` provides the equivalent
+process-level override for build and golden-generation scripts, while any
+other nonempty value selects that executable. The default remains automatic
+discovery. Raw `hw_decode` is unchanged and always emits the core operation.
+
+Input and output patterns may use different scalar, aggregate, or
+extension-defined hardware types. Espresso chooses a concrete value for every
+output don't-care; the fallback preserves that freedom for downstream
+synthesis. See [`../../examples/decode.rhdl`](../../examples/decode.rhdl) for an
+aggregate input/output example.
 
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
 sparse record output pattern to serve several input patterns. Its optional
