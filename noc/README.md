@@ -22,6 +22,8 @@ The current implementation provides:
   the public authoring API.
 - Optional embedded unordered routing rules that expand only into the public
   policy algebra.
+- An initial three-way equivalence fixture for raw, builder, and embedded
+  authoring paths that does not re-materialize their routing relations.
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Inspectable routing-policy expressions with symbolic contexts and lowering to
   the existing normalized routing relation.
@@ -90,6 +92,8 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/escape-composition-test.
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/routing-test.rhm
 bash noc/tests/language/run-negative.sh
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/irregular-three-way-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm

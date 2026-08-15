@@ -1,0 +1,195 @@
+#lang rhombus
+// Proves raw, builder, and embedded forms have identical irregular-network semantics.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../support/routing-equivalence.rhm" open
+
+// Numeric identities below deliberately match deterministic symbolic lowering:
+// nodes a, b, c, d and links a_b, a_c, b_d, c_b.
+def raw_a = NodeId(0)
+def raw_b = NodeId(1)
+def raw_c = NodeId(2)
+def raw_d = NodeId(3)
+def raw_a_b = LinkId(0)
+def raw_a_c = LinkId(1)
+def raw_b_d = LinkId(2)
+def raw_c_b = LinkId(3)
+
+def raw_topology = Topology(
+  [raw_a, raw_b, raw_c, raw_d],
+  [PhysicalLink(raw_a_b, raw_a, raw_b, 1),
+   PhysicalLink(raw_a_c, raw_a, raw_c, 1),
+   PhysicalLink(raw_b_d, raw_b, raw_d, 1),
+   PhysicalLink(raw_c_b, raw_c, raw_b, 1)]
+)
+def raw_route = RouteClass(RouteClassId(0), raw_a, raw_d)
+def mutable raw_query_count = 0
+
+fun raw_allows(_route_class, origin, candidate_vc):
+  raw_query_count := raw_query_count + 1
+  cond
+  | origin is_a Injection:
+      link_id_equal(candidate_vc.link_id, raw_a_c)
+  | vc_id_equal(origin.vc, VCId(raw_a_c, 0)):
+      link_id_equal(candidate_vc.link_id, raw_c_b)
+  | vc_id_equal(origin.vc, VCId(raw_c_b, 0)):
+      link_id_equal(candidate_vc.link_id, raw_b_d)
+  | ~else: #false
+
+def raw_problem = RoutingProblem(
+  raw_topology,
+  [raw_route],
+  RoutingRelation(raw_allows)
+)
+
+def phase0 = VCGroup("phase0", 1)
+def phase1 = VCGroup("phase1", 1)
+def phase2 = VCGroup("phase2", 1)
+def builder_a = NodeRef("a")
+def builder_b = NodeRef("b")
+def builder_c = NodeRef("c")
+def builder_d = NodeRef("d")
+def builder_spec = TopologySpec(
+  [builder_a, builder_b, builder_c, builder_d],
+  [directed_link(LinkRef("a_b"), builder_a, builder_b, [phase0]),
+   directed_link(LinkRef("a_c"), builder_a, builder_c, [phase0]),
+   directed_link(LinkRef("b_d"), builder_b, builder_d, [phase2]),
+   directed_link(LinkRef("c_b"), builder_c, builder_b, [phase1])]
+)
+def builder_topology = lower_topology(builder_spec)
+def builder_route_ref = RouteClassRef("a_to_d")
+def builder_routes = lower_route_classes(
+  builder_topology,
+  [RouteClassSpec(builder_route_ref, builder_a, builder_d)]
+)
+def builder_policy = policy_union(
+  [routing_phase(
+     "inject",
+     policy_intersection(
+       [injection_policy,
+        match_route_classes([builder_route_ref]),
+        restrict_vc_groups(["phase0"]),
+        select_candidate_links([builder_spec.link("a_c")])]
+     )
+   ),
+   routing_phase(
+     "advance_phase1",
+     policy_intersection(
+       [forwarding_policy,
+        match_route_classes([builder_route_ref]),
+        match_current_vc_groups(["phase0"]),
+        restrict_vc_groups(["phase1"]),
+        select_candidate_links([builder_spec.link("c_b")])]
+     )
+   ),
+   routing_phase(
+     "advance_phase2",
+     policy_intersection(
+       [forwarding_policy,
+        match_route_classes([builder_route_ref]),
+        match_current_vc_groups(["phase1"]),
+        restrict_vc_groups(["phase2"]),
+        select_candidate_links([builder_spec.link("b_d")])]
+     )
+   )]
+)
+def builder_problem = RoutingProblem(
+  builder_topology.topology,
+  builder_routes.route_classes,
+  lower_routing_policy(builder_routes, builder_policy)
+)
+
+def syntax_spec = topology:
+  vc_group phase0: 1
+  vc_group phase1: 1
+  vc_group phase2: 1
+  node a
+  node b
+  node c
+  node d
+  directed a_b:
+    a -> b
+    vcs [phase0]
+  directed a_c:
+    a -> c
+    vcs [phase0]
+  directed b_d:
+    b -> d
+    vcs [phase2]
+  directed c_b:
+    c -> b
+    vcs [phase1]
+
+def syntax_topology = lower_topology(syntax_spec)
+def syntax_route_ref = RouteClassRef("a_to_d")
+def syntax_routes = lower_route_classes(
+  syntax_topology,
+  [RouteClassSpec(
+     syntax_route_ref,
+     syntax_spec.node("a"),
+     syntax_spec.node("d")
+   )]
+)
+def syntax_policy = routing:
+  rule inject:
+    origin injection
+    routes [syntax_route_ref]
+    candidate_vcs [phase0]
+    candidate_links [syntax_spec.link("a_c")]
+  rule advance_phase1:
+    origin forwarding
+    routes [syntax_route_ref]
+    current_vcs [phase0]
+    candidate_vcs [phase1]
+    candidate_links [syntax_spec.link("c_b")]
+  rule advance_phase2:
+    origin forwarding
+    routes [syntax_route_ref]
+    current_vcs [phase1]
+    candidate_vcs [phase2]
+    candidate_links [syntax_spec.link("b_d")]
+
+def syntax_problem = RoutingProblem(
+  syntax_topology.topology,
+  syntax_routes.route_classes,
+  lower_routing_policy(syntax_routes, syntax_policy)
+)
+
+def raw_semantics = snapshot_routing(raw_problem)
+def builder_semantics = snapshot_routing(builder_problem)
+def syntax_semantics = snapshot_routing(syntax_problem)
+
+check:
+  // Five finite candidate queries prove the snapshot compiles only once.
+  raw_query_count ~is 5
+  raw_semantics.result_kind ~is "validated-acyclic"
+  raw_semantics.materialized_decisions.length() ~is 5
+  raw_semantics.dependency_vertices ~is ["l1.vc0", "l2.vc0", "l3.vc0"]
+  raw_semantics.route_table_rows.length() ~is 4
+  raw_semantics.topology_nodes ~is builder_semantics.topology_nodes
+  raw_semantics.topology_nodes ~is syntax_semantics.topology_nodes
+  raw_semantics.topology_links ~is builder_semantics.topology_links
+  raw_semantics.topology_links ~is syntax_semantics.topology_links
+  raw_semantics.route_classes ~is builder_semantics.route_classes
+  raw_semantics.route_classes ~is syntax_semantics.route_classes
+  raw_semantics.materialized_decisions ~is builder_semantics.materialized_decisions
+  raw_semantics.materialized_decisions ~is syntax_semantics.materialized_decisions
+  raw_semantics.reachable_routes ~is builder_semantics.reachable_routes
+  raw_semantics.reachable_routes ~is syntax_semantics.reachable_routes
+  raw_semantics.dependency_vertices ~is builder_semantics.dependency_vertices
+  raw_semantics.dependency_vertices ~is syntax_semantics.dependency_vertices
+  raw_semantics.dependency_edges ~is builder_semantics.dependency_edges
+  raw_semantics.dependency_edges ~is syntax_semantics.dependency_edges
+  raw_semantics.result_kind ~is builder_semantics.result_kind
+  raw_semantics.result_kind ~is syntax_semantics.result_kind
+  raw_semantics.proof ~is builder_semantics.proof
+  raw_semantics.proof ~is syntax_semantics.proof
+  raw_semantics.route_table_rows ~is builder_semantics.route_table_rows
+  raw_semantics.route_table_rows ~is syntax_semantics.route_table_rows
+  raw_semantics.assumptions ~is builder_semantics.assumptions
+  raw_semantics.assumptions ~is syntax_semantics.assumptions
+  raw_semantics.validator_version ~is builder_semantics.validator_version
+  raw_semantics.validator_version ~is syntax_semantics.validator_version

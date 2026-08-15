@@ -1,0 +1,160 @@
+#lang rhombus
+// Captures comparable public semantics from one compiled routing result for equivalence tests.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../plan/main.rhm" open
+
+export:
+  RoutingSemantics
+  snapshot_routing
+
+class RoutingSemantics(topology_nodes,
+                       topology_links,
+                       route_classes,
+                       materialized_decisions,
+                       reachable_routes,
+                       dependency_vertices,
+                       dependency_edges,
+                       result_kind,
+                       proof,
+                       route_table_rows,
+                       assumptions,
+                       validator_version)
+
+fun route_class_signature(route_class):
+  String.append(route_class.describe(),
+                "; metadata=", to_string(route_class.metadata))
+
+fun reachable_route_signature(route):
+  String.append(
+    route.describe(),
+    "; decisions=[",
+    String.join(
+      route.reachable_decisions.map(fun (decision): decision.describe()),
+      ", "
+    ),
+    "]"
+  )
+
+fun dependency_edge_signature(edge):
+  String.append(
+    edge.describe(),
+    "; decisions=[",
+    String.join(
+      edge.decisions.map(fun (decision): decision.describe()),
+      ", "
+    ),
+    "]"
+  )
+
+fun escape_entry_signature(entry):
+  String.append(
+    entry.origin.describe(),
+    " -> [",
+    String.join(
+      entry.decisions.map(fun (decision): decision.describe()),
+      ", "
+    ),
+    "]"
+  )
+
+fun escape_route_signature(route):
+  String.append(
+    route.route_class.id.describe(),
+    "; reachable=[",
+    String.join(
+      route.reachable_escape_vcs.map(fun (vc): vc.describe()),
+      ", "
+    ),
+    "]; viable=[",
+    String.join(
+      route.viable_escape_vcs.map(fun (vc): vc.describe()),
+      ", "
+    ),
+    "]; decisions=[",
+    String.join(
+      route.escape_decisions.map(fun (decision): decision.describe()),
+      ", "
+    ),
+    "]; entries=[",
+    String.join(route.entries.map(escape_entry_signature), ", "),
+    "]"
+  )
+
+fun certificate_signature(certificate):
+  cond
+  | certificate is_a AcyclicCertificate:
+      ["acyclic"] ++ certificate.ordered_vcs.map(
+        fun (vc): vc.describe()
+      )
+  | certificate is_a EscapeCertificate:
+      def mutable rows = [
+        "escape",
+        certificate.request.describe(),
+        certificate.closure.describe()
+      ]
+      for (route in certificate.reachability.routes):
+        rows := rows ++ [escape_route_signature(route)]
+      rows := rows ++ certificate.dependency_graph.vertices.map(
+        fun (vc): "escape vertex " ++ vc.describe()
+      )
+      rows := rows ++ certificate.dependency_graph.edges.map(
+        fun (edge): "escape edge " ++ dependency_edge_signature(edge)
+      )
+      rows ++ certificate.acyclic_certificate.ordered_vcs.map(
+        fun (vc): "escape rank " ++ vc.describe()
+      )
+  | ~else:
+      error(~who: #'snapshot_routing,
+            "unsupported validated-routing certificate")
+
+fun snapshot_routing(problem, ~escape: escape_request = #false):
+  unless problem is_a RoutingProblem
+  | error(~who: #'snapshot_routing, "expected a RoutingProblem")
+  def result = compile_routing(problem, ~escape: escape_request)
+  def graph:
+    cond
+    | result is_a ValidatedRouting: result.dependency_graph
+    | result is_a DependencyCycle: result.graph
+    | ~else:
+        error(~who: #'snapshot_routing,
+              "routing compilation did not produce a comparable result")
+  def reachable = graph.reachable
+  def materialized = reachable.materialized
+  def result_kind:
+    cond
+    | result is_a DependencyCycle: "dependency-cycle"
+    | result.certificate is_a EscapeCertificate: "validated-escape"
+    | ~else: "validated-acyclic"
+  def proof:
+    if result is_a DependencyCycle
+    | ["cycle"] ++ result.edges.map(dependency_edge_signature)
+    | certificate_signature(result.certificate)
+  def route_table_rows:
+    if result is_a ValidatedRouting
+    | result.route_table.rows.map(fun (row): row.describe())
+    | []
+  def assumptions:
+    if result is_a ValidatedRouting
+    | result.assumptions.describe()
+    | "none"
+  def validator_version:
+    if result is_a ValidatedRouting
+    | result.validator_version
+    | "none"
+  RoutingSemantics(
+    materialized.topology.nodes.map(fun (node): node.describe()),
+    materialized.topology.links.map(fun (link): link.describe()),
+    materialized.route_classes.map(route_class_signature),
+    materialized.decisions.map(fun (decision): decision.describe()),
+    reachable.routes.map(reachable_route_signature),
+    graph.vertices.map(fun (vc): vc.describe()),
+    graph.edges.map(dependency_edge_signature),
+    result_kind,
+    proof,
+    route_table_rows,
+    assumptions,
+    validator_version
+  )
