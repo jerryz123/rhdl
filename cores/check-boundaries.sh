@@ -35,6 +35,23 @@ if [[ -n "$component_control_imports" ]]; then
   exit 1
 fi
 
+pipeline_transport_imports="$(rg -n 'simple-memory' \
+  cores/ricket/core-pipeline.rhdl || true)"
+if [[ -n "$pipeline_transport_imports" ]]; then
+  echo "Ricket pipeline must depend on its cache protocol, not SimpleMemory" >&2
+  echo "$pipeline_transport_imports" >&2
+  exit 1
+fi
+
+cache_cross_imports="$(rg -n '^[[:space:]]+"[^" ]*(icache|dcache)/' \
+  cores/ricket/icache cores/ricket/dcache \
+  --glob '*.rhm' --glob '*.rhdl' || true)"
+if [[ -n "$cache_cross_imports" ]]; then
+  echo "Ricket instruction and data cache packages must not import each other" >&2
+  echo "$cache_cross_imports" >&2
+  exit 1
+fi
+
 unexpected_root_sources="$(find cores -maxdepth 1 -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
   ! -name 'alu.rhdl' ! -name 'branch-resolver.rhdl' \
   ! -name 'load-store.rhdl' -print)"

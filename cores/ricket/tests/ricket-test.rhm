@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks Ricket elaboration, hierarchy, ports, and configuration bounds.
+// Checks Ricket's pipeline-cache hierarchy, external ports, and configuration bounds.
 
 import:
   "../../../rhdl/core/main.rhm" open
@@ -7,8 +7,15 @@ import:
   "../ricket.rhdl" as core
 
 def design = embedded.run_elaboration(fun (): core.Ricket(32))
-def top = design.modules.find(
-  fun (module_def): module_def.name == "Ricket"
+def top = design.modules.find(fun (module_def): module_def.name == "Ricket")
+def pipeline = design.modules.find(
+  fun (module_def): module_def.name == "RicketPipeline"
+)
+def l1i = design.modules.find(
+  fun (module_def): module_def.name == "RicketL1ICache"
+)
+def l1d = design.modules.find(
+  fun (module_def): module_def.name == "RicketL1DCache"
 )
 def register_file = design.modules.find(
   fun (module_def): module_def.name == "RicketRegisterFile"
@@ -20,19 +27,21 @@ def wide_design = embedded.run_elaboration(fun (): core.Ricket(64))
 def wide_top = wide_design.modules.find(
   fun (module_def): module_def.name == "Ricket"
 )
-def instance_modules = top.operations.filter(
-  ~keep: fun (operation): operation.opcode == "rtl.instance"
-).map(fun (operation): operation.attribute("module").name)
-fun register_names(module_def):
+fun instance_names(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).map(fun (operation): operation.attribute("module").name)
+fun state_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
   ).map(fun (operation): operation.attribute("name"))
-def state_registers = top.operations.filter(
-  ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
-)
-def state_names = state_registers.map(
-  fun (operation): operation.attribute("name")
-)
+fun sync_memories(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.sync_memory"
+  )
+
+def top_instances = instance_names(top)
+def pipeline_instances = instance_names(pipeline)
 
 check:
   top.inputs.map(fun (port): port.name) ~is [
@@ -41,30 +50,35 @@ check:
   top.outputs.map(fun (port): port.name) ~is [
     "start_out", "imem_out", "dmem_out", "fault"
   ]
-  top.find_input("start_in").type.field("bits").type.width ~is 64
-  // Stage logic stays in Ricket. Four flow-owned register boundaries and six
-  // reusable components remain as child modules.
-  instance_modules.filter(
+  top_instances ~is ["RicketPipeline", "RicketL1ICache", "RicketL1DCache"]
+  state_names(top) ~is []
+  pipeline_instances.filter(
     ~keep: fun (name): name.starts_with("Pipe")
   ).length() ~is 3
-  instance_modules.contains("ValidPipe") ~is #true
-  instance_modules.contains("RV64IInstructionDecoder") ~is #true
-  instance_modules.contains("RicketRegisterFile") ~is #true
-  instance_modules.contains("ALU") ~is #true
-  instance_modules.contains("BranchResolver") ~is #true
-  instance_modules.contains("LoadGen") ~is #true
-  instance_modules.contains("StoreGen") ~is #true
-  instance_modules.length() ~is 10
+  pipeline_instances.contains("ValidPipe") ~is #true
+  pipeline_instances.contains("RV64IInstructionDecoder") ~is #true
+  pipeline_instances.contains("RicketRegisterFile") ~is #true
+  pipeline_instances.contains("ALU") ~is #true
+  pipeline_instances.contains("BranchResolver") ~is #true
+  pipeline_instances.contains("LoadGen") ~is #false
+  pipeline_instances.contains("StoreGen") ~is #false
+  pipeline_instances.length() ~is 8
+  instance_names(l1i) ~is []
+  instance_names(l1d).contains("LoadGen") ~is #true
+  instance_names(l1d).contains("StoreGen") ~is #true
+  sync_memories(l1i).length() ~is 2
+  sync_memories(l1d).length() ~is 2
   type_equal(architectural_registers.results[0].type,
              VectorType(32, Bits(64))) ~is #true
-  state_names ~is [
+  state_names(pipeline) ~is [
     "faulted", "started", "fetch_pc", "fetch_request_outstanding",
     "fetch_request_pc", "fetch_epoch", "fetch_request_epoch",
     "memory_request_sent"
   ]
-  wide_top.find_input("start_in").type.field("bits").type.width ~is 64
+  top.find_input("start_in").type.field("bits").type.width ~is 64
+  top.find_output("imem_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
   wide_top.find_output("imem_out").type.field("request").type.field("bits").type.field("address").type.width ~is 64
   verify_design(design) ~is #void
   verify_design(wide_design) ~is #void
-  embedded.run_elaboration(fun (): core.Ricket(2)) ~throws "cover an eight-byte data transfer"
+  embedded.run_elaboration(fun (): core.Ricket(11)) ~throws "tag bits"
   embedded.run_elaboration(fun (): core.Ricket(65)) ~throws "must not exceed"

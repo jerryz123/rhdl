@@ -1,0 +1,28 @@
+#lang rhombus
+// Checks Ricket data-cache protocol widths, geometry, and state shape.
+
+import:
+  "../../../rhdl/core/main.rhm" open
+  "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../dcache/cache.rhdl" as l1d
+
+def design = embedded.run_elaboration(
+  fun (): l1d.RicketL1DCache(32, 8, 32)
+)
+def cache = design.modules.find(
+  fun (module_def): module_def.name == "RicketL1DCache"
+)
+fun register_names(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+  ).map(fun (operation): operation.attribute("name"))
+
+check:
+  cache.find_input("core_in").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  cache.find_output("memory_out").type.field("request").type.field("bits").type.field("mask").type.width ~is 8
+  register_names(cache).contains("valid_bits") ~is #true
+  register_names(cache).contains("request") ~is #true
+  verify_design(design) ~is #void
+  embedded.run_elaboration(
+    fun (): l1d.RicketL1DCache(32, 8, 24)
+  ) ~throws "line byte count"

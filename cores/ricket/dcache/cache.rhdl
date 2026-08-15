@@ -1,0 +1,209 @@
+#lang rhdl
+// Implements Ricket's blocking direct-mapped write-through data cache.
+
+import:
+  "protocol.rhdl" open
+  "../../load-store.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/simple-memory.rhdl") open
+
+hardware_enum RicketL1DState:
+  Idle
+  Lookup
+  Refill
+  WriteRequest
+  WriteResponse
+  Respond
+
+fun check_l1d_geometry(address_width :: Int,
+                       sets :: Int,
+                       line_bytes :: Int):
+  unless sets >= 2 && power_of_two(sets)
+  | error(~who: #'RicketL1DCache,
+          "set count must be a power of two of at least two")
+  unless line_bytes >= 8 && power_of_two(line_bytes)
+  | error(~who: #'RicketL1DCache,
+          "line byte count must be a power of two of at least eight")
+  unless address_width > (alignment_bits(line_bytes) + alignment_bits(sets))
+  | error(~who: #'RicketL1DCache,
+          "address width must include line offset, set, and tag bits")
+
+sync_circuit RicketL1DCache(address_width :: Int,
+                            sets :: Int,
+                            line_bytes :: Int):
+  check_l1d_geometry(address_width, sets, line_bytes)
+  def beats = line_bytes / 8
+  def line_bits = line_bytes * 8
+  def offset_width = alignment_bits(line_bytes)
+  def set_width = alignment_bits(sets)
+  def tag_width = address_width - offset_width - set_width
+  def beat_width = index_width(beats)
+  def count_width = index_width(beats + 1)
+  def Line = Vec(beats, Bits(64))
+
+  interface core(RicketDataAccess(address_width), ~role: responder)
+  interface memory(SimpleMemory(address_width, 8), ~role: requester)
+
+  sync_mem tags(sets, Bits(tag_width)):
+    read_write
+  sync_mem lines(sets, Line, ~mask_granularity: 8):
+    read_write
+
+  inst load_gen(LoadGen())
+  inst store_gen(StoreGen())
+
+  def empty_request = RicketDataReq(address_width):
+    address: bits(0, address_width)
+    write: Bool(#false)
+    width: MemoryWidth.Double
+    unsigned: Bool(#false)
+    data: bits(0, 64)
+  reg state(~init: RicketL1DState.Idle)
+  reg valid_bits(~init: bits(0, sets))
+  reg request(~init: empty_request)
+  reg request_set(~init: bits(0, set_width))
+  reg request_tag(~init: bits(0, tag_width))
+  reg request_beat(~init: bits(0, beat_width))
+  reg refill_requested(~init: bits(0, count_width))
+  reg refill_received(~init: bits(0, count_width))
+  reg refill_line(~init: cast(bits(0, line_bits), Line))
+  reg response_data(~init: bits(0, 64))
+
+  core.request.ready <== state === RicketL1DState.Idle
+  core.response.valid <== state === RicketL1DState.Respond
+  core.response.bits.data <== response_data
+  memory.response.ready <== (state === RicketL1DState.Refill) ||| (
+    state === RicketL1DState.WriteResponse
+  )
+
+  def request_fire = fire(core.request)
+  def response_fire = fire(core.response)
+  def refill_response_fire = fire(memory.response)
+  def request_set_value = core.request.bits.address[
+    offset_width..(offset_width + set_width)
+  ]
+  def request_tag_value = core.request.bits.address[
+    (offset_width + set_width)..address_width
+  ]
+  def request_beat_value = core.request.bits.address[3..offset_width]
+  def valid_vector = valid_bits.into(Vec(sets, Bool))
+  def line_hit = valid_vector.lookup(
+    request_set,
+    ~default: Bool(#false)
+  ) & (tags.read_write.read_data === request_tag)
+  def cached_line = lines.read_write.read_data
+  def cached_beat = cached_line.lookup(request_beat, ~default: bits(0, 64))
+
+  load_gen.address <== zext(request.address, 64)
+  load_gen.data <== mux(
+    (state === RicketL1DState.Refill) & refill_response_fire,
+    refill_line.updated(
+      refill_received[0..beat_width],
+      memory.response.bits.data
+    ).lookup(request_beat, ~default: bits(0, 64)),
+    cached_beat
+  )
+  load_gen.width <== request.width
+  load_gen.unsigned_load <== request.unsigned
+  store_gen.address <== zext(request.address, 64)
+  store_gen.value <== request.data
+  store_gen.width <== request.width
+
+  def refill_index = refill_received[0..beat_width]
+  def line_with_response = refill_line.updated(
+    refill_index,
+    memory.response.bits.data
+  )
+  def store_line = cached_line.updated(request_beat, store_gen.data)
+  def last_refill_response = refill_received === bits(beats - 1, count_width)
+  def install_refill = (state === RicketL1DState.Refill) & (
+    refill_response_fire
+  ) & last_refill_response
+  def update_store_hit = (state === RicketL1DState.Lookup) & request.write & line_hit
+  def cache_write = install_refill ||| update_store_hit
+  def store_line_mask = zext(store_gen.mask, line_bytes) << zext(
+    concat(request_beat, bits(0, 3)),
+    line_bytes
+  )
+
+  def line_base = align_down(request.address, line_bytes)
+  def refill_byte_offset = zext(refill_requested, address_width) << (
+    bits(3, address_width)
+  )
+  memory.request.valid <== mux(
+    state === RicketL1DState.Refill,
+    refill_requested < bits(beats, count_width),
+    state === RicketL1DState.WriteRequest
+  )
+  memory.request.bits <== SimpleMemoryReq(address_width, 8):
+    address: mux(
+      state === RicketL1DState.WriteRequest,
+      align_down(request.address, 8),
+      line_base + refill_byte_offset
+    )
+    write: state === RicketL1DState.WriteRequest
+    data: store_gen.data
+    mask: mux(
+      state === RicketL1DState.WriteRequest,
+      store_gen.mask,
+      !bits(0, 8)
+    )
+  tags.read_write.address <== mux(cache_write, request_set, request_set_value)
+  tags.read_write.enable <== (request_fire ||| install_refill).into(Bits(1))
+  tags.read_write.write <== install_refill.into(Bits(1))
+  tags.read_write.write_data <== request_tag
+  lines.read_write.address <== mux(cache_write, request_set, request_set_value)
+  lines.read_write.enable <== (request_fire ||| cache_write).into(Bits(1))
+  lines.read_write.write <== cache_write.into(Bits(1))
+  lines.read_write.write_data <== mux(
+    install_refill,
+    line_with_response,
+    store_line
+  )
+  lines.read_write.write_mask <== mux(
+    install_refill,
+    !bits(0, line_bytes),
+    store_line_mask
+  )
+
+  when request_fire:
+    request <== core.request.bits
+    request_set <== request_set_value
+    request_tag <== request_tag_value
+    request_beat <== request_beat_value
+    state <== RicketL1DState.Lookup
+  elsewhen (state === RicketL1DState.Lookup):
+    when (request.write):
+      state <== RicketL1DState.WriteRequest
+    elsewhen line_hit:
+      response_data <== load_gen.value
+      state <== RicketL1DState.Respond
+    otherwise:
+      refill_requested <== bits(0, count_width)
+      refill_received <== bits(0, count_width)
+      refill_line <== cast(bits(0, line_bits), Line)
+      state <== RicketL1DState.Refill
+  elsewhen (state === RicketL1DState.Refill):
+    when (fire(memory.request)):
+      refill_requested <== refill_requested + bits(1, count_width)
+    when refill_response_fire:
+      refill_line <== line_with_response
+      refill_received <== refill_received + bits(1, count_width)
+      when last_refill_response:
+        valid_bits <== valid_vector.updated(
+          request_set,
+          Bool(#true)
+        ).into(Bits(sets))
+        response_data <== load_gen.value
+        state <== RicketL1DState.Respond
+  elsewhen ((state === RicketL1DState.WriteRequest) & fire(memory.request)):
+    state <== RicketL1DState.WriteResponse
+  elsewhen ((state === RicketL1DState.WriteResponse) & fire(memory.response)):
+    response_data <== bits(0, 64)
+    state <== RicketL1DState.Respond
+  elsewhen response_fire:
+    state <== RicketL1DState.Idle
+
+export:
+  RicketL1DCache
