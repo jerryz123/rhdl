@@ -192,6 +192,14 @@ protocol assertions.
 `fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
 returns `endpoint.valid and endpoint.ready`.
 
+Ready-valid flow helpers classify protocols through the same nominal
+refinement and `supports` relation used by interface connections. A differently
+named refinement is accepted and normalized to its canonical `Decoupled(T)`,
+`Irrevocable(T)`, or `Valid(T)` contract; an unrelated declaration is rejected
+even if it reuses one of those display names. Control-only helpers additionally
+require the exact payloadless control-plane member shape, so a payload-bearing
+protocol is not silently treated as a `Ctrl` flow.
+
 ## Generic interconnect parameters
 
 [`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral host-side sets

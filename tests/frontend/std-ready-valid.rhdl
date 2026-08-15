@@ -4,6 +4,22 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
 
+// Differently named protocols exercise nominal refinement and explicit support
+// without relying on the canonical declarations' display names.
+interface Buffered8() refines Decoupled(Bits(8))
+
+interface StableBuffered8() refines Irrevocable(Bits(8))
+
+interface BufferedCtrl() refines DecoupledCtrl()
+
+interface BufferedValid8() refines Valid(Bits(8))
+
+interface Alternate8() refines DecoupledCtrl():
+  supports producer: Decoupled(Bits(8))
+
+  producer -> consumer:
+    bits: Bits(8)
+
 fun require_byte_decoupled(
   endpoint :: Endpoint.supports(Decoupled(Bits(8)))
 ) :~ Endpoint:
@@ -33,6 +49,22 @@ circuit IrrevocableCtrlAdapter():
   interface ingress(IrrevocableCtrl(), ~role: consumer)
   interface egress(IrrevocableCtrl(), ~role: producer)
   egress <=> ingress
+
+circuit RefinedProtocolHelpers():
+  interface payload(Buffered8(), ~role: consumer)
+  interface control(BufferedCtrl(), ~role: consumer)
+  def PayloadType = decoupled_payload_type(payload)
+  output payload_value: PayloadType
+  output control_valid: Bool
+
+  payload.ready <== Bool(#true)
+  ctrl_endpoint(control).ready <== Bool(#true)
+  payload_value <== payload.bits
+  control_valid <== ctrl_endpoint(control).valid
+
+circuit PayloadIsNotCtrl():
+  interface payload(Decoupled(Bits(8)), ~role: consumer)
+  ctrl_endpoint(payload)
 
 // Exercises the common control annotation on a payload-bearing endpoint.
 circuit DecoupledFire():
@@ -173,6 +205,13 @@ export:
   IrrevocableAdapter
   DecoupledCtrlAdapter
   IrrevocableCtrlAdapter
+  Buffered8
+  StableBuffered8
+  BufferedCtrl
+  BufferedValid8
+  Alternate8
+  RefinedProtocolHelpers
+  PayloadIsNotCtrl
   DecoupledFire
   IrrevocableFire
   IrrevocableToDecoupled

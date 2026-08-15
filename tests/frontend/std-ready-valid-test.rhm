@@ -7,6 +7,7 @@ import:
   "../../rhdl/frontend/layers/bool.rhm" as bool
   "../../rhdl/frontend/layers/interface.rhm" open
   "../../rhdl/std/ready-valid.rhdl" as std
+  "../../rhdl/std/flow/stage.rhdl" as stage
   "std-ready-valid.rhdl" as fixture
 
 def valid_type = std.Valid(Bits(8))
@@ -51,6 +52,9 @@ def irrevocable_ctrl_to_decoupled_ctrl_design = embedded.run_elaboration(
 def transitive_control_design = embedded.run_elaboration(
   fun (): fixture.TransitiveCtrlCompatibility()
 )
+def refined_helpers_design = embedded.run_elaboration(
+  fun (): fixture.RefinedProtocolHelpers()
+)
 def decoupled_merge_design = embedded.run_elaboration(
   fun (): fixture.DecoupledPayloadMerge()
 )
@@ -62,6 +66,20 @@ def decoupled_split_design = embedded.run_elaboration(
 )
 def irrevocable_split_design = embedded.run_elaboration(
   fun (): fixture.IrrevocablePayloadSplit()
+)
+def impostor_decoupled = InterfaceType(
+  "Decoupled",
+  ["producer", "consumer"],
+  [
+    InterfaceMember("valid", bool.Bool, "producer", "consumer"),
+    InterfaceMember("ready", bool.Bool, "consumer", "producer"),
+    InterfaceMember("bits", Bits(8), "producer", "consumer")
+  ],
+  ~provider_role: "producer"
+)
+def remapped_stable_protocol = stage.flow_protocol_with_payload(
+  fixture.StableBuffered8(),
+  Bits(16)
 )
 
 check:
@@ -83,6 +101,20 @@ check:
   irrevocable_type.parent.parent.name ~is "DecoupledCtrl"
   irrevocable_type.supported_types.map(fun (type): type.name) ~is ["Decoupled"]
   irrevocable_type.flows.length() ~is 2
+  interface_type_supports(fixture.Buffered8(), std.Decoupled(Bits(8))) ~is #true
+  interface_type_supports(fixture.Alternate8(), std.Decoupled(Bits(8))) ~is #true
+  interface_type_supports(impostor_decoupled, std.Decoupled(Bits(8))) ~is #false
+  std.decoupled_protocol_type(impostor_decoupled) ~is #false
+  stage.flow_protocol_type(fixture.Buffered8()).identity === decoupled_type.identity ~is #true
+  stage.flow_payload_type(fixture.Buffered8()).width ~is 8
+  stage.flow_protocol_type(fixture.Alternate8()).identity === decoupled_type.identity ~is #true
+  stage.flow_protocol_type(fixture.StableBuffered8()).identity === irrevocable_type.identity ~is #true
+  stage.valid_flow_protocol_type(fixture.BufferedValid8()).identity === valid_type.identity ~is #true
+  remapped_stable_protocol.identity === std.Irrevocable(Bits(16)).identity ~is #true
+  remapped_stable_protocol.members.find(
+    fun (member): member.name == "bits"
+  ).type.width ~is 16
+  stage.flow_protocol_type(impostor_decoupled) ~throws "requires a Decoupled or Irrevocable protocol"
   valid_adapter.inputs.map(fun (port): port.name) ~is ["ingress_in"]
   valid_adapter.outputs.map(fun (port): port.name) ~is ["egress_out"]
   decoupled_adapter.inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
@@ -115,6 +147,7 @@ check:
   verify_design(irrevocable_to_ctrl_design) ~is #void
   verify_design(irrevocable_ctrl_to_decoupled_ctrl_design) ~is #void
   verify_design(transitive_control_design) ~is #void
+  verify_design(refined_helpers_design) ~is #void
   verify_design(decoupled_merge_design) ~is #void
   verify_design(irrevocable_merge_design) ~is #void
   verify_design(decoupled_split_design) ~is #void
@@ -129,3 +162,4 @@ check:
   embedded.run_elaboration(fun (): fixture.WrongSplitMemberDirection()) ~throws "driveable hardware place"
   embedded.run_elaboration(fun (): fixture.ValidIsNotReadyValidCompatible()) ~throws "does not support"
   embedded.run_elaboration(fun (): fixture.UnsafeCtrlStrengthening()) ~throws "does not support"
+  embedded.run_elaboration(fun (): fixture.PayloadIsNotCtrl()) ~throws "control-flow chaining requires"

@@ -23,13 +23,14 @@ fun flow_protocol_type(source_or_type):
         | error(~who: #'flow_protocol_type,
                 "flow stage requires a payload DataType, ready-valid InterfaceType, Endpoint, or Handle")
         Decoupled(source_or_type)
-  unless protocol.name == "Decoupled" || protocol.name == "Irrevocable"
+  def normalized = decoupled_protocol_type(protocol)
+  unless normalized
   | if source_or_type is_a Endpoint || source_or_type is_a Handle
     | error(~who: #'flow_protocol_type,
             "flow-control chaining requires a Decoupled or Irrevocable endpoint")
     | error(~who: #'flow_protocol_type,
             "flow-control chaining requires a Decoupled or Irrevocable protocol")
-  protocol
+  normalized
 
 // Extracts the payload carried by any accepted ready-valid stage argument.
 fun flow_payload_type(source_or_type):
@@ -57,13 +58,14 @@ fun valid_flow_protocol_type(source_or_type):
         | error(~who: #'valid_flow_protocol_type,
                 "Valid stage requires a payload DataType, Valid InterfaceType, Endpoint, or Handle")
         Valid(source_or_type)
-  unless protocol.name == "Valid"
+  def normalized = valid_protocol_type(protocol)
+  unless normalized
   | if source_or_type is_a Endpoint || source_or_type is_a Handle
     | error(~who: #'valid_flow_protocol_type,
             "Valid-flow chaining requires a Valid endpoint")
     | error(~who: #'valid_flow_protocol_type,
             "Valid-flow chaining requires a Valid protocol")
-  protocol
+  normalized
 
 fun valid_flow_payload_type(source_or_type):
   def protocol = valid_flow_protocol_type(source_or_type)
@@ -73,15 +75,16 @@ fun valid_flow_payload_type(source_or_type):
 
 // Replaces a protocol's payload without weakening its behavioral contract.
 fun flow_protocol_with_payload(protocol, payload_type):
-  unless protocol is_a InterfaceType
+  def normalized = decoupled_protocol_type(protocol)
+  unless normalized
   | error(~who: #'flow_protocol_with_payload,
-          "flow protocol must be an InterfaceType")
-  if protocol.name == "Irrevocable"
+          "flow protocol must nominally support Decoupled or Irrevocable")
+  def current_payload_type = normalized.members.find(
+    fun (member): member.name == "bits"
+  ).type
+  if interface_type_supports(normalized, Irrevocable(current_payload_type))
   | Irrevocable(payload_type)
-  | if protocol.name == "Decoupled"
-    | Decoupled(payload_type)
-    | error(~who: #'flow_protocol_with_payload,
-            "flow protocol must be Decoupled or Irrevocable")
+  | Decoupled(payload_type)
 
 // A DataType or InterfaceType requests an unconnected handle. An endpoint or
 // earlier handle is connected immediately through the callable protocol.

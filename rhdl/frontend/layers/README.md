@@ -577,6 +577,9 @@ its arguments as part of exact-specialization matching. `Endpoint.of(protocol)`
 checks one exact nominal specialization.
 `Endpoint.supports(protocol)` accepts that protocol, a transitive refinement,
 or a declared supported contract while retaining endpoint static information.
+Ordinary libraries can apply the same nominal relation to type descriptors
+with `interface_type_supports(type, protocol)`; interface display names are not
+part of either check.
 
 A parameterized root interface may explicitly define a directional connection
 rule after its provider declaration:

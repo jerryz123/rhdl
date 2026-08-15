@@ -87,7 +87,7 @@ import one primitive without loading unrelated generators.
 | `std/decode/table.rhdl` | Validated unordered typed decode relations, grouped sparse record cases, input lifting, and row-aligned output products | `std/decode/pattern.rhdl` |
 | `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings lowering to one core decode | `std/decode/pattern.rhdl`, `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
-| `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
+| `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
 | `std/tilelink/params.rhdl` | Host-side TileLink wire widths, operation capabilities, and endpoint descriptions | `std/bits.rhdl`, `std/interconnect.rhdl` |
 | `std/tilelink/bundles.rhdl` | Exact TileLink A-E opcode and payload bundle types | `std/tilelink/params.rhdl` |
 | `std/tilelink/link.rhdl` | Directional `TLUncached` and `TLCached` ready-valid interfaces | `std/ready-valid.rhdl`, `std/tilelink/params.rhdl`, `std/tilelink/bundles.rhdl` |

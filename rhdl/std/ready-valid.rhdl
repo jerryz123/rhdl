@@ -55,6 +55,42 @@ interface Irrevocable(T) refines IrrevocableCtrl():
   producer -> consumer:
     bits: T
 
+// Normalizes any nominal payload-bearing refinement to the canonical contract
+// that its provider promises. Display names deliberately play no role.
+fun decoupled_protocol_type(protocol):
+  if !(protocol is_a InterfaceType)
+  | #false
+  | block:
+      def payload_member = protocol.members.find(
+        fun (member): member.name == "bits" && data_type(member.type)
+      )
+      if !payload_member
+      | #false
+      | block:
+          def payload_type = payload_member.type
+          cond
+          | interface_type_supports(protocol, Irrevocable(payload_type)):
+              Irrevocable(payload_type)
+          | interface_type_supports(protocol, Decoupled(payload_type)):
+              Decoupled(payload_type)
+          | ~else: #false
+
+// Valid-only refinements similarly normalize by nominal support instead of by
+// the declaration's diagnostic name.
+fun valid_protocol_type(protocol):
+  if !(protocol is_a InterfaceType)
+  | #false
+  | block:
+      def payload_member = protocol.members.find(
+        fun (member): member.name == "bits" && data_type(member.type)
+      )
+      if payload_member && interface_type_supports(
+        protocol,
+        Valid(payload_member.type)
+      )
+      | Valid(payload_member.type)
+      | #false
+
 // Reports the transfer event for any endpoint that nominally refines the
 // decoupled control contract.
 fun fire(
@@ -66,17 +102,21 @@ fun fire(
 // ready-valid contracts are accepted; the subsequent bulk connection still
 // performs the complete nominal type and direction check.
 fun decoupled_payload_type(endpoint :: Endpoint):
-  unless endpoint.type.name == "Decoupled" || endpoint.type.name == "Irrevocable"
+  def protocol = decoupled_protocol_type(endpoint.type)
+  unless protocol
   | error(~who: #'decoupled_payload_type,
           "flow-control chaining requires a Decoupled or Irrevocable endpoint")
-  endpoint.type.members.find(
+  protocol.members.find(
     fun (member): member.name == "bits"
   ).type
 
 // Validates the payloadless ready-valid family for Ctrl flow helpers while
 // retaining the endpoint itself and its static interface information.
 fun ctrl_endpoint(endpoint :: Endpoint) :~ Endpoint:
-  unless endpoint.type.name == "DecoupledCtrl" || endpoint.type.name == "IrrevocableCtrl"
+  def control_contract = DecoupledCtrl()
+  unless interface_type_supports(endpoint.type, control_contract) && (
+    endpoint.type.members.length() == control_contract.members.length()
+  )
   | error(~who: #'ctrl_endpoint,
           "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint")
   endpoint
@@ -88,5 +128,7 @@ export:
   Decoupled
   Irrevocable
   fire
+  decoupled_protocol_type
+  valid_protocol_type
   decoupled_payload_type
   ctrl_endpoint
