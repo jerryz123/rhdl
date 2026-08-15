@@ -1,12 +1,15 @@
 #lang rhdl
-// Implements Ricket's two-read, one-write integer register file with x0 hardwired to zero.
+// Implements Ricket's two-read, two-write integer register file with x0 hardwired to zero.
 
 sync_circuit RicketRegisterFile():
   input read_address_1: Bits(5)
   input read_address_2: Bits(5)
-  input write_enable: Bool
-  input write_address: Bits(5)
-  input write_data: Bits(64)
+  input write_enable_1: Bool
+  input write_address_1: Bits(5)
+  input write_data_1: Bits(64)
+  input write_enable_2: Bool
+  input write_address_2: Bits(5)
+  input write_data_2: Bits(64)
   output read_data_1: Bits(64)
   output read_data_2: Bits(64)
 
@@ -14,29 +17,45 @@ sync_circuit RicketRegisterFile():
   def initial = vec(for List (_index in 0..32): zero)
   reg registers(~init: initial)
 
-  def writing_nonzero = write_enable & (write_address =/= bits(0, 5))
-  when writing_nonzero:
-    registers.next <== registers.updated(write_address, write_data)
+  def writing_1 = write_enable_1 & (write_address_1 =/= bits(0, 5))
+  def writing_2 = write_enable_2 & (write_address_2 =/= bits(0, 5))
+  // Port 2 carries the younger load when both pipeline paths target the same
+  // register in one cycle, so it wins both stored state and write-first reads.
+  def next_registers = vec(
+    for List (index in 0..32):
+      mux(
+        writing_2 & (write_address_2 === bits(index, 5)),
+        write_data_2,
+        mux(writing_1 & (write_address_1 === bits(index, 5)), write_data_1, registers[index])
+      )
+  )
+  when (writing_1 ||| writing_2):
+    registers.next <== next_registers
 
-  // Define write-first behavior: a read matching an enabled nonzero write
-  // observes write_data during the cycle of that write.
+  // Define write-first behavior for both ports with the same port-2 priority.
   def read_1_zero = read_address_1 === bits(0, 5)
   def read_2_zero = read_address_2 === bits(0, 5)
-  def bypass_1 = writing_nonzero & (write_address === read_address_1)
-  def bypass_2 = writing_nonzero & (write_address === read_address_2)
+  def read_1_from_write_1 = writing_1 & (write_address_1 === read_address_1)
+  def read_1_from_write_2 = writing_2 & (write_address_2 === read_address_1)
+  def read_2_from_write_1 = writing_1 & (write_address_1 === read_address_2)
+  def read_2_from_write_2 = writing_2 & (write_address_2 === read_address_2)
   read_data_1 <== mux(
     read_1_zero,
     zero,
-    mux(bypass_1,
-        write_data,
-        registers.lookup(read_address_1, ~default: zero))
+    mux(
+      read_1_from_write_2,
+      write_data_2,
+      mux(read_1_from_write_1, write_data_1, registers.lookup(read_address_1, ~default: zero))
+    )
   )
   read_data_2 <== mux(
     read_2_zero,
     zero,
-    mux(bypass_2,
-        write_data,
-        registers.lookup(read_address_2, ~default: zero))
+    mux(
+      read_2_from_write_2,
+      write_data_2,
+      mux(read_2_from_write_1, write_data_1, registers.lookup(read_address_2, ~default: zero))
+    )
   )
 
 export:

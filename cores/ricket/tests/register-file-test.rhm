@@ -1,0 +1,25 @@
+#lang rhombus
+// Checks Ricket's two-write register-file ports, state type, and verification.
+
+import:
+  "../../../rhdl/core/main.rhm" open
+  "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../register-file.rhdl" as register_file
+
+def design = embedded.run_elaboration(fun (): register_file.RicketRegisterFile())
+def module_def = design.modules.find(fun (candidate): candidate.name == "RicketRegisterFile")
+def registers = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+)
+
+check:
+  module_def.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "read_address_1", "read_address_2",
+    "write_enable_1", "write_address_1", "write_data_1",
+    "write_enable_2", "write_address_2", "write_data_2"
+  ]
+  module_def.outputs.map(fun (port): port.name) ~is ["read_data_1", "read_data_2"]
+  registers.length() ~is 1
+  registers[0].attribute("name") ~is "registers"
+  registers[0].results[0].type.type_equal(VectorType(32, Bits(64))) ~is #true
+  verify_design(design) ~is #void

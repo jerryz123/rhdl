@@ -5,14 +5,17 @@
 `protocol.rhdl` defines `RicketDataAccess`, an ordered `Irrevocable`
 request/response interface carrying the original byte address, read/write
 intent, scalar width, load signedness, and 64-bit store source. It returns a
-normalized 64-bit load value; store response data has no meaning. The pipeline
-checks architectural alignment, while the cache owns beat alignment, masks,
-and load/store lane generation.
+normalized 64-bit load value and echoes the request's five-bit completion tag;
+store response data and tag have no meaning. The pipeline uses the tag to clear
+the destination scoreboard entry when a delayed load returns. It checks
+architectural alignment, while the cache owns beat alignment, masks, and
+load/store lane generation.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,
 write-through/write-no-allocate cache. Its synchronous lookup accepts and
-returns consecutive load hits every cycle. A miss blocks new cache requests
-until refill completes. A store completes to the core during its lookup,
+returns tagged consecutive load hits every cycle through a two-entry response
+queue. A miss blocks new cache requests until refill completes. A store
+completes to the core during its lookup,
 updates a resident line on a hit, and enters a one-entry ordered write buffer;
 the buffer drains to backing `SimpleMemory` before the cache accepts another
 memory operation. This preserves ordering without holding unrelated pipeline

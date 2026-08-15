@@ -12,6 +12,7 @@ import:
   "decode/writeback-ctrl.rhdl" open
   "bundles.rhdl" open
   "register-file.rhdl" open
+  "scoreboard.rhdl" open
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/model/formats.rhm" as riscv_fields
@@ -38,16 +39,17 @@ sync_circuit RicketPipeline(address_width :: Int):
   reg fetch_pc(~init: zero64)
   reg fetch_epoch(~init: Bool(#false))
 
-  // Three elastic pipes own the stallable boundaries; the always-advancing
-  // MEM/WB boundary uses the Valid-only pipe. Stage logic remains local.
+  // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
+  // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
   inst if_id_pipe(Pipe(FetchDecode(), 1))
   inst fetch_metadata(Queue(FetchMetadata(), 2, ~pipe: #true))
   inst id_ex_pipe(Pipe(DecodeExecute(), 1))
-  inst ex_mem_pipe(Pipe(ExecuteMemory(), 1))
+  inst ex_mem_pipe(ValidPipe(ExecuteMemory(), 1))
   inst mem_wb_pipe(ValidPipe(MemoryWriteback(), 1))
 
   inst decoder(RV64IInstructionDecoder())
   inst registers(RicketRegisterFile())
+  inst scoreboard(RicketScoreboard())
   inst alu(ALU())
   inst branch_resolver(BranchResolver(64))
 
@@ -135,14 +137,23 @@ sync_circuit RicketPipeline(address_width :: Int):
 
   registers.read_address_1 <== rs1
   registers.read_address_2 <== rs2
+  scoreboard.query_rs1 <== rs1
+  scoreboard.query_rs2 <== rs2
+  scoreboard.query_rd <== rd
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
   def load_destination = id_ex.bits.rd
   def load_use_rs1 = control.operand.uses_rs1 & (load_destination =/= bits(0, 5)) & (load_destination === rs1)
   def load_use_rs2 = control.operand.uses_rs2 & (load_destination =/= bits(0, 5)) & (load_destination === rs2)
-  def load_use_hazard = live_if_id.valid & id_ex_is_load & (load_use_rs1 ||| load_use_rs2)
-  live_if_id.ready <== id_ex_pipe.ingress.ready & !load_use_hazard
-  id_ex_pipe.ingress.valid <== live_if_id.valid & !load_use_hazard
+  def load_use_rd = control.writeback.enable & (load_destination =/= bits(0, 5)) & (load_destination === rd)
+  def load_dependency_hazard = live_if_id.valid & id_ex_is_load & (load_use_rs1 ||| load_use_rs2 ||| load_use_rd)
+  def scoreboard_raw_hazard = (control.operand.uses_rs1 & scoreboard.rs1_busy) ||| (
+    control.operand.uses_rs2 & scoreboard.rs2_busy
+  )
+  def scoreboard_waw_hazard = control.writeback.enable & scoreboard.rd_busy
+  def register_hazard = load_dependency_hazard ||| scoreboard_raw_hazard ||| scoreboard_waw_hazard
+  live_if_id.ready <== id_ex_pipe.ingress.ready & !register_hazard
+  id_ex_pipe.ingress.valid <== live_if_id.valid & !register_hazard
   id_ex_pipe.ingress.bits <== DecodeExecute():
     pc: live_if_id.bits.pc
     instruction: instruction
@@ -224,7 +235,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   )
   def execute_is_memory = id_ex.bits.memory_operation =/= MemoryOperation.None
   def execute_cache_ready = !execute_is_memory ||| execute_fault ||| data_access.request.ready
-  def execute_stage_ready = ex_mem_pipe.ingress.ready & execute_cache_ready
+  def execute_stage_ready = execute_cache_ready
   def execute_transfer = id_ex.valid & execute_stage_ready
   def pc_plus_four = id_ex.bits.pc + bits(4, 64)
   def execute_result = mux(
@@ -238,72 +249,67 @@ sync_circuit RicketPipeline(address_width :: Int):
   redirect_link.left.bits <== computed_redirect_target
 
   id_ex.ready <== execute_stage_ready
-  ex_mem_pipe.ingress.valid <== id_ex.valid & !execute_fault & (!execute_is_memory ||| data_access.request.ready)
+  ex_mem_pipe.ingress.valid <== id_ex.valid & !execute_fault & execute_cache_ready
   ex_mem_pipe.ingress.bits <== ExecuteMemory():
     memory_operation: id_ex.bits.memory_operation
     writeback_enable: id_ex.bits.writeback_enable
-    writeback_source: id_ex.bits.writeback_source
     rd: id_ex.bits.rd
     result: execute_result
 
   // A legal memory access starts its synchronous cache lookup at the same
   // edge that captures the instruction in EX/MEM. A hit therefore occupies
   // the ordinary MEM stage instead of adding a request cycle after it.
-  data_access.request.valid <== id_ex.valid & !execute_fault & execute_is_memory & ex_mem_pipe.ingress.ready
+  data_access.request.valid <== id_ex.valid & !execute_fault & execute_is_memory
   data_access.request.bits <== RicketDataReq(address_width):
     address: alu.result[0..address_width]
     write: id_ex.bits.memory_operation === MemoryOperation.Write
     width: id_ex.bits.memory_width
     unsigned: id_ex.bits.memory_unsigned
     data: forwarded_rs2
+    tag: mux(id_ex.bits.memory_operation === MemoryOperation.Read, id_ex.bits.rd, bits(0, 5))
 
-  // Memory (MEM) consumes the ordered result of the lookup started by EX.
-  // Misses still hold EX/MEM, while a hit completes within this stage.
-  def ex_mem = ex_mem_pipe.egress
-  def memory_operation = ex_mem.bits.memory_operation
-  def is_memory = memory_operation =/= MemoryOperation.None
-  def memory_response_available = data_access.response.valid
-  def memory_writeback_value = mux(
-    ex_mem.bits.writeback_source === WritebackSelect.Memory,
-    data_access.response.bits.data,
-    ex_mem.bits.result
-  )
+  // Memory is Ricket's ordered commit point. A load marks its destination
+  // busy here and releases EX/MEM without waiting for the tagged cache result.
+  // Stores also commit at this point because alignment and other faults were
+  // resolved before the cache accepted their requests.
+  def commit = ex_mem_pipe.egress
+  def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
+  def commit_writes_immediately = commit.bits.writeback_enable & !commit_is_load
 
-  data_access.response.ready <== ex_mem.valid & is_memory
-
-  mem_wb_pipe.ingress.valid <== ex_mem.valid & (!is_memory ||| memory_response_available)
+  mem_wb_pipe.ingress.valid <== commit.valid & commit_writes_immediately
   mem_wb_pipe.ingress.bits <== MemoryWriteback():
-    write_enable: ex_mem.bits.writeback_enable
-    rd: ex_mem.bits.rd
-    value: memory_writeback_value
-  ex_mem.ready <== !is_memory ||| memory_response_available
+    write_enable: commit.bits.writeback_enable
+    rd: commit.bits.rd
+    value: commit.bits.result
 
-  memory_bypass_link.left.valid <== ex_mem.valid & (
-    ex_mem.bits.writeback_enable
-  ) & (
-    ex_mem.bits.rd =/= bits(0, 5)
-  ) & (
-    (ex_mem.bits.writeback_source =/= WritebackSelect.Memory) ||| (
-      memory_response_available
-    )
-  )
+  memory_bypass_link.left.valid <== commit.valid & commit_writes_immediately & (commit.bits.rd =/= bits(0, 5))
   memory_bypass_link.left.bits <== RicketBypass():
-    rd: ex_mem.bits.rd
-    value: memory_writeback_value
+    rd: commit.bits.rd
+    value: commit.bits.result
 
-  // Writeback (WB) consumes the final token and exposes its register-file
-  // update and bypass sideband directly inside the core.
+  // The two register-file write ports accept an immediate WB result and a
+  // delayed load completion independently, so neither path backpressures MEM.
   def mem_wb = mem_wb_pipe.egress
-  def writeback_valid = mem_wb.valid
-  def writeback_enable = writeback_valid & mem_wb.bits.write_enable
-  writeback_bypass_link.left.valid <== writeback_enable & (mem_wb.bits.rd =/= bits(0, 5))
+  def load_completion_valid = data_access.response.valid & (data_access.response.bits.tag =/= bits(0, 5))
+  def immediate_write_valid = mem_wb.valid & mem_wb.bits.write_enable
+
+  data_access.response.ready <== Bool(#true)
+  scoreboard.set_valid <== commit.valid & commit_is_load & commit.bits.writeback_enable
+  scoreboard.set_address <== commit.bits.rd
+  scoreboard.clear_valid <== load_completion_valid
+  scoreboard.clear_address <== data_access.response.bits.tag
+
+  writeback_bypass_link.left.valid <== immediate_write_valid & (mem_wb.bits.rd =/= bits(0, 5))
   writeback_bypass_link.left.bits <== RicketBypass():
     rd: mem_wb.bits.rd
     value: mem_wb.bits.value
 
-  registers.write_enable <== writeback_enable
-  registers.write_address <== mem_wb.bits.rd
-  registers.write_data <== mem_wb.bits.value
+  registers.write_enable_1 <== immediate_write_valid
+  registers.write_address_1 <== mem_wb.bits.rd
+  registers.write_data_1 <== mem_wb.bits.value
+  registers.write_enable_2 <== load_completion_valid
+  registers.write_address_2 <== data_access.response.bits.tag
+  registers.write_data_2 <== data_access.response.bits.data
 
 export:
   RicketPipeline

@@ -1,0 +1,51 @@
+#lang rhdl
+// Tracks deferred Ricket register writes and exposes same-cycle commit/completion hazards.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+
+sync_circuit RicketScoreboard():
+  input set_valid: Bool
+  input set_address: Bits(5)
+  input clear_valid: Bool
+  input clear_address: Bits(5)
+  input query_rs1: Bits(5)
+  input query_rs2: Bits(5)
+  input query_rd: Bits(5)
+  output rs1_busy: Bool
+  output rs2_busy: Bool
+  output rd_busy: Bool
+
+  reg busy_bits(~init: bits(0, 32))
+  def busy = cast(busy_bits, Vec(32, Bool))
+  def set_nonzero = set_valid & (set_address =/= bits(0, 5))
+  def clear_nonzero = clear_valid & (clear_address =/= bits(0, 5))
+  def set_was_free = !busy.lookup(set_address, ~default: Bool(#false)) ||| (
+    clear_nonzero & (clear_address === set_address)
+  )
+  def clear_was_busy = busy.lookup(clear_address, ~default: Bool(#false)) ||| (
+    set_nonzero & (set_address === clear_address)
+  )
+  when set_nonzero:
+    assert(set_was_free, "ricket_scoreboard_set_free")
+  when clear_nonzero:
+    assert(clear_was_busy, "ricket_scoreboard_clear_busy")
+  // A same-cycle completion clears a just-committed one-cycle load.
+  def effective_busy = vec(
+    for List (index in 0..32):
+      mux(
+        clear_nonzero & (clear_address === bits(index, 5)),
+        Bool(#false),
+        mux(set_nonzero & (set_address === bits(index, 5)), Bool(#true), busy[index])
+      )
+  )
+
+  when (set_nonzero ||| clear_nonzero):
+    busy_bits <== cast(effective_busy, Bits(32))
+
+  rs1_busy <== (query_rs1 =/= bits(0, 5)) & effective_busy.lookup(query_rs1, ~default: Bool(#false))
+  rs2_busy <== (query_rs2 =/= bits(0, 5)) & effective_busy.lookup(query_rs2, ~default: Bool(#false))
+  rd_busy <== (query_rd =/= bits(0, 5)) & effective_busy.lookup(query_rd, ~default: Bool(#false))
+
+export:
+  RicketScoreboard
