@@ -33,6 +33,8 @@ The current implementation provides:
   generic routing-policy interface and rectangular-mesh view.
 - Generic minimal-adaptive routing over precomputed hop distances for any
   authored directed topology.
+- Deterministic up*/down* routing synthesis for connected bidirectional
+  topologies with an explicit root and canonical tie-breaking.
 - Minimal-adaptive mesh routing with irreversible XY escape transitions,
   rejected by default whole-graph acyclicity and accepted by explicit escape
   validation.
@@ -91,6 +93,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/minimal-adaptive-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/adaptive-minimal-escape-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/up-down-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
@@ -321,6 +324,29 @@ ordinary example code rather than a core topology or routing primitive. The
 escape certificate accepts the full relation and retains its adaptive choices.
 Raw callback, reversed-declaration, and prefixed forms produce equivalent
 materialized relations, cycle witnesses, proof graphs, orderings, and tables.
+
+`UpDownPolicy` synthesizes a reusable escape policy for a connected
+bidirectional topology. The caller supplies one exact `LoweredTopology`, an
+explicit root, and the VC groups reserved for up*/down*. A deterministic BFS
+rooted at that node assigns every node a unique rank using canonical symbolic
+node order to break ties. Every directed link toward a lower rank is `up` and
+every link toward a higher rank is `down`; self-loops and links without a
+reverse direction are rejected.
+
+The policy permits only an up* followed by down* turn sequence and precomputes
+which `(node, destination, phase)` states can still reach the destination.
+This viability filter prevents an allowed down turn from entering a branch
+that would require a later forbidden up turn. Entering the selected groups
+from injection or a non-up*/down* VC starts a fresh up phase, while a held
+up*/down* VC carries the phase through its physical-link orientation. The
+node order, link directions, and viable states remain inspectable ordinary
+host data.
+
+Synthesis grants no proof authority. Users compose the resulting policy with
+`with_escape`, materialize the complete relation, and explicitly submit its
+VCs through `EscapeValidationRequest`. The standard-policy tests exercise
+that independent path on the irregular adaptive example and reject unsuitable
+disconnected, one-way, self-loop, and incompletely provisioned topologies.
 
 ## Model
 

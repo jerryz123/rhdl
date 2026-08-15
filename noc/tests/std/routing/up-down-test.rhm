@@ -1,0 +1,352 @@
+#lang rhombus
+// Checks deterministic up*/down* synthesis and independent escape validation.
+
+import:
+  "../../../model/main.rhm" open
+  "../../../analysis/main.rhm" open
+  "../../../authoring/main.rhm" open
+  "../../../plan/main.rhm" open
+  "../../../std/traffic/main.rhm" open
+  "../../../std/routing/main.rhm" open
+  "../../../examples/irregular-adaptive-escape.rhm" open
+
+def escape_policy = up_down(
+  irregular_topology,
+  irregular_b,
+  ["escape"]
+)
+
+check:
+  escape_policy is_a RoutingPolicy ~is #true
+  escape_policy is_a UpDownPolicy ~is #true
+  escape_policy.root === irregular_b ~is #true
+  escape_policy.vc_groups ~is ["escape"]
+  escape_policy.node_orders.length() ~is 5
+  escape_policy.viable_states.length() > 0 ~is #true
+  escape_policy.describe() ~is "up-down(root=b; vc-groups=escape)"
+
+// Rooted BFS uses canonical node names to resolve equal-depth discoveries.
+// The non-tree c-d edge is oriented by the resulting unique ranks as well.
+check:
+  escape_policy.node_order(irregular_b).depth ~is 0
+  escape_policy.node_order(irregular_b).rank ~is 0
+  escape_policy.node_order(irregular_b).parent ~is #false
+  escape_policy.node_order(irregular_a).depth ~is 1
+  escape_policy.node_order(irregular_a).rank ~is 1
+  escape_policy.node_order(irregular_a).parent === irregular_b ~is #true
+  escape_policy.node_order(irregular_c).rank ~is 2
+  escape_policy.node_order(irregular_e).rank ~is 3
+  escape_policy.node_order(irregular_d).depth ~is 2
+  escape_policy.node_order(irregular_d).rank ~is 4
+  escape_policy.node_order(irregular_d).parent === irregular_a ~is #true
+  escape_policy.direction_of(irregular_a_to_b) ~is "up"
+  escape_policy.direction_of(irregular_b_to_a) ~is "down"
+  escape_policy.direction_of(irregular_d_to_c) ~is "up"
+  escape_policy.direction_of(irregular_c_to_d) ~is "down"
+
+def standard_policy = with_escape(
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["adaptive"]
+  ),
+  escape_policy,
+  ["adaptive"],
+  ["escape"]
+)
+def standard_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  lower_routing_policy(irregular_routes, standard_policy)
+)
+def standard_materialized = materialize_routing(standard_problem)
+def standard_whole_graph_result = compile_routing(standard_problem)
+def standard_validated = compile_routing(
+  standard_problem,
+  ~escape: irregular_escape_request
+)
+
+fun route_between(source, destination):
+  irregular_routes.route_classes.find(
+    fun (route_class):
+      node_id_equal(route_class.source, irregular_topology.node_id(source)) && node_id_equal(
+        route_class.destination,
+        irregular_topology.node_id(destination)
+      )
+  )
+
+fun vc(link, group):
+  irregular_topology.vc_id(VCRef(link, group, 0))
+
+def a_to_c = route_between(irregular_a, irregular_c)
+def d_to_e = route_between(irregular_d, irregular_e)
+def a_to_b_escape = vc(irregular_a_to_b, "escape")
+def b_to_a_escape = vc(irregular_b_to_a, "escape")
+def b_to_a_adaptive = vc(irregular_b_to_a, "adaptive")
+def b_to_c_escape = vc(irregular_b_to_c, "escape")
+def a_to_d_escape = vc(irregular_a_to_d, "escape")
+def d_to_a_escape = vc(irregular_d_to_a, "escape")
+def d_to_c_escape = vc(irregular_d_to_c, "escape")
+
+// Viability removes a tempting down branch that cannot reach c without a
+// later down-to-up turn. Both legal up branches from d can reach e.
+check:
+  standard_materialized.allows(
+    a_to_c,
+    Injection(irregular_topology.node_id(irregular_a)),
+    a_to_b_escape
+  ) ~is #true
+  standard_materialized.allows(
+    a_to_c,
+    Injection(irregular_topology.node_id(irregular_a)),
+    a_to_d_escape
+  ) ~is #false
+  standard_materialized.allows(
+    d_to_e,
+    Injection(irregular_topology.node_id(irregular_d)),
+    d_to_a_escape
+  ) ~is #true
+  standard_materialized.allows(
+    d_to_e,
+    Injection(irregular_topology.node_id(irregular_d)),
+    d_to_c_escape
+  ) ~is #true
+
+// Entering escape from an adaptive VC starts a fresh phase. Once the same
+// physical direction is held in escape, down-to-up is forbidden.
+check:
+  standard_materialized.allows(
+    a_to_c,
+    HeldVC(b_to_a_adaptive),
+    a_to_b_escape
+  ) ~is #true
+  standard_materialized.allows(
+    a_to_c,
+    HeldVC(b_to_a_escape),
+    a_to_b_escape
+  ) ~is #false
+  standard_materialized.allows(
+    a_to_c,
+    HeldVC(a_to_b_escape),
+    b_to_c_escape
+  ) ~is #true
+
+check:
+  standard_whole_graph_result is_a DependencyCycle ~is #true
+  standard_validated is_a ValidatedRouting ~is #true
+  standard_validated.certificate is_a EscapeCertificate ~is #true
+  standard_validated.certificate.request === irregular_escape_request ~is #true
+
+// The synthesized policy is ordinary inspectable host data. An independently
+// spelled raw relation using that data materializes identically.
+fun raw_origin_node(origin):
+  if origin is_a Injection
+  | irregular_topology.node_ref(origin.node)
+  | irregular_topology.node_ref(
+      irregular_topology.topology.find_vc_link(origin.vc).destination
+    )
+
+fun raw_current_phase(origin):
+  if origin is_a HeldVC && irregular_topology.vc_ref(origin.vc).group == "escape"
+  | if escape_policy.direction_of(
+      irregular_topology.vc_ref(origin.vc).link
+    ) == "down"
+    | "down"
+    | "up"
+  | "up"
+
+fun raw_allows(route_class, origin, candidate_vc):
+  def candidate = irregular_topology.vc_ref(candidate_vc)
+  def link = irregular_spec.find_link(candidate.link)
+  def direction = escape_policy.direction_of(link.ref)
+  def next = if direction == "down" | "down" | "up"
+  def phase = raw_current_phase(origin)
+  candidate.group == "escape" && node_ref_equal(
+    link.source,
+    raw_origin_node(origin)
+  ) && (phase == "up" || direction == "down") && escape_policy.viable(
+    link.destination,
+    irregular_topology.node_ref(route_class.destination),
+    next
+  )
+
+def raw_escape_materialized = materialize_routing(
+  RoutingProblem(
+    irregular_topology.topology,
+    irregular_routes.route_classes,
+    RoutingRelation(raw_allows)
+  )
+)
+def authored_escape_materialized = materialize_routing(
+  RoutingProblem(
+    irregular_topology.topology,
+    irregular_routes.route_classes,
+    lower_routing_policy(irregular_routes, escape_policy)
+  )
+)
+
+check:
+  raw_escape_materialized.describe() ~is authored_escape_materialized.describe()
+
+// Canonical lowering and BFS tie-breaking make declaration order irrelevant.
+def reordered_spec = TopologySpec(
+  irregular_spec.nodes.reverse(),
+  irregular_spec.links.reverse()
+)
+def reordered_topology = lower_topology(reordered_spec)
+def reordered_routes = lower_route_classes(
+  reordered_topology,
+  all_pairs(reordered_spec).reverse()
+)
+def reordered_escape = up_down(
+  reordered_topology,
+  irregular_b,
+  ["escape"]
+)
+def reordered_problem = RoutingProblem(
+  reordered_topology.topology,
+  reordered_routes.route_classes,
+  lower_routing_policy(
+    reordered_routes,
+    with_escape(
+      minimal_adaptive(
+        reordered_topology,
+        compute_hop_distances(reordered_topology.topology),
+        ["adaptive"]
+      ),
+      reordered_escape,
+      ["adaptive"],
+      ["escape"]
+    )
+  )
+)
+def reordered_validated = compile_routing(
+  reordered_problem,
+  ~escape: EscapeValidationRequest(
+    reordered_topology.topology,
+    reordered_topology.vc_ids_in_groups(["escape"])
+  )
+)
+
+check:
+  reordered_escape.node_orders.map(fun (order): order.describe()) ~is escape_policy.node_orders.map(fun (order): order.describe())
+  reordered_validated.materialized.describe() ~is standard_validated.materialized.describe()
+  reordered_validated.certificate.dependency_graph.describe() ~is standard_validated.certificate.dependency_graph.describe()
+  reordered_validated.route_table.describe() ~is standard_validated.route_table.describe()
+
+// Prefixing names changes diagnostics but preserves normalized synthesis and
+// the independently checked proof result.
+def prefixed_spec = prefix_topology("cluster", irregular_spec)
+def prefixed_topology = lower_topology(prefixed_spec)
+def prefixed_routes = lower_route_classes(
+  prefixed_topology,
+  all_pairs(prefixed_spec)
+)
+def prefixed_escape = up_down(
+  prefixed_topology,
+  prefix_node_ref("cluster", irregular_b),
+  ["escape"]
+)
+def prefixed_problem = RoutingProblem(
+  prefixed_topology.topology,
+  prefixed_routes.route_classes,
+  lower_routing_policy(
+    prefixed_routes,
+    with_escape(
+      minimal_adaptive(
+        prefixed_topology,
+        compute_hop_distances(prefixed_topology.topology),
+        ["adaptive"]
+      ),
+      prefixed_escape,
+      ["adaptive"],
+      ["escape"]
+    )
+  )
+)
+def prefixed_validated = compile_routing(
+  prefixed_problem,
+  ~escape: EscapeValidationRequest(
+    prefixed_topology.topology,
+    prefixed_topology.vc_ids_in_groups(["escape"])
+  )
+)
+
+check:
+  prefixed_validated.materialized.describe() ~is standard_validated.materialized.describe()
+  prefixed_validated.certificate.dependency_graph.describe() ~is standard_validated.certificate.dependency_graph.describe()
+  prefixed_validated.route_table.describe() ~is standard_validated.route_table.describe()
+
+def bad_a = NodeRef("bad-a")
+def bad_b = NodeRef("bad-b")
+def bad_c = NodeRef("bad-c")
+def bad_d = NodeRef("bad-d")
+def escape_group = [VCGroup("escape", 1)]
+
+def one_way = lower_topology(
+  TopologySpec(
+    [bad_a, bad_b],
+    [TopologyLink(LinkRef("one-way"), bad_a, bad_b, escape_group)]
+  )
+)
+def disconnected = lower_topology(
+  TopologySpec(
+    [bad_a, bad_b, bad_c, bad_d],
+    bidirectional_link(
+      LinkRef("a-b"), LinkRef("b-a"), bad_a, bad_b, escape_group
+    ) ++ bidirectional_link(
+      LinkRef("c-d"), LinkRef("d-c"), bad_c, bad_d, escape_group
+    )
+  )
+)
+def self_loop = lower_topology(
+  TopologySpec(
+    [bad_a],
+    [TopologyLink(LinkRef("loop"), bad_a, bad_a, escape_group)]
+  )
+)
+def partially_provisioned = lower_topology(
+  TopologySpec(
+    [bad_a, bad_b, bad_c],
+    bidirectional_link(
+      LinkRef("a-b"),
+      LinkRef("b-a"),
+      bad_a,
+      bad_b,
+      [VCGroup("adaptive", 1), VCGroup("escape", 1)]
+    ) ++ bidirectional_link(
+      LinkRef("b-c"),
+      LinkRef("c-b"),
+      bad_b,
+      bad_c,
+      [VCGroup("adaptive", 1)]
+    )
+  )
+)
+
+check:
+  up_down("not lowered", bad_a, ["escape"]) ~throws "requires a LoweredTopology"
+  up_down(irregular_topology, "not a node", ["escape"]) ~throws "root must be a NodeRef"
+  up_down(irregular_topology, NodeRef("unknown"), ["escape"]) ~throws "root is not in topology"
+  up_down(irregular_topology, irregular_b, []) ~throws "nonempty List"
+  up_down(irregular_topology, irregular_b, ["bad/group"]) ~throws "names without '/'"
+  up_down(
+    irregular_topology,
+    irregular_b,
+    ["escape", "escape"]
+  ) ~throws "duplicate up/down VC group escape"
+  up_down(
+    irregular_topology,
+    irregular_b,
+    ["unknown"]
+  ) ~throws "topology has no up/down VC group unknown"
+  up_down(one_way, bad_a, ["escape"]) ~throws "requires a reverse link"
+  up_down(disconnected, bad_a, ["escape"]) ~throws "disconnected node"
+  up_down(self_loop, bad_a, ["escape"]) ~throws "does not support self-loop"
+  up_down(
+    partially_provisioned,
+    bad_a,
+    ["escape"]
+  ) ~throws "has no up/down VC group escape"
+  escape_policy.node_order(NodeRef("unknown")) ~throws "node is not in up/down topology"
+  escape_policy.viable(irregular_a, irregular_b, "sideways") ~throws "phase must be 'up' or 'down'"
