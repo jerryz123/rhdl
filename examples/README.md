@@ -103,6 +103,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`predicate-filter.rhdl`](predicate-filter.rhdl) | Host predicate closures specialized through a `Valid` interface |
 | [`wire.rhdl`](wire.rhdl) | Forward-readable aggregate wire driven later by element |
 | [`interface.rhdl`](interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
+| [`interface-specialization.rhdl`](interface-specialization.rhdl) | Directional parameter compatibility, nested rules, operand reversal, and explicit width adaptation |
 | [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
 | [`interface-array.rhdl`](interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
@@ -119,6 +120,13 @@ connection with `<=>`, serial composition of two `interface_link` handles, and
 parallel composition into array-shaped handle or sink ends. Handles and sinks
 work for any directional interface, including the bidirectional `ByteExchange`
 protocol.
+
+[`interface-specialization.rhdl`](interface-specialization.rhdl) demonstrates
+declaration-owned compatibility between specializations of one nominal
+interface. A provider with greater semantic capacity can satisfy a smaller
+requirement in either `<=>` operand order, including through a nested interface
+member. Its width-adapter circuit separately shows that semantic compatibility
+does not waive exact physical wire shape: width conversion remains explicit.
 
 [`flow-topology.rhdl`](flow-topology.rhdl) then layers ready-valid operations on
 that generic mechanism. Its three integrated circuits show the complete

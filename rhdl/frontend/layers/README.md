@@ -563,12 +563,40 @@ connects exact flows or compatible provider-to-peer contracts; operand order
 is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
 
-Each root interface declaration has a stable nominal identity. Repeated calls
-to one parameterized declaration compare that identity plus their realized
-member structure; independently declared same-named interfaces remain
-distinct. `Endpoint.of(protocol)` checks one exact nominal specialization.
+Each root interface declaration has a stable nominal identity. By default,
+repeated calls to one parameterized declaration compare that identity plus
+their realized member structure; independently declared same-named interfaces
+remain distinct. A declaration with a custom connection rule also preserves
+its arguments as part of exact-specialization matching. `Endpoint.of(protocol)`
+checks one exact nominal specialization.
 `Endpoint.supports(protocol)` accepts that protocol, a transitive refinement,
 or a declared supported contract while retaining endpoint static information.
+
+A parameterized root interface may explicitly define a directional connection
+rule after its provider declaration:
+
+```rhombus
+interface CapacityLink(capacity, width):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    provided[0] >= required[0]
+
+  producer -> consumer:
+    payload: Bits(width)
+```
+
+`provided` and `required` are Lists containing the corresponding declaration
+arguments. The provider-owned predicate runs at elaboration time, must return a
+host `Boolean`, and is directional; `<=>` operand order does not affect which
+specialization is provided. `Endpoint.supports(protocol)` uses the rule, while
+`Endpoint.of(protocol)` remains exact. A rule applies only within one nominal
+interface family. It may relax semantic parameter compatibility, but member
+names, directions, and recursively realized hardware types must still match
+exactly. Width conversion or field translation therefore requires an explicit
+adapter. Nested interface members and endpoint arrays apply the same rule
+recursively.
 
 The first declared role is the compatibility provider by default. A root
 interface whose provider is the other role declares it explicitly after its

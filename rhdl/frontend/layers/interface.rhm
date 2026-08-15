@@ -13,6 +13,7 @@ import:
 
 export:
   InterfaceFlow
+  InterfaceCompatibility
   InterfaceIdentity
   InterfaceMember
   InterfaceSupport
@@ -40,6 +41,15 @@ class InterfaceFlow(from_role, to_role, type):
 
 class InterfaceMember(name, type, from_role, to_role)
 class InterfaceSupport(role, type)
+class InterfaceCompatibility(role, predicate):
+  constructor (role, predicate):
+    unless role is_a String
+    | error(~who: #'InterfaceCompatibility,
+            "interface compatibility role must be a String")
+    unless predicate is_a Function
+    | error(~who: #'InterfaceCompatibility,
+            "interface compatibility predicate must be a Function")
+    super(role, predicate)
 class InterfaceIdentity()
 
 // The parent supplies inherited layout. Additional supported types declare
@@ -52,14 +62,18 @@ class InterfaceType(name,
                     members,
                     provider_role,
                     parent = #false,
-                    supported_contracts = []):
+                    supported_contracts = [],
+                    specialization_arguments = [],
+                    connection_compatibility = #false):
   constructor (name,
                roles,
                declarations,
                parent = #false,
                supported_contracts = [],
                ~provider_role: supplied_provider_role = #false,
-               ~identity: identity = InterfaceIdentity()):
+               ~identity: identity = InterfaceIdentity(),
+               ~specialization_arguments: specialization_arguments = [],
+               ~connection_compatibility: connection_compatibility = #false):
     unless name is_a String
     | error(~who: #'InterfaceType, "interface name must be a String")
     unless roles is_a List && roles.length() == 2 && roles[0] != roles[1]
@@ -83,6 +97,16 @@ class InterfaceType(name,
     unless supported_contracts is_a List
     | error(~who: #'InterfaceType,
             "supported interface contracts must be supplied as a List")
+    unless specialization_arguments is_a List
+    | error(~who: #'InterfaceType,
+            "interface specialization arguments must be supplied as a List")
+    when connection_compatibility
+    | unless connection_compatibility is_a InterfaceCompatibility
+      | error(~who: #'InterfaceType,
+              "interface connection compatibility must be an InterfaceCompatibility")
+      unless connection_compatibility.role == provider_role
+      | error(~who: #'InterfaceType,
+              "interface compatibility role must match the provider role")
     def mutable members = if parent | parent.members | []
     for (declaration in declarations):
       cond
@@ -147,7 +171,9 @@ class InterfaceType(name,
           members,
           provider_role,
           parent,
-          supported_contracts)
+          supported_contracts,
+          specialization_arguments,
+          connection_compatibility)
 
   property flows: interface_flows(this)
   property supported_types:
@@ -291,6 +317,19 @@ fun interface_member_type_equal(left, right):
   | interface_type_equal(left, right)
   | type_equal(left, right)
 
+// Connection policies may relax specialization arguments, but never the
+// recursively realized wire layout that an ordinary kernel connection sees.
+fun interface_member_wire_shape_equal(left, right):
+  if left is_a InterfaceType || right is_a InterfaceType
+  | interface_type_wire_shape_equal(left, right)
+  | type_equal(left, right)
+
+fun interface_type_wire_shape_equal(left, right):
+  left is_a InterfaceType && right is_a InterfaceType && left.roles == right.roles && left.provider_role == right.provider_role && left.members.length() == right.members.length() && (
+    for all (left_member in left.members, right_member in right.members):
+      left_member.name == right_member.name && left_member.from_role == right_member.from_role && left_member.to_role == right_member.to_role && interface_member_wire_shape_equal(left_member.type, right_member.type)
+  )
+
 fun interface_type_equal(left, right):
   if !(left is_a InterfaceType && right is_a InterfaceType) || !(left.identity === right.identity) || left.roles != right.roles || left.provider_role != right.provider_role || !interface_parent_equal(left.parent, right.parent) || left.supported_contracts.length() != right.supported_contracts.length() || left.members.length() != right.members.length()
   | #false
@@ -306,9 +345,95 @@ fun interface_parent_equal(left, right):
   | left is_a InterfaceType && right is_a InterfaceType && interface_type_equal(left, right)
   | #true
 
+fun interface_type_same_specialization(left, right):
+  interface_type_equal(left, right) && !interface_type_has_compatibility_difference(left, right)
+
+fun interface_type_has_compatibility_difference(left, right):
+  left is_a InterfaceType && right is_a InterfaceType && left.identity === right.identity && (
+    (left.connection_compatibility && left.specialization_arguments != right.specialization_arguments) || (
+      for any (left_member in left.members, right_member in right.members):
+        left_member.type is_a InterfaceType && right_member.type is_a InterfaceType && interface_type_has_compatibility_difference(left_member.type, right_member.type)
+    ) || (
+      left.parent is_a InterfaceType && right.parent is_a InterfaceType && interface_type_has_compatibility_difference(left.parent, right.parent)
+    ) || (
+      for any (left_supported in left.supported_contracts,
+               right_supported in right.supported_contracts):
+        interface_type_has_compatibility_difference(left_supported.type,
+                                                    right_supported.type)
+    )
+  )
+
+fun nested_compatibility_provider_is_left(parent_type, member):
+  def nested_type = member.type
+  def nested_provider_parent_role:
+    if nested_type.provider_role == nested_type.roles[0]
+    | member.from_role
+    | member.to_role
+  nested_provider_parent_role == parent_type.provider_role
+
+fun interface_nested_contracts_compatible(type, expected_type):
+  for all (member in type.members, expected_member in expected_type.members):
+    if member.type is_a InterfaceType || expected_member.type is_a InterfaceType
+    | member.type is_a InterfaceType && expected_member.type is_a InterfaceType && (
+        if nested_compatibility_provider_is_left(type, member)
+        | interface_type_connection_compatible(member.type,
+                                               expected_member.type)
+        | interface_type_connection_compatible(expected_member.type,
+                                               member.type)
+      )
+    | type_equal(member.type, expected_member.type)
+
+fun interface_parent_contract_compatible(type, expected_type):
+  if type.parent || expected_type.parent
+  | type.parent is_a InterfaceType && expected_type.parent is_a InterfaceType && interface_type_connection_compatible(
+      type.parent,
+      expected_type.parent
+    )
+  | #true
+
+fun interface_supported_contracts_compatible(type, expected_type):
+  type.supported_contracts.length() == expected_type.supported_contracts.length() && (
+    for all (supported in type.supported_contracts,
+             expected_supported in expected_type.supported_contracts):
+      supported.role == expected_supported.role && interface_type_connection_compatible(supported.type,
+                                                                                        expected_supported.type)
+  )
+
+fun interface_type_connection_compatible(type, expected_type):
+  cond
+  | interface_type_same_specialization(type, expected_type): #true
+  | !(type is_a InterfaceType && expected_type is_a InterfaceType && type.identity === expected_type.identity && interface_type_has_compatibility_difference(type, expected_type)):
+      #false
+  | !interface_type_wire_shape_equal(type, expected_type):
+      error(~who: #'connect_interfaces,
+            "compatible interface specializations must have exactly the same wire shape")
+  | ~else:
+      def direct_result:
+        if type.connection_compatibility && type.specialization_arguments != expected_type.specialization_arguments
+        | type.connection_compatibility.predicate(
+            type.specialization_arguments,
+            expected_type.specialization_arguments
+          )
+        | #true
+      unless direct_result is_a Boolean
+      | error(~who: #'connect_interfaces,
+              "interface connection compatibility predicate must return a host Boolean")
+      def parent_result = interface_parent_contract_compatible(type,
+                                                               expected_type)
+      def supported_result = interface_supported_contracts_compatible(
+        type,
+        expected_type
+      )
+      def nested_result = interface_nested_contracts_compatible(type,
+                                                                expected_type)
+      direct_result && parent_result && supported_result && nested_result
+
+fun interface_type_declared_compatible(type, expected_type):
+  interface_type_connection_compatible(type, expected_type)
+
 fun interface_type_supports(type, expected_type):
   type is_a InterfaceType && expected_type is_a InterfaceType && (
-    interface_type_equal(type, expected_type) || (
+    interface_type_declared_compatible(type, expected_type) || (
       type.parent is_a InterfaceType && interface_type_supports(type.parent,
                                                                 expected_type)
     ) || type.supported_contracts.find(
@@ -494,7 +619,7 @@ fun resolve_interface_member(value, name):
 def registered_interface_member_resolver = register_member_resolver(resolve_interface_member)
 
 fun interface_endpoint_has_type(value, expected_type):
-  value is_a InterfaceEndpoint && expected_type is_a InterfaceType && interface_type_equal(value.type, expected_type)
+  value is_a InterfaceEndpoint && expected_type is_a InterfaceType && interface_type_same_specialization(value.type, expected_type)
 
 fun interface_endpoint_supports_type(value, expected_type):
   value is_a InterfaceEndpoint && interface_type_supports(value.type,
@@ -724,7 +849,7 @@ fun compatible_interface_connection_pairs(left, right, extra_values, extra_field
 fun interface_connection_pairs(left, right, extra_values = [], extra_fields = {}):
   unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
   | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
-  if interface_type_equal(left.type, right.type) && extra_values.length() == 0 && extra_fields.length() == 0
+  if interface_type_same_specialization(left.type, right.type) && extra_values.length() == 0 && extra_fields.length() == 0
   | exact_interface_connection_pairs(left, right)
   | compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
 
@@ -837,7 +962,8 @@ fun make_refined_interface(identity,
                            name,
                            parent,
                            declarations,
-                           supported_contracts = []):
+                           supported_contracts = [],
+                           ~specialization_arguments: specialization_arguments = []):
   unless parent is_a InterfaceType
   | error(~who: #'interface,
           "interface refinement parent must be an InterfaceType")
@@ -847,7 +973,8 @@ fun make_refined_interface(identity,
                 parent,
                 supported_contracts,
                 ~provider_role: parent.provider_role,
-                ~identity: identity)
+                ~identity: identity,
+                ~specialization_arguments: specialization_arguments)
 
 defn.macro
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
@@ -883,7 +1010,8 @@ defn.macro
                             $second_from_name,
                             $second_to_name),
             ...],
-           [InterfaceSupport($support_role_name, $supported)]
+           [InterfaceSupport($support_role_name, $supported)],
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
@@ -908,7 +1036,8 @@ defn.macro
                             $from_role_name,
                             $to_role_name),
             ...],
-           [InterfaceSupport($support_role_name, $supported)]
+           [InterfaceSupport($support_role_name, $supported)],
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
@@ -923,7 +1052,8 @@ defn.macro
            $interface_name,
            $parent,
            [],
-           [InterfaceSupport($support_role_name, $supported)]
+           [InterfaceSupport($support_role_name, $supported)],
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
@@ -956,7 +1086,8 @@ defn.macro
                             $second_type,
                             $second_from_name,
                             $second_to_name),
-            ...]
+            ...],
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
@@ -978,7 +1109,8 @@ defn.macro
                             $field_type,
                             $from_role_name,
                             $to_role_name),
-            ...]
+            ...],
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed)':
@@ -989,7 +1121,95 @@ defn.macro
          make_refined_interface(interface_identity,
                                 $interface_name,
                                 $parent,
-                                [])
+                                [],
+                                ~specialization_arguments: [$parameter, ...])
+     »'
+| 'interface $(name :: Identifier)($parameter, ...):
+     role $(first_role :: Identifier)
+     role $(second_role :: Identifier)
+     provider $(provider_role :: Identifier)
+     connection_compatible $(compatibility_role :: Identifier) ($(provided_arguments :: Identifier), $(required_arguments :: Identifier)):
+       $compatibility
+     $(first_from :: Identifier) -> $(first_to :: Identifier):
+       $first_field: $first_type
+       ...
+     $(second_from :: Identifier) -> $(second_to :: Identifier):
+       $second_field: $second_type
+       ...':
+    def interface_name = name.to_source_string()
+    def provider_role_name = provider_role.to_source_string()
+    def compatibility_role_name = compatibility_role.to_source_string()
+    def first_role_name = first_role.to_source_string()
+    def second_role_name = second_role.to_source_string()
+    def first_from_name = first_from.to_source_string()
+    def first_to_name = first_to.to_source_string()
+    def second_from_name = second_from.to_source_string()
+    def second_to_name = second_to.to_source_string()
+    let [first_field_name, ...] = [first_field.to_source_string(), ...]
+    let [second_field_name, ...] = [second_field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($first_field_name,
+                            $first_type,
+                            $first_from_name,
+                            $first_to_name),
+            ...,
+            InterfaceMember($second_field_name,
+                            $second_type,
+                            $second_from_name,
+                            $second_to_name),
+            ...],
+           ~provider_role: $provider_role_name,
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...],
+           ~connection_compatibility:
+             InterfaceCompatibility(
+               $compatibility_role_name,
+               fun ($provided_arguments, $required_arguments): $compatibility
+             )
+         )
+     »'
+| 'interface $(name :: Identifier)($parameter, ...):
+     role $(first_role :: Identifier)
+     role $(second_role :: Identifier)
+     provider $(provider_role :: Identifier)
+     connection_compatible $(compatibility_role :: Identifier) ($(provided_arguments :: Identifier), $(required_arguments :: Identifier)):
+       $compatibility
+     $(from_role :: Identifier) -> $(to_role :: Identifier):
+       $field: $field_type
+       ...':
+    def interface_name = name.to_source_string()
+    def provider_role_name = provider_role.to_source_string()
+    def compatibility_role_name = compatibility_role.to_source_string()
+    def first_role_name = first_role.to_source_string()
+    def second_role_name = second_role.to_source_string()
+    def from_role_name = from_role.to_source_string()
+    def to_role_name = to_role.to_source_string()
+    let [field_name, ...] = [field.to_source_string(), ...]
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $name($parameter, ...):
+         InterfaceType(
+           $interface_name,
+           [$first_role_name, $second_role_name],
+           [InterfaceMember($field_name,
+                            $field_type,
+                            $from_role_name,
+                            $to_role_name),
+            ...],
+           ~provider_role: $provider_role_name,
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...],
+           ~connection_compatibility:
+             InterfaceCompatibility(
+               $compatibility_role_name,
+               fun ($provided_arguments, $required_arguments): $compatibility
+             )
+         )
      »'
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
@@ -1028,7 +1248,8 @@ defn.macro
                             $second_to_name),
             ...],
            ~provider_role: $provider_role_name,
-           ~identity: interface_identity
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...):
@@ -1057,7 +1278,8 @@ defn.macro
                             $to_role_name),
             ...],
            ~provider_role: $provider_role_name,
-           ~identity: interface_identity
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($parameter, ...):
@@ -1094,7 +1316,8 @@ defn.macro
                             $second_from_name,
                             $second_to_name),
             ...],
-           ~identity: interface_identity
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 | 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier))':
@@ -1128,7 +1351,8 @@ defn.macro
                             $from_role_name,
                             $to_role_name),
             ...],
-           ~identity: interface_identity
+           ~identity: interface_identity,
+           ~specialization_arguments: [$parameter, ...]
          )
      »'
 

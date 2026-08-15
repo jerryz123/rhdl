@@ -1,5 +1,5 @@
 #lang rhdl
-// Exercises declaration identity and explicit provider orientation for interface compatibility.
+// Exercises nominal identity, provider orientation, and specialization-defined interface compatibility.
 
 import:
   "interface-nominal-contract.rhdl" as foreign
@@ -26,6 +26,28 @@ interface ReverseOnly():
 
 interface StrongReverseOnly() refines ReverseOnly()
 
+interface CapacityLink(capacity, width):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    provided[0] >= required[0]
+
+  producer -> consumer:
+    payload: Bits(width)
+
+interface NestedCapacity(capacity):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    link: CapacityLink(capacity, 8)
+
+fun require_capacity(
+  endpoint :: Endpoint.supports(CapacityLink(2, 8))
+) :~ Endpoint:
+  endpoint
+
 circuit LocalNominalIdentity():
   interface endpoint(Collision(Bits(8)), ~role: consumer)
   require_local_collision(endpoint)
@@ -51,14 +73,50 @@ circuit CompatibleReverseOnly():
   interface base_end(ReverseOnly(), ~role: sender)
   strong_end <=> base_end
 
+circuit CompatibleSpecializations():
+  interface source(CapacityLink(4, 8), ~role: consumer)
+  interface sink(CapacityLink(2, 8), ~role: producer)
+  source <=> sink
+
+circuit CompatibleSpecializationsReversed():
+  interface source(CapacityLink(4, 8), ~role: consumer)
+  interface sink(CapacityLink(2, 8), ~role: producer)
+  sink <=> source
+
+circuit CompatibleSpecializationArrays():
+  interface sources[2](CapacityLink(4, 8), ~role: consumer)
+  interface sinks[2](CapacityLink(2, 8), ~role: producer)
+  sources <=> sinks
+
+circuit CompatibleNestedSpecializations():
+  interface source(NestedCapacity(4), ~role: consumer)
+  interface sink(NestedCapacity(2), ~role: producer)
+  source <=> sink
+
+circuit CompatibleEndpointSupport():
+  interface source(CapacityLink(4, 8), ~role: consumer)
+  require_capacity(source)
+  #void
+
 def local_nominal_design = elaborate(LocalNominalIdentity())
 def exact_reverse_design = elaborate(ExactReverseOnly())
 def compatible_reverse_design = elaborate(CompatibleReverseOnly())
+def compatible_specializations_design = elaborate(CompatibleSpecializations())
+def compatible_specializations_reversed_design = elaborate(CompatibleSpecializationsReversed())
+def compatible_specialization_arrays_design = elaborate(CompatibleSpecializationArrays())
+def compatible_nested_specializations_design = elaborate(CompatibleNestedSpecializations())
+def compatible_endpoint_support_design = elaborate(CompatibleEndpointSupport())
 
 export:
+  CapacityLink
   ReverseOnly
   ForeignNominalCollision
   ForeignNominalBulkCollision
   local_nominal_design
   exact_reverse_design
   compatible_reverse_design
+  compatible_specializations_design
+  compatible_specializations_reversed_design
+  compatible_specialization_arrays_design
+  compatible_nested_specializations_design
+  compatible_endpoint_support_design

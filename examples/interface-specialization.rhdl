@@ -1,0 +1,62 @@
+#lang rhdl
+// Demonstrates declaration-owned compatibility between parameterized interface specializations.
+
+interface CapacityLink(capacity, width):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    // The first argument is semantic capacity; width remains physical shape.
+    provided[0] >= required[0]
+
+  producer -> consumer:
+    payload: Bits(width)
+
+interface CapacityEnvelope(capacity, width):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    link: CapacityLink(capacity, width)
+
+circuit CapacityBridge():
+  // The represented provider offers four units to a peer requiring two.
+  interface provided(CapacityLink(4, 8), ~role: consumer)
+  interface required(CapacityLink(2, 8), ~role: producer)
+  provided <=> required
+
+circuit ReversedCapacityBridge():
+  interface provided(CapacityLink(4, 8), ~role: consumer)
+  interface required(CapacityLink(2, 8), ~role: producer)
+  // Operand order does not change provider-to-peer compatibility.
+  required <=> provided
+
+circuit NestedCapacityBridge():
+  interface provided(CapacityEnvelope(4, 8), ~role: consumer)
+  interface required(CapacityEnvelope(2, 8), ~role: producer)
+  // Nested interface members apply their own compatibility rule recursively.
+  provided <=> required
+
+circuit CapacityWidthAdapter():
+  interface narrow(CapacityLink(4, 8), ~role: consumer)
+  interface wide(CapacityLink(2, 16), ~role: producer)
+  // Different physical widths cannot bulk-connect, even though capacity is
+  // compatible. The explicit adapter owns the widening policy.
+  wide.payload <== zext(narrow.payload, 16)
+
+def design = elaborate(CapacityBridge())
+def reversed_design = elaborate(ReversedCapacityBridge())
+def nested_design = elaborate(NestedCapacityBridge())
+def width_adapter_design = elaborate(CapacityWidthAdapter())
+
+export:
+  CapacityLink
+  CapacityEnvelope
+  CapacityBridge
+  ReversedCapacityBridge
+  NestedCapacityBridge
+  CapacityWidthAdapter
+  design
+  reversed_design
+  nested_design
+  width_adapter_design
