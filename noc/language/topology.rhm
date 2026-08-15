@@ -1,0 +1,165 @@
+#lang rhombus/and_meta
+// Defines embedded structural topology syntax that expands only to public authoring values.
+
+import:
+  rhombus/meta open
+  "../authoring/main.rhm" open
+
+export:
+  topology
+
+meta:
+  fun identifier_name(identifier):
+    identifier.to_source_string()
+
+  fun find_identifier(identifiers, candidate):
+    def candidate_name = identifier_name(candidate)
+    identifiers.find(
+      fun (identifier): identifier_name(identifier) == candidate_name
+    )
+
+  fun require_fresh(identifiers, candidate, subject):
+    when find_identifier(identifiers, candidate)
+    | syntax_meta.error(
+        "duplicate topology " ++ subject ++ " " ++ identifier_name(candidate),
+        candidate
+      )
+
+  fun require_declared(identifiers, candidate, subject):
+    unless find_identifier(identifiers, candidate)
+    | syntax_meta.error(
+        "unknown topology " ++ subject ++ " " ++ identifier_name(candidate),
+        candidate
+      )
+
+  fun validate_selected_groups(selected_groups, declared_groups, link_name):
+    def mutable seen = []
+    for (selected in selected_groups):
+      require_declared(declared_groups, selected, "VC group")
+      when find_identifier(seen, selected)
+      | syntax_meta.error(
+          String.append("duplicate VC group ", identifier_name(selected),
+                        " on topology link ", identifier_name(link_name)),
+          selected
+        )
+      seen := seen ++ [selected]
+
+  fun collect_declarations(clauses):
+    def mutable group_names = []
+    def mutable group_counts = []
+    def mutable node_names = []
+    def mutable link_names = []
+    for (clause in clauses):
+      match clause
+      | 'vc_group $(name :: Identifier): $count':
+          require_fresh(group_names, name, "VC group")
+          when find_identifier(node_names, name)
+          | syntax_meta.error(
+              "topology name is already used by a node: " ++ identifier_name(name),
+              name
+            )
+          group_names := group_names ++ [name]
+          group_counts := group_counts ++ [count]
+      | 'node $(name :: Identifier)':
+          require_fresh(node_names, name, "node")
+          when find_identifier(group_names, name)
+          | syntax_meta.error(
+              "topology name is already used by a VC group: " ++ identifier_name(name),
+              name
+            )
+          node_names := node_names ++ [name]
+      | 'directed $(name :: Identifier):
+           $(source :: Identifier) -> $(destination :: Identifier)
+           vcs [$(group :: Identifier), ...]':
+          require_fresh(link_names, name, "link")
+          link_names := link_names ++ [name]
+      | 'bidirectional ($(forward :: Identifier), $(reverse :: Identifier)):
+           $(source :: Identifier) <-> $(destination :: Identifier)
+           vcs [$(group :: Identifier), ...]':
+          require_fresh(link_names, forward, "link")
+          link_names := link_names ++ [forward]
+          require_fresh(link_names, reverse, "link")
+          link_names := link_names ++ [reverse]
+      | ~else:
+          syntax_meta.error(
+            "expected vc_group, node, directed, or bidirectional topology declaration",
+            clause
+          )
+    when node_names.length() == 0
+    | syntax_meta.error("topology requires at least one node")
+    values(group_names, group_counts, node_names)
+
+  fun lower_links(clauses, node_names, group_names):
+    def mutable links = []
+    for (clause in clauses):
+      match clause
+      | 'directed $(name :: Identifier):
+           $(source :: Identifier) -> $(destination :: Identifier)
+           vcs [$(group :: Identifier), ...]':
+          require_declared(node_names, source, "node")
+          require_declared(node_names, destination, "node")
+          def selected_groups = [group, ...]
+          when selected_groups.length() == 0
+          | syntax_meta.error(
+              "directed topology link requires at least one VC group",
+              name
+            )
+          validate_selected_groups(selected_groups, group_names, name)
+          def link_name = identifier_name(name)
+          links := links ++ [
+            'TopologyLink(
+               LinkRef($link_name),
+               $source,
+               $destination,
+               [$group, ...]
+             )'
+          ]
+      | 'bidirectional ($(forward :: Identifier), $(reverse :: Identifier)):
+           $(source :: Identifier) <-> $(destination :: Identifier)
+           vcs [$(group :: Identifier), ...]':
+          require_declared(node_names, source, "node")
+          require_declared(node_names, destination, "node")
+          def selected_groups = [group, ...]
+          when selected_groups.length() == 0
+          | syntax_meta.error(
+              "bidirectional topology link requires at least one VC group",
+              forward
+            )
+          validate_selected_groups(selected_groups, group_names, forward)
+          def forward_name = identifier_name(forward)
+          def reverse_name = identifier_name(reverse)
+          links := links ++ [
+            'TopologyLink(
+               LinkRef($forward_name),
+               $source,
+               $destination,
+               [$group, ...]
+             )',
+            'TopologyLink(
+               LinkRef($reverse_name),
+               $destination,
+               $source,
+               [$group, ...]
+             )'
+          ]
+      | ~else: #void
+    links
+
+expr.macro 'topology:
+              $clause
+              ...':
+  def clauses = [clause, ...]
+  def (group_names, group_counts, node_names) = collect_declarations(clauses)
+  def links = lower_links(clauses, node_names, group_names)
+  let [group_name, ...] = group_names
+  let [group_count, ...] = group_counts
+  let [node_name, ...] = node_names
+  let [link, ...] = links
+  let [group_string, ...] = group_names.map(identifier_name)
+  let [node_string, ...] = node_names.map(identifier_name)
+  'block:
+     def $group_name = VCGroup($group_string, $group_count)
+     ...
+     def $node_name = NodeRef($node_string)
+     ...
+     TopologySpec([$node_name, ...], [$link, ...])'

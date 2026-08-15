@@ -18,6 +18,8 @@ The current implementation provides:
   identity-provenance lookups.
 - Hierarchical prefixing and collision-checked topology composition.
 - Topology-independent directed and bidirectional link helpers.
+- Optional embedded structural topology declarations that expand only into
+  the public authoring API.
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Inspectable routing-policy expressions with symbolic contexts and lowering to
   the existing normalized routing relation.
@@ -64,8 +66,8 @@ The package does not yet lower route tables into RHDL or generate router RTL.
 
 ## Dependency boundary
 
-Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, `noc/plan/`, and
-`noc/std/` use only `#lang rhombus` and other modules in the pure NoC package.
+Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, `noc/language/`,
+`noc/plan/`, and `noc/std/` use only `#lang rhombus` and other modules in the pure NoC package.
 They must not import RHDL core, frontend, backend, standard-library hardware
 modules, or CIRCT integration. Core model, authoring, analysis, and planning
 modules must not import `noc/std`; reusable topology and routing definitions
@@ -81,6 +83,8 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-te
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-phase-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/escape-composition-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/topology-test.rhm
+bash noc/tests/language/run-negative.sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -136,6 +140,36 @@ composition operations make no assumptions about topology families,
 coordinates, directions, or routing metrics. A user-defined topology view only
 needs to contain an ordinary `TopologySpec`; it can expose any additional
 domain queries without modifying core authoring or analysis modules.
+
+## Embedded topology syntax
+
+The optional `noc/language` package provides a structural `topology:`
+expression for explicit graphs:
+
+```rhombus
+def network = topology:
+  vc_group adaptive: 2
+  vc_group escape: 1
+  node a
+  node b
+  bidirectional (a_to_b, b_to_a):
+    a <-> b
+    vcs [adaptive, escape]
+```
+
+The form resolves its node, link, and VC-group identifiers lexically within
+the declaration and returns an ordinary `TopologySpec`. Declarations may
+appear in any order. `TopologySpec.node` and `TopologySpec.link` recover named
+handles without exposing macro-generated local bindings. Duplicate and unknown
+names are rejected during expansion at the relevant identifier; host values
+such as VC counts remain subject to the public constructors' runtime checks.
+
+Every accepted clause expands only into `NodeRef`, `LinkRef`, `VCGroup`,
+`TopologyLink`, and `TopologySpec`. It does not lower numeric identities,
+define topology families, materialize routing, invoke validation, or construct
+hardware. Generated lines, meshes, and user topology views remain ordinary
+functions in `std` or user modules. Routing syntax is deliberately deferred
+until this structural form passes its equivalence gate.
 
 ## Standard topology definitions
 
