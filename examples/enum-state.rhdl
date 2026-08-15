@@ -1,5 +1,5 @@
 #lang rhdl
-// Demonstrates nominal enums with automatic and explicit hardware encodings.
+// Demonstrates equivalent enum mux and switch forms plus explicit encodings.
 
 hardware_enum State:
   Idle
@@ -11,7 +11,7 @@ hardware_enum Opcode(~width: 4):
   Sub = 1
   Load = 8
 
-circuit StateMachine():
+circuit StateMachineLookup():
   input clock: Clock
   input reset: Reset
   output state_out: State
@@ -22,6 +22,26 @@ circuit StateMachine():
     State.Idle: State.Running
     State.Running: State.Done
     State.Done: State.Idle
+  state_out <== current
+
+// This statement form has the same transition and invalid-encoding behavior
+// as StateMachineLookup, while allowing multiple assignments or effects per case.
+circuit StateMachine():
+  input clock: Clock
+  input reset: Reset
+  output state_out: State
+
+  reg current(State, ~clock: clock, ~reset: reset, ~init: State.Idle)
+  // The mandatory otherwise branch recovers from the unused two-bit encoding.
+  switch current:
+    case State.Idle:
+      current.next <== State.Running
+    case State.Running:
+      current.next <== State.Done
+    case State.Done:
+      current.next <== State.Idle
+    otherwise:
+      current.next <== State.Idle
   state_out <== current
 
 circuit OpcodeDecoder():
@@ -35,6 +55,7 @@ circuit OpcodeDecoder():
     Opcode.Load: Opcode.Add
 
 def design = elaborate(StateMachine())
+def lookup_design = elaborate(StateMachineLookup())
 
 def verilog_reference = @str|<<{
 module StateMachine(
@@ -58,6 +79,8 @@ export:
   State
   Opcode
   StateMachine
+  StateMachineLookup
   OpcodeDecoder
   design
+  lookup_design
   verilog_reference

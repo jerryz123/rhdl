@@ -62,7 +62,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`alu.rhdl`](alu.rhdl) | Boolean, bitwise, arithmetic, equality, and N-way selection |
 | [`unsigned-comparisons.rhdl`](unsigned-comparisons.rhdl) | Unsigned ordering derived from one core comparison |
 | [`signed-integers.rhdl`](signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
-| [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums, explicit encodings, state, and invalid recovery |
+| [`enum-state.rhdl`](enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
 | [`one-hot.rhdl`](one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
 | [`one-hot-enum.rhdl`](one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
 | [`shifts.rhdl`](shifts.rhdl) | Logical shifts with independent amount widths |

@@ -26,7 +26,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed separate or shared ports |
 | [`assertion.rhm`](assertion.rhm) | Reset-suppressed, branch-guarded clocked assertions |
 | [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
-| [`conditional.rhm`](conditional.rhm) | Hardware `when`, priority branches, and guarded writes |
+| [`conditional.rhm`](conditional.rhm) | Hardware `when` priority chains, exact-key `switch`, and guarded effects |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
 | [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
 | [`interface.rhm`](interface.rhm) | Roles, directional protocols, refinement, and bulk connection |
@@ -410,15 +410,34 @@ mux lookups plus one final drive. Register-next destinations may omit
 `otherwise` and implicitly hold current state. Outputs, wires, and instance
 inputs require exhaustive assignment.
 
+`switch` selects unordered, unique exact keys from one hardware selector:
+
+```rhombus
+switch state:
+  case State.Idle:
+    state.next <== State.Running
+  case State.Running:
+    state.next <== State.Done
+  otherwise:
+    state.next <== State.Idle
+```
+
+Bits selectors use nonnegative host `Int` keys. Typed mux-key selectors such as
+hardware enums and `OneHot` require keys from that selector's own type. Case
+order carries no priority, fallthrough is unsupported, and keys must be unique
+and fit the selector width. Each assigned destination lowers directly to one
+`rtl.mux_lookup`. As with `when`, outputs, wires, and instance inputs require
+`otherwise`, while register-next destinations may omit it and hold.
+
 Conditional memory writes are effects rather than place assignments. Branch
 guards combine with explicit local enables, and corresponding write positions
 across mutually exclusive branches share one physical port with muxed address
 and data. Independent chains remain independent ports.
 
 Assertions participate in conditional-body lowering: each assertion receives
-the effective priority branch as a derived activation guard. Clocked DPI calls
-and DPI result registers do not participate; put those effects outside `when`
-and pass the hardware condition through `~enable`.
+the effective priority or exact-match branch as a derived activation guard.
+Clocked DPI calls and DPI result registers do not participate; put those effects
+outside `when` or `switch` and pass the hardware condition through `~enable`.
 
 A destination may appear once per branch, and separate chains do not implement
 last-connect semantics. Primitive register reset remains expressed through

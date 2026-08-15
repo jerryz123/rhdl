@@ -40,6 +40,8 @@ expect_failure bad-interface-array-role.rhdl "incompatible roles and boundary di
 expect_failure bad-mux-key-type.rhdl "mux lookup keys must be host Int values"
 expect_failure bad-mux-key-width.rhdl "mux lookup key does not fit its selector type"
 expect_failure bad-mux-duplicate-key.rhdl "mux lookup keys must be unique"
+expect_failure bad-switch-empty.rhdl "switch requires at least one case"
+expect_failure bad-switch-case-after-otherwise.rhdl "switch case cannot follow otherwise"
 expect_failure bad-parameter.rhdl "circuit parameters must be host values, not hardware values"
 expect_failure bad-register-parameter.rhdl "circuit parameters must be host values, not hardware values"
 expect_failure bad-ambient-register.rhdl "implicit clock/reset use requires an active sync_circuit"

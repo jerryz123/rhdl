@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks nominal enum declarations, encodings, literals, equality, state, and composition.
+// Checks nominal enums, switch keys, literals, equality, state, and composition.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -26,6 +26,18 @@ def constants = module_def.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.constant"
 )
 def idle_key = fixture.State.Idle
+
+def lookup_design = fixture.lookup_design
+def lookup_module = lookup_design.modules[0]
+def expression_lookup = lookup_module.operations.find(
+  fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+
+fun literal_encoding(module_def, value):
+  def operation = module_def.find_operation(value.defining_op_id)
+  if operation.opcode == "rtl.cast"
+  | literal_encoding(module_def, operation.operands[0])
+  | operation.attribute("value")
 
 def opcode_design = embedded.run_elaboration(fun (): fixture.OpcodeDecoder())
 def opcode_module = opcode_design.modules[0]
@@ -79,7 +91,14 @@ check:
   (for all (case_value in state_lookup.operands.drop(2)):
      type_equal(case_value.type, fixture.State)) ~is #true
   type_equal(state_lookup.results[0].type, fixture.State) ~is #true
-  constants.map(fun (operation): operation.attribute("value")) ~is [0, 0, 1, 2, 0]
+  constants.map(fun (operation): operation.attribute("value")) ~is [0, 1, 2, 0, 0]
+  expression_lookup.attribute("keys") ~is state_lookup.attribute("keys")
+  expression_lookup.operands.drop(1).map(
+    fun (value): literal_encoding(lookup_module, value)
+  ) ~is [0, 1, 2, 0]
+  state_lookup.operands.drop(1).map(
+    fun (value): literal_encoding(module_def, value)
+  ) ~is [0, 1, 2, 0]
   type_equal(opcode_module.find_input("opcode").type, fixture.Opcode) ~is #true
   opcode_equality.operands[0].type.width ~is 4
   opcode_equality.operands[1].type.width ~is 4
@@ -102,6 +121,7 @@ check:
      type_equal(choice.type, Bits(8))) ~is #true
   type_equal(one_hot_mux.results[0].type, Bits(8)) ~is #true
   verify_design(design) ~is #void
+  verify_design(lookup_design) ~is #void
   verify_design(composed_fixture.design) ~is #void
   verify_design(opcode_design) ~is #void
   verify_design(one_hot_design) ~is #void

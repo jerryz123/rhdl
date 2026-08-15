@@ -241,7 +241,7 @@ fixture_specs=(
   'adder4|adder4_tb|examples/adder4.rhdl|design|verilog_reference'
   'generated-adder|generated_adder_tb|examples/generated-adder.rhdl|design|verilog_reference'
   'alu|alu_tb|examples/alu.rhdl|design|verilog_reference'
-  'enum-state||examples/enum-state.rhdl|design|verilog_reference'
+  'enum-state|enum_state_tb|examples/enum-state.rhdl|design|verilog_reference'
   'one-hot|one_hot_tb|examples/one-hot.rhdl|design|verilog_reference'
   'one-hot-enum||examples/one-hot-enum.rhdl|design|verilog_reference'
   'shifts|shifts_tb|examples/shifts.rhdl|design|verilog_reference'

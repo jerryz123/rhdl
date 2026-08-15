@@ -66,6 +66,7 @@ export:
   inst
   connect
   conditional_chain
+  switch_chain
   read
   hardware_entity
   frontend_fail
@@ -133,6 +134,7 @@ class FrontendContext(design,
 Parameter.def current_context = #false
 Parameter.def current_module = #false
 Parameter.def current_conditional_branch = #false
+Parameter.def current_conditional_form = "when"
 
 class ConditionalAssignment(place, value)
 class ConditionalMemoryWrite(resource, address, data, clock, enable, location)
@@ -161,13 +163,14 @@ class ConditionalBranch(mutable assignments = [],
   method add_assertion(assertion):
     assertions := assertions ++ [assertion]
 
-// Prevents effects with no conditional-lowering protocol from escaping a when
-// branch without an explicit hardware guard in their own semantics.
+// Prevents effects with no conditional-lowering protocol from escaping a
+// hardware branch without an explicit guard in their own semantics.
 fun reject_unsupported_conditional_effect(effect,
                                           location = Location(),
                                           guidance = "use ~enable for hardware control"):
   when current_conditional_branch() is_a ConditionalBranch
-  | frontend_fail(effect ++ " is not supported inside when; " ++ guidance,
+  | frontend_fail(String.append(effect, " is not supported inside ",
+                                current_conditional_form(), "; ", guidance),
                   location)
 
 fun require_context(location = Location()):
@@ -874,28 +877,21 @@ fun validate_conditional_value(condition, location = Location()):
   | frontend_fail("hardware condition must have a one-bit FlatDataType", location)
   value
 
-fun collect_conditional_branch(body, location = Location()):
+fun collect_conditional_branch(body, form, location = Location()):
   def branch = ConditionalBranch()
-  parameterize { current_conditional_branch: branch }:
+  parameterize { current_conditional_branch: branch,
+                 current_conditional_form: form }:
     body()
   branch
 
-// Elaborates an ordered hardware-conditional chain into mux trees, final
-// drivers, enabled memory writes, and priority-guarded assertions.
-fun conditional_chain(branches, otherwise_body = #false, location = Location()):
-  unless branches is_a List && branches.length() >= 1
-  | frontend_fail("conditional chain requires at least one branch", location)
-  def conditions:
-    for List (branch in branches):
-      validate_conditional_value(branch[0](), location)
-  def branch_results:
-    for List (branch in branches):
-      collect_conditional_branch(branch[1], location)
-  def otherwise_result:
-    if otherwise_body
-    | collect_conditional_branch(otherwise_body, location)
-    | #false
-
+// Resolves collected mutually exclusive branches through a caller-supplied
+// selection strategy, preserving the one-final-driver and shared-port rules.
+fun resolve_conditional_branches(branch_results,
+                                 otherwise_result,
+                                 select_values,
+                                 build_assertion_guards,
+                                 origin_description,
+                                 location):
   def mutable has_assertions = #false
   for (branch_result in branch_results):
     when branch_result.assertions.length() > 0
@@ -903,34 +899,19 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
   when otherwise_result && otherwise_result.assertions.length() > 0
   | has_assertions := #true
 
-  // Priority-aware assertion guards describe the cycles in which each branch
-  // body is active. Nested chains combine their guards while unwinding.
   when has_assertions
   | block:
-      def mutable unmatched_guard = #false
-      def branch_guards:
-        for List (condition in conditions, index in 0..conditions.length()):
-          def condition_bits = cast(condition, Bits(1), #false, location)
-          def branch_guard = combine_assertion_guards(unmatched_guard,
-                                                      condition_bits,
-                                                      location)
-          def needs_unmatched:
-            if index + 1 < conditions.length()
-            | #true
-            | otherwise_result && otherwise_result.assertions.length() > 0
-          when needs_unmatched
-          | def condition_false = bit_not(condition_bits, #false, location)
-            unmatched_guard := combine_assertion_guards(unmatched_guard,
-                                                        condition_false,
-                                                        location)
-          branch_guard
-
+      def guards = build_assertion_guards(
+        otherwise_result && otherwise_result.assertions.length() > 0
+      )
+      def branch_guards = guards[0]
+      def otherwise_guard = guards[1]
       for (branch_result in branch_results, branch_guard in branch_guards):
         for (assertion in branch_result.assertions):
           emit_conditional_assertion(assertion, branch_guard)
       when otherwise_result
       | for (assertion in otherwise_result.assertions):
-          emit_conditional_assertion(assertion, unmatched_guard)
+          emit_conditional_assertion(assertion, otherwise_guard)
 
   def mutable places = []
   for (branch_result in branch_results):
@@ -943,7 +924,7 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
       | places := places ++ [assignment.place]
   for (place in places):
     def hold = register_hold_value(place, location)
-    def mutable selected:
+    def fallback:
       if otherwise_result
       | block:
           def assignment = otherwise_result.assignment_for(place)
@@ -959,23 +940,20 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
                                       place.name,
                                       " requires otherwise"),
                         location)
-    for (index in (branches.length() - 1) >=..= 0):
-      def assignment = branch_results[index].assignment_for(place)
-      def branch_value:
+    def branch_values:
+      for List (branch_result in branch_results):
+        def assignment = branch_result.assignment_for(place)
         if assignment
         | assignment.value
         | if hold
           | hold
           | frontend_fail("conditional branch does not assign " ++ place.name,
                           location)
-      selected := hw_mux_lookup(
-        cast(conditions[index], Bits(1), #false, location),
-        selected,
-        [[1, branch_value]],
-        #false,
-        location,
-        Origin("embedded conditional mux", place.name)
-      )
+    def selected = select_values(
+      branch_values,
+      fallback,
+      Origin(origin_description ++ " mux", place.name)
+    )
     emit_conditional_assignment(place, selected, location)
 
   def mutable memories = []
@@ -1021,49 +999,37 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
       def fallback_write = memory_write_at(otherwise_result,
                                            resource,
                                            port_index)
-      def mutable selected_address:
+      def fallback_address:
         if fallback_write | fallback_write.address | representative.address
-      def mutable selected_data:
+      def fallback_data:
         if fallback_write | fallback_write.data | representative.data
-      def mutable selected_enable:
+      def fallback_enable:
         if fallback_write
         | cast(fallback_write.enable, Bits(1), #false, location)
         | disabled
-      for (index in (branches.length() - 1) >=..= 0):
-        def write = memory_write_at(branch_results[index],
-                                    resource,
-                                    port_index)
-        def condition = cast(conditions[index], Bits(1), #false, location)
-        def branch_enable:
-          if write
-          | cast(write.enable, Bits(1), #false, location)
-          | disabled
-        selected_enable := hw_mux_lookup(
-          condition,
-          selected_enable,
-          [[1, branch_enable]],
-          #false,
-          location,
-          Origin("embedded conditional memory enable", resource.name)
-        )
-        when write
-        | block:
-            selected_address := hw_mux_lookup(
-              condition,
-              selected_address,
-              [[1, write.address]],
-              #false,
-              location,
-              Origin("embedded conditional memory address", resource.name)
-            )
-            selected_data := hw_mux_lookup(
-              condition,
-              selected_data,
-              [[1, write.data]],
-              #false,
-              location,
-              Origin("embedded conditional memory data", resource.name)
-            )
+      def branch_writes:
+        for List (branch_result in branch_results):
+          memory_write_at(branch_result, resource, port_index)
+      def selected_address = select_values(
+        branch_writes.map(fun (write): if write | write.address | #false),
+        fallback_address,
+        Origin(origin_description ++ " memory address", resource.name)
+      )
+      def selected_data = select_values(
+        branch_writes.map(fun (write): if write | write.data | #false),
+        fallback_data,
+        Origin(origin_description ++ " memory data", resource.name)
+      )
+      def selected_enable = select_values(
+        branch_writes.map(
+          fun (write):
+            if write
+            | cast(write.enable, Bits(1), #false, location)
+            | disabled
+        ),
+        fallback_enable,
+        Origin(origin_description ++ " memory enable", resource.name)
+      )
       emit_conditional_memory_write(
         ConditionalMemoryWrite(resource,
                                selected_address,
@@ -1073,6 +1039,122 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
                                representative.location)
       )
   #void
+
+// Elaborates an ordered hardware-conditional chain into priority mux trees.
+fun conditional_chain(branches, otherwise_body = #false, location = Location()):
+  unless branches is_a List && branches.length() >= 1
+  | frontend_fail("conditional chain requires at least one branch", location)
+  def conditions:
+    for List (branch in branches):
+      validate_conditional_value(branch[0](), location)
+  def branch_results:
+    for List (branch in branches):
+      collect_conditional_branch(branch[1], "when", location)
+  def otherwise_result:
+    if otherwise_body
+    | collect_conditional_branch(otherwise_body, "when", location)
+    | #false
+  fun select_values(branch_values, fallback, origin):
+    def mutable selected = fallback
+    for (index in (branches.length() - 1) >=..= 0):
+      def branch_value = branch_values[index]
+      when branch_value
+      | selected := hw_mux_lookup(
+          cast(conditions[index], Bits(1), #false, location),
+          selected,
+          [[1, branch_value]],
+          #false,
+          location,
+          origin
+        )
+    selected
+  fun build_assertion_guards(needs_otherwise):
+    def mutable unmatched_guard = #false
+    def branch_guards:
+      for List (condition in conditions, index in 0..conditions.length()):
+        def condition_bits = cast(condition, Bits(1), #false, location)
+        def branch_guard = combine_assertion_guards(unmatched_guard,
+                                                    condition_bits,
+                                                    location)
+        when index + 1 < conditions.length() || needs_otherwise
+        | def condition_false = bit_not(condition_bits, #false, location)
+          unmatched_guard := combine_assertion_guards(unmatched_guard,
+                                                      condition_false,
+                                                      location)
+        branch_guard
+    [branch_guards, unmatched_guard]
+  resolve_conditional_branches(branch_results,
+                               otherwise_result,
+                               select_values,
+                               build_assertion_guards,
+                               "embedded conditional",
+                               location)
+
+// Elaborates unordered exact-key cases into direct keyed mux lookups. Keys are
+// normalized host integers, so no switch control-flow operation enters core.
+fun switch_chain(selector,
+                 cases,
+                 otherwise_body = #false,
+                 location = Location()):
+  def selector_value = read(selector, location)
+  unless bits_type(selector_value.type)
+  | frontend_fail("switch selector must lower to Bits", location)
+  unless cases is_a List && cases.length() >= 1
+  | frontend_fail("switch requires at least one case", location)
+  def width = data_width(selector_value.type)
+  def mutable keys = []
+  for (case in cases):
+    unless case is_a List && case.length() == 2 && case[0] is_a Int
+    | frontend_fail("switch cases must contain host Int keys and branch bodies",
+                    location)
+    def key = case[0]
+    unless key >= 0 && key < (1 bits.(<<) width)
+    | frontend_fail("switch case key does not fit the selector width", location)
+    when keys.find(fun (existing): existing == key)
+    | frontend_fail("switch case keys must be unique", location)
+    keys := keys ++ [key]
+  def branch_results:
+    for List (case in cases):
+      collect_conditional_branch(case[1], "switch", location)
+  def otherwise_result:
+    if otherwise_body
+    | collect_conditional_branch(otherwise_body, "switch", location)
+    | #false
+  fun select_values(branch_values, fallback, origin):
+    def mutable selected_cases = []
+    for (key in keys, branch_value in branch_values):
+      when branch_value
+      | selected_cases := selected_cases ++ [[key, branch_value]]
+    if selected_cases.length() == 0
+    | fallback
+    | hw_mux_lookup(selector_value,
+                    fallback,
+                    selected_cases,
+                    #false,
+                    location,
+                    origin)
+  fun build_assertion_guards(needs_otherwise):
+    def branch_guards:
+      for List (key in keys):
+        hw_eq(selector_value,
+              literal(Bits(width), key, #false, location),
+              #false,
+              location)
+    def mutable otherwise_guard = #false
+    when needs_otherwise
+    | for (branch_guard in branch_guards):
+        otherwise_guard := combine_assertion_guards(
+          otherwise_guard,
+          bit_not(branch_guard, #false, location),
+          location
+        )
+    [branch_guards, otherwise_guard]
+  resolve_conditional_branches(branch_results,
+                               otherwise_result,
+                               select_values,
+                               build_assertion_guards,
+                               "embedded switch",
+                               location)
 
 fun frontend_run(program):
   def design = Design()

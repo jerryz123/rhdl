@@ -104,6 +104,7 @@ Boolean                      host value only
 Bool                         runtime Boolean hardware data
 if                           elaboration-time choice
 when                         hardware conditional assignment
+switch                       hardware exact-key conditional assignment
 for over a host collection   repeated generated structure
 generator call               fresh module definition
 ```
@@ -112,9 +113,10 @@ Host control retains ordinary Rhombus truthiness. A hardware value is a host
 object and is therefore truthy, so using one wherever Rhombus asks for a truth
 value—including `if`, `unless`, `cond`, host Boolean operators, and iteration
 guards—tests the presence of that object; it never observes the value carried
-by hardware at runtime. Use the hardware-only `when` form supplied by the
-conditional layer for runtime control. Its condition must be a one-bit
-hardware value; host values are rejected.
+by hardware at runtime. Use the hardware-only `when` and `switch` forms supplied
+by the conditional layer for runtime control. `when` conditions must be one-bit
+hardware values; `switch` selectors must be hardware values with supported
+exact keys. Host values are rejected by both forms.
 
 ## Host parameters and helpers
 

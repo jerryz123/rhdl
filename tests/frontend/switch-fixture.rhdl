@@ -1,0 +1,213 @@
+#lang rhdl
+// Defines exact-key hardware switch circuits, effects, nesting, and invalid uses.
+
+hardware_enum State:
+  Idle
+  Running
+  Done
+
+hardware_enum OtherState:
+  Idle
+  Running
+
+def Grant = OneHot(2)
+
+circuit BitsSwitch():
+  input selector: Bits(2)
+  input(a, b, fallback): Bits(8)
+  output selected: Bits(8)
+
+  switch selector:
+    case 2:
+      selected <== b
+    case 0:
+      selected <== a
+    otherwise:
+      selected <== fallback
+
+circuit EnumSwitch():
+  input selector: State
+  input(a, b, fallback): Bits(8)
+  output selected: Bits(8)
+
+  switch selector:
+    case State.Running:
+      selected <== b
+    case State.Idle:
+      selected <== a
+    otherwise:
+      selected <== fallback
+
+circuit OneHotSwitch():
+  input selector: Grant
+  input(a, b, fallback): Bits(8)
+  output selected: Bits(8)
+
+  switch selector:
+    case Grant(0):
+      selected <== a
+    case Grant(1):
+      selected <== b
+    otherwise:
+      selected <== fallback
+
+circuit SwitchRegisterHold():
+  input clock: Clock
+  input selector: State
+  input data: Bits(8)
+  output result: Bits(8)
+
+  reg state(Bits(8), ~clock: clock)
+  switch selector:
+    case State.Running:
+      state.next <== data
+  result <== state
+
+circuit NestedSwitch():
+  input selector: Bits(2)
+  input choose_a: Bool
+  input(a, b, c, fallback): Bits(8)
+  output selected: Bits(8)
+
+  switch selector:
+    case 0:
+      when choose_a:
+        selected <== a
+      otherwise:
+        selected <== b
+    case 1:
+      selected <== c
+    otherwise:
+      selected <== fallback
+
+sync_circuit SwitchMemoryWrites():
+  input selector: Bits(2)
+  input read_address: Bits(2)
+  input first_address: Bits(2)
+  input second_address: Bits(2)
+  input first_data: Bits(8)
+  input second_data: Bits(8)
+  output read_data: Bits(8)
+
+  mem storage(4, Bits(8))
+  switch selector:
+    case 0:
+      storage.write(first_address, first_data)
+    case 2:
+      storage.write(second_address, second_data)
+  read_data <== storage[read_address]
+
+sync_circuit SwitchAssertions():
+  input selector: Bits(2)
+  input first_condition: Bool
+  input second_condition: Bool
+  input fallback_condition: Bool
+
+  switch selector:
+    case 0:
+      assert(first_condition, "switch_first")
+    case 2:
+      assert(second_condition, "switch_second")
+    otherwise:
+      assert(fallback_condition, "switch_fallback")
+
+circuit HostSwitchSelector():
+  output selected: Bits(1)
+  switch 0:
+    case 0:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit UnsupportedSwitchSelector():
+  input selector: Bool
+  output selected: Bits(1)
+  switch selector:
+    case 0:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit DuplicateSwitchKey():
+  input selector: Bits(2)
+  output selected: Bits(1)
+  switch selector:
+    case 1:
+      selected <== bits(0, 1)
+    case 1:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit WideSwitchKey():
+  input selector: Bits(2)
+  output selected: Bits(1)
+  switch selector:
+    case 4:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit NonIntegerSwitchKey():
+  input selector: Bits(2)
+  output selected: Bits(1)
+  switch selector:
+    case #true:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit MissingSwitchOtherwise():
+  input selector: Bits(2)
+  output selected: Bits(1)
+  switch selector:
+    case 0:
+      selected <== bits(1, 1)
+
+circuit MissingSwitchBranch():
+  input selector: Bits(2)
+  output selected: Bits(1)
+  switch selector:
+    case 0:
+      selected <== bits(1, 1)
+    case 1:
+      #void
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit IntegerEnumSwitchKey():
+  input selector: State
+  output selected: Bits(1)
+  switch selector:
+    case 0:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+circuit ForeignEnumSwitchKey():
+  input selector: State
+  output selected: Bits(1)
+  switch selector:
+    case OtherState.Idle:
+      selected <== bits(1, 1)
+    otherwise:
+      selected <== bits(0, 1)
+
+export:
+  State
+  BitsSwitch
+  EnumSwitch
+  OneHotSwitch
+  SwitchRegisterHold
+  NestedSwitch
+  SwitchMemoryWrites
+  SwitchAssertions
+  HostSwitchSelector
+  UnsupportedSwitchSelector
+  DuplicateSwitchKey
+  WideSwitchKey
+  NonIntegerSwitchKey
+  MissingSwitchOtherwise
+  MissingSwitchBranch
+  IntegerEnumSwitchKey
+  ForeignEnumSwitchKey
