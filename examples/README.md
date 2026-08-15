@@ -93,7 +93,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`dont-care.rhdl`](dont-care.rhdl) | Typed synthesis freedom and Pattern-selected fixed bits |
 | [`decode.rhdl`](decode.rhdl) | Callable typed decode relation with named aggregate fields and semantic enum values |
 | [`decode-composition.rhdl`](decode-composition.rhdl) | Independent decode expansion across rows, output fields, and input fields |
-| [`bundle.rhdl`](bundle.rhdl) | Structural records, recursive literal shadows, muxes, casts, and state |
+| [`bundle.rhdl`](bundle.rhdl) | Type-named bundle construction, recursive literal shadows, muxes, casts, and state |
 | [`vector.rhdl`](vector.rhdl) | Fixed vectors, selection, packing, aggregate drives, and state |
 | [`vector-update.rhdl`](vector-update.rhdl) | Functional hardware-selected replacement |
 | [`table.rhdl`](table.rhdl) | Host-generated combinational vector table |

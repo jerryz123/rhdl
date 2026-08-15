@@ -14,14 +14,6 @@ import:
   lib("rhdl/std/flow/map.rhdl") open
   lib("rhdl/std/flow/parallel.rhdl") open
 
-bundle TaggedSimpleMemoryReq(address_width :: Int, data_bytes :: Int):
-  request: SimpleMemoryReq(address_width, data_bytes)
-  processor: Bool
-
-bundle TaggedSimpleMemoryResp(data_bytes :: Int):
-  response: SimpleMemoryResp(data_bytes)
-  processor: Bool
-
 // Request arbitration is fair at the point where a selected request enters
 // the stabilizing pipe. An owner token is committed atomically with each RAM
 // request and retained until the matching ordered response moves. Two tags are
@@ -30,6 +22,14 @@ sync_circuit FesvrSharedMemory(address_width :: Int,
                                data_bytes :: Int,
                                size_bytes :: Int,
                                ~base_address: base_address :: Int = 0):
+  bundle TaggedReq():
+    request: SimpleMemoryReq(address_width, data_bytes)
+    processor: Bool
+
+  bundle TaggedResp():
+    response: SimpleMemoryResp(data_bytes)
+    processor: Bool
+
   interface fesvr(SimpleMemory(address_width, data_bytes), ~role: responder)
   interface processor(SimpleMemory(address_width, data_bytes), ~role: responder)
 
@@ -39,11 +39,9 @@ sync_circuit FesvrSharedMemory(address_width :: Int,
                            ~base_address: base_address))
   inst owners(Queue(Bool, 2))
 
-  def TaggedReq = TaggedSimpleMemoryReq(address_width, data_bytes)
-
   fun tag_request(is_processor):
     map_flow(SimpleMemoryReq(address_width, data_bytes),
-             request => record(TaggedReq)):
+             request => TaggedReq()):
       request: request
       processor: Bool(is_processor)
 
@@ -53,35 +51,34 @@ sync_circuit FesvrSharedMemory(address_width :: Int,
     fesvr.request |> tag_request(#false),
     processor.request |> tag_request(#true)
   )
-    |> rr_arbiter(TaggedReq, 2)
-    |> pipe(TaggedReq, 1)
-    |> atomic_fork(TaggedReq, 2)
+    |> rr_arbiter(TaggedReq(), 2)
+    |> pipe(TaggedReq(), 1)
+    |> atomic_fork(TaggedReq(), 2)
     |> parallel(
          (
-           map_flow(TaggedReq, tagged => tagged.request)
+           map_flow(TaggedReq(), tagged => tagged.request)
              |> pipe(SimpleMemoryReq(address_width, data_bytes), 1)
          ) <=> ram.port.request,
-         map_flow(TaggedReq, tagged => tagged.processor)
+         map_flow(TaggedReq(), tagged => tagged.processor)
            <=> owners.ingress
        )
 
   // Buffer returned data together with its oldest owner before exposing it to
   // either client. This keeps response readiness independent of client
   // backpressure and therefore separates the two memory directions.
-  def TaggedResp = TaggedSimpleMemoryResp(data_bytes)
   Array(ram.port.response, owners.egress) |> (
       zip_flow(SimpleMemoryResp(data_bytes), response,
                Bool, owner):
-        record(TaggedResp):
+        TaggedResp():
           response: response
           processor: owner
-    ) |> queue(TaggedResp, 2)
-      |> demux_flow(Irrevocable(TaggedResp), 2,
+    ) |> queue(TaggedResp(), 2)
+      |> demux_flow(Irrevocable(TaggedResp()), 2,
                     tagged => tagged.processor)
       |> parallel(
-           map_flow(Irrevocable(TaggedResp),
+           map_flow(Irrevocable(TaggedResp()),
                     tagged => tagged.response) <=> fesvr.response,
-           map_flow(Irrevocable(TaggedResp),
+           map_flow(Irrevocable(TaggedResp()),
                     tagged => tagged.response) <=> processor.response
          )
 

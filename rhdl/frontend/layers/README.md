@@ -475,15 +475,27 @@ bundle Pair(T):
   left: T
   right: T
 
+def swapped = Pair(Bits(8)):
+  left: source.right
+  right: source.left
+
 result.left <== source.right
 result.right <== source.left
 ```
 
+Calling the declared name with its parameters and no field block produces a
+`RecordType`; attaching a field block constructs a value of that type. Fields
+are named, order-independent, and must be supplied exactly once with matching
+hardware types. The bare type family remains an ordinary host value, so it can
+be passed to a function and called later.
+
 Complete field-wise drives canonicalize to nested record construction and one
 whole-record drive. Partial assignment and mixing whole with field-wise drives
-are errors. When every field of `record(...)` is a `HardwareLiteral`, the form
-creates a reusable recursive `RecordLiteral`; otherwise it creates runtime
-`rtl.record_create` hardware.
+are errors. When every field of a named bundle construction is a
+`HardwareLiteral`, the form creates a reusable recursive `RecordLiteral`;
+otherwise it creates runtime `rtl.record_create` hardware. The lower-level
+`record(type_value): fields` form remains available when the `RecordType` is a
+dynamically computed host value instead of a directly named bundle family.
 
 ## Fixed-length vectors
 

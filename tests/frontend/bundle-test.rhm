@@ -5,10 +5,13 @@ import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../examples/bundle.rhdl" as bundle_fixture
+  "hardware-literal-fixture.rhdl" as literal_fixture
 
 def pipeline_design = bundle_fixture.design
 def pipeline = pipeline_design.modules[0]
 def pair_type = bundle_fixture.Pair(Bits(8))
+def pair_type_family = bundle_fixture.Pair
+def indirect_pair_type = pair_type_family(Bits(8))
 def selected = pipeline.operations.find(
   fun (operation): operation.opcode == "rtl.mux_lookup"
 )
@@ -41,6 +44,7 @@ def swap_ir = dump_ir(swap_design)
 
 check:
   record_type(pair_type) ~is #true
+  type_equal(indirect_pair_type, pair_type) ~is #true
   pair_type.fields.map(fun (field): field.name) ~is ["left", "right"]
   type_equal(pipeline.find_input("direct").type, pair_type) ~is #true
   type_equal(pipeline.find_output("result").type, pair_type) ~is #true
@@ -82,3 +86,12 @@ check:
   verify_design(nested_design) ~is #void
   verify_design(hierarchy_design) ~is #void
   verify_design(bundle_fixture.cast_design) ~is #void
+  embedded.run_elaboration(
+    fun (): literal_fixture.MissingBundleField()
+  ) ~throws "literal must supply every record field exactly once"
+  embedded.run_elaboration(
+    fun (): literal_fixture.DuplicateBundleField()
+  ) ~throws "literal must supply every record field exactly once"
+  embedded.run_elaboration(
+    fun (): literal_fixture.WrongBundleFieldType()
+  ) ~throws "literal field right has the wrong hardware type"

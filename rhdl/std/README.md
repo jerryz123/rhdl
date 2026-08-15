@@ -303,7 +303,7 @@ same item in different cycles.
 `map_flow(T, payload => expression)` constructs a generic interface handle that
 maps a `Decoupled(T)` payload while forwarding valid and ready. A block-bearing
 expression keeps its block outside the call, as in
-`map_flow(T, payload => record(U)): fields`; the equivalent
+`map_flow(T, payload => U()): fields`; the equivalent
 `map_flow(T, payload): body` form remains available for arbitrary multiline
 mappings. An explicit `Decoupled(T)` or `Irrevocable(T)` argument selects and
 preserves that exact contract. The binder retains precise bundle field
@@ -312,7 +312,7 @@ endpoint applies the mapping immediately and preserves its contract:
 
 ```rhombus
 def tagging:
-  map_flow(Request(), payload => record(TaggedRequest())):
+  map_flow(Request(), payload => TaggedRequest()):
     request: payload
     processor: Bool(#false)
 
@@ -336,7 +336,7 @@ the handle immediately:
 def response_join:
   zip_flow(Response(), response,
            Bool, owner):
-    record(TaggedResponse()):
+    TaggedResponse():
       response: response
       owner: owner
 
