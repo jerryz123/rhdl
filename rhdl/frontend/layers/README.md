@@ -16,8 +16,8 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
 | [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, unsigned ordering, and binary `mux` |
-| [`enum.rhm`](enum.rhm) | Nominal encoded hardware enums |
-| [`one-hot.rhm`](one-hot.rhm) | Structurally sized one-hot values and selection |
+| [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
+| [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
 | [`vector.rhm`](vector.rhm) | `Vec`, construction, selection, and functional update |
 | [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
@@ -151,6 +151,33 @@ capability. Automatic encodings use declaration order and the minimum positive
 width. Explicit encodings require a stable width, unique names and values, and
 all-or-none explicit values.
 
+A declaration can instead make its encoding policy explicit and derive one
+selector bit per member:
+
+```rhombus
+hardware_enum ResultKind(~encoding: one_hot):
+  Arithmetic
+  Shift
+  Compare
+  Xor
+  Or
+  And
+
+result <== mux_onehot(select):
+  ResultKind.Arithmetic: arithmetic_result
+  ResultKind.Shift: shift_result
+  ResultKind.Compare: compare_result
+  ResultKind.Xor: xor_result
+  ResultKind.Or: or_result
+  ResultKind.And: and_result
+```
+
+This produces a six-bit nominal enum with encodings `1`, `2`, `4`, `8`, `16`,
+and `32`. It is distinct from both `OneHot(6)` and every other enum declaration,
+but its packed representation can directly drive `mux_onehot`. Keyed arms are
+checked against that nominal enum and must cover each member exactly once. See
+[`../../../examples/one-hot-enum.rhdl`](../../../examples/one-hot-enum.rhdl).
+
 Each evaluated declaration has distinct nominal identity. Members lower to
 `Bits(width)` constants plus casts. Enum-selected `mux_lookup` requires keys
 from exactly the selector's enum and retains a mandatory default for unused
@@ -159,7 +186,9 @@ encodings. See [`../../../examples/enum-state.rhdl`](../../../examples/enum-stat
 ## One-hot values
 
 `OneHot(n)` is a structurally sized `FlatDataType`. Calling the type with a
-host index produces the corresponding power-of-two literal:
+host index produces the corresponding power-of-two literal. A one-hot encoded
+hardware enum provides the same selector contract while retaining named,
+nominal members:
 
 ```rhombus
 def Grant = OneHot(4)
@@ -172,8 +201,9 @@ next_grant <== mux_onehot(current):
 
 One-hot values deliberately do not implement `BitwiseType`, because bitwise
 operations do not preserve the exactly-one invariant. Equality, aggregates,
-ports, state, and explicit casts work normally. `mux_onehot` lowers to the
-partial `rtl.onehot_mux` operation. Exactly one selector bit must be set;
+ports, state, and explicit casts work normally. `mux_onehot` accepts either a
+structural `OneHot(n)` value or a nominal one-hot hardware enum and lowers to
+the partial `rtl.onehot_mux` operation. Exactly one selector bit must be set;
 zero-hot and multi-hot results are unspecified. This contract needs no default
 value and allows the backend to use selector-bit gating and a balanced OR tree.
 

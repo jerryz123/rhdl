@@ -107,8 +107,8 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
-| `enum.rhm` | Nominal encoded hardware enums and member literals | core IR, kernel, field support, mux-lookup support |
-| `one-hot.rhm` | Structurally sized one-hot types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
+| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, mux-lookup support |
+| `one-hot.rhm` | One-hot selector types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, runtime records, recursive record literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
@@ -136,8 +136,9 @@ language profiles:
   operands, instance inputs, and drives.
 - `generator-parameters.rhm` extracts runtime bindings from the ordinary
   Rhombus parameter forms shared by circuit generators.
-- `mux-lookup.rhm` lets independent layers contribute typed static keys and
-  selector behavior to combinational mux syntax.
+- `mux-lookup.rhm` lets independent layers contribute typed static keys,
+  lookup selector behavior, and one-hot selector types without importing one
+  another.
 
 The kernel's deferred-value protocol retains authoring metadata until an
 operation consumes it. Reusable host descriptions remain distinct from

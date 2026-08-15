@@ -64,6 +64,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`signed-integers.rhdl`](signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
 | [`enum-state.rhdl`](enum-state.rhdl) | Nominal enums, explicit encodings, state, and invalid recovery |
 | [`one-hot.rhdl`](one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
+| [`one-hot-enum.rhdl`](one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
 | [`shifts.rhdl`](shifts.rhdl) | Logical shifts with independent amount widths |
 | [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless arithmetic over unequal-width operands |
 | [`counter.rhdl`](counter.rhdl) | Host helper functions accepting and returning hardware |

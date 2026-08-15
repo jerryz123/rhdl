@@ -20,7 +20,7 @@ fun one_hot_encoding(index):
 class _OneHotType(width):
   implements FlatDataType
   implements Callable
-  implements mux_support.MuxLookupSelectorType
+  implements mux_support.OneHotSelectorType
 
   constructor (width):
     unless width is_a Int && width > 0
@@ -47,6 +47,9 @@ class _OneHotType(width):
     | error(~who: #'mux_lookup,
             "one-hot mux lookup keys must belong to the selector's OneHot type")
     key.mux_lookup_key_encoding()
+
+  override method one_hot_selector_width():
+    width
 
 class OneHotValue(type, index):
   implements mux_support.MuxLookupKey
@@ -79,24 +82,55 @@ fun one_hot_width(type):
 // is a caller precondition; invalid selector encodings have no result contract.
 fun build_one_hot_mux(selector, choices) :~ HardwareFields:
   def selector_value = kernel.read(selector)
-  unless one_hot_type(selector_value.type)
-  | error(~who: #'mux_onehot, "selector must have a OneHot type")
+  unless selector_value.type is_a mux_support.OneHotSelectorType
+  | error(~who: #'mux_onehot, "selector must have a one-hot selector type")
+  def selector_width = selector_value.type.one_hot_selector_width()
   unless choices is_a List
   | error(~who: #'mux_onehot, "choices must be supplied as a host List")
-  unless choices.length() == selector_value.type.width
+  unless choices.length() == selector_width
   | error(~who: #'mux_onehot,
-          "choice count must equal the OneHot selector width")
+          "choice count must equal the one-hot selector width")
   def selector_bits = kernel.cast(selector_value,
-                                  Bits(selector_value.type.width))
+                                  Bits(selector_width))
   kernel.hw_onehot_mux(selector_bits,
                        choices,
                        #false,
                        Location(),
                        Origin("embedded one-hot mux", ""))
 
+// Keyed arms make the logical member-to-lane mapping explicit, then lower in
+// physical selector-bit order to the same core operation as positional arms.
+fun build_keyed_one_hot_mux(selector, cases) :~ HardwareFields:
+  def selector_value = kernel.read(selector)
+  unless selector_value.type is_a mux_support.OneHotSelectorType
+  | error(~who: #'mux_onehot, "selector must have a one-hot selector type")
+  def selector_width = selector_value.type.one_hot_selector_width()
+  unless cases is_a List
+  | error(~who: #'mux_onehot, "cases must be supplied as a host List")
+  unless cases.length() == selector_width
+  | error(~who: #'mux_onehot,
+          "keyed arms must cover every one-hot selector lane exactly once")
+  def normalized_cases = cases.map(
+    fun (case):
+      unless case is_a List && case.length() == 2
+      | error(~who: #'mux_onehot, "cases must be [key, value] pairs")
+      [selector_value.type.normalize_mux_lookup_key(case[0]), case[1]]
+  ).sort(fun (left, right): left[0] < right[0])
+  for (index in 0..selector_width):
+    unless normalized_cases[index][0] == one_hot_encoding(index)
+    | error(~who: #'mux_onehot,
+            "keyed arms must cover every one-hot selector lane exactly once")
+  build_one_hot_mux(selector_value,
+                    normalized_cases.map(fun (case): case[1]))
+
 expr.macro
 | 'mux_onehot($selector, $choices)':
     'build_one_hot_mux($selector, $choices)'
+| 'mux_onehot($selector):
+     $(key :: expr_meta.Parsed): $case_value
+     ...':
+    'build_keyed_one_hot_mux($selector,
+                             [[$key, $case_value], ...])'
 | 'mux_onehot($selector):
      $(choice :: expr_meta.Parsed)
      ...':

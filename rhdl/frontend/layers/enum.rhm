@@ -37,8 +37,32 @@ class EnumType(name, identity, members, width):
             "enum mux lookup keys must be members of the selector's enum type")
     key.mux_lookup_key_encoding()
 
+// One-hot enums remain nominal enums while advertising that each packed bit
+// selects the correspondingly declared member.
+class OneHotEnumType(name, identity, members, width):
+  implements FlatDataType
+  implements mux_support.OneHotSelectorType
+
+  override method describe():
+    "one-hot enum<" ++ name ++ ">"
+
+  override method type_equal(other):
+    enum_type(other) && identity === other.identity
+
+  override method bit_width():
+    width
+
+  override method normalize_mux_lookup_key(key):
+    unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
+    | error(~who: #'mux_lookup,
+            "enum mux lookup keys must be members of the selector's enum type")
+    key.mux_lookup_key_encoding()
+
+  override method one_hot_selector_width():
+    width
+
 fun enum_type(type):
-  type is_a EnumType
+  type is_a EnumType || type is_a OneHotEnumType
 
 fun enum_width(type):
   unless enum_type(type)
@@ -68,7 +92,11 @@ fun required_enum_width(maximum_encoding):
     | loop(width + 1, capacity * 2)
   loop(1, 2)
 
-fun validate_enum_declaration(name, member_names, encodings, requested_width):
+fun validate_enum_declaration(name,
+                              member_names,
+                              encodings,
+                              requested_width,
+                              ~one_hot: one_hot = #false):
   unless name is_a String
   | error(~who: #'hardware_enum, "enum name must be a String")
   unless member_names is_a List && member_names.length() >= 1
@@ -103,11 +131,11 @@ fun validate_enum_declaration(name, member_names, encodings, requested_width):
         when requested_width < minimum_width
         | error(~who: #'hardware_enum, "enum encoding does not fit the declared width")
         requested_width
-  EnumType(name,
-           EnumIdentity(),
-           for List (member_name in member_names, encoding in encodings):
-             EnumMember(member_name, encoding),
-           width)
+  def members = for List (member_name in member_names, encoding in encodings):
+    EnumMember(member_name, encoding)
+  if one_hot
+  | OneHotEnumType(name, EnumIdentity(), members, width)
+  | EnumType(name, EnumIdentity(), members, width)
 
 fun make_automatic_enum(name, member_names, requested_width = #false):
   validate_enum_declaration(name,
@@ -120,6 +148,15 @@ fun make_explicit_enum(name, members, requested_width = #false):
                             members.map(fun (member): member[0]),
                             members.map(fun (member): member[1]),
                             requested_width)
+
+fun make_one_hot_enum(name, member_names):
+  validate_enum_declaration(
+    name,
+    member_names,
+    for List (index in 0..member_names.length()): 1 bits.(<<) index,
+    member_names.length(),
+    ~one_hot: #true
+  )
 
 class EnumValue(type, member_name, encoding):
   implements mux_support.MuxLookupKey
@@ -150,6 +187,17 @@ dot.macro 'enum_member_dot $left $dot $right':
   'enum_value($left, $(right.to_source_string())) :: HardwareFields'
 
 defn.macro
+| 'hardware_enum $(name :: Identifier)(~encoding: one_hot):
+     $(member :: Identifier)
+     ...':
+    def enum_name = name.to_source_string()
+    let [member_name, ...] = [member.to_source_string(), ...]
+    '«
+       def $name :: EnumMembers = make_one_hot_enum($enum_name,
+                                                    [$member_name, ...])
+       annot.macro '$name':
+         'HardwareFields.of($name)'
+     »'
 | 'hardware_enum $(name :: Identifier):
      $(member :: Identifier)
      ...':
