@@ -50,6 +50,23 @@ registered for that root."
 (defvar rhdl--configured-roots nil
   "Checkout roots considered for automatic back-end configuration.")
 
+(defconst rhdl--font-lock-keywords
+  `((,(regexp-opt
+       '("assert" "bundle" "case" "circuit" "dpi_import" "dpi_reg"
+         "elaborate" "elsewhen" "hardware_enum" "input" "inst"
+         "interface" "mem" "mux_lookup" "mux_onehot" "otherwise"
+         "output" "record" "refines" "reg" "supports" "switch"
+         "sync_circuit" "sync_mem" "when" "wire")
+       'symbols)
+     . font-lock-keyword-face)
+    (,(regexp-opt '("Bits" "Bool" "Clock" "OneHot" "Reset" "SInt" "Vec")
+                  'symbols)
+     . font-lock-type-face))
+  "Additional font-lock rules for RHDL-specific syntax and types.")
+
+(defvar-local rhdl--font-lock-installed nil
+  "Whether RHDL-specific font-lock rules are installed in this buffer.")
+
 (defun rhdl--checkout-root (&optional directory)
   "Return the RHDL checkout containing DIRECTORY, or nil.
 
@@ -100,12 +117,26 @@ An RHDL checkout is identified by its `rhdl/main.rkt' reader shim."
           '("(lib rhdl/language.rhm)"
             "(lib rhdl/base/language.rhm)")))
 
+(defun rhdl--configure-font-lock (enable)
+  "Install RHDL font-lock rules when ENABLE is non-nil, otherwise remove them."
+  (cond
+   ((and enable (not rhdl--font-lock-installed))
+    (font-lock-add-keywords nil rhdl--font-lock-keywords 'append)
+    (setq-local rhdl--font-lock-installed t)
+    (font-lock-flush))
+   ((and (not enable) rhdl--font-lock-installed)
+    (font-lock-remove-keywords nil rhdl--font-lock-keywords)
+    (setq-local rhdl--font-lock-installed nil)
+    (font-lock-flush))))
+
 (defun rhdl--language-setup (module-language)
   "Apply RHDL presentation after loading MODULE-LANGUAGE metadata."
-  (when (rhdl--module-language-p module-language)
-    (setq-local racket-hash-lang-mode-lighter
-                (replace-regexp-in-string
-                 "\\`#lang" "RHDL" racket-hash-lang-mode-lighter))))
+  (let ((rhdl-language-p (rhdl--module-language-p module-language)))
+    (rhdl--configure-font-lock rhdl-language-p)
+    (when rhdl-language-p
+      (setq-local racket-hash-lang-mode-lighter
+                  (replace-regexp-in-string
+                   "\\`#lang" "RHDL" racket-hash-lang-mode-lighter)))))
 
 (with-eval-after-load 'racket-hash-lang
   (add-hook 'racket-hash-lang-module-language-hook

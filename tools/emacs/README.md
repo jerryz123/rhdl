@@ -5,7 +5,9 @@
 [`rhdl-mode.el`](rhdl-mode.el) provides a discoverable `M-x rhdl-mode` entry
 point while retaining Racket Mode's `racket-hash-lang-mode` as the actual major
 mode. That distinction preserves Rhombus-provided coloring, indentation,
-navigation, comments, and REPL behavior.
+navigation, comments, and REPL behavior. A language-specific font-lock layer
+adds faces for RHDL syntax such as `circuit`, `input`, `when`, and `assert`,
+plus the built-in hardware types, while leaving Rhombus tokens to the reader.
 
 Install the Emacs package `racket-mode`, then add this directory to Emacs's
 load path:

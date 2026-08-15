@@ -89,4 +89,33 @@
     (rhdl--language-setup "(lib rhombus/main.rhm)")
     (should (equal racket-hash-lang-mode-lighter "#lang⇉"))))
 
+(ert-deftest rhdl-mode-highlights-rhdl-syntax-and-types ()
+  (with-temp-buffer
+    (prog-mode)
+    (insert "circuit Example():\n"
+            "  input value: Bits(1)\n"
+            "  assert(value, \"valid\")\n"
+            "def my_circuit = Example()\n")
+    (font-lock-mode 1)
+    (setq-local racket-hash-lang-mode-lighter "#lang")
+    (rhdl--language-setup "(lib rhdl/language.rhm)")
+    (font-lock-ensure)
+    (dolist (word '("circuit" "input" "assert"))
+      (goto-char (point-min))
+      (search-forward word)
+      (should (eq (get-text-property (- (point) (length word)) 'face)
+                  'font-lock-keyword-face)))
+    (goto-char (point-min))
+    (search-forward "Bits")
+    (should (eq (get-text-property (- (point) 4) 'face)
+                'font-lock-type-face))
+    (goto-char (point-min))
+    (search-forward "my_circuit")
+    (should-not (get-text-property (- (point) (length "my_circuit")) 'face))
+    (rhdl--language-setup "(lib rhombus/main.rhm)")
+    (font-lock-ensure)
+    (goto-char (point-min))
+    (search-forward "circuit")
+    (should-not (get-text-property (- (point) (length "circuit")) 'face))))
+
 ;;; rhdl-mode-test.el ends here
