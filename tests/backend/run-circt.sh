@@ -132,7 +132,7 @@ run_fixture() {
   local verilog="$test_tmp_dir/$fixture.sv"
   local object_dir="$test_tmp_dir/${fixture}_obj"
   local build_log="$test_tmp_dir/$fixture.verilator.log"
-  local dpi_source="tests/backend/verilog/${fixture}_dpi.cpp"
+  local dpi_source="$repo_dir/tests/backend/verilog/${fixture}_dpi.cpp"
 
   fixture_selected "$fixture" || return 0
   prepare_example "$fixture" "$example" "$reference_export"
