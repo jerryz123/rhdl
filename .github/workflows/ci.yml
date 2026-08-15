@@ -1,0 +1,174 @@
+# Runs RHDL host-language checks and CIRCT integration on every proposed change.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RACKET_VERSION: "9.2"
+  # Update this pin deliberately when advancing the Rhombus dependency.
+  RHOMBUS_CHECKSUM: ccd04c4d2ace9e2ed7f03089448efe3e31eda0a6
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'latest' }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      host: "${{ steps.filter.outputs.host }}"
+      circt: "${{ steps.filter.outputs.circt }}"
+      fesvr: "${{ steps.filter.outputs.fesvr }}"
+    steps:
+      - name: Check out RHDL history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Test change classifier
+        run: tools/check-ci-changes.sh
+      - name: Select affected jobs
+        id: filter
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            tools/ci-changes.sh --all >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            tools/ci-changes.sh \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}" \
+              >> "$GITHUB_OUTPUT"
+          else
+            tools/ci-changes.sh \
+              "${{ github.event.before }}" \
+              "${{ github.sha }}" \
+              >> "$GITHUB_OUTPUT"
+          fi
+
+  host:
+    name: Racket and model tests
+    needs: changes
+    if: needs.changes.outputs.host == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PLTUSERHOME: "${{ runner.temp }}/rhdl-racket-user"
+      PLTCOMPILEDROOTS: "${{ runner.temp }}/rhdl-compiled:"
+    steps:
+      - name: Check out RHDL
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: "${{ env.RACKET_VERSION }}"
+      - name: Cache Rhombus installation
+        id: racket-packages
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "${{ env.PLTUSERHOME }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}"
+      - name: Cache compiled RHDL bytecode
+        # Exact source keys prevent old bytecode from surviving module moves.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "${{ runner.temp }}/rhdl-compiled"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+      - name: Install Rhombus
+        if: steps.racket-packages.outputs.cache-hit != 'true'
+        run: raco pkg install --user --auto --batch --no-docs --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
+      - name: Run Racket and model tests
+        run: make host-test
+
+  circt:
+    name: CIRCT integration
+    needs: changes
+    if: needs.changes.outputs.circt == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PLTUSERHOME: "${{ runner.temp }}/rhdl-racket-user"
+      PLTCOMPILEDROOTS: "${{ runner.temp }}/rhdl-compiled:"
+    steps:
+      - name: Check out RHDL
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: "${{ env.RACKET_VERSION }}"
+      - name: Cache Rhombus installation
+        id: racket-packages
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "${{ env.PLTUSERHOME }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}"
+      - name: Cache compiled RHDL bytecode
+        # Exact source keys prevent old bytecode from surviving module moves.
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "${{ runner.temp }}/rhdl-compiled"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+      - name: Install Rhombus and Verilator
+        run: |
+          if [[ "${{ steps.racket-packages.outputs.cache-hit }}" != "true" ]]; then
+            raco pkg install --user --auto --batch --no-docs \
+              --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
+          fi
+          sudo apt-get update
+          sudo apt-get install --yes verilator
+      - name: Cache CIRCT
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .tools/firtool-*
+          key: "${{ runner.os }}-${{ runner.arch }}-circt-${{ hashFiles('tools/install-circt.sh') }}"
+      - name: Install CIRCT
+        run: make setup-circt
+      - name: Verify CIRCT and generated RTL
+        run: make circt-test
+
+  fesvr:
+    name: FESVR integration
+    needs: changes
+    if: needs.changes.outputs.fesvr == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out RHDL
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install native toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            device-tree-compiler \
+            gcc-riscv64-unknown-elf \
+            verilator \
+            zlib1g-dev
+      - name: Cache FESVR
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .tools/fesvr-*
+          key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('tools/install-fesvr.sh', 'sim/fesvr/Makefile') }}"
+      - name: Build pinned FESVR
+        run: make -C sim/fesvr setup
+      - name: Test direct-memory transport
+        run: make -C sim/fesvr test
+      - name: Compile Verilator DPI adapter
+        run: |
+          verilator_root="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
+          test -n "$verilator_root"
+          make -C sim/fesvr dpi-compile-check VERILATOR_ROOT="$verilator_root"

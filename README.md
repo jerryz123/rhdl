@@ -56,8 +56,8 @@ brew install minimal-racket
 raco pkg install --auto rhombus
 ```
 
-On Apple Silicon macOS, install the pinned CIRCT release into the ignored
-`.tools` directory:
+On x86-64 Linux or Apple Silicon macOS, install the pinned CIRCT release into
+the ignored `.tools` directory:
 
 ```sh
 make setup-circt

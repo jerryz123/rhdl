@@ -6,5 +6,5 @@ repo_dir="$(cd "$(dirname "$0")/../../.." && pwd)"
 compiled_root="$(mktemp -d "${TMPDIR:-/tmp}/rhdl-noc-language.XXXXXX")"
 trap 'rm -rf "$compiled_root"' EXIT
 
-PLTCOMPILEDROOTS="$compiled_root" racket -S "$repo_dir" \
+PLTCOMPILEDROOTS="$compiled_root:" racket -S "$repo_dir" \
   "$repo_dir/noc/tests/language/run-negative.rkt"

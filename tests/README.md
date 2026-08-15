@@ -26,10 +26,17 @@ make lop-test               # equivalence across authoring layers
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering without external tools
 make unit-test              # frontend plus backend Rhombus tests
+make noc-test               # pure host-side NoC model and its package boundary
+make riscv-test             # pure RISC-V model, decode, and package boundaries
+make host-test              # unit tests, examples, NoC, and RISC-V
 make circt-test             # CIRCT verification and Verilator simulation
 make verilog-golden-test    # exact example-owned SystemVerilog references
-make test                   # complete unit and CIRCT suite
+make test                   # complete host and CIRCT suite
 ```
+
+The standalone FESVR transport has its own setup, native test, and DPI compile
+checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI runs those checks as an
+independent external-toolchain job.
 
 Use `FIXTURE=name` with `tests/backend/run-circt.sh` to select one external
 backend fixture. Update Verilog references only when backend output changes

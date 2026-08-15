@@ -1,12 +1,13 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test check-boundaries frontend-test backend-test unit-test lop-test riscv-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
 BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
 LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
 LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
+NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 
@@ -26,6 +27,11 @@ lop-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test $(LOP_FRONTEND_TESTS)
 	env PLTCOLLECTS=$(CURDIR): raco test $(LOP_BACKEND_TESTS)
 
+noc-test:
+	bash noc/check-boundaries.sh
+	env PLTCOLLECTS=$(CURDIR): raco test $(NOC_TESTS)
+	bash noc/tests/language/run-negative.sh
+
 riscv-test:
 	bash riscv/check-boundaries.sh
 	env PLTCOLLECTS=$(CURDIR): raco test $(RISCV_TESTS)
@@ -39,7 +45,9 @@ verilog-golden-test:
 update-verilog-goldens:
 	bash tests/backend/run-circt.sh --update-goldens
 
-test: unit-test circt-test
+host-test: unit-test examples noc-test riscv-test
+
+test: host-test circt-test
 
 setup-circt:
 	bash tools/install-circt.sh
