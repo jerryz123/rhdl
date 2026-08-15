@@ -1,5 +1,5 @@
 #lang rhdl
-// Materializes the standard arbitration, routing, join, and fanout primitives.
+// Demonstrates primitive generators and composable ready-valid handle/sink topologies.
 
 import:
   lib("rhdl/std/flow.rhdl") open
@@ -48,6 +48,8 @@ sync_circuit FanInProjectTopology():
   interface data_egress(Irrevocable(Bits(8)), ~role: producer)
   interface origin_egress(Decoupled(Bool), ~role: producer)
 
+  def data_path = map_flow(TaggedByte(), tagged => tagged.data)
+                  |> pipe(Bits(8), 1)
   def path:
     parallel(
       map_flow(Bits(8), payload):
@@ -62,15 +64,11 @@ sync_circuit FanInProjectTopology():
       |> pipe(TaggedByte(), 1)
       |> atomic_fork(TaggedByte(), 2)
       |> parallel(
-           (
-             map_flow(TaggedByte(), tagged):
-               tagged.data
-           ) |> pipe(Bits(8), 1),
-           map_flow(TaggedByte(), tagged):
-             tagged.from_second
+           data_path <=> data_egress,
+           map_flow(TaggedByte(), tagged => tagged.from_second)
+             <=> origin_egress
          )
-  def projected = ingress |> path
-  Array(data_egress, origin_egress) <=> projected
+  ingress |> path
 
 // Array-shaped inputs can also rendezvous through a heterogeneous zip. The
 // queue makes the offer irrevocable, payload-selected routing preserves that
@@ -88,18 +86,15 @@ sync_circuit ZipRouteTopology():
           data: data
           destination: destination
     ) |> queue(RoutedByte(), 2)
-      |> (
-           demux_flow(Irrevocable(RoutedByte()), 2, routed):
-             routed.destination
-         )
+      |> demux_flow(Irrevocable(RoutedByte()), 2,
+                    routed => routed.destination)
       |> parallel(
-           map_flow(Irrevocable(RoutedByte()), routed):
-             routed.data,
-           map_flow(Irrevocable(RoutedByte()), routed):
-             routed.data
+           map_flow(Irrevocable(RoutedByte()), routed => routed.data)
+             <=> egress[0],
+           map_flow(Irrevocable(RoutedByte()), routed => routed.data)
+             <=> egress[1]
          )
-  def routed = Array(data_ingress, destination_ingress) |> path
-  egress <=> routed
+  Array(data_ingress, destination_ingress) |> path
 
 def rr_arbiter_design = elaborate(RRArbiter(Bits(8), 3))
 def demux_design = elaborate(Demux(Bits(8), 3))

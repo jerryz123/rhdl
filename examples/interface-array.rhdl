@@ -1,5 +1,5 @@
 #lang rhdl
-// Demonstrates bulk connection of declared arrays and endpoint sequences.
+// Demonstrates endpoint arrays, generic handles, and terminated interface sinks.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -60,9 +60,22 @@ circuit ParallelHandleChain():
   def connected = ingress |> lanes
   egress <=> connected
 
+// Closing each handle against its destination produces a one-ended sink.
+// Parallel sink composition lets one endpoint array complete both lanes.
+circuit ParallelSinkChain():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  def lanes = parallel_handles(Array(
+    interface_link(Decoupled(Bits(8)), "lane") <=> egress[0],
+    interface_link(Decoupled(Bits(8)), "lane") <=> egress[1]
+  ))
+  ingress |> lanes
+
 def design = elaborate(InterfaceArrayAdapter(2))
 def generic_handle_design = elaborate(GenericHandleChain())
 def parallel_handle_design = elaborate(ParallelHandleChain())
+def parallel_sink_design = elaborate(ParallelSinkChain())
 
 def verilog_reference = @str|<<{
 module InterfaceArrayAdapter(
@@ -90,7 +103,9 @@ export:
   InterfaceSequenceAdapter
   GenericHandleChain
   ParallelHandleChain
+  ParallelSinkChain
   design
   generic_handle_design
   parallel_handle_design
+  parallel_sink_design
   verilog_reference

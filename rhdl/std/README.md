@@ -300,33 +300,37 @@ transaction must atomically update multiple downstream flows. In contrast,
 `Broadcast` stores per-recipient delivery state so recipients may accept the
 same item in different cycles.
 
-`map_flow(T, payload): body` constructs a generic interface handle that maps a
-`Decoupled(T)` payload while forwarding valid and ready. An explicit
-`Decoupled(T)` or `Irrevocable(T)` argument selects and preserves that exact
-contract. The binder retains precise bundle field information, and the result
-type is inferred from the body. Supplying an endpoint applies the mapping
-immediately and preserves its contract:
+`map_flow(T, payload => expression)` constructs a generic interface handle that
+maps a `Decoupled(T)` payload while forwarding valid and ready. A block-bearing
+expression keeps its block outside the call, as in
+`map_flow(T, payload => record(U)): fields`; the equivalent
+`map_flow(T, payload): body` form remains available for arbitrary multiline
+mappings. An explicit `Decoupled(T)` or `Irrevocable(T)` argument selects and
+preserves that exact contract. The binder retains precise bundle field
+information, and the result type is inferred from the body. Supplying an
+endpoint applies the mapping immediately and preserves its contract:
 
 ```rhombus
 def tagging:
-  map_flow(Request(), payload):
-    record(TaggedRequest()):
-      request: payload
-      processor: Bool(#false)
+  map_flow(Request(), payload => record(TaggedRequest())):
+    request: payload
+    processor: Bool(#false)
 
 def tagged = ingress |> tagging
 ```
 
-`demux_flow(protocol, n, payload): selector` constructs a one-to-many routing
-handle whose selector is derived from the offered payload. It retains the
-input protocol and returns an array of `n` endpoints; an out-of-range selector
-blocks the input. This distinguishes exclusive routing from `atomic_fork`,
-which requires every output to accept the same item.
+`demux_flow(protocol, n, payload => selector)` constructs a one-to-many routing
+handle whose selector is derived from the offered payload. The colon-bodied
+form remains available for multiline selectors. The handle retains the input
+protocol and returns an array of `n` endpoints; an out-of-range selector blocks
+the input. This distinguishes exclusive routing from `atomic_fork`, which
+requires every output to accept the same item.
 
-`zip_flow(T, left_payload, U, right_payload): body` constructs an array-input
-handle that atomically consumes one item from each payload type and maps them
-to one inferred result type. Neither input can transfer by itself. Supplying
-two endpoints applies the handle immediately:
+`zip_flow(T, left_payload, U, right_payload => expression)` constructs an
+array-input handle that atomically consumes one item from each payload type and
+maps them to one inferred result type. Its colon-bodied form supports multiline
+mappings. Neither input can transfer by itself. Supplying two endpoints applies
+the handle immediately:
 
 ```rhombus
 def response_join:
@@ -343,11 +347,13 @@ These are ordinary `InterfaceHandle` values from the frontend interface layer,
 not a flow-specific graph or deferred source. Inline adapters use local
 `interface_link` wires and add no module hierarchy. Stateful `pipe`, `queue`,
 `rr_arbiter`, and `atomic_fork` stages expose the same handle protocol when
-given explicit payload types. A handle is linear and can be consumed only once.
+given explicit payload types. A handle or sink is linear and can be consumed
+only once.
 
-`parallel` combines independent handles into one array-shaped handle. This
-lets fan-in, buffering, fanout, and heterogeneous projections form one path
-before any external endpoint is attached:
+`parallel` combines independent handles into one array-shaped handle, or
+independent terminated sinks into one array-shaped sink. This lets fan-in,
+buffering, fanout, heterogeneous projections, and their destinations form one
+path. A call cannot mix handles and sinks:
 
 ```rhombus
 def request_path:
@@ -356,20 +362,34 @@ def request_path:
   |> pipe(TaggedRequest(), 1)
   |> atomic_fork(TaggedRequest(), 2)
   |> parallel(
-       map_flow(TaggedRequest(), tagged): tagged.request,
-       map_flow(TaggedRequest(), tagged): tagged.processor
+       map_flow(TaggedRequest(), tagged => tagged.request)
+         <=> memory_request,
+       map_flow(TaggedRequest(), tagged => tagged.processor)
+         <=> owner_queue.ingress
      )
 
-(
-  Array(fesvr_request, processor_request) |> request_path
-) <=> Array(memory_request, owner_queue.ingress)
+Array(fesvr_request, processor_request) |> request_path
 ```
 
-The endpoint and handle shapes must match recursively. To terminate a pipeline
-in a bulk connection, parenthesize the completed pipeline once and apply
-`<=>`; both operators intentionally occupy Rhombus's low-precedence boundary.
-`zip_flow` is deliberately binary; homogeneous multi-input rendezvous remains
-the role of `Join(T, n)`.
+The arrow form is especially useful for routing in the middle of a chain:
+
+```rhombus
+buffered
+|> demux_flow(Irrevocable(TaggedResponse()), 2,
+              tagged => tagged.processor)
+|> parallel(
+     map_flow(Irrevocable(TaggedResponse()), tagged => tagged.response)
+       <=> fesvr_response,
+     map_flow(Irrevocable(TaggedResponse()), tagged => tagged.response)
+       <=> processor_response
+   )
+```
+
+The endpoint, handle, and sink shapes must match recursively. A
+`handle <=> endpoint` branch closes that handle's output immediately while
+leaving its input available to the surrounding `parallel`. `zip_flow` is
+deliberately binary; homogeneous multi-input rendezvous remains the role of
+`Join(T, n)`.
 
 Given a concrete `Decoupled` or `Irrevocable` endpoint, `queue` and `pipe`
 infer its payload type, instantiate in the ambient `sync_circuit` domain, and

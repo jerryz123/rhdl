@@ -76,37 +76,43 @@ fun finish_demux_flow_handle(input_link :: Handle,
 
 // A payload type defaults to Decoupled, while an explicit ready-valid
 // InterfaceType retains that exact contract. Supplying an endpoint or handle
-// applies the router immediately.
-expr.macro 'demux_flow($source_or_protocol,
-                       $count,
-                       $(payload :: Identifier)): $selector':
-  'block:
-     def demux_flow_argument = $source_or_protocol
-     def demux_flow_count = $count
-     unless demux_flow_count is_a Int && demux_flow_count > 0
-     | error(~who: #'demux_flow,
-             "output count must be a positive host Int")
-     def demux_flow_protocol = flow_protocol_type(demux_flow_argument)
-     def demux_flow_input_link = interface_link(
-       demux_flow_protocol,
-       "demux_input"
-     )
-     def demux_flow_input :: Endpoint = demux_flow_input_link.right
-     def $payload = demux_flow_input.bits
-     fun compute_demux_selector(): $selector
-     def demux_flow_selector = compute_demux_selector()
-     def demux_flow_output_links = Array.make(demux_flow_count)
-     for (index in 0..demux_flow_count):
-       demux_flow_output_links[index] := interface_link(
+// applies the router immediately. The arrow form avoids grouping a
+// colon-bodied macro when the router is one operand in a pipeline.
+expr.macro
+| 'demux_flow($source_or_protocol,
+              $count,
+              $(payload :: Identifier) => $selector ...)':
+    'demux_flow($source_or_protocol, $count, $payload): $selector ...'
+| 'demux_flow($source_or_protocol,
+              $count,
+              $(payload :: Identifier)): $selector':
+    'block:
+       def demux_flow_argument = $source_or_protocol
+       def demux_flow_count = $count
+       unless demux_flow_count is_a Int && demux_flow_count > 0
+       | error(~who: #'demux_flow,
+               "output count must be a positive host Int")
+       def demux_flow_protocol = flow_protocol_type(demux_flow_argument)
+       def demux_flow_input_link = interface_link(
          demux_flow_protocol,
-         "demux_output"
+         "demux_input"
        )
-     def demux_flow_handle = finish_demux_flow_handle(
-       demux_flow_input_link,
-       demux_flow_output_links,
-       demux_flow_selector
-     )
-     finish_flow_stage(demux_flow_argument, demux_flow_handle)'
+       def demux_flow_input :: Endpoint = demux_flow_input_link.right
+       def $payload = demux_flow_input.bits
+       fun compute_demux_selector(): $selector
+       def demux_flow_selector = compute_demux_selector()
+       def demux_flow_output_links = Array.make(demux_flow_count)
+       for (index in 0..demux_flow_count):
+         demux_flow_output_links[index] := interface_link(
+           demux_flow_protocol,
+           "demux_output"
+         )
+       def demux_flow_handle = finish_demux_flow_handle(
+         demux_flow_input_link,
+         demux_flow_output_links,
+         demux_flow_selector
+       )
+       finish_flow_stage(demux_flow_argument, demux_flow_handle)'
 
 export:
   Demux

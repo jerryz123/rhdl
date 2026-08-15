@@ -104,7 +104,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`wire.rhdl`](wire.rhdl) | Forward-readable aggregate wire driven later by element |
 | [`interface.rhdl`](interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
 | [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
-| [`interface-array.rhdl`](interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, and serial/parallel handles |
+| [`interface-array.rhdl`](interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`flow-control.rhdl`](flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
 | [`flow-topology.rhdl`](flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, zip, parallel, arbitration, buffering, fork, and payload routing |
@@ -115,8 +115,9 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 [`interface-array.rhdl`](interface-array.rhdl) separates the generic interface
 model from ready-valid flow control. It demonstrates direct endpoint bulk
 connection with `<=>`, serial composition of two `interface_link` handles, and
-parallel composition into array-shaped handle ends. These handles work for any
-directional interface, including the bidirectional `ByteExchange` protocol.
+parallel composition into array-shaped handle or sink ends. Handles and sinks
+work for any directional interface, including the bidirectional `ByteExchange`
+protocol.
 
 [`flow-topology.rhdl`](flow-topology.rhdl) then layers ready-valid operations on
 that generic mechanism. Its three integrated circuits show the complete
@@ -132,9 +133,13 @@ composition vocabulary:
 
 The operator boundary is deliberate: `|>` applies or composes handles and
 returns the still-open end, while `<=>` bulk-connects two concrete endpoint
-shapes. Pure maps and zips elaborate as local wiring; pipes, queues, arbiters,
-and forks remain explicit circuit instances where they represent state or a
-meaningful structural boundary.
+shapes. The ordered `handle <=> endpoint` form instead closes one branch and
+returns a sink, allowing `parallel` to terminate heterogeneous branches inside
+one chain. Compact `payload => expression` binders keep maps, zips, and payload
+routing directly inside pipelines; their colon-bodied forms remain available
+for multiline transformations. Pure maps and zips elaborate as local wiring;
+pipes, queues, arbiters, and forks remain explicit circuit instances where
+they represent state or a meaningful structural boundary.
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus library,
 showing that useful RHDL composition need not modify a reader or define a

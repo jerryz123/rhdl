@@ -99,7 +99,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
 | `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` and array-shaped handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/parallel.rhdl` | Parallel generic-handle composition | None |
+| `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
 | `std/flow.rhdl` | Ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
 
 ## Frontend layer dependencies
@@ -122,7 +122,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `sync-memory.rhm` | Circuit-shaped synchronous memories with fixed read, write, and shared read-write ports plus optional packed-lane write masks | core IR, kernel, clocking support, field support |
 | `assertion.rhm` | Reset-suppressed clocked assertions with branch-derived guards and optional labels | kernel, clocking support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
-| `interface.rhm` | Roles, directional interfaces, refinement, endpoint shapes, local links, linear callable handles, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
+| `interface.rhm` | Roles, directional interfaces, refinement, endpoint shapes, local links, linear callable handles and sinks, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived forward-readable single-driver connections | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when` priority chains and exact-key `switch`, including assignment, memory-write, and assertion effects | core IR, kernel, mux-lookup support |

@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines valid and invalid flow chains for endpoint and mapping syntax tests.
+// Defines valid and invalid flow handle and sink chains for frontend tests.
 
 import:
   lib("rhdl/std/flow.rhdl") open
@@ -29,17 +29,16 @@ bundle ZipFlowOutput():
   data: Bits(8)
   owner: Bool
 
-// The block binder retains the precise input bundle type, including fields,
-// and returns a typed endpoint suitable for ordinary bulk connection.
+// The arrow-with-block binder retains the precise input bundle type and lets a
+// record constructor carry its field block outside the call parentheses.
 circuit MapFlowChain():
   interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
   interface egress(Decoupled(MapFlowOutput()), ~role: producer)
 
   (
-    map_flow(ingress, payload):
-      record(MapFlowOutput()):
-        data: payload.request
-        owner: payload.processor
+    map_flow(ingress, payload => record(MapFlowOutput())):
+      data: payload.request
+      owner: payload.processor
   ) <=> egress
 
 circuit MapFlowWrongProtocol():
@@ -90,6 +89,19 @@ sync_circuit ZipFlowChain():
   def zipped = Array(data, owner) |> path
   egress <=> zipped
 
+// The arrow binder keeps a single-expression zip directly inside ordinary
+// call and pipeline syntax without grouping a trailing block.
+circuit ZipFlowArrowChain():
+  interface data(Decoupled(Bits(8)), ~role: consumer)
+  interface owner(Decoupled(Bool), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  def zipped = zip_flow(
+    data, data_bits,
+    owner, owner_bits => mux(owner_bits, data_bits, bits(0, 8))
+  )
+  egress <=> zipped
+
 circuit ZipFlowWrongProtocol():
   interface data(Valid(Bits(8)), ~role: consumer)
   interface owner(Decoupled(Bool), ~role: consumer)
@@ -126,15 +138,12 @@ sync_circuit ParallelMapFlowChain():
   interface owner_egress(Decoupled(Bool), ~role: producer)
 
   def forked = ingress |> atomic_fork(_, 2)
-  def projected = forked |> parallel(
-    (
-      map_flow(MapFlowInput(), payload):
-        payload.request
-    ) |> pipe(Bits(8), 1),
-    map_flow(MapFlowInput(), payload):
-        payload.processor
+  def data_path = map_flow(MapFlowInput(), payload => payload.request)
+                  |> pipe(Bits(8), 1)
+  forked |> parallel(
+    data_path <=> data_egress,
+    map_flow(MapFlowInput(), payload => payload.processor) <=> owner_egress
   )
-  Array(data_egress, owner_egress) <=> projected
 
 // A non-flowing queue establishes an irrevocable offer that pure routing and
 // mapping retain through an array-shaped response path.
@@ -142,19 +151,15 @@ sync_circuit DemuxFlowChain():
   interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
   interface egress[2](Irrevocable(Bits(8)), ~role: producer)
 
-  (
-    ingress |> queue(_, 2)
-      |> (
-           demux_flow(Irrevocable(MapFlowInput()), 2, payload):
-             payload.processor
-         )
-      |> parallel(
-           map_flow(Irrevocable(MapFlowInput()), payload):
-             payload.request,
-           map_flow(Irrevocable(MapFlowInput()), payload):
-             payload.request
-         )
-  ) <=> egress
+  ingress |> queue(_, 2)
+    |> demux_flow(Irrevocable(MapFlowInput()), 2,
+                  payload => payload.processor)
+    |> parallel(
+         map_flow(Irrevocable(MapFlowInput()),
+                  payload => payload.request) <=> egress[0],
+         map_flow(Irrevocable(MapFlowInput()),
+                  payload => payload.request) <=> egress[1]
+       )
 
 sync_circuit FlowThroughQueueStrongerDestination():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
@@ -301,6 +306,7 @@ export:
   MapFlowReusedSource
   ZipFlowOutput
   ZipFlowChain
+  ZipFlowArrowChain
   ZipFlowWrongProtocol
   ZipFlowHostValue
   MapToAtomicForkChain

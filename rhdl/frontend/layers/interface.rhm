@@ -19,6 +19,7 @@ export:
   InterfaceType
   InterfaceEndpoint
   InterfaceHandle
+  InterfaceSink
   interface_link
   parallel_handles
   connect_endpoint_shapes
@@ -26,6 +27,7 @@ export:
   <=>
   Endpoint
   Handle
+  Sink
   InterfaceFields
 
 class InterfaceFlow(from_role, to_role, type):
@@ -253,6 +255,30 @@ class InterfaceHandle(left, right, mutable consumed = #false):
         connect_endpoint_shapes(source, left)
         consumed := #true
         right
+
+// Owns the still-exposed input end of a transformation whose output has
+// already been connected. Applying a concrete source completes the topology;
+// composing an earlier handle produces another sink with its input exposed.
+class InterfaceSink(left, mutable consumed = #false):
+  implements Callable
+
+  override method call(source):
+    unless !consumed
+    | error(~who: #'InterfaceSink,
+            "an interface sink can be consumed only once")
+    if source is_a InterfaceHandle
+    | block:
+        unless !source.consumed
+        | error(~who: #'InterfaceSink,
+                "an interface handle can be consumed only once")
+        connect_endpoint_shapes(source.right, left)
+        source.consumed := #true
+        consumed := #true
+        InterfaceSink(source.left)
+    | block:
+        connect_endpoint_shapes(source, left)
+        consumed := #true
+        #void
 
 class InterfaceGroup(module_def, name, type, role, bindings)
 class InterfaceArrayGroup(module_def, name, groups)
@@ -496,6 +522,9 @@ namespace Endpoint:
 annot.macro 'Handle':
   annot_meta.pack_predicate('fun (value): value is_a InterfaceHandle')
 
+annot.macro 'Sink':
+  annot_meta.pack_predicate('fun (value): value is_a InterfaceSink')
+
 // Retains the implementation-facing name while the standard profile exports
 // Endpoint as the public annotation for interface-producing functions.
 annot.macro 'InterfaceFields': 'Endpoint'
@@ -713,29 +742,61 @@ fun connect_interfaces(left, right):
 fun connect_endpoint_shapes(left, right):
   connect_interfaces(left, right)
 
-// Combines independent handles without wiring between them. The resulting
-// handle owns array-shaped left and right ends and consumes its components.
-fun parallel_handles(handles :: Array):
-  unless handles.length() > 0
+// Combines independent handles or already-terminated sinks. A homogeneous
+// handle collection retains both array-shaped ends; a homogeneous sink
+// collection retains only its array-shaped input end.
+fun parallel_handles(paths :: Array):
+  unless paths.length() > 0
   | error(~who: #'parallel_handles,
-          "parallel interface composition requires at least one handle")
-  for (handle in handles):
-    unless handle is_a InterfaceHandle
-    | error(~who: #'parallel_handles,
-            "parallel interface composition requires only handles")
-    when handle.consumed
-    | error(~who: #'parallel_handles,
-            "an interface handle can be consumed only once")
-  def left = Array(& (for List (handle in handles): handle.left))
-  def right = Array(& (for List (handle in handles): handle.right))
-  for (handle in handles): handle.consumed := #true
-  InterfaceHandle(left, right)
+          "parallel interface composition requires at least one handle or sink")
+  cond
+  | paths[0] is_a InterfaceHandle:
+      for (path in paths):
+        unless path is_a InterfaceHandle
+        | error(~who: #'parallel_handles,
+                "parallel interface composition requires all handles or all sinks")
+        when path.consumed
+        | error(~who: #'parallel_handles,
+                "an interface handle can be consumed only once")
+      def left = Array(& (for List (path in paths): path.left))
+      def right = Array(& (for List (path in paths): path.right))
+      for (path in paths): path.consumed := #true
+      InterfaceHandle(left, right)
+  | paths[0] is_a InterfaceSink:
+      for (path in paths):
+        unless path is_a InterfaceSink
+        | error(~who: #'parallel_handles,
+                "parallel interface composition requires all handles or all sinks")
+        when path.consumed
+        | error(~who: #'parallel_handles,
+                "an interface sink can be consumed only once")
+      def left = Array(& (for List (path in paths): path.left))
+      for (path in paths): path.consumed := #true
+      InterfaceSink(left)
+  | ~else:
+      error(~who: #'parallel_handles,
+            "parallel interface composition requires all handles or all sinks")
+
+// Connects the output end of a handle now and returns its still-open input as
+// a linear sink for later serial or parallel composition.
+fun terminate_interface_handle(handle :: Handle, terminal):
+  unless !handle.consumed
+  | error(~who: #'InterfaceHandle,
+          "an interface handle can be consumed only once")
+  connect_endpoint_shapes(handle.right, terminal)
+  handle.consumed := #true
+  InterfaceSink(handle.left)
 
 fun connect_interface_fields(left,
                              right,
                              & extra_values,
                              ~& extra_fields):
   cond
+  | left is_a InterfaceHandle:
+      unless extra_values.length() == 0 && extra_fields.length() == 0
+      | error(~who: #'connect_interfaces,
+              "handle termination requires exactly one endpoint shape")
+      terminate_interface_handle(left, right)
   | left is_a Array:
       when extra_fields.length() > 0
       | error(~who: #'connect_interfaces,

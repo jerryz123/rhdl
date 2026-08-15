@@ -1,5 +1,5 @@
 #lang rhdl
-// Provides valid interface-array circuits for frontend elaboration tests.
+// Provides valid and invalid endpoint-array, handle, and sink test circuits.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -96,11 +96,62 @@ circuit ParallelInterfaceHandleAdapter():
   def result = ingress |> path
   egress <=> result
 
+// Terminating each handle closes its output and leaves one callable sink. A
+// parallel sink accepts the matching endpoint array and completes all lanes.
+circuit ParallelInterfaceSinkAdapter():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  ingress |> parallel_handles(Array(
+    interface_link(Decoupled(Bits(8)), "lane") <=> egress[0],
+    interface_link(Decoupled(Bits(8)), "lane") <=> egress[1]
+  ))
+
+// A sink can consume an earlier handle before any concrete source is
+// attached, retaining only the earlier handle's input end.
+circuit ComposedInterfaceSinkAdapter():
+  interface ingress(BidirectionalByte(), ~role: responder)
+  interface egress(BidirectionalByte(), ~role: requester)
+
+  def sink = interface_link(BidirectionalByte(), "second") <=> egress
+  def composed = interface_link(BidirectionalByte(), "first") |> sink
+  ingress |> composed
+
 circuit ReusedInterfaceHandle():
   interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
   def path = interface_link(Decoupled(Bits(8)))
   ingress[0] |> path
   ingress[1] |> path
+
+circuit ReusedInterfaceSink():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  def sink = interface_link(Decoupled(Bits(8))) <=> egress
+  ingress[0] |> sink
+  ingress[1] |> sink
+
+circuit MixedParallelInterfacePaths():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  ingress |> parallel_handles(Array(
+    interface_link(Decoupled(Bits(8))),
+    interface_link(Decoupled(Bits(8))) <=> egress
+  ))
+
+circuit ParallelInterfaceSinkLengthMismatch():
+  interface ingress[3](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  ingress |> parallel_handles(Array(
+    interface_link(Decoupled(Bits(8))) <=> egress[0],
+    interface_link(Decoupled(Bits(8))) <=> egress[1]
+  ))
+
+circuit InterfaceSinkTypeMismatch():
+  interface egress(Decoupled(Bits(16)), ~role: producer)
+  interface_link(Decoupled(Bits(8))) <=> egress
 
 export:
   BidirectionalByte
@@ -113,4 +164,10 @@ export:
   InterfaceArrayTypeOnce
   InterfaceHandleAdapter
   ParallelInterfaceHandleAdapter
+  ParallelInterfaceSinkAdapter
+  ComposedInterfaceSinkAdapter
   ReusedInterfaceHandle
+  ReusedInterfaceSink
+  MixedParallelInterfacePaths
+  ParallelInterfaceSinkLengthMismatch
+  InterfaceSinkTypeMismatch

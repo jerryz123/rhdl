@@ -42,58 +42,48 @@ sync_circuit FesvrSharedMemory(address_width :: Int,
   def TaggedReq = TaggedSimpleMemoryReq(address_width, data_bytes)
 
   fun tag_request(is_processor):
-    map_flow(SimpleMemoryReq(address_width, data_bytes), request):
-      record(TaggedReq):
-        request: request
-        processor: Bool(is_processor)
-
-  def request_branch:
-    (
-      map_flow(TaggedReq, tagged):
-        tagged.request
-    ) |> pipe(SimpleMemoryReq(address_width, data_bytes), 1)
-
-  def owner_branch:
-    map_flow(TaggedReq, tagged):
-      tagged.processor
+    map_flow(SimpleMemoryReq(address_width, data_bytes),
+             request => record(TaggedReq)):
+      request: request
+      processor: Bool(is_processor)
 
   // One generic interface chain covers independent input maps, stateful
   // arbitration and buffering, fanout, output projections, and connection.
-  (
-    Array(fesvr.request, processor.request)
-      |> parallel(
-           tag_request(#false),
-           tag_request(#true)
-         )
-      |> rr_arbiter(TaggedReq, 2)
-      |> pipe(TaggedReq, 1)
-      |> atomic_fork(TaggedReq, 2)
-      |> parallel(request_branch, owner_branch)
-  ) <=> Array(ram.port.request, owners.ingress)
+  Array(
+    fesvr.request |> tag_request(#false),
+    processor.request |> tag_request(#true)
+  )
+    |> rr_arbiter(TaggedReq, 2)
+    |> pipe(TaggedReq, 1)
+    |> atomic_fork(TaggedReq, 2)
+    |> parallel(
+         (
+           map_flow(TaggedReq, tagged => tagged.request)
+             |> pipe(SimpleMemoryReq(address_width, data_bytes), 1)
+         ) <=> ram.port.request,
+         map_flow(TaggedReq, tagged => tagged.processor)
+           <=> owners.ingress
+       )
 
   // Buffer returned data together with its oldest owner before exposing it to
   // either client. This keeps response readiness independent of client
   // backpressure and therefore separates the two memory directions.
   def TaggedResp = TaggedSimpleMemoryResp(data_bytes)
-  (
-    Array(ram.port.response, owners.egress) |> (
+  Array(ram.port.response, owners.egress) |> (
       zip_flow(SimpleMemoryResp(data_bytes), response,
                Bool, owner):
         record(TaggedResp):
           response: response
           processor: owner
     ) |> queue(TaggedResp, 2)
-      |> (
-           demux_flow(Irrevocable(TaggedResp), 2, tagged):
-             tagged.processor
-         )
+      |> demux_flow(Irrevocable(TaggedResp), 2,
+                    tagged => tagged.processor)
       |> parallel(
-           map_flow(Irrevocable(TaggedResp), tagged):
-             tagged.response,
-           map_flow(Irrevocable(TaggedResp), tagged):
-             tagged.response
+           map_flow(Irrevocable(TaggedResp),
+                    tagged => tagged.response) <=> fesvr.response,
+           map_flow(Irrevocable(TaggedResp),
+                    tagged => tagged.response) <=> processor.response
          )
-  ) <=> Array(fesvr.response, processor.response)
 
 export:
   FesvrSharedMemory
