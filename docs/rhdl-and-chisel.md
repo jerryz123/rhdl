@@ -24,12 +24,14 @@ of the default model.
 | Semantic packed types | Open capability interfaces; typed one-hot values and enums | Built-in ground types plus user aggregates, enums, opaque wrappers, and library conventions |
 | Protocol compatibility | Nominal identity, named roles, refinement, and supported contracts | Structural shape, relative alignment, `Flipped`, `Connectable`, and views |
 | Topology composition | Linear interface handles and sinks | Ordinary Scala references and connection APIs |
+| Generator graph negotiation | No graph-wide negotiation layer | Rocket Chip Diplomacy negotiates parameters across a generator graph |
 | Decode | Unordered typed relations over scalar or aggregate patterns | `BitPat`, truth tables, structured decode fields, and optional minimizers |
 | Synthesis freedom | Typed value with a complete driver and no runtime-X meaning | `DontCare` participates in Chisel's invalidation/unconnected model |
 
 ## One definition and one effective driver
 
-The core distinguishes a readable [`Value`](core/README.md#values-and-places)
+The core distinguishes a readable
+[`Value`](../rhdl/core/README.md#values-and-places)
 from a driveable `Place`. Module inputs and child outputs are values. Module
 outputs, child inputs, register next-state inputs, and internal destinations are
 places. A place must have one effective driver of exactly the same hardware
@@ -49,14 +51,15 @@ and one final drive. Consequently:
 - input-like values cannot accidentally be used as destinations;
 - complete field-wise aggregate construction becomes one whole-value drive;
 - partial aggregate drives and mixed whole/field drive modes are rejected; and
-- priority is localized in a construct that explicitly denotes priority.
+- priority, when present, is localized in a construct that explicitly denotes
+  it.
 
 The cost is that incremental software-style assignment is intentionally less
 convenient.
 
 ## Exact widths, types, and control kinds
 
-RHDL's [core width rules](core/README.md#width-rules) require positive,
+RHDL's [core width rules](../rhdl/core/README.md#width-rules) require positive,
 elaboration-known widths. Connections and ordinary modular arithmetic require
 exact hardware types. Extension, truncation, and equal-width representation
 casts are explicit operations.
@@ -73,8 +76,9 @@ selected by an ordinary data mux or accidentally participate in arithmetic.
 Chisel permits casts such as `Bool.asClock`, with an explicit warning that clock
 construction requires care in its
 [data-type documentation](https://www.chisel-lang.org/docs/explanations/data-types).
-RHDL's restriction is safer for ordinary synchronous logic, although it also
-contributes to the current lack of clock-gating and clock-generation features.
+RHDL still permits an explicit equal-width representation cast to `Clock` or
+`Reset`, so this is a default barrier rather than proof-level separation. RHDL
+does not yet provide richer clock-gating or clock-generation abstractions.
 
 ## Open semantic types and one-hot intent
 
@@ -84,7 +88,7 @@ supports. Frontend-defined `Bool`, `SInt`, enums, one-hot types, and compatible
 extension-defined types use those capabilities without adding backend-specific
 node cases.
 
-The [`OneHot`](frontend/layers/README.md#one-hot-values) abstraction is a useful
+The [`OneHot`](../rhdl/frontend/layers/README.md#one-hot-values) abstraction is a useful
 example. `OneHot(n)` is distinct from `Bits(n)`, and a nominal one-hot hardware
 enum is distinct from both. One-hot types do not expose arbitrary bitwise
 operations because those operations do not preserve exactly-one intent.
@@ -101,7 +105,7 @@ models.
 
 ## Nominal protocols and linear topology
 
-RHDL [interfaces](frontend/layers/README.md#interfaces) are protocol descriptors,
+RHDL [interfaces](../rhdl/frontend/layers/README.md#interfaces) are protocol descriptors,
 not merely aggregate data types. They provide:
 
 - stable nominal identity, including for parameterized protocols;
@@ -120,7 +124,7 @@ that two aggregate shapes can be connected.
 
 RHDL also provides linear `InterfaceHandle` and `InterfaceSink` values. A handle
 can be consumed only once, because consuming it twice would drive a destination
-twice. The [flow library](std/README.md#ready-valid-flow-control) uses the same
+twice. The [flow library](../rhdl/std/README.md#flow-control-circuits) uses the same
 generic handle protocol for mapping, filtering, gating, zipping, arbitration,
 buffering, fanout, and parallel branches:
 
@@ -135,11 +139,14 @@ Chisel has mature `ReadyValidIO`, `Decoupled`, `Irrevocable`, `Queue`, `Pipe`,
 and arbiter utilities. RHDL's additional contribution is one linear composition
 vocabulary spanning both inline transformations and stateful stages. The
 linearity check currently occurs during elaboration rather than through a
-static linear type system.
+static linear type system. These handles compose already-typed endpoints; they
+do not negotiate parameters, cardinality, or capabilities across a generator
+graph, nor do they provide Rocket Chip Diplomacy's adapter and monitor
+ecosystem.
 
 ## Typed decode relations and synthesis freedom
 
-RHDL's [decode library](std/README.md#typed-decode-patterns) treats a decoder as
+RHDL's [decode library](../rhdl/std/README.md#typed-decode-patterns) treats a decoder as
 an unordered typed relation. A `Pattern` can recursively describe `Bits`,
 `Bool`, enums, one-hot types, records, vectors, and compatible extension-defined
 types. Input cubes must not overlap, so row order never introduces hidden
@@ -175,7 +182,7 @@ synthesis optimization, and runtime unknown-state semantics separate.
 ## Host descriptions, language layers, and one public IR
 
 RHDL's frontend supports
-[deferred host descriptions](frontend/README.md#deferred-host-descriptions).
+[deferred host descriptions](../rhdl/frontend/README.md#deferred-host-descriptions).
 Static literals, enum members, patterns, and other reusable descriptions can be
 passed through host computation without allocating circuit IR. They become
 ordinary core values only when a hardware operation consumes them.
@@ -185,7 +192,7 @@ and standard `#lang rhdl` profile all construct the same public IR. Frontend
 layers can add notation, typed literals, field behavior, or connection policy
 without creating frontend-only hardware operations. Backends consume only the
 verified core and never import frontend syntax. The enforced dependency model
-is documented in the [implementation architecture](README.md).
+is documented in the [implementation architecture](../rhdl/README.md).
 
 This is a smaller and more inspectable boundary than Chisel's full frontend,
 compiler-plugin, FIRRTL/CIRCT, annotation, and transform ecosystem. It is not
@@ -201,9 +208,12 @@ outside isolated examples:
   control pattern;
 - pipeline state stores only typed leaf controls used downstream;
 - irrelevant controls remain synthesis freedom behind a separate valid bit;
-- `Pipe` and `ValidPipe` modules mark stateful pipeline boundaries; and
-- inline flow filtering and gating implement squash and hazard policy without
-  processor-specific queue variants.
+- `Pipe` and `ValidPipe` modules mark stateful pipeline boundaries;
+- inline flow filtering implements squash, while explicit ready-valid gating
+  implements load-use hazard policy without processor-specific queue variants;
+  and
+- nominal instruction- and data-access protocols keep pipeline logic
+  independent of the private caches and external memory protocol.
 
 The example does not prove that RHDL produces better quality of results than an
 equivalent Chisel design. It shows that the semantic abstractions compose into
@@ -223,6 +233,17 @@ and Rocket Chip remain substantially stronger in:
 - annotations, compiler intrinsics, user transforms, and implementation hooks;
 - module specialization, separate compilation, and production tooling; and
 - protocol, cache, coherence, interconnect, and SoC-generator ecosystems.
+
+Rocket Chip is more than a collection of Chisel language idioms. It provides
+Diplomacy parameter negotiation, production TileLink buses and adapters,
+cores and coherent memory-system components, configuration infrastructure,
+devices, debug and interrupt integration, simulation harnesses, and complete
+SoC assembly. RHDL's current
+[TileLink support](../rhdl/std/README.md#tilelink-definitions) is deliberately
+definition-only: parameter records, A-E bundles, and directional link types,
+without negotiation, routing, adapters, monitors, or endpoint behavior. The
+[Rocket Chip repository](https://github.com/chipsalliance/rocket-chip) is the
+appropriate comparison point for that generator ecosystem.
 
 See Chisel's official documentation for
 [external modules](https://www.chisel-lang.org/docs/explanations/blackboxes),

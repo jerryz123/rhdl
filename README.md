@@ -41,7 +41,7 @@ frontend layers or ordinary libraries.
 The authoritative package graph and dependency contract are in
 [`rhdl/README.md`](rhdl/README.md).
 
-> **Design perspective:** [RHDL and Chisel: design tradeoffs](rhdl/chisel-comparison.md)
+> **Design perspective:** [RHDL and Chisel: design tradeoffs](docs/rhdl-and-chisel.md)
 > explains where RHDL's exact-construction model is intentionally stricter or
 > more compositional, and where Chisel remains substantially more capable.
 
@@ -110,7 +110,7 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
-| Design tradeoffs relative to Chisel | [`rhdl/chisel-comparison.md`](rhdl/chisel-comparison.md) |
+| Design tradeoffs relative to Chisel | [`docs/rhdl-and-chisel.md`](docs/rhdl-and-chisel.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
