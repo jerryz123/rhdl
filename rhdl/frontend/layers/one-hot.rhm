@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines structurally sized one-hot values, literals, and exact-match muxing.
+// Defines structurally sized one-hot values, literals, and partial one-hot selection.
 
 import:
   rhombus/meta open
@@ -75,9 +75,9 @@ fun one_hot_width(type):
   | error(~who: #'one_hot_width, "expected a OneHot type")
   type.width
 
-// Expands an indexed choice list into the existing exact-match lookup. The
-// explicit default defines behavior for zero and multi-hot representations.
-fun build_one_hot_mux(selector, default_value, choices) :~ HardwareFields:
+// Preserves one-hot selection as a partial core operation. Exactly one bit set
+// is a caller precondition; invalid selector encodings have no result contract.
+fun build_one_hot_mux(selector, choices) :~ HardwareFields:
   def selector_value = kernel.read(selector)
   unless one_hot_type(selector_value.type)
   | error(~who: #'mux_onehot, "selector must have a OneHot type")
@@ -88,23 +88,17 @@ fun build_one_hot_mux(selector, default_value, choices) :~ HardwareFields:
           "choice count must equal the OneHot selector width")
   def selector_bits = kernel.cast(selector_value,
                                   Bits(selector_value.type.width))
-  def cases:
-    for List (index in 0..selector_value.type.width,
-              choice in choices):
-      [one_hot_encoding(index), choice]
-  kernel.hw_mux_lookup(selector_bits,
-                       default_value,
-                       cases,
+  kernel.hw_onehot_mux(selector_bits,
+                       choices,
                        #false,
                        Location(),
                        Origin("embedded one-hot mux", ""))
 
 expr.macro
-| 'mux_onehot($selector, ~default: $default_value, $choices)':
-    'build_one_hot_mux($selector, $default_value, $choices)'
-| 'mux_onehot($selector, ~default: $default_value):
+| 'mux_onehot($selector, $choices)':
+    'build_one_hot_mux($selector, $choices)'
+| 'mux_onehot($selector):
      $(choice :: expr_meta.Parsed)
      ...':
     'build_one_hot_mux($selector,
-                       $default_value,
                        [$choice, ...])'

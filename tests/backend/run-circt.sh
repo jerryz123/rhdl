@@ -336,5 +336,6 @@ verify_fixture nested-bundle
 verify_fixture bundle-hierarchy
 verify_fixture interface-hierarchy
 verify_fixture aggregate-memory
+verify_fixture one-hot-aggregate
 verify_fixture table table_tb
 verify_fixture vec-search vec_search_tb

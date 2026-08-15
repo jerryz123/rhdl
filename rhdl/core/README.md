@@ -142,6 +142,7 @@ record_get(R, field_name)                   -> R.field_type(field_name)
 vector_create(elements matching V)          -> V: VectorType
 vector_get(V, host_index)                    -> V.element_type
 cast(A: packable, B: same packed width)     -> B
+onehot_mux(Bits(n), n values of T)          -> T: packable DataType
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
 extract(Bits(w), high, low)                 -> Bits(high - low + 1)
 sext(S: SignedArithmeticType, wider width)  -> S.with_bit_width(wider width)
@@ -163,6 +164,12 @@ Mux keys are unique nonnegative host integers that fit the selector width and
 are normalized into increasing order. Every lookup has a default and at least
 one case. There is no `rtl.mux`: a binary Boolean mux is a frontend
 specialization of `rtl.mux_lookup`.
+
+`rtl.onehot_mux` is a separate partial selection primitive. Its selector width
+must equal its number of same-typed choices. Exactly one selector bit being set
+is a caller precondition; zero-hot and multi-hot selectors have an unspecified
+result. This permits direct selector-bit gating and reduction without validity
+logic or a default value.
 
 There is also no conditional-connect operation or general control-flow
 region. Frontend hardware conditionals canonicalize to mux lookups and one

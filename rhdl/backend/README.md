@@ -53,6 +53,7 @@ IR and lower through CIRCT type aliases.
 | `rtl.shl/shru/shrs` | `comb.shl/shru/shrs` with lossless operand-width normalization |
 | `rtl.eq/ult/slt` | `comb.icmp eq/ult/slt` |
 | `rtl.mux_lookup` | comparisons plus a `comb.mux` tree |
+| `rtl.onehot_mux` | selector-bit gating plus a balanced `comb.or` tree |
 | `rtl.cast` | alias or `hw.bitcast` |
 | `rtl.concat` | `comb.concat` |
 | `rtl.extract/trunc` | `comb.extract` |
@@ -73,6 +74,11 @@ Shift operands require equal widths in CIRCT. A narrower amount is
 zero-extended. For a wider amount, an unsigned value is zero-extended and a
 signed value is sign-extended before shifting and truncating back to its
 declared width. This preserves fixed-width overflow and overshift semantics.
+
+One-hot mux choices are packed when necessary, AND-gated by their corresponding
+selector bits, reduced through a balanced OR tree, and cast back to their result
+type. The operation deliberately adds no validity detector: zero-hot and
+multi-hot selectors are outside its result contract.
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend

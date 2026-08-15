@@ -163,7 +163,7 @@ host index produces the corresponding power-of-two literal:
 
 ```rhombus
 def Grant = OneHot(4)
-next_grant <== mux_onehot(current, ~default: Grant(0)):
+next_grant <== mux_onehot(current):
   Grant(1)
   Grant(2)
   Grant(3)
@@ -172,9 +172,10 @@ next_grant <== mux_onehot(current, ~default: Grant(0)):
 
 One-hot values deliberately do not implement `BitwiseType`, because bitwise
 operations do not preserve the exactly-one invariant. Equality, aggregates,
-ports, state, and explicit casts work normally. `mux_onehot` lowers to
-power-of-two keys in `rtl.mux_lookup` and keeps a default for invalid zero or
-multi-hot representations.
+ports, state, and explicit casts work normally. `mux_onehot` lowers to the
+partial `rtl.onehot_mux` operation. Exactly one selector bit must be set;
+zero-hot and multi-hot results are unspecified. This contract needs no default
+value and allows the backend to use selector-bit gating and a balanced OR tree.
 
 ## Packing and width operations
 

@@ -367,6 +367,44 @@ fun build_mux_lookup(design,
                         who,
                         {"keys": normalized_cases.map(fun (case): case[0])})
 
+// Builds a partial one-hot selection operation. Exactly one selector bit is a
+// caller precondition; zero-hot and multi-hot results are intentionally
+// unspecified so backends can use direct gating and reduction.
+fun build_onehot_mux(design,
+                     module_def,
+                     selector,
+                     choices,
+                     name,
+                     location,
+                     origin,
+                     who):
+  ensure_module_in_design(design, module_def, who)
+  ensure_open(module_def, who)
+  ensure_value_in(module_def, selector, who)
+  unless bits_type(selector.type)
+  | fail(who, "one-hot mux selector must be Bits")
+  unless choices is_a List
+  | fail(who, "one-hot mux choices must be supplied as a List")
+  unless choices.length() == selector.type.width
+  | fail(who, "one-hot mux choice count must equal selector width")
+  for (choice in choices):
+    ensure_value_in(module_def, choice, who)
+  def result_type = choices[0].type
+  unless data_type(result_type) && packable_type(result_type)
+  | fail(who, "one-hot mux choices must have a packable DataType")
+  for (choice in choices):
+    unless data_type(choice.type) && type_equal(choice.type, result_type)
+    | fail(who, "one-hot mux choices must have exactly the same DataType")
+  build_value_operation(design,
+                        module_def,
+                        "rtl.onehot_mux",
+                        [selector] ++ choices,
+                        result_type,
+                        name,
+                        location,
+                        origin,
+                        who)
+
 class Builder(design):
   // Materializes a design-level declaration lazily so reusable frontend
   // descriptors can be called from any circuit in one elaborated design.
@@ -997,6 +1035,21 @@ class Builder(design):
                      location,
                      origin,
                      #'mux_lookup)
+
+  method onehot_mux(module_def,
+                    selector,
+                    choices,
+                    name = #false,
+                    location = Location(),
+                    origin = Origin("onehot_mux")):
+    build_onehot_mux(design,
+                     module_def,
+                     selector,
+                     choices,
+                     name,
+                     location,
+                     origin,
+                     #'onehot_mux)
 
   method cast(module_def,
               value,

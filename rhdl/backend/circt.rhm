@@ -317,6 +317,89 @@ fun emit_mux_lookup(operation):
         selected_ref := step_ref
       String.join(lines, "\n")
 
+// A one-hot mux has a deliberately partial contract: exactly one selector bit
+// is set. Gating each packed choice and OR-reducing the leaves implements that
+// contract without adding comparators or defining invalid selector encodings.
+fun emit_onehot_mux(operation):
+  def selector = operation.operands[0]
+  def choices = operation.operands.drop(1)
+  def result = operation.results[0]
+  def width = packed_width(result.type)
+  def prefix = "%__rhdl_onehot_" ++ to_string(operation.id)
+  def packed_result_ref:
+    if flat_data_type(result.type)
+    | value_ref(result)
+    | prefix ++ "_result"
+  def mutable lines = []
+  def mutable leaves = []
+  for (choice in choices, index in 0..choices.length()):
+    def suffix = to_string(index)
+    def selector_bit_ref:
+      if choices.length() == 1
+      | value_ref(selector)
+      | prefix ++ "_select_" ++ suffix
+    when choices.length() != 1
+    | lines := lines ++ [String.append(
+        "    ", selector_bit_ref, " = comb.extract ", value_ref(selector),
+        " from ", suffix, " : (", circt_type(selector.type), ") -> i1"
+      )]
+    def packed_choice_ref:
+      if flat_data_type(choice.type)
+      | value_ref(choice)
+      | prefix ++ "_choice_" ++ suffix
+    unless flat_data_type(choice.type)
+    | lines := lines ++ [String.append(
+        "    ", packed_choice_ref, " = hw.bitcast ", value_ref(choice),
+        " : (", circt_type(choice.type), ") -> i", to_string(width)
+      )]
+    def mask_ref:
+      if width == 1
+      | selector_bit_ref
+      | prefix ++ "_mask_" ++ suffix
+    when width != 1
+    | lines := lines ++ [String.append(
+        "    ", mask_ref, " = comb.concat ",
+        String.join(for List (_index in 0..width): selector_bit_ref, ", "),
+        " : ", String.join(for List (_index in 0..width): "i1", ", ")
+      )]
+    def leaf_ref:
+      if choices.length() == 1
+      | packed_result_ref
+      | prefix ++ "_gated_" ++ suffix
+    lines := lines ++ [String.append(
+      "    ", leaf_ref, " = comb.and ", packed_choice_ref, ", ", mask_ref,
+      " : i", to_string(width)
+    )]
+    leaves := leaves ++ [leaf_ref]
+  def mutable level = 0
+  def mutable current = leaves
+  while current.length() > 1:
+    def mutable next = []
+    def mutable remaining = current
+    def mutable pair_index = 0
+    while remaining.length() > 1:
+      def combined_ref:
+        if current.length() == 2
+        | packed_result_ref
+        | String.append(prefix, "_or_", to_string(level), "_", to_string(pair_index))
+      lines := lines ++ [String.append(
+        "    ", combined_ref, " = comb.or ", remaining[0], ", ", remaining[1],
+        " : i", to_string(width)
+      )]
+      next := next ++ [combined_ref]
+      remaining := remaining.drop(2)
+      pair_index := pair_index + 1
+    when remaining.length() == 1
+    | next := next ++ [remaining[0]]
+    current := next
+    level := level + 1
+  unless flat_data_type(result.type)
+  | lines := lines ++ [String.append(
+      "    ", value_ref(result), " = hw.bitcast ", packed_result_ref,
+      " : (i", to_string(width), ") -> ", circt_type(result.type)
+    )]
+  String.join(lines, "\n")
+
 fun emit_concat(operation):
   def result = operation.results[0]
   def operands = String.join(operation.operands.map(value_ref), ", ")
@@ -701,6 +784,8 @@ fun emit_operation(operation):
         emit_slt(operation)
     | "rtl.mux_lookup":
         emit_mux_lookup(operation)
+    | "rtl.onehot_mux":
+        emit_onehot_mux(operation)
     | "rtl.concat":
         emit_concat(operation)
     | "rtl.extract":
