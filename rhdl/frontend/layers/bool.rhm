@@ -13,6 +13,7 @@ export:
   bool_type
   bool_eq
   bool_ne
+  is_one_of
   unsigned_lt
   signed_lt
   unsigned_gt
@@ -88,6 +89,25 @@ fun bool_ne(left, right, name = #false, location = Location()):
 operator (left =/= right):
   ~same_as: ===
   bool_ne(left, right)
+
+// Compares one hardware value against a host-authored set of typed choices.
+// The fold happens during elaboration and therefore needs no dedicated IR op.
+fun is_one_of(value, candidate, ...) :~ HardwareFields:
+  def location = Location()
+  def value_read = kernel.read(value, location)
+  def candidates = [candidate, ...]
+  def comparisons = candidates.map(
+    fun (alternative):
+      equality_bits(value_read,
+                    alternative,
+                    #'is_one_of,
+                    "is_one_of",
+                    location)
+  )
+  def mutable combined = comparisons[0]
+  for (comparison in comparisons.drop(1)):
+    combined := kernel.bit_or(combined, comparison, #false, location)
+  kernel.cast(combined, Bool, #false, location)
 
 fun require_unsigned_bits(left, right, who, location):
   def left_value = kernel.read(left, location)

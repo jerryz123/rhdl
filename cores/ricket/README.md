@@ -41,13 +41,15 @@ not module boundaries. Three `Pipe(_, 1)` instances own the stallable IF/ID,
 ID/EX, and EX/MEM boundaries; one `ValidPipe(_, 1)` owns the always-advancing
 MEM/WB boundary.
 
-Fetch has one epoch-tagged instruction request outstanding. Redirects consume
-younger tokens and drain stale responses. Decode holds a load-use dependent
-token. Execute owns forwarding, branch resolution, target and access alignment
-checks, and architectural fault generation. Memory holds its EX/MEM token
-until the data access returns exactly one response. Cache hit or miss latency
-is consequently ordinary backpressure and does not alter pipeline state
-semantics.
+Fetch keeps accepted PCs and epochs in a two-entry ordered metadata queue.
+The pipelined L1I can therefore accept and return one hit per cycle. Redirects
+consume younger tokens and drain stale responses without confusing their PCs.
+Decode holds a load-use dependent token. Execute owns forwarding, branch
+resolution, target and access alignment checks, and architectural fault
+generation. A legal data-cache request transfers at the same edge that places
+its instruction in EX/MEM, so a synchronous load or store hit completes in the
+ordinary MEM stage. Miss latency remains ordinary backpressure and does not
+alter pipeline state semantics.
 
 The integrated structured decoder emits the component control bundles
 directly, without an intermediate instruction-kind enum. Unused controls stay
@@ -59,7 +61,10 @@ values have architectural meaning.
 [`ricket.rhdl`](ricket.rhdl) defines
 `Ricket(address_width, ~cache_sets: 64, ~line_bytes: 32)`. It exposes an
 `Irrevocable(Bits(64))` start consumer, separate eight-byte `SimpleMemory`
-instruction and data requester ports, and a sticky `fault` output. The two
+instruction and data requester ports, and a sticky `fault` output. L1I hits
+have one-cycle latency and one-request-per-cycle throughput. L1D load hits have
+the same throughput; stores complete to the pipeline at lookup and drain
+through an ordered one-entry write buffer. The two
 external ports intentionally remain separate; SoC arbitration and integration
 are outside the core.
 

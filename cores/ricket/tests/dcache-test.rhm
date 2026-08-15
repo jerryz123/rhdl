@@ -6,12 +6,9 @@ import:
   "../../../rhdl/frontend/kernel.rhm" as embedded
   "../dcache/cache.rhdl" as l1d
 
-def design = embedded.run_elaboration(
-  fun (): l1d.RicketL1DCache(32, 8, 32)
-)
-def cache = design.modules.find(
-  fun (module_def): module_def.name == "RicketL1DCache"
-)
+def design = embedded.run_elaboration(fun (): l1d.RicketL1DCache(32, 8, 32))
+def cache = design.modules.find(fun (module_def): module_def.name == "RicketL1DCache")
+def one_beat_design = embedded.run_elaboration(fun (): l1d.RicketL1DCache(32, 8, 8))
 fun register_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
@@ -21,8 +18,14 @@ check:
   cache.find_input("core_in").type.field("request").type.field("bits").type.field("data").type.width ~is 64
   cache.find_output("memory_out").type.field("request").type.field("bits").type.field("mask").type.width ~is 8
   register_names(cache).contains("valid_bits") ~is #true
-  register_names(cache).contains("request") ~is #true
+  register_names(cache).contains("lookup_valid") ~is #true
+  register_names(cache).contains("lookup_request") ~is #true
+  register_names(cache).contains("store_active") ~is #true
+  register_names(cache).contains("store_sent") ~is #true
+  register_names(cache).contains("outstanding") ~is #true
+  register_names(cache).contains("state") ~is #false
   verify_design(design) ~is #void
+  verify_design(one_beat_design) ~is #void
   embedded.run_elaboration(
     fun (): l1d.RicketL1DCache(32, 8, 24)
   ) ~throws "line byte count"

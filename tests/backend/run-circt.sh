@@ -348,3 +348,5 @@ verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
 verify_fixture valid-pipe valid_pipe_tb
 verify_fixture load-store load_store_tb
+verify_fixture ricket-icache ricket_icache_tb
+verify_fixture ricket-dcache ricket_dcache_tb

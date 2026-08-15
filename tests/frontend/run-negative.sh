@@ -69,6 +69,7 @@ expect_failure bad-enum-width.rhdl "enum encoding does not fit the declared widt
 expect_failure bad-enum-assignment.rhdl "connection source and target must have exactly the same hardware type"
 expect_failure bad-enum-equality.rhdl "=== operands must have exactly the same FlatDataType"
 expect_failure bad-enum-inequality.rhdl "=/= operands must have exactly the same FlatDataType"
+expect_failure bad-is-one-of.rhdl "is_one_of operands must have exactly the same FlatDataType"
 expect_failure bad-invert-enum.rhdl "bit_not operand must have a bitwise type"
 expect_failure bad-enum-member.rhdl "enum State has no member named Missing"
 expect_failure bad-enum-mux-integer-key.rhdl "enum mux lookup keys must be members of the selector's enum type"

@@ -51,6 +51,8 @@ ricket-test: ricket-host-test
 	FIXTURE=rv64i-alu-decode bash tests/backend/run-circt.sh
 	FIXTURE=rv64i-alu-integrated bash tests/backend/run-circt.sh
 	FIXTURE=load-store bash tests/backend/run-circt.sh
+	FIXTURE=ricket-icache bash tests/backend/run-circt.sh
+	FIXTURE=ricket-dcache bash tests/backend/run-circt.sh
 
 circt-test:
 	bash tests/backend/run-circt.sh

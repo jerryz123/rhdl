@@ -26,6 +26,16 @@
   covered confidently by focused tests.
 - Keep generated Racket and Verilator build output out of version control.
 
+## RTL formatting
+
+- Prefer one-line RTL declarations, calls, assignments, and expressions.
+- Do not break an RTL expression merely because it contains a call or several
+  operands. Use line breaks only for syntactic blocks, extremely long
+  expressions, or regular repeated forms whose aligned layout improves the
+  visible hardware structure.
+- Keep record and bundle construction, lookup and decode tables, and repeated
+  port or field mappings multiline when their block structure is meaningful.
+
 ## Package boundaries
 
 - Treat `rhdl/README.md` as the authoritative package and frontend-layer
