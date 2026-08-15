@@ -122,7 +122,9 @@ The second target additionally requires Verilator and an RV32-capable
 `riscv64-unknown-elf-gcc`. `FESVR_PREFIX` and `CIRCT_OPT` may point at existing
 installations.
 
-A future processor implementation is expected to live under the repository's
-top-level `core/`, not under this simulator package. A concrete simulation
-configuration can supply that processor to `SimpleSoCTop` while retaining the
-FESVR host, shared memory, SV driver, and DPI support defined here.
+The standalone Ricket processor implementation lives in
+[`cores/ricket/ricket.rhdl`](../../cores/ricket/ricket.rhdl), not under this simulator
+package. It deliberately exposes separate instruction and data memory ports,
+so it does not yet satisfy `SimpleSoCTop`'s single combined processor-memory
+contract. A later SoC-level adapter or arbiter can reconcile those boundaries
+while retaining the FESVR host, shared memory, SV driver, and DPI support here.

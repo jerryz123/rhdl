@@ -1,0 +1,55 @@
+#lang rhdl
+// Defines host-parameterized alignment operations for hardware bit vectors.
+
+fun power_of_two(value :: Int):
+  value > 0 && (value and (value - 1)) == 0
+
+fun unchecked_alignment_bits(alignment :: Int):
+  fun loop(value, bits):
+    if value == 1
+    | bits
+    | loop(value / 2, bits + 1)
+  loop(alignment, 0)
+
+fun alignment_bits(alignment :: Int):
+  unless power_of_two(alignment)
+  | error(~who: #'alignment_bits,
+          "alignment must be a positive power-of-two host Int")
+  unchecked_alignment_bits(alignment)
+
+fun checked_alignment_width(value, alignment :: Int, who):
+  def width = value.type.bit_width()
+  unless value.type.type_equal(Bits(width)) && Bits(width).type_equal(value.type)
+  | error(~who: who, "alignment value must have a Bits type")
+  unless power_of_two(alignment)
+  | error(~who: who,
+          "alignment must be a positive power-of-two host Int")
+  def low_width = unchecked_alignment_bits(alignment)
+  unless low_width <= width
+  | error(~who: who, "alignment must fit the Bits width")
+  values(width, low_width)
+
+fun is_aligned(value, alignment :: Int) :~ Bool:
+  def (_width, low_width) = checked_alignment_width(
+    value,
+    alignment,
+    #'is_aligned
+  )
+  if low_width == 0
+  | Bool(#true)
+  | extract(value, low_width - 1, 0) === bits(0, low_width)
+
+fun align_down(value, alignment :: Int) :~ Bits(value.type.bit_width()):
+  def (width, _low_width) = checked_alignment_width(
+    value,
+    alignment,
+    #'align_down
+  )
+  if alignment == 1
+  | value
+  | value and bits((1 bits.(<<) width) - alignment, width)
+
+export:
+  alignment_bits
+  is_aligned
+  align_down

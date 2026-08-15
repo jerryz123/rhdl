@@ -38,6 +38,39 @@ fun flow_payload_type(source_or_type):
     fun (member): member.name == "bits"
   ).type
 
+// Resolves the non-backpressured Valid family independently so ready-valid
+// stages cannot accidentally accept a protocol with no readiness signal.
+fun valid_flow_protocol_type(source_or_type):
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'valid_flow_protocol_type,
+                "Valid handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        unless data_type(source_or_type)
+        | error(~who: #'valid_flow_protocol_type,
+                "Valid stage requires a payload DataType, Valid InterfaceType, Endpoint, or Handle")
+        Valid(source_or_type)
+  unless protocol.name == "Valid"
+  | if source_or_type is_a Endpoint || source_or_type is_a Handle
+    | error(~who: #'valid_flow_protocol_type,
+            "Valid-flow chaining requires a Valid endpoint")
+    | error(~who: #'valid_flow_protocol_type,
+            "Valid-flow chaining requires a Valid protocol")
+  protocol
+
+fun valid_flow_payload_type(source_or_type):
+  def protocol = valid_flow_protocol_type(source_or_type)
+  protocol.members.find(
+    fun (member): member.name == "bits"
+  ).type
+
 // Replaces a protocol's payload without weakening its behavioral contract.
 fun flow_protocol_with_payload(protocol, payload_type):
   unless protocol is_a InterfaceType
@@ -60,5 +93,7 @@ fun finish_flow_stage(source_or_type, handle :: Handle):
 export:
   flow_protocol_type
   flow_payload_type
+  valid_flow_protocol_type
+  valid_flow_payload_type
   flow_protocol_with_payload
   finish_flow_stage

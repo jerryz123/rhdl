@@ -346,3 +346,5 @@ verify_fixture vec-search vec_search_tb
 verify_fixture rv64i-alu rv64i_alu_tb
 verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
+verify_fixture valid-pipe valid_pipe_tb
+verify_fixture load-store load_store_tb

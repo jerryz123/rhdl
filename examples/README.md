@@ -83,7 +83,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`sync-memory.rhdl`](sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
 | [`sync-memory-1rw.rhdl`](sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
 | [`sync-memory-masked.rhdl`](sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
-| [`simple-memory.rhdl`](simple-memory.rhdl) | Parameterized aligned byte-masked `SimpleMemory` protocol |
+| [`simple-memory.rhdl`](simple-memory.rhdl) | Parameterized byte-masked `SimpleMemory` protocol plus generic alignment operations |
 | [`simple-memory-flow.rhdl`](simple-memory-flow.rhdl) | `SimpleMemory` request and response channels composed with standard flow control |
 | [`simple-memory-ram.rhdl`](simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
@@ -107,6 +107,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`interface-array.rhdl`](interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`flow-control.rhdl`](flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
+| [`valid-pipe.rhdl`](valid-pipe.rhdl) | Fixed-latency Valid-only pipelining without a readiness channel |
 | [`flow-topology.rhdl`](flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, zip, parallel, arbitration, buffering, fork, and payload routing |
 | [`ctrl-flow.rhdl`](ctrl-flow.rhdl) | Payloadless token-flow versions of pipe, queue, arbitration, routing, join, and broadcast |
 

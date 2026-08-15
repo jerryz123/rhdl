@@ -117,7 +117,7 @@ Detailed documentation lives with the component that owns it:
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
 | RISC-V instruction model, RV64I catalog, typed controls, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
-| Concrete RV64I integer core components | [`core/README.md`](core/README.md) |
+| Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
 
 ## Current status
 
@@ -134,9 +134,10 @@ The current vertical slice includes:
   protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
-- A concrete combinational RV64I integer ALU with scoped, typed instruction
-  controls, annotation-derived decode, and derived signed and word-operation
-  semantics.
+- Ricket, a standalone five-stage RV64I integer core with direct component-oriented
+  structured decode, separate instruction and data memory ports, forwarding,
+  load-use stalls, redirect flushing, and fault-stop behavior. Its typed,
+  shared integer ALU remains independently reusable.
 
 ## Deferred work
 

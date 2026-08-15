@@ -1,0 +1,34 @@
+#lang rhdl
+// Defines inline ready-valid gating that holds tokens while disabled.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+
+// Gating may change with live sideband state, so it deliberately weakens the
+// output to Decoupled. Unlike filtering, a disabled gate does not consume its
+// input token.
+fun gate_flow(source_or_type, enabled :: Bool):
+  def gate_flow_protocol = flow_protocol_type(source_or_type)
+  def gate_flow_input_link = interface_link(
+    gate_flow_protocol,
+    "gate_input"
+  )
+  def gate_flow_input = gate_flow_input_link.right
+  def gate_flow_output_link = interface_link(
+    Decoupled(flow_payload_type(source_or_type)),
+    "gate_output"
+  )
+  def gate_flow_output = gate_flow_output_link.left
+  gate_flow_output.field("valid") <== gate_flow_input.field("valid") and enabled
+  gate_flow_output.field("bits") <== gate_flow_input.field("bits")
+  gate_flow_input.field("ready") <== gate_flow_output.field("ready") and enabled
+  gate_flow_input_link.consumed := #true
+  gate_flow_output_link.consumed := #true
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(gate_flow_input_link.left, gate_flow_output_link.right)
+  )
+
+export:
+  gate_flow

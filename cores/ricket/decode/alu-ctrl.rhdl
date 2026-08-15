@@ -1,10 +1,11 @@
 #lang rhdl
-// Decodes RV64I arithmetic instructions into the integer ALU's datapath controls.
+// Defines arithmetic and complete-domain RV64I controls for the reusable integer ALU.
 
 import:
-  "../alu.rhdl" open
-  "../../riscv/isa/rv64i.rhm" open
-  "../../riscv/rhdl/instruction-pattern.rhdl" open
+  "../../alu.rhdl" open
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/rhdl/instruction-pattern.rhdl" open
   lib("rhdl/std/decode.rhdl") open
 
 // Immediate and register forms share sparse control patterns. Omitted fields
@@ -86,6 +87,36 @@ def RV64IAluCases = decode_groups(
 
 def RV64IAluDecode = ValidDecodeGen(RV64IAluCases)
 
+// Only address-producing instructions constrain the non-arithmetic ALU path.
+// Instructions that do not consume the ALU result leave every control bit free.
+def address_alu = partial_pattern(AluControl()):
+  result_select: AluResultSelect.Arithmetic
+  subtract: Bool(#false)
+  word: Bool(#false)
+def unused_alu = pattern(AluControl(), _)
+def arithmetic_instructions = [
+  ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
+  SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW,
+  ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND,
+  ADDW, SUBW, SLLW, SRLW, SRAW
+]
+def address_instructions = [
+  LUI, AUIPC,
+  LB, LH, LW, LBU, LHU, LWU, LD,
+  SB, SH, SW, SD
+]
+def unused_alu_instructions = [
+  JAL, JALR,
+  BEQ, BNE, BLT, BGE, BLTU, BGEU,
+  FENCE, ECALL, EBREAK
+]
+def RV64INonArithmeticAluCases = combine_case_groups([
+  instruction_cases(address_instructions, address_alu),
+  instruction_cases(unused_alu_instructions, unused_alu)
+])
+def RV64ICompleteAluCases = RV64IAluCases ++ RV64INonArithmeticAluCases
+def RV64ICompleteAluDecode = ValidDecodeGen(RV64ICompleteAluCases)
+
 circuit RV64IAluInstructionDecoder():
   input instruction: Bits(32)
   output valid: Bool
@@ -98,4 +129,7 @@ circuit RV64IAluInstructionDecoder():
 export:
   RV64IAluCases
   RV64IAluDecode
+  RV64INonArithmeticAluCases
+  RV64ICompleteAluCases
+  RV64ICompleteAluDecode
   RV64IAluInstructionDecoder

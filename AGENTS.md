@@ -47,6 +47,9 @@
   for the `#lang rhdl` reader shim.
 - Preserve the mirrored `tests/core/`, `tests/frontend/`, and `tests/backend/`
   organization. Run `make check-boundaries` after moving or adding modules.
+- Keep processor components reusable across named cores directly under `cores/`.
+  Put implementation-specific decode, datapath, state, and tests under
+  `cores/<core-name>/`.
 
 ## Documentation ownership
 

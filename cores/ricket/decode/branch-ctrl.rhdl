@@ -1,0 +1,70 @@
+#lang rhdl
+// Maps RV64I control transfers to resolver and target-selection controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../branch-resolver.rhdl" open
+  "../../../riscv/isa/rv64i.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+bundle BranchControl():
+  resolver: BranchResolverControl()
+  target_from_rs1: Bool
+
+fun equality_branch_pattern(invert :: Boolean):
+  def resolver = partial_pattern(BranchResolverControl()):
+    enable: Bool(#true)
+    unconditional: Bool(#false)
+    compare_equal: Bool(#true)
+    invert: Bool(invert)
+  partial_pattern(BranchControl()):
+    resolver: resolver
+    target_from_rs1: Bool(#false)
+
+fun less_branch_pattern(signed_mode :: Boolean, invert :: Boolean):
+  def resolver = partial_pattern(BranchResolverControl()):
+    enable: Bool(#true)
+    unconditional: Bool(#false)
+    compare_equal: Bool(#false)
+    signed_mode: Bool(signed_mode)
+    invert: Bool(invert)
+  partial_pattern(BranchControl()):
+    resolver: resolver
+    target_from_rs1: Bool(#false)
+
+fun unconditional_branch_pattern(target_from_rs1 :: Boolean):
+  def resolver = partial_pattern(BranchResolverControl()):
+    enable: Bool(#true)
+    unconditional: Bool(#true)
+  partial_pattern(BranchControl()):
+    resolver: resolver
+    target_from_rs1: Bool(target_from_rs1)
+
+def disabled_resolver = partial_pattern(BranchResolverControl()):
+  enable: Bool(#false)
+def no_branch = partial_pattern(BranchControl()):
+  resolver: disabled_resolver
+
+def branch_instructions = [BEQ, BNE, BLT, BGE, BLTU, BGEU]
+def branching_instructions = [JAL, JALR] ++ branch_instructions
+def RV64IBranchCases = combine_case_groups([
+  instruction_cases([JAL], unconditional_branch_pattern(#false)),
+  instruction_cases([JALR], unconditional_branch_pattern(#true)),
+  instruction_cases([BEQ], equality_branch_pattern(#false)),
+  instruction_cases([BNE], equality_branch_pattern(#true)),
+  instruction_cases([BLT], less_branch_pattern(#true, #false)),
+  instruction_cases([BGE], less_branch_pattern(#true, #true)),
+  instruction_cases([BLTU], less_branch_pattern(#false, #false)),
+  instruction_cases([BGEU], less_branch_pattern(#false, #true)),
+  instruction_cases(
+    excluding_instructions(branching_instructions),
+    no_branch
+  )
+])
+
+def RV64IBranchDecode = ValidDecodeGen(RV64IBranchCases)
+
+export:
+  BranchControl
+  RV64IBranchCases
+  RV64IBranchDecode

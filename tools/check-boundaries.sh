@@ -92,7 +92,7 @@ fi
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './examples/*' ! -path './tests/frontend/*' ! -path './tests/fesvr/*' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
-  ! -path './sim/*' ! -path './core/*' -print)"
+  ! -path './sim/*' ! -path './cores/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
   echo ".rhdl files may appear only in std, public adapters, examples, concrete cores, simulation adapters, and frontend or FESVR fixtures" >&2
   echo "$unexpected_rhdl" >&2

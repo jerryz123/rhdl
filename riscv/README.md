@@ -47,9 +47,12 @@ format fields are disjoint and together cover all 32 instruction bits. An
 ## RHDL adapter
 
 [`rhdl/instruction-pattern.rhdl`](rhdl/instruction-pattern.rhdl) converts
-architectural value/care encodings to typed `Pattern` values. Concrete hardware
-uses ordinary `DecodeCase` relations and generators from `rhdl/std/decode`,
-which remains independent of RISC-V instruction descriptions.
+architectural value/care encodings to typed `Pattern` values.
+[`rhdl/instruction-fields.rhdl`](rhdl/instruction-fields.rhdl) generates
+hardware field and immediate extraction from the same pure descriptors.
+Concrete hardware uses ordinary `DecodeCase` relations and generators from
+`rhdl/std/decode`, which remains independent of RISC-V instruction
+descriptions.
 
 ## RV64I catalog
 

@@ -11,3 +11,9 @@ tests.
 `InstructionEncoding` and `InstructionSpec` values into typed RHDL `Pattern`
 values. Generic case grouping, output patterns, valid-tagged partial mappings,
 and hardware decode generation remain in `rhdl/std/decode`.
+
+[`instruction-fields.rhdl`](instruction-fields.rhdl) converts the pure model's
+`BitField` and `ImmediateLayout` descriptors into hardware slices,
+concatenations, and signed or unsigned extension. Architectural bit placement
+therefore remains defined once in `riscv/model`; concrete cores only select
+which described layout their datapath consumes.

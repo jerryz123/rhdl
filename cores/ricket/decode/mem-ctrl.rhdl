@@ -1,0 +1,61 @@
+#lang rhdl
+// Defines RV64I load/store operation, width, and extension controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../load-store.rhdl" open
+  "../../../riscv/isa/rv64i.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum MemoryOperation:
+  None
+  Read
+  Write
+
+bundle MemoryControl():
+  access: MemoryOperation
+  width: MemoryWidth
+  unsigned: Bool
+
+fun load_pattern(width, unsigned :: Boolean):
+  pattern(MemoryControl()):
+    access: MemoryOperation.Read
+    width: width
+    unsigned: Bool(unsigned)
+
+fun store_pattern(width):
+  partial_pattern(MemoryControl()):
+    access: MemoryOperation.Write
+    width: width
+
+def no_memory = partial_pattern(MemoryControl()):
+  access: MemoryOperation.None
+
+def load_instructions = [LB, LH, LW, LBU, LHU, LWU, LD]
+def store_instructions = [SB, SH, SW, SD]
+def memory_instructions = load_instructions ++ store_instructions
+def RV64IMemoryCases = combine_case_groups([
+  instruction_cases([LB], load_pattern(MemoryWidth.Byte, #false)),
+  instruction_cases([LBU], load_pattern(MemoryWidth.Byte, #true)),
+  instruction_cases([LH], load_pattern(MemoryWidth.Half, #false)),
+  instruction_cases([LHU], load_pattern(MemoryWidth.Half, #true)),
+  instruction_cases([LW], load_pattern(MemoryWidth.Word, #false)),
+  instruction_cases([LWU], load_pattern(MemoryWidth.Word, #true)),
+  instruction_cases([LD], load_pattern(MemoryWidth.Double, #false)),
+  instruction_cases([SB], store_pattern(MemoryWidth.Byte)),
+  instruction_cases([SH], store_pattern(MemoryWidth.Half)),
+  instruction_cases([SW], store_pattern(MemoryWidth.Word)),
+  instruction_cases([SD], store_pattern(MemoryWidth.Double)),
+  instruction_cases(
+    excluding_instructions(memory_instructions),
+    no_memory
+  )
+])
+
+def RV64IMemoryDecode = ValidDecodeGen(RV64IMemoryCases)
+
+export:
+  MemoryOperation
+  MemoryControl
+  RV64IMemoryCases
+  RV64IMemoryDecode

@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, unsigned ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality and inequality, unsigned ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
@@ -102,11 +102,14 @@ of the same core `rtl.mux_lookup`; there is no separate core mux operation.
 output ready: Bool
 ready <== Bool(#true)
 equal <== a === b
+different <== a =/= b
 less <== a < b
 ```
 
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
-works on exactly equal flat types. `<`, `>`, `<=`, and `>=` require equal-width
+and inequality work on exactly equal flat types and return `Bool`; `=/=` is
+the Boolean complement of `===` and lowers to equality followed by negation.
+Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from
 the corresponding core less-than operation.
@@ -596,6 +599,11 @@ interface refinement merge and split.
 views over forward-readable, exactly-one-driver wires. An `InterfaceHandle`
 owns a left endpoint shape and a right endpoint shape. Endpoint shapes are an
 `Endpoint` or recursively matching `Array`s of endpoints.
+
+A binding annotated as `Handle` exposes `.left` and `.right` with `Endpoint`
+static information. This supports named local links such as `Valid(T)`
+sidebands: drive the fields on `.left` and read the corresponding fields on
+`.right` without materializing a circuit instance.
 
 - `endpoint |> handle` connects the endpoint to the left end and returns the
   right end.

@@ -1,0 +1,47 @@
+#lang rhombus
+// Checks generic Bits alignment structure, widths, and host constraints.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/std/bits.rhdl" as bits_std
+  "std-bits-fixture.rhdl" as fixture
+
+def design = embedded.run_elaboration(fun (): fixture.BitsAlignmentFixture())
+def module_def = design.modules[0]
+def extracts = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.extract"
+)
+def bitwise_ands = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.and" && operation.results[0].type.type_equal(Bits(8))
+)
+
+check:
+  bits_std.alignment_bits(1) ~is 0
+  bits_std.alignment_bits(2) ~is 1
+  bits_std.alignment_bits(8) ~is 3
+  bits_std.alignment_bits(256) ~is 8
+  module_def.outputs.map(fun (port): port.name) ~is [
+    "aligned_1", "aligned_2", "aligned_4", "aligned_8", "aligned_256",
+    "down_1", "down_4", "down_256"
+  ]
+  extracts.map(fun (operation): operation.attribute("high")) ~is [0, 1, 2, 7]
+  bitwise_ands.length() ~is 2
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value", #false) == 252
+  ).length() ~is 1
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value", #false) == 0 && operation.results[0].type.type_equal(Bits(8))
+  ).length() >= 1 ~is #true
+  verify_design(design) ~is #void
+  bits_std.alignment_bits(0) ~throws "positive power-of-two"
+  bits_std.alignment_bits(3) ~throws "positive power-of-two"
+  embedded.run_elaboration(
+    fun (): fixture.AlignmentTooWideFixture()
+  ) ~throws "alignment must fit the Bits width"
+  embedded.run_elaboration(
+    fun (): fixture.NonPowerAlignmentFixture()
+  ) ~throws "alignment must be a positive power-of-two host Int"
+  embedded.run_elaboration(
+    fun (): fixture.NonBitsAlignmentFixture()
+  ) ~throws "alignment value must have a Bits type"

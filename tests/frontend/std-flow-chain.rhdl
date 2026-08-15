@@ -71,6 +71,30 @@ circuit MapFlowReusedSource():
   mapped <=> egress0
   ingress |> mapping
 
+// Filtering discards rejected offers, while gating holds disabled offers.
+// Both conservatively expose Decoupled outputs after observing live sidebands.
+circuit FilterFlowChain():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  input keep: Bool
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  filter_flow(ingress, payload => keep and not (payload === bits(0, 8))) <=> egress
+
+circuit GateFlowChain():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  input enabled: Bool
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  gate_flow(ingress, enabled) <=> egress
+
+circuit FilterFlowWrongProtocol():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  filter_flow(ingress, payload => Bool(#true))
+
+circuit GateFlowWrongProtocol():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  gate_flow(ingress, Bool(#true))
+
 // A heterogeneous rendezvous is an array-input handle that composes with the
 // same generic handle protocol as a one-input stateful stage.
 sync_circuit ZipFlowChain():
@@ -244,6 +268,20 @@ sync_circuit PipeToQueueChain():
   def buffered = ingress |> pipe(_, 1) |> queue(_, 2)
   egress <=> buffered
 
+sync_circuit ValidPipeChain():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  interface egress(Valid(Bits(8)), ~role: producer)
+
+  def delayed = ingress |> valid_pipe(_, 2)
+  egress <=> delayed
+
+sync_circuit ValidPipeWrongProtocol():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  valid_pipe(ingress, 1)
+
+sync_circuit ValidPipeNonEndpoint():
+  valid_pipe(bits(0, 8), 1)
+
 sync_circuit CtrlFlowChain():
   interface ingress(DecoupledCtrl(), ~role: consumer)
   interface egress(DecoupledCtrl(), ~role: producer)
@@ -291,11 +329,18 @@ circuit CtrlMissingSyncDomain():
   interface ingress(DecoupledCtrl(), ~role: consumer)
   ctrl_queue(ingress, 2)
 
+circuit ValidPipeMissingSyncDomain():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  valid_pipe(ingress, 1)
+
 def design = elaborate(FlowChain())
 
 export:
   FlowChain
   PipeToQueueChain
+  ValidPipeChain
+  ValidPipeWrongProtocol
+  ValidPipeNonEndpoint
   CtrlFlowChain
   CtrlPipeToQueueChain
   MapFlowInput
@@ -304,6 +349,10 @@ export:
   MapFlowWrongProtocol
   MapFlowStrongerDestination
   MapFlowReusedSource
+  FilterFlowChain
+  GateFlowChain
+  FilterFlowWrongProtocol
+  GateFlowWrongProtocol
   ZipFlowOutput
   ZipFlowChain
   ZipFlowArrowChain
@@ -326,4 +375,5 @@ export:
   CtrlNonEndpointChain
   MissingSyncDomain
   CtrlMissingSyncDomain
+  ValidPipeMissingSyncDomain
   design

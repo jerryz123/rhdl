@@ -1,0 +1,69 @@
+#lang rhdl
+// Composes Ricket's independent control relations into one hardware decoder.
+
+import:
+  "../../alu.rhdl" open
+  "alu-ctrl.rhdl" open
+  "operand-ctrl.rhdl" open
+  "branch-ctrl.rhdl" open
+  "mem-ctrl.rhdl" open
+  "writeback-ctrl.rhdl" open
+  "trap-ctrl.rhdl" open
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/rhdl/instruction-pattern.rhdl" open
+  lib("rhdl/std/decode.rhdl") open
+
+bundle RV64IControl():
+  alu: AluControl()
+  operand: OperandControl()
+  branch: BranchControl()
+  memory: MemoryControl()
+  writeback: WritebackControl()
+  trap: TrapControl()
+
+fun same_input_pattern(left, right):
+  left.type.type_equal(right.type) && right.type.type_equal(left.type) && (
+    left.width == right.width
+  ) && left.value_bits == right.value_bits && left.care_bits == right.care_bits
+
+fun component_output(cases, input):
+  def matching = cases.filter(
+    ~keep: fun (candidate): same_input_pattern(candidate.input, input)
+  )
+  unless matching.length() == 1
+  | error(~who: #'RV64IControlCases,
+          "each component relation must contain every canonical instruction exactly once")
+  matching[0].output
+
+// Ordinary host code adds the independently authored control columns to one
+// canonical row per RV64I instruction. Nested Patterns retain their care bits.
+def RV64IControlCases = for List (instruction in RV64IInstructions):
+  block:
+    def input = instruction_pattern(instruction)
+    DecodeCase(
+      input,
+      pattern(RV64IControl()):
+        alu: component_output(RV64ICompleteAluCases, input)
+        operand: component_output(RV64IOperandCases, input)
+        branch: component_output(RV64IBranchCases, input)
+        memory: component_output(RV64IMemoryCases, input)
+        writeback: component_output(RV64IWritebackCases, input)
+        trap: component_output(RV64ITrapCases, input)
+    )
+
+def RV64IControlDecode = ValidDecodeGen(RV64IControlCases)
+
+circuit RV64IInstructionDecoder():
+  input instruction: Bits(32)
+  output valid: Bool
+  output control: RV64IControl()
+
+  def decoded :: DecodeResult(RV64IControl()) = RV64IControlDecode(instruction)
+  valid <== decoded.valid
+  control <== decoded.value
+
+export:
+  RV64IControl
+  RV64IControlCases
+  RV64IControlDecode
+  RV64IInstructionDecoder

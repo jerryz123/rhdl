@@ -24,7 +24,7 @@ classify_path() {
     .github/workflows/ci.yml|tools/ci-changes.sh|tools/check-ci-changes.sh)
       mark_all
       ;;
-    Makefile|rhdl/*.rhm|rhdl/*.rhdl|rhdl/*.rkt|examples/*.rhm|examples/*.rhdl|tests/backend/*.rhm|tests/backend/*.rkt)
+    Makefile|rhdl/*.rhm|rhdl/*.rhdl|rhdl/*.rkt|cores/*.rhm|cores/*.rhdl|cores/*.rkt|cores/*.sh|examples/*.rhm|examples/*.rhdl|tests/backend/*.rhm|tests/backend/*.rkt)
       host=true
       circt=true
       ;;

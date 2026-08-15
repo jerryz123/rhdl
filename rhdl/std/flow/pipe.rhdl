@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines payload-bearing and control-only registered elastic pipelines.
+// Defines registered pipelines for Valid and ready-valid protocol families.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -43,6 +43,36 @@ sync_circuit Pipe(T, stages :: Int):
       when (valid_sources[index]):
         stage_bits[index] <== bits_sources[index]
 
+// Valid has no backpressure: every stage advances on every clock, and each
+// asserted input cycle emerges after exactly `stages` cycles.
+sync_circuit ValidPipe(T, stages :: Int):
+  unless stages > 0
+  | error(~who: #'ValidPipe, "stages must be a positive host Int")
+
+  interface ingress(Valid(T), ~role: consumer)
+  interface egress(Valid(T), ~role: producer)
+
+  def initial_valid = vec(
+    for List (_ in 0..stages): Bool(#false)
+  )
+  reg stage_valid(~init: initial_valid)
+  reg stage_bits(Vec(stages, T))
+
+  def valid_sources = [ingress.valid] ++ (
+    for List (index in 0..(stages - 1)): stage_valid[index]
+  )
+  def bits_sources = [ingress.bits] ++ (
+    for List (index in 0..(stages - 1)): stage_bits[index]
+  )
+
+  egress.valid <== stage_valid[stages - 1]
+  egress.bits <== stage_bits[stages - 1]
+
+  for (index in 0..stages):
+    stage_valid.next[index] <== valid_sources[index]
+    when (valid_sources[index]):
+      stage_bits.next[index] <== bits_sources[index]
+
 // The control-only specialization stores just the validity of each token.
 // Its output is irrevocable because an occupied stage cannot withdraw while
 // its downstream endpoint is stalled.
@@ -84,6 +114,15 @@ fun pipe(source_or_type, stages :: Int):
     InterfaceHandle(pipe_stage.ingress, pipe_stage.egress)
   )
 
+fun valid_pipe(source_or_type, stages :: Int):
+  def T = valid_flow_payload_type(source_or_type)
+  def ValidPipeModule = ValidPipe(T, stages)
+  inst valid_pipe_stage(ValidPipeModule)
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(valid_pipe_stage.ingress, valid_pipe_stage.egress)
+  )
+
 // Control-only chaining keeps exact endpoint static information without
 // introducing a dummy payload field.
 fun ctrl_pipe(source :: Endpoint, stages :: Int) :~ Endpoint:
@@ -95,5 +134,7 @@ fun ctrl_pipe(source :: Endpoint, stages :: Int) :~ Endpoint:
 export:
   Pipe
   pipe
+  ValidPipe
+  valid_pipe
   CtrlPipe
   ctrl_pipe

@@ -1,0 +1,49 @@
+#lang rhombus
+// Checks the reusable branch resolver's control contract and datapath shape.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../branch-resolver.rhdl" as branch
+
+def design = embedded.run_elaboration(fun (): branch.BranchResolver(64))
+def module_def = design.modules[0]
+def control_type = branch.BranchResolverControl()
+def control_fields = [
+  "enable", "unconditional", "compare_equal", "signed_mode", "invert"
+]
+def control_extracts = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.record_get"
+)
+def muxes = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
+)
+
+check:
+  record_type(control_type) ~is #true
+  control_type.fields.map(fun (field): field.name) ~is control_fields
+  (for all (field in control_type.fields):
+     type_equal(field.type, bool.Bool)) ~is #true
+  packed_width(control_type) ~is 5
+  type_equal(module_def.find_input("left").type, Bits(64)) ~is #true
+  type_equal(module_def.find_input("right").type, Bits(64)) ~is #true
+  type_equal(module_def.find_input("control").type, control_type) ~is #true
+  type_equal(module_def.find_output("taken").type, bool.Bool) ~is #true
+  control_extracts.map(fun (operation): operation.attribute("field")) ~is [
+    "signed_mode", "compare_equal", "unconditional", "invert", "enable"
+  ]
+  muxes.length() ~is 4
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.eq"
+  ).length() ~is 1
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.ult"
+  ).length() ~is 1
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+  ).length() ~is 0
+  verify_design(design) ~is #void
+  embedded.run_elaboration(
+    fun (): branch.BranchResolver(0)
+  ) ~throws "positive width"

@@ -1,0 +1,67 @@
+#lang rhdl
+// Defines RV64I architectural writeback enable and result-source controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv64i.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum WritebackSelect:
+  Alu
+  Memory
+  PcPlus4
+
+bundle WritebackControl():
+  enable: Bool
+  source: WritebackSelect
+
+fun writeback_pattern(enable :: Boolean, source):
+  pattern(WritebackControl()):
+    enable: Bool(enable)
+    source: source
+
+def no_writeback = partial_pattern(WritebackControl()):
+  enable: Bool(#false)
+
+def immediate_alu_instructions = [
+  ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
+  SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW
+]
+def register_alu_instructions = [
+  ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND,
+  ADDW, SUBW, SLLW, SRLW, SRAW
+]
+def alu_writeback_instructions = (
+  [LUI, AUIPC] ++ immediate_alu_instructions ++ register_alu_instructions
+)
+def load_instructions = [LB, LH, LW, LBU, LHU, LWU, LD]
+def link_instructions = [JAL, JALR]
+def writeback_instructions = (
+  alu_writeback_instructions ++ load_instructions ++ link_instructions
+)
+def RV64IWritebackCases = combine_case_groups([
+  instruction_cases(
+    alu_writeback_instructions,
+    writeback_pattern(#true, WritebackSelect.Alu)
+  ),
+  instruction_cases(
+    load_instructions,
+    writeback_pattern(#true, WritebackSelect.Memory)
+  ),
+  instruction_cases(
+    link_instructions,
+    writeback_pattern(#true, WritebackSelect.PcPlus4)
+  ),
+  instruction_cases(
+    excluding_instructions(writeback_instructions),
+    no_writeback
+  )
+])
+
+def RV64IWritebackDecode = ValidDecodeGen(RV64IWritebackCases)
+
+export:
+  WritebackSelect
+  WritebackControl
+  RV64IWritebackCases
+  RV64IWritebackDecode

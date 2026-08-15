@@ -13,6 +13,10 @@ def top = design.modules[0]
 def pipe_to_queue_design = embedded.run_elaboration(
   fun (): fixture.PipeToQueueChain()
 )
+def valid_pipe_design = embedded.run_elaboration(
+  fun (): fixture.ValidPipeChain()
+)
+def valid_pipe_top = valid_pipe_design.modules[0]
 def ctrl_design = embedded.run_elaboration(
   fun (): fixture.CtrlFlowChain()
 )
@@ -24,6 +28,14 @@ def map_flow_design = embedded.run_elaboration(
   fun (): fixture.MapFlowChain()
 )
 def map_flow_top = map_flow_design.modules[0]
+def filter_flow_design = embedded.run_elaboration(
+  fun (): fixture.FilterFlowChain()
+)
+def filter_flow_top = filter_flow_design.modules[0]
+def gate_flow_design = embedded.run_elaboration(
+  fun (): fixture.GateFlowChain()
+)
+def gate_flow_top = gate_flow_design.modules[0]
 def zip_flow_design = embedded.run_elaboration(
   fun (): fixture.ZipFlowChain()
 )
@@ -69,6 +81,16 @@ check:
   verify_design(design) ~is #void
   verify_design(pipe_to_queue_design) ~is #void
 
+  valid_pipe_design.modules.map(fun (module_def): module_def.name) ~is [
+    "ValidPipeChain", "ValidPipe"
+  ]
+  valid_pipe_top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in"
+  ]
+  valid_pipe_top.outputs.map(fun (port): port.name) ~is ["egress_out"]
+  operations(valid_pipe_top, "rtl.instance").length() ~is 1
+  verify_design(valid_pipe_design) ~is #void
+
   ctrl_design.modules.map(fun (module_def): module_def.name) ~is [
     "CtrlFlowChain", "CtrlQueue", "CtrlPipe"
   ]
@@ -92,6 +114,22 @@ check:
   ]
   operations(map_flow_top, "rtl.instance").length() ~is 0
   verify_design(map_flow_design) ~is #void
+  filter_flow_design.modules.map(fun (module_def): module_def.name) ~is [
+    "FilterFlowChain"
+  ]
+  gate_flow_design.modules.map(fun (module_def): module_def.name) ~is [
+    "GateFlowChain"
+  ]
+  operations(filter_flow_top, "rtl.instance").length() ~is 0
+  operations(gate_flow_top, "rtl.instance").length() ~is 0
+  filter_flow_top.find_output("egress_out").type.fields.map(
+    fun (field): field.name
+  ) ~is ["valid", "bits"]
+  gate_flow_top.find_output("egress_out").type.fields.map(
+    fun (field): field.name
+  ) ~is ["valid", "bits"]
+  verify_design(filter_flow_design) ~is #void
+  verify_design(gate_flow_design) ~is #void
   map_to_atomic_fork_design.modules.map(
     fun (module_def): module_def.name
   ) ~is ["MapToAtomicForkChain", "AtomicFork"]
@@ -149,6 +187,12 @@ check:
     fun (): fixture.WrongProtocolChain()
   ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
   embedded.run_elaboration(
+    fun (): fixture.ValidPipeWrongProtocol()
+  ) ~throws "Valid-flow chaining requires a Valid endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.ValidPipeNonEndpoint()
+  ) ~throws "Valid stage requires a payload DataType, Valid InterfaceType, Endpoint, or Handle"
+  embedded.run_elaboration(
     fun (): fixture.WrongEndpointType()
   ) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(
@@ -169,6 +213,12 @@ check:
   embedded.run_elaboration(
     fun (): fixture.MapFlowReusedSource()
   ) ~throws "an interface handle can be consumed only once"
+  embedded.run_elaboration(
+    fun (): fixture.FilterFlowWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.GateFlowWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
   embedded.run_elaboration(
     fun (): fixture.ZipFlowWrongProtocol()
   ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
@@ -195,4 +245,7 @@ check:
   ) ~throws "active sync_circuit"
   embedded.run_elaboration(
     fun (): fixture.CtrlMissingSyncDomain()
+  ) ~throws "active sync_circuit"
+  embedded.run_elaboration(
+    fun (): fixture.ValidPipeMissingSyncDomain()
   ) ~throws "active sync_circuit"

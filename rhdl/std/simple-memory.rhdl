@@ -3,16 +3,10 @@
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/bits.rhdl").alignment_bits
 
 fun power_of_two(value :: Int):
   value > 0 && (value and (value - 1)) == 0
-
-fun simple_memory_alignment_bits(data_bytes :: Int):
-  fun loop(bytes, bits):
-    if (bytes == 1)
-    | bits
-    | loop(bytes / 2, bits + 1)
-  loop(data_bytes, 0)
 
 fun checked_address_type(address_width :: Int, data_bytes :: Int):
   unless address_width > 0
@@ -24,7 +18,7 @@ fun checked_address_type(address_width :: Int, data_bytes :: Int):
   unless power_of_two(data_bytes)
   | error(~who: #'SimpleMemory,
           "data byte count must be a power of two")
-  unless address_width >= simple_memory_alignment_bits(data_bytes)
+  unless address_width >= alignment_bits(data_bytes)
   | error(~who: #'SimpleMemory,
           "address width must cover the data alignment bits")
   Bits(address_width)
@@ -63,21 +57,7 @@ interface SimpleMemory(address_width :: Int, data_bytes :: Int):
   responder -> requester:
     response: Irrevocable(SimpleMemoryResp(data_bytes))
 
-// Checks the behavioral address-alignment obligation without changing the
-// byte-address representation used by software images and processors.
-fun memory_address_aligned(address,
-                           data_bytes :: Int) :~ Bool:
-  unless data_bytes > 0 && power_of_two(data_bytes)
-  | error(~who: #'memory_address_aligned,
-          "data byte count must be a positive power of two")
-  def low_width = simple_memory_alignment_bits(data_bytes)
-  if (low_width == 0)
-  | Bool(#true)
-  | extract(address, low_width - 1, 0) === bits(0, low_width)
-
 export:
   SimpleMemoryReq
   SimpleMemoryResp
   SimpleMemory
-  simple_memory_alignment_bits
-  memory_address_aligned

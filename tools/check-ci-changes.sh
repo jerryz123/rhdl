@@ -26,6 +26,7 @@ all_jobs=$'host=true\ncirct=true\nfesvr=true'
 
 check_paths "$no_jobs" README.md rhdl/README.md tests/backend/README.md
 check_paths "$host_and_circt" rhdl/core/ir.rhm
+check_paths "$host_and_circt" cores/alu.rhdl cores/ricket/ricket.rhdl
 check_paths "$host_only" noc/model/topology.rhm
 check_paths "$host_only" riscv/isa/rv64i.rhm
 check_paths "$host_and_circt" tests/backend/circt-test.rhm

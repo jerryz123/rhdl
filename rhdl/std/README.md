@@ -189,6 +189,26 @@ protocol assertions.
 `fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
 returns `endpoint.valid and endpoint.ready`.
 
+## Bit-vector alignment
+
+[`bits.rhdl`](bits.rhdl) provides reusable alignment operations over hardware
+`Bits` values:
+
+```rhombus
+import:
+  lib("rhdl/std/bits.rhdl") open
+
+def aligned = is_aligned(address, 8)
+def base = align_down(address, 8)
+```
+
+The alignment is a positive power-of-two host parameter and must fit the
+value's width. `is_aligned` checks that the corresponding low bits are zero;
+`align_down` clears them while preserving the input width. Alignment to one is
+the identity for `align_down` and always true for `is_aligned`.
+`alignment_bits(alignment)` exposes the exact host-side base-two width for
+protocols and generators that need to size or remove those low bits.
+
 ## Memory transactions
 
 [`simple-memory.rhdl`](simple-memory.rhdl) defines `SimpleMemory(address_width,
@@ -227,9 +247,10 @@ Strict ordering avoids transaction IDs while allowing pipelined responders.
 
 Every request address must be aligned to `data_bytes`. The protocol retains a
 full byte address so it composes directly with processor addresses and software
-images; it does not silently discard low bits. Use
-`memory_address_aligned(address, data_bytes)` for a hardware alignment check.
-The interface type validates its host parameters during construction.
+images; it does not silently discard low bits. Import
+[`bits.rhdl`](bits.rhdl) and use `is_aligned(address, data_bytes)` for a
+hardware alignment check. The interface type validates its host parameters
+during construction.
 See [`../../examples/simple-memory-flow.rhdl`](../../examples/simple-memory-flow.rhdl)
 for a bidirectional adapter that applies the ordinary `queue` and `pipe`
 helpers independently to the request and response channels.
@@ -250,6 +271,10 @@ transferred response corresponds to an outstanding request.
 
 [`flow.rhdl`](flow.rhdl) re-exports the independently importable generators
 under [`flow/`](flow/):
+
+| Valid-only generator | Behavior |
+|---|---|
+| `ValidPipe(T, stages)` | Fixed-latency registered valid/payload pipeline with no backpressure |
 
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|
@@ -308,7 +333,10 @@ expression keeps its block outside the call, as in
 mappings. An explicit `Decoupled(T)` or `Irrevocable(T)` argument selects and
 preserves that exact contract. The binder retains precise bundle field
 information, and the result type is inferred from the body. Supplying an
-endpoint applies the mapping immediately and preserves its contract:
+endpoint applies the mapping immediately and preserves its contract. For an
+`Irrevocable` input, the mapping body must therefore remain stable while an
+offer is stalled; transformations that observe changing sidebands should use
+an explicit `Decoupled` stage instead:
 
 ```rhombus
 def tagging:
@@ -317,6 +345,20 @@ def tagging:
     processor: Bool(#false)
 
 def tagged = ingress |> tagging
+```
+
+`filter_flow(source, payload => predicate)` consumes an offered token without
+producing an output when the hardware predicate is false. Its input is ready
+for a rejected token regardless of downstream backpressure. `gate_flow(source,
+enabled)` instead blocks both input readiness and output validity while
+disabled, preserving the token upstream. Because either decision may observe
+live sideband state, both helpers conservatively return `Decoupled` even when
+their input is `Irrevocable`; a following `pipe` can re-establish stability:
+
+```rhombus
+def live = filter_flow(buffered, payload => not squash)
+def permitted = gate_flow(live, not hazard)
+def stable = permitted |> pipe(_, 1)
 ```
 
 `demux_flow(protocol, n, payload => selector)` constructs a one-to-many routing
@@ -390,6 +432,12 @@ The endpoint, handle, and sink shapes must match recursively. A
 leaving its input available to the surrounding `parallel`. `zip_flow` is
 deliberately binary; homogeneous multi-input rendezvous remains the role of
 `Join(T, n)`.
+
+Given a concrete `Valid` endpoint, `valid_pipe` infers its payload type,
+instantiates in the ambient `sync_circuit` domain, and returns the downstream
+`Valid` endpoint. Given a payload type, it returns an unconnected generic
+handle. Every asserted input cycle advances and emerges after exactly the
+configured number of stages; there is no readiness or pending-offer state.
 
 Given a concrete `Decoupled` or `Irrevocable` endpoint, `queue` and `pipe`
 infer its payload type, instantiate in the ambient `sync_circuit` domain, and

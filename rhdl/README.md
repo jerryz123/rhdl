@@ -80,16 +80,17 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
+| `std/bits.rhdl` | Power-of-two alignment width, checking, and downward alignment for `Bits` | None |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes, exact-literal normalization, partial records, and recursive aggregate construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
 | `std/decode/table.rhdl` | Validated unordered typed decode relations, grouped sparse record cases, input lifting, and row-aligned output products | `std/decode/pattern.rhdl` |
 | `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings lowering to one core decode | `std/decode/pattern.rhdl`, `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
-| `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/ready-valid.rhdl` |
+| `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
-| `std/flow/stage.rhdl` | Ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
-| `std/flow/pipe.rhdl` | Registered elastic `Pipe`/`CtrlPipe` plus endpoint and handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/stage.rhdl` | Valid-only and ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
+| `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and their endpoint/handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
 | `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus Array-shaped handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
@@ -100,7 +101,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` and array-shaped handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
-| `std/flow.rhdl` | Ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
+| `std/flow.rhdl` | Valid-only and ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
 
 ## Frontend layer dependencies
 
@@ -113,7 +114,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
+| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality and inequality, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
 | `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, mux-lookup support |
 | `one-hot.rhm` | One-hot selector types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, type-named construction, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |

@@ -1,0 +1,379 @@
+#lang rhdl
+// Implements Ricket as one core circuit with flow-owned pipeline registers.
+
+import:
+  "../alu.rhdl" open
+  "../branch-resolver.rhdl" open
+  "../load-store.rhdl" open
+  "decode/core-ctrl.rhdl" open
+  "decode/operand-ctrl.rhdl" open
+  "decode/branch-ctrl.rhdl" open
+  "decode/mem-ctrl.rhdl" open
+  "decode/writeback-ctrl.rhdl" open
+  "pipeline.rhdl" open
+  "register-file.rhdl" open
+  "../../riscv/model/formats.rhm" as riscv_fields
+  "../../riscv/rhdl/instruction-fields.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+  lib("rhdl/std/simple-memory.rhdl") open
+
+sync_circuit Ricket(address_width :: Int):
+  unless address_width >= 3
+  | error(~who: #'Ricket,
+          "address width must cover an eight-byte data transfer")
+  unless address_width <= 64
+  | error(~who: #'Ricket,
+          "address width must not exceed the RV64 architectural address width")
+
+  interface start(Irrevocable(Bits(64)), ~role: consumer)
+  interface imem(SimpleMemory(address_width, 4), ~role: requester)
+  interface dmem(SimpleMemory(address_width, 8), ~role: requester)
+  output fault: Bool
+
+  def zero64 = bits(0, 64)
+  reg faulted(~init: Bool(#false))
+  reg started(~init: Bool(#false))
+  reg fetch_pc(~init: zero64)
+  reg fetch_request_outstanding(~init: Bool(#false))
+  reg fetch_request_pc(~init: zero64)
+  reg fetch_epoch(~init: Bool(#false))
+  reg fetch_request_epoch(~init: Bool(#false))
+  reg memory_request_sent(~init: Bool(#false))
+
+  // Three elastic pipes own the stallable boundaries; the always-advancing
+  // MEM/WB boundary uses the Valid-only pipe. Stage logic remains local.
+  inst if_id_pipe(Pipe(FetchDecode(), 1))
+  inst id_ex_pipe(Pipe(DecodeExecute(), 1))
+  inst ex_mem_pipe(Pipe(ExecuteMemory(), 1))
+  inst mem_wb_pipe(ValidPipe(MemoryWriteback(), 1))
+
+  inst decoder(RV64IInstructionDecoder())
+  inst registers(RicketRegisterFile())
+  inst alu(ALU())
+  inst branch_resolver(BranchResolver(64))
+  inst load_gen(LoadGen())
+  inst store_gen(StoreGen())
+
+  fault <== faulted
+
+  // Backward-traveling observations use local Valid interface links. Their
+  // producers remain in their pipeline stages below, despite earlier stages
+  // consuming their values. The payloadless fault event remains a Bool wire.
+  wire execute_fault_event: Bool
+  def redirect_link :: Handle = interface_link(Valid(Bits(64)))
+  def memory_bypass_link :: Handle = interface_link(
+    Valid(RicketBypass())
+  )
+  def writeback_bypass_link :: Handle = interface_link(
+    Valid(RicketBypass())
+  )
+
+  // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
+  // its Pipe. Redirects and faults consume any younger registered token.
+  def squash = faulted or execute_fault_event or redirect_link.right.valid
+  def fetch_stale_response = fetch_request_epoch =/= fetch_epoch
+  def start_aligned = is_aligned(start.bits, 4)
+
+  start.ready <== not started and not (faulted or execute_fault_event)
+  def start_fault = fire(start) and not start_aligned
+  imem.request.valid <== started and not (
+    faulted or execute_fault_event
+  ) and not redirect_link.right.valid and not fetch_request_outstanding
+  imem.request.bits.address <== fetch_pc[0..address_width]
+  imem.request.bits.write <== Bool(#false)
+  imem.request.bits.data <== bits(0, 32)
+  imem.request.bits.mask <== bits(0xf, 4)
+
+  if_id_pipe.ingress.valid <== fetch_request_outstanding and (
+    imem.response.valid
+  ) and not squash and not fetch_stale_response
+  if_id_pipe.ingress.bits <== FetchDecode():
+    pc: fetch_request_pc
+    instruction: imem.response.bits.data
+  imem.response.ready <== fetch_request_outstanding and (
+    squash or fetch_stale_response or if_id_pipe.ingress.ready
+  )
+
+  def start_fire = fire(start)
+  def fetch_request_fire = fire(imem.request)
+  def fetch_response_fire = fire(imem.response)
+  when start_fire:
+    started.next <== Bool(#true)
+
+  when (redirect_link.right.valid):
+    fetch_pc.next <== redirect_link.right.bits
+  elsewhen start_fire:
+    fetch_pc.next <== start.bits
+  elsewhen fetch_request_fire:
+    fetch_pc.next <== fetch_pc + bits(4, 64)
+
+  when (redirect_link.right.valid):
+    fetch_epoch.next <== not fetch_epoch
+
+  when fetch_response_fire:
+    fetch_request_outstanding.next <== Bool(#false)
+  elsewhen fetch_request_fire:
+    fetch_request_outstanding.next <== Bool(#true)
+
+  when fetch_request_fire:
+    fetch_request_pc.next <== fetch_pc
+    fetch_request_epoch.next <== fetch_epoch
+
+  when (start_fault or execute_fault_event):
+    faulted.next <== Bool(#true)
+
+  // Decode (ID) is ordinary combinational logic between IF/ID and ID/EX.
+  // Filtering consumes squashed tokens; gating holds a load-use dependent
+  // token.
+  def live_if_id :: Endpoint = filter_flow(
+    if_id_pipe.egress,
+    fetch_token => not squash
+  )
+  def id_ex = id_ex_pipe.egress
+  def instruction = live_if_id.bits.instruction
+  decoder.instruction <== instruction
+  def control = decoder.control
+
+  def rs1 = instruction_field(riscv_fields.rs1, instruction)
+  def rs2 = instruction_field(riscv_fields.rs2, instruction)
+  def rd = instruction_field(riscv_fields.rd, instruction)
+  def decoded_immediate = mux_lookup(
+    control.operand.immediate,
+    ~default: bits(0, 64),
+    [
+      [ImmediateSelect.I,
+       instruction_immediate(riscv_fields.IImmediate, instruction, 64)],
+      [ImmediateSelect.S,
+       instruction_immediate(riscv_fields.SImmediate, instruction, 64)],
+      [ImmediateSelect.B,
+       instruction_immediate(riscv_fields.BImmediate, instruction, 64)],
+      [ImmediateSelect.U,
+       instruction_immediate(riscv_fields.UImmediate, instruction, 64)],
+      [ImmediateSelect.J,
+       instruction_immediate(riscv_fields.JImmediate, instruction, 64)]
+    ]
+  )
+
+  registers.read_address_1 <== rs1
+  registers.read_address_2 <== rs2
+
+  def id_ex_is_load = id_ex.valid and (
+    id_ex.bits.memory_operation === MemoryOperation.Read
+  )
+  def load_destination = id_ex.bits.rd
+  def load_use_rs1 = control.operand.uses_rs1 and (
+    load_destination =/= bits(0, 5)
+  ) and (
+    load_destination === rs1
+  )
+  def load_use_rs2 = control.operand.uses_rs2 and (
+    load_destination =/= bits(0, 5)
+  ) and (
+    load_destination === rs2
+  )
+  def load_use_hazard = live_if_id.valid and id_ex_is_load and (
+    load_use_rs1 or load_use_rs2
+  )
+  live_if_id.ready <== id_ex_pipe.ingress.ready and not load_use_hazard
+  id_ex_pipe.ingress.valid <== live_if_id.valid and not load_use_hazard
+  id_ex_pipe.ingress.bits <== DecodeExecute():
+    pc: live_if_id.bits.pc
+    instruction: instruction
+    alu_control: control.alu
+    operand_left: control.operand.left
+    operand_right: control.operand.right
+    branch_control: control.branch.resolver
+    target_from_rs1: control.branch.target_from_rs1
+    memory_operation: control.memory.access
+    memory_width: control.memory.width
+    memory_unsigned: control.memory.unsigned
+    writeback_enable: control.writeback.enable
+    writeback_source: control.writeback.source
+    trap: control.trap.trap
+    illegal: not decoder.valid
+    immediate: decoded_immediate
+    rs1: rs1
+    rs2: rs2
+    rd: rd
+    rs1_value: registers.read_data_1
+    rs2_value: registers.read_data_2
+
+  // Execute (EX) consumes the registered ID/EX token. Forwarding is live, so
+  // the next Pipe owns the resulting EX/MEM stability under backpressure.
+  def memory_forwards_rs1 = memory_bypass_link.right.valid and (
+    memory_bypass_link.right.bits.rd === id_ex.bits.rs1
+  )
+  def memory_forwards_rs2 = memory_bypass_link.right.valid and (
+    memory_bypass_link.right.bits.rd === id_ex.bits.rs2
+  )
+  def writeback_forwards_rs1 = writeback_bypass_link.right.valid and (
+    writeback_bypass_link.right.bits.rd === id_ex.bits.rs1
+  )
+  def writeback_forwards_rs2 = writeback_bypass_link.right.valid and (
+    writeback_bypass_link.right.bits.rd === id_ex.bits.rs2
+  )
+  def forwarded_rs1 = mux(
+    memory_forwards_rs1,
+    memory_bypass_link.right.bits.value,
+    mux(writeback_forwards_rs1,
+        writeback_bypass_link.right.bits.value,
+        id_ex.bits.rs1_value)
+  )
+  def forwarded_rs2 = mux(
+    memory_forwards_rs2,
+    memory_bypass_link.right.bits.value,
+    mux(writeback_forwards_rs2,
+        writeback_bypass_link.right.bits.value,
+        id_ex.bits.rs2_value)
+  )
+
+  alu.left <== mux_lookup(
+    id_ex.bits.operand_left,
+    ~default: forwarded_rs1,
+    [
+      [OperandASelect.Pc, id_ex.bits.pc],
+      [OperandASelect.Zero, bits(0, 64)]
+    ]
+  )
+  alu.right <== mux(
+    id_ex.bits.operand_right === OperandBSelect.Immediate,
+    id_ex.bits.immediate,
+    forwarded_rs2
+  )
+  alu.control <== id_ex.bits.alu_control
+
+  branch_resolver.left <== forwarded_rs1
+  branch_resolver.right <== forwarded_rs2
+  branch_resolver.control <== id_ex.bits.branch_control
+  def redirect_requested = branch_resolver.taken
+  def pc_target = id_ex.bits.pc + id_ex.bits.immediate
+  def register_target_sum = forwarded_rs1 + id_ex.bits.immediate
+  def register_target = register_target_sum and bits(0xfffffffffffffffe, 64)
+  def computed_redirect_target :: Bits(64) = mux(
+    id_ex.bits.target_from_rs1,
+    register_target,
+    pc_target
+  )
+  def redirect_aligned = is_aligned(computed_redirect_target, 4)
+  def memory_aligned = memory_access_aligned(
+    alu.result,
+    id_ex.bits.memory_width
+  )
+  def execute_fault = id_ex.bits.illegal or id_ex.bits.trap or (
+    redirect_requested and not redirect_aligned
+  ) or (
+    (id_ex.bits.memory_operation =/= MemoryOperation.None) and not (
+      memory_aligned
+    )
+  )
+  def execute_transfer = id_ex.valid and ex_mem_pipe.ingress.ready
+  def pc_plus_four = id_ex.bits.pc + bits(4, 64)
+  def execute_result = mux(
+    id_ex.bits.writeback_source === WritebackSelect.PcPlus4,
+    pc_plus_four,
+    alu.result
+  )
+
+  execute_fault_event <== execute_transfer and execute_fault
+  redirect_link.left.valid <== execute_transfer and not execute_fault and (
+    redirect_requested
+  )
+  redirect_link.left.bits <== computed_redirect_target
+
+  id_ex.ready <== ex_mem_pipe.ingress.ready
+  ex_mem_pipe.ingress.valid <== id_ex.valid and not execute_fault
+  ex_mem_pipe.ingress.bits <== ExecuteMemory():
+    pc: id_ex.bits.pc
+    memory_operation: id_ex.bits.memory_operation
+    memory_width: id_ex.bits.memory_width
+    memory_unsigned: id_ex.bits.memory_unsigned
+    writeback_enable: id_ex.bits.writeback_enable
+    writeback_source: id_ex.bits.writeback_source
+    rd: id_ex.bits.rd
+    result: execute_result
+    address: alu.result
+    store_data: forwarded_rs2
+
+  // Memory (MEM) holds an EX/MEM token until its single ordered request
+  // completes, then supplies the always-advancing MEM/WB boundary.
+  def ex_mem = ex_mem_pipe.egress
+  def memory_operation = ex_mem.bits.memory_operation
+  def is_memory = memory_operation =/= MemoryOperation.None
+  def is_store = memory_operation === MemoryOperation.Write
+  def memory_response_available = memory_request_sent and dmem.response.valid
+  load_gen.address <== ex_mem.bits.address
+  load_gen.data <== dmem.response.bits.data
+  load_gen.width <== ex_mem.bits.memory_width
+  load_gen.unsigned_load <== ex_mem.bits.memory_unsigned
+  store_gen.address <== ex_mem.bits.address
+  store_gen.value <== ex_mem.bits.store_data
+  store_gen.width <== ex_mem.bits.memory_width
+  def memory_writeback_value = mux(
+    ex_mem.bits.writeback_source === WritebackSelect.Memory,
+    load_gen.value,
+    ex_mem.bits.result
+  )
+
+  dmem.request.valid <== ex_mem.valid and is_memory and not memory_request_sent
+  dmem.request.bits.address <== align_down(
+    ex_mem.bits.address[0..address_width],
+    8
+  )
+  dmem.request.bits.write <== is_store
+  dmem.request.bits.data <== store_gen.data
+  dmem.request.bits.mask <== mux(
+    is_store,
+    store_gen.mask,
+    bits(0xff, 8)
+  )
+  dmem.response.ready <== ex_mem.valid and is_memory and memory_request_sent
+
+  mem_wb_pipe.ingress.valid <== ex_mem.valid and (
+    not is_memory or memory_response_available
+  )
+  mem_wb_pipe.ingress.bits <== MemoryWriteback():
+    write_enable: ex_mem.bits.writeback_enable
+    rd: ex_mem.bits.rd
+    value: memory_writeback_value
+  ex_mem.ready <== not is_memory or memory_response_available
+
+  memory_bypass_link.left.valid <== ex_mem.valid and (
+    ex_mem.bits.writeback_enable
+  ) and (
+    ex_mem.bits.rd =/= bits(0, 5)
+  ) and (
+    (ex_mem.bits.writeback_source =/= WritebackSelect.Memory) or (
+      memory_response_available
+    )
+  )
+  memory_bypass_link.left.bits <== RicketBypass():
+    rd: ex_mem.bits.rd
+    value: memory_writeback_value
+
+  def memory_complete = ex_mem.valid and is_memory and (
+    memory_response_available
+  )
+  when memory_complete:
+    memory_request_sent.next <== Bool(#false)
+  elsewhen (fire(dmem.request)):
+    memory_request_sent.next <== Bool(#true)
+
+  // Writeback (WB) consumes the final token and exposes its register-file
+  // update and bypass sideband directly inside the core.
+  def mem_wb = mem_wb_pipe.egress
+  def writeback_valid = mem_wb.valid
+  def writeback_enable = writeback_valid and mem_wb.bits.write_enable
+  writeback_bypass_link.left.valid <== writeback_enable and (
+    mem_wb.bits.rd =/= bits(0, 5)
+  )
+  writeback_bypass_link.left.bits <== RicketBypass():
+    rd: mem_wb.bits.rd
+    value: mem_wb.bits.value
+
+  registers.write_enable <== writeback_enable
+  registers.write_address <== mem_wb.bits.rd
+  registers.write_data <== mem_wb.bits.value
+
+export:
+  Ricket
