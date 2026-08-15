@@ -7,6 +7,8 @@ import:
 export:
   Pattern
   pattern
+  partial_pattern
+  as_pattern
 
 fun literal_types_equal(left, right):
   def left_type = left.literal_type()
@@ -80,6 +82,18 @@ fun exact_pattern(value):
                    (1 bits.(<<) width) - 1)
   )
 
+// Normalizes the two public forms accepted by typed decode consumers. Existing
+// cubes retain partial care; exact literal shadows receive full care.
+fun as_pattern(value):
+  cond
+  | value is_a Pattern:
+      value
+  | value is_a HardwareLiteral:
+      exact_pattern(value)
+  | ~else:
+      error(~who: #'as_pattern,
+            "expected a HardwareLiteral or Pattern")
+
 fun wildcard_pattern(type):
   def zero = literal(type, 0)
   Pattern(~value: zero, ~care: zero)
@@ -100,25 +114,38 @@ fun normalize_pattern_component(component, expected_type, role):
   | error(~who: #'pattern, role ++ " has the wrong hardware type")
   cube
 
-fun build_record_pattern(type, fields):
+fun build_record_pattern(type, fields, ~partial: partial = #false):
   unless type is_a RecordType
   | error(~who: #'pattern, "field form requires a RecordType")
-  unless fields is_a List && fields.length() == type.fields.length()
-  | error(~who: #'pattern,
-          "record pattern must supply every field exactly once")
+  unless fields is_a List
+  | error(~who: #'pattern, "record pattern fields must be a List")
+  for (field in fields):
+    unless field is_a List && field.length() == 2 && field[0] is_a String
+    | error(~who: #'pattern, "record pattern fields must be [name, value] pairs")
+    unless type.fields.find(fun (declared): declared.name == field[0])
+    | error(~who: #'pattern,
+            "record pattern has no field named " ++ field[0])
+    def matching_fields = fields.filter(
+      ~keep: fun (candidate): candidate[0] == field[0]
+    )
+    unless matching_fields.length() == 1
+    | error(~who: #'pattern,
+            "record pattern must not repeat field " ++ field[0])
   def cubes = for List (declared in type.fields):
     block:
       def matching = fields.filter(
         ~keep: fun (field): field is_a List && field.length() == 2 && field[0] == declared.name
       )
-      unless matching.length() == 1
-      | error(~who: #'pattern,
-              "record pattern must supply every field exactly once")
-      normalize_pattern_component(
-        matching[0][1],
-        declared.type,
-        "pattern field " ++ declared.name
-      )
+      if matching.length() == 1
+      | normalize_pattern_component(
+          matching[0][1],
+          declared.type,
+          "pattern field " ++ declared.name
+        )
+      | if partial
+        | wildcard_pattern(declared.type)
+        | error(~who: #'pattern,
+                "record pattern must supply every field exactly once")
   def value_fields = for List (declared in type.fields, cube in cubes):
     [declared.name, literal(declared.type, cube.value_bits)]
   def care_fields = for List (declared in type.fields, cube in cubes):
@@ -157,6 +184,16 @@ expr.macro
 
 // Exact literals receive full care automatically. An underscore contributes
 // zero care, while a nested Pattern contributes its existing value/care cube.
+expr.macro 'partial_pattern($type):
+              $(field_name :: Identifier): $field_value
+              ...':
+  let [field_string, ...] = [field_name.to_source_string(), ...]
+  'build_record_pattern(
+     $type,
+     [[$field_string, pattern_component($field_value)], ...],
+     ~partial: #true
+   )'
+
 expr.macro
 | 'pattern($type):
      $(field_name :: Identifier): $field_value

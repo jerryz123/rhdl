@@ -31,6 +31,23 @@ Record fields are named, vector elements are positional, and both forms recurse
 through nested aggregates. The underscore is host pattern syntax: it neither
 creates hardware nor denotes a runtime X value.
 
+`partial_pattern(T)` is the record form for sparse control descriptions. Every
+listed field follows the same literal/nested-pattern rules, while omitted
+fields are unconstrained:
+
+```rhombus
+def add_control = partial_pattern(Control()):
+  result_select: ResultSelect.Arithmetic
+  subtract: Bool(#false)
+```
+
+Unknown and duplicate fields remain errors.
+
+`as_pattern(value)` normalizes values accepted by decode consumers: an
+existing `Pattern` is retained, while a `HardwareLiteral` becomes a fully
+cared exact pattern. Domain adapters can therefore accept both forms without
+reimplementing packed care-mask construction.
+
 The lower-level `Pattern(~value: ..., ~care: ...)` constructor remains useful
 for partially cared scalar fields and extension libraries. A care bit of one
 makes the corresponding value bit significant; zero makes it a don't-care.
@@ -76,11 +93,16 @@ priority.
 import:
   lib("rhdl/std/decode.rhdl") open
 
-def decoder = DecodeGen(
-  [DecodeCase(add_input, add_control),
-   DecodeCase(sub_input, sub_control)],
-  ~default: default_control
-)
+def cases = decode_groups(Control()):
+  [add_input]:
+    operation: Operation.Add
+    write: Bool(#true)
+
+  [sub_input]:
+    operation: Operation.Subtract
+    write: Bool(#true)
+
+def decoder = DecodeGen(cases, ~default: default_control)
 
 circuit ControlPath():
   input instruction: Instruction()
@@ -97,6 +119,49 @@ hardware types. CIRCT carries output freedom to downstream synthesis, which
 is responsible for selecting and optimizing a concrete implementation. See
 [`../../examples/decode.rhdl`](../../examples/decode.rhdl) for an aggregate
 input/output example.
+
+`decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
+sparse record output pattern to serve several input patterns. Its optional
+`~input` host function adapts domain descriptions into `Pattern` values without
+making the decode library depend on that domain. `ValidDecodeGen(cases)` treats
+the cases as a partial mapping and returns `DecodeResult(T)`, asserting `valid`
+for matches and leaving the unmatched value as synthesis freedom.
+
+Decode relations compose as ordinary case lists before constructing a
+`DecodeGen`. Row extension is list concatenation; the final `DecodeTable`
+rejects overlaps and inconsistent types. `lift_decode_inputs(cases, lift)`
+explicitly embeds every input cube into a wider type while retaining its output
+cube. The lift function returns the replacement input `Pattern`, so added input
+fields can be cared or unconstrained without an inferred packing policy.
+
+`zip_decode_cases(left, right, combine)` forms an output product. Both inputs
+must contain exactly the same input cubes, although their row order may differ.
+The combiner receives the two output patterns and returns one aggregate output
+pattern; nested patterns preserve each side's care bits. Missing, extra, or
+duplicate counterparts are errors. This deliberately avoids implicit priority,
+sparse joins, or input-partition refinement:
+
+```rhombus
+def extended_inputs = lift_decode_inputs(
+  base_cases,
+  fun (opcode):
+    partial_pattern(ExtendedInstruction()):
+      opcode: opcode
+)
+
+def combined_outputs = zip_decode_cases(
+  base_cases,
+  custom_cases,
+  fun (base, custom):
+    pattern(CombinedControl()):
+      base: base
+      custom: custom
+)
+```
+
+[`../../examples/decode-composition.rhdl`](../../examples/decode-composition.rhdl)
+shows all three independent extensions in one executable example: concatenated
+rows, zipped output fields, and lifted input fields.
 
 ## Ready-valid protocols
 

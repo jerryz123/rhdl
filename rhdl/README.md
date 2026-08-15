@@ -78,10 +78,10 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes plus recursive record/vector pattern construction | None |
+| `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes, exact-literal normalization, partial records, and recursive aggregate construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
-| `std/decode/table.rhdl` | Validated unordered typed decode relations | `std/decode/pattern.rhdl` |
-| `std/decode/generator.rhdl` | Callable `DecodeGen` lowering to one core decode | `std/decode/table.rhdl` |
+| `std/decode/table.rhdl` | Validated unordered typed decode relations, grouped sparse record cases, input lifting, and row-aligned output products | `std/decode/pattern.rhdl` |
+| `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings lowering to one core decode | `std/decode/pattern.rhdl`, `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/ready-valid.rhdl` |

@@ -2,11 +2,15 @@
 // Defines validated, unordered host-side decode relations over typed Patterns.
 
 import:
-  lib("rhdl/std/decode/pattern.rhdl").Pattern
+  rhombus/meta open
+  lib("rhdl/std/decode/pattern.rhdl") open
 
 export:
   DecodeCase
   DecodeTable
+  decode_groups
+  lift_decode_inputs
+  zip_decode_cases
 
 fun exact_type_equal(left, right):
   left.type_equal(right) && right.type_equal(left)
@@ -21,6 +25,119 @@ class DecodeCase(input, output):
     require_pattern(input, "decode input", #'DecodeCase)
     require_pattern(output, "decode output", #'DecodeCase)
     super(input, output)
+
+fun require_decode_cases(cases, role, who):
+  unless cases is_a List && cases.length() > 0
+  | error(~who: who, role ++ " must be a nonempty List")
+  for (case in cases, index in 0..cases.length()):
+    unless case is_a DecodeCase
+    | error(~who: who,
+            role ++ " element " ++ to_string(index) ++ " must be a DecodeCase")
+  cases
+
+fun exact_pattern_equal(left, right):
+  exact_type_equal(left.type, right.type) && left.width == right.width && left.value_bits == right.value_bits && left.care_bits == right.care_bits
+
+// Explicitly embeds every input cube into a new domain while preserving each
+// output cube. DecodeTable remains responsible for type and overlap checks.
+fun lift_decode_inputs(cases, lift):
+  def checked_cases = require_decode_cases(
+    cases,
+    "lifted decode cases",
+    #'lift_decode_inputs
+  )
+  unless lift is_a Function
+  | error(~who: #'lift_decode_inputs,
+          "decode input lift must be a Function")
+  for List (case in checked_cases):
+    DecodeCase(as_pattern(lift(case.input)), case.output)
+
+// Forms an output product from two relations with exactly the same input
+// cubes. Row order is irrelevant; missing or duplicate counterparts are errors.
+fun zip_decode_cases(left_cases, right_cases, combine):
+  def left = require_decode_cases(
+    left_cases,
+    "left decode cases",
+    #'zip_decode_cases
+  )
+  def right = require_decode_cases(
+    right_cases,
+    "right decode cases",
+    #'zip_decode_cases
+  )
+  unless left.length() == right.length()
+  | error(~who: #'zip_decode_cases,
+          "zipped decode relations must have the same number of input cubes")
+  unless combine is_a Function
+  | error(~who: #'zip_decode_cases,
+          "decode output combiner must be a Function")
+  for (case in left):
+    unless right.filter(
+      ~keep: fun (candidate): exact_pattern_equal(case.input, candidate.input)
+    ).length() == 1
+    | error(~who: #'zip_decode_cases,
+            "each left input cube must have exactly one right counterpart")
+  for (case in right):
+    unless left.filter(
+      ~keep: fun (candidate): exact_pattern_equal(case.input, candidate.input)
+    ).length() == 1
+    | error(~who: #'zip_decode_cases,
+            "each right input cube must have exactly one left counterpart")
+  for List (left_case in left):
+    def right_case = right.find(
+      fun (candidate): exact_pattern_equal(left_case.input, candidate.input)
+    )
+    DecodeCase(
+      left_case.input,
+      as_pattern(combine(left_case.output, right_case.output))
+    )
+
+fun build_decode_group(inputs, output, input_pattern):
+  unless inputs is_a List && inputs.length() > 0
+  | error(~who: #'decode_groups,
+          "decode group inputs must be a nonempty List")
+  unless input_pattern is_a Function
+  | error(~who: #'decode_groups,
+          "decode group input adapter must be a Function")
+  for List (input in inputs):
+    DecodeCase(as_pattern(input_pattern(input)), output)
+
+fun flatten_decode_groups(groups):
+  def mutable cases = []
+  for (group in groups):
+    cases := cases ++ group
+  cases
+
+// Constructs ordinary DecodeCase values from grouped input descriptions and
+// sparse record output patterns. The optional adapter remains ordinary host
+// code and lets domain libraries translate their descriptors into Patterns.
+meta:
+  syntax_class SparseDecodeGroup:
+    kind: ~group
+  | '[$input, ...]:
+       $(field_name :: Identifier): $field_value
+       ...':
+      field expand:
+        fun (output_type, input_pattern):
+          'build_decode_group(
+             [$input, ...],
+             (partial_pattern($output_type):
+                $field_name: $field_value
+                ...),
+             $input_pattern
+           )'
+
+expr.macro
+| 'decode_groups($output_type):
+     $(row :: SparseDecodeGroup)
+     ...':
+    let [group, ...] = [row.expand(output_type, #'as_pattern), ...]
+    'flatten_decode_groups([$group, ...])'
+| 'decode_groups($output_type, ~input: $input_pattern):
+     $(row :: SparseDecodeGroup)
+     ...':
+    let [group, ...] = [row.expand(output_type, input_pattern), ...]
+    'flatten_decode_groups([$group, ...])'
 
 class DecodeTable(cases,
                   default,

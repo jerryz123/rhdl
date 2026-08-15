@@ -2,10 +2,17 @@
 // Defines callable DecodeGen host values that elaborate one typed core decode.
 
 import:
+  lib("rhdl/std/decode/pattern.rhdl") open
   lib("rhdl/std/decode/table.rhdl") open
 
 export:
+  DecodeResult
   DecodeGen
+  ValidDecodeGen
+
+bundle DecodeResult(T):
+  valid: Bool
+  value: T
 
 class DecodeGen(table):
   implements Callable
@@ -19,3 +26,29 @@ class DecodeGen(table):
               table.packed_cases,
               table.default.value_bits,
               table.default.care_bits)
+
+// Turns a nonempty decode relation into a partial hardware function. Matched
+// cases assert valid; the unmatched value is unconstrained synthesis freedom.
+fun ValidDecodeGen(cases):
+  unless cases is_a List && cases.length() > 0
+  | error(~who: #'ValidDecodeGen,
+          "valid decode cases must be a nonempty List")
+  for (case in cases, index in 0..cases.length()):
+    unless case is_a DecodeCase
+    | error(~who: #'ValidDecodeGen,
+            "valid decode case " ++ to_string(index) ++ " must be a DecodeCase")
+  def output_type = cases[0].output.type
+  def result_type = DecodeResult(output_type)
+  def wrapped_cases = for List (case in cases):
+    DecodeCase(
+      case.input,
+      pattern(result_type):
+        valid: Bool(#true)
+        value: case.output
+    )
+  DecodeGen(
+    wrapped_cases,
+    ~default: (pattern(result_type):
+                 valid: Bool(#false)
+                 value: _)
+  )

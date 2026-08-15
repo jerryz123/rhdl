@@ -306,6 +306,7 @@ fixture_specs=(
   'fresh-generators||examples/fresh-generators.rhdl|design|verilog_reference'
   'dont-care||examples/dont-care.rhdl|design|verilog_reference'
   'decode|decode_tb|examples/decode.rhdl|design|verilog_reference'
+  'decode-composition||examples/decode-composition.rhdl|design|verilog_reference'
 )
 
 materialize_args=()
