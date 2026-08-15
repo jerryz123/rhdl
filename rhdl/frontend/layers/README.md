@@ -64,12 +64,17 @@ the typed `DecodeGen` standard-library wrapper, which constructs those images
 from `Pattern` values.
 
 The standard combinational surface includes modular `+`, `-`, `*`, shifts,
-bitwise `&`, `^`, `and`, `or`, `xor`, and prefix `!`. On hardware, `!` is a
-width-preserving inversion for both `Bool` and `Bits`; on host Booleans it
-retains Rhombus negation. `Bits` arithmetic is unsigned;
+and the hardware-only bitwise operators `&`, `|||`, and `^`. Prefix `!` is a
+width-preserving hardware inversion for both `Bool` and `Bits`; on host values
+it retains Rhombus negation. The three-character OR spelling avoids conflicting
+with Rhombus's use of bare `|` for block alternatives. Host bit manipulation
+remains available explicitly through `rhombus.bits`. `Bits` arithmetic is
+unsigned. Rhombus `&&` and `||` remain host short-circuit operators; hardware
+conjunction and disjunction use `&` and `|||`.
 `SInt` arithmetic uses a signed interpretation where the operation depends on
-it. Both remain fixed-width. On host values these operators keep their ordinary
-Rhombus meaning.
+it. Both remain fixed-width. Arithmetic and shift operators keep their ordinary
+Rhombus meaning on host values; the symbolic bitwise family requires hardware
+operands.
 
 Expanding arithmetic is explicit:
 
@@ -88,7 +93,7 @@ The canonical selection form is N-way lookup:
 ```rhombus
 result <== mux_lookup(op, ~default: !a):
   0: a & b
-  1: a or b
+  1: a ||| b
   2: a ^ b
 ```
 
