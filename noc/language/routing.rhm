@@ -1,0 +1,153 @@
+#lang rhombus/and_meta
+// Defines unordered routing-rule syntax as a thin layer over public policy combinators.
+
+import:
+  rhombus/meta open
+  "../authoring/main.rhm" open
+
+export:
+  routing
+
+meta:
+  fun identifier_name(identifier):
+    identifier.to_source_string()
+
+  fun find_identifier(identifiers, candidate):
+    def candidate_name = identifier_name(candidate)
+    identifiers.find(
+      fun (identifier): identifier_name(identifier) == candidate_name
+    )
+
+  fun require_nonempty(items, message, location):
+    when items.length() == 0
+    | syntax_meta.error(message, location)
+
+  fun group_name_strings(groups, subject, location):
+    require_nonempty(groups, subject ++ " must be nonempty", location)
+    def mutable seen = []
+    def mutable strings = []
+    for (group in groups):
+      when find_identifier(seen, group)
+      | syntax_meta.error(
+          "duplicate " ++ subject ++ " " ++ identifier_name(group),
+          group
+        )
+      seen := seen ++ [group]
+      strings := strings ++ [identifier_name(group)]
+    strings
+
+  fun lower_rule(rule):
+    match rule
+    | 'rule $(name :: Identifier):
+         $constraint
+         ...':
+        def constraints = [constraint, ...]
+        when constraints.length() == 0
+        | syntax_meta.error(
+            "routing rule " ++ identifier_name(name) ++ " must contain at least one constraint",
+            name
+          )
+        def mutable lowered = []
+        def mutable origin = #false
+        for (constraint in constraints):
+          match constraint
+          | 'use $(policy :: expr_meta.Parsed)':
+              lowered := lowered ++ [policy]
+          | 'origin injection':
+              when origin
+              | syntax_meta.error(
+                  "routing rule " ++ identifier_name(name) ++ " has more than one origin constraint",
+                  constraint
+                )
+              origin := constraint
+              lowered := lowered ++ ['injection_policy']
+          | 'origin forwarding':
+              when origin
+              | syntax_meta.error(
+                  "routing rule " ++ identifier_name(name) ++ " has more than one origin constraint",
+                  constraint
+                )
+              origin := constraint
+              lowered := lowered ++ ['forwarding_policy']
+          | 'origin $bad ...':
+              syntax_meta.error(
+                "routing origin must be injection or forwarding",
+                constraint
+              )
+          | 'routes [$(route :: expr_meta.Parsed), ...]':
+              def routes = [route, ...]
+              require_nonempty(
+                routes,
+                "routing route-class selection must be nonempty",
+                constraint
+              )
+              lowered := lowered ++ ['match_route_classes([$route, ...])']
+          | 'current_vcs [$(group :: Identifier), ...]':
+              def groups = [group, ...]
+              def strings = group_name_strings(
+                groups,
+                "current-VC-group selection",
+                constraint
+              )
+              let [group_string, ...] = strings
+              lowered := lowered ++ [
+                'match_current_vc_groups([$group_string, ...])'
+              ]
+          | 'candidate_vcs [$(group :: Identifier), ...]':
+              def groups = [group, ...]
+              def strings = group_name_strings(
+                groups,
+                "candidate-VC-group selection",
+                constraint
+              )
+              let [group_string, ...] = strings
+              lowered := lowered ++ [
+                'restrict_vc_groups([$group_string, ...])'
+              ]
+          | 'candidate_links [$(link :: expr_meta.Parsed), ...]':
+              def links = [link, ...]
+              require_nonempty(
+                links,
+                "routing candidate-link selection must be nonempty",
+                constraint
+              )
+              lowered := lowered ++ ['select_candidate_links([$link, ...])']
+          | ~else:
+              syntax_meta.error(
+                "expected use, origin, routes, current_vcs, candidate_vcs, or candidate_links routing constraint",
+                constraint
+              )
+        let [policy, ...] = lowered
+        def rule_name = identifier_name(name)
+        'routing_phase(
+           $rule_name,
+           policy_intersection([$policy, ...])
+         )'
+    | ~else:
+        syntax_meta.error("expected a named routing rule", rule)
+
+expr.macro 'routing:
+              $rule
+              ...':
+  ~op_stx self
+  def rules = [rule, ...]
+  when rules.length() == 0
+  | syntax_meta.error("routing requires at least one rule", self)
+  def mutable names = []
+  def mutable lowered = []
+  for (rule_form in rules):
+    match rule_form
+    | 'rule $(name :: Identifier):
+         $constraint
+         ...':
+        when find_identifier(names, name)
+        | syntax_meta.error(
+            "duplicate routing rule " ++ identifier_name(name),
+            name
+          )
+        names := names ++ [name]
+        lowered := lowered ++ [lower_rule(rule_form)]
+    | ~else:
+        syntax_meta.error("expected a named routing rule", rule_form)
+  let [policy, ...] = lowered
+  'policy_union([$policy, ...])'

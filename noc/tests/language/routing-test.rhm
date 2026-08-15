@@ -1,0 +1,248 @@
+#lang rhombus
+// Checks routing-rule syntax against builder policies and the validation pipeline.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../std/topology/main.rhm" open
+  "../../std/traffic/main.rhm" open
+  "../../std/routing/main.rhm" open
+  "../../examples/irregular-adaptive-escape.rhm" open
+
+def spec = topology:
+  vc_group x: 1
+  vc_group y: 1
+  node a
+  node b
+  node c
+  directed a_to_b:
+    a -> b
+    vcs [x, y]
+  directed b_to_c:
+    b -> c
+    vcs [x, y]
+
+def lowered_topology = lower_topology(spec)
+def route_ref = RouteClassRef("a-to-c")
+def route_spec = RouteClassSpec(
+  route_ref,
+  spec.node("a"),
+  spec.node("c")
+)
+def routes = lower_route_classes(lowered_topology, [route_spec])
+
+def syntax_policy = routing:
+  rule inject_x:
+    use allow_all
+    origin injection
+    routes [route_ref]
+    candidate_vcs [x]
+    candidate_links [spec.link("a_to_b")]
+  rule advance_y:
+    use allow_all
+    origin forwarding
+    routes [route_ref]
+    current_vcs [x]
+    candidate_vcs [y]
+    candidate_links [spec.link("b_to_c")]
+
+def builder_policy = policy_union(
+  [routing_phase(
+     "inject_x",
+     policy_intersection(
+       [allow_all,
+        injection_policy,
+        match_route_classes([route_ref]),
+        restrict_vc_groups(["x"]),
+        select_candidate_links([spec.link("a_to_b")])]
+     )
+   ),
+   routing_phase(
+     "advance_y",
+     policy_intersection(
+       [allow_all,
+        forwarding_policy,
+        match_route_classes([route_ref]),
+        match_current_vc_groups(["x"]),
+        restrict_vc_groups(["y"]),
+        select_candidate_links([spec.link("b_to_c")])]
+     )
+   )]
+)
+
+def syntax_problem = RoutingProblem(
+  lowered_topology.topology,
+  routes.route_classes,
+  lower_routing_policy(routes, syntax_policy)
+)
+def builder_problem = RoutingProblem(
+  lowered_topology.topology,
+  routes.route_classes,
+  lower_routing_policy(routes, builder_policy)
+)
+def syntax_materialized = materialize_routing(syntax_problem)
+def builder_materialized = materialize_routing(builder_problem)
+def syntax_validated = compile_routing(syntax_problem)
+def builder_validated = compile_routing(builder_problem)
+
+check:
+  syntax_policy is_a RoutingPolicy ~is #true
+  syntax_policy is_a UnionPolicy ~is #true
+  syntax_policy.policies.length() ~is 2
+  syntax_policy.describe() ~is builder_policy.describe()
+  syntax_materialized.describe() ~is builder_materialized.describe()
+  syntax_validated.dependency_graph.describe() ~is builder_validated.dependency_graph.describe()
+  syntax_validated.certificate.describe() ~is builder_validated.certificate.describe()
+  syntax_validated.route_table.describe() ~is builder_validated.route_table.describe()
+
+// Rule and constraint order do not create routing priority.
+def reordered_policy = routing:
+  rule advance_y:
+    candidate_links [spec.link("b_to_c")]
+    candidate_vcs [y]
+    current_vcs [x]
+    routes [route_ref]
+    origin forwarding
+    use allow_all
+  rule inject_x:
+    candidate_links [spec.link("a_to_b")]
+    candidate_vcs [x]
+    routes [route_ref]
+    origin injection
+    use allow_all
+
+check:
+  reordered_policy.describe() ~is syntax_policy.describe()
+  materialize_routing(
+    RoutingProblem(
+      lowered_topology.topology,
+      routes.route_classes,
+      lower_routing_policy(routes, reordered_policy)
+    )
+  ).describe() ~is syntax_materialized.describe()
+
+// Standard routing algorithms remain ordinary host policies passed through
+// `use`; syntax neither recognizes nor reimplements their semantics.
+def synthesized_escape = up_down(
+  irregular_topology,
+  irregular_b,
+  ["escape"]
+)
+def adaptive_escape = with_escape(
+  minimal_adaptive(
+    irregular_topology,
+    irregular_distances,
+    ["adaptive"]
+  ),
+  synthesized_escape,
+  ["adaptive"],
+  ["escape"]
+)
+def adaptive_escape_syntax = routing:
+  rule adaptive_escape:
+    use adaptive_escape
+def adaptive_escape_builder = policy_union(
+  [routing_phase(
+     "adaptive_escape",
+     policy_intersection([adaptive_escape])
+   )]
+)
+def adaptive_escape_syntax_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  lower_routing_policy(irregular_routes, adaptive_escape_syntax)
+)
+def adaptive_escape_builder_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  lower_routing_policy(irregular_routes, adaptive_escape_builder)
+)
+def adaptive_escape_syntax_default = compile_routing(
+  adaptive_escape_syntax_problem
+)
+def adaptive_escape_syntax_validated = compile_routing(
+  adaptive_escape_syntax_problem,
+  ~escape: irregular_escape_request
+)
+def adaptive_escape_builder_validated = compile_routing(
+  adaptive_escape_builder_problem,
+  ~escape: irregular_escape_request
+)
+
+check:
+  adaptive_escape_syntax.describe() ~is adaptive_escape_builder.describe()
+  adaptive_escape_syntax_default is_a DependencyCycle ~is #true
+  adaptive_escape_syntax_validated is_a ValidatedRouting ~is #true
+  adaptive_escape_syntax_validated.certificate is_a EscapeCertificate ~is #true
+  adaptive_escape_syntax_validated.materialized.describe() ~is adaptive_escape_builder_validated.materialized.describe()
+  adaptive_escape_syntax_validated.certificate.dependency_graph.describe() ~is adaptive_escape_builder_validated.certificate.dependency_graph.describe()
+  adaptive_escape_syntax_validated.route_table.describe() ~is adaptive_escape_builder_validated.route_table.describe()
+
+// Dimension-order routing also passes through `use` without a DSL keyword.
+def mesh = rectangular_mesh(
+  2,
+  2,
+  [VCGroup("escape", 1)]
+)
+def mesh_topology = lower_topology(mesh.spec)
+def mesh_routes = lower_route_classes(mesh_topology, all_pairs(mesh.spec))
+def xy_policy = xy_dimension_order(mesh, ~vc_groups: ["escape"])
+def xy_syntax = routing:
+  rule xy:
+    use xy_policy
+def xy_builder = policy_union(
+  [routing_phase("xy", policy_intersection([xy_policy]))]
+)
+def xy_syntax_materialized = materialize_routing(
+  RoutingProblem(
+    mesh_topology.topology,
+    mesh_routes.route_classes,
+    lower_routing_policy(mesh_routes, xy_syntax)
+  )
+)
+def xy_builder_materialized = materialize_routing(
+  RoutingProblem(
+    mesh_topology.topology,
+    mesh_routes.route_classes,
+    lower_routing_policy(mesh_routes, xy_builder)
+  )
+)
+
+check:
+  xy_syntax.describe() ~is xy_builder.describe()
+  xy_syntax_materialized.describe() ~is xy_builder_materialized.describe()
+
+fun invalid_policy_value():
+  routing:
+    rule bad:
+      use "not a routing policy"
+
+def unknown_group_policy = routing:
+  rule bad_group:
+    candidate_vcs [missing]
+
+def unknown_link_policy = routing:
+  rule bad_link:
+    candidate_links [LinkRef("missing")]
+
+def unknown_route_policy = routing:
+  rule bad_route:
+    routes [RouteClassRef("missing")]
+
+check:
+  invalid_policy_value() ~throws "policy composition must contain only RoutingPolicy values"
+  lower_routing_policy(
+    routes,
+    unknown_group_policy
+  ) ~throws "unknown VC group missing"
+  lower_routing_policy(
+    routes,
+    unknown_link_policy
+  ) ~throws "unknown link missing"
+  lower_routing_policy(
+    routes,
+    unknown_route_policy
+  ) ~throws "unknown route class missing"

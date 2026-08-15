@@ -20,6 +20,8 @@ The current implementation provides:
 - Topology-independent directed and bidirectional link helpers.
 - Optional embedded structural topology declarations that expand only into
   the public authoring API.
+- Optional embedded unordered routing rules that expand only into the public
+  policy algebra.
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Inspectable routing-policy expressions with symbolic contexts and lowering to
   the existing normalized routing relation.
@@ -86,6 +88,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-phase-authoring-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/escape-composition-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/topology-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/routing-test.rhm
 bash noc/tests/language/run-negative.sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
@@ -171,8 +174,51 @@ Every accepted clause expands only into `NodeRef`, `LinkRef`, `VCGroup`,
 `TopologyLink`, and `TopologySpec`. It does not lower numeric identities,
 define topology families, materialize routing, invoke validation, or construct
 hardware. Generated lines, meshes, and user topology views remain ordinary
-functions in `std` or user modules. Routing syntax is deliberately deferred
-until this structural form passes its equivalence gate.
+functions in `std` or user modules.
+
+## Embedded routing syntax
+
+The same optional package provides a `routing:` expression whose named rules
+form an unordered legal-routing relation:
+
+```rhombus
+def policy = routing:
+  rule inject_adaptive:
+    origin injection
+    routes [request_route]
+    candidate_vcs [adaptive]
+    use adaptive_policy
+  rule enter_escape:
+    origin forwarding
+    current_vcs [adaptive]
+    candidate_vcs [escape]
+    use escape_policy
+```
+
+Each rule lowers to `routing_phase(name,
+policy_intersection(constraints))`; the complete form lowers to
+`policy_union(rules)`. Both public combinators sort their children by stable
+description, so rule and constraint order cannot imply preference or
+arbitration priority. A rule name is inspectable diagnostic metadata, not
+hidden packet state.
+
+The initial constraints are `use`, `origin injection`, `origin forwarding`,
+`routes`, `current_vcs`, `candidate_vcs`, and `candidate_links`. VC-group
+identifiers become ordinary group-name strings. Route classes, candidate
+links, and `use` policies remain host expressions, allowing hierarchical
+lookups and user-defined abstractions without adding macro-only semantics.
+Empty rules and selections, duplicate rule or group names, malformed origins,
+and unknown clauses are rejected during expansion with source locations.
+Unknown topology objects and non-policy runtime values remain errors of the
+existing public authoring and lowering APIs.
+
+Standard routing algorithms have no dedicated syntax. Dimension order,
+minimal adaptation, up*/down*, and `with_escape` remain ordinary policies
+passed through `use`. Consequently the syntax cannot construct a routing
+relation, certificate, route table, or validated artifact by another path;
+all decisions still pass through `lower_routing_policy`, finite
+materialization, reachability, dependency analysis, and the selected proof
+regime.
 
 ## Standard topology definitions
 
