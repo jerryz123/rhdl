@@ -19,6 +19,7 @@ user base-profile imports -----> selected frontend/layers/*
 
 std/* -------------------------> public #lang rhdl authoring surface
 sim/* -------------------------> public #lang rhdl authoring surface
+riscv/rhdl --------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* libraries
 
 frontend/foundation -----------+
@@ -49,6 +50,7 @@ internal module implementing its shared frontend forms is called the
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
+| [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 
 The import direction is one-way. Core never imports frontend or backend code;
 frontend code never imports a backend; and a backend never imports frontend
@@ -108,7 +110,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `cast.rhm` | Functional equal-width representation casts | core IR, kernel, field support |
-| `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
+| `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
@@ -145,6 +147,10 @@ language profiles:
   lookup selector behavior, and one-hot selector types without importing one
   another.
 
+Domain adapters such as `riscv/rhdl` consume the public language and standard
+libraries. They do not become frontend layers and cannot import RHDL
+implementation packages.
+
 The kernel's deferred-value protocol retains authoring metadata until an
 operation consumes it. Reusable host descriptions remain distinct from
 objects already owned by an elaborated circuit. These protocols do not add
@@ -157,8 +163,9 @@ directions, prevents sibling-layer imports, keeps `standard.rhm` aggregation
 only, and restricts reader shims and `.rhdl` files to their intended
 locations. Run `make check-boundaries` after moving or adding modules.
 
-`.rhdl` is reserved for RHDL-profile programs, simulation adapters, and
-frontend or FESVR fixtures. `.rhm` contains Rhombus implementation and library modules.
+`.rhdl` is reserved for RHDL-profile programs, public adapters, concrete core
+designs, simulation adapters, and frontend or FESVR fixtures. `.rhm` contains
+Rhombus implementation and library modules.
 `.rkt` is restricted to reader shims and Racket interoperability where
 collection lookup requires it.
 

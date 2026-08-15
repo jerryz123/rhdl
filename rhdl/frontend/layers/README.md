@@ -214,7 +214,9 @@ value and allows the backend to use selector-bit gating and a balanced OR tree.
 - `bits_value[index]` produces `Bits(1)`.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
 - Explicit `extract(value, high, low)` uses inclusive host indices.
-- `zext` adds most-significant zeroes; `trunc` retains low bits.
+- `zext(bits_value, target_width)` adds most-significant zeroes to `Bits` and
+  returns wider `Bits`; other types require an explicit equal-width cast first.
+- `trunc` retains low bits.
 - `.into(TargetType)` and `cast(value, TargetType)` preserve packed width and
   bit pattern while changing the hardware type.
 

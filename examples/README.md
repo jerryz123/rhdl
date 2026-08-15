@@ -77,7 +77,6 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`layered-adder.rhdl`](layered-adder.rhdl) | Ordinary imported library plus generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Fresh definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Opaque host parameters and type-producing closures |
-| [`riscv-control-annotations.rhm`](riscv-control-annotations.rhm) | Independent typed host control layers over an immutable architectural catalog |
 | [`tiny-simd.rhdl`](tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |
 | [`stack.rhdl`](stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
 | [`async-read-memory.rhdl`](async-read-memory.rhdl) | Asynchronous reads and synchronous writes |

@@ -116,7 +116,8 @@ Detailed documentation lives with the component that owns it:
 | Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
-| Pure RISC-V instruction model, RV64I catalog, and typed control overlays | [`riscv/README.md`](riscv/README.md) |
+| RISC-V instruction model, RV64I catalog, typed controls, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
+| Concrete RV64I integer core components | [`core/README.md`](core/README.md) |
 
 ## Current status
 
@@ -133,6 +134,9 @@ The current vertical slice includes:
   protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
+- A concrete combinational RV64I integer ALU with scoped, typed instruction
+  controls, annotation-derived decode, and derived signed and word-operation
+  semantics.
 
 ## Deferred work
 

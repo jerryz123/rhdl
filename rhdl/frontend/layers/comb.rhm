@@ -10,8 +10,10 @@ import:
       concat
       literal
       dont_care
+      zext
   "../kernel.rhm".concat as kernel_concat
   "../kernel.rhm".dont_care as kernel_dont_care
+  "../kernel.rhm".zext as kernel_zext
   "../support/fields.rhm".HardwareFields
   "../support/hardware-literal.rhm" open
   "../support/mux-lookup.rhm" open
@@ -85,17 +87,19 @@ class DontCareValue(type, name = #false):
 fun dont_care(type, name = #false):
   DontCareValue(type, name)
 
-// Packs frontend data operands into their canonical Bits representations and
-// constructs one kernel concat, preserving left-to-right MSB ordering.
-fun concat_operand(entity):
+// Exposes packable frontend data through canonical Bits for concatenation.
+fun packed_data_bits(entity, who, role):
   def value = read(entity)
   def width = packed_width(value.type)
   unless data_type(value.type) && width != #false
-  | error(~who: #'concat,
-          "concat operands must have packable DataType types")
+  | error(~who: who,
+          role ++ " must have a packable DataType")
   if bits_type(value.type)
   | value
   | cast(value, Bits(width))
+
+fun concat_operand(entity):
+  packed_data_bits(entity, #'concat, "concat operand")
 
 fun concat(entity, ...) :~ HardwareFields:
   def supplied = [entity, ...]
@@ -106,6 +110,11 @@ fun concat(entity, ...) :~ HardwareFields:
   unless entities.length() >= 2
   | error(~who: #'concat, "concat requires at least two operands")
   kernel_concat(entities.map(concat_operand))
+
+// Zero extension retains the kernel's narrow unsigned bit-vector contract.
+// Other hardware types must cross into Bits explicitly before changing width.
+fun zext(entity, target_width, name = #false) :~ HardwareFields:
+  kernel_zext(entity, target_width, name)
 
 fun build_mux_lookup(selector, default_value, cases):
   def selector_value = read(selector)

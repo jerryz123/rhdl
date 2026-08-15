@@ -1,0 +1,69 @@
+#lang rhombus
+// Checks RV64I decoding into partial aggregate ALU controls over its instruction scope.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../rhdl/std/decode/pattern.rhdl" as decode_pattern
+  "../../riscv/isa/rv64i.rhm" open
+  "../alu.rhdl" as alu
+  "../decode/alu-ctrl.rhdl" as controls
+
+def decode_design = embedded.run_elaboration(
+  fun (): controls.RV64IAluInstructionDecoder()
+)
+def decode_module = decode_design.modules[0]
+def decode_operation = decode_module.operations.find(
+  fun (operation): operation.opcode == "rtl.decode"
+)
+fun control_for(name):
+  def instruction = RV64I.find(name)
+  def decode_case = controls.RV64IAluCases.find(
+    fun (candidate):
+      candidate.input.value_bits == instruction.encoding.value && candidate.input.care_bits == instruction.encoding.care
+  )
+  if decode_case | decode_case.output | #false
+def add_control = control_for("ADDI")
+def control_width = packed_width(alu.AluControl())
+
+check:
+  controls.RV64IAluCases.length() ~is 28
+
+  add_control is_a decode_pattern.Pattern ~is #true
+  add_control.value_bits ~is 0b0000010000
+  add_control.care_bits ~is 0b1111111001
+  control_for("SUB").value_bits ~is 0b0000011000
+  control_for("SUB").care_bits ~is 0b1111111001
+  control_for("SLL").value_bits ~is 0b0000100000
+  control_for("SLL").care_bits ~is 0b1111110011
+  control_for("SLT").value_bits ~is 0b0001000100
+  control_for("SLT").care_bits ~is 0b1111110100
+  control_for("SLTU").value_bits ~is 0b0001000000
+  control_for("SLTU").care_bits ~is 0b1111110100
+  control_for("XOR").value_bits ~is 0b0010000000
+  control_for("XOR").care_bits ~is 0b1111110000
+  control_for("SRAI").value_bits ~is 0b0000100110
+  control_for("SRAI").care_bits ~is 0b1111110111
+  control_for("ADDIW").value_bits ~is 0b0000010001
+  control_for("ADDIW").care_bits ~is 0b1111111001
+  control_for("SRAW").value_bits ~is 0b0000100111
+  control_for("SRAW").care_bits ~is 0b1111110111
+  control_for("LUI") ~is #false
+  control_for("LD") ~is #false
+  control_for("BEQ") ~is #false
+  decode_operation != #false ~is #true
+  decode_operation.attribute("cases").length() ~is 28
+  decode_operation.attribute("cases")[0] ~is [
+    ADDI.encoding.value,
+    ADDI.encoding.care,
+    (1 bits.(<<) control_width) + add_control.value_bits,
+    (1 bits.(<<) control_width) + add_control.care_bits
+  ]
+  decode_operation.attribute("default_value") ~is 0
+  decode_operation.attribute("default_care") ~is (1 bits.(<<) control_width)
+  type_equal(decode_module.find_input("instruction").type, Bits(32)) ~is #true
+  type_equal(decode_module.find_output("valid").type, bool.Bool) ~is #true
+  type_equal(decode_module.find_output("control").type, alu.AluControl()) ~is #true
+  type_equal(add_control.type, alu.AluControl()) ~is #true
+  verify_design(decode_design) ~is #void

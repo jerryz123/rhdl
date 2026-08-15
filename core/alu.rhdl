@@ -1,0 +1,107 @@
+#lang rhdl
+// Implements the combinational RV64I integer ALU from decoded datapath controls.
+
+// The nominal one-hot enum names each mutually exclusive result family while
+// preserving a direct selector bit for the decoder and datapath.
+hardware_enum AluResultSelect(~encoding: one_hot):
+  Arithmetic
+  Shift
+  Compare
+  Xor
+  Or
+  And
+
+bundle AluControl():
+  result_select: AluResultSelect
+  subtract: Bool
+  signed_mode: Bool
+  shift_right: Bool
+  word: Bool
+
+// Word operations compute modulo 32 bits, then use the standard signed layer
+// to extend their two's-complement result back to the 64-bit ALU interface.
+fun sign_extend_word(value :: Hardware) :: Hardware:
+  cast(sext(value.into(SInt(32)), 64), Bits(64))
+
+circuit ALU():
+  input(left, right): Bits(64)
+  input control: AluControl()
+  output result: Bits(64)
+
+  def result_select = control.result_select
+  def subtract = control.subtract
+  def signed_mode = control.signed_mode
+  def shift_right = control.shift_right
+  def word = control.word
+  def word_capable = (result_select === AluResultSelect.Arithmetic) or (result_select === AluResultSelect.Shift)
+  def use_word = word and word_capable
+
+  def left_word = left[0..32]
+  def right_word = right[0..32]
+  def shift_amount = right[0..6]
+  def word_shift_amount = right[0..5]
+  def add_result :: Bits(64) = left + right
+  def sub_result :: Bits(64) = left - right
+  def unsigned_less = left < right
+  def left_sign = left[63].into(Bool)
+  def right_sign = right[63].into(Bool)
+  def signed_less = mux(left_sign ^ right_sign, left_sign, unsigned_less)
+
+  // Each shift direction shares one 64-bit shifter between its full-width
+  // and word operation. Word-mode steering supplies a five-bit amount and the
+  // extension required to keep upper operand bits out of the word result.
+  def sll_amount :: Bits(6) = mux(
+    word,
+    zext(word_shift_amount, 6),
+    shift_amount
+  )
+  def sll_result :: Bits(64) = left << sll_amount
+
+  def srl_input :: Bits(64) = mux(word, zext(left_word, 64), left)
+  def srl_amount :: Bits(6) = mux(
+    word,
+    zext(word_shift_amount, 6),
+    shift_amount
+  )
+  def srl_result :: Bits(64) = srl_input >> srl_amount
+
+  def sra_input :: SInt(64) = mux(
+    word,
+    sext(left_word.into(SInt(32)), 64),
+    left.into(SInt(64))
+  )
+  def sra_amount :: Bits(6) = mux(
+    word,
+    zext(word_shift_amount, 6),
+    shift_amount
+  )
+  def sra_result :: SInt(64) = sra_input >> sra_amount
+  def sra_bits :: Bits(64) = cast(sra_result, Bits(64))
+
+  def arithmetic_result = mux(subtract, sub_result, add_result)
+  def comparison :: Bool = mux(signed_mode, signed_less, unsigned_less)
+  def shift_result = mux(
+    shift_right,
+    mux(signed_mode, sra_bits, srl_result),
+    sll_result
+  )
+
+  def selected_result :: Bits(64) = mux_onehot(result_select):
+    AluResultSelect.Arithmetic: arithmetic_result
+    AluResultSelect.Shift: shift_result
+    AluResultSelect.Compare: zext(comparison.into(Bits(1)), 64)
+    AluResultSelect.Xor: left ^ right
+    AluResultSelect.Or: left or right
+    AluResultSelect.And: left and right
+
+  // Every RV64 word operation shares this final low-word sign extension.
+  result <== mux(
+    use_word,
+    sign_extend_word(selected_result[0..32]),
+    selected_result
+  )
+
+export:
+  AluResultSelect
+  AluControl
+  ALU

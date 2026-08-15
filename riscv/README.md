@@ -1,22 +1,22 @@
-<!-- Defines the pure host-side RISC-V instruction model and RV64I catalog contract. -->
+<!-- Defines the pure RISC-V host model, RV64I catalog, and RHDL adapter boundary. -->
 
 # RISC-V instruction model
 
-`riscv/` is a domain package for describing instruction encodings, decoded
-field layouts, and typed host-side instruction annotations. It is intentionally
-separate from the RHDL implementation and standard library. The package
-contains no RTL generation, RHDL `Pattern`, `DecodeGen`, core IR, or CIRCT
-integration.
+`riscv/` is a domain package for describing instruction encodings and decoded
+field layouts. Those pure host packages remain separate from RHDL. The isolated
+[`rhdl/`](rhdl/README.md) bridge converts the model to public RHDL patterns
+without introducing a dependency in the opposite direction.
 
 ## Dependency boundary
 
-Files under `model/`, `isa/`, and `annotations/` use only ordinary Rhombus and
-modules in this package:
+Files under `model/` and `isa/` use only ordinary Rhombus and modules in those
+pure packages:
 
 ```text
-riscv/isa ---------\
-                    > riscv/model --> Rhombus
-riscv/annotations -/
+riscv/isa ---------> riscv/model --> Rhombus
+       |
+       v
+riscv/rhdl --------> public RHDL standard libraries
 ```
 
 Run the focused package checks from the repository root:
@@ -44,12 +44,12 @@ format. Every `InstructionSpec` proves that its fixed requirements and variable
 format fields are disjoint and together cover all 32 instruction bits. An
 `InstructionCatalog` requires unique names and pairwise-disjoint encodings.
 
-[`annotations/control.rhm`](annotations/control.rhm) attaches independently
-defined, typed control metadata without modifying the architectural catalog.
-Nominal callable `ControlKey` values validate their values and may provide
-defaults. A `ControlLayer` materializes a complete value for every owned key and
-instruction; `AnnotatedCatalog` composes layers only when their keys are
-disjoint. This deliberately prevents implicit last-layer-wins overrides.
+## RHDL adapter
+
+[`rhdl/instruction-pattern.rhdl`](rhdl/instruction-pattern.rhdl) converts
+architectural value/care encodings to typed `Pattern` values. Concrete hardware
+uses ordinary `DecodeCase` relations and generators from `rhdl/std/decode`,
+which remains independent of RISC-V instruction descriptions.
 
 ## RV64I catalog
 
@@ -69,9 +69,8 @@ add.encoding_fields
 
 The architecture-facing `encoding_fields` are instruction bits, not generated
 control signals. Microarchitecture-specific operations, pipeline classes, and
-similar policy belong in control layers. See the executable
-[`riscv-control-annotations.rhm`](../examples/riscv-control-annotations.rhm)
-example.
+similar policy belong in concrete typed decode relations rather than the
+architectural catalog.
 
 Assembler pseudoinstructions are deliberately excluded because they alias and
 overlap architectural encodings. Specialized aliases such as `FENCE.TSO`,

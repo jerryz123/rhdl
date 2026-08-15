@@ -24,6 +24,8 @@ Run the minimum target that covers a change:
 make check-boundaries       # package, dependency, and file-type rules
 make examples               # all canonical example modules
 make lop-test               # equivalence across authoring layers
+make riscv-test             # pure RISC-V model and instruction catalogs
+make rv64i-core-test        # concrete integer ALU controls and simulation
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering without external tools
 make unit-test              # frontend plus backend Rhombus tests

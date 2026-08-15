@@ -1,0 +1,101 @@
+#lang rhdl
+// Decodes RV64I arithmetic instructions into the integer ALU's datapath controls.
+
+import:
+  "../alu.rhdl" open
+  "../../riscv/isa/rv64i.rhm" open
+  "../../riscv/rhdl/instruction-pattern.rhdl" open
+  lib("rhdl/std/decode.rhdl") open
+
+// Immediate and register forms share sparse control patterns. Omitted fields
+// remain synthesis don't-cares.
+def RV64IAluCases = decode_groups(
+  AluControl(),
+  ~input: instruction_pattern
+):
+  [ADDI, ADD]:
+    result_select: AluResultSelect.Arithmetic
+    subtract: Bool(#false)
+    word: Bool(#false)
+
+  [SUB]:
+    result_select: AluResultSelect.Arithmetic
+    subtract: Bool(#true)
+    word: Bool(#false)
+
+  [SLLI, SLL]:
+    result_select: AluResultSelect.Shift
+    shift_right: Bool(#false)
+    word: Bool(#false)
+
+  [SLTI, SLT]:
+    result_select: AluResultSelect.Compare
+    signed_mode: Bool(#true)
+
+  [SLTIU, SLTU]:
+    result_select: AluResultSelect.Compare
+    signed_mode: Bool(#false)
+
+  [XORI, XOR]:
+    result_select: AluResultSelect.Xor
+
+  [SRLI, SRL]:
+    result_select: AluResultSelect.Shift
+    signed_mode: Bool(#false)
+    shift_right: Bool(#true)
+    word: Bool(#false)
+
+  [SRAI, SRA]:
+    result_select: AluResultSelect.Shift
+    signed_mode: Bool(#true)
+    shift_right: Bool(#true)
+    word: Bool(#false)
+
+  [ORI, OR]:
+    result_select: AluResultSelect.Or
+
+  [ANDI, AND]:
+    result_select: AluResultSelect.And
+
+  [ADDIW, ADDW]:
+    result_select: AluResultSelect.Arithmetic
+    subtract: Bool(#false)
+    word: Bool(#true)
+
+  [SUBW]:
+    result_select: AluResultSelect.Arithmetic
+    subtract: Bool(#true)
+    word: Bool(#true)
+
+  [SLLIW, SLLW]:
+    result_select: AluResultSelect.Shift
+    shift_right: Bool(#false)
+    word: Bool(#true)
+
+  [SRLIW, SRLW]:
+    result_select: AluResultSelect.Shift
+    signed_mode: Bool(#false)
+    shift_right: Bool(#true)
+    word: Bool(#true)
+
+  [SRAIW, SRAW]:
+    result_select: AluResultSelect.Shift
+    signed_mode: Bool(#true)
+    shift_right: Bool(#true)
+    word: Bool(#true)
+
+def RV64IAluDecode = ValidDecodeGen(RV64IAluCases)
+
+circuit RV64IAluInstructionDecoder():
+  input instruction: Bits(32)
+  output valid: Bool
+  output control: AluControl()
+
+  def decoded :: DecodeResult(AluControl()) = RV64IAluDecode(instruction)
+  valid <== decoded.valid
+  control <== decoded.value
+
+export:
+  RV64IAluCases
+  RV64IAluDecode
+  RV64IAluInstructionDecoder
