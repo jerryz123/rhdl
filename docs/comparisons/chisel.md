@@ -11,20 +11,19 @@ This comparison is about the languages' central authoring models. It uses the cu
 [Chisel 7.14 API](https://www.chisel-lang.org/api/latest/).
 
 RHDL and Chisel share the same broad denotation: a host-language program runs
-to construct synchronous hardware. Their most important difference is the
-semantic unit presented to the author. Chisel presents bound `Data` objects
-whose connections accumulate during Scala elaboration. RHDL presents readable
-`Value`s and driveable `Place`s that become a small, verified, typed IR. Chisel
-is terser when inference and default-then-override wiring are helpful. RHDL is
-more local when the question is exactly what drives a destination and what
-width or semantic type crosses an operation.
+to construct synchronous hardware. Chisel presents bound `Data` objects whose
+connections accumulate during Scala elaboration. RHDL's frontend presents a
+similarly common `Hardware` surface, while its core IR factors readable
+`Value`s from driveable `Place`s. The sharper differences are RHDL's exact
+types, one final binding per destination, explicit conditional priority, and
+separate current- and next-state semantics.
 
 ## Summary
 
 | Concern | RHDL | Chisel |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | Scala evaluation constructs a hardware graph lowered through FIRRTL/CIRCT |
-| Hardware object | Separate readable `Value` and driveable `Place` | `Data` object whose binding determines whether it is a type, wire, port, or register |
+| Hardware object | Common frontend `Hardware`; core IR factors readable `Value` from driveable `Place` | `Data` object whose binding determines whether it is a type, wire, port, or register |
 | Width policy | Positive explicit widths; exact types at operations and connections | Widths may be unknown and inferred; operators and connections have sizing rules |
 | Assignment | One effective driver; alternatives become one selected drive | Repeated connections are legal and the last connection wins |
 | State | Current value plus a distinct next-state place | `Reg` is read and connected through the usual `Data` surface |
@@ -57,12 +56,14 @@ type checker. The official
 [Chisel type versus Scala type guide](https://www.chisel-lang.org/docs/explanations/chisel-type-vs-scala-type)
 documents this distinction.
 
-RHDL host descriptions and type objects are not circuit values. A `Value`
-already belongs to a module and denotes a readable result; a `Place` denotes a
-legal destination. Frontend profiles, macros, and the direct builder all
-produce the same [core IR](../../rhdl/core/README.md). This makes the
-post-elaboration meaning unusually explicit, while Chisel keeps a more uniform
-author-facing object vocabulary.
+RHDL host descriptions and type objects are not circuit values. Frontend
+profiles expose one broad `Hardware` vocabulary, then read and drive contexts
+select the appropriate facet. In the resulting [core IR](../../rhdl/core/README.md),
+a `Value` belongs to a module and denotes a readable result, while a `Place`
+denotes a legal destination. This source/sink factoring makes the completed
+graph explicit, but Chisel could enforce comparable capabilities through the
+binding state of its unified `Data` objects; the two-class representation is
+not what determines the languages' expressiveness.
 
 ## Expressions, types, and widths
 
@@ -100,13 +101,13 @@ widely composable primitives.
 
 ## State, assignment, and priority
 
-RHDL treats connection as definition. A place has exactly one effective
-driver. Hardware conditionals collect alternatives and lower them to a mux,
-enable, or guard followed by one final drive. Priority is therefore attached
-to `when`/`else` structure, not to unrelated statement order. A register
-exposes its current value separately from its next-state place; an uncovered
-next-state branch means hold, while a combinational destination must be
-covered.
+RHDL treats connection as one final binding. Hardware conditionals collect
+alternatives and lower them to a mux, enable, or guard followed by that single
+drive. Priority is therefore attached to `when`/`else` structure, not to
+unrelated statement order. A register's read context selects current state and
+its drive context selects next state; the core represents those as a value and
+a place. An uncovered next-state branch means hold, while a combinational
+destination must be covered.
 
 Chisel uses repeated connection as a control idiom. The normal rule is that
 the last connection to a sink wins, including connections nested under
@@ -124,8 +125,9 @@ implicit clock and reset unless a more explicit form is selected; see the
 [sequential-circuit guide](https://www.chisel-lang.org/docs/explanations/sequential-circuits).
 RHDL registers carry an explicit clock and optional synchronous active-high
 reset in core, with `sync_circuit` providing ambient convenience. Chisel's
-unified syntax is economical; RHDL's current/next split makes dataflow and
-state boundaries visible in the semantic graph.
+unified syntax is economical and can still enforce disciplined state updates;
+RHDL's separate current/next semantics make the state boundary directly
+visible in the completed graph.
 
 ## Hierarchy, interfaces, and composition
 
@@ -169,25 +171,27 @@ RHDL inherits Rhombus functions, classes, pattern matching, macros, and
 language composition. Frontend layers may add surface syntax and semantic
 types, but hardware operations still end in the same public IR.
 Pure combinational helpers can return values without introducing hierarchy;
-stateful or intentionally structural boundaries remain circuits. The
-`Value`/`Place` split and exact-width connections make individual expressions
-more self-describing, at the cost of more explicit adaptation and less
-default-override shorthand.
+stateful or intentionally structural boundaries remain circuits. Exact-width
+connections, one final binding, and explicit priority make the resulting
+circuit locally reconstructable. The internal `Value`/`Place` factoring helps
+the verifier express those rules directly.
 
 ## Language-level judgment
 
 Chisel is cleaner when syntactic economy and fluent generator construction are
 the priority: one `Data` vocabulary, contextual widths, and ordered connections
-make common RTL compact. RHDL is cleaner when the source should expose the
-final circuit locally: read versus drive capability, exact result types, and
-the point where priority enters are explicit. Chisel's abstractions are broader
-and smoother; RHDL's ordinary denotation is smaller and easier to reconstruct
-without replaying surrounding elaboration order.
+make common RTL compact. RHDL's frontend is also intentionally uniform; its
+language-level advantage is not that core uses two object classes, but that
+exact result types, one final binding, explicit priority, and current/next
+state remain straightforward to recover. Chisel's abstractions are broader
+and smoother; RHDL's ordinary denotation is smaller and less dependent on
+replaying surrounding connection order.
 
 ## Lessons for RHDL
 
-1. Keep exact types and the `Value`/`Place` distinction; they are the clearest
-   explanation of RHDL's local semantics.
+1. Keep exact types and one-final-binding semantics. Retain `Value`/`Place` in
+   core while it remains the clearest internal source/sink factoring, without
+   requiring that distinction to burden ordinary authoring.
 2. Add concise authoring forms only when they still elaborate to one visible
    driver and do not make priority depend on ambient statement order.
 3. Preserve the separation between inline value composition and intentional

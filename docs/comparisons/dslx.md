@@ -37,8 +37,8 @@ microarchitecture itself is the design.
 ## Denotation and staging
 
 RHDL is a deep embedding. Rhombus evaluation computes parameters, generates
-hierarchy, and decides which operations exist. Circuit `Value`s and `Place`s
-become nodes and destinations in one frontend-independent
+hierarchy, and decides which operations exist. Circuit expressions and
+connections become nodes and destination bindings in one frontend-independent
 [core IR](../../rhdl/core/README.md). The generated graph already identifies
 all sequential resources and therefore its cycle behavior.
 
@@ -81,9 +81,9 @@ result shapes directly in the source language.
 DSLX's type system is especially expressive for reusable pure computation.
 RHDL's host language can calculate arbitrary shapes, but the relationship is
 often checked when elaboration constructs hardware rather than proved as a
-DSL-level parametric signature. Conversely, RHDL types can encode RTL-specific
-roles—driveable versus readable objects and nominal multi-signal protocols—that
-are not data values in DSLX's functional type system.
+DSL-level parametric signature. Conversely, RHDL's exact circuit types and
+nominal multi-signal protocols express RTL-specific constraints that are not
+data values in DSLX's functional type system.
 
 ## Time, state, and scheduling
 
@@ -99,12 +99,13 @@ tokens in XLS IR. This gives the compiler a behavioral recurrence and
 communication graph while preserving latitude over their physical
 realization.
 
-RHDL exposes the realization instead. A register has current state, a
-next-state `Place`, a clock, and optional synchronous reset. A memory has a
-chosen port form. Hardware `when` and `switch` lower to explicit mux and guard
-logic, and one effective driver is verified for every destination. Moving a
-calculation across a register is therefore a source-visible architectural
-change, not an ordinary scheduling decision.
+RHDL exposes the realization instead. A register has current state, an
+explicit next-state binding, a clock, and optional synchronous reset. A memory
+has a chosen port form. Hardware `when` and `switch` lower prioritized
+alternatives to explicit mux and guard logic, and exactly one final binding is
+verified for every destination. Moving a calculation across a register is
+therefore a source-visible architectural change, not an ordinary scheduling
+decision.
 
 This distinction is deeper than imperative versus functional syntax. DSLX
 functions are functional descriptions *before* cycle selection; RHDL's
@@ -146,10 +147,10 @@ and the surrounding graph determine that later. Proc syntax makes recurrence
 and communication clear, but not every queue depth, handshake register, or
 port shape.
 
-RHDL uses more construction vocabulary—circuits, ports, places, explicit
-registers, connections, and hardware conditionals. Rhombus functions make
-generation concise, while runtime selection and state remain explicit. That
-source is more verbose for pure algorithms and more predictive for
+RHDL uses more construction vocabulary—circuits, ports, explicit registers,
+connections, and hardware conditionals. Rhombus functions make generation
+concise, while runtime selection, binding priority, and state remain explicit.
+That source is more verbose for pure algorithms and more predictive for
 microarchitecture: adding a register or queue locally adds a temporal boundary
 locally.
 

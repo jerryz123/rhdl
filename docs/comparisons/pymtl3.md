@@ -10,10 +10,10 @@ and PyMTL3's current official documentation and primary repository.
 At the synthesizable RTL level, RHDL and PyMTL3 are close peers: both execute a
 host language to elaborate hierarchy and both describe cycle-accurate hardware
 rather than asking an HLS scheduler to invent a pipeline. Their semantic
-centers differ. RHDL elaborates into one explicit hardware graph with separate
-readable values and driveable places. PyMTL3 elaborates an executable Python
-component model whose concurrent update blocks are scheduled for simulation
-and translated from a defined Python RTL subset.
+centers differ. RHDL elaborates into one explicit hardware graph with exact
+types, final connectivity, and explicit state boundaries. PyMTL3 elaborates an
+executable Python component model whose concurrent update blocks are scheduled
+for simulation and translated from a defined Python RTL subset.
 
 PyMTL3 also supports functional-level and cycle-level models. That wider
 modeling vocabulary matters for composition and syntax, but it should not be
@@ -30,7 +30,7 @@ executable modeling levels.
 | Staging | Host forms generate structure; hardware forms construct graph nodes | `construct` elaborates; decorated blocks describe model behavior |
 | Time | Explicit register and memory operations | `@update_ff` state transition plus simulator ticks; CL methods can model cycle timing |
 | Control | Hardware `when` / `switch` lower to muxes and guards | Python `if` / `for` in a decorated, translatable block |
-| Types | Exact semantic hardware types and separate `Value` / `Place` | Concrete `BitsN`, `BitStruct`, ports, wires, and Python values |
+| Types | Exact semantic hardware types and explicit conversions | Concrete `BitsN`, `BitStruct`, ports, wires, and Python values |
 | Composition | Modules plus nominal two-role interface descriptors | Components plus hierarchical signal or method interfaces |
 | Scheduling | Source fixes every sequential boundary | RTL source fixes boundaries; simulator schedules concurrent update blocks |
 | Syntactic center | Dedicated circuit forms inside Rhombus | Familiar Python statements under decorators and overloaded operators |
@@ -38,9 +38,10 @@ executable modeling levels.
 ## Denotation and staging
 
 RHDL is a deep embedding in Rhombus. Ordinary Rhombus values decide widths,
-module structure, and generator control. Circuit `Value`s and `Place`s build
-the operations and connections of the same
-[core IR](../../rhdl/core/README.md) from every frontend profile.
+module structure, and generator control. Circuit expressions and connections
+build the same [core IR](../../rhdl/core/README.md) from every frontend profile.
+Within that IR, `Value` and `Place` factor computed results from destinations
+that receive bindings.
 
 PyMTL3 runs a component's `construct` method to create children, ports, wires,
 interfaces, connections, and update blocks. An `@update` block denotes
@@ -69,8 +70,9 @@ only the exact RTL denotation.
 RHDL requires exact hardware types at operations and connections. `Bits`,
 `Bool`, `SInt`, enums, `OneHot`, clocks, resets, records, and vectors can remain
 distinct despite equal packed widths. Extension, truncation, and
-representation casts are explicit. The separate `Value` and `Place` classes
-also put read-versus-drive capability into the construction API.
+representation casts are explicit. Its core `Value` and `Place` classes make
+definition/use and destination binding convenient to verify, but this is an IR
+factoring rather than a distinctive type-system capability.
 
 PyMTL3's [`Bits` types](https://pymtl3.readthedocs.io/en/latest/ref/datatypes.html)
 are fixed-width concrete values usable both in models and tests. `BitsN`
@@ -101,9 +103,10 @@ translator to move logic across an `@update_ff` boundary.
 
 RHDL removes procedural block scheduling from its hardware denotation.
 Combinational operations form a dataflow graph, operation listing order has no
-runtime meaning, and pure combinational cycles are rejected. A register exposes
-current state and a single next-state `Place`. Conditional assignments are
-captured and become one final muxed drive; effects receive explicit guards.
+runtime meaning, and pure combinational cycles are rejected. A register has an
+explicit current value and next-state binding. Conditional assignments are
+captured with explicit priority and become one final muxed binding; effects
+receive explicit guards.
 
 Thus both RTL languages preserve author-chosen cycles, but they make
 combinational intent differently local. PyMTL3 presents a process body that is
@@ -147,10 +150,11 @@ construct is translatable depends on the enclosing block and accepted subset.
 Understanding drive ownership or block ordering can also require examining the
 whole component schedule rather than only one assignment.
 
-RHDL uses less familiar graph-construction forms. `Value` versus `Place` makes
-an expression's direction explicit, and runtime alternatives use dedicated
-selection forms. A source-level connection immediately constructs an IR edge,
-so the generated structure is predictable. This adds ceremony for simple
+RHDL uses less familiar graph-construction forms. Runtime alternatives use
+dedicated selection forms, conversions are explicit, and a source-level
+connection immediately constructs an IR edge contributing to one final
+binding for its destination. The
+generated structure is therefore predictable. This adds ceremony for simple
 behavioral logic, while Rhombus functions and macros provide abstraction
 without changing the final RTL semantics.
 
@@ -163,12 +167,12 @@ for related equations. That reuse is powerful, but it is context-sensitive:
 the enclosing phase and accepted subset determine what otherwise ordinary
 Python denotes.
 
-RHDL is more orthogonal as an exact RTL construction language. Exact types and
-the `Value` / `Place` split expose ownership and final connectivity without
-consulting a simulator schedule or translation subset. PyMTL3's wider modeling
-continuum is genuine abstraction expressivity, however; RHDL's smaller core
-does not replace the ability to state useful non-RTL models in the same
-component vocabulary.
+RHDL is more orthogonal as an exact RTL construction language. Exact types,
+one final binding per destination, explicit conditional priority, and visible
+state boundaries determine connectivity without consulting a simulator
+schedule or translation subset. PyMTL3's wider modeling continuum is genuine
+abstraction expressivity, however; RHDL's smaller core does not replace the
+ability to state useful non-RTL models in the same component vocabulary.
 
 ## Lessons for RHDL
 
@@ -176,8 +180,8 @@ component vocabulary.
    component vocabulary without claiming that the higher levels synthesize to
    the lower one. RHDL could adopt such models as separate denotations.
 2. Update-block syntax is economical for behavioral combinational logic, but a
-   compatible RHDL form should still lower immediately to explicit values,
-   places, muxes, and effects.
+   compatible RHDL form should still lower immediately to an exact graph with
+   final bindings, muxes, and guarded effects.
 3. Concrete executable bit values improve examples, testing, and direct
    interpretation; they can coexist with graph-owned symbolic values.
 4. Structural model substitution and nominal protocol compatibility solve

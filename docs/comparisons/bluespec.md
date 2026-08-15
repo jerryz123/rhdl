@@ -25,7 +25,7 @@ RHDL is more local when the authored structure is itself the contract.
 | Question | RHDL | Bluespec |
 |---|---|---|
 | Source denotes | One deterministic, verified hardware graph | A statically elaborated system of guarded rules, methods, and state |
-| Core composition unit | Typed `Value`s wired into `Place`s and explicit instances | Atomic rules calling guarded interface methods |
+| Core composition unit | Explicit definition/binding edges and circuit instances | Atomic rules calling guarded interface methods |
 | Concurrency | Circuit graph is concurrent; state edges are explicit | Compiler selects a serializable subset of rules per clock |
 | Conflicting state effects | Rejected unless the author constructs explicit selection | Permitted across rules and resolved by scheduling |
 | Static guarantees | Exact hardware types, one effective driver, legal ownership, no combinational cycles | Static types plus rule atomicity and method-schedule consistency |
@@ -64,8 +64,9 @@ as `output sum: Bits(width)` introduces a driveable destination, and
 `sum <== a + b` supplies its one driver. `reg state(...)` introduces explicit
 state, while `when` and `switch` collect alternatives into mux or enable logic.
 Circuit calls create definitions, and explicit `inst` operations create
-hierarchy. These forms compose uniformly because they all reduce to values,
-places, operations, and resources.
+hierarchy. These forms compose uniformly because they all reduce to operations,
+definition results, binding destinations, and resources. The expressive
+contrast with Bluespec begins above that exact-IR normal form.
 
 BSV's high-leverage form is the rule: a guard next to a sequence of method
 calls and state updates. Methods are value, `Action`, or `ActionValue`
@@ -132,11 +133,11 @@ substitutes for a functional proof of the design.
 
 ## Locality and predictability
 
-RHDL has strong structural locality. Reading the driver of a `Place` reveals
-the selected expression or state enable, and unrelated operations do not
-silently acquire a shared scheduling relationship. The cost is that a protocol
-or resource policy is repeated as graph structure unless the author packages
-it behind a circuit abstraction.
+RHDL has strong structural locality. Following a destination's single binding
+reveals the selected expression or state enable, and unrelated operations do
+not silently acquire a shared scheduling relationship. The cost is that a
+protocol or resource policy is repeated as graph structure unless the author
+packages it behind a circuit abstraction.
 
 Bluespec has stronger transactional locality. A rule states one coherent
 operation even when it spans several module interfaces. But realized
@@ -158,11 +159,12 @@ commit form one coherent model, so rules and guarded methods compose with high
 leverage. The abstraction is especially elegant for control-dominated designs
 whose natural specification is a set of possible transactions.
 
-RHDL's `Value`/`Place` split is smaller and more orthogonal to ordinary RTL.
-It does not reinterpret connections as transactions or hide arbitration behind
-method calls. That makes datapaths, exact pipeline structure, and local priority
-easy to audit, but it offers no language-level way to postpone a scheduling
-choice while retaining an atomic specification.
+RHDL's exact-construction policy is smaller and more literal than Bluespec's
+rule semantics. It requires final bindings, priority, and state boundaries to
+be explicit rather than hiding arbitration behind method calls. That makes
+datapaths, exact pipeline structure, and local priority easy to audit, but it
+offers no language-level way to postpone a scheduling choice while retaining
+an atomic specification.
 
 The crucial distinction is representational. RHDL can construct the circuit
 produced by a Bluespec schedule, but its current language cannot state a set of
@@ -174,8 +176,9 @@ That is a missing semantic layer, not a missing mux primitive.
 1. Keep atomic actions distinct from connection semantics. If RHDL adopts
    rules, they should elaborate through an explicitly named scheduling layer
    into ordinary verified RHDL IR.
-2. Preserve the compact `Value`/`Place` model for exact construction. It is a
-   useful lower language even if a transaction layer is later added.
+2. Preserve a compact, verified definition/binding normal form for exact
+   construction regardless of the authoring surface or any transaction layer
+   above it.
 3. Treat guards as contracts that compose with an operation, not as detached
    Boolean conventions. Bluespec methods show the expressive value of carrying
    readiness with the action it controls.

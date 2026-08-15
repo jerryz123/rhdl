@@ -28,7 +28,7 @@ protocol boundaries more local and predictable.
 | Semantic unit | Exact RTL module in a verified dataflow IR | Accelerator component with cells, wiring groups, and control |
 | Time | Registers, memories, and enables fix cycle behavior | Dynamic go/done actions or exact-latency static control |
 | Control | Muxes and guarded effects are already circuitry | `seq`, `par`, `if`, `while`, `repeat`, group activation, and `invoke` |
-| Assignment | One effective driver per `Place` | Guarded assignments may share a destination when mutually exclusive |
+| Assignment | One final binding per driveable destination | Guarded assignments may share a destination when mutually exclusive |
 | Types | Exact semantic types, records, vectors, and nominal protocols | Concrete-width ports, parameters, and semantic attributes |
 | Composition | Module hierarchy plus directional protocol interfaces | Component invocation and caller-supplied `ref` cells |
 | Compiler freedom | Cycle boundaries are author-selected | Control and static schedules remain available for lowering |
@@ -37,10 +37,10 @@ protocol boundaries more local and predictable.
 ## Denotation and staging
 
 RHDL executes Rhombus host code to elaborate one concrete design. Host values
-choose structure; circuit `Value`s and `Place`s describe runtime hardware. All
-frontend layers lower into the same [core IR](../../rhdl/core/README.md), where
-operation order is not execution order and registers or memories mark temporal
-boundaries.
+choose structure; circuit expressions and connections describe runtime
+hardware. All frontend layers lower into the same
+[core IR](../../rhdl/core/README.md), where operation order is not execution
+order and registers or memories mark temporal boundaries.
 
 Calyx is designed as an intermediate language that higher-level frontends can
 generate. A component's `cells` instantiate resources. Its `wires` contain
@@ -81,11 +81,12 @@ same IR that states the final circuit.
 
 ## Time, state, and scheduling
 
-In RHDL, state is a physical resource. A register exposes current state and a
-next-state `Place`; memory operations expose concrete port and clock behavior.
-Hardware `when` and `switch` collect alternatives and lower them to muxes,
-enables, and guarded effects before core verification. Every driveable place
-has one effective driver, including through aggregate connections.
+In RHDL, state is a physical resource. A register exposes its current value and
+an explicit next-state binding; memory operations expose concrete port and
+clock behavior. Hardware `when` and `switch` collect prioritized alternatives
+and lower them to muxes, enables, and guarded effects before core verification.
+Every driveable destination has exactly one final binding, including through
+aggregate connections.
 
 Calyx groups package assignments with a completion condition. Dynamic control
 uses go/done handshakes: `seq` orders actions, `par` permits overlap, `if` and
@@ -144,11 +145,14 @@ elsewhere in the component. Guard exclusivity is similarly a property of the
 active schedule and guards together.
 
 RHDL spends more syntax on the realized microarchitecture. A register, mux,
-queue, or handshake stage is explicit, and `Value` versus `Place` exposes the
-direction of every connection. Rhombus functions and macros can recover
-authoring economy, but they elaborate immediately to concrete hardware. That
-makes a local source edit more predictably structural, at the cost of requiring
-the author to formulate repetitive controllers that Calyx can derive.
+queue, or handshake stage is explicit; connections require exact types, and
+conditional assignments resolve to one final binding. Rhombus functions and
+macros can recover authoring economy, but they elaborate immediately to
+concrete hardware. That makes a local source edit more predictably structural,
+at the cost of requiring the author to formulate repetitive controllers that
+Calyx can derive. The resulting graph is easy to verify; its author-facing
+predictability comes from the binding policy rather than a special source
+abstraction.
 
 ## Language-level judgment
 

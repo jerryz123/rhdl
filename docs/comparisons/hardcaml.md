@@ -15,17 +15,17 @@ a functional host language to build an explicit graph, expose that graph for
 inspection, use exact vector widths for primitive operations, and avoid an
 implicit hardware scheduler. Hardcaml's most elegant abstraction is a shared
 combinational signature implemented by both concrete `Bits.t` values and deep
-`Signal.t` expressions. RHDL's is the separation of readable `Value`,
-driveable `Place`, and complete semantic hardware type. Hardcaml is more
-uniform and functional at the expression level; RHDL records more intent in
-the graph's types and destinations.
+`Signal.t` expressions. RHDL's frontend is also broadly uniform, while its core
+factors readable `Value` from driveable `Place`. That factoring usefully names
+sources and sinks, but the stronger distinction is RHDL's complete semantic
+types, one final binding, explicit priority, and current/next-state semantics.
 
 ## Summary
 
 | Concern | RHDL | Hardcaml |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | OCaml evaluation constructs a `Signal.t` graph; a `Circuit.t` is traced from outputs |
-| Expression model | Typed `Value` nodes plus explicit `Place` destinations | Deep `Signal.t` expressions sharing `Comb.S` with shallow `Bits.t` values |
+| Expression model | Common frontend hardware surface; core factors typed `Value` nodes from `Place` destinations | Deep `Signal.t` expressions sharing `Comb.S` with shallow `Bits.t` values |
 | Width/type policy | Exact complete hardware types; explicit conversion | Exact vector widths checked while constructing; signedness usually belongs to the chosen operator |
 | Assignment | One effective driver per place; conditional alternatives become one drive | Ordinary wires accept one driver; `Always` variables use defaults and last-executed assignment priority |
 | State | Current value and next-state place; explicit clock | `Signal.reg` and memories are graph nodes configured by `Reg_spec` |
@@ -119,19 +119,20 @@ executed determines the next value. Priority is therefore local to the ordered
 `Always` program rather than to ordinary signal wiring.
 
 RHDL uses one assignment model for both straightforward and conditional
-construction. Every place has one effective driver. `when` and `switch`
+construction. Every destination has one final binding. `when` and `switch`
 capture alternatives and emit one selected drive; a missing register branch
 means hold, while combinational destinations require full coverage. This is
-close to Hardcaml's one-driver wires after `Always` has compiled, but RHDL
-exposes the final-drive discipline directly in ordinary authoring.
+close to Hardcaml's one-driver wires after `Always` has compiled. The important
+difference is when priority becomes explicit, not whether the destination is
+represented by a separate object class.
 
 Hardcaml state is configured by `Reg_spec`, which groups clock, edge, reset,
 clear, enable, and associated values. `Signal.reg` consumes a spec and a data
-input. RHDL gives a register an explicit `Clock` value, current result,
-next-state place, and optional synchronous reset value; its `sync_circuit`
-layer supplies ambient convenience. Hardcaml centralizes state policy in a
-reusable record, while RHDL makes current/next direction an explicit graph
-relationship.
+input. RHDL gives a register an explicit `Clock`, distinct current- and
+next-state semantics, and an optional synchronous reset value; core represents
+current as a value and next as a place, while its `sync_circuit` layer supplies
+ambient convenience. Hardcaml centralizes state policy in a reusable record;
+RHDL makes the temporal direction directly inspectable in the graph.
 
 ## Hierarchy, interfaces, and composition
 
@@ -181,28 +182,30 @@ or record abstraction rather than in each graph node's base type. Those
 abstractions are strong while present in OCaml, but some distinctions are
 erased in the underlying signal graph.
 
-RHDL uses Rhombus functions, classes, macros, and language layers, but preserves
-more distinctions through elaboration. A type object remains attached to each
-core value, a place records drive capability, and nominal interface relations
-are checked before interface endpoints lower to ordinary records and ports.
-This makes the resulting hardware easier to interpret without its source
-abstraction, at the cost of less uniform reuse across all bit-vector meanings.
+RHDL uses Rhombus functions, classes, macros, and language layers, and presents
+readable and driveable hardware through a common frontend surface. Core's
+source/sink factoring helps verification. More consequentially, a complete
+semantic type remains attached to each core value, and nominal interface
+relations are checked before endpoints lower to records and ports. This makes
+the resulting hardware easier to interpret without its source abstraction, at
+the cost of less uniform reuse across bit-vector meanings.
 
 ## Language-level judgment
 
-Hardcaml has the most elegant expression-level abstraction in this comparison:
-the same combinational program can run shallowly over `Bits.t` or elaborate
-deeply over `Signal.t`, and ordinary signal wiring remains largely functional.
-RHDL is cleaner after elaboration because semantic types, destinations, and
-modules survive in the core IR, while nominal protocol relations are checked at
-the frontend boundary. Hardcaml optimizes reuse across interpretations; RHDL
-optimizes preservation of hardware intent through interpretation.
+Hardcaml has the more elegant expression-level abstraction: the same
+combinational program can run shallowly over `Bits.t` or elaborate deeply over
+`Signal.t`, and its unified signal vocabulary still supports disciplined
+one-driver wires. RHDL is cleaner after elaboration where complete semantic
+types, one final binding, explicit priority, current/next state, and modules
+should remain directly inspectable. Hardcaml optimizes reuse across
+interpretations; RHDL optimizes preservation of hardware intent through
+interpretation.
 
 ## Lessons for RHDL
 
-1. Preserve semantic types and `Value`/`Place`, but consider a principled
-   combinational signature that can support both construction and concrete
-   interpretation.
+1. Preserve semantic types and one-final-binding semantics. Keep `Value` and
+   `Place` as an internal factoring while useful, but learn from Hardcaml's
+   principled unified combinational signature and shallow/deep reuse.
 2. Keep hierarchy intentional while making it easy to choose between an inline
    helper and a reusable module definition from one implementation body.
 3. Derive generic traversal, packing, and naming views from protocol member

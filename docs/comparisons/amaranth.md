@@ -13,17 +13,18 @@ and focuses on language semantics and authoring syntax.
 Amaranth and RHDL are close in scale and intent. Both execute a host-language
 program to construct explicit RTL. Amaranth centers its model on Python
 `Value` expressions, assignable `Signal`s, and named control domains. RHDL
-centers its model on exact semantic types, readable `Value`s, driveable
-`Place`s, and one verified public IR. Amaranth makes mathematical expression
-sizing and default-then-override assignment economical. RHDL makes final
-widths, drivers, and protocol identity more local.
+presents one broad frontend `Hardware` surface, then factors readable `Value`s
+from driveable `Place`s in its verified core IR. The substantive contrast is
+between Amaranth's growing shapes and ordered assignments and RHDL's exact
+types, one final binding, explicit priority, and separate current/next-state
+semantics.
 
 ## Summary
 
 | Concern | RHDL | Amaranth |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | Python evaluation constructs `Value` expressions and module fragments |
-| Hardware object | Readable `Value` and driveable `Place` are distinct | A `Signal` is both a readable value and an assignment target |
+| Hardware object | Common frontend `Hardware`; core IR factors readable `Value` from driveable `Place` | A `Signal` is both a readable value and an assignment target |
 | Width policy | Positive explicit widths and explicit adaptation | Shapes may be inferred; expressions grow; assignment may truncate |
 | Assignment | One effective driver; conditional alternatives become one drive | One driving domain per bit; within a domain the last active assignment wins |
 | State | Explicit register with current value, next place, clock, and optional synchronous reset | Synchronous domains hold state; domain assignments update it at the active edge |
@@ -103,12 +104,13 @@ to its initial value, which makes the combinational network total rather than
 inferring a latch. These rules are described in the guide's
 [assignment and control-domain sections](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-domains).
 
-RHDL gives every driveable `Place` one effective driver. Hardware conditionals
-collect branch assignments and produce a mux or enable followed by one drive.
-Priority is visible in the conditional chain, but ordinary connection order is
-not a priority mechanism. A register's current value and next-state place are
-distinct; a missing next-state branch means hold, whereas a combinational place
-must be fully covered.
+RHDL gives every destination one final binding. Hardware conditionals collect
+branch assignments and produce a mux or enable followed by one drive. Priority
+is visible in the conditional chain, but ordinary connection order is not a
+priority mechanism. Read and drive contexts select a register's current and
+next state respectively; core records those facets as a value and a place. A
+missing next-state branch means hold, whereas a combinational destination must
+be fully covered.
 
 The practical difference is syntactic. Amaranth's ordered assignments make
 default-then-override control compact and allow separate helpers to contribute
@@ -166,21 +168,23 @@ inference or the assignment target; priority may depend on assignment order;
 implementation may depend on the domain that owns the signal. These rules are
 regular and documented, but they are not always visible in one expression.
 
-RHDL uses Rhombus functions, classes, macros, and language layers, then narrows
-them through a small set of hardware categories. Readability and driveability
-are different values, type adaptation is explicit, and completed priority
-logic has one driver. More syntax is required at some boundaries, but fewer
-facts must be recovered from surrounding statements.
+RHDL uses Rhombus functions, classes, macros, and language layers through a
+common frontend hardware annotation. Core later records readable sources and
+driveable destinations separately. That representation helps state the
+invariants, but the important author-facing rules are explicit type adaptation,
+one final binding, and priority expressed by conditional structure. More syntax
+is required at some boundaries, but fewer facts must be recovered from
+surrounding statements.
 
 ## Language-level judgment
 
 Amaranth is cleaner when a design benefits from lightweight Python objects,
 mathematically growing expressions, named domains, and concise ordered
-assignment. Its rules form a coherent language even though width and priority
-may be contextual. RHDL is cleaner when implementation width, semantic type,
-and final driver should be apparent at the operation itself. Amaranth optimizes
-low-friction construction; RHDL optimizes local reconstruction of the
-elaborated circuit.
+assignment. Its unified `Signal` is a coherent abstraction, not a semantic
+defect. RHDL is cleaner when implementation width, semantic type, final
+binding, and the point of priority should be apparent at the operation itself.
+Amaranth optimizes low-friction construction; RHDL optimizes local
+reconstruction of the elaborated circuit.
 
 ## Lessons for RHDL
 

@@ -25,7 +25,7 @@ general synchronous RTL and dynamically stalled protocols.
 | Question | RHDL | Filament |
 |---|---|---|
 | Source denotes | One exact graph of operations, state, resources, and instances | A statically timed network of component instances and event-indexed invocations |
-| Core composition unit | Typed value connected to a driveable place | Component invocation at a symbolic event |
+| Core composition unit | Explicit definition/binding connection | Component invocation at a symbolic event |
 | Time | Emerges from explicit state edges and protocol logic | Appears in port availability intervals and event expressions |
 | Resource sharing | Author constructs arbitration, enables, and state | Repeated invocations checked against a component's initiation interval |
 | Static guarantee | Concrete graph is typed, single-driver, and cycle-safe | Composed values and resource uses satisfy declared timeline constraints |
@@ -58,10 +58,11 @@ time by a checked symbolic contract that later determines graph control.
 ## Core composition unit and syntax
 
 RHDL syntax names hardware ownership directly. `output out: Bits(32)` creates
-a destination, `out <== value` supplies its driver, and `reg state(...)`
+a destination, `out <== value` supplies its one binding, and `reg state(...)`
 introduces a state element. `when` and `switch` describe runtime selection that
 lowers to muxes and enables. Composition is uniform because all of these forms
-end in the same values, places, and operations.
+end in the same exact operation graph. Its definition/binding normal form is
+not an extra timing abstraction.
 
 Filament syntax separates three ideas that conventional structural HDLs often
 conflate: component declaration, physical instantiation, and timed invocation.
@@ -118,10 +119,10 @@ RHDL host generation does not attempt.
 
 RHDL's type system records a different set of facts: exact packed and
 aggregate structure, semantic distinctions such as signed, enum, and one-hot
-values, operation capabilities, and driveability. The verifier checks those
-facts plus one-driver ownership and combinational acyclicity in the realized
-design. Its types do not carry temporal intervals, and module signatures do not
-promise latency or initiation interval.
+values, operation capabilities, and binding legality. The verifier checks those
+facts plus single-binding ownership and combinational acyclicity in the
+realized design. Its types do not carry temporal intervals, and module
+signatures do not promise latency or initiation interval.
 
 The representational boundary is important. RHDL can implement the same
 pipeline and even generate host-side checks for a particular instance, but the
@@ -157,11 +158,11 @@ the same event expression explains value availability and legal resource reuse.
 That orthogonality gives a small syntax unusually high leverage for static
 pipelines.
 
-RHDL's construction language is more general and more literal. Its
-`Value`/`Place` model accommodates elastic control, arbitrary state machines,
-memories, and ordinary datapaths without translating them into a timeline.
-The cost is that timing intent above the register level is not expressible as a
-checked contract.
+RHDL's construction language is more general and more literal. Its explicit
+bindings, state boundaries, and control accommodate elastic protocols,
+arbitrary state machines, memories, and ordinary datapaths without translating
+them into a timeline. The cost is that timing intent above the register level
+is not expressible as a checked contract.
 
 The right comparison is therefore not which language has “more timing.” RHDL
 owns exact cycle implementation; Filament owns symbolic timing composition.

@@ -30,7 +30,7 @@ trade is syntactic breadth for local predictability.
 | Semantic unit | Elaborated module in a verified two-state dataflow IR | Module/interface design plus event-driven process semantics |
 | Staging | Arbitrary Rhombus host computation constructs a concrete design | Parameters, constant expressions, generate, macros, and elaboration |
 | Time | Explicit rising-edge registers and memory/effect operations | Event controls, procedural regions, blocking/nonblocking assignment, delays in full language |
-| Assignment | One effective driver per `Place` | Variables follow procedural-driver rules; nets can resolve multiple drivers |
+| Assignment | One final binding per driveable destination | Variables follow procedural-driver rules; nets can resolve multiple drivers |
 | Types | Exact semantic hardware types and explicit conversion | Rich two-/four-state, signed, packed/unpacked, aggregate, and context-sized types |
 | Composition | Modules plus nominal complementary protocol roles | Modules, interfaces/modports, packages, and retained parameters |
 | Compiler freedom | Preserve explicit cycle and resource structure | RTL synthesis preserves sequential boundaries; full behavioral syntax is broader than synthesis |
@@ -104,13 +104,13 @@ region. Nonblocking assignment is the standard sequential-RTL convention for
 simultaneous state updates. Multiple processes remain concurrent even though
 statements within a process are ordered.
 
-RHDL replaces these procedural scheduling rules with explicit objects. A
-register exposes readable current state and a driveable next-state place.
-Hardware alternatives become muxes and guarded effects; every place has one
-effective driver. The current sequential primitives choose rising-edge clocks
-and optional active-high synchronous reset. Latches, falling-edge state, and
-asynchronous reset are not alternate spellings of the same primitive in the
-current language.
+RHDL replaces these procedural scheduling rules with explicit graph state. A
+register has distinct current-state use and next-state binding. Hardware
+alternatives become explicitly prioritized muxes and guarded effects; every
+driveable destination has exactly one final binding. The current sequential
+primitives choose rising-edge clocks and optional active-high synchronous
+reset. Latches, falling-edge state, and asynchronous reset are not alternate
+spellings of the same primitive in the current language.
 
 Neither ordinary synthesizable SystemVerilog nor RHDL is HLS at this level.
 Once a register boundary is present, synthesis can optimize logic while
@@ -156,12 +156,12 @@ variables obey different driver rules. The source is predictable when a
 project follows a well-defined subset and style, less so when the full language
 is treated as one uniform semantic space.
 
-RHDL makes dataflow distinctions explicit in syntax and object kind. Readable
-values and driveable places are different objects, conversions are named, and
-conditional driving is resolved before core verification. This is more verbose
-than a compact procedural block, but a local operation has fewer ambient
-language rules. Rhombus abstraction can remove repetition without changing
-which circuit objects the expansion constructs.
+RHDL makes dataflow policy explicit. Conversions are named, conditional
+driving has explicit priority and is resolved before core verification, and
+each destination receives one final binding. RHDL remains more verbose than a
+compact procedural block, but a local operation has fewer ambient language
+rules. Rhombus abstraction can remove repetition without changing the graph
+that the expansion constructs.
 
 ## Language-level judgment
 
@@ -173,11 +173,11 @@ alone; it is the interaction of several assignment, sizing, event, net, and
 elaboration models within one language.
 
 RHDL is more orthogonal within the circuits it denotes. Explicit conversion,
-single-driver places, and explicit graph state reduce ambient rules. It is not
-simply a cleaner spelling of all SystemVerilog RTL: the current primitive model
-excludes legitimate circuit semantics such as latches, alternative clock/reset
-events, and resolved nets. The smaller model is compelling only if extensions
-preserve its local rules.
+one final binding per destination, explicit priority, and explicit graph state
+reduce ambient rules. It is not simply a cleaner spelling of all SystemVerilog
+RTL: the current primitive model excludes legitimate circuit semantics such as
+latches, alternative clock/reset events, and resolved nets. The smaller model
+is compelling only if extensions preserve its local rules.
 
 ## Lessons for RHDL
 

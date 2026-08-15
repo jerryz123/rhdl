@@ -26,7 +26,7 @@ better local model for the design at hand.
 | Question | RHDL | Clash |
 |---|---|---|
 | Source denotes | Host elaboration that constructs one verified operation graph | A normalizable Haskell description of combinational or synchronous functions |
-| Core composition unit | `Value`/`Place` connections and explicit circuit instances | Typed functions and function application |
+| Core composition unit | Explicit definition/binding connections and circuit instances | Typed functions and function application |
 | Time | Explicit registers, memories, clocks, and next-state drives | `Signal dom a` streams plus explicit state primitives and combinators |
 | Static dimension | Realized hardware types checked during elaboration and verification | Widths, lengths, data types, and domains participate in Haskell types |
 | Concurrency | The constructed graph is concurrent; no scheduler | Pure signal network is concurrent; no general operation scheduler |
@@ -59,11 +59,11 @@ runtime constructs without first following normalization and specialization.
 ## Core composition unit and syntax
 
 RHDL composition is constructive. `sum <== a + b` reads as a structural claim:
-the output place `sum` is driven by this expression. `reg state(...)` introduces
-a state element. A circuit call creates a fresh module definition; `inst`
-creates an instance boundary. Records and vectors remain hardware values, while
-the `Value`/`Place` distinction says which expressions are readable and which
-are driveable.
+the output destination `sum` receives its one binding from this expression.
+`reg state(...)` introduces a state element. A circuit call creates a fresh
+module definition; `inst` creates an instance boundary. Internally, RHDL records
+definition results and binding destinations separately. That is the exact IR's
+normal form, not a counterpart to Clash's functional abstractions.
 
 Clash composition is applicative. A combinational circuit commonly has type
 `a -> b`; a synchronous circuit has a type involving `Signal dom a`. Function
@@ -90,10 +90,10 @@ expressed through the functional network, with state primitives breaking the
 cycle.
 
 RHDL instead represents the state object directly. A register exposes current
-state as a readable value and next state as a driveable place. Guarded writes
-become enables or muxes; absence of a guarded register write means hold. The
-clock is an explicit hardware value, although `sync_circuit` can provide an
-ambient clock/reset policy as authoring shorthand.
+state separately from its single next-state binding. Guarded writes become
+enables or muxes; absence of a guarded register write means hold. The clock is
+an explicit hardware value, although `sync_circuit` can provide an ambient
+clock/reset policy as authoring shorthand.
 
 Neither language performs general latency scheduling. In both, adding a
 register changes the authored cycle behavior. Clash's compiler normalizes the
@@ -160,10 +160,11 @@ of orthogonal concepts with unusually high reuse. Its best abstractions feel
 like mathematics that happens to synthesize. Domain-indexed signals also make
 an important physical distinction statically visible.
 
-RHDL has the more explicit construction semantics. `Value`, `Place`, one
-driver, explicit state, and dedicated hardware control form a compact language
-for saying exactly which RTL graph should exist, and it preserves intentional
-structure without depending on normalization.
+RHDL has the more explicit construction semantics. One final binding per
+destination, explicit priority and state boundaries, and dedicated hardware
+control form a compact policy for saying exactly which RTL graph should exist.
+It preserves intentional structure without depending on normalization; the
+particular core representation is secondary to those guarantees.
 
 The systems therefore optimize different forms of elegance. Clash minimizes
 the conceptual distance between reusable functions and circuits. RHDL
@@ -183,8 +184,7 @@ the other's final Boolean network.
    Clash shows how much syntax disappears when reusable datapaths denote
    functions instead of construction procedures.
 5. Do not adopt `Signal` as decorative terminology. Making time part of a type
-   changes the denotation of composition and should be done only with domain
-   and state semantics that justify it.
+   is a semantic decision that requires domain and state semantics.
 
 ## Sources
 

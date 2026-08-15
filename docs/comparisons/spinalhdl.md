@@ -12,19 +12,18 @@ and concentrates on the language's ordinary RTL model.
 
 SpinalHDL and RHDL both aim to make constructed hardware predictable rather
 than emulate an event-driven HDL. SpinalHDL builds a mutable netlist through a
-fluent Scala API and checks many structural mistakes after elaboration. RHDL
-builds a small typed IR around separate readable `Value`s and driveable
-`Place`s. SpinalHDL is syntactically economical where signals can be declared,
-assigned, overridden conditionally, and grouped with ordinary Scala objects.
-RHDL is more explicit about the final driver, exact type, and protocol relation
-at each boundary.
+fluent Scala API and checks many structural mistakes after elaboration. RHDL's
+frontend presents a common hardware surface, while core factors readable
+`Value`s from driveable `Place`s. SpinalHDL is syntactically economical; RHDL
+is more explicit about exact types, one final binding, conditional priority,
+and current/next-state semantics.
 
 ## Summary
 
 | Concern | RHDL | SpinalHDL |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | Scala evaluation constructs an in-memory netlist that later passes transform/check phases |
-| Hardware object | Separate readable `Value` and driveable `Place` | Mutable-reference-like `Data` objects denote signals and destinations |
+| Hardware object | Common frontend hardware surface; core factors readable `Value` from driveable `Place` | Mutable-reference-like `Data` objects denote signals and destinations |
 | Width policy | Positive explicit widths; exact types at connections | Widths may be explicit or inferred; assignment widths are checked; `.resized` is contextual |
 | Assignment | One effective driver; alternatives become one selected drive | Same-scope overlap normally rejects; under conditional muxing the last active assignment wins |
 | State | Current value plus distinct next-state place | `Reg` declaration makes state; assignment syntax remains uniform |
@@ -53,10 +52,11 @@ assignments deliberately encode mux priority.
 
 RHDL also runs its host program to construct hardware, but its completed
 denotation is a documented [core IR](../../rhdl/core/README.md). Frontend
-profiles and language layers all produce that representation. A `Value`
-denotes a readable result owned by one module; a `Place` denotes a destination.
-This makes ownership and direction explicit in the completed graph rather than
-properties of a general graph object.
+profiles and language layers present a common hardware vocabulary and all
+produce that representation. Core then uses `Value` for a readable result and
+`Place` for a destination. This makes ownership and direction explicit in the
+completed graph, although a unified graph object with checked capabilities can
+enforce the same policy.
 
 Both systems are deterministic construction languages in the ordinary case.
 SpinalHDL exposes more of elaboration as mutation of shared graph references;
@@ -111,12 +111,12 @@ default-then-override and priority logic. The separate `\=` operator updates a
 combinational graph reference immediately for deliberately imperative
 construction.
 
-RHDL instead gives a place one effective driver. `when` and `switch` capture
-branch alternatives and lower them to one selected value or guarded effect.
-Registers expose a current value and a next-state place; a conditionally
-uncovered next state holds. This removes connection order as an ambient source
-of priority, but requires alternatives from separate helpers to be brought
-together explicitly.
+RHDL instead gives each destination one final binding. `when` and `switch`
+capture branch alternatives and lower them to one selected value or guarded
+effect. Read and drive contexts select a register's current and next state;
+core records those as a value and a place. A conditionally uncovered next state
+holds. This removes connection order as an ambient source of priority, but
+requires alternatives from separate helpers to be brought together explicitly.
 
 SpinalHDL's `ClockDomain` makes clock, reset, edge, polarity, and enable policy
 an ambient construction context, and `ClockingArea` scopes it. RHDL registers
@@ -169,22 +169,23 @@ combinational loops, latches, undriven signals, and width mismatch; see
 The language is therefore not merely permissive mutation: it accepts concise
 construction idioms, then validates global graph properties.
 
-RHDL puts more restrictions into the authoring categories themselves. A
-readable value cannot be mistaken for a destination, connection adaptation is
-explicit, and ordinary connection order cannot override a drive. Its verifier
-then checks ownership, types, drivers, resource rules, and combinational
-cycles. This improves local predictability but makes some incremental
+RHDL's frontend largely presents one hardware category, with driveability
+checked when `<==` is elaborated. Core's source/sink factoring then gives the
+verifier direct categories for ownership and direction. The stronger
+language-level policies are that connection adaptation is explicit, each
+destination has one final binding, and ordinary connection order cannot
+override it. This improves local predictability but makes some incremental
 construction patterns more verbose.
 
 ## Language-level judgment
 
 SpinalHDL is the strongest compromise between terse embedded-HDL syntax and
 predictable RTL among these Scala-style designs. Its overlap checks, width
-checks, `Component`/`Area` distinction, and explicit resize forms make its
-fluent mutation disciplined. RHDL is nevertheless cleaner at the semantic
-center: destinations are distinct from expressions, ordinary wiring has no
-override order, and protocol compatibility is not inferred from shape alone.
-SpinalHDL wins syntactic economy; RHDL wins locality of denotation.
+checks, `Component`/`Area` distinction, and explicit resize forms show that a
+unified `Data` surface can be disciplined. RHDL is cleaner where exact type,
+one final binding, explicit conditional priority, and current/next state should
+be recoverable without replaying assignment order. SpinalHDL wins syntactic
+economy; RHDL wins locality of denotation.
 
 ## Lessons for RHDL
 

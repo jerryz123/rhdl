@@ -12,8 +12,8 @@ a backward resolver, a predicate defining transfer, and a type-level account
 of whether forward signals depend on backward signals. Modules consume and
 produce those interfaces through Rust-shaped functions and combinators.
 
-RHDL begins one level lower. Its source constructs arbitrary typed values,
-driveable destinations, operations, state, and module ports. Ready/valid is one
+RHDL begins one level lower. Its source constructs arbitrary typed expressions,
+explicit bindings, operations, state, and module ports. Ready/valid is one
 protocol expressible over that core, not the denotation of every circuit.
 HazardFlow is therefore more semantically economical for elastic pipelines;
 RHDL is more orthogonal to protocols and more direct for hardware that does not
@@ -24,9 +24,9 @@ naturally form a flow graph.
 | Question | RHDL | HazardFlow |
 |---|---|---|
 | Source denotes | One verified RTL-style operation graph | A network of typed forward/backward interfaces and cycle functions |
-| Core composition unit | `Value`/`Place` connections and circuit instances | A consumed interface transformed into another interface |
+| Core composition unit | Explicit definition/binding connections and circuit instances | A consumed interface transformed into another interface |
 | Transfer semantics | Written as ordinary signal logic for a chosen protocol | Intrinsic `Hazard` payload, resolver, and ready predicate |
-| State | Explicit registers and next-state places | Interface-attached FSM with explicit state transition callback |
+| State | Explicit registers and next-state bindings | Interface-attached FSM with explicit state transition callback |
 | Dependency guarantee | Whole-design combinational-cycle verification after elaboration | Local `Helpful`/`Demanding` interface dependency types |
 | Main source of locality | Every driver and state edge is directly represented | Payload, backpressure, and transfer behavior travel together |
 | Syntactic compression | General but explicit | Very high for stream transformations and elastic pipelines |
@@ -54,11 +54,12 @@ smoother than RHDL's general graph-construction forms.
 
 ## Core composition unit and syntax
 
-RHDL composes a circuit by connecting readable `Value`s to driveable `Place`s.
+RHDL composes a circuit by binding source expressions to explicit destinations.
 The expression `destination <== source` has one direction and one ownership
-effect. A bidirectional protocol is represented by an interface descriptor
-with complementary endpoint roles, but connecting it ultimately performs a
-set of ordinary drives. The general circuit model does not define a transfer
+effect. This definition/binding normal form is not itself a protocol
+abstraction. A bidirectional protocol is represented by an interface descriptor
+with complementary endpoint roles, but connecting it ultimately performs a set
+of ordinary bindings. The general circuit model does not define a transfer
 event.
 
 HazardFlow treats a function implementing `FnOnce(Ingress) -> Egress`, where
@@ -89,12 +90,12 @@ and the chosen combinator determines when state advances under transfer or
 stall. Backpressure is therefore part of the state-transition expression, not
 an external convention.
 
-RHDL state is an explicit graph primitive. A register's current value is
-readable and its next-state place has one effective driver; guarded updates
-become muxes or enables. An author writes `valid`, `ready`, and state-hold
-equations directly. That is more verbose for a standard elastic stage, but it
-also exposes the precise hardware when state does not advance on the same event
-as an interface transfer.
+RHDL state is an explicit graph primitive. A register separates current state
+from one selected next-state binding; guarded updates become muxes or enables.
+An author writes `valid`, `ready`, and state-hold equations directly. That is
+more verbose for a standard elastic stage, but it also exposes the precise
+hardware when state does not advance on the same event as an interface
+transfer.
 
 Concurrency in both systems is the concurrency of the resulting network, not
 a Bluespec-style rule schedule. The major difference is which cycle invariant

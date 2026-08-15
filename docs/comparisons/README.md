@@ -39,9 +39,12 @@ The individual documents compare against the same RHDL model:
   backend-independent IR.
 - Hardware data has elaboration-known, explicit widths. Ordinary connections,
   arithmetic, and representation casts do not silently resize values.
-- Readable `Value`s and driveable `Place`s are distinct, and every place has
-  one effective driver. Hardware alternatives become explicit mux or guarded
-  effect logic rather than source-ordered last-connect behavior.
+- Core IR separates readable definitions (`Value`) from bindable endpoints
+  (`Place`). Every endpoint receives one effective driver, and hardware
+  alternatives become explicit mux or guarded-effect logic rather than
+  source-ordered last-connect behavior. The standard frontend presents both
+  through a largely common hardware surface and selects the readable or
+  bindable facet from context.
 - Frontend layers add authoring policy and notation without defining a second
   hardware IR. The optional CIRCT backend consumes only verified core IR.
 - Interfaces have nominal identities, named complementary roles, refinement,
@@ -73,6 +76,9 @@ radically in what programmers can say directly. The comparisons distinguish:
 
 The essays focus on these language-level questions. Library inventories,
 vendor integrations, and ecosystem maturity are intentionally out of scope.
+An internal IR distinction does not count as language expressivity by itself;
+the guide credits it only when it changes what an author can state, compose,
+or have checked.
 
 “Clean” and “elegant” have concrete meanings here:
 
@@ -88,13 +94,22 @@ vendor integrations, and ecosystem maturity are intentionally out of scope.
 
 ## Overall judgment
 
-RHDL's strongest language idea is the combination of readable `Value`,
-driveable `Place`, one effective driver, exact semantic types, and intentional
-module boundaries. Those concepts reinforce one another and remain visible in
-one verified IR. Among direct RTL construction languages, that gives RHDL
-unusually local and reconstructable meaning. Its price is real: explicit
-adaptation and selection take more syntax than inferred widths, unified signal
-objects, procedural update blocks, or default-then-override assignment.
+RHDL's strongest language idea is its exact-construction discipline: exact
+semantic types, one explicit effective driver per destination, priority stated
+as selection or guarding, explicit current/next-state relationships, and
+intentional module boundaries, all preserved in one verified IR. Among direct
+RTL construction languages, that gives RHDL unusually local and reconstructable
+meaning. Its price is real: explicit adaptation and selection take more syntax
+than inferred widths, procedural update blocks, or default-then-override
+assignment.
+
+The core `Value`/`Place` split is a clean representation of that discipline,
+not an independent expressivity advantage. A capability-aware unified signal
+object can enforce the same read, bind, ownership, type, and exactly-one-driver
+rules. RHDL's own frontend already moves in that direction: outputs, wires, and
+registers use a common authoring surface whose read or drive interpretation
+depends on context. The comparison therefore credits RHDL for explicit binding
+and priority semantics, not for having two IR classes.
 
 Several comparison systems have a genuinely stronger abstraction in a narrower
 domain. Hardcaml can interpret one combinational description concretely or as a
@@ -157,6 +172,8 @@ Every comparison covers the following questions:
   resulting hardware runs?
 - Are widths, domains, directions, and interface identities inferred,
   structural, nominal, or statically typed?
+- Does an internal representation distinction produce an author-visible,
+  compositional guarantee, or only a convenient compiler normal form?
 - How are state updates, assignment conflicts, priority, and concurrency
   represented?
 - Do reusable abstractions compose as expressions, signal bundles, modules,
