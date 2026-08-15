@@ -11,56 +11,68 @@ bundle BranchControl():
   resolver: BranchResolverControl()
   target_from_rs1: Bool
 
-fun equality_branch_pattern(invert :: Boolean):
-  def resolver = partial_pattern(BranchResolverControl()):
+fun equality_resolver(invert :: Boolean):
+  partial_pattern(BranchResolverControl()):
     enable: Bool(#true)
     unconditional: Bool(#false)
     compare_equal: Bool(#true)
     invert: Bool(invert)
-  partial_pattern(BranchControl()):
-    resolver: resolver
-    target_from_rs1: Bool(#false)
 
-fun less_branch_pattern(signed_mode :: Boolean, invert :: Boolean):
-  def resolver = partial_pattern(BranchResolverControl()):
+fun less_resolver(signed_mode :: Boolean, invert :: Boolean):
+  partial_pattern(BranchResolverControl()):
     enable: Bool(#true)
     unconditional: Bool(#false)
     compare_equal: Bool(#false)
     signed_mode: Bool(signed_mode)
     invert: Bool(invert)
-  partial_pattern(BranchControl()):
-    resolver: resolver
-    target_from_rs1: Bool(#false)
 
-fun unconditional_branch_pattern(target_from_rs1 :: Boolean):
-  def resolver = partial_pattern(BranchResolverControl()):
-    enable: Bool(#true)
-    unconditional: Bool(#true)
-  partial_pattern(BranchControl()):
-    resolver: resolver
-    target_from_rs1: Bool(target_from_rs1)
+def unconditional_resolver = partial_pattern(BranchResolverControl()):
+  enable: Bool(#true)
+  unconditional: Bool(#true)
 
 def disabled_resolver = partial_pattern(BranchResolverControl()):
   enable: Bool(#false)
-def no_branch = partial_pattern(BranchControl()):
-  resolver: disabled_resolver
 
 def branch_instructions = [BEQ, BNE, BLT, BGE, BLTU, BGEU]
 def branching_instructions = [JAL, JALR] ++ branch_instructions
-def RV64IBranchCases = combine_case_groups([
-  instruction_cases([JAL], unconditional_branch_pattern(#false)),
-  instruction_cases([JALR], unconditional_branch_pattern(#true)),
-  instruction_cases([BEQ], equality_branch_pattern(#false)),
-  instruction_cases([BNE], equality_branch_pattern(#true)),
-  instruction_cases([BLT], less_branch_pattern(#true, #false)),
-  instruction_cases([BGE], less_branch_pattern(#true, #true)),
-  instruction_cases([BLTU], less_branch_pattern(#false, #false)),
-  instruction_cases([BGEU], less_branch_pattern(#false, #true)),
-  instruction_cases(
-    excluding_instructions(branching_instructions),
-    no_branch
-  )
-])
+def RV64IBranchCases = decode_groups(
+  BranchControl(),
+  ~input: instruction_pattern
+):
+  [JAL]:
+    resolver: unconditional_resolver
+    target_from_rs1: Bool(#false)
+
+  [JALR]:
+    resolver: unconditional_resolver
+    target_from_rs1: Bool(#true)
+
+  [BEQ]:
+    resolver: equality_resolver(#false)
+    target_from_rs1: Bool(#false)
+
+  [BNE]:
+    resolver: equality_resolver(#true)
+    target_from_rs1: Bool(#false)
+
+  [BLT]:
+    resolver: less_resolver(#true, #false)
+    target_from_rs1: Bool(#false)
+
+  [BGE]:
+    resolver: less_resolver(#true, #true)
+    target_from_rs1: Bool(#false)
+
+  [BLTU]:
+    resolver: less_resolver(#false, #false)
+    target_from_rs1: Bool(#false)
+
+  [BGEU]:
+    resolver: less_resolver(#false, #true)
+    target_from_rs1: Bool(#false)
+
+  group excluding_instructions(branching_instructions):
+    resolver: disabled_resolver
 
 def RV64IBranchDecode = ValidDecodeGen(RV64IBranchCases)
 

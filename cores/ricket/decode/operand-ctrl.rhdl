@@ -30,31 +30,6 @@ bundle OperandControl():
   right: OperandBSelect
   immediate: ImmediateSelect
 
-fun alu_operand_pattern(uses_rs1 :: Boolean,
-                        uses_rs2 :: Boolean,
-                        left,
-                        right,
-                        immediate):
-  pattern(OperandControl()):
-    uses_rs1: Bool(uses_rs1)
-    uses_rs2: Bool(uses_rs2)
-    left: left
-    right: right
-    immediate: immediate
-
-fun control_operand_pattern(uses_rs1 :: Boolean,
-                            uses_rs2 :: Boolean,
-                            immediate):
-  partial_pattern(OperandControl()):
-    uses_rs1: Bool(uses_rs1)
-    uses_rs2: Bool(uses_rs2)
-    immediate: immediate
-
-fun unused_operand_pattern():
-  partial_pattern(OperandControl()):
-    uses_rs1: Bool(#false)
-    uses_rs2: Bool(#false)
-
 def immediate_alu_instructions = [
   ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
   SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW
@@ -66,61 +41,66 @@ def register_alu_instructions = [
 def load_instructions = [LB, LH, LW, LBU, LHU, LWU, LD]
 def store_instructions = [SB, SH, SW, SD]
 def branch_instructions = [BEQ, BNE, BLT, BGE, BLTU, BGEU]
-
-def register_immediate_operand = alu_operand_pattern(
-  #true, #false,
-  OperandASelect.Register, OperandBSelect.Immediate, ImmediateSelect.I
+def register_immediate_instructions = (
+  load_instructions ++ immediate_alu_instructions
 )
-def register_register_operand = partial_pattern(OperandControl()):
-  uses_rs1: Bool(#true)
-  uses_rs2: Bool(#true)
-  left: OperandASelect.Register
-  right: OperandBSelect.Register
 
-def RV64IOperandCases = combine_case_groups([
-  instruction_cases(
-    [LUI],
-    alu_operand_pattern(#false, #false,
-                        OperandASelect.Zero,
-                        OperandBSelect.Immediate,
-                        ImmediateSelect.U)
-  ),
-  instruction_cases(
-    [AUIPC],
-    alu_operand_pattern(#false, #false,
-                        OperandASelect.Pc,
-                        OperandBSelect.Immediate,
-                        ImmediateSelect.U)
-  ),
-  instruction_cases(
-    [JAL],
-    control_operand_pattern(#false, #false, ImmediateSelect.J)
-  ),
-  instruction_cases(
-    [JALR],
-    control_operand_pattern(#true, #false, ImmediateSelect.I)
-  ),
-  instruction_cases(
-    load_instructions ++ immediate_alu_instructions,
-    register_immediate_operand
-  ),
-  instruction_cases(
-    branch_instructions,
-    control_operand_pattern(#true, #true, ImmediateSelect.B)
-  ),
-  instruction_cases(
-    store_instructions,
-    alu_operand_pattern(#true, #true,
-                        OperandASelect.Register,
-                        OperandBSelect.Immediate,
-                        ImmediateSelect.S)
-  ),
-  instruction_cases(register_alu_instructions, register_register_operand),
-  instruction_cases(
-    [FENCE, ECALL, EBREAK],
-    unused_operand_pattern()
-  )
-])
+def RV64IOperandCases = decode_groups(
+  OperandControl(),
+  ~input: instruction_pattern
+):
+  [LUI]:
+    uses_rs1: Bool(#false)
+    uses_rs2: Bool(#false)
+    left: OperandASelect.Zero
+    right: OperandBSelect.Immediate
+    immediate: ImmediateSelect.U
+
+  [AUIPC]:
+    uses_rs1: Bool(#false)
+    uses_rs2: Bool(#false)
+    left: OperandASelect.Pc
+    right: OperandBSelect.Immediate
+    immediate: ImmediateSelect.U
+
+  [JAL]:
+    uses_rs1: Bool(#false)
+    uses_rs2: Bool(#false)
+    immediate: ImmediateSelect.J
+
+  [JALR]:
+    uses_rs1: Bool(#true)
+    uses_rs2: Bool(#false)
+    immediate: ImmediateSelect.I
+
+  group register_immediate_instructions:
+    uses_rs1: Bool(#true)
+    uses_rs2: Bool(#false)
+    left: OperandASelect.Register
+    right: OperandBSelect.Immediate
+    immediate: ImmediateSelect.I
+
+  group branch_instructions:
+    uses_rs1: Bool(#true)
+    uses_rs2: Bool(#true)
+    immediate: ImmediateSelect.B
+
+  group store_instructions:
+    uses_rs1: Bool(#true)
+    uses_rs2: Bool(#true)
+    left: OperandASelect.Register
+    right: OperandBSelect.Immediate
+    immediate: ImmediateSelect.S
+
+  group register_alu_instructions:
+    uses_rs1: Bool(#true)
+    uses_rs2: Bool(#true)
+    left: OperandASelect.Register
+    right: OperandBSelect.Register
+
+  [FENCE, ECALL, EBREAK]:
+    uses_rs1: Bool(#false)
+    uses_rs2: Bool(#false)
 
 def RV64IOperandDecode = ValidDecodeGen(RV64IOperandCases)
 

@@ -15,14 +15,6 @@ bundle WritebackControl():
   enable: Bool
   source: WritebackSelect
 
-fun writeback_pattern(enable :: Boolean, source):
-  pattern(WritebackControl()):
-    enable: Bool(enable)
-    source: source
-
-def no_writeback = partial_pattern(WritebackControl()):
-  enable: Bool(#false)
-
 def immediate_alu_instructions = [
   ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
   SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW
@@ -39,24 +31,24 @@ def link_instructions = [JAL, JALR]
 def writeback_instructions = (
   alu_writeback_instructions ++ load_instructions ++ link_instructions
 )
-def RV64IWritebackCases = combine_case_groups([
-  instruction_cases(
-    alu_writeback_instructions,
-    writeback_pattern(#true, WritebackSelect.Alu)
-  ),
-  instruction_cases(
-    load_instructions,
-    writeback_pattern(#true, WritebackSelect.Memory)
-  ),
-  instruction_cases(
-    link_instructions,
-    writeback_pattern(#true, WritebackSelect.PcPlus4)
-  ),
-  instruction_cases(
-    excluding_instructions(writeback_instructions),
-    no_writeback
-  )
-])
+def RV64IWritebackCases = decode_groups(
+  WritebackControl(),
+  ~input: instruction_pattern
+):
+  group alu_writeback_instructions:
+    enable: Bool(#true)
+    source: WritebackSelect.Alu
+
+  group load_instructions:
+    enable: Bool(#true)
+    source: WritebackSelect.Memory
+
+  group link_instructions:
+    enable: Bool(#true)
+    source: WritebackSelect.PcPlus4
+
+  group excluding_instructions(writeback_instructions):
+    enable: Bool(#false)
 
 def RV64IWritebackDecode = ValidDecodeGen(RV64IWritebackCases)
 

@@ -123,9 +123,12 @@ input/output example.
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
 sparse record output pattern to serve several input patterns. Its optional
 `~input` host function adapts domain descriptions into `Pattern` values without
-making the decode library depend on that domain. `ValidDecodeGen(cases)` treats
-the cases as a partial mapping and returns `DecodeResult(T)`, asserting `valid`
-for matches and leaving the unmatched value as synthesis freedom.
+making the decode library depend on that domain. A bracketed row enumerates its
+inputs directly. A `group inputs:` row accepts any nonempty host `List`, so a
+domain library can name and compose instruction families without wrapping the
+result pattern in a one-off constructor. `ValidDecodeGen(cases)` treats the
+cases as a partial mapping and returns `DecodeResult(T)`, asserting `valid` for
+matches and leaving the unmatched value as synthesis freedom.
 
 Decode relations compose as ordinary case lists before constructing a
 `DecodeGen`. Row extension is list concatenation; the final `DecodeTable`

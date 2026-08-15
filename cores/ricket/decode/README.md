@@ -15,7 +15,7 @@ authored control columns.
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`trap-ctrl.rhdl`](trap-ctrl.rhdl) | Synchronous trap indication |
-| [`decode-support.rhdl`](decode-support.rhdl) | Generic case-list construction and exclusion helpers |
+| [`decode-support.rhdl`](decode-support.rhdl) | Canonical instruction-pattern adaptation and instruction-family exclusion helpers |
 | [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the integrated decoder circuit |
 
 Each component file owns its decoder-facing control bundle,
@@ -34,6 +34,9 @@ extension; a non-writing instruction constrains write enable but not its result
 source; and an instruction that does not consume the ALU result leaves the
 whole ALU control unconstrained. `DecodeGen` preserves those omitted fields as
 synthesis don't-cares, including all result fields for unmatched instructions.
+Component tables use `decode_groups` directly. Its `group inputs:` form accepts
+the named host instruction-family lists, avoiding component-specific wrappers
+whose only job would be to construct and distribute one output pattern.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 single `ValidDecodeGen` preserves every nested care mask and emits one hardware
