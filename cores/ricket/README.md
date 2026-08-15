@@ -14,7 +14,7 @@ package.
 
 ```text
 ricket.rhdl
-  |--> pipeline.rhdl
+  |--> bundles.rhdl
   |--> register-file.rhdl
   |--> decode/core-ctrl.rhdl
   |      |--> decode/{alu,operand,branch,mem,writeback,trap}-ctrl.rhdl
@@ -100,7 +100,7 @@ connected to `SimpleSoCTop`; a later SoC-level adapter or arbiter will reconcile
 the Harvard core boundary with the simulation memory topology.
 
 [`register-file.rhdl`](register-file.rhdl) owns the 32-by-64-bit architectural
-register state. [`pipeline.rhdl`](pipeline.rhdl) owns only stage and sideband
+register state. [`bundles.rhdl`](bundles.rhdl) owns only stage and sideband
 payload types. Decode, Execute, and Memory combinational logic is written where
 each logical stage consumes it in [`ricket.rhdl`](ricket.rhdl).
 [`ricket.rhdl`](ricket.rhdl) owns all five logical stage regions, their local
