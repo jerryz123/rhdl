@@ -9,6 +9,7 @@ Tests mirror the implementation boundaries:
 | [`core/`](core/) | Backend-independent types, IR construction, verification, and primitive semantics |
 | [`frontend/`](frontend/) | Language profiles, layers, elaboration, examples, and invalid frontend uses |
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
+| [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
 | [`fesvr/`](fesvr/) | Standalone direct-memory FESVR transport |
 
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
@@ -26,6 +27,7 @@ make lop-test               # equivalence across authoring layers
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering without external tools
 make unit-test              # frontend plus backend Rhombus tests
+make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary
 make riscv-test             # pure RISC-V model, decode, and package boundaries
 make host-test              # unit tests, examples, NoC, and RISC-V

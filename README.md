@@ -113,6 +113,7 @@ Detailed documentation lives with the component that owns it:
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
+| Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
 | Pure RISC-V instruction model, RV64I catalog, and typed control overlays | [`riscv/README.md`](riscv/README.md) |

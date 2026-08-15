@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -35,6 +35,9 @@ noc-test:
 riscv-test:
 	bash riscv/check-boundaries.sh
 	env PLTCOLLECTS=$(CURDIR): raco test $(RISCV_TESTS)
+
+emacs-test:
+	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
 circt-test:
 	bash tests/backend/run-circt.sh
