@@ -12,11 +12,12 @@ This document describes where current RHDL is cleaner or provides a useful
 abstraction beyond base Chisel. It does not claim that equivalent hardware is
 impossible to implement in Chisel. Many RHDL advantages can be recreated with
 careful Chisel conventions or project-specific libraries; RHDL makes them part
-of the default model.
+of the default model. Rocket Chip appears separately where the relevant
+comparison is generator infrastructure rather than the Chisel language itself.
 
 ## Summary
 
-| Concern | RHDL default | Chisel default |
+| Concern | RHDL default or current surface | Chisel / Rocket Chip |
 |---|---|---|
 | Connections | One effective driver for each driveable `Place` | Multiple connects with last-connect semantics |
 | Widths and conversions | Exact widths and types; explicit resize and cast | Width inference and context-dependent padding or truncation |
@@ -130,8 +131,8 @@ buffering, fanout, and parallel branches:
 
 - combinational adapters become direct wiring in the containing circuit;
 - queues and pipes retain module hierarchy because they own state;
-- transformations preserve or conservatively weaken `Decoupled` and
-  `Irrevocable` contracts; and
+- transformations preserve contracts, strengthen them when storage guarantees
+  stability, or conservatively weaken them when behavior requires it; and
 - payloadless `DecoupledCtrl` and `IrrevocableCtrl` paths do not manufacture a
   dummy payload.
 
@@ -161,8 +162,10 @@ support:
 - row-aligned products of independently defined output controls.
 
 Calling a `DecodeGen` produces one typed `rtl.decode` operation. The core keeps
-the relation and output freedom intact for the backend and downstream synthesis
-instead of forcing a particular mux or gate network.
+the relation and output freedom intact and leaves its realization to a backend.
+The current CIRCT backend expands each row into mask/equality logic and a nested
+mux chain; it preserves uncared output bits as synthesis freedom rather than
+claiming a specialized decoder implementation.
 
 Chisel has capable
 [`BitPat`, `TruthTable`, and DecodeTable`](https://www.chisel-lang.org/docs/explanations/decoder)
@@ -177,15 +180,19 @@ its bits but has no runtime four-state meaning. Chisel's
 [`DontCare`](https://www.chisel-lang.org/docs/explanations/unconnected-wires)
 is the source for its invalidation API and marks a destination as intentionally
 not driven. RHDL's narrower distinction keeps assignment completeness,
-synthesis optimization, and runtime unknown-state semantics separate.
+synthesis optimization, and runtime unknown-state semantics separate. The
+current CIRCT backend uses `sv.constantX` as the carrier for that synthesis
+freedom, so backend simulation can display X even though RHDL assigns it no
+runtime-X semantics.
 
 ## Host descriptions, language layers, and one public IR
 
 RHDL's frontend supports
 [deferred host descriptions](../rhdl/frontend/README.md#deferred-host-descriptions).
-Static literals, enum members, patterns, and other reusable descriptions can be
-passed through host computation without allocating circuit IR. They become
-ordinary core values only when a hardware operation consumes them.
+Static literals and enum members can pass through host computation without
+allocating circuit IR, then materialize as core values only when hardware
+consumes them. Decode `Pattern` objects remain host data until they are packed
+into `rtl.decode` attributes or explicitly materialized with `pattern_value`.
 
 The direct Builder, construction kernel, composed `#lang rhdl/base` profile,
 and standard `#lang rhdl` profile all construct the same public IR. Frontend
@@ -197,7 +204,8 @@ is documented in the [implementation architecture](../rhdl/README.md).
 This is a smaller and more inspectable boundary than Chisel's full frontend,
 compiler-plugin, FIRRTL/CIRCT, annotation, and transform ecosystem. It is not
 yet a maturity advantage: Chisel's compiler APIs are much more capable, while
-RHDL's public-IR immutability and extension contracts still require hardening.
+RHDL's read-only public-IR contract and extension contracts still require
+hardening.
 
 ## Concrete use in Ricket
 
@@ -206,12 +214,13 @@ outside isolated examples:
 
 - independently owned 52-row decode relations are combined into one aggregate
   control pattern;
-- pipeline state stores only typed leaf controls used downstream;
+- pipeline state carries selected typed leaf controls rather than a monolithic
+  decoder result or instruction-kind enum;
 - irrelevant controls remain synthesis freedom behind a separate valid bit;
 - `Pipe` and `ValidPipe` modules mark stateful pipeline boundaries;
 - inline flow filtering implements squash, while explicit ready-valid gating
-  implements load-use hazard policy without processor-specific queue variants;
-  and
+  implements load-use hazard policy without processor-specific queue
+  variants; and
 - nominal instruction- and data-access protocols keep pipeline logic
   independent of the private caches and external memory protocol.
 
@@ -222,17 +231,40 @@ demonstrations.
 
 ## Where Chisel remains stronger
 
-RHDL's stricter model is not a substitute for Chisel's breadth. Current Chisel
-and Rocket Chip remain substantially stronger in:
+RHDL's stricter model is not a substitute for Chisel's breadth. Some differences
+are current representation gaps; others are missing libraries and production
+infrastructure. Repository absence by itself does not imply that digital logic
+could never be authored in RHDL.
+
+### Current representation gaps
+
+Through its supported IR and authoring surface, RHDL cannot currently express
+the intended primitive or tool semantics for:
 
 - external RTL modules, vendor primitives, and source/resource packaging;
 - analog, bidirectional, and attached nets;
-- asynchronous and abstract reset plus richer clock/reset-domain support;
-- initialized and general multi-port SRAM descriptions;
-- assumptions, coverage, temporal properties, probes, logging, and stopping;
-- annotations, compiler intrinsics, user transforms, and implementation hooks;
-- module specialization, separate compilation, and production tooling; and
-- protocol, cache, coherence, interconnect, and SoC-generator ecosystems.
+- asynchronous or abstract reset;
+- initialized SRAMs or general multi-port memory primitives with declared
+  collision behavior;
+- assumptions, coverage, temporal properties, probes, formatted logging, and
+  simulation stopping;
+- backend or vendor intrinsics and non-hardware property graphs; and
+- clock- or reset-bearing aggregate fields, although equivalent flattened
+  ports can often carry the same signals.
+
+These are API and semantic gaps, not claims that the corresponding ordinary
+digital functions are mathematically inexpressible. For example, a divider can
+be assembled from current arithmetic, shifts, muxes, and state; a black-box
+SRAM or PLL cannot be integrated faithfully without an external-module
+abstraction.
+
+### Library, generator, and tooling gaps
+
+Chisel and Rocket Chip also remain substantially stronger in annotations, user
+transforms, module specialization, separate compilation, production tooling,
+and protocol, cache-coherence, interconnect, and SoC-generator ecosystems.
+Much of this could be implemented as host libraries over RHDL without changing
+the core hardware semantics, but it would be a major engineering project.
 
 Rocket Chip is more than a collection of Chisel language idioms. It provides
 Diplomacy parameter negotiation, production TileLink buses and adapters,
@@ -247,24 +279,57 @@ appropriate comparison point for that generator ecosystem.
 
 See Chisel's official documentation for
 [external modules](https://www.chisel-lang.org/docs/explanations/blackboxes),
+[analog data types](https://www.chisel-lang.org/docs/explanations/data-types),
 [reset](https://www.chisel-lang.org/docs/explanations/reset),
-[memories](https://www.chisel-lang.org/docs/explanations/memories), and
-[probes](https://www.chisel-lang.org/docs/explanations/probes).
+[memories](https://www.chisel-lang.org/docs/explanations/memories),
+[probes](https://www.chisel-lang.org/docs/explanations/probes),
+[intrinsics](https://www.chisel-lang.org/docs/explanations/intrinsics),
+[non-hardware properties](https://www.chisel-lang.org/docs/explanations/properties),
+and [temporal verification](https://www.chisel-lang.org/api/latest/chisel3/ltl/index.html).
 
 ## Current RHDL caveats
 
 Several implementation seams currently weaken the architectural guarantees
-described above:
+described above. They are important to distinguish from deliberate scope
+limits.
 
-- ordinary Rhombus host control treats a hardware object as truthy instead of
-  rejecting it, so `if signal` can silently select an elaboration branch;
-- the documented read-only public IR contains mutable module collections, and
-  verification does not yet re-establish every descriptor invariant;
-- operation type rules use strings whose unknown verifier branch fails open;
-- some ready-valid helpers compare interface display names instead of using
-  nominal support relationships; and
-- conditional effect capture has dedicated cases for assignments, memory
+### Semantic integrity risks
+
+- Ordinary Rhombus host control treats a hardware object as truthy instead of
+  rejecting it. `if signal` can therefore silently select an elaboration branch
+  rather than construct hardware.
+- The documented read-only public IR contains mutable module collections, and
+  verification does not yet re-establish every descriptor invariant. External
+  mutation can create inconsistent port and operation views.
+- Operation type rules use strings whose unknown verifier branch fails open. A
+  misspelled rule on a new schema can silently skip its type-specific checks.
+
+### Non-compositional and one-off surfaces
+
+- Some ready-valid helpers compare interface display names instead of using
+  nominal support relationships. This rejects differently named compatible
+  protocols and makes names carry accidental semantics.
+- Conditional effect capture has dedicated cases for assignments, memory
   writes, and assertions rather than an extensible guarded-effect protocol.
+  Each new effect kind must modify the elaboration kernel.
+- Instance and synchronous-memory dot APIs rely on internal static annotations
+  that ordinary unannotated host helpers do not preserve. Moving such a value
+  through a generic Rhombus function can lose its authoring surface.
+- Condition typing is inconsistent: hardware `when` accepts any one-bit
+  `FlatDataType`, while `mux` requires nominal `Bool`.
+- Synchronous-memory construction encodes four fixed port shapes with Boolean
+  choices. Named, repeated, or otherwise general ports will require a new API
+  rather than a natural extension of the current one.
+- The DPI surface arbitrarily rejects zero-input imports, while a multi-result
+  registration retains one result name in a field that printing and lowering
+  ignore.
+- Interface protocols have exactly two roles, and temporal promises such as
+  `Irrevocable` stability or `SimpleMemory` ordering are documented contracts,
+  not automatically generated assertions.
+- Interface reconstruction uses process-global resolver and grouping
+  registries without a lifecycle reset. Identity scoping avoids a demonstrated
+  cross-design miscompile, but this remains ambient-state debt for long-running
+  tools.
 
 These are reasons to harden RHDL's existing model, not reasons to replace its
 exact-driver, exact-width, typed-relation, or nominal-protocol foundations.
