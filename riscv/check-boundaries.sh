@@ -5,7 +5,17 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(rg -n '^[[:space:]]+"[^"]*(rhdl/|circt)' riscv/model riscv/isa riscv/annotations --glob '*.rhm' || true)"
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhm'
+  else
+    find "$@" -type f -name '*.rhm' -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+forbidden_imports="$(search_sources '^[[:space:]]+"[^"]*(rhdl/|circt)' riscv/model riscv/isa riscv/annotations || true)"
 if [[ -n "$forbidden_imports" ]]; then
   echo "pure RISC-V model, ISA, and annotation modules must not import RHDL or CIRCT" >&2
   echo "$forbidden_imports" >&2

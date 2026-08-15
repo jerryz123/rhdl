@@ -5,12 +5,23 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhm' --glob '*.rhdl'
+  else
+    find "$@" -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
+      -exec grep -nHE "$pattern" {} +
+  fi
+}
+
 fail_matches() {
   local description="$1"
   local pattern="$2"
   local directory="$3"
   local matches
-  matches="$(rg -n "$pattern" "$directory" --glob '*.rhm' --glob '*.rhdl' || true)"
+  matches="$(search_sources "$pattern" "$directory" || true)"
   if [[ -n "$matches" ]]; then
     echo "$description" >&2
     echo "$matches" >&2
@@ -49,7 +60,7 @@ fail_matches "frontend layers must not import sibling layers" \
 
 while IFS= read -r layer_file; do
   layer_name="$(basename "$layer_file")"
-  if ! rg -Fq "| \`$layer_name\` |" rhdl/README.md; then
+  if ! grep -Fq "| \`$layer_name\` |" rhdl/README.md; then
     echo "frontend layer is missing from the rhdl/README.md dependency table: $layer_file" >&2
     exit 1
   fi

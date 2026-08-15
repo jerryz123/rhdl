@@ -5,14 +5,24 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(rg -n '^[[:space:]]+\"[^\"]*(rhdl/|circt)' noc/model noc/authoring noc/analysis noc/language noc/plan noc/std --glob '*.rhm' || true)"
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhm'
+  else
+    find "$@" -type f -name '*.rhm' -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+forbidden_imports="$(search_sources '^[[:space:]]+\"[^\"]*(rhdl/|circt)' noc/model noc/authoring noc/analysis noc/language noc/plan noc/std || true)"
 if [[ -n "$forbidden_imports" ]]; then
   echo "pure NoC model, authoring, language, standard definitions, analysis, and plan must not import RHDL or CIRCT modules" >&2
   echo "$forbidden_imports" >&2
   exit 1
 fi
 
-forbidden_std_imports="$(rg -n '^[[:space:]]+\"[^\"]*std/' noc/model noc/authoring noc/analysis noc/language noc/plan --glob '*.rhm' || true)"
+forbidden_std_imports="$(search_sources '^[[:space:]]+\"[^\"]*std/' noc/model noc/authoring noc/analysis noc/language noc/plan || true)"
 if [[ -n "$forbidden_std_imports" ]]; then
   echo "core NoC model, authoring, language, analysis, and plan must not import standard topology or routing definitions" >&2
   echo "$forbidden_std_imports" >&2
