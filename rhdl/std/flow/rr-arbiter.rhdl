@@ -3,6 +3,7 @@
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
 
 // Priority starts immediately after the most recently transferred input.
 // Selection may change while stalled, so the output deliberately remains
@@ -118,6 +119,29 @@ sync_circuit CtrlRRArbiter(n :: Int):
       selected_index + bits(1, choice_width)
     )
 
+// Infers the common payload type and input count from an ordinary host Array,
+// then returns the selected endpoint for further flow-pipeline composition.
+fun rr_arbiter(inputs_or_type, n = #false):
+  def typed = !(inputs_or_type is_a Array)
+  def input_count:
+    if typed
+    | block:
+        unless n is_a Int && n > 0
+        | error(~who: #'rr_arbiter,
+                "typed round-robin arbitration requires a positive input count")
+        n
+    | block:
+        unless inputs_or_type is_a Array && inputs_or_type.length() > 0
+        | error(~who: #'rr_arbiter,
+                "round-robin arbitration requires at least one input endpoint")
+        inputs_or_type.length()
+  def T:
+    if typed | inputs_or_type | flow_payload_type(inputs_or_type[0])
+  inst arbiter_stage(RRArbiter(T, input_count))
+  def handle = InterfaceHandle(arbiter_stage.ingress, arbiter_stage.egress)
+  if typed | handle | handle(inputs_or_type)
+
 export:
   RRArbiter
+  rr_arbiter
   CtrlRRArbiter

@@ -86,13 +86,18 @@ import one primitive without loading unrelated generators.
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
-| `std/flow/pipe.rhdl` | Registered elastic `Pipe`/`CtrlPipe` and typed chaining helpers | `std/ready-valid.rhdl` |
-| `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed chaining helpers | `std/ready-valid.rhdl`, `std/counter.rhdl` |
+| `std/flow/stage.rhdl` | Ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
+| `std/flow/pipe.rhdl` | Registered elastic `Pipe`/`CtrlPipe` plus endpoint and handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
-| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` | `std/ready-valid.rhdl` |
-| `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` | `std/ready-valid.rhdl` |
+| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus Array-shaped handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus payload-selected handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/join.rhdl` | Atomic homogeneous `Join`/`CtrlJoin` | `std/ready-valid.rhdl` |
+| `std/flow/zip.rhdl` | Inline binary heterogeneous atomic `zip_flow` handles | `std/ready-valid.rhdl` |
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
+| `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` and array-shaped handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/parallel.rhdl` | Parallel generic-handle composition | None |
 | `std/flow.rhdl` | Ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
 
 ## Frontend layer dependencies
@@ -115,7 +120,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `sync-memory.rhm` | Circuit-shaped synchronous memories with fixed read, write, and shared read-write ports plus optional packed-lane write masks | core IR, kernel, clocking support, field support |
 | `assertion.rhm` | Reset-suppressed clocked assertions with branch-derived guards and optional labels | kernel, clocking support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
-| `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
+| `interface.rhm` | Roles, directional interfaces, refinement, endpoint shapes, local links, linear callable handles, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived forward-readable single-driver connections | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when` priority chains and exact-key `switch`, including assignment, memory-write, and assertion effects | core IR, kernel, mux-lookup support |
@@ -128,8 +133,8 @@ language profiles:
 - `hardware-literal.rhm` validates reusable packed host images, exposes their
   hardware type and packed width to ordinary libraries, and materializes them
   as a `Bits` constant followed by an explicit equal-width cast.
-- `fields.rhm` owns exact hardware annotations plus readable and driveable
-  field static information.
+- `fields.rhm` owns exact hardware annotations, public hardware-value type
+  discovery for libraries, and readable and driveable field static information.
 - `instance-members.rhm` lets layers contribute virtual instance members
   without creating sibling-layer dependencies.
 - `clocking.rhm` expands frontend sync policy into explicit ports, register

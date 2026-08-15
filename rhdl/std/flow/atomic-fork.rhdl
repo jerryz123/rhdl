@@ -1,0 +1,76 @@
+#lang rhdl
+// Defines atomic one-to-many forks for payload-bearing and control-only flows.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+
+// Every output transfers in the same cycle or none do. Unlike Broadcast, the
+// fork has no storage and does not retain independently pending recipients.
+// Output offers are Decoupled because each valid depends on peer readiness.
+circuit AtomicFork(T, n :: Int):
+  unless n > 0
+  | error(~who: #'AtomicFork, "output count must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress[n](Decoupled(T), ~role: producer)
+
+  def mutable all_ready = Bool(#true)
+  for (index in 0..n):
+    all_ready := all_ready and egress[index].ready
+
+  ingress.ready <== all_ready
+  for (index in 0..n):
+    def mutable peers_ready = Bool(#true)
+    for (peer in 0..n):
+      if (peer != index)
+      | peers_ready := peers_ready and egress[peer].ready
+      | #void
+    egress[index].valid <== ingress.valid and peers_ready
+    egress[index].bits <== ingress.bits
+
+// The control-only specialization atomically duplicates indistinguishable
+// tokens without manufacturing a payload.
+circuit CtrlAtomicFork(n :: Int):
+  unless n > 0
+  | error(~who: #'CtrlAtomicFork, "output count must be a positive host Int")
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  interface egress[n](DecoupledCtrl(), ~role: producer)
+
+  def mutable all_ready = Bool(#true)
+  for (index in 0..n):
+    all_ready := all_ready and egress[index].ready
+
+  ingress.ready <== all_ready
+  for (index in 0..n):
+    def mutable peers_ready = Bool(#true)
+    for (peer in 0..n):
+      if (peer != index)
+      | peers_ready := peers_ready and egress[peer].ready
+      | #void
+    egress[index].valid <== ingress.valid and peers_ready
+
+// Instantiates an atomic fork and returns its indexable output endpoint array.
+fun atomic_fork(source_or_type,
+                n :: Int):
+  def T = flow_payload_type(source_or_type)
+  inst fork_stage(AtomicFork(T, n))
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(fork_stage.ingress, fork_stage.egress)
+  )
+
+// Instantiates the payloadless atomic fork for control-only token flows.
+fun ctrl_atomic_fork(source :: Endpoint,
+                     n :: Int):
+  def checked = ctrl_endpoint(source)
+  inst ctrl_fork_stage(CtrlAtomicFork(n))
+  ctrl_fork_stage.ingress <=> checked
+  ctrl_fork_stage.egress
+
+export:
+  AtomicFork
+  atomic_fork
+  CtrlAtomicFork
+  ctrl_atomic_fork

@@ -4,6 +4,16 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
 
+interface BidirectionalByte():
+  role requester
+  role responder
+
+  requester -> responder:
+    command: Bits(8)
+
+  responder -> requester:
+    response: Bits(8)
+
 circuit InterfaceArrayAdapter(n):
   interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
   interface egress[n](Decoupled(Bits(8)), ~role: producer)
@@ -16,6 +26,30 @@ circuit IndexedInterfaceArrayAdapter(n):
 
   for (index in 0..n):
     egress[index] <=> ingress[index]
+
+// A parenthesized endpoint sequence is connection syntax for a concrete
+// endpoint array; it is not a general-purpose host tuple.
+circuit ParenthesizedInterfaceArrayAdapter():
+  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
+  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> (ingress0, ingress1)
+
+circuit ParenthesizedInterfaceArrayLengthMismatch():
+  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
+  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
+  interface ingress2(Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> (ingress0, ingress1, ingress2)
+
+circuit ParenthesizedInterfaceArrayNamedMember():
+  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
+  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> (ingress0, ~second: ingress1)
 
 circuit InterfaceArrayHierarchy(n):
   interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
@@ -41,8 +75,42 @@ circuit InterfaceArrayTypeOnce(n):
   | error("interface array type expression was evaluated more than once")
   #void
 
+// Generic handles compose independently of ready-valid-specific helpers.
+circuit InterfaceHandleAdapter():
+  interface ingress(BidirectionalByte(), ~role: responder)
+  interface egress(BidirectionalByte(), ~role: requester)
+
+  def path = interface_link(BidirectionalByte(), "first")
+             |> interface_link(BidirectionalByte(), "second")
+  def result = ingress |> path
+  egress <=> result
+
+circuit ParallelInterfaceHandleAdapter():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  def path = parallel_handles(Array(
+    interface_link(Decoupled(Bits(8)), "lane"),
+    interface_link(Decoupled(Bits(8)), "lane")
+  ))
+  def result = ingress |> path
+  egress <=> result
+
+circuit ReusedInterfaceHandle():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  def path = interface_link(Decoupled(Bits(8)))
+  ingress[0] |> path
+  ingress[1] |> path
+
 export:
+  BidirectionalByte
   InterfaceArrayAdapter
   IndexedInterfaceArrayAdapter
+  ParenthesizedInterfaceArrayAdapter
+  ParenthesizedInterfaceArrayLengthMismatch
+  ParenthesizedInterfaceArrayNamedMember
   InterfaceArrayHierarchy
   InterfaceArrayTypeOnce
+  InterfaceHandleAdapter
+  ParallelInterfaceHandleAdapter
+  ReusedInterfaceHandle

@@ -558,6 +558,37 @@ bulk connection, and instance reconstruction work recursively. Nested
 directions lower to nested `RecordType` fields and then CIRCT `hw.struct`
 without core or backend interface cases.
 
+Declared endpoint arrays bulk-connect directly. A parenthesized sequence on
+the right connects individual endpoints positionally to an array on the left:
+
+```rhombus
+egress <=> (first_ingress, second_ingress)
+```
+
+The sequence must have the same length as the array, and every pair receives
+the ordinary protocol, type, and direction checks. This parenthesized form is
+connection-only syntax, not a general host tuple, and cannot appear on the
+left of `<=>`. Scalar endpoint connections keep using the same syntax for
+interface refinement merge and split.
+
+`interface_link(protocol)` creates a local pair of complementary endpoint
+views over forward-readable, exactly-one-driver wires. An `InterfaceHandle`
+owns a left endpoint shape and a right endpoint shape. Endpoint shapes are an
+`Endpoint` or recursively matching `Array`s of endpoints.
+
+- `endpoint |> handle` connects the endpoint to the left end and returns the
+  right end.
+- `first_handle |> second_handle` connects their adjacent ends and returns a
+  handle owning the two outside ends.
+- `parallel_handles(Array(...))` creates one array-shaped handle from
+  independent handles.
+
+Handles are interface-generic: they contain no ready-valid policy, buffering,
+or new core IR. They are linear host objects because consuming one twice would
+attempt to drive an interface destination twice. Apply or compose handles only
+with `|>`. `<=>` connects concrete endpoint shapes, performs the hardware
+wiring effect, and returns `#void`.
+
 Ready-valid protocols and reusable flow circuits are documented in
 [`../../std/README.md`](../../std/README.md). Canonical feature programs live
 in [`../../../examples/`](../../../examples/README.md).

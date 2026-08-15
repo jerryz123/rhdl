@@ -1,8 +1,18 @@
 #lang rhdl
-// Demonstrates host-sized arrays of independently flattened interface endpoints.
+// Demonstrates bulk connection of declared arrays and endpoint sequences.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
+
+interface ByteExchange():
+  role requester
+  role responder
+
+  requester -> responder:
+    request: Bits(8)
+
+  responder -> requester:
+    response: Bits(8)
 
 circuit InterfaceArrayAdapter(n):
   interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
@@ -18,7 +28,41 @@ circuit InterfaceArrayHierarchy(n):
   adapter.ingress <=> ingress
   egress <=> adapter.egress
 
+circuit InterfaceSequenceAdapter():
+  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
+  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  egress <=> (ingress0, ingress1)
+
+// Generic handles are not specific to ready-valid flow. Each interface_link
+// contributes a transparent local connection; handle-to-handle application
+// composes the links before either external endpoint is attached.
+circuit GenericHandleChain():
+  interface ingress(ByteExchange(), ~role: responder)
+  interface egress(ByteExchange(), ~role: requester)
+
+  def path = interface_link(ByteExchange(), "first")
+             |> interface_link(ByteExchange(), "second")
+  def connected = ingress |> path
+  egress <=> connected
+
+// Parallel handle composition gives one handle array-shaped ends. The same
+// ordinary endpoint-array bulk connection terminates both sides of the path.
+circuit ParallelHandleChain():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress[2](Decoupled(Bits(8)), ~role: producer)
+
+  def lanes = parallel_handles(Array(
+    interface_link(Decoupled(Bits(8)), "lane"),
+    interface_link(Decoupled(Bits(8)), "lane")
+  ))
+  def connected = ingress |> lanes
+  egress <=> connected
+
 def design = elaborate(InterfaceArrayAdapter(2))
+def generic_handle_design = elaborate(GenericHandleChain())
+def parallel_handle_design = elaborate(ParallelHandleChain())
 
 def verilog_reference = @str|<<{
 module InterfaceArrayAdapter(
@@ -40,7 +84,13 @@ endmodule
 }>>|
 
 export:
+  ByteExchange
   InterfaceArrayAdapter
   InterfaceArrayHierarchy
+  InterfaceSequenceAdapter
+  GenericHandleChain
+  ParallelHandleChain
   design
+  generic_handle_design
+  parallel_handle_design
   verilog_reference

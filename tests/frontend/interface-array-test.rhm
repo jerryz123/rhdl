@@ -4,6 +4,7 @@
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../examples/interface-array.rhdl" as example
   "interface-array.rhdl" as fixture
 
 def array_design = embedded.run_elaboration(fun (): fixture.InterfaceArrayAdapter(3))
@@ -11,11 +12,21 @@ def array_module = array_design.modules[0]
 def indexed_design = embedded.run_elaboration(
   fun (): fixture.IndexedInterfaceArrayAdapter(3)
 )
+def parenthesized_design = embedded.run_elaboration(
+  fun (): fixture.ParenthesizedInterfaceArrayAdapter()
+)
+def parenthesized_module = parenthesized_design.modules[0]
 def hierarchy_design = embedded.run_elaboration(
   fun (): fixture.InterfaceArrayHierarchy(3)
 )
 def type_once_design = embedded.run_elaboration(
   fun (): fixture.InterfaceArrayTypeOnce(3)
+)
+def handle_design = embedded.run_elaboration(
+  fun (): fixture.InterfaceHandleAdapter()
+)
+def parallel_handle_design = embedded.run_elaboration(
+  fun (): fixture.ParallelInterfaceHandleAdapter()
 )
 def hierarchy_module = hierarchy_design.modules.find(
   fun (module_def): module_def.name.starts_with("InterfaceArrayHierarchy")
@@ -43,5 +54,31 @@ check:
   ).length() ~is 12
   verify_design(array_design) ~is #void
   verify_design(indexed_design) ~is #void
+  parenthesized_module.inputs.map(fun (port): port.name) ~is [
+    "ingress0_in", "ingress1_in", "egress_0_in", "egress_1_in"
+  ]
+  parenthesized_module.outputs.map(fun (port): port.name) ~is [
+    "ingress0_out", "ingress1_out", "egress_0_out", "egress_1_out"
+  ]
+  parenthesized_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.drive"
+  ).length() ~is 4
+  verify_design(parenthesized_design) ~is #void
   verify_design(hierarchy_design) ~is #void
+  verify_design(handle_design) ~is #void
+  verify_design(parallel_handle_design) ~is #void
+  verify_design(example.generic_handle_design) ~is #void
+  verify_design(example.parallel_handle_design) ~is #void
+  handle_design.modules[0].operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).length() ~is 0
   type_once_design.modules[0].inputs.length() ~is 6
+  embedded.run_elaboration(
+    fun (): fixture.ParenthesizedInterfaceArrayLengthMismatch()
+  ) ~throws "must have the same length"
+  embedded.run_elaboration(
+    fun (): fixture.ParenthesizedInterfaceArrayNamedMember()
+  ) ~throws "cannot use named refinement members"
+  embedded.run_elaboration(
+    fun (): fixture.ReusedInterfaceHandle()
+  ) ~throws "can be consumed only once"

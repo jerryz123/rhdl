@@ -291,6 +291,8 @@ fixture_specs=(
   'demux|demux_tb|examples/flow-topology.rhdl|demux_design|demux_verilog_reference'
   'join|join_tb|examples/flow-topology.rhdl|join_design|join_verilog_reference'
   'broadcast|broadcast_tb|examples/flow-topology.rhdl|broadcast_design|broadcast_verilog_reference'
+  'atomic-fork|atomic_fork_tb|examples/flow-topology.rhdl|atomic_fork_design|atomic_fork_verilog_reference'
+  'flow-map|flow_map_tb|examples/flow-topology.rhdl|flow_map_design|flow_map_verilog_reference'
   'ctrl-pipe|ctrl_pipe_tb|examples/ctrl-flow.rhdl|ctrl_pipe_design|ctrl_pipe_verilog_reference'
   'ctrl-queue|ctrl_queue_tb|examples/ctrl-flow.rhdl|ctrl_queue_design|ctrl_queue_verilog_reference'
   'ctrl-queue-options|ctrl_queue_options_tb|examples/ctrl-flow.rhdl|ctrl_queue_options_design|ctrl_queue_options_verilog_reference'

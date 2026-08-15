@@ -1,0 +1,64 @@
+#lang rhdl
+// Adapts ready-valid stage constructors to the generic interface-handle model.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// Resolves an endpoint, handle, ready-valid protocol, or shorthand payload
+// type to the exact protocol expected at a new handle's input.
+fun flow_protocol_type(source_or_type):
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'flow_protocol_type,
+                "ready-valid handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        unless data_type(source_or_type)
+        | error(~who: #'flow_protocol_type,
+                "flow stage requires a payload DataType, ready-valid InterfaceType, Endpoint, or Handle")
+        Decoupled(source_or_type)
+  unless protocol.name == "Decoupled" || protocol.name == "Irrevocable"
+  | if source_or_type is_a Endpoint || source_or_type is_a Handle
+    | error(~who: #'flow_protocol_type,
+            "flow-control chaining requires a Decoupled or Irrevocable endpoint")
+    | error(~who: #'flow_protocol_type,
+            "flow-control chaining requires a Decoupled or Irrevocable protocol")
+  protocol
+
+// Extracts the payload carried by any accepted ready-valid stage argument.
+fun flow_payload_type(source_or_type):
+  def protocol = flow_protocol_type(source_or_type)
+  protocol.members.find(
+    fun (member): member.name == "bits"
+  ).type
+
+// Replaces a protocol's payload without weakening its behavioral contract.
+fun flow_protocol_with_payload(protocol, payload_type):
+  unless protocol is_a InterfaceType
+  | error(~who: #'flow_protocol_with_payload,
+          "flow protocol must be an InterfaceType")
+  if protocol.name == "Irrevocable"
+  | Irrevocable(payload_type)
+  | if protocol.name == "Decoupled"
+    | Decoupled(payload_type)
+    | error(~who: #'flow_protocol_with_payload,
+            "flow protocol must be Decoupled or Irrevocable")
+
+// A DataType or InterfaceType requests an unconnected handle. An endpoint or
+// earlier handle is connected immediately through the callable protocol.
+fun finish_flow_stage(source_or_type, handle :: Handle):
+  if source_or_type is_a Endpoint || source_or_type is_a Handle
+  | handle(source_or_type)
+  | handle
+
+export:
+  flow_protocol_type
+  flow_payload_type
+  flow_protocol_with_payload
+  finish_flow_stage

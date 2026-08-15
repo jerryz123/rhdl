@@ -1,13 +1,115 @@
 #lang rhdl
-// Materializes the standard arbitration, routing, join, and broadcast primitives.
+// Materializes the standard arbitration, routing, join, and fanout primitives.
 
 import:
   lib("rhdl/std/flow.rhdl") open
+
+bundle MappedByte():
+  data: Bits(8)
+  tag: Bits(4)
+
+bundle TaggedByte():
+  data: Bits(8)
+  from_second: Bool
+
+bundle RoutedByte():
+  data: Bits(8)
+  destination: Bool
+
+circuit MapFlowExample():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  input tag: Bits(4)
+  interface egress(Decoupled(MappedByte()), ~role: producer)
+
+  def mapping:
+    map_flow(Bits(8), payload):
+      record(MappedByte()):
+        data: payload
+        tag: tag
+  def mapped = ingress |> mapping
+  egress <=> mapped
+
+// With concrete endpoints on the left, each handle is applied immediately and
+// the final value is the only still-unconnected endpoint.
+sync_circuit EndpointFirstTopology():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+
+  def selected = ingress
+                 |> rr_arbiter(_)
+                 |> pipe(_, 1)
+  egress <=> selected
+
+// With types on the left, the same operations construct one reusable handle:
+// independently tag two lanes, arbitrate and buffer, atomically fork the
+// winner, then project its fields through independent output paths.
+sync_circuit FanInProjectTopology():
+  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
+  interface data_egress(Irrevocable(Bits(8)), ~role: producer)
+  interface origin_egress(Decoupled(Bool), ~role: producer)
+
+  def path:
+    parallel(
+      map_flow(Bits(8), payload):
+        record(TaggedByte()):
+          data: payload
+          from_second: Bool(#false),
+      map_flow(Bits(8), payload):
+        record(TaggedByte()):
+          data: payload
+          from_second: Bool(#true)
+    ) |> rr_arbiter(TaggedByte(), 2)
+      |> pipe(TaggedByte(), 1)
+      |> atomic_fork(TaggedByte(), 2)
+      |> parallel(
+           (
+             map_flow(TaggedByte(), tagged):
+               tagged.data
+           ) |> pipe(Bits(8), 1),
+           map_flow(TaggedByte(), tagged):
+             tagged.from_second
+         )
+  def projected = ingress |> path
+  Array(data_egress, origin_egress) <=> projected
+
+// Array-shaped inputs can also rendezvous through a heterogeneous zip. The
+// queue makes the offer irrevocable, payload-selected routing preserves that
+// contract, and parallel maps remove the routing metadata at both outputs.
+sync_circuit ZipRouteTopology():
+  interface data_ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface destination_ingress(Decoupled(Bool), ~role: consumer)
+  interface egress[2](Irrevocable(Bits(8)), ~role: producer)
+
+  def path:
+    (
+      zip_flow(Bits(8), data,
+               Bool, destination):
+        record(RoutedByte()):
+          data: data
+          destination: destination
+    ) |> queue(RoutedByte(), 2)
+      |> (
+           demux_flow(Irrevocable(RoutedByte()), 2, routed):
+             routed.destination
+         )
+      |> parallel(
+           map_flow(Irrevocable(RoutedByte()), routed):
+             routed.data,
+           map_flow(Irrevocable(RoutedByte()), routed):
+             routed.data
+         )
+  def routed = Array(data_ingress, destination_ingress) |> path
+  egress <=> routed
 
 def rr_arbiter_design = elaborate(RRArbiter(Bits(8), 3))
 def demux_design = elaborate(Demux(Bits(8), 3))
 def join_design = elaborate(Join(Bits(8), 3))
 def broadcast_design = elaborate(Broadcast(Bits(8), 3))
+def atomic_fork_design = elaborate(AtomicFork(Bits(8), 3))
+def flow_map_design = elaborate(MapFlowExample())
+def endpoint_first_design = elaborate(EndpointFirstTopology())
+def fan_in_project_design = elaborate(FanInProjectTopology())
+def zip_route_design = elaborate(ZipRouteTopology())
 
 def rr_arbiter_verilog_reference = @str|<<{
 module RRArbiter(
@@ -175,12 +277,66 @@ module Broadcast(
 endmodule
 }>>|
 
+def atomic_fork_verilog_reference = @str|<<{
+module AtomicFork(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_0_in,
+                                                         egress_1_in,
+                                                         egress_2_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_0_out,
+                                                         egress_1_out,
+                                                         egress_2_out
+);
+
+  assign ingress_out =
+    '{ready: (egress_0_in.ready & egress_1_in.ready & egress_2_in.ready)};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & egress_1_in.ready & egress_2_in.ready),
+      bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & egress_0_in.ready & egress_2_in.ready),
+      bits: ingress_in.bits};
+  assign egress_2_out =
+    '{valid: (ingress_in.valid & egress_0_in.ready & egress_1_in.ready),
+      bits: ingress_in.bits};
+endmodule
+}>>|
+
+def flow_map_verilog_reference = @str|<<{
+module MapFlowExample(
+  input  struct packed {logic valid; logic [7:0] bits; }                                         ingress_in,
+  input  [3:0]                                                                                   tag,
+  input  struct packed {logic ready; }                                                           egress_in,
+  output struct packed {logic ready; }                                                           ingress_out,
+  output struct packed {logic valid; struct packed {logic [7:0] data; logic [3:0] tag; } bits; } egress_out
+);
+
+  wire struct packed {logic [7:0] data; logic [3:0] tag; } _GEN =
+    '{data: ingress_in.bits, tag: tag};
+  assign ingress_out = egress_in;
+  assign egress_out = '{valid: ingress_in.valid, bits: _GEN};
+endmodule
+}>>|
+
 export:
+  TaggedByte
+  RoutedByte
+  EndpointFirstTopology
+  FanInProjectTopology
+  ZipRouteTopology
   rr_arbiter_design
   demux_design
   join_design
   broadcast_design
+  atomic_fork_design
+  flow_map_design
+  endpoint_first_design
+  fan_in_project_design
+  zip_route_design
   rr_arbiter_verilog_reference
   demux_verilog_reference
   join_verilog_reference
   broadcast_verilog_reference
+  atomic_fork_verilog_reference
+  flow_map_verilog_reference

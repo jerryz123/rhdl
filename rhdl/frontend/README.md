@@ -62,6 +62,10 @@ The base profile provides `circuit`, `elaborate`, ports, `<==`, `Bits`,
 not expose the public core Builder or raw kernel. The standard profile adds the
 curated layers without changing the resulting IR.
 
+Library code may use `hardware_value_type(value)` to recover the RHDL type of
+caller-elaborated readable or driveable hardware without importing core IR
+classes. Host values are rejected.
+
 The four programs under [`../../examples/lop/`](../../examples/lop/) express
 one adder through the public core, kernel, explicit base composition, and
 standard profile. `make lop-test` checks that they produce identical public IR

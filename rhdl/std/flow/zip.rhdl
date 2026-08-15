@@ -1,0 +1,72 @@
+#lang rhdl
+// Defines an inline heterogeneous ready-valid join as an interface handle.
+
+import:
+  rhombus/meta open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+fun finish_zip_flow_handle(left_link :: Handle,
+                           right_link :: Handle,
+                           output_link :: Handle,
+                           mapped_bits):
+  output_link.left.field("valid") <== (
+    left_link.right.field("valid") and right_link.right.field("valid")
+  )
+  output_link.left.field("bits") <== mapped_bits
+  left_link.right.field("ready") <== (
+    output_link.left.field("ready") and right_link.right.field("valid")
+  )
+  right_link.right.field("ready") <== (
+    output_link.left.field("ready") and left_link.right.field("valid")
+  )
+  left_link.consumed := #true
+  right_link.consumed := #true
+  output_link.consumed := #true
+  InterfaceHandle(
+    Array(left_link.left, right_link.left),
+    output_link.right
+  )
+
+// Payload types construct a reusable two-input handle. Supplying two concrete
+// endpoints applies the same handle immediately.
+expr.macro
+| 'zip_flow($left_source_or_type, $(left_payload :: Identifier),
+            $right_source_or_type, $(right_payload :: Identifier)): $body':
+    'block:
+       def zip_left_argument = $left_source_or_type
+       def zip_right_argument = $right_source_or_type
+       def zip_left_type:
+         if zip_left_argument is_a Endpoint
+         | decoupled_payload_type(zip_left_argument)
+         | zip_left_argument
+       def zip_right_type:
+         if zip_right_argument is_a Endpoint
+         | decoupled_payload_type(zip_right_argument)
+         | zip_right_argument
+       unless (zip_left_argument is_a Endpoint) == (zip_right_argument is_a Endpoint)
+       | error(~who: #'zip_flow,
+               "zip_flow inputs must both be types or both be endpoints")
+       def zip_left_link = interface_link(Decoupled(zip_left_type), "zip_left")
+       def zip_right_link = interface_link(Decoupled(zip_right_type), "zip_right")
+       def zip_left_endpoint :: Endpoint = zip_left_link.right
+       def zip_right_endpoint :: Endpoint = zip_right_link.right
+       def $left_payload = zip_left_endpoint.bits
+       def $right_payload = zip_right_endpoint.bits
+       fun compute_zipped_bits(): $body
+       def zipped_bits = compute_zipped_bits()
+       def zip_output_link = interface_link(
+         Decoupled(hardware_value_type(zipped_bits)),
+         "zip_output"
+       )
+       def zip_handle = finish_zip_flow_handle(
+         zip_left_link,
+         zip_right_link,
+         zip_output_link,
+         zipped_bits
+       )
+       if zip_left_argument is_a Endpoint
+       | zip_handle(Array(zip_left_argument, zip_right_argument))
+       | zip_handle'
+
+export:
+  zip_flow

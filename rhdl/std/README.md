@@ -260,6 +260,7 @@ under [`flow/`](flow/):
 | `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
 | `Join(T, n)` | `CtrlJoin(n)` | Atomic join that never partially consumes inputs |
 | `Broadcast(T, n)` | `CtrlBroadcast(n)` | Buffered exactly-once delivery tracked independently per recipient |
+| `AtomicFork(T, n)` | `CtrlAtomicFork(n)` | Combinational fanout where every recipient transfers together or none do |
 
 Import the aggregate when several components are needed:
 
@@ -278,19 +279,112 @@ def buffered = ingress |> queue(_, 4, ~pipe: #true) |> pipe(_, 2)
 egress <=> buffered
 ```
 
-`queue` and `pipe` infer payload type from a `Decoupled` or `Irrevocable`
-endpoint, instantiate in the ambient `sync_circuit` domain, connect the input,
-and return the downstream endpoint with static interface information intact.
-`Pipe` produces an `Irrevocable` endpoint. Use an explicit `Queue` instance
-when its `count` output or instance handle is needed.
+Fan-in helpers take an ordinary host `Array` as their pipeline source.
+`rr_arbiter` infers both the common payload type and input count, connects a
+round-robin arbiter, and returns its `Decoupled` egress:
+
+```rhombus
+def selected = Array(first_request, second_request)
+               |> rr_arbiter(_)
+               |> pipe(_, 1)
+```
+
+Use an explicit `RRArbiter` instance when its `chosen` output is needed.
+Inputs must be a nonempty array of mutually compatible `Decoupled` or
+`Irrevocable` endpoints. The typed form `rr_arbiter(T, n)` constructs an
+array-input handle for composition before endpoints are attached.
+
+`atomic_fork` returns an indexable array of `Decoupled` endpoints and permits a
+transfer only when every output can accept it. This is useful when one logical
+transaction must atomically update multiple downstream flows. In contrast,
+`Broadcast` stores per-recipient delivery state so recipients may accept the
+same item in different cycles.
+
+`map_flow(T, payload): body` constructs a generic interface handle that maps a
+`Decoupled(T)` payload while forwarding valid and ready. An explicit
+`Decoupled(T)` or `Irrevocable(T)` argument selects and preserves that exact
+contract. The binder retains precise bundle field information, and the result
+type is inferred from the body. Supplying an endpoint applies the mapping
+immediately and preserves its contract:
+
+```rhombus
+def tagging:
+  map_flow(Request(), payload):
+    record(TaggedRequest()):
+      request: payload
+      processor: Bool(#false)
+
+def tagged = ingress |> tagging
+```
+
+`demux_flow(protocol, n, payload): selector` constructs a one-to-many routing
+handle whose selector is derived from the offered payload. It retains the
+input protocol and returns an array of `n` endpoints; an out-of-range selector
+blocks the input. This distinguishes exclusive routing from `atomic_fork`,
+which requires every output to accept the same item.
+
+`zip_flow(T, left_payload, U, right_payload): body` constructs an array-input
+handle that atomically consumes one item from each payload type and maps them
+to one inferred result type. Neither input can transfer by itself. Supplying
+two endpoints applies the handle immediately:
+
+```rhombus
+def response_join:
+  zip_flow(Response(), response,
+           Bool, owner):
+    record(TaggedResponse()):
+      response: response
+      owner: owner
+
+def tagged_response = Array(memory_response, owners) |> response_join
+```
+
+These are ordinary `InterfaceHandle` values from the frontend interface layer,
+not a flow-specific graph or deferred source. Inline adapters use local
+`interface_link` wires and add no module hierarchy. Stateful `pipe`, `queue`,
+`rr_arbiter`, and `atomic_fork` stages expose the same handle protocol when
+given explicit payload types. A handle is linear and can be consumed only once.
+
+`parallel` combines independent handles into one array-shaped handle. This
+lets fan-in, buffering, fanout, and heterogeneous projections form one path
+before any external endpoint is attached:
+
+```rhombus
+def request_path:
+  parallel(tag_fesvr, tag_processor)
+  |> rr_arbiter(TaggedRequest(), 2)
+  |> pipe(TaggedRequest(), 1)
+  |> atomic_fork(TaggedRequest(), 2)
+  |> parallel(
+       map_flow(TaggedRequest(), tagged): tagged.request,
+       map_flow(TaggedRequest(), tagged): tagged.processor
+     )
+
+(
+  Array(fesvr_request, processor_request) |> request_path
+) <=> Array(memory_request, owner_queue.ingress)
+```
+
+The endpoint and handle shapes must match recursively. To terminate a pipeline
+in a bulk connection, parenthesize the completed pipeline once and apply
+`<=>`; both operators intentionally occupy Rhombus's low-precedence boundary.
+`zip_flow` is deliberately binary; homogeneous multi-input rendezvous remains
+the role of `Join(T, n)`.
+
+Given a concrete `Decoupled` or `Irrevocable` endpoint, `queue` and `pipe`
+infer its payload type, instantiate in the ambient `sync_circuit` domain, and
+return the downstream endpoint. Given a payload type, they instead return an
+unconnected generic handle. `Pipe` and a non-flowing `Queue` produce an
+`Irrevocable` endpoint; `Queue(~flow: #true)` remains `Decoupled` because it
+may expose its input offer directly. Use an explicit `Queue` instance when its
+`count` output or instance handle is needed.
 
 The corresponding `ctrl_queue` and `ctrl_pipe` helpers accept
 `DecoupledCtrl` or `IrrevocableCtrl` endpoints and retain the same static
 interface information without manufacturing a dummy payload. Control-only
 streams carry indistinguishable tokens; they are not a detachable control half
-of a payload-bearing transaction. `CtrlPipe` produces `IrrevocableCtrl`, while
-`CtrlQueue` remains conservatively `DecoupledCtrl` because flow-through mode
-can expose its input offer directly.
+of a payload-bearing transaction. `CtrlPipe` and a non-flowing `CtrlQueue`
+produce `IrrevocableCtrl`; flow-through queues remain `DecoupledCtrl`.
 
 `Queue(T, depth)` defaults to a registered, non-flow-through FIFO.
 `~pipe: #true` permits enqueue when a full queue dequeues in the same cycle;
@@ -303,8 +397,8 @@ arbiters similarly assert that their rotating priority remains in range.
 See [`../../examples/flow-control.rhdl`](../../examples/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and
 [`../../examples/flow-topology.rhdl`](../../examples/flow-topology.rhdl) for
-round-robin arbitration, demux, join, and broadcast. The parallel token-only
-family is materialized in
+round-robin arbitration, demux, join, atomic fork, payload mapping, and
+broadcast. The parallel token-only family is materialized in
 [`../../examples/ctrl-flow.rhdl`](../../examples/ctrl-flow.rhdl).
 
 ## Counter

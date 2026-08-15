@@ -105,11 +105,37 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`wire.rhdl`](wire.rhdl) | Forward-readable aggregate wire driven later by element |
 | [`interface.rhdl`](interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
 | [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
-| [`interface-array.rhdl`](interface-array.rhdl) | Host-sized endpoint arrays and flattened ports |
+| [`interface-array.rhdl`](interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, and serial/parallel handles |
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`flow-control.rhdl`](flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
-| [`flow-topology.rhdl`](flow-topology.rhdl) | Round-robin arbitration, demux, atomic join, and exactly-once broadcast |
+| [`flow-topology.rhdl`](flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, zip, parallel, arbitration, buffering, fork, and payload routing |
 | [`ctrl-flow.rhdl`](ctrl-flow.rhdl) | Payloadless token-flow versions of pipe, queue, arbitration, routing, join, and broadcast |
+
+## Interface topology composition
+
+[`interface-array.rhdl`](interface-array.rhdl) separates the generic interface
+model from ready-valid flow control. It demonstrates direct endpoint bulk
+connection with `<=>`, serial composition of two `interface_link` handles, and
+parallel composition into array-shaped handle ends. These handles work for any
+directional interface, including the bidirectional `ByteExchange` protocol.
+
+[`flow-topology.rhdl`](flow-topology.rhdl) then layers ready-valid operations on
+that generic mechanism. Its three integrated circuits show the complete
+composition vocabulary:
+
+- `EndpointFirstTopology` starts from concrete endpoints and applies an
+  arbiter and pipe immediately.
+- `FanInProjectTopology` builds a handle before attaching endpoints, combining
+  per-lane maps, round-robin fan-in, stateful buffering, atomic fanout, and
+  independent projections.
+- `ZipRouteTopology` atomically joins heterogeneous inputs, buffers the joined
+  payload, routes by a payload field, and maps both outputs in parallel.
+
+The operator boundary is deliberate: `|>` applies or composes handles and
+returns the still-open end, while `<=>` bulk-connects two concrete endpoint
+shapes. Pure maps and zips elaborate as local wiring; pipes, queues, arbiters,
+and forks remain explicit circuit instances where they represent state or a
+meaningful structural boundary.
 
 [`add-pair.rhm`](add-pair.rhm) is intentionally an ordinary Rhombus library,
 showing that useful RHDL composition need not modify a reader or define a

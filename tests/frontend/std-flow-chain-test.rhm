@@ -5,6 +5,7 @@ import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../rhdl/frontend/standard.rhm" as frontend
+  "../../examples/flow-topology.rhdl" as example
   "std-flow-chain.rhdl" as fixture
 
 def design = fixture.design
@@ -19,6 +20,30 @@ def ctrl_top = ctrl_design.modules[0]
 def ctrl_pipe_to_queue_design = embedded.run_elaboration(
   fun (): fixture.CtrlPipeToQueueChain()
 )
+def map_flow_design = embedded.run_elaboration(
+  fun (): fixture.MapFlowChain()
+)
+def map_flow_top = map_flow_design.modules[0]
+def zip_flow_design = embedded.run_elaboration(
+  fun (): fixture.ZipFlowChain()
+)
+def zip_flow_top = zip_flow_design.modules[0]
+def map_to_atomic_fork_design = embedded.run_elaboration(
+  fun (): fixture.MapToAtomicForkChain()
+)
+def map_to_atomic_fork_top = map_to_atomic_fork_design.modules[0]
+def parallel_map_flow_design = embedded.run_elaboration(
+  fun (): fixture.ParallelMapFlowChain()
+)
+def parallel_map_flow_top = parallel_map_flow_design.modules[0]
+def demux_flow_design = embedded.run_elaboration(
+  fun (): fixture.DemuxFlowChain()
+)
+def demux_flow_top = demux_flow_design.modules[0]
+def rr_arbiter_pipeline_design = embedded.run_elaboration(
+  fun (): fixture.RRArbiterPipelineChain()
+)
+def rr_arbiter_pipeline_top = rr_arbiter_pipeline_design.modules[0]
 
 fun operations(module_def, opcode):
   module_def.operations.filter(
@@ -53,6 +78,69 @@ check:
   verify_design(ctrl_design) ~is #void
   verify_design(ctrl_pipe_to_queue_design) ~is #void
 
+  map_flow_design.modules.map(fun (module_def): module_def.name) ~is [
+    "MapFlowChain"
+  ]
+  map_flow_top.inputs.map(fun (port): port.name) ~is [
+    "ingress_in", "egress_in"
+  ]
+  map_flow_top.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_out"
+  ]
+  operations(map_flow_top, "rtl.instance").length() ~is 0
+  verify_design(map_flow_design) ~is #void
+  map_to_atomic_fork_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["MapToAtomicForkChain", "AtomicFork"]
+  operations(map_to_atomic_fork_top, "rtl.instance").length() ~is 1
+  verify_design(map_to_atomic_fork_design) ~is #void
+
+  zip_flow_design.modules.map(fun (module_def): module_def.name) ~is [
+    "ZipFlowChain", "Queue", "Counter"
+  ]
+  zip_flow_top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "data_in", "owner_in", "egress_in"
+  ]
+  zip_flow_top.outputs.map(fun (port): port.name) ~is [
+    "data_out", "owner_out", "egress_out"
+  ]
+  operations(zip_flow_top, "rtl.instance").length() ~is 1
+  verify_design(zip_flow_design) ~is #void
+
+  parallel_map_flow_top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in", "data_egress_in", "owner_egress_in"
+  ]
+  parallel_map_flow_top.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "data_egress_out", "owner_egress_out"
+  ]
+  operations(parallel_map_flow_top, "rtl.instance").length() ~is 2
+  verify_design(parallel_map_flow_design) ~is #void
+
+  demux_flow_design.modules.map(fun (module_def): module_def.name) ~is [
+    "DemuxFlowChain", "Queue", "Counter"
+  ]
+  demux_flow_top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_in", "egress_0_in", "egress_1_in"
+  ]
+  demux_flow_top.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_0_out", "egress_1_out"
+  ]
+  operations(demux_flow_top, "rtl.instance").length() ~is 1
+  verify_design(demux_flow_design) ~is #void
+
+  embedded.run_elaboration(
+    fun (): fixture.FlowThroughQueueStrongerDestination()
+  ) ~throws "provider interface does not support the peer interface contract"
+
+  rr_arbiter_pipeline_design.modules.map(fun (module_def): module_def.name) ~is [
+    "RRArbiterPipelineChain", "RRArbiter", "Pipe"
+  ]
+  operations(rr_arbiter_pipeline_top, "rtl.instance").length() ~is 2
+  verify_design(rr_arbiter_pipeline_design) ~is #void
+  verify_design(example.endpoint_first_design) ~is #void
+  verify_design(example.fan_in_project_design) ~is #void
+  verify_design(example.zip_route_design) ~is #void
+
   embedded.run_elaboration(
     fun (): fixture.WrongProtocolChain()
   ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
@@ -61,13 +149,43 @@ check:
   ) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(
     fun (): fixture.NonEndpointChain()
-  ) ~throws "argument does not satisfy annotation"
+  ) ~throws "requires a payload DataType, ready-valid InterfaceType, Endpoint, or Handle"
   embedded.run_elaboration(
     fun (): fixture.CtrlWrongProtocolChain()
   ) ~throws "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint"
   embedded.run_elaboration(
     fun (): fixture.CtrlNonEndpointChain()
   ) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(
+    fun (): fixture.MapFlowWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.MapFlowStrongerDestination()
+  ) ~throws "provider interface does not support the peer interface contract"
+  embedded.run_elaboration(
+    fun (): fixture.MapFlowReusedSource()
+  ) ~throws "an interface handle can be consumed only once"
+  embedded.run_elaboration(
+    fun (): fixture.ZipFlowWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.ZipFlowHostValue()
+  ) ~throws "expected hardware data"
+  embedded.run_elaboration(
+    fun (): fixture.ParallelMapFlowMixedPaths()
+  ) ~throws "parallel interface composition requires only handles"
+  embedded.run_elaboration(
+    fun (): fixture.ParallelMapFlowLengthMismatch()
+  ) ~throws "must have the same length"
+  embedded.run_elaboration(
+    fun (): fixture.ParallelMapFlowHostValue()
+  ) ~throws "expected hardware data"
+  embedded.run_elaboration(
+    fun (): fixture.EmptyRRArbiterPipeline()
+  ) ~throws "requires at least one input endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.MismatchedRRArbiterPipeline()
+  ) ~throws "does not support the peer interface contract"
   embedded.run_elaboration(
     fun (): fixture.MissingSyncDomain()
   ) ~throws "active sync_circuit"

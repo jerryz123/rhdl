@@ -3,6 +3,7 @@
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
 
 // Each stage stores one item, contributes one cycle of unloaded latency, and
 // propagates readiness combinationally backward. Stored payloads remain stable
@@ -72,14 +73,16 @@ sync_circuit CtrlPipe(stages :: Int):
     when (ready[index]):
       stage_valid.next[index] <== valid_sources[index]
 
-// Instantiates a pipe in the ambient sync domain and returns its downstream
-// endpoint with interface field static information intact.
-fun pipe(source :: Endpoint, stages :: Int) :~ Endpoint:
-  def T = decoupled_payload_type(source)
+// A payload type constructs an unconnected handle; an endpoint or earlier
+// handle connects immediately and returns the remaining far end.
+fun pipe(source_or_type, stages :: Int):
+  def T = flow_payload_type(source_or_type)
   def PipeModule = Pipe(T, stages)
   inst pipe_stage(PipeModule)
-  pipe_stage.ingress <=> source
-  pipe_stage.egress
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(pipe_stage.ingress, pipe_stage.egress)
+  )
 
 // Control-only chaining keeps exact endpoint static information without
 // introducing a dummy payload field.
