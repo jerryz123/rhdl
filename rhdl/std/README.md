@@ -192,6 +192,71 @@ protocol assertions.
 `fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
 returns `endpoint.valid and endpoint.ready`.
 
+## Generic interconnect parameters
+
+[`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral host-side sets
+used to describe interconnect endpoints. `IdRange(start, end)` is a nonempty
+half-open range of nonnegative IDs. `AddressSet(base, mask)` describes every
+nonnegative address formed by varying the one bits of `mask`; canonical bases
+keep those bits clear. `TransferSizes(min_bytes, max_bytes)` is an inclusive
+power-of-two byte-size range. These are immutable elaboration-time values and
+do not create hardware.
+
+## TileLink definitions
+
+[`tilelink.rhdl`](tilelink.rhdl) is the public facade for definition-only
+TileLink support. It provides validated host parameter records, exact A-E
+payload bundles, and directional uncached and cached interfaces. It does not
+implement negotiation, routing, adapters, monitors, transaction helpers, or
+endpoint behavior.
+
+`TLBundleParams(address_width, data_bytes, size_width, source_width,
+sink_width)` fixes the physical link widths. `data_bytes` must be a power of
+two and determines both `data_width = data_bytes * 8` and `mask_width =
+data_bytes`; every other wire width must be positive. These are host generator
+parameters and do not add runtime configuration signals.
+
+The host-only endpoint descriptions use the following vocabulary:
+
+- `IdRange(start, end)` is a nonempty half-open ID range.
+- `AddressSet(base, mask)` uses one mask bit for each variable address bit;
+  the canonical base has those bits clear.
+- `TransferSizes(min_bytes, max_bytes)` is an inclusive power-of-two range.
+- `TLAOperationSizes` describes A operations emitted by a client or supported
+  by a manager.
+- `TLBOperationSizes` describes B operations emitted by a manager or supported
+  by a cached client. An operation field equal to `#false` is unsupported.
+- `TLClientParams` and `TLManagerParams` collect names, ID/address ownership,
+  directional capabilities, and manager denial policy without performing
+  graph-wide negotiation.
+
+The channel payloads follow the TileLink A-E wire layouts. Opcode namespaces
+are nominal and channel-specific (`TLAOpcode` through `TLDOpcode`); the E
+channel contains only its sink ID and therefore has no opcode. `param` remains
+raw `Bits` because its interpretation depends on the opcode.
+
+| Interface | Client to manager | Manager to client |
+|---|---|---|
+| `TLUncached(p)` | A | D |
+| `TLCached(p)` | A, C, E | B, D |
+
+Each channel is nested as `Decoupled(TLChannelX(p))`. TileLink permits an
+unaccepted first beat to be withdrawn or replaced, so the library does not
+claim the stronger `Irrevocable` contract. Clock and reset are properties of
+the circuits using a link, not members of the protocol interface.
+
+```rhombus
+import:
+  lib("rhdl/std/tilelink.rhdl") open
+
+def link_params = TLBundleParams(32, 8, 4, 3, 2)
+
+circuit TileLinkBoundary():
+  interface client(TLUncached(link_params), ~role: manager)
+  interface manager(TLUncached(link_params), ~role: client)
+  manager <=> client
+```
+
 ## Bit-vector alignment
 
 [`bits.rhdl`](bits.rhdl) provides reusable alignment operations over hardware
@@ -205,6 +270,8 @@ def aligned = is_aligned(address, 8)
 def base = align_down(address, 8)
 ```
 
+`power_of_two(value)` is the shared host-side predicate for positive
+power-of-two `Int` values. It returns false for zero and negative integers.
 The alignment is a positive power-of-two host parameter and must fit the
 value's width. `is_aligned` checks that the corresponding low bits are zero;
 `align_down` clears them while preserving the input width. Alignment to one is

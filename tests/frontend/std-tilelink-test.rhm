@@ -1,0 +1,99 @@
+#lang rhombus
+// Checks TileLink opcode encodings, payload layouts, directions, and elaboration.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/layers/enum.rhm" as enum
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../rhdl/std/tilelink.rhdl" as tl
+  "std-tilelink-fixture.rhdl" as fixture
+
+def p = fixture.params
+def a = tl.TLChannelA(p)
+def b = tl.TLChannelB(p)
+def c = tl.TLChannelC(p)
+def d = tl.TLChannelD(p)
+def e = tl.TLChannelE(p)
+def uncached = tl.TLUncached(p)
+def cached = tl.TLCached(p)
+def uncached_a = uncached.members.find(fun (member): member.name == "a")
+def uncached_d = uncached.members.find(fun (member): member.name == "d")
+def uncached_module = fixture.uncached_design.modules[0]
+def cached_module = fixture.cached_design.modules[0]
+
+check:
+  enum.enum_width(tl.TLAOpcode) ~is 3
+  enum.enum_width(tl.TLBOpcode) ~is 3
+  enum.enum_width(tl.TLCOpcode) ~is 3
+  enum.enum_width(tl.TLDOpcode) ~is 3
+  enum.enum_encoding(tl.TLAOpcode, "PutFullData") ~is 0
+  enum.enum_encoding(tl.TLAOpcode, "Intent") ~is 5
+  enum.enum_encoding(tl.TLAOpcode, "AcquirePerm") ~is 7
+  enum.enum_encoding(tl.TLBOpcode, "ProbeBlock") ~is 6
+  enum.enum_encoding(tl.TLCOpcode, "ProbeAck") ~is 4
+  enum.enum_encoding(tl.TLCOpcode, "ReleaseData") ~is 7
+  enum.enum_encoding(tl.TLDOpcode, "GrantData") ~is 5
+  enum.enum_encoding(tl.TLDOpcode, "ReleaseAck") ~is 6
+  a.fields.map(fun (field): field.name) ~is ["opcode",
+                                             "param",
+                                             "size",
+                                             "source",
+                                             "address",
+                                             "mask",
+                                             "data",
+                                             "corrupt"]
+  b.fields.map(fun (field): field.name) ~is a.fields.map(fun (field): field.name)
+  c.fields.map(fun (field): field.name) ~is ["opcode",
+                                             "param",
+                                             "size",
+                                             "source",
+                                             "address",
+                                             "data",
+                                             "corrupt"]
+  d.fields.map(fun (field): field.name) ~is ["opcode",
+                                             "param",
+                                             "size",
+                                             "source",
+                                             "sink",
+                                             "denied",
+                                             "data",
+                                             "corrupt"]
+  e.fields.map(fun (field): field.name) ~is ["sink"]
+  a.field("opcode").type === tl.TLAOpcode ~is #true
+  b.field("opcode").type === tl.TLBOpcode ~is #true
+  c.field("opcode").type === tl.TLCOpcode ~is #true
+  d.field("opcode").type === tl.TLDOpcode ~is #true
+  a.field("param").type.width ~is 3
+  d.field("param").type.width ~is 2
+  a.field("address").type.width ~is 32
+  a.field("mask").type.width ~is 8
+  a.field("data").type.width ~is 64
+  d.field("sink").type.width ~is 2
+  d.field("denied").type === bool.Bool ~is #true
+  packed_width(a) ~is 118
+  packed_width(b) ~is 118
+  packed_width(c) ~is 110
+  packed_width(d) ~is 80
+  packed_width(e) ~is 2
+  uncached.roles ~is ["client", "manager"]
+  uncached.provider_role ~is "client"
+  uncached.members.map(fun (member): member.name) ~is ["a", "d"]
+  uncached_a.from_role ~is "client"
+  uncached_d.from_role ~is "manager"
+  uncached_a.type.name ~is "Decoupled"
+  uncached_d.type.name ~is "Decoupled"
+  uncached_a.type.members.map(fun (member): member.name) ~is ["valid", "ready", "bits"]
+  type_equal(uncached_a.type.members.find(fun (member): member.name == "bits").type,
+             a) ~is #true
+  cached.members.map(fun (member): member.name) ~is ["a", "c", "e", "b", "d"]
+  cached.members.find(fun (member): member.name == "a").from_role ~is "client"
+  cached.members.find(fun (member): member.name == "c").from_role ~is "client"
+  cached.members.find(fun (member): member.name == "e").from_role ~is "client"
+  cached.members.find(fun (member): member.name == "b").from_role ~is "manager"
+  cached.members.find(fun (member): member.name == "d").from_role ~is "manager"
+  uncached_module.inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
+  uncached_module.outputs.map(fun (port): port.name) ~is ["ingress_out", "egress_out"]
+  cached_module.inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
+  cached_module.outputs.map(fun (port): port.name) ~is ["ingress_out", "egress_out"]
+  verify_design(fixture.uncached_design) ~is #void
+  verify_design(fixture.cached_design) ~is #void

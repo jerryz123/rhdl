@@ -1,0 +1,52 @@
+#lang rhombus
+// Checks TileLink host parameter construction, queries, defaults, and rejection.
+
+import:
+  "../../rhdl/std/tilelink/params.rhdl" as tl
+
+def ids = tl.IdRange(2, 6)
+def address = tl.AddressSet(0x8000, 0x0fff)
+def transfers = tl.TransferSizes(4, 64)
+def reads = tl.TLAOperationSizes(~get: transfers, ~intent: tl.TransferSizes(1, 8))
+def probes = tl.TLBOperationSizes(~probe: transfers)
+def client = tl.TLClientParams("cpu", ids, ~emits: reads, ~supports: probes)
+def manager = tl.TLManagerParams("ram", [address], tl.IdRange(0, 4),
+                                 ~supports: reads, ~may_deny_get: #true)
+def widths = tl.TLBundleParams(32, 8, 4, 3, 2)
+
+check:
+  ids.start ~is 2
+  ids.end ~is 6
+  ids.size ~is 4
+  ids.contains(2) ~is #true
+  ids.contains(5) ~is #true
+  ids.contains(6) ~is #false
+  address.contains(0x8000) ~is #true
+  address.contains(0x8abc) ~is #true
+  address.contains(0x9000) ~is #false
+  transfers.contains(4) ~is #true
+  transfers.contains(32) ~is #true
+  transfers.contains(3) ~is #false
+  transfers.contains(128) ~is #false
+  reads.get === transfers ~is #true
+  reads.put_full ~is #false
+  probes.probe === transfers ~is #true
+  client.name ~is "cpu"
+  client.source_ids === ids ~is #true
+  client.emits === reads ~is #true
+  client.supports === probes ~is #true
+  manager.address_sets ~is [address]
+  manager.supports === reads ~is #true
+  manager.emits.probe ~is #false
+  manager.may_deny_get ~is #true
+  manager.may_deny_put ~is #false
+  widths.address_width ~is 32
+  widths.data_bytes ~is 8
+  widths.data_width ~is 64
+  widths.mask_width ~is 8
+  tl.TLAOperationSizes(~get: "unsupported") ~throws "get must be #false or TransferSizes"
+  tl.TLClientParams("", ids, ~emits: reads) ~throws "nonempty String"
+  tl.TLManagerParams("ram", [], ids, ~supports: reads) ~throws "nonempty List"
+  tl.TLManagerParams("ram", ["bad"], ids, ~supports: reads) ~throws "elements must be AddressSet"
+  tl.TLBundleParams(32, 3, 4, 3, 2) ~throws "positive power of two"
+  tl.TLBundleParams(32, 8, 4, 0, 2) ~throws "source width must be a positive"

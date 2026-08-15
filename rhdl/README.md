@@ -80,13 +80,18 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/bits.rhdl` | Power-of-two alignment width, checking, and downward alignment for `Bits` | None |
+| `std/bits.rhdl` | Host power-of-two testing plus alignment width, checking, and downward alignment for `Bits` | None |
+| `std/interconnect.rhdl` | Protocol-neutral host-side ID ranges, masked address sets, and transfer-size sets | `std/bits.rhdl` |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes, exact-literal normalization, partial records, and recursive aggregate construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
 | `std/decode/table.rhdl` | Validated unordered typed decode relations, grouped sparse record cases, input lifting, and row-aligned output products | `std/decode/pattern.rhdl` |
 | `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings lowering to one core decode | `std/decode/pattern.rhdl`, `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and endpoint introspection | None |
+| `std/tilelink/params.rhdl` | Host-side TileLink wire widths, operation capabilities, and endpoint descriptions | `std/bits.rhdl`, `std/interconnect.rhdl` |
+| `std/tilelink/bundles.rhdl` | Exact TileLink A-E opcode and payload bundle types | `std/tilelink/params.rhdl` |
+| `std/tilelink/link.rhdl` | Directional `TLUncached` and `TLCached` ready-valid interfaces | `std/ready-valid.rhdl`, `std/tilelink/params.rhdl`, `std/tilelink/bundles.rhdl` |
+| `std/tilelink.rhdl` | Public TileLink facade | All `std/tilelink/` modules |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
 | `std/flow/stage.rhdl` | Valid-only and ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |

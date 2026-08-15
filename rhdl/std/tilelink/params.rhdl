@@ -1,0 +1,185 @@
+#lang rhdl
+// Defines validated host-side TileLink widths, address sets, ID ranges, and capabilities.
+
+import:
+  lib("rhdl/std/bits.rhdl").power_of_two
+  lib("rhdl/std/interconnect.rhdl") open
+
+fun require_transfer_sizes(value, role, who):
+  unless value == #false || value is_a TransferSizes
+  | error(~who: who,
+          role ++ " must be #false or TransferSizes")
+  value
+
+// A-channel capabilities are used both for operations emitted by clients and
+// operations accepted by managers. #false means an operation is unsupported.
+class TLAOperationSizes(acquire_block,
+                        acquire_perm,
+                        arithmetic,
+                        logical,
+                        get,
+                        put_full,
+                        put_partial,
+                        intent):
+  constructor (~acquire_block: acquire_block = #false,
+               ~acquire_perm: acquire_perm = #false,
+               ~arithmetic: arithmetic = #false,
+               ~logical: logical = #false,
+               ~get: get = #false,
+               ~put_full: put_full = #false,
+               ~put_partial: put_partial = #false,
+               ~intent: intent = #false):
+    require_transfer_sizes(acquire_block, "acquire_block", #'TLAOperationSizes)
+    require_transfer_sizes(acquire_perm, "acquire_perm", #'TLAOperationSizes)
+    require_transfer_sizes(arithmetic, "arithmetic", #'TLAOperationSizes)
+    require_transfer_sizes(logical, "logical", #'TLAOperationSizes)
+    require_transfer_sizes(get, "get", #'TLAOperationSizes)
+    require_transfer_sizes(put_full, "put_full", #'TLAOperationSizes)
+    require_transfer_sizes(put_partial, "put_partial", #'TLAOperationSizes)
+    require_transfer_sizes(intent, "intent", #'TLAOperationSizes)
+    super(acquire_block,
+          acquire_perm,
+          arithmetic,
+          logical,
+          get,
+          put_full,
+          put_partial,
+          intent)
+
+// B-channel capabilities are emitted by managers and accepted by cached
+// clients. Probe covers both ProbeBlock and ProbePerm.
+class TLBOperationSizes(probe,
+                        arithmetic,
+                        logical,
+                        get,
+                        put_full,
+                        put_partial,
+                        intent):
+  constructor (~probe: probe = #false,
+               ~arithmetic: arithmetic = #false,
+               ~logical: logical = #false,
+               ~get: get = #false,
+               ~put_full: put_full = #false,
+               ~put_partial: put_partial = #false,
+               ~intent: intent = #false):
+    require_transfer_sizes(probe, "probe", #'TLBOperationSizes)
+    require_transfer_sizes(arithmetic, "arithmetic", #'TLBOperationSizes)
+    require_transfer_sizes(logical, "logical", #'TLBOperationSizes)
+    require_transfer_sizes(get, "get", #'TLBOperationSizes)
+    require_transfer_sizes(put_full, "put_full", #'TLBOperationSizes)
+    require_transfer_sizes(put_partial, "put_partial", #'TLBOperationSizes)
+    require_transfer_sizes(intent, "intent", #'TLBOperationSizes)
+    super(probe,
+          arithmetic,
+          logical,
+          get,
+          put_full,
+          put_partial,
+          intent)
+
+class TLClientParams(name, source_ids, emits, supports):
+  constructor (name,
+               source_ids,
+               ~emits,
+               ~supports: supports = TLBOperationSizes()):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'TLClientParams,
+            "name must be a nonempty String")
+    unless source_ids is_a IdRange
+    | error(~who: #'TLClientParams,
+            "source_ids must be an IdRange")
+    unless emits is_a TLAOperationSizes
+    | error(~who: #'TLClientParams,
+            "emits must be TLAOperationSizes")
+    unless supports is_a TLBOperationSizes
+    | error(~who: #'TLClientParams,
+            "supports must be TLBOperationSizes")
+    super(name, source_ids, emits, supports)
+
+class TLManagerParams(name,
+                      address_sets,
+                      sink_ids,
+                      supports,
+                      emits,
+                      may_deny_get,
+                      may_deny_put):
+  constructor (name,
+               address_sets,
+               sink_ids,
+               ~supports,
+               ~emits: emits = TLBOperationSizes(),
+               ~may_deny_get: may_deny_get = #false,
+               ~may_deny_put: may_deny_put = #false):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'TLManagerParams,
+            "name must be a nonempty String")
+    unless address_sets is_a List && address_sets.length() > 0
+    | error(~who: #'TLManagerParams,
+            "address_sets must be a nonempty List")
+    for (address_set in address_sets):
+      unless address_set is_a AddressSet
+      | error(~who: #'TLManagerParams,
+              "address_sets elements must be AddressSet values")
+    unless sink_ids is_a IdRange
+    | error(~who: #'TLManagerParams,
+            "sink_ids must be an IdRange")
+    unless supports is_a TLAOperationSizes
+    | error(~who: #'TLManagerParams,
+            "supports must be TLAOperationSizes")
+    unless emits is_a TLBOperationSizes
+    | error(~who: #'TLManagerParams,
+            "emits must be TLBOperationSizes")
+    unless may_deny_get is_a Boolean && may_deny_put is_a Boolean
+    | error(~who: #'TLManagerParams,
+            "denial flags must be host Boolean values")
+    super(name,
+          address_sets,
+          sink_ids,
+          supports,
+          emits,
+          may_deny_get,
+          may_deny_put)
+
+class TLBundleParams(address_width,
+                     data_bytes,
+                     size_width,
+                     source_width,
+                     sink_width):
+  constructor (address_width,
+               data_bytes,
+               size_width,
+               source_width,
+               sink_width):
+    unless address_width is_a Int && address_width > 0
+    | error(~who: #'TLBundleParams,
+            "address width must be a positive host Int")
+    unless data_bytes is_a Int && power_of_two(data_bytes)
+    | error(~who: #'TLBundleParams,
+            "data byte count must be a positive power of two")
+    unless size_width is_a Int && size_width > 0
+    | error(~who: #'TLBundleParams,
+            "size width must be a positive host Int")
+    unless source_width is_a Int && source_width > 0
+    | error(~who: #'TLBundleParams,
+            "source width must be a positive host Int")
+    unless sink_width is_a Int && sink_width > 0
+    | error(~who: #'TLBundleParams,
+            "sink width must be a positive host Int")
+    super(address_width,
+          data_bytes,
+          size_width,
+          source_width,
+          sink_width)
+
+  property data_width: data_bytes * 8
+  property mask_width: data_bytes
+
+export:
+  IdRange
+  AddressSet
+  TransferSizes
+  TLAOperationSizes
+  TLBOperationSizes
+  TLClientParams
+  TLManagerParams
+  TLBundleParams
