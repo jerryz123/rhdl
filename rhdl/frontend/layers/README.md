@@ -64,7 +64,9 @@ the typed `DecodeGen` standard-library wrapper, which constructs those images
 from `Pattern` values.
 
 The standard combinational surface includes modular `+`, `-`, `*`, shifts,
-bitwise `&`, `^`, `and`, `or`, `xor`, and `not`. `Bits` arithmetic is unsigned;
+bitwise `&`, `^`, `and`, `or`, `xor`, and prefix `!`. On hardware, `!` is a
+width-preserving inversion for both `Bool` and `Bits`; on host Booleans it
+retains Rhombus negation. `Bits` arithmetic is unsigned;
 `SInt` arithmetic uses a signed interpretation where the operation depends on
 it. Both remain fixed-width. On host values these operators keep their ordinary
 Rhombus meaning.
@@ -84,7 +86,7 @@ implied by a result width.
 The canonical selection form is N-way lookup:
 
 ```rhombus
-result <== mux_lookup(op, ~default: not a):
+result <== mux_lookup(op, ~default: !a):
   0: a & b
   1: a or b
   2: a ^ b

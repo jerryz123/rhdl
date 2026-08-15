@@ -75,19 +75,19 @@ sync_circuit Ricket(address_width :: Int):
   def fetch_stale_response = fetch_request_epoch =/= fetch_epoch
   def start_aligned = is_aligned(start.bits, 4)
 
-  start.ready <== not started and not (faulted or execute_fault_event)
-  def start_fault = fire(start) and not start_aligned
-  imem.request.valid <== started and not (
+  start.ready <== !started and !(faulted or execute_fault_event)
+  def start_fault = fire(start) and !start_aligned
+  imem.request.valid <== started and !(
     faulted or execute_fault_event
-  ) and not redirect_link.right.valid and not fetch_request_outstanding
+  ) and !redirect_link.right.valid and !fetch_request_outstanding
   imem.request.bits.address <== fetch_pc[0..address_width]
   imem.request.bits.write <== Bool(#false)
   imem.request.bits.data <== bits(0, 32)
-  imem.request.bits.mask <== not bits(0, 4)
+  imem.request.bits.mask <== !bits(0, 4)
 
   if_id_pipe.ingress.valid <== fetch_request_outstanding and (
     imem.response.valid
-  ) and not squash and not fetch_stale_response
+  ) and !squash and !fetch_stale_response
   if_id_pipe.ingress.bits <== FetchDecode():
     pc: fetch_request_pc
     instruction: imem.response.bits.data
@@ -109,7 +109,7 @@ sync_circuit Ricket(address_width :: Int):
     fetch_pc.next <== fetch_pc + bits(4, 64)
 
   when (redirect_link.right.valid):
-    fetch_epoch.next <== not fetch_epoch
+    fetch_epoch.next <== !fetch_epoch
 
   when fetch_response_fire:
     fetch_request_outstanding.next <== Bool(#false)
@@ -128,7 +128,7 @@ sync_circuit Ricket(address_width :: Int):
   // token.
   def live_if_id :: Endpoint = filter_flow(
     if_id_pipe.egress,
-    fetch_token => not squash
+    fetch_token => !squash
   )
   def id_ex = id_ex_pipe.egress
   def instruction = live_if_id.bits.instruction
@@ -175,8 +175,8 @@ sync_circuit Ricket(address_width :: Int):
   def load_use_hazard = live_if_id.valid and id_ex_is_load and (
     load_use_rs1 or load_use_rs2
   )
-  live_if_id.ready <== id_ex_pipe.ingress.ready and not load_use_hazard
-  id_ex_pipe.ingress.valid <== live_if_id.valid and not load_use_hazard
+  live_if_id.ready <== id_ex_pipe.ingress.ready and !load_use_hazard
+  id_ex_pipe.ingress.valid <== live_if_id.valid and !load_use_hazard
   id_ex_pipe.ingress.bits <== DecodeExecute():
     pc: live_if_id.bits.pc
     instruction: instruction
@@ -191,7 +191,7 @@ sync_circuit Ricket(address_width :: Int):
     writeback_enable: control.writeback.enable
     writeback_source: control.writeback.source
     trap: control.trap.trap
-    illegal: not decoder.valid
+    illegal: !decoder.valid
     immediate: decoded_immediate
     rs1: rs1
     rs2: rs2
@@ -261,9 +261,9 @@ sync_circuit Ricket(address_width :: Int):
     id_ex.bits.memory_width
   )
   def execute_fault = id_ex.bits.illegal or id_ex.bits.trap or (
-    redirect_requested and not redirect_aligned
+    redirect_requested and !redirect_aligned
   ) or (
-    (id_ex.bits.memory_operation =/= MemoryOperation.None) and not (
+    (id_ex.bits.memory_operation =/= MemoryOperation.None) and !(
       memory_aligned
     )
   )
@@ -276,13 +276,13 @@ sync_circuit Ricket(address_width :: Int):
   )
 
   execute_fault_event <== execute_transfer and execute_fault
-  redirect_link.left.valid <== execute_transfer and not execute_fault and (
+  redirect_link.left.valid <== execute_transfer and !execute_fault and (
     redirect_requested
   )
   redirect_link.left.bits <== computed_redirect_target
 
   id_ex.ready <== ex_mem_pipe.ingress.ready
-  ex_mem_pipe.ingress.valid <== id_ex.valid and not execute_fault
+  ex_mem_pipe.ingress.valid <== id_ex.valid and !execute_fault
   ex_mem_pipe.ingress.bits <== ExecuteMemory():
     pc: id_ex.bits.pc
     memory_operation: id_ex.bits.memory_operation
@@ -315,7 +315,7 @@ sync_circuit Ricket(address_width :: Int):
     ex_mem.bits.result
   )
 
-  dmem.request.valid <== ex_mem.valid and is_memory and not memory_request_sent
+  dmem.request.valid <== ex_mem.valid and is_memory and !memory_request_sent
   dmem.request.bits.address <== align_down(
     ex_mem.bits.address[0..address_width],
     8
@@ -325,18 +325,18 @@ sync_circuit Ricket(address_width :: Int):
   dmem.request.bits.mask <== mux(
     is_store,
     store_gen.mask,
-    not bits(0, 8)
+    !bits(0, 8)
   )
   dmem.response.ready <== ex_mem.valid and is_memory and memory_request_sent
 
   mem_wb_pipe.ingress.valid <== ex_mem.valid and (
-    not is_memory or memory_response_available
+    !is_memory or memory_response_available
   )
   mem_wb_pipe.ingress.bits <== MemoryWriteback():
     write_enable: ex_mem.bits.writeback_enable
     rd: ex_mem.bits.rd
     value: memory_writeback_value
-  ex_mem.ready <== not is_memory or memory_response_available
+  ex_mem.ready <== !is_memory or memory_response_available
 
   memory_bypass_link.left.valid <== ex_mem.valid and (
     ex_mem.bits.writeback_enable
