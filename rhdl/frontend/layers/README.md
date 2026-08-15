@@ -225,12 +225,19 @@ always explicit.
 
 ## Registers and synchronous circuits
 
-A register exposes readable current state and a driveable next-state place:
+A register reads as its current state and drives as its next state:
 
 ```rhombus
 reg state(Bits(width), ~clock: clk, ~reset: reset, ~init: zero)
-state.next <== state + one
+state <== state + one
 ```
+
+The same rule follows statically selected aggregate paths. Reading
+`state.field` or `state[index]` selects current state, while using that path as
+the direct target of `<==` selects the corresponding next-state place. The
+explicit `state.next` spelling remains available for compatibility and
+low-level code. Hardware-selected dynamic indices are values rather than
+places; express those updates as a whole-register drive with `.updated`.
 
 The type can be inferred from `~init` or `~next`. Supplying `~next` drives the
 register immediately; another drive is an error. `~init` is an active-high
@@ -245,7 +252,7 @@ ambient domain:
 sync_circuit Counter(width):
   output count: Bits(width)
   reg state(~init: bits(0, width))
-  state.next <== state + bits(1, width)
+  state <== state + bits(1, width)
   count <== state
 ```
 
@@ -400,11 +407,11 @@ ordinary circuits pass `~clock` explicitly. `dpi_reg` accepts `~clock` and
 
 ```rhombus
 when load:
-  state.next <== data_in
+  state <== data_in
 elsewhen clear:
-  state.next <== zero
+  state <== zero
 otherwise:
-  state.next <== fallback
+  state <== fallback
 ```
 
 The first true branch wins. Nested chains lower each destination to priority
@@ -417,11 +424,11 @@ inputs require exhaustive assignment.
 ```rhombus
 switch state:
   case State.Idle:
-    state.next <== State.Running
+    state <== State.Running
   case State.Running:
-    state.next <== State.Done
+    state <== State.Done
   otherwise:
-    state.next <== State.Idle
+    state <== State.Idle
 ```
 
 Bits selectors use nonnegative host `Int` keys. Typed mux-key selectors such as

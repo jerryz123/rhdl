@@ -100,6 +100,21 @@ interface DeferredHardwareValue:
 interface StaticHardwareValue:
   extends DeferredHardwareValue
 
+// Carries one register-relative path with its current-state value and its
+// next-state place until a read or drive context selects the appropriate side.
+interface RegisterPathValue:
+  extends DeferredHardwareValue
+  method drive_hardware(location)
+
+class RegisterPath(materialize_current, next, mutable current = #false):
+  implements RegisterPathValue
+
+  override method materialize_hardware(location):
+    unless current
+    | current := materialize_current()
+    current
+  override method drive_hardware(location): next
+
 fun hardware_entity(value):
   cond
   | value is_a Value: #true
@@ -660,14 +675,32 @@ fun record_create(type, fields, name = #false, location = Location()):
 
 fun project(entity, field_name, name = #false, location = Location()):
   def context = require_context(location)
-  if entity is_a Place
-  | context.builder.project(entity, field_name)
-  | context.builder.record_get(require_module(location),
-                               read(entity, location),
-                               field_name,
-                               name,
-                               location,
-                               Origin("embedded record get", field_name))
+  def drive_place:
+    cond
+    | entity is_a Register: entity.next
+    | entity is_a RegisterPathValue: entity.drive_hardware(location)
+    | ~else: #false
+  cond
+  | entity is_a Place:
+      context.builder.project(entity, field_name)
+  | drive_place:
+      RegisterPath(
+        fun ():
+          context.builder.record_get(require_module(location),
+                                     read(entity, location),
+                                     field_name,
+                                     name,
+                                     location,
+                                     Origin("embedded record get", field_name)),
+        context.builder.project(drive_place, field_name)
+      )
+  | ~else:
+      context.builder.record_get(require_module(location),
+                                 read(entity, location),
+                                 field_name,
+                                 name,
+                                 location,
+                                 Origin("embedded record get", field_name))
 
 fun vector_create(type, elements, name = #false, location = Location()):
   def context = require_context(location)
@@ -693,9 +726,19 @@ fun vector_get(entity, element_index, name = #false, location = Location()):
 
 fun vector_project(entity, element_index, location = Location()):
   def context = require_context(location)
-  if entity is_a Place
-  | context.builder.project_vector(entity, element_index)
-  | vector_get(entity, element_index, #false, location)
+  def drive_place:
+    cond
+    | entity is_a Register: entity.next
+    | entity is_a RegisterPathValue: entity.drive_hardware(location)
+    | ~else: #false
+  cond
+  | entity is_a Place:
+      context.builder.project_vector(entity, element_index)
+  | drive_place:
+      RegisterPath(fun (): vector_get(entity, element_index, #false, location),
+                   context.builder.project_vector(drive_place, element_index))
+  | ~else:
+      vector_get(entity, element_index, #false, location)
 
 fun index(entity, element_index, location = Location()):
   def type:
@@ -787,20 +830,25 @@ fun inst(name, child, location = Location()):
 
 fun connect(place, entity, location = Location()):
   def context = require_context(location)
-  unless place is_a Place
+  def target:
+    cond
+    | place is_a Register: place.next
+    | place is_a RegisterPathValue: place.drive_hardware(location)
+    | ~else: place
+  unless target is_a Place
   | frontend_fail("connection target must be a driveable hardware place",
                   location)
   def value = read(entity, location)
-  unless type_equal(place.type, value.type)
+  unless type_equal(target.type, value.type)
   | frontend_fail("connection source and target must have exactly the same hardware type",
                   location)
   def conditional_branch = current_conditional_branch()
   if conditional_branch is_a ConditionalBranch
-  | conditional_branch.add(place, value, location)
-  | context.builder.drive(place,
+  | conditional_branch.add(target, value, location)
+  | context.builder.drive(target,
                           value,
                           location,
-                          Origin("embedded connect", place.name))
+                          Origin("embedded connect", target.name))
 
 fun register_hold_value(place, location = Location()):
   if place.parent
