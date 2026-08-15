@@ -1,0 +1,202 @@
+<!-- Compares the core denotation and authoring semantics of RHDL and Amaranth. -->
+
+# RHDL and Amaranth
+
+## Scope and thesis
+
+*Snapshot: 2026-08-15.*
+
+This comparison uses the current
+[Amaranth documentation](https://amaranth-lang.org/docs/amaranth/latest/intro.html)
+and focuses on language semantics and authoring syntax.
+
+Amaranth and RHDL are close in scale and intent. Both execute a host-language
+program to construct explicit RTL. Amaranth centers its model on Python
+`Value` expressions, assignable `Signal`s, and named control domains. RHDL
+centers its model on exact semantic types, readable `Value`s, driveable
+`Place`s, and one verified public IR. Amaranth makes mathematical expression
+sizing and default-then-override assignment economical. RHDL makes final
+widths, drivers, and protocol identity more local.
+
+## Summary
+
+| Concern | RHDL | Amaranth |
+|---|---|---|
+| Source denotation | Rhombus evaluation constructs one public core IR | Python evaluation constructs `Value` expressions and module fragments |
+| Hardware object | Readable `Value` and driveable `Place` are distinct | A `Signal` is both a readable value and an assignment target |
+| Width policy | Positive explicit widths and explicit adaptation | Shapes may be inferred; expressions grow; assignment may truncate |
+| Assignment | One effective driver; conditional alternatives become one drive | One driving domain per bit; within a domain the last active assignment wins |
+| State | Explicit register with current value, next place, clock, and optional synchronous reset | Synchronous domains hold state; domain assignments update it at the active edge |
+| Hierarchy | Circuit definitions and explicit instances | `Elaboratable` objects return fragments; `Module.submodules` establishes hierarchy |
+| Interface relation | Nominal roles, refinement, support, and linear handles | Immutable signatures, nested directions, flipping, equality, and structural connection |
+| Primary abstraction tools | Rhombus functions, macros, classes, language layers, type capabilities | Python functions, classes, generators, castable protocols, and signatures |
+
+## Denotation and staging
+
+Amaranth hardware expressions are Python objects that form an abstract syntax
+tree. Python executes first, creating values, assignments, modules, and
+submodules; the resulting structure denotes hardware. The
+[language guide](https://amaranth-lang.org/docs/amaranth/latest/guide.html)
+draws this boundary explicitly: Python `if` and loops choose generated
+structure, while `m.If`, `m.Switch`, and value operators describe circuit-time
+behavior.
+
+RHDL uses the same two phases. Ordinary Rhombus computation chooses generated
+structure; `when`, `switch`, and hardware operators create runtime logic.
+
+The completed assignments in both systems denote concurrent logic. Python or
+Rhombus statement order is construction order, not circuit execution order;
+it becomes hardware priority only through the language's assignment and
+conditional rules.
+
+An Amaranth `Elaboratable` returns a `Module`, `Instance`, or another
+elaboratable, and recursive preparation turns these fragments into a complete
+design. RHDL executes a circuit generator inside one active design builder and
+immediately creates a module definition. All frontend forms converge on the
+same [core representation](../../rhdl/core/README.md). Amaranth's fragment
+protocol favors Python object composition; RHDL's explicit design ownership
+makes the completed semantic object easier to name and inspect.
+
+## Expressions, types, and widths
+
+Amaranth's central type descriptor is a *shape*: a width plus signedness.
+Shapes may come from explicit declarations, Python integers and ranges, enums,
+or user-defined `ShapeCastable` objects. Constants choose a sufficient width,
+signals may infer a shape, and zero-width values are legal. User-defined
+`ValueCastable` objects can present richer data abstractions while lowering to
+ordinary Amaranth values.
+
+The arithmetic rules aim to preserve the mathematical range of an
+intermediate expression. Addition, subtraction, multiplication, comparisons,
+and shifts derive result shapes from their operands. Assignment is a separate
+boundary and may discard high bits when the destination is narrower. This
+combination makes expressions concise and often prevents accidental
+intermediate overflow, but the stored width is not determined by the expression
+alone. The official guide documents these
+[shape and value rules](https://amaranth-lang.org/docs/amaranth/latest/guide.html#shapes).
+
+RHDL requires positive, elaboration-known widths. Ordinary arithmetic is
+fixed-width and modular; expanding arithmetic, extension, truncation, and casts
+are different operations. Connections require complete type equality, not
+only a compatible width. `Bits(8)`, `SInt(8)`, `Bool`, enums, one-hot controls,
+records, and vectors therefore retain their semantic distinction through the
+IR.
+
+Amaranth's approach is elegant when the expression should follow mathematical
+range rules. RHDL's approach is elegant when each operation should expose the
+implemented datapath width without consulting its eventual destination. Both
+allow semantic types to be layered above bit vectors; Amaranth does so through
+castable Python protocols, while RHDL uses hardware-type objects with explicit
+operation capabilities.
+
+## State, assignment, and priority
+
+Amaranth assignments belong to control domains such as `comb` or `sync`. A bit
+may be driven from only one domain, but it may receive many assignments within
+that domain. If several are active, the last assignment added wins. `m.If`,
+`m.Elif`, and `m.Switch` establish conditional activity, so a common style is a
+default assignment followed by increasingly specific overrides.
+
+Inactive assignment has domain-specific meaning. A synchronously driven
+signal retains its previous value. A combinationally driven signal falls back
+to its initial value, which makes the combinational network total rather than
+inferring a latch. These rules are described in the guide's
+[assignment and control-domain sections](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-domains).
+
+RHDL gives every driveable `Place` one effective driver. Hardware conditionals
+collect branch assignments and produce a mux or enable followed by one drive.
+Priority is visible in the conditional chain, but ordinary connection order is
+not a priority mechanism. A register's current value and next-state place are
+distinct; a missing next-state branch means hold, whereas a combinational place
+must be fully covered.
+
+The practical difference is syntactic. Amaranth's ordered assignments make
+default-then-override control compact and allow separate helpers to contribute
+updates to one signal. RHDL requires those alternatives to meet at one
+selection boundary, which is more explicit but can require more structure.
+Amaranth also attaches state to named clock domains, including domain edge and
+reset policy. RHDL attaches a clock directly to each register and offers an
+ambient synchronous-circuit convention; domain identity is not a general
+property of every signal.
+
+## Hierarchy, interfaces, and composition
+
+Amaranth separates an object's Python API from its elaborated contents.
+`Elaboratable.elaborate(platform)` returns hardware, and placing elaboratables
+in `m.submodules` records hierarchy. `Component` adds a declared wiring
+signature to that pattern. This is a natural fit for Python classes: a reusable
+object can expose configuration and methods before or independently of its RTL
+implementation.
+
+RHDL circuit calls create definitions, and explicit instances connect those
+definitions inside parents. Hardware crosses hierarchy through ports. Pure
+functions over current-circuit values stay inline; stateful or intentionally
+structural abstractions use circuits. That distinction makes hierarchy a
+deliberate hardware decision rather than an automatic consequence of every
+host abstraction.
+
+Amaranth's
+[`wiring.Signature`](https://amaranth-lang.org/docs/amaranth/latest/stdlib/wiring.html)
+contains immutable `In` and `Out` members, may nest other signatures, can be
+flipped, and constructs introspectable interface objects. `connect()` checks
+member names, dimensions, widths, initial values, and direction before adding
+combinational assignments; signal signedness may differ when widths match.
+Base signatures compare structurally; signature subclasses compare by identity
+unless they override equality, which lets an abstraction define nominal or
+domain-specific compatibility.
+
+RHDL interfaces begin from nominal protocol identity. They name two roles,
+orient members by role, and can refine or declare support for other nominal
+contracts. Linear handles add single-consumption semantics for composed
+topologies. Amaranth offers the more general structural wiring object; RHDL
+puts protocol meaning and topology consumption directly into connection
+semantics.
+
+## Abstraction, locality, and predictability
+
+Amaranth benefits from Python's functions, classes, generators, containers,
+metaclasses, and duck-typed protocols. `ShapeCastable`, `ValueCastable`, and
+signature subclasses provide explicit extension seams without requiring every
+semantic abstraction to be a built-in AST node. The source is often concise:
+one signal object can be read, assigned, indexed, or passed through generic
+helpers.
+
+That economy moves some meaning into context. Exact width may depend on shape
+inference or the assignment target; priority may depend on assignment order;
+implementation may depend on the domain that owns the signal. These rules are
+regular and documented, but they are not always visible in one expression.
+
+RHDL uses Rhombus functions, classes, macros, and language layers, then narrows
+them through a small set of hardware categories. Readability and driveability
+are different values, type adaptation is explicit, and completed priority
+logic has one driver. More syntax is required at some boundaries, but fewer
+facts must be recovered from surrounding statements.
+
+## Language-level judgment
+
+Amaranth is cleaner when a design benefits from lightweight Python objects,
+mathematically growing expressions, named domains, and concise ordered
+assignment. Its rules form a coherent language even though width and priority
+may be contextual. RHDL is cleaner when implementation width, semantic type,
+and final driver should be apparent at the operation itself. Amaranth optimizes
+low-friction construction; RHDL optimizes local reconstruction of the
+elaborated circuit.
+
+## Lessons for RHDL
+
+1. Keep exact connection types, while learning from Amaranth's concise and
+   consistently documented shape rules.
+2. If clock domains become first-class, define their denotation as one coherent
+   object rather than adding unrelated register options.
+3. Preserve nominal protocol relations and linear handles, but borrow the
+   immutability and introspection discipline of Amaranth signatures.
+
+## Sources
+
+- [Amaranth introduction](https://amaranth-lang.org/docs/amaranth/latest/intro.html)
+- [Amaranth language guide](https://amaranth-lang.org/docs/amaranth/latest/guide.html)
+- [Amaranth elaboration model](https://amaranth-lang.org/docs/amaranth/latest/guide.html#elaboration)
+- [Amaranth interfaces and connections](https://amaranth-lang.org/docs/amaranth/latest/stdlib/wiring.html)
+- [RHDL core semantics](../../rhdl/core/README.md)
+- [RHDL frontend semantics](../../rhdl/frontend/README.md)
+- [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

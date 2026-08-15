@@ -41,9 +41,12 @@ frontend layers or ordinary libraries.
 The authoritative package graph and dependency contract are in
 [`rhdl/README.md`](rhdl/README.md).
 
-> **Design perspective:** [RHDL and Chisel: design tradeoffs](docs/rhdl-and-chisel.md)
-> explains where RHDL's exact-construction model is intentionally stricter or
-> more compositional, and where Chisel remains substantially more capable.
+> **Design perspectives:** the
+> [RHDL comparison guide](docs/comparisons/README.md) contrasts RHDL with
+> construction languages, rule-based and functional HDLs, timing-typed
+> research languages, compiler IRs, multi-level modeling systems, and
+> SystemVerilog. It focuses on core semantics, abstraction expressivity,
+> syntactic clarity, and compositionality.
 
 ## Quick start
 
@@ -110,7 +113,7 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
-| Design tradeoffs relative to Chisel | [`docs/rhdl-and-chisel.md`](docs/rhdl-and-chisel.md) |
+| Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
@@ -152,7 +155,7 @@ The current vertical slice includes:
   width inference
 - Memory initialization, masks on asynchronous-read memories, general
   multi-port synchronous memories, and defined inter-port collisions
-- Asynchronous or active-low reset and multi-domain analysis
+- Asynchronous reset, reset-polarity metadata, and multi-domain analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects
 - Multi-role protocols, optional interface fields, and generated protocol
