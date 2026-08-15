@@ -90,10 +90,10 @@ if [[ -n "$unexpected_racket" ]]; then
 fi
 
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
-  ! -path './examples/*' ! -path './tests/frontend/*' \
+  ! -path './examples/*' ! -path './tests/frontend/*' ! -path './tests/fesvr/*' \
   ! -path './rhdl/std/*' ! -path './sim/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
-  echo ".rhdl files may appear only in std, examples, simulation adapters, and frontend fixtures" >&2
+  echo ".rhdl files may appear only in std, examples, simulation adapters, and frontend or FESVR fixtures" >&2
   echo "$unexpected_rhdl" >&2
   exit 1
 fi

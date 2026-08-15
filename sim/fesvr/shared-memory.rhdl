@@ -1,0 +1,99 @@
+#lang rhdl
+// Arbitrates FESVR and processor traffic into one finite shared simulation RAM.
+
+import:
+  lib("rhdl/std/simple-memory.rhdl") open
+  lib("rhdl/std/simple-memory/ram.rhdl").SimpleMemoryRam
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/rr-arbiter.rhdl").rr_arbiter
+  lib("rhdl/std/flow/pipe.rhdl").pipe
+  lib("rhdl/std/flow/queue.rhdl") open
+  lib("rhdl/std/flow/zip.rhdl").zip_flow
+  lib("rhdl/std/flow/demux.rhdl").demux_flow
+  lib("rhdl/std/flow/atomic-fork.rhdl").atomic_fork
+  lib("rhdl/std/flow/map.rhdl") open
+  lib("rhdl/std/flow/parallel.rhdl") open
+
+bundle TaggedSimpleMemoryReq(address_width :: Int, data_bytes :: Int):
+  request: SimpleMemoryReq(address_width, data_bytes)
+  processor: Bool
+
+bundle TaggedSimpleMemoryResp(data_bytes :: Int):
+  response: SimpleMemoryResp(data_bytes)
+  processor: Bool
+
+// Request arbitration is fair at the point where a selected request enters
+// the stabilizing pipe. An owner token is committed atomically with each RAM
+// request and retained until the matching ordered response moves. Two tags are
+// sufficient for the two-outstanding SimpleMemoryRam.
+sync_circuit FesvrSharedMemory(address_width :: Int,
+                               data_bytes :: Int,
+                               size_bytes :: Int,
+                               ~base_address: base_address :: Int = 0):
+  interface fesvr(SimpleMemory(address_width, data_bytes), ~role: responder)
+  interface processor(SimpleMemory(address_width, data_bytes), ~role: responder)
+
+  inst ram(SimpleMemoryRam(address_width,
+                           data_bytes,
+                           size_bytes,
+                           ~base_address: base_address))
+  inst owners(Queue(Bool, 2))
+
+  def TaggedReq = TaggedSimpleMemoryReq(address_width, data_bytes)
+
+  fun tag_request(is_processor):
+    map_flow(SimpleMemoryReq(address_width, data_bytes), request):
+      record(TaggedReq):
+        request: request
+        processor: Bool(is_processor)
+
+  def request_branch:
+    (
+      map_flow(TaggedReq, tagged):
+        tagged.request
+    ) |> pipe(SimpleMemoryReq(address_width, data_bytes), 1)
+
+  def owner_branch:
+    map_flow(TaggedReq, tagged):
+      tagged.processor
+
+  // One generic interface chain covers independent input maps, stateful
+  // arbitration and buffering, fanout, output projections, and connection.
+  (
+    Array(fesvr.request, processor.request)
+      |> parallel(
+           tag_request(#false),
+           tag_request(#true)
+         )
+      |> rr_arbiter(TaggedReq, 2)
+      |> pipe(TaggedReq, 1)
+      |> atomic_fork(TaggedReq, 2)
+      |> parallel(request_branch, owner_branch)
+  ) <=> Array(ram.port.request, owners.ingress)
+
+  // Buffer returned data together with its oldest owner before exposing it to
+  // either client. This keeps response readiness independent of client
+  // backpressure and therefore separates the two memory directions.
+  def TaggedResp = TaggedSimpleMemoryResp(data_bytes)
+  (
+    Array(ram.port.response, owners.egress) |> (
+      zip_flow(SimpleMemoryResp(data_bytes), response,
+               Bool, owner):
+        record(TaggedResp):
+          response: response
+          processor: owner
+    ) |> queue(TaggedResp, 2)
+      |> (
+           demux_flow(Irrevocable(TaggedResp), 2, tagged):
+             tagged.processor
+         )
+      |> parallel(
+           map_flow(Irrevocable(TaggedResp), tagged):
+             tagged.response,
+           map_flow(Irrevocable(TaggedResp), tagged):
+             tagged.response
+         )
+  ) <=> Array(fesvr.response, processor.response)
+
+export:
+  FesvrSharedMemory

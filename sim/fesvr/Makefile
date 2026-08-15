@@ -6,6 +6,10 @@ BUILD_DIR ?= /tmp/rhdl-direct-memory-htif
 CXX ?= c++
 AR ?= ar
 RISCV_CC ?= riscv64-unknown-elf-gcc
+RACKET ?= racket
+RACO ?= raco
+VERILATOR ?= verilator
+CIRCT_OPT ?= $(REPO_DIR)/.tools/firtool-1.155.0/bin/circt-opt
 
 CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(CURDIR)
 CXXFLAGS += -std=c++20 -Wall -Wextra -Werror
@@ -14,8 +18,12 @@ TRANSPORT_OBJECT := $(BUILD_DIR)/direct_mem_htif.o
 TRANSPORT_LIBRARY := $(BUILD_DIR)/libdirect_mem_htif.a
 TEST_ELF := $(BUILD_DIR)/direct_mem_htif_pass.elf
 TEST_BINARY := $(BUILD_DIR)/direct_mem_htif_test
+STUB_MLIR := $(BUILD_DIR)/fesvr_stub_harness.mlir
+STUB_VERILOG := $(BUILD_DIR)/fesvr_stub_harness.sv
+STUB_OBJECT_DIR := $(BUILD_DIR)/fesvr_stub_harness_obj
+STUB_BINARY := $(STUB_OBJECT_DIR)/Vfesvr_stub_harness_tb
 
-.PHONY: all setup test dpi-compile-check
+.PHONY: all setup test dpi-compile-check rtl-elaboration-test stub-harness-test
 
 all: $(TRANSPORT_LIBRARY)
 
@@ -30,6 +38,29 @@ dpi-compile-check: $(FESVR_LIBRARY) | $(BUILD_DIR)
 	  (echo "set VERILATOR_ROOT to the Verilator share directory" >&2; exit 1)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I$(VERILATOR_ROOT)/include/vltstd \
 	  -c direct_mem_htif_dpi.cc -o $(BUILD_DIR)/direct_mem_htif_dpi.o
+
+rtl-elaboration-test:
+	cd $(REPO_DIR) && env PLTCOLLECTS=$(REPO_DIR): \
+	  $(RACO) test tests/fesvr/fesvr-rtl-test.rhm
+
+stub-harness-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
+	@test -x "$(CIRCT_OPT)" || \
+	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
+	cd $(REPO_DIR) && $(RACKET) -S $(REPO_DIR) \
+	  tests/fesvr/emit-stub-harness.rhm > $(STUB_MLIR)
+	$(CIRCT_OPT) --canonicalize --cse --prettify-verilog \
+	  --lower-seq-hlmem --lower-sim-to-sv \
+	  --lower-seq-to-sv='disable-mem-randomization=true disable-reg-randomization=true' \
+	  --lower-seq-firmem \
+	  --hw-memory-sim='disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined' \
+	  --export-verilog $(STUB_MLIR) -o /dev/null > $(STUB_VERILOG)
+	$(VERILATOR) --binary --timing --vpi --build-jobs 0 \
+	  --top-module fesvr_stub_harness_tb --Mdir $(STUB_OBJECT_DIR) \
+	  $(STUB_VERILOG) $(REPO_DIR)/tests/fesvr/fesvr_stub_harness_tb.sv \
+	  $(CURDIR)/direct_mem_htif.cc $(CURDIR)/direct_mem_htif_dpi.cc \
+	  -CFLAGS "-I$(FESVR_PREFIX)/include -I$(CURDIR) -std=c++20" \
+	  -LDFLAGS "$(FESVR_LIBRARY) -pthread"
+	$(STUB_BINARY) $(TEST_ELF)
 
 $(FESVR_LIBRARY):
 	@echo "FESVR is not installed; run 'make setup' first" >&2

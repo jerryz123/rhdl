@@ -158,7 +158,7 @@ only, and restricts reader shims and `.rhdl` files to their intended
 locations. Run `make check-boundaries` after moving or adding modules.
 
 `.rhdl` is reserved for RHDL-profile programs, simulation adapters, and
-frontend fixtures. `.rhm` contains Rhombus implementation and library modules.
+frontend or FESVR fixtures. `.rhm` contains Rhombus implementation and library modules.
 `.rkt` is restricted to reader shims and Racket interoperability where
 collection lookup requires it.
 

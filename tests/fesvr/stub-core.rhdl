@@ -1,0 +1,51 @@
+#lang rhdl
+// Models the smallest processor-side client needed to complete an HTIF run.
+
+import:
+  lib("rhdl/std/simple-memory.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// After accepting the ELF entry point, the stub writes a passing value to the
+// standard tohost location and consumes the corresponding memory response.
+// It executes no instructions and therefore remains a simulation test fixture.
+sync_circuit FesvrStubCore():
+  interface start(Irrevocable(Bits(32)), ~role: consumer)
+  interface memory(SimpleMemory(32, 4), ~role: requester)
+
+  reg state(~init: bits(0, 2))
+  reg entry_matches(~init: Bool(#false))
+  def waiting_for_start = state === bits(0, 2)
+  def sending_exit = state === bits(1, 2)
+  def waiting_for_response = state === bits(2, 2)
+
+  start.ready <== waiting_for_start
+
+  memory.request.valid <== sending_exit
+  memory.request.bits.address <== bits(0x80001000, 32)
+  memory.request.bits.write <== Bool(#true)
+  // A mismatched startup entry reports target exit code one instead of
+  // silently allowing the integration test to pass.
+  memory.request.bits.data <== mux(
+    entry_matches,
+    bits(1, 32),
+    bits(3, 32)
+  )
+  memory.request.bits.mask <== bits(0xf, 4)
+  memory.response.ready <== waiting_for_response
+
+  def start_fire = fire(start)
+  def request_fire = fire(memory.request)
+  def response_fire = fire(memory.response)
+
+  when start_fire:
+    entry_matches.next <== start.bits === bits(0x80000000, 32)
+
+  when start_fire:
+    state.next <== bits(1, 2)
+  elsewhen request_fire:
+    state.next <== bits(2, 2)
+  elsewhen response_fire:
+    state.next <== bits(3, 2)
+
+export:
+  FesvrStubCore

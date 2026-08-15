@@ -1,6 +1,6 @@
-<!-- Documents the standalone C++ FESVR transport and its generated-RTL contract. -->
+<!-- Documents the FESVR transport, typed RTL adapter, and minimal simulation harness. -->
 
-# Direct-memory FESVR transport
+# Direct-memory FESVR simulation support
 
 `DirectMemoryHtif` derives from FESVR's `htif_t` and converts its abstract
 memory chunks into one-outstanding, aligned 32-bit ready/valid transactions.
@@ -20,8 +20,18 @@ make -C sim/fesvr test
 ```
 
 `direct_mem_htif_dpi.cc` provides the intended DPI-C entry point.
-`direct-memory-htif.rhdl` wraps it as a synchronous circuit whose ports can be
-connected to a future core simulation top. Its DPI declaration is:
+`direct-memory-htif.rhdl` keeps that flat ABI in `DirectMemoryHTIF` and exposes
+the normal RHDL-facing `FesvrHost` adapter:
+
+```text
+FesvrHost
+  memory: SimpleMemory(32, 4) requester
+  start:  Irrevocable(Bits(32)) producer
+  exit:   Bits(32)
+```
+
+The full-byte request mask matches the C++ transport: FESVR itself performs
+read-modify-write for sub-word ELF chunks. The underlying DPI declaration is:
 
 ```rhombus
 dpi_import function rhdl_htif_tick(
@@ -42,7 +52,7 @@ dpi_import function rhdl_htif_tick(
 )
 ```
 
-The wrapper binds those ordered results directly with one parenthesized
+The flat wrapper binds those ordered results directly with one parenthesized
 `dpi_reg` declaration. The exact C signature is declared in
 `direct_mem_htif_dpi.h`. Check the adapter against the installed Verilator
 headers with:
@@ -55,3 +65,43 @@ make -C sim/fesvr dpi-compile-check \
 The transport is simulation support rather than synthesizable RHDL. It does
 not introduce a dependency from the RHDL core, frontend, or CIRCT backend to
 FESVR.
+
+## Shared-memory harness
+
+`shared-memory.rhdl` fairly arbitrates FESVR and processor requests directly
+into one `SimpleMemoryRam`. It exposes complete `SimpleMemory` endpoints for
+both requesters; the request and response directions remain independent
+generic interface-handle chains internally. It stores one owner token per
+accepted request, couples it with the corresponding ordered response, and
+payload-demultiplexes that response back to its requester.
+
+The executable fixture under `tests/fesvr/` composes:
+
+```text
+FesvrHost ---------\
+                    FesvrSharedMemory
+FesvrStubCore -----/
+       ^
+       +------------ start entry
+```
+
+The stub executes no instructions. After accepting the ELF entry point, it
+writes `1` to `tohost`. The integration test proves that FESVR loads the ELF
+through generated RTL, start delivery completes, processor and host traffic
+share the same RAM, and FESVR observes the passing exit.
+
+Install FESVR and CIRCT, then run the focused RTL checks:
+
+```sh
+make -C sim/fesvr rtl-elaboration-test
+make -C sim/fesvr stub-harness-test
+```
+
+The second target additionally requires Verilator and an RV32-capable
+`riscv64-unknown-elf-gcc`. `FESVR_PREFIX` and `CIRCT_OPT` may point at existing
+installations.
+
+A future processor implementation is expected to live under the repository's
+top-level `core/`, not under this simulator package. Its simulation top can
+replace the test stub while retaining the FESVR host, shared memory, and DPI
+support defined here.
