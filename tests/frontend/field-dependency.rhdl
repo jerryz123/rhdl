@@ -1,0 +1,41 @@
+#lang rhdl
+// Provides a bidirectional interface hierarchy with field-independent aggregate feedback.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+circuit FieldSelectiveEndpoint():
+  input fill: Bits(1)
+  interface ingress(Decoupled(Bits(1)), ~role: consumer)
+  interface egress(Decoupled(Bits(1)), ~role: producer)
+
+  egress.valid <== ingress.valid
+  egress.bits <== fill
+  ingress.ready <== egress.ready
+
+circuit FieldSelectiveHierarchy():
+  input valid: Bool
+  input fill: Bits(1)
+  input ready: Bool
+  output accepted: Bool
+  output sent: Bool
+  interface ingress(Decoupled(Bits(1)), ~role: consumer)
+  interface egress(Decoupled(Bits(1)), ~role: producer)
+
+  inst child(FieldSelectiveEndpoint())
+  child.fill <== fill
+  child.ingress.valid <== ingress.valid
+  child.ingress.bits <== child.egress.bits
+  child.egress.ready <== egress.ready
+  ingress.ready <== child.ingress.ready
+  egress.valid <== child.egress.valid
+  egress.bits <== child.egress.bits
+  accepted <== child.ingress.ready
+  sent <== child.egress.valid
+
+def design = elaborate(FieldSelectiveHierarchy())
+
+export:
+  FieldSelectiveEndpoint
+  FieldSelectiveHierarchy
+  design

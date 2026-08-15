@@ -356,6 +356,181 @@ block:
 block:
   def design = Design()
   def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def child = builder.module("FieldSelectiveChild")
+  def child_input = builder.input(child, "input", pair_type)
+  def child_output = builder.output(child, "output", pair_type)
+  def child_left = builder.record_get(child, child_input, "left")
+  def zero = builder.constant(child, Bits(1), 0)
+  builder.drive(
+    child_output,
+    builder.record_create(child,
+                          pair_type,
+                          [["left", child_left], ["right", zero]])
+  )
+  builder.finish(child)
+  def top = builder.module("FieldSelectiveTop")
+  def instance = builder.instance(top, child, "u")
+  def top_zero = builder.constant(top, Bits(1), 0)
+  def output_left = builder.record_get(top,
+                                       instance.output("output"),
+                                       "left")
+  builder.drive(builder.project(instance.input("input"), "left"), top_zero)
+  builder.drive(builder.project(instance.input("input"), "right"), output_left)
+  builder.finish(top)
+  check:
+    // The feedback reaches an input field that cannot affect output.left.
+    verify_design(design) ~is #void
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def child = builder.module("FieldCycleChild")
+  def child_input = builder.input(child, "input", pair_type)
+  def child_output = builder.output(child, "output", pair_type)
+  def child_left = builder.record_get(child, child_input, "left")
+  def child_right = builder.record_get(child, child_input, "right")
+  builder.drive(
+    child_output,
+    builder.record_create(child,
+                          pair_type,
+                          [["left", child_left], ["right", child_right]])
+  )
+  builder.finish(child)
+  def top = builder.module("FieldCycleTop")
+  def instance = builder.instance(top, child, "u")
+  def zero = builder.constant(top, Bits(1), 0)
+  def output_left = builder.record_get(top,
+                                       instance.output("output"),
+                                       "left")
+  builder.drive(builder.project(instance.input("input"), "left"), output_left)
+  builder.drive(builder.project(instance.input("input"), "right"), zero)
+  builder.finish(top)
+  check:
+    verify_design(design) ~throws "combinational cycle reaches value u.output.left"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def child = builder.module("CrossFieldCycleChild")
+  def child_input = builder.input(child, "input", pair_type)
+  def child_output = builder.output(child, "output", pair_type)
+  def child_left = builder.record_get(child, child_input, "left")
+  def child_right = builder.record_get(child, child_input, "right")
+  builder.drive(
+    child_output,
+    builder.record_create(child,
+                          pair_type,
+                          [["left", child_right], ["right", child_left]])
+  )
+  builder.finish(child)
+  def top = builder.module("CrossFieldCycleTop")
+  def instance = builder.instance(top, child, "u")
+  def zero = builder.constant(top, Bits(1), 0)
+  def output_left = builder.record_get(top,
+                                       instance.output("output"),
+                                       "left")
+  builder.drive(builder.project(instance.input("input"), "left"), zero)
+  builder.drive(builder.project(instance.input("input"), "right"), output_left)
+  builder.finish(top)
+  check:
+    verify_design(design) ~throws "combinational cycle reaches value u.output.left"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def pair_vector_type = VectorType(2, pair_type)
+  def leaf = builder.module("NestedFieldLeaf")
+  def leaf_input = builder.input(leaf, "input", pair_vector_type)
+  def leaf_output = builder.output(leaf, "output", pair_vector_type)
+  def rebuilt_pairs:
+    for List (index in 0..2):
+      def element = builder.vector_get(leaf, leaf_input, index)
+      builder.record_create(
+        leaf,
+        pair_type,
+        [["left", builder.record_get(leaf, element, "left")],
+         ["right", builder.record_get(leaf, element, "right")]]
+      )
+  builder.drive(leaf_output,
+                builder.vector_create(leaf, pair_vector_type, rebuilt_pairs))
+  builder.finish(leaf)
+  def wrapper = builder.module("NestedFieldWrapper")
+  def wrapper_input = builder.input(wrapper, "input", pair_vector_type)
+  def wrapper_output = builder.output(wrapper, "output", pair_vector_type)
+  def inner = builder.instance(wrapper, leaf, "inner")
+  builder.drive(inner.input("input"), wrapper_input)
+  builder.drive(wrapper_output, inner.output("output"))
+  builder.finish(wrapper)
+  def top = builder.module("NestedFieldTop")
+  def outer = builder.instance(top, wrapper, "outer")
+  def zero = builder.constant(top, Bits(1), 0)
+  def output_element = builder.vector_get(top,
+                                          outer.output("output"),
+                                          0)
+  def output_left = builder.record_get(top, output_element, "left")
+  for (index in 0..2):
+    def input_element = builder.project_vector(outer.input("input"), index)
+    builder.drive(builder.project(input_element, "left"), zero)
+    builder.drive(
+      builder.project(input_element, "right"),
+      if index == 1 | output_left | zero
+    )
+  builder.finish(top)
+  check:
+    // Nested output[0].left cannot depend on the feedback at input[1].right.
+    verify_design(design) ~is #void
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def child = builder.module("ConservativeCastChild")
+  def child_input = builder.input(child, "input", pair_type)
+  def child_output = builder.output(child, "output", pair_type)
+  def packed = builder.cast(child, child_input, Bits(2))
+  builder.drive(child_output, builder.cast(child, packed, pair_type))
+  builder.finish(child)
+  def top = builder.module("ConservativeCastTop")
+  def instance = builder.instance(top, child, "u")
+  def zero = builder.constant(top, Bits(1), 0)
+  def output_left = builder.record_get(top,
+                                       instance.output("output"),
+                                       "left")
+  builder.drive(builder.project(instance.input("input"), "left"), zero)
+  builder.drive(builder.project(instance.input("input"), "right"), output_left)
+  builder.finish(top)
+  check:
+    // A representation-changing cast conservatively mixes aggregate leaves.
+    verify_design(design) ~throws "combinational cycle reaches value u.output.left"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def pair_type = RecordType([RecordField("left", Bits(1)),
+                              RecordField("right", Bits(1))])
+  def module_def = builder.module("DeadFieldCycle")
+  def temporary = builder.wire(module_def, "temporary", pair_type)
+  def temporary_value = builder.read(temporary)
+  def temporary_left = builder.record_get(module_def, temporary_value, "left")
+  def zero = builder.constant(module_def, Bits(1), 0)
+  builder.drive(builder.project(temporary, "left"), temporary_left)
+  builder.drive(builder.project(temporary, "right"), zero)
+  builder.finish(module_def)
+  check:
+    verify_design(design) ~throws "combinational cycle reaches value temporary.left"
+
+block:
+  def design = Design()
+  def builder = Builder(design)
   def child = builder.module("RegisteredChild")
   def child_clock = builder.input(child, "clock", Clock)
   def child_input = builder.input(child, "a", Bits(1))

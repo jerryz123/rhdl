@@ -564,8 +564,10 @@ fun check_operation_types(module_def, operation, schema):
   | ~else:
       #void
 
-class ValueDependencySummary(value, input_indices)
-class ModuleDependencySummary(module_def, output_input_indices)
+class InputLeaf(input_index, path)
+class ValueDependencySummary(value, path, input_leaves)
+class OutputLeafDependency(path, input_leaves)
+class ModuleDependencySummary(module_def, output_leaf_dependencies)
 
 fun identity_index(items, item):
   def mutable result = #false
@@ -575,16 +577,65 @@ fun identity_index(items, item):
     | result := index
   result
 
-fun merge_indices(left, right):
-  def mutable result = left
-  for (index in right):
-    unless index in result
-    | result := result ++ [index]
+fun equal_index(items, item):
+  def mutable result = #false
+  for (candidate in items,
+       index in 0..items.length()):
+    when result == #false && candidate == item
+    | result := index
   result
 
-// Summarize each output by the module inputs that can reach it without
-// crossing state. Instance results then depend on only the corresponding
-// parent input drivers, preserving register boundaries and unused ports.
+fun same_input_leaf(left, right):
+  left.input_index == right.input_index && left.path == right.path
+
+fun merge_input_leaves(left, right):
+  def mutable result = left
+  for (leaf in right):
+    unless result.find(fun (candidate): same_input_leaf(candidate, leaf))
+    | result := result ++ [leaf]
+  result
+
+fun leaf_paths(type):
+  cond
+  | record_type(type):
+      def mutable result = []
+      for (field in type.fields):
+        for (path in leaf_paths(field.type)):
+          result := result ++ [[field.name] ++ path]
+      result
+  | vector_type(type):
+      def mutable result = []
+      for (index in 0..type.length):
+        for (path in leaf_paths(type.element_type)):
+          result := result ++ [[index] ++ path]
+      result
+  | ~else:
+      [[]]
+
+fun projection_index(summaries, value, path):
+  def mutable result = #false
+  for (summary in summaries,
+       index in 0..summaries.length()):
+    when result == #false && summary.value === value && summary.path == path
+    | result := index
+  result
+
+fun describe_value_path(value, path):
+  def mutable result = value.name
+  for (step in path):
+    result := if step is_a String | result ++ "." ++ step | result ++ "[" ++ to_string(step) ++ "]"
+  result
+
+fun place_at_path(place, path):
+  if path.length() == 0
+  | place
+  | block:
+      def projected = place.projected_place(path[0])
+      projected && place_at_path(projected, path.drop(1))
+
+// Summarize each output leaf by the module input leaves that can reach it
+// without crossing state. Structural paths preserve independent record fields
+// and vector elements across wires and instance boundaries.
 fun verify_combinational_cycles(module_defs):
   def mutable module_summaries = []
   def mutable active_modules = []
@@ -602,102 +653,130 @@ fun verify_combinational_cycles(module_defs):
         def mutable value_summaries = []
         def mutable active_values = []
 
-        // A projected wire read depends on only the corresponding staged
-        // field or element driver. Treating it as a read of the assembled
-        // aggregate creates false cycles between independent projections.
-        fun projected_wire_place(value):
-          def operation = module_def.find_operation(value.defining_op_id)
-          cond
-          | operation && operation.opcode == "rtl.wire":
-              operation.places[0]
-          | operation && operation.opcode == "rtl.record_get":
-              def parent = projected_wire_place(operation.operands[0])
-              parent && parent.projected_place(operation.attribute("field"))
-          | operation && operation.opcode == "rtl.vector_get":
-              def parent = projected_wire_place(operation.operands[0])
-              parent && parent.projected_place(operation.attribute("index"))
-          | ~else: #false
-
-        fun summarize_value(value, via_operation = #false):
+        fun summarize_value(value, path, via_operation = #false):
           def cached_value = value_summaries.find(
-            fun (summary): summary.value === value
+            fun (summary): summary.value === value && summary.path == path
           )
           if cached_value
-          | cached_value.input_indices
+          | cached_value.input_leaves
           | block:
-              def active_index = identity_index(active_values, value)
+              def active_index = projection_index(active_values, value, path)
               when active_index is_a Int
-              | def cycle = active_values.drop(active_index) ++ [value]
-                def path = String.join(
-                  cycle.map(fun (candidate): candidate.name),
+              | def repeated = ValueDependencySummary(value, path, [])
+                def cycle = active_values.drop(active_index) ++ [repeated]
+                def cycle_path = String.join(
+                  cycle.map(
+                    fun (candidate):
+                      describe_value_path(candidate.value, candidate.path)
+                  ),
                   " -> "
                 )
                 def message = String.append(
                   "combinational cycle reaches value ",
-                  value.name,
+                  describe_value_path(value, repeated.path),
                   " in module ",
                   module_def.name,
                   ": ",
-                  path
+                  cycle_path
                 )
                 if via_operation
                 | fail_operation(via_operation, message)
                 | fail(message)
-              active_values := active_values ++ [value]
+              active_values := active_values ++ [
+                ValueDependencySummary(value, path, [])
+              ]
               def operation = module_def.find_operation(value.defining_op_id)
               def input_index = identity_index(
                 module_def.inputs.map(fun (port): port.value),
                 value
               )
-              def wire_place = projected_wire_place(value)
-              def input_indices:
+              def input_leaves:
                 cond
                 | input_index is_a Int:
-                    [input_index]
-                | wire_place && wire_place.driver:
-                    summarize_value(wire_place.driver, operation)
+                    [InputLeaf(input_index, path)]
+                | operation && operation.opcode == "rtl.wire":
+                    def wire_place = operation.places[0]
+                    def projected_place = place_at_path(wire_place, path)
+                    if projected_place && projected_place.driver
+                    | summarize_value(projected_place.driver, [], operation)
+                    | summarize_value(wire_place.driver, path, operation)
                 | operation && combinational_opcode(operation.opcode):
                     def mutable dependencies = []
-                    for (operand in operation.operands):
-                      dependencies := merge_indices(
+
+                    fun add_operand(operand, operand_path):
+                      dependencies := merge_input_leaves(
                         dependencies,
-                        summarize_value(operand, operation)
+                        summarize_value(operand, operand_path, operation)
                       )
+
+                    fun add_whole_operand(operand):
+                      for (operand_path in leaf_paths(operand.type)):
+                        add_operand(operand, operand_path)
+
+                    cond
+                    | operation.opcode == "rtl.record_create" && path.length() > 0:
+                        def field_index = equal_index(operation.attribute("fields"),
+                                                      path[0])
+                        add_operand(operation.operands[field_index], path.drop(1))
+                    | operation.opcode == "rtl.record_get":
+                        add_operand(operation.operands[0],
+                                    [operation.attribute("field")] ++ path)
+                    | operation.opcode == "rtl.vector_create" && path.length() > 0:
+                        add_operand(operation.operands[path[0]], path.drop(1))
+                    | operation.opcode == "rtl.vector_get":
+                        add_operand(operation.operands[0],
+                                    [operation.attribute("index")] ++ path)
+                    | operation.opcode == "rtl.mux_lookup":
+                        add_whole_operand(operation.operands[0])
+                        for (operand in operation.operands.drop(1)):
+                          add_operand(operand, path)
+                    | operation.opcode == "rtl.cast":
+                        add_whole_operand(operation.operands[0])
+                    | ~else:
+                        for (operand in operation.operands):
+                          add_whole_operand(operand)
                     dependencies
                 | operation && operation.opcode == "rtl.instance":
                     def child = operation.attribute("module")
                     def child_summary = summarize_module(child)
                     def output_index = identity_index(operation.results, value)
                     def mutable dependencies = []
-                    for (child_input_index in child_summary.output_input_indices[output_index]):
-                      def input_place = operation.places[child_input_index]
+                    def output_leaf = child_summary.output_leaf_dependencies[
+                      output_index
+                    ].find(fun (candidate): candidate.path == path)
+                    for (input_leaf in output_leaf.input_leaves):
+                      def input_place = operation.places[input_leaf.input_index]
                       def drive_operation = module_def.operations.find(
                         fun (candidate): is_drive_to(candidate, input_place.id)
                       )
-                      dependencies := merge_indices(
+                      dependencies := merge_input_leaves(
                         dependencies,
                         summarize_value(input_place.driver,
+                                        input_leaf.path,
                                         drive_operation || operation)
                       )
                     dependencies
                 | ~else:
                     []
               active_values := active_values.filter(
-                ~keep: fun (candidate): !(candidate === value)
+                ~keep: fun (candidate): !(candidate.value === value && candidate.path == path)
               )
-              def summary = ValueDependencySummary(value, input_indices)
+              def summary = ValueDependencySummary(value, path, input_leaves)
               value_summaries := value_summaries ++ [summary]
-              input_indices
+              input_leaves
 
-        // Visit dead values too: an unobservable combinational loop is still
-        // invalid even when it does not reach a module output.
+        // Visit every leaf of dead values too: an unobservable combinational
+        // loop is still invalid even when it does not reach a module output.
         for (value in module_def.values):
-          summarize_value(value)
-        def output_input_indices:
+          for (path in leaf_paths(value.type)):
+            summarize_value(value, path)
+        def output_leaf_dependencies:
           for List (port in module_def.outputs):
-            summarize_value(port.place.driver)
+            for List (path in leaf_paths(port.type)):
+              OutputLeafDependency(path,
+                                   summarize_value(port.place.driver, path))
         def summary = ModuleDependencySummary(module_def,
-                                              output_input_indices)
+                                              output_leaf_dependencies)
         module_summaries := module_summaries ++ [summary]
         active_modules := active_modules.filter(
           ~keep: fun (candidate): !(candidate === module_def)

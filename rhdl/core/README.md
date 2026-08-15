@@ -338,7 +338,11 @@ The Builder and whole-design verifier enforce:
 13. Instances reference completed same-design definitions and have unique
     final names within their parent.
 14. Purely combinational cycles are rejected, including cycles that cross
-    instance boundaries.
+    instance boundaries. Dependency summaries preserve record-field and
+    vector-element paths through structural operations and hierarchy, so an
+    independent aggregate leaf does not create a false cycle. Operations that
+    reinterpret a packed representation, including `rtl.cast`, conservatively
+    depend on every source leaf.
 
 The frontend separately rejects active recursive generator elaboration,
 runtime hardware circuit parameters, and hardware-controlled host
