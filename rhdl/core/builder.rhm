@@ -699,8 +699,9 @@ class Builder(design):
     module_def.add_output(Port(name, "output", type, #false, place))
     place
 
-  // Creates a readable internal connection point. Like every Place, a wire
-  // must acquire one complete effective driver before verification.
+  // Creates a declaration-order-independent single-driver connection. The
+  // place accepts its driver while the paired value can be consumed earlier;
+  // verification still requires one complete effective driver.
   method wire(module_def, name, type, location = Location(), origin = Origin("wire", name)):
     ensure_module_in_design(design, module_def, #'wire)
     ensure_open(module_def, #'wire)
@@ -709,16 +710,18 @@ class Builder(design):
     ensure_unique_hardware_name(module_def, name, #'wire)
     def operation_id = design.fresh_id()
     def place = Place(design.fresh_id(), name, type, module_def, operation_id)
+    def value = Value(design.fresh_id(), name, type, module_def, operation_id)
     def operation = Operation(operation_id,
                               "rtl.wire",
                               module_def,
                               [],
-                              [],
+                              [value],
                               [place],
                               {"name": name},
                               location,
                               origin)
     module_def.add_place(place)
+    module_def.add_value(value)
     module_def.add_operation(operation)
     place
 
@@ -1422,15 +1425,20 @@ class Builder(design):
                              Origin("aggregate place assembly", place.name))
       | ~else: #false
 
-  method canonicalize_aggregate_place(place, location = Location()):
+  method canonicalize_aggregate_place(place,
+                                      location = Location(),
+                                      ~preserve_projections: preserve_projections = #false):
     def assembled = this.assemble_aggregate_place(place, location)
     if assembled
     | block:
+        def projections = place.projected_places
         place.projected_places := []
         this.drive(place,
                    assembled,
                    location,
                    Origin("aggregate place canonicalization", place.name))
+        when preserve_projections
+        | place.projected_places := projections
         assembled
     | #false
 
@@ -1879,28 +1887,37 @@ class Builder(design):
     def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
     unless target_owned
     | fail(#'read, "read target belongs to a different design")
-    if place.driver
-    | place.driver
-    | block:
-        def assembled = this.assemble_aggregate_place(place)
-        cond
-        | assembled && place.projected():
-            place.driver := assembled
-            assembled
-        | assembled:
-            place.projected_places := []
-            this.drive(place,
-                       assembled,
-                       Location(),
-                       Origin("aggregate place canonicalization", place.name))
-            assembled
-        | place.projected():
-            def parent_value = this.read(place.parent)
-            if record_type(place.parent.type)
-            | this.record_get(module_def, parent_value, place.projection_key)
-            | this.vector_get(module_def, parent_value, place.projection_key)
-        | ~else:
-            fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
+    def owner = module_def.find_operation(root.owner_op_id)
+    if owner && owner.opcode == "rtl.wire"
+    | if place.projected()
+      | block:
+          def parent_value = this.read(place.parent)
+          if record_type(place.parent.type)
+          | this.record_get(module_def, parent_value, place.projection_key)
+          | this.vector_get(module_def, parent_value, place.projection_key)
+      | owner.results[0]
+    | if place.driver
+      | place.driver
+      | block:
+          def assembled = this.assemble_aggregate_place(place)
+          cond
+          | assembled && place.projected():
+              place.driver := assembled
+              assembled
+          | assembled:
+              place.projected_places := []
+              this.drive(place,
+                         assembled,
+                         Location(),
+                         Origin("aggregate place canonicalization", place.name))
+              assembled
+          | place.projected():
+              def parent_value = this.read(place.parent)
+              if record_type(place.parent.type)
+              | this.record_get(module_def, parent_value, place.projection_key)
+              | this.vector_get(module_def, parent_value, place.projection_key)
+          | ~else:
+              fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
 
   method finish(module_def):
     ensure_module_in_design(design, module_def, #'finish)
@@ -1913,6 +1930,10 @@ class Builder(design):
                | "record place " ++ place.name ++ " has incomplete field-wise drivers"
                | "vector place " ++ place.name ++ " has incomplete element-wise drivers")
         when aggregate_place_complete(place)
-        | this.canonicalize_aggregate_place(place)
+        | def owner = module_def.find_operation(place.owner_op_id)
+          this.canonicalize_aggregate_place(
+            place,
+            ~preserve_projections: owner && owner.opcode == "rtl.wire"
+          )
     module_def.finished := #true
     module_def

@@ -116,7 +116,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `assertion.rhm` | Reset-suppressed clocked assertions with branch-derived guards and optional labels | kernel, clocking support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
 | `interface.rhm` | Roles, directional interfaces, single-parent refinement, declared protocol support, refinement-delta routing, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
-| `wire.rhm` | Binding-derived single-driver wires | kernel, field support |
+| `wire.rhm` | Binding-derived forward-readable single-driver connections | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when`, priority branches, conditional assignment, memory-write, and assertion effects | kernel |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |

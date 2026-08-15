@@ -136,7 +136,7 @@ mux_lookup(Bits(w), keys -> T, default: T)  -> T: DataType
 decode(I: packable DataType,
        input cubes -> output cubes,
        default output cube)                 -> O: packable DataType
-wire(T: HardwareType)                       -> Place<T>
+wire(T: HardwareType)                       -> (Value<T>, Place<T>) alias pair
 record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
 vector_create(elements matching V)          -> V: VectorType

@@ -100,7 +100,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`vec-shift-register.rhdl`](vec-shift-register.rhdl) | Priority aggregate load and shift updates |
 | [`vec-shift-register-param.rhdl`](vec-shift-register-param.rhdl) | Host-parameterized vector pipeline |
 | [`predicate-filter.rhdl`](predicate-filter.rhdl) | Host predicate closures specialized through a `Valid` interface |
-| [`wire.rhdl`](wire.rhdl) | Internal aggregate wire assembled by element |
+| [`wire.rhdl`](wire.rhdl) | Forward-readable aggregate wire driven later by element |
 | [`interface.rhdl`](interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
 | [`ready-valid-compatibility.rhdl`](ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
 | [`interface-array.rhdl`](interface-array.rhdl) | Host-sized endpoint arrays and flattened ports |

@@ -457,8 +457,10 @@ selected mutable place in core.
 
 ## Wires
 
-`wire temporary: T` creates an internal single-driver place that becomes
-readable after one complete drive. Aggregates may be assembled leaf by leaf;
+`wire temporary: T` creates an internal single-driver connection. Its value is
+readable before its one driver is declared, so wiring order does not impose
+dataflow order. Verification still requires one complete effective driver.
+Aggregates may be assembled leaf by leaf;
 all leaves must be driven, and whole and projected drive modes cannot mix.
 Conditional assignment may synthesize one exhaustive priority driver.
 

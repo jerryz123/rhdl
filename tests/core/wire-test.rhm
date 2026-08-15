@@ -15,13 +15,15 @@ block:
   def source = builder.input(module_def, "source", Bits(8))
   def result = builder.output(module_def, "result", Bits(8))
   def temporary = builder.wire(module_def, "temporary", Bits(8))
+  def early_read = builder.read(temporary)
+  builder.drive(result, early_read)
   builder.drive(temporary, source)
-  builder.drive(result, builder.read(temporary))
   builder.finish(module_def)
   check:
     temporary is_a Place ~is #true
-    builder.read(temporary) === source ~is #true
-    dump_ir(design).contains("&temporary = rtl.wire bits<8>") ~is #true
+    builder.read(temporary) === early_read ~is #true
+    early_read.module_def.find_operation(early_read.defining_op_id).opcode ~is "rtl.wire"
+    dump_ir(design).contains("%temporary, &temporary = rtl.wire bits<8>") ~is #true
     verify_design(design) ~is #void
 
 block:
@@ -34,11 +36,12 @@ block:
   def second = builder.input(module_def, "second", element_type)
   def result = builder.output(module_def, "result", type)
   def temporary = builder.wire(module_def, "temporary", type)
+  def early_read = builder.read(temporary)
+  builder.drive(result, early_read)
   builder.drive(builder.project_vector(temporary, 0), first)
   builder.drive(builder.project_vector(temporary, 1), second)
-  def assembled = builder.read(temporary)
-  builder.drive(result, assembled)
   builder.finish(module_def)
+  def assembled = temporary.driver
   check:
     assembled.module_def.find_operation(assembled.defining_op_id).opcode ~is "rtl.vector_create"
     temporary.driver === assembled ~is #true
@@ -52,10 +55,10 @@ block:
   def other = builder.input(module_def, "other", Bits(4))
   def scalar = builder.wire(module_def, "scalar", Bits(4))
   def partial = builder.wire(module_def, "partial", VectorType(2, Bits(4)))
-  check:
-    builder.read(scalar) ~throws "must be driven before it is read"
+  def scalar_read = builder.read(scalar)
   builder.drive(scalar, source)
   check:
+    scalar_read.module_def.find_operation(scalar_read.defining_op_id).opcode ~is "rtl.wire"
     builder.drive(scalar, other) ~throws "already has a driver"
   builder.drive(builder.project_vector(partial, 0), source)
   check:

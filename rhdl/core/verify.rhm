@@ -60,7 +60,7 @@ fun check_operation_types(module_def, operation, schema):
       unless type_well_formed(operation.places[0].type)
       | fail_operation(operation, "output port must have a well-formed HardwareType")
   | "hardware_wire":
-      unless type_well_formed(operation.places[0].type)
+      unless type_well_formed(operation.places[0].type) && type_well_formed(operation.results[0].type) && type_equal(operation.places[0].type, operation.results[0].type)
       | fail_operation(operation, "wire must have a well-formed HardwareType")
   | "bits_constant":
       def result = operation.results[0]
@@ -602,6 +602,22 @@ fun verify_combinational_cycles(module_defs):
         def mutable value_summaries = []
         def mutable active_values = []
 
+        // A projected wire read depends on only the corresponding staged
+        // field or element driver. Treating it as a read of the assembled
+        // aggregate creates false cycles between independent projections.
+        fun projected_wire_place(value):
+          def operation = module_def.find_operation(value.defining_op_id)
+          cond
+          | operation && operation.opcode == "rtl.wire":
+              operation.places[0]
+          | operation && operation.opcode == "rtl.record_get":
+              def parent = projected_wire_place(operation.operands[0])
+              parent && parent.projected_place(operation.attribute("field"))
+          | operation && operation.opcode == "rtl.vector_get":
+              def parent = projected_wire_place(operation.operands[0])
+              parent && parent.projected_place(operation.attribute("index"))
+          | ~else: #false
+
         fun summarize_value(value, via_operation = #false):
           def cached_value = value_summaries.find(
             fun (summary): summary.value === value
@@ -633,10 +649,13 @@ fun verify_combinational_cycles(module_defs):
                 module_def.inputs.map(fun (port): port.value),
                 value
               )
+              def wire_place = projected_wire_place(value)
               def input_indices:
                 cond
                 | input_index is_a Int:
                     [input_index]
+                | wire_place && wire_place.driver:
+                    summarize_value(wire_place.driver, operation)
                 | operation && combinational_opcode(operation.opcode):
                     def mutable dependencies = []
                     for (operand in operation.operands):
