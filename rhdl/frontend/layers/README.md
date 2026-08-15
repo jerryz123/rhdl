@@ -593,13 +593,14 @@ interface CapacityLink(capacity, width):
 `provided` and `required` are Lists containing the corresponding declaration
 arguments. The provider-owned predicate runs at elaboration time, must return a
 host `Boolean`, and is directional; `<=>` operand order does not affect which
-specialization is provided. `Endpoint.supports(protocol)` uses the rule, while
-`Endpoint.of(protocol)` remains exact. A rule applies only within one nominal
-interface family. It may relax semantic parameter compatibility, but member
-names, directions, and recursively realized hardware types must still match
-exactly. Width conversion or field translation therefore requires an explicit
-adapter. Nested interface members and endpoint arrays apply the same rule
-recursively.
+specialization is provided. The predicate governs every connection, including
+two endpoints with equal arguments. `Endpoint.supports(protocol)` uses the
+rule, while `Endpoint.of(protocol)` remains exact. A rule applies only within
+one nominal interface family. It may relax semantic parameter compatibility,
+but member names, directions, and recursively realized hardware types must
+still match exactly. Width conversion or field translation therefore requires
+an explicit adapter. Nested interface members and endpoint arrays apply the
+same rule recursively.
 
 The first declared role is the compatibility provider by default. A root
 interface whose provider is the other role declares it explicitly after its

@@ -206,9 +206,10 @@ do not create hardware.
 
 [`tilelink.rhdl`](tilelink.rhdl) is the public facade for definition-only
 TileLink support. It provides validated host parameter records, exact A-E
-payload bundles, and directional uncached and cached interfaces. It does not
-implement negotiation, routing, adapters, monitors, transaction helpers, or
-endpoint behavior.
+payload bundles, and directional uncached and cached interfaces with local
+client-to-manager legality checks. It does not implement graph-wide
+negotiation, routing, adapters, monitors, transaction helpers, or endpoint
+behavior.
 
 `TLBundleParams(address_width, data_bytes, size_width, source_width,
 sink_width)` fixes the physical link widths. `data_bytes` must be a power of
@@ -229,6 +230,8 @@ The host-only endpoint descriptions use the following vocabulary:
 - `TLClientParams` and `TLManagerParams` collect names, ID/address ownership,
   directional capabilities, and manager denial policy without performing
   graph-wide negotiation.
+- `TLClientLinkParams` and `TLManagerLinkParams` pair one endpoint description
+  with the shared physical `TLBundleParams` used to realize its wires.
 
 The channel payloads follow the TileLink A-E wire layouts. Opcode namespaces
 are nominal and channel-specific (`TLAOpcode` through `TLDOpcode`); the E
@@ -237,23 +240,49 @@ raw `Bits` because its interpretation depends on the opcode.
 
 | Interface | Client to manager | Manager to client |
 |---|---|---|
-| `TLUncached(p)` | A | D |
-| `TLCached(p)` | A, C, E | B, D |
+| `TLUncached(endpoint)` | A | D |
+| `TLCached(endpoint)` | A, C, E | B, D |
 
-Each channel is nested as `Decoupled(TLChannelX(p))`. TileLink permits an
-unaccepted first beat to be withdrawn or replaced, so the library does not
-claim the stronger `Irrevocable` contract. Clock and reset are properties of
-the circuits using a link, not members of the protocol interface.
+Each channel is nested as `Decoupled(TLChannelX(endpoint.bundle))`. TileLink
+permits an unaccepted first beat to be withdrawn or replaced, so the library
+does not claim the stronger `Irrevocable` contract. Clock and reset are
+properties of the circuits using a link, not members of the protocol
+interface.
+
+Bulk connection orients the client specialization as the provider regardless
+of `<=>` operand order. `Endpoint.supports` applies the same directional rule
+from its endpoint type to the expected type. Every A operation emitted by the
+client must fit the corresponding manager-supported `TransferSizes`.
+Cached links also require every manager-emitted B operation to fit the
+client-supported range. Source IDs, sink IDs, manager address sets, and emitted
+transfer sizes must fit the physical encodings. Uncached links reject Acquire
+or manager-emitted B traffic. These checks validate the capabilities currently
+represented by the parameter records; they do not yet model complete C/E
+coherence negotiation or synthesize width and ID adapters.
 
 ```rhombus
 import:
   lib("rhdl/std/tilelink.rhdl") open
 
-def link_params = TLBundleParams(32, 8, 4, 3, 2)
+def bundle = TLBundleParams(32, 8, 4, 3, 2)
+def transfers = TransferSizes(1, 8)
+def client_params = TLClientParams(
+  "cpu",
+  IdRange(0, 4),
+  ~emits: TLAOperationSizes(~get: transfers)
+)
+def manager_params = TLManagerParams(
+  "ram",
+  [AddressSet(0x80000000, 0x0fffffff)],
+  IdRange(0, 4),
+  ~supports: TLAOperationSizes(~get: TransferSizes(1, 64))
+)
+def client_link = TLClientLinkParams(bundle, client_params)
+def manager_link = TLManagerLinkParams(bundle, manager_params)
 
 circuit TileLinkBoundary():
-  interface client(TLUncached(link_params), ~role: manager)
-  interface manager(TLUncached(link_params), ~role: client)
+  interface client(TLUncached(client_link), ~role: manager)
+  interface manager(TLUncached(manager_link), ~role: client)
   manager <=> client
 ```
 

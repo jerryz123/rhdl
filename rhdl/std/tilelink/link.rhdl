@@ -6,32 +6,161 @@ import:
   lib("rhdl/std/tilelink/params.rhdl") open
   lib("rhdl/std/tilelink/bundles.rhdl") open
 
+fun transfer_sizes_supported(emitted, supported):
+  emitted == #false || supported is_a TransferSizes && supported.contains_all(emitted)
+
+fun a_operations_supported(emitted, supported):
+  for all (pair in [[emitted.acquire_block, supported.acquire_block],
+                    [emitted.acquire_perm, supported.acquire_perm],
+                    [emitted.arithmetic, supported.arithmetic],
+                    [emitted.logical, supported.logical],
+                    [emitted.get, supported.get],
+                    [emitted.put_full, supported.put_full],
+                    [emitted.put_partial, supported.put_partial],
+                    [emitted.intent, supported.intent]]):
+    transfer_sizes_supported(pair[0], pair[1])
+
+fun b_operations_supported(emitted, supported):
+  for all (pair in [[emitted.probe, supported.probe],
+                    [emitted.arithmetic, supported.arithmetic],
+                    [emitted.logical, supported.logical],
+                    [emitted.get, supported.get],
+                    [emitted.put_full, supported.put_full],
+                    [emitted.put_partial, supported.put_partial],
+                    [emitted.intent, supported.intent]]):
+    transfer_sizes_supported(pair[0], pair[1])
+
+fun b_operations_empty(operations):
+  for all (value in [operations.probe,
+                     operations.arithmetic,
+                     operations.logical,
+                     operations.get,
+                     operations.put_full,
+                     operations.put_partial,
+                     operations.intent]):
+    value == #false
+
+fun unsigned_value_count(width):
+  1 bits.(<<) width
+
+fun id_range_fits(range, width):
+  range.end <= unsigned_value_count(width)
+
+fun address_sets_fit(address_sets, width):
+  def limit = unsigned_value_count(width)
+  for all (address_set in address_sets):
+    (address_set.base bits.or address_set.mask) < limit
+
+fun power_of_two_exponent(value, candidate = 1, exponent = 0):
+  if candidate == value
+  | exponent
+  | power_of_two_exponent(value, candidate * 2, exponent + 1)
+
+fun transfer_sizes_fit(value, size_width):
+  value == #false || power_of_two_exponent(value.max_bytes) < unsigned_value_count(size_width)
+
+fun a_operation_sizes_fit(operations, size_width):
+  for all (value in [operations.acquire_block,
+                     operations.acquire_perm,
+                     operations.arithmetic,
+                     operations.logical,
+                     operations.get,
+                     operations.put_full,
+                     operations.put_partial,
+                     operations.intent]):
+    transfer_sizes_fit(value, size_width)
+
+fun b_operation_sizes_fit(operations, size_width):
+  for all (value in [operations.probe,
+                     operations.arithmetic,
+                     operations.logical,
+                     operations.get,
+                     operations.put_full,
+                     operations.put_partial,
+                     operations.intent]):
+    transfer_sizes_fit(value, size_width)
+
+fun link_parameter_pair(provided, required):
+  if provided.length() == 1 && required.length() == 1 && provided[0] is_a TLClientLinkParams && required[0] is_a TLManagerLinkParams
+  | [provided[0], required[0]]
+  | #false
+
+fun link_bundle(endpoint):
+  cond
+  | endpoint is_a TLClientLinkParams: endpoint.bundle
+  | endpoint is_a TLManagerLinkParams: endpoint.bundle
+  | ~else:
+      error(~who: #'TLUncached,
+            "TileLink interfaces require TLClientLinkParams or TLManagerLinkParams")
+
+fun uncached_connection_legal(provided, required):
+  def pair = link_parameter_pair(provided, required)
+  if !pair
+  | #false
+  | block:
+      def client_link = pair[0]
+      def manager_link = pair[1]
+      def client = client_link.client
+      def manager = manager_link.manager
+      def bundle = client_link.bundle
+      for all (condition in [client.emits.acquire_block == #false,
+                             client.emits.acquire_perm == #false,
+                             b_operations_empty(manager.emits),
+                             a_operations_supported(client.emits, manager.supports),
+                             a_operation_sizes_fit(client.emits, bundle.size_width),
+                             id_range_fits(client.source_ids, bundle.source_width),
+                             address_sets_fit(manager.address_sets, bundle.address_width)]):
+        condition
+
+fun cached_connection_legal(provided, required):
+  def pair = link_parameter_pair(provided, required)
+  if !pair
+  | #false
+  | block:
+      def client_link = pair[0]
+      def manager_link = pair[1]
+      def client = client_link.client
+      def manager = manager_link.manager
+      def bundle = client_link.bundle
+      for all (condition in [a_operations_supported(client.emits, manager.supports),
+                             b_operations_supported(manager.emits, client.supports),
+                             a_operation_sizes_fit(client.emits, bundle.size_width),
+                             b_operation_sizes_fit(manager.emits, bundle.size_width),
+                             id_range_fits(client.source_ids, bundle.source_width),
+                             id_range_fits(manager.sink_ids, bundle.sink_width),
+                             address_sets_fit(manager.address_sets, bundle.address_width)]):
+        condition
+
 // TileLink permits an unaccepted first beat to be withdrawn or replaced, so
 // protocol channels use Decoupled rather than the stronger Irrevocable.
-interface TLUncached(p :: TLBundleParams):
+interface TLUncached(endpoint):
   role client
   role manager
   provider client
+  connection_compatible client (provided, required):
+    uncached_connection_legal(provided, required)
 
   client -> manager:
-    a: Decoupled(TLChannelA(p))
+    a: Decoupled(TLChannelA(link_bundle(endpoint)))
 
   manager -> client:
-    d: Decoupled(TLChannelD(p))
+    d: Decoupled(TLChannelD(link_bundle(endpoint)))
 
-interface TLCached(p :: TLBundleParams):
+interface TLCached(endpoint):
   role client
   role manager
   provider client
+  connection_compatible client (provided, required):
+    cached_connection_legal(provided, required)
 
   client -> manager:
-    a: Decoupled(TLChannelA(p))
-    c: Decoupled(TLChannelC(p))
-    e: Decoupled(TLChannelE(p))
+    a: Decoupled(TLChannelA(link_bundle(endpoint)))
+    c: Decoupled(TLChannelC(link_bundle(endpoint)))
+    e: Decoupled(TLChannelE(link_bundle(endpoint)))
 
   manager -> client:
-    b: Decoupled(TLChannelB(p))
-    d: Decoupled(TLChannelD(p))
+    b: Decoupled(TLChannelB(link_bundle(endpoint)))
+    d: Decoupled(TLChannelD(link_bundle(endpoint)))
 
 export:
   TLUncached

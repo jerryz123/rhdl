@@ -4,23 +4,52 @@
 import:
   lib("rhdl/std/tilelink.rhdl") open
 
-circuit TLUncachedAdapter(p):
-  interface ingress(TLUncached(p), ~role: manager)
-  interface egress(TLUncached(p), ~role: client)
+circuit TLUncachedAdapter(client_link, manager_link):
+  interface ingress(TLUncached(client_link), ~role: manager)
+  interface egress(TLUncached(manager_link), ~role: client)
   egress <=> ingress
 
-circuit TLCachedAdapter(p):
-  interface ingress(TLCached(p), ~role: manager)
-  interface egress(TLCached(p), ~role: client)
+circuit TLCachedAdapter(client_link, manager_link):
+  interface ingress(TLCached(client_link), ~role: manager)
+  interface egress(TLCached(manager_link), ~role: client)
   egress <=> ingress
 
 def params = TLBundleParams(32, 8, 4, 3, 2)
-def uncached_design = elaborate(TLUncachedAdapter(params))
-def cached_design = elaborate(TLCachedAdapter(params))
+def transfers = TransferSizes(1, 8)
+def manager_transfers = TransferSizes(1, 64)
+def client = TLClientParams(
+  "cpu",
+  IdRange(0, 4),
+  ~emits: TLAOperationSizes(~get: transfers),
+  ~supports: TLBOperationSizes(~probe: manager_transfers)
+)
+def uncached_manager = TLManagerParams(
+  "ram",
+  [AddressSet(0x80000000, 0x0fffffff)],
+  IdRange(0, 4),
+  ~supports: TLAOperationSizes(~get: manager_transfers)
+)
+def cached_manager = TLManagerParams(
+  "cache",
+  [AddressSet(0x80000000, 0x0fffffff)],
+  IdRange(0, 4),
+  ~supports: TLAOperationSizes(~get: manager_transfers),
+  ~emits: TLBOperationSizes(~probe: transfers)
+)
+def client_link = TLClientLinkParams(params, client)
+def uncached_manager_link = TLManagerLinkParams(params, uncached_manager)
+def cached_manager_link = TLManagerLinkParams(params, cached_manager)
+def uncached_design = elaborate(TLUncachedAdapter(client_link,
+                                                  uncached_manager_link))
+def cached_design = elaborate(TLCachedAdapter(client_link,
+                                              cached_manager_link))
 
 export:
   TLUncachedAdapter
   TLCachedAdapter
   params
+  client_link
+  uncached_manager_link
+  cached_manager_link
   uncached_design
   cached_design

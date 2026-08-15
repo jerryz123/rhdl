@@ -363,6 +363,19 @@ fun interface_type_has_compatibility_difference(left, right):
     )
   )
 
+fun interface_type_has_connection_policy(type):
+  type is_a InterfaceType && (
+    type.connection_compatibility || (
+      type.parent is_a InterfaceType && interface_type_has_connection_policy(type.parent)
+    ) || (
+      for any (supported in type.supported_contracts):
+        interface_type_has_connection_policy(supported.type)
+    ) || (
+      for any (member in type.members):
+        member.type is_a InterfaceType && interface_type_has_connection_policy(member.type)
+    )
+  )
+
 fun nested_compatibility_provider_is_left(parent_type, member):
   def nested_type = member.type
   def nested_provider_parent_role:
@@ -401,15 +414,16 @@ fun interface_supported_contracts_compatible(type, expected_type):
 
 fun interface_type_connection_compatible(type, expected_type):
   cond
-  | interface_type_same_specialization(type, expected_type): #true
-  | !(type is_a InterfaceType && expected_type is_a InterfaceType && type.identity === expected_type.identity && interface_type_has_compatibility_difference(type, expected_type)):
+  | interface_type_same_specialization(type, expected_type) && !interface_type_has_connection_policy(type):
+      #true
+  | !(type is_a InterfaceType && expected_type is_a InterfaceType && type.identity === expected_type.identity && interface_type_has_connection_policy(type)):
       #false
   | !interface_type_wire_shape_equal(type, expected_type):
       error(~who: #'connect_interfaces,
             "compatible interface specializations must have exactly the same wire shape")
   | ~else:
       def direct_result:
-        if type.connection_compatibility && type.specialization_arguments != expected_type.specialization_arguments
+        if type.connection_compatibility
         | type.connection_compatibility.predicate(
             type.specialization_arguments,
             expected_type.specialization_arguments
@@ -849,7 +863,7 @@ fun compatible_interface_connection_pairs(left, right, extra_values, extra_field
 fun interface_connection_pairs(left, right, extra_values = [], extra_fields = {}):
   unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
   | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
-  if interface_type_same_specialization(left.type, right.type) && extra_values.length() == 0 && extra_fields.length() == 0
+  if interface_type_same_specialization(left.type, right.type) && !interface_type_has_connection_policy(left.type) && !interface_type_has_connection_policy(right.type) && extra_values.length() == 0 && extra_fields.length() == 0
   | exact_interface_connection_pairs(left, right)
   | compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
 
