@@ -1,0 +1,30 @@
+#lang rhdl
+// Composes a processor with the FESVR host and finite shared simulation RAM.
+
+import:
+  "direct-memory-htif.rhdl".FesvrHost
+  "shared-memory.rhdl".FesvrSharedMemory
+
+// The supplied processor must expose a SimpleMemory(32, 4) requester named
+// memory and an Irrevocable(Bits(32)) consumer named start. Keeping the
+// processor as a host parameter lets the simulation hierarchy exist before
+// the eventual core while preserving one generated SimpleSoCTop module.
+sync_circuit SimpleSoCTop(processor,
+                          memory_size_bytes :: Int,
+                          ~base_address: base_address :: Int = 0x80000000):
+  output exit: Bits(32)
+
+  inst host(FesvrHost())
+  inst core(processor)
+  inst memory(FesvrSharedMemory(32,
+                                4,
+                                memory_size_bytes,
+                                ~base_address: base_address))
+
+  memory.fesvr <=> host.memory
+  memory.processor <=> core.memory
+  core.start <=> host.start
+  exit <== host.exit
+
+export:
+  SimpleSoCTop

@@ -8,9 +8,9 @@ It deliberately implements only an RV32 little-endian target. FESVR splits
 larger accesses and performs read-modify-write for partial words.
 
 The transport also turns `htif_t::reset()` into a startup transaction carrying
-the ELF entry point. Generated simulation RTL should hold the core in reset
-until that transaction is accepted. Once running, FESVR polls `tohost` through
-the same memory interface and reports completion as `(exit_code << 1) | 1`.
+the ELF entry point. The processor must remain idle until that transaction is
+accepted. Once running, FESVR polls `tohost` through the same memory interface
+and reports completion as `(exit_code << 1) | 1`.
 
 Install the pinned optional dependency, then build and test the transport:
 
@@ -66,7 +66,7 @@ The transport is simulation support rather than synthesizable RHDL. It does
 not introduce a dependency from the RHDL core, frontend, or CIRCT backend to
 FESVR.
 
-## Shared-memory harness
+## Simple simulation SoC
 
 `shared-memory.rhdl` fairly arbitrates FESVR and processor requests directly
 into one `SimpleMemoryRam`. It exposes complete `SimpleMemory` endpoints for
@@ -75,7 +75,26 @@ generic interface-handle chains internally. It stores one owner token per
 accepted request, couples it with the corresponding ordered response, and
 payload-demultiplexes that response back to its requester.
 
-The executable fixture under `tests/fesvr/` composes:
+`simple-soc-top.rhdl` owns the reusable simulation-only composition. Its
+processor is a host generator parameter with two required interfaces:
+`SimpleMemory(32, 4)` requester `memory` and
+`Irrevocable(Bits(32))` consumer `start`.
+
+```text
+TestDriver.sv
+└── SimpleSoCTop
+    ├── processor
+    ├── FesvrSharedMemory
+    │   └── SimpleMemoryRam
+    └── FesvrHost
+        └── DirectMemoryHTIF
+```
+
+`TestDriver.sv` is the only handwritten SystemVerilog layer. It supplies
+clock and reset, monitors the FESVR exit word, and enforces a timeout. The
+generated `SimpleSoCTop` owns all typed hardware composition and the DPI call.
+
+The runnable smoke configuration is also under `sim/fesvr/`:
 
 ```text
 FesvrHost ---------\
@@ -85,16 +104,18 @@ FesvrStubCore -----/
        +------------ start entry
 ```
 
-The stub executes no instructions. After accepting the ELF entry point, it
-writes `1` to `tohost`. The integration test proves that FESVR loads the ELF
+`stub-soc.rhdl` supplies `FesvrStubCore` to `SimpleSoCTop`. The stub executes no
+instructions. After accepting the ELF entry point, it writes `1` to `tohost`.
+The integration test under `tests/fesvr/` proves that FESVR loads the ELF
 through generated RTL, start delivery completes, processor and host traffic
-share the same RAM, and FESVR observes the passing exit.
+share the same RAM, and FESVR observes the passing exit. Test-owned files are
+limited to assertions, the transport unit test, and target programs.
 
 Install FESVR and CIRCT, then run the focused RTL checks:
 
 ```sh
 make -C sim/fesvr rtl-elaboration-test
-make -C sim/fesvr stub-harness-test
+make -C sim/fesvr stub-soc-test
 ```
 
 The second target additionally requires Verilator and an RV32-capable
@@ -102,6 +123,6 @@ The second target additionally requires Verilator and an RV32-capable
 installations.
 
 A future processor implementation is expected to live under the repository's
-top-level `core/`, not under this simulator package. Its simulation top can
-replace the test stub while retaining the FESVR host, shared memory, and DPI
-support defined here.
+top-level `core/`, not under this simulator package. A concrete simulation
+configuration can supply that processor to `SimpleSoCTop` while retaining the
+FESVR host, shared memory, SV driver, and DPI support defined here.

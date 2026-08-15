@@ -1,10 +1,10 @@
-// Clocks the generated FESVR stub harness until HTIF reports completion.
-module fesvr_stub_harness_tb;
+// Clocks SimpleSoCTop until the generated FESVR host reports target completion.
+module TestDriver;
   logic clock = 1'b0;
   logic reset = 1'b1;
   wire [31:0] exit;
 
-  FesvrStubHarness dut (
+  SimpleSoCTop dut (
     .clock(clock),
     .reset(reset),
     .exit(exit)
@@ -21,11 +21,11 @@ module fesvr_stub_harness_tb;
       if (exit != 0) begin
         if (exit != 1)
           $fatal(1, "FESVR reported target failure: exit word %0d", exit);
-        $display("FESVR stub harness passed");
+        $display("SimpleSoCTop passed");
         $finish;
       end
     end
 
-    $fatal(1, "FESVR stub harness timed out");
+    $fatal(1, "SimpleSoCTop timed out");
   end
 endmodule

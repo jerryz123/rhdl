@@ -10,7 +10,7 @@ Tests mirror the implementation boundaries:
 | [`frontend/`](frontend/) | Language profiles, layers, elaboration, examples, and invalid frontend uses |
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
 | [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
-| [`fesvr/`](fesvr/) | Direct-memory FESVR transport and generated-RTL stub harness |
+| [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
 Intentional language failures live under `frontend/invalid/` and are exercised

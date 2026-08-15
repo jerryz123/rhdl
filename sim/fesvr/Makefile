@@ -1,4 +1,4 @@
-# Builds and tests the direct-memory FESVR transport without changing the main RHDL build.
+# Builds the FESVR transport and generated SimpleSoCTop simulation independently.
 REPO_DIR := $(abspath ../..)
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
 FESVR_PREFIX ?= $(REPO_DIR)/.tools/fesvr-$(FESVR_REVISION)
@@ -18,12 +18,12 @@ TRANSPORT_OBJECT := $(BUILD_DIR)/direct_mem_htif.o
 TRANSPORT_LIBRARY := $(BUILD_DIR)/libdirect_mem_htif.a
 TEST_ELF := $(BUILD_DIR)/direct_mem_htif_pass.elf
 TEST_BINARY := $(BUILD_DIR)/direct_mem_htif_test
-STUB_MLIR := $(BUILD_DIR)/fesvr_stub_harness.mlir
-STUB_VERILOG := $(BUILD_DIR)/fesvr_stub_harness.sv
-STUB_OBJECT_DIR := $(BUILD_DIR)/fesvr_stub_harness_obj
-STUB_BINARY := $(STUB_OBJECT_DIR)/Vfesvr_stub_harness_tb
+SOC_MLIR := $(BUILD_DIR)/simple_soc_top.mlir
+SOC_VERILOG := $(BUILD_DIR)/SimpleSoCTop.sv
+SOC_OBJECT_DIR := $(BUILD_DIR)/simple_soc_obj
+SOC_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 
-.PHONY: all setup test dpi-compile-check rtl-elaboration-test stub-harness-test
+.PHONY: all setup test dpi-compile-check rtl-elaboration-test stub-soc-test
 
 all: $(TRANSPORT_LIBRARY)
 
@@ -43,24 +43,24 @@ rtl-elaboration-test:
 	cd $(REPO_DIR) && env PLTCOLLECTS=$(REPO_DIR): \
 	  $(RACO) test tests/fesvr/fesvr-rtl-test.rhm
 
-stub-harness-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
+stub-soc-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	@test -x "$(CIRCT_OPT)" || \
 	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
 	cd $(REPO_DIR) && $(RACKET) -S $(REPO_DIR) \
-	  tests/fesvr/emit-stub-harness.rhm > $(STUB_MLIR)
+	  tools/emit-fesvr-stub-soc.rhm > $(SOC_MLIR)
 	$(CIRCT_OPT) --canonicalize --cse --prettify-verilog \
 	  --lower-seq-hlmem --lower-sim-to-sv \
 	  --lower-seq-to-sv='disable-mem-randomization=true disable-reg-randomization=true' \
 	  --lower-seq-firmem \
 	  --hw-memory-sim='disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined' \
-	  --export-verilog $(STUB_MLIR) -o /dev/null > $(STUB_VERILOG)
+	  --export-verilog $(SOC_MLIR) -o /dev/null > $(SOC_VERILOG)
 	$(VERILATOR) --binary --timing --vpi --build-jobs 0 \
-	  --top-module fesvr_stub_harness_tb --Mdir $(STUB_OBJECT_DIR) \
-	  $(STUB_VERILOG) $(REPO_DIR)/tests/fesvr/fesvr_stub_harness_tb.sv \
+	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \
+	  $(SOC_VERILOG) $(CURDIR)/TestDriver.sv \
 	  $(CURDIR)/direct_mem_htif.cc $(CURDIR)/direct_mem_htif_dpi.cc \
 	  -CFLAGS "-I$(FESVR_PREFIX)/include -I$(CURDIR) -std=c++20" \
 	  -LDFLAGS "$(FESVR_LIBRARY) -pthread"
-	$(STUB_BINARY) $(TEST_ELF)
+	$(SOC_BINARY) $(TEST_ELF)
 
 $(FESVR_LIBRARY):
 	@echo "FESVR is not installed; run 'make setup' first" >&2
