@@ -1,4 +1,4 @@
-// Simulates fixed-width logical shifts with narrow and wide hardware shift amounts.
+// Simulates fixed-width logical shifts with host and hardware shift amounts.
 module shifts_tb;
     logic [7:0] value;
     logic [2:0] amount;
@@ -7,6 +7,8 @@ module shifts_tb;
     logic [7:0] right;
     logic [7:0] left_wide;
     logic [7:0] right_wide;
+    logic [7:0] left_three;
+    logic [7:0] right_three;
 
     ShiftOps8 dut (
         .value(value),
@@ -15,7 +17,9 @@ module shifts_tb;
         .left(left),
         .right(right),
         .left_wide(left_wide),
-        .right_wide(right_wide)
+        .right_wide(right_wide),
+        .left_three(left_three),
+        .right_three(right_three)
     );
 
     task automatic check_shifts(
@@ -35,6 +39,8 @@ module shifts_tb;
         assert (right == expected_right) else $fatal(1, "narrow-amount right shift failed");
         assert (left_wide == expected_left_wide) else $fatal(1, "wide-amount left shift failed");
         assert (right_wide == expected_right_wide) else $fatal(1, "wide-amount right shift failed");
+        assert (left_three == value_in << 3) else $fatal(1, "host-amount left shift failed");
+        assert (right_three == value_in >> 3) else $fatal(1, "host-amount right shift failed");
     endtask
 
     initial begin

@@ -5,6 +5,7 @@ import:
   rhombus
   rhombus.(!) as host_invert
   rhombus/meta open
+  "../../core/ir.rhm".Location
   "../../core/types.rhm" open
   "../kernel.rhm" open:
     except:
@@ -12,9 +13,15 @@ import:
       literal
       dont_care
       zext
+      hw_shl
+      hw_shru
+      hw_shrs
   "../kernel.rhm".concat as kernel_concat
   "../kernel.rhm".dont_care as kernel_dont_care
   "../kernel.rhm".zext as kernel_zext
+  "../kernel.rhm".hw_shl as kernel_hw_shl
+  "../kernel.rhm".hw_shru as kernel_hw_shru
+  "../kernel.rhm".hw_shrs as kernel_hw_shrs
   "../support/fields.rhm".HardwareFields
   "../support/hardware-literal.rhm" open
   "../support/mux-lookup.rhm" open
@@ -56,6 +63,51 @@ fun literal(type, value, name = #false):
 
 fun bits(value, width, name = #false):
   literal(Bits(width), value, name)
+
+// Host shift amounts are elaboration-time constants. Convert them to the
+// narrowest positive-width Bits literal while leaving dynamic hardware
+// amounts untouched for the kernel's ordinary type checking.
+fun required_shift_amount_width(amount):
+  fun loop(width, capacity):
+    if amount < capacity
+    | width
+    | loop(width + 1, capacity * 2)
+  loop(1, 2)
+
+fun normalize_shift_amount(amount, who):
+  if amount is_a Int
+  | block:
+      unless amount >= 0
+      | error(~who: who, "shift amount must be a nonnegative host Int or hardware Bits")
+      bits(amount, required_shift_amount_width(amount))
+  | amount
+
+fun hw_shl(value,
+           amount,
+           name = #false,
+           location = Location()):
+  kernel_hw_shl(value,
+                normalize_shift_amount(amount, #'hw_shl),
+                name,
+                location)
+
+fun hw_shru(value,
+            amount,
+            name = #false,
+            location = Location()):
+  kernel_hw_shru(value,
+                 normalize_shift_amount(amount, #'hw_shru),
+                 name,
+                 location)
+
+fun hw_shrs(value,
+            amount,
+            name = #false,
+            location = Location()):
+  kernel_hw_shrs(value,
+                 normalize_shift_amount(amount, #'hw_shrs),
+                 name,
+                 location)
 
 // Like a literal shadow, a typed don't-care is materialized only when a
 // hardware consumer reads it. Core IR carries only its packed Bits image.

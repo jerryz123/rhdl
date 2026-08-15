@@ -65,7 +65,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`enum-state.rhdl`](enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
 | [`one-hot.rhdl`](one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
 | [`one-hot-enum.rhdl`](one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
-| [`shifts.rhdl`](shifts.rhdl) | Logical shifts with independent amount widths |
+| [`shifts.rhdl`](shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |
 | [`expanding-arithmetic.rhdl`](expanding-arithmetic.rhdl) | Lossless arithmetic over unequal-width operands |
 | [`counter.rhdl`](counter.rhdl) | Host helper functions accepting and returning hardware |
 | [`standard-counter.rhdl`](standard-counter.rhdl) | Reusable bounded counter with wrap indication |

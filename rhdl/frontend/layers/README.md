@@ -74,7 +74,9 @@ conjunction and disjunction use `&` and `|||`.
 `SInt` arithmetic uses a signed interpretation where the operation depends on
 it. Both remain fixed-width. Arithmetic and shift operators keep their ordinary
 Rhombus meaning on host values; the symbolic bitwise family requires hardware
-operands.
+operands. A hardware value may be shifted by either an unsigned hardware `Bits`
+amount or a nonnegative host `Int`; a host amount becomes a minimally wide
+constant during elaboration. Negative host amounts are rejected.
 
 Expanding arithmetic is explicit:
 
@@ -131,13 +133,14 @@ width and retain a canonical packed image:
 input(a, b): SInt(8)
 output result: SInt(8)
 
-result <== (a + sint(-3, 8)) >> bits(1, 3)
+result <== (a + sint(-3, 8)) >> 1
 ```
 
 Fixed-width `+`, `-`, and `*` wrap modulo `2^width`, just as their packed
 two's-complement representations do. `>>` is arithmetic for `SInt`; `<<`
-preserves the signed type. Shift amounts remain unsigned `Bits`. Mixed widths
-and mixed `Bits`/`SInt` arithmetic are rejected rather than coerced.
+preserves the signed type. Dynamic shift amounts remain unsigned `Bits`;
+constant amounts may be nonnegative host `Int` values. Mixed widths and mixed
+`Bits`/`SInt` arithmetic are rejected rather than coerced.
 
 `sext(value, target_width)` explicitly sign-extends. `strunc(value,
 target_width)` explicitly retains the low bits and returns the same signed type
