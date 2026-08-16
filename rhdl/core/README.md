@@ -272,15 +272,19 @@ or immediate combinational checks.
 The public object model includes:
 
 ```text
-Design        DpiImport      DpiResult    Module       Operation
-Value         Place          Port         Register
-Memory        SyncMemory     Instance     HardwareType  Location      Origin
+Design        DesignElaboration  DpiImport   DpiResult   Module       Operation
+Value         Place              Port        Register    Memory       SyncMemory
+Instance      HardwareType       Location    Origin
 ```
 
 An operation owns operands, results, places, attributes, a location, and an
 origin. The IR is a read-only inspection API: callers can walk designs,
 modules, and operations; follow value definitions and users; and print
 deterministic text with `dump_ir`.
+
+`DesignElaboration` pairs a verified design with its explicit top module for
+downstream consumers. `Module.find_instance(name)` returns the stable direct
+`rtl.instance` operation rather than relying on operation or module order.
 
 IR identity is separate from user-facing names. Hardware names are ASCII
 identifiers beginning with a letter or underscore; `__rhdl_` is reserved for

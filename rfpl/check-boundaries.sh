@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforces RFPL's one-way dependency on RHDL's structural construction surface.
+# Enforces RFPL's read-only dependency on the public RHDL core IR.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,9 +10,8 @@ if rg -n '^[[:space:]]+"[^\"]*rfpl/' rhdl --glob '*.rhm' --glob '*.rhdl'; then
   exit 1
 fi
 
-if rg -n 'rhdl/frontend/(standard\.rhm|layers/(assertion|bool|bundle|cast|comb|conditional|dpi|enum|expanding-arithmetic|interface|memory|one-hot|sequential|signed|sync-memory|sync|vector|wire)\.rhm)' \
-    rfpl/frontend --glob '*.rhm'; then
-  echo "RFPL frontend must not import RHDL logic or state layers" >&2
+if rg -n 'rhdl/frontend/' rfpl/frontend --glob '*.rhm'; then
+  echo "RFPL annotation code must not import the RHDL frontend" >&2
   exit 1
 fi
 

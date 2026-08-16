@@ -1,69 +1,61 @@
 #lang rhombus
-// Verifies RFPL's logic-free hierarchy direction and placed floorplan instances.
+// Verifies that an annotated composite circuit contains only hierarchy and wiring.
 
 import:
   "../../rhdl/core/ir.rhm" open
 
 export:
-  verify_floorplan_module
-  verify_floorplan_hierarchy
+  verify_composite_module
 
-def allowed_floorplan_opcodes = [
+def allowed_composite_opcodes = [
   "rtl.input_port",
   "rtl.output_port",
   "rtl.instance",
-  "rtl.drive"
+  "rtl.drive",
+  "rtl.wire"
 ]
 
-fun verify_floorplan_module(module_def):
+fun verify_composite_module(module_def, placed_instances):
   unless module_def is_a Module
   | error(~who: #'floorplan, "expected an RHDL core Module")
+  unless placed_instances is_a List
+  | error(~who: #'floorplan, "placed instances must be supplied as a List")
   for (operation in module_def.operations):
-    unless allowed_floorplan_opcodes.find(
+    unless allowed_composite_opcodes.find(
       fun (allowed): allowed == operation.opcode
     )
     | error(
         ~who: #'floorplan,
         String.append(
           operation.location.describe(),
-          ": floorplan ", module_def.name,
+          ": composite floorplan ", module_def.name,
           " cannot contain ", operation.opcode,
-          "; define logic in an RHDL circuit and instantiate that circuit"
+          "; annotate logic-bearing circuits as hard macros"
         )
       )
+    when operation.opcode == "rtl.instance"
+    | unless placed_instances.find(fun (candidate): candidate === operation)
+      | error(
+          ~who: #'floorplan,
+          String.append(
+            operation.location.describe(),
+            ": composite floorplan ", module_def.name,
+            " has no placement for instance ",
+            operation.attribute("name")
+          )
+        )
+  for (operation in placed_instances):
+    def valid_instance = operation is_a Operation && operation.module_def === module_def && operation.opcode == "rtl.instance"
+    unless valid_instance
+    | error(~who: #'floorplan,
+            "placement must select a direct instance of its composite floorplan")
+    when placed_instances.filter(
+      ~keep: fun (candidate): candidate === operation
+    ).length() != 1
+    | error(
+        ~who: #'floorplan,
+        String.append("instance ", operation.attribute("name"),
+                      " is placed more than once in composite floorplan ",
+                      module_def.name)
+      )
   module_def
-
-fun verify_floorplan_hierarchy(design,
-                               floorplan_definitions,
-                               floorplan_placements = []):
-  def floorplan_modules = floorplan_definitions.map(
-    fun (definition): definition.module_def
-  )
-  fun is_floorplan_module(module_def):
-    floorplan_modules.find(fun (candidate): candidate === module_def) != #false
-  for (module_def in design.modules):
-    for (operation in module_def.operations):
-      when operation.opcode == "rtl.instance"
-      | def child = operation.attribute("module")
-        when is_floorplan_module(child)
-        | if is_floorplan_module(module_def)
-          | unless floorplan_placements.find(
-              fun (placement): placement.instance.operation === operation
-            )
-            | error(
-                ~who: #'floorplan,
-                String.append(
-                  operation.location.describe(),
-                  ": floorplan instance ", operation.attribute("name"),
-                  " requires an at: coordinate"
-                )
-              )
-          | error(
-              ~who: #'floorplan,
-              String.append(
-                operation.location.describe(),
-                ": RHDL circuit ", module_def.name,
-                " cannot instantiate RFPL floorplan ", child.name
-              )
-            )
-  design

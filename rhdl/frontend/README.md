@@ -85,6 +85,19 @@ circuit Passthrough(T):
 def design = elaborate(Passthrough(Bits(8)))
 ```
 
+Consumers that need a stable explicit top, such as RFPL physical annotation,
+use `elaborate_with_top`:
+
+```rhombus
+def logical = elaborate_with_top(Passthrough(Bits(8)))
+def design = logical.design
+def top = logical.top
+```
+
+`elaborate` remains the concise compatibility form returning a bare `Design`.
+`Module.find_instance(name)` provides stable direct-instance inspection; tools
+must not infer the top or hierarchy from module-list positions.
+
 Inputs are readable and cannot be driven. Outputs are driveable and become
 readable after they are driven. Outputs, instance inputs, and register
 next-state places use `<==`; every place has one effective driver.

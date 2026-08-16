@@ -17,10 +17,7 @@ not a second IR.
 #lang rhdl/base ---------------> frontend/foundation
 user base-profile imports -----> selected frontend/layers/*
 
-#lang rfpl --------------------> ../rfpl/frontend
-                                      |
-                                      +----> structural frontend APIs ----> core
-                                      +----> RHDL circuit definitions
+#lang rfpl --------------------> ../rfpl/frontend ------------------------> core IR
 
 std/* -------------------------> public #lang rhdl authoring surface
 tilelink/* --------------------> public #lang rhdl and generic std/* libraries
@@ -53,7 +50,7 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
-| [`../rfpl/`](../rfpl/PLAN.md) | Rectangular physical floorplans with contained child coordinates and logic-free structural wiring | Foundation types and wiring, kernel construction, clocking-aware circuit instances, generator parameters, instance-member support, and core IR verification |
+| [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, interfaces, and local connection legality | Public `#lang rhdl` and protocol-neutral `std/` libraries |
@@ -65,9 +62,10 @@ frontend code never imports a backend; and a backend never imports frontend
 syntax or elaboration. Layers do not import sibling layers. Shared machinery
 needed by multiple layers belongs in `frontend/support/`. Standard-library
 modules and simulation adapters use public RHDL forms rather than importing
-implementation modules. RFPL is a downstream structural language: it may
-reuse the enumerated RHDL construction APIs and existing backend, while RHDL
-core, frontend, and backend modules never import RFPL.
+implementation modules. RFPL is a downstream annotation language: it inspects
+the public RHDL IR but does not construct hardware or import frontend/backend
+implementation modules. RHDL core, frontend, and backend modules never import
+RFPL.
 
 ## Design commitments
 

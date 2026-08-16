@@ -1,107 +1,88 @@
 #lang rhombus
-// Checks RFPL rectangles, placed hierarchy, shared stamping, and CIRCT emission.
+// Checks RFPL physical views, placed composition, logical reuse, and CIRCT stability.
 
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/backend/circt.rhm".emit_circt
-  "../frontend/foundation.rhm".FloorplanDefinition
+  "../frontend/foundation.rhm".CompositeFloorplan
   "../frontend/foundation.rhm".Coordinate
   "../frontend/foundation.rhm".FloorplanPlacement
+  "../frontend/foundation.rhm".FloorplanDesign
+  "../frontend/foundation.rhm".HardMacro
   "../frontend/foundation.rhm".Length
   "../frontend/foundation.rhm".RectOutline
   "../../examples/rfpl/circuit-pair.rfpl" as fixture
 
-def elaboration = fixture.elaboration
-def design = elaboration.design
-def top = elaboration.top
-def pair = top.module_def
-def shell = design.modules.find(fun (module_def): module_def.name == "AdderShell")
-def crossed_wires = design.modules.find(
-  fun (module_def): module_def.name == "CrossedWires"
+def floorplan_design = fixture.floorplan_design
+def logical = fixture.logical
+def design = floorplan_design.design
+def pair_view = fixture.pair_floorplan
+def shell_view = fixture.shell_floorplan
+def adder_view = fixture.adder_macro
+def crossed_view = fixture.crossed_macro
+def pair = pair_view.module_def
+def shell = shell_view.module_def
+def adder = adder_view.module_def
+def crossed_wires = crossed_view.module_def
+def left_placement = pair_view.placements.find(
+  fun (placement): placement.instance.attribute("name") == "left"
 )
-def adder = design.modules.find(fun (module_def): module_def.name == "Adder")
-def shell_definition = elaboration.floorplans.find(
-  fun (definition): definition.name == "AdderShell"
+def right_placement = pair_view.placements.find(
+  fun (placement): placement.instance.attribute("name") == "right"
 )
-def crossed_wires_definition = elaboration.floorplans.find(
-  fun (definition): definition.name == "CrossedWires"
+def crossed_placement = pair_view.placements.find(
+  fun (placement): placement.instance.attribute("name") == "crossed"
 )
-def left_placement = elaboration.placements.find(
-  fun (placement): placement.instance.operation.attribute("name") == "left"
-)
-def right_placement = elaboration.placements.find(
-  fun (placement): placement.instance.operation.attribute("name") == "right"
-)
-def crossed_placement = elaboration.placements.find(
-  fun (placement): placement.instance.operation.attribute("name") == "crossed"
-)
+def wrapped_placement = shell_view.placements[0]
 def pair_instances = pair.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.instance"
 )
 def shell_instances = shell.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.instance"
 )
-def crossed_wire_instances = crossed_wires.operations.filter(
-  ~keep: fun (operation): operation.opcode == "rtl.instance"
-)
 def crossed_wire_drives = crossed_wires.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.drive"
 )
-def allowed_floorplan_opcodes = [
-  "rtl.input_port",
-  "rtl.output_port",
-  "rtl.instance",
-  "rtl.drive"
-]
-fun floorplan_opcodes_valid(module_def):
-  for all (operation in module_def.operations):
-    allowed_floorplan_opcodes.find(
-      fun (allowed): allowed == operation.opcode
-    ) != #false
 def circt = emit_circt(design)
 
 check:
-  elaboration.floorplans.length() ~is 3
-  top is_a FloorplanDefinition ~is #true
-  top.name ~is "AdderPair"
-  top.outline is_a RectOutline ~is #true
-  top.outline.width is_a Length ~is #true
-  top.outline.width.picometers ~is 100000000
-  top.outline.height.picometers ~is 50000000
-  shell_definition.module_def === shell ~is #true
-  shell_definition.outline.width.picometers ~is 40000000
-  shell_definition.outline.height.picometers ~is 24000000
-  crossed_wires_definition.module_def === crossed_wires ~is #true
-  crossed_wires_definition.outline.width.picometers ~is 16000000
-  crossed_wires_definition.outline.height.picometers ~is 8000000
-  elaboration.floorplans.filter(
-    ~keep: fun (definition): definition.name == "AdderShell"
-  ).length() ~is 1
-  elaboration.placements.length() ~is 3
+  floorplan_design is_a FloorplanDesign ~is #true
+  floorplan_design.logical === logical ~is #true
+  floorplan_design.top === pair_view ~is #true
+  floorplan_design.top_module === logical.top ~is #true
+  floorplan_design.views.length() ~is 4
+  floorplan_design.placements.length() ~is 4
+  pair_view is_a CompositeFloorplan ~is #true
+  shell_view is_a CompositeFloorplan ~is #true
+  adder_view is_a HardMacro ~is #true
+  crossed_view is_a HardMacro ~is #true
+  pair_view.outline is_a RectOutline ~is #true
+  pair_view.outline.width is_a Length ~is #true
+  pair_view.outline.width.picometers ~is 100000000
+  pair_view.outline.height.picometers ~is 50000000
+  shell_view.outline.width.picometers ~is 40000000
+  shell_view.outline.height.picometers ~is 24000000
+  adder_view.outline.width.picometers ~is 40000000
+  adder_view.outline.height.picometers ~is 24000000
+  crossed_view.outline.width.picometers ~is 16000000
+  crossed_view.outline.height.picometers ~is 8000000
   left_placement is_a FloorplanPlacement ~is #true
   left_placement.coordinate is_a Coordinate ~is #true
   left_placement.parent_module === pair ~is #true
-  left_placement.child === shell_definition ~is #true
+  left_placement.child === shell_view ~is #true
   left_placement.coordinate.x.picometers ~is 0
   left_placement.coordinate.y.picometers ~is 0
-  right_placement.child === shell_definition ~is #true
+  right_placement.child === shell_view ~is #true
   right_placement.coordinate.x.picometers ~is 50000000
   right_placement.coordinate.y.picometers ~is 0
-  crossed_placement.child === crossed_wires_definition ~is #true
+  crossed_placement.child === crossed_view ~is #true
   crossed_placement.coordinate.x.picometers ~is 42000000
   crossed_placement.coordinate.y.picometers ~is 30000000
+  wrapped_placement.child === adder_view ~is #true
   design.modules.length() ~is 4
   pair_instances.length() ~is 3
-  pair_instances[0].attribute("module") === shell ~is #true
-  pair_instances[1].attribute("module") === shell ~is #true
-  pair_instances[2].attribute("module") === crossed_wires ~is #true
   shell_instances.length() ~is 1
-  shell_instances[0].attribute("module") === adder ~is #true
-  crossed_wire_instances.length() ~is 0
   crossed_wire_drives.length() ~is 2
-  floorplan_opcodes_valid(pair) ~is #true
-  floorplan_opcodes_valid(shell) ~is #true
-  floorplan_opcodes_valid(crossed_wires) ~is #true
   adder.operations.find(fun (operation): operation.opcode == "rtl.add") != #false ~is #true
   verify_design(design) ~is #void
   circt.contains("hw.module @AdderPair") ~is #true
