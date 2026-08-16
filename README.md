@@ -2,7 +2,7 @@
 
 # RHDL
 
-> Yes, all pf the code here was written by a LLM. The only text not written by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
+> Yes, all the code here was written by a LLM. The only text not produced by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
 
 RHDL is an experimental Rhombus-hosted hardware description language. Ordinary
 Rhombus computation elaborates and verifies a public hardware IR. Optional
