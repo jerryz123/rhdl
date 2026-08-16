@@ -41,8 +41,12 @@ while IFS= read -r source_file; do
       echo "$source_file: $reference_export must be exported" >&2
       status=1
     elif [[ "$allow_empty" == false ]] &&
-         ! sed -n "/^def $reference_export = @str|<<{/,/^}>>|/p" "$source_file" |
-           sed '1d;$d' | grep -q '[^[:space:]]'; then
+         ! awk -v start="def $reference_export = @str|<<{" '
+             $0 == start { in_reference = 1; next }
+             in_reference && $0 == "}>>|" { in_reference = 0 }
+             in_reference && /[^[:space:]]/ { has_verilog = 1 }
+             END { exit(has_verilog ? 0 : 1) }
+           ' "$source_file"; then
       echo "$source_file: $reference_export must contain generated Verilog" >&2
       status=1
     fi
