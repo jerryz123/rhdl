@@ -45,6 +45,13 @@ make update-verilog-goldens
 Review the resulting example-file diff normally. `FIXTURE=name` limits both
 commands to one fixture.
 
+Exact references belong to the CIRCT version pinned by
+[`tools/install-circt.sh`](../../tools/install-circt.sh). When `make circt-test`
+is run against another CIRCT version, such as tip of tree, the runner still
+verifies lowering and executes every available Verilator testbench but skips
+the version-specific text comparison. `make verilog-golden-test` requires the
+pinned version so it cannot silently pass without checking the references.
+
 SystemVerilog testbenches remain under [`verilog/`](verilog/). They verify
 behavior rather than textual output. A same-base-name `*_dpi.cpp` file is
 linked automatically when a fixture exercises DPI-C.

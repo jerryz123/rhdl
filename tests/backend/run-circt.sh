@@ -25,6 +25,18 @@ if [[ ! -x "$circt_opt" ]]; then
   fi
 fi
 
+golden_circt_version="firtool-1.155.0"
+circt_version="$("$circt_opt" --version | sed -n 's/^CIRCT //p')"
+compare_goldens=true
+if [[ "$circt_version" != "$golden_circt_version" ]]; then
+  if [[ "$mode" == --golden-only ]]; then
+    echo "Verilog goldens require CIRCT $golden_circt_version; found ${circt_version:-an unknown version}" >&2
+    exit 1
+  fi
+  compare_goldens=false
+  echo "CIRCT ${circt_version:-version unknown}: skipping version-specific Verilog golden comparisons"
+fi
+
 cd "$repo_dir"
 
 fixture_selected() {
@@ -103,6 +115,10 @@ prepare_example() {
 
   if [[ "$mode" == --update-goldens ]]; then
     update_reference "$example" "$reference_export" "$verilog"
+    return 0
+  fi
+
+  if [[ "$compare_goldens" != true ]]; then
     return 0
   fi
 
