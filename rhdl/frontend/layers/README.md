@@ -11,7 +11,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 
 | Layer | Authoring feature |
 |---|---|
-| [`cast.rhm`](cast.rhm) | Functional equal-width representation casts |
+| [`cast.rhm`](cast.rhm) | Functional equal-width representation casts and inferred packing to `Bits` |
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
@@ -238,10 +238,12 @@ value and allows the backend to use selector-bit gating and a balanced OR tree.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
 - Explicit `extract(value, high, low)` uses inclusive host indices.
 - `zext(bits_value, target_width)` adds most-significant zeroes to `Bits` and
-  returns wider `Bits`; other types require an explicit equal-width cast first.
+  returns wider `Bits`; use `as_bits` to expose other packable data first.
 - `trunc` retains low bits.
 - `.into(TargetType)` and `cast(value, TargetType)` preserve packed width and
   bit pattern while changing the hardware type.
+- `as_bits(value)` exposes any packable data value as
+  `Bits(packed_width(value.type))`; an existing `Bits` value is unchanged.
 
 Indices and ranges are host values known during elaboration. Width changes are
 always explicit.
