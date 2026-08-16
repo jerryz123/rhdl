@@ -56,6 +56,7 @@ internal module implementing its shared frontend forms is called the
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, interfaces, and local connection legality | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
+| [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
 
 The import direction is one-way. Core never imports frontend or backend code;
 frontend code never imports a backend; and a backend never imports frontend
@@ -178,8 +179,9 @@ only, and restricts reader shims and `.rhdl` files to their intended
 locations. Run `make check-boundaries` after moving or adding modules.
 
 `.rhdl` is reserved for RHDL-profile programs, public adapters, concrete core
-designs, simulation adapters, and frontend or FESVR fixtures. `.rhm` contains
-Rhombus implementation and library modules.
+designs, simulation adapters, physical-design integration fixtures, and
+frontend or FESVR fixtures. `.rhm` contains Rhombus implementation and library
+modules.
 `.rkt` is restricted to reader shims and Racket interoperability where
 collection lookup requires it.
 
