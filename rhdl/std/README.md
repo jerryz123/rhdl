@@ -361,6 +361,10 @@ under [`flow/`](flow/):
 |---|---|
 | `ValidPipe(T, stages)` | Fixed-latency registered valid/payload pipeline with no backpressure |
 
+| Transaction generator | Behavior |
+|---|---|
+| `CompletionQueue(Request, Response, depth)` | Reserves response capacity at a ready-valid request handshake, emits a nonstallable issue, and buffers the matching nonstallable completion |
+
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|
 | `Pipe(T, stages)` | `CtrlPipe(stages)` | Registered elastic pipeline with stable output under backpressure |
@@ -430,6 +434,16 @@ def tagging:
     processor: Bool(#false)
 
 def tagged = ingress |> tagging
+```
+
+`map_valid(T, payload => expression)` is the corresponding inline payload map
+for `Valid` flows. `fork_valid(source, n)` copies every asserted Valid payload
+to all `n` outputs in the same cycle. Neither helper adds an instance or a
+readiness path:
+
+```rhombus
+def mapped = map_valid(issued, request => translate(request))
+def copies = fork_valid(mapped, 2)
 ```
 
 `filter_flow(source, payload => predicate)` consumes an offered token without
@@ -546,6 +560,14 @@ produce `IrrevocableCtrl`; flow-through queues remain `DecoupledCtrl`.
 depths greater than one compose two `Counter(depth)` pointer instances. Those
 queues assert that occupancy stays within the configured depth. Round-robin
 arbiters similarly assert that their rotating priority remains in range.
+
+`CompletionQueue(Request, Response, depth)` couples a ready-valid request path
+to a nonbackpressured implementation. Each request handshake reserves one
+slot and appears immediately on the `Valid` `issue` endpoint. The implementation
+must later produce exactly one `Valid` `completion`; completed responses emerge
+in arrival order through the `Irrevocable` `response` endpoint. Assertions
+detect unreserved completions, unavailable completion slots, and reservation
+counts outside the configured depth.
 
 See [`../../examples/flow-control.rhdl`](../../examples/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and

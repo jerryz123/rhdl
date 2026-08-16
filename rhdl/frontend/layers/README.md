@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, equality, typed membership, unsigned ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions, equality, typed membership, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
@@ -114,6 +114,8 @@ equal <== a === b
 different <== a =/= b
 less <== a < b
 active <== is_one_of(state, State.Refill, State.Respond)
+nonzero <== or_reduce(value)
+all_set <== and_reduce(value)
 ```
 
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
@@ -121,6 +123,11 @@ and inequality work on exactly equal flat types and return `Bool`; `=/=` is
 the Boolean complement of `===` and lowers to equality followed by negation.
 `is_one_of(value, alternative, ...)` accepts one or more alternatives of that
 same exact flat type and lowers to typed equalities joined by hardware OR.
+`or_reduce(value)` and `and_reduce(value)` accept any packable hardware
+`DataType`, reduce its canonical packed representation, and return `Bool`.
+They lower respectively to inequality with zero and equality with an all-ones
+value, expressed through existing equality and inversion operations without
+adding core reduction operations.
 Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from

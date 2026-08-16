@@ -1,0 +1,59 @@
+#lang rhdl
+// Exercises inline Valid composition and reserved nonstallable completion buffering.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+circuit ValidMapForkChain():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  interface egress[2](Valid(Bits(9)), ~role: producer)
+
+  def mapping = map_valid(Bits(8),
+                          payload => concat(bits(0, 1), payload))
+  def mapped = ingress |> mapping
+  def outputs = mapped |> fork_valid(Valid(Bits(9)), 2)
+  egress <=> outputs
+
+sync_circuit CompletionQueueWrapper():
+  interface request(Decoupled(Bits(8)), ~role: consumer)
+  interface issue(Valid(Bits(8)), ~role: producer)
+  interface completion(Valid(Bits(16)), ~role: consumer)
+  interface response(Irrevocable(Bits(16)), ~role: producer)
+
+  inst bridge(CompletionQueue(Bits(8), Bits(16), 2))
+  request <=> bridge.request
+  issue <=> bridge.issue
+  completion <=> bridge.completion
+  response <=> bridge.response
+
+circuit MapValidWrongProtocol():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  map_valid(ingress, payload => payload)
+
+circuit ForkValidWrongProtocol():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  fork_valid(ingress, 2)
+
+circuit ForkValidZeroOutputs():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  fork_valid(ingress, 0)
+
+sync_circuit CompletionQueueZeroDepth():
+  inst invalid(CompletionQueue(Bits(8), Bits(8), 0))
+
+def valid_design = elaborate(ValidMapForkChain())
+def completion_design = elaborate(CompletionQueueWrapper())
+def single_completion_design = elaborate(
+  CompletionQueue(Bits(8), Bits(16), 1)
+)
+
+export:
+  ValidMapForkChain
+  CompletionQueueWrapper
+  MapValidWrongProtocol
+  ForkValidWrongProtocol
+  ForkValidZeroOutputs
+  CompletionQueueZeroDepth
+  valid_design
+  completion_design
+  single_completion_design

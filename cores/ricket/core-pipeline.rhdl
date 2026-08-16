@@ -143,9 +143,9 @@ sync_circuit RicketPipeline(address_width :: Int):
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
   def load_destination = id_ex.bits.rd
-  def load_use_rs1 = control.operand.uses_rs1 & (load_destination =/= bits(0, 5)) & (load_destination === rs1)
-  def load_use_rs2 = control.operand.uses_rs2 & (load_destination =/= bits(0, 5)) & (load_destination === rs2)
-  def load_use_rd = control.writeback.enable & (load_destination =/= bits(0, 5)) & (load_destination === rd)
+  def load_use_rs1 = control.operand.uses_rs1 & or_reduce(load_destination) & (load_destination === rs1)
+  def load_use_rs2 = control.operand.uses_rs2 & or_reduce(load_destination) & (load_destination === rs2)
+  def load_use_rd = control.writeback.enable & or_reduce(load_destination) & (load_destination === rd)
   def load_dependency_hazard = live_if_id.valid & id_ex_is_load & (load_use_rs1 ||| load_use_rs2 ||| load_use_rd)
   def scoreboard_raw_hazard = (control.operand.uses_rs1 & scoreboard.rs1_busy) ||| (
     control.operand.uses_rs2 & scoreboard.rs2_busy
@@ -282,7 +282,7 @@ sync_circuit RicketPipeline(address_width :: Int):
     rd: commit.bits.rd
     value: commit.bits.result
 
-  memory_bypass_link.left.valid <== commit.valid & commit_writes_immediately & (commit.bits.rd =/= bits(0, 5))
+  memory_bypass_link.left.valid <== commit.valid & commit_writes_immediately & or_reduce(commit.bits.rd)
   memory_bypass_link.left.bits <== RicketBypass():
     rd: commit.bits.rd
     value: commit.bits.result
@@ -290,7 +290,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   // The two register-file write ports accept an immediate WB result and a
   // delayed load completion independently, so neither path backpressures MEM.
   def mem_wb = mem_wb_pipe.egress
-  def load_completion_valid = data_access.response.valid & (data_access.response.bits.tag =/= bits(0, 5))
+  def load_completion_valid = data_access.response.valid & or_reduce(data_access.response.bits.tag)
   def immediate_write_valid = mem_wb.valid & mem_wb.bits.write_enable
 
   data_access.response.ready <== Bool(#true)
@@ -299,7 +299,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   scoreboard.clear_valid <== load_completion_valid
   scoreboard.clear_address <== data_access.response.bits.tag
 
-  writeback_bypass_link.left.valid <== immediate_write_valid & (mem_wb.bits.rd =/= bits(0, 5))
+  writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(mem_wb.bits.rd)
   writeback_bypass_link.left.bits <== RicketBypass():
     rd: mem_wb.bits.rd
     value: mem_wb.bits.value

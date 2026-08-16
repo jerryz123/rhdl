@@ -1,0 +1,104 @@
+#lang rhdl
+// Implements a finite uncached TileLink RAM over the generic fixed-latency 1RW storage wrapper.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/read-write.rhdl") open
+  lib("rhdl/std/sync-ram.rhdl").SyncRam1RW
+  lib("rhdl/std/flow/pipe.rhdl").valid_pipe
+  lib("rhdl/std/flow/completion-queue.rhdl").CompletionQueue
+  lib("rhdl/std/flow/map-valid.rhdl").map_valid
+  lib("rhdl/std/flow/fork-valid.rhdl").fork_valid
+  lib("tilelink/params.rhdl") open
+  lib("tilelink/bundles.rhdl") open
+  lib("tilelink/link.rhdl").TLUncached
+
+fun checked_tl_ram_region(name :: String,
+                          bundle :: TLBundleParams,
+                          size_bytes :: Int,
+                          base_address :: Int):
+  unless name.length() > 0
+  | error(~who: #'TLRam, "name must be a nonempty String")
+  unless size_bytes > 0
+  | error(~who: #'TLRam, "size must be a positive host byte count")
+  unless power_of_two(size_bytes)
+  | error(~who: #'TLRam, "size must be a power-of-two host byte count")
+  unless size_bytes mod bundle.data_bytes == 0
+  | error(~who: #'TLRam, "size must be a multiple of the data byte count")
+  unless base_address >= 0 && base_address mod size_bytes == 0
+  | error(~who: #'TLRam,
+          "base address must be nonnegative and aligned to the RAM size")
+  def address_limit = 1 bits.(<<) bundle.address_width
+  unless (base_address + size_bytes) <= address_limit
+  | error(~who: #'TLRam, "memory region must fit in the address width")
+  unless alignment_bits(bundle.data_bytes) < unsigned_value_count(bundle.size_width)
+  | error(~who: #'TLRam, "size field cannot encode the data byte count")
+  #void
+
+sync_circuit TLRam(name :: String,
+                   bundle :: TLBundleParams,
+                   size_bytes :: Int,
+                   ~base_address: base_address :: Int = 0):
+  checked_tl_ram_region(name, bundle, size_bytes, base_address)
+  def transfers = TransferSizes(1, bundle.data_bytes)
+  def manager_params = TLManagerParams(
+    name,
+    [AddressSet(base_address, size_bytes - 1)],
+    IdRange(0, 1),
+    ~supports: TLAOperationSizes(
+      ~get: transfers,
+      ~put_full: transfers,
+      ~put_partial: transfers
+    )
+  )
+  def outstanding_limit = 2
+  def depth = size_bytes / bundle.data_bytes
+  def word_address_width = index_width(depth)
+  def low_width = alignment_bits(bundle.data_bytes)
+  def Data = Vec(bundle.data_bytes, Bits(8))
+
+  interface port(TLUncached(bundle, manager_params), ~role: manager, ~monitor)
+  inst storage(SyncRam1RW(depth, Bits(8), bundle.data_bytes))
+  inst transactions(CompletionQueue(
+    TLChannelA(bundle),
+    TLChannelD(bundle),
+    outstanding_limit
+  ))
+  port.a <=> transactions.request
+  port.d <=> transactions.response
+
+  def Array(storage_issue, response_issue) = fork_valid(transactions.issue, 2)
+  (
+    map_valid(storage_issue, request):
+      def request_put_full = request.opcode === TLAOpcode.PutFullData
+      def request_put_partial = request.opcode === TLAOpcode.PutPartialData
+      def relative_address :: Bits(bundle.address_width) = request.address - bits(base_address, bundle.address_width)
+      def word_address:
+        if depth == 1
+        | bits(0, word_address_width)
+        | relative_address[low_width..(low_width + word_address_width)]
+      ReadWriteRequest(word_address_width, Bits(8), bundle.data_bytes):
+        address: word_address
+        write: request_put_full ||| request_put_partial
+        data: cast(request.data, Data)
+        mask: request.mask
+  ) <=> storage.port.request
+
+  (
+    map_valid(response_issue |> valid_pipe(_, 1), request):
+      def request_read = request.opcode === TLAOpcode.Get
+      TLChannelD(bundle):
+        opcode: mux(request_read, TLDOpcode.AccessAckData, TLDOpcode.AccessAck)
+        param: bits(0, 2)
+        size: request.size
+        source: request.source
+        sink: bits(0, bundle.sink_width)
+        denied: Bool(#false)
+        data: mux(request_read,
+                  cast(storage.port.response.bits, Bits(bundle.data_width)),
+                  bits(0, bundle.data_width))
+        corrupt: Bool(#false)
+  ) <=> transactions.completion
+
+export:
+  TLRam

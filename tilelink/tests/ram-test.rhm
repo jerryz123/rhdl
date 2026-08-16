@@ -1,0 +1,86 @@
+#lang rhombus
+// Checks TLRam storage composition, protocol assertions, and invalid regions.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../main.rhdl" as tl
+  "ram-fixture.rhdl" as fixture
+
+def top = fixture.design.modules.find(fun (module): module.name == "TLRam")
+def storage = fixture.design.modules.find(
+  fun (module): module.name == "SyncRam1RW"
+)
+def operation_delay = fixture.design.modules.find(
+  fun (module): module.name == "ValidPipe"
+)
+def physical_memory = storage.operations.find(
+  fun (operation): operation.opcode == "rtl.sync_memory"
+)
+def assertions = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "verif.assert"
+)
+def byte_design = embedded.run_elaboration(
+  fun ():
+    tl.TLRam(
+      "byte_ram",
+      tl.TLBundleParams(8, 1, 1, 1, 1),
+      1
+    )
+)
+
+check:
+  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "port_in"]
+  top.outputs.map(fun (output): output.name) ~is ["port_out"]
+  physical_memory.attribute("depth") ~is 4
+  physical_memory.attribute("mask_granularity") ~is 8
+  physical_memory.attribute("has_read_write") ~is #true
+  top.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).length() ~is 3
+  operation_delay.operations.filter(
+    ~keep: fun (operation): operation.opcode.starts_with("rtl.register")
+  ).length() ~is 2
+  assertions.map(
+    fun (operation): operation.attribute("label")
+  ) ~is ["tilelink_a_opcode_supported",
+         "tilelink_a_param_supported",
+         "tilelink_a_size_supported",
+         "tilelink_a_address_aligned",
+         "tilelink_a_mask_supported",
+         "tilelink_a_address_supported"]
+  verify_design(fixture.design) ~is #void
+  verify_design(byte_design) ~is #void
+
+  embedded.run_elaboration(
+    fun (): tl.TLRam("", fixture.bundle, 16)
+  ) ~throws "name must be a nonempty String"
+  embedded.run_elaboration(
+    fun (): tl.TLRam("ram", fixture.bundle, 0)
+  ) ~throws "size must be a positive host byte count"
+  embedded.run_elaboration(
+    fun (): tl.TLRam("ram", fixture.bundle, 12)
+  ) ~throws "size must be a power-of-two host byte count"
+  embedded.run_elaboration(
+    fun (): tl.TLRam("ram", fixture.bundle, 2)
+  ) ~throws "size must be a multiple of the data byte count"
+  embedded.run_elaboration(
+    fun (): tl.TLRam("ram", fixture.bundle, 16, ~base_address: 4)
+  ) ~throws "base address must be nonnegative and aligned"
+  embedded.run_elaboration(
+    fun ():
+      tl.TLRam(
+        "ram",
+        tl.TLBundleParams(8, 4, 3, 1, 1),
+        16,
+        ~base_address: 256
+      )
+  ) ~throws "memory region must fit"
+  embedded.run_elaboration(
+    fun ():
+      tl.TLRam(
+        "ram",
+        tl.TLBundleParams(8, 4, 1, 1, 1),
+        16
+      )
+  ) ~throws "size field cannot encode"

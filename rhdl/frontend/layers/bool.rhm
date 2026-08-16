@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines Bool literals, Boolean-valued comparisons, and binary-selection syntax.
+// Defines Bool literals, packed reduction, Boolean comparisons, and binary-selection syntax.
 
 import:
   "../../core/ir.rhm" open
@@ -13,6 +13,8 @@ export:
   bool_type
   bool_eq
   bool_ne
+  or_reduce
+  and_reduce
   is_one_of
   unsigned_lt
   signed_lt
@@ -85,6 +87,47 @@ fun bool_ne(left, right, name = #false, location = Location()):
     location
   )
   kernel.bit_not(equal, name, location)
+
+// Validates and packs the common operand accepted by Boolean bit reductions.
+fun packed_reduction_operand(entity, who, spelling :: String, location):
+  def value = kernel.read(entity, location)
+  def width = packed_width(value.type)
+  unless data_type(value.type) && width != #false
+  | error(~who: who,
+          location.describe() ++ ": " ++ spelling ++ " operand must have a packable DataType")
+  values(kernel.cast(value, Bits(width), #false, location), width)
+
+// Reduces the canonical packed representation of hardware data to whether any
+// bit is asserted. Existing equality and inversion IR fully express the
+// operation, so the frontend does not introduce a reduction-specific opcode.
+fun or_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
+  def (packed, width) = packed_reduction_operand(entity, #'or_reduce, "or_reduce", location)
+  def equal_zero = kernel.cast(
+    kernel.hw_eq(packed,
+                 kernel.literal(Bits(width), 0, #false, location),
+                 #false,
+                 location),
+    Bool,
+    #false,
+    location
+  )
+  kernel.bit_not(equal_zero, name, location)
+
+// Reduces the canonical packed representation of hardware data to whether
+// every bit is asserted. Equality with the packed all-ones value avoids a new
+// core reduction operation.
+fun and_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
+  def (packed, width) = packed_reduction_operand(entity, #'and_reduce, "and_reduce", location)
+  def all_ones = (1 bits.(<<) width) - 1
+  kernel.cast(
+    kernel.hw_eq(packed,
+                 kernel.literal(Bits(width), all_ones, #false, location),
+                 #false,
+                 location),
+    Bool,
+    name,
+    location
+  )
 
 operator (left =/= right):
   ~same_as: ===

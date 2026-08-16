@@ -17,12 +17,13 @@ circuit Demux(T, n :: Int):
   input select: Bits(index_width(n))
   interface egress[n](Decoupled(T), ~role: producer)
 
-  def mutable selected_ready = Bool(#false)
-  for (index in 0..n):
-    def selected = select === bits(index, index_width(n))
-    egress[index].valid <== ingress.valid & selected
-    egress[index].bits <== ingress.bits
-    selected_ready := selected_ready ||| (selected & egress[index].ready)
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..n):
+      def selected = select === bits(index, index_width(n))
+      egress[index].valid <== ingress.valid & selected
+      egress[index].bits <== ingress.bits
+      selected & egress[index].ready
+  ))
 
   ingress.ready <== selected_ready
 
@@ -36,11 +37,12 @@ circuit CtrlDemux(n :: Int):
   input select: Bits(index_width(n))
   interface egress[n](DecoupledCtrl(), ~role: producer)
 
-  def mutable selected_ready = Bool(#false)
-  for (index in 0..n):
-    def selected = select === bits(index, index_width(n))
-    egress[index].valid <== ingress.valid & selected
-    selected_ready := selected_ready ||| (selected & egress[index].ready)
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..n):
+      def selected = select === bits(index, index_width(n))
+      egress[index].valid <== ingress.valid & selected
+      selected & egress[index].ready
+  ))
 
   ingress.ready <== selected_ready
 
@@ -55,17 +57,14 @@ fun finish_demux_flow_handle(input_link :: Handle,
   def select_width = index_width(count)
   def selector_bits = selector.into(Bits(select_width))
   def input_endpoint = input_link.right
-  def mutable selected_ready = Bool(#false)
-  for (index in 0..count):
-    def output_endpoint = output_links[index].left
-    def selected = selector_bits === bits(index, select_width)
-    output_endpoint.field("valid") <== (
-      input_endpoint.field("valid") & selected
-    )
-    output_endpoint.field("bits") <== input_endpoint.field("bits")
-    selected_ready := selected_ready ||| (
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..count):
+      def output_endpoint = output_links[index].left
+      def selected = selector_bits === bits(index, select_width)
+      output_endpoint.field("valid") <== input_endpoint.field("valid") & selected
+      output_endpoint.field("bits") <== input_endpoint.field("bits")
       selected & output_endpoint.field("ready")
-    )
+  ))
   input_endpoint.field("ready") <== selected_ready
   input_link.consumed := #true
   for (output_link in output_links): output_link.consumed := #true

@@ -1,0 +1,32 @@
+#lang rhombus
+// Checks generic packed OR and AND reduction lowering, result types, and verification.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "or-reduce-fixture.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def equalities = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.eq"
+)
+def negations = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.not"
+)
+def constants = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.constant"
+)
+
+check:
+  bool.bool_type(module_def.find_output("any_bits").type) ~is #true
+  bool.bool_type(module_def.find_output("any_flags").type) ~is #true
+  bool.bool_type(module_def.find_output("all_bits").type) ~is #true
+  bool.bool_type(module_def.find_output("all_flags").type) ~is #true
+  equalities.length() ~is 4
+  equalities.map(fun (operation): operation.operands[0].type.width) ~is [8, 4, 8, 4]
+  equalities.map(fun (operation): operation.operands[1].type.width) ~is [8, 4, 8, 4]
+  negations.length() ~is 2
+  constants.map(fun (operation): operation.attribute("value")) ~is [0, 0, 255, 15]
+  (for all (negation in negations):
+     bool.bool_type(negation.results[0].type)) ~is #true
+  verify_design(fixture.design) ~is #void

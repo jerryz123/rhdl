@@ -37,7 +37,7 @@ circuit FilterFlowExample():
   input keep: Bool
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  filter_flow(ingress, payload => keep & !(payload === bits(0, 8))) <=> egress
+  filter_flow(ingress, payload => keep & or_reduce(payload)) <=> egress
 
 circuit GateFlowExample():
   interface ingress(Irrevocable(Bits(8)), ~role: consumer)
@@ -217,8 +217,9 @@ module Demux(
   wire _GEN_1 = select == 2'h2;
   assign ingress_out =
     '{ready:
-        (_GEN & egress_0_in.ready | _GEN_0 & egress_1_in.ready | _GEN_1
-         & egress_2_in.ready)};
+        (|({{_GEN_1 & egress_2_in.ready},
+            {_GEN_0 & egress_1_in.ready},
+            {_GEN & egress_0_in.ready}}))};
   assign egress_0_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
   assign egress_1_out = '{valid: (ingress_in.valid & _GEN_0), bits: ingress_in.bits};
   assign egress_2_out = '{valid: (ingress_in.valid & _GEN_1), bits: ingress_in.bits};
@@ -238,13 +239,13 @@ module Join(
 );
 
   assign ingress_0_out =
-    '{ready: (egress_in.ready & ingress_1_in.valid & ingress_2_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_1_in.valid}})))};
   assign ingress_1_out =
-    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_2_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_0_in.valid}})))};
   assign ingress_2_out =
-    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_1_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_1_in.valid}, {ingress_0_in.valid}})))};
   assign egress_out =
-    '{valid: (ingress_0_in.valid & ingress_1_in.valid & ingress_2_in.valid),
+    '{valid: (&({{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}})),
       bits: ({{ingress_2_in.bits}, {ingress_1_in.bits}, {ingress_0_in.bits}})};
 endmodule
 }>>|
@@ -266,9 +267,10 @@ module Broadcast(
   reg  [2:0] pending;
   reg  [7:0] payload;
   wire       _GEN =
-    ~(pending[2'h0] | pending[2'h1] | pending[2'h2])
-    | (~pending[2'h0] | egress_0_in.ready) & (~pending[2'h1] | egress_1_in.ready)
-    & (~pending[2'h2] | egress_2_in.ready);
+    pending == 3'h0
+    | (&({{~pending[2'h2] | egress_2_in.ready},
+          {~pending[2'h1] | egress_1_in.ready},
+          {~pending[2'h0] | egress_0_in.ready}}));
   wire       _GEN_0 = ingress_in.valid & _GEN;
   wire       _GEN_1 = _GEN_0 | ~(pending[2'h0] & egress_0_in.ready) & pending[2'h0];
   wire       _GEN_2 = _GEN_0 | ~(pending[2'h1] & egress_1_in.ready) & pending[2'h1];
@@ -304,15 +306,15 @@ module AtomicFork(
 );
 
   assign ingress_out =
-    '{ready: (egress_0_in.ready & egress_1_in.ready & egress_2_in.ready)};
+    '{ready: (&({{egress_2_in.ready}, {egress_1_in.ready}, {egress_0_in.ready}}))};
   assign egress_0_out =
-    '{valid: (ingress_in.valid & egress_1_in.ready & egress_2_in.ready),
+    '{valid: (ingress_in.valid & (&({{egress_2_in.ready}, {egress_1_in.ready}}))),
       bits: ingress_in.bits};
   assign egress_1_out =
-    '{valid: (ingress_in.valid & egress_0_in.ready & egress_2_in.ready),
+    '{valid: (ingress_in.valid & (&({{egress_2_in.ready}, {egress_0_in.ready}}))),
       bits: ingress_in.bits};
   assign egress_2_out =
-    '{valid: (ingress_in.valid & egress_0_in.ready & egress_1_in.ready),
+    '{valid: (ingress_in.valid & (&({{egress_1_in.ready}, {egress_0_in.ready}}))),
       bits: ingress_in.bits};
 endmodule
 }>>|

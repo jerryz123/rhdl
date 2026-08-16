@@ -1,0 +1,59 @@
+#lang rhombus
+// Checks Valid mapping/fanout and completion-reservation queue structure and diagnostics.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "std-valid-flow.rhdl" as fixture
+
+def valid_top = fixture.valid_design.modules[0]
+def completion_top = fixture.completion_design.modules.find(
+  fun (module_def): module_def.name == "CompletionQueue"
+)
+def assertions = completion_top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "verif.assert"
+)
+
+fun operations(module_def, opcode):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == opcode
+  )
+
+check:
+  fixture.valid_design.modules.map(fun (module_def): module_def.name) ~is [
+    "ValidMapForkChain"
+  ]
+  operations(valid_top, "rtl.instance").length() ~is 0
+  operations(valid_top, "rtl.concat").length() ~is 1
+  valid_top.find_output("egress_0_out").type.field("bits").type.width ~is 9
+  valid_top.find_output("egress_1_out").type.field("bits").type.width ~is 9
+  verify_design(fixture.valid_design) ~is #void
+
+  fixture.completion_design.modules.map(fun (module_def): module_def.name) ~is [
+    "CompletionQueueWrapper", "CompletionQueue", "Queue", "Counter"
+  ]
+  operations(completion_top, "rtl.instance").length() ~is 1
+  operations(completion_top, "rtl.register_reset").length() ~is 1
+  assertions.map(fun (operation): operation.attribute("label")) ~is [
+    "completion_queue_completion_has_request",
+    "completion_queue_slot_reserved",
+    "completion_queue_reservations_in_range"
+  ]
+  verify_design(fixture.completion_design) ~is #void
+  fixture.single_completion_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["CompletionQueue", "Queue"]
+  verify_design(fixture.single_completion_design) ~is #void
+
+  embedded.run_elaboration(
+    fun (): fixture.MapValidWrongProtocol()
+  ) ~throws "Valid-flow chaining requires a Valid endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.ForkValidWrongProtocol()
+  ) ~throws "Valid-flow chaining requires a Valid endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.ForkValidZeroOutputs()
+  ) ~throws "output count must be a positive host Int"
+  embedded.run_elaboration(
+    fun (): fixture.CompletionQueueZeroDepth()
+  ) ~throws "depth must be a positive host Int"

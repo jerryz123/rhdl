@@ -1,0 +1,28 @@
+#lang rhdl
+// Defines inline one-to-many fanout for non-backpressured Valid flows.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+
+fun fork_valid(source_or_type, n :: Int):
+  unless n > 0
+  | error(~who: #'fork_valid, "output count must be a positive host Int")
+  def protocol = valid_flow_protocol_type(source_or_type)
+  def input_link = interface_link(protocol, "fork_valid_input")
+  def output_links = for Array (index in 0..n):
+    interface_link(protocol, "fork_valid_output_" ++ to_string(index))
+  for (output_link in output_links):
+    output_link.left.field("valid") <== input_link.right.field("valid")
+    output_link.left.field("bits") <== input_link.right.field("bits")
+    output_link.consumed := #true
+  input_link.consumed := #true
+  def outputs = for Array (output_link in output_links):
+    output_link.right
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(input_link.left, outputs)
+  )
+
+export:
+  fork_valid

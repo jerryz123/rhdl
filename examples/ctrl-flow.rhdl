@@ -214,8 +214,9 @@ module CtrlDemux(
   wire _GEN_1 = select == 2'h2;
   assign ingress_out =
     '{ready:
-        (_GEN & egress_0_in.ready | _GEN_0 & egress_1_in.ready | _GEN_1
-         & egress_2_in.ready)};
+        (|({{_GEN_1 & egress_2_in.ready},
+            {_GEN_0 & egress_1_in.ready},
+            {_GEN & egress_0_in.ready}}))};
   assign egress_0_out = '{valid: (ingress_in.valid & _GEN)};
   assign egress_1_out = '{valid: (ingress_in.valid & _GEN_0)};
   assign egress_2_out = '{valid: (ingress_in.valid & _GEN_1)};
@@ -235,13 +236,13 @@ module CtrlJoin(
 );
 
   assign ingress_0_out =
-    '{ready: (egress_in.ready & ingress_1_in.valid & ingress_2_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_1_in.valid}})))};
   assign ingress_1_out =
-    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_2_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_0_in.valid}})))};
   assign ingress_2_out =
-    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_1_in.valid)};
+    '{ready: (egress_in.ready & (&({{ingress_1_in.valid}, {ingress_0_in.valid}})))};
   assign egress_out =
-    '{valid: (ingress_0_in.valid & ingress_1_in.valid & ingress_2_in.valid)};
+    '{valid: (&({{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}}))};
 endmodule
 }>>|
 
@@ -261,9 +262,10 @@ module CtrlBroadcast(
 
   reg  [2:0] pending;
   wire       _GEN =
-    ~(pending[2'h0] | pending[2'h1] | pending[2'h2])
-    | (~pending[2'h0] | egress_0_in.ready) & (~pending[2'h1] | egress_1_in.ready)
-    & (~pending[2'h2] | egress_2_in.ready);
+    pending == 3'h0
+    | (&({{~pending[2'h2] | egress_2_in.ready},
+          {~pending[2'h1] | egress_1_in.ready},
+          {~pending[2'h0] | egress_0_in.ready}}));
   wire       _GEN_0 = ingress_in.valid & _GEN;
   wire       _GEN_1 = _GEN_0 | ~(pending[2'h0] & egress_0_in.ready) & pending[2'h0];
   wire       _GEN_2 = _GEN_0 | ~(pending[2'h1] & egress_1_in.ready) & pending[2'h1];

@@ -53,7 +53,7 @@ internal module implementing its shared frontend forms is called the
 | [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
-| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, interfaces, and local connection legality | Public `#lang rhdl` and protocol-neutral `std/` libraries |
+| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, monitored interfaces, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
@@ -106,6 +106,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/stage.rhdl` | Valid-only and ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
 | `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and their endpoint/handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/completion-queue.rhdl` | Reserved response buffering between ready-valid requests and nonstallable issues/completions | `std/ready-valid.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
 | `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus Array-shaped handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus payload-selected handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
@@ -114,6 +115,8 @@ import one primitive without loading unrelated generators.
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
 | `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` and array-shaped handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/map-valid.rhdl` | Inline payload substitution for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/fork-valid.rhdl` | Inline one-to-many fanout for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
 | `std/flow.rhdl` | Valid-only and ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
 
@@ -128,7 +131,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, equality, typed membership, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
+| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed OR reduction, equality, typed membership, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
 | `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, mux-lookup support |
 | `one-hot.rhm` | One-hot selector types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, type-named construction, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |

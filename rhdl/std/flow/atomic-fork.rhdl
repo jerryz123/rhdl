@@ -15,17 +15,21 @@ circuit AtomicFork(T, n :: Int):
   interface ingress(Decoupled(T), ~role: consumer)
   interface egress[n](Decoupled(T), ~role: producer)
 
-  def mutable all_ready = Bool(#true)
+  ingress.ready <== and_reduce(vec(
+    for List (index in 0..n): egress[index].ready
+  ))
   for (index in 0..n):
-    all_ready := all_ready & egress[index].ready
-
-  ingress.ready <== all_ready
-  for (index in 0..n):
-    def mutable peers_ready = Bool(#true)
-    for (peer in 0..n):
-      if (peer != index)
-      | peers_ready := peers_ready & egress[peer].ready
-      | #void
+    def peer_indices = (
+      for List (peer in 0..index): peer
+    ) ++ (
+      for List (peer in (index + 1)..n): peer
+    )
+    def peers_ready:
+      if peer_indices.length() == 0
+      | Bool(#true)
+      | and_reduce(vec(
+          for List (peer in peer_indices): egress[peer].ready
+        ))
     egress[index].valid <== ingress.valid & peers_ready
     egress[index].bits <== ingress.bits
 
@@ -38,17 +42,21 @@ circuit CtrlAtomicFork(n :: Int):
   interface ingress(DecoupledCtrl(), ~role: consumer)
   interface egress[n](DecoupledCtrl(), ~role: producer)
 
-  def mutable all_ready = Bool(#true)
+  ingress.ready <== and_reduce(vec(
+    for List (index in 0..n): egress[index].ready
+  ))
   for (index in 0..n):
-    all_ready := all_ready & egress[index].ready
-
-  ingress.ready <== all_ready
-  for (index in 0..n):
-    def mutable peers_ready = Bool(#true)
-    for (peer in 0..n):
-      if (peer != index)
-      | peers_ready := peers_ready & egress[peer].ready
-      | #void
+    def peer_indices = (
+      for List (peer in 0..index): peer
+    ) ++ (
+      for List (peer in (index + 1)..n): peer
+    )
+    def peers_ready:
+      if peer_indices.length() == 0
+      | Bool(#true)
+      | and_reduce(vec(
+          for List (peer in peer_indices): egress[peer].ready
+        ))
     egress[index].valid <== ingress.valid & peers_ready
 
 // Instantiates an atomic fork and returns its indexable output endpoint array.

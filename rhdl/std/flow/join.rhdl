@@ -13,24 +13,25 @@ circuit Join(T, n :: Int):
   interface ingress[n](Decoupled(T), ~role: consumer)
   interface egress(Decoupled(Vec(n, T)), ~role: producer)
 
-  def mutable all_valid = Bool(#true)
-  def payloads:
-    for List (index in 0..n):
-      all_valid := all_valid & ingress[index].valid
-      ingress[index].bits
-
-  egress.valid <== all_valid
-  egress.bits <== vec(payloads)
+  egress.valid <== and_reduce(vec(
+    for List (index in 0..n): ingress[index].valid
+  ))
+  egress.bits <== vec(
+    for List (index in 0..n): ingress[index].bits
+  )
 
   for (index in 0..n):
-    def mutable peers_valid = Bool(#true)
     def peer_indices = (
       for List (peer in 0..index): peer
     ) ++ (
       for List (peer in (index + 1)..n): peer
     )
-    for (peer in peer_indices):
-      peers_valid := peers_valid & ingress[peer].valid
+    def peers_valid:
+      if peer_indices.length() == 0
+      | Bool(#true)
+      | and_reduce(vec(
+          for List (peer in peer_indices): ingress[peer].valid
+        ))
     ingress[index].ready <== egress.ready & peers_valid
 
 // Rendezvous payloadless tokens without allowing any valid input to transfer
@@ -42,20 +43,22 @@ circuit CtrlJoin(n :: Int):
   interface ingress[n](DecoupledCtrl(), ~role: consumer)
   interface egress(DecoupledCtrl(), ~role: producer)
 
-  def mutable all_valid = Bool(#true)
-  for (index in 0..n):
-    all_valid := all_valid & ingress[index].valid
-  egress.valid <== all_valid
+  egress.valid <== and_reduce(vec(
+    for List (index in 0..n): ingress[index].valid
+  ))
 
   for (index in 0..n):
-    def mutable peers_valid = Bool(#true)
     def peer_indices = (
       for List (peer in 0..index): peer
     ) ++ (
       for List (peer in (index + 1)..n): peer
     )
-    for (peer in peer_indices):
-      peers_valid := peers_valid & ingress[peer].valid
+    def peers_valid:
+      if peer_indices.length() == 0
+      | Bool(#true)
+      | and_reduce(vec(
+          for List (peer in peer_indices): ingress[peer].valid
+        ))
     ingress[index].ready <== egress.ready & peers_valid
 
 export:

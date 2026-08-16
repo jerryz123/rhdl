@@ -23,7 +23,8 @@ core, frontend, or backend implementation modules.
 |---|---|---|
 | [`params.rhdl`](params.rhdl) | Wire widths, operation capabilities, and endpoint descriptions | `rhdl/std/bits.rhdl`, `rhdl/std/interconnect.rhdl` |
 | [`bundles.rhdl`](bundles.rhdl) | Exact TileLink A-E opcode and payload types | `params.rhdl` |
-| [`link.rhdl`](link.rhdl) | Directional `TLUncached` and `TLCached` interfaces and local connection legality | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `params.rhdl`, `bundles.rhdl` |
+| [`link.rhdl`](link.rhdl) | Directional `TLUncached` and `TLCached` interfaces, local connection legality, and uncached manager monitoring | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `params.rhdl`, `bundles.rhdl` |
+| [`ram.rhdl`](ram.rhdl) | Finite uncached RAM manager with generated endpoint parameters | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `rhdl/std/read-write.rhdl`, `rhdl/std/sync-ram.rhdl`, `rhdl/std/flow/queue.rhdl`, `params.rhdl`, `bundles.rhdl`, `link.rhdl` |
 | [`main.rhdl`](main.rhdl) | Public TileLink facade | All modules above |
 
 ## Parameters and payloads
@@ -39,8 +40,10 @@ a manager. `TLBOperationSizes` describes B operations emitted by a manager or
 supported by a cached client. An operation field equal to `#false` is
 unsupported. `TLClientParams` and `TLManagerParams` collect endpoint identity,
 ID or address ownership, capabilities, and manager denial policy.
-`TLClientLinkParams` and `TLManagerLinkParams` pair those descriptions with the
-shared physical bundle parameters.
+`TLUncached` and `TLCached` pair an endpoint description with shared physical
+bundle parameters when their interface specialization is constructed.
+`TLClientLinkParams` and `TLManagerLinkParams` remain the normalized records
+used by connection and monitor checks.
 
 The channel payloads follow the TileLink A-E layouts. Opcode namespaces are
 nominal and channel-specific (`TLAOpcode` through `TLDOpcode`); the E channel
@@ -49,8 +52,8 @@ depends on the opcode.
 
 | Interface | Client to manager | Manager to client |
 |---|---|---|
-| `TLUncached(endpoint)` | A | D |
-| `TLCached(endpoint)` | A, C, E | B, D |
+| `TLUncached(bundle, endpoint_params)` | A | D |
+| `TLCached(bundle, endpoint_params)` | A, C, E | B, D |
 
 Each channel uses `Decoupled(TLChannelX(...))`. TileLink permits an unaccepted
 first beat to be withdrawn or replaced, so these interfaces do not claim the
@@ -69,6 +72,14 @@ links reject Acquire and manager-emitted B traffic.
 These checks cover the capabilities represented by the current parameter
 records. They do not perform graph-wide negotiation, routing, width or ID
 adaptation, complete C/E coherence negotiation, or endpoint behavior.
+
+An uncached manager endpoint can opt into the `TLUncached` whole-link monitor
+with `~monitor`. While A is valid, the monitor checks its opcode and size
+against the manager's advertised support, requires zero `param` for Get and
+Put operations, checks single-beat alignment and mask shape, and requires the
+address to match one of the manager's address sets. These observational checks
+do not drive `ready` or otherwise change link behavior. Corruption checking is
+currently deferred.
 
 ```rhombus
 import:
@@ -90,15 +101,40 @@ def manager_params = TLManagerParams(
 
 circuit TileLinkBoundary():
   interface client(
-    TLUncached(TLClientLinkParams(bundle, client_params)),
+    TLUncached(bundle, client_params),
     ~role: manager
   )
   interface manager(
-    TLUncached(TLManagerLinkParams(bundle, manager_params)),
+    TLUncached(bundle, manager_params),
     ~role: client
   )
   manager <=> client
 ```
+
+## RAM manager
+
+`TLRam(name, bundle, size_bytes, ~base_address: 0)` is a finite uncached
+manager backed by `SyncRam1RW`. Its naturally aligned power-of-two region
+supports single-beat `Get`, `PutFullData`, and `PutPartialData` operations from
+one byte through `bundle.data_bytes`. The circuit derives and advertises its
+`TLManagerParams` directly from those physical parameters.
+
+The RAM converts byte addresses into word indices, maps each A-channel write
+mask onto the byte lanes of the shared 1RW storage, and returns `AccessAckData`
+for reads or `AccessAck` for writes. D responses preserve the request `size`
+and `source`; `param`, `sink`, `denied`, and `corrupt` are zero. A two-entry
+`CompletionQueue` reserves D capacity when A transfers, then exposes the
+accepted request through `fork_valid`. One `map_valid` branch drives the RAM
+request while the other crosses a one-cycle `valid_pipe` and maps the RAM result
+into the matching D completion. This standard flow composition allows one
+request per cycle until D-channel backpressure fills the reservation window,
+without losing the storage wrapper's nonstallable one-cycle read result.
+
+`TLRam` opts into the uncached manager monitor. `PutFullData` and `Get` require
+the complete naturally addressed mask; `PutPartialData` permits any subset of
+that mask. The RAM's A-channel readiness depends only on reserved response
+capacity; protocol assertions remain observational and corruption metadata is
+ignored for now.
 
 ## Verification
 
