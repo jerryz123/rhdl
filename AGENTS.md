@@ -18,6 +18,16 @@
 
 - After changes, run the minimum focused set of tests that directly covers the
   modified behavior; do not run the full test suite by default.
+- Run every Racket or Rhombus test, elaboration, and fixture command with
+  `PLTCOMPILEDROOTS` set to a newly created temporary directory. Do not append
+  a trailing path-list separator: that restores source-adjacent `compiled/`
+  directories as fallback roots and can load stale bytecode. Reuse the same
+  temporary root within one focused validation batch so dependencies are not
+  repeatedly rebuilt.
+- Add `-y` when invoking `racket` directly so changed dependencies are rebuilt.
+  Treat an `instantiate-linklet` mismatch or a reference to a moved module as
+  stale bytecode first, and reproduce it with a fresh compiled root before
+  diagnosing the source.
 - Test supported behavior and invalid uses of supported features. Do not add
   tests whose purpose is to prove that a removed or unimplemented feature does
   not exist.
