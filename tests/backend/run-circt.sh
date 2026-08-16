@@ -350,6 +350,7 @@ verify_fixture rv64i-alu rv64i_alu_tb
 verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
 verify_fixture valid-pipe valid_pipe_tb
+verify_fixture sync-ram sync_ram_tb
 verify_fixture load-store load_store_tb
 verify_fixture ricket-register-file ricket_register_file_tb
 verify_fixture ricket-scoreboard ricket_scoreboard_tb

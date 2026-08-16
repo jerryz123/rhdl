@@ -334,6 +334,50 @@ the identity for `align_down` and always true for `is_aligned`.
 `alignment_bits(alignment)` exposes the exact host-side base-two width for
 protocols and generators that need to size or remove those low bits.
 
+## Fixed-latency synchronous RAM
+
+[`read-write.rhdl`](read-write.rhdl) defines
+`ReadWritePort(address_width, T, n)`. `T` is one data-lane type and `n` is the
+number of lanes. Its single `request` flow carries a `Bits(address_width)`
+address, a read/write selector, `Vec(n, T)` data, and a `Bits(n)` mask. The
+`response` flow returns `Vec(n, T)`. Request data and mask are meaningful only
+for writes; response data is meaningful only for reads.
+
+[`sync-ram.rhdl`](sync-ram.rhdl) applies that interface to a word-indexed shared
+1RW physical memory. `SyncRam1RW(depth, T, n)` stores `n` lanes of `T` per
+word, and each mask bit controls the corresponding lane:
+
+```rhombus
+import:
+  lib("rhdl/std/read-write.rhdl") open
+  lib("rhdl/std/sync-ram.rhdl") open
+
+inst tags(SyncRam1RW(64, Bits(20), 1))
+tags.port.request.valid <== lookup ||| update
+tags.port.request.bits <== ReadWriteRequest(6, Bits(20), 1):
+  address: index
+  write: update
+  data: vec(new_tag)
+  mask: bits(1, 1)
+```
+
+Every asserted request is accepted; there is no readiness or retry state. A
+read produces `response.valid` exactly one cycle later. Writes produce no
+response, and response bits are meaningful only while valid is asserted.
+Addresses are word indices. A one-lane RAM uses `n = 1`; asserting its sole
+mask bit writes the complete `T` value.
+
+The wrapper maps each lane to a raw-memory mask granularity of `T.bit_width()`.
+It neither initializes storage nor changes the raw primitive's behavior for
+dynamically out-of-range addresses. A separate 1R1W wrapper remains deferred
+until its read-during-write collision policy is explicit.
+
+Use raw `sync_mem` when physical port shape or timing must remain explicit.
+Use this wrapper for fixed-latency internal arrays whose callers naturally
+produce `Valid` accesses. Use `SimpleMemoryRam` when byte addressing,
+backpressure, ordered request/response transactions, or multiple outstanding
+operations are required.
+
 ## Memory transactions
 
 [`simple-memory.rhdl`](simple-memory.rhdl) defines `SimpleMemory(address_width,

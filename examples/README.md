@@ -83,6 +83,7 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 | [`sync-memory.rhdl`](sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
 | [`sync-memory-1rw.rhdl`](sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
 | [`sync-memory-masked.rhdl`](sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
+| [`sync-ram.rhdl`](sync-ram.rhdl) | One generic lane-masked `Valid` request flow over a fixed-latency shared 1RW RAM |
 | [`simple-memory.rhdl`](simple-memory.rhdl) | Parameterized byte-masked `SimpleMemory` protocol plus generic alignment operations |
 | [`simple-memory-flow.rhdl`](simple-memory-flow.rhdl) | `SimpleMemory` request and response channels composed with standard flow control |
 | [`simple-memory-ram.rhdl`](simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |

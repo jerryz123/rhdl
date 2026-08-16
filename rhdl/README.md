@@ -90,12 +90,14 @@ import one primitive without loading unrelated generators.
 | `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings selecting minimized PLA or core-decode fallback | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/espresso.rhdl`, `std/decode/pla.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
+| `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
 | `std/tilelink/params.rhdl` | Host-side TileLink wire widths, operation capabilities, and endpoint descriptions | `std/bits.rhdl`, `std/interconnect.rhdl` |
 | `std/tilelink/bundles.rhdl` | Exact TileLink A-E opcode and payload bundle types | `std/tilelink/params.rhdl` |
 | `std/tilelink/link.rhdl` | Directional `TLUncached` and `TLCached` ready-valid interfaces | `std/ready-valid.rhdl`, `std/tilelink/params.rhdl`, `std/tilelink/bundles.rhdl` |
 | `std/tilelink.rhdl` | Public TileLink facade | All `std/tilelink/` modules |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
+| `std/sync-ram.rhdl` | Fixed-latency lane-masked shared 1RW RAM | `std/read-write.rhdl` |
 | `std/flow/stage.rhdl` | Valid-only and ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
 | `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and their endpoint/handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |

@@ -5,8 +5,10 @@ import:
   "protocol.rhdl" open
   "../../load-store.rhdl" open
   lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/read-write.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/simple-memory.rhdl") open
+  lib("rhdl/std/sync-ram.rhdl") open
   lib("rhdl/std/flow/queue.rhdl") open
 
 fun check_l1d_geometry(address_width :: Int, sets :: Int, line_bytes :: Int):
@@ -31,14 +33,13 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   def count_width = index_width(beats + 1)
   def outstanding_width = index_width(3)
   def Line = Vec(beats, Bits(64))
+  def ByteLine = Vec(line_bytes, Bits(8))
 
   interface core(RicketDataAccess(address_width), ~role: responder)
   interface memory(SimpleMemory(address_width, 8), ~role: requester)
 
-  sync_mem tags(sets, Bits(tag_width)):
-    read_write
-  sync_mem lines(sets, Line, ~mask_granularity: 8):
-    read_write
+  inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
+  inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
   inst load_gen(LoadGen())
   inst store_gen(StoreGen())
   inst responses(Queue(RicketDataResp(), 2, ~pipe: #true, ~flow: #true))
@@ -51,7 +52,6 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
     data: bits(0, 64)
     tag: bits(0, 5)
   reg valid_bits(~init: bits(0, sets))
-  reg lookup_valid(~init: Bool(#false))
   reg lookup_request(~init: empty_request)
   reg lookup_set(~init: bits(0, set_width))
   reg lookup_tag(~init: bits(0, tag_width))
@@ -83,11 +83,11 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   def line_hit = valid_vector.lookup(
     lookup_set,
     ~default: Bool(#false)
-  ) & (tags.read_write.read_data === lookup_tag)
-  def lookup_store = lookup_valid & lookup_request.write
-  def lookup_load = lookup_valid & !lookup_request.write
+  ) & (tags.port.response.bits[0] === lookup_tag)
+  def lookup_store = tags.port.response.valid & lookup_request.write
+  def lookup_load = tags.port.response.valid & !lookup_request.write
   def lookup_miss = lookup_load & !line_hit
-  def cached_line = lines.read_write.read_data
+  def cached_line = cast(lines.port.response.bits, Line)
   def cached_beat = cached_line.lookup(lookup_beat, ~default: bits(0, 64))
 
   def lookup_address64:
@@ -159,17 +159,19 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   when produces_response:
     assert(responses.ingress.ready, "l1d_response_slot_reserved")
 
-  tags.read_write.address <== mux(cache_write, lookup_set, request_set_value)
-  tags.read_write.enable <== cast(request_fire ||| install_refill, Bits(1))
-  tags.read_write.write <== cast(install_refill, Bits(1))
-  tags.read_write.write_data <== lookup_tag
-  lines.read_write.address <== mux(cache_write, lookup_set, request_set_value)
-  lines.read_write.enable <== cast(request_fire ||| cache_write, Bits(1))
-  lines.read_write.write <== cast(cache_write, Bits(1))
-  lines.read_write.write_data <== mux(install_refill, line_with_response, store_line)
-  lines.read_write.write_mask <== mux(install_refill, !bits(0, line_bytes), store_line_mask)
+  tags.port.request.valid <== request_fire ||| install_refill
+  tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
+    address: mux(cache_write, lookup_set, request_set_value)
+    write: install_refill
+    data: vec(lookup_tag)
+    mask: bits(1, 1)
+  lines.port.request.valid <== request_fire ||| cache_write
+  lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), line_bytes):
+    address: mux(cache_write, lookup_set, request_set_value)
+    write: cache_write
+    data: cast(mux(install_refill, line_with_response, store_line), ByteLine)
+    mask: mux(install_refill, !bits(0, line_bytes), store_line_mask)
 
-  lookup_valid <== request_fire
   when request_fire:
     lookup_request <== core.request.bits
     lookup_set <== request_set_value
