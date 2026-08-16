@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks the RV64I ALU control contract, shared datapath shape, and result type.
+// Checks the shared 32- and 64-bit ALU control contract and datapath shapes.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -8,8 +8,10 @@ import:
   "../../rhdl/frontend/layers/enum.rhm" as enum
   "../alu.rhdl" as alu
 
-def design = embedded.run_elaboration(fun (): alu.ALU())
+def design = embedded.run_elaboration(fun (): alu.ALU(64))
 def module_def = design.modules[0]
+def design32 = embedded.run_elaboration(fun (): alu.ALU(32))
+def module32 = design32.modules[0]
 def control_type = alu.AluControl()
 def control_fields = [
   "result_select",
@@ -58,6 +60,10 @@ check:
   type_equal(module_def.find_input("right").type, Bits(64)) ~is #true
   type_equal(module_def.find_input("control").type, control_type) ~is #true
   type_equal(module_def.find_output("result").type, Bits(64)) ~is #true
+  type_equal(module32.find_input("left").type, Bits(32)) ~is #true
+  type_equal(module32.find_input("right").type, Bits(32)) ~is #true
+  type_equal(module32.find_input("control").type, control_type) ~is #true
+  type_equal(module32.find_output("result").type, Bits(32)) ~is #true
   control_extracts.length() ~is 5
   control_extracts.map(fun (operation): operation.attribute("field")) ~is control_fields
   result_mux.operands.length() ~is 7
@@ -97,8 +103,19 @@ check:
   ).length() ~is 1
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.zext" && operation.operands[0].type.width == 5 && operation.results[0].type.width == 6
-  ).length() ~is 3
+  ).length() ~is 1
+  module32.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.sext"
+  ).length() ~is 0
+  module32.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.zext" && operation.operands[0].type.width == 5
+  ).length() ~is 0
+  module32.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.shl" || operation.opcode == "rtl.shru" || operation.opcode == "rtl.shrs"
+  ).map(fun (operation): operation.operands[1].type.width) ~is [5, 5, 5]
   module_def.operations.find(
     fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
   ) ~is #false
   verify_design(design) ~is #void
+  verify_design(design32) ~is #void
+  embedded.run_elaboration(fun (): alu.ALU(16)) ~throws "integer width must be 32 or 64"

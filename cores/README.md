@@ -15,7 +15,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 
 | Path | Owner |
 |---|---|
-| [`alu.rhdl`](alu.rhdl) | ISA-independent 64-bit integer ALU |
+| [`alu.rhdl`](alu.rhdl) | Width-parameterized 32- or 64-bit integer ALU |
 | [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
 | [`load-store.rhdl`](load-store.rhdl) | RV64 scalar-access width, alignment, load extraction, and store lane generation |
 | [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
@@ -39,12 +39,14 @@ public designs from outside this package.
 
 ## Integer ALU
 
-[`alu.rhdl`](alu.rhdl) defines a stateless 64-bit ALU whose `AluControl` input
+[`alu.rhdl`](alu.rhdl) defines a stateless `ALU(xlen)` for 32- and 64-bit
+integer cores. Its `AluControl` input
 contains one nominal one-hot `AluResultSelect` enum and four orthogonal
-modifiers. Its data inputs are already-selected 64-bit operands. It owns modular
-arithmetic, bitwise operations, six-bit shifts, signed and unsigned
-set-less-than results, and 32-bit word behaviors with five-bit shifts and
-32-to-64-bit sign extension.
+modifiers. Its data inputs are already-selected `Bits(xlen)` operands. It owns
+modular arithmetic, bitwise operations, XLEN-sized shifts, and signed and
+unsigned set-less-than results. The 64-bit specialization additionally supports
+32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;
+`word` is inert in the 32-bit specialization.
 
 Keyed `mux_onehot` arms select the arithmetic, shift, comparison, XOR, OR, or
 AND result directly. `subtract`, `signed_mode`, `shift_right`, and `word`

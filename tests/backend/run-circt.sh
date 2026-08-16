@@ -417,6 +417,7 @@ if espresso_path="$(command -v espresso 2>/dev/null)"; then
 fi
 verify_fixture table table_tb
 verify_fixture vec-search vec_search_tb
+verify_fixture rv32i-alu rv32i_alu_tb
 verify_fixture rv64i-alu rv64i_alu_tb
 verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb

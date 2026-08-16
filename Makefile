@@ -74,6 +74,7 @@ ricket-host-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
 
 ricket-test: ricket-host-test
+	FIXTURE=rv32i-alu bash tests/backend/run-circt.sh
 	FIXTURE=rv64i-alu bash tests/backend/run-circt.sh
 	FIXTURE=rv64i-alu-decode bash tests/backend/run-circt.sh
 	FIXTURE=rv64i-alu-integrated bash tests/backend/run-circt.sh
