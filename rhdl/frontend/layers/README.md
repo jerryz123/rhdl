@@ -510,7 +510,10 @@ Calling the declared name with its parameters and no field block produces a
 `RecordType`; attaching a field block constructs a value of that type. Fields
 are named, order-independent, and must be supplied exactly once with matching
 hardware types. The bare type family remains an ordinary host value, so it can
-be passed to a function and called later.
+be passed to a function and called later. The declaration also supplies a
+preferred emitted type name without changing structural type equality. When
+multiple concrete specializations request that name, the backend retains the
+first and adds numeric suffixes to the rest.
 
 Complete field-wise drives canonicalize to nested record construction and one
 whole-record drive. Partial assignment and mixing whole with field-wise drives

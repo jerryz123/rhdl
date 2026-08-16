@@ -8,15 +8,50 @@ export:
   emit_circt
   emit_module_circt
 
-fun circt_type(type):
+class CirctRecordAlias(key, type, name)
+
+Parameter.def current_circt_record_aliases = []
+
+// Produces the canonical CIRCT representation used to identify equal packed
+// record shapes before any source-level bundle names are attached.
+fun circt_shape_type(type):
   cond
   | flat_data_type(type):
       "i" ++ to_string(data_width(type))
   | record_type(type):
       "!hw.struct<" ++ String.join(
-        type.fields.map(fun (field): field.name ++ ": " ++ circt_type(field.type)),
+        type.fields.map(fun (field): field.name ++ ": " ++ circt_shape_type(field.type)),
         ", "
       ) ++ ">"
+  | vector_type(type):
+      "!hw.array<" ++ to_string(type.length) ++ "x" ++ circt_shape_type(type.element_type) ++ ">"
+  | clock_type(type) || reset_type(type):
+      "i1"
+  | ~else:
+      error(~who: #'emit_circt,
+            "CIRCT lowering does not support hardware type " ++ type_text(type))
+
+fun record_alias(type):
+  current_circt_record_aliases().find(
+    fun (alias): alias.key == circt_shape_type(type)
+  )
+
+fun circt_record_underlying_type(type):
+  "!hw.struct<" ++ String.join(
+    type.fields.map(fun (field): field.name ++ ": " ++ circt_type(field.type)),
+    ", "
+  ) ++ ">"
+
+fun circt_type(type):
+  cond
+  | flat_data_type(type):
+      "i" ++ to_string(data_width(type))
+  | record_type(type):
+      def underlying = circt_record_underlying_type(type)
+      def alias = record_alias(type)
+      if alias
+      | "!hw.typealias<@rhdl_types::@" ++ alias.name ++ ", " ++ underlying ++ ">"
+      | underlying
   | vector_type(type):
       "!hw.array<" ++ to_string(type.length) ++ "x" ++ circt_type(type.element_type) ++ ">"
   | clock_type(type) || reset_type(type):
@@ -27,6 +62,61 @@ fun circt_type(type):
 
 fun circt_width(type):
   if flat_data_type(type) | data_width(type) | 1
+
+fun collect_circt_record_aliases(design):
+  def mutable aliases = []
+
+  fun unique_name(base_name):
+    fun loop(index):
+      def candidate = if index == 0 | base_name | base_name ++ "_" ++ to_string(index)
+      if aliases.find(fun (alias): alias.name == candidate)
+      | loop(index + 1)
+      | candidate
+    loop(0)
+
+  fun collect(type):
+    cond
+    | record_type(type):
+        for (field in type.fields):
+          collect(field.type)
+        when type.preferred_name
+        | def key = circt_shape_type(type)
+          unless aliases.find(fun (alias): alias.key == key)
+          | aliases := aliases ++ [CirctRecordAlias(key,
+                                                    type,
+                                                    unique_name(type.preferred_name))]
+    | vector_type(type):
+        collect(type.element_type)
+    | ~else:
+        #void
+
+  for (dpi_import in design.dpi_imports):
+    for (type in dpi_import.input_types):
+      collect(type)
+    for (result in dpi_import.results):
+      collect(result.type)
+  for (module_def in design.modules):
+    for (value in module_def.values):
+      collect(value.type)
+    for (place in module_def.places):
+      collect(place.type)
+    for (memory in module_def.memories):
+      collect(memory.element_type)
+  aliases
+
+fun emit_circt_record_aliases(aliases):
+  if aliases.length() == 0
+  | ""
+  | String.append(
+      "  hw.type_scope @rhdl_types {\n",
+      String.join(
+        aliases.map(
+          fun (alias):
+            "    hw.typedecl @" ++ alias.name ++ " : " ++ circt_record_underlying_type(alias.type)
+        ),
+        "\n"
+      ),
+      "\n  }")
 
 // CIRCT array indices use the minimum nonzero integer width capable of naming
 // every element. This representation detail stays local to the backend.
@@ -853,7 +943,11 @@ fun emit_module_circt(module_def):
 
 fun emit_circt(design):
   verify_design(design)
-  def imports = design.dpi_imports.map(emit_dpi_import)
-  String.append("module {\n",
-                String.join(imports ++ design.modules.map(emit_module_circt), "\n\n"),
-                "\n}\n")
+  def aliases = collect_circt_record_aliases(design)
+  parameterize { current_circt_record_aliases: aliases }:
+    def declarations = emit_circt_record_aliases(aliases)
+    def imports = design.dpi_imports.map(emit_dpi_import)
+    def sections = (if declarations == "" | [] | [declarations]) ++ imports ++ design.modules.map(emit_module_circt)
+    String.append("module {\n",
+                  String.join(sections, "\n\n"),
+                  "\n}\n")

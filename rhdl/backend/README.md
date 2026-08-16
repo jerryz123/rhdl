@@ -24,8 +24,9 @@ RHDL does not own a SystemVerilog emitter. CIRCT owns RTL generation.
 ## Type lowering
 
 - Every `FlatDataType` lowers to a signless integer of its physical width.
-- `RecordType` lowers recursively to packed `hw.struct`, preserving field
-  names and order.
+- Anonymous `RecordType` lowers recursively to packed `hw.struct`, preserving
+  field names and order. Named record shapes lower through `hw.typedecl` and
+  `hw.typealias`.
 - `VectorType` lowers recursively to `hw.array`.
 - `Clock` and `Reset` lower to one-bit values in their control positions.
 - Modules and instances use `hw`; combinational expressions use `comb` or
@@ -35,10 +36,11 @@ RHDL does not own a SystemVerilog emitter. CIRCT owns RTL generation.
 
 Frontend-defined flat types need no backend special case. Equal lowered types
 make representation casts aliases; other equal-width representations use
-`hw.bitcast`. RHDL's current structural records therefore become anonymous
-packed SystemVerilog structs. Preserving a source bundle name as a typedef
-would additionally require a named type declaration to survive in the public
-IR and lower through CIRCT type aliases.
+`hw.bitcast`. Bundle declarations preserve a preferred name as non-semantic
+record metadata. The backend emits reachable named shapes in one CIRCT type
+scope, and ExportVerilog renders them as packed SystemVerilog typedefs.
+Distinct concrete shapes that request the same preferred name receive stable
+numeric suffixes. Anonymous structural records remain inline structs.
 
 ## Operation lowering
 

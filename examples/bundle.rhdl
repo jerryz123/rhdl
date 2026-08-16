@@ -41,6 +41,15 @@ circuit BundleCast(width):
   bits_out <== raw
   restored <== raw.into(Pair(Bits(width)))
 
+circuit BundleSpecializations():
+  input narrow: Pair(Bits(8))
+  input wide: Pair(Bits(16))
+  output narrow_result: Pair(Bits(8))
+  output wide_result: Pair(Bits(16))
+
+  narrow_result <== narrow
+  wide_result <== wide
+
 circuit BundlePipeline(width):
   input clk: Clock
   input reset: Reset
@@ -59,18 +68,23 @@ circuit BundlePipeline(width):
 
 def design = elaborate(BundlePipeline(8))
 def cast_design = elaborate(BundleCast(8))
+def specialization_design = elaborate(BundleSpecializations())
 
 def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhdl_types
 module BundlePipeline(
-  input                                                        clk,
-                                                               reset,
-                                                               select,
-  input  struct packed {logic [7:0] left; logic [7:0] right; } direct,
-                                                               alternate,
-  output struct packed {logic [7:0] left; logic [7:0] right; } result
+  input       clk,
+              reset,
+              select,
+  input  Pair direct,
+              alternate,
+  output Pair result
 );
 
-  struct packed {logic [7:0] left; logic [7:0] right; } state;
+  Pair state;
   always @(posedge clk) begin
     if (reset)
       state <= '{left: 8'h0, right: 8'h0};
@@ -81,10 +95,14 @@ module BundlePipeline(
 endmodule
 }>>|
 def cast_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhdl_types
 module BundleCast(
-  input  struct packed {logic [7:0] left; logic [7:0] right; } source,
-  output [15:0]                                                bits_out,
-  output struct packed {logic [7:0] left; logic [7:0] right; } restored
+  input  Pair   source,
+  output [15:0] bits_out,
+  output Pair   restored
 );
 
   assign bits_out = /*cast(bit[15:0])*/source;
@@ -99,8 +117,10 @@ export:
   NestedSwap
   BundleHierarchy
   BundleCast
+  BundleSpecializations
   BundlePipeline
   design
   cast_design
+  specialization_design
   verilog_reference
   cast_verilog_reference

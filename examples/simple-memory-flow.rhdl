@@ -24,26 +24,28 @@ sync_circuit BufferedSimpleMemory(address_width, data_bytes):
 def design = elaborate(BufferedSimpleMemory(32, 4))
 
 def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef
+    struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
+    SimpleMemoryReq;
+  typedef struct packed {logic [31:0] data; } SimpleMemoryResp;
+`endif // _TYPESCOPE_rhdl_types
 module BufferedSimpleMemory(
-  input                                                                                                                                                                                                 clock,
-                                                                                                                                                                                                        reset,
-  input  struct packed {struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } request; struct packed {logic ready; } response; } upstream_in,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; struct packed {logic [31:0] data; } bits; } response; }                                                      downstream_in,
-  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; struct packed {logic [31:0] data; } bits; } response; }                                                      upstream_out,
-  output struct packed {struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } request; struct packed {logic ready; } response; } downstream_out
+  input                                                                                                                         clock,
+                                                                                                                                reset,
+  input  struct packed {struct packed {logic valid; SimpleMemoryReq bits; } request; struct packed {logic ready; } response; }  upstream_in,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; SimpleMemoryResp bits; } response; } downstream_in,
+  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; SimpleMemoryResp bits; } response; } upstream_out,
+  output struct packed {struct packed {logic valid; SimpleMemoryReq bits; } request; struct packed {logic ready; } response; }  downstream_out
 );
 
   wire struct packed {logic ready; } _pipe_stage_1_ingress_out;
-  wire struct packed {logic valid; struct packed {logic [31:0] data; } bits; }
-    _pipe_stage_1_egress_out;
+  wire struct packed {logic valid; SimpleMemoryResp bits; } _pipe_stage_1_egress_out;
   wire struct packed {logic ready; } _pipe_stage_ingress_out;
-  wire
-    struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; }
-    _pipe_stage_egress_out;
+  wire struct packed {logic valid; SimpleMemoryReq bits; } _pipe_stage_egress_out;
   wire struct packed {logic ready; } _queue_stage_ingress_out;
-  wire
-    struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; }
-    _queue_stage_egress_out;
+  wire struct packed {logic valid; SimpleMemoryReq bits; } _queue_stage_egress_out;
   Queue queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -76,24 +78,21 @@ module BufferedSimpleMemory(
 endmodule
 
 module Queue(
-  input                                                                                                                               clock,
-                                                                                                                                      reset,
-  input  struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } ingress_in,
-  input  struct packed {logic ready; }                                                                                                egress_in,
-  output struct packed {logic ready; }                                                                                                ingress_out,
-  output struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } egress_out,
-  output [1:0]                                                                                                                        count
+  input                                                      clock,
+                                                             reset,
+  input  struct packed {logic valid; SimpleMemoryReq bits; } ingress_in,
+  input  struct packed {logic ready; }                       egress_in,
+  output struct packed {logic ready; }                       ingress_out,
+  output struct packed {logic valid; SimpleMemoryReq bits; } egress_out,
+  output [1:0]                                               count
 );
 
-  wire
-    struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
-    _GEN;
-  wire       _GEN_0;
-  wire       _write_pointer_value;
-  wire       _read_pointer_value;
-  wire       _GEN_1 = 1'h0;
-  struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
-    storage[0:1];
+  wire SimpleMemoryReq _GEN;
+  wire                 _GEN_0;
+  wire                 _write_pointer_value;
+  wire                 _read_pointer_value;
+  wire                 _GEN_1 = 1'h0;
+  SimpleMemoryReq      storage[0:1];
   always_ff @(posedge clock) begin
     if (_GEN_1) begin
     end
@@ -102,15 +101,15 @@ module Queue(
         storage[_write_pointer_value] <= _GEN;
     end
   end // always_ff @(posedge)
-  reg  [1:0] occupancy;
-  wire       _GEN_2 = occupancy == 2'h0;
+  reg  [1:0]           occupancy;
+  wire                 _GEN_2 = occupancy == 2'h0;
   `ifndef SYNTHESIS
     queue_occupancy_in_range:
       assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
   `endif // not def SYNTHESIS
-  wire       _GEN_3 = occupancy != 2'h2 | egress_in.ready;
+  wire                 _GEN_3 = occupancy != 2'h2 | egress_in.ready;
   assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
+  wire                 _GEN_4 = ~_GEN_2 & egress_in.ready;
   assign _GEN = ingress_in.bits;
   Counter read_pointer (
     .clock  (clock),
@@ -158,22 +157,19 @@ module Counter(
 endmodule
 
 module Pipe(
-  input                                                                                                                               clock,
-                                                                                                                                      reset,
-  input  struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } ingress_in,
-  input  struct packed {logic ready; }                                                                                                egress_in,
-  output struct packed {logic ready; }                                                                                                ingress_out,
-  output struct packed {logic valid; struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; } bits; } egress_out
+  input                                                      clock,
+                                                             reset,
+  input  struct packed {logic valid; SimpleMemoryReq bits; } ingress_in,
+  input  struct packed {logic ready; }                       egress_in,
+  output struct packed {logic ready; }                       ingress_out,
+  output struct packed {logic valid; SimpleMemoryReq bits; } egress_out
 );
 
-  reg  [0:0] stage_valid;
-  struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }[0:0]
-    stage_bits;
-  wire       _GEN = ~stage_valid[1'h0] | egress_in.ready;
-  wire       _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
-  wire
-    struct packed {logic [31:0] address; logic write; logic [31:0] data; logic [3:0] mask; }
-    _GEN_1 =
+  reg  [0:0]                stage_valid;
+  SimpleMemoryReq[0:0]      stage_bits;
+  wire                      _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire                      _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire SimpleMemoryReq      _GEN_1 =
     _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
   always @(posedge clock) begin
     if (reset)
@@ -188,19 +184,19 @@ module Pipe(
 endmodule
 
 module Pipe_1(
-  input                                                                          clock,
-                                                                                 reset,
-  input  struct packed {logic valid; struct packed {logic [31:0] data; } bits; } ingress_in,
-  input  struct packed {logic ready; }                                           egress_in,
-  output struct packed {logic ready; }                                           ingress_out,
-  output struct packed {logic valid; struct packed {logic [31:0] data; } bits; } egress_out
+  input                                                       clock,
+                                                              reset,
+  input  struct packed {logic valid; SimpleMemoryResp bits; } ingress_in,
+  input  struct packed {logic ready; }                        egress_in,
+  output struct packed {logic ready; }                        ingress_out,
+  output struct packed {logic valid; SimpleMemoryResp bits; } egress_out
 );
 
-  reg  [0:0] stage_valid;
-  struct packed {logic [31:0] data; }[0:0] stage_bits;
-  wire       _GEN = ~stage_valid[1'h0] | egress_in.ready;
-  wire       _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
-  wire struct packed {logic [31:0] data; } _GEN_1 =
+  reg  [0:0]                 stage_valid;
+  SimpleMemoryResp[0:0]      stage_bits;
+  wire                       _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire                       _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire SimpleMemoryResp      _GEN_1 =
     _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
   always @(posedge clock) begin
     if (reset)

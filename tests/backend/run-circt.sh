@@ -338,6 +338,7 @@ run_expected_assertion_failure assertions assertions_fail_tb \
   tests/backend/verilog/assertions_fail_tb.sv request_holds
 
 verify_fixture nested-bundle
+verify_fixture bundle-specializations
 verify_fixture bundle-hierarchy
 verify_fixture interface-hierarchy
 verify_fixture aggregate-memory
