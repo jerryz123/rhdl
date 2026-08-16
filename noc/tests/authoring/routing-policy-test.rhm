@@ -40,13 +40,13 @@ def topology_spec = TopologySpec(
 )
 def lowered_topology = lower_topology(topology_spec)
 
-def request_ref = RouteClassRef(["traffic", "request"])
+def selected_ref = RouteClassRef(["traffic", "selected"])
 def other_ref = RouteClassRef(["traffic", "other"])
-def request_spec = RouteClassSpec(request_ref, source, destination)
+def selected_spec = RouteClassSpec(selected_ref, source, destination)
 def other_spec = RouteClassSpec(other_ref, source, middle)
 def lowered_routes = lower_route_classes(
   lowered_topology,
-  [request_spec, other_spec]
+  [selected_spec, other_spec]
 )
 
 def injection_branch = policy_intersection(
@@ -57,12 +57,12 @@ def injection_branch = policy_intersection(
 def forwarding_branch = policy_intersection(
   [forwarding_policy, restrict_vc_groups(["escape"])]
 )
-def request_policy = policy_intersection(
-  [match_route_classes([request_ref]),
+def selected_policy = policy_intersection(
+  [match_route_classes([selected_ref]),
    policy_union([forwarding_branch, injection_branch])]
 )
-def relation = lower_routing_policy(lowered_routes, request_policy)
-def request = lowered_routes.route_class(request_ref)
+def relation = lower_routing_policy(lowered_routes, selected_policy)
+def selected = lowered_routes.route_class(selected_ref)
 def other = lowered_routes.route_class(other_ref)
 
 def source_id = lowered_topology.node_id(source)
@@ -85,36 +85,36 @@ def middle_destination_escape = lowered_topology.vc_id(
 check:
   allow_all.describe() ~is "allow-all"
   deny_all.describe() ~is "deny-all"
-  match_route_classes([request_ref]).describe() ~is "route-class(traffic/request)"
+  match_route_classes([selected_ref]).describe() ~is "route-class(traffic/selected)"
   select_candidate_links([source_middle]).describe() ~is "candidate-link(source/middle)"
   restrict_vc_groups(["escape", "adaptive"]).describe() ~is "candidate-vc-group(adaptive, escape)"
   policy_union([injection_policy, forwarding_policy]).describe() ~is policy_union([forwarding_policy, injection_policy]).describe()
-  request_policy is_a RoutingPolicy ~is #true
-  request_policy is_a IntersectionPolicy ~is #true
+  selected_policy is_a RoutingPolicy ~is #true
+  selected_policy is_a IntersectionPolicy ~is #true
 
 check:
   relation.allow(
-    request,
+    selected,
     Injection(source_id),
     source_middle_adaptive
   ) ~is #true
   relation.allow(
-    request,
+    selected,
     Injection(source_id),
     source_middle_escape
   ) ~is #false
   relation.allow(
-    request,
+    selected,
     Injection(source_id),
     source_alternate_escape
   ) ~is #false
   relation.allow(
-    request,
+    selected,
     HeldVC(source_middle_adaptive),
     middle_destination_escape
   ) ~is #true
   relation.allow(
-    request,
+    selected,
     HeldVC(source_middle_escape),
     middle_destination_adaptive
   ) ~is #false
@@ -133,11 +133,11 @@ def materialized = materialize_routing(problem)
 
 check:
   materialized.allowed_candidates(
-    request,
+    selected,
     Injection(source_id)
   ).map(fun (vc): vc.describe()) ~is [source_middle_adaptive.describe()]
   materialized.allowed_candidates(
-    request,
+    selected,
     HeldVC(source_middle_adaptive)
   ).map(fun (vc): vc.describe()) ~is [middle_destination_escape.describe()]
   materialized.allowed_candidates(
@@ -147,23 +147,23 @@ check:
 
 // Policy lowering feeds the existing validation and route-table path without
 // another policy evaluator or table generator.
-def request_only_routes = lower_route_classes(
+def selected_only_routes = lower_route_classes(
   lowered_topology,
-  [request_spec]
+  [selected_spec]
 )
 def validated = compile_routing(
   RoutingProblem(
     lowered_topology.topology,
-    request_only_routes.route_classes,
-    lower_routing_policy(request_only_routes, request_policy)
+    selected_only_routes.route_classes,
+    lower_routing_policy(selected_only_routes, selected_policy)
   )
 )
-def validated_request = request_only_routes.route_class(request_ref)
+def validated_selected = selected_only_routes.route_class(selected_ref)
 
 check:
   validated is_a ValidatedRouting ~is #true
   validated.route_row(
-    validated_request,
+    validated_selected,
     Injection(source_id)
   ).allowed_vcs.map(
     fun (vc): vc.describe()
@@ -180,18 +180,18 @@ def observed_relation = lower_routing_policy(lowered_routes, observed_policy)
 
 check:
   observed_relation.allow(
-    request,
+    selected,
     Injection(source_id),
     source_middle_adaptive
   ) ~is #true
-  observed_context.route_class.ref.describe() ~is "traffic/request"
+  observed_context.route_class.ref.describe() ~is "traffic/selected"
   observed_context.origin.describe() ~is "inject(source)"
   observed_context.current_node.describe() ~is "source"
   observed_context.candidate_link().describe() ~is "source/middle"
   observed_context.candidate_vc.describe() ~is "source/middle/adaptive[0]"
 
 def direct_context = RoutingContext(
-  request_spec,
+  selected_spec,
   RoutingForwarding(VCRef(source_middle, "adaptive", 0)),
   middle,
   VCRef(middle_destination, "escape", 0)
@@ -209,19 +209,19 @@ check:
   routing_policy_result(injection_policy, direct_context) ~is #false
   traced_evaluation.allowed ~is #true
   traced_evaluation.rule_names ~is ["forward-rule"]
-  direct_context.describe() ~is "traffic/request forward(source/middle/adaptive[0]) at middle -> middle/destination/escape[0]"
+  direct_context.describe() ~is "traffic/selected forward(source/middle/adaptive[0]) at middle -> middle/destination/escape[0]"
 
 check:
   RoutingInjection("source") ~throws "must contain a NodeRef"
   RoutingForwarding("vc") ~throws "must contain a VCRef"
-  RoutingContext("request", RoutingInjection(source), source,
+  RoutingContext("route", RoutingInjection(source), source,
                  VCRef(source_middle, "escape", 0)) ~throws "must be a RouteClassSpec"
-  RoutingContext(request_spec, "injection", source,
+  RoutingContext(selected_spec, "injection", source,
                  VCRef(source_middle, "escape", 0)) ~throws "must be a RoutingOrigin"
-  RoutingContext(request_spec, RoutingInjection(source), middle,
+  RoutingContext(selected_spec, RoutingInjection(source), middle,
                  VCRef(source_middle, "escape", 0)) ~throws "must equal the current node"
   match_route_classes([]) ~throws "nonempty List"
-  match_route_classes(["request"]) ~throws "only RouteClassRef"
+  match_route_classes(["selected"]) ~throws "only RouteClassRef"
   select_candidate_links([]) ~throws "nonempty List"
   select_candidate_links(["source-middle"]) ~throws "only LinkRef"
   restrict_vc_groups([]) ~throws "nonempty List"

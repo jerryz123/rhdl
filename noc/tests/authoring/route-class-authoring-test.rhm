@@ -22,47 +22,43 @@ def topology_spec = TopologySpec(
 def lowered_topology = lower_topology(topology_spec)
 
 def local_ref = RouteClassRef(["traffic", "local"])
-def request_ref = RouteClassRef(["traffic", "request"])
+def remote_ref = RouteClassRef(["traffic", "remote"])
 def local_spec = RouteClassSpec(
   local_ref,
   source,
-  source,
-  "local metadata"
+  source
 )
-def request_spec = RouteClassSpec(
-  request_ref,
+def remote_spec = RouteClassSpec(
+  remote_ref,
   source,
-  destination,
-  "request metadata"
+  destination
 )
 
 // Supply declarations out of canonical route-name order.
 def lowered_routes = lower_route_classes(
   lowered_topology,
-  [request_spec, local_spec]
+  [remote_spec, local_spec]
 )
 def reversed_routes = lower_route_classes(
   lowered_topology,
-  [local_spec, request_spec]
+  [local_spec, remote_spec]
 )
 
 check:
   lowered_routes.specs.map(
     fun (spec): spec.ref.describe()
-  ) ~is ["traffic/local", "traffic/request"]
+  ) ~is ["traffic/local", "traffic/remote"]
   lowered_routes.route_classes.map(
     fun (route_class): route_class.id.value
   ) ~is [0, 1]
   lowered_routes.route_class(local_ref).source.value ~is lowered_topology.node_id(source).value
   lowered_routes.route_class(local_ref).destination.value ~is lowered_topology.node_id(source).value
-  lowered_routes.route_class(request_ref).source.value ~is lowered_topology.node_id(source).value
-  lowered_routes.route_class(request_ref).destination.value ~is lowered_topology.node_id(destination).value
-  lowered_routes.route_class(request_ref).metadata ~is "request metadata"
+  lowered_routes.route_class(remote_ref).source.value ~is lowered_topology.node_id(source).value
+  lowered_routes.route_class(remote_ref).destination.value ~is lowered_topology.node_id(destination).value
   lowered_routes.route_ref(RouteClassId(0)).describe() ~is "traffic/local"
-  lowered_routes.route_ref(RouteClassId(1)).describe() ~is "traffic/request"
-  lowered_routes.source_ref(request_ref).describe() ~is "source"
-  lowered_routes.destination_ref(request_ref).describe() ~is "destination"
-  lowered_routes.route_spec(local_ref).metadata ~is "local metadata"
+  lowered_routes.route_ref(RouteClassId(1)).describe() ~is "traffic/remote"
+  lowered_routes.source_ref(remote_ref).describe() ~is "source"
+  lowered_routes.destination_ref(remote_ref).describe() ~is "destination"
   lowered_routes.route_classes.map(
     fun (route_class): route_class.describe()
   ) ~is reversed_routes.route_classes.map(
@@ -81,7 +77,7 @@ def problem = RoutingProblem(
 check:
   problem.route_classes.length() ~is 2
   problem.candidates(
-    lowered_routes.route_class(request_ref),
+    lowered_routes.route_class(remote_ref),
     Injection(lowered_topology.node_id(source))
   ).map(fun (vc): vc.describe()) ~is ["l1.vc0"]
   problem.candidates(
@@ -91,18 +87,18 @@ check:
 
 check:
   RouteClassRef([]) ~throws "nonempty String or List"
-  RouteClassSpec("request", source, destination) ~throws "must be a RouteClassRef"
-  RouteClassSpec(request_ref, "source", destination) ~throws "must be NodeRef"
-  lower_route_classes("not a topology", [request_spec]) ~throws "expected a LoweredTopology"
+  RouteClassSpec("remote", source, destination) ~throws "must be a RouteClassRef"
+  RouteClassSpec(remote_ref, "source", destination) ~throws "must be NodeRef"
+  lower_route_classes("not a topology", [remote_spec]) ~throws "expected a LoweredTopology"
   lower_route_classes(lowered_topology, []) ~throws "nonempty List"
   lower_route_classes(lowered_topology, ["not a spec"]) ~throws "only RouteClassSpec"
   lower_route_classes(
     lowered_topology,
-    [request_spec,
-     RouteClassSpec(RouteClassRef(["traffic", "request"]),
+    [remote_spec,
+     RouteClassSpec(RouteClassRef(["traffic", "remote"]),
                     middle,
                     destination)]
-  ) ~throws "duplicate route class traffic/request"
+  ) ~throws "duplicate route class traffic/remote"
   lower_route_classes(
     lowered_topology,
     [RouteClassSpec(RouteClassRef("unknown-source"),
@@ -115,7 +111,7 @@ check:
                     source,
                     NodeRef("unknown"))]
   ) ~throws "unknown destination unknown"
-  lowered_routes.route_class("request") ~throws "expected a RouteClassRef"
+  lowered_routes.route_class("remote") ~throws "expected a RouteClassRef"
   lowered_routes.route_class(RouteClassRef("unknown")) ~throws "unknown route class unknown"
   lowered_routes.route_ref("r0") ~throws "expected a RouteClassId"
   lowered_routes.route_ref(RouteClassId(99)) ~throws "unknown route class r99"

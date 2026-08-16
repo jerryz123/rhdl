@@ -298,7 +298,7 @@ packages do not import that instance.
 `RouteClassSpec` keeps its source and destination as `NodeRef` values. The
 generic `lower_route_classes` operation resolves those endpoints through one
 exact `LoweredTopology`, assigns route-class IDs by canonical symbolic-name
-order, copies opaque metadata unchanged, and retains bidirectional provenance.
+order, and retains bidirectional provenance.
 
 This layer defines only explicit route-class semantics. Reusable traffic sets
 such as all ordered source/destination pairs belong under `noc/std/traffic/`,
@@ -465,9 +465,9 @@ PhysicalLink(id, source, destination, vc_count)
 link identity and then increasing local VC index, making subsequent graph and
 table construction deterministic.
 
-A `RouteClass` currently identifies one injection node and one destination
-node. Its `metadata` field is opaque to the model and may carry distinctions
-such as a virtual network or traffic class for a user routing function.
+A `RouteClass` identifies one injection node and one destination node within a
+single independently transported protocol-level channel. Protocol-channel,
+opcode, QoS, and other payload distinctions are not part of the routing model.
 
 Routing origins are either:
 
