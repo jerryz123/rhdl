@@ -1,0 +1,278 @@
+#lang rhombus
+// Checks semantically named cycle diagnostics recorded during one authored-policy evaluation.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../../plan/main.rhm" open
+
+def spec = topology:
+  vc_group escape: 1
+  node w
+  node x
+  node y
+  node z
+  directed a:
+    x -> y
+    vcs [escape]
+  directed b:
+    y -> x
+    vcs [escape]
+  directed c:
+    x -> z
+    vcs [escape]
+  directed d:
+    y -> w
+    vcs [escape]
+
+def lowered_topology = lower_topology(spec)
+def x_to_z = RouteClassRef("x_to_z")
+def y_to_w = RouteClassRef("y_to_w")
+def routes = lower_route_classes(
+  lowered_topology,
+  [RouteClassSpec(x_to_z, spec.node("x"), spec.node("z")),
+   RouteClassSpec(y_to_w, spec.node("y"), spec.node("w"))]
+)
+
+def mutable policy_evaluations = 0
+def observe = custom_policy(
+  "observe",
+  fun (_context):
+    policy_evaluations := policy_evaluations + 1
+    #true
+)
+def policy = routing:
+  rule route0_inject_a:
+    use observe
+    routes [x_to_z]
+    origin injection
+    candidate_vcs [escape]
+    candidate_links [spec.link("a")]
+  rule route0_a_to_b:
+    use observe
+    routes [x_to_z]
+    origin forwarding
+    current_vcs [escape]
+    candidate_vcs [escape]
+    candidate_links [spec.link("b")]
+  rule route0_b_to_c:
+    use observe
+    routes [x_to_z]
+    origin forwarding
+    current_vcs [escape]
+    candidate_vcs [escape]
+    candidate_links [spec.link("c")]
+  rule route1_inject_b:
+    use observe
+    routes [y_to_w]
+    origin injection
+    candidate_vcs [escape]
+    candidate_links [spec.link("b")]
+  rule route1_b_to_a:
+    use observe
+    routes [y_to_w]
+    origin forwarding
+    current_vcs [escape]
+    candidate_vcs [escape]
+    candidate_links [spec.link("a")]
+  rule route1_a_to_d:
+    use observe
+    routes [y_to_w]
+    origin forwarding
+    current_vcs [escape]
+    candidate_vcs [escape]
+    candidate_links [spec.link("d")]
+
+def compilation = compile_authored_routing(routes, policy)
+def evaluations_after_compile = policy_evaluations
+def diagnostic = compilation.diagnostic
+def diagnostic_text = diagnostic.describe()
+
+check:
+  compilation.result is_a DependencyCycle ~is #true
+  diagnostic is_a AuthoredDependencyCycle ~is #true
+  diagnostic.edges.length() ~is 2
+  diagnostic.edges[0].source_vc.describe() ~is "a/escape[0]"
+  diagnostic.edges[0].target_vc.describe() ~is "b/escape[0]"
+  diagnostic.edges[0].causes[0].route_class.describe() ~is "x_to_z"
+  diagnostic.edges[0].causes[0].rule_names ~is ["route0_a_to_b"]
+  diagnostic.edges[1].source_vc.describe() ~is "b/escape[0]"
+  diagnostic.edges[1].target_vc.describe() ~is "a/escape[0]"
+  diagnostic.edges[1].causes[0].route_class.describe() ~is "y_to_w"
+  diagnostic.edges[1].causes[0].rule_names ~is ["route1_b_to_a"]
+  diagnostic_text.contains("route x_to_z") ~is #true
+  diagnostic_text.contains("rules=[route0_a_to_b]") ~is #true
+  compilation.decision_provenance().length() ~is compilation.result.graph.reachable.materialized.decisions.length()
+  // Reading or formatting provenance never invokes the authored policy again.
+  policy_evaluations ~is evaluations_after_compile
+
+// Escape failures use the same symbolic projection without changing the
+// normalized validator or granting authored policies any proof authority.
+def escape_source = NodeRef("escape_source")
+def escape_middle = NodeRef("escape_middle")
+def escape_destination = NodeRef("escape_destination")
+def escape_first = LinkRef("escape_first")
+def escape_second = LinkRef("escape_second")
+def escape_back = LinkRef("escape_back")
+def adaptive_group = VCGroup("adaptive", 1)
+def escape_group = VCGroup("escape", 1)
+def escape_spec = TopologySpec(
+  [escape_source, escape_middle, escape_destination],
+  [directed_link(
+     escape_first,
+     escape_source,
+     escape_middle,
+     [adaptive_group, escape_group]
+   ),
+   directed_link(
+     escape_second,
+     escape_middle,
+     escape_destination,
+     [adaptive_group, escape_group]
+   ),
+   directed_link(
+     escape_back,
+     escape_middle,
+     escape_source,
+     [adaptive_group, escape_group]
+   )]
+)
+def escape_topology = lower_topology(escape_spec)
+def escape_route_ref = RouteClassRef("escape_request")
+def escape_routes = lower_route_classes(
+  escape_topology,
+  [RouteClassSpec(
+     escape_route_ref,
+     escape_source,
+     escape_destination
+   )]
+)
+def escape_request = EscapeValidationRequest(
+  escape_topology.topology,
+  escape_topology.vc_ids_in_groups(["escape"])
+)
+
+def closure_policy = policy_union(
+  [routing_phase(
+     "inject_escape",
+     policy_intersection(
+       [injection_policy,
+        restrict_vc_groups(["escape"]),
+        select_candidate_links([escape_first])]
+     )
+   ),
+   routing_phase(
+     "leave_escape",
+     policy_intersection(
+       [forwarding_policy,
+        match_current_vc_groups(["escape"]),
+        restrict_vc_groups(["adaptive"]),
+        select_candidate_links([escape_second])]
+     )
+   )]
+)
+def closure_compilation = compile_authored_routing(
+  escape_routes,
+  closure_policy,
+  ~escape: escape_request
+)
+
+check:
+  closure_compilation.result is_a EscapeClosureViolation ~is #true
+  closure_compilation.diagnostic is_a AuthoredRoutingFailure ~is #true
+  closure_compilation.diagnostic.route_class.describe() ~is "escape_request"
+  closure_compilation.diagnostic.origin.describe() ~is "forward(escape_first/escape[0])"
+  closure_compilation.diagnostic.candidate_vc.describe() ~is "escape_second/adaptive[0]"
+  closure_compilation.diagnostic.rule_names ~is ["leave_escape"]
+
+def missing_entry_policy = policy_union(
+  [routing_phase(
+     "inject_adaptive",
+     policy_intersection(
+       [injection_policy,
+        restrict_vc_groups(["adaptive"]),
+        select_candidate_links([escape_first])]
+     )
+   ),
+   routing_phase(
+     "continue_adaptive",
+     policy_intersection(
+       [forwarding_policy,
+        match_current_vc_groups(["adaptive"]),
+        restrict_vc_groups(["adaptive"]),
+        select_candidate_links([escape_second])]
+     )
+   )]
+)
+def missing_entry_compilation = compile_authored_routing(
+  escape_routes,
+  missing_entry_policy,
+  ~escape: escape_request
+)
+
+check:
+  missing_entry_compilation.result is_a MissingEscapeEntry ~is #true
+  missing_entry_compilation.diagnostic is_a AuthoredRoutingFailure ~is #true
+  missing_entry_compilation.diagnostic.route_class.describe() ~is "escape_request"
+  missing_entry_compilation.diagnostic.origin.describe() ~is "inject(escape_source)"
+  missing_entry_compilation.diagnostic.candidate_vc ~is #false
+
+def missing_route_policy = policy_union(
+  [routing_phase(
+     "inject_adaptive",
+     policy_intersection(
+       [injection_policy,
+        restrict_vc_groups(["adaptive"]),
+        select_candidate_links([escape_first])]
+     )
+   ),
+   routing_phase(
+     "inject_escape",
+     policy_intersection(
+       [injection_policy,
+        restrict_vc_groups(["escape"]),
+        select_candidate_links([escape_first])]
+     )
+   ),
+   routing_phase(
+     "finish_adaptive",
+     policy_intersection(
+       [forwarding_policy,
+        match_current_vc_groups(["adaptive"]),
+        restrict_vc_groups(["adaptive"]),
+        select_candidate_links([escape_second])]
+     )
+   ),
+   routing_phase(
+     "escape_turn_back",
+     policy_intersection(
+       [forwarding_policy,
+        match_current_vc_groups(["escape"]),
+        restrict_vc_groups(["escape"]),
+        select_candidate_links([escape_back])]
+     )
+   ),
+   routing_phase(
+     "escape_repeat",
+     policy_intersection(
+       [forwarding_policy,
+        match_current_vc_groups(["escape"]),
+        restrict_vc_groups(["escape"]),
+        select_candidate_links([escape_first])]
+     )
+   )]
+)
+def missing_route_compilation = compile_authored_routing(
+  escape_routes,
+  missing_route_policy,
+  ~escape: escape_request
+)
+
+check:
+  missing_route_compilation.result is_a MissingEscapeRoute ~is #true
+  missing_route_compilation.diagnostic is_a AuthoredRoutingFailure ~is #true
+  missing_route_compilation.diagnostic.route_class.describe() ~is "escape_request"
+  missing_route_compilation.diagnostic.origin.describe() ~is "forward(escape_back/escape[0])"
+  missing_route_compilation.diagnostic.candidate_vc ~is #false

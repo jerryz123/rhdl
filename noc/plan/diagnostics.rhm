@@ -1,0 +1,181 @@
+#lang rhombus
+// Projects normalized routing failures through authoring provenance without re-evaluating policies.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/main.rhm" open
+  "../authoring/main.rhm" open
+  "validated-routing.rhm" open
+
+export:
+  AuthoredCycleCause
+  AuthoredCycleEdge
+  AuthoredDependencyCycle
+  AuthoredRoutingFailure
+  AuthoredRoutingCompilation
+  compile_authored_routing
+
+fun origin_equal(left, right):
+  cond
+  | left is_a Injection && right is_a Injection:
+      node_id_equal(left.node, right.node)
+  | left is_a HeldVC && right is_a HeldVC:
+      vc_id_equal(left.vc, right.vc)
+  | ~else: #false
+
+fun evidence_matches(evidence, decision):
+  evidence.route_class === decision.route_class && origin_equal(
+    evidence.origin,
+    decision.origin
+  ) && vc_id_equal(evidence.candidate_vc, decision.candidate_vc)
+
+fun find_evidence(lowering, decision):
+  def found = lowering.decisions.find(
+    fun (evidence): evidence_matches(evidence, decision)
+  )
+  unless found
+  | error(~who: #'compile_authored_routing,
+          "materialized decision has no authored provenance")
+  unless found.allowed == decision.allowed
+  | error(~who: #'compile_authored_routing,
+          "authored provenance disagrees with its materialized decision")
+  found
+
+fun evidence_rule_names(lowering, evidence):
+  if evidence.rule_names.length() > 0
+  | evidence.rule_names
+  | [lowering.policy.describe()]
+
+class AuthoredCycleCause(route_class, origin, candidate_vc, rule_names):
+  method describe():
+    String.append(
+      "route ", route_class.describe(),
+      "; ", origin.describe(),
+      " -> ", candidate_vc.describe(),
+      "; rules=[", String.join(rule_names, ", "), "]"
+    )
+
+class AuthoredCycleEdge(source_vc, target_vc, causes):
+  method describe():
+    def cause_rows = causes.map(
+      fun (cause): "    " ++ cause.describe()
+    )
+    String.append(
+      "  ", source_vc.describe(), " -> ", target_vc.describe(),
+      "\n", String.join(cause_rows, "\n")
+    )
+
+class AuthoredDependencyCycle(normalized_cycle, edges):
+  method describe():
+    "authored VC dependency cycle:\n" ++ String.join(
+      edges.map(fun (edge): edge.describe()),
+      "\n"
+    )
+
+class AuthoredRoutingFailure(kind,
+                             route_class,
+                             origin,
+                             candidate_vc,
+                             rule_names):
+  method describe():
+    def candidate:
+      if candidate_vc == #false
+      | ""
+      | " -> " ++ candidate_vc.describe()
+    def rules:
+      if rule_names.length() == 0
+      | ""
+      | "; rules=[" ++ String.join(rule_names, ", ") ++ "]"
+    String.append(kind, " for route ", route_class.describe(),
+                  " at ", origin.describe(), candidate, rules)
+
+class AuthoredRoutingCompilation(result, lowering, diagnostic):
+  method decision_provenance(): lowering.decisions
+
+fun symbolic_origin(lowered_topology, origin):
+  cond
+  | origin is_a Injection:
+      RoutingInjection(lowered_topology.node_ref(origin.node))
+  | origin is_a HeldVC:
+      RoutingForwarding(lowered_topology.vc_ref(origin.vc))
+  | ~else:
+      error(~who: #'compile_authored_routing,
+            "routing origin must be an Injection or HeldVC")
+
+fun cycle_cause(lowering, decision):
+  def evidence = find_evidence(lowering, decision)
+  AuthoredCycleCause(
+    evidence.context.route_class.ref,
+    evidence.context.origin,
+    evidence.context.candidate_vc,
+    evidence_rule_names(lowering, evidence)
+  )
+
+fun authored_cycle(lowering, cycle):
+  def lowered_topology = lowering.lowered_routes.lowered_topology
+  def edges = for List (edge in cycle.edges):
+    AuthoredCycleEdge(
+      lowered_topology.vc_ref(edge.source_vc),
+      lowered_topology.vc_ref(edge.target_vc),
+      edge.decisions.map(fun (decision): cycle_cause(lowering, decision))
+    )
+  AuthoredDependencyCycle(cycle, edges)
+
+fun authored_failure(lowering, result):
+  def lowered_routes = lowering.lowered_routes
+  def lowered_topology = lowered_routes.lowered_topology
+  cond
+  | result is_a EscapeClosureViolation:
+      def evidence = find_evidence(lowering, result.decision)
+      AuthoredRoutingFailure(
+        "escape closure violation",
+        evidence.context.route_class.ref,
+        evidence.context.origin,
+        evidence.context.candidate_vc,
+        evidence_rule_names(lowering, evidence)
+      )
+  | result is_a MissingEscapeEntry:
+      AuthoredRoutingFailure(
+        "missing viable escape entry",
+        lowered_routes.route_ref(result.route_class.id),
+        symbolic_origin(lowered_topology, result.origin),
+        #false,
+        []
+      )
+  | result is_a MissingEscapeRoute:
+      AuthoredRoutingFailure(
+        "missing escape-only route",
+        lowered_routes.route_ref(result.route_class.id),
+        symbolic_origin(lowered_topology, result.origin),
+        #false,
+        []
+      )
+  | ~else: #false
+
+fun materialized_result(result):
+  cond
+  | result is_a ValidatedRouting: result.materialized
+  | result is_a DependencyCycle: result.graph.reachable.materialized
+  | ~else: #false
+
+fun compile_authored_routing(lowered_routes,
+                             policy,
+                             ~escape: escape_request = #false):
+  def lowering = lower_routing_policy_with_evidence(lowered_routes, policy)
+  def result = compile_routing(
+    RoutingProblem(
+      lowered_routes.lowered_topology.topology,
+      lowered_routes.route_classes,
+      lowering.relation()
+    ),
+    ~escape: escape_request
+  )
+  def materialized = materialized_result(result)
+  when materialized && lowering.decisions.length() != materialized.decisions.length()
+  | error(~who: #'compile_authored_routing,
+          "authored provenance does not cover every materialized decision")
+  def diagnostic:
+    if result is_a DependencyCycle
+    | authored_cycle(lowering, result)
+    | authored_failure(lowering, result)
+  AuthoredRoutingCompilation(result, lowering, diagnostic)

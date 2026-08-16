@@ -1,0 +1,175 @@
+#lang rhombus
+// Proves raw, builder, and embedded composed-topology routing have identical semantics.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../support/routing-equivalence.rhm" open
+
+// Canonical ordering is left/finish, left/start, right/finish, right/start and
+// bridge, left/internal, right/internal.
+def raw_n0 = NodeId(0)
+def raw_n1 = NodeId(1)
+def raw_n2 = NodeId(2)
+def raw_n3 = NodeId(3)
+def raw_bridge = LinkId(0)
+def raw_left = LinkId(1)
+def raw_right = LinkId(2)
+def raw_topology = Topology(
+  [raw_n0, raw_n1, raw_n2, raw_n3],
+  [PhysicalLink(raw_bridge, raw_n0, raw_n3, 1),
+   PhysicalLink(raw_left, raw_n1, raw_n0, 1),
+   PhysicalLink(raw_right, raw_n3, raw_n2, 1)]
+)
+def raw_route = RouteClass(RouteClassId(0), raw_n1, raw_n2)
+
+fun raw_allows(_route_class, origin, candidate_vc):
+  cond
+  | origin is_a Injection:
+      link_id_equal(candidate_vc.link_id, raw_left)
+  | vc_id_equal(origin.vc, VCId(raw_left, 0)):
+      link_id_equal(candidate_vc.link_id, raw_bridge)
+  | vc_id_equal(origin.vc, VCId(raw_bridge, 0)):
+      link_id_equal(candidate_vc.link_id, raw_right)
+  | ~else: #false
+
+def raw_problem = RoutingProblem(
+  raw_topology,
+  [raw_route],
+  RoutingRelation(raw_allows)
+)
+
+def data = VCGroup("data", 1)
+def fragment_start = NodeRef("start")
+def fragment_finish = NodeRef("finish")
+def builder_fragment = TopologySpec(
+  [fragment_start, fragment_finish],
+  [directed_link(
+     LinkRef("internal"),
+     fragment_start,
+     fragment_finish,
+     [data]
+   )]
+)
+def builder_left = prefix_topology("left", builder_fragment)
+def builder_right = prefix_topology("right", builder_fragment)
+def builder_bridge = directed_link(
+  LinkRef("bridge"),
+  NodeRef(["left", "finish"]),
+  NodeRef(["right", "start"]),
+  [data]
+)
+def builder_spec = compose_topologies(
+  [builder_left, builder_right],
+  ~links: [builder_bridge]
+)
+def builder_topology = lower_topology(builder_spec)
+def builder_route_ref = RouteClassRef("system")
+def builder_routes = lower_route_classes(
+  builder_topology,
+  [RouteClassSpec(
+     builder_route_ref,
+     builder_spec.node(["left", "start"]),
+     builder_spec.node(["right", "finish"])
+   )]
+)
+def builder_policy = policy_union(
+  [routing_phase(
+     "left",
+     policy_intersection(
+       [injection_policy,
+        select_candidate_links([builder_spec.link(["left", "internal"])])]
+     )
+   ),
+   routing_phase(
+     "bridge",
+     policy_intersection(
+       [forwarding_policy,
+        select_candidate_links([builder_spec.link("bridge")])]
+     )
+   ),
+   routing_phase(
+     "right",
+     policy_intersection(
+       [forwarding_policy,
+        select_candidate_links([builder_spec.link(["right", "internal"])])]
+     )
+   )]
+)
+def builder_problem = RoutingProblem(
+  builder_topology.topology,
+  builder_routes.route_classes,
+  lower_routing_policy(builder_routes, builder_policy)
+)
+
+def syntax_fragment = topology:
+  vc_group data: 1
+  node start
+  node finish
+  directed internal:
+    start -> finish
+    vcs [data]
+def syntax_left = prefix_topology("left", syntax_fragment)
+def syntax_right = prefix_topology("right", syntax_fragment)
+def syntax_spec = compose_topologies(
+  [syntax_right, syntax_left],
+  ~links: [
+    directed_link(
+      LinkRef("bridge"),
+      NodeRef(["left", "finish"]),
+      NodeRef(["right", "start"]),
+      [VCGroup("data", 1)]
+    )
+  ]
+)
+def syntax_topology = lower_topology(syntax_spec)
+def syntax_route_ref = RouteClassRef("system")
+def syntax_routes = lower_route_classes(
+  syntax_topology,
+  [RouteClassSpec(
+     syntax_route_ref,
+     syntax_spec.node(["left", "start"]),
+     syntax_spec.node(["right", "finish"])
+   )]
+)
+def syntax_policy = routing:
+  rule left:
+    origin injection
+    candidate_links [syntax_spec.link(["left", "internal"])]
+  rule bridge:
+    origin forwarding
+    candidate_links [syntax_spec.link("bridge")]
+  rule right:
+    origin forwarding
+    candidate_links [syntax_spec.link(["right", "internal"])]
+def syntax_problem = RoutingProblem(
+  syntax_topology.topology,
+  syntax_routes.route_classes,
+  lower_routing_policy(syntax_routes, syntax_policy)
+)
+
+def raw_semantics = snapshot_routing(raw_problem)
+def builder_semantics = snapshot_routing(builder_problem)
+def syntax_semantics = snapshot_routing(syntax_problem)
+
+check:
+  raw_semantics.result_kind ~is "validated-acyclic"
+  raw_semantics.route_table_rows.length() ~is 4
+  raw_semantics.fingerprint() ~is builder_semantics.fingerprint()
+  raw_semantics.fingerprint() ~is syntax_semantics.fingerprint()
+  builder_topology.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is syntax_topology.node_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  builder_topology.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is syntax_topology.link_bindings.map(
+    fun (binding): binding.ref.describe()
+  )
+  builder_topology.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  ) ~is syntax_topology.vc_bindings.map(
+    fun (binding): binding.ref.describe()
+  )

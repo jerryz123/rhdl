@@ -22,8 +22,10 @@ The current implementation provides:
   the public authoring API.
 - Optional embedded unordered routing rules that expand only into the public
   policy algebra.
-- An initial three-way equivalence fixture for raw, builder, and embedded
+- A complete pre-hardware equivalence matrix for raw, builder, and embedded
   authoring paths that does not re-materialize their routing relations.
+- Authored compilation diagnostics that project normalized cycle and escape
+  failures back to symbolic topology, route, and routing-rule names.
 - Symbolic route classes with deterministic normalized IDs and provenance.
 - Inspectable routing-policy expressions with symbolic contexts and lowering to
   the existing normalized routing relation.
@@ -68,7 +70,10 @@ The current implementation provides:
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The package does not yet lower route tables into RHDL or generate router RTL.
+The pure package does not lower route tables into RHDL or generate router RTL.
+The optional one-way consumer under `rhdl/std/noc/` accepts only
+`ValidatedRouting` and lowers its finite rows into a combinational route
+computer without adding an RHDL dependency here.
 
 ## Dependency boundary
 
@@ -78,6 +83,12 @@ They must not import RHDL core, frontend, backend, standard-library hardware
 modules, or CIRCT integration. Core model, authoring, analysis, and planning
 modules must not import `noc/std`; reusable topology and routing definitions
 depend on the core abstractions, never the reverse.
+
+The hardware bridge is tested separately by
+`tests/frontend/noc-route-computer-test.rhm` and the focused
+`noc-route-computer` CIRCT/Verilator fixture. Those consumers exhaust every
+encoded input for a small validated network; they do not grant hardware code
+access to unvalidated relations or proof construction.
 
 Run the focused checks from the repository root:
 
@@ -93,7 +104,11 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/topology-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/routing-test.rhm
 bash noc/tests/language/run-negative.sh
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/irregular-three-way-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/mesh-xy-three-way-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/adaptive-escape-three-way-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/composition-three-way-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/authored-diagnostics-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -223,6 +238,33 @@ relation, certificate, route table, or validated artifact by another path;
 all decisions still pass through `lower_routing_policy`, finite
 materialization, reachability, dependency analysis, and the selected proof
 regime.
+
+## Authored diagnostics and equivalence gate
+
+`compile_authored_routing` is a pure host-side facade over the ordinary
+authoring and validation APIs. Policy lowering records a
+`LoweredRoutingDecision` beside each Boolean relation result during the same
+evaluation that materialization requested. Reading or formatting the resulting
+provenance never invokes the routing policy again. The normalized
+`RoutingProblem`, `ValidatedRouting`, dependency graph, certificate, and route
+table remain unchanged.
+
+When whole-graph validation finds a cycle, the authored compilation attaches
+an `AuthoredDependencyCycle`. Its edges use `VCRef` names and its causes retain
+the originating `RouteClassRef`, symbolic origin and candidate VC, and the
+matching `routing_phase` names. Escape closure, missing-entry, and
+missing-route failures receive the same symbolic projection where their
+normalized evidence permits it. Raw-model clients continue to use
+`compile_routing` directly and do not depend on authoring types.
+
+The pre-hardware equivalence tests independently cover an irregular directed
+topology with explicit VC phases, a coordinate-bearing 2x2 mesh with XY
+routing, adaptive-minimal routing under both whole-graph and escape proofs,
+and prefixed topology-fragment composition. Each raw, builder, and embedded
+form is reduced to a `RoutingSemantics` fingerprint containing the normalized
+topology and route classes, materialized and reachable decisions, dependency
+graph, proof result, route-table rows, assumptions, and validator version.
+Hardware emission remains outside this package.
 
 ## Standard topology definitions
 

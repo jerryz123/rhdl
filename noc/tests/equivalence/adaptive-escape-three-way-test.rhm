@@ -1,0 +1,81 @@
+#lang rhombus
+// Proves raw, builder, and embedded adaptive-escape routing have identical proof results.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../../examples/irregular-adaptive-escape.rhm" open
+  "../support/routing-equivalence.rhm" open
+
+fun raw_origin_node(origin):
+  if origin is_a Injection
+  | origin.node
+  | irregular_topology.topology.find_vc_link(origin.vc).destination
+
+fun raw_current_group(origin):
+  if origin is_a Injection
+  | #false
+  | irregular_topology.vc_ref(origin.vc).group
+
+fun raw_allows(route_class, origin, candidate_vc):
+  def current = irregular_topology.node_ref(raw_origin_node(origin))
+  def destination = irregular_topology.node_ref(route_class.destination)
+  def candidate = irregular_topology.vc_ref(candidate_vc)
+  def required_escape = irregular_escape_tree.next_link(current, destination)
+  def adaptive_candidate = candidate.group == "adaptive" && irregular_distances.link_is_minimal(
+    candidate_vc.link_id,
+    route_class.destination
+  )
+  def escape_candidate = candidate.group == "escape" && required_escape != #false && link_ref_equal(
+    required_escape,
+    candidate.link
+  )
+  def current_group = raw_current_group(origin)
+  if origin is_a Injection || current_group == "adaptive"
+  | adaptive_candidate || escape_candidate
+  | current_group == "escape" && escape_candidate
+
+def raw_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  RoutingRelation(raw_allows)
+)
+
+def syntax_policy = routing:
+  rule adaptive_escape:
+    use irregular_policy
+def syntax_problem = RoutingProblem(
+  irregular_topology.topology,
+  irregular_routes.route_classes,
+  lower_routing_policy(irregular_routes, syntax_policy)
+)
+
+def raw_cycle = snapshot_routing(raw_problem)
+def builder_cycle = snapshot_routing(irregular_problem)
+def syntax_cycle = snapshot_routing(syntax_problem)
+def raw_escape = snapshot_routing(
+  raw_problem,
+  ~escape: irregular_escape_request
+)
+def builder_escape = snapshot_routing(
+  irregular_problem,
+  ~escape: irregular_escape_request
+)
+def syntax_escape = snapshot_routing(
+  syntax_problem,
+  ~escape: irregular_escape_request
+)
+
+check:
+  raw_cycle.result_kind ~is "dependency-cycle"
+  raw_escape.result_kind ~is "validated-escape"
+  raw_cycle.route_classes.length() ~is 20
+  raw_cycle.fingerprint() ~is builder_cycle.fingerprint()
+  raw_cycle.fingerprint() ~is syntax_cycle.fingerprint()
+  raw_escape.fingerprint() ~is builder_escape.fingerprint()
+  raw_escape.fingerprint() ~is syntax_escape.fingerprint()
+  // Selecting the escape theorem cannot change the full routing relation.
+  raw_cycle.materialized_decisions ~is raw_escape.materialized_decisions
+  builder_cycle.materialized_decisions ~is builder_escape.materialized_decisions
+  syntax_cycle.materialized_decisions ~is syntax_escape.materialized_decisions

@@ -10,7 +10,10 @@ import:
   "escape-composition.rhm" open
 
 export:
+  LoweredRoutingDecision
+  RoutingPolicyLowering
   lower_routing_policy
+  lower_routing_policy_with_evidence
 
 fun find_exact_route_binding(lowered_routes, route_class):
   lowered_routes.bindings.find(
@@ -79,24 +82,52 @@ fun current_node_ref(lowered_topology, origin):
       error(~who: #'lower_routing_policy,
             "routing origin must be an Injection or HeldVC")
 
-fun lower_routing_policy(lowered_routes, policy):
+class LoweredRoutingDecision(route_class,
+                             origin,
+                             candidate_vc,
+                             context,
+                             allowed,
+                             rule_names)
+
+class RoutingPolicyLowering(lowered_routes,
+                            policy,
+                            mutable decisions = []):
+  method relation():
+    RoutingRelation(
+      fun (route_class, origin, candidate_vc):
+        def binding = find_exact_route_binding(lowered_routes, route_class)
+        unless binding
+        | error(~who: #'lower_routing_policy,
+                "route class does not belong to these lowered route classes")
+        def context = RoutingContext(
+          binding.spec,
+          symbolic_origin(lowered_routes.lowered_topology, origin),
+          current_node_ref(lowered_routes.lowered_topology, origin),
+          lowered_routes.lowered_topology.vc_ref(candidate_vc)
+        )
+        def evaluation = routing_policy_evaluation(policy, context)
+        decisions := decisions ++ [
+          LoweredRoutingDecision(
+            route_class,
+            origin,
+            candidate_vc,
+            context,
+            evaluation.allowed,
+            evaluation.rule_names
+          )
+        ]
+        evaluation.allowed
+    )
+
+fun lower_routing_policy_with_evidence(lowered_routes, policy):
   unless lowered_routes is_a LoweredRouteClasses
-  | error(~who: #'lower_routing_policy, "expected LoweredRouteClasses")
+  | error(~who: #'lower_routing_policy_with_evidence,
+          "expected LoweredRouteClasses")
   unless policy is_a RoutingPolicy
-  | error(~who: #'lower_routing_policy, "expected a RoutingPolicy")
+  | error(~who: #'lower_routing_policy_with_evidence,
+          "expected a RoutingPolicy")
   validate_policy_references(lowered_routes, policy)
-  def lowered_topology = lowered_routes.lowered_topology
-  RoutingRelation(
-    fun (route_class, origin, candidate_vc):
-      def binding = find_exact_route_binding(lowered_routes, route_class)
-      unless binding
-      | error(~who: #'lower_routing_policy,
-              "route class does not belong to these lowered route classes")
-      def context = RoutingContext(
-        binding.spec,
-        symbolic_origin(lowered_topology, origin),
-        current_node_ref(lowered_topology, origin),
-        lowered_topology.vc_ref(candidate_vc)
-      )
-      routing_policy_result(policy, context)
-  )
+  RoutingPolicyLowering(lowered_routes, policy)
+
+fun lower_routing_policy(lowered_routes, policy):
+  lower_routing_policy_with_evidence(lowered_routes, policy).relation()

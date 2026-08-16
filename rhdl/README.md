@@ -98,6 +98,7 @@ import one primitive without loading unrelated generators.
 | `std/decode/pla.rhdl` | Shared product-term hardware elaboration for minimized decode covers | `std/decode/espresso.rhdl`, `std/decode/table.rhdl` |
 | `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings selecting minimized PLA or core-decode fallback | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/espresso.rhdl`, `std/decode/pla.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
+| `std/noc/route-computer.rhdl` | Validated NoC route-table ABI and combinational `RouteComputer` | `std/decode.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
 | `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |

@@ -1,0 +1,72 @@
+#lang rhdl
+// Builds a route computer exclusively from a validated two-hop NoC routing artifact.
+
+import:
+  "../../noc/model/main.rhm" open
+  "../../noc/plan/main.rhm" open
+  lib("rhdl/std/noc/route-computer.rhdl") open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def first = PhysicalLink(LinkId(0), n0, n1, 2)
+def second = PhysicalLink(LinkId(1), n1, n2, 2)
+def topology = Topology([n0, n1, n2], [first, second])
+def route = RouteClass(RouteClassId(0), n0, n2)
+
+fun on_link(vc, link):
+  link_id_equal(vc.link_id, link.id)
+
+fun allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      on_link(candidate, first)
+  | origin is_a HeldVC:
+      on_link(origin.vc, first) && on_link(candidate, second) && (origin.vc.index == candidate.index)
+  | ~else: #false
+
+def routing = compile_routing(
+  RoutingProblem(topology, [route], RoutingRelation(allows))
+)
+unless routing is_a ValidatedRouting
+| error(~who: #'RouteComputer,
+        "example routing must pass validation before hardware generation")
+
+def abi = RouteComputerABI(routing)
+def design = elaborate(RouteComputer(abi, ~espresso: #false))
+
+// Exact normalized SystemVerilog reference for the focused backend fixture.
+def verilog_reference = @str|<<{
+module RouteComputer(
+  input        route_key,
+  input  [2:0] origin_key,
+  output [3:0] allowed_mask,
+  output       eject,
+               valid
+);
+
+  wire [3:0] _GEN = {route_key, origin_key};
+  wire [5:0] _GEN_0 =
+    _GEN == 4'h0
+      ? 6'hD
+      : _GEN == 4'h1
+          ? 6'h11
+          : _GEN == 4'h2 ? 6'h21 : _GEN == 4'h3 | _GEN == 4'h4 ? 6'h3 : 6'h0;
+  assign allowed_mask = _GEN_0[5:2];
+  assign eject = _GEN_0[1];
+  assign valid = _GEN_0[0];
+endmodule
+}>>|
+
+export:
+  n0
+  n1
+  n2
+  first
+  second
+  topology
+  route
+  routing
+  abi
+  design
+  verilog_reference

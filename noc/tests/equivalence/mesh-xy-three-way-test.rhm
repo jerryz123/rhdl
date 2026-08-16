@@ -1,0 +1,197 @@
+#lang rhombus
+// Proves raw, standard-builder, and embedded forms have identical 2x2 XY semantics.
+
+import:
+  "../../model/main.rhm" open
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm" open
+  "../../std/topology/main.rhm" open
+  "../../std/traffic/main.rhm" open
+  "../../std/routing/main.rhm" open
+  "../support/routing-equivalence.rhm" open
+
+// Node order is (0,0), (0,1), (1,0), (1,1). Link order matches
+// rectangular_mesh's canonical source-path and direction ordering.
+def raw_nodes = [NodeId(0), NodeId(1), NodeId(2), NodeId(3)]
+def raw_topology = Topology(
+  raw_nodes,
+  [PhysicalLink(LinkId(0), raw_nodes[0], raw_nodes[2], 2),
+   PhysicalLink(LinkId(1), raw_nodes[0], raw_nodes[1], 2),
+   PhysicalLink(LinkId(2), raw_nodes[1], raw_nodes[3], 2),
+   PhysicalLink(LinkId(3), raw_nodes[1], raw_nodes[0], 2),
+   PhysicalLink(LinkId(4), raw_nodes[2], raw_nodes[3], 2),
+   PhysicalLink(LinkId(5), raw_nodes[2], raw_nodes[0], 2),
+   PhysicalLink(LinkId(6), raw_nodes[3], raw_nodes[2], 2),
+   PhysicalLink(LinkId(7), raw_nodes[3], raw_nodes[1], 2)]
+)
+def mutable raw_route_classes = []
+for (source in raw_nodes):
+  for (destination in raw_nodes):
+    unless node_id_equal(source, destination)
+    | raw_route_classes := raw_route_classes ++ [
+        RouteClass(
+          RouteClassId(raw_route_classes.length()),
+          source,
+          destination
+        )
+      ]
+
+fun raw_coordinate(node):
+  cond
+  | node_id_equal(node, raw_nodes[0]): [0, 0]
+  | node_id_equal(node, raw_nodes[1]): [0, 1]
+  | node_id_equal(node, raw_nodes[2]): [1, 0]
+  | node_id_equal(node, raw_nodes[3]): [1, 1]
+  | ~else: error(~who: #'raw_coordinate, "unknown raw mesh node")
+
+fun raw_current_node(origin):
+  if origin is_a Injection
+  | origin.node
+  | raw_topology.find_vc_link(origin.vc).destination
+
+fun raw_link_direction(link_id):
+  cond
+  | link_id_equal(link_id, LinkId(0)): "east"
+  | link_id_equal(link_id, LinkId(1)): "north"
+  | link_id_equal(link_id, LinkId(2)): "east"
+  | link_id_equal(link_id, LinkId(3)): "south"
+  | link_id_equal(link_id, LinkId(4)): "north"
+  | link_id_equal(link_id, LinkId(5)): "west"
+  | link_id_equal(link_id, LinkId(6)): "south"
+  | link_id_equal(link_id, LinkId(7)): "west"
+  | ~else: error(~who: #'raw_link_direction, "unknown raw mesh link")
+
+fun required_direction(current, destination):
+  cond
+  | current[0] < destination[0]: "east"
+  | current[0] > destination[0]: "west"
+  | current[1] < destination[1]: "north"
+  | current[1] > destination[1]: "south"
+  | ~else: #false
+
+fun raw_xy_allows(route_class, origin, candidate_vc):
+  def current = raw_coordinate(raw_current_node(origin))
+  def destination = raw_coordinate(route_class.destination)
+  candidate_vc.index == 1 && raw_link_direction(
+    candidate_vc.link_id
+  ) == required_direction(current, destination)
+
+def raw_problem = RoutingProblem(
+  raw_topology,
+  raw_route_classes,
+  RoutingRelation(raw_xy_allows)
+)
+
+def groups = [VCGroup("adaptive", 1), VCGroup("escape", 1)]
+def mesh = rectangular_mesh(2, 2, groups)
+def builder_topology = lower_topology(mesh.spec)
+def builder_routes = lower_route_classes(
+  builder_topology,
+  all_pairs(mesh.spec)
+)
+def builder_problem = RoutingProblem(
+  builder_topology.topology,
+  builder_routes.route_classes,
+  lower_routing_policy(
+    builder_routes,
+    xy_dimension_order(mesh, ~vc_groups: ["escape"])
+  )
+)
+
+// Alphabetic symbolic names deliberately preserve the standard mesh's
+// canonical normalized node and link order without encoding coordinates in
+// the topology language itself.
+def syntax_spec = topology:
+  vc_group adaptive: 1
+  vc_group escape: 1
+  node a
+  node b
+  node c
+  node d
+  bidirectional (a_east, c_west):
+    a <-> c
+    vcs [adaptive, escape]
+  bidirectional (a_north, b_south):
+    a <-> b
+    vcs [adaptive, escape]
+  bidirectional (b_east, d_west):
+    b <-> d
+    vcs [adaptive, escape]
+  bidirectional (c_north, d_south):
+    c <-> d
+    vcs [adaptive, escape]
+
+def syntax_topology = lower_topology(syntax_spec)
+def syntax_routes = lower_route_classes(
+  syntax_topology,
+  all_pairs(syntax_spec)
+)
+
+fun syntax_coordinate(node):
+  cond
+  | node_ref_equal(node, syntax_spec.node("a")): [0, 0]
+  | node_ref_equal(node, syntax_spec.node("b")): [0, 1]
+  | node_ref_equal(node, syntax_spec.node("c")): [1, 0]
+  | node_ref_equal(node, syntax_spec.node("d")): [1, 1]
+  | ~else: error(~who: #'syntax_coordinate, "unknown syntax mesh node")
+
+fun syntax_link_direction(link):
+  cond
+  | link_ref_equal(link, syntax_spec.link("a_east")): "east"
+  | link_ref_equal(link, syntax_spec.link("a_north")): "north"
+  | link_ref_equal(link, syntax_spec.link("b_east")): "east"
+  | link_ref_equal(link, syntax_spec.link("b_south")): "south"
+  | link_ref_equal(link, syntax_spec.link("c_north")): "north"
+  | link_ref_equal(link, syntax_spec.link("c_west")): "west"
+  | link_ref_equal(link, syntax_spec.link("d_south")): "south"
+  | link_ref_equal(link, syntax_spec.link("d_west")): "west"
+  | ~else: error(~who: #'syntax_link_direction, "unknown syntax mesh link")
+
+def syntax_xy = custom_policy(
+  "xy",
+  fun (context):
+    def current = syntax_coordinate(context.current_node)
+    def destination = syntax_coordinate(context.route_class.destination)
+    context.candidate_vc.group == "escape" && syntax_link_direction(
+      context.candidate_link()
+    ) == required_direction(current, destination)
+)
+def syntax_policy = routing:
+  rule xy:
+    use syntax_xy
+def syntax_problem = RoutingProblem(
+  syntax_topology.topology,
+  syntax_routes.route_classes,
+  lower_routing_policy(syntax_routes, syntax_policy)
+)
+
+def raw_semantics = snapshot_routing(raw_problem)
+def builder_semantics = snapshot_routing(builder_problem)
+def syntax_semantics = snapshot_routing(syntax_problem)
+
+check:
+  raw_semantics.result_kind ~is "validated-acyclic"
+  raw_semantics.route_classes.length() ~is 12
+  raw_semantics.route_table_rows.length() ~is 28
+  raw_semantics.topology_nodes ~is builder_semantics.topology_nodes
+  raw_semantics.topology_nodes ~is syntax_semantics.topology_nodes
+  raw_semantics.topology_links ~is builder_semantics.topology_links
+  raw_semantics.topology_links ~is syntax_semantics.topology_links
+  raw_semantics.route_classes ~is builder_semantics.route_classes
+  raw_semantics.route_classes ~is syntax_semantics.route_classes
+  raw_semantics.materialized_decisions ~is builder_semantics.materialized_decisions
+  raw_semantics.materialized_decisions ~is syntax_semantics.materialized_decisions
+  raw_semantics.reachable_routes ~is builder_semantics.reachable_routes
+  raw_semantics.reachable_routes ~is syntax_semantics.reachable_routes
+  raw_semantics.dependency_vertices ~is builder_semantics.dependency_vertices
+  raw_semantics.dependency_vertices ~is syntax_semantics.dependency_vertices
+  raw_semantics.dependency_edges ~is builder_semantics.dependency_edges
+  raw_semantics.dependency_edges ~is syntax_semantics.dependency_edges
+  raw_semantics.proof ~is builder_semantics.proof
+  raw_semantics.proof ~is syntax_semantics.proof
+  raw_semantics.route_table_rows ~is builder_semantics.route_table_rows
+  raw_semantics.route_table_rows ~is syntax_semantics.route_table_rows
+  raw_semantics.assumptions ~is builder_semantics.assumptions
+  raw_semantics.assumptions ~is syntax_semantics.assumptions
+  raw_semantics.validator_version ~is builder_semantics.validator_version
+  raw_semantics.validator_version ~is syntax_semantics.validator_version

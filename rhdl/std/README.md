@@ -180,6 +180,30 @@ def combined_outputs = zip_decode_cases(
 shows all three independent extensions in one executable example: concatenated
 rows, zipped output fields, and lifted input fields.
 
+## Validated NoC route computation
+
+[`noc/route-computer.rhdl`](noc/route-computer.rhdl) is a one-way bridge from
+the pure NoC planner to hardware. `RouteComputerABI` accepts only an opaque
+`ValidatedRouting`; it cannot consume an unchecked routing relation or run
+topology, reachability, dependency, or deadlock analysis itself.
+
+The initial ABI gives every route class a dense stable key, encodes injection
+as origin zero and a held VC as one plus its stable global VC index, and emits
+a global next-VC mask. Every valid row's mask is checked against the allowed
+candidates in the materialized relation. The packed lookup result appends
+`eject` and `valid` bits. Invalid or unreachable route/origin encodings return
+all zeros, while a valid ejection row has `valid=1`, `eject=1`, and an empty
+next-VC mask.
+
+`RouteComputer(abi)` lowers the resulting finite rows through the ordinary
+typed decode generator and exposes only combinational `Bits` ports. It accepts
+the decode generator's `~espresso` selection; the canonical fixture requests
+fallback explicitly so its exact generated Verilog is reproducible. The pure
+modules under `noc/model`, `noc/analysis`, and `noc/plan` do not import RHDL or
+CIRCT. See
+[`../../examples/std/noc-route-computer.rhdl`](../../examples/std/noc-route-computer.rhdl)
+for the validated two-hop fixture and its exact generated Verilog.
+
 ## Ready-valid protocols
 
 Import the protocol family directly:

@@ -1,0 +1,99 @@
+#lang rhombus
+// Exhaustively checks the validated-routing ABI and its single RHDL decode operation.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/std/noc/route-computer.rhdl" open
+  "../../noc/model/main.rhm" open
+  "../../noc/plan/main.rhm" open
+  "../../examples/std/noc-route-computer.rhdl" as fixture
+
+def abi = fixture.abi
+def decoder_table = abi.decoder(~espresso: #false).table
+def module_def = fixture.design.modules[0]
+def decode_operation = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.decode"
+)
+
+fun decoded_result(encoded_key):
+  def matching = decoder_table.cases.find(
+    fun (case): case.input.value_bits == encoded_key
+  )
+  if matching
+  | matching.output.value_bits
+  | decoder_table.default.value_bits
+
+fun expected_result(encoded_key):
+  def origin_mask = (1 bits.(<<) abi.origin_width) - 1
+  def route_key = encoded_key bits.(>>) abi.origin_width
+  def origin_key = encoded_key bits.and origin_mask
+  def entry = abi.entry_for_keys(route_key, origin_key)
+  if entry | entry.result_bits() | 0
+
+fun materialized_mask(entry):
+  def mutable mask = 0
+  for (vc in fixture.routing.materialized.allowed_candidates(
+             entry.route_row.route_class,
+             entry.route_row.origin
+           )):
+    mask := mask bits.or (1 bits.(<<) abi.vc_bit(vc))
+  mask
+
+def all_encoded_keys = 0..(1 bits.(<<) abi.key_width)
+def decoded_results = for List (key in all_encoded_keys):
+  decoded_result(key)
+def expected_results = for List (key in all_encoded_keys):
+  expected_result(key)
+def abi_masks = abi.entries.map(fun (entry): entry.allowed_mask)
+def materialized_masks = abi.entries.map(materialized_mask)
+
+check:
+  abi.validated_routing === fixture.routing ~is #true
+  abi.route_width ~is 1
+  abi.origin_width ~is 3
+  abi.key_width ~is 4
+  abi.vc_count ~is 4
+  abi.encode(fixture.route, Injection(fixture.n0)) ~is 0
+  abi.encode(fixture.route, HeldVC(VCId(fixture.first.id, 0))) ~is 1
+  abi.vc_bit(VCId(fixture.second.id, 1)) ~is 3
+  abi.entries.length() ~is 5
+  abi.entries.map(fun (entry): entry.encoded_key) ~is [0, 1, 2, 3, 4]
+  abi.entries.map(fun (entry): entry.allowed_mask) ~is [0b0011,
+                                                        0b0100,
+                                                        0b1000,
+                                                        0,
+                                                        0]
+  abi_masks ~is materialized_masks
+  abi.entries.map(fun (entry): entry.result_bits()) ~is [0b001101,
+                                                         0b010001,
+                                                         0b100001,
+                                                         0b000011,
+                                                         0b000011]
+  decoded_results ~is expected_results
+  decode_operation != #false ~is #true
+  decode_operation.attribute("cases") ~is decoder_table.packed_cases
+  decode_operation.attribute("default_value") ~is 0
+  decode_operation.attribute("default_care") ~is 0b111111
+  type_equal(module_def.find_input("route_key").type, Bits(1)) ~is #true
+  type_equal(module_def.find_input("origin_key").type, Bits(3)) ~is #true
+  type_equal(module_def.find_output("allowed_mask").type, Bits(4)) ~is #true
+  type_equal(module_def.find_output("eject").type, Bits(1)) ~is #true
+  type_equal(module_def.find_output("valid").type, Bits(1)) ~is #true
+  verify_design(fixture.design) ~is #void
+
+def isolated_node = NodeId(0)
+def self_route = RouteClass(RouteClassId(0), isolated_node, isolated_node)
+def no_vc_routing = compile_routing(
+  RoutingProblem(
+    Topology([isolated_node], []),
+    [self_route],
+    RoutingRelation(fun (_route, _origin, _candidate): #false)
+  )
+)
+
+check:
+  RouteComputerABI("not validated") ~throws "requires ValidatedRouting"
+  abi.route_key("not a route") ~throws "requires a RouteClass"
+  abi.encode(fixture.route, Injection(fixture.n1)) ~throws "must equal the route-class source"
+  no_vc_routing is_a ValidatedRouting ~is #true
+  RouteComputerABI(no_vc_routing) ~throws "at least one virtual channel"
