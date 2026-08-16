@@ -120,6 +120,7 @@ Detailed documentation lives with the component that owns it:
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
+| TileLink parameters, payloads, interfaces, and legality checks | [`tilelink/README.md`](tilelink/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |

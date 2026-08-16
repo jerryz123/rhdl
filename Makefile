@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -9,6 +9,7 @@ LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
 LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
+TILELINK_TESTS := $(sort $(wildcard tilelink/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
 EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -16,6 +17,7 @@ EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rh
 check-boundaries:
 	bash tools/check-boundaries.sh
 	bash riscv/check-boundaries.sh
+	bash tilelink/check-boundaries.sh
 	bash cores/check-boundaries.sh
 
 frontend-test: check-boundaries
@@ -39,6 +41,10 @@ noc-test:
 riscv-test:
 	bash riscv/check-boundaries.sh
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RISCV_TESTS)
+
+tilelink-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_TESTS)
+	bash tilelink/tests/run-negative.sh
 
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
@@ -66,7 +72,7 @@ verilog-golden-test:
 update-verilog-goldens:
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-test: unit-test examples noc-test riscv-test ricket-host-test
+host-test: unit-test examples noc-test riscv-test tilelink-test ricket-host-test
 
 test: host-test circt-test
 

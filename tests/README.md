@@ -12,6 +12,9 @@ Tests mirror the implementation boundaries:
 | [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
 | [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
+Domain-library tests live with their owning packages, including
+[`../tilelink/tests/`](../tilelink/tests/).
+
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
 Intentional language failures live under `frontend/invalid/` and are exercised
 by `frontend/run-negative.sh`.
@@ -25,6 +28,7 @@ make check-boundaries       # package, dependency, and file-type rules
 make examples               # all canonical example modules
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
+make tilelink-test          # TileLink package boundaries, definitions, and invalid uses
 make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses
@@ -33,7 +37,7 @@ make unit-test              # frontend plus backend Rhombus tests
 make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary
 make riscv-test             # pure RISC-V model, decode, and package boundaries
-make host-test              # unit tests, examples, NoC, and RISC-V
+make host-test              # unit tests, examples, NoC, RISC-V, and TileLink
 make circt-test             # CIRCT verification and Verilator simulation
 make verilog-golden-test    # exact example-owned SystemVerilog references
 make test                   # complete host and CIRCT suite

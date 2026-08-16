@@ -18,9 +18,10 @@ not a second IR.
 user base-profile imports -----> selected frontend/layers/*
 
 std/* -------------------------> public #lang rhdl authoring surface
+tilelink/* --------------------> public #lang rhdl and generic std/* libraries
 sim/* -------------------------> public #lang rhdl authoring surface
 riscv/rhdl --------------------> public #lang rhdl authoring surface
-user designs ------------------> optional std/* libraries
+user designs ------------------> optional std/* and domain libraries
 
 frontend/foundation -----------+
 frontend/layers/* -------------+----> frontend/support/*
@@ -49,6 +50,7 @@ internal module implementing its shared frontend forms is called the
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
+| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, interfaces, and local connection legality | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 
@@ -91,10 +93,6 @@ import one primitive without loading unrelated generators.
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
 | `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
-| `std/tilelink/params.rhdl` | Host-side TileLink wire widths, operation capabilities, and endpoint descriptions | `std/bits.rhdl`, `std/interconnect.rhdl` |
-| `std/tilelink/bundles.rhdl` | Exact TileLink A-E opcode and payload bundle types | `std/tilelink/params.rhdl` |
-| `std/tilelink/link.rhdl` | Directional `TLUncached` and `TLCached` ready-valid interfaces | `std/ready-valid.rhdl`, `std/tilelink/params.rhdl`, `std/tilelink/bundles.rhdl` |
-| `std/tilelink.rhdl` | Public TileLink facade | All `std/tilelink/` modules |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
 | `std/sync-ram.rhdl` | Fixed-latency lane-masked shared 1RW RAM | `std/read-write.rhdl` |
@@ -157,9 +155,9 @@ language profiles:
   lookup selector behavior, and one-hot selector types without importing one
   another.
 
-Domain adapters such as `riscv/rhdl` consume the public language and standard
-libraries. They do not become frontend layers and cannot import RHDL
-implementation packages.
+Domain libraries and adapters such as `tilelink/` and `riscv/rhdl` consume the
+public language and standard libraries. They do not become frontend layers and
+cannot import RHDL implementation packages.
 
 The kernel's deferred-value protocol retains authoring metadata until an
 operation consumes it. Reusable host descriptions remain distinct from
