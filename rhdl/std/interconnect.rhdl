@@ -19,8 +19,44 @@ class IdRange(start, end):
   method contains(id):
     id is_a Int && start <= id && id < end
 
+  method overlaps(other):
+    other is_a IdRange && start < other.end && other.start < end
+
   method fits_unsigned_width(width):
     end <= unsigned_value_count(width)
+
+class IdRangeMap(local, global):
+  constructor (local, global):
+    unless local is_a IdRange && global is_a IdRange
+    | error(~who: #'IdRangeMap,
+            "local and global must be IdRange values")
+    unless local.size == global.size
+    | error(~who: #'IdRangeMap,
+            "local and global ranges must have the same size")
+    super(local, global)
+
+  method map(id):
+    unless local.contains(id)
+    | error(~who: #'IdRangeMap, "ID is outside the local range")
+    global.start + (id - local.start)
+
+  method unmap(id):
+    unless global.contains(id)
+    | error(~who: #'IdRangeMap, "ID is outside the global range")
+    local.start + (id - global.start)
+
+fun allocate_id_ranges(ranges):
+  unless ranges is_a List && ranges.length() > 0
+  | error(~who: #'allocate_id_ranges,
+          "ranges must be a nonempty List")
+  def mutable next_id = 0
+  for List (id_range in ranges):
+    unless id_range is_a IdRange
+    | error(~who: #'allocate_id_ranges,
+            "range elements must be IdRange values")
+    def global = IdRange(next_id, next_id + id_range.size)
+    next_id := global.end
+    IdRangeMap(id_range, global)
 
 // A one bit in mask makes that address bit variable. Canonical sets keep
 // those variable bits clear in base.
@@ -39,6 +75,13 @@ class AddressSet(base, mask):
 
   method contains(address):
     address is_a Int && address >= 0 && (address bits.or mask) == (base bits.or mask)
+
+  method overlaps(other):
+    other is_a AddressSet && (
+      base bits.or mask bits.or other.mask
+    ) == (
+      other.base bits.or mask bits.or other.mask
+    )
 
   method fits_unsigned_width(width):
     (base bits.or mask) < unsigned_value_count(width)
@@ -64,5 +107,7 @@ class TransferSizes(min_bytes, max_bytes):
 
 export:
   IdRange
+  IdRangeMap
+  allocate_id_ranges
   AddressSet
   TransferSizes

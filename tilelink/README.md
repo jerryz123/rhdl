@@ -21,8 +21,9 @@ core, frontend, or backend implementation modules.
 
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
-| [`params.rhdl`](params.rhdl) | Wire widths, operation capabilities, and endpoint descriptions | `rhdl/std/bits.rhdl`, `rhdl/std/interconnect.rhdl` |
+| [`params.rhdl`](params.rhdl) | Wire widths, endpoint and port descriptions, edge validation, and crossbar ID allocation | `rhdl/std/bits.rhdl`, `rhdl/std/interconnect.rhdl` |
 | [`bundles.rhdl`](bundles.rhdl) | Exact TileLink A-E opcode and payload types | `params.rhdl` |
+| [`protocol.rhdl`](protocol.rhdl) | Opcode groups, response mappings, and data-dependent physical beat counts | `rhdl/std/bits.rhdl`, `params.rhdl`, `bundles.rhdl` |
 | [`link.rhdl`](link.rhdl) | Directional `TLUncached` and `TLCached` interfaces, local connection legality, and uncached manager monitoring | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `params.rhdl`, `bundles.rhdl` |
 | [`ram.rhdl`](ram.rhdl) | Finite uncached RAM manager with generated endpoint parameters | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `rhdl/std/read-write.rhdl`, `rhdl/std/sync-ram.rhdl`, `rhdl/std/flow/queue.rhdl`, `params.rhdl`, `bundles.rhdl`, `link.rhdl` |
 | [`main.rhdl`](main.rhdl) | Public TileLink facade | All modules above |
@@ -41,14 +42,37 @@ supported by a cached client. An operation field equal to `#false` is
 unsupported. `TLClientParams` and `TLManagerParams` collect endpoint identity,
 ID or address ownership, capabilities, and manager denial policy.
 `TLUncached` and `TLCached` pair an endpoint description with shared physical
-bundle parameters when their interface specialization is constructed.
-`TLClientLinkParams` and `TLManagerLinkParams` remain the normalized records
-used by connection and monitor checks.
+bundle parameters when their interface specialization is constructed. The
+physical size field must be wide enough to encode the link's data beat.
+`TLClientLinkParams` and `TLManagerLinkParams` remain the normalized singleton
+records used by existing connection and monitor checks.
+
+`TLClientPortParams` and `TLManagerPortParams` preserve collections of logical
+endpoints behind one physical port, including the association between source
+IDs and clients and between addresses, sink IDs, and managers. Their IDs and
+addresses must be unambiguous within a port. `TLEdgeParams` combines normalized
+client and manager ports with one physical bundle and validates that every ID
+and address fits its wire width.
+
+`TLXbarParams(bundle, clients, managers)` accepts nonempty lists of singleton
+or port parameters. It assigns every client port an exact contiguous global
+source range and every manager port an exact contiguous global sink range,
+rejects insufficient wire widths and overlapping manager address regions, and
+produces the shifted aggregate ports that a future crossbar exposes on its two
+sides. Each `IdRangeMap` retains the original possibly nonzero local range for
+reversible translation. This object describes and validates generated
+topology; it does not yet instantiate routing hardware.
 
 The channel payloads follow the TileLink A-E layouts. Opcode namespaces are
 nominal and channel-specific (`TLAOpcode` through `TLDOpcode`); the E channel
 contains only its sink ID. `param` remains raw `Bits` because its meaning
 depends on the opcode.
+
+`protocol.rhdl` classifies data-carrying and coherence opcodes on every
+channel, checks the legal A-to-D, B-to-C, and Release-to-ReleaseAck opcode
+relationships, and computes `beats - 1` from `size`, opcode, and physical beat
+width. Returning the remaining-beat count makes every no-data or single-beat
+message zero while retaining enough width for the largest encoded transfer.
 
 | Interface | Client to manager | Manager to client |
 |---|---|---|

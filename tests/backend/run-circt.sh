@@ -420,6 +420,7 @@ verify_fixture rv64i-alu rv64i_alu_tb
 verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
 verify_fixture valid-pipe valid_pipe_tb
+verify_fixture tilelink-protocol tilelink_protocol_tb
 verify_fixture tilelink-ram tilelink_ram_tb
 run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \
   tests/backend/verilog/tilelink-ram-invalid_tb.sv tilelink_a_mask_supported

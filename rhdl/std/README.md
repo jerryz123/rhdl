@@ -224,7 +224,10 @@ keep those bits clear. `TransferSizes(min_bytes, max_bytes)` is an inclusive
 power-of-two byte-size range. These are immutable elaboration-time values and
 do not create hardware. `IdRange.fits_unsigned_width(width)` and
 `AddressSet.fits_unsigned_width(width)` report whether every represented value
-fits a nonnegative unsigned host width.
+fits a nonnegative unsigned host width. Both set types provide `overlaps` for
+host-time topology validation. `allocate_id_ranges` assigns exact contiguous
+global ranges to a nonempty list of local ranges and returns reversible
+`IdRangeMap` records without requiring the local ranges to begin at zero.
 
 ## Bit-vector alignment
 

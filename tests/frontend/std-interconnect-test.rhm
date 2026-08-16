@@ -5,8 +5,16 @@ import:
   "../../rhdl/std/interconnect.rhdl" as interconnect
 
 def ids = interconnect.IdRange(2, 6)
+def touching_ids = interconnect.IdRange(6, 8)
+def overlapping_ids = interconnect.IdRange(5, 9)
 def address = interconnect.AddressSet(0x8000, 0x0fff)
+def adjacent_address = interconnect.AddressSet(0x9000, 0x0fff)
+def overlapping_address = interconnect.AddressSet(0x8800, 0x07ff)
 def transfers = interconnect.TransferSizes(4, 64)
+def allocated = interconnect.allocate_id_ranges([
+  interconnect.IdRange(2, 6),
+  interconnect.IdRange(0, 2)
+])
 
 check:
   ids.start ~is 2
@@ -15,11 +23,21 @@ check:
   ids.contains(2) ~is #true
   ids.contains(5) ~is #true
   ids.contains(6) ~is #false
+  ids.overlaps(overlapping_ids) ~is #true
+  ids.overlaps(touching_ids) ~is #false
   ids.fits_unsigned_width(2) ~is #false
   ids.fits_unsigned_width(3) ~is #true
+  allocated.map(fun (mapping): mapping.global) ~is [
+    interconnect.IdRange(0, 4),
+    interconnect.IdRange(4, 6)
+  ]
+  allocated[0].map(3) ~is 1
+  allocated[0].unmap(2) ~is 4
   address.contains(0x8000) ~is #true
   address.contains(0x8abc) ~is #true
   address.contains(0x9000) ~is #false
+  address.overlaps(overlapping_address) ~is #true
+  address.overlaps(adjacent_address) ~is #false
   address.fits_unsigned_width(15) ~is #false
   address.fits_unsigned_width(16) ~is #true
   transfers.contains(4) ~is #true
@@ -31,6 +49,10 @@ check:
   transfers.contains_all(interconnect.TransferSizes(8, 128)) ~is #false
   interconnect.IdRange(-1, 2) ~throws "start must be a nonnegative"
   interconnect.IdRange(2, 2) ~throws "greater than start"
+  interconnect.IdRangeMap(interconnect.IdRange(0, 1),
+                          interconnect.IdRange(0, 2)) ~throws "same size"
+  interconnect.allocate_id_ranges([]) ~throws "nonempty List"
+  interconnect.allocate_id_ranges([ids, "bad"]) ~throws "elements must be IdRange"
   interconnect.AddressSet(0x8001, 0x0fff) ~throws "zeroes in every variable"
   interconnect.TransferSizes(3, 8) ~throws "positive power of two"
   interconnect.TransferSizes(8, 4) ~throws "must not exceed"

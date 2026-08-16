@@ -2,7 +2,7 @@
 // Defines validated host-side TileLink widths, endpoint parameters, and capabilities.
 
 import:
-  lib("rhdl/std/bits.rhdl").power_of_two
+  lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/interconnect.rhdl") open
 
 fun require_transfer_sizes(value, role, who):
@@ -140,6 +140,86 @@ class TLManagerParams(name,
           may_deny_get,
           may_deny_put)
 
+fun covering_id_range(id_ranges):
+  def mutable first = id_ranges[0].start
+  def mutable last = id_ranges[0].end
+  for (id_range in id_ranges):
+    if id_range.start < first | first := id_range.start | #void
+    if id_range.end > last | last := id_range.end | #void
+  IdRange(first, last)
+
+fun require_disjoint_id_ranges(entries, range_getter, role, who):
+  for (left_index in 0..entries.length()):
+    for (right_index in (left_index + 1)..entries.length()):
+      def left_range = range_getter(entries[left_index])
+      def right_range = range_getter(entries[right_index])
+      if left_range.overlaps(right_range)
+      | error(~who: who, role ++ " ID ranges must not overlap")
+      | #void
+
+fun require_disjoint_manager_addresses(managers, who):
+  for (left_index in 0..managers.length()):
+    for (right_index in (left_index + 1)..managers.length()):
+      for (left_address in managers[left_index].address_sets):
+        for (right_address in managers[right_index].address_sets):
+          if left_address.overlaps(right_address)
+          | error(~who: who,
+                  "manager address sets must not overlap")
+          | #void
+
+class TLClientPortParams(clients, source_ids):
+  constructor (clients):
+    unless clients is_a List && clients.length() > 0
+    | error(~who: #'TLClientPortParams,
+            "clients must be a nonempty List")
+    for (client in clients):
+      unless client is_a TLClientParams
+      | error(~who: #'TLClientPortParams,
+              "clients elements must be TLClientParams values")
+    require_disjoint_id_ranges(clients,
+                               fun (client): client.source_ids,
+                               "client source",
+                               #'TLClientPortParams)
+    super(clients,
+          covering_id_range(clients.map(fun (client): client.source_ids)))
+
+class TLManagerPortParams(managers, sink_ids, address_sets):
+  constructor (managers):
+    unless managers is_a List && managers.length() > 0
+    | error(~who: #'TLManagerPortParams,
+            "managers must be a nonempty List")
+    for (manager in managers):
+      unless manager is_a TLManagerParams
+      | error(~who: #'TLManagerPortParams,
+              "managers elements must be TLManagerParams values")
+    require_disjoint_id_ranges(managers,
+                               fun (manager): manager.sink_ids,
+                               "manager sink",
+                               #'TLManagerPortParams)
+    require_disjoint_manager_addresses(managers, #'TLManagerPortParams)
+    def mutable all_addresses = []
+    for (manager in managers):
+      all_addresses := all_addresses ++ manager.address_sets
+    super(managers,
+          covering_id_range(managers.map(fun (manager): manager.sink_ids)),
+          all_addresses)
+
+fun client_port_params(value):
+  cond
+  | value is_a TLClientPortParams: value
+  | value is_a TLClientParams: TLClientPortParams([value])
+  | ~else:
+      error(~who: #'client_port_params,
+            "value must be TLClientParams or TLClientPortParams")
+
+fun manager_port_params(value):
+  cond
+  | value is_a TLManagerPortParams: value
+  | value is_a TLManagerParams: TLManagerPortParams([value])
+  | ~else:
+      error(~who: #'manager_port_params,
+            "value must be TLManagerParams or TLManagerPortParams")
+
 class TLBundleParams(address_width,
                      data_bytes,
                      size_width,
@@ -165,6 +245,9 @@ class TLBundleParams(address_width,
     unless sink_width is_a Int && sink_width > 0
     | error(~who: #'TLBundleParams,
             "sink width must be a positive host Int")
+    unless alignment_bits(data_bytes) < unsigned_value_count(size_width)
+    | error(~who: #'TLBundleParams,
+            "size width must encode the physical data beat size")
     super(address_width,
           data_bytes,
           size_width,
@@ -173,6 +256,116 @@ class TLBundleParams(address_width,
 
   property data_width: data_bytes * 8
   property mask_width: data_bytes
+
+fun validate_client_port(bundle, port, who):
+  for (client in port.clients):
+    unless client.source_ids.fits_unsigned_width(bundle.source_width)
+    | error(~who: who,
+            "client source ID range must fit the bundle source width")
+
+fun validate_manager_port(bundle, port, who):
+  for (manager in port.managers):
+    unless manager.sink_ids.fits_unsigned_width(bundle.sink_width)
+    | error(~who: who,
+            "manager sink ID range must fit the bundle sink width")
+    for (address_set in manager.address_sets):
+      unless address_set.fits_unsigned_width(bundle.address_width)
+      | error(~who: who,
+              "manager address set must fit the bundle address width")
+
+class TLEdgeParams(bundle, client_port, manager_port):
+  constructor (bundle, client, manager):
+    unless bundle is_a TLBundleParams
+    | error(~who: #'TLEdgeParams,
+            "bundle must be a TLBundleParams")
+    def normalized_client = client_port_params(client)
+    def normalized_manager = manager_port_params(manager)
+    validate_client_port(bundle, normalized_client, #'TLEdgeParams)
+    validate_manager_port(bundle, normalized_manager, #'TLEdgeParams)
+    super(bundle, normalized_client, normalized_manager)
+
+fun shifted_client(client, mapping):
+  def shift = mapping.global.start - mapping.local.start
+  TLClientParams(
+    client.name,
+    IdRange(client.source_ids.start + shift,
+            client.source_ids.end + shift),
+    ~emits: client.emits,
+    ~supports: client.supports
+  )
+
+fun shifted_manager(manager, mapping):
+  def shift = mapping.global.start - mapping.local.start
+  TLManagerParams(
+    manager.name,
+    manager.address_sets,
+    IdRange(manager.sink_ids.start + shift,
+            manager.sink_ids.end + shift),
+    ~supports: manager.supports,
+    ~emits: manager.emits,
+    ~may_deny_get: manager.may_deny_get,
+    ~may_deny_put: manager.may_deny_put
+  )
+
+class TLXbarParams(bundle,
+                   client_ports,
+                   manager_ports,
+                   source_maps,
+                   sink_maps,
+                   downstream_client_port,
+                   upstream_manager_port):
+  constructor (bundle, clients, managers):
+    unless bundle is_a TLBundleParams
+    | error(~who: #'TLXbarParams,
+            "bundle must be a TLBundleParams")
+    unless clients is_a List && clients.length() > 0
+    | error(~who: #'TLXbarParams,
+            "clients must be a nonempty List")
+    unless managers is_a List && managers.length() > 0
+    | error(~who: #'TLXbarParams,
+            "managers must be a nonempty List")
+    def normalized_clients = clients.map(client_port_params)
+    def normalized_managers = managers.map(manager_port_params)
+    for (port in normalized_clients):
+      validate_client_port(bundle, port, #'TLXbarParams)
+    for (port in normalized_managers):
+      validate_manager_port(bundle, port, #'TLXbarParams)
+    def allocated_sources = allocate_id_ranges(
+      normalized_clients.map(fun (port): port.source_ids)
+    )
+    def allocated_sinks = allocate_id_ranges(
+      normalized_managers.map(fun (port): port.sink_ids)
+    )
+    def allocated_source_ids = allocated_sources[allocated_sources.length() - 1].global
+    def allocated_sink_ids = allocated_sinks[allocated_sinks.length() - 1].global
+    unless allocated_source_ids.fits_unsigned_width(bundle.source_width)
+    | error(~who: #'TLXbarParams,
+            "allocated source IDs must fit the bundle source width")
+    unless allocated_sink_ids.fits_unsigned_width(bundle.sink_width)
+    | error(~who: #'TLXbarParams,
+            "allocated sink IDs must fit the bundle sink width")
+    def mutable shifted_clients = []
+    for (port_index in 0..normalized_clients.length()):
+      for (client in normalized_clients[port_index].clients):
+        shifted_clients := shifted_clients ++ [
+          shifted_client(client, allocated_sources[port_index])
+        ]
+    def mutable shifted_managers = []
+    for (port_index in 0..normalized_managers.length()):
+      for (manager in normalized_managers[port_index].managers):
+        shifted_managers := shifted_managers ++ [
+          shifted_manager(manager, allocated_sinks[port_index])
+        ]
+    def downstream_clients = TLClientPortParams(shifted_clients)
+    def upstream_managers = TLManagerPortParams(shifted_managers)
+    TLEdgeParams(bundle, downstream_clients, upstream_managers)
+    super(bundle,
+          normalized_clients,
+          normalized_managers,
+          allocated_sources,
+          allocated_sinks,
+          downstream_clients,
+          upstream_managers)
 
 class TLClientLinkParams(bundle, client):
   constructor (bundle, client):
@@ -196,12 +389,20 @@ class TLManagerLinkParams(bundle, manager):
 
 export:
   IdRange
+  IdRangeMap
+  allocate_id_ranges
   AddressSet
   TransferSizes
   TLAOperationSizes
   TLBOperationSizes
   TLClientParams
   TLManagerParams
+  TLClientPortParams
+  TLManagerPortParams
+  client_port_params
+  manager_port_params
   TLBundleParams
+  TLEdgeParams
+  TLXbarParams
   TLClientLinkParams
   TLManagerLinkParams

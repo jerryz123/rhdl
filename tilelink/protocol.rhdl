@@ -1,0 +1,130 @@
+#lang rhdl
+// Defines reusable TileLink opcode, response, and multibeat classification logic.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("tilelink/params.rhdl").TLBundleParams
+  lib("tilelink/bundles.rhdl") open
+
+fun tl_a_has_data(opcode):
+  is_one_of(opcode,
+            TLAOpcode.PutFullData,
+            TLAOpcode.PutPartialData,
+            TLAOpcode.ArithmeticData,
+            TLAOpcode.LogicalData)
+
+fun tl_b_has_data(opcode):
+  is_one_of(opcode,
+            TLBOpcode.PutFullData,
+            TLBOpcode.PutPartialData,
+            TLBOpcode.ArithmeticData,
+            TLBOpcode.LogicalData)
+
+fun tl_c_has_data(opcode):
+  is_one_of(opcode, TLCOpcode.ProbeAckData, TLCOpcode.ReleaseData)
+
+fun tl_d_has_data(opcode):
+  is_one_of(opcode, TLDOpcode.AccessAckData, TLDOpcode.GrantData)
+
+fun tl_a_is_acquire(opcode):
+  is_one_of(opcode, TLAOpcode.AcquireBlock, TLAOpcode.AcquirePerm)
+
+fun tl_b_is_probe(opcode):
+  is_one_of(opcode, TLBOpcode.ProbeBlock, TLBOpcode.ProbePerm)
+
+fun tl_c_is_probe_ack(opcode):
+  is_one_of(opcode, TLCOpcode.ProbeAck, TLCOpcode.ProbeAckData)
+
+fun tl_c_is_release(opcode):
+  is_one_of(opcode, TLCOpcode.Release, TLCOpcode.ReleaseData)
+
+fun tl_d_is_grant(opcode):
+  is_one_of(opcode, TLDOpcode.Grant, TLDOpcode.GrantData)
+
+fun tl_d_requires_ack(opcode):
+  tl_d_is_grant(opcode)
+
+fun tl_a_response_matches(request_opcode, response_opcode):
+  (is_one_of(request_opcode,
+             TLAOpcode.PutFullData,
+             TLAOpcode.PutPartialData) & (
+    response_opcode === TLDOpcode.AccessAck
+  )) ||| (is_one_of(request_opcode,
+                    TLAOpcode.ArithmeticData,
+                    TLAOpcode.LogicalData,
+                    TLAOpcode.Get) & (
+    response_opcode === TLDOpcode.AccessAckData
+  )) ||| ((request_opcode === TLAOpcode.Intent) & (
+    response_opcode === TLDOpcode.HintAck
+  )) ||| ((request_opcode === TLAOpcode.AcquireBlock) & is_one_of(
+    response_opcode,
+    TLDOpcode.Grant,
+    TLDOpcode.GrantData
+  )) ||| ((request_opcode === TLAOpcode.AcquirePerm) & (
+    response_opcode === TLDOpcode.Grant
+  ))
+
+fun tl_b_response_matches(request_opcode, response_opcode):
+  (is_one_of(request_opcode,
+             TLBOpcode.PutFullData,
+             TLBOpcode.PutPartialData) & (
+    response_opcode === TLCOpcode.AccessAck
+  )) ||| (is_one_of(request_opcode,
+                    TLBOpcode.ArithmeticData,
+                    TLBOpcode.LogicalData,
+                    TLBOpcode.Get) & (
+    response_opcode === TLCOpcode.AccessAckData
+  )) ||| ((request_opcode === TLBOpcode.Intent) & (
+    response_opcode === TLCOpcode.HintAck
+  )) ||| (tl_b_is_probe(request_opcode) & is_one_of(
+    response_opcode,
+    TLCOpcode.ProbeAck,
+    TLCOpcode.ProbeAckData
+  ))
+
+fun tl_c_response_matches(request_opcode, response_opcode):
+  tl_c_is_release(request_opcode) & (response_opcode === TLDOpcode.ReleaseAck)
+
+// The returned count is one less than the number of physical beats. Zero
+// therefore represents every single-beat message without requiring an extra
+// bit for the largest size encoding.
+fun tl_beats_minus_one(size, has_data, bundle :: TLBundleParams):
+  def count_width = unsigned_value_count(bundle.size_width)
+  def beat_size = alignment_bits(bundle.data_bytes)
+  def transfer_bytes = bits(1, count_width) << size
+  def transfer_beats = transfer_bytes >> bits(beat_size, count_width)
+  mux(has_data & (size > bits(beat_size, bundle.size_width)),
+      transfer_beats - bits(1, count_width),
+      bits(0, count_width))
+
+fun tl_a_beats_minus_one(opcode, size, bundle :: TLBundleParams):
+  tl_beats_minus_one(size, tl_a_has_data(opcode), bundle)
+
+fun tl_b_beats_minus_one(opcode, size, bundle :: TLBundleParams):
+  tl_beats_minus_one(size, tl_b_has_data(opcode), bundle)
+
+fun tl_c_beats_minus_one(opcode, size, bundle :: TLBundleParams):
+  tl_beats_minus_one(size, tl_c_has_data(opcode), bundle)
+
+fun tl_d_beats_minus_one(opcode, size, bundle :: TLBundleParams):
+  tl_beats_minus_one(size, tl_d_has_data(opcode), bundle)
+
+export:
+  tl_a_has_data
+  tl_b_has_data
+  tl_c_has_data
+  tl_d_has_data
+  tl_a_is_acquire
+  tl_b_is_probe
+  tl_c_is_probe_ack
+  tl_c_is_release
+  tl_d_is_grant
+  tl_d_requires_ack
+  tl_a_response_matches
+  tl_b_response_matches
+  tl_c_response_matches
+  tl_beats_minus_one
+  tl_a_beats_minus_one
+  tl_b_beats_minus_one
+  tl_c_beats_minus_one
+  tl_d_beats_minus_one

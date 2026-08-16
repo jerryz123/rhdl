@@ -8,13 +8,13 @@ cd "$repo_dir"
 if command -v rg >/dev/null 2>&1; then
   implementation_imports="$(
     rg -n '^[[:space:]]+.*rhdl/(core|frontend|backend)/' \
-      tilelink/main.rhdl tilelink/params.rhdl tilelink/bundles.rhdl tilelink/link.rhdl \
+      tilelink/*.rhdl \
       || true
   )"
 else
   implementation_imports="$(
     grep -nHE '^[[:space:]]+.*rhdl/(core|frontend|backend)/' \
-      tilelink/main.rhdl tilelink/params.rhdl tilelink/bundles.rhdl tilelink/link.rhdl \
+      tilelink/*.rhdl \
       || true
   )"
 fi
