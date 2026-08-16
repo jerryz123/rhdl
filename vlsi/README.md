@@ -35,6 +35,25 @@ The CIRCT setup is only needed when the repository-local tool is absent.
 The check regenerates the leaf RTL, verifies the wrapper header and pin-template
 contract against the submodule, and lints the complete wrapper with Verilator.
 
+## Run the focused LVS proof
+
+The full OpenFrame wrapper contains roughly 32 mm2 of standard-cell rows. Filling
+that area around a one-cell design would create millions of physical-only cells,
+so the fast integration profile intentionally leaves tap, filler, and LVS steps
+disabled. A separate 100 um by 100 um fixture hardens the same RHDL-generated
+inverter with normal SKY130 well taps and fillers, then requires Netgen LVS to
+match:
+
+```sh
+make -C vlsi lvs-smoke
+```
+
+The target fails unless LibreLane runs LVS and Netgen reports a matching final
+result. Its exported GDS is written to `build/lvs-views/gds/rhdl_lvs_smoke.gds`.
+This gives the RHDL-to-standard-cell flow a cheap physical-connectivity
+regression without pretending that the sparse full-size wrapper is signoff
+ready.
+
 ## Produce and integrate GDS
 
 The harness flake pins LibreLane 3.1.0.dev2 and its matching Sky130 PDK commit.
@@ -60,5 +79,9 @@ Generated artifacts stay under `vlsi/build/`; the final files are:
 This is an integration smoke test, not tapeout signoff. Like the upstream sparse
 example, it skips tap/fill insertion, in-flow DRC/LVS, and IR-drop analysis to
 keep a one-cell design tractable in the 32 mm2 footprint. A real design must
-restore physical-verification and power-integrity checks and run the harness
-precheck.
+enable tap/endcap and filler insertion, enable wrapper LVS, cut standard-cell
+rows around SRAMs and other macros, provide each macro's LVS model or matching
+black-box declaration, restore the remaining physical-verification and
+power-integrity checks, and run the harness precheck. The focused fixture proves
+the tool path and well-tap fix, but it does not replace wrapper, padframe, or
+post-integration LVS for the populated design.

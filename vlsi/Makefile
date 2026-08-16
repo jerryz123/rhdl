@@ -11,6 +11,10 @@ WRAPPER := $(VLSI_ROOT)/verilog/rtl/double_wide_openframe_project_wrapper.v
 HARNESS_WRAPPER := $(HARNESS_DIR)/verilog/rtl/double_wide_openframe_project_wrapper.v
 PIN_TEMPLATE := $(HARNESS_DIR)/librelane/wrapper/pin_template.def
 TOP_NAME := double_wide_openframe_project_wrapper
+LVS_CONFIG := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/config.yaml
+LVS_WRAPPER := $(VLSI_ROOT)/verilog/rtl/rhdl_lvs_smoke.v
+LVS_TOP_NAME := rhdl_lvs_smoke
+LVS_RUN_DIR := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/runs/RHDL_LVS
 
 RACKET ?= racket
 CIRCT_OPT ?= $(RHDL_ROOT)/.tools/firtool-1.155.0/bin/circt-opt
@@ -25,8 +29,8 @@ PDK_COMMIT ?= 74c0e6b118a67d94c24172143d3bd597473fa63d
 LIBRELANE := librelane --pdk-root $(PDK_ROOT) --pdk $(PDK)
 export PDK_ROOT PDK
 
-.PHONY: all setup-circt rtl contract-check rtl-check enable-pdk harden harden-native \
-	integrate integrate-native gds clean
+.PHONY: all setup-circt rtl contract-check rtl-check lvs-smoke-rtl-check enable-pdk \
+	harden harden-native lvs-smoke lvs-smoke-native integrate integrate-native gds clean
 
 all: rtl-check
 
@@ -69,6 +73,11 @@ rtl-check: rtl contract-check
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
 		$(BUILD_DIR)/rhdl-top.sv $(WRAPPER)
 
+lvs-smoke-rtl-check: rtl
+	$(VERILATOR) --lint-only --top-module $(LVS_TOP_NAME) -DUSE_POWER_PINS \
+		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
+		$(BUILD_DIR)/rhdl-top.sv $(LVS_WRAPPER)
+
 enable-pdk:
 	@if command -v ciel >/dev/null 2>&1; then \
 		ciel enable $(PDK_COMMIT) --pdk-family $(PDK); \
@@ -94,6 +103,24 @@ harden-native: rtl
 	$(LIBRELANE) $(CONFIG) --save-views-to $(BUILD_DIR)/views
 	test -s $(BUILD_DIR)/views/gds/$(TOP_NAME).gds
 
+lvs-smoke: rtl-check lvs-smoke-rtl-check
+	@if command -v librelane >/dev/null 2>&1; then \
+		$(MAKE) lvs-smoke-native; \
+	elif command -v $(NIX) >/dev/null 2>&1; then \
+		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) lvs-smoke-native; \
+	else \
+		echo "lvs-smoke requires either LibreLane or Nix; see vlsi/README.md" >&2; \
+		exit 1; \
+	fi
+
+lvs-smoke-native: rtl lvs-smoke-rtl-check
+	command -v librelane >/dev/null
+	$(LIBRELANE) $(LVS_CONFIG) --run-tag RHDL_LVS --overwrite --condensed \
+		--hide-progress-bar --save-views-to $(BUILD_DIR)/lvs-views
+	test -s $(BUILD_DIR)/lvs-views/gds/$(LVS_TOP_NAME).gds
+	grep -Eq "^Final result: (Circuits|Netlists) match" \
+		$(LVS_RUN_DIR)/*-netgen-lvs/reports/lvs.netgen.rpt
+
 integrate: harden
 	@if command -v magic >/dev/null 2>&1; then \
 		$(MAKE) integrate-native; \
@@ -118,4 +145,5 @@ integrate-native:
 gds: integrate
 
 clean:
-	rm -rf $(BUILD_DIR) openlane/double_wide_openframe_project_wrapper/runs
+	rm -rf $(BUILD_DIR) openlane/double_wide_openframe_project_wrapper/runs \
+		openlane/rhdl_lvs_smoke/runs
