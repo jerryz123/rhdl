@@ -1,0 +1,95 @@
+#lang rhdl
+// Provides elaboration fixtures for credited transport, adapters, and monitors.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+interface RefinedCredited8() refines Credited(Bits(8), 2)
+
+sync_circuit MonitoredCreditedTransmitter():
+  input send: Bool
+  input payload: Bits(8)
+  interface link(Credited(Bits(8), 2), ~role: transmitter, ~monitor)
+
+  link.valid <== send
+  link.bits <== payload
+
+sync_circuit CreditSenderWrapper():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface link(Credited(Bits(8), 2), ~role: transmitter)
+  output credit_count: Bits(2)
+
+  inst sender(CreditSender(Bits(8), 2))
+  ingress <=> sender.ingress
+  link <=> sender.link
+  credit_count <== sender.credit_count
+
+sync_circuit CreditBufferWrapper():
+  input grant_enable: Bool
+  interface link(Credited(Bits(8), 2), ~role: receiver)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+  output count: Bits(2)
+  output reserved: Bits(2)
+
+  inst buffer(CreditBuffer(Bits(8), 2))
+  buffer.grant_enable <== grant_enable
+  link <=> buffer.link
+  egress <=> buffer.egress
+  count <== buffer.count
+  reserved <== buffer.reserved
+
+sync_circuit CreditedRoundTrip():
+  input grant_enable: Bool
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+
+  def transmitted = ingress |> credit_sender(_, 2)
+  egress <=> (
+    transmitted |> credit_buffer(_, 2, ~grant_enable: grant_enable)
+  )
+
+sync_circuit InvalidCreditLimit():
+  interface link(Credited(Bits(8), 0), ~role: transmitter)
+  link.valid <== Bool(#false)
+  link.bits <== bits(0, 8)
+
+sync_circuit InvalidSenderLimit():
+  inst sender(CreditSender(Bits(8), 0))
+
+sync_circuit InvalidBufferDepth():
+  inst buffer(CreditBuffer(Bits(8), 0))
+
+sync_circuit MismatchedCreditLimits():
+  interface transmitter(Credited(Bits(8), 2), ~role: transmitter)
+  interface receiver(Credited(Bits(8), 3), ~role: receiver)
+  transmitter <=> receiver
+
+sync_circuit WrongCreditBufferProtocol():
+  interface ingress(Decoupled(Bits(8)), ~role: producer)
+  credit_buffer(ingress, 2)
+
+sync_circuit WrongCreditBufferLimit():
+  interface ingress(Credited(Bits(8), 3), ~role: transmitter)
+  credit_buffer(ingress, 2)
+
+def monitor_design = elaborate(MonitoredCreditedTransmitter())
+def sender_design = elaborate(CreditSenderWrapper())
+def buffer_design = elaborate(CreditBufferWrapper())
+def round_trip_design = elaborate(CreditedRoundTrip())
+
+export:
+  RefinedCredited8
+  MonitoredCreditedTransmitter
+  CreditSenderWrapper
+  CreditBufferWrapper
+  CreditedRoundTrip
+  InvalidCreditLimit
+  InvalidSenderLimit
+  InvalidBufferDepth
+  MismatchedCreditLimits
+  WrongCreditBufferProtocol
+  WrongCreditBufferLimit
+  monitor_design
+  sender_design
+  buffer_design
+  round_trip_design

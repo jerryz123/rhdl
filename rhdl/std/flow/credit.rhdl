@@ -1,0 +1,150 @@
+#lang rhdl
+// Bridges ready-valid flows across bounded single-hop credited transport.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/credited.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+  lib("rhdl/std/flow/queue.rhdl").Queue
+
+// Tracks an owned resource balance. A decrement requires a resource present
+// before the edge; simultaneous increment and decrement therefore cannot
+// manufacture a zero-balance resource for immediate use.
+sync_circuit CreditCounter(limit :: Int):
+  unless limit > 0
+  | error(~who: #'CreditCounter, "limit must be a positive host Int")
+
+  def count_width = index_width(limit + 1)
+  input increment: Bool
+  input decrement: Bool
+  output count: Bits(count_width)
+  output empty: Bool
+  output full: Bool
+
+  reg state(~init: bits(0, count_width))
+  def state_empty = state === bits(0, count_width)
+  def state_full = state === bits(limit, count_width)
+
+  assert(!decrement ||| !state_empty, "credit_counter_underflow")
+  assert(!increment ||| decrement ||| !state_full,
+         "credit_counter_overflow")
+  assert(state <= bits(limit, count_width), "credit_counter_in_range")
+
+  when (increment ^ decrement):
+    state <== mux(
+      increment,
+      state + bits(1, count_width),
+      state - bits(1, count_width)
+    )
+
+  count <== state
+  empty <== state_empty
+  full <== state_full
+
+// Converts internal ready-valid traffic to credited transport. Readiness is
+// based only on registered credits, never on a grant arriving this cycle.
+sync_circuit CreditSender(T, credit_limit :: Int):
+  unless credit_limit > 0
+  | error(~who: #'CreditSender,
+          "credit limit must be a positive host Int")
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface link(Credited(T, credit_limit), ~role: transmitter)
+  output credit_count: Bits(index_width(credit_limit + 1))
+
+  inst balance(CreditCounter(credit_limit))
+  def can_send = !balance.empty
+
+  ingress.ready <== can_send
+  link.valid <== ingress.valid & can_send
+  link.bits <== ingress.bits
+  balance.increment <== link.credit
+  balance.decrement <== link.valid
+  credit_count <== balance.count
+
+// Converts credited transport back to a buffered ready-valid flow. Reserved
+// capacity includes both buffered payloads and credits still held remotely.
+sync_circuit CreditBuffer(T, depth :: Int):
+  unless depth > 0
+  | error(~who: #'CreditBuffer, "depth must be a positive host Int")
+
+  input grant_enable: Bool
+  interface link(Credited(T, depth), ~role: receiver, ~monitor)
+  interface egress(Irrevocable(T), ~role: producer)
+  output count: Bits(index_width(depth + 1))
+  output reserved: Bits(index_width(depth + 1))
+
+  inst storage(Queue(T, depth, ~pipe: #true))
+  inst reservations(CreditCounter(depth))
+  egress <=> storage.egress
+
+  storage.ingress.valid <== link.valid
+  storage.ingress.bits <== link.bits
+  def dequeue = fire(egress)
+  def grant = grant_enable & (!reservations.full ||| dequeue)
+  link.credit <== grant
+  reservations.increment <== grant
+  reservations.decrement <== dequeue
+  count <== storage.count
+  reserved <== reservations.count
+
+  assert(!link.valid ||| storage.ingress.ready,
+         "credit_buffer_reserved_slot_available")
+  assert(storage.count <= reservations.count,
+         "credit_buffer_occupancy_reserved")
+
+fun finish_credit_stage(source_or_type, handle :: Handle):
+  if source_or_type is_a Endpoint || source_or_type is_a Handle
+  | handle(source_or_type)
+  | handle
+
+fun credited_stage_protocol(source_or_type, credit_limit :: Int):
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint: source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'credit_buffer,
+                "credited handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType: source_or_type
+    | ~else:
+        unless data_type(source_or_type)
+        | error(~who: #'credit_buffer,
+                "credit buffer requires a payload DataType, Credited InterfaceType, Endpoint, or Handle")
+        Credited(source_or_type, credit_limit)
+  def normalized = credited_protocol_type(protocol)
+  unless normalized
+  | error(~who: #'credit_buffer,
+          "credited-flow chaining requires a Credited protocol")
+  unless normalized.specialization_arguments[1] == credit_limit
+  | error(~who: #'credit_buffer,
+          "credit buffer depth must match the protocol credit limit")
+  normalized
+
+fun credit_sender(source_or_type, credit_limit :: Int):
+  def T = flow_payload_type(source_or_type)
+  inst credit_sender_stage(CreditSender(T, credit_limit))
+  finish_flow_stage(
+    source_or_type,
+    InterfaceHandle(credit_sender_stage.ingress, credit_sender_stage.link)
+  )
+
+fun credit_buffer(source_or_type,
+                  depth :: Int,
+                  ~grant_enable: grant_enable = Bool(#true)):
+  def protocol = credited_stage_protocol(source_or_type, depth)
+  def T = protocol.members.find(fun (member): member.name == "bits").type
+  inst credit_buffer_stage(CreditBuffer(T, depth))
+  credit_buffer_stage.grant_enable <== grant_enable
+  finish_credit_stage(
+    source_or_type,
+    InterfaceHandle(credit_buffer_stage.link, credit_buffer_stage.egress)
+  )
+
+export:
+  CreditCounter
+  CreditSender
+  CreditBuffer
+  credit_sender
+  credit_buffer

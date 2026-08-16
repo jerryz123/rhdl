@@ -100,7 +100,7 @@ The generic standard library should therefore add a minimal protocol-neutral
 interface resembling:
 
 ```rhombus
-interface Credited(T):
+interface Credited(T, credit_limit):
   role transmitter
   role receiver
   provider transmitter
@@ -126,15 +126,17 @@ The contract is:
 - Reset does not invent credits. The receiver explicitly grants its initial
   empty-buffer capacity when the surrounding protocol allows the link to run.
 
-The interface describes the wire contract; buffering and accounting should be
-ordinary reusable modules rather than hidden interface behavior:
+`credit_limit` is an elaboration-time connection and monitoring contract; it
+does not add a physical field. The interface describes the wire contract;
+buffering and accounting are ordinary reusable modules rather than hidden
+interface behavior:
 
 | Proposed utility | Responsibility |
 |---|---|
-| `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T)`, track the received-credit balance, and expose `ready` only when a credit is available |
+| `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T, max_credits)`, track the received-credit balance, and expose `ready` only when a credit is available |
 | `CreditBuffer(T, depth)` | Accept every legal credited transfer into real storage, expose an internal `Irrevocable(T)` dequeue, grant initial credits, and return a credit whenever a slot is freed |
 | `CreditCounter(max_credits)` | Reusable bounded balance primitive with simultaneous grant/consume support |
-| `monitor_credited(link, max_credits)` | Assert credit underflow, overflow, and conservation without driving either direction |
+| `monitor_credited(valid, credit, max_credits)` | Assert credit underflow, overflow, and conservation without driving either direction |
 
 Activation is intentionally outside the generic interface. CHI-specific link
 code will gate initial credit grants with CHI link activation and add any CHI

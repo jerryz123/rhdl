@@ -421,6 +421,17 @@ verify_fixture rv64i-alu rv64i_alu_tb
 verify_fixture rv64i-alu-decode
 verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
 verify_fixture valid-pipe valid_pipe_tb
+verify_fixture credited-flow credited_flow_tb
+verify_fixture credited-monitor
+run_expected_assertion_failure credited-monitor \
+  credited_monitor_underflow_tb \
+  tests/backend/verilog/credited-monitor-underflow_tb.sv \
+  credited_transfer_has_credit
+verify_fixture credited-monitor-overgrant
+run_expected_assertion_failure credited-monitor-overgrant \
+  credited_monitor_overgrant_tb \
+  tests/backend/verilog/credited-monitor-overgrant_tb.sv \
+  credited_grant_within_limit
 verify_fixture tilelink-protocol tilelink_protocol_tb
 verify_fixture tilelink-ram tilelink_ram_tb
 run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \

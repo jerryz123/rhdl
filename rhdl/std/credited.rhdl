@@ -1,0 +1,96 @@
+#lang rhdl
+// Defines the protocol-neutral single-hop credited payload interface and monitor.
+
+fun checked_credited_payload(T, credit_limit):
+  unless data_type(T)
+  | error(~who: #'Credited, "payload must be a hardware DataType")
+  unless credit_limit is_a Int && credit_limit > 0
+  | error(~who: #'Credited, "credit limit must be a positive host Int")
+  T
+
+// Observes grants and transfers from either endpoint. A credit granted on the
+// current edge is not available to authorize a transfer on that same edge.
+fun monitor_credited(valid, credit, credit_limit :: Int):
+  def count_width = index_width(credit_limit + 1)
+  reg credit_balance(~init: bits(0, count_width))
+  def transfer = valid
+  def grant = credit
+  def empty = credit_balance === bits(0, count_width)
+  def full = credit_balance === bits(credit_limit, count_width)
+
+  assert(!transfer ||| !empty, "credited_transfer_has_credit")
+  assert(!grant ||| transfer ||| !full, "credited_grant_within_limit")
+  assert(credit_balance <= bits(credit_limit, count_width),
+         "credited_balance_in_range")
+
+  when (grant ^ transfer):
+    credit_balance <== mux(
+      grant,
+      credit_balance + bits(1, count_width),
+      credit_balance - bits(1, count_width)
+    )
+
+fun credited_connection_legal(provided, required):
+  provided.length() == 2 && required.length() == 2 && (
+    provided[1] == required[1]
+  )
+
+// Every asserted valid cycle transfers one payload and consumes one credit
+// that the receiver granted on an earlier edge. Credit is a one-credit pulse.
+interface Credited(T, credit_limit):
+  role transmitter
+  role receiver
+  provider transmitter
+  connection_compatible transmitter (provided, required):
+    credited_connection_legal(provided, required)
+  monitor (link, endpoint_role):
+    monitor_credited(link.valid, link.credit, credit_limit)
+
+  transmitter -> receiver:
+    valid: Bool
+    bits: checked_credited_payload(T, credit_limit)
+
+  receiver -> transmitter:
+    credit: Bool
+
+// Finds the canonical specialization beneath a nominal refinement without
+// accepting an unrelated declaration that reuses the same member names.
+fun credited_base_protocol(protocol):
+  if !(protocol is_a InterfaceType)
+  | #false
+  | block:
+      def arguments = protocol.specialization_arguments
+      def local_base:
+        if arguments.length() == 2 && data_type(arguments[0]) && (
+          arguments[1] is_a Int
+        ) && arguments[1] > 0
+        | block:
+            def canonical = Credited(arguments[0], arguments[1])
+            if interface_type_supports(protocol, canonical) | canonical | #false
+        | #false
+      if local_base
+      | local_base
+      | block:
+          if protocol.parent
+          | credited_base_protocol(protocol.parent)
+          | #false
+
+// Normalizes the canonical interface and its refinements.
+fun credited_protocol_type(protocol):
+  def canonical = credited_base_protocol(protocol)
+  if canonical && interface_type_supports(protocol, canonical)
+  | canonical
+  | #false
+
+fun credited_payload_type(endpoint :: Endpoint):
+  def protocol = credited_protocol_type(endpoint.type)
+  unless protocol
+  | error(~who: #'credited_payload_type,
+          "credited-flow chaining requires a Credited endpoint")
+  protocol.members.find(fun (member): member.name == "bits").type
+
+export:
+  Credited
+  monitor_credited
+  credited_protocol_type
+  credited_payload_type

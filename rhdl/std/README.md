@@ -238,6 +238,37 @@ even if it reuses one of those display names. Control-only helpers additionally
 require the exact payloadless control-plane member shape, so a payload-bearing
 protocol is not silently treated as a `Ctrl` flow.
 
+## Credited transport
+
+[`credited.rhdl`](credited.rhdl) defines `Credited(T, credit_limit)` for a
+bounded single-hop payload channel. The transmitter drives `valid` and `bits`;
+the receiver returns one credit with each asserted `credit` pulse. Every valid
+cycle transfers one payload and consumes a credit received on an earlier edge.
+There is no ready signal, and a same-edge credit cannot authorize a transfer
+from a zero pre-edge balance.
+
+The positive host `credit_limit` is a semantic interface parameter rather than
+a wire field. Connections require the same limit, and an endpoint can opt into
+the whole-link monitor with `~monitor`. The monitor asserts that every transfer
+owns a prior credit, grants remain within the configured limit, and its tracked
+balance stays in range.
+
+[`flow/credit.rhdl`](flow/credit.rhdl) provides the transport adapters.
+`CreditSender(T, credit_limit)` accepts `Decoupled(T)`, tracks returned
+credits, and emits credited traffic only while its registered balance is
+nonzero. `CreditBuffer(T, depth)` owns the receiver capacity, accepts every
+legal credited transfer into a pipelined queue, and emits `Irrevocable(T)`.
+Its `grant_enable` input controls new grants without revoking credits already
+held remotely. The buffer initially grants empty capacity one credit per cycle
+and recycles a credit when an item leaves its egress.
+
+`credit_sender` and `credit_buffer` are handle-producing forms. They make a
+credited hop compose as `Decoupled -> CreditSender -> Credited -> CreditBuffer
+-> Irrevocable`. Mapping, arbitration, and routing stay in the ready-valid
+domain between hop boundaries rather than acquiring duplicate credited
+variants. `CreditCounter` is the shared bounded accounting circuit used by the
+adapters.
+
 ## Generic interconnect parameters
 
 [`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral host-side sets
@@ -391,6 +422,12 @@ under [`flow/`](flow/):
 | Transaction generator | Behavior |
 |---|---|
 | `CompletionQueue(Request, Response, depth)` | Reserves response capacity at a ready-valid request handshake, emits a nonstallable issue, and buffers the matching nonstallable completion |
+
+| Credited transport generator | Behavior |
+|---|---|
+| `CreditSender(T, credit_limit)` | Converts ready-valid ingress to credited transport using only previously registered credits |
+| `CreditBuffer(T, depth)` | Owns receiver capacity, returns credits, and converts credited transport to an irrevocable egress |
+| `CreditCounter(limit)` | Tracks a bounded resource balance with simultaneous increment and decrement |
 
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|

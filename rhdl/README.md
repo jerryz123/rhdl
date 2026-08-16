@@ -100,6 +100,7 @@ import one primitive without loading unrelated generators.
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/noc/route-computer.rhdl` | Validated NoC route-table ABI and combinational `RouteComputer` | `std/decode.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
+| `std/credited.rhdl` | Protocol-neutral bounded credited payload transport, monitoring, and nominal protocol introspection | None |
 | `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
@@ -108,6 +109,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and their endpoint/handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/completion-queue.rhdl` | Reserved response buffering between ready-valid requests and nonstallable issues/completions | `std/ready-valid.rhdl`, `std/flow/queue.rhdl` |
+| `std/flow/credit.rhdl` | Credited sender and receiver adapters, bounded accounting, and generic handle construction | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flow/stage.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
 | `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus Array-shaped handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus payload-selected handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
@@ -119,7 +121,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/map-valid.rhdl` | Inline payload substitution for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/fork-valid.rhdl` | Inline one-to-many fanout for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
-| `std/flow.rhdl` | Valid-only and ready-valid protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl` and all `std/flow/` modules |
+| `std/flow.rhdl` | Valid-only, ready-valid, and credited protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl`, `std/credited.rhdl`, and all `std/flow/` modules |
 
 ## Frontend layer dependencies
 
