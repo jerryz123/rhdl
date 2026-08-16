@@ -34,6 +34,8 @@ expect_failure bad-interface-specialization-shape.rhdl "exactly the same wire sh
 expect_failure bad-interface-compatibility-result.rhdl "must return a host Boolean"
 expect_failure bad-interface-exact-specialization.rhdl "argument does not satisfy annotation"
 expect_failure bad-interface-equal-specialization-compatibility.rhdl "does not support"
+expect_failure bad-interface-monitor-drive.rhdl "connection target must be a driveable hardware place"
+expect_failure bad-interface-monitor-missing.rhdl "does not define a monitor"
 expect_failure bad-interface-type.rhdl "does not support"
 expect_failure bad-tilelink-a-capability.rhdl "does not support"
 expect_failure bad-tilelink-b-capability.rhdl "does not support"

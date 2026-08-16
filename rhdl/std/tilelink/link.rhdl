@@ -2,6 +2,7 @@
 // Composes TileLink payloads into uncached and cached directional links.
 
 import:
+  lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/tilelink/params.rhdl") open
   lib("rhdl/std/tilelink/bundles.rhdl") open
@@ -40,24 +41,8 @@ fun b_operations_empty(operations):
                      operations.intent]):
     value == #false
 
-fun unsigned_value_count(width):
-  1 bits.(<<) width
-
-fun id_range_fits(range, width):
-  range.end <= unsigned_value_count(width)
-
-fun address_sets_fit(address_sets, width):
-  def limit = unsigned_value_count(width)
-  for all (address_set in address_sets):
-    (address_set.base bits.or address_set.mask) < limit
-
-fun power_of_two_exponent(value, candidate = 1, exponent = 0):
-  if candidate == value
-  | exponent
-  | power_of_two_exponent(value, candidate * 2, exponent + 1)
-
 fun transfer_sizes_fit(value, size_width):
-  value == #false || power_of_two_exponent(value.max_bytes) < unsigned_value_count(size_width)
+  value == #false || alignment_bits(value.max_bytes) < unsigned_value_count(size_width)
 
 fun a_operation_sizes_fit(operations, size_width):
   for all (value in [operations.acquire_block,
@@ -108,8 +93,9 @@ fun uncached_connection_legal(provided, required):
                              b_operations_empty(manager.emits),
                              a_operations_supported(client.emits, manager.supports),
                              a_operation_sizes_fit(client.emits, bundle.size_width),
-                             id_range_fits(client.source_ids, bundle.source_width),
-                             address_sets_fit(manager.address_sets, bundle.address_width)]):
+                             client.source_ids.fits_unsigned_width(bundle.source_width),
+                             for all (address_set in manager.address_sets):
+                               address_set.fits_unsigned_width(bundle.address_width)]):
         condition
 
 fun cached_connection_legal(provided, required):
@@ -126,9 +112,10 @@ fun cached_connection_legal(provided, required):
                              b_operations_supported(manager.emits, client.supports),
                              a_operation_sizes_fit(client.emits, bundle.size_width),
                              b_operation_sizes_fit(manager.emits, bundle.size_width),
-                             id_range_fits(client.source_ids, bundle.source_width),
-                             id_range_fits(manager.sink_ids, bundle.sink_width),
-                             address_sets_fit(manager.address_sets, bundle.address_width)]):
+                             client.source_ids.fits_unsigned_width(bundle.source_width),
+                             manager.sink_ids.fits_unsigned_width(bundle.sink_width),
+                             for all (address_set in manager.address_sets):
+                               address_set.fits_unsigned_width(bundle.address_width)]):
         condition
 
 // TileLink permits an unaccepted first beat to be withdrawn or replaced, so

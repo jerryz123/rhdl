@@ -29,7 +29,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`conditional.rhm`](conditional.rhm) | Hardware `when` priority chains, exact-key `switch`, and guarded effects |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
 | [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
-| [`interface.rhm`](interface.rhm) | Roles, directional protocols, refinement, and bulk connection |
+| [`interface.rhm`](interface.rhm) | Roles, directional protocols, monitoring, refinement, and bulk connection |
 
 `#lang rhdl` aggregates the curated set. A `#lang rhdl/base` program can import
 only the layers it needs.
@@ -568,6 +568,36 @@ Each root direction becomes one record-typed core port. `<=>` atomically
 connects exact flows or compatible provider-to-peer contracts; operand order
 is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
+
+An interface can define an optional whole-link monitor. The monitor receives a
+read-only view containing fields from both directions and the local endpoint
+role, so one check can correlate a forward `valid` with a backward `ready`:
+
+```rhombus
+interface MonitoredStream(T):
+  role producer
+  role consumer
+  monitor (link, endpoint_role):
+    assert(!(link.ready & !link.valid), "ready_requires_valid")
+  producer -> consumer:
+    valid: Bool
+    bits: T
+  consumer -> producer:
+    ready: Bool
+
+sync_circuit Producer():
+  interface stream(MonitoredStream(Bits(8)), ~role: producer, ~monitor)
+  stream.valid <== false
+  stream.bits <== 0
+```
+
+Monitoring is disabled unless an endpoint opts in with `~monitor`; endpoint
+arrays apply the option to every element. The read-only view prevents a
+monitor from becoming another driver. Monitor elaboration runs after the
+circuit body, making it independent of whether the endpoint's outgoing fields
+are driven before or after its declaration. A monitor that uses `assert`,
+registers, or other ambient sequential operations must be activated in a
+`sync_circuit`. Interface refinements inherit their parent's monitor.
 
 Each root interface declaration has a stable nominal identity. By default,
 repeated calls to one parameterized declaration compare that identity plus

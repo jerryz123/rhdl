@@ -1,0 +1,116 @@
+#lang rhdl
+// Defines a custom bidirectional ready-valid interface with an opt-in whole-link monitor.
+
+interface MonitoredWordStream(width :: Int):
+  role producer
+  role consumer
+  monitor (link, endpoint_role):
+    def label:
+      if endpoint_role == "producer"
+      | "producer_ready_requires_valid"
+      | "consumer_ready_requires_valid"
+    assert(!(link.ready & !link.valid), label)
+  producer -> consumer:
+    valid: Bool
+    bits: Bits(width)
+  consumer -> producer:
+    ready: Bool
+
+// Exercises the monitor grammar alongside each optional interface-definition
+// clause and both one-way and two-way flow shapes.
+interface MonitoredCompatibleOneWay(capacity):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    provided[0] >= required[0]
+  monitor (link, endpoint_role):
+    #void
+  producer -> consumer:
+    bits: Bits(8)
+
+interface MonitoredCompatibleTwoWay(capacity):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    provided[0] >= required[0]
+  monitor (link, endpoint_role):
+    #void
+  producer -> consumer:
+    bits: Bits(8)
+  consumer -> producer:
+    accepted: Bool
+
+interface MonitoredProviderOneWay():
+  role consumer
+  role producer
+  provider producer
+  monitor (link, endpoint_role):
+    #void
+  producer -> consumer:
+    bits: Bits(8)
+
+interface MonitoredProviderTwoWay():
+  role consumer
+  role producer
+  provider producer
+  monitor (link, endpoint_role):
+    #void
+  producer -> consumer:
+    bits: Bits(8)
+  consumer -> producer:
+    accepted: Bool
+
+interface MonitoredOneWay():
+  role producer
+  role consumer
+  monitor (link, endpoint_role):
+    #void
+  producer -> consumer:
+    bits: Bits(8)
+
+interface RefinedMonitoredWordStream() refines MonitoredWordStream(8)
+
+sync_circuit MonitoredProducer():
+  interface stream(MonitoredWordStream(8), ~role: producer, ~monitor)
+
+  stream.valid <== Bool(#false)
+  stream.bits <== bits(0, 8)
+
+sync_circuit MonitoredConsumer():
+  interface stream(MonitoredWordStream(8), ~role: consumer, ~monitor)
+
+  stream.ready <== Bool(#false)
+
+sync_circuit UnmonitoredProducer():
+  interface stream(MonitoredWordStream(8), ~role: producer)
+
+  stream.valid <== Bool(#false)
+  stream.bits <== bits(0, 8)
+
+sync_circuit MonitoredProducerArray():
+  interface streams[2](MonitoredWordStream(8), ~role: producer, ~monitor)
+
+  for (index in 0..2):
+    streams[index].valid <== Bool(#false)
+    streams[index].bits <== bits(0, 8)
+
+sync_circuit RefinedMonitoredProducer():
+  interface stream(RefinedMonitoredWordStream(), ~role: producer, ~monitor)
+
+  stream.valid <== Bool(#false)
+  stream.bits <== bits(0, 8)
+
+export:
+  MonitoredWordStream
+  MonitoredProducer
+  MonitoredConsumer
+  UnmonitoredProducer
+  MonitoredProducerArray
+  RefinedMonitoredProducer
+  MonitoredCompatibleOneWay
+  MonitoredCompatibleTwoWay
+  MonitoredProviderOneWay
+  MonitoredProviderTwoWay
+  MonitoredOneWay

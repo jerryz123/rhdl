@@ -16,6 +16,8 @@ export:
   frontend_run
   run_elaboration
   build_circuit
+  defer_circuit_finalizer
+  run_circuit_finalizers
   active_module
   fresh_name
   input
@@ -127,7 +129,7 @@ fun hardware_entity(value):
   | ~else: value is_a HardwareEntity
 
 class CircuitIdentity(name)
-class ActiveCircuit(identity, name)
+class ActiveCircuit(identity, name, mutable finalizers = [])
 
 fun new_circuit_identity(name):
   unless name is_a String
@@ -224,6 +226,28 @@ fun read(entity, location = Location()):
   | ~else:
       frontend_fail("expected readable hardware data", location)
 
+// Defers source-order-independent elaboration collateral until the active
+// circuit body has created and driven all of its declared hardware places.
+fun defer_circuit_finalizer(finalizer, location = Location()):
+  unless finalizer is_a Function
+  | frontend_fail("circuit finalizer must be a Function", location)
+  def context = require_context(location)
+  unless context.active_circuits.length() > 0
+  | frontend_fail("circuit finalizer requires an active circuit", location)
+  def active = context.active_circuits[context.active_circuits.length() - 1]
+  active.finalizers := active.finalizers ++ [finalizer]
+  #void
+
+fun run_circuit_finalizers(location = Location()):
+  def context = require_context(location)
+  unless context.active_circuits.length() > 0
+  | frontend_fail("circuit finalizers require an active circuit", location)
+  def active = context.active_circuits[context.active_circuits.length() - 1]
+  def finalizers = active.finalizers
+  active.finalizers := []
+  for (finalizer in finalizers): finalizer()
+  #void
+
 fun build_circuit(identity, name, arguments, implementation, location = Location()):
   def context = require_context(location)
   unless identity is_a CircuitIdentity
@@ -237,10 +261,14 @@ fun build_circuit(identity, name, arguments, implementation, location = Location
     | frontend_fail("circuit parameters must be host values, not hardware values", location)
   when context.active_circuits.find(fun (active): active.identity === identity)
   | frontend_fail("recursive elaboration of circuit " ++ name, location)
-  context.active_circuits := context.active_circuits ++ [ActiveCircuit(identity, name)]
+  def active_circuit = ActiveCircuit(identity, name)
+  context.active_circuits := context.active_circuits ++ [active_circuit]
   def module_def = context.builder.module(context.allocate_symbol(name))
   parameterize { current_module: module_def }:
     implementation()
+    // Direct kernel clients get a fallback flush. Frontend circuit wrappers
+    // flush earlier while their ambient layer parameters are still active.
+    run_circuit_finalizers(location)
   context.builder.finish(module_def)
   context.active_circuits := context.active_circuits.filter(
     ~keep: fun (active): !(active.identity === identity)

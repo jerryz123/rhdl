@@ -222,7 +222,9 @@ half-open range of nonnegative IDs. `AddressSet(base, mask)` describes every
 nonnegative address formed by varying the one bits of `mask`; canonical bases
 keep those bits clear. `TransferSizes(min_bytes, max_bytes)` is an inclusive
 power-of-two byte-size range. These are immutable elaboration-time values and
-do not create hardware.
+do not create hardware. `IdRange.fits_unsigned_width(width)` and
+`AddressSet.fits_unsigned_width(width)` report whether every represented value
+fits a nonnegative unsigned host width.
 
 ## TileLink definitions
 
@@ -323,6 +325,8 @@ def base = align_down(address, 8)
 
 `power_of_two(value)` is the shared host-side predicate for positive
 power-of-two `Int` values. It returns false for zero and negative integers.
+`unsigned_value_count(width)` returns the number of distinct values represented
+by a nonnegative unsigned width, including one value for width zero.
 The alignment is a positive power-of-two host parameter and must fit the
 value's width. `is_aligned` checks that the corresponding low bits are zero;
 `align_down` clears them while preserving the input width. Alignment to one is
