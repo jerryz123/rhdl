@@ -12,6 +12,112 @@ sync_circuit SyncRamExample():
 
 def design = elaborate(SyncRamExample())
 
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef
+    struct packed {logic [1:0] address; logic write; logic [3:0][7:0] data; logic [3:0] mask; }
+    ReadWriteRequest;
+`endif // _TYPESCOPE_rhdl_types
+module SyncRamExample(
+  input                                                                                  clock,
+                                                                                         reset,
+  input  struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }  port_in,
+  output struct packed {struct packed {logic valid; logic [3:0][7:0] bits; } response; } port_out
+);
+
+  SyncRam1RW storage (
+    .clock    (clock),
+    .reset    (reset),
+    .port_in  (port_in),
+    .port_out (port_out)
+  );
+endmodule
+
+module storage_4x32(
+  input  [1:0]  RW0_addr,
+  input         RW0_en,
+                RW0_clk,
+                RW0_wmode,
+  input  [31:0] RW0_wdata,
+  output [31:0] RW0_rdata,
+  input  [3:0]  RW0_wmask
+);
+
+  reg  [31:0] Memory[0:3];
+  reg  [1:0]  _RW0_raddr_d0;
+  reg         _RW0_ren_d0;
+  reg         _RW0_rmode_d0;
+  always @(posedge RW0_clk) begin
+    _RW0_raddr_d0 <= RW0_addr;
+    _RW0_ren_d0 <= RW0_en;
+    _RW0_rmode_d0 <= RW0_wmode;
+  end // always @(posedge)
+  wire [31:0] _GEN;
+  assign _GEN = _RW0_ren_d0 & _RW0_rmode_d0 == 1'h0 ? Memory[_RW0_raddr_d0] : 32'bx;
+  always @(posedge RW0_clk) begin
+    if (RW0_en & RW0_wmask[0] & RW0_wmode)
+      Memory[RW0_addr][32'h0 +: 8] <= RW0_wdata[7:0];
+  end // always @(posedge)
+  always @(posedge RW0_clk) begin
+    if (RW0_en & RW0_wmask[1] & RW0_wmode)
+      Memory[RW0_addr][32'h8 +: 8] <= RW0_wdata[15:8];
+  end // always @(posedge)
+  always @(posedge RW0_clk) begin
+    if (RW0_en & RW0_wmask[2] & RW0_wmode)
+      Memory[RW0_addr][32'h10 +: 8] <= RW0_wdata[23:16];
+  end // always @(posedge)
+  always @(posedge RW0_clk) begin
+    if (RW0_en & RW0_wmask[3] & RW0_wmode)
+      Memory[RW0_addr][32'h18 +: 8] <= RW0_wdata[31:24];
+  end // always @(posedge)
+  assign RW0_rdata = _GEN;
+endmodule
+
+module SyncRam1RW(
+  input                                                                                  clock,
+                                                                                         reset,
+  input  struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }  port_in,
+  output struct packed {struct packed {logic valid; logic [3:0][7:0] bits; } response; } port_out
+);
+
+  wire [3:0]      _GEN;
+  wire [3:0][7:0] _GEN_0;
+  wire            _GEN_1;
+  wire            _GEN_2;
+  wire [1:0]      _GEN_3;
+  wire [31:0]     _GEN_4;
+  wire [31:0]     _storage_ext_RW0_rdata;
+  storage_4x32 storage_ext (
+    .RW0_addr  (_GEN_3),
+    .RW0_en    (_GEN_2),
+    .RW0_clk   (clock),
+    .RW0_wmode (_GEN_1),
+    .RW0_wdata (_GEN_4),
+    .RW0_rdata (_storage_ext_RW0_rdata),
+    .RW0_wmask (_GEN)
+  );
+  assign _GEN_4 = /*cast(bit[31:0])*/_GEN_0;
+  wire [3:0][7:0] _GEN_5 = /*cast(bit[3:0][7:0])*/_storage_ext_RW0_rdata;
+  reg             response_valid;
+  assign _GEN_3 = port_in.request.bits.address;
+  assign _GEN_2 = port_in.request.valid;
+  assign _GEN_1 = port_in.request.bits.write;
+  assign _GEN_0 = port_in.request.bits.data;
+  assign _GEN = port_in.request.bits.mask;
+  wire struct packed {logic valid; logic [3:0][7:0] bits; } _GEN_6 =
+    '{valid: response_valid, bits: _GEN_5};
+  always @(posedge clock) begin
+    if (reset)
+      response_valid <= 1'h0;
+    else
+      response_valid <= _GEN_2 & ~_GEN_1;
+  end // always @(posedge)
+  assign port_out = '{response: _GEN_6};
+endmodule
+}>>|
+
 export:
   SyncRamExample
   design
+  verilog_reference

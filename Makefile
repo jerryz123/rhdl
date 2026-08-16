@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test rfpl-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -22,6 +22,9 @@ check-boundaries:
 	bash riscv/check-boundaries.sh
 	bash tilelink/check-boundaries.sh
 	bash cores/check-boundaries.sh
+
+check-example-verilog:
+	bash tools/check-example-verilog.sh
 
 frontend-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_TESTS) $(FRONTEND_TESTS)
@@ -77,10 +80,11 @@ ricket-test: ricket-host-test
 circt-test:
 	bash tests/backend/run-circt.sh
 
-verilog-golden-test:
+verilog-golden-test: check-example-verilog
 	bash tests/backend/run-circt.sh --golden-only
 
 update-verilog-goldens:
+	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
 host-test: unit-test examples rfpl-test noc-test riscv-test tilelink-test ricket-host-test
@@ -90,5 +94,5 @@ test: host-test circt-test rfpl-circt-test
 setup-circt:
 	bash tools/install-circt.sh
 
-examples:
+examples: check-example-verilog
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(EXAMPLES)

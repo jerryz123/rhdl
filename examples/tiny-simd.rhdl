@@ -235,6 +235,106 @@ module Lane(
 endmodule
 }>>|
 
+def no_multiply_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [3:0] opcode; logic [7:0] operand; } Instruction;
+`endif // _TYPESCOPE_rhdl_types
+module TinySIMD(
+  input                                                                        clock,
+                                                                               reset,
+                                                                               load_seed,
+                                                                               step,
+  input  [1:0][7:0]                                                            seeds,
+  input  struct packed {logic [1:0] address; logic [11:0] data; logic write; } loader_in,
+  output [1:0][7:0]                                                            results,
+  output [1:0]                                                                 pc_out,
+  output struct packed {logic ready; }                                         loader_out
+);
+
+  wire             _GEN;
+  wire [11:0]      _GEN_0;
+  wire [1:0]       _GEN_1;
+  wire [7:0]       _lane_1_result;
+  wire [7:0]       _lane_result;
+  wire             _GEN_2 = 1'h0;
+  reg  [11:0]      program_0[0:3];
+  always_ff @(posedge clock) begin
+    if (_GEN_2) begin
+    end
+    else begin
+      if (_GEN)
+        program_0[_GEN_1] <= _GEN_0;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0]       pc;
+  wire Instruction _GEN_3 = /*cast(bit)*/program_0[pc];
+  assign _GEN_1 = loader_in.address;
+  assign _GEN_0 = loader_in.data;
+  assign _GEN = loader_in.write;
+  Lane lane (
+    .clock       (clock),
+    .reset       (reset),
+    .load_seed   (load_seed),
+    .step        (step),
+    .seed        (seeds[_GEN_2]),
+    .instruction (_GEN_3),
+    .result      (_lane_result)
+  );
+  Lane lane_1 (
+    .clock       (clock),
+    .reset       (reset),
+    .load_seed   (load_seed),
+    .step        (step),
+    .seed        (seeds[1'h1]),
+    .instruction (_GEN_3),
+    .result      (_lane_1_result)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      pc <= 2'h0;
+    else
+      pc <= step ? pc + 2'h1 : pc;
+  end // always @(posedge)
+  assign results = {{_lane_1_result}, {_lane_result}};
+  assign pc_out = pc;
+  assign loader_out = '{ready: 1'h1};
+endmodule
+
+module Lane(
+  input              clock,
+                     reset,
+                     load_seed,
+                     step,
+  input  [7:0]       seed,
+  input  Instruction instruction,
+  output [7:0]       result
+);
+
+  reg [7:0] accumulator;
+  always @(posedge clock) begin
+    if (reset)
+      accumulator <= 8'h0;
+    else
+      accumulator <=
+        load_seed
+          ? seed
+          : step
+              ? (instruction.opcode == 4'h0
+                   ? instruction.operand
+                   : instruction.opcode == 4'h1
+                       ? accumulator + instruction.operand
+                       : instruction.opcode == 4'h2
+                           ? accumulator ^ instruction.operand
+                           : instruction.opcode == 4'h3
+                               ? accumulator << instruction.operand
+                               : accumulator)
+              : accumulator;
+  end // always @(posedge)
+  assign result = accumulator;
+endmodule
+}>>|
+
 export:
   EngineConfig
   Opcode
@@ -246,3 +346,4 @@ export:
   design
   no_multiply_design
   verilog_reference
+  no_multiply_verilog_reference

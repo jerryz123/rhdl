@@ -25,10 +25,12 @@ not duplicate its evolving list.
 
 ## Verilog references
 
-Each public feature example exports a `verilog_reference` string beside its
-canonical `design`. The backend lowers the design with the pinned CIRCT
-toolchain, removes generated-version and temporary-location noise, and compares
-the complete SystemVerilog output exactly:
+Each concrete example design exports a colocated Verilog string. The canonical
+`design` pairs with `verilog_reference`; another `*_design` pairs with the same
+prefix followed by `*_verilog_reference`. `make examples` enforces references,
+exports, and manifest coverage. The backend lowers each design with the pinned
+CIRCT toolchain, removes generated-version and temporary-location noise, and
+compares the complete SystemVerilog output exactly:
 
 ```sh
 make verilog-golden-test

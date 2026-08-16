@@ -19,6 +19,11 @@ Valid canonical authoring programs live under [`../examples/`](../examples/READM
 Intentional language failures live under `frontend/invalid/` and are exercised
 by `frontend/run-negative.sh`.
 
+Successful programs remain under `frontend/` only when their small, test-shaped
+form isolates a profile boundary, diagnostic, or exact IR property that a
+canonical example does not. Frontend tests should import an example directly
+when it already demonstrates the supported behavior under test.
+
 ## Focused commands
 
 Run the minimum target that covers a change:

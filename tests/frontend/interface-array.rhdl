@@ -14,27 +14,12 @@ interface BidirectionalByte():
   responder -> requester:
     response: Bits(8)
 
-circuit InterfaceArrayAdapter(n):
-  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
-  interface egress[n](Decoupled(Bits(8)), ~role: producer)
-
-  egress <=> ingress
-
 circuit IndexedInterfaceArrayAdapter(n):
   interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
   interface egress[n](Decoupled(Bits(8)), ~role: producer)
 
   for (index in 0..n):
     egress[index] <=> ingress[index]
-
-// A parenthesized endpoint sequence is connection syntax for a concrete
-// endpoint array; it is not a general-purpose host tuple.
-circuit ParenthesizedInterfaceArrayAdapter():
-  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
-  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
-  interface egress[2](Decoupled(Bits(8)), ~role: producer)
-
-  egress <=> (ingress0, ingress1)
 
 circuit ParenthesizedInterfaceArrayLengthMismatch():
   interface ingress0(Decoupled(Bits(8)), ~role: consumer)
@@ -51,17 +36,6 @@ circuit ParenthesizedInterfaceArrayNamedMember():
 
   egress <=> (ingress0, ~second: ingress1)
 
-circuit InterfaceArrayHierarchy(n):
-  interface ingress[n](Decoupled(Bits(8)), ~role: consumer)
-  interface egress[n](Decoupled(Bits(8)), ~role: producer)
-
-  inst adapter(InterfaceArrayAdapter(n))
-  adapter.ingress <=> ingress
-  for (index in 0..n):
-    egress[index].valid <== adapter.egress[index].valid
-    egress[index].bits <== adapter.egress[index].bits
-    adapter.egress[index].ready <== egress[index].ready
-
 circuit InterfaceArrayTypeOnce(n):
   def mutable evaluations = 0
   fun counted_type():
@@ -75,16 +49,6 @@ circuit InterfaceArrayTypeOnce(n):
   | error("interface array type expression was evaluated more than once")
   #void
 
-// Generic handles compose independently of ready-valid-specific helpers.
-circuit InterfaceHandleAdapter():
-  interface ingress(BidirectionalByte(), ~role: responder)
-  interface egress(BidirectionalByte(), ~role: requester)
-
-  def path = interface_link(BidirectionalByte(), "first")
-             |> interface_link(BidirectionalByte(), "second")
-  def result = ingress |> path
-  egress <=> result
-
 // Direct handle-end access keeps endpoint field information for local links.
 circuit InterfaceHandleEnds():
   input source_valid: Bool
@@ -97,28 +61,6 @@ circuit InterfaceHandleEnds():
   link.left.bits <== source_bits
   sink_valid <== link.right.valid
   sink_bits <== link.right.bits
-
-circuit ParallelInterfaceHandleAdapter():
-  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
-  interface egress[2](Decoupled(Bits(8)), ~role: producer)
-
-  def path = parallel_handles(Array(
-    interface_link(Decoupled(Bits(8)), "lane"),
-    interface_link(Decoupled(Bits(8)), "lane")
-  ))
-  def result = ingress |> path
-  egress <=> result
-
-// Terminating each handle closes its output and leaves one callable sink. A
-// parallel sink accepts the matching endpoint array and completes all lanes.
-circuit ParallelInterfaceSinkAdapter():
-  interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
-  interface egress[2](Decoupled(Bits(8)), ~role: producer)
-
-  ingress |> parallel_handles(Array(
-    interface_link(Decoupled(Bits(8)), "lane") <=> egress[0],
-    interface_link(Decoupled(Bits(8)), "lane") <=> egress[1]
-  ))
 
 // A sink can consume an earlier handle before any concrete source is
 // attached, retaining only the earlier handle's input end.
@@ -168,17 +110,11 @@ circuit InterfaceSinkTypeMismatch():
 
 export:
   BidirectionalByte
-  InterfaceArrayAdapter
   IndexedInterfaceArrayAdapter
-  ParenthesizedInterfaceArrayAdapter
   ParenthesizedInterfaceArrayLengthMismatch
   ParenthesizedInterfaceArrayNamedMember
-  InterfaceArrayHierarchy
   InterfaceArrayTypeOnce
-  InterfaceHandleAdapter
   InterfaceHandleEnds
-  ParallelInterfaceHandleAdapter
-  ParallelInterfaceSinkAdapter
   ComposedInterfaceSinkAdapter
   ReusedInterfaceHandle
   ReusedInterfaceSink

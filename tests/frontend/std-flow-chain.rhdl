@@ -4,16 +4,8 @@
 import:
   lib("rhdl/std/flow.rhdl") open
 
-fun preserve_endpoint(endpoint :: Endpoint) :~ Endpoint:
-  endpoint
-
 fun require_byte_irrevocable(
   endpoint :: Endpoint.of(Irrevocable(Bits(8)))
-) :~ Endpoint:
-  endpoint
-
-fun require_ctrl_irrevocable(
-  endpoint :: Endpoint.of(IrrevocableCtrl())
 ) :~ Endpoint:
   endpoint
 
@@ -30,18 +22,6 @@ bundle ZipFlowOutput():
   owner: Bool
 
 interface StableAlias8() refines Irrevocable(Bits(8))
-
-// The arrow-with-block binder retains the precise input bundle type and lets a
-// record constructor carry its field block outside the call parentheses.
-circuit MapFlowChain():
-  interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  interface egress(Decoupled(MapFlowOutput()), ~role: producer)
-
-  (
-    map_flow(ingress, payload => MapFlowOutput()):
-      data: payload.request
-      owner: payload.processor
-  ) <=> egress
 
 circuit MapFlowWrongProtocol():
   interface ingress(Valid(MapFlowInput()), ~role: consumer)
@@ -81,22 +61,6 @@ circuit RefinedMapFlowChain():
 
   map_flow(ingress, payload => payload) <=> egress
 
-// Filtering discards rejected offers, while gating holds disabled offers.
-// Both conservatively expose Decoupled outputs after observing live sidebands.
-circuit FilterFlowChain():
-  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
-  input keep: Bool
-  interface egress(Decoupled(Bits(8)), ~role: producer)
-
-  filter_flow(ingress, payload => keep & !(payload === bits(0, 8))) <=> egress
-
-circuit GateFlowChain():
-  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
-  input enabled: Bool
-  interface egress(Decoupled(Bits(8)), ~role: producer)
-
-  gate_flow(ingress, enabled) <=> egress
-
 circuit FilterFlowWrongProtocol():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   filter_flow(ingress, payload => Bool(#true))
@@ -104,24 +68,6 @@ circuit FilterFlowWrongProtocol():
 circuit GateFlowWrongProtocol():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   gate_flow(ingress, Bool(#true))
-
-// A heterogeneous rendezvous is an array-input handle that composes with the
-// same generic handle protocol as a one-input stateful stage.
-sync_circuit ZipFlowChain():
-  interface data(Decoupled(Bits(8)), ~role: consumer)
-  interface owner(Irrevocable(Bool), ~role: consumer)
-  interface egress(Decoupled(ZipFlowOutput()), ~role: producer)
-
-  def path:
-    (
-      zip_flow(Bits(8), data_bits,
-               Bool, owner_bits):
-        ZipFlowOutput():
-          data: data_bits
-          owner: owner_bits
-    ) |> queue(ZipFlowOutput(), 2)
-  def zipped = Array(data, owner) |> path
-  egress <=> zipped
 
 // The arrow binder keeps a single-expression zip directly inside ordinary
 // call and pipeline syntax without grouping a trailing block.
@@ -151,49 +97,6 @@ circuit ZipFlowHostValue():
   zip_flow(data, data_bits,
            owner, owner_bits):
     8
-
-// Combinational and stateful handles compose before a source is attached.
-circuit MapToAtomicForkChain():
-  interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  interface egress[2](Decoupled(Bits(8)), ~role: producer)
-
-  def path:
-    (
-      map_flow(Bits(8), payload):
-        payload
-    ) |> atomic_fork(Bits(8), 2)
-  def forked = ingress |> path
-  egress <=> forked
-
-// Parallel composition turns independent handles into one array-shaped handle.
-sync_circuit ParallelMapFlowChain():
-  interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  interface data_egress(Irrevocable(Bits(8)), ~role: producer)
-  interface owner_egress(Decoupled(Bool), ~role: producer)
-
-  def forked = ingress |> atomic_fork(_, 2)
-  def data_path = map_flow(MapFlowInput(), payload => payload.request)
-                  |> pipe(Bits(8), 1)
-  forked |> parallel(
-    data_path <=> data_egress,
-    map_flow(MapFlowInput(), payload => payload.processor) <=> owner_egress
-  )
-
-// A non-flowing queue establishes an irrevocable offer that pure routing and
-// mapping retain through an array-shaped response path.
-sync_circuit DemuxFlowChain():
-  interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  interface egress[2](Irrevocable(Bits(8)), ~role: producer)
-
-  ingress |> queue(_, 2)
-    |> demux_flow(Irrevocable(MapFlowInput()), 2,
-                  payload => payload.processor)
-    |> parallel(
-         map_flow(Irrevocable(MapFlowInput()),
-                  payload => payload.request) <=> egress[0],
-         map_flow(Irrevocable(MapFlowInput()),
-                  payload => payload.request) <=> egress[1]
-       )
 
 sync_circuit FlowThroughQueueStrongerDestination():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
@@ -237,18 +140,6 @@ circuit ParallelMapFlowHostValue():
     )
   #void
 
-// An ordinary host Array supplies the fan-in side of the same endpoint
-// pipeline used by one-to-one and one-to-many flow helpers.
-sync_circuit RRArbiterPipelineChain():
-  interface ingress0(Decoupled(Bits(8)), ~role: consumer)
-  interface ingress1(Decoupled(Bits(8)), ~role: consumer)
-  interface egress(Irrevocable(Bits(8)), ~role: producer)
-
-  def selected = Array(ingress0, ingress1)
-                 |> rr_arbiter(_)
-                 |> pipe(_, 1)
-  egress <=> selected
-
 sync_circuit EmptyRRArbiterPipeline():
   Array() |> rr_arbiter(_)
 
@@ -256,19 +147,6 @@ sync_circuit MismatchedRRArbiterPipeline():
   interface byte_input(Decoupled(Bits(8)), ~role: consumer)
   interface word_input(Decoupled(Bits(16)), ~role: consumer)
   Array(byte_input, word_input) |> rr_arbiter(_)
-
-sync_circuit FlowChain():
-  interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  interface egress(Decoupled(Bits(8)), ~role: producer)
-  output observed_valid: Bool
-  output observed_bits: Bits(8)
-
-  def buffered = preserve_endpoint(ingress |> queue(_, 3, ~pipe: #true) |> pipe(_, 2))
-  def checked = require_byte_irrevocable(buffered)
-
-  observed_valid <== checked.valid
-  observed_bits <== checked.bits
-  egress <=> checked
 
 // Verifies that one-to-one helpers accept the stronger Pipe output contract.
 sync_circuit PipeToQueueChain():
@@ -278,32 +156,12 @@ sync_circuit PipeToQueueChain():
   def buffered = ingress |> pipe(_, 1) |> queue(_, 2)
   egress <=> buffered
 
-sync_circuit ValidPipeChain():
-  interface ingress(Valid(Bits(8)), ~role: consumer)
-  interface egress(Valid(Bits(8)), ~role: producer)
-
-  def delayed = ingress |> valid_pipe(_, 2)
-  egress <=> delayed
-
 sync_circuit ValidPipeWrongProtocol():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   valid_pipe(ingress, 1)
 
 sync_circuit ValidPipeNonEndpoint():
   valid_pipe(bits(0, 8), 1)
-
-sync_circuit CtrlFlowChain():
-  interface ingress(DecoupledCtrl(), ~role: consumer)
-  interface egress(DecoupledCtrl(), ~role: producer)
-  output observed_valid: Bool
-
-  def buffered = preserve_endpoint(
-    ingress |> ctrl_queue(_, 3, ~pipe: #true) |> ctrl_pipe(_, 2)
-  )
-  def checked = require_ctrl_irrevocable(buffered)
-
-  observed_valid <== checked.valid
-  egress <=> checked
 
 // Verifies that the stronger CtrlPipe result can feed a CtrlQueue.
 sync_circuit CtrlPipeToQueueChain():
@@ -343,40 +201,27 @@ circuit ValidPipeMissingSyncDomain():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   valid_pipe(ingress, 1)
 
-def design = elaborate(FlowChain())
-
 export:
-  FlowChain
   PipeToQueueChain
-  ValidPipeChain
   ValidPipeWrongProtocol
   ValidPipeNonEndpoint
-  CtrlFlowChain
   CtrlPipeToQueueChain
   MapFlowInput
   MapFlowOutput
-  MapFlowChain
   MapFlowWrongProtocol
   MapFlowStrongerDestination
   MapFlowReusedSource
   RefinedMapFlowChain
-  FilterFlowChain
-  GateFlowChain
   FilterFlowWrongProtocol
   GateFlowWrongProtocol
   ZipFlowOutput
-  ZipFlowChain
   ZipFlowArrowChain
   ZipFlowWrongProtocol
   ZipFlowHostValue
-  MapToAtomicForkChain
-  ParallelMapFlowChain
-  DemuxFlowChain
   FlowThroughQueueStrongerDestination
   ParallelMapFlowMixedPaths
   ParallelMapFlowLengthMismatch
   ParallelMapFlowHostValue
-  RRArbiterPipelineChain
   EmptyRRArbiterPipeline
   MismatchedRRArbiterPipeline
   WrongProtocolChain
@@ -387,4 +232,3 @@ export:
   MissingSyncDomain
   CtrlMissingSyncDomain
   ValidPipeMissingSyncDomain
-  design

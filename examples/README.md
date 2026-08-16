@@ -88,6 +88,8 @@ assignments; physical metadata deliberately adds no RTL.
 | [`layered-adder.rhdl`](layered-adder.rhdl) | Ordinary imported library plus generated structure |
 | [`fresh-generators.rhdl`](fresh-generators.rhdl) | Fresh definitions without automatic deduplication |
 | [`host-parameters.rhdl`](host-parameters.rhdl) | Opaque host parameters and type-producing closures |
+| [`generator-parameters.rhdl`](generator-parameters.rhdl) | Positional, keyword, typed, defaulted, and synchronous generator parameters |
+| [`register-forms.rhdl`](register-forms.rhdl) | Inferred register types, immediate next values, reset values, and direct drives |
 | [`tiny-simd.rhdl`](tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |
 | [`stack.rhdl`](stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
 | [`async-read-memory.rhdl`](async-read-memory.rhdl) | Asynchronous reads and synchronous writes |
@@ -96,6 +98,7 @@ assignments; physical metadata deliberately adds no RTL.
 | [`sync-memory-masked.rhdl`](sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
 | [`sync-ram.rhdl`](sync-ram.rhdl) | One generic lane-masked `Valid` request flow over a fixed-latency shared 1RW RAM |
 | [`simple-memory.rhdl`](simple-memory.rhdl) | Parameterized byte-masked `SimpleMemory` protocol plus generic alignment operations |
+| [`tilelink.rhdl`](tilelink.rhdl) | Parameterized uncached and cached TileLink interface adapters |
 | [`simple-memory-flow.rhdl`](simple-memory-flow.rhdl) | `SimpleMemory` request and response channels composed with standard flow control |
 | [`simple-memory-ram.rhdl`](simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`multi-write-memory.rhdl`](multi-write-memory.rhdl) | Independent same-clock physical write ports |
@@ -121,7 +124,7 @@ assignments; physical metadata deliberately adds no RTL.
 | [`nested-interface.rhdl`](nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`flow-control.rhdl`](flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
 | [`valid-pipe.rhdl`](valid-pipe.rhdl) | Fixed-latency Valid-only pipelining without a readiness channel |
-| [`flow-topology.rhdl`](flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, zip, parallel, arbitration, buffering, fork, and payload routing |
+| [`flow-topology.rhdl`](flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, filter, gate, zip, parallel, arbitration, buffering, fork, and payload routing |
 | [`ctrl-flow.rhdl`](ctrl-flow.rhdl) | Payloadless token-flow versions of pipe, queue, arbitration, routing, join, and broadcast |
 
 ## Interface topology composition
@@ -175,6 +178,13 @@ make examples
 
 ## Generated Verilog
 
-Canonical feature examples colocate exact `verilog_reference` strings with
-their exported designs. The comparison, update, and Verilator workflows are
-documented in [`../tests/backend/README.md`](../tests/backend/README.md).
+Every concrete example design colocates its complete generated Verilog. The
+canonical `design` uses `verilog_reference`; additional names such as
+`register_design` use the matching `register_verilog_reference`. Generic
+circuit generators need a concrete `*_design` elaboration before they have one
+specific Verilog form.
+
+`make examples` checks that every concrete design owns and exports a nonempty
+reference and appears in the backend golden manifest. The comparison, update,
+and Verilator workflows are documented in
+[`../tests/backend/README.md`](../tests/backend/README.md).

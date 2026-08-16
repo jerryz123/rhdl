@@ -29,6 +29,23 @@ circuit MapFlowExample():
   def mapped = ingress |> mapping
   egress <=> mapped
 
+// Filtering consumes rejected offers, while gating leaves disabled offers
+// pending. Both conservatively expose Decoupled outputs after inspecting live
+// sidebands.
+circuit FilterFlowExample():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  input keep: Bool
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  filter_flow(ingress, payload => keep & !(payload === bits(0, 8))) <=> egress
+
+circuit GateFlowExample():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  input enabled: Bool
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  gate_flow(ingress, enabled) <=> egress
+
 // With concrete endpoints on the left, each handle is applied immediately and
 // the final value is the only still-unconnected endpoint.
 sync_circuit EndpointFirstTopology():
@@ -102,6 +119,8 @@ def join_design = elaborate(Join(Bits(8), 3))
 def broadcast_design = elaborate(Broadcast(Bits(8), 3))
 def atomic_fork_design = elaborate(AtomicFork(Bits(8), 3))
 def flow_map_design = elaborate(MapFlowExample())
+def filter_flow_design = elaborate(FilterFlowExample())
+def gate_flow_design = elaborate(GateFlowExample())
 def endpoint_first_design = elaborate(EndpointFirstTopology())
 def fan_in_project_design = elaborate(FanInProjectTopology())
 def zip_route_design = elaborate(ZipRouteTopology())
@@ -317,9 +336,461 @@ module MapFlowExample(
 endmodule
 }>>|
 
+def filter_flow_verilog_reference = @str|<<{
+module FilterFlowExample(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input                                                  keep,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  wire _GEN = keep & (|ingress_in.bits);
+  assign ingress_out = '{ready: (~_GEN | egress_in.ready)};
+  assign egress_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
+endmodule
+}>>|
+def gate_flow_verilog_reference = @str|<<{
+module GateFlowExample(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input                                                  enabled,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  assign ingress_out = '{ready: (egress_in.ready & enabled)};
+  assign egress_out = '{valid: (ingress_in.valid & enabled), bits: ingress_in.bits};
+endmodule
+}>>|
+def endpoint_first_verilog_reference = @str|<<{
+module EndpointFirstTopology(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  wire struct packed {logic ready; } _pipe_stage_ingress_out;
+  wire struct packed {logic valid; logic [7:0] bits; } _arbiter_stage_egress_out;
+  RRArbiter arbiter_stage (
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (ingress_0_in),
+    .ingress_1_in  (ingress_1_in),
+    .egress_in     (_pipe_stage_ingress_out),
+    .ingress_0_out (ingress_0_out),
+    .ingress_1_out (ingress_1_out),
+    .egress_out    (_arbiter_stage_egress_out),
+    .chosen        (/* unused */)
+  );
+  Pipe pipe_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_arbiter_stage_egress_out),
+    .egress_in   (egress_in),
+    .ingress_out (_pipe_stage_ingress_out),
+    .egress_out  (egress_out)
+  );
+endmodule
+
+module RRArbiter(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out,
+  output                                                 chosen
+);
+
+  reg  next_priority;
+  wire _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
+  wire _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
+  wire _GEN_1 = ingress_0_in.valid & ~ingress_1_in.valid;
+  wire _GEN_2 = next_priority ? _GEN_0 : ~next_priority & _GEN_0;
+  wire _GEN_3 = next_priority ? ~_GEN_1 : ~next_priority & _GEN;
+  always @(posedge clock) begin
+    if (reset)
+      next_priority <= 1'h0;
+    else
+      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
+  end // always @(posedge)
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_2 & ~_GEN_3)};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_3)};
+  assign egress_out =
+    '{valid: _GEN_2,
+      bits:
+        (next_priority
+           ? (_GEN_1
+                ? ingress_0_in.bits
+                : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits)
+           : ~next_priority
+               ? (_GEN
+                    ? ingress_1_in.bits
+                    : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits)
+               : ingress_0_in.bits)};
+  assign chosen = _GEN_3;
+endmodule
+
+module Pipe(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg  [0:0]      stage_valid;
+  reg  [0:0][7:0] stage_bits;
+  wire            _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire            _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire [7:0]      _GEN_1 =
+    _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0};
+    else
+      stage_valid[1'h0] <= _GEN_0;
+  end // always @(posedge)
+  always @(posedge clock)
+    stage_bits[1'h0] <= _GEN_1;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: stage_valid[1'h0], bits: stage_bits[1'h0]};
+endmodule
+}>>|
+def fan_in_project_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] data; logic from_second; } TaggedByte;
+`endif // _TYPESCOPE_rhdl_types
+module FanInProjectTopology(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_0_in,
+                                                         ingress_1_in,
+  input  struct packed {logic ready; }                   data_egress_in,
+                                                         origin_egress_in,
+  output struct packed {logic ready; }                   ingress_0_out,
+                                                         ingress_1_out,
+  output struct packed {logic valid; logic [7:0] bits; } data_egress_out,
+  output struct packed {logic valid; logic bits; }       origin_egress_out
+);
+
+  wire struct packed {logic ready; } _fork_stage_ingress_out;
+  wire struct packed {logic valid; TaggedByte bits; } _fork_stage_egress_0_out;
+  wire struct packed {logic valid; TaggedByte bits; } _fork_stage_egress_1_out;
+  wire struct packed {logic ready; } _pipe_stage_1_ingress_out;
+  wire struct packed {logic valid; TaggedByte bits; } _pipe_stage_1_egress_out;
+  wire struct packed {logic valid; TaggedByte bits; } _arbiter_stage_egress_out;
+  wire struct packed {logic ready; } _pipe_stage_ingress_out;
+  wire TaggedByte                    _GEN =
+    '{data: ingress_0_in.bits, from_second: (1'h0)};
+  wire TaggedByte                    _GEN_0 =
+    '{data: ingress_1_in.bits, from_second: (1'h1)};
+  wire struct packed {logic valid; logic [7:0] bits; } _GEN_1 =
+    '{valid: _fork_stage_egress_0_out.valid, bits: _fork_stage_egress_0_out.bits.data};
+  wire struct packed {logic valid; TaggedByte bits; } _GEN_2 =
+    '{valid: ingress_0_in.valid, bits: _GEN};
+  wire struct packed {logic valid; TaggedByte bits; } _GEN_3 =
+    '{valid: ingress_1_in.valid, bits: _GEN_0};
+  Pipe pipe_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_GEN_1),
+    .egress_in   (data_egress_in),
+    .ingress_out (_pipe_stage_ingress_out),
+    .egress_out  (data_egress_out)
+  );
+  RRArbiter arbiter_stage (
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (_GEN_2),
+    .ingress_1_in  (_GEN_3),
+    .egress_in     (_pipe_stage_1_ingress_out),
+    .ingress_0_out (ingress_0_out),
+    .ingress_1_out (ingress_1_out),
+    .egress_out    (_arbiter_stage_egress_out),
+    .chosen        (/* unused */)
+  );
+  Pipe_1 pipe_stage_1 (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_arbiter_stage_egress_out),
+    .egress_in   (_fork_stage_ingress_out),
+    .ingress_out (_pipe_stage_1_ingress_out),
+    .egress_out  (_pipe_stage_1_egress_out)
+  );
+  AtomicFork fork_stage (
+    .ingress_in   (_pipe_stage_1_egress_out),
+    .egress_0_in  (_pipe_stage_ingress_out),
+    .egress_1_in  (origin_egress_in),
+    .ingress_out  (_fork_stage_ingress_out),
+    .egress_0_out (_fork_stage_egress_0_out),
+    .egress_1_out (_fork_stage_egress_1_out)
+  );
+  assign origin_egress_out =
+    '{valid: _fork_stage_egress_1_out.valid,
+      bits: _fork_stage_egress_1_out.bits.from_second};
+endmodule
+
+module Pipe(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg  [0:0]      stage_valid;
+  reg  [0:0][7:0] stage_bits;
+  wire            _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire            _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire [7:0]      _GEN_1 =
+    _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0};
+    else
+      stage_valid[1'h0] <= _GEN_0;
+  end // always @(posedge)
+  always @(posedge clock)
+    stage_bits[1'h0] <= _GEN_1;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: stage_valid[1'h0], bits: stage_bits[1'h0]};
+endmodule
+
+module RRArbiter(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; TaggedByte bits; } ingress_0_in,
+                                                        ingress_1_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+  output struct packed {logic valid; TaggedByte bits; } egress_out,
+  output                                                chosen
+);
+
+  reg  next_priority;
+  wire _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
+  wire _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
+  wire _GEN_1 = ingress_0_in.valid & ~ingress_1_in.valid;
+  wire _GEN_2 = next_priority ? _GEN_0 : ~next_priority & _GEN_0;
+  wire _GEN_3 = next_priority ? ~_GEN_1 : ~next_priority & _GEN;
+  always @(posedge clock) begin
+    if (reset)
+      next_priority <= 1'h0;
+    else
+      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
+  end // always @(posedge)
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_2 & ~_GEN_3)};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_3)};
+  assign egress_out =
+    '{valid: _GEN_2,
+      bits:
+        (next_priority
+           ? (_GEN_1
+                ? ingress_0_in.bits
+                : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits)
+           : ~next_priority
+               ? (_GEN
+                    ? ingress_1_in.bits
+                    : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits)
+               : ingress_0_in.bits)};
+  assign chosen = _GEN_3;
+endmodule
+
+module Pipe_1(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; TaggedByte bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; TaggedByte bits; } egress_out
+);
+
+  reg  [0:0]           stage_valid;
+  TaggedByte[0:0]      stage_bits;
+  wire                 _GEN = ~stage_valid[1'h0] | egress_in.ready;
+  wire                 _GEN_0 = _GEN ? ingress_in.valid : stage_valid[1'h0];
+  wire TaggedByte      _GEN_1 =
+    _GEN ? (ingress_in.valid ? ingress_in.bits : stage_bits[1'h0]) : stage_bits[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0};
+    else
+      stage_valid[1'h0] <= _GEN_0;
+  end // always @(posedge)
+  always @(posedge clock)
+    stage_bits[1'h0] <= _GEN_1;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: stage_valid[1'h0], bits: stage_bits[1'h0]};
+endmodule
+
+module AtomicFork(
+  input  struct packed {logic valid; TaggedByte bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; TaggedByte bits; } egress_0_out,
+                                                        egress_1_out
+);
+
+  assign ingress_out = '{ready: (egress_0_in.ready & egress_1_in.ready)};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & egress_1_in.ready), bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & egress_0_in.ready), bits: ingress_in.bits};
+endmodule
+}>>|
+def zip_route_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] data; logic destination; } RoutedByte;
+`endif // _TYPESCOPE_rhdl_types
+module ZipRouteTopology(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } data_ingress_in,
+  input  struct packed {logic valid; logic bits; }       destination_ingress_in,
+  input  struct packed {logic ready; }                   egress_0_in,
+                                                         egress_1_in,
+  output struct packed {logic ready; }                   data_ingress_out,
+                                                         destination_ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_0_out,
+                                                         egress_1_out
+);
+
+  wire                               _GEN;
+  wire                               _GEN_0;
+  wire struct packed {logic ready; } _queue_stage_ingress_out;
+  wire struct packed {logic valid; RoutedByte bits; } _queue_stage_egress_out;
+  wire RoutedByte                    _GEN_1 =
+    '{data: data_ingress_in.bits, destination: destination_ingress_in.bits};
+  assign _GEN_0 = egress_0_in.ready;
+  assign _GEN = egress_1_in.ready;
+  wire struct packed {logic valid; RoutedByte bits; } _GEN_2 =
+    '{valid: (data_ingress_in.valid & destination_ingress_in.valid), bits: _GEN_1};
+  wire struct packed {logic ready; } _GEN_3 =
+    '{ready:
+        (~_queue_stage_egress_out.bits.destination & _GEN_0
+         | _queue_stage_egress_out.bits.destination & _GEN)};
+  Queue queue_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (_GEN_2),
+    .egress_in   (_GEN_3),
+    .ingress_out (_queue_stage_ingress_out),
+    .egress_out  (_queue_stage_egress_out),
+    .count       (/* unused */)
+  );
+  assign data_ingress_out =
+    '{ready: (_queue_stage_ingress_out.ready & destination_ingress_in.valid)};
+  assign destination_ingress_out =
+    '{ready: (_queue_stage_ingress_out.ready & data_ingress_in.valid)};
+  assign egress_0_out =
+    '{valid: (_queue_stage_egress_out.valid & ~_queue_stage_egress_out.bits.destination),
+      bits: _queue_stage_egress_out.bits.data};
+  assign egress_1_out =
+    '{valid: (_queue_stage_egress_out.valid & _queue_stage_egress_out.bits.destination),
+      bits: _queue_stage_egress_out.bits.data};
+endmodule
+
+module Queue(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedByte bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedByte bits; } egress_out,
+  output [1:0]                                          count
+);
+
+  wire RoutedByte _GEN;
+  wire            _GEN_0;
+  wire            _write_pointer_value;
+  wire            _read_pointer_value;
+  wire            _GEN_1 = 1'h0;
+  RoutedByte      storage[0:1];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[_write_pointer_value] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0]      occupancy;
+  wire            _GEN_2 = occupancy == 2'h0;
+  `ifndef SYNTHESIS
+    queue_occupancy_in_range:
+      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
+  `endif // not def SYNTHESIS
+  wire            _GEN_3 = occupancy != 2'h2;
+  assign _GEN_0 = ingress_in.valid & _GEN_3;
+  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
+  assign _GEN = ingress_in.bits;
+  Counter read_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_4),
+    .value  (_read_pointer_value),
+    .wrap   (/* unused */)
+  );
+  Counter write_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_0),
+    .value  (_write_pointer_value),
+    .wrap   (/* unused */)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_3};
+  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
+  assign count = occupancy;
+endmodule
+
+module Counter(
+  input  clock,
+         reset,
+         enable,
+  output value,
+         wrap
+);
+
+  reg state;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 1'h0;
+    else
+      state <= enable ? ~state & state - 1'h1 : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & state;
+endmodule
+}>>|
+
 export:
   TaggedByte
   RoutedByte
+  MapFlowExample
+  FilterFlowExample
+  GateFlowExample
   EndpointFirstTopology
   FanInProjectTopology
   ZipRouteTopology
@@ -329,6 +800,8 @@ export:
   broadcast_design
   atomic_fork_design
   flow_map_design
+  filter_flow_design
+  gate_flow_design
   endpoint_first_design
   fan_in_project_design
   zip_route_design
@@ -338,3 +811,8 @@ export:
   broadcast_verilog_reference
   atomic_fork_verilog_reference
   flow_map_verilog_reference
+  filter_flow_verilog_reference
+  gate_flow_verilog_reference
+  endpoint_first_verilog_reference
+  fan_in_project_verilog_reference
+  zip_route_verilog_reference

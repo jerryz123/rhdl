@@ -69,6 +69,8 @@ circuit BundlePipeline(width):
 def design = elaborate(BundlePipeline(8))
 def cast_design = elaborate(BundleCast(8))
 def specialization_design = elaborate(BundleSpecializations())
+def nested_swap_design = elaborate(NestedSwap(8))
+def hierarchy_design = elaborate(BundleHierarchy(8))
 
 def verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhdl_types
@@ -110,6 +112,64 @@ module BundleCast(
 endmodule
 }>>|
 
+def specialization_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+  typedef struct packed {logic [15:0] left; logic [15:0] right; } Pair_1;
+`endif // _TYPESCOPE_rhdl_types
+module BundleSpecializations(
+  input  Pair   narrow,
+  input  Pair_1 wide,
+  output Pair   narrow_result,
+  output Pair_1 wide_result
+);
+
+  assign narrow_result = narrow;
+  assign wide_result = wide;
+endmodule
+}>>|
+
+def nested_swap_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+  typedef struct packed {Pair payload; logic [1:0] tag; } Envelope;
+`endif // _TYPESCOPE_rhdl_types
+module NestedSwap(
+  input  Envelope source,
+  output Envelope result
+);
+
+  wire Pair _GEN = '{left: source.payload.right, right: source.payload.left};
+  assign result = '{payload: _GEN, tag: source.tag};
+endmodule
+}>>|
+def hierarchy_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhdl_types
+module BundleHierarchy(
+  input  Pair source,
+  output Pair result
+);
+
+  Swap swap (
+    .source (source),
+    .result (result)
+  );
+endmodule
+
+module Swap(
+  input  Pair source,
+  output Pair result
+);
+
+  assign result = '{left: source.right, right: source.left};
+endmodule
+}>>|
+
 export:
   Pair
   Envelope
@@ -122,5 +182,10 @@ export:
   design
   cast_design
   specialization_design
+  nested_swap_design
+  hierarchy_design
   verilog_reference
   cast_verilog_reference
+  specialization_verilog_reference
+  nested_swap_verilog_reference
+  hierarchy_verilog_reference

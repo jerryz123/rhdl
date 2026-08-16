@@ -12,6 +12,50 @@ sync_circuit ValidDelay(T, stages :: Int):
 
 def design = elaborate(ValidDelay(Bits(8), 2))
 
+def verilog_reference = @str|<<{
+module ValidDelay(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  ValidPipe valid_pipe_stage (
+    .clock      (clock),
+    .reset      (reset),
+    .ingress_in (ingress_in),
+    .egress_out (egress_out)
+  );
+endmodule
+
+module ValidPipe(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  reg  [1:0]      stage_valid;
+  reg  [1:0][7:0] stage_bits;
+  wire [7:0]      _GEN = ingress_in.valid ? ingress_in.bits : stage_bits[1'h0];
+  wire [7:0]      _GEN_0 = stage_valid[1'h0] ? stage_bits[1'h0] : stage_bits[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      stage_valid <= '{1'h0, 1'h0};
+    else begin
+      stage_valid[1'h1] <= stage_valid[1'h0];
+      stage_valid[1'h0] <= ingress_in.valid;
+    end
+  end // always @(posedge)
+  always @(posedge clock) begin
+    stage_bits[1'h1] <= _GEN_0;
+    stage_bits[1'h0] <= _GEN;
+  end // always @(posedge)
+  assign egress_out = '{valid: stage_valid[1'h1], bits: stage_bits[1'h1]};
+endmodule
+}>>|
+
 export:
   ValidDelay
   design
+  verilog_reference
