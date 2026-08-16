@@ -1,10 +1,14 @@
 #lang rhombus
-// Checks RFPL structural hierarchy, shared stamping, and CIRCT module emission.
+// Checks RFPL rectangles, placed hierarchy, shared stamping, and CIRCT emission.
 
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/backend/circt.rhm".emit_circt
   "../frontend/foundation.rhm".FloorplanDefinition
+  "../frontend/foundation.rhm".Coordinate
+  "../frontend/foundation.rhm".FloorplanPlacement
+  "../frontend/foundation.rhm".Length
+  "../frontend/foundation.rhm".RectOutline
   "../../examples/rfpl/circuit-pair.rfpl" as fixture
 
 def elaboration = fixture.elaboration
@@ -16,6 +20,21 @@ def crossed_wires = design.modules.find(
   fun (module_def): module_def.name == "CrossedWires"
 )
 def adder = design.modules.find(fun (module_def): module_def.name == "Adder")
+def shell_definition = elaboration.floorplans.find(
+  fun (definition): definition.name == "AdderShell"
+)
+def crossed_wires_definition = elaboration.floorplans.find(
+  fun (definition): definition.name == "CrossedWires"
+)
+def left_placement = elaboration.placements.find(
+  fun (placement): placement.instance.operation.attribute("name") == "left"
+)
+def right_placement = elaboration.placements.find(
+  fun (placement): placement.instance.operation.attribute("name") == "right"
+)
+def crossed_placement = elaboration.placements.find(
+  fun (placement): placement.instance.operation.attribute("name") == "crossed"
+)
 def pair_instances = pair.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.instance"
 )
@@ -45,6 +64,32 @@ check:
   elaboration.floorplans.length() ~is 3
   top is_a FloorplanDefinition ~is #true
   top.name ~is "AdderPair"
+  top.outline is_a RectOutline ~is #true
+  top.outline.width is_a Length ~is #true
+  top.outline.width.picometers ~is 100000000
+  top.outline.height.picometers ~is 50000000
+  shell_definition.module_def === shell ~is #true
+  shell_definition.outline.width.picometers ~is 40000000
+  shell_definition.outline.height.picometers ~is 24000000
+  crossed_wires_definition.module_def === crossed_wires ~is #true
+  crossed_wires_definition.outline.width.picometers ~is 16000000
+  crossed_wires_definition.outline.height.picometers ~is 8000000
+  elaboration.floorplans.filter(
+    ~keep: fun (definition): definition.name == "AdderShell"
+  ).length() ~is 1
+  elaboration.placements.length() ~is 3
+  left_placement is_a FloorplanPlacement ~is #true
+  left_placement.coordinate is_a Coordinate ~is #true
+  left_placement.parent_module === pair ~is #true
+  left_placement.child === shell_definition ~is #true
+  left_placement.coordinate.x.picometers ~is 0
+  left_placement.coordinate.y.picometers ~is 0
+  right_placement.child === shell_definition ~is #true
+  right_placement.coordinate.x.picometers ~is 50000000
+  right_placement.coordinate.y.picometers ~is 0
+  crossed_placement.child === crossed_wires_definition ~is #true
+  crossed_placement.coordinate.x.picometers ~is 42000000
+  crossed_placement.coordinate.y.picometers ~is 30000000
   design.modules.length() ~is 4
   pair_instances.length() ~is 3
   pair_instances[0].attribute("module") === shell ~is #true
@@ -68,4 +113,7 @@ check:
   circt.contains("hw.instance \"crossed\" @CrossedWires") ~is #true
   circt.contains("hw.instance \"wrapped\" @Adder") ~is #true
   circt.contains("comb.add") ~is #true
+  circt.contains("picometers") ~is #false
+  circt.contains("rfpl.") ~is #false
+  circt.contains("at:") ~is #false
   emit_circt(design) ~is circt

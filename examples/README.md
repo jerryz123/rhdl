@@ -57,8 +57,11 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 [`rfpl/circuit-pair.rfpl`](rfpl/circuit-pair.rfpl) defines an RFPL top module,
 nests and stamps one sub-floorplan twice, routes one instance through a
 pure-wiring `CrossedWires` floorplan, and contains an imported RHDL adder
-circuit as the only logic-bearing module. Its colocated `verilog_reference`
-shows the complete emitted hierarchy and direct wiring assignments.
+circuit as the only logic-bearing module. Every floorplan declares an exact
+rectangular macro size, including dimensions computed from host parameters,
+and every child floorplan has an explicit contained coordinate. The colocated
+`verilog_reference` shows the complete emitted hierarchy and direct wiring
+assignments; physical metadata deliberately adds no RTL.
 
 ## Feature showcases
 

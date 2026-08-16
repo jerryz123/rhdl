@@ -53,7 +53,7 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
-| [`../rfpl/`](../rfpl/PLAN.md) | Structural floorplans that instantiate and wire floorplans or RHDL circuits without implementing logic | Foundation types and wiring, kernel construction, hierarchy support, generator parameters, and core IR verification |
+| [`../rfpl/`](../rfpl/PLAN.md) | Rectangular physical floorplans with contained child coordinates and logic-free structural wiring | Foundation types and wiring, kernel construction, clocking-aware circuit instances, generator parameters, instance-member support, and core IR verification |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, interfaces, and local connection legality | Public `#lang rhdl` and protocol-neutral `std/` libraries |

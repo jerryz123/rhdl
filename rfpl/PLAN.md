@@ -7,18 +7,20 @@
 This document records the accepted direction and concrete initial cut for
 RFPL. The first structural vertical slice is implemented: `#lang rfpl`
 defines floorplans, admits nested floorplans and RHDL circuit instances,
-enforces structural-only module bodies, and emits the shared design through
-the existing CIRCT backend. Strap-pin specialization is the next semantic
-milestone.
+requires an exact rectangular physical outline for every floorplan definition,
+requires coordinates for contained floorplan instances, enforces
+structural-only module bodies, and emits the shared design through the existing
+CIRCT backend. Strap-pin specialization is the next semantic milestone.
 
 The first cut is intentionally much narrower than a physical-design database
 or geometry language. It establishes a structural floorplan hierarchy that
-can contain RHDL circuits, preserves ordinary typed wiring, rejects logic in
-floorplan bodies, and emits the complete hierarchy as CIRCT modules.
+can contain RHDL circuits, gives every floorplan a rectangular macro width and
+height, preserves ordinary typed wiring, rejects logic in floorplan bodies,
+and emits the complete hierarchy as CIRCT modules.
 
-Geometry, placement constraints, technology data, and physical-design tool
-integration build on this structural foundation later. They must not be
-designed into the first implementation speculatively.
+Placement coordinates, nonrectangular geometry, technology grids, constraints,
+and physical-design tool integration build on this foundation later. They
+must not be designed into the rectangular-outline feature speculatively.
 
 ## Decision
 
@@ -29,6 +31,8 @@ A floorplan behaves similarly to an RHDL circuit:
 
 - It is a parameterized host-language generator.
 - It declares typed input and output ports.
+- It declares one exact rectangular physical size.
+- Its child floorplans have explicit lower-left coordinates within it.
 - Its body may use ordinary Rhombus host computation to generate structure.
 - Calling it elaborates a module definition.
 - The resulting object may be instantiated hierarchically.
@@ -36,7 +40,8 @@ A floorplan behaves similarly to an RHDL circuit:
 
 Unlike a circuit, a floorplan body may contain only:
 
-- Instances of other floorplans.
+- One `size(width: ..., height: ...)` declaration.
+- Placed instances of other floorplans.
 - Instances of RHDL circuits.
 - Exact-type wiring among its own ports, child ports, and optional internal
   alias wires.
@@ -89,6 +94,10 @@ structural modules:
 - `floorplan`
 - `input`
 - `output`
+- `size`
+- `Length`, `RectOutline`, `nm`, and `um`
+- `Coordinate` and `FloorplanPlacement` for inspecting elaborated placement
+  metadata
 - `wire`, if the implementation retains explicit alias wires
 - `inst`
 - `<==`
@@ -123,6 +132,7 @@ import:
   "blocks.rhdl" open
 
 floorplan Pair(width):
+  size(width: um(100), height: um(50))
   input(a, b): Bits(width)
   output(sum0, sum1): Bits(width)
 
@@ -177,6 +187,7 @@ least:
 - Its floorplan declaration identity and source name.
 - Its host generator arguments for diagnostics only; they are not hashed or
   compared in the initial cut.
+- Its required `RectOutline` with exact physical width and height.
 - Its source location.
 
 `FloorplanDefinition` is not itself a second module IR. Its core module is the
@@ -189,13 +200,14 @@ The wrapper exists to:
 - Let RFPL's `inst` admit both floorplans and circuits.
 - Prevent RHDL's `inst` from admitting floorplans.
 - Select floorplan modules for structural-only verification.
-- Retain room for later strap and physical metadata without placing that
-  metadata in the RHDL hardware IR prematurely.
+- Retain rectangular physical metadata and later strap specialization without
+  placing either in the RHDL hardware IR prematurely.
 
 The complete RFPL elaboration result contains the shared RHDL `Design`, the
 explicit top `FloorplanDefinition`, and the set of all floorplan definitions
-created during elaboration. Child circuit modules remain ordinary modules in
-the same design.
+created during elaboration. It also retains every `FloorplanPlacement`, tying
+an instance operation to its parent module, child definition, and coordinate.
+Child circuit modules remain ordinary modules in the same design.
 
 ## Elaboration behavior
 
@@ -204,6 +216,10 @@ the same design.
 - Generator arguments are host values, not live hardware values.
 - Each generator call creates a fresh floorplan definition in the initial cut.
 - A floorplan definition can be stored and instantiated more than once.
+- Every generated definition declares `size` exactly once; every stamp of that
+  definition shares the same outline.
+- Only the selected top may be generated outside a floorplan body. Every other
+  floorplan generator call occurs while a parent floorplan body is active.
 - Active recursion by declaration identity is rejected.
 - Nested floorplan declarations may capture host values but not parent
   hardware ports or child-instance handles.
@@ -217,6 +233,60 @@ beneath the top floorplan.
 
 The elaboration result must retain its explicit top instead of returning a
 bare `Design` whose top is inferred from module order.
+
+## Physical rectangle
+
+Every generated floorplan definition declares exactly one rectangular macro
+outline:
+
+```rhombus
+floorplan Macro(bit_width):
+  size(width: um(bit_width * 5), height: um(20))
+  // ports, instances, and wiring
+```
+
+`Length` is an exact nonnegative physical distance. The initial closed unit
+surface is `nm(nonnegative_int)` and `um(nonnegative_int)`, both canonicalized
+to an integer number of picometers so equality and later specialization keys
+never depend on floating-point behavior. `size` additionally requires both
+dimensions to be positive. Bare numbers and negative lengths are rejected;
+zero is reserved for coordinate components.
+
+The outline belongs to `FloorplanDefinition`, not an instance occurrence.
+Stamping one definition repeatedly preserves one physical macro shape. A
+different size requires a separately generated definition or, after strap
+support exists, a distinct specialization. Per-instance size overrides are
+not allowed.
+
+The rectangle is implicitly anchored at `(0, 0)` and extends to
+`(width, height)`. Bare RHDL circuits have no RFPL outline; wrap a circuit in a
+floorplan to assign its physical macro boundary.
+
+## Floorplan containment and coordinates
+
+Every instance whose child is a `FloorplanDefinition` requires an explicit
+lower-left coordinate relative to its parent floorplan:
+
+```rhombus
+def child = ChildFloorplan()
+inst placed(child, at: (um(10), um(5)))
+```
+
+Coordinate components are nonnegative `Length` values, so `um(0)` and `nm(0)`
+represent the parent origin while negative or unitless components are invalid.
+The placed child rectangle must fit completely within the parent's rectangle.
+Overlap between siblings, orientation, halos, and placement grids remain
+deferred.
+
+The top floorplan is the sole root exception. A second root-level floorplan is
+invalid, as is generating a floorplan while an RHDL circuit body is active.
+The whole-elaboration verifier independently rejects floorplan instances under
+circuit modules and floorplan instances that bypass RFPL's coordinate-aware
+`inst` form.
+
+RHDL circuit instances inside a floorplan do not accept `at:`. They are logical
+implementation children rather than independently placed RFPL macros; wrap a
+circuit in a floorplan when it needs a physical rectangle and coordinate.
 
 ## Ports and wiring
 
@@ -312,8 +382,11 @@ emitted MLIR in integration tests.
 
 No floorplan marker is required in CIRCT for the initial cut. The RFPL
 elaboration result retains which modules are floorplans for source-level
-inspection. Add a CIRCT attribute or separate physical dialect only when a
-concrete downstream consumer requires one.
+inspection, including each definition's rectangle. Physical dimensions do not
+become ports, constants, or logic, and placement coordinates remain in the
+RFPL elaboration result, so neither changes CIRCT or Verilog output. Add a
+CIRCT attribute, sidecar, or physical dialect only when a concrete downstream
+consumer defines the contract.
 
 ## RHDL construction boundary
 
@@ -369,9 +442,11 @@ semantics:
 - Strap values never become CIRCT module ports and never enter RHDL logic.
 
 The specialization key will be based on the base floorplan definition identity
-and canonical strap bindings. Its exact object model, allowed static types,
+and canonical strap bindings. A specialization may have its own rectangular
+outline; two differently sized variants cannot remain instances of one
+physical definition. The exact strap object model, allowed static types,
 forwarding rules, and naming are specified when strap support begins. Do not
-implement geometry or a general physical IR as a prerequisite.
+add a general physical IR as a prerequisite.
 
 Use unambiguous names for later power distribution concepts:
 
@@ -451,7 +526,26 @@ enforce:
   floorplan is rejected even when the operator is not exported by RFPL.
 - Add dependency-boundary checks.
 
-### Milestone 5: strap-pin specialization
+### Milestone 5: rectangular macro dimensions — implemented
+
+- Require one `size(width: ..., height: ...)` declaration per floorplan.
+- Represent dimensions as positive, exact, explicitly unit-bearing `Length`
+  values.
+- Retain one `RectOutline` on each `FloorplanDefinition`.
+- Keep physical dimensions out of the logical RHDL IR and CIRCT output.
+- Reject missing, duplicate, zero, negative, and unitless dimensions.
+
+### Milestone 6: contained floorplan coordinates — implemented
+
+- Permit only one top floorplan outside an active floorplan body.
+- Require `inst child(definition, at: (x, y))` for floorplan children.
+- Retain typed placement records in the RFPL elaboration result.
+- Require nonnegative coordinates and complete containment in the parent
+  rectangle.
+- Reject floorplans under circuits and coordinate-less low-level instances in
+  whole-elaboration verification.
+
+### Milestone 7: strap-pin specialization
 
 - Specify closed strap types and canonical equality.
 - Bind straps at floorplan instance sites.
@@ -459,12 +553,12 @@ enforce:
 - Emit distinct `hw.module` symbols for distinct specializations.
 - Retain deterministic provenance explaining each de-uniquification.
 
-Physical geometry and placement planning begin only after Milestone 5 has a
-real example that requires them.
+Automatic placement and geometry beyond rectangular containment begin only
+after Milestone 7 has a real example that requires them.
 
 ## Focused verification plan
 
-The first four milestones require these checks:
+The first six milestones require these checks:
 
 - A pass-through floorplan emits one `hw.module` and direct `hw.output`.
 - A floorplan containing one circuit emits one floorplan module, one circuit
@@ -472,6 +566,15 @@ The first four milestones require these checks:
 - Reusing one child definition twice emits two instances targeting the same
   module symbol.
 - A nested floorplan may itself contain circuit instances.
+- Every floorplan retains one positive exact rectangular outline.
+- Reused instances of one definition share that definition's rectangle.
+- Host generator parameters may determine dimensions.
+- Missing, duplicate, zero, negative, and unitless sizes fail.
+- Every floorplan child instance has a nonnegative coordinate and fits within
+  its parent rectangle.
+- A second root floorplan, a floorplan generated or instantiated by a circuit,
+  and a coordinate-less floorplan instance fail.
+- Circuit instances reject RFPL coordinates.
 - Floorplan inputs and child outputs are readable but not driveable.
 - Floorplan outputs and child inputs are driveable and have exactly one
   driver.
@@ -498,8 +601,10 @@ code changes.
 The first cut does not include:
 
 - Strap pins or module specialization.
-- Coordinates, outlines, shapes, layers, tracks, sites, or units.
-- Macro placement or standard-cell placement.
+- Nonrectangular outlines, shapes, layers, tracks, sites, technology grids, or
+  unit conversion beyond exact `nm` and `um`.
+- Automatic macro placement, sibling-overlap resolution, orientation, or
+  standard-cell placement.
 - Regions, blockages, halos, or pin placement constraints.
 - Power domains or power distribution.
 - DEF, LEF, OpenDB, or OpenROAD emission.
@@ -517,8 +622,10 @@ must not be accepted as a substitute for missing RFPL semantics.
 The initial cut is complete when one checked-in `.rfpl` example can:
 
 - Define a top floorplan with typed ports.
+- Declare one exact rectangular macro size for every floorplan definition.
 - Instantiate at least one imported RHDL circuit.
 - Instantiate a nested floorplan.
+- Place every nested floorplan at an explicit contained coordinate.
 - Stamp one child definition more than once.
 - Wire all boundaries using exact-type connections.
 - Elaborate to one shared verified RHDL core `Design` with an explicit RFPL

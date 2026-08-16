@@ -1,5 +1,5 @@
 #lang rhombus
-// Verifies that RFPL floorplan modules contain hierarchy and wiring but no logic.
+// Verifies RFPL's logic-free hierarchy direction and placed floorplan instances.
 
 import:
   "../../rhdl/core/ir.rhm" open
@@ -33,18 +33,31 @@ fun verify_floorplan_module(module_def):
       )
   module_def
 
-fun verify_floorplan_hierarchy(design, floorplan_definitions):
+fun verify_floorplan_hierarchy(design,
+                               floorplan_definitions,
+                               floorplan_placements = []):
   def floorplan_modules = floorplan_definitions.map(
     fun (definition): definition.module_def
   )
   fun is_floorplan_module(module_def):
     floorplan_modules.find(fun (candidate): candidate === module_def) != #false
   for (module_def in design.modules):
-    unless is_floorplan_module(module_def)
-    | for (operation in module_def.operations):
-        when operation.opcode == "rtl.instance"
-        | def child = operation.attribute("module")
-          when is_floorplan_module(child)
+    for (operation in module_def.operations):
+      when operation.opcode == "rtl.instance"
+      | def child = operation.attribute("module")
+        when is_floorplan_module(child)
+        | if is_floorplan_module(module_def)
+          | unless floorplan_placements.find(
+              fun (placement): placement.instance.operation === operation
+            )
+            | error(
+                ~who: #'floorplan,
+                String.append(
+                  operation.location.describe(),
+                  ": floorplan instance ", operation.attribute("name"),
+                  " requires an at: coordinate"
+                )
+              )
           | error(
               ~who: #'floorplan,
               String.append(

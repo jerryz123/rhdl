@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines RFPL floorplans as structural wrappers around verified RHDL core modules.
+// Defines rectangular RFPL floorplans, contained placements, and structural wiring.
 
 import:
   rhombus/meta open
@@ -12,10 +12,12 @@ import:
   "../../rhdl/frontend/foundation.rhm".(<==)
   "../../rhdl/frontend/kernel.rhm".CircuitDefinition
   "../../rhdl/frontend/kernel.rhm".build_circuit as kernel_build_circuit
+  "../../rhdl/frontend/kernel.rhm".active_module as kernel_active_module
   "../../rhdl/frontend/kernel.rhm".new_circuit_identity as kernel_new_circuit_identity
   "../../rhdl/frontend/kernel.rhm".run_elaboration as kernel_run_elaboration
-  "../../rhdl/frontend/layers/hierarchy.rhm".inst
+  "../../rhdl/frontend/support/clocking.rhm".instantiate as clocking_inst
   "../../rhdl/frontend/support/generator-parameters.rhm".GeneratorParameter
+  "../../rhdl/frontend/support/instance-members.rhm".InstanceMembers
   "verify.rhm".verify_floorplan_hierarchy
   "verify.rhm".verify_floorplan_module
 
@@ -27,26 +29,86 @@ export:
   output
   <==
   inst
+  Length
+  RectOutline
+  Coordinate
+  FloorplanPlacement
+  nm
+  um
+  size
   FloorplanDefinition
   FloorplanElaboration
   floorplan
   elaborate
 
+class Length(picometers):
+  constructor (picometers):
+    unless picometers is_a Int && picometers >= 0
+    | error(~who: #'Length, "picometers must be a nonnegative host Int")
+    super(picometers)
+
+class RectOutline(width, height):
+  constructor (width, height):
+    unless width is_a Length
+    | error(~who: #'RectOutline, "width must be a Length")
+    unless height is_a Length
+    | error(~who: #'RectOutline, "height must be a Length")
+    unless width.picometers > 0
+    | error(~who: #'RectOutline, "width must be positive")
+    unless height.picometers > 0
+    | error(~who: #'RectOutline, "height must be positive")
+    super(width, height)
+
+class Coordinate(x, y):
+  constructor (x, y):
+    unless x is_a Length
+    | error(~who: #'Coordinate, "x must be a Length")
+    unless y is_a Length
+    | error(~who: #'Coordinate, "y must be a Length")
+    super(x, y)
+
+fun nm(magnitude):
+  unless magnitude is_a Int && magnitude >= 0
+  | error(~who: #'nm, "magnitude must be a nonnegative host Int")
+  Length(magnitude * 1000)
+
+fun um(magnitude):
+  unless magnitude is_a Int && magnitude >= 0
+  | error(~who: #'um, "magnitude must be a nonnegative host Int")
+  Length(magnitude * 1000000)
+
 class FloorplanDefinition(module_def,
                           identity,
                           name,
                           arguments,
+                          outline,
                           location = Location()):
   implements CircuitDefinition
   override method core_module(): module_def
 
-class FloorplanElaboration(design, top, floorplans)
+class FloorplanPlacement(parent_module, child, instance, coordinate)
 
-class FloorplanContext(mutable definitions = []):
+class FloorplanElaboration(design, top, floorplans, placements)
+
+class FloorplanContext(mutable definitions = [],
+                       mutable placements = [],
+                       mutable root_started = #false):
   method add(definition):
     definitions := definitions ++ [definition]
+  method add_placement(placement):
+    placements := placements ++ [placement]
+
+class FloorplanBuildMetadata(name,
+                             mutable module_def = #false,
+                             mutable outline = #false):
+  method set_outline(new_outline, location = Location()):
+    when outline
+    | floorplan_fail("floorplan " ++ name ++ " declares size more than once",
+                     location)
+    outline := new_outline
 
 Parameter.def current_floorplan_context = #false
+Parameter.def current_floorplan_build_metadata = #false
 
 fun floorplan_fail(message, location = Location()):
   error(~who: #'floorplan, location.describe() ++ ": " ++ message)
@@ -58,25 +120,119 @@ fun require_floorplan_context(location = Location()):
                    location)
   context
 
+fun active_floorplan_metadata(location = Location()):
+  def metadata = current_floorplan_build_metadata()
+  if metadata is_a FloorplanBuildMetadata && metadata.module_def === kernel_active_module(location)
+  | metadata
+  | #false
+
+fun require_active_floorplan(location = Location()):
+  def metadata = active_floorplan_metadata(location)
+  unless metadata
+  | floorplan_fail("operation requires an active floorplan body", location)
+  metadata
+
+fun set_floorplan_size(width, height, location = Location()):
+  def metadata = active_floorplan_metadata(location)
+  unless metadata
+  | floorplan_fail("size may only be declared inside a floorplan body", location)
+  unless width is_a Length
+  | floorplan_fail("floorplan size width must be a Length", location)
+  unless height is_a Length
+  | floorplan_fail("floorplan size height must be a Length", location)
+  unless width.picometers > 0
+  | floorplan_fail("floorplan size width must be positive", location)
+  unless height.picometers > 0
+  | floorplan_fail("floorplan size height must be positive", location)
+  metadata.set_outline(RectOutline(width, height), location)
+
+fun instantiate_rfpl(name,
+                     child,
+                     coordinate = #false,
+                     clock = #false,
+                     reset = #false,
+                     location = Location()) :~ InstanceMembers:
+  def metadata = require_active_floorplan(location)
+  def is_floorplan = child is_a FloorplanDefinition
+  when is_floorplan && !(coordinate is_a Coordinate)
+  | floorplan_fail("floorplan instance " ++ name ++ " requires an at: coordinate",
+                   location)
+  when !is_floorplan && coordinate
+  | floorplan_fail("only floorplan instances accept an at: coordinate",
+                   location)
+  def instance = clocking_inst(name, child, clock, reset, location)
+  when is_floorplan
+  | require_floorplan_context(location).add_placement(
+      FloorplanPlacement(metadata.module_def, child, instance, coordinate)
+    )
+  instance
+
 fun build_floorplan(identity,
                     name,
                     arguments,
                     implementation,
                     location = Location()):
   def context = require_floorplan_context(location)
+  def parent_metadata = current_floorplan_build_metadata()
+  if parent_metadata
+  | unless active_floorplan_metadata(location) === parent_metadata
+    | floorplan_fail(
+        "floorplan " ++ name ++ " may only be generated directly inside a floorplan body",
+        location
+      )
+  | block:
+      when context.root_started
+      | floorplan_fail(
+          "only the top floorplan may be generated outside a floorplan body",
+          location
+        )
+      context.root_started := #true
+  def metadata = FloorplanBuildMetadata(name)
+  fun scoped_implementation():
+    metadata.module_def := kernel_active_module(location)
+    parameterize { current_floorplan_build_metadata: metadata }:
+      implementation()
   def module_def = kernel_build_circuit(identity,
                                         name,
                                         arguments,
-                                        implementation,
+                                        scoped_implementation,
                                         location)
+  unless metadata.outline
+  | floorplan_fail(
+      "floorplan " ++ name ++ " must declare size(width: ..., height: ...)",
+      location
+    )
   verify_floorplan_module(module_def)
   def definition = FloorplanDefinition(module_def,
                                        identity,
                                        name,
                                        arguments,
+                                       metadata.outline,
                                        location)
   context.add(definition)
   definition
+
+fun verify_floorplan_placements(context):
+  for (placement in context.placements):
+    def parent = context.definitions.find(
+      fun (definition): definition.module_def === placement.parent_module
+    )
+    unless parent
+    | floorplan_fail("floorplan placement has no floorplan parent")
+    def coordinate = placement.coordinate
+    def child = placement.child
+    def right_edge = coordinate.x.picometers + child.outline.width.picometers
+    def top_edge = coordinate.y.picometers + child.outline.height.picometers
+    def fits_width = right_edge <= parent.outline.width.picometers
+    def fits_height = top_edge <= parent.outline.height.picometers
+    unless fits_width && fits_height
+    | floorplan_fail(
+        String.append("floorplan instance ",
+                      placement.instance.operation.attribute("name"),
+                      " does not fit within parent ", parent.name,
+                      " at its coordinate"),
+        placement.instance.operation.location
+      )
 
 fun run_floorplan_elaboration(program, location = Location()):
   unless program is_a Function
@@ -94,8 +250,12 @@ fun run_floorplan_elaboration(program, location = Location()):
           top_definition := top
           top
       )
-  verify_floorplan_hierarchy(design, context.definitions)
-  FloorplanElaboration(design, top_definition, context.definitions)
+  verify_floorplan_hierarchy(design, context.definitions, context.placements)
+  verify_floorplan_placements(context)
+  FloorplanElaboration(design,
+                       top_definition,
+                       context.definitions,
+                       context.placements)
 
 defn.macro 'floorplan $(name :: Identifier)($(argument :: GeneratorParameter), ...): $body; ...':
   def floorplan_name = name.to_source_string()
@@ -110,6 +270,53 @@ defn.macro 'floorplan $(name :: Identifier)($(argument :: GeneratorParameter), .
                        [$argument.binding, ...],
                        implementation)
    »'
+
+defn.sequence_macro 'inst $(name :: Identifier)($argument, ...); $tail; ...':
+  def instance_name = name.to_source_string()
+  def instance:
+    match '($argument, ...)'
+    | '($child)':
+        'instantiate_rfpl($instance_name, $child)'
+    | '($child, at: ($x, $y))':
+        'instantiate_rfpl($instance_name, $child, Coordinate($x, $y))'
+    | '($child, ~clock: $clock, ~reset: $reset)':
+        'instantiate_rfpl($instance_name, $child, #false, $clock, $reset)'
+    | '($child, ~clock: $clock)':
+        'instantiate_rfpl($instance_name, $child, #false, $clock)'
+    | '($child, ~reset: $reset)':
+        'instantiate_rfpl($instance_name, $child, #false, #false, $reset)'
+    | ~else:
+        syntax_meta.error(
+          "expected (child), (child, at: (x, y)), or circuit clock/reset overrides",
+          '($argument, ...)'
+        )
+  def expansion:
+    if [tail, ...].length() == 0
+    | 'def $name :: InstanceMembers = $instance; $name'
+    | 'def $name :: InstanceMembers = $instance'
+  values(expansion, '$tail; ...')
+
+expr.macro 'inst $(name :: Identifier)($argument, ...)':
+  def instance_name = name.to_source_string()
+  match '($argument, ...)'
+  | '($child)':
+      'instantiate_rfpl($instance_name, $child) :: InstanceMembers'
+  | '($child, at: ($x, $y))':
+      'instantiate_rfpl($instance_name, $child, Coordinate($x, $y)) :: InstanceMembers'
+  | '($child, ~clock: $clock, ~reset: $reset)':
+      'instantiate_rfpl($instance_name, $child, #false, $clock, $reset) :: InstanceMembers'
+  | '($child, ~clock: $clock)':
+      'instantiate_rfpl($instance_name, $child, #false, $clock) :: InstanceMembers'
+  | '($child, ~reset: $reset)':
+      'instantiate_rfpl($instance_name, $child, #false, #false, $reset) :: InstanceMembers'
+  | ~else:
+      syntax_meta.error(
+        "expected (child), (child, at: (x, y)), or circuit clock/reset overrides",
+        '($argument, ...)'
+      )
+
+expr.macro 'size(width: $width, height: $height)':
+  'set_floorplan_size($width, $height)'
 
 expr.macro 'elaborate($body)':
   'run_floorplan_elaboration(fun (): $body)'
