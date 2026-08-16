@@ -31,6 +31,11 @@ Run the minimum target that covers a change:
 ```sh
 make check-boundaries       # package, dependency, and file-type rules
 make examples               # all canonical example modules
+make examples-rhdl          # built-in language examples only
+make examples-std           # standard-library examples only
+make examples-lop           # abstraction-level comparisons only
+make examples-rfpl          # logical and physical RFPL examples only
+make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses
@@ -44,6 +49,7 @@ make unit-test              # frontend plus backend Rhombus tests
 make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary
 make riscv-test             # pure RISC-V model, decode, and package boundaries
+make host-checks            # host and model checks without the explicit example sweep
 make host-test              # unit tests, examples, NoC, RISC-V, and TileLink
 make circt-test             # CIRCT verification and Verilator simulation
 make verilog-golden-test    # exact example-owned SystemVerilog references

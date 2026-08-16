@@ -168,8 +168,8 @@ information. `Bits`, `SInt`, `Clock`, `Reset`, `Bool`, `Vec`, bundles, and
 hardware enums provide concise annotation forms. Extension-produced types can use
 `Hardware.of(type)` directly.
 
-See [`../../examples/host-parameters.rhdl`](../../examples/host-parameters.rhdl)
-and [`../../examples/layered-adder.rhdl`](../../examples/layered-adder.rhdl).
+See [`../../examples/rhdl/host-parameters.rhdl`](../../examples/rhdl/host-parameters.rhdl)
+and [`../../examples/rhdl/layered-adder.rhdl`](../../examples/rhdl/layered-adder.rhdl).
 
 ## Nested circuits and hierarchy
 
@@ -199,9 +199,9 @@ A nested `sync_circuit` follows the same domain rules as any other synchronous
 child. A sync parent propagates its ambient clock and reset only to marked sync
 children; ordinary children never inherit a domain by port name or type.
 
-See [`../../examples/nested-circuit.rhdl`](../../examples/nested-circuit.rhdl)
+See [`../../examples/rhdl/nested-circuit.rhdl`](../../examples/rhdl/nested-circuit.rhdl)
 and the integrated host-specialization example
-[`../../examples/tiny-simd.rhdl`](../../examples/tiny-simd.rhdl).
+[`../../examples/rhdl/tiny-simd.rhdl`](../../examples/rhdl/tiny-simd.rhdl).
 
 ## Deferred host descriptions
 

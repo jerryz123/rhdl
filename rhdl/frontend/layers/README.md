@@ -158,7 +158,7 @@ at the narrower width. Equal-width representation changes between `Bits` and
 `SInt` continue to use `cast` or `.into`. Signed expanding arithmetic,
 division, remainder, and implicit width inference are not part of this layer.
 
-See [`../../../examples/signed-integers.rhdl`](../../../examples/signed-integers.rhdl).
+See [`../../../examples/rhdl/signed-integers.rhdl`](../../../examples/rhdl/signed-integers.rhdl).
 
 ## Hardware enums
 
@@ -199,12 +199,12 @@ This produces a six-bit nominal enum with encodings `1`, `2`, `4`, `8`, `16`,
 and `32`. It is distinct from both `OneHot(6)` and every other enum declaration,
 but its packed representation can directly drive `mux_onehot`. Keyed arms are
 checked against that nominal enum and must cover each member exactly once. See
-[`../../../examples/one-hot-enum.rhdl`](../../../examples/one-hot-enum.rhdl).
+[`../../../examples/rhdl/one-hot-enum.rhdl`](../../../examples/rhdl/one-hot-enum.rhdl).
 
 Each evaluated declaration has distinct nominal identity. Members lower to
 `Bits(width)` constants plus casts. Enum-selected `mux_lookup` requires keys
 from exactly the selector's enum and retains a mandatory default for unused
-encodings. See [`../../../examples/enum-state.rhdl`](../../../examples/enum-state.rhdl).
+encodings. See [`../../../examples/rhdl/enum-state.rhdl`](../../../examples/rhdl/enum-state.rhdl).
 
 ## One-hot values
 

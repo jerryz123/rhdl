@@ -3,12 +3,27 @@
 set -euo pipefail
 
 allow_empty=false
-if [[ "${1:-}" == "--allow-empty" ]]; then
-  allow_empty=true
-elif [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--allow-empty]" >&2
-  exit 2
+source_roots=()
+for argument in "$@"; do
+  if [[ "$argument" == "--allow-empty" ]]; then
+    allow_empty=true
+  elif [[ "$argument" == --* ]]; then
+    echo "usage: $0 [--allow-empty] [SOURCE_ROOT ...]" >&2
+    exit 2
+  else
+    source_roots+=("$argument")
+  fi
+done
+if (( ${#source_roots[@]} == 0 )); then
+  source_roots=(examples)
 fi
+
+for source_root in "${source_roots[@]}"; do
+  if [[ ! -e "$source_root" ]]; then
+    echo "example source root not found: $source_root" >&2
+    exit 2
+  fi
+done
 
 status=0
 while IFS= read -r source_file; do
@@ -47,6 +62,6 @@ while IFS= read -r source_file; do
       fi
     done < <(sed -n -E 's/^(sync_)?circuit ([A-Za-z0-9_]+).*/\2/p' "$source_file")
   fi
-done < <(find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \) | sort)
+done < <(find "${source_roots[@]}" -type f \( -name '*.rhm' -o -name '*.rhdl' \) | sort)
 
 exit "$status"

@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -14,7 +14,12 @@ RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricke
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
 RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
-EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+RHDL_EXAMPLES := $(sort $(shell find examples/rhdl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+STD_EXAMPLES := $(sort $(shell find examples/std -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+LOP_EXAMPLES := $(sort $(shell find examples/lop -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+RFPL_LOGICAL_EXAMPLES := $(sort $(shell find examples/rfpl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+TILELINK_EXAMPLES := $(sort $(shell find examples/tilelink -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)) $(RFPL_EXAMPLES))
 
 check-boundaries:
 	bash tools/check-boundaries.sh
@@ -39,10 +44,12 @@ lop-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_FRONTEND_TESTS)
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_BACKEND_TESTS)
 
-rfpl-test:
+rfpl-unit-test:
 	bash rfpl/check-boundaries.sh
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_TESTS) $(RFPL_EXAMPLES)
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_TESTS)
 	bash rfpl/tests/run-negative.sh
+
+rfpl-test: rfpl-unit-test examples-rfpl
 
 rfpl-circt-test:
 	bash rfpl/tests/run-circt.sh
@@ -77,7 +84,7 @@ ricket-test: ricket-host-test
 	FIXTURE=ricket-icache bash tests/backend/run-circt.sh
 	FIXTURE=ricket-dcache bash tests/backend/run-circt.sh
 
-circt-test:
+circt-test: check-example-verilog
 	bash tests/backend/run-circt.sh
 
 verilog-golden-test: check-example-verilog
@@ -87,7 +94,9 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-test: unit-test examples rfpl-test noc-test riscv-test tilelink-test ricket-host-test
+host-checks: unit-test rfpl-unit-test noc-test riscv-test tilelink-test ricket-host-test
+
+host-test: host-checks examples
 
 test: host-test circt-test rfpl-circt-test
 
@@ -96,3 +105,23 @@ setup-circt:
 
 examples: check-example-verilog
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(EXAMPLES)
+
+examples-rhdl:
+	bash tools/check-example-verilog.sh examples/rhdl
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RHDL_EXAMPLES)
+
+examples-std:
+	bash tools/check-example-verilog.sh examples/std
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(STD_EXAMPLES)
+
+examples-lop:
+	bash tools/check-example-verilog.sh examples/lop
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_EXAMPLES)
+
+examples-rfpl:
+	bash tools/check-example-verilog.sh examples/rfpl
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_LOGICAL_EXAMPLES) $(RFPL_EXAMPLES)
+
+examples-tilelink:
+	bash tools/check-example-verilog.sh examples/tilelink
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_EXAMPLES)

@@ -131,7 +131,7 @@ discovery. Raw `hw_decode` is unchanged and always emits the core operation.
 Input and output patterns may use different scalar, aggregate, or
 extension-defined hardware types. Espresso chooses a concrete value for every
 output don't-care; the fallback preserves that freedom for downstream
-synthesis. See [`../../examples/decode.rhdl`](../../examples/decode.rhdl) for an
+synthesis. See [`../../examples/std/decode.rhdl`](../../examples/std/decode.rhdl) for an
 aggregate input/output example.
 
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
@@ -176,7 +176,7 @@ def combined_outputs = zip_decode_cases(
 )
 ```
 
-[`../../examples/decode-composition.rhdl`](../../examples/decode-composition.rhdl)
+[`../../examples/std/decode-composition.rhdl`](../../examples/std/decode-composition.rhdl)
 shows all three independent extensions in one executable example: concatenated
 rows, zipped output fields, and lifted input fields.
 
@@ -336,7 +336,7 @@ images; it does not silently discard low bits. Import
 [`bits.rhdl`](bits.rhdl) and use `is_aligned(address, data_bytes)` for a
 hardware alignment check. The interface type validates its host parameters
 during construction.
-See [`../../examples/simple-memory-flow.rhdl`](../../examples/simple-memory-flow.rhdl)
+See [`../../examples/std/simple-memory-flow.rhdl`](../../examples/std/simple-memory-flow.rhdl)
 for a bidirectional adapter that applies the ordinary `queue` and `pipe`
 helpers independently to the request and response channels.
 
@@ -569,12 +569,12 @@ in arrival order through the `Irrevocable` `response` endpoint. Assertions
 detect unreserved completions, unavailable completion slots, and reservation
 counts outside the configured depth.
 
-See [`../../examples/flow-control.rhdl`](../../examples/flow-control.rhdl) for
+See [`../../examples/std/flow-control.rhdl`](../../examples/std/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and
-[`../../examples/flow-topology.rhdl`](../../examples/flow-topology.rhdl) for
+[`../../examples/std/flow-topology.rhdl`](../../examples/std/flow-topology.rhdl) for
 round-robin arbitration, demux, join, atomic fork, payload mapping, and
 broadcast. The parallel token-only family is materialized in
-[`../../examples/ctrl-flow.rhdl`](../../examples/ctrl-flow.rhdl).
+[`../../examples/std/ctrl-flow.rhdl`](../../examples/std/ctrl-flow.rhdl).
 
 ## Counter
 

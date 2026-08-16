@@ -1,4 +1,4 @@
-# Runs RHDL host-language checks and CIRCT integration on every proposed change.
+# Runs dependency-sensitive RHDL host, example, CIRCT, and FESVR checks.
 
 name: CI
 
@@ -30,6 +30,8 @@ jobs:
       host: "${{ steps.filter.outputs.host }}"
       circt: "${{ steps.filter.outputs.circt }}"
       fesvr: "${{ steps.filter.outputs.fesvr }}"
+      examples: "${{ steps.filter.outputs.examples }}"
+      example_matrix: "${{ steps.filter.outputs.example_matrix }}"
     steps:
       - name: Check out RHDL history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -90,7 +92,47 @@ jobs:
         if: steps.racket-packages.outputs.cache-hit != 'true'
         run: raco pkg install --user --auto --batch --no-docs --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
       - name: Run Racket and model tests
-        run: make host-test
+        run: make host-checks
+
+  examples:
+    name: Examples (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.examples == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.example_matrix) }}
+    steps:
+      - name: Check out RHDL
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: "${{ env.RACKET_VERSION }}"
+      - name: Configure Racket cache directories
+        run: |
+          echo "PLTUSERHOME=$RUNNER_TEMP/rhdl-racket-user" >> "$GITHUB_ENV"
+          echo "PLTCOMPILEDROOTS=$RUNNER_TEMP/rhdl-compiled:" >> "$GITHUB_ENV"
+      - name: Cache Rhombus installation
+        id: racket-packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ runner.temp }}/rhdl-racket-user"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}"
+      - name: Cache compiled example bytecode
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ runner.temp }}/rhdl-compiled"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ matrix.target }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+      - name: Install Rhombus
+        if: steps.racket-packages.outputs.cache-hit != 'true'
+        run: raco pkg install --user --auto --batch --no-docs --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
+      - name: Run affected example group
+        run: make "${{ matrix.target }}"
 
   circt:
     name: CIRCT integration
