@@ -1,0 +1,71 @@
+#lang rhombus
+// Checks RFPL structural hierarchy, shared stamping, and CIRCT module emission.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/backend/circt.rhm".emit_circt
+  "../frontend/foundation.rhm".FloorplanDefinition
+  "../../examples/rfpl/circuit-pair.rfpl" as fixture
+
+def elaboration = fixture.elaboration
+def design = elaboration.design
+def top = elaboration.top
+def pair = top.module_def
+def shell = design.modules.find(fun (module_def): module_def.name == "AdderShell")
+def crossed_wires = design.modules.find(
+  fun (module_def): module_def.name == "CrossedWires"
+)
+def adder = design.modules.find(fun (module_def): module_def.name == "Adder")
+def pair_instances = pair.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def shell_instances = shell.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def crossed_wire_instances = crossed_wires.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def crossed_wire_drives = crossed_wires.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.drive"
+)
+def allowed_floorplan_opcodes = [
+  "rtl.input_port",
+  "rtl.output_port",
+  "rtl.instance",
+  "rtl.drive"
+]
+fun floorplan_opcodes_valid(module_def):
+  for all (operation in module_def.operations):
+    allowed_floorplan_opcodes.find(
+      fun (allowed): allowed == operation.opcode
+    ) != #false
+def circt = emit_circt(design)
+
+check:
+  elaboration.floorplans.length() ~is 3
+  top is_a FloorplanDefinition ~is #true
+  top.name ~is "AdderPair"
+  design.modules.length() ~is 4
+  pair_instances.length() ~is 3
+  pair_instances[0].attribute("module") === shell ~is #true
+  pair_instances[1].attribute("module") === shell ~is #true
+  pair_instances[2].attribute("module") === crossed_wires ~is #true
+  shell_instances.length() ~is 1
+  shell_instances[0].attribute("module") === adder ~is #true
+  crossed_wire_instances.length() ~is 0
+  crossed_wire_drives.length() ~is 2
+  floorplan_opcodes_valid(pair) ~is #true
+  floorplan_opcodes_valid(shell) ~is #true
+  floorplan_opcodes_valid(crossed_wires) ~is #true
+  adder.operations.find(fun (operation): operation.opcode == "rtl.add") != #false ~is #true
+  verify_design(design) ~is #void
+  circt.contains("hw.module @AdderPair") ~is #true
+  circt.contains("hw.module @AdderShell") ~is #true
+  circt.contains("hw.module @CrossedWires") ~is #true
+  circt.contains("hw.module @Adder") ~is #true
+  circt.contains("hw.instance \"left\" @AdderShell") ~is #true
+  circt.contains("hw.instance \"right\" @AdderShell") ~is #true
+  circt.contains("hw.instance \"crossed\" @CrossedWires") ~is #true
+  circt.contains("hw.instance \"wrapped\" @Adder") ~is #true
+  circt.contains("comb.add") ~is #true
+  emit_circt(design) ~is circt

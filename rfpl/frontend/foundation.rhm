@@ -1,0 +1,115 @@
+#lang rhombus/and_meta
+// Defines RFPL floorplans as structural wrappers around verified RHDL core modules.
+
+import:
+  rhombus/meta open
+  "../../rhdl/core/ir.rhm".Location
+  "../../rhdl/frontend/foundation.rhm".Bits
+  "../../rhdl/frontend/foundation.rhm".Clock
+  "../../rhdl/frontend/foundation.rhm".Reset
+  "../../rhdl/frontend/foundation.rhm".input
+  "../../rhdl/frontend/foundation.rhm".output
+  "../../rhdl/frontend/foundation.rhm".(<==)
+  "../../rhdl/frontend/kernel.rhm".CircuitDefinition
+  "../../rhdl/frontend/kernel.rhm".build_circuit as kernel_build_circuit
+  "../../rhdl/frontend/kernel.rhm".new_circuit_identity as kernel_new_circuit_identity
+  "../../rhdl/frontend/kernel.rhm".run_elaboration as kernel_run_elaboration
+  "../../rhdl/frontend/layers/hierarchy.rhm".inst
+  "../../rhdl/frontend/support/generator-parameters.rhm".GeneratorParameter
+  "verify.rhm".verify_floorplan_hierarchy
+  "verify.rhm".verify_floorplan_module
+
+export:
+  Bits
+  Clock
+  Reset
+  input
+  output
+  <==
+  inst
+  FloorplanDefinition
+  FloorplanElaboration
+  floorplan
+  elaborate
+
+class FloorplanDefinition(module_def,
+                          identity,
+                          name,
+                          arguments,
+                          location = Location()):
+  implements CircuitDefinition
+  override method core_module(): module_def
+
+class FloorplanElaboration(design, top, floorplans)
+
+class FloorplanContext(mutable definitions = []):
+  method add(definition):
+    definitions := definitions ++ [definition]
+
+Parameter.def current_floorplan_context = #false
+
+fun floorplan_fail(message, location = Location()):
+  error(~who: #'floorplan, location.describe() ++ ": " ++ message)
+
+fun require_floorplan_context(location = Location()):
+  def context = current_floorplan_context()
+  unless context is_a FloorplanContext
+  | floorplan_fail("floorplan generators may only be called during elaborate",
+                   location)
+  context
+
+fun build_floorplan(identity,
+                    name,
+                    arguments,
+                    implementation,
+                    location = Location()):
+  def context = require_floorplan_context(location)
+  def module_def = kernel_build_circuit(identity,
+                                        name,
+                                        arguments,
+                                        implementation,
+                                        location)
+  verify_floorplan_module(module_def)
+  def definition = FloorplanDefinition(module_def,
+                                       identity,
+                                       name,
+                                       arguments,
+                                       location)
+  context.add(definition)
+  definition
+
+fun run_floorplan_elaboration(program, location = Location()):
+  unless program is_a Function
+  | floorplan_fail("elaboration body must be a Function", location)
+  def context = FloorplanContext()
+  def mutable top_definition = #false
+  def design:
+    parameterize { current_floorplan_context: context }:
+      kernel_run_elaboration(
+        fun ():
+          def top = program()
+          unless top is_a FloorplanDefinition
+          | floorplan_fail("elaboration did not select a top floorplan",
+                           location)
+          top_definition := top
+          top
+      )
+  verify_floorplan_hierarchy(design, context.definitions)
+  FloorplanElaboration(design, top_definition, context.definitions)
+
+defn.macro 'floorplan $(name :: Identifier)($(argument :: GeneratorParameter), ...): $body; ...':
+  def floorplan_name = name.to_source_string()
+  '«
+     def floorplan_identity = kernel_new_circuit_identity($floorplan_name)
+     fun $name($argument, ...):
+       fun implementation():
+         $body
+         ...
+       build_floorplan(floorplan_identity,
+                       $floorplan_name,
+                       [$argument.binding, ...],
+                       implementation)
+   »'
+
+expr.macro 'elaborate($body)':
+  'run_floorplan_elaboration(fun (): $body)'

@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
+.PHONY: test host-test check-boundaries frontend-test backend-test unit-test lop-test rfpl-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -12,10 +12,13 @@ RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 TILELINK_TESTS := $(sort $(wildcard tilelink/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
+RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
+RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
 EXAMPLES := $(sort $(shell find examples -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 
 check-boundaries:
 	bash tools/check-boundaries.sh
+	bash rfpl/check-boundaries.sh
 	bash riscv/check-boundaries.sh
 	bash tilelink/check-boundaries.sh
 	bash cores/check-boundaries.sh
@@ -32,6 +35,14 @@ unit-test: frontend-test backend-test
 lop-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_FRONTEND_TESTS)
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_BACKEND_TESTS)
+
+rfpl-test:
+	bash rfpl/check-boundaries.sh
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_TESTS) $(RFPL_EXAMPLES)
+	bash rfpl/tests/run-negative.sh
+
+rfpl-circt-test:
+	bash rfpl/tests/run-circt.sh
 
 noc-test:
 	bash noc/check-boundaries.sh
@@ -72,9 +83,9 @@ verilog-golden-test:
 update-verilog-goldens:
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-test: unit-test examples noc-test riscv-test tilelink-test ricket-host-test
+host-test: unit-test examples rfpl-test noc-test riscv-test tilelink-test ricket-host-test
 
-test: host-test circt-test
+test: host-test circt-test rfpl-circt-test
 
 setup-circt:
 	bash tools/install-circt.sh

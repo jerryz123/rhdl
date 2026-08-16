@@ -33,6 +33,8 @@ make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering without external tools
+make rfpl-test              # structural RFPL semantics and invalid uses
+make rfpl-circt-test        # RFPL CIRCT and example-owned Verilog golden
 make unit-test              # frontend plus backend Rhombus tests
 make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary

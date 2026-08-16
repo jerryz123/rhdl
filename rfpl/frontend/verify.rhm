@@ -1,0 +1,56 @@
+#lang rhombus
+// Verifies that RFPL floorplan modules contain hierarchy and wiring but no logic.
+
+import:
+  "../../rhdl/core/ir.rhm" open
+
+export:
+  verify_floorplan_module
+  verify_floorplan_hierarchy
+
+def allowed_floorplan_opcodes = [
+  "rtl.input_port",
+  "rtl.output_port",
+  "rtl.instance",
+  "rtl.drive"
+]
+
+fun verify_floorplan_module(module_def):
+  unless module_def is_a Module
+  | error(~who: #'floorplan, "expected an RHDL core Module")
+  for (operation in module_def.operations):
+    unless allowed_floorplan_opcodes.find(
+      fun (allowed): allowed == operation.opcode
+    )
+    | error(
+        ~who: #'floorplan,
+        String.append(
+          operation.location.describe(),
+          ": floorplan ", module_def.name,
+          " cannot contain ", operation.opcode,
+          "; define logic in an RHDL circuit and instantiate that circuit"
+        )
+      )
+  module_def
+
+fun verify_floorplan_hierarchy(design, floorplan_definitions):
+  def floorplan_modules = floorplan_definitions.map(
+    fun (definition): definition.module_def
+  )
+  fun is_floorplan_module(module_def):
+    floorplan_modules.find(fun (candidate): candidate === module_def) != #false
+  for (module_def in design.modules):
+    unless is_floorplan_module(module_def)
+    | for (operation in module_def.operations):
+        when operation.opcode == "rtl.instance"
+        | def child = operation.attribute("module")
+          when is_floorplan_module(child)
+          | error(
+              ~who: #'floorplan,
+              String.append(
+                operation.location.describe(),
+                ": RHDL circuit ", module_def.name,
+                " cannot instantiate RFPL floorplan ", child.name
+              )
+            )
+  design

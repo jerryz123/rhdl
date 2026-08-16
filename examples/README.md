@@ -1,6 +1,6 @@
-<!-- Presents RHDL's executable language-oriented walkthrough and canonical feature examples. -->
+<!-- Presents the executable RHDL and RFPL walkthroughs and canonical feature examples. -->
 
-# RHDL examples
+# RHDL and RFPL examples
 
 The examples demonstrate that progressively richer authoring layers construct
 one public hardware IR. Language and component details live in the
@@ -51,6 +51,14 @@ The aggregate equivalence examples make the same boundary executable:
 
 The [frontend guide](../rhdl/frontend/README.md) explains the profiles, and
 the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
+
+## Structural floorplanning
+
+[`rfpl/circuit-pair.rfpl`](rfpl/circuit-pair.rfpl) defines an RFPL top module,
+nests and stamps one sub-floorplan twice, routes one instance through a
+pure-wiring `CrossedWires` floorplan, and contains an imported RHDL adder
+circuit as the only logic-bearing module. Its colocated `verilog_reference`
+shows the complete emitted hierarchy and direct wiring assignments.
 
 ## Feature showcases
 

@@ -16,6 +16,11 @@ standard syntax without creating competing hardware semantics.
 
 RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 
+RFPL is the structural floorplanning language above RHDL. Its initial
+`floorplan` object may instantiate and wire RFPL floorplans and RHDL circuits,
+but may not implement logic; each floorplan emits as an ordinary CIRCT
+`hw.module`. See the [RFPL plan](rfpl/PLAN.md).
+
 ## Architecture
 
 ```text
@@ -115,6 +120,7 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
+| RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
@@ -134,6 +140,9 @@ Detailed documentation lives with the component that owns it:
 
 The current vertical slice includes:
 
+- An RFPL structural language whose floorplans compose nested floorplans and
+  RHDL circuits, reject logic in floorplan bodies, and emit through the shared
+  CIRCT backend.
 - A public, inspectable, backend-independent IR with explicit-width types,
   structural aggregates, primitive state and memories, clocked assertions, DPI
   simulation operations, single-driver verification, and combinational-cycle
