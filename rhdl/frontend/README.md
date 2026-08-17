@@ -166,7 +166,11 @@ fun low_word(value, width) :: Bits(width):
 Exact hardware annotations retain field, indexing, casting, and lookup static
 information. `Bits`, `SInt`, `Clock`, `Reset`, `Bool`, `Vec`, bundles, and
 hardware enums provide concise annotation forms. Extension-produced types can use
-`Hardware.of(type)` directly.
+`Hardware.of(type)` directly. Use `Hardware.bits` only when a function accepts
+`Bits` of any width, and `Hardware.packable` only when it accepts any packable
+hardware `DataType`. Bare `Hardware` is reserved for operations that genuinely
+accept arbitrary readable or driveable hardware entities without a data-type
+constraint.
 
 See [`../../examples/rhdl/host-parameters.rhdl`](../../examples/rhdl/host-parameters.rhdl)
 and [`../../examples/rhdl/layered-adder.rhdl`](../../examples/rhdl/layered-adder.rhdl).

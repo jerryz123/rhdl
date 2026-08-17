@@ -313,7 +313,7 @@ def reserve_index = map_valid(operation => operation.destination)
 def completion_index = map_valid(completion => completion.tag)
 (reservations |> reserve_filter |> reserve_index) <=> hazards.set
 (completions |> completion_index) <=> hazards.clear
-def permitted = requests |> gate_flow(!scoreboard_busy(hazards.busy, source))
+def permitted = requests |> gate_flow(!scoreboard_busy(32, hazards.busy, source))
 ```
 
 The power-of-two entry count must be at least two. Reset empties the scoreboard.

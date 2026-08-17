@@ -7,17 +7,19 @@ depend on public `#lang rhdl` facilities and reusable RHDL standard-library
 primitives, but the pure `noc/model`, `analysis`, `authoring`, `language`,
 `plan`, and `std` directories never depend on this package.
 
-`route-computer.rhdl` defines `RouteDecoder`, `compile_route_decoder`, and
-`RouteComputer`. `compile_route_decoder` accepts only a `RouterPlan` projected
-from opaque `ValidatedRouting`; it cannot consume an unchecked relation or
-rerun topology, reachability, dependency, or deadlock analysis. Route keys
-retain their global stable encoding, while origin keys and outgoing-VC masks
-are local to one router. The decode relation uses a typed `RouteLookupKey`
-input and a typed `RouteDecision` output with a unified `target_mask` plus a
-Boolean `valid` field. Compilation returns an opaque `RouteDecoder` that
-stores only the plan, derived decode widths, and compiled `DecodeGen`; route
-mappings and rows remain owned by `RouterPlan`. `DecodeGen` alone owns any
-flattening needed by Espresso or CIRCT;
+`route-computer.rhdl` defines `RouteDecoder`, `route_decoder_lookup`,
+`compile_route_decoder`, and `RouteComputer`. `compile_route_decoder` accepts
+only a `RouterPlan` projected from opaque `ValidatedRouting`; it cannot consume
+an unchecked relation or rerun topology, reachability, dependency, or deadlock
+analysis. Route keys retain their global stable encoding, while origin keys
+and outgoing-VC masks are local to one router. The decode relation uses a typed
+`RouteLookupKey` input and a typed `RouteDecision` output with a unified
+`target_mask` plus a Boolean `valid` field. The receiver-explicit
+`route_decoder_lookup` function preserves those decoder-dependent exact types
+at its boundary. Compilation returns an opaque `RouteDecoder` that stores only
+the plan, derived decode widths, and compiled `DecodeGen`; route mappings and
+rows remain owned by `RouterPlan`. `DecodeGen` alone owns any flattening needed
+by Espresso or CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 
