@@ -89,8 +89,9 @@ eight-byte `SimpleMemory` instruction and data requester ports, and a sticky
 `fault` output. L1I hits have one-cycle latency and one-request-per-cycle
 throughput. L1D load hits have the same throughput and pass through a mandatory
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
-completion tag; stores complete through the same registered response path and
-drain through an ordered one-entry write buffer. The two
+completion tag. A one-stage lookup flow carries request context beside the SRAM
+access and holds it across refill; stores complete through the registered
+response path and drain through an ordered one-entry write buffer. The two
 external ports intentionally remain separate; SoC arbitration and integration
 are outside the core. The backing-memory data width stays fixed at 64 bits in
 both specializations; only the architectural and core-facing values follow

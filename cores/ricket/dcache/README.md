@@ -14,10 +14,12 @@ load/store lane generation. `RicketL1DCache(xlen, address_width, ...)` accepts
 an eight-byte `SimpleMemory` backing port.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,
-write-through/write-no-allocate cache. Its synchronous lookup accepts tagged
-consecutive load hits every cycle. A mandatory non-backpressurable `ValidPipe`
-register after the SRAM lookup preserves that throughput while aligning an EX
-request's hit response with WB. A miss blocks
+write-through/write-no-allocate cache. A one-stage `Pipe` carries lookup
+context alongside the synchronous SRAM access, advances on consecutive hits,
+and holds the request across a refill. Set, tag, and beat are derived from that
+context instead of stored independently. A mandatory non-backpressurable
+`ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
+aligning an EX request's hit response with WB. A miss blocks
 new cache requests until refill completes. A store produces its registered
 completion during lookup, updates a resident line on a hit, and enters a
 one-entry ordered write buffer;
