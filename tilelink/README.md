@@ -24,8 +24,9 @@ core, frontend, or backend implementation modules.
 | [`params.rhdl`](params.rhdl) | Wire widths, endpoint and port descriptions, edge validation, and crossbar ID allocation | `rhdl/std/bits.rhdl`, `rhdl/std/interconnect.rhdl` |
 | [`bundles.rhdl`](bundles.rhdl) | Exact TileLink A-E opcode and payload types | `params.rhdl` |
 | [`protocol.rhdl`](protocol.rhdl) | Opcode groups, response mappings, and data-dependent physical beat counts | `rhdl/std/bits.rhdl`, `params.rhdl`, `bundles.rhdl` |
-| [`link.rhdl`](link.rhdl) | Directional `TLUncached` and `TLCached` interfaces, local connection legality, and uncached manager monitoring | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `params.rhdl`, `bundles.rhdl` |
-| [`ram.rhdl`](ram.rhdl) | Finite uncached RAM manager with generated endpoint parameters | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `rhdl/std/read-write.rhdl`, `rhdl/std/sync-ram.rhdl`, `rhdl/std/flow/queue.rhdl`, `params.rhdl`, `bundles.rhdl`, `link.rhdl` |
+| [`link.rhdl`](link.rhdl) | Directional `TLUncached` and `TLCached` interfaces and local connection legality | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `params.rhdl`, `bundles.rhdl` |
+| [`monitor.rhdl`](monitor.rhdl) | Explicit uncached manager endpoint monitoring | `rhdl/std/bits.rhdl`, `params.rhdl`, `bundles.rhdl`, `link.rhdl` |
+| [`ram.rhdl`](ram.rhdl) | Finite uncached RAM manager with generated endpoint parameters | `rhdl/std/bits.rhdl`, `rhdl/std/ready-valid.rhdl`, `rhdl/std/read-write.rhdl`, `rhdl/std/sync-ram.rhdl`, `rhdl/std/flow/queue.rhdl`, `params.rhdl`, `bundles.rhdl`, `link.rhdl`, `monitor.rhdl` |
 | [`main.rhdl`](main.rhdl) | Public TileLink facade | All modules above |
 
 ## Parameters and payloads
@@ -97,10 +98,10 @@ These checks cover the capabilities represented by the current parameter
 records. They do not perform graph-wide negotiation, routing, width or ID
 adaptation, complete C/E coherence negotiation, or endpoint behavior.
 
-An uncached manager endpoint can opt into the `TLUncached` whole-link monitor
-with `~monitor`. While A is valid, the monitor checks its opcode and size
-against the manager's advertised support, requires zero `param` for Get and
-Put operations, checks single-beat alignment and mask shape, and requires the
+`monitor_tl_uncached_manager(bundle, manager, endpoint)` explicitly instruments
+an uncached manager endpoint. While A is valid, it checks the opcode and size
+against the manager's advertised support, requires zero `param` for Get and Put
+operations, checks single-beat alignment and mask shape, and requires the
 address to match one of the manager's address sets. These observational checks
 do not drive `ready` or otherwise change link behavior. Corruption checking is
 currently deferred.
@@ -154,7 +155,7 @@ into the matching D completion. This standard flow composition allows one
 request per cycle until D-channel backpressure fills the reservation window,
 without losing the storage wrapper's nonstallable one-cycle read result.
 
-`TLRam` opts into the uncached manager monitor. `PutFullData` and `Get` require
+`TLRam` explicitly calls the uncached manager monitor. `PutFullData` and `Get` require
 the complete naturally addressed mask; `PutPartialData` permits any subset of
 that mask. The RAM's A-channel readiness depends only on reserved response
 capacity; protocol assertions remain observational and corruption metadata is

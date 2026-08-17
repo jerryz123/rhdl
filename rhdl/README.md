@@ -57,7 +57,7 @@ internal module implementing its shared frontend forms is called the
 | [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
-| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, monitored interfaces, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
+| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, endpoint monitors, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../chi/`](../chi/README.md) | AMBA CHI Issue H parameters, exact flits, protocol classifiers, credited node-role links, and link-local monitors | Public `#lang rhdl`; protocol-neutral `std/` libraries as later layers require them |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |

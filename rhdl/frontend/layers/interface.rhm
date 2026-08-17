@@ -14,7 +14,6 @@ import:
 export:
   InterfaceFlow
   InterfaceCompatibility
-  InterfaceMonitor
   InterfaceIdentity
   InterfaceMember
   InterfaceSupport
@@ -24,11 +23,13 @@ export:
   InterfaceSink
   interface_type_supports
   interface_link
+  observe
   parallel_handles
   connect_endpoint_shapes
   interface
   <=>
   Endpoint
+  Observation
   Handle
   Sink
   InterfaceFields
@@ -44,7 +45,6 @@ class InterfaceFlow(from_role :: String, to_role :: String, type :: RecordType):
 class InterfaceMember(name, type, from_role, to_role)
 class InterfaceSupport(role, type)
 class InterfaceCompatibility(role :: String, predicate :: Function)
-class InterfaceMonitor(factory :: Function)
 class InterfaceIdentity()
 
 // The parent supplies inherited layout. Additional supported types declare
@@ -59,8 +59,7 @@ class InterfaceType(name,
                     parent = #false,
                     supported_contracts = [],
                     specialization_arguments = [],
-                    connection_compatibility = #false,
-                    monitor = #false):
+                    connection_compatibility = #false):
   constructor (name :: String,
                roles :: List.of(String),
                declarations :: List,
@@ -69,8 +68,7 @@ class InterfaceType(name,
                ~provider_role: supplied_provider_role = #false,
                ~identity: identity = InterfaceIdentity(),
                ~specialization_arguments: specialization_arguments :: List = [],
-               ~connection_compatibility: connection_compatibility = #false,
-               ~monitor: supplied_monitor = #false):
+               ~connection_compatibility: connection_compatibility = #false):
     unless roles.length() == 2 && roles[0] != roles[1]
     | error(~who: #'InterfaceType, "interfaces require exactly two distinct roles")
     def provider_role = supplied_provider_role || roles[0]
@@ -94,11 +92,6 @@ class InterfaceType(name,
       unless connection_compatibility.role == provider_role
       | error(~who: #'InterfaceType,
               "interface compatibility role must match the provider role")
-    def monitor = supplied_monitor || (if parent | parent.monitor | #false)
-    when monitor
-    | unless monitor is_a InterfaceMonitor
-      | error(~who: #'InterfaceType,
-              "interface monitor must be an InterfaceMonitor")
     def mutable members = if parent | parent.members | []
     for (declaration in declarations):
       cond
@@ -162,8 +155,7 @@ class InterfaceType(name,
           parent,
           supported_contracts,
           specialization_arguments,
-          connection_compatibility,
-          monitor)
+          connection_compatibility)
 
   property flows: interface_flows(this)
   property supported_types:
@@ -249,8 +241,8 @@ class InterfaceEndpoint(type,
         kernel.project(binding.entity, field_name)
 
 // Presents every interface leaf as a readable value, independent of which
-// endpoint role drives that leaf. Monitor factories receive this view so they
-// can correlate both directions without acquiring connection or drive access.
+// endpoint role drives that leaf. Instrumentation receives this view so it can
+// correlate both directions without acquiring connection or drive access.
 class InterfaceObservation(endpoint, mutable nested_observations = []):
   method field(field_name):
     def member = endpoint.type.members.find(
@@ -538,36 +530,14 @@ fun declare_interface_unchecked(module_def, name, type, role):
                      bindings,
                      "boundary")]
 
-fun activate_interface_monitor(endpoint):
-  def monitor = endpoint.type.monitor
-  unless monitor
-  | error(~who: #'interface,
-          "interface " ++ endpoint.type.name ++ " does not define a monitor")
-  kernel.defer_circuit_finalizer(
-    fun ():
-      monitor.factory(InterfaceObservation(endpoint), endpoint.role)
-      #void
-  )
-  #void
-
-fun declare_interface(name,
-                      type,
-                      role,
-                      monitor_enabled :: Boolean = #false):
+fun declare_interface(name, type, role):
   validate_interface_declaration(type, role)
   def module_def = kernel.active_module()
   when interface_name_taken(module_def, name)
   | error(~who: #'interface, "duplicate interface endpoint " ++ name)
-  def endpoint = declare_interface_unchecked(module_def, name, type, role)[1]
-  when monitor_enabled
-  | activate_interface_monitor(endpoint)
-  endpoint
+  declare_interface_unchecked(module_def, name, type, role)[1]
 
-fun declare_interface_array(name,
-                            count :: PosInt,
-                            type,
-                            role,
-                            monitor_enabled :: Boolean = #false):
+fun declare_interface_array(name, count :: PosInt, type, role):
   validate_interface_declaration(type, role)
   def module_def = kernel.active_module()
   def element_names:
@@ -584,10 +554,7 @@ fun declare_interface_array(name,
                         name,
                         declarations.map(fun (declaration): declaration[0]))
   ]
-  def endpoints = Array(& declarations.map(fun (declaration): declaration[1]))
-  when monitor_enabled
-  | for (endpoint in endpoints): activate_interface_monitor(endpoint)
-  endpoints
+  Array(& declarations.map(fun (declaration): declaration[1]))
 
 // Creates a local, declaration-order-independent pair of complementary
 // endpoint views. The left view accepts the first-role flow and the right view
@@ -723,6 +690,12 @@ fun interface_observation_member(value, name):
   | value.field(name)
   | kernel.project(value, name)
 
+annot.macro 'Observation':
+  annot_meta.pack_predicate(
+    'fun (value): value is_a InterfaceObservation',
+    '(($(statinfo_meta.dot_provider_key), interface_observation_dot))'
+  )
+
 annot.macro 'InterfaceObservationFields':
   annot_meta.pack_predicate(
     'fun (value): value is_a InterfaceObservation || kernel.hardware_entity(value)',
@@ -740,6 +713,11 @@ dot.macro 'interface_observation_dot $left $dot $right':
   | 'view': #false
   | ~else:
       'interface_observation_member($left, $(right.to_source_string())) :: InterfaceObservationFields'
+
+// Restricts an endpoint to recursively readable leaves so instrumentation can
+// inspect both interface directions without acquiring connection authority.
+fun observe(endpoint :: InterfaceEndpoint) :~ Observation:
+  InterfaceObservation(endpoint)
 
 annot.macro 'InterfaceArrayFields':
   annot_meta.pack_predicate(
@@ -1197,271 +1175,6 @@ defn.macro
      provider $(provider_role :: Identifier)
      connection_compatible $(compatibility_role :: Identifier) ($(provided_arguments :: Identifier), $(required_arguments :: Identifier)):
        $compatibility
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(first_from :: Identifier) -> $(first_to :: Identifier):
-       $first_field: $first_type
-       ...
-     $(second_from :: Identifier) -> $(second_to :: Identifier):
-       $second_field: $second_type
-       ...':
-    def interface_name = name.to_source_string()
-    def provider_role_name = provider_role.to_source_string()
-    def compatibility_role_name = compatibility_role.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def first_from_name = first_from.to_source_string()
-    def first_to_name = first_to.to_source_string()
-    def second_from_name = second_from.to_source_string()
-    def second_to_name = second_to.to_source_string()
-    let [first_field_name, ...] = [first_field.to_source_string(), ...]
-    let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~connection_compatibility:
-             InterfaceCompatibility(
-               $compatibility_role_name,
-               fun ($provided_arguments, $required_arguments): $compatibility
-             ),
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     provider $(provider_role :: Identifier)
-     connection_compatible $(compatibility_role :: Identifier) ($(provided_arguments :: Identifier), $(required_arguments :: Identifier)):
-       $compatibility
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(from_role :: Identifier) -> $(to_role :: Identifier):
-       $field: $field_type
-       ...':
-    def interface_name = name.to_source_string()
-    def provider_role_name = provider_role.to_source_string()
-    def compatibility_role_name = compatibility_role.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def from_role_name = from_role.to_source_string()
-    def to_role_name = to_role.to_source_string()
-    let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~connection_compatibility:
-             InterfaceCompatibility(
-               $compatibility_role_name,
-               fun ($provided_arguments, $required_arguments): $compatibility
-             ),
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     provider $(provider_role :: Identifier)
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(first_from :: Identifier) -> $(first_to :: Identifier):
-       $first_field: $first_type
-       ...
-     $(second_from :: Identifier) -> $(second_to :: Identifier):
-       $second_field: $second_type
-       ...':
-    def interface_name = name.to_source_string()
-    def provider_role_name = provider_role.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def first_from_name = first_from.to_source_string()
-    def first_to_name = first_to.to_source_string()
-    def second_from_name = second_from.to_source_string()
-    def second_to_name = second_to.to_source_string()
-    let [first_field_name, ...] = [first_field.to_source_string(), ...]
-    let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     provider $(provider_role :: Identifier)
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(from_role :: Identifier) -> $(to_role :: Identifier):
-       $field: $field_type
-       ...':
-    def interface_name = name.to_source_string()
-    def provider_role_name = provider_role.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def from_role_name = from_role.to_source_string()
-    def to_role_name = to_role.to_source_string()
-    let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(first_from :: Identifier) -> $(first_to :: Identifier):
-       $first_field: $first_type
-       ...
-     $(second_from :: Identifier) -> $(second_to :: Identifier):
-       $second_field: $second_type
-       ...':
-    def interface_name = name.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def first_from_name = first_from.to_source_string()
-    def first_to_name = first_to.to_source_string()
-    def second_from_name = second_from.to_source_string()
-    def second_to_name = second_to.to_source_string()
-    let [first_field_name, ...] = [first_field.to_source_string(), ...]
-    let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     monitor ($(observation :: Identifier), $(monitor_role :: Identifier)):
-       $monitor_body
-     $(from_role :: Identifier) -> $(to_role :: Identifier):
-       $field: $field_type
-       ...':
-    def interface_name = name.to_source_string()
-    def first_role_name = first_role.to_source_string()
-    def second_role_name = second_role.to_source_string()
-    def from_role_name = from_role.to_source_string()
-    def to_role_name = to_role.to_source_string()
-    let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~monitor:
-             InterfaceMonitor(
-               fun ($observation :: InterfaceObservationFields,
-                    $monitor_role): $monitor_body
-             )
-         )
-     »'
-| 'interface $(name :: Identifier)($parameter, ...):
-     role $(first_role :: Identifier)
-     role $(second_role :: Identifier)
-     provider $(provider_role :: Identifier)
-     connection_compatible $(compatibility_role :: Identifier) ($(provided_arguments :: Identifier), $(required_arguments :: Identifier)):
-       $compatibility
      $(first_from :: Identifier) -> $(first_to :: Identifier):
        $first_field: $first_type
        ...
@@ -1652,14 +1365,6 @@ defn.macro
            ~specialization_arguments: [$parameter, ...]
          )
      »'
-| 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier), ~monitor)':
-    def endpoint_name = name.to_source_string()
-    def role_name = role.to_source_string()
-    'def $name :: Endpoint = declare_interface($endpoint_name, $type, $role_name, #true)'
-| 'interface $(name :: Identifier)[$count]($type, ~role: $(role :: Identifier), ~monitor)':
-    def endpoint_name = name.to_source_string()
-    def role_name = role.to_source_string()
-    'def $name :: InterfaceArrayFields = declare_interface_array($endpoint_name, $count, $type, $role_name, #true)'
 | 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier))':
     def endpoint_name = name.to_source_string()
     def role_name = role.to_source_string()

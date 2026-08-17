@@ -14,7 +14,6 @@
  ("bad-interface-exact-specialization.rhdl" "argument does not satisfy annotation")
  ("bad-interface-equal-specialization-compatibility.rhdl" "does not support")
  ("bad-interface-monitor-drive.rhdl" "connection target must be a driveable hardware place")
- ("bad-interface-monitor-missing.rhdl" "does not define a monitor")
  ("bad-interface-type.rhdl" "does not support")
  ("bad-interface-array-zero.rhdl" "PosInt")
  ("bad-interface-array-count.rhdl" "PosInt")

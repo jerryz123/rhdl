@@ -122,9 +122,9 @@ the distinct protocol rules without duplicating identical wiring.
 
 ## Link-local monitoring
 
-Each node-role interface defines an opt-in whole-link monitor. Add `~monitor`
-to either endpoint declaration; one monitor observes both node-to-ICN and
-ICN-to-node paths and uses that endpoint's parameters to interpret them.
+`monitor_chi_rn`, `monitor_chi_rni`, and `monitor_chi_sn` explicitly instrument
+one selected endpoint. Each function observes both node-to-ICN and ICN-to-node
+paths and uses the supplied link and endpoint parameters to interpret them.
 
 [`monitor.rhdl`](monitor.rhdl) checks the four-state activation handshake in
 each direction, permits flits only after the receiver acknowledges activation,
@@ -155,12 +155,11 @@ architectural maximum of 1024 outstanding transactions, and corresponding
 node and ICN-port descriptions must agree. It gives stateful monitors a finite
 CAM size without introducing a checker-specific profile or a hidden capacity.
 
-The whole-link monitor automatically adds the initial transaction checker for
-an RN-I, SN-F, or SN-I endpoint when its advertised request, response, and data
-opcode capabilities are wholly within the non-coherent subset below. At least
-one supported request opcode is required. Capabilities remain the single
-description of protocol behavior; `max_outstanding` describes only endpoint
-capacity.
+The RN-I and SN monitor functions also add the initial transaction checker when
+the advertised request, response, and data opcode capabilities are wholly
+within the non-coherent subset below. At least one supported request opcode is
+required. Capabilities remain the single description of protocol behavior;
+`max_outstanding` describes only endpoint capacity.
 
 The requester and subordinate views both check these exact successful flows:
 
@@ -223,7 +222,7 @@ The first implementation will have these explicit limits:
   transfer, direct cache transfer, direct write transfer, data separation, or
   memory tagging in the first implementation.
 - Unsupported opcodes and field combinations are rejected by the advertised
-  capabilities and checked by the interface monitor; they are not silently
+  capabilities and checked by the selected endpoint monitor; they are not silently
   treated as ordinary reads or writes.
 
 Later non-coherent milestones can add multi-flit data, ordering and
@@ -298,8 +297,8 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
 | [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
 | [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, Size checking, and DAT packetization |
-| [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, static connection compatibility, and monitor attachment |
-| [`monitor.rhdl`](monitor.rhdl) | Implemented link-local activation, credit, opcode, NodeID, Size, and DataID checks |
+| [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
+| [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
 | `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |

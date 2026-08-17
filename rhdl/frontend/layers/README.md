@@ -29,7 +29,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`conditional.rhm`](conditional.rhm) | Hardware `when` priority chains, exact-key `switch`, and guarded effects |
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
 | [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
-| [`interface.rhm`](interface.rhm) | Roles, directional protocols, monitoring, refinement, and bulk connection |
+| [`interface.rhm`](interface.rhm) | Roles, directional protocols, read-only observations, refinement, and bulk connection |
 
 `#lang rhdl` aggregates the curated set. A `#lang rhdl/base` program can import
 only the layers it needs.
@@ -614,35 +614,36 @@ connects exact flows or compatible provider-to-peer contracts; operand order
 is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
 
-An interface can define an optional whole-link monitor. The monitor receives a
-read-only view containing fields from both directions and the local endpoint
-role, so one check can correlate a forward `valid` with a backward `ready`:
+Interfaces describe connectivity and do not carry monitor factories or
+instrumentation policy. `observe(endpoint)` explicitly creates a read-only view
+containing fields from both directions, so ordinary library functions can
+correlate a forward `valid` with a backward `ready`:
 
 ```rhombus
-interface MonitoredStream(T):
+interface Stream(T):
   role producer
   role consumer
-  monitor (link, endpoint_role):
-    assert(!(link.ready & !link.valid), "ready_requires_valid")
   producer -> consumer:
     valid: Bool
     bits: T
   consumer -> producer:
     ready: Bool
 
+fun monitor_stream(link :: Observation):
+  assert(!(link.ready & !link.valid), "ready_requires_valid")
+
 sync_circuit Producer():
-  interface stream(MonitoredStream(Bits(8)), ~role: producer, ~monitor)
+  interface stream(Stream(Bits(8)), ~role: producer)
   stream.valid <== false
   stream.bits <== 0
+  monitor_stream(observe(stream))
 ```
 
-Monitoring is disabled unless an endpoint opts in with `~monitor`; endpoint
-arrays apply the option to every element. The read-only view prevents a
-monitor from becoming another driver. Monitor elaboration runs after the
-circuit body, making it independent of whether the endpoint's outgoing fields
-are driven before or after its declaration. A monitor that uses `assert`,
-registers, or other ambient sequential operations must be activated in a
-`sync_circuit`. Interface refinements inherit their parent's monitor.
+The observation capability prevents instrumentation from becoming another
+driver. Protocol packages can offer several independent monitor functions, and
+an implementation or verification wrapper chooses which ones to elaborate at a
+specific endpoint. A monitor that uses `assert`, registers, or other ambient
+sequential operations must be called in a `sync_circuit`.
 
 Each root interface declaration has a stable nominal identity. By default,
 repeated calls to one parameterized declaration compare that identity plus

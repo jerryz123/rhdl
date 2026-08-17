@@ -224,13 +224,13 @@ There is no ready signal, and a same-edge credit cannot authorize a transfer
 from a zero pre-edge balance.
 
 The positive host `credit_limit` is a semantic interface parameter rather than
-a wire field. Connections require the same limit, and an endpoint can opt into
-the whole-link monitor with `~monitor`. The monitor asserts that every transfer
-owns a prior credit, grants remain within the configured limit, and its tracked
-balance stays in range. Protocol monitors that own several channel balances
-can call `check_credited(valid, credit, credit_limit, balance)` to reuse the
-same checks and update rule without asking `monitor_credited` to allocate
-multiple identically named registers.
+a wire field, and connections require the same limit. Calling
+`monitor_credited(endpoint)` explicitly instruments one endpoint: every
+transfer must own a prior credit, grants must remain within the configured
+limit, and the tracked balance must stay in range. Protocol monitors that own
+several channel balances can call
+`check_credited(valid, credit, credit_limit, balance)` to reuse the same checks
+and update rule without allocating multiple identically named registers.
 
 [`flow/credit.rhdl`](flow/credit.rhdl) provides the transport adapters.
 `CreditSender(T, credit_limit)` accepts `Decoupled(T)`, tracks returned
