@@ -589,6 +589,18 @@ reconstructs the vector with per-element muxes; an out-of-range selector leaves
 the original vector unchanged. There is no dynamically selected mutable place
 or dedicated dynamic vector-index operation in core.
 
+A direct `Reg<Vec(2^w, T)>` is the one assignable exception:
+
+```rhombus
+state[selector] <== replacement
+```
+
+This is frontend sugar for one whole next-state value built with `updated`; the
+unselected elements hold their current values. Existing one-driver and
+conditional-branch checks permit only one such update on each active control
+path. Multiple replacements must be composed explicitly with chained `updated`
+calls. Dynamically selected ordinary vector places remain read-only.
+
 ## Wires
 
 `wire temporary: T` creates an internal single-driver connection. Its value is

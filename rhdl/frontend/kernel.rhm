@@ -63,6 +63,7 @@ export:
   vector_create
   vector_get
   vector_project
+  vector_index
   vector_select
   vector_lookup
   vector_updated
@@ -109,6 +110,12 @@ interface StaticHardwareValue:
 interface RegisterPathValue:
   extends DeferredHardwareValue
   method drive_hardware(location)
+
+// Lets a frontend-only lvalue lower an assignment without pretending that a
+// runtime-selected destination is a structural core Place.
+interface DynamicAssignmentTarget:
+  extends DeferredHardwareValue
+  method assign_hardware(entity, location)
 
 class RegisterPath(materialize_current, next, mutable current = #false):
   implements RegisterPathValue
@@ -781,15 +788,9 @@ fun vector_lookup(entity,
                 location,
                 Origin("embedded vector lookup", name || ""))
 
-// Selects from a vector whose Bits selector exhaustively names every element.
-// Element zero supplies the structurally unreachable mux default so bracket
-// syntax does not invent behavior for an out-of-range selector.
-fun vector_select(entity,
-                  selector,
-                  name = #false,
-                  location = Location()):
-  def vector_value = read(entity, location)
-  def selector_value = read(selector, location)
+fun validate_exhaustive_vector_selector(vector_value,
+                                        selector_value,
+                                        location):
   unless vector_type(vector_value.type)
   | frontend_fail("hardware vector indexing requires a VectorType value", location)
   unless bits_type(selector_value.type)
@@ -799,6 +800,17 @@ fun vector_select(entity,
       "hardware vector indexing requires exactly one element per selector value; use .lookup(..., ~default: ...) for possible out-of-range values",
       location
     )
+
+// Selects from a vector whose Bits selector exhaustively names every element.
+// Element zero supplies the structurally unreachable mux default so bracket
+// syntax does not invent behavior for an out-of-range selector.
+fun vector_select(entity,
+                  selector,
+                  name = #false,
+                  location = Location()):
+  def vector_value = read(entity, location)
+  def selector_value = read(selector, location)
+  validate_exhaustive_vector_selector(vector_value, selector_value, location)
   vector_lookup(vector_value,
                 selector_value,
                 vector_get(vector_value, 0, #false, location),
@@ -842,6 +854,44 @@ fun vector_updated(entity,
                     Origin("embedded vector update", to_string(element_index)))
   vector_create(vector_value.type, elements, name, location)
 
+// Carries a dynamically selected element of a direct vector register. Reads
+// remain ordinary mux selection; writes become one whole next-state update.
+class DynamicVectorRegisterPath(register,
+                                vector_value,
+                                selector_value,
+                                mutable current = #false):
+  implements DynamicAssignmentTarget
+
+  override method materialize_hardware(location):
+    unless current
+    | current := vector_select(vector_value,
+                               selector_value,
+                               #false,
+                               location)
+    current
+
+  override method assign_hardware(entity, location):
+    connect(register.next,
+            vector_updated(vector_value,
+                           selector_value,
+                           entity,
+                           #false,
+                           location),
+            location)
+
+// Preserves the read behavior of hardware vector indexing while retaining an
+// assignable path only for a direct Reg<Vec>. Other vector entities stay values.
+fun vector_index(entity,
+                 selector,
+                 name = #false,
+                 location = Location()):
+  def vector_value = read(entity, location)
+  def selector_value = read(selector, location)
+  validate_exhaustive_vector_selector(vector_value, selector_value, location)
+  if entity is_a Register
+  | DynamicVectorRegisterPath(entity, vector_value, selector_value)
+  | vector_select(vector_value, selector_value, name, location)
+
 fun reg(name, type, clock, reset = #false, reset_value = #false,
         location = Location()):
   def context = require_context(location)
@@ -863,26 +913,30 @@ fun inst(name, child, location = Location()):
                                      Origin("embedded instance", name))
 
 fun connect(place, entity, location = Location()):
-  def context = require_context(location)
-  def target:
-    cond
-    | place is_a Register: place.next
-    | place is_a RegisterPathValue: place.drive_hardware(location)
-    | ~else: place
-  unless target is_a Place
-  | frontend_fail("connection target must be a driveable hardware place",
-                  location)
-  def value = read(entity, location)
-  unless type_equal(target.type, value.type)
-  | frontend_fail("connection source and target must have exactly the same hardware type",
-                  location)
-  def conditional_branch = current_conditional_branch()
-  if conditional_branch is_a ConditionalBranch
-  | conditional_branch.add(target, value, location)
-  | context.builder.drive(target,
-                          value,
-                          location,
-                          Origin("embedded connect", target.name))
+  cond
+  | place is_a DynamicAssignmentTarget:
+      place.assign_hardware(entity, location)
+  | ~else:
+      def context = require_context(location)
+      def target:
+        cond
+        | place is_a Register: place.next
+        | place is_a RegisterPathValue: place.drive_hardware(location)
+        | ~else: place
+      unless target is_a Place
+      | frontend_fail("connection target must be a driveable hardware place",
+                      location)
+      def value = read(entity, location)
+      unless type_equal(target.type, value.type)
+      | frontend_fail("connection source and target must have exactly the same hardware type",
+                      location)
+      def conditional_branch = current_conditional_branch()
+      if conditional_branch is_a ConditionalBranch
+      | conditional_branch.add(target, value, location)
+      | context.builder.drive(target,
+                              value,
+                              location,
+                              Origin("embedded connect", target.name))
 
 fun register_hold_value(place, location = Location()):
   if place.parent
