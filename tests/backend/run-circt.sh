@@ -54,7 +54,7 @@ integration_fixtures=(
   async-read-memory sync-memory-masked simple-memory-ram sync-ram
   clocked-dpi assertions hierarchy bundle interface-array
   queue-options rr-arbiter ctrl-queue-options
-  dont-care decode noc-route-computer noc-router
+  dont-care decode noc-route-computer noc-router noc-network
   nested-bundle aggregate-memory one-hot-aggregate
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
@@ -450,6 +450,7 @@ fixture_specs=(
   'decode-composition||examples/std/decode-composition.rhdl|design|verilog_reference'
   'noc-route-computer|noc_route_computer_tb|examples/noc/noc-route-computer.rhdl|design|verilog_reference'
   'noc-router|noc_router_tb|examples/noc/noc-router.rhdl|design|verilog_reference'
+  'noc-network|noc_network_tb|examples/noc/noc-network.rhdl|design|verilog_reference'
   'generator-ordinary-defaults||examples/rhdl/generator-parameters.rhdl|ordinary_defaults_design|ordinary_defaults_verilog_reference'
   'generator-ordinary-overrides||examples/rhdl/generator-parameters.rhdl|ordinary_overrides_design|ordinary_overrides_verilog_reference'
   'generator-ordinary-typed-defaults||examples/rhdl/generator-parameters.rhdl|ordinary_typed_defaults_design|ordinary_typed_defaults_verilog_reference'

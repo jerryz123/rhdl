@@ -1,0 +1,78 @@
+#lang rhombus
+// Checks user-owned hierarchical assembly of independently configured NoC routers.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../examples/noc/noc-network.rhdl" as fixture
+
+def top = fixture.design.modules.find(
+  fun (module_def): module_def.name == "HierarchicalNoCFixture"
+)
+def source = fixture.design.modules.find(
+  fun (module_def): module_def.name == "SourceSubsystem"
+)
+def transit = fixture.design.modules.find(
+  fun (module_def): module_def.name == "TransitSubsystem"
+)
+def destination = fixture.design.modules.find(
+  fun (module_def): module_def.name == "DestinationSubsystem"
+)
+
+fun instances(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  )
+
+check:
+  fixture.source_config.router_plan === (
+    fixture.network_plan.router_plan(fixture.n0)
+  ) ~is #true
+  fixture.transit_config.router_plan === (
+    fixture.network_plan.router_plan(fixture.n1)
+  ) ~is #true
+  fixture.destination_config.router_plan === (
+    fixture.network_plan.router_plan(fixture.n2)
+  ) ~is #true
+  fixture.source_config.input_count ~is 1
+  fixture.source_config.target_count ~is 1
+  fixture.transit_config.input_count ~is 1
+  fixture.transit_config.target_count ~is 2
+  fixture.destination_config.input_count ~is 1
+  fixture.destination_config.target_count ~is 1
+
+check:
+  fixture.source_injection.input_index ~is 0
+  fixture.first_connection.source_target_index ~is 0
+  fixture.first_connection.destination_input_index ~is 0
+  fixture.second_connection.source_target_index ~is 0
+  fixture.second_connection.destination_input_index ~is 0
+  fixture.near_ejection.target_index ~is 1
+  fixture.far_ejection.target_index ~is 0
+
+check:
+  top != #false ~is #true
+  source != #false ~is #true
+  transit != #false ~is #true
+  destination != #false ~is #true
+  top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "injection_in", "ejection_0_in", "ejection_1_in"
+  ]
+  top.outputs.map(fun (port): port.name) ~is [
+    "injection_out", "ejection_0_out", "ejection_1_out"
+  ]
+  instances(top).map(
+    fun (operation): operation.attribute("module").name
+  ) ~is ["SourceSubsystem", "TransitSubsystem", "DestinationSubsystem"]
+  instances(source).length() ~is 1
+  instances(transit).length() ~is 1
+  instances(destination).length() ~is 1
+  instances(source)[0].attribute("module").name.starts_with(
+    "OneBeatRouter"
+  ) ~is #true
+  instances(transit)[0].attribute("module").name.starts_with(
+    "OneBeatRouter"
+  ) ~is #true
+  instances(destination)[0].attribute("module").name.starts_with(
+    "OneBeatRouter"
+  ) ~is #true
+  verify_design(fixture.design) ~is #void

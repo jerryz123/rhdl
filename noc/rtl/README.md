@@ -45,6 +45,15 @@ certificates require persistent escape requests and eventual grants; the
 fixed-priority allocator does not yet claim that fairness contract, so router
 configuration compilation rejects escape-certified plans.
 
+There is intentionally no whole-network circuit or router-instantiating
+network helper in this package. Real routers live in independently owned tile,
+switch, or subsystem modules and may be separated by arbitrary hierarchy.
+Integration code obtains each node's `RouterPlan` from the pure `NetworkPlan`,
+compiles only that local `OneBeatRouterConfig`, and exposes the physical VC
+ports appropriate to its own boundary. A user-owned parent connects those
+boundaries using `NetworkVCConnection`; `noc/rtl` neither owns the system
+hierarchy nor inserts a wrapper around the complete transport.
+
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar
 mechanisms come from `rhdl/std`.
