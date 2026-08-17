@@ -1,8 +1,10 @@
-<!-- Defines the Ricket RV64I core, its cache boundary, pipeline contract, and verification. -->
+<!-- Defines the width-parameterized Ricket core, cache boundary, pipeline contract, and verification. -->
 
 # Ricket
 
-Ricket is the repository's single-issue, in-order five-stage RV64I processor.
+Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
+processor. The required `xlen` host parameter selects 32 or 64 bits; the same
+pipeline and cache implementation is specialized during elaboration.
 Core-specific decode, architectural state, pipeline policy, and private L1
 caches live here. Reusable execution components remain directly under
 [`cores/`](../).
@@ -66,23 +68,27 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder emits the component control bundles
-directly, without an intermediate instruction-kind enum. Unused controls stay
-synthesis don't-cares while a separate valid bit determines whether decoded
-values have architectural meaning.
+The integrated structured decoder selects the RV32I or RV64I catalog at host
+elaboration and emits the component control bundles directly, without an
+intermediate instruction-kind enum or parallel hardware decoders. Unused
+controls stay synthesis don't-cares while a separate valid bit determines
+whether decoded values have architectural meaning.
 
 ## Top-level core
 
 [`ricket.rhdl`](ricket.rhdl) defines
-`Ricket(address_width, ~cache_sets: 64, ~line_bytes: 32)`. It exposes an
-`Irrevocable(Bits(64))` start consumer, separate eight-byte `SimpleMemory`
+`Ricket(xlen, address_width, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` must be
+32 or 64, and `address_width` must not exceed it. The core exposes an
+`Irrevocable(Bits(xlen))` start consumer, separate eight-byte `SimpleMemory`
 instruction and data requester ports, and a sticky `fault` output. L1I hits
 have one-cycle latency and one-request-per-cycle throughput. L1D load hits have
 the same throughput and preserve a five-bit pipeline completion tag through
 their two-entry response queue; stores complete to the pipeline at lookup and
 drain through an ordered one-entry write buffer. The two
 external ports intentionally remain separate; SoC arbitration and integration
-are outside the core.
+are outside the core. The backing-memory data width stays fixed at 64 bits in
+both specializations; only the architectural and core-facing values follow
+`xlen`.
 
 ## Verification
 
@@ -101,5 +107,5 @@ env PLTCOLLECTS="$PWD": raco test --direct \
   cores/ricket/tests/ricket-test.rhm
 ```
 
-`make ricket-test` additionally runs the reusable RV64I decode, ALU, and
-load/store CIRCT/Verilator fixtures.
+`make ricket-test` additionally runs RV32I and RV64I decode, ALU, pipeline,
+cache, and load/store CIRCT fixtures plus the applicable Verilator fixtures.

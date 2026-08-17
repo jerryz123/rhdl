@@ -20,38 +20,40 @@ import:
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/flow.rhdl") open
 
-sync_circuit RicketPipeline(address_width :: Int):
+sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'RicketPipeline, "integer width must be 32 or 64")
   unless address_width >= 3
-  | error(~who: #'Ricket,
+  | error(~who: #'RicketPipeline,
           "address width must cover an eight-byte data transfer")
-  unless address_width <= 64
-  | error(~who: #'Ricket,
-          "address width must not exceed the RV64 architectural address width")
+  unless address_width <= xlen
+  | error(~who: #'RicketPipeline,
+          "address width must not exceed the architectural integer width")
 
-  interface start(Irrevocable(Bits(64)), ~role: consumer)
+  interface start(Irrevocable(Bits(xlen)), ~role: consumer)
   interface instruction_access(RicketInstructionAccess(address_width), ~role: requester)
-  interface data_access(RicketDataAccess(address_width), ~role: requester)
+  interface data_access(RicketDataAccess(xlen, address_width), ~role: requester)
   output fault: Bool
 
-  def zero64 = bits(0, 64)
+  def zero = bits(0, xlen)
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
-  reg fetch_pc(~init: zero64)
+  reg fetch_pc(~init: zero)
   reg fetch_epoch(~init: Bool(#false))
 
   // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
   // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
-  inst if_id_pipe(Pipe(FetchDecode(), 1))
-  inst fetch_metadata(Queue(FetchMetadata(), 2, ~pipe: #true))
-  inst id_ex_pipe(Pipe(DecodeExecute(), 1))
-  inst ex_mem_pipe(ValidPipe(ExecuteMemory(), 1))
-  inst mem_wb_pipe(ValidPipe(MemoryWriteback(), 1))
+  inst if_id_pipe(Pipe(FetchDecode(xlen), 1))
+  inst fetch_metadata(Queue(FetchMetadata(xlen), 2, ~pipe: #true))
+  inst id_ex_pipe(Pipe(DecodeExecute(xlen), 1))
+  inst ex_mem_pipe(ValidPipe(ExecuteMemory(xlen), 1))
+  inst mem_wb_pipe(ValidPipe(MemoryWriteback(xlen), 1))
 
-  inst decoder(RV64IInstructionDecoder())
-  inst registers(RicketRegisterFile())
+  inst decoder(RicketInstructionDecoder(xlen))
+  inst registers(RicketRegisterFile(xlen))
   inst scoreboard(RicketScoreboard())
-  inst alu(ALU(64))
-  inst branch_resolver(BranchResolver(64))
+  inst alu(ALU(xlen))
+  inst branch_resolver(BranchResolver(xlen))
 
   fault <== faulted
 
@@ -59,9 +61,9 @@ sync_circuit RicketPipeline(address_width :: Int):
   // producers remain in their pipeline stages below, despite earlier stages
   // consuming their values. The payloadless fault event remains a Bool wire.
   wire execute_fault_event: Bool
-  def redirect_link :: Handle = interface_link(Valid(Bits(64)))
-  def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass()))
-  def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass()))
+  def redirect_link :: Handle = interface_link(Valid(Bits(xlen)))
+  def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
+  def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults consume any younger registered token.
@@ -75,14 +77,14 @@ sync_circuit RicketPipeline(address_width :: Int):
   instruction_access.request.valid <== fetch_wants_request & fetch_metadata.ingress.ready
   instruction_access.request.bits.address <== fetch_pc[0..address_width]
   fetch_metadata.ingress.valid <== fetch_wants_request & instruction_access.request.ready
-  fetch_metadata.ingress.bits <== FetchMetadata():
+  fetch_metadata.ingress.bits <== FetchMetadata(xlen):
     pc: fetch_pc
     epoch: fetch_epoch
 
   def fetch_pair_valid = instruction_access.response.valid & fetch_metadata.egress.valid
   def fetch_pair_ready = squash ||| fetch_stale_response ||| if_id_pipe.ingress.ready
   if_id_pipe.ingress.valid <== fetch_pair_valid & !squash & !fetch_stale_response
-  if_id_pipe.ingress.bits <== FetchDecode():
+  if_id_pipe.ingress.bits <== FetchDecode(xlen):
     pc: fetch_metadata.egress.bits.pc
     instruction: instruction_access.response.bits.instruction
   instruction_access.response.ready <== fetch_metadata.egress.valid & fetch_pair_ready
@@ -98,7 +100,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   elsewhen start_fire:
     fetch_pc.next <== start.bits
   elsewhen fetch_request_fire:
-    fetch_pc.next <== fetch_pc + bits(4, 64)
+    fetch_pc.next <== fetch_pc + bits(4, xlen)
 
   when (redirect_link.right.valid):
     fetch_epoch.next <== !fetch_epoch
@@ -120,18 +122,18 @@ sync_circuit RicketPipeline(address_width :: Int):
   def rd = instruction_field(riscv_fields.rd, instruction)
   def decoded_immediate = mux_lookup(
     control.operand.immediate,
-    ~default: bits(0, 64),
+    ~default: bits(0, xlen),
     [
       [ImmediateSelect.I,
-       instruction_immediate(riscv_fields.IImmediate, instruction, 64)],
+       instruction_immediate(riscv_fields.IImmediate, instruction, xlen)],
       [ImmediateSelect.S,
-       instruction_immediate(riscv_fields.SImmediate, instruction, 64)],
+       instruction_immediate(riscv_fields.SImmediate, instruction, xlen)],
       [ImmediateSelect.B,
-       instruction_immediate(riscv_fields.BImmediate, instruction, 64)],
+       instruction_immediate(riscv_fields.BImmediate, instruction, xlen)],
       [ImmediateSelect.U,
-       instruction_immediate(riscv_fields.UImmediate, instruction, 64)],
+       instruction_immediate(riscv_fields.UImmediate, instruction, xlen)],
       [ImmediateSelect.J,
-       instruction_immediate(riscv_fields.JImmediate, instruction, 64)]
+       instruction_immediate(riscv_fields.JImmediate, instruction, xlen)]
     ]
   )
 
@@ -154,7 +156,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   def register_hazard = load_dependency_hazard ||| scoreboard_raw_hazard ||| scoreboard_waw_hazard
   live_if_id.ready <== id_ex_pipe.ingress.ready & !register_hazard
   id_ex_pipe.ingress.valid <== live_if_id.valid & !register_hazard
-  id_ex_pipe.ingress.bits <== DecodeExecute():
+  id_ex_pipe.ingress.bits <== DecodeExecute(xlen):
     pc: live_if_id.bits.pc
     instruction: instruction
     alu_control: control.alu
@@ -202,7 +204,7 @@ sync_circuit RicketPipeline(address_width :: Int):
     ~default: forwarded_rs1,
     [
       [OperandASelect.Pc, id_ex.bits.pc],
-      [OperandASelect.Zero, bits(0, 64)]
+      [OperandASelect.Zero, bits(0, xlen)]
     ]
   )
   alu.right <== mux(
@@ -218,8 +220,8 @@ sync_circuit RicketPipeline(address_width :: Int):
   def redirect_requested = branch_resolver.taken
   def pc_target = id_ex.bits.pc + id_ex.bits.immediate
   def register_target_sum = forwarded_rs1 + id_ex.bits.immediate
-  def register_target = register_target_sum & bits(0xfffffffffffffffe, 64)
-  def computed_redirect_target :: Bits(64) = mux(
+  def register_target = register_target_sum & !bits(1, xlen)
+  def computed_redirect_target :: Bits(xlen) = mux(
     id_ex.bits.target_from_rs1,
     register_target,
     pc_target
@@ -237,7 +239,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   def execute_cache_ready = !execute_is_memory ||| execute_fault ||| data_access.request.ready
   def execute_stage_ready = execute_cache_ready
   def execute_transfer = id_ex.valid & execute_stage_ready
-  def pc_plus_four = id_ex.bits.pc + bits(4, 64)
+  def pc_plus_four = id_ex.bits.pc + bits(4, xlen)
   def execute_result = mux(
     id_ex.bits.writeback_source === WritebackSelect.PcPlus4,
     pc_plus_four,
@@ -250,7 +252,7 @@ sync_circuit RicketPipeline(address_width :: Int):
 
   id_ex.ready <== execute_stage_ready
   ex_mem_pipe.ingress.valid <== id_ex.valid & !execute_fault & execute_cache_ready
-  ex_mem_pipe.ingress.bits <== ExecuteMemory():
+  ex_mem_pipe.ingress.bits <== ExecuteMemory(xlen):
     memory_operation: id_ex.bits.memory_operation
     writeback_enable: id_ex.bits.writeback_enable
     rd: id_ex.bits.rd
@@ -260,7 +262,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   // edge that captures the instruction in EX/MEM. A hit therefore occupies
   // the ordinary MEM stage instead of adding a request cycle after it.
   data_access.request.valid <== id_ex.valid & !execute_fault & execute_is_memory
-  data_access.request.bits <== RicketDataReq(address_width):
+  data_access.request.bits <== RicketDataReq(xlen, address_width):
     address: alu.result[0..address_width]
     write: id_ex.bits.memory_operation === MemoryOperation.Write
     width: id_ex.bits.memory_width
@@ -277,13 +279,13 @@ sync_circuit RicketPipeline(address_width :: Int):
   def commit_writes_immediately = commit.bits.writeback_enable & !commit_is_load
 
   mem_wb_pipe.ingress.valid <== commit.valid & commit_writes_immediately
-  mem_wb_pipe.ingress.bits <== MemoryWriteback():
+  mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
     write_enable: commit.bits.writeback_enable
     rd: commit.bits.rd
     value: commit.bits.result
 
   memory_bypass_link.left.valid <== commit.valid & commit_writes_immediately & or_reduce(commit.bits.rd)
-  memory_bypass_link.left.bits <== RicketBypass():
+  memory_bypass_link.left.bits <== RicketBypass(xlen):
     rd: commit.bits.rd
     value: commit.bits.result
 
@@ -300,7 +302,7 @@ sync_circuit RicketPipeline(address_width :: Int):
   scoreboard.clear_address <== data_access.response.bits.tag
 
   writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(mem_wb.bits.rd)
-  writeback_bypass_link.left.bits <== RicketBypass():
+  writeback_bypass_link.left.bits <== RicketBypass(xlen):
     rd: mem_wb.bits.rd
     value: mem_wb.bits.value
 

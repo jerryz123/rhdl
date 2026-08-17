@@ -22,7 +22,11 @@ fun check_l1d_geometry(address_width :: Int, sets :: Int, line_bytes :: Int):
   | error(~who: #'RicketL1DCache,
           "address width must include line offset, set, and tag bits")
 
-sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int):
+sync_circuit RicketL1DCache(xlen :: Int, address_width :: Int, sets :: Int, line_bytes :: Int):
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'RicketL1DCache, "integer width must be 32 or 64")
+  unless address_width <= xlen
+  | error(~who: #'RicketL1DCache, "address width must not exceed integer width")
   check_l1d_geometry(address_width, sets, line_bytes)
   def beats = line_bytes / 8
   def line_bits = line_bytes * 8
@@ -35,21 +39,21 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   def Line = Vec(beats, Bits(64))
   def ByteLine = Vec(line_bytes, Bits(8))
 
-  interface core(RicketDataAccess(address_width), ~role: responder)
+  interface core(RicketDataAccess(xlen, address_width), ~role: responder)
   interface memory(SimpleMemory(address_width, 8), ~role: requester)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
-  inst load_gen(LoadGen())
-  inst store_gen(StoreGen())
-  inst responses(Queue(RicketDataResp(), 2, ~pipe: #true, ~flow: #true))
+  inst load_gen(LoadGen(xlen))
+  inst store_gen(StoreGen(xlen))
+  inst responses(Queue(RicketDataResp(xlen), 2, ~pipe: #true, ~flow: #true))
 
-  def empty_request = RicketDataReq(address_width):
+  def empty_request = RicketDataReq(xlen, address_width):
     address: bits(0, address_width)
     write: Bool(#false)
     width: MemoryWidth.Double
     unsigned: Bool(#false)
-    data: bits(0, 64)
+    data: bits(0, xlen)
     tag: bits(0, 5)
   reg valid_bits(~init: bits(0, sets))
   reg lookup_request(~init: empty_request)
@@ -90,11 +94,11 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   def cached_line = cast(lines.port.response.bits, Line)
   def cached_beat = cached_line.lookup(lookup_beat, ~default: bits(0, 64))
 
-  def lookup_address64:
-    if address_width == 64
+  def lookup_address_xlen:
+    if address_width == xlen
     | as_bits(lookup_request.address)
-    | zext(lookup_request.address, 64)
-  load_gen.address <== lookup_address64
+    | zext(lookup_request.address, xlen)
+  load_gen.address <== lookup_address_xlen
   load_gen.data <== mux(
     refilling,
     refill_line.updated(
@@ -105,7 +109,7 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   )
   load_gen.width <== lookup_request.width
   load_gen.unsigned_load <== lookup_request.unsigned
-  store_gen.address <== lookup_address64
+  store_gen.address <== lookup_address_xlen
   store_gen.value <== lookup_request.data
   store_gen.width <== lookup_request.width
 
@@ -153,8 +157,8 @@ sync_circuit RicketL1DCache(address_width :: Int, sets :: Int, line_bytes :: Int
   def produces_load_hit = lookup_load & line_hit
   def produces_response = produces_load_hit ||| lookup_store ||| install_refill
   responses.ingress.valid <== produces_response
-  responses.ingress.bits <== RicketDataResp():
-    data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, 64))
+  responses.ingress.bits <== RicketDataResp(xlen):
+    data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, xlen))
     tag: lookup_request.tag
   when produces_response:
     assert(responses.ingress.ready, "l1d_response_slot_reserved")

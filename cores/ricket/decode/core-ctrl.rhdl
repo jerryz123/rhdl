@@ -1,19 +1,21 @@
 #lang rhdl
-// Composes Ricket's independent control relations into one hardware decoder.
+// Composes Ricket's RV32I and RV64I control relations into one hardware decoder.
 
 import:
   "../../alu.rhdl" open
+  "decode-support.rhdl" open
   "alu-ctrl.rhdl" open
   "operand-ctrl.rhdl" open
   "branch-ctrl.rhdl" open
   "mem-ctrl.rhdl" open
   "writeback-ctrl.rhdl" open
   "trap-ctrl.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   lib("rhdl/std/decode.rhdl") open
 
-bundle RV64IControl():
+bundle RicketControl():
   alu: AluControl()
   operand: OperandControl()
   branch: BranchControl()
@@ -21,47 +23,62 @@ bundle RV64IControl():
   writeback: WritebackControl()
   trap: TrapControl()
 
-fun same_input_pattern(left, right):
-  left.type.type_equal(right.type) && right.type.type_equal(left.type) && (
-    left.width == right.width
-  ) && left.value_bits == right.value_bits && left.care_bits == right.care_bits
+// Ordinary host code adds independently authored control columns to one row
+// per instruction. The selected ISA still elaborates to one decode table.
+fun compose_control_cases(instructions, alu_cases, operand_cases, branch_cases,
+                          memory_cases, writeback_cases, trap_cases):
+  for List (instruction in instructions):
+    block:
+      def input = instruction_pattern(instruction)
+      DecodeCase(
+        input,
+        pattern(RicketControl()):
+          alu: component_output(alu_cases, input)
+          operand: component_output(operand_cases, input)
+          branch: component_output(branch_cases, input)
+          memory: component_output(memory_cases, input)
+          writeback: component_output(writeback_cases, input)
+          trap: component_output(trap_cases, input)
+      )
 
-fun component_output(cases, input):
-  def matching = cases.filter(~keep: fun (candidate): same_input_pattern(candidate.input, input))
-  unless matching.length() == 1
-  | error(~who: #'RV64IControlCases,
-          "each component relation must contain every canonical instruction exactly once")
-  matching[0].output
-
-// Ordinary host code adds the independently authored control columns to one
-// canonical row per RV64I instruction. Nested Patterns retain their care bits.
-def RV64IControlCases = for List (instruction in RV64IInstructions):
-  block:
-    def input = instruction_pattern(instruction)
-    DecodeCase(
-      input,
-      pattern(RV64IControl()):
-        alu: component_output(RV64ICompleteAluCases, input)
-        operand: component_output(RV64IOperandCases, input)
-        branch: component_output(RV64IBranchCases, input)
-        memory: component_output(RV64IMemoryCases, input)
-        writeback: component_output(RV64IWritebackCases, input)
-        trap: component_output(RV64ITrapCases, input)
-    )
-
+def RV32IControlCases = compose_control_cases(
+  rv32.RV32IInstructions,
+  RV32ICompleteAluCases,
+  RV32IOperandCases,
+  RV32IBranchCases,
+  RV32IMemoryCases,
+  RV32IWritebackCases,
+  RV32ITrapCases
+)
+def RV64IControlCases = compose_control_cases(
+  RV64IInstructions,
+  RV64ICompleteAluCases,
+  RV64IOperandCases,
+  RV64IBranchCases,
+  RV64IMemoryCases,
+  RV64IWritebackCases,
+  RV64ITrapCases
+)
+def RV32IControlDecode = ValidDecodeGen(RV32IControlCases)
 def RV64IControlDecode = ValidDecodeGen(RV64IControlCases)
 
-circuit RV64IInstructionDecoder():
+circuit RicketInstructionDecoder(xlen :: Int):
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'RicketInstructionDecoder, "integer width must be 32 or 64")
+
   input instruction: Bits(32)
   output valid: Bool
-  output control: RV64IControl()
+  output control: RicketControl()
 
-  def decoded :: DecodeResult(RV64IControl()) = RV64IControlDecode(instruction)
+  def decoded :: DecodeResult(RicketControl()) = if xlen == 32 | RV32IControlDecode(instruction) | RV64IControlDecode(instruction)
   valid <== decoded.valid
   control <== decoded.value
 
 export:
-  RV64IControl
+  RicketControl
+  compose_control_cases
+  RV32IControlCases
   RV64IControlCases
+  RV32IControlDecode
   RV64IControlDecode
-  RV64IInstructionDecoder
+  RicketInstructionDecoder

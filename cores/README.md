@@ -21,7 +21,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
 | [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
-| [`ricket/`](ricket/README.md) | Ricket's RV64I decode, five-stage pipeline, state, and tests |
+| [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, state, and tests |
 
 The dependency direction is one way:
 
@@ -66,9 +66,9 @@ selection, PCs, or redirects.
 ## Load and store generators
 
 [`load-store.rhdl`](load-store.rhdl) owns the shared `MemoryWidth` control and
-two stateless RV64 datapath components. `LoadGen` selects a byte, halfword,
-word, or doubleword from an eight-byte returned beat and performs signed or
-unsigned extension. `StoreGen` shifts a scalar source into its addressed byte
+two stateless XLEN-parameterized datapath components. `LoadGen` selects a byte,
+halfword, word, or doubleword from an eight-byte returned beat and extends it to
+32 or 64 bits. `StoreGen` shifts an XLEN scalar source into its addressed byte
 lane and generates the corresponding eight-bit write mask.
 
 `memory_access_aligned` checks the same size contract independently. The

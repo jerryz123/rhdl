@@ -1,63 +1,70 @@
 #lang rhdl
-// Defines arithmetic and complete-domain RV64I controls for the reusable integer ALU.
+// Defines RV32I and RV64I controls for the reusable integer ALU.
 
 import:
   "../../alu.rhdl" open
   "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   lib("rhdl/std/decode.rhdl") open
 
-// Immediate and register forms share sparse control patterns. Omitted fields
-// remain synthesis don't-cares.
-def RV64IAluCases = decode_groups(
+// The shared control relation accepts each catalog's own immediate-shift
+// instructions. All other inputs are the same InstructionSpec objects in both
+// catalogs, so their controls are authored exactly once.
+fun base_alu_cases(slli, srli, srai):
+  decode_groups(
+    AluControl(),
+    ~input: instruction_pattern
+  ):
+    [ADDI, ADD]:
+      result_select: AluResultSelect.Arithmetic
+      subtract: Bool(#false)
+      word: Bool(#false)
+
+    [SUB]:
+      result_select: AluResultSelect.Arithmetic
+      subtract: Bool(#true)
+      word: Bool(#false)
+
+    group [slli, SLL]:
+      result_select: AluResultSelect.Shift
+      shift_right: Bool(#false)
+      word: Bool(#false)
+
+    [SLTI, SLT]:
+      result_select: AluResultSelect.Compare
+      signed_mode: Bool(#true)
+
+    [SLTIU, SLTU]:
+      result_select: AluResultSelect.Compare
+      signed_mode: Bool(#false)
+
+    [XORI, XOR]:
+      result_select: AluResultSelect.Xor
+
+    group [srli, SRL]:
+      result_select: AluResultSelect.Shift
+      signed_mode: Bool(#false)
+      shift_right: Bool(#true)
+      word: Bool(#false)
+
+    group [srai, SRA]:
+      result_select: AluResultSelect.Shift
+      signed_mode: Bool(#true)
+      shift_right: Bool(#true)
+      word: Bool(#false)
+
+    [ORI, OR]:
+      result_select: AluResultSelect.Or
+
+    [ANDI, AND]:
+      result_select: AluResultSelect.And
+
+def RV64IWordAluCases = decode_groups(
   AluControl(),
   ~input: instruction_pattern
 ):
-  [ADDI, ADD]:
-    result_select: AluResultSelect.Arithmetic
-    subtract: Bool(#false)
-    word: Bool(#false)
-
-  [SUB]:
-    result_select: AluResultSelect.Arithmetic
-    subtract: Bool(#true)
-    word: Bool(#false)
-
-  [SLLI, SLL]:
-    result_select: AluResultSelect.Shift
-    shift_right: Bool(#false)
-    word: Bool(#false)
-
-  [SLTI, SLT]:
-    result_select: AluResultSelect.Compare
-    signed_mode: Bool(#true)
-
-  [SLTIU, SLTU]:
-    result_select: AluResultSelect.Compare
-    signed_mode: Bool(#false)
-
-  [XORI, XOR]:
-    result_select: AluResultSelect.Xor
-
-  [SRLI, SRL]:
-    result_select: AluResultSelect.Shift
-    signed_mode: Bool(#false)
-    shift_right: Bool(#true)
-    word: Bool(#false)
-
-  [SRAI, SRA]:
-    result_select: AluResultSelect.Shift
-    signed_mode: Bool(#true)
-    shift_right: Bool(#true)
-    word: Bool(#false)
-
-  [ORI, OR]:
-    result_select: AluResultSelect.Or
-
-  [ANDI, AND]:
-    result_select: AluResultSelect.And
-
   [ADDIW, ADDW]:
     result_select: AluResultSelect.Arithmetic
     subtract: Bool(#false)
@@ -85,6 +92,9 @@ def RV64IAluCases = decode_groups(
     shift_right: Bool(#true)
     word: Bool(#true)
 
+def RV32IAluCases = base_alu_cases(rv32.SLLI, rv32.SRLI, rv32.SRAI)
+def RV64IAluCases = base_alu_cases(SLLI, SRLI, SRAI) ++ RV64IWordAluCases
+def RV32IAluDecode = ValidDecodeGen(RV32IAluCases)
 def RV64IAluDecode = ValidDecodeGen(RV64IAluCases)
 
 // Only address-producing instructions constrain the non-arithmetic ALU path.
@@ -94,27 +104,24 @@ def address_alu = partial_pattern(AluControl()):
   subtract: Bool(#false)
   word: Bool(#false)
 def unused_alu = pattern(AluControl(), _)
-def arithmetic_instructions = [
-  ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
-  SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW,
-  ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND,
-  ADDW, SUBW, SLLW, SRLW, SRAW
-]
-def address_instructions = [
-  LUI, AUIPC,
-  LB, LH, LW, LBU, LHU, LWU, LD,
-  SB, SH, SW, SD
-]
+def shared_address_instructions = [LUI, AUIPC, LB, LH, LW, LBU, LHU, SB, SH, SW]
+def rv64_address_instructions = shared_address_instructions ++ [LWU, LD, SD]
 def unused_alu_instructions = [
   JAL, JALR,
   BEQ, BNE, BLT, BGE, BLTU, BGEU,
   FENCE, ECALL, EBREAK
 ]
-def RV64INonArithmeticAluCases = combine_case_groups([
-  instruction_cases(address_instructions, address_alu),
-  instruction_cases(unused_alu_instructions, unused_alu)
-])
+fun non_arithmetic_alu_cases(address_instructions):
+  combine_case_groups([
+    instruction_cases(address_instructions, address_alu),
+    instruction_cases(unused_alu_instructions, unused_alu)
+  ])
+
+def RV32INonArithmeticAluCases = non_arithmetic_alu_cases(shared_address_instructions)
+def RV64INonArithmeticAluCases = non_arithmetic_alu_cases(rv64_address_instructions)
+def RV32ICompleteAluCases = RV32IAluCases ++ RV32INonArithmeticAluCases
 def RV64ICompleteAluCases = RV64IAluCases ++ RV64INonArithmeticAluCases
+def RV32ICompleteAluDecode = ValidDecodeGen(RV32ICompleteAluCases)
 def RV64ICompleteAluDecode = ValidDecodeGen(RV64ICompleteAluCases)
 
 circuit RV64IAluInstructionDecoder():
@@ -127,9 +134,14 @@ circuit RV64IAluInstructionDecoder():
   control <== decoded.value
 
 export:
+  RV32IAluCases
   RV64IAluCases
+  RV32IAluDecode
   RV64IAluDecode
+  RV32INonArithmeticAluCases
   RV64INonArithmeticAluCases
+  RV32ICompleteAluCases
   RV64ICompleteAluCases
+  RV32ICompleteAluDecode
   RV64ICompleteAluDecode
   RV64IAluInstructionDecoder

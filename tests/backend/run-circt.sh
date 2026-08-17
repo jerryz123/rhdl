@@ -480,8 +480,10 @@ direct_fixture_specs=(
   'ricket-register-file|ricket_register_file_tb'
   'ricket-scoreboard|ricket_scoreboard_tb'
   'ricket-pipeline|ricket_pipeline_tb'
+  'ricket-pipeline-rv32|'
   'ricket-icache|ricket_icache_tb'
   'ricket-dcache|ricket_dcache_tb'
+  'ricket-dcache-rv32|'
 )
 
 fixture_declared() {

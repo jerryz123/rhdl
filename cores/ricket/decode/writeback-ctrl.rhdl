@@ -1,8 +1,9 @@
 #lang rhdl
-// Defines RV64I architectural writeback enable and result-source controls.
+// Defines RV32I and RV64I architectural writeback and result-source controls.
 
 import:
   "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   lib("rhdl/std/decode.rhdl") open
 
@@ -15,45 +16,48 @@ bundle WritebackControl():
   enable: Bool
   source: WritebackSelect
 
-def immediate_alu_instructions = [
-  ADDI, SLTI, SLTIU, XORI, ORI, ANDI,
-  SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW
-]
-def register_alu_instructions = [
-  ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND,
-  ADDW, SUBW, SLLW, SRLW, SRAW
-]
-def alu_writeback_instructions = (
-  [LUI, AUIPC] ++ immediate_alu_instructions ++ register_alu_instructions
-)
-def load_instructions = [LB, LH, LW, LBU, LHU, LWU, LD]
+def alu_writeback = pattern(WritebackControl()):
+  enable: Bool(#true)
+  source: WritebackSelect.Alu
+def memory_writeback = pattern(WritebackControl()):
+  enable: Bool(#true)
+  source: WritebackSelect.Memory
+def link_writeback = pattern(WritebackControl()):
+  enable: Bool(#true)
+  source: WritebackSelect.PcPlus4
+def no_writeback = partial_pattern(WritebackControl()):
+  enable: Bool(#false)
+
+def shared_immediate_alu = [ADDI, SLTI, SLTIU, XORI, ORI, ANDI]
+def shared_register_alu = [ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND]
+def shared_loads = [LB, LH, LW, LBU, LHU]
 def link_instructions = [JAL, JALR]
-def writeback_instructions = (
-  alu_writeback_instructions ++ load_instructions ++ link_instructions
+fun writeback_cases(instructions, alu_instructions, load_instructions):
+  def writing_instructions = alu_instructions ++ load_instructions ++ link_instructions
+  combine_case_groups([
+    instruction_cases(alu_instructions, alu_writeback),
+    instruction_cases(load_instructions, memory_writeback),
+    instruction_cases(link_instructions, link_writeback),
+    instruction_cases(excluding_instructions(instructions, writing_instructions), no_writeback)
+  ])
+
+def RV32IWritebackCases = writeback_cases(
+  rv32.RV32IInstructions,
+  [LUI, AUIPC] ++ shared_immediate_alu ++ [rv32.SLLI, rv32.SRLI, rv32.SRAI] ++ shared_register_alu,
+  shared_loads
 )
-def RV64IWritebackCases = decode_groups(
-  WritebackControl(),
-  ~input: instruction_pattern
-):
-  group alu_writeback_instructions:
-    enable: Bool(#true)
-    source: WritebackSelect.Alu
-
-  group load_instructions:
-    enable: Bool(#true)
-    source: WritebackSelect.Memory
-
-  group link_instructions:
-    enable: Bool(#true)
-    source: WritebackSelect.PcPlus4
-
-  group excluding_instructions(writeback_instructions):
-    enable: Bool(#false)
-
+def RV64IWritebackCases = writeback_cases(
+  RV64IInstructions,
+  [LUI, AUIPC] ++ shared_immediate_alu ++ [SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW] ++ shared_register_alu ++ [ADDW, SUBW, SLLW, SRLW, SRAW],
+  shared_loads ++ [LWU, LD]
+)
+def RV32IWritebackDecode = ValidDecodeGen(RV32IWritebackCases)
 def RV64IWritebackDecode = ValidDecodeGen(RV64IWritebackCases)
 
 export:
   WritebackSelect
   WritebackControl
+  RV32IWritebackCases
   RV64IWritebackCases
+  RV32IWritebackDecode
   RV64IWritebackDecode

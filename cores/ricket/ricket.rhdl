@@ -8,17 +8,23 @@ import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/simple-memory.rhdl") open
 
-sync_circuit Ricket(address_width :: Int,
+sync_circuit Ricket(xlen :: Int,
+                    address_width :: Int,
                     ~cache_sets: cache_sets :: Int = 64,
                     ~line_bytes: line_bytes :: Int = 32):
-  interface start(Irrevocable(Bits(64)), ~role: consumer)
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'Ricket, "integer width must be 32 or 64")
+  unless address_width <= xlen
+  | error(~who: #'Ricket, "address width must not exceed integer width")
+
+  interface start(Irrevocable(Bits(xlen)), ~role: consumer)
   interface imem(SimpleMemory(address_width, 8), ~role: requester)
   interface dmem(SimpleMemory(address_width, 8), ~role: requester)
   output fault: Bool
 
-  inst pipeline(RicketPipeline(address_width))
+  inst pipeline(RicketPipeline(xlen, address_width))
   inst l1i(RicketL1ICache(address_width, cache_sets, line_bytes))
-  inst l1d(RicketL1DCache(address_width, cache_sets, line_bytes))
+  inst l1d(RicketL1DCache(xlen, address_width, cache_sets, line_bytes))
 
   start <=> pipeline.start
   pipeline.instruction_access <=> l1i.core

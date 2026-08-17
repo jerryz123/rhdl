@@ -1,8 +1,9 @@
 #lang rhdl
-// Defines RV64I synchronous trap controls for the initial fault-stop core.
+// Defines RV32I and RV64I synchronous trap controls for the initial fault-stop core.
 
 import:
   "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   lib("rhdl/std/decode.rhdl") open
 
@@ -10,19 +11,24 @@ bundle TrapControl():
   trap: Bool
 
 def trap_instructions = [ECALL, EBREAK]
-def RV64ITrapCases = decode_groups(
-  TrapControl(),
-  ~input: instruction_pattern
-):
-  group trap_instructions:
-    trap: Bool(#true)
+def trap = pattern(TrapControl()):
+  trap: Bool(#true)
+def no_trap = pattern(TrapControl()):
+  trap: Bool(#false)
+fun trap_cases(instructions):
+  combine_case_groups([
+    instruction_cases(trap_instructions, trap),
+    instruction_cases(excluding_instructions(instructions, trap_instructions), no_trap)
+  ])
 
-  group excluding_instructions(trap_instructions):
-    trap: Bool(#false)
-
+def RV32ITrapCases = trap_cases(rv32.RV32IInstructions)
+def RV64ITrapCases = trap_cases(RV64IInstructions)
+def RV32ITrapDecode = ValidDecodeGen(RV32ITrapCases)
 def RV64ITrapDecode = ValidDecodeGen(RV64ITrapCases)
 
 export:
   TrapControl
+  RV32ITrapCases
   RV64ITrapCases
+  RV32ITrapDecode
   RV64ITrapDecode

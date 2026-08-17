@@ -1,10 +1,11 @@
 #lang rhombus
-// Checks direct component-oriented RV64I decode relations across all 52 base instructions.
+// Checks composed RV32I and RV64I component-control relations and hardware decoders.
 
 import:
   "../../../rhdl/core/main.rhm" open
   "../../../rhdl/frontend/kernel.rhm" as embedded
   "../../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   "../../alu.rhdl" as alu
@@ -18,8 +19,10 @@ import:
   "../decode/trap-ctrl.rhdl" as trap_controls
   "../decode/core-ctrl.rhdl" as controls
 
-def design = embedded.run_elaboration(fun (): controls.RV64IInstructionDecoder())
+def design = embedded.run_elaboration(fun (): controls.RicketInstructionDecoder(64))
 def module_def = design.modules[0]
+def rv32_design = embedded.run_elaboration(fun (): controls.RicketInstructionDecoder(32))
+def rv32_module = rv32_design.modules[0]
 fun control_for(cases, name):
   def instruction = RV64I.find(name)
   cases.find(
@@ -48,6 +51,15 @@ fun has_canonical_domain(cases):
       ).length() == 1
   )
 
+def rv32_domain = rv32.RV32IInstructions.map(instruction_pattern)
+fun has_rv32_domain(cases):
+  cases.length() == rv32_domain.length() && (
+    for all (expected in rv32_domain):
+      cases.filter(
+        ~keep: fun (candidate): exact_pattern_equal(candidate.input, expected)
+      ).length() == 1
+  )
+
 def complete_relations = [
   alu_controls.RV64ICompleteAluCases,
   operand_controls.RV64IOperandCases,
@@ -56,6 +68,15 @@ def complete_relations = [
   writeback_controls.RV64IWritebackCases,
   trap_controls.RV64ITrapCases,
   controls.RV64IControlCases
+]
+def rv32_complete_relations = [
+  alu_controls.RV32ICompleteAluCases,
+  operand_controls.RV32IOperandCases,
+  branch_controls.RV32IBranchCases,
+  memory_controls.RV32IMemoryCases,
+  writeback_controls.RV32IWritebackCases,
+  trap_controls.RV32ITrapCases,
+  controls.RV32IControlCases
 ]
 
 fun record_field(record, name):
@@ -157,6 +178,8 @@ check:
   alu_controls.RV64INonArithmeticAluCases.length() ~is 24
   (for all (relation in complete_relations):
      has_canonical_domain(relation)) ~is #true
+  (for all (relation in rv32_complete_relations):
+     has_rv32_domain(relation)) ~is #true
   has_canonical_domain(
     operand_controls.RV64IOperandCases.drop(1)
   ) ~is #false
@@ -209,14 +232,22 @@ check:
     "branch"
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
+  controls.RV32IControlDecode.table.packed_cases.length() ~is 40
+  alu_controls.RV32IAluCases.length() ~is 19
   module_def.outputs.map(fun (port): port.name) ~is [
     "valid", "control"
   ]
   type_equal(module_def.find_input("instruction").type, Bits(32)) ~is #true
   type_equal(module_def.find_output("valid").type, bool.Bool) ~is #true
   type_equal(module_def.find_output("control").type,
-             controls.RV64IControl()) ~is #true
+             controls.RicketControl()) ~is #true
   module_def.find_output("control").type.fields.map(
     fun (field): field.name
   ) ~is ["alu", "operand", "branch", "memory", "writeback", "trap"]
   verify_design(design) ~is #void
+  type_equal(rv32_module.find_output("control").type,
+             controls.RicketControl()) ~is #true
+  verify_design(rv32_design) ~is #void
+  embedded.run_elaboration(
+    fun (): controls.RicketInstructionDecoder(16)
+  ) ~throws "must be 32 or 64"

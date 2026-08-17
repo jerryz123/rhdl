@@ -1,9 +1,10 @@
 #lang rhdl
-// Defines RV64I load/store operation, width, and extension controls.
+// Defines RV32I and RV64I load/store operation, width, and extension controls.
 
 import:
   "decode-support.rhdl" open
   "../../load-store.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   lib("rhdl/std/decode.rhdl") open
 
@@ -17,10 +18,13 @@ bundle MemoryControl():
   width: MemoryWidth
   unsigned: Bool
 
-def load_instructions = [LB, LH, LW, LBU, LHU, LWU, LD]
-def store_instructions = [SB, SH, SW, SD]
-def memory_instructions = load_instructions ++ store_instructions
-def RV64IMemoryCases = decode_groups(
+def shared_loads = [LB, LH, LW, LBU, LHU]
+def shared_stores = [SB, SH, SW]
+def shared_memory_instructions = shared_loads ++ shared_stores
+def no_memory = partial_pattern(MemoryControl()):
+  access: MemoryOperation.None
+
+def SharedMemoryCases = decode_groups(
   MemoryControl(),
   ~input: instruction_pattern
 ):
@@ -49,16 +53,6 @@ def RV64IMemoryCases = decode_groups(
     width: MemoryWidth.Word
     unsigned: Bool(#false)
 
-  [LWU]:
-    access: MemoryOperation.Read
-    width: MemoryWidth.Word
-    unsigned: Bool(#true)
-
-  [LD]:
-    access: MemoryOperation.Read
-    width: MemoryWidth.Double
-    unsigned: Bool(#false)
-
   [SB]:
     access: MemoryOperation.Write
     width: MemoryWidth.Byte
@@ -71,17 +65,40 @@ def RV64IMemoryCases = decode_groups(
     access: MemoryOperation.Write
     width: MemoryWidth.Word
 
+def RV64IOnlyMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LWU]:
+    access: MemoryOperation.Read
+    width: MemoryWidth.Word
+    unsigned: Bool(#true)
+
+  [LD]:
+    access: MemoryOperation.Read
+    width: MemoryWidth.Double
+    unsigned: Bool(#false)
+
   [SD]:
     access: MemoryOperation.Write
     width: MemoryWidth.Double
 
-  group excluding_instructions(memory_instructions):
-    access: MemoryOperation.None
-
+def RV32IMemoryCases = SharedMemoryCases ++ instruction_cases(
+  excluding_instructions(rv32.RV32IInstructions, shared_memory_instructions),
+  no_memory
+)
+def rv64_memory_instructions = shared_memory_instructions ++ [LWU, LD, SD]
+def RV64IMemoryCases = SharedMemoryCases ++ RV64IOnlyMemoryCases ++ instruction_cases(
+  excluding_instructions(RV64IInstructions, rv64_memory_instructions),
+  no_memory
+)
+def RV32IMemoryDecode = ValidDecodeGen(RV32IMemoryCases)
 def RV64IMemoryDecode = ValidDecodeGen(RV64IMemoryCases)
 
 export:
   MemoryOperation
   MemoryControl
+  RV32IMemoryCases
   RV64IMemoryCases
+  RV32IMemoryDecode
   RV64IMemoryDecode

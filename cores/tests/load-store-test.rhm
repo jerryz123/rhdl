@@ -9,11 +9,15 @@ import:
   "../load-store.rhdl" as load_store
   "load-store-fixture.rhdl" as fixture
 
-def load_design = embedded.run_elaboration(fun (): load_store.LoadGen())
+def load_design = embedded.run_elaboration(fun (): load_store.LoadGen(64))
 def load_module = load_design.modules[0]
-def store_design = embedded.run_elaboration(fun (): load_store.StoreGen())
+def store_design = embedded.run_elaboration(fun (): load_store.StoreGen(64))
 def store_module = store_design.modules[0]
-def fixture_design = embedded.run_elaboration(fun (): fixture.LoadStoreFixture())
+def rv32_load_design = embedded.run_elaboration(fun (): load_store.LoadGen(32))
+def rv32_load_module = rv32_load_design.modules[0]
+def rv32_store_design = embedded.run_elaboration(fun (): load_store.StoreGen(32))
+def rv32_store_module = rv32_store_design.modules[0]
+def fixture_design = embedded.run_elaboration(fun (): fixture.LoadStoreFixture(64))
 def fixture_top = fixture_design.modules[0]
 fun state_operations(module_def):
   module_def.operations.filter(
@@ -50,6 +54,14 @@ check:
   state_operations(store_module).length() ~is 0
   verify_design(store_design) ~is #void
 
+  type_equal(rv32_load_module.find_input("address").type, Bits(32)) ~is #true
+  type_equal(rv32_load_module.find_input("data").type, Bits(64)) ~is #true
+  type_equal(rv32_load_module.find_output("value").type, Bits(32)) ~is #true
+  type_equal(rv32_store_module.find_input("value").type, Bits(32)) ~is #true
+  type_equal(rv32_store_module.find_output("data").type, Bits(64)) ~is #true
+  verify_design(rv32_load_design) ~is #void
+  verify_design(rv32_store_design) ~is #void
+
   fixture_design.modules.map(fun (module_def): module_def.name) ~is [
     "LoadStoreFixture", "LoadGen", "StoreGen"
   ]
@@ -57,3 +69,4 @@ check:
     ~keep: fun (operation): operation.opcode == "rtl.instance"
   ).length() ~is 2
   verify_design(fixture_design) ~is #void
+  embedded.run_elaboration(fun (): load_store.LoadGen(16)) ~throws "must be 32 or 64"

@@ -4,12 +4,14 @@
 
 `protocol.rhdl` defines `RicketDataAccess`, an ordered `Irrevocable`
 request/response interface carrying the original byte address, read/write
-intent, scalar width, load signedness, and 64-bit store source. It returns a
-normalized 64-bit load value and echoes the request's five-bit completion tag;
+intent, scalar width, load signedness, and XLEN-wide store source. It returns an
+XLEN-wide normalized load value and echoes the request's five-bit completion tag;
 store response data and tag have no meaning. The pipeline uses the tag to clear
 the destination scoreboard entry when a delayed load returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation.
+load/store lane generation. `RicketL1DCache(xlen, address_width, ...)` supports
+32- and 64-bit architectural values while retaining eight-byte line beats and
+an eight-byte `SimpleMemory` backing port.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,
 write-through/write-no-allocate cache. Its synchronous lookup accepts and

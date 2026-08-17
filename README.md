@@ -155,7 +155,7 @@ The current vertical slice includes:
   protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
-- Ricket, a standalone five-stage RV64I integer core with direct component-oriented
+- Ricket, a standalone five-stage RV32I/RV64I integer core with direct component-oriented
   structured decode, separate instruction and data memory ports, forwarding,
   load-use stalls, redirect flushing, and fault-stop behavior. Its typed,
   shared integer ALU remains independently reusable.

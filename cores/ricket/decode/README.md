@@ -4,7 +4,7 @@
 
 Ricket decodes each instruction directly into the controls consumed by one
 pipeline component. There is no intermediate instruction-kind enum. The final
-`RV64IControl` bundle is only the structural product of those independently
+`RicketControl` bundle is only the structural product of those independently
 authored control columns.
 
 | File | Owned result |
@@ -15,17 +15,22 @@ authored control columns.
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`trap-ctrl.rhdl`](trap-ctrl.rhdl) | Synchronous trap indication |
-| [`decode-support.rhdl`](decode-support.rhdl) | Canonical instruction-pattern adaptation and instruction-family exclusion helpers |
-| [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the integrated decoder circuit |
+| [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
+| [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the XLEN-selected integrated decoder circuit |
 
-Each component file owns its decoder-facing control bundle,
-instruction-family lists, complete 52-row relation, and standalone
-`ValidDecodeGen`. Component files do not import one another. Memory decode uses
-the `MemoryWidth` owned by the reusable
+Each component file owns its decoder-facing control bundle and instruction
+families. XLEN-independent controls are authored against the exact shared
+`InstructionSpec` objects from `integer-common.rhm`. The ALU and operand
+relations accept each catalog's own `SLLI`, `SRLI`, and `SRAI` specs, whose
+encodings genuinely differ, and append explicit RV64-only operation groups.
+No catalog is treated as the source of another, and no instruction is rebound
+by name. Both complete relations get their own `ValidDecodeGen`; this creates
+one selected table in a core specialization, not parallel decoders. Component
+files do not import one another. Memory decode uses the `MemoryWidth` owned by the reusable
 [`LoadGen`/`StoreGen`](../../load-store.rhdl) datapath contract instead of
 defining a decoder-local duplicate. `core-ctrl.rhdl` iterates over the canonical
-`RV64IInstructions` list, looks up one output pattern from every relation, and
-nests those patterns into one `RV64IControl` case. This is ordinary host code
+selected catalog, looks up one output pattern from every relation, and nests
+those patterns into one `RicketControl` case. This is ordinary host code
 over `Pattern` and `DecodeCase`, not another decode-library primitive.
 
 Relations express architectural requirements rather than defensive defaults.
@@ -39,6 +44,6 @@ the named host instruction-family lists, avoiding component-specific wrappers
 whose only job would be to construct and distribute one output pattern.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
-single `ValidDecodeGen` preserves every nested care mask and emits one hardware
-decode operation. The focused decoder test separately rejects missing, extra,
-or duplicate component rows against the canonical instruction-pattern domain.
+selected `ValidDecodeGen` preserves every nested care mask and emits one
+hardware decode operation. The focused decoder test checks all 40 RV32I and 52
+RV64I rows against their canonical instruction-pattern domains.

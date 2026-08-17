@@ -1,5 +1,5 @@
 #lang rhdl
-// Generates aligned RV64-style load values and byte-lane store data and masks.
+// Generates XLEN load values and byte-lane stores within a 64-bit memory beat.
 
 import:
   lib("rhdl/std/bits.rhdl") open
@@ -12,7 +12,7 @@ hardware_enum MemoryWidth:
   Word
   Double
 
-fun memory_access_aligned(address :: Bits(64), width :: MemoryWidth) :~ Bool:
+fun memory_access_aligned(address :: Hardware, width :: MemoryWidth) :~ Bool:
   mux_lookup(
     width,
     ~default: is_aligned(address, 8),
@@ -23,45 +23,51 @@ fun memory_access_aligned(address :: Bits(64), width :: MemoryWidth) :~ Bool:
     ]
   )
 
-// Selects one scalar from a returned eight-byte beat and extends it to RV64.
-circuit LoadGen():
-  input address: Bits(64)
+// Selects one scalar from a returned eight-byte beat and extends it to XLEN.
+circuit LoadGen(xlen :: Int):
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'LoadGen, "integer width must be 32 or 64")
+
+  input address: Bits(xlen)
   input data: Bits(64)
   input width: MemoryWidth
   input unsigned_load: Bool
-  output value: Bits(64)
+  output value: Bits(xlen)
 
   def shifted :: Bits(64) = data >> concat(address[0..3], bits(0, 3))
   def byte = shifted[0..8]
   def half = shifted[0..16]
   def word = shifted[0..32]
-  def signed_value = mux_lookup(
+  def double_value = if xlen == 64 | data | data[0..32]
+  def signed_word = if xlen == 64 | as_bits(sext(cast(word, SInt(32)), 64)) | word
+  def unsigned_word = if xlen == 64 | zext(word, 64) | word
+  def signed_value :: Bits(xlen) = mux_lookup(
     width,
-    ~default: data,
+    ~default: double_value,
     [
-      [MemoryWidth.Byte,
-       as_bits(sext(cast(byte, SInt(8)), 64))],
-      [MemoryWidth.Half,
-       as_bits(sext(cast(half, SInt(16)), 64))],
-      [MemoryWidth.Word,
-       as_bits(sext(cast(word, SInt(32)), 64))]
+      [MemoryWidth.Byte, as_bits(sext(cast(byte, SInt(8)), xlen))],
+      [MemoryWidth.Half, as_bits(sext(cast(half, SInt(16)), xlen))],
+      [MemoryWidth.Word, signed_word]
     ]
   )
-  def unsigned_value = mux_lookup(
+  def unsigned_value :: Bits(xlen) = mux_lookup(
     width,
-    ~default: data,
+    ~default: double_value,
     [
-      [MemoryWidth.Byte, zext(byte, 64)],
-      [MemoryWidth.Half, zext(half, 64)],
-      [MemoryWidth.Word, zext(word, 64)]
+      [MemoryWidth.Byte, zext(byte, xlen)],
+      [MemoryWidth.Half, zext(half, xlen)],
+      [MemoryWidth.Word, unsigned_word]
     ]
   )
   value <== mux(unsigned_load, unsigned_value, signed_value)
 
 // Places one scalar into an eight-byte beat and marks exactly its byte lanes.
-circuit StoreGen():
-  input address: Bits(64)
-  input value: Bits(64)
+circuit StoreGen(xlen :: Int):
+  unless xlen == 32 || xlen == 64
+  | error(~who: #'StoreGen, "integer width must be 32 or 64")
+
+  input address: Bits(xlen)
+  input value: Bits(xlen)
   input width: MemoryWidth
   output data: Bits(64)
   output mask: Bits(8)
@@ -77,7 +83,8 @@ circuit StoreGen():
       [MemoryWidth.Word, bits(0x0f, 8)]
     ]
   )
-  data <== value << shift
+  def beat_value = if xlen == 64 | value | zext(value, 64)
+  data <== beat_value << shift
   mask <== base_mask << offset
 
 export:

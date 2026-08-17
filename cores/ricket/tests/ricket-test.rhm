@@ -6,7 +6,7 @@ import:
   "../../../rhdl/frontend/kernel.rhm" as embedded
   "../ricket.rhdl" as core
 
-def design = embedded.run_elaboration(fun (): core.Ricket(32))
+def design = embedded.run_elaboration(fun (): core.Ricket(64, 32))
 def top = design.modules.find(fun (module_def): module_def.name == "Ricket")
 def pipeline = design.modules.find(fun (module_def): module_def.name == "RicketPipeline")
 def l1i = design.modules.find(fun (module_def): module_def.name == "RicketL1ICache")
@@ -14,7 +14,10 @@ def l1d = design.modules.find(fun (module_def): module_def.name == "RicketL1DCac
 def register_file = design.modules.find(fun (module_def): module_def.name == "RicketRegisterFile")
 def scoreboard = design.modules.find(fun (module_def): module_def.name == "RicketScoreboard")
 def architectural_registers = register_file.operations.find(fun (operation): operation.attribute("name") == "registers")
-def wide_design = embedded.run_elaboration(fun (): core.Ricket(64))
+def rv32_design = embedded.run_elaboration(fun (): core.Ricket(32, 32))
+def rv32_top = rv32_design.modules.find(fun (module_def): module_def.name == "Ricket")
+def rv32_register_file = rv32_design.modules.find(fun (module_def): module_def.name == "RicketRegisterFile")
+def wide_design = embedded.run_elaboration(fun (): core.Ricket(64, 64))
 def wide_top = wide_design.modules.find(fun (module_def): module_def.name == "Ricket")
 fun instance_names(module_def):
   module_def.operations.filter(
@@ -52,7 +55,7 @@ check:
   pipeline_instances.filter(
     ~keep: fun (name): name.starts_with("ValidPipe")
   ).length() ~is 2
-  pipeline_instances.contains("RV64IInstructionDecoder") ~is #true
+  pipeline_instances.contains("RicketInstructionDecoder") ~is #true
   pipeline_instances.contains("RicketRegisterFile") ~is #true
   pipeline_instances.contains("RicketScoreboard") ~is #true
   pipeline_instances.contains("ALU") ~is #true
@@ -78,8 +81,15 @@ check:
   state_names(scoreboard) ~is ["busy_bits"]
   top.find_input("start_in").type.field("bits").type.width ~is 64
   top.find_output("imem_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  rv32_top.find_input("start_in").type.field("bits").type.width ~is 32
+  rv32_top.find_output("dmem_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  rv32_register_file.operations.find(
+    fun (operation): operation.attribute("name") == "registers"
+  ).results[0].type.type_equal(VectorType(32, Bits(32))) ~is #true
   wide_top.find_output("imem_out").type.field("request").type.field("bits").type.field("address").type.width ~is 64
   verify_design(design) ~is #void
+  verify_design(rv32_design) ~is #void
   verify_design(wide_design) ~is #void
-  embedded.run_elaboration(fun (): core.Ricket(11)) ~throws "tag bits"
-  embedded.run_elaboration(fun (): core.Ricket(65)) ~throws "must not exceed"
+  embedded.run_elaboration(fun (): core.Ricket(64, 11)) ~throws "tag bits"
+  embedded.run_elaboration(fun (): core.Ricket(32, 33)) ~throws "must not exceed"
+  embedded.run_elaboration(fun (): core.Ricket(16, 16)) ~throws "must be 32 or 64"
