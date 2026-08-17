@@ -388,6 +388,7 @@ fixture_specs=(
   'bundle|bundle_tb|examples/rhdl/bundle.rhdl|design|verilog_reference'
   'record-cast|record_cast_tb|examples/rhdl/bundle.rhdl|cast_design|cast_verilog_reference'
   'bundle-specialization-types||examples/rhdl/bundle.rhdl|specialization_design|specialization_verilog_reference'
+  'bundle-conditional-specialization||examples/rhdl/bundle.rhdl|conditional_specialization_design|conditional_specialization_verilog_reference'
   'bundle-nested-swap||examples/rhdl/bundle.rhdl|nested_swap_design|nested_swap_verilog_reference'
   'bundle-hierarchy||examples/rhdl/bundle.rhdl|hierarchy_design|hierarchy_verilog_reference'
   'interface|interface_tb|examples/rhdl/interface.rhdl|design|verilog_reference'
