@@ -1,0 +1,128 @@
+#lang rhdl
+// Defines CHI fabric ports, subordinate services, and validated System Address Maps.
+
+import:
+  rhombus/meta open
+  lib("rhdl/std/interconnect.rhdl") open
+  lib("chi/params.rhdl") open
+  lib("chi/flits.rhdl") open
+  lib("chi/link.rhdl") open
+
+// Transfer sizes are service metadata, not a property of the physical link.
+class CHIRequestSupport(opcode :: CHIReqOpcode, sizes :: TransferSizes)
+
+fun subordinate_node_kind(kind):
+  [CHINodeKind.SNF, CHINodeKind.SNI].contains(kind)
+
+fun require_unique_request_support(requests, who):
+  for (left_index in 0..requests.length()):
+    for (right_index in (left_index + 1)..requests.length()):
+      if requests[left_index].opcode == requests[right_index].opcode
+      | error(~who: who, "request support must not contain duplicate opcodes")
+      | #void
+
+class CHISubordinateServiceParams(endpoint :: CHIICNPortParams,
+                                  address_sets :: NonemptyList.of(AddressSet),
+                                  requests :: NonemptyList.of(CHIRequestSupport)):
+  constructor (endpoint :: CHIICNPortParams,
+               address_sets :: NonemptyList.of(AddressSet),
+               requests :: NonemptyList.of(CHIRequestSupport)):
+    unless subordinate_node_kind(endpoint.kind)
+    | error(~who: #'CHISubordinateServiceParams,
+            "service endpoint must have an SN-F or SN-I node kind")
+    require_unique_request_support(requests, #'CHISubordinateServiceParams)
+    for (request in requests):
+      unless endpoint.emits.req.contains(request.opcode)
+      | error(~who: #'CHISubordinateServiceParams,
+              "service request opcode must be emitted by its ICN port")
+      unless request.sizes.max_bytes <= 64
+      | error(~who: #'CHISubordinateServiceParams,
+              "service request size must fit the CHI Size field")
+    super(endpoint, address_sets, requests)
+
+  method supports(opcode, bytes):
+    for any (request in requests):
+      request.opcode == opcode && request.sizes.contains(bytes)
+
+fun chi_link_matches_node_kind(link, kind):
+  cond
+  | [CHINodeKind.RNF, CHINodeKind.RND].contains(kind): link is_a CHIRNLinkParams
+  | kind == CHINodeKind.RNI: link is_a CHIRNILinkParams
+  | subordinate_node_kind(kind): link is_a CHISNLinkParams
+  | ~else: #false
+
+fun chi_link_params(value):
+  value is_a CHIRNLinkParams || value is_a CHIRNILinkParams || value is_a CHISNLinkParams
+
+annot.macro 'CHILinkParams':
+  'Any && satisfying(chi_link_params)'
+
+class CHIFabricPortParams(endpoint :: CHIICNPortParams,
+                          link :: CHILinkParams):
+  constructor (endpoint :: CHIICNPortParams, link :: CHILinkParams):
+    unless chi_link_matches_node_kind(link, endpoint.kind)
+    | error(~who: #'CHIFabricPortParams,
+            "link parameter type must match the ICN port node kind")
+    super(endpoint, link)
+
+class CHISAMEntry(address_set :: AddressSet,
+                  service :: CHISubordinateServiceParams):
+  property target_node_id: service.endpoint.node_id
+
+  method supports(opcode, bytes):
+    service.supports(opcode, bytes)
+
+fun require_unique_node_ids(ports, who):
+  for (left_index in 0..ports.length()):
+    for (right_index in (left_index + 1)..ports.length()):
+      if ports[left_index].endpoint.node_id == ports[right_index].endpoint.node_id
+      | error(~who: who, "fabric NodeIDs must be unique")
+      | #void
+
+fun require_disjoint_sam(sam, who):
+  for (left_index in 0..sam.length()):
+    for (right_index in (left_index + 1)..sam.length()):
+      if sam[left_index].address_set.overlaps(sam[right_index].address_set)
+      | error(~who: who, "System Address Map entries must not overlap")
+      | #void
+
+fun fabric_has_endpoint(ports, endpoint):
+  for any (port in ports):
+    port.endpoint == endpoint
+
+class CHIFabricParams(flit :: CHIFlitParams,
+                      ports :: NonemptyList.of(CHIFabricPortParams),
+                      services :: NonemptyList.of(CHISubordinateServiceParams),
+                      sam :: NonemptyList.of(CHISAMEntry)):
+  constructor (flit :: CHIFlitParams,
+               ports :: NonemptyList.of(CHIFabricPortParams),
+               services :: NonemptyList.of(CHISubordinateServiceParams)):
+    require_unique_node_ids(ports, #'CHIFabricParams)
+    for (port in ports):
+      unless port.link.flit == flit
+      | error(~who: #'CHIFabricParams,
+              "fabric ports must use the fabric physical flit parameters")
+      unless port.endpoint.node_id < (1 bits.(<<) flit.node_id_width)
+      | error(~who: #'CHIFabricParams,
+              "fabric NodeID must fit the physical NodeID width")
+    def mutable entries = []
+    for (service in services):
+      unless fabric_has_endpoint(ports, service.endpoint)
+      | error(~who: #'CHIFabricParams,
+              "subordinate service endpoint must be a fabric port")
+      for (address_set in service.address_sets):
+        unless address_set.fits_unsigned_width(flit.request_address_width)
+        | error(~who: #'CHIFabricParams,
+                "System Address Map entry must fit the request address width")
+        entries := entries ++ [CHISAMEntry(address_set, service)]
+    require_disjoint_sam(entries, #'CHIFabricParams)
+    super(flit, ports, services, entries)
+
+export:
+  AddressSet
+  TransferSizes
+  CHIRequestSupport
+  CHISubordinateServiceParams
+  CHIFabricPortParams
+  CHISAMEntry
+  CHIFabricParams

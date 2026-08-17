@@ -14,8 +14,8 @@ wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
 protocol classifiers, node capabilities, credited node-role links, link-local
-monitors, and bounded initial non-coherent transaction checking. Fabrics and
-endpoints remain planned below.
+monitors, bounded initial non-coherent transaction checking, and validated
+fabric/SAM metadata. Fabric RTL and endpoints remain planned below.
 
 ## Architectural boundary
 
@@ -119,6 +119,25 @@ to `SnpDVMOp`. A connection is legal only when:
 The RN-F/RN-D and SN-F/SN-I pairs intentionally share physical interface
 types. Their exact kind remains endpoint metadata so later monitors can apply
 the distinct protocol rules without duplicating identical wiring.
+
+## Fabric and System Address Map parameters
+
+[`fabric.rhdl`](fabric.rhdl) keeps routed service metadata separate from link
+identity. `CHIRequestSupport` associates one REQ opcode with the
+`TransferSizes` accepted by a target, while `CHISubordinateServiceParams`
+associates those operation sizes and one or more `AddressSet` regions with an
+SN-F or SN-I ICN port. This allows one subordinate to expose different service
+profiles in disjoint address regions without changing its physical link.
+
+`CHIFabricPortParams` pairs each ICN endpoint with the link parameter class
+required by its node kind. `CHIFabricParams` accepts a common `CHIFlitParams`,
+nonempty port and subordinate-service lists, and derives a flat `sam` list of
+`CHISAMEntry` values. Construction rejects duplicate or width-overflowing
+NodeIDs, mismatched physical flit parameters, absent service targets,
+out-of-range addresses, overlapping SAM entries, duplicate service opcodes,
+and transfer sizes that cannot be represented by CHI's Size field. These are
+host-side topology parameters; they do not yet generate routing or arbitration
+RTL.
 
 ## Link-local monitoring
 
@@ -301,7 +320,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
-| `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |
+| [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, subordinate services, and validated SAM metadata; routing, arbitration, credit termination, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
 ## Implementation order
@@ -317,8 +336,8 @@ turns an externally credited flit channel into a buffered internal flow.
 5. **Initial non-coherent subset complete:** Add bounded TxnID/DBID,
    response, and single-flit data-completeness transaction monitors. General
    ordering, retry and Protocol Credits, and other transaction families remain.
-6. Define `CHIFabricParams`, validate the System Address Map, and generate a
-   small credit-terminating crossbar.
+6. **Parameters complete:** Define `CHIFabricParams` and validate the System
+   Address Map. Next, generate a small credit-terminating crossbar.
 7. Implement the RN-I-facing non-coherent memory subsystem and `CHIRam` over
    `SyncRam1RW`, first for single-flit reads and writes and then multibeat
    traffic.
