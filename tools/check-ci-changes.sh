@@ -18,10 +18,10 @@ check_paths() {
 }
 
 empty_examples=$'examples=false\nexample_matrix={"include":[]}'
-all_examples=$'examples=true\nexample_matrix={"include":[{"name":"RHDL","target":"examples-rhdl"},{"name":"standard library","target":"examples-std"},{"name":"levels of power","target":"examples-lop"},{"name":"RFPL","target":"examples-rfpl"},{"name":"TileLink","target":"examples-tilelink"}]}'
+all_examples=$'examples=true\nexample_matrix={"include":[{"name":"RHDL","target":"examples-rhdl"},{"name":"standard library","target":"examples-std"},{"name":"language-oriented programming","target":"examples-lop"},{"name":"RFPL","target":"examples-rfpl"},{"name":"TileLink","target":"examples-tilelink"}]}'
 rhdl_examples=$'examples=true\nexample_matrix={"include":[{"name":"RHDL","target":"examples-rhdl"}]}'
 std_examples=$'examples=true\nexample_matrix={"include":[{"name":"standard library","target":"examples-std"}]}'
-lop_examples=$'examples=true\nexample_matrix={"include":[{"name":"levels of power","target":"examples-lop"}]}'
+lop_examples=$'examples=true\nexample_matrix={"include":[{"name":"language-oriented programming","target":"examples-lop"}]}'
 std_dependents=$'examples=true\nexample_matrix={"include":[{"name":"RHDL","target":"examples-rhdl"},{"name":"standard library","target":"examples-std"},{"name":"TileLink","target":"examples-tilelink"}]}'
 rfpl_examples=$'examples=true\nexample_matrix={"include":[{"name":"RFPL","target":"examples-rfpl"}]}'
 tilelink_examples=$'examples=true\nexample_matrix={"include":[{"name":"TileLink","target":"examples-tilelink"}]}'

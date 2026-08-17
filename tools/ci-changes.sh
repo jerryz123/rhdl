@@ -64,7 +64,7 @@ emit_jobs() {
   fi
   if [[ "$example_lop" == true ]]; then
     [[ -n "$matrix" ]] && matrix+=,
-    matrix+='{"name":"levels of power","target":"examples-lop"}'
+    matrix+='{"name":"language-oriented programming","target":"examples-lop"}'
   fi
   if [[ "$example_rfpl" == true ]]; then
     [[ -n "$matrix" ]] && matrix+=,
