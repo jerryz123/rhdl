@@ -1,0 +1,74 @@
+#lang rhombus
+// Checks CHI node capabilities, role-specific credited channels, and legal adapters.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../main.rhdl" as chi
+  "link-fixture.rhdl" as fixture
+
+def rni = chi.CHIRNILink(fixture.rni_link, fixture.rni_node)
+def rnf = chi.CHIRNLink(fixture.rnf_link, fixture.rnf_node)
+def sn = chi.CHISNLink(fixture.sn_link, fixture.sn_node)
+def tx_req = rni.members.find(fun (member): member.name == "tx_req")
+def rx_rsp = rni.members.find(fun (member): member.name == "rx_rsp")
+
+check:
+  fixture.rni_node.kind ~is chi.CHINodeKind.RNI
+  fixture.rni_node.node_id ~is 3
+  fixture.rni_node.emits.req.map(fun (opcode): opcode.packed_value()) ~is [0x04]
+  fixture.rni_node.emits.req.contains(chi.CHIReqOpcode.ReadNoSnp) ~is #true
+  fixture.rni_icn.supports.req.map(fun (opcode): opcode.packed_value()) ~is [0x04, 0x1d]
+  fixture.rni_link.tx_req_credits ~is 4
+  fixture.rni_link.rx_dat_credits ~is 3
+  fixture.flit == chi.CHIFlitParams() ~is #true
+  chi.CHIRNILinkParams(fixture.flit, ~tx_req_credits: 0) ~throws "PosInt"
+  chi.CHINodeParams(
+    "string-kind",
+    3,
+    "RN-I",
+    ~emits: chi.CHIChannelCapabilities(),
+    ~supports: chi.CHIChannelCapabilities()
+  ) ~throws "kind must be a CHINodeKind"
+  chi.CHINodeParams(
+    "dvm-requester",
+    6,
+    chi.CHINodeKind.RND,
+    ~emits: chi.CHIChannelCapabilities(),
+    ~supports: chi.CHIChannelCapabilities(~snp: [chi.CHISnpOpcode.SnpShared])
+  ) ~throws "channel capabilities are not valid"
+  rni.roles ~is ["node", "icn"]
+  rni.provider_role ~is "node"
+  rni.members.map(fun (member): member.name) ~is [
+    "tx_link_active_request",
+    "rx_link_active_ack",
+    "tx_req",
+    "tx_rsp",
+    "tx_dat",
+    "tx_link_active_ack",
+    "rx_link_active_request",
+    "rx_rsp",
+    "rx_dat"
+  ]
+  tx_req.from_role ~is "node"
+  rx_rsp.from_role ~is "icn"
+  tx_req.type.name ~is "Credited"
+  tx_req.type.specialization_arguments[1] ~is 4
+  tx_req.type.members.map(fun (member): member.name) ~is ["valid", "bits", "credit"]
+  rnf.members.map(fun (member): member.name).contains("rx_snp") ~is #true
+  rnf.members.find(fun (member): member.name == "rx_snp").type.specialization_arguments[1] ~is 4
+  sn.members.map(fun (member): member.name) ~is [
+    "tx_link_active_request",
+    "rx_link_active_ack",
+    "tx_rsp",
+    "tx_dat",
+    "tx_link_active_ack",
+    "rx_link_active_request",
+    "rx_req",
+    "rx_dat"
+  ]
+  sn.members.find(fun (member): member.name == "rx_req").from_role ~is "icn"
+  fixture.rni_design.modules[0].inputs.map(fun (port): port.name) ~is ["ingress_in", "egress_in"]
+  fixture.rni_design.modules[0].outputs.map(fun (port): port.name) ~is ["ingress_out", "egress_out"]
+  verify_design(fixture.rni_design) ~is #void
+  verify_design(fixture.rnf_design) ~is #void
+  verify_design(fixture.sn_design) ~is #void

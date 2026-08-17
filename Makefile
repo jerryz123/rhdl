@@ -71,6 +71,7 @@ tilelink-test: check-boundaries
 
 chi-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CHI_TESTS)
+	bash chi/tests/run-negative.sh
 
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit

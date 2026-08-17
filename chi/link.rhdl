@@ -1,0 +1,337 @@
+#lang rhdl
+// Defines CHI node roles, channel capabilities, credited links, and static connection legality.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/credited.rhdl") open
+  lib("chi/params.rhdl") open
+  lib("chi/flits.rhdl") open
+
+enum CHINodeKind
+| RNF
+| RND
+| RNI
+| SNF
+| SNI
+
+fun chi_subordinate_node_kind(kind):
+  [CHINodeKind.SNF, CHINodeKind.SNI].contains(kind)
+
+class CHIChannelCapabilities(req :: List.of(CHIReqOpcode),
+                             rsp :: List.of(CHIRspOpcode),
+                             snp :: List.of(CHISnpOpcode),
+                             dat :: List.of(CHIDatOpcode)):
+  constructor (~req: req = [], ~rsp: rsp = [], ~snp: snp = [], ~dat: dat = []):
+    super(req, rsp, snp, dat)
+
+fun opcode_lists_contain(supported, emitted):
+  for all (opcode in emitted):
+    supported.contains(opcode)
+
+fun capabilities_contain(supported, emitted):
+  for all (pair in [[supported.req, emitted.req],
+                    [supported.rsp, emitted.rsp],
+                    [supported.snp, emitted.snp],
+                    [supported.dat, emitted.dat]]):
+    opcode_lists_contain(pair[0], pair[1])
+
+fun capabilities_use_only(capabilities, ~req, ~rsp, ~snp, ~dat):
+  for all (condition in [(req || capabilities.req.length() == 0),
+                         (rsp || capabilities.rsp.length() == 0),
+                         (snp || capabilities.snp.length() == 0),
+                         (dat || capabilities.dat.length() == 0)]):
+    condition
+
+fun dvm_snoop_capabilities(capabilities):
+  for all (opcode in capabilities.snp):
+    opcode.packed_value() == CHISnpOpcode.SnpDVMOp.packed_value()
+
+fun validate_endpoint_capabilities(kind, emits, supports, side, who):
+  unless emits is_a CHIChannelCapabilities && supports is_a CHIChannelCapabilities
+  | error(~who: who, "emits and supports must be CHIChannelCapabilities")
+  def legal:
+    cond
+    | side == "node" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
+          (kind != CHINodeKind.RND || dvm_snoop_capabilities(supports))
+        ]):
+          condition
+    | side == "icn" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
+          capabilities_use_only(supports, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          (kind != CHINodeKind.RND || dvm_snoop_capabilities(emits))
+        ]):
+          condition
+    | side == "node" && kind == CHINodeKind.RNI:
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
+        ]):
+          condition
+    | side == "icn" && kind == CHINodeKind.RNI:
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
+          capabilities_use_only(supports, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true)
+        ]):
+          condition
+    | side == "node" && chi_subordinate_node_kind(kind):
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
+          capabilities_use_only(supports, ~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true)
+        ]):
+          condition
+    | side == "icn" && chi_subordinate_node_kind(kind):
+        for all (condition in [
+          capabilities_use_only(emits, ~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true),
+          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
+        ]):
+          condition
+    | ~else: #false
+  unless legal
+  | error(~who: who,
+          "channel capabilities are not valid for the " ++ to_string(kind) ++ " " ++ side ++ " role")
+
+class CHINodeParams(name, node_id, kind, emits, supports):
+  constructor (name, node_id, kind, ~emits, ~supports):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'CHINodeParams, "name must be a nonempty String")
+    unless node_id is_a Int && node_id >= 0
+    | error(~who: #'CHINodeParams, "node_id must be a nonnegative host Int")
+    unless kind is_a CHINodeKind
+    | error(~who: #'CHINodeParams, "kind must be a CHINodeKind")
+    validate_endpoint_capabilities(kind, emits, supports, "node", #'CHINodeParams)
+    super(name, node_id, kind, emits, supports)
+
+class CHIICNPortParams(name, node_id, kind, emits, supports):
+  constructor (name, node_id, kind, ~emits, ~supports):
+    unless name is_a String && name.length() > 0
+    | error(~who: #'CHIICNPortParams, "name must be a nonempty String")
+    unless node_id is_a Int && node_id >= 0
+    | error(~who: #'CHIICNPortParams, "node_id must be a nonnegative host Int")
+    unless kind is_a CHINodeKind
+    | error(~who: #'CHIICNPortParams, "kind must be a CHINodeKind")
+    validate_endpoint_capabilities(kind, emits, supports, "icn", #'CHIICNPortParams)
+    super(name, node_id, kind, emits, supports)
+
+class CHIRNLinkParams(flit :: CHIFlitParams,
+                      tx_req_credits :: PosInt,
+                      tx_rsp_credits :: PosInt,
+                      tx_dat_credits :: PosInt,
+                      rx_rsp_credits :: PosInt,
+                      rx_dat_credits :: PosInt,
+                      rx_snp_credits :: PosInt):
+  constructor (flit,
+               ~tx_req_credits: tx_req_credits = 2,
+               ~tx_rsp_credits: tx_rsp_credits = 2,
+               ~tx_dat_credits: tx_dat_credits = 2,
+               ~rx_rsp_credits: rx_rsp_credits = 2,
+               ~rx_dat_credits: rx_dat_credits = 2,
+               ~rx_snp_credits: rx_snp_credits = 2):
+    super(flit,
+          tx_req_credits,
+          tx_rsp_credits,
+          tx_dat_credits,
+          rx_rsp_credits,
+          rx_dat_credits,
+          rx_snp_credits)
+
+class CHIRNILinkParams(flit :: CHIFlitParams,
+                       tx_req_credits :: PosInt,
+                       tx_rsp_credits :: PosInt,
+                       tx_dat_credits :: PosInt,
+                       rx_rsp_credits :: PosInt,
+                       rx_dat_credits :: PosInt):
+  constructor (flit,
+               ~tx_req_credits: tx_req_credits = 2,
+               ~tx_rsp_credits: tx_rsp_credits = 2,
+               ~tx_dat_credits: tx_dat_credits = 2,
+               ~rx_rsp_credits: rx_rsp_credits = 2,
+               ~rx_dat_credits: rx_dat_credits = 2):
+    super(flit,
+          tx_req_credits,
+          tx_rsp_credits,
+          tx_dat_credits,
+          rx_rsp_credits,
+          rx_dat_credits)
+
+class CHISNLinkParams(flit :: CHIFlitParams,
+                      tx_rsp_credits :: PosInt,
+                      tx_dat_credits :: PosInt,
+                      rx_req_credits :: PosInt,
+                      rx_dat_credits :: PosInt):
+  constructor (flit,
+               ~tx_rsp_credits: tx_rsp_credits = 2,
+               ~tx_dat_credits: tx_dat_credits = 2,
+               ~rx_req_credits: rx_req_credits = 2,
+               ~rx_dat_credits: rx_dat_credits = 2):
+    super(flit, tx_rsp_credits, tx_dat_credits, rx_req_credits, rx_dat_credits)
+
+fun endpoint_pair_legal(node, icn, flit, kinds):
+  node is_a CHINodeParams && icn is_a CHIICNPortParams && for all (condition in [
+    kinds.contains(node.kind),
+    node.kind == icn.kind,
+    node.node_id == icn.node_id,
+    node.node_id < (1 bits.(<<) flit.node_id_width),
+    capabilities_contain(icn.supports, node.emits),
+    capabilities_contain(node.supports, icn.emits)
+  ]):
+    condition
+
+fun rn_connection_legal(provided, required):
+  if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHIRNLinkParams && required[0] is_a CHIRNLinkParams
+  | block:
+      def node_link = provided[0]
+      def icn_link = required[0]
+      for all (condition in [
+        node_link.flit == icn_link.flit,
+        endpoint_pair_legal(provided[1], required[1], node_link.flit, [CHINodeKind.RNF, CHINodeKind.RND]),
+        for all (pair in [[node_link.tx_req_credits, icn_link.tx_req_credits],
+                          [node_link.tx_rsp_credits, icn_link.tx_rsp_credits],
+                          [node_link.tx_dat_credits, icn_link.tx_dat_credits],
+                          [node_link.rx_rsp_credits, icn_link.rx_rsp_credits],
+                          [node_link.rx_dat_credits, icn_link.rx_dat_credits],
+                          [node_link.rx_snp_credits, icn_link.rx_snp_credits]]):
+          pair[0] == pair[1]
+      ]):
+        condition
+  | #false
+
+fun rni_connection_legal(provided, required):
+  if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHIRNILinkParams && required[0] is_a CHIRNILinkParams
+  | block:
+      def node_link = provided[0]
+      def icn_link = required[0]
+      for all (condition in [
+        node_link.flit == icn_link.flit,
+        endpoint_pair_legal(provided[1], required[1], node_link.flit, [CHINodeKind.RNI]),
+        for all (pair in [[node_link.tx_req_credits, icn_link.tx_req_credits],
+                          [node_link.tx_rsp_credits, icn_link.tx_rsp_credits],
+                          [node_link.tx_dat_credits, icn_link.tx_dat_credits],
+                          [node_link.rx_rsp_credits, icn_link.rx_rsp_credits],
+                          [node_link.rx_dat_credits, icn_link.rx_dat_credits]]):
+          pair[0] == pair[1]
+      ]):
+        condition
+  | #false
+
+fun sn_connection_legal(provided, required):
+  if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHISNLinkParams && required[0] is_a CHISNLinkParams
+  | block:
+      def node_link = provided[0]
+      def icn_link = required[0]
+      for all (condition in [
+        node_link.flit == icn_link.flit,
+        endpoint_pair_legal(provided[1], required[1], node_link.flit, [CHINodeKind.SNF, CHINodeKind.SNI]),
+        for all (pair in [[node_link.tx_rsp_credits, icn_link.tx_rsp_credits],
+                          [node_link.tx_dat_credits, icn_link.tx_dat_credits],
+                          [node_link.rx_req_credits, icn_link.rx_req_credits],
+                          [node_link.rx_dat_credits, icn_link.rx_dat_credits]]):
+          pair[0] == pair[1]
+      ]):
+        condition
+  | #false
+
+fun checked_rn_link(link, endpoint):
+  unless link is_a CHIRNLinkParams && (
+    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
+  )
+  | error(~who: #'CHIRNLink,
+          "requires CHIRNLinkParams and CHINodeParams or CHIICNPortParams")
+  unless [CHINodeKind.RNF, CHINodeKind.RND].contains(endpoint.kind)
+  | error(~who: #'CHIRNLink, "endpoint kind must be RN-F or RN-D")
+  link
+
+fun checked_rni_link(link, endpoint):
+  unless link is_a CHIRNILinkParams && (
+    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
+  )
+  | error(~who: #'CHIRNILink,
+          "requires CHIRNILinkParams and CHINodeParams or CHIICNPortParams")
+  unless endpoint.kind == CHINodeKind.RNI
+  | error(~who: #'CHIRNILink, "endpoint kind must be RN-I")
+  link
+
+fun checked_sn_link(link, endpoint):
+  unless link is_a CHISNLinkParams && (
+    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
+  )
+  | error(~who: #'CHISNLink,
+          "requires CHISNLinkParams and CHINodeParams or CHIICNPortParams")
+  unless chi_subordinate_node_kind(endpoint.kind)
+  | error(~who: #'CHISNLink, "endpoint kind must be SN-F or SN-I")
+  link
+
+interface CHIRNLink(link, endpoint):
+  role node
+  role icn
+  provider node
+  connection_compatible node (provided, required):
+    rn_connection_legal(provided, required)
+
+  node -> icn:
+    tx_link_active_request: Bool
+    rx_link_active_ack: Bool
+    tx_req: Credited(CHIReqFlit(checked_rn_link(link, endpoint).flit), link.tx_req_credits)
+    tx_rsp: Credited(CHIRspFlit(link.flit), link.tx_rsp_credits)
+    tx_dat: Credited(CHIDatFlit(link.flit), link.tx_dat_credits)
+
+  icn -> node:
+    tx_link_active_ack: Bool
+    rx_link_active_request: Bool
+    rx_rsp: Credited(CHIRspFlit(link.flit), link.rx_rsp_credits)
+    rx_dat: Credited(CHIDatFlit(link.flit), link.rx_dat_credits)
+    rx_snp: Credited(CHISnpFlit(link.flit), link.rx_snp_credits)
+
+interface CHIRNILink(link, endpoint):
+  role node
+  role icn
+  provider node
+  connection_compatible node (provided, required):
+    rni_connection_legal(provided, required)
+
+  node -> icn:
+    tx_link_active_request: Bool
+    rx_link_active_ack: Bool
+    tx_req: Credited(CHIReqFlit(checked_rni_link(link, endpoint).flit), link.tx_req_credits)
+    tx_rsp: Credited(CHIRspFlit(link.flit), link.tx_rsp_credits)
+    tx_dat: Credited(CHIDatFlit(link.flit), link.tx_dat_credits)
+
+  icn -> node:
+    tx_link_active_ack: Bool
+    rx_link_active_request: Bool
+    rx_rsp: Credited(CHIRspFlit(link.flit), link.rx_rsp_credits)
+    rx_dat: Credited(CHIDatFlit(link.flit), link.rx_dat_credits)
+
+interface CHISNLink(link, endpoint):
+  role node
+  role icn
+  provider node
+  connection_compatible node (provided, required):
+    sn_connection_legal(provided, required)
+
+  node -> icn:
+    tx_link_active_request: Bool
+    rx_link_active_ack: Bool
+    tx_rsp: Credited(CHIRspFlit(checked_sn_link(link, endpoint).flit), link.tx_rsp_credits)
+    tx_dat: Credited(CHIDatFlit(link.flit), link.tx_dat_credits)
+
+  icn -> node:
+    tx_link_active_ack: Bool
+    rx_link_active_request: Bool
+    rx_req: Credited(CHIReqFlit(link.flit), link.rx_req_credits)
+    rx_dat: Credited(CHIDatFlit(link.flit), link.rx_dat_credits)
+
+export:
+  CHINodeKind
+  CHIChannelCapabilities
+  CHINodeParams
+  CHIICNPortParams
+  CHIRNLinkParams
+  CHIRNILinkParams
+  CHISNLinkParams
+  CHIRNLink
+  CHIRNILink
+  CHISNLink

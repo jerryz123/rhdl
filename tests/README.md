@@ -39,7 +39,7 @@ make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses
-make chi-test               # CHI boundaries, Issue H parameters, flits, and classifiers
+make chi-test               # CHI boundaries, flits, links, and invalid connections
 make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses

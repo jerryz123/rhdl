@@ -12,9 +12,9 @@ The initial implementation targets revision IHI 0050H of the AMBA CHI
 Architecture Specification. This identifies the source used for the implemented
 wire definitions; it is not a configurable parameter in the API.
 
-The package currently implements the physical parameter, flit, and classifier
-foundation. Node-role links, monitors, fabrics, and endpoints remain planned
-below.
+The package currently implements the physical parameter and flit foundation,
+protocol classifiers, node capabilities, and credited node-role links.
+Monitors, fabrics, and endpoints remain planned below.
 
 ## Architectural boundary
 
@@ -79,6 +79,47 @@ encoding, and derives physical DAT packet counts and legal DataID values from
 of the encodings declared by its CHI hardware enum; later monitors add the
 node-role and negotiated-feature constraints. These helpers are hardware
 expressions intended for endpoint construction and later monitors.
+
+## Node-role links
+
+[`link.rhdl`](link.rhdl) models CHI interfaces from the node's point of view.
+It provides three physical shapes matching the channel sets in B13.6:
+
+| Interface | Node kinds | Node transmit channels | Node receive channels |
+|---|---|---|---|
+| `CHIRNLink` | RN-F, RN-D | REQ, RSP, DAT | RSP, DAT, SNP |
+| `CHIRNILink` | RN-I | REQ, RSP, DAT | RSP, DAT |
+| `CHISNLink` | SN-F, SN-I | RSP, DAT | REQ, DAT |
+
+Each protocol channel is a generic `Credited(flit, credit_limit)` interface.
+The link parameter classes (`CHIRNLinkParams`, `CHIRNILinkParams`, and
+`CHISNLinkParams`) carry the common `CHIFlitParams` and an explicit positive
+credit limit for every physically present channel.
+
+The four activation wires use names relative to the node. The node drives
+`tx_link_active_request` for its transmit channels and
+`rx_link_active_ack` for its receive channels; the ICN drives the complementary
+`tx_link_active_ack` and `rx_link_active_request`. One request/ack pair covers
+all protocol channels in that direction, as specified in B14.5. This milestone
+defines the activation contract's wires; the next monitor milestone checks the
+four-phase state transitions and gates legal credit and flit activity.
+
+`CHINodeParams` and `CHIICNPortParams` give both sides the same NodeID and
+`CHINodeKind` enum value while separately declaring channel opcodes emitted
+and accepted through `CHIChannelCapabilities`. Construction rejects
+capabilities on channels that
+the selected node role does not possess; RN-D snoop capabilities are limited
+to `SnpDVMOp`. A connection is legal only when:
+
+- both endpoints select the same node kind and NodeID, and the NodeID fits the
+  physical width;
+- every opcode emitted by either endpoint appears in the peer's accepted set;
+- every flit parameter, including optional-field selections, matches exactly;
+- corresponding per-channel credit limits match.
+
+The RN-F/RN-D and SN-F/SN-I pairs intentionally share physical interface
+types. Their exact kind remains endpoint metadata so later monitors can apply
+the distinct protocol rules without duplicating identical wiring.
 
 ## Non-coherent-first scope
 
@@ -193,7 +234,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
 | [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
 | [`protocol.rhdl`](protocol.rhdl) | Implemented initial operation groups, Size checking, and DAT packetization; transaction relationships remain planned |
-| `link.rhdl` | CHI node-role interfaces composed from credited channels, link activation, and static connection compatibility |
+| [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, link activation wires, and static connection compatibility |
 | `monitor.rhdl` | Link-credit, channel, endpoint-transaction, ordering, retry, and eventually coherence checks |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
 | `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |
@@ -205,8 +246,8 @@ turns an externally credited flit channel into a buffered internal flow.
    credit accounting, and their monitors under `rhdl/std`.
 2. **Complete:** Define validated physical parameters, every defined
    opcode, exact parameterized flit layouts, and initial protocol classifiers.
-3. Define node capabilities, node-role interfaces, link activation signals,
-   and static connection legality.
+3. **Complete:** Define node capabilities, node-role interfaces, link
+   activation signals, and static connection legality.
 4. Add link-local activation, credit, opcode, conditional-field, and NodeID
    monitoring.
 5. Add bounded TxnID/DBID, response, retry, ordering, and data-completeness
@@ -223,9 +264,10 @@ Each milestone requires host elaboration tests, invalid-parameter and invalid
 connection tests, generated CIRCT verification, and a cycle-level Verilator
 test of the supported transaction flows.
 
-Run `make chi-test` for the package boundary, parameter, flit-layout, and
-classifier tests. Run `FIXTURE=chi-foundation bash tests/backend/run-circt.sh`
-for CIRCT lowering and the cycle-level classifier simulation.
+Run `make chi-test` for package boundaries, parameters, flit layouts,
+classifiers, link contracts, and invalid connections. Run
+`FIXTURES='chi-foundation chi-link' bash tests/backend/run-circt.sh` for CIRCT
+lowering and cycle-level classifier and link simulations.
 
 ## Specification references
 

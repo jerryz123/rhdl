@@ -1,0 +1,126 @@
+#lang rhdl
+// Provides legal RN-I and SN-F credited-link adapters for CHI link testing and lowering.
+
+import:
+  lib("chi/main.rhdl") open
+
+def flit = CHIFlitParams()
+
+def rni_node = CHINodeParams(
+  "requester",
+  3,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp],
+    ~rsp: [CHIRspOpcode.CompAck],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.Comp, CHIRspOpcode.DBIDResp],
+    ~dat: [CHIDatOpcode.CompData]
+  )
+)
+def rni_icn = CHIICNPortParams(
+  "requester-port",
+  3,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.Comp, CHIRspOpcode.DBIDResp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~rsp: [CHIRspOpcode.CompAck],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  )
+)
+def rni_link = CHIRNILinkParams(flit, ~tx_req_credits: 4, ~rx_dat_credits: 3)
+
+def rnf_node = CHINodeParams(
+  "cache",
+  5,
+  CHINodeKind.RNF,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadShared],
+    ~rsp: [CHIRspOpcode.SnpResp],
+    ~dat: [CHIDatOpcode.SnpRespData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.Comp],
+    ~snp: [CHISnpOpcode.SnpShared],
+    ~dat: [CHIDatOpcode.CompData]
+  )
+)
+def rnf_icn = CHIICNPortParams(
+  "cache-port",
+  5,
+  CHINodeKind.RNF,
+  ~emits: rnf_node.supports,
+  ~supports: rnf_node.emits
+)
+def rnf_link = CHIRNLinkParams(flit, ~rx_snp_credits: 4)
+
+def sn_node = CHINodeParams(
+  "memory",
+  9,
+  CHINodeKind.SNF,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.Comp, CHIRspOpcode.DBIDResp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  )
+)
+def sn_icn = CHIICNPortParams(
+  "memory-port",
+  9,
+  CHINodeKind.SNF,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.Comp, CHIRspOpcode.DBIDResp, CHIRspOpcode.RetryAck],
+    ~dat: [CHIDatOpcode.CompData]
+  )
+)
+def sn_link = CHISNLinkParams(flit, ~rx_req_credits: 4, ~tx_dat_credits: 3)
+
+circuit CHIRNILinkAdapter(node_link, node, icn_link, icn):
+  interface ingress(CHIRNILink(node_link, node), ~role: icn)
+  interface egress(CHIRNILink(icn_link, icn), ~role: node)
+  egress <=> ingress
+
+circuit CHIRNLinkAdapter(node_link, node, icn_link, icn):
+  interface ingress(CHIRNLink(node_link, node), ~role: icn)
+  interface egress(CHIRNLink(icn_link, icn), ~role: node)
+  egress <=> ingress
+
+circuit CHISNLinkAdapter(node_link, node, icn_link, icn):
+  interface ingress(CHISNLink(node_link, node), ~role: icn)
+  interface egress(CHISNLink(icn_link, icn), ~role: node)
+  egress <=> ingress
+
+def rni_design = elaborate(CHIRNILinkAdapter(rni_link, rni_node, rni_link, rni_icn))
+def rnf_design = elaborate(CHIRNLinkAdapter(rnf_link, rnf_node, rnf_link, rnf_icn))
+def sn_design = elaborate(CHISNLinkAdapter(sn_link, sn_node, sn_link, sn_icn))
+
+export:
+  flit
+  rni_node
+  rni_icn
+  rni_link
+  rnf_node
+  rnf_icn
+  rnf_link
+  sn_node
+  sn_icn
+  sn_link
+  CHIRNILinkAdapter
+  CHIRNLinkAdapter
+  CHISNLinkAdapter
+  rni_design
+  rnf_design
+  sn_design
