@@ -138,7 +138,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed OR reduction, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support |
 | `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, finite-enum support, mux-lookup support |
-| `one-hot.rhm` | One-hot selector types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
+| `one-hot.rhm` | One-hot selector types, literals, total `Bits` index conversion, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, type-named construction, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |

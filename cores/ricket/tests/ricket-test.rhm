@@ -1,24 +1,23 @@
 #lang rhombus
-// Checks Ricket's pipeline-cache hierarchy, external ports, and configuration bounds.
+// Checks Ricket's core-cache hierarchy, external ports, and configuration bounds.
 
 import:
   "../../../rhdl/core/main.rhm" open
   "../../../rhdl/frontend/kernel.rhm" as embedded
   "../../../riscv/isa/xlen.rhm" open
-  "../ricket.rhdl" as core
+  "../ricket.rhdl" as ricket
 
-def design = embedded.run_elaboration(fun (): core.Ricket(XLen.X64, 32))
+def design = embedded.run_elaboration(fun (): ricket.Ricket(XLen.X64, 32))
 def top = design.modules.find(fun (module_def): module_def.name == "Ricket")
-def pipeline = design.modules.find(fun (module_def): module_def.name == "RicketPipeline")
+def core = design.modules.find(fun (module_def): module_def.name == "RicketCore")
 def l1i = design.modules.find(fun (module_def): module_def.name == "RicketL1ICache")
 def l1d = design.modules.find(fun (module_def): module_def.name == "RicketL1DCache")
 def register_file = design.modules.find(fun (module_def): module_def.name == "RicketRegisterFile")
-def scoreboard = design.modules.find(fun (module_def): module_def.name == "RicketScoreboard")
 def architectural_registers = register_file.operations.find(fun (operation): operation.attribute("name") == "registers")
-def rv32_design = embedded.run_elaboration(fun (): core.Ricket(XLen.X32, 32))
+def rv32_design = embedded.run_elaboration(fun (): ricket.Ricket(XLen.X32, 32))
 def rv32_top = rv32_design.modules.find(fun (module_def): module_def.name == "Ricket")
 def rv32_register_file = rv32_design.modules.find(fun (module_def): module_def.name == "RicketRegisterFile")
-def wide_design = embedded.run_elaboration(fun (): core.Ricket(XLen.X64, 64))
+def wide_design = embedded.run_elaboration(fun (): ricket.Ricket(XLen.X64, 64))
 def wide_top = wide_design.modules.find(fun (module_def): module_def.name == "Ricket")
 fun instance_names(module_def):
   module_def.operations.filter(
@@ -34,7 +33,7 @@ fun sync_memories(module_def):
   )
 
 def top_instances = instance_names(top)
-def pipeline_instances = instance_names(pipeline)
+def core_instances = instance_names(core)
 def l1i_instances = instance_names(l1i)
 def l1d_instances = instance_names(l1d)
 def sync_rams = design.modules.filter(
@@ -48,23 +47,22 @@ check:
   top.outputs.map(fun (port): port.name) ~is [
     "start_out", "imem_out", "dmem_out", "fault"
   ]
-  top_instances ~is ["RicketPipeline", "RicketL1ICache", "RicketL1DCache"]
+  top_instances ~is ["RicketCore", "RicketL1ICache", "RicketL1DCache"]
   state_names(top) ~is []
-  pipeline_instances.filter(
+  core_instances.filter(
     ~keep: fun (name): name.starts_with("Pipe")
   ).length() ~is 2
-  pipeline_instances.filter(
+  core_instances.filter(
     ~keep: fun (name): name.starts_with("ValidPipe")
   ).length() ~is 2
-  pipeline_instances.contains("RicketInstructionDecoder") ~is #true
-  pipeline_instances.contains("RicketRegisterFile") ~is #true
-  pipeline_instances.contains("RicketScoreboard") ~is #true
-  pipeline_instances.contains("ALU") ~is #true
-  pipeline_instances.contains("BranchResolver") ~is #true
-  pipeline_instances.contains("LoadGen") ~is #false
-  pipeline_instances.contains("StoreGen") ~is #false
-  pipeline_instances.contains("Queue") ~is #true
-  pipeline_instances.length() ~is 10
+  core_instances.contains("RicketInstructionDecoder") ~is #true
+  core_instances.contains("RicketRegisterFile") ~is #true
+  core_instances.contains("ALU") ~is #true
+  core_instances.contains("BranchResolver") ~is #true
+  core_instances.contains("LoadGen") ~is #false
+  core_instances.contains("StoreGen") ~is #false
+  core_instances.contains("Queue") ~is #true
+  core_instances.length() ~is 9
   l1i_instances.filter(~keep: fun (name): name.starts_with("SyncRam1RW")).length() ~is 2
   l1i_instances.filter(~keep: fun (name): name.starts_with("Queue")).length() ~is 1
   l1d_instances.filter(~keep: fun (name): name.starts_with("SyncRam1RW")).length() ~is 2
@@ -76,10 +74,9 @@ check:
   sync_rams.map(fun (module_def): sync_memories(module_def).length()) ~is [1, 1, 1, 1]
   type_equal(architectural_registers.results[0].type,
              VectorType(32, Bits(64))) ~is #true
-  state_names(pipeline) ~is [
-    "faulted", "started", "fetch_pc"
+  state_names(core) ~is [
+    "faulted", "started", "fetch_pc", "busy_bits"
   ]
-  state_names(scoreboard) ~is ["busy_bits"]
   top.find_input("start_in").type.field("bits").type.width ~is 64
   top.find_output("imem_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
   rv32_top.find_input("start_in").type.field("bits").type.width ~is 32
@@ -91,6 +88,6 @@ check:
   verify_design(design) ~is #void
   verify_design(rv32_design) ~is #void
   verify_design(wide_design) ~is #void
-  embedded.run_elaboration(fun (): core.Ricket(XLen.X64, 11)) ~throws "tag bits"
-  embedded.run_elaboration(fun (): core.Ricket(XLen.X32, 33)) ~throws "must not exceed"
-  embedded.run_elaboration(fun (): core.Ricket(64, 16)) ~throws "XLen"
+  embedded.run_elaboration(fun (): ricket.Ricket(XLen.X64, 11)) ~throws "tag bits"
+  embedded.run_elaboration(fun (): ricket.Ricket(XLen.X32, 33)) ~throws "must not exceed"
+  embedded.run_elaboration(fun (): ricket.Ricket(64, 16)) ~throws "XLen"

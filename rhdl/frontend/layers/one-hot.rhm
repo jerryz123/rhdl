@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines structurally sized one-hot values, literals, and partial one-hot selection.
+// Defines structurally sized one-hot values, index conversion, and partial selection.
 
 import:
   rhombus/meta open
@@ -10,6 +10,7 @@ import:
 
 export:
   OneHot
+  one_hot
   one_hot_type
   one_hot_width
   mux_onehot
@@ -72,6 +73,22 @@ fun one_hot_width(type):
   unless one_hot_type(type)
   | error(~who: #'one_hot_width, "expected a OneHot type")
   type.width
+
+// Converts every encoding of Bits(n) into one of the 2^n lanes, so the result
+// preserves the exactly-one invariant without an out-of-range case.
+fun one_hot(index, name = #false, location = Location()) :~ HardwareFields:
+  def index_value = kernel.read(index, location)
+  unless bits_type(index_value.type)
+  | error(~who: #'one_hot,
+          location.describe() ++ ": index must be Bits")
+  def result_width = 1 bits.(<<) index_value.type.width
+  def encoded_bits = kernel.hw_shl(
+    kernel.literal(Bits(result_width), 1, #false, location),
+    index_value,
+    #false,
+    location
+  )
+  kernel.cast(encoded_bits, OneHot(result_width), name, location)
 
 // Preserves one-hot selection as a partial core operation. Exactly one bit set
 // is a caller precondition; invalid selector encodings have no result contract.

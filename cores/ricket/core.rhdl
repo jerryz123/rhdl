@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements Ricket's five-stage pipeline against core-facing cache protocols.
+// Implements Ricket's five-stage core against core-facing cache protocols.
 
 import:
   "../alu.rhdl" open
@@ -12,7 +12,6 @@ import:
   "decode/writeback-ctrl.rhdl" open
   "bundles.rhdl" open
   "register-file.rhdl" open
-  "scoreboard.rhdl" open
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm" open
@@ -21,13 +20,13 @@ import:
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/flow.rhdl") open
 
-sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
+sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def width = xlen_width(xlen)
   unless address_width >= 3
-  | error(~who: #'RicketPipeline,
+  | error(~who: #'RicketCore,
           "address width must cover an eight-byte data transfer")
   unless address_width <= width
-  | error(~who: #'RicketPipeline,
+  | error(~who: #'RicketCore,
           "address width must not exceed the architectural integer width")
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
@@ -39,6 +38,7 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
+  reg busy_bits(~init: bits(0, 32))
 
   // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
   // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
@@ -49,7 +49,6 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
 
   inst decoder(RicketInstructionDecoder(xlen))
   inst registers(RicketRegisterFile(xlen))
-  inst scoreboard(RicketScoreboard())
   inst alu(ALU(xlen))
   inst branch_resolver(BranchResolver(width))
 
@@ -62,6 +61,36 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   def redirect_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
+
+  // Deferred loads mark their destinations busy at ordered commit and clear
+  // them when the tagged cache response returns. Completion wins when both
+  // updates target the same register in one cycle.
+  def commit = ex_mem_pipe.egress
+  def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
+  def load_completion_valid = data_access.response.valid & or_reduce(data_access.response.bits.tag)
+  def scoreboard_set_valid = commit.valid & commit_is_load & commit.bits.writeback_enable
+  def scoreboard_set_address = commit.bits.rd
+  def scoreboard_clear_valid = load_completion_valid
+  def scoreboard_clear_address = data_access.response.bits.tag
+  def scoreboard_set_nonzero = scoreboard_set_valid & or_reduce(scoreboard_set_address)
+  def scoreboard_clear_nonzero = scoreboard_clear_valid & or_reduce(scoreboard_clear_address)
+  def scoreboard_set_bit = as_bits(one_hot(scoreboard_set_address))
+  def scoreboard_clear_bit = as_bits(one_hot(scoreboard_clear_address))
+  def scoreboard_set_mask = mux(scoreboard_set_nonzero, scoreboard_set_bit, bits(0, 32))
+  def scoreboard_clear_mask = mux(scoreboard_clear_nonzero, scoreboard_clear_bit, bits(0, 32))
+  def scoreboard_set_was_free = !or_reduce(busy_bits & scoreboard_set_bit) ||| (
+    scoreboard_clear_nonzero & (scoreboard_clear_address === scoreboard_set_address)
+  )
+  def scoreboard_clear_was_busy = or_reduce(busy_bits & scoreboard_clear_bit) ||| (
+    scoreboard_set_nonzero & (scoreboard_set_address === scoreboard_clear_address)
+  )
+  when scoreboard_set_nonzero:
+    assert(scoreboard_set_was_free, "ricket_scoreboard_set_free")
+  when scoreboard_clear_nonzero:
+    assert(scoreboard_clear_was_busy, "ricket_scoreboard_clear_busy")
+  def effective_busy_bits = (busy_bits ||| scoreboard_set_mask) & !scoreboard_clear_mask
+  when (scoreboard_set_nonzero ||| scoreboard_clear_nonzero):
+    busy_bits <== effective_busy_bits
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending metadata and the L1I's
@@ -139,9 +168,9 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
 
   registers.read_address_1 <== rs1
   registers.read_address_2 <== rs2
-  scoreboard.query_rs1 <== rs1
-  scoreboard.query_rs2 <== rs2
-  scoreboard.query_rd <== rd
+  def rs1_busy = or_reduce(rs1) & or_reduce(effective_busy_bits & as_bits(one_hot(rs1)))
+  def rs2_busy = or_reduce(rs2) & or_reduce(effective_busy_bits & as_bits(one_hot(rs2)))
+  def rd_busy = or_reduce(rd) & or_reduce(effective_busy_bits & as_bits(one_hot(rd)))
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
   def load_destination = id_ex.bits.rd
@@ -149,10 +178,10 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   def load_use_rs2 = control.operand.uses_rs2 & or_reduce(load_destination) & (load_destination === rs2)
   def load_use_rd = control.writeback.enable & or_reduce(load_destination) & (load_destination === rd)
   def load_dependency_hazard = live_if_id.valid & id_ex_is_load & (load_use_rs1 ||| load_use_rs2 ||| load_use_rd)
-  def scoreboard_raw_hazard = (control.operand.uses_rs1 & scoreboard.rs1_busy) ||| (
-    control.operand.uses_rs2 & scoreboard.rs2_busy
+  def scoreboard_raw_hazard = (control.operand.uses_rs1 & rs1_busy) ||| (
+    control.operand.uses_rs2 & rs2_busy
   )
-  def scoreboard_waw_hazard = control.writeback.enable & scoreboard.rd_busy
+  def scoreboard_waw_hazard = control.writeback.enable & rd_busy
   def register_hazard = load_dependency_hazard ||| scoreboard_raw_hazard ||| scoreboard_waw_hazard
   live_if_id.ready <== id_ex_pipe.ingress.ready & !register_hazard
   id_ex_pipe.ingress.valid <== live_if_id.valid & !register_hazard
@@ -274,8 +303,6 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   // busy here and releases EX/MEM without waiting for the tagged cache result.
   // Stores also commit at this point because alignment and other faults were
   // resolved before the cache accepted their requests.
-  def commit = ex_mem_pipe.egress
-  def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
   def commit_writes_immediately = commit.bits.writeback_enable & !commit_is_load
 
   mem_wb_pipe.ingress.valid <== commit.valid & commit_writes_immediately
@@ -292,14 +319,9 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   // The two register-file write ports accept an immediate WB result and a
   // delayed load completion independently, so neither path backpressures MEM.
   def mem_wb = mem_wb_pipe.egress
-  def load_completion_valid = data_access.response.valid & or_reduce(data_access.response.bits.tag)
   def immediate_write_valid = mem_wb.valid & mem_wb.bits.write_enable
 
   data_access.response.ready <== Bool(#true)
-  scoreboard.set_valid <== commit.valid & commit_is_load & commit.bits.writeback_enable
-  scoreboard.set_address <== commit.bits.rd
-  scoreboard.clear_valid <== load_completion_valid
-  scoreboard.clear_address <== data_access.response.bits.tag
 
   writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(mem_wb.bits.rd)
   writeback_bypass_link.left.bits <== RicketBypass(xlen):
@@ -314,4 +336,4 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   registers.write_data_2 <== data_access.response.bits.data
 
 export:
-  RicketPipeline
+  RicketCore

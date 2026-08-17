@@ -15,7 +15,7 @@ caches live here. Reusable execution components remain directly under
 ```text
 ricket.rhdl                         composition only
   |--> core.rhdl                    IF/ID/EX/MEM/WB logic
-  |     |--> bundles + decode + register-file + scoreboard
+  |     |--> bundles + decode + register-file
   |     |--> ../{alu,branch-resolver,load-store}.rhdl
   |     |--> icache/protocol.rhdl
   |     `--> dcache/protocol.rhdl
@@ -24,10 +24,10 @@ ricket.rhdl                         composition only
         `--> ../load-store.rhdl
 ```
 
-The pipeline does not import `SimpleMemory`: it speaks Ricket's semantic
+`RicketCore` does not import `SimpleMemory`: it speaks Ricket's semantic
 instruction and data access protocols. Cache modules own line lookup, refill,
 beat alignment, byte masks, and load/store lane generation. The wrapper is the
-only place that composes the pipeline and caches into the external Harvard
+only place that composes the core and caches into the external Harvard
 memory boundary.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
@@ -53,11 +53,11 @@ Decode holds a load-use dependent token. Execute owns forwarding, branch
 resolution, target and access alignment checks, and architectural fault
 generation. A legal data-cache request transfers at the same edge that places
 its instruction in EX/MEM. Memory is the ordered commit point: a committed load
-sets its destination in `RicketScoreboard` and releases the pipeline before its
-tagged result returns. Decode stalls on scoreboard RAW and WAW hazards, while
-independent younger instructions may complete first. A returning load clears
-its destination and writes through the register file's second write port. The
-first write port independently accepts the ordinary MEM/WB result, so a load
+sets its destination in the core's scoreboard state and releases the pipeline
+before its tagged result returns. Decode stalls on scoreboard RAW and WAW
+hazards, while independent younger instructions may complete first. A returning
+load clears its destination and writes through the register file's second write
+port. The first write port independently accepts the ordinary MEM/WB result, so a load
 completion never backpressures either feed-forward stage. A same-cycle hit sets
 and clears the entry without an extra busy cycle. If both write ports target
 the same register, the load port wins because that load is the younger

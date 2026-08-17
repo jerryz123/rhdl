@@ -231,6 +231,11 @@ next_grant <== mux_onehot(current):
   Grant(0)
 ```
 
+`one_hot(index)` converts a hardware `Bits(n)` index to `OneHot(2^n)`. Inferring
+the result width makes the conversion total: every index encoding selects
+exactly one lane. Use `as_bits(one_hot(index))` when subsequent mask operations
+may produce zero or multiple asserted bits.
+
 One-hot values deliberately do not implement `BitwiseType`, because bitwise
 operations do not preserve the exactly-one invariant. Equality, aggregates,
 ports, state, and explicit casts work normally. `mux_onehot` accepts either a

@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks OneHot typing, literals, mux selection, casts, and invalid uses.
+// Checks OneHot typing, index conversion, mux selection, casts, and invalid uses.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -26,6 +26,14 @@ def aggregate_design = embedded.run_elaboration(fun (): invalid.AggregateMux())
 def aggregate_module = aggregate_design.modules[0]
 def aggregate_onehot_mux = aggregate_module.operations.find(
   fun (operation): operation.opcode == "rtl.onehot_mux"
+)
+def dynamic_design = embedded.run_elaboration(fun (): invalid.DynamicOneHot())
+def dynamic_module = dynamic_design.modules[0]
+def dynamic_shift = dynamic_module.operations.find(
+  fun (operation): operation.opcode == "rtl.shl"
+)
+def dynamic_cast = dynamic_module.operations.find(
+  fun (operation): operation.opcode == "rtl.cast"
 )
 
 check:
@@ -57,12 +65,18 @@ check:
     ~keep: fun (operation): operation.opcode == "rtl.record_get"
   ).length() ~is 1
   verify_design(aggregate_design) ~is #void
+  type_equal(dynamic_module.find_output("result").type, one_hot.OneHot(4)) ~is #true
+  type_equal(dynamic_shift.operands[0].type, Bits(4)) ~is #true
+  type_equal(dynamic_shift.operands[1].type, Bits(2)) ~is #true
+  type_equal(dynamic_cast.results[0].type, one_hot.OneHot(4)) ~is #true
+  verify_design(dynamic_design) ~is #void
 
   one_hot.OneHot(0) ~throws "PosInt"
   one_hot.one_hot_width(Bits(4)) ~throws "expected a OneHot type"
   fixture.Grant(-1) ~throws "Nat"
   fixture.Grant(4) ~throws "literal index must satisfy 0 <= index < width"
   embedded.run_elaboration(fun (): invalid.NonOneHotSelector()) ~throws "selector must have a one-hot selector type"
+  embedded.run_elaboration(fun (): invalid.NonBitsOneHot()) ~throws "index must be Bits"
   embedded.run_elaboration(fun (): invalid.NonListChoices()) ~throws "choices must be supplied as a host List"
   embedded.run_elaboration(fun (): invalid.TooFewChoices()) ~throws "choice count must equal the one-hot selector width"
   embedded.run_elaboration(fun (): invalid.TooManyChoices()) ~throws "choice count must equal the one-hot selector width"

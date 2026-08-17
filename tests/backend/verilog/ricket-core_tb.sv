@@ -1,5 +1,5 @@
-// Verifies out-of-order load completion with ordered commit and scoreboard hazards.
-module ricket_pipeline_tb;
+// Verifies RicketCore out-of-order load completion with ordered commit and scoreboard hazards.
+module ricket_core_tb;
   typedef struct packed { logic valid; logic [63:0] bits; } start_in_t;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [31:0] address; } instruction_req_bits_t;
@@ -44,7 +44,7 @@ module ricket_pipeline_tb;
   logic saw_fetch_flush;
   logic saw_redirect;
 
-  RicketPipeline dut (.*);
+  RicketCore dut (.*);
   always #5 clock = ~clock;
 
   function automatic logic [31:0] instruction_at(input logic [31:0] address);
@@ -180,6 +180,6 @@ module ricket_pipeline_tb;
     end while (!start_out.ready);
     start_in.valid = 1'b0;
     repeat (200) @(posedge clock);
-    $fatal(1, "pipeline did not complete the scoreboard scenario");
+    $fatal(1, "core did not complete the scoreboard scenario");
   end
 endmodule
