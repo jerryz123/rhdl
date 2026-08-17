@@ -572,19 +572,22 @@ dynamically computed host value instead of a directly named bundle family.
 produces a reusable `VectorLiteral`; live elements produce a runtime vector
 value. Element zero occupies the least-significant packed slot.
 
-Static host indexing works for readable values and driveable places. Complete
-element-wise drives canonicalize to one vector construction and whole drive.
-Dynamic read and functional replacement are explicit:
+Static host indexing works for readable values and driveable places. A
+hardware `Bits(w)` index may read a `Vec(2^w, T)` with ordinary brackets because
+every selector value names an element; the result is a value, not a driveable
+place. Complete element-wise drives canonicalize to one vector construction and
+whole drive. Dynamic reads with possible out-of-range values and functional
+replacement remain explicit:
 
 ```rhombus
 chosen <== values.lookup(selector, ~default: fallback)
 next_value <== current.updated(selector, replacement)
 ```
 
-Lookup projects all elements and builds a mux. `updated` reconstructs the
-vector with per-element muxes; an out-of-range selector leaves the original
-vector unchanged. There is no dynamic vector-index operation or dynamically
-selected mutable place in core.
+Bracket selection and lookup project all elements and build a mux. `updated`
+reconstructs the vector with per-element muxes; an out-of-range selector leaves
+the original vector unchanged. There is no dynamically selected mutable place
+or dedicated dynamic vector-index operation in core.
 
 ## Wires
 

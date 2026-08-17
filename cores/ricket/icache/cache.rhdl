@@ -65,12 +65,12 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
     | bits(0, beat_width)
     | lookup_address[3..offset_width]
   def valid_vector = cast(valid_bits, Vec(sets, Bool))
-  def line_hit = valid_vector.lookup(
-    lookup_set,
-    ~default: Bool(#false)
-  ) & (tags.port.response.bits[0] === lookup_tag)
+  def line_hit = valid_vector[lookup_set] & (tags.port.response.bits[0] === lookup_tag)
   def lookup_miss = lookup.egress.valid & tags.port.response.valid & !line_hit
-  def cached_beat = lines.port.response.bits.lookup(lookup_beat, ~default: bits(0, 64))
+  def cached_beat:
+    if beats == 1
+    | lines.port.response.bits[0]
+    | lines.port.response.bits[lookup_beat]
   def completion_address = as_bits(refill.completion.bits.context)
   def completion_set = completion_address[offset_width..(offset_width + set_width)]
   def completion_tag = completion_address[(offset_width + set_width)..width]
@@ -78,10 +78,10 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
     if beats == 1
     | bits(0, beat_width)
     | completion_address[3..offset_width]
-  def completed_beat = refill.completion.bits.line.lookup(
-    completion_beat,
-    ~default: bits(0, 64)
-  )
+  def completed_beat:
+    if beats == 1
+    | refill.completion.bits.line[0]
+    | refill.completion.bits.line[completion_beat]
   def completion_instruction = mux(
     cast(completion_address[2], Bool),
     completed_beat[32..64],

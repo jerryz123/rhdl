@@ -63,6 +63,7 @@ export:
   vector_create
   vector_get
   vector_project
+  vector_select
   vector_lookup
   vector_updated
   index
@@ -779,6 +780,30 @@ fun vector_lookup(entity,
                 name,
                 location,
                 Origin("embedded vector lookup", name || ""))
+
+// Selects from a vector whose Bits selector exhaustively names every element.
+// Element zero supplies the structurally unreachable mux default so bracket
+// syntax does not invent behavior for an out-of-range selector.
+fun vector_select(entity,
+                  selector,
+                  name = #false,
+                  location = Location()):
+  def vector_value = read(entity, location)
+  def selector_value = read(selector, location)
+  unless vector_type(vector_value.type)
+  | frontend_fail("hardware vector indexing requires a VectorType value", location)
+  unless bits_type(selector_value.type)
+  | frontend_fail("hardware vector index must have a Bits type", location)
+  unless vector_value.type.length == (1 bits.(<<) selector_value.type.width)
+  | frontend_fail(
+      "hardware vector indexing requires exactly one element per selector value; use .lookup(..., ~default: ...) for possible out-of-range values",
+      location
+    )
+  vector_lookup(vector_value,
+                selector_value,
+                vector_get(vector_value, 0, #false, location),
+                name,
+                location)
 
 // Constructs a new vector whose hardware-selected element is replaced. Each
 // element falls back to the original value, so an out-of-range selector leaves
