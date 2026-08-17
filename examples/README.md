@@ -149,6 +149,7 @@ instances, or logic to the generated RTL.
 | [`noc/noc-route-computer.rhdl`](noc/noc-route-computer.rhdl) | Validated NoC route rows lowered into an exhaustively checked combinational decoder |
 | [`noc/noc-router.rhdl`](noc/noc-router.rhdl) | Validated one-beat NoC routing with per-origin buffers, one-to-one allocation, ejection, and backpressure |
 | [`noc/noc-network.rhdl`](noc/noc-network.rhdl) | Three user-owned router subsystems assembled hierarchically from pure router and VC wiring plans |
+| [`noc/noc-crossbar.rhdl`](noc/noc-crossbar.rhdl) | Linkless one-router NoC elaborated as a three-ingress, three-ejection generalized crossbar |
 | [`tilelink/tilelink.rhdl`](tilelink/tilelink.rhdl) | Parameterized uncached and cached TileLink interface adapters |
 
 ## Interface topology composition

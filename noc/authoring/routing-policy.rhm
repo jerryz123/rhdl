@@ -45,11 +45,15 @@ export:
 interface RoutingOrigin:
   method describe()
 
-class RoutingInjection(node :: NodeRef):
+class RoutingInjection(terminal :: InjectionRef, router :: NodeRef):
   implements RoutingOrigin
+  constructor (terminal, router = #false):
+    if terminal is_a NodeRef
+    | super(InjectionRef(terminal.path), if router | router | terminal)
+    | super(terminal, router)
 
   override method describe():
-    "inject(" ++ node.describe() ++ ")"
+    "inject(" ++ terminal.describe() ++ " @ " ++ router.describe() ++ ")"
 
 class RoutingForwarding(vc :: VCRef):
   implements RoutingOrigin
@@ -60,15 +64,30 @@ class RoutingForwarding(vc :: VCRef):
 class RoutingContext(route_class :: RouteClassSpec,
                      origin :: RoutingOrigin,
                      current_node :: NodeRef,
-                     candidate_vc :: VCRef):
+                     candidate_vc :: VCRef,
+                     source_router :: NodeRef,
+                     destination_router :: NodeRef):
   constructor (route_class :: RouteClassSpec,
                origin :: RoutingOrigin,
                current_node :: NodeRef,
-               candidate_vc :: VCRef):
-    when origin is_a RoutingInjection && !node_ref_equal(origin.node, current_node)
+               candidate_vc :: VCRef,
+               source_router = #false,
+               destination_router = #false):
+    def resolved_source:
+      if source_router | source_router | NodeRef(route_class.source.path)
+    def resolved_destination:
+      if destination_router
+      | destination_router
+      | NodeRef(route_class.destination.path)
+    when origin is_a RoutingInjection && !node_ref_equal(origin.router, current_node)
     | error(~who: #'RoutingContext,
             "routing injection node must equal the current node")
-    super(route_class, origin, current_node, candidate_vc)
+    super(route_class,
+          origin,
+          current_node,
+          candidate_vc,
+          resolved_source,
+          resolved_destination)
 
   method candidate_link():
     candidate_vc.link

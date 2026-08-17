@@ -12,7 +12,7 @@ export:
 fun origin_equal(left, right):
   cond
   | left is_a Injection && right is_a Injection:
-      node_id_equal(left.node, right.node)
+      injection_id_equal(left.terminal.id, right.terminal.id)
   | left is_a HeldVC && right is_a HeldVC:
       vc_id_equal(left.vc, right.vc)
   | ~else: #false
@@ -30,15 +30,15 @@ fun incoming_vcs(topology, node):
     vcs := vcs ++ link.virtual_channels()
   vcs
 
-fun node_has_injection(route_classes, node):
-  route_classes.find(
-    fun (route_class): node_id_equal(route_class.source, node)
-  ) != #false
+fun injection_terminals_at(validated_routing, node):
+  validated_routing.injection_terminals.filter(
+    ~keep: fun (terminal): node_id_equal(terminal.router, node)
+  )
 
-fun node_has_ejection(route_classes, node):
-  route_classes.find(
-    fun (route_class): node_id_equal(route_class.destination, node)
-  ) != #false
+fun ejection_terminals_at(validated_routing, node):
+  validated_routing.ejection_terminals.filter(
+    ~keep: fun (terminal): node_id_equal(terminal.router, node)
+  )
 
 fun require_route_key(route_classes, route_class :: RouteClass):
   def found = list_index(
@@ -62,16 +62,23 @@ fun require_origin_key(origins, origin):
   | error(~who: #'RouterPlan, "origin does not belong to this router plan")
   found
 
-fun require_output_bit(output_vcs, vc :: VCId):
+fun target_equal(left, right):
+  cond
+  | left is_a VCId && right is_a VCId: vc_id_equal(left, right)
+  | left is_a EjectionTerminal && right is_a EjectionTerminal:
+      ejection_id_equal(left.id, right.id)
+  | ~else: #false
+
+fun require_target_bit(targets, target):
   def found = list_index(
-    output_vcs,
-    fun (candidate): vc_id_equal(candidate, vc)
+    targets,
+    fun (candidate): target_equal(candidate, target)
   )
   unless found != #false
-  | error(~who: #'RouterPlan, "output VC does not belong to this router plan")
+  | error(~who: #'RouterPlan, "target does not belong to this router plan")
   found
 
-class RouterPlanRow(route_row, route_key, origin_key, allowed_mask):
+class RouterPlanRow(route_row, route_key, origin_key, target_mask):
   opaque
   internal _RouterPlanRow
   constructor ~none
@@ -79,51 +86,56 @@ class RouterPlanRow(route_row, route_key, origin_key, allowed_mask):
   method describe():
     String.append(route_row.describe(), "; route-key=", to_string(route_key),
                   "; origin-key=", to_string(origin_key),
-                  "; local-mask=", to_string(allowed_mask))
+                  "; target-mask=", to_string(target_mask))
 
-fun make_plan_row(route_classes, origins, output_vcs, route_row):
+fun make_plan_row(route_classes, origins, targets, route_row):
   def route_key = require_route_key(route_classes, route_row.route_class)
   def origin_key = require_origin_key(origins, route_row.origin)
-  def mutable allowed_mask = 0
+  def mutable target_mask = 0
   for (vc in route_row.allowed_vcs):
-    def bit = require_output_bit(output_vcs, vc)
-    allowed_mask := allowed_mask bits.or (1 bits.(<<) bit)
-  _RouterPlanRow(route_row, route_key, origin_key, allowed_mask)
+    def bit = require_target_bit(targets, vc)
+    target_mask := target_mask bits.or (1 bits.(<<) bit)
+  when route_row.ejection_terminal
+  | def bit = require_target_bit(targets, route_row.ejection_terminal)
+    target_mask := target_mask bits.or (1 bits.(<<) bit)
+  _RouterPlanRow(route_row, route_key, origin_key, target_mask)
 
 class RouterPlan(validated_routing,
                  node,
                  route_classes,
-                 has_injection,
-                 has_ejection,
+                 injection_terminals,
+                 ejection_terminals,
                  origins,
                  output_vcs,
+                 targets,
                  rows):
   constructor (validated_routing :: ValidatedRouting, node :: NodeId):
     unless validated_routing.topology.contains_node(node)
     | error(~who: #'RouterPlan, "router node does not belong to the topology")
     def route_classes = validated_routing.route_classes
-    def has_injection = node_has_injection(route_classes, node)
-    def has_ejection = node_has_ejection(route_classes, node)
+    def injection_terminals = injection_terminals_at(validated_routing, node)
+    def ejection_terminals = ejection_terminals_at(validated_routing, node)
     def held_origins = incoming_vcs(
       validated_routing.topology,
       node
     ).map(fun (vc): HeldVC(vc))
-    def origins:
-      if has_injection
-      | [Injection(node)] ++ held_origins
-      | held_origins
+    def origins = injection_terminals.map(
+      fun (terminal): Injection(terminal)
+    ) ++ held_origins
     def output_vcs = validated_routing.topology.outgoing_vcs(node)
+    def targets = output_vcs ++ ejection_terminals
     def rows = validated_routing.route_table.rows_at(node).map(
       fun (route_row):
-        make_plan_row(route_classes, origins, output_vcs, route_row)
+        make_plan_row(route_classes, origins, targets, route_row)
     )
     super(validated_routing,
           node,
           route_classes,
-          has_injection,
-          has_ejection,
+          injection_terminals,
+          ejection_terminals,
           origins,
           output_vcs,
+          targets,
           rows)
 
   method route_key(route_class):
@@ -132,8 +144,8 @@ class RouterPlan(validated_routing,
   method origin_key(origin):
     require_origin_key(origins, origin)
 
-  method output_bit(vc):
-    require_output_bit(output_vcs, vc)
+  method target_bit(target):
+    require_target_bit(targets, target)
 
   method row(route_class, origin):
     def encoded_route = route_key(route_class)
@@ -152,5 +164,5 @@ class RouterPlan(validated_routing,
     String.append("router plan ", node.describe(),
                   ": routes=", to_string(route_classes.length()),
                   ", inputs=", to_string(origins.length()),
-                  ", outputs=", to_string(output_vcs.length()),
+                  ", targets=", to_string(targets.length()),
                   ", rows=", to_string(rows.length()))

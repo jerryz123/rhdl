@@ -5,6 +5,8 @@ import:
   "names.rhm" open
 
 export:
+  InjectionTerminalSpec
+  EjectionTerminalSpec
   TopologyLink
   TopologySpec
 
@@ -17,8 +19,28 @@ fun duplicate_node_ref(nodes, ref):
 fun duplicate_link_ref(links, ref):
   links.filter(~keep: fun (candidate): link_ref_equal(candidate.ref, ref)).length() > 1
 
+fun duplicate_injection_ref(terminals, ref):
+  terminals.filter(
+    ~keep: fun (candidate): injection_ref_equal(candidate.ref, ref)
+  ).length() > 1
+
+fun duplicate_ejection_ref(terminals, ref):
+  terminals.filter(
+    ~keep: fun (candidate): ejection_ref_equal(candidate.ref, ref)
+  ).length() > 1
+
 fun duplicate_vc_group(groups, name):
   groups.filter(~keep: fun (candidate): candidate.name == name).length() > 1
+
+class InjectionTerminalSpec(ref :: InjectionRef, router :: NodeRef):
+
+  method describe():
+    "inject " ++ ref.describe() ++ " @ " ++ router.describe()
+
+class EjectionTerminalSpec(ref :: EjectionRef, router :: NodeRef):
+
+  method describe():
+    "eject " ++ ref.describe() ++ " @ " ++ router.describe()
 
 class TopologyLink(ref :: LinkRef,
                    source :: NodeRef,
@@ -66,9 +88,13 @@ class TopologyLink(ref :: LinkRef,
                   ")")
 
 class TopologySpec(nodes :: NonemptyList.of(NodeRef),
-                   links :: List.of(TopologyLink)):
+                   links :: List.of(TopologyLink),
+                   injections :: List.of(InjectionTerminalSpec),
+                   ejections :: List.of(EjectionTerminalSpec)):
   constructor (nodes :: NonemptyList.of(NodeRef),
-               links :: List.of(TopologyLink)):
+               links :: List.of(TopologyLink),
+               ~injections: injections :: List.of(InjectionTerminalSpec) = [],
+               ~ejections: ejections :: List.of(EjectionTerminalSpec) = []):
     for (node in nodes):
       when duplicate_node_ref(nodes, node)
       | error(~who: #'TopologySpec,
@@ -86,8 +112,32 @@ class TopologySpec(nodes :: NonemptyList.of(NodeRef),
               String.append("link ", link.ref.describe(),
                             " has unknown destination ",
                             link.destination.describe()))
+    for (terminal in injections):
+      when duplicate_injection_ref(injections, terminal.ref)
+      | error(~who: #'TopologySpec,
+              "duplicate injection terminal " ++ terminal.ref.describe())
+      unless contains_node_ref(nodes, terminal.router)
+      | error(~who: #'TopologySpec,
+              String.append("injection terminal ", terminal.ref.describe(),
+                            " has unknown router ",
+                            terminal.router.describe()))
+    for (terminal in ejections):
+      when duplicate_ejection_ref(ejections, terminal.ref)
+      | error(~who: #'TopologySpec,
+              "duplicate ejection terminal " ++ terminal.ref.describe())
+      unless contains_node_ref(nodes, terminal.router)
+      | error(~who: #'TopologySpec,
+              String.append("ejection terminal ", terminal.ref.describe(),
+                            " has unknown router ",
+                            terminal.router.describe()))
     super(nodes.sort(node_ref_less),
-          links.sort(fun (left, right): link_ref_less(left.ref, right.ref)))
+          links.sort(fun (left, right): link_ref_less(left.ref, right.ref)),
+          injections.sort(
+            fun (left, right): injection_ref_less(left.ref, right.ref)
+          ),
+          ejections.sort(
+            fun (left, right): ejection_ref_less(left.ref, right.ref)
+          ))
 
   method find_node(ref :: NodeRef):
     def found = nodes.find(fun (node): node_ref_equal(node, ref))
@@ -111,5 +161,38 @@ class TopologySpec(nodes :: NonemptyList.of(NodeRef),
     find_link(ref)
     ref
 
+  method find_injection(ref :: InjectionRef):
+    def found = injections.find(
+      fun (terminal): injection_ref_equal(terminal.ref, ref)
+    )
+    unless found
+    | error(~who: #'find_injection,
+            "unknown injection terminal " ++ ref.describe())
+    found
+
+  method injection(path):
+    def ref = if path is_a InjectionRef | path | InjectionRef(path)
+    find_injection(ref)
+    ref
+
+  method find_ejection(ref :: EjectionRef):
+    def found = ejections.find(
+      fun (terminal): ejection_ref_equal(terminal.ref, ref)
+    )
+    unless found
+    | error(~who: #'find_ejection,
+            "unknown ejection terminal " ++ ref.describe())
+    found
+
+  method ejection(path):
+    def ref = if path is_a EjectionRef | path | EjectionRef(path)
+    find_ejection(ref)
+    ref
+
   method describe():
-    String.join(links.map(fun (link): link.describe()), "\n")
+    String.join(
+      injections.map(fun (terminal): terminal.describe()) ++ (
+        ejections.map(fun (terminal): terminal.describe())
+      ) ++ links.map(fun (link): link.describe()),
+      "\n"
+    )

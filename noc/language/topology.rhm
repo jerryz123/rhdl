@@ -49,6 +49,8 @@ meta:
     def mutable group_counts = []
     def mutable node_names = []
     def mutable link_names = []
+    def mutable injection_names = []
+    def mutable ejection_names = []
     for (clause in clauses):
       match clause
       | 'vc_group $(name :: Identifier): $count':
@@ -68,6 +70,12 @@ meta:
               name
             )
           node_names := node_names ++ [name]
+      | 'injection $(name :: Identifier) at $(router :: Identifier)':
+          require_fresh(injection_names, name, "injection terminal")
+          injection_names := injection_names ++ [name]
+      | 'ejection $(name :: Identifier) at $(router :: Identifier)':
+          require_fresh(ejection_names, name, "ejection terminal")
+          ejection_names := ejection_names ++ [name]
       | 'directed $(name :: Identifier):
            $(source :: Identifier) -> $(destination :: Identifier)
            vcs [$(group :: Identifier), ...]':
@@ -82,12 +90,36 @@ meta:
           link_names := link_names ++ [reverse]
       | ~else:
           syntax_meta.error(
-            "expected vc_group, node, directed, or bidirectional topology declaration",
+            "expected vc_group, node, injection, ejection, directed, or bidirectional topology declaration",
             clause
           )
     when node_names.length() == 0
     | syntax_meta.error("topology requires at least one node", location)
-    values(group_names, group_counts, node_names)
+    values(group_names,
+           group_counts,
+           node_names,
+           injection_names,
+           ejection_names)
+
+  fun lower_terminals(clauses, node_names):
+    def mutable injections = []
+    def mutable ejections = []
+    for (clause in clauses):
+      match clause
+      | 'injection $(name :: Identifier) at $(router :: Identifier)':
+          require_declared(node_names, router, "node")
+          def name_string = identifier_name(name)
+          injections := injections ++ [
+            'InjectionTerminalSpec(InjectionRef($name_string), $router)'
+          ]
+      | 'ejection $(name :: Identifier) at $(router :: Identifier)':
+          require_declared(node_names, router, "node")
+          def name_string = identifier_name(name)
+          ejections := ejections ++ [
+            'EjectionTerminalSpec(EjectionRef($name_string), $router)'
+          ]
+      | ~else: #void
+    values(injections, ejections)
 
   fun lower_links(clauses, node_names, group_names):
     def mutable links = []
@@ -150,15 +182,22 @@ expr.macro 'topology:
               ...':
   ~op_stx self
   def clauses = [clause, ...]
-  def (group_names, group_counts, node_names) = collect_declarations(
+  def (group_names,
+       group_counts,
+       node_names,
+       _injection_names,
+       _ejection_names) = collect_declarations(
     clauses,
     self
   )
   def links = lower_links(clauses, node_names, group_names)
+  def (injections, ejections) = lower_terminals(clauses, node_names)
   let [group_name, ...] = group_names
   let [group_count, ...] = group_counts
   let [node_name, ...] = node_names
   let [link, ...] = links
+  let [injection, ...] = injections
+  let [ejection, ...] = ejections
   let [group_string, ...] = group_names.map(identifier_name)
   let [node_string, ...] = node_names.map(identifier_name)
   'block:
@@ -166,4 +205,7 @@ expr.macro 'topology:
      ...
      def $node_name = NodeRef($node_string)
      ...
-     TopologySpec([$node_name, ...], [$link, ...])'
+     TopologySpec([$node_name, ...],
+                  [$link, ...],
+                  ~injections: [$injection, ...],
+                  ~ejections: [$ejection, ...])'

@@ -19,21 +19,25 @@ def escape_validator_version = "vc-escape-subnetwork/v1"
 fun origin_equal(left, right):
   cond
   | left is_a Injection && right is_a Injection:
-      node_id_equal(left.node, right.node)
+      injection_id_equal(left.terminal.id, right.terminal.id)
   | left is_a HeldVC && right is_a HeldVC:
       vc_id_equal(left.vc, right.vc)
   | ~else: #false
 
 fun origin_node(materialized, origin):
   cond
-  | origin is_a Injection: origin.node
+  | origin is_a Injection: origin.terminal.router
   | origin is_a HeldVC:
       materialized.topology.find_vc_link(origin.vc).destination
   | ~else:
       error(~who: #'compile_routing,
             "route-table origin must be an Injection or HeldVC")
 
-class RouteTableRow(route_class, origin, router_node, allowed_vcs, eject):
+class RouteTableRow(route_class,
+                    origin,
+                    router_node,
+                    allowed_vcs,
+                    ejection_terminal):
   opaque
   internal _RouteTableRow
   constructor ~none
@@ -45,8 +49,8 @@ class RouteTableRow(route_class, origin, router_node, allowed_vcs, eject):
 
   method describe():
     def action:
-      if eject
-      | "eject"
+      if ejection_terminal
+      | "eject " ++ ejection_terminal.describe()
       | block:
           def vc_names = allowed_vcs.map(fun (vc): vc.describe())
           "[" ++ String.join(vc_names, ", ") ++ "]"
@@ -152,6 +156,8 @@ class EscapeCertificate(request,
 
 class ValidatedRouting(topology,
                        route_classes,
+                       injection_terminals,
+                       ejection_terminals,
                        materialized,
                        reachable,
                        dependency_graph,
@@ -174,12 +180,19 @@ class ValidatedRouting(topology,
 
 fun make_row(materialized, route_class, origin):
   def node = origin_node(materialized, origin)
-  def eject = node_id_equal(node, route_class.destination)
+  def ejection_terminal:
+    if node_id_equal(node, route_class.destination.router)
+    | route_class.destination
+    | #false
   def allowed_vcs = materialized.allowed_candidates(route_class, origin)
-  when eject && allowed_vcs.length() > 0
+  when ejection_terminal && allowed_vcs.length() > 0
   | error(~who: #'compile_routing,
           "internal error: destination row has output VCs")
-  _RouteTableRow(route_class, origin, node, allowed_vcs, eject)
+  _RouteTableRow(route_class,
+                 origin,
+                 node,
+                 allowed_vcs,
+                 ejection_terminal)
 
 fun build_route_table(materialized, reachable):
   def mutable rows = []
@@ -208,6 +221,8 @@ fun finish_validated_routing(materialized,
   _ValidatedRouting(
     materialized.topology,
     materialized.route_classes,
+    materialized.injection_terminals,
+    materialized.ejection_terminals,
     materialized,
     reachable,
     dependency_graph,

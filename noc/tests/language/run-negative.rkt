@@ -8,10 +8,12 @@
 
 (define cases
   '(("duplicate-node.rhm.invalid" "duplicate topology node repeated")
+    ("duplicate-injection.rhm.invalid" "duplicate topology injection terminal port")
     ("duplicate-link.rhm.invalid" "duplicate topology link forward")
     ("unknown-node.rhm.invalid" "unknown topology node missing")
+    ("unknown-terminal-router.rhm.invalid" "unknown topology node missing")
     ("unknown-group.rhm.invalid" "unknown topology VC group missing")
-    ("malformed-clause.rhm.invalid" "expected vc_group, node, directed, or bidirectional topology declaration")
+    ("malformed-clause.rhm.invalid" "expected vc_group, node, injection, ejection, directed, or bidirectional topology declaration")
     ("empty-vcs.rhm.invalid" "directed topology link requires at least one VC group")
     ("duplicate-link-group.rhm.invalid" "duplicate VC group escape on topology link broken")
     ("topology-no-node.rhm.invalid" "topology requires at least one node")

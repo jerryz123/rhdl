@@ -10,7 +10,7 @@ import:
 def a = NodeRef("a")
 def b = NodeRef("b")
 def c = NodeRef(["group", "c"])
-def explicit_topology = TopologySpec([c, b, a], [])
+def explicit_topology = with_router_terminals(TopologySpec([c, b, a], []))
 def nonlocal_pairs = all_pairs(explicit_topology)
 def pairs_with_local = all_pairs(
   explicit_topology,
@@ -21,17 +21,17 @@ check:
   nonlocal_pairs.length() ~is 6
   pairs_with_local.length() ~is 9
   nonlocal_pairs.map(fun (spec): spec.ref.describe()) ~is [
-    "all-pairs/from/node=a/to/node=b",
-    "all-pairs/from/node=a/to/node=group/node=c",
-    "all-pairs/from/node=b/to/node=a",
-    "all-pairs/from/node=b/to/node=group/node=c",
-    "all-pairs/from/node=group/node=c/to/node=a",
-    "all-pairs/from/node=group/node=c/to/node=b"
+    "all-pairs/from/terminal=a/to/terminal=b",
+    "all-pairs/from/terminal=a/to/terminal=group/terminal=c",
+    "all-pairs/from/terminal=b/to/terminal=a",
+    "all-pairs/from/terminal=b/to/terminal=group/terminal=c",
+    "all-pairs/from/terminal=group/terminal=c/to/terminal=a",
+    "all-pairs/from/terminal=group/terminal=c/to/terminal=b"
   ]
   nonlocal_pairs[0].source.describe() ~is "a"
   nonlocal_pairs[0].destination.describe() ~is "b"
   pairs_with_local.filter(
-    ~keep: fun (spec): node_ref_equal(spec.source, spec.destination)
+    ~keep: fun (spec): spec.source.describe() == spec.destination.describe()
   ).length() ~is 3
 
 def lowered_topology = lower_topology(explicit_topology)
@@ -40,10 +40,10 @@ def lowered_pairs = lower_route_classes(lowered_topology, nonlocal_pairs)
 check:
   lowered_pairs.route_classes.length() ~is 6
   lowered_pairs.route_ref(RouteClassId(0)).describe() ~is nonlocal_pairs[0].ref.describe()
-  lowered_pairs.route_class(nonlocal_pairs[0].ref).source.value ~is lowered_topology.node_id(a).value
-  lowered_pairs.route_class(nonlocal_pairs[0].ref).destination.value ~is lowered_topology.node_id(b).value
+  lowered_pairs.route_class(nonlocal_pairs[0].ref).source.router.value ~is lowered_topology.node_id(a).value
+  lowered_pairs.route_class(nonlocal_pairs[0].ref).destination.router.value ~is lowered_topology.node_id(b).value
 
-def singleton = TopologySpec([NodeRef("only")], [])
+def singleton = with_router_terminals(TopologySpec([NodeRef("only")], []))
 
 check:
   all_pairs(singleton) ~is []
@@ -52,26 +52,26 @@ check:
     singleton,
     ~include_local: #true,
     ~prefix: ["traffic", "local"]
-  )[0].ref.describe() ~is "traffic/local/from/node=only/to/node=only"
+  )[0].ref.describe() ~is "traffic/local/from/terminal=only/to/terminal=only"
   all_pairs_route_ref(
-    a,
-    b,
+    InjectionRef(a.path),
+    EjectionRef(b.path),
     ~prefix: RouteClassRef(["traffic", "explicit"])
-  ).describe() ~is "traffic/explicit/from/node=a/to/node=b"
+  ).describe() ~is "traffic/explicit/from/terminal=a/to/terminal=b"
 
 // Endpoint-segment markers keep hierarchical route names unambiguous.
 def ambiguous_left = all_pairs_route_ref(
-  NodeRef(["a", "to", "b"]),
-  NodeRef("c")
+  InjectionRef(["a", "to", "b"]),
+  EjectionRef("c")
 )
 def ambiguous_right = all_pairs_route_ref(
-  NodeRef("a"),
-  NodeRef(["b", "to", "c"])
+  InjectionRef("a"),
+  EjectionRef(["b", "to", "c"])
 )
 
 check:
-  ambiguous_left.describe() ~is "all-pairs/from/node=a/node=to/node=b/to/node=c"
-  ambiguous_right.describe() ~is "all-pairs/from/node=a/to/node=b/node=to/node=c"
+  ambiguous_left.describe() ~is "all-pairs/from/terminal=a/terminal=to/terminal=b/to/terminal=c"
+  ambiguous_right.describe() ~is "all-pairs/from/terminal=a/to/terminal=b/terminal=to/terminal=c"
   ambiguous_left.describe() == ambiguous_right.describe() ~is #false
 
 // A standard mesh and an explicit topology with the same symbolic nodes
@@ -83,9 +83,9 @@ def explicit_mesh_nodes = TopologySpec(
 )
 
 check:
-  all_pairs(mesh.spec).map(
+  all_pairs(with_router_terminals(mesh.spec)).map(
     fun (spec): spec.describe()
-  ) ~is all_pairs(explicit_mesh_nodes).map(
+  ) ~is all_pairs(with_router_terminals(explicit_mesh_nodes)).map(
     fun (spec): spec.describe()
   )
 
@@ -93,4 +93,4 @@ check:
   all_pairs("not a topology") ~throws "TopologySpec"
   all_pairs(explicit_topology, ~include_local: "yes") ~throws "Boolean"
   all_pairs(singleton, ~prefix: "") ~throws "NonemptyList.of(NonemptyString)"
-  all_pairs_route_ref("a", b) ~throws "NodeRef"
+  all_pairs_route_ref("a", EjectionRef(b.path)) ~throws "InjectionRef"

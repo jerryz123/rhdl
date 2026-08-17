@@ -19,8 +19,7 @@ bundle RouteLookupKey(route_width, origin_width):
 
 // Gives hardware consumers named access to the typed routing decision.
 bundle RouteDecision(mask_width):
-  allowed_mask: Bits(mask_width)
-  eject: Bool
+  target_mask: Bits(mask_width)
   valid: Bool
 
 class RouteDecoder(router_plan,
@@ -48,10 +47,10 @@ fun compile_route_decoder(router_plan :: RouterPlan,
           "route decoding requires at least one local route row")
   def route_width = index_width(router_plan.route_classes.length())
   def origin_width = index_width(router_plan.origins.length())
-  def output_count = router_plan.output_vcs.length()
-  // RHDL has no zero-width Bits value. An ejection-only router therefore
-  // carries one constant-zero padding bit without inventing an output VC.
-  def mask_width = if output_count > 0 | output_count | 1
+  def target_count = router_plan.targets.length()
+  // RHDL has no zero-width Bits value. A plan with no local target retains a
+  // padding bit so invalid lookups still have a representable result type.
+  def mask_width = if target_count > 0 | target_count | 1
   def cases = router_plan.rows.map(
     fun (entry):
       DecodeCase(
@@ -59,8 +58,7 @@ fun compile_route_decoder(router_plan :: RouterPlan,
            route_key: bits(entry.route_key, route_width)
            origin_key: bits(entry.origin_key, origin_width)),
         (pattern(RouteDecision(mask_width)):
-           allowed_mask: bits(entry.allowed_mask, mask_width)
-           eject: Bool(entry.route_row.eject)
+           target_mask: bits(entry.target_mask, mask_width)
            valid: Bool(#true))
       )
   )
@@ -69,8 +67,7 @@ fun compile_route_decoder(router_plan :: RouterPlan,
   def decoder = DecodeGen(
     cases,
     ~default: (pattern(RouteDecision(mask_width)):
-                 allowed_mask: bits(0, mask_width)
-                 eject: Bool(#false)
+                 target_mask: bits(0, mask_width)
                  valid: Bool(#false)),
     ~espresso: espresso
   )
@@ -83,11 +80,9 @@ fun compile_route_decoder(router_plan :: RouterPlan,
 circuit RouteComputer(route_decoder :: RouteDecoder):
   input route_key: Bits(route_decoder.route_width)
   input origin_key: Bits(route_decoder.origin_width)
-  output allowed_mask: Bits(route_decoder.mask_width)
-  output eject: Bool
+  output target_mask: Bits(route_decoder.mask_width)
   output valid: Bool
 
   def decision :: Hardware = route_decoder.lookup(route_key, origin_key)
-  allowed_mask <== decision.allowed_mask
-  eject <== decision.eject
+  target_mask <== decision.target_mask
   valid <== decision.valid

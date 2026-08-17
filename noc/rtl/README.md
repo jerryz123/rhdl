@@ -13,8 +13,8 @@ from opaque `ValidatedRouting`; it cannot consume an unchecked relation or
 rerun topology, reachability, dependency, or deadlock analysis. Route keys
 retain their global stable encoding, while origin keys and outgoing-VC masks
 are local to one router. The decode relation uses a typed `RouteLookupKey`
-input and a typed `RouteDecision` output with an `allowed_mask` plus Boolean
-`eject` and `valid` fields. Compilation returns an opaque `RouteDecoder` that
+input and a typed `RouteDecision` output with a unified `target_mask` plus a
+Boolean `valid` field. Compilation returns an opaque `RouteDecoder` that
 stores only the plan, derived decode widths, and compiled `DecodeGen`; route
 mappings and rows remain owned by `RouterPlan`. `DecodeGen` alone owns any
 flattening needed by Espresso or CIRCT;
@@ -34,7 +34,9 @@ helper connects their outputs directly to egress. The standard-library
 and supplies grants but does not pretend to consume or forward payload flow.
 A NoC-specific ingress monitor checks every externally offered route key
 against the physical input's origin key before buffering. Outgoing VCs are the
-first targets and an optional ejection endpoint is last.
+first targets and every local ejection terminal follows. The router contains
+no singular ejection convention, so a linkless plan with several terminals is
+an ordinary many-input, many-output crossbar instance.
 
 Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through

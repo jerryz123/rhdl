@@ -8,12 +8,18 @@ import:
 
 export:
   NodeBinding
+  InjectionBinding
+  EjectionBinding
   LinkBinding
   VCBinding
   LoweredTopology
   lower_topology
 
 class NodeBinding(ref :: NodeRef, id :: NodeId)
+class InjectionBinding(spec :: InjectionTerminalSpec,
+                       terminal :: InjectionTerminal)
+class EjectionBinding(spec :: EjectionTerminalSpec,
+                      terminal :: EjectionTerminal)
 class LinkBinding(ref :: LinkRef, id :: LinkId)
 class VCBinding(ref :: VCRef, id :: VCId)
 
@@ -22,6 +28,26 @@ fun find_node_binding_by_ref(bindings, ref):
 
 fun find_node_binding_by_id(bindings, id):
   bindings.find(fun (binding): node_id_equal(binding.id, id))
+
+fun find_injection_binding_by_ref(bindings, ref):
+  bindings.find(
+    fun (binding): injection_ref_equal(binding.spec.ref, ref)
+  )
+
+fun find_injection_binding_by_id(bindings, id):
+  bindings.find(
+    fun (binding): injection_id_equal(binding.terminal.id, id)
+  )
+
+fun find_ejection_binding_by_ref(bindings, ref):
+  bindings.find(
+    fun (binding): ejection_ref_equal(binding.spec.ref, ref)
+  )
+
+fun find_ejection_binding_by_id(bindings, id):
+  bindings.find(
+    fun (binding): ejection_id_equal(binding.terminal.id, id)
+  )
 
 fun find_link_binding_by_ref(bindings, ref):
   bindings.find(fun (binding): link_ref_equal(binding.ref, ref))
@@ -47,6 +73,8 @@ fun topology_has_vc_group(spec, name):
 class LoweredTopology(spec :: TopologySpec,
                       topology :: Topology,
                       node_bindings :: List.of(NodeBinding),
+                      injection_bindings :: List.of(InjectionBinding),
+                      ejection_bindings :: List.of(EjectionBinding),
                       link_bindings :: List.of(LinkBinding),
                       vc_bindings :: List.of(VCBinding)):
 
@@ -61,6 +89,40 @@ class LoweredTopology(spec :: TopologySpec,
     unless found
     | error(~who: #'node_ref, "unknown node " ++ id.describe())
     found.ref
+
+  method injection_terminal(ref :: InjectionRef):
+    def found = find_injection_binding_by_ref(injection_bindings, ref)
+    unless found
+    | error(~who: #'injection_terminal,
+            "unknown injection terminal " ++ ref.describe())
+    found.terminal
+
+  method find_injection_binding(ref :: InjectionRef):
+    find_injection_binding_by_ref(injection_bindings, ref)
+
+  method injection_ref(id :: InjectionId):
+    def found = find_injection_binding_by_id(injection_bindings, id)
+    unless found
+    | error(~who: #'injection_ref,
+            "unknown injection terminal " ++ id.describe())
+    found.spec.ref
+
+  method ejection_terminal(ref :: EjectionRef):
+    def found = find_ejection_binding_by_ref(ejection_bindings, ref)
+    unless found
+    | error(~who: #'ejection_terminal,
+            "unknown ejection terminal " ++ ref.describe())
+    found.terminal
+
+  method find_ejection_binding(ref :: EjectionRef):
+    find_ejection_binding_by_ref(ejection_bindings, ref)
+
+  method ejection_ref(id :: EjectionId):
+    def found = find_ejection_binding_by_id(ejection_bindings, id)
+    unless found
+    | error(~who: #'ejection_ref,
+            "unknown ejection terminal " ++ id.describe())
+    found.spec.ref
 
   method link_id(ref :: LinkRef):
     def found = find_link_binding_by_ref(link_bindings, ref)
@@ -108,6 +170,32 @@ fun lower_topology(spec :: TopologySpec):
   for (ref in spec.nodes):
     node_bindings := node_bindings ++ [NodeBinding(ref, NodeId(node_bindings.length()))]
 
+  def mutable injection_bindings = []
+  for (terminal in spec.injections):
+    def router = find_node_binding_by_ref(
+      node_bindings,
+      terminal.router
+    ).id
+    injection_bindings := injection_bindings ++ [
+      InjectionBinding(
+        terminal,
+        InjectionTerminal(InjectionId(injection_bindings.length()), router)
+      )
+    ]
+
+  def mutable ejection_bindings = []
+  for (terminal in spec.ejections):
+    def router = find_node_binding_by_ref(
+      node_bindings,
+      terminal.router
+    ).id
+    ejection_bindings := ejection_bindings ++ [
+      EjectionBinding(
+        terminal,
+        EjectionTerminal(EjectionId(ejection_bindings.length()), router)
+      )
+    ]
+
   def mutable link_bindings = []
   def mutable vc_bindings = []
   def mutable physical_links = []
@@ -133,6 +221,8 @@ fun lower_topology(spec :: TopologySpec):
     spec,
     Topology(node_bindings.map(fun (binding): binding.id), physical_links),
     node_bindings,
+    injection_bindings,
+    ejection_bindings,
     link_bindings,
     vc_bindings
   )

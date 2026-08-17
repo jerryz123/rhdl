@@ -11,7 +11,8 @@ construction and CIRCT.
 
 The current implementation provides:
 
-- Symbolic hierarchical node and directed-link handles for topology authoring.
+- Symbolic hierarchical node, injection-terminal, ejection-terminal, and
+  directed-link handles for topology authoring.
 - Named VC groups with deterministic local VC assignment.
 - Immutable symbolic topology specifications with early structural validation.
 - Deterministic lowering to the normalized topology model with bidirectional
@@ -50,7 +51,8 @@ The current implementation provides:
 - Explicit directed multigraph topologies.
 - Positive, heterogeneous virtual-channel counts on physical links.
 - Stable topology and VC normalization.
-- Finite route classes with injection and destination nodes.
+- Finite route classes between injection and ejection terminals attached to
+  routers.
 - Injection and held-VC routing origins.
 - Physically legal candidate enumeration with automatic destination ejection.
 - A host routing-relation wrapper.
@@ -66,7 +68,7 @@ The current implementation provides:
 - Deterministic unit-hop distances and complete minimal-next-link sets for any
   directed topology.
 - An opaque validated-routing artifact and deterministic host route-table rows.
-- Deterministic router-local input and output encodings projected from that
+- Deterministic router-local origin and target encodings projected from that
   validated artifact.
 - Deterministic whole-network plans assigning router indices, external
   injection and ejection ports, and every physical VC's source-target and
@@ -196,12 +198,14 @@ def network = topology:
   vc_group escape: 1
   node a
   node b
+  injection request at a
+  ejection response at b
   bidirectional (a_to_b, b_to_a):
     a <-> b
     vcs [adaptive, escape]
 ```
 
-The form resolves its node, link, and VC-group identifiers lexically within
+The form resolves its node, terminal, link, and VC-group identifiers lexically within
 the declaration and returns an ordinary `TopologySpec`. Declarations may
 appear in any order. `TopologySpec.node` and `TopologySpec.link` recover named
 handles without exposing macro-generated local bindings. Duplicate and unknown
@@ -209,7 +213,8 @@ names are rejected during expansion at the relevant identifier; host values
 such as VC counts remain subject to the public constructors' runtime checks.
 
 Every accepted clause expands only into `NodeRef`, `LinkRef`, `VCGroup`,
-`TopologyLink`, and `TopologySpec`. It does not lower numeric identities,
+`InjectionTerminalSpec`, `EjectionTerminalSpec`, `TopologyLink`, and
+`TopologySpec`. It does not lower numeric identities,
 define topology families, materialize routing, invoke validation, or construct
 hardware. Generated lines, meshes, and user topology views remain ordinary
 functions in `std` or user modules.
@@ -314,10 +319,12 @@ packages do not import that instance.
 ## Route-class authoring
 
 `RouteClassRef` gives a finite route class a hierarchical symbolic name, while
-`RouteClassSpec` keeps its source and destination as `NodeRef` values. The
-generic `lower_route_classes` operation resolves those endpoints through one
-exact `LoweredTopology`, assigns route-class IDs by canonical symbolic-name
-order, and retains bidirectional provenance.
+`RouteClassSpec` names an `InjectionRef` source and `EjectionRef` destination.
+Each terminal is independently attached to a `NodeRef`, so any router can own
+zero, one, or many injection and ejection terminals. The generic
+`lower_route_classes` operation resolves those terminals through one exact
+`LoweredTopology`, assigns route-class IDs by canonical symbolic-name order,
+and retains bidirectional provenance.
 
 This layer defines only explicit route-class semantics. Reusable traffic sets
 such as all ordered source/destination pairs belong under `noc/std/traffic/`,
@@ -325,11 +332,14 @@ and concrete selections belong under `noc/examples/` or in user packages.
 
 ## Standard traffic definitions
 
-`all_pairs` generates ordinary `RouteClassSpec` values for every ordered pair
-of symbolic nodes in any `TopologySpec`. Local routes are excluded by default
-and can be included explicitly. Route names encode marked endpoint path
-segments, so hierarchical node names remain deterministic and unambiguous
-without depending on normalized `NodeId` values.
+`all_pairs` generates ordinary `RouteClassSpec` values for every ordered
+injection/ejection-terminal pair in a `TopologySpec`. Pairs attached to the
+same router are excluded by default and can be included explicitly. Route
+names encode marked terminal path segments, so hierarchical terminal names
+remain deterministic and unambiguous without depending on normalized IDs.
+`with_router_terminals` is an optional authoring convenience that attaches one
+same-named injection and ejection terminal to every router; topology-family
+definitions themselves remain terminal-independent.
 
 The definition performs no lowering or routing analysis. The mesh-traffic
 example independently selects the reusable example mesh, applies `all_pairs`,
@@ -339,9 +349,10 @@ and lowers the result through that mesh's `LoweredTopology`.
 
 A `RoutingPolicy` is an inspectable host-side predicate expression over a
 symbolic `RoutingContext`. Each context contains the original `RouteClassSpec`,
-a symbolic injection or forwarding origin, the current `NodeRef`, and the
-candidate `VCRef`. Topology-specific user libraries can therefore inspect the
-candidate link through the VC reference without parsing normalized IDs.
+a symbolic injection or forwarding origin, the current `NodeRef`, source and
+destination router references, and the candidate `VCRef`. Topology-specific
+user libraries can therefore inspect terminal attachments and candidate links
+without parsing normalized IDs.
 
 The initial policy algebra can match route classes, distinguish injection from
 forwarding, select candidate links, restrict named VC groups, and combine
@@ -484,22 +495,24 @@ PhysicalLink(id, source, destination, vc_count)
 link identity and then increasing local VC index, making subsequent graph and
 table construction deterministic.
 
-A `RouteClass` identifies one injection node and one destination node within a
-single independently transported protocol-level channel. Protocol-channel,
+A `RouteClass` identifies one `InjectionTerminal` and one `EjectionTerminal`
+within a single independently transported protocol-level channel. Each
+terminal carries a stable identity and router attachment. Protocol-channel,
 opcode, QoS, and other payload distinctions are not part of the routing model.
 
 Routing origins are either:
 
 ```text
-Injection(node)
+Injection(injection_terminal)
 HeldVC(vc)
 ```
 
-For an injection, physically legal candidates are all VCs on links leaving the
-injection node. For a held VC, candidates are all VCs on links leaving the
-current link's destination. Once an origin is at its route class's destination,
-`RoutingProblem.candidates` returns an empty list to represent automatic
-ejection without another routing-relation query.
+For an injection, physically legal candidates are all VCs on links leaving its
+terminal's router. For a held VC, candidates are all VCs on links leaving the
+current link's destination. Once an origin reaches the destination terminal's
+router, `RoutingProblem.candidates` returns an empty list. The validated route
+row then names that exact ejection terminal without another routing-relation
+query.
 
 The user policy is wrapped as:
 
@@ -605,10 +618,10 @@ retains the normalized topology, route classes, materialized and reachable
 relations, full dependency graph, selected certificate, proof assumptions,
 validator version, and deterministic `RouteTable`.
 
-There is one table row for each route class's legal injection origin and each
-reachable held VC. A row records its router node, whether it ejects, and the
-allowed output VCs copied from the exact materialized snapshot that passed
-validation. Unreachable materialized origins are omitted so routing decisions
+There is one table row for each route class's legal injection terminal and each
+reachable held VC. A row records its router node, its exact ejection terminal
+when at the destination, and the allowed output VCs copied from the exact
+materialized snapshot that passed validation. Unreachable materialized origins are omitted so routing decisions
 excluded from the dependency proof cannot leak into generated hardware. No
 route-table operation can reach or re-run the user callback. Escape-certified
 tables are still projected from the complete materialized relation, so legal
@@ -616,15 +629,15 @@ adaptive choices outside the escape proof graph are retained exactly.
 
 `RouterPlan(validated_routing, node)` is the only per-node projection consumed
 by route-computer RTL. It retains the validated artifact, uses the global
-stable route encoding, and assigns dense local origin and output-VC indices.
-It states whether the node has injection and ejection endpoints. Local origins
-consist of an injection slot when a route starts at the node plus every VC on
-its incoming physical links. Local output bits correspond exactly to VCs on
-outgoing physical links. Unused physical slots remain representable but have
-no route row and therefore decode invalid.
+stable route encoding, and assigns dense local origin and target indices.
+Local origins consist of every injection terminal attached to the router plus
+every VC on its incoming physical links. Local targets consist of outgoing VCs
+followed by every local ejection terminal. Multiple terminals therefore remain
+independently addressable even when they share one router.
 
 Each `RouterPlanRow` points back to its validated `RouteTableRow` and records
-the global route key, local origin key, and local output mask. An ejection-only
-router legitimately has zero output VCs; the RHDL ABI uses one constant-zero
-padding bit because hardware `Bits` values cannot have width zero. The padding
-does not denote a VC and `output_count` remains zero.
+the global route key, local origin key, and unified target mask. An ejection
+row selects one exact local terminal in the same mask used for outgoing VCs;
+there is no singular ejection sideband. A linkless one-router topology can
+therefore elaborate directly as a generalized crossbar with arbitrary ingress
+and ejection counts, while its VC dependency graph remains empty.

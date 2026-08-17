@@ -6,6 +6,8 @@ import:
   "topology.rhm" open
 
 export:
+  InjectionTerminal
+  EjectionTerminal
   RouteClass
   Injection
   HeldVC
@@ -19,16 +21,79 @@ fun duplicate_route_class_id(route_classes, id):
     ~keep: fun (candidate): route_class_id_equal(candidate.id, id)
   ).length() > 1
 
-class RouteClass(id :: RouteClassId, source :: NodeId, destination :: NodeId):
+fun conflicting_injection(route_classes, terminal):
+  route_classes.find(
+    fun (candidate):
+      injection_id_equal(candidate.source.id, terminal.id) && (
+        !node_id_equal(candidate.source.router, terminal.router)
+      )
+  ) != #false
+
+fun conflicting_ejection(route_classes, terminal):
+  route_classes.find(
+    fun (candidate):
+      ejection_id_equal(candidate.destination.id, terminal.id) && (
+        !node_id_equal(candidate.destination.router, terminal.router)
+      )
+  ) != #false
+
+fun unique_injections(route_classes):
+  def mutable terminals = []
+  for (route_class in route_classes):
+    unless terminals.find(
+      fun (terminal): injection_id_equal(terminal.id, route_class.source.id)
+    )
+    | terminals := terminals ++ [route_class.source]
+  terminals.sort(fun (left, right): injection_id_less(left.id, right.id))
+
+fun unique_ejections(route_classes):
+  def mutable terminals = []
+  for (route_class in route_classes):
+    unless terminals.find(
+      fun (terminal): ejection_id_equal(terminal.id,
+                                        route_class.destination.id)
+    )
+    | terminals := terminals ++ [route_class.destination]
+  terminals.sort(fun (left, right): ejection_id_less(left.id, right.id))
+
+class InjectionTerminal(id :: InjectionId, router :: NodeId):
+
+  method describe():
+    id.describe() ++ "@" ++ router.describe()
+
+class EjectionTerminal(id :: EjectionId, router :: NodeId):
+
+  method describe():
+    id.describe() ++ "@" ++ router.describe()
+
+class RouteClass(id :: RouteClassId,
+                 source :: InjectionTerminal,
+                 destination :: EjectionTerminal):
+  constructor (id :: RouteClassId, source, destination):
+    def source_terminal:
+      if source is_a NodeId
+      | InjectionTerminal(InjectionId(source.value), source)
+      | source
+    def destination_terminal:
+      if destination is_a NodeId
+      | EjectionTerminal(EjectionId(destination.value), destination)
+      | destination
+    super(id, source_terminal, destination_terminal)
 
   method describe():
     String.append(id.describe(), ": ", source.describe(), " -> ",
                   destination.describe())
 
-class Injection(node :: NodeId):
+class Injection(terminal :: InjectionTerminal):
+  constructor (terminal):
+    super(
+      if terminal is_a NodeId
+      | InjectionTerminal(InjectionId(terminal.value), terminal)
+      | terminal
+    )
 
   method describe():
-    "inject(" ++ node.describe() ++ ")"
+    "inject(" ++ terminal.describe() ++ ")"
 
 class HeldVC(vc :: VCId):
 
@@ -48,7 +113,9 @@ class RoutingRelation(allows :: Function.of_arity(3)):
 
 class RoutingProblem(topology :: Topology,
                      route_classes :: NonemptyList.of(RouteClass),
-                     relation :: RoutingRelation):
+                     relation :: RoutingRelation,
+                     injection_terminals,
+                     ejection_terminals):
   constructor (topology :: Topology,
                route_classes :: NonemptyList.of(RouteClass),
                relation :: RoutingRelation):
@@ -56,21 +123,36 @@ class RoutingProblem(topology :: Topology,
       when duplicate_route_class_id(route_classes, route_class.id)
       | error(~who: #'RoutingProblem,
               "duplicate route class " ++ route_class.id.describe())
-      unless topology.contains_node(route_class.source)
+      unless topology.contains_node(route_class.source.router)
       | error(~who: #'RoutingProblem,
               String.append("route class ", route_class.id.describe(),
-                            " has unknown source ",
+                            " has source terminal on unknown router ",
                             route_class.source.describe()))
-      unless topology.contains_node(route_class.destination)
+      unless topology.contains_node(route_class.destination.router)
       | error(~who: #'RoutingProblem,
               String.append("route class ", route_class.id.describe(),
-                            " has unknown destination ",
+                            " has destination terminal on unknown router ",
                             route_class.destination.describe()))
+      when conflicting_injection(route_classes, route_class.source)
+      | error(~who: #'RoutingProblem,
+              String.append(
+                "injection terminal has conflicting router attachment ",
+                route_class.source.id.describe()
+              ))
+      when conflicting_ejection(route_classes, route_class.destination)
+      | error(~who: #'RoutingProblem,
+              String.append(
+                "ejection terminal has conflicting router attachment ",
+                route_class.destination.id.describe()
+              ))
+    def ordered_routes = route_classes.sort(
+      fun (left, right): route_class_id_less(left.id, right.id)
+    )
     super(topology,
-          route_classes.sort(
-            fun (left, right): route_class_id_less(left.id, right.id)
-          ),
-          relation)
+          ordered_routes,
+          relation,
+          unique_injections(ordered_routes),
+          unique_ejections(ordered_routes))
 
   method contains_route_class(route_class):
     route_class is_a RouteClass && route_classes.find(
@@ -89,10 +171,13 @@ class RoutingProblem(topology :: Topology,
   method origin_node(origin):
     cond
     | origin is_a Injection:
-        unless topology.contains_node(origin.node)
+        unless topology.contains_node(origin.terminal.router)
         | error(~who: #'origin_node,
-                "injection references unknown node " ++ origin.node.describe())
-        origin.node
+                String.append(
+                  "injection references a terminal on an unknown router ",
+                  origin.terminal.describe()
+                ))
+        origin.terminal.router
     | origin is_a HeldVC:
         topology.find_vc_link(origin.vc).destination
     | ~else:
@@ -103,17 +188,20 @@ class RoutingProblem(topology :: Topology,
     unless contains_route_class(route_class)
     | error(~who: #'at_destination,
             "route class does not belong to this routing problem")
-    node_id_equal(origin_node(origin), route_class.destination)
+    node_id_equal(origin_node(origin), route_class.destination.router)
 
   method candidates(route_class, origin):
     unless contains_route_class(route_class)
     | error(~who: #'candidates,
             "route class does not belong to this routing problem")
-    when origin is_a Injection && !node_id_equal(origin.node, route_class.source)
+    when origin is_a Injection && !injection_id_equal(
+      origin.terminal.id,
+      route_class.source.id
+    )
     | error(~who: #'candidates,
             String.append("route class ", route_class.id.describe(),
-                          " cannot inject at ", origin.node.describe()))
+                          " cannot inject at ", origin.terminal.describe()))
     def node = origin_node(origin)
-    if node_id_equal(node, route_class.destination)
+    if node_id_equal(node, route_class.destination.router)
     | []
     | topology.outgoing_vcs(node)

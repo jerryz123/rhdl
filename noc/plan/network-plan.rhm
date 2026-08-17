@@ -20,7 +20,7 @@ fun require_node_index(nodes, node):
   | error(~who: #'NetworkPlan, "internal error: missing topology node")
   found
 
-class NetworkInjectionPort(node :: NodeId,
+class NetworkInjectionPort(terminal :: InjectionTerminal,
                            router_index :: Nat,
                            input_index :: Nat):
   opaque
@@ -28,11 +28,11 @@ class NetworkInjectionPort(node :: NodeId,
   constructor ~none
 
   method describe():
-    String.append("inject ", node.describe(), " -> router[",
+    String.append("inject ", terminal.describe(), " -> router[",
                   to_string(router_index), "].input[",
                   to_string(input_index), "]")
 
-class NetworkEjectionPort(node :: NodeId,
+class NetworkEjectionPort(terminal :: EjectionTerminal,
                           router_index :: Nat,
                           target_index :: Nat):
   opaque
@@ -40,7 +40,7 @@ class NetworkEjectionPort(node :: NodeId,
   constructor ~none
 
   method describe():
-    String.append("eject ", node.describe(), " <- router[",
+    String.append("eject ", terminal.describe(), " <- router[",
                   to_string(router_index), "].target[",
                   to_string(target_index), "]")
 
@@ -75,20 +75,20 @@ class NetworkPlan(validated_routing :: ValidatedRouting,
     def mutable ejection_ports = []
     for (router_plan in router_plans,
          router_index in 0..router_plans.length()):
-      when router_plan.has_injection
-      | injection_ports := injection_ports ++ [
+      for (terminal in router_plan.injection_terminals):
+        injection_ports := injection_ports ++ [
           _NetworkInjectionPort(
-            router_plan.node,
+            terminal,
             router_index,
-            router_plan.origin_key(Injection(router_plan.node))
+            router_plan.origin_key(Injection(terminal))
           )
         ]
-      when router_plan.has_ejection
-      | ejection_ports := ejection_ports ++ [
+      for (terminal in router_plan.ejection_terminals):
+        ejection_ports := ejection_ports ++ [
           _NetworkEjectionPort(
-            router_plan.node,
+            terminal,
             router_index,
-            router_plan.output_vcs.length()
+            router_plan.target_bit(terminal)
           )
         ]
 
@@ -108,7 +108,7 @@ class NetworkPlan(validated_routing :: ValidatedRouting,
         _NetworkVCConnection(
           vc,
           source_router_index,
-          source_router.output_bit(vc),
+          source_router.target_bit(vc),
           destination_router_index,
           destination_router.origin_key(HeldVC(vc))
         )
@@ -124,22 +124,22 @@ class NetworkPlan(validated_routing :: ValidatedRouting,
     | error(~who: #'NetworkPlan, "unknown network-plan node")
     router_plans[require_node_index(validated_routing.topology.nodes, node)]
 
-  method injection_port(node :: NodeId):
+  method injection_port(id :: InjectionId):
     def found = injection_ports.find(
-      fun (port): node_id_equal(port.node, node)
+      fun (port): injection_id_equal(port.terminal.id, id)
     )
     unless found
     | error(~who: #'NetworkPlan,
-            "node does not have an external injection port")
+            "unknown external injection terminal")
     found
 
-  method ejection_port(node :: NodeId):
+  method ejection_port(id :: EjectionId):
     def found = ejection_ports.find(
-      fun (port): node_id_equal(port.node, node)
+      fun (port): ejection_id_equal(port.terminal.id, id)
     )
     unless found
     | error(~who: #'NetworkPlan,
-            "node does not have an external ejection port")
+            "unknown external ejection terminal")
     found
 
   method vc_connection(vc :: VCId):

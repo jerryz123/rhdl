@@ -1,0 +1,702 @@
+#lang rhdl
+// Elaborates a linkless one-router NoC with three independent ingress and ejection terminals.
+
+import:
+  "../../noc/model/main.rhm" open
+  "../../noc/authoring/main.rhm" open
+  "../../noc/plan/main.rhm" open
+  "../../noc/std/traffic/main.rhm" open
+  lib("rhdl/std/ready-valid.rhdl") open
+  "../../noc/rtl/main.rhdl" open
+
+export:
+  topology_spec
+  lowered_topology
+  injection_terminals
+  ejection_terminals
+  route_specs
+  routes
+  routing
+  network_plan
+  router_plan
+  router_config
+  OneRouterCrossbarFixture
+  design
+  verilog_reference
+
+def router_ref = NodeRef("router")
+def injection_specs = for List (index in 0..3):
+  InjectionTerminalSpec(
+    InjectionRef("input" ++ to_string(index)),
+    router_ref
+  )
+def ejection_specs = for List (index in 0..3):
+  EjectionTerminalSpec(
+    EjectionRef("output" ++ to_string(index)),
+    router_ref
+  )
+def topology_spec = TopologySpec(
+  [router_ref],
+  [],
+  ~injections: injection_specs,
+  ~ejections: ejection_specs
+)
+def lowered_topology = lower_topology(topology_spec)
+def injection_terminals = lowered_topology.injection_bindings.map(
+  fun (binding): binding.terminal
+)
+def ejection_terminals = lowered_topology.ejection_bindings.map(
+  fun (binding): binding.terminal
+)
+def route_specs = all_pairs(topology_spec, ~include_local: #true)
+def lowered_routes = lower_route_classes(lowered_topology, route_specs)
+def routes = lowered_routes.route_classes
+
+def routing = compile_routing(
+  RoutingProblem(
+    lowered_topology.topology,
+    routes,
+    RoutingRelation(fun (_route, _origin, _candidate): #false)
+  )
+)
+unless routing is_a ValidatedRouting
+| error(~who: #'OneRouterCrossbarFixture,
+        "linkless crossbar routing must validate before hardware generation")
+
+def network_plan = NetworkPlan(routing)
+def router_plan = network_plan.router_plan(lowered_topology.node_id(router_ref))
+def router_config = compile_one_beat_router(router_plan, ~espresso: #false)
+def Beat = RoutedBeat(Bits(8), router_config.route_decoder.route_width)
+
+sync_circuit OneRouterCrossbarFixture():
+  interface ingress[3](Decoupled(Beat), ~role: consumer)
+  interface egress[3](Decoupled(Beat), ~role: producer)
+
+  inst router(OneBeatRouter(Bits(8), router_config))
+  router.ingress <=> ingress
+  egress <=> router.egress
+
+def design = elaborate(OneRouterCrossbarFixture())
+
+// Updated mechanically by the focused CIRCT golden command.
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [3:0] route_key; logic [7:0] payload; } RoutedBeat;
+  typedef struct packed {logic [3:0] route_key; logic [1:0] origin_key; } RouteLookupKey;
+  typedef struct packed {logic [2:0] target_mask; logic valid; } RouteDecision;
+`endif // _TYPESCOPE_rhdl_types
+module OneRouterCrossbarFixture(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  OneBeatRouter router (
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (ingress_0_in),
+    .ingress_1_in  (ingress_1_in),
+    .ingress_2_in  (ingress_2_in),
+    .egress_0_in   (egress_0_in),
+    .egress_1_in   (egress_1_in),
+    .egress_2_in   (egress_2_in),
+    .ingress_0_out (ingress_0_out),
+    .ingress_1_out (ingress_1_out),
+    .ingress_2_out (ingress_2_out),
+    .egress_0_out  (egress_0_out),
+    .egress_1_out  (egress_1_out),
+    .egress_2_out  (egress_2_out)
+  );
+endmodule
+
+module OneBeatRouter(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  wire struct packed {logic ready; } _crossbar_stage_ingress_0_out;
+  wire struct packed {logic ready; } _crossbar_stage_ingress_1_out;
+  wire struct packed {logic ready; } _crossbar_stage_ingress_2_out;
+  wire [2:0][2:0]                    _allocator_grants;
+  wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_2_egress_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_1_egress_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
+  wire RouteDecision                 _GEN = '{target_mask: 3'h4, valid: 1'h1};
+  wire RouteDecision                 _GEN_0 = '{target_mask: 3'h2, valid: 1'h1};
+  wire RouteDecision                 _GEN_1 = '{target_mask: 3'h1, valid: 1'h1};
+  wire RouteDecision                 _GEN_2 = '{target_mask: 3'h0, valid: 1'h0};
+  wire RouteLookupKey                _GEN_3 =
+    '{route_key: ingress_0_in.bits.route_key, origin_key: (2'h0)};
+  wire [5:0]                         _GEN_4 = /*cast(bit[5:0])*/_GEN_3;
+  wire RouteDecision                 _GEN_5 =
+    _GEN_4 == 6'h0
+      ? _GEN_1
+      : _GEN_4 == 6'h4
+          ? _GEN_0
+          : _GEN_4 == 6'h8
+              ? _GEN
+              : _GEN_4 == 6'hD
+                  ? _GEN_1
+                  : _GEN_4 == 6'h11
+                      ? _GEN_0
+                      : _GEN_4 == 6'h15
+                          ? _GEN
+                          : _GEN_4 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_4 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_4 == 6'h22 ? _GEN : _GEN_2;
+  `ifndef SYNTHESIS
+    one_beat_router_ingress_valid_route_0:
+      assert property (@(posedge clock) disable iff (reset)
+                         ~ingress_0_in.valid | _GEN_5.valid);
+  `endif // not def SYNTHESIS
+  wire RouteLookupKey                _GEN_6 =
+    '{route_key: ingress_1_in.bits.route_key, origin_key: (2'h1)};
+  wire [5:0]                         _GEN_7 = /*cast(bit[5:0])*/_GEN_6;
+  wire RouteDecision                 _GEN_8 =
+    _GEN_7 == 6'h0
+      ? _GEN_1
+      : _GEN_7 == 6'h4
+          ? _GEN_0
+          : _GEN_7 == 6'h8
+              ? _GEN
+              : _GEN_7 == 6'hD
+                  ? _GEN_1
+                  : _GEN_7 == 6'h11
+                      ? _GEN_0
+                      : _GEN_7 == 6'h15
+                          ? _GEN
+                          : _GEN_7 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_7 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_7 == 6'h22 ? _GEN : _GEN_2;
+  `ifndef SYNTHESIS
+    one_beat_router_ingress_valid_route_1:
+      assert property (@(posedge clock) disable iff (reset)
+                         ~ingress_1_in.valid | _GEN_8.valid);
+  `endif // not def SYNTHESIS
+  wire RouteLookupKey                _GEN_9 =
+    '{route_key: ingress_2_in.bits.route_key, origin_key: (2'h2)};
+  wire [5:0]                         _GEN_10 = /*cast(bit[5:0])*/_GEN_9;
+  wire RouteDecision                 _GEN_11 =
+    _GEN_10 == 6'h0
+      ? _GEN_1
+      : _GEN_10 == 6'h4
+          ? _GEN_0
+          : _GEN_10 == 6'h8
+              ? _GEN
+              : _GEN_10 == 6'hD
+                  ? _GEN_1
+                  : _GEN_10 == 6'h11
+                      ? _GEN_0
+                      : _GEN_10 == 6'h15
+                          ? _GEN
+                          : _GEN_10 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_10 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_10 == 6'h22 ? _GEN : _GEN_2;
+  `ifndef SYNTHESIS
+    one_beat_router_ingress_valid_route_2:
+      assert property (@(posedge clock) disable iff (reset)
+                         ~ingress_2_in.valid | _GEN_11.valid);
+  `endif // not def SYNTHESIS
+  wire RouteLookupKey                _GEN_12 =
+    '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (2'h0)};
+  wire [5:0]                         _GEN_13 = /*cast(bit[5:0])*/_GEN_12;
+  wire RouteDecision                 _GEN_14 =
+    _GEN_13 == 6'h0
+      ? _GEN_1
+      : _GEN_13 == 6'h4
+          ? _GEN_0
+          : _GEN_13 == 6'h8
+              ? _GEN
+              : _GEN_13 == 6'hD
+                  ? _GEN_1
+                  : _GEN_13 == 6'h11
+                      ? _GEN_0
+                      : _GEN_13 == 6'h15
+                          ? _GEN
+                          : _GEN_13 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_13 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_13 == 6'h22 ? _GEN : _GEN_2;
+  wire RouteLookupKey                _GEN_15 =
+    '{route_key: _queue_stage_1_egress_out.bits.route_key, origin_key: (2'h1)};
+  wire [5:0]                         _GEN_16 = /*cast(bit[5:0])*/_GEN_15;
+  wire RouteDecision                 _GEN_17 =
+    _GEN_16 == 6'h0
+      ? _GEN_1
+      : _GEN_16 == 6'h4
+          ? _GEN_0
+          : _GEN_16 == 6'h8
+              ? _GEN
+              : _GEN_16 == 6'hD
+                  ? _GEN_1
+                  : _GEN_16 == 6'h11
+                      ? _GEN_0
+                      : _GEN_16 == 6'h15
+                          ? _GEN
+                          : _GEN_16 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_16 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_16 == 6'h22 ? _GEN : _GEN_2;
+  wire RouteLookupKey                _GEN_18 =
+    '{route_key: _queue_stage_2_egress_out.bits.route_key, origin_key: (2'h2)};
+  wire [5:0]                         _GEN_19 = /*cast(bit[5:0])*/_GEN_18;
+  wire RouteDecision                 _GEN_20 =
+    _GEN_19 == 6'h0
+      ? _GEN_1
+      : _GEN_19 == 6'h4
+          ? _GEN_0
+          : _GEN_19 == 6'h8
+              ? _GEN
+              : _GEN_19 == 6'hD
+                  ? _GEN_1
+                  : _GEN_19 == 6'h11
+                      ? _GEN_0
+                      : _GEN_19 == 6'h15
+                          ? _GEN
+                          : _GEN_19 == 6'h1A
+                              ? _GEN_1
+                              : _GEN_19 == 6'h1E
+                                  ? _GEN_0
+                                  : _GEN_19 == 6'h22 ? _GEN : _GEN_2;
+  Queue queue_stage (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (ingress_0_in),
+    .egress_in   (_crossbar_stage_ingress_0_out),
+    .ingress_out (ingress_0_out),
+    .egress_out  (_queue_stage_egress_out),
+    .count       (/* unused */)
+  );
+  Queue_1 queue_stage_1 (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (ingress_1_in),
+    .egress_in   (_crossbar_stage_ingress_1_out),
+    .ingress_out (ingress_1_out),
+    .egress_out  (_queue_stage_1_egress_out),
+    .count       (/* unused */)
+  );
+  Queue_2 queue_stage_2 (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (ingress_2_in),
+    .egress_in   (_crossbar_stage_ingress_2_out),
+    .ingress_out (ingress_2_out),
+    .egress_out  (_queue_stage_2_egress_out),
+    .count       (/* unused */)
+  );
+  GreedyMatcher allocator (
+    .requests
+      ({{{{_queue_stage_2_egress_out.valid & _GEN_20.valid & _GEN_20.target_mask[2]},
+          {_queue_stage_2_egress_out.valid & _GEN_20.valid & _GEN_20.target_mask[1]},
+          {_queue_stage_2_egress_out.valid & _GEN_20.valid & _GEN_20.target_mask[0]}}},
+        {{{_queue_stage_1_egress_out.valid & _GEN_17.valid & _GEN_17.target_mask[2]},
+          {_queue_stage_1_egress_out.valid & _GEN_17.valid & _GEN_17.target_mask[1]},
+          {_queue_stage_1_egress_out.valid & _GEN_17.valid & _GEN_17.target_mask[0]}}},
+        {{{_queue_stage_egress_out.valid & _GEN_14.valid & _GEN_14.target_mask[2]},
+          {_queue_stage_egress_out.valid & _GEN_14.valid & _GEN_14.target_mask[1]},
+          {_queue_stage_egress_out.valid & _GEN_14.valid & _GEN_14.target_mask[0]}}}}),
+    .grants   (_allocator_grants)
+  );
+  GrantCrossbar crossbar_stage (
+    .ingress_0_in  (_queue_stage_egress_out),
+    .ingress_1_in  (_queue_stage_1_egress_out),
+    .ingress_2_in  (_queue_stage_2_egress_out),
+    .grants        (_allocator_grants),
+    .egress_0_in   (egress_0_in),
+    .egress_1_in   (egress_1_in),
+    .egress_2_in   (egress_2_in),
+    .ingress_0_out (_crossbar_stage_ingress_0_out),
+    .ingress_1_out (_crossbar_stage_ingress_1_out),
+    .ingress_2_out (_crossbar_stage_ingress_2_out),
+    .egress_0_out  (egress_0_out),
+    .egress_1_out  (egress_1_out),
+    .egress_2_out  (egress_2_out)
+  );
+endmodule
+
+module Queue(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out,
+  output                                                count
+);
+
+  reg             occupied;
+  RoutedBeat      payload;
+  wire            _GEN = ingress_in.valid & ~occupied;
+  always @(posedge clock) begin
+    if (reset)
+      occupied <= 1'h0;
+    else
+      occupied <= _GEN ^ occupied & egress_in.ready ? _GEN : occupied;
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= _GEN ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: (~occupied)};
+  assign egress_out = '{valid: occupied, bits: payload};
+  assign count = occupied;
+endmodule
+
+module Queue_1(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out,
+  output                                                count
+);
+
+  reg             occupied;
+  RoutedBeat      payload;
+  wire            _GEN = ingress_in.valid & ~occupied;
+  always @(posedge clock) begin
+    if (reset)
+      occupied <= 1'h0;
+    else
+      occupied <= _GEN ^ occupied & egress_in.ready ? _GEN : occupied;
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= _GEN ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: (~occupied)};
+  assign egress_out = '{valid: occupied, bits: payload};
+  assign count = occupied;
+endmodule
+
+module Queue_2(
+  input                                                 clock,
+                                                        reset,
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out,
+  output                                                count
+);
+
+  reg             occupied;
+  RoutedBeat      payload;
+  wire            _GEN = ingress_in.valid & ~occupied;
+  always @(posedge clock) begin
+    if (reset)
+      occupied <= 1'h0;
+    else
+      occupied <= _GEN ^ occupied & egress_in.ready ? _GEN : occupied;
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= _GEN ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: (~occupied)};
+  assign egress_out = '{valid: occupied, bits: payload};
+  assign count = occupied;
+endmodule
+
+module GreedyMatcher(
+  input  [2:0][2:0] requests,
+  output [2:0][2:0] grants
+);
+
+  wire _GEN = requests[2'h0][2'h1] & ~requests[2'h0][2'h0];
+  wire _GEN_0 = requests[2'h0][2'h2] & ~(requests[2'h0][2'h0] | _GEN);
+  wire _GEN_1 = requests[2'h1][2'h0] & ~requests[2'h0][2'h0];
+  wire _GEN_2 = requests[2'h1][2'h1] & ~_GEN_1 & ~_GEN;
+  wire _GEN_3 = requests[2'h1][2'h2] & ~(_GEN_1 | _GEN_2) & ~_GEN_0;
+  wire _GEN_4 = requests[2'h2][2'h0] & ~(requests[2'h0][2'h0] | _GEN_1);
+  wire _GEN_5 = requests[2'h2][2'h1] & ~_GEN_4 & ~(_GEN | _GEN_2);
+  assign grants =
+    {{{{requests[2'h2][2'h2] & ~(_GEN_4 | _GEN_5) & ~(_GEN_0 | _GEN_3)},
+       {_GEN_5},
+       {_GEN_4}}},
+     {{{_GEN_3}, {_GEN_2}, {_GEN_1}}},
+     {{{_GEN_0}, {_GEN}, {requests[2'h0][2'h0]}}}};
+endmodule
+
+module GrantCrossbar(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  [2:0][2:0]                                     grants,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  wire struct packed {logic ready; } _output_stage_2_ingress_0_out;
+  wire struct packed {logic ready; } _output_stage_2_ingress_1_out;
+  wire struct packed {logic ready; } _output_stage_2_ingress_2_out;
+  wire struct packed {logic ready; } _output_stage_1_ingress_0_out;
+  wire struct packed {logic ready; } _output_stage_1_ingress_1_out;
+  wire struct packed {logic ready; } _output_stage_1_ingress_2_out;
+  wire struct packed {logic ready; } _output_stage_ingress_0_out;
+  wire struct packed {logic ready; } _output_stage_ingress_1_out;
+  wire struct packed {logic ready; } _output_stage_ingress_2_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_2_egress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_2_egress_1_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_2_egress_2_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_1_egress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_1_egress_1_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_1_egress_2_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_egress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_egress_1_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _input_stage_egress_2_out;
+  GrantDemux input_stage (
+    .ingress_in   (ingress_0_in),
+    .grants       (grants[2'h0]),
+    .egress_0_in  (_output_stage_ingress_0_out),
+    .egress_1_in  (_output_stage_1_ingress_0_out),
+    .egress_2_in  (_output_stage_2_ingress_0_out),
+    .ingress_out  (ingress_0_out),
+    .egress_0_out (_input_stage_egress_0_out),
+    .egress_1_out (_input_stage_egress_1_out),
+    .egress_2_out (_input_stage_egress_2_out)
+  );
+  GrantDemux_1 input_stage_1 (
+    .ingress_in   (ingress_1_in),
+    .grants       (grants[2'h1]),
+    .egress_0_in  (_output_stage_ingress_1_out),
+    .egress_1_in  (_output_stage_1_ingress_1_out),
+    .egress_2_in  (_output_stage_2_ingress_1_out),
+    .ingress_out  (ingress_1_out),
+    .egress_0_out (_input_stage_1_egress_0_out),
+    .egress_1_out (_input_stage_1_egress_1_out),
+    .egress_2_out (_input_stage_1_egress_2_out)
+  );
+  GrantDemux_2 input_stage_2 (
+    .ingress_in   (ingress_2_in),
+    .grants       (grants[2'h2]),
+    .egress_0_in  (_output_stage_ingress_2_out),
+    .egress_1_in  (_output_stage_1_ingress_2_out),
+    .egress_2_in  (_output_stage_2_ingress_2_out),
+    .ingress_out  (ingress_2_out),
+    .egress_0_out (_input_stage_2_egress_0_out),
+    .egress_1_out (_input_stage_2_egress_1_out),
+    .egress_2_out (_input_stage_2_egress_2_out)
+  );
+  GrantMerge output_stage (
+    .ingress_0_in  (_input_stage_egress_0_out),
+    .ingress_1_in  (_input_stage_1_egress_0_out),
+    .ingress_2_in  (_input_stage_2_egress_0_out),
+    .grants        ({{grants[2'h2][2'h0]}, {grants[2'h1][2'h0]}, {grants[2'h0][2'h0]}}),
+    .egress_in     (egress_0_in),
+    .ingress_0_out (_output_stage_ingress_0_out),
+    .ingress_1_out (_output_stage_ingress_1_out),
+    .ingress_2_out (_output_stage_ingress_2_out),
+    .egress_out    (egress_0_out)
+  );
+  GrantMerge_1 output_stage_1 (
+    .ingress_0_in  (_input_stage_egress_1_out),
+    .ingress_1_in  (_input_stage_1_egress_1_out),
+    .ingress_2_in  (_input_stage_2_egress_1_out),
+    .grants        ({{grants[2'h2][2'h1]}, {grants[2'h1][2'h1]}, {grants[2'h0][2'h1]}}),
+    .egress_in     (egress_1_in),
+    .ingress_0_out (_output_stage_1_ingress_0_out),
+    .ingress_1_out (_output_stage_1_ingress_1_out),
+    .ingress_2_out (_output_stage_1_ingress_2_out),
+    .egress_out    (egress_1_out)
+  );
+  GrantMerge_2 output_stage_2 (
+    .ingress_0_in  (_input_stage_egress_2_out),
+    .ingress_1_in  (_input_stage_1_egress_2_out),
+    .ingress_2_in  (_input_stage_2_egress_2_out),
+    .grants        ({{grants[2'h2][2'h2]}, {grants[2'h1][2'h2]}, {grants[2'h0][2'h2]}}),
+    .egress_in     (egress_2_in),
+    .ingress_0_out (_output_stage_2_ingress_0_out),
+    .ingress_1_out (_output_stage_2_ingress_1_out),
+    .ingress_2_out (_output_stage_2_ingress_2_out),
+    .egress_out    (egress_2_out)
+  );
+endmodule
+
+module GrantDemux(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  assign ingress_out =
+    '{ready:
+        (|({{grants[2'h2] & egress_2_in.ready},
+            {grants[2'h1] & egress_1_in.ready},
+            {grants[2'h0] & egress_0_in.ready}}))};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & grants[2'h0]), bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & grants[2'h1]), bits: ingress_in.bits};
+  assign egress_2_out =
+    '{valid: (ingress_in.valid & grants[2'h2]), bits: ingress_in.bits};
+endmodule
+
+module GrantDemux_1(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  assign ingress_out =
+    '{ready:
+        (|({{grants[2'h2] & egress_2_in.ready},
+            {grants[2'h1] & egress_1_in.ready},
+            {grants[2'h0] & egress_0_in.ready}}))};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & grants[2'h0]), bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & grants[2'h1]), bits: ingress_in.bits};
+  assign egress_2_out =
+    '{valid: (ingress_in.valid & grants[2'h2]), bits: ingress_in.bits};
+endmodule
+
+module GrantDemux_2(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_0_in,
+                                                        egress_1_in,
+                                                        egress_2_in,
+  output struct packed {logic ready; }                  ingress_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
+                                                        egress_1_out,
+                                                        egress_2_out
+);
+
+  assign ingress_out =
+    '{ready:
+        (|({{grants[2'h2] & egress_2_in.ready},
+            {grants[2'h1] & egress_1_in.ready},
+            {grants[2'h0] & egress_0_in.ready}}))};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & grants[2'h0]), bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & grants[2'h1]), bits: ingress_in.bits};
+  assign egress_2_out =
+    '{valid: (ingress_in.valid & grants[2'h2]), bits: ingress_in.bits};
+endmodule
+
+module GrantMerge(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out
+);
+
+  wire _GEN = grants[2'h0] & ingress_0_in.valid;
+  wire _GEN_0 = grants[2'h1] & ingress_1_in.valid;
+  wire _GEN_1 = grants[2'h2] & ingress_2_in.valid;
+  assign ingress_0_out = '{ready: (grants[2'h0] & egress_in.ready)};
+  assign ingress_1_out = '{ready: (grants[2'h1] & egress_in.ready)};
+  assign ingress_2_out = '{ready: (grants[2'h2] & egress_in.ready)};
+  assign egress_out =
+    '{valid: (_GEN | _GEN_0 | _GEN_1),
+      bits:
+        (_GEN_1
+           ? ingress_2_in.bits
+           : _GEN_0 ? ingress_1_in.bits : _GEN ? ingress_0_in.bits : ingress_0_in.bits)};
+endmodule
+
+module GrantMerge_1(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out
+);
+
+  wire _GEN = grants[2'h0] & ingress_0_in.valid;
+  wire _GEN_0 = grants[2'h1] & ingress_1_in.valid;
+  wire _GEN_1 = grants[2'h2] & ingress_2_in.valid;
+  assign ingress_0_out = '{ready: (grants[2'h0] & egress_in.ready)};
+  assign ingress_1_out = '{ready: (grants[2'h1] & egress_in.ready)};
+  assign ingress_2_out = '{ready: (grants[2'h2] & egress_in.ready)};
+  assign egress_out =
+    '{valid: (_GEN | _GEN_0 | _GEN_1),
+      bits:
+        (_GEN_1
+           ? ingress_2_in.bits
+           : _GEN_0 ? ingress_1_in.bits : _GEN ? ingress_0_in.bits : ingress_0_in.bits)};
+endmodule
+
+module GrantMerge_2(
+  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+                                                        ingress_1_in,
+                                                        ingress_2_in,
+  input  [2:0]                                          grants,
+  input  struct packed {logic ready; }                  egress_in,
+  output struct packed {logic ready; }                  ingress_0_out,
+                                                        ingress_1_out,
+                                                        ingress_2_out,
+  output struct packed {logic valid; RoutedBeat bits; } egress_out
+);
+
+  wire _GEN = grants[2'h0] & ingress_0_in.valid;
+  wire _GEN_0 = grants[2'h1] & ingress_1_in.valid;
+  wire _GEN_1 = grants[2'h2] & ingress_2_in.valid;
+  assign ingress_0_out = '{ready: (grants[2'h0] & egress_in.ready)};
+  assign ingress_1_out = '{ready: (grants[2'h1] & egress_in.ready)};
+  assign ingress_2_out = '{ready: (grants[2'h2] & egress_in.ready)};
+  assign egress_out =
+    '{valid: (_GEN | _GEN_0 | _GEN_1),
+      bits:
+        (_GEN_1
+           ? ingress_2_in.bits
+           : _GEN_0 ? ingress_1_in.bits : _GEN ? ingress_0_in.bits : ingress_0_in.bits)};
+endmodule
+}>>|

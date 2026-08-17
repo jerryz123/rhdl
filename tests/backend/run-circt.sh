@@ -448,6 +448,7 @@ fixture_specs=(
   'dont-care||examples/std/dont-care.rhdl|design|verilog_reference'
   'decode|decode_tb|examples/std/decode.rhdl|design|verilog_reference'
   'decode-composition||examples/std/decode-composition.rhdl|design|verilog_reference'
+  'noc-crossbar|noc_crossbar_tb|examples/noc/noc-crossbar.rhdl|design|verilog_reference'
   'noc-route-computer|noc_route_computer_tb|examples/noc/noc-route-computer.rhdl|design|verilog_reference'
   'noc-router|noc_router_tb|examples/noc/noc-router.rhdl|design|verilog_reference'
   'noc-network|noc_network_tb|examples/noc/noc-network.rhdl|design|verilog_reference'
