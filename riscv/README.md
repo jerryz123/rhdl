@@ -1,4 +1,4 @@
-<!-- Defines the pure RISC-V host model, RV64I catalog, and RHDL adapter boundary. -->
+<!-- Defines the pure RISC-V host model, RV32I/RV64I catalogs, and RHDL adapter boundary. -->
 
 # RISC-V instruction model
 
@@ -35,9 +35,10 @@ conflicting constraints; encodings support host-side matching, overlap, and
 subsumption relations.
 
 [`model/formats.rhm`](model/formats.rhm) defines register operands, scattered
-immediate layouts, and the R/I/S/B/U/J formats. RV64-specific six-bit and
-five-bit shift-amount formats are distinct. A layout maps named instruction
-fields into immediate result bits and explicitly records implicit zero bits.
+immediate layouts, and the R/I/S/B/U/J formats. Five-bit 32-bit-operation shift
+amounts and six-bit 64-bit-operation shift amounts are distinct. A layout maps
+named instruction fields into immediate result bits and explicitly records
+implicit zero bits.
 
 [`model/instruction.rhm`](model/instruction.rhm) binds an encoding to its
 format. Every `InstructionSpec` proves that its fixed requirements and variable
@@ -54,14 +55,16 @@ Concrete hardware uses ordinary `DecodeCase` relations and generators from
 `rhdl/std/decode`, which remains independent of RISC-V instruction
 descriptions.
 
-## RV64I catalog
+## Integer catalogs
 
-[`isa/rv64i.rhm`](isa/rv64i.rhm) enumerates the 52 architectural instructions
-in RV64I version 2.1 over RV32I version 2.1. Each instruction exposes its
+[`isa/rv32i.rhm`](isa/rv32i.rhm) enumerates the 40 architectural instructions
+in RV32I version 2.1. [`isa/rv64i.rhm`](isa/rv64i.rhm) enumerates the 52
+instructions in RV64I version 2.1 over that base. Each instruction exposes its
 required encoding, register operands, immediate layout, and complete variable
 field list:
 
 ```rhombus
+def rv32_add = rv32i_instruction("ADD")
 def add = rv64i_instruction("ADD")
 add.encoding.value
 add.encoding.care
@@ -69,6 +72,15 @@ add.operands
 add.immediate
 add.encoding_fields
 ```
+
+[`isa/integer-common.rhm`](isa/integer-common.rhm) owns the 37 instruction
+specifications whose encodings are identical at both XLENs. Both catalogs
+reuse those same immutable objects. `SLLI`, `SRLI`, and `SRAI` remain distinct:
+RV32I fixes instruction bit 25 and exposes a five-bit shift amount, while RV64I
+uses that bit as the sixth shift-amount bit. RV64I then adds its wider loads,
+store, and word-operation instructions. Consumers should import `rv32i.rhm` or
+`rv64i.rhm` explicitly; the package deliberately has no ambiguous combined
+namespace for architecture-specific instruction names.
 
 The architecture-facing `encoding_fields` are instruction bits, not generated
 control signals. Microarchitecture-specific operations, pipeline classes, and
@@ -79,7 +91,7 @@ Assembler pseudoinstructions are deliberately excluded because they alias and
 overlap architectural encodings. Specialized aliases such as `FENCE.TSO`,
 `PAUSE`, and `SEXT.W` therefore do not create catalog entries.
 
-The catalog was checked against the RISC-V International
+The catalogs were checked against the RISC-V International
 [RV32I specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html),
 [RV64I specification](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
 and canonical [`rv_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv_i)

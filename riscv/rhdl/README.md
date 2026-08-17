@@ -10,7 +10,9 @@ tests.
 [`instruction-pattern.rhdl`](instruction-pattern.rhdl) converts
 `InstructionEncoding` and `InstructionSpec` values into typed RHDL `Pattern`
 values. Generic case grouping, output patterns, valid-tagged partial mappings,
-and hardware decode generation remain in `rhdl/std/decode`.
+and hardware decode generation remain in `rhdl/std/decode`. The adapter is
+catalog-independent: RV32I and RV64I instructions pass through the same
+conversion while retaining their exact architectural care masks.
 
 [`instruction-fields.rhdl`](instruction-fields.rhdl) converts the pure model's
 `BitField` and `ImmediateLayout` descriptors into hardware slices,
