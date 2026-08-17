@@ -51,8 +51,11 @@ make noc-test               # pure host-side NoC model and its package boundary
 make riscv-test             # pure RISC-V model, decode, and package boundaries
 make host-checks            # host and model checks without the explicit example sweep
 make host-test              # unit tests, examples, NoC, RISC-V, and TileLink
-make circt-test             # CIRCT verification and Verilator simulation
-make verilog-golden-test    # exact example-owned SystemVerilog references
+make circt-test             # curated CIRCT, golden, and Verilator integration spine
+make circt-verify-test      # curated CIRCT lowering without simulation
+make verilator-test         # curated behavioral SystemVerilog simulations
+make verilog-golden-test    # every exact example-owned SystemVerilog reference
+make circt-full-test        # comprehensive goldens and available simulations
 make test                   # complete host and CIRCT suite
 ```
 
@@ -61,8 +64,8 @@ checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI runs those checks as an
 independent external-toolchain job.
 
 Use `FIXTURE=name` with `tests/backend/run-circt.sh` to select one external
-backend fixture. Update Verilog references only when backend output changes
-intentionally.
+backend fixture, or space-separated `FIXTURES` to batch several. Update
+Verilog references only when backend output changes intentionally.
 
 Generated Racket, CIRCT, SystemVerilog, and Verilator build output remains out
 of version control.

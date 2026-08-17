@@ -1,15 +1,66 @@
 #!/usr/bin/env bash
-# Compares example-owned Verilog goldens, verifies CIRCT IR, and simulates fixtures.
+# Runs curated or comprehensive CIRCT lowering, Verilog golden, and simulation checks.
 set -euo pipefail
 
 mode="${1:-run}"
+fixture_scope=curated
+compare_goldens=true
+update_goldens=false
+simulate_fixtures=true
+simulation_only=false
+run_direct_fixtures=true
 case "$mode" in
-  run|--golden-only|--update-goldens) ;;
+  run) ;;
+  --verify-only)
+    compare_goldens=false
+    simulate_fixtures=false
+    ;;
+  --simulate-only)
+    compare_goldens=false
+    simulation_only=true
+    ;;
+  --golden-only)
+    fixture_scope=all
+    simulate_fixtures=false
+    run_direct_fixtures=false
+    ;;
+  --full)
+    fixture_scope=all
+    ;;
+  --update-goldens)
+    fixture_scope=all
+    compare_goldens=false
+    update_goldens=true
+    simulate_fixtures=false
+    run_direct_fixtures=false
+    ;;
   *)
-    echo "usage: $0 [--golden-only|--update-goldens]" >&2
+    echo "usage: $0 [--verify-only|--simulate-only|--golden-only|--full|--update-goldens]" >&2
     exit 2
     ;;
 esac
+
+if [[ -n "${FIXTURE:-}" && -n "${FIXTURES:-}" ]]; then
+  echo "set either FIXTURE or FIXTURES, not both" >&2
+  exit 2
+fi
+
+# This semantic spine crosses every lowering family whose external-tool behavior
+# is not already established by the backend's host-side text tests. FIXTURE
+# always selects an explicit fixture, including fixtures outside this set.
+integration_fixtures=(
+  alu enum-state shifts signed-integers generated-adder
+  vector-update vec-shift-register-param
+  async-read-memory sync-memory-masked simple-memory-ram sync-ram
+  clocked-dpi assertions hierarchy bundle interface-array
+  queue-options rr-arbiter ctrl-queue-options
+  dont-care decode noc-route-computer
+  nested-bundle aggregate-memory one-hot-aggregate
+  rv32i-alu rv64i-alu-integrated
+  credited-flow credited-monitor credited-monitor-overgrant
+  tilelink-protocol tilelink-ram
+  ricket-pipeline ricket-dcache
+)
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 test_tmp_dir="$(mktemp -d /tmp/rhdl-circt.XXXXXX)"
@@ -27,8 +78,7 @@ fi
 
 golden_circt_version="firtool-1.155.0"
 circt_version="$("$circt_opt" --version | sed -n 's/^CIRCT //p')"
-compare_goldens=true
-if [[ "$circt_version" != "$golden_circt_version" ]]; then
+if [[ "$compare_goldens" == true && "$circt_version" != "$golden_circt_version" ]]; then
   if [[ "$mode" == --golden-only ]]; then
     echo "Verilog goldens require CIRCT $golden_circt_version; found ${circt_version:-an unknown version}" >&2
     exit 1
@@ -40,7 +90,41 @@ fi
 cd "$repo_dir"
 
 fixture_selected() {
-  [[ -z "${FIXTURE:-}" || "$1" == "$FIXTURE" ]]
+  local fixture="$1"
+
+  if [[ -n "${FIXTURE:-}" ]]; then
+    [[ "$fixture" == "$FIXTURE" ]]
+    return
+  fi
+  if [[ -n "${FIXTURES:-}" ]]; then
+    local requested_fixture
+    for requested_fixture in $FIXTURES; do
+      [[ "$fixture" == "$requested_fixture" ]] && return 0
+    done
+    return 1
+  fi
+  if [[ "$fixture_scope" == all ]]; then
+    return 0
+  fi
+  local integration_fixture
+  for integration_fixture in "${integration_fixtures[@]}"; do
+    [[ "$fixture" == "$integration_fixture" ]] && return 0
+  done
+  return 1
+}
+
+direct_fixture_selected() {
+  local fixture="$1"
+  local top="$2"
+
+  fixture_selected "$fixture" || return 1
+  [[ "$run_direct_fixtures" == true ]] || return 1
+  if [[ "$simulation_only" == true && -z "$top" \
+      && "$fixture" != credited-monitor \
+      && "$fixture" != credited-monitor-overgrant ]]; then
+    return 1
+  fi
+  return 0
 }
 
 update_reference() {
@@ -90,7 +174,6 @@ prepare_example() {
     --prettify-verilog
   )
 
-  "$circt_opt" "$mlir" -o /dev/null
   if grep -q 'seq.hlmem' "$mlir"; then
     circt_args+=(--lower-seq-hlmem)
   fi
@@ -113,7 +196,7 @@ prepare_example() {
           -e '/^\/\/ VCS coverage exclude_file$/d' \
     | perl -0pe 's/\n+\z//' > "$verilog"
 
-  if [[ "$mode" == --update-goldens ]]; then
+  if [[ "$update_goldens" == true ]]; then
     update_reference "$example" "$reference_export" "$verilog"
     return 0
   fi
@@ -136,6 +219,7 @@ golden_fixture() {
   local reference_export="${4:-verilog_reference}"
 
   fixture_selected "$fixture" || return 0
+  [[ "$simulation_only" == false ]] || return 0
   prepare_example "$fixture" "$example" "$reference_export"
 }
 
@@ -152,7 +236,7 @@ run_fixture() {
 
   fixture_selected "$fixture" || return 0
   prepare_example "$fixture" "$example" "$reference_export"
-  [[ "$mode" == run ]] || return 0
+  [[ "$simulate_fixtures" == true ]] || return 0
 
   local verilator_args=(
     --binary --timing --assert --build-jobs 0 --top-module "$top"
@@ -181,7 +265,7 @@ run_expected_assertion_failure() {
   local run_log="$test_tmp_dir/$fixture.failure.run.log"
 
   fixture_selected "$fixture" || return 0
-  [[ "$mode" == run ]] || return 0
+  [[ "$simulate_fixtures" == true ]] || return 0
 
   if ! verilator --binary --timing --assert --build-jobs 0 --top-module "$top" \
       --Mdir "$object_dir" \
@@ -216,11 +300,8 @@ verify_fixture() {
   local object_dir="$test_tmp_dir/${fixture}_obj"
   local build_log="$test_tmp_dir/$fixture.verilator.log"
 
-  fixture_selected "$fixture" || return 0
-  [[ "$mode" == run ]] || return 0
+  direct_fixture_selected "$fixture" "$top" || return 0
 
-  racket -S "$repo_dir" "tests/backend/emit-$fixture.rhm" > "$mlir"
-  "$circt_opt" "$mlir" -o /dev/null
   if grep -q 'seq.hlmem' "$mlir"; then
     circt_args+=(--lower-seq-hlmem)
   fi
@@ -240,7 +321,7 @@ verify_fixture() {
   circt_args+=(--export-verilog)
   "$circt_opt" "${circt_args[@]}" "$mlir" -o /dev/null > "$verilog"
 
-  if [[ -n "$top" ]]; then
+  if [[ "$simulate_fixtures" == true && -n "$top" ]]; then
     if ! verilator --binary --timing --assert --build-jobs 0 --top-module "$top" \
         --Mdir "$object_dir" \
         "$verilog" "tests/backend/verilog/${fixture}_tb.sv" \
@@ -375,23 +456,88 @@ fixture_specs=(
   'generator-sync-typed-defaults||examples/rhdl/generator-parameters.rhdl|sync_typed_defaults_design|sync_typed_defaults_verilog_reference'
   'register-forms||examples/rhdl/register-forms.rhdl|design|verilog_reference'
   'sync-ram|sync_ram_tb|examples/std/sync-ram.rhdl|design|verilog_reference'
-  'table||examples/rhdl/table.rhdl|design|verilog_reference'
+  'table|table_tb|examples/rhdl/table.rhdl|design|verilog_reference'
   'tilelink-uncached||examples/tilelink/tilelink.rhdl|uncached_design|uncached_verilog_reference'
   'tilelink-cached||examples/tilelink/tilelink.rhdl|cached_design|cached_verilog_reference'
-  'valid-pipe||examples/std/valid-pipe.rhdl|design|verilog_reference'
-  'vec-search||examples/rhdl/vec-search.rhdl|design|verilog_reference'
+  'valid-pipe|valid_pipe_tb|examples/std/valid-pipe.rhdl|design|verilog_reference'
+  'vec-search|vec_search_tb|examples/rhdl/vec-search.rhdl|design|verilog_reference'
 )
+
+direct_fixture_specs=(
+  'nested-bundle|'
+  'aggregate-memory|'
+  'one-hot-aggregate|'
+  'rv32i-alu|rv32i_alu_tb'
+  'rv64i-alu|rv64i_alu_tb'
+  'rv64i-alu-decode|'
+  'rv64i-alu-integrated|rv64i_alu_integrated_tb'
+  'credited-flow|credited_flow_tb'
+  'credited-monitor|'
+  'credited-monitor-overgrant|'
+  'tilelink-protocol|tilelink_protocol_tb'
+  'tilelink-ram|tilelink_ram_tb'
+  'load-store|load_store_tb'
+  'ricket-register-file|ricket_register_file_tb'
+  'ricket-scoreboard|ricket_scoreboard_tb'
+  'ricket-pipeline|ricket_pipeline_tb'
+  'ricket-icache|ricket_icache_tb'
+  'ricket-dcache|ricket_dcache_tb'
+)
+
+fixture_declared() {
+  local wanted="$1"
+  local spec fixture
+  for spec in "${fixture_specs[@]}" "${direct_fixture_specs[@]}"; do
+    IFS='|' read -r fixture _ <<< "$spec"
+    [[ "$fixture" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+for integration_fixture in "${integration_fixtures[@]}"; do
+  if ! fixture_declared "$integration_fixture"; then
+    echo "curated CIRCT fixture is not declared: $integration_fixture" >&2
+    exit 1
+  fi
+done
+
+for requested_fixture in ${FIXTURE:-} ${FIXTURES:-}; do
+  if [[ "$requested_fixture" != decode-espresso ]] \
+      && ! fixture_declared "$requested_fixture"; then
+    echo "requested CIRCT fixture is not declared: $requested_fixture" >&2
+    exit 1
+  fi
+done
+
+for direct_spec in "${direct_fixture_specs[@]}"; do
+  IFS='|' read -r direct_fixture _ <<< "$direct_spec"
+  for example_spec in "${fixture_specs[@]}"; do
+    IFS='|' read -r example_fixture _ <<< "$example_spec"
+    if [[ "$direct_fixture" == "$example_fixture" ]]; then
+      echo "CIRCT fixture has duplicate example and direct paths: $direct_fixture" >&2
+      exit 1
+    fi
+  done
+done
 
 materialize_args=()
 for spec in "${fixture_specs[@]}"; do
   IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
-  if fixture_selected "$fixture"; then
-    materialize_args+=("$fixture" "$example" "$design_export" "$reference_export")
+  if fixture_selected "$fixture" \
+      && [[ "$simulation_only" == false || -n "$top" ]]; then
+    materialize_args+=(example "$fixture" "$example" "$design_export" "$reference_export")
+  fi
+done
+
+for spec in "${direct_fixture_specs[@]}"; do
+  IFS='|' read -r fixture top <<< "$spec"
+  if direct_fixture_selected "$fixture" "$top"; then
+    materialize_args+=(emitter "$fixture" "tests/backend/emit-$fixture.rhm")
   fi
 done
 
 if (( ${#materialize_args[@]} > 0 )); then
-  RHDL_ESPRESSO=off racket -S "$repo_dir" tests/backend/load-example.rkt \
+  RHDL_ESPRESSO=off racket -y -S "$repo_dir" tests/backend/load-example.rkt \
     materialize "$test_tmp_dir" "${materialize_args[@]}"
 fi
 
@@ -404,42 +550,28 @@ for spec in "${fixture_specs[@]}"; do
   fi
 done
 
+if espresso_path="$(command -v espresso 2>/dev/null)"; then
+  if fixture_selected decode-espresso && [[ "$run_direct_fixtures" == true ]]; then
+    RHDL_ESPRESSO="$espresso_path" racket -y -S "$repo_dir" \
+      tests/backend/emit-decode-espresso.rhm > "$test_tmp_dir/decode-espresso.mlir"
+    verify_fixture decode-espresso decode_espresso_tb
+  fi
+fi
+
+for spec in "${direct_fixture_specs[@]}"; do
+  IFS='|' read -r fixture top <<< "$spec"
+  verify_fixture "$fixture" "$top"
+done
+
 run_expected_assertion_failure assertions assertions_fail_tb \
   tests/backend/verilog/assertions_fail_tb.sv request_holds
-
-verify_fixture nested-bundle
-verify_fixture bundle-hierarchy
-verify_fixture interface-hierarchy
-verify_fixture aggregate-memory
-verify_fixture one-hot-aggregate
-if espresso_path="$(command -v espresso 2>/dev/null)"; then
-  RHDL_ESPRESSO="$espresso_path" verify_fixture decode-espresso decode_espresso_tb
-fi
-verify_fixture table table_tb
-verify_fixture vec-search vec_search_tb
-verify_fixture rv32i-alu rv32i_alu_tb
-verify_fixture rv64i-alu rv64i_alu_tb
-verify_fixture rv64i-alu-decode
-verify_fixture rv64i-alu-integrated rv64i_alu_integrated_tb
-verify_fixture valid-pipe valid_pipe_tb
-verify_fixture credited-flow credited_flow_tb
-verify_fixture credited-monitor
 run_expected_assertion_failure credited-monitor \
   credited_monitor_underflow_tb \
   tests/backend/verilog/credited-monitor-underflow_tb.sv \
   credited_transfer_has_credit
-verify_fixture credited-monitor-overgrant
 run_expected_assertion_failure credited-monitor-overgrant \
   credited_monitor_overgrant_tb \
   tests/backend/verilog/credited-monitor-overgrant_tb.sv \
   credited_grant_within_limit
-verify_fixture tilelink-protocol tilelink_protocol_tb
-verify_fixture tilelink-ram tilelink_ram_tb
 run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \
   tests/backend/verilog/tilelink-ram-invalid_tb.sv tilelink_a_mask_supported
-verify_fixture load-store load_store_tb
-verify_fixture ricket-register-file ricket_register_file_tb
-verify_fixture ricket-scoreboard ricket_scoreboard_tb
-verify_fixture ricket-pipeline ricket_pipeline_tb
-verify_fixture ricket-icache ricket_icache_tb
-verify_fixture ricket-dcache ricket_dcache_tb

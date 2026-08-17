@@ -14,18 +14,32 @@ example design
     -> optional Verilator testbench
 ```
 
-Run every external fixture with `make circt-test`, or select one:
+`make circt-test` runs a curated semantic spine across the external pipeline.
+It covers each distinct lowering family without rebuilding every documented
+frontend variation. Select one fixture explicitly with:
 
 ```sh
 FIXTURE=bundle bash tests/backend/run-circt.sh
 ```
 
-The fixture manifest in `run-circt.sh` is authoritative; this document does
-not duplicate its evolving list.
+Use space-separated `FIXTURES` when one focused batch needs several fixtures;
+they share one Rhombus materialization process.
+
+The fixture manifest and curated integration set in `run-circt.sh` are
+authoritative; this document does not duplicate their evolving lists.
+
+The external stages are independently selectable:
+
+```sh
+make circt-verify-test     # curated CIRCT lowering without simulation
+make verilator-test       # curated fixtures that own behavioral testbenches
+make verilog-golden-test  # every example-owned exact Verilog reference
+make circt-full-test      # comprehensive goldens and available simulations
+```
 
 ## Verilog references
 
-Each concrete example design exports a colocated Verilog string. The canonical
+Each concrete example design still exports a colocated Verilog string. The canonical
 `design` pairs with `verilog_reference`; another `*_design` pairs with the same
 prefix followed by `*_verilog_reference`. `make examples` enforces references,
 exports, and manifest coverage. The backend lowers each design with the pinned
@@ -45,7 +59,8 @@ make update-verilog-goldens
 Review the resulting example-file diff normally. `FIXTURE=name` limits both
 commands to one fixture.
 
-Exact references belong to the CIRCT version pinned by
+The complete golden sweep is intentionally separate from the normal curated
+integration path. Exact references belong to the CIRCT version pinned by
 [`tools/install-circt.sh`](../../tools/install-circt.sh). When `make circt-test`
 is run against another CIRCT version, such as tip of tree, the runner still
 verifies lowering and executes every available Verilator testbench but skips
@@ -64,5 +79,6 @@ the suite checks reset suppression, branch suppression, and active failure.
 
 `emit-*.rhm` modules cover backend shapes that are not owned by one canonical
 example, including nested and hierarchical aggregates and aggregate memories.
-They are parsed and verified by CIRCT; fixtures with a matching testbench are
-also simulated.
+The curated integration set retains the distinct aggregate, assertion,
+protocol, and processor shapes. `make circt-full-test` parses and lowers every
+additional fixture; fixtures with a matching testbench are also simulated.

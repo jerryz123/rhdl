@@ -1,5 +1,5 @@
 #lang racket/base
-;; Materializes example designs and colocated Verilog references for shell tests.
+;; Materializes example references and direct-emitter MLIR for external tests.
 
 (require racket/file
          racket/match)
@@ -12,7 +12,7 @@
    (let loop ([remaining specifications])
      (match remaining
        ['() (void)]
-       [(list* fixture example-path design-export reference-export rest)
+       [(list* "example" fixture example-path design-export reference-export rest)
         (define design
           (dynamic-require example-path (string->symbol design-export)))
         (define reference
@@ -26,11 +26,19 @@
          #:exists 'truncate/replace
          (lambda (out) (display reference out)))
         (loop rest)]
+       [(list* "emitter" fixture emitter-path rest)
+        (call-with-output-file
+         (build-path output-directory (string-append fixture ".mlir"))
+         #:exists 'truncate/replace
+         (lambda (out)
+           (parameterize ([current-output-port out])
+             (dynamic-require emitter-path #f))))
+        (loop rest)]
        [_
         (raise-user-error
          'load-example
-         "each fixture needs EXAMPLE DESIGN-EXPORT REFERENCE-EXPORT")]))]
+         "each fixture must be tagged as example or emitter")]))]
   [_
    (raise-user-error
     'load-example
-    "expected: materialize OUTPUT-DIRECTORY FIXTURE EXAMPLE DESIGN-EXPORT REFERENCE-EXPORT ...")])
+    "expected: materialize OUTPUT-DIRECTORY (example FIXTURE EXAMPLE DESIGN-EXPORT REFERENCE-EXPORT | emitter FIXTURE EMITTER) ...")])

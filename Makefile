@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -74,19 +74,19 @@ ricket-host-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
 
 ricket-test: ricket-host-test
-	FIXTURE=rv32i-alu bash tests/backend/run-circt.sh
-	FIXTURE=rv64i-alu bash tests/backend/run-circt.sh
-	FIXTURE=rv64i-alu-decode bash tests/backend/run-circt.sh
-	FIXTURE=rv64i-alu-integrated bash tests/backend/run-circt.sh
-	FIXTURE=load-store bash tests/backend/run-circt.sh
-	FIXTURE=ricket-register-file bash tests/backend/run-circt.sh
-	FIXTURE=ricket-scoreboard bash tests/backend/run-circt.sh
-	FIXTURE=ricket-pipeline bash tests/backend/run-circt.sh
-	FIXTURE=ricket-icache bash tests/backend/run-circt.sh
-	FIXTURE=ricket-dcache bash tests/backend/run-circt.sh
+	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store ricket-register-file ricket-scoreboard ricket-pipeline ricket-icache ricket-dcache' bash tests/backend/run-circt.sh
 
 circt-test: check-example-verilog
 	bash tests/backend/run-circt.sh
+
+circt-verify-test: check-example-verilog
+	bash tests/backend/run-circt.sh --verify-only
+
+verilator-test: check-example-verilog
+	bash tests/backend/run-circt.sh --simulate-only
+
+circt-full-test: check-example-verilog
+	bash tests/backend/run-circt.sh --full
 
 verilog-golden-test: check-example-verilog
 	bash tests/backend/run-circt.sh --golden-only
