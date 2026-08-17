@@ -1,6 +1,9 @@
 #lang rhdl
 // Implements a width-parameterized combinational integer ALU from decoded controls.
 
+import:
+  "../riscv/isa/xlen.rhm" open
+
 // The nominal one-hot enum names each mutually exclusive result family while
 // preserving a direct selector bit for the decoder and datapath.
 hardware_enum AluResultSelect(~encoding: one_hot):
@@ -23,13 +26,12 @@ bundle AluControl():
 fun sign_extend_word(value :: Hardware) :: Hardware:
   as_bits(sext(value.into(SInt(32)), 64))
 
-circuit ALU(xlen :: Int):
-  unless xlen == 32 || xlen == 64
-  | error(~who: #'ALU, "integer width must be 32 or 64")
+circuit ALU(xlen :: XLen):
+  def width = xlen_width(xlen)
 
-  input(left, right): Bits(xlen)
+  input(left, right): Bits(width)
   input control: AluControl()
-  output result: Bits(xlen)
+  output result: Bits(width)
 
   def result_select = control.result_select
   def subtract = control.subtract
@@ -39,27 +41,27 @@ circuit ALU(xlen :: Int):
   // Word mode exists only in the RV64 specialization. In an RV32 ALU the
   // control bit is deliberately inert, so the same control bundle remains
   // reusable without elaborating a redundant narrow datapath.
-  def use_word = if xlen == 64 | word & ((result_select === AluResultSelect.Arithmetic) ||| (result_select === AluResultSelect.Shift)) | Bool(#false)
+  def use_word = if xlen == XLen.X64 | word & ((result_select === AluResultSelect.Arithmetic) ||| (result_select === AluResultSelect.Shift)) | Bool(#false)
 
   def word_shift_amount = right[0..5]
-  def shift_amount = if xlen == 64 | right[0..6] | word_shift_amount
-  def effective_shift_amount = if xlen == 64 | mux(word, zext(word_shift_amount, 6), shift_amount) | shift_amount
-  def add_result :: Bits(xlen) = left + right
-  def sub_result :: Bits(xlen) = left - right
+  def shift_amount = if xlen == XLen.X64 | right[0..6] | word_shift_amount
+  def effective_shift_amount = if xlen == XLen.X64 | mux(word, zext(word_shift_amount, 6), shift_amount) | shift_amount
+  def add_result :: Bits(width) = left + right
+  def sub_result :: Bits(width) = left - right
   def unsigned_less = left < right
-  def left_sign = left[xlen - 1].into(Bool)
-  def right_sign = right[xlen - 1].into(Bool)
+  def left_sign = left[width - 1].into(Bool)
+  def right_sign = right[width - 1].into(Bool)
   def signed_less = mux(left_sign ^ right_sign, left_sign, unsigned_less)
 
   // RV64 word shifts steer five shift bits and an extended low word into the
   // shared shifters. RV32 specializes these host branches to its native data
   // and five-bit shift paths, avoiding illegal equal-width extensions.
-  def sll_result :: Bits(xlen) = left << effective_shift_amount
-  def srl_input = if xlen == 64 | mux(word, zext(left[0..32], 64), left) | left
-  def srl_result :: Bits(xlen) = srl_input >> effective_shift_amount
-  def sra_input = if xlen == 64 | mux(word, sext(left[0..32].into(SInt(32)), 64), left.into(SInt(64))) | left.into(SInt(32))
-  def sra_result :: SInt(xlen) = sra_input >> effective_shift_amount
-  def sra_bits :: Bits(xlen) = as_bits(sra_result)
+  def sll_result :: Bits(width) = left << effective_shift_amount
+  def srl_input = if xlen == XLen.X64 | mux(word, zext(left[0..32], 64), left) | left
+  def srl_result :: Bits(width) = srl_input >> effective_shift_amount
+  def sra_input = if xlen == XLen.X64 | mux(word, sext(left[0..32].into(SInt(32)), 64), left.into(SInt(64))) | left.into(SInt(32))
+  def sra_result :: SInt(width) = sra_input >> effective_shift_amount
+  def sra_bits :: Bits(width) = as_bits(sra_result)
 
   def arithmetic_result = mux(subtract, sub_result, add_result)
   def comparison :: Bool = mux(signed_mode, signed_less, unsigned_less)
@@ -69,17 +71,17 @@ circuit ALU(xlen :: Int):
     sll_result
   )
 
-  def selected_result :: Bits(xlen) = mux_onehot(result_select):
+  def selected_result :: Bits(width) = mux_onehot(result_select):
     AluResultSelect.Arithmetic: arithmetic_result
     AluResultSelect.Shift: shift_result
-    AluResultSelect.Compare: zext(as_bits(comparison), xlen)
+    AluResultSelect.Compare: zext(as_bits(comparison), width)
     AluResultSelect.Xor: left ^ right
     AluResultSelect.Or: left ||| right
     AluResultSelect.And: left & right
 
   // Every RV64 word operation shares this final low-word sign extension; the
   // RV32 specialization returns its full-width result directly.
-  def final_result = if xlen == 64 | mux(use_word, sign_extend_word(selected_result[0..32]), selected_result) | selected_result
+  def final_result = if xlen == XLen.X64 | mux(use_word, sign_extend_word(selected_result[0..32]), selected_result) | selected_result
   result <== final_result
 
 export:

@@ -57,6 +57,13 @@ descriptions.
 
 ## Integer catalogs
 
+[`isa/xlen.rhm`](isa/xlen.rhm) defines the closed host-side `XLen` configuration
+with `XLen.X32` and `XLen.X64` members. Hardware generators accept this enum
+when their behavior follows architectural XLEN and use `xlen_width` only when
+constructing width-indexed RHDL types. Arbitrary implementation dimensions
+such as address, cache, and generic comparator widths remain ordinary `Int`
+values.
+
 [`isa/rv32i.rhm`](isa/rv32i.rhm) enumerates the 40 architectural instructions
 in RV32I version 2.1. [`isa/rv64i.rhm`](isa/rv64i.rhm) enumerates the 52
 instructions in RV64I version 2.1 over that base. Each instruction exposes its

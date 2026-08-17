@@ -14,10 +14,14 @@ if [[ -n "$forbidden_imports" ]]; then
   exit 1
 fi
 
-component_domain_imports="$(rg -n '^[[:space:]]+"[^"]*(riscv/|ricket/)' \
-  cores/alu.rhdl cores/branch-resolver.rhdl cores/load-store.rhdl || true)"
+component_domain_imports="$(
+  rg -n '^[[:space:]]+"[^"]*(riscv/|ricket/)' \
+    cores/alu.rhdl cores/branch-resolver.rhdl cores/load-store.rhdl \
+    | rg -v 'riscv/isa/xlen\.rhm' \
+    || true
+)"
 if [[ -n "$component_domain_imports" ]]; then
-  echo "reusable processor components must remain independent of instruction catalogs" >&2
+  echo "reusable processor components may import XLen but not instruction catalogs or named cores" >&2
   echo "$component_domain_imports" >&2
   exit 1
 fi

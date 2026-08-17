@@ -4,6 +4,7 @@
 import:
   "protocol.rhdl" open
   "../../load-store.rhdl" open
+  "../../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/read-write.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
@@ -22,10 +23,9 @@ fun check_l1d_geometry(address_width :: Int, sets :: Int, line_bytes :: Int):
   | error(~who: #'RicketL1DCache,
           "address width must include line offset, set, and tag bits")
 
-sync_circuit RicketL1DCache(xlen :: Int, address_width :: Int, sets :: Int, line_bytes :: Int):
-  unless xlen == 32 || xlen == 64
-  | error(~who: #'RicketL1DCache, "integer width must be 32 or 64")
-  unless address_width <= xlen
+sync_circuit RicketL1DCache(xlen :: XLen, address_width :: Int, sets :: Int, line_bytes :: Int):
+  def width = xlen_width(xlen)
+  unless address_width <= width
   | error(~who: #'RicketL1DCache, "address width must not exceed integer width")
   check_l1d_geometry(address_width, sets, line_bytes)
   def beats = line_bytes / 8
@@ -53,7 +53,7 @@ sync_circuit RicketL1DCache(xlen :: Int, address_width :: Int, sets :: Int, line
     write: Bool(#false)
     width: MemoryWidth.Double
     unsigned: Bool(#false)
-    data: bits(0, xlen)
+    data: bits(0, width)
     tag: bits(0, 5)
   reg valid_bits(~init: bits(0, sets))
   reg lookup_request(~init: empty_request)
@@ -95,9 +95,9 @@ sync_circuit RicketL1DCache(xlen :: Int, address_width :: Int, sets :: Int, line
   def cached_beat = cached_line.lookup(lookup_beat, ~default: bits(0, 64))
 
   def lookup_address_xlen:
-    if address_width == xlen
+    if address_width == width
     | as_bits(lookup_request.address)
-    | zext(lookup_request.address, xlen)
+    | zext(lookup_request.address, width)
   load_gen.address <== lookup_address_xlen
   load_gen.data <== mux(
     refilling,
@@ -158,7 +158,7 @@ sync_circuit RicketL1DCache(xlen :: Int, address_width :: Int, sets :: Int, line
   def produces_response = produces_load_hit ||| lookup_store ||| install_refill
   responses.ingress.valid <== produces_response
   responses.ingress.bits <== RicketDataResp(xlen):
-    data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, xlen))
+    data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, width))
     tag: lookup_request.tag
   when produces_response:
     assert(responses.ingress.ready, "l1d_response_slot_reserved")

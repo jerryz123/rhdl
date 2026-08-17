@@ -9,8 +9,8 @@ XLEN-wide normalized load value and echoes the request's five-bit completion tag
 store response data and tag have no meaning. The pipeline uses the tag to clear
 the destination scoreboard entry when a delayed load returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation. `RicketL1DCache(xlen, address_width, ...)` supports
-32- and 64-bit architectural values while retaining eight-byte line beats and
+load/store lane generation. `RicketL1DCache(xlen, address_width, ...)` accepts
+`XLen.X32` or `XLen.X64` while retaining eight-byte line beats and
 an eight-byte `SimpleMemory` backing port.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,

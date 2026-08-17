@@ -17,7 +17,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 |---|---|
 | [`alu.rhdl`](alu.rhdl) | Width-parameterized 32- or 64-bit integer ALU |
 | [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
-| [`load-store.rhdl`](load-store.rhdl) | RV64 scalar-access width, alignment, load extraction, and store lane generation |
+| [`load-store.rhdl`](load-store.rhdl) | XLEN scalar-access width, alignment, load extraction, and store lane generation |
 | [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
 | [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
@@ -30,21 +30,25 @@ cores/ricket/ --> cores/{alu,branch-resolver,load-store}.rhdl
        |-------> riscv/isa + riscv/rhdl
        `-------> rhdl/std
 
-cores/{alu,branch-resolver,load-store}.rhdl --> #lang rhdl + rhdl/std only
+cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhdl + rhdl/std
+cores/branch-resolver.rhdl --> #lang rhdl only
 ```
 
 Neither reusable components nor named cores may import the optional CIRCT
 backend, examples, or test implementations. Backend consumers elaborate their
-public designs from outside this package.
+public designs from outside this package. Reusable components may consume the
+closed architectural `XLen` configuration but remain independent of RISC-V
+instruction catalogs, field models, decode adapters, and named cores.
 
 ## Integer ALU
 
-[`alu.rhdl`](alu.rhdl) defines a stateless `ALU(xlen)` for 32- and 64-bit
-integer cores. Its `AluControl` input
+[`alu.rhdl`](alu.rhdl) defines a stateless `ALU(xlen)` whose host parameter is
+`XLen.X32` or `XLen.X64`. Its `AluControl` input
 contains one nominal one-hot `AluResultSelect` enum and four orthogonal
-modifiers. Its data inputs are already-selected `Bits(xlen)` operands. It owns
-modular arithmetic, bitwise operations, XLEN-sized shifts, and signed and
-unsigned set-less-than results. The 64-bit specialization additionally supports
+modifiers. Its data inputs are already-selected
+`Bits(xlen_width(xlen))` operands. It owns modular arithmetic, bitwise
+operations, XLEN-sized shifts, and signed and unsigned set-less-than results.
+The 64-bit specialization additionally supports
 32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;
 `word` is inert in the 32-bit specialization.
 

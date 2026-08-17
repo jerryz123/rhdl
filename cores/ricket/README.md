@@ -3,8 +3,9 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor. The required `xlen` host parameter selects 32 or 64 bits; the same
-pipeline and cache implementation is specialized during elaboration.
+processor. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+`XLen.X64`; the same pipeline and cache implementation is specialized during
+elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
 caches live here. Reusable execution components remain directly under
 [`cores/`](../).
@@ -77,10 +78,11 @@ whether decoded values have architectural meaning.
 ## Top-level core
 
 [`ricket.rhdl`](ricket.rhdl) defines
-`Ricket(xlen, address_width, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` must be
-32 or 64, and `address_width` must not exceed it. The core exposes an
-`Irrevocable(Bits(xlen))` start consumer, separate eight-byte `SimpleMemory`
-instruction and data requester ports, and a sticky `fault` output. L1I hits
+`Ricket(xlen, address_width, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` is an
+`XLen` enum value, and `address_width` must not exceed `xlen_width(xlen)`. The
+core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer, separate
+eight-byte `SimpleMemory` instruction and data requester ports, and a sticky
+`fault` output. L1I hits
 have one-cycle latency and one-request-per-cycle throughput. L1D load hits have
 the same throughput and preserve a five-bit pipeline completion tag through
 their two-entry response queue; stores complete to the pipeline at lookup and

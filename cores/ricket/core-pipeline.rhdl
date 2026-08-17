@@ -15,27 +15,27 @@ import:
   "scoreboard.rhdl" open
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
+  "../../riscv/isa/xlen.rhm" open
   "../../riscv/model/formats.rhm" as riscv_fields
   "../../riscv/rhdl/instruction-fields.rhdl" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/flow.rhdl") open
 
-sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
-  unless xlen == 32 || xlen == 64
-  | error(~who: #'RicketPipeline, "integer width must be 32 or 64")
+sync_circuit RicketPipeline(xlen :: XLen, address_width :: Int):
+  def width = xlen_width(xlen)
   unless address_width >= 3
   | error(~who: #'RicketPipeline,
           "address width must cover an eight-byte data transfer")
-  unless address_width <= xlen
+  unless address_width <= width
   | error(~who: #'RicketPipeline,
           "address width must not exceed the architectural integer width")
 
-  interface start(Irrevocable(Bits(xlen)), ~role: consumer)
+  interface start(Irrevocable(Bits(width)), ~role: consumer)
   interface instruction_access(RicketInstructionAccess(address_width), ~role: requester)
   interface data_access(RicketDataAccess(xlen, address_width), ~role: requester)
   output fault: Bool
 
-  def zero = bits(0, xlen)
+  def zero = bits(0, width)
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
@@ -53,7 +53,7 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   inst registers(RicketRegisterFile(xlen))
   inst scoreboard(RicketScoreboard())
   inst alu(ALU(xlen))
-  inst branch_resolver(BranchResolver(xlen))
+  inst branch_resolver(BranchResolver(width))
 
   fault <== faulted
 
@@ -61,7 +61,7 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   // producers remain in their pipeline stages below, despite earlier stages
   // consuming their values. The payloadless fault event remains a Bool wire.
   wire execute_fault_event: Bool
-  def redirect_link :: Handle = interface_link(Valid(Bits(xlen)))
+  def redirect_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
 
@@ -100,7 +100,7 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   elsewhen start_fire:
     fetch_pc.next <== start.bits
   elsewhen fetch_request_fire:
-    fetch_pc.next <== fetch_pc + bits(4, xlen)
+    fetch_pc.next <== fetch_pc + bits(4, width)
 
   when (redirect_link.right.valid):
     fetch_epoch.next <== !fetch_epoch
@@ -122,18 +122,18 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   def rd = instruction_field(riscv_fields.rd, instruction)
   def decoded_immediate = mux_lookup(
     control.operand.immediate,
-    ~default: bits(0, xlen),
+    ~default: bits(0, width),
     [
       [ImmediateSelect.I,
-       instruction_immediate(riscv_fields.IImmediate, instruction, xlen)],
+       instruction_immediate(riscv_fields.IImmediate, instruction, width)],
       [ImmediateSelect.S,
-       instruction_immediate(riscv_fields.SImmediate, instruction, xlen)],
+       instruction_immediate(riscv_fields.SImmediate, instruction, width)],
       [ImmediateSelect.B,
-       instruction_immediate(riscv_fields.BImmediate, instruction, xlen)],
+       instruction_immediate(riscv_fields.BImmediate, instruction, width)],
       [ImmediateSelect.U,
-       instruction_immediate(riscv_fields.UImmediate, instruction, xlen)],
+       instruction_immediate(riscv_fields.UImmediate, instruction, width)],
       [ImmediateSelect.J,
-       instruction_immediate(riscv_fields.JImmediate, instruction, xlen)]
+       instruction_immediate(riscv_fields.JImmediate, instruction, width)]
     ]
   )
 
@@ -204,7 +204,7 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
     ~default: forwarded_rs1,
     [
       [OperandASelect.Pc, id_ex.bits.pc],
-      [OperandASelect.Zero, bits(0, xlen)]
+      [OperandASelect.Zero, bits(0, width)]
     ]
   )
   alu.right <== mux(
@@ -220,8 +220,8 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   def redirect_requested = branch_resolver.taken
   def pc_target = id_ex.bits.pc + id_ex.bits.immediate
   def register_target_sum = forwarded_rs1 + id_ex.bits.immediate
-  def register_target = register_target_sum & !bits(1, xlen)
-  def computed_redirect_target :: Bits(xlen) = mux(
+  def register_target = register_target_sum & !bits(1, width)
+  def computed_redirect_target :: Bits(width) = mux(
     id_ex.bits.target_from_rs1,
     register_target,
     pc_target
@@ -239,7 +239,7 @@ sync_circuit RicketPipeline(xlen :: Int, address_width :: Int):
   def execute_cache_ready = !execute_is_memory ||| execute_fault ||| data_access.request.ready
   def execute_stage_ready = execute_cache_ready
   def execute_transfer = id_ex.valid & execute_stage_ready
-  def pc_plus_four = id_ex.bits.pc + bits(4, xlen)
+  def pc_plus_four = id_ex.bits.pc + bits(4, width)
   def execute_result = mux(
     id_ex.bits.writeback_source === WritebackSelect.PcPlus4,
     pc_plus_four,
