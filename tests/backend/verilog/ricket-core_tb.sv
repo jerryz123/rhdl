@@ -20,7 +20,7 @@ module ricket_core_tb;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
   typedef struct packed { ready_t request; data_resp_t response; } data_in_t;
-  typedef struct packed { data_req_t request; ready_t response; } data_out_t;
+  typedef struct packed { data_req_t request; } data_out_t;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -38,6 +38,7 @@ module ricket_core_tb;
   logic [4:0] data_response_tag;
   logic [1:0] load_requests;
   logic first_response_sent;
+  logic [1:0] first_response_delay;
   logic second_response_sent;
   logic [2:0] second_response_delay;
   logic [1:0] stores_seen;
@@ -50,10 +51,11 @@ module ricket_core_tb;
   function automatic logic [31:0] instruction_at(input logic [31:0] address);
     case (address)
       32'd0: instruction_at = 32'h00003283;  // ld x5, 0(x0)
-      32'd4: instruction_at = 32'h01003403;  // ld x8, 16(x0)
-      32'd8: instruction_at = 32'h00100313;  // addi x6, x0, 1
-      32'd12: instruction_at = 32'h02031a63; // bne x6, x0, +52
-      32'd64: instruction_at = 32'h006283b3; // add x7, x5, x6
+      32'd4: instruction_at = 32'h00028533;  // add x10, x5, x0
+      32'd8: instruction_at = 32'h01003403;  // ld x8, 16(x0)
+      32'd12: instruction_at = 32'h00100313; // addi x6, x0, 1
+      32'd16: instruction_at = 32'h02031863; // bne x6, x0, +48
+      32'd64: instruction_at = 32'h006503b3; // add x7, x10, x6
       32'd68: instruction_at = 32'h00900413; // addi x8, x0, 9
       32'd72: instruction_at = 32'h00703423; // sd x7, 8(x0)
       32'd76: instruction_at = 32'h00803823; // sd x8, 16(x0)
@@ -80,6 +82,7 @@ module ricket_core_tb;
       data_response_tag <= '0;
       load_requests <= '0;
       first_response_sent <= 1'b0;
+      first_response_delay <= '0;
       second_response_sent <= 1'b0;
       second_response_delay <= '0;
       stores_seen <= '0;
@@ -98,14 +101,14 @@ module ricket_core_tb;
           if (instruction_access_out.request.bits.address == 32'd64) begin
             assert (saw_fetch_flush)
               else $fatal(1, "branch target fetched without flushing wrong-path requests");
-            assert (!first_response_sent && !second_response_sent)
-              else $fatal(1, "branch redirect waited for deferred loads");
+            assert (first_response_sent && !second_response_sent)
+              else $fatal(1, "branch redirect did not pass only the deferred load");
             saw_redirect <= 1'b1;
           end
         end
       end
 
-      if (data_response_valid && data_access_out.response.ready) begin
+      if (data_response_valid) begin
         data_response_valid <= 1'b0;
         if (data_response_tag == 5'd5) begin
           first_response_sent <= 1'b1;
@@ -116,11 +119,15 @@ module ricket_core_tb;
           second_response_sent <= 1'b1;
         end
       end else if (!data_response_valid) begin
-        if (saw_redirect && load_requests == 2 && !first_response_sent) begin
-          data_response_valid <= 1'b1;
-          data_response_bits <= 64'd42;
-          data_response_tag <= 5'd5;
-        end else if (first_response_sent && !second_response_sent) begin
+        if (load_requests != 0 && !first_response_sent) begin
+          if (first_response_delay != 0)
+            first_response_delay <= first_response_delay - 1'b1;
+          else begin
+            data_response_valid <= 1'b1;
+            data_response_bits <= 64'd42;
+            data_response_tag <= 5'd5;
+          end
+        end else if (saw_redirect && first_response_sent && !second_response_sent) begin
           if (second_response_delay != 0)
             second_response_delay <= second_response_delay - 1'b1;
           else begin
@@ -142,6 +149,8 @@ module ricket_core_tb;
                     data_access_out.request.bits.address == 32'd16 &&
                     data_access_out.request.bits.tag == 5'd8)
               else $fatal(1, "second load lost its address or destination tag");
+          if (load_requests == 0)
+            first_response_delay <= 2'd1;
           load_requests <= load_requests + 1'b1;
         end else begin
           assert (second_response_sent)

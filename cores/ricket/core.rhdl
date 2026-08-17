@@ -62,16 +62,20 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
 
-  // Deferred loads mark their destinations busy at ordered commit and clear
-  // them when the tagged cache response returns. Completion wins when both
+  // WB is the ordered commit point. Deferred loads mark their destinations
+  // busy there and clear them when the tagged cache response returns. The L1D
+  // registers SRAM results to align hits with WB; completion wins when both
   // updates target the same register in one cycle.
-  def commit = ex_mem_pipe.egress
+  def memory = ex_mem_pipe.egress
+  def commit = mem_wb_pipe.egress
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
-  def load_completion_valid = data_access.response.valid & or_reduce(data_access.response.bits.tag)
-  scoreboard.set.valid <== commit.valid & commit_is_load & commit.bits.writeback_enable & or_reduce(commit.bits.rd)
+  def response_tag = data_access.response.bits.tag
+  def response_tag_nonzero = or_reduce(response_tag)
+  def load_completion_valid = data_access.response.valid & response_tag_nonzero
+  scoreboard.set.valid <== commit.valid & commit_is_load & commit.bits.write_enable & or_reduce(commit.bits.rd)
   scoreboard.set.bits <== commit.bits.rd
   scoreboard.clear.valid <== load_completion_valid
-  scoreboard.clear.bits <== data_access.response.bits.tag
+  scoreboard.clear.bits <== response_tag
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -123,8 +127,8 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
     faulted.next <== Bool(#true)
 
   // Decode (ID) is ordinary combinational logic between IF/ID and ID/EX.
-  // Filtering consumes squashed tokens; gating holds a load-use dependent
-  // token.
+  // Filtering consumes squashed tokens; gating holds a token that depends on
+  // a load which has not yet reached the WB commit point.
   def id_ex = id_ex_pipe.egress
   def instruction = live_if_id.bits.instruction
   decoder.instruction <== instruction
@@ -157,11 +161,20 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def rd_busy = or_reduce(rd) & scoreboard_busy(scoreboard.busy, rd)
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
-  def load_destination = id_ex.bits.rd
-  def load_use_rs1 = control.operand.uses_rs1 & or_reduce(load_destination) & (load_destination === rs1)
-  def load_use_rs2 = control.operand.uses_rs2 & or_reduce(load_destination) & (load_destination === rs2)
-  def load_use_rd = control.writeback.enable & or_reduce(load_destination) & (load_destination === rd)
-  def load_dependency_hazard = live_if_id.valid & id_ex_is_load & (load_use_rs1 ||| load_use_rs2 ||| load_use_rd)
+  def memory_is_load = memory.valid & (memory.bits.memory_operation === MemoryOperation.Read)
+  fun conflicts_with_load(load_valid, load_destination):
+    load_valid & or_reduce(load_destination) & (
+      (control.operand.uses_rs1 & (load_destination === rs1)) ||| (
+        control.operand.uses_rs2 & (load_destination === rs2)
+      ) ||| (
+        control.writeback.enable & (load_destination === rd)
+      )
+    )
+  def load_dependency_hazard = live_if_id.valid & (
+    conflicts_with_load(id_ex_is_load, id_ex.bits.rd) ||| (
+      conflicts_with_load(memory_is_load, memory.bits.rd)
+    )
+  )
   def scoreboard_raw_hazard = (control.operand.uses_rs1 & rs1_busy) ||| (
     control.operand.uses_rs2 & rs2_busy
   )
@@ -284,38 +297,35 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
     data: forwarded_rs2
     tag: mux(id_ex.bits.memory_operation === MemoryOperation.Read, id_ex.bits.rd, bits(0, 5))
 
-  // Memory is Ricket's ordered commit point. A load marks its destination
-  // busy here and releases EX/MEM without waiting for the tagged cache result.
-  // Stores also commit at this point because alignment and other faults were
-  // resolved before the cache accepted their requests.
-  def commit_writes_immediately = commit.bits.writeback_enable & !commit_is_load
+  // Memory advances every non-faulting instruction into WB. Non-load results
+  // can already bypass here, but no instruction commits at this boundary.
+  def memory_writes_immediately = memory.bits.writeback_enable & !memory_is_load
 
-  mem_wb_pipe.ingress.valid <== commit.valid & commit_writes_immediately
+  mem_wb_pipe.ingress.valid <== memory.valid
   mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
-    write_enable: commit.bits.writeback_enable
-    rd: commit.bits.rd
-    value: commit.bits.result
+    memory_operation: memory.bits.memory_operation
+    write_enable: memory.bits.writeback_enable
+    rd: memory.bits.rd
+    value: memory.bits.result
 
-  memory_bypass_link.left.valid <== commit.valid & commit_writes_immediately & or_reduce(commit.bits.rd)
+  memory_bypass_link.left.valid <== memory.valid & memory_writes_immediately & or_reduce(memory.bits.rd)
   memory_bypass_link.left.bits <== RicketBypass(xlen):
-    rd: commit.bits.rd
-    value: commit.bits.result
+    rd: memory.bits.rd
+    value: memory.bits.result
 
-  // The two register-file write ports accept an immediate WB result and a
-  // delayed load completion independently, so neither path backpressures MEM.
-  def mem_wb = mem_wb_pipe.egress
-  def immediate_write_valid = mem_wb.valid & mem_wb.bits.write_enable
+  // The two register-file write ports accept an ordinary committed WB result
+  // and a committed load completion independently. The L1D's registered hit
+  // response arrives here; a miss completion can arrive later.
+  def immediate_write_valid = commit.valid & commit.bits.write_enable & !commit_is_load
 
-  data_access.response.ready <== Bool(#true)
-
-  writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(mem_wb.bits.rd)
+  writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(commit.bits.rd)
   writeback_bypass_link.left.bits <== RicketBypass(xlen):
-    rd: mem_wb.bits.rd
-    value: mem_wb.bits.value
+    rd: commit.bits.rd
+    value: commit.bits.value
 
   registers.write_enable_1 <== immediate_write_valid
-  registers.write_address_1 <== mem_wb.bits.rd
-  registers.write_data_1 <== mem_wb.bits.value
+  registers.write_address_1 <== commit.bits.rd
+  registers.write_data_1 <== commit.bits.value
   registers.write_enable_2 <== load_completion_valid
   registers.write_address_2 <== data_access.response.bits.tag
   registers.write_data_2 <== data_access.response.bits.data

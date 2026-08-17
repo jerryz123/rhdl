@@ -10,7 +10,7 @@ import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/simple-memory.rhdl") open
   lib("rhdl/std/sync-ram.rhdl") open
-  lib("rhdl/std/flow/queue.rhdl") open
+  lib("rhdl/std/flow/pipe.rhdl") open
 
 fun check_l1d_geometry(address_width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
   unless sets >= 2
@@ -35,7 +35,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   def tag_width = address_width - offset_width - set_width
   def beat_width = index_width(beats)
   def count_width = index_width(beats + 1)
-  def outstanding_width = index_width(3)
   def Line = Vec(beats, Bits(64))
   def ByteLine = Vec(line_bytes, Bits(8))
 
@@ -46,7 +45,9 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
   inst load_gen(LoadGen(xlen))
   inst store_gen(StoreGen(xlen))
-  inst responses(Queue(RicketDataResp(xlen), 2, ~pipe: #true, ~flow: #true))
+  // This mandatory register after the SRAM lookup aligns a hit issued from EX
+  // with the instruction's WB stage. Responses cannot be backpressured.
+  inst responses(ValidPipe(RicketDataResp(xlen), 1))
 
   def empty_request = RicketDataReq(xlen, address_width):
     address: bits(0, address_width)
@@ -69,14 +70,11 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   reg store_address(~init: bits(0, address_width))
   reg store_data(~init: bits(0, 64))
   reg store_mask(~init: bits(0, 8))
-  reg outstanding(~init: bits(0, outstanding_width))
 
   core.response.valid <== responses.egress.valid
   core.response.bits <== responses.egress.bits
-  responses.egress.ready <== core.response.ready
   memory.response.ready <== refilling ||| (store_active & store_sent)
 
-  def response_fire = fire(core.response)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def request_tag_value = core.request.bits.address[(offset_width + set_width)..address_width]
   def request_beat_value:
@@ -128,16 +126,13 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
         concat(lookup_beat, bits(0, 3)),
         line_bytes
       )
-  def response_capacity = (outstanding < bits(2, outstanding_width)) ||| response_fire
-  assert(outstanding <= bits(2, outstanding_width), "l1d_outstanding_in_range")
   assert(!(refilling & store_active), "l1d_backing_owner_exclusive")
-  when response_fire:
-    assert(or_reduce(outstanding), "l1d_response_has_request")
 
   // Loads can follow hit lookups every cycle. A miss blocks until refill, and
   // a store blocks only the cache-request stream while its one-entry backing
-  // write buffer drains; the pipeline receives the store completion at lookup.
-  core.request.ready <== !refilling & !store_active & !lookup_miss & !lookup_store & response_capacity
+  // write buffer drains; the store completion enters the response register at
+  // lookup and reaches the pipeline in WB.
+  core.request.ready <== !refilling & !store_active & !lookup_miss & !lookup_store
   def request_fire = fire(core.request)
 
   def refill_line_base = align_down(as_bits(lookup_request.address), line_bytes)
@@ -160,8 +155,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   responses.ingress.bits <== RicketDataResp(xlen):
     data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, width))
     tag: lookup_request.tag
-  when produces_response:
-    assert(responses.ingress.ready, "l1d_response_slot_reserved")
 
   tags.port.request.valid <== request_fire ||| install_refill
   tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
@@ -210,14 +203,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   elsewhen (store_active & store_sent & fire(memory.response)):
     store_active.next <== Bool(#false)
     store_sent.next <== Bool(#false)
-
-  def next_outstanding = mux(
-    request_fire,
-    outstanding + bits(1, outstanding_width),
-    outstanding - bits(1, outstanding_width)
-  )
-  when (request_fire ^ response_fire):
-    outstanding <== next_outstanding
 
 export:
   RicketL1DCache

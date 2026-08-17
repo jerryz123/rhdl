@@ -1,4 +1,4 @@
-// Verifies refill, consecutive load hits, and buffered store completion for Ricket L1D.
+// Verifies Ricket L1D refill and the registered, full-throughput hit-response path.
 module ricket_dcache_tb;
   typedef struct packed {
     logic [31:0] address;
@@ -12,7 +12,7 @@ module ricket_dcache_tb;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } core_resp_bits_t;
   typedef struct packed { logic valid; core_resp_bits_t bits; } core_resp_t;
-  typedef struct packed { core_req_t request; ready_t response; } core_in_t;
+  typedef struct packed { core_req_t request; } core_in_t;
   typedef struct packed { ready_t request; core_resp_t response; } core_out_t;
 
   typedef struct packed {
@@ -98,7 +98,6 @@ module ricket_dcache_tb;
     core_in = '0;
     memory_in = '0;
     memory_in.request.ready = 1'b1;
-    core_in.response.ready = 1'b1;
     repeat (2) @(posedge clock);
     #1;
     reset = 1'b0;
@@ -121,17 +120,21 @@ module ricket_dcache_tb;
     #1;
     assert (core_out.request.ready)
       else $fatal(1, "second load hit was not accepted consecutively");
-    assert (core_out.response.valid &&
-            core_out.response.bits.data == 64'h88776655_44332211 &&
-            core_out.response.bits.tag == 5'd4)
-      else $fatal(1, "first load hit did not return after one lookup cycle");
+    assert (!core_out.response.valid)
+      else $fatal(1, "load hit bypassed the post-SRAM response register");
     @(posedge clock);
     #1;
     core_in.request.valid = 1'b0;
     assert (core_out.response.valid &&
             core_out.response.bits.data == 64'h88776655_44332211 &&
             core_out.response.bits.tag == 5'd4)
-      else $fatal(1, "second consecutive load hit did not return on time");
+      else $fatal(1, "first registered load hit did not return in WB");
+    @(posedge clock);
+    #1;
+    assert (core_out.response.valid &&
+            core_out.response.bits.data == 64'h88776655_44332211 &&
+            core_out.response.bits.tag == 5'd4)
+      else $fatal(1, "registered load hits lost one-per-cycle throughput");
 
     while (!core_out.request.ready) begin
       @(posedge clock);
@@ -147,8 +150,12 @@ module ricket_dcache_tb;
     @(posedge clock);
     #1;
     core_in.request.valid = 1'b0;
+    assert (!core_out.response.valid)
+      else $fatal(1, "store completion bypassed the post-SRAM response register");
+    @(posedge clock);
+    #1;
     assert (core_out.response.valid)
-      else $fatal(1, "store hit did not complete after one lookup cycle");
+      else $fatal(1, "store did not complete through the registered response path");
     while (!saw_store) begin
       @(posedge clock);
       #1;
