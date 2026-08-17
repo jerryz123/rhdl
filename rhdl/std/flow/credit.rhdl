@@ -87,11 +87,6 @@ sync_circuit CreditBuffer(T, depth :: PosInt):
          "credit_buffer_occupancy_reserved")
   monitor_credited(link)
 
-fun finish_credit_stage(source_or_type, handle :: Handle):
-  if source_or_type is_a Endpoint || source_or_type is_a Handle
-  | handle(source_or_type)
-  | handle
-
 fun credited_stage_protocol(source_or_type, credit_limit :: PosInt):
   def protocol:
     cond
@@ -116,25 +111,28 @@ fun credited_stage_protocol(source_or_type, credit_limit :: PosInt):
           "credit buffer depth must match the protocol credit limit")
   normalized
 
-fun credit_sender(source_or_type, credit_limit :: PosInt):
-  def T = flow_payload_type(source_or_type)
-  inst credit_sender_stage(CreditSender(T, credit_limit))
-  finish_flow_stage(
-    source_or_type,
-    InterfaceHandle(credit_sender_stage.ingress, credit_sender_stage.link)
-  )
+fun credit_sender(credit_limit :: PosInt)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    def T = flow_payload_type(source)
+    inst credit_sender_stage(CreditSender(T, credit_limit))
+    finish_flow_stage(
+      source,
+      InterfaceHandle(credit_sender_stage.ingress, credit_sender_stage.link)
+    )
 
-fun credit_buffer(source_or_type,
-                  depth :: PosInt,
-                  ~grant_enable: grant_enable = Bool(#true)):
-  def protocol = credited_stage_protocol(source_or_type, depth)
-  def T = protocol.members.find(fun (member): member.name == "bits").type
-  inst credit_buffer_stage(CreditBuffer(T, depth))
-  credit_buffer_stage.grant_enable <== grant_enable
-  finish_credit_stage(
-    source_or_type,
-    InterfaceHandle(credit_buffer_stage.link, credit_buffer_stage.egress)
-  )
+fun credit_buffer(depth :: PosInt,
+                  ~grant_enable: grant_enable = Bool(#true))
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    def protocol = credited_stage_protocol(source, depth)
+    def T = protocol.members.find(fun (member): member.name == "bits").type
+    inst credit_buffer_stage(CreditBuffer(T, depth))
+    credit_buffer_stage.grant_enable <== grant_enable
+    finish_flow_stage(
+      source,
+      InterfaceHandle(credit_buffer_stage.link, credit_buffer_stage.egress)
+    )
 
 export:
   CreditCounter

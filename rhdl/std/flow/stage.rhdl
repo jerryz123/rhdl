@@ -2,7 +2,48 @@
 // Adapts ready-valid stage constructors to the generic interface-handle model.
 
 import:
+  rhombus/meta open
   lib("rhdl/std/ready-valid.rhdl") open
+
+// Selects static information for a configured stage when it receives its
+// eventual input. Connected endpoint shapes expose the stage-specific far
+// side; unconnected type seeds and handles expose a complete Handle.
+meta.bridge stage_result_static_infos:
+  fun (data, dependencies :: annot_meta.Dependencies):
+    let '($position, $connected_infos)' = data
+    def source_infos = dependencies.arguments[position.unwrap()]
+    def topology = statinfo_meta.find(
+      statinfo_meta.unpack(source_infos),
+      'interface_topology_key'
+    )
+    cond
+    | topology && topology.unwrap() in [#'endpoint, #'endpoint_array]:
+        statinfo_meta.pack(connected_infos)
+    | topology && topology.unwrap() == #'handle:
+        annot_meta.parse_to_packed_statinfo('Handle')
+    | ~else:
+        annot_meta.parse_to_packed_statinfo('InterfaceTopologyResult')
+
+annot.macro 'StageResult($source, $(connected :: annot_meta.Parsed))':
+  ~context context
+  def position = context.argument_names[
+    syntax_meta.flip_introduce(source)
+  ]
+  unless position is_a Nat
+  | error(~who: #'StageResult,
+          "source must name a positional argument of the annotated function")
+  def (_connected_predicate, connected_infos) = annot_meta.unpack_predicate(
+    connected
+  )
+  def dependent_infos = statinfo_meta.pack_dependent_result(
+    'stage_result_static_infos',
+    '($position, $connected_infos)',
+    {}
+  )
+  annot_meta.pack_predicate(
+    'fun (_value): #true',
+    '(($(statinfo_meta.dependent_result_key), $dependent_infos))'
+  )
 
 // Resolves an endpoint, handle, ready-valid protocol, or shorthand payload
 // type to the exact protocol expected at a new handle's input.
@@ -73,6 +114,32 @@ fun valid_flow_payload_type(source_or_type):
     fun (member): member.name == "bits"
   ).type
 
+// Resolves the payloadless ready-valid family for configured Ctrl stages.
+// Unlike payload-bearing helpers, there is no DataType shorthand: a detached
+// topology starts from DecoupledCtrl() or IrrevocableCtrl().
+fun ctrl_flow_protocol_type(source_or_type):
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'ctrl_flow_protocol_type,
+                "control-flow handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        error(~who: #'ctrl_flow_protocol_type,
+              "control flow stage requires a DecoupledCtrl or IrrevocableCtrl InterfaceType, Endpoint, or Handle")
+  def control_contract = DecoupledCtrl()
+  unless interface_type_supports(protocol, control_contract) && (
+    protocol.members.length() == control_contract.members.length()
+  )
+  | error(~who: #'ctrl_flow_protocol_type,
+          "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint or protocol")
+  protocol
+
 // Replaces a protocol's payload without weakening its behavioral contract.
 fun flow_protocol_with_payload(protocol, payload_type):
   def normalized = decoupled_protocol_type(protocol)
@@ -88,15 +155,29 @@ fun flow_protocol_with_payload(protocol, payload_type):
 
 // A DataType or InterfaceType requests an unconnected handle. An endpoint or
 // earlier handle is connected immediately through the callable protocol.
+fun connected_flow_source(source):
+  cond
+  | source is_a Endpoint: #true
+  | source is_a Array && source.length() > 0:
+      def mutable all_endpoints = #true
+      for (element in source):
+        unless element is_a Endpoint
+        | all_endpoints := #false
+      all_endpoints
+  | ~else: #false
+
 fun finish_flow_stage(source_or_type, handle :: Handle):
-  if source_or_type is_a Endpoint || source_or_type is_a Handle
+  if connected_flow_source(source_or_type) || source_or_type is_a Handle
   | handle(source_or_type)
   | handle
 
 export:
+  StageResult
   flow_protocol_type
   flow_payload_type
   valid_flow_protocol_type
   valid_flow_payload_type
+  ctrl_flow_protocol_type
   flow_protocol_with_payload
+  connected_flow_source
   finish_flow_stage

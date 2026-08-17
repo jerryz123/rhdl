@@ -33,6 +33,10 @@ export:
   Handle
   Sink
   InterfaceFields
+  InterfaceArrayFields
+  InterfaceTopologyFields
+  InterfaceTopologyResult
+  interface_topology_key
 
 class InterfaceFlow(from_role :: String, to_role :: String, type :: RecordType):
   constructor (from_role :: String, to_role :: String, type :: RecordType):
@@ -641,35 +645,109 @@ fun interface_endpoint_supports_type(value, expected_type):
   value is_a InterfaceEndpoint && interface_type_supports(value.type,
                                                           expected_type)
 
+// Marks the static topology carried by interface annotations so higher-level
+// libraries can compute precise result information without knowing runtime
+// interface representation details.
+statinfo.key interface_topology_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+// Applying a linear topology object preserves whether another handle remains
+// open. Concrete endpoint sources expose the object's far endpoint shape;
+// statically unknown sources retain the conservative topology surface.
+meta.bridge interface_topology_call_result_static_infos:
+  fun (_data, dependencies :: annot_meta.Dependencies):
+    def source_infos = dependencies.arguments[0]
+    def topology = statinfo_meta.find(
+      statinfo_meta.unpack(source_infos),
+      'interface_topology_key'
+    )
+    cond
+    | topology && topology.unwrap() == #'handle:
+        annot_meta.parse_to_packed_statinfo('Handle')
+    | topology && topology.unwrap() in [#'endpoint, #'endpoint_array]:
+        annot_meta.parse_to_packed_statinfo('InterfaceTopologyFields')
+    | ~else:
+        annot_meta.parse_to_packed_statinfo('InterfaceTopologyResult')
+
 annot.macro 'Endpoint':
   annot_meta.pack_predicate(
     'fun (value): value is_a InterfaceEndpoint',
-    '(($(statinfo_meta.dot_provider_key), interface_field_dot))'
+    '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint))'
   )
 
 namespace Endpoint:
   export annot.macro 'of($expected_type)':
     annot_meta.pack_predicate(
       'fun (value): interface_endpoint_has_type(value, $expected_type)',
-      '(($(statinfo_meta.dot_provider_key), interface_field_dot))'
+      '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint))'
     )
 
   export annot.macro 'supports($expected_type)':
     annot_meta.pack_predicate(
       'fun (value): interface_endpoint_supports_type(value, $expected_type)',
-      '(($(statinfo_meta.dot_provider_key), interface_field_dot))'
+      '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint))'
     )
 
-fun interface_handle_left(handle) :~ Endpoint:
+annot.macro 'InterfaceArrayFields':
+  def endpoint_infos = statinfo_meta.unpack(
+    annot_meta.parse_to_packed_statinfo('Endpoint')
+  )
+  annot_meta.pack_predicate(
+    'fun (value): value is_a Array',
+    '(($(statinfo_meta.index_get_key), interface_array_index), ($(statinfo_meta.index_result_key), $(statinfo_meta.pack_index_result(endpoint_infos, []))), (interface_topology_key, endpoint_array))'
+  )
+
+// A handle side can be either one endpoint or an endpoint array. The generic
+// annotation deliberately exposes both access paths while precise connected
+// stage results continue to use Endpoint or InterfaceArrayFields.
+annot.macro 'InterfaceTopologyFields':
+  def endpoint_infos = statinfo_meta.unpack(
+    annot_meta.parse_to_packed_statinfo('Endpoint')
+  )
+  annot_meta.pack_predicate(
+    'fun (value): value is_a InterfaceEndpoint || value is_a Array',
+    '(($(statinfo_meta.dot_provider_key), interface_field_dot), ($(statinfo_meta.index_get_key), interface_array_index), ($(statinfo_meta.index_result_key), $(statinfo_meta.pack_index_result(endpoint_infos, []))))'
+  )
+
+// Conservatively describes a stage result whose input topology was not known
+// statically. It supports endpoint fields, endpoint-array indexing, and handle
+// sides without claiming which runtime shape elaboration will produce.
+annot.macro 'InterfaceTopologyResult':
+  def endpoint_infos = statinfo_meta.unpack(
+    annot_meta.parse_to_packed_statinfo('Endpoint')
+  )
+  def dependent_result = statinfo_meta.pack_dependent_result(
+    'interface_topology_call_result_static_infos',
+    '(unused)',
+    {}
+  )
+  def call_result = statinfo_meta.pack(
+    '(($(statinfo_meta.dependent_result_key), $dependent_result))'
+  )
+  annot_meta.pack_predicate(
+    'fun (value): value is_a InterfaceEndpoint || value is_a Array || value is_a InterfaceHandle',
+    '(($(statinfo_meta.dot_provider_key), interface_topology_result_dot), ($(statinfo_meta.index_get_key), interface_array_index), ($(statinfo_meta.index_result_key), $(statinfo_meta.pack_index_result(endpoint_infos, []))), ($(statinfo_meta.call_result_key), $call_result))'
+  )
+
+fun interface_handle_left(handle) :~ InterfaceTopologyFields:
   handle.left
 
-fun interface_handle_right(handle) :~ Endpoint:
+fun interface_handle_right(handle) :~ InterfaceTopologyFields:
   handle.right
 
 annot.macro 'Handle':
+  def dependent_result = statinfo_meta.pack_dependent_result(
+    'interface_topology_call_result_static_infos',
+    '(unused)',
+    {}
+  )
+  def call_result = statinfo_meta.pack(
+    '(($(statinfo_meta.dependent_result_key), $dependent_result))'
+  )
   annot_meta.pack_predicate(
     'fun (value): value is_a InterfaceHandle',
-    '(($(statinfo_meta.dot_provider_key), interface_handle_dot))'
+    '(($(statinfo_meta.dot_provider_key), interface_handle_dot), (interface_topology_key, handle), ($(statinfo_meta.call_result_key), $call_result))'
   )
 
 dot.macro 'interface_handle_dot $left $dot $right':
@@ -677,6 +755,13 @@ dot.macro 'interface_handle_dot $left $dot $right':
   | 'left': 'interface_handle_left($left)'
   | 'right': 'interface_handle_right($left)'
   | ~else: #false
+
+dot.macro 'interface_topology_result_dot $left $dot $right':
+  match right
+  | 'left': 'interface_handle_left($left)'
+  | 'right': 'interface_handle_right($left)'
+  | ~else:
+      'interface_member($left, $(right.to_source_string())) :: InstanceMembers'
 
 annot.macro 'Sink':
   annot_meta.pack_predicate('fun (value): value is_a InterfaceSink')
@@ -718,12 +803,6 @@ dot.macro 'interface_observation_dot $left $dot $right':
 // inspect both interface directions without acquiring connection authority.
 fun observe(endpoint :: InterfaceEndpoint) :~ Observation:
   InterfaceObservation(endpoint)
-
-annot.macro 'InterfaceArrayFields':
-  annot_meta.pack_predicate(
-    'fun (value): value is_a Array',
-    '(($(statinfo_meta.index_get_key), interface_array_index))'
-  )
 
 fun interface_array_index(value, index :: Nat) :~ Endpoint:
   value[index]

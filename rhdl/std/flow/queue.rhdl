@@ -154,33 +154,37 @@ sync_circuit CtrlQueue(depth :: PosInt,
       #void
 // Instantiates a queue in the ambient sync domain and returns its downstream
 // endpoint. Use an explicit Queue instance when count must remain accessible.
-fun queue(source_or_type,
-          depth :: PosInt,
+fun queue(depth :: PosInt,
           ~pipe: pipe_enabled :: Boolean = #false,
-          ~flow: flow_enabled :: Boolean = #false):
-  def T = flow_payload_type(source_or_type)
-  def QueueModule = Queue(T,
-                          depth,
-                          ~pipe: pipe_enabled,
-                          ~flow: flow_enabled)
-  inst queue_stage(QueueModule)
-  finish_flow_stage(
-    source_or_type,
-    InterfaceHandle(queue_stage.ingress, queue_stage.egress)
-  )
+          ~flow: flow_enabled :: Boolean = #false)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    def T = flow_payload_type(source)
+    def QueueModule = Queue(T,
+                            depth,
+                            ~pipe: pipe_enabled,
+                            ~flow: flow_enabled)
+    inst queue_stage(QueueModule)
+    finish_flow_stage(
+      source,
+      InterfaceHandle(queue_stage.ingress, queue_stage.egress)
+    )
 
-// Instantiates the payloadless token FIFO in the ambient sync domain.
-fun ctrl_queue(source :: Endpoint,
-               depth :: PosInt,
+// Configures the payloadless token FIFO in the ambient sync domain.
+fun ctrl_queue(depth :: PosInt,
                ~pipe: pipe_enabled :: Boolean = #false,
-               ~flow: flow_enabled :: Boolean = #false) :~ Endpoint:
-  def checked = ctrl_endpoint(source)
-  def CtrlQueueModule = CtrlQueue(depth,
-                                  ~pipe: pipe_enabled,
-                                  ~flow: flow_enabled)
-  inst ctrl_queue_stage(CtrlQueueModule)
-  ctrl_queue_stage.ingress <=> checked
-  ctrl_queue_stage.egress
+               ~flow: flow_enabled :: Boolean = #false)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    ctrl_flow_protocol_type(source)
+    def CtrlQueueModule = CtrlQueue(depth,
+                                    ~pipe: pipe_enabled,
+                                    ~flow: flow_enabled)
+    inst ctrl_queue_stage(CtrlQueueModule)
+    finish_flow_stage(
+      source,
+      InterfaceHandle(ctrl_queue_stage.ingress, ctrl_queue_stage.egress)
+    )
 
 export:
   Queue

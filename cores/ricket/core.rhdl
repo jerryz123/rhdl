@@ -61,19 +61,17 @@ sync_circuit RicketCore(xlen :: XLen):
   // registers SRAM results to align hits with WB; completion wins when both
   // updates target the same register in one cycle.
   def memory = ex_mem_pipe.egress
-  def Array(commit_path, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(_, 2)
-  def commit :: Endpoint = commit_path
+  def Array(commit, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(2)
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
-  def scoreboard_set_filter = filter_valid(Valid(MemoryWriteback(xlen)), operation):
+  def scoreboard_set_filter = filter_valid(operation):
     (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd)
-  def scoreboard_set_address = map_valid(Valid(MemoryWriteback(xlen)), operation => operation.rd)
+  def scoreboard_set_address = map_valid(operation => operation.rd)
   (scoreboard_set_path |> scoreboard_set_filter |> scoreboard_set_address) <=> scoreboard.set
 
-  def load_completion_filter = filter_valid(Valid(RicketDataResp(xlen)), response => or_reduce(response.tag))
+  def load_completion_filter = filter_valid(response => or_reduce(response.tag))
   def valid_load_completions = data_access.response |> load_completion_filter
-  def Array(load_writeback_path, scoreboard_clear_path) = valid_load_completions |> fork_valid(_, 2)
-  def load_completion :: Endpoint = load_writeback_path
-  def load_completion_tag = map_valid(Valid(RicketDataResp(xlen)), response => response.tag)
+  def Array(load_completion, scoreboard_clear_path) = valid_load_completions |> fork_valid(2)
+  def load_completion_tag = map_valid(response => response.tag)
   (scoreboard_clear_path |> load_completion_tag) <=> scoreboard.clear
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
@@ -99,16 +97,14 @@ sync_circuit RicketCore(xlen :: XLen):
 
   def live_if_id :: Endpoint = (
     (
-      zip_flow(
-        instruction_access.response, response,
-        fetch_pcs.egress, pc
-      ):
+      Array(instruction_access.response, fetch_pcs.egress)
+        |> zip_flow(response, pc):
         FetchDecode(xlen):
           pc: pc
           instruction: response.instruction
-    ) |> filter_flow(FetchDecode(xlen), _ => !squash)
-      |> pipe(_, 1)
-      |> filter_flow(FetchDecode(xlen), _ => !squash)
+    ) |> filter_flow(fetch_token => !squash)
+      |> pipe(1)
+      |> filter_flow(fetch_token => !squash)
   )
 
   def fetch_request_fire = fire(instruction_access.request)
@@ -179,8 +175,8 @@ sync_circuit RicketCore(xlen :: XLen):
   )
   def scoreboard_waw_hazard = control.writeback.enable & rd_busy
   def register_hazard = load_dependency_hazard ||| scoreboard_raw_hazard ||| scoreboard_waw_hazard
-  def hazard_free_if_id = gate_flow(live_if_id, !register_hazard)
-  def decoded = map_flow(hazard_free_if_id, fetch_token):
+  def hazard_free_if_id = live_if_id |> gate_flow(!register_hazard)
+  def decoded = hazard_free_if_id |> map_flow(fetch_token):
     DecodeExecute(xlen):
       pc: fetch_token.pc
       instruction: fetch_token.instruction

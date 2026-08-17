@@ -97,33 +97,42 @@ sync_circuit CtrlPipe(stages :: PosInt):
     when (ready[index]):
       stage_valid[index] <== valid_sources[index]
 
-// A payload type constructs an unconnected handle; an endpoint or earlier
-// handle connects immediately and returns the remaining far end.
-fun pipe(source_or_type, stages :: PosInt):
-  def T = flow_payload_type(source_or_type)
-  def PipeModule = Pipe(T, stages)
-  inst pipe_stage(PipeModule)
-  finish_flow_stage(
-    source_or_type,
-    InterfaceHandle(pipe_stage.ingress, pipe_stage.egress)
-  )
+// Configuration produces a unary flow operation. A payload type constructs
+// an unconnected handle; an endpoint connects immediately and exposes the far
+// endpoint; an earlier handle remains an unconnected composed handle.
+fun pipe(stages :: PosInt)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    def T = flow_payload_type(source)
+    def PipeModule = Pipe(T, stages)
+    inst pipe_stage(PipeModule)
+    finish_flow_stage(
+      source,
+      InterfaceHandle(pipe_stage.ingress, pipe_stage.egress)
+    )
 
-fun valid_pipe(source_or_type, stages :: PosInt):
-  def T = valid_flow_payload_type(source_or_type)
-  def ValidPipeModule = ValidPipe(T, stages)
-  inst valid_pipe_stage(ValidPipeModule)
-  finish_flow_stage(
-    source_or_type,
-    InterfaceHandle(valid_pipe_stage.ingress, valid_pipe_stage.egress)
-  )
+fun valid_pipe(stages :: PosInt)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    def T = valid_flow_payload_type(source)
+    def ValidPipeModule = ValidPipe(T, stages)
+    inst valid_pipe_stage(ValidPipeModule)
+    finish_flow_stage(
+      source,
+      InterfaceHandle(valid_pipe_stage.ingress, valid_pipe_stage.egress)
+    )
 
-// Control-only chaining keeps exact endpoint static information without
+// Control-only chaining uses the same configured unary topology rule without
 // introducing a dummy payload field.
-fun ctrl_pipe(source :: Endpoint, stages :: PosInt) :~ Endpoint:
-  def checked = ctrl_endpoint(source)
-  inst ctrl_pipe_stage(CtrlPipe(stages))
-  ctrl_pipe_stage.ingress <=> checked
-  ctrl_pipe_stage.egress
+fun ctrl_pipe(stages :: PosInt)
+  :: ((source :: Any) -> StageResult(source, Endpoint)):
+  fun (source) :~ StageResult(source, Endpoint):
+    ctrl_flow_protocol_type(source)
+    inst ctrl_pipe_stage(CtrlPipe(stages))
+    finish_flow_stage(
+      source,
+      InterfaceHandle(ctrl_pipe_stage.ingress, ctrl_pipe_stage.egress)
+    )
 
 export:
   Pipe

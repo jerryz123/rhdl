@@ -241,12 +241,13 @@ Its `grant_enable` input controls new grants without revoking credits already
 held remotely. The buffer initially grants empty capacity one credit per cycle
 and recycles a credit when an item leaves its egress.
 
-`credit_sender` and `credit_buffer` are handle-producing forms. They make a
-credited hop compose as `Decoupled -> CreditSender -> Credited -> CreditBuffer
--> Irrevocable`. Mapping, arbitration, and routing stay in the ready-valid
-domain between hop boundaries rather than acquiring duplicate credited
-variants. `CreditCounter` is the shared bounded accounting circuit used by the
-adapters.
+`credit_sender(credit_limit)` and `credit_buffer(depth)` are configured unary
+flow stages. They make a credited hop compose as `Decoupled -> CreditSender ->
+Credited -> CreditBuffer -> Irrevocable`; a source supplies the payload and
+protocol through `|>`. Mapping, arbitration, and routing stay in the
+ready-valid domain between hop boundaries rather than acquiring duplicate
+credited variants. `CreditCounter` is the shared bounded accounting circuit
+used by the adapters.
 
 ## Generic interconnect parameters
 
@@ -307,12 +308,12 @@ import:
   lib("rhdl/std/scoreboard.rhdl") open
 
 inst hazards(Scoreboard(32))
-def reserve_filter = filter_valid(Valid(Operation()), operation => operation.reserve)
-def reserve_index = map_valid(Valid(Operation()), operation => operation.destination)
-def completion_index = map_valid(Valid(Completion()), completion => completion.tag)
+def reserve_filter = filter_valid(operation => operation.reserve)
+def reserve_index = map_valid(operation => operation.destination)
+def completion_index = map_valid(completion => completion.tag)
 (reservations |> reserve_filter |> reserve_index) <=> hazards.set
 (completions |> completion_index) <=> hazards.clear
-def permitted = requests |> gate_flow(_, !scoreboard_busy(hazards.busy, source))
+def permitted = requests |> gate_flow(!scoreboard_busy(hazards.busy, source))
 ```
 
 The power-of-two entry count must be at least two. Reset empties the scoreboard.
@@ -457,7 +458,7 @@ under [`flow/`](flow/):
 | `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
 | `GrantDemux(T, outputs)` | -- | Optional-one-hot grant routing to ready-valid outputs |
 | `GrantMerge(T, inputs)` | -- | Optional-one-hot grant selection from ready-valid inputs |
-| `GrantCrossbar(T, inputs, outputs)` | -- | Grant-controlled one-to-one ready-valid payload traversal; endpoint-first `grant_crossbar(inputs, outputs, ~grants)` helper |
+| `GrantCrossbar(T, inputs, outputs)` | -- | Grant-controlled one-to-one ready-valid payload traversal; configured `grant_crossbar(outputs, ~grants)` stage |
 | `Join(T, n)` | `CtrlJoin(n)` | Atomic join that never partially consumes inputs |
 | `Broadcast(T, n)` | `CtrlBroadcast(n)` | Buffered exactly-once delivery tracked independently per recipient |
 | `AtomicFork(T, n)` | `CtrlAtomicFork(n)` | Combinational fanout where every recipient transfers together or none do |
@@ -471,28 +472,54 @@ import:
 inst buffered(Queue(Bits(8), 4, ~pipe: #true, ~flow: #false))
 ```
 
-Lowercase helpers form typed endpoint pipelines when intermediate instance
-handles are unnecessary:
+Every lowercase flow-stage helper is configured first and receives its input only
+through Rhombus `|>`. This makes every stage an ordinary unary host function:
 
 ```rhombus
-def buffered = ingress |> queue(_, 4, ~pipe: #true) |> pipe(_, 2)
+def buffered = ingress |> queue(4, ~pipe: #true) |> pipe(2)
 egress <=> buffered
 ```
 
-Fan-in helpers take an ordinary host `Array` as their pipeline source.
-`rr_arbiter` infers both the common payload type and input count, connects a
-round-robin arbiter, and returns its `Decoupled` egress:
+With a concrete endpoint source, each operation connects immediately and
+returns its far endpoint shape. A disconnected topology begins with its
+payload or protocol type exactly once and returns an ordinary `InterfaceHandle`:
+
+```rhombus
+def path = Request()
+           |> pipe(1)
+           |> queue(4)
+def buffered = ingress |> path
+```
+
+Use an explicit `Decoupled(T)` or `Irrevocable(T)` seed when the disconnected
+path must retain that exact contract. Later stages infer the protocol and
+payload from the preceding endpoint or handle; they never repeat it.
+
+`StageResult` is the single dependent static-information rule behind these
+operations. A statically known endpoint produces the operation's connected
+shape, an endpoint array produces the cardinality-changing connected shape,
+and a type seed or existing handle produces a handle. A conservative topology
+annotation covers generic instance-member expressions. Consequently `.bits`,
+`[0].bits`, array destructuring, and handle `.right` remain available under
+`use_static` without corrective `:: Endpoint` annotations.
+
+Fan-in helpers take an ordinary host `Array`. `rr_arbiter()` infers the input
+count from a connected array. A disconnected topology states its protocol once
+and its cardinality in the configured arbiter:
 
 ```rhombus
 def selected = Array(first_request, second_request)
-               |> rr_arbiter(_)
-               |> pipe(_, 1)
+               |> rr_arbiter()
+               |> pipe(1)
+
+def selector = Request()
+               |> rr_arbiter(2)
+               |> pipe(1)
 ```
 
 Use an explicit `RRArbiter` instance when its `chosen` output is needed.
 Inputs must be a nonempty array of mutually compatible `Decoupled` or
-`Irrevocable` endpoints. The typed form `rr_arbiter(T, n)` constructs an
-array-input handle for composition before endpoints are attached.
+`Irrevocable` endpoints.
 
 `atomic_fork` returns an indexable array of `Decoupled` endpoints and permits a
 transfer only when every output can accept it. This is useful when one logical
@@ -500,68 +527,61 @@ transaction must atomically update multiple downstream flows. In contrast,
 `Broadcast` stores per-recipient delivery state so recipients may accept the
 same item in different cycles.
 
-`map_flow(T, payload => expression)` constructs a generic interface handle that
-maps a `Decoupled(T)` payload while forwarding valid and ready. A block-bearing
-expression keeps its block outside the call, as in
-`map_flow(T, payload => U()): fields`; the equivalent
-`map_flow(T, payload): body` form remains available for arbitrary multiline
-mappings. An explicit `Decoupled(T)` or `Irrevocable(T)` argument selects and
-preserves that exact contract. The binder retains precise bundle field
-information, and the result type is inferred from the body. Supplying an
-endpoint applies the mapping immediately and preserves its contract. For an
-`Irrevocable` input, the mapping body must therefore remain stable while an
-offer is stalled; transformations that observe changing sidebands should use
-an explicit `Decoupled` stage instead:
+`map_flow(payload => expression)` configures an inline payload mapping while
+forwarding valid and ready. The binder retains precise bundle field
+information, and the result type is inferred from the body. The colon form
+supports multiline mappings. For an `Irrevocable` input, the body must remain
+stable while an offer is stalled; transformations that observe changing
+sidebands should start from or produce an explicit `Decoupled` stage instead:
 
 ```rhombus
 def tagging:
-  map_flow(Request(), payload => TaggedRequest()):
+  map_flow(payload => TaggedRequest()):
     request: payload
     processor: Bool(#false)
 
 def tagged = ingress |> tagging
 ```
 
-`map_valid(T, payload => expression)` is the corresponding inline payload map
-for `Valid` flows. `filter_valid(source, payload => predicate)` drops asserted
-events whose predicate is false, and `fork_valid(source, n)` copies every
-retained event to all `n` outputs in the same cycle. None of these helpers adds
-an instance or a readiness path:
+`map_valid(payload => expression)` is the corresponding inline payload map for
+`Valid` flows. `filter_valid(payload => predicate)` drops asserted events whose
+predicate is false, and `fork_valid(n)` copies every retained event to all `n`
+outputs in the same cycle. None adds an instance or a readiness path:
 
 ```rhombus
-def enabled_filter = filter_valid(Valid(Request()), request => request.enabled)
-def request_map = map_valid(Valid(Request()), request => translate(request))
+def enabled_filter = filter_valid(request => request.enabled)
+def request_map = map_valid(request => translate(request))
 def mapped = issued |> enabled_filter |> request_map
-def copies = fork_valid(mapped, 2)
+def copies = mapped |> fork_valid(2)
 ```
 
-`accept_flow(source)` terminates the readiness path of a `Decoupled` or
+`accept_flow()` terminates the readiness path of a `Decoupled` or
 `Irrevocable` source by permanently asserting `ready`. Every offered item is
 therefore transferred immediately and appears as a same-cycle `Valid` event.
 Use this explicit adapter when a nonbackpressured observer owns consumption of
 a ready-valid source; it must not be used where downstream backpressure still
 has meaning.
 
-`filter_flow(source, payload => predicate)` consumes an offered token without
-producing an output when the hardware predicate is false. Its input is ready
-for a rejected token regardless of downstream backpressure. `gate_flow(source,
-enabled)` instead blocks both input readiness and output validity while
+`filter_flow(payload => predicate)` consumes an offered token without producing
+an output when the hardware predicate is false. Its input is ready for a
+rejected token regardless of downstream backpressure. `gate_flow(enabled)`
+instead blocks both input readiness and output validity while
 disabled, preserving the token upstream. Because either decision may observe
 live sideband state, both helpers conservatively return `Decoupled` even when
 their input is `Irrevocable`; a following `pipe` can re-establish stability:
 
 ```rhombus
-def live = filter_flow(buffered, payload => not squash)
-def permitted = gate_flow(live, not hazard)
-def stable = permitted |> pipe(_, 1)
+def stable = buffered
+             |> filter_flow(payload => !squash)
+             |> gate_flow(!hazard)
+             |> pipe(1)
 ```
 
-`demux_flow(protocol, n, payload => selector)` constructs a one-to-many routing
-handle whose selector is derived from the offered payload. The colon-bodied
-form remains available for multiline selectors. The handle retains the input
-protocol and returns an array of `n` endpoints; an out-of-range selector blocks
-the input. This distinguishes exclusive routing from `atomic_fork`, which
-requires every output to accept the same item.
+`demux_flow(n, payload => selector)` is a one-to-many routing stage whose
+selector is derived from the offered payload. It retains the input protocol and
+returns an array of `n` endpoints; an out-of-range selector blocks the input.
+This distinguishes exclusive routing from `atomic_fork(n)`, which requires
+every output to accept the same item.
 
 `GreedyMatcher(inputs, outputs)` maps an input-major Boolean request matrix to
 a Boolean one-to-one grant matrix. Lower input indices have priority, and each
@@ -579,27 +599,23 @@ input with one `GrantMerge` per output around an externally generated
 one-to-one grant matrix. It does not perform routing, arbitration, or
 buffering. Because grants may change while an output is stalled, all three
 primitives expose `Decoupled` outputs; add a queue or pipe when the consumer
-requires an irrevocable pending offer. The endpoint-first `grant_crossbar`
-helper infers the payload and input count from an input array, connects the
-grant sideband, and returns its output endpoint array for continued flow
-composition:
+requires an irrevocable pending offer. The configured
+`grant_crossbar(output_count, ~grants)` stage infers the payload and input
+count from its input array and returns an output endpoint array:
 
 ```rhombus
 (buffered_inputs
- |> grant_crossbar(_, output_count, ~grants: allocator.grants)
+ |> grant_crossbar(output_count, ~grants: allocator.grants)
 ) <=> egress
 ```
 
-`zip_flow(T, left_payload, U, right_payload => expression)` constructs an
-array-input handle that atomically consumes one item from each payload type and
-maps them to one inferred result type. Its colon-bodied form supports multiline
-mappings. Neither input can transfer by itself. Supplying two endpoints applies
-the handle immediately:
+`zip_flow(left_payload, right_payload => expression)` atomically consumes a
+two-element source array and maps the pair to one inferred result type. Neither
+input can transfer by itself:
 
 ```rhombus
-def response_join:
-  zip_flow(Response(), response,
-           Bool, owner):
+def response_join = Array(Response(), Bool)
+  |> zip_flow(response, owner):
     TaggedResponse():
       response: response
       owner: owner
@@ -607,12 +623,11 @@ def response_join:
 def tagged_response = Array(memory_response, owners) |> response_join
 ```
 
-These are ordinary `InterfaceHandle` values from the frontend interface layer,
-not a flow-specific graph or deferred source. Inline adapters use local
-`interface_link` wires and add no module hierarchy. Stateful `pipe`, `queue`,
-`rr_arbiter`, and `atomic_fork` stages expose the same handle protocol when
-given explicit payload types. A handle or sink is linear and can be consumed
-only once.
+Disconnected results are ordinary `InterfaceHandle` values from the frontend
+interface layer, not a flow-specific graph. Inline adapters use local
+`interface_link` wires and add no module hierarchy. Handles and sinks remain
+linear; configured unary functions are reusable and construct a fresh stage on
+each application.
 
 `parallel` combines independent handles into one array-shaped handle, or
 independent terminated sinks into one array-shaped sink. This lets fan-in,
@@ -621,14 +636,15 @@ path. A call cannot mix handles and sinks:
 
 ```rhombus
 def request_path:
-  parallel(tag_fesvr, tag_processor)
-  |> rr_arbiter(TaggedRequest(), 2)
-  |> pipe(TaggedRequest(), 1)
-  |> atomic_fork(TaggedRequest(), 2)
+  Array(Request(), Request())
+  |> parallel(tag_fesvr, tag_processor)
+  |> rr_arbiter()
+  |> pipe(1)
+  |> atomic_fork(2)
   |> parallel(
-       map_flow(TaggedRequest(), tagged => tagged.request)
+       (TaggedRequest() |> map_flow(tagged => tagged.request))
          <=> memory_request,
-       map_flow(TaggedRequest(), tagged => tagged.processor)
+       (TaggedRequest() |> map_flow(tagged => tagged.processor))
          <=> owner_queue.ingress
      )
 
@@ -639,12 +655,11 @@ The arrow form is especially useful for routing in the middle of a chain:
 
 ```rhombus
 buffered
-|> demux_flow(Irrevocable(TaggedResponse()), 2,
-              tagged => tagged.processor)
+|> demux_flow(2, tagged => tagged.processor)
 |> parallel(
-     map_flow(Irrevocable(TaggedResponse()), tagged => tagged.response)
+     (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
        <=> fesvr_response,
-     map_flow(Irrevocable(TaggedResponse()), tagged => tagged.response)
+     (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
        <=> processor_response
    )
 ```
@@ -655,26 +670,24 @@ leaving its input available to the surrounding `parallel`. `zip_flow` is
 deliberately binary; homogeneous multi-input rendezvous remains the role of
 `Join(T, n)`.
 
-Given a concrete `Valid` endpoint, `valid_pipe` infers its payload type,
-instantiates in the ambient `sync_circuit` domain, and returns the downstream
-`Valid` endpoint. Given a payload type, it returns an unconnected generic
-handle. Every asserted input cycle advances and emerges after exactly the
-configured number of stages; there is no readiness or pending-offer state.
+`valid_pipe(stages)` infers its eventual input payload, instantiates in the
+ambient `sync_circuit` domain, and delays every asserted cycle by exactly the
+configured number of stages. There is no readiness or pending-offer state.
 
-Given a concrete `Decoupled` or `Irrevocable` endpoint, `queue` and `pipe`
-infer its payload type, instantiate in the ambient `sync_circuit` domain, and
-return the downstream endpoint. Given a payload type, they instead return an
-unconnected generic handle. `Pipe` and a non-flowing `Queue` produce an
-`Irrevocable` endpoint; `Queue(~flow: #true)` remains `Decoupled` because it
-may expose its input offer directly. Use an explicit `Queue` instance when its
-`count` output or instance handle is needed.
+`queue(depth, ...)` and `pipe(stages)` similarly infer their eventual
+ready-valid input. `Pipe` and a non-flowing `Queue` produce an `Irrevocable`
+endpoint; `queue(depth, ~flow: #true)` remains `Decoupled` because it may expose
+its input offer directly. Use an explicit `Queue` instance when its `count`
+output or instance handle is needed.
 
-The corresponding `ctrl_queue` and `ctrl_pipe` helpers accept
-`DecoupledCtrl` or `IrrevocableCtrl` endpoints and retain the same static
-interface information without manufacturing a dummy payload. Control-only
-streams carry indistinguishable tokens; they are not a detachable control half
-of a payload-bearing transaction. `CtrlPipe` and a non-flowing `CtrlQueue`
-produce `IrrevocableCtrl`; flow-through queues remain `DecoupledCtrl`.
+The corresponding `ctrl_queue(depth)`, `ctrl_pipe(stages)`, and
+`ctrl_atomic_fork(n)` configured helpers accept `DecoupledCtrl` or
+`IrrevocableCtrl` sources and retain the same dependent static information
+without manufacturing a dummy payload. A disconnected control topology starts
+with `DecoupledCtrl()` or `IrrevocableCtrl()`. Control-only streams carry
+indistinguishable tokens; they are not a detachable control half of a
+payload-bearing transaction. `CtrlPipe` and a non-flowing `CtrlQueue` produce
+`IrrevocableCtrl`; flow-through queues remain `DecoupledCtrl`.
 
 `Queue(T, depth)` defaults to a registered, non-flow-through FIFO.
 `~pipe: #true` permits enqueue when a full queue dequeues in the same cycle;

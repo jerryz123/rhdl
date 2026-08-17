@@ -28,7 +28,7 @@ circuit MapFlowWrongProtocol():
   interface egress(Decoupled(MapFlowOutput()), ~role: producer)
 
   (
-    map_flow(ingress, payload):
+    ingress |> map_flow(payload):
       MapFlowOutput():
         data: payload.request
         owner: payload.processor
@@ -39,7 +39,7 @@ circuit MapFlowStrongerDestination():
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
   (
-    map_flow(ingress, payload):
+    ingress |> map_flow(payload):
       payload
   ) <=> egress
 
@@ -48,7 +48,7 @@ circuit MapFlowReusedSource():
   interface egress0(Decoupled(Bits(8)), ~role: producer)
   interface egress1(Decoupled(Bits(8)), ~role: producer)
 
-  def mapping = map_flow(Bits(8), payload): payload
+  def mapping = map_flow(payload): payload
   def mapped = ingress |> mapping
   mapped <=> egress0
   ingress |> mapping
@@ -59,15 +59,15 @@ circuit RefinedMapFlowChain():
   interface ingress(StableAlias8(), ~role: consumer)
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
-  map_flow(ingress, payload => payload) <=> egress
+  (ingress |> map_flow(payload => payload)) <=> egress
 
 circuit FilterFlowWrongProtocol():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  filter_flow(ingress, _ => Bool(#true))
+  ingress |> filter_flow(payload => Bool(#true))
 
 circuit GateFlowWrongProtocol():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  gate_flow(ingress, Bool(#true))
+  ingress |> gate_flow(Bool(#true))
 
 // The arrow binder keeps a single-expression zip directly inside ordinary
 // call and pipeline syntax without grouping a trailing block.
@@ -76,17 +76,16 @@ circuit ZipFlowArrowChain():
   interface owner(Decoupled(Bool), ~role: consumer)
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  def zipped = zip_flow(
-    data, data_bits,
-    owner, owner_bits => mux(owner_bits, data_bits, bits(0, 8))
+  def zipped = Array(data, owner) |> zip_flow(
+    data_bits,
+    owner_bits => mux(owner_bits, data_bits, bits(0, 8))
   )
   egress <=> zipped
 
 circuit ZipFlowWrongProtocol():
   interface data(Valid(Bits(8)), ~role: consumer)
   interface owner(Decoupled(Bool), ~role: consumer)
-  zip_flow(data, data_bits,
-           owner, owner_bits):
+  Array(data, owner) |> zip_flow(data_bits, owner_bits):
     ZipFlowOutput():
       data: data_bits
       owner: owner_bits
@@ -94,81 +93,80 @@ circuit ZipFlowWrongProtocol():
 circuit ZipFlowHostValue():
   interface data(Decoupled(Bits(8)), ~role: consumer)
   interface owner(Decoupled(Bool), ~role: consumer)
-  zip_flow(data, data_bits,
-           owner, owner_bits):
+  Array(data, owner) |> zip_flow(data_bits, owner_bits):
     8
 
 sync_circuit FlowThroughQueueStrongerDestination():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
-  def forwarded = ingress |> queue(_, 2, ~flow: #true)
+  def forwarded = ingress |> queue(2, ~flow: #true)
   egress <=> forwarded
 
 circuit ParallelMapFlowMixedPaths():
   interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  def forked = ingress |> atomic_fork(_, 2)
+  def forked = ingress |> atomic_fork(2)
   forked |> parallel(
-    map_flow(MapFlowInput(), payload):
+    map_flow(payload):
       payload.request,
     ingress
   )
 
 circuit ParallelMapFlowLengthMismatch():
   interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  def forked = ingress |> atomic_fork(_, 2)
+  def forked = ingress |> atomic_fork(2)
   def (data_path, owner_path, duplicate_path):
     forked |> parallel(
-      map_flow(MapFlowInput(), payload):
+      map_flow(payload):
         payload.request,
-      map_flow(MapFlowInput(), payload):
+      map_flow(payload):
         payload.processor,
-      map_flow(MapFlowInput(), payload):
+      map_flow(payload):
         payload.request
     )
   #void
 
 circuit ParallelMapFlowHostValue():
   interface ingress(Decoupled(MapFlowInput()), ~role: consumer)
-  def forked = ingress |> atomic_fork(_, 2)
+  def forked = ingress |> atomic_fork(2)
   def (data_path, owner_path):
     forked |> parallel(
-      map_flow(MapFlowInput(), payload):
+      map_flow(payload):
         8,
-      map_flow(MapFlowInput(), payload):
+      map_flow(payload):
         payload.processor
     )
   #void
 
 sync_circuit EmptyRRArbiterPipeline():
-  Array() |> rr_arbiter(_)
+  Array() |> rr_arbiter()
 
 sync_circuit MismatchedRRArbiterPipeline():
   interface byte_input(Decoupled(Bits(8)), ~role: consumer)
   interface word_input(Decoupled(Bits(16)), ~role: consumer)
-  Array(byte_input, word_input) |> rr_arbiter(_)
+  Array(byte_input, word_input) |> rr_arbiter()
 
 // Verifies that one-to-one helpers accept the stronger Pipe output contract.
 sync_circuit PipeToQueueChain():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  def buffered = ingress |> pipe(_, 1) |> queue(_, 2)
+  def buffered = ingress |> pipe(1) |> queue(2)
   egress <=> buffered
 
 sync_circuit ValidPipeWrongProtocol():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  valid_pipe(ingress, 1)
+  ingress |> valid_pipe(1)
 
 sync_circuit ValidPipeNonEndpoint():
-  valid_pipe(bits(0, 8), 1)
+  bits(0, 8) |> valid_pipe(1)
 
 // Verifies that the stronger CtrlPipe result can feed a CtrlQueue.
 sync_circuit CtrlPipeToQueueChain():
   interface ingress(DecoupledCtrl(), ~role: consumer)
   interface egress(DecoupledCtrl(), ~role: producer)
 
-  def buffered = ingress |> ctrl_pipe(_, 1) |> ctrl_queue(_, 2)
+  def buffered = ingress |> ctrl_pipe(1) |> ctrl_queue(2)
   egress <=> buffered
 
 // Connects an array-shaped payload path while keeping grants as an explicit
@@ -179,46 +177,46 @@ circuit GrantCrossbarChain():
   interface egress[3](Decoupled(Bits(8)), ~role: producer)
 
   (
-    ingress |> grant_crossbar(_, 3, ~grants: grants)
+    ingress |> grant_crossbar(3, ~grants: grants)
   ) <=> egress
 
 circuit EmptyGrantCrossbarChain():
-  Array() |> grant_crossbar(_, 1, ~grants: #false)
+  Array() |> grant_crossbar(1, ~grants: #false)
 
 circuit GrantCrossbarWrongProtocol():
   interface ingress[1](Valid(Bits(8)), ~role: consumer)
   input grants: Vec(1, Vec(1, Bool))
-  ingress |> grant_crossbar(_, 1, ~grants: grants)
+  ingress |> grant_crossbar(1, ~grants: grants)
 
 sync_circuit WrongProtocolChain():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  queue(ingress, 2)
+  ingress |> queue(2)
 
 sync_circuit WrongEndpointType():
   interface ingress(Decoupled(Bits(16)), ~role: consumer)
   require_byte_irrevocable(ingress)
 
 sync_circuit NonEndpointChain():
-  queue(bits(0, 8), 2)
+  bits(0, 8) |> queue(2)
 
 sync_circuit CtrlWrongProtocolChain():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  ctrl_queue(ingress, 2)
+  ingress |> ctrl_queue(2)
 
 sync_circuit CtrlNonEndpointChain():
-  ctrl_queue(bits(0, 8), 2)
+  bits(0, 8) |> ctrl_queue(2)
 
 circuit MissingSyncDomain():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  queue(ingress, 2)
+  ingress |> queue(2)
 
 circuit CtrlMissingSyncDomain():
   interface ingress(DecoupledCtrl(), ~role: consumer)
-  ctrl_queue(ingress, 2)
+  ingress |> ctrl_queue(2)
 
 circuit ValidPipeMissingSyncDomain():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  valid_pipe(ingress, 1)
+  ingress |> valid_pipe(1)
 
 export:
   PipeToQueueChain

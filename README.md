@@ -64,7 +64,7 @@ The authoritative package graph and dependency contract are in
 ### Requirements
 
 - Racket 9.2 or a compatible current release
-- The Rhombus package
+- Rhombus 1.1
 - CIRCT and Verilator only for external backend integration tests
 
 On a Homebrew-based macOS setup:

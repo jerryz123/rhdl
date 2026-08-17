@@ -103,13 +103,12 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
 
   def Array(miss_path, hit_path) = (
     lookup.egress
-      |> filter_flow(Bits(width), _ => tags.port.response.valid & !core.flush)
-      |> demux_flow(Decoupled(Bits(width)), 2, _ => as_bits(line_hit))
+      |> filter_flow(address => tags.port.response.valid & !core.flush)
+      |> demux_flow(2, address => as_bits(line_hit))
   )
   def refill_commands = (
     miss_path
-      |> map_flow(Decoupled(Bits(width)),
-                  address => RicketLineRefillCommand(Bits(width), width)):
+      |> map_flow(address => RicketLineRefillCommand(Bits(width), width)):
         line_address: align_down(address, line_bytes)
         context: address
   )
@@ -119,7 +118,7 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
 
   def hit_responses = (
     hit_path
-      |> map_flow(Decoupled(Bits(width)), address => RicketInstructionResp()):
+      |> map_flow(address => RicketInstructionResp()):
         instruction: mux(cast(address[2], Bool), cached_beat[32..64], cached_beat[0..32])
   )
   response_arbiter.ingress[0] <=> hit_responses
@@ -127,8 +126,8 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   def refill_results = RicketLineRefillResult(Bits(width), width, line_bytes)
   def refill_responses = (
     refill.completion
-      |> filter_flow(refill_results, _ => refill_live)
-      |> map_flow(Decoupled(refill_results), _ => RicketInstructionResp()):
+      |> filter_flow(result => refill_live)
+      |> map_flow(result => RicketInstructionResp()):
         instruction: completion_instruction
   )
   response_arbiter.ingress[1] <=> refill_responses

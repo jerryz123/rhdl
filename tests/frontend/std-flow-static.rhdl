@@ -1,0 +1,43 @@
+#lang rhdl
+// Proves configured flow stages preserve exact topology under static checking.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+use_static
+
+sync_circuit FlowStaticInformation():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+
+  def piped = ingress |> pipe(1)
+  def piped_bits = piped.bits
+  def forked = piped |> atomic_fork(2)
+  def indexed_bits = forked[0].bits
+  def Array(first_path, second_path) = forked
+  def first_bits = first_path.bits
+  def second_bits = second_path.bits
+
+  def disconnected = Bits(8) |> pipe(1) |> queue(2)
+  def disconnected_bits = disconnected.right.bits
+  def composed = disconnected |> pipe(1)
+  def composed_bits = composed.right.bits
+
+  interface detached_source(Decoupled(Bits(8)), ~role: consumer)
+  def detached_path = Bits(8) |> pipe(1) |> queue(2)
+  def detached_output = detached_source |> detached_path
+  def detached_output_bits = detached_output.bits
+
+  inst valid_source(ValidPipe(Bits(8), 1))
+  def instance_fork = valid_source.egress |> fork_valid(2)
+  def instance_bits = instance_fork[0].bits
+
+  interface control(DecoupledCtrl(), ~role: consumer)
+  def control_fork = control |> ctrl_pipe(1) |> ctrl_atomic_fork(2)
+  def control_valid = control_fork[0].valid
+  def disconnected_control = DecoupledCtrl() |> ctrl_queue(2) |> ctrl_pipe(1)
+  def disconnected_control_valid = disconnected_control.right.valid
+
+  #void
+
+export:
+  FlowStaticInformation

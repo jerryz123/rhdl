@@ -110,24 +110,28 @@ import one primitive without loading unrelated generators.
 | `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
 | `std/sync-ram.rhdl` | Fixed-latency lane-masked shared 1RW RAM | `std/read-write.rhdl` |
-| `std/flow/stage.rhdl` | Valid-only and ready-valid protocol and payload inference plus generic-handle application helpers | `std/ready-valid.rhdl` |
-| `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and their endpoint/handle chaining | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and typed handle construction | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/stage.rhdl` | Dependent topology results, flow protocol and payload inference, and generic-handle application | `std/ready-valid.rhdl` |
+| `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and configured unary stages | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and configured unary stages | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/completion-queue.rhdl` | Reserved response buffering between ready-valid requests and nonstallable issues/completions | `std/ready-valid.rhdl`, `std/flow/queue.rhdl` |
-| `std/flow/credit.rhdl` | Credited sender and receiver adapters, bounded accounting, and generic handle construction | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flow/stage.rhdl`, `std/flow/queue.rhdl` |
+| `std/flow/credit.rhdl` | Credited sender and receiver adapters, bounded accounting, and configured unary stages | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flow/stage.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
-| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus Array-shaped handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus payload-selected handle construction | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus configured Array-to-endpoint arbitration | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus configured payload-selected routing | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/grant.rhdl` | Optional-one-hot ready-valid grant routing and merging primitives | `std/ready-valid.rhdl` |
+| `std/flow/crossbar.rhdl` | Configured grant-controlled one-to-one ready-valid crossbar stage | `std/ready-valid.rhdl`, `std/flow/stage.rhdl`, `std/flow/grant.rhdl` |
 | `std/flow/join.rhdl` | Atomic homogeneous `Join`/`CtrlJoin` | `std/ready-valid.rhdl` |
-| `std/flow/zip.rhdl` | Inline binary heterogeneous atomic `zip_flow` handles | `std/ready-valid.rhdl` |
+| `std/flow/zip.rhdl` | Configured inline binary heterogeneous atomic `zip_flow` stage | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
-| `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` and array-shaped handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/map-valid.rhdl` | Inline payload substitution for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/fork-valid.rhdl` | Inline one-to-many fanout for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/filter-valid.rhdl` | Inline predicate filtering for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/accept.rhdl` | Always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
+| `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` plus configured fanout stages | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/map.rhdl` | Configured protocol-preserving inline payload substitution | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/map-valid.rhdl` | Configured inline payload substitution for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/fork-valid.rhdl` | Configured inline one-to-many fanout for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/filter-valid.rhdl` | Configured inline predicate filtering for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/accept.rhdl` | Configured always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/filter.rhdl` | Configured inline predicate filtering for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/gate.rhdl` | Configured combinational enable gating for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/parallel.rhdl` | Configured parallel stage, generic handle, and terminated-sink composition | `std/flow/stage.rhdl` |
 | `std/flow.rhdl` | Valid-only, ready-valid, and credited protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl`, `std/credited.rhdl`, and all `std/flow/` modules |
 
 ## Frontend layer dependencies
@@ -150,7 +154,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `sync-memory.rhm` | Circuit-shaped synchronous memories with fixed read, write, and shared read-write ports plus optional packed-lane write masks | core IR, kernel, clocking support, field support |
 | `assertion.rhm` | Reset-suppressed clocked assertions with branch-derived guards and optional labels | kernel, clocking support |
 | `dpi.rhm` | Design-level DPI-C imports, result-less procedure calls, and explicit named DPI result registers | core IR, kernel, clocking support, field support |
-| `interface.rhm` | Roles, directional interfaces, refinement, endpoint shapes, local links, linear callable handles and sinks, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
+| `interface.rhm` | Roles, directional interfaces, refinement, endpoint shapes, local links, linear callable handles and sinks, topology static information, annotations, and compatible bulk connection | core IR, kernel, field support, instance-member support |
 | `wire.rhm` | Binding-derived forward-readable single-driver connections | kernel, field support |
 | `sequential.rhm` | Binding-derived explicit and ambient registers | kernel, clocking support, field support |
 | `conditional.rhm` | Hardware `when` priority chains and exact-key `switch`, including assignment, memory-write, and assertion effects | core IR, kernel, mux-lookup support |

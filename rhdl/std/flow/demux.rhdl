@@ -70,24 +70,19 @@ fun finish_demux_flow_handle(input_link :: Handle,
   InterfaceHandle(input_link.left, output_endpoints)
 
 // A payload type defaults to Decoupled, while an explicit ready-valid
-// InterfaceType retains that exact contract. Supplying an endpoint or handle
-// applies the router immediately. The arrow form avoids grouping a
-// colon-bodied macro when the router is one operand in a pipeline.
+// InterfaceType retains that exact contract. Configuration produces a unary
+// cardinality-changing stage for ordinary pipeline composition.
 expr.macro
-| 'demux_flow($source_or_protocol,
-              $count,
+| 'demux_flow($count,
               $(payload :: Identifier) => $selector ...)':
-    'demux_flow($source_or_protocol, $count, $payload): $selector ...'
-| 'demux_flow($source_or_protocol,
-              $count,
-              $(payload :: Identifier)): $selector':
-    'block:
-       def demux_flow_argument = $source_or_protocol
+    'demux_flow($count, $payload): $selector ...'
+| 'demux_flow($count, $(payload :: Identifier)): $selector':
+    'fun (demux_flow_source) :~ StageResult(demux_flow_source, InterfaceArrayFields):
        def demux_flow_count = $count
        unless demux_flow_count is_a PosInt
        | error(~who: #'demux_flow,
                "output count must be PosInt")
-       def demux_flow_protocol = flow_protocol_type(demux_flow_argument)
+       def demux_flow_protocol = flow_protocol_type(demux_flow_source)
        def demux_flow_input_link = interface_link(
          demux_flow_protocol,
          "demux_input"
@@ -107,7 +102,7 @@ expr.macro
          demux_flow_output_links,
          demux_flow_selector
        )
-       finish_flow_stage(demux_flow_argument, demux_flow_handle)'
+       finish_flow_stage(demux_flow_source, demux_flow_handle)'
 
 export:
   Demux

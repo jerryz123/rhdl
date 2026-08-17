@@ -41,8 +41,7 @@ sync_circuit FesvrSharedMemory(address_width :: PosInt,
   inst owners(Queue(Bool, 2))
 
   fun tag_request(is_processor):
-    map_flow(SimpleMemoryReq(address_width, data_bytes),
-             request => TaggedReq()):
+    map_flow(request => TaggedReq()):
       request: request
       processor: Bool(is_processor)
 
@@ -52,35 +51,35 @@ sync_circuit FesvrSharedMemory(address_width :: PosInt,
     fesvr.request |> tag_request(#false),
     processor.request |> tag_request(#true)
   )
-    |> rr_arbiter(TaggedReq(), 2)
-    |> pipe(TaggedReq(), 1)
-    |> atomic_fork(TaggedReq(), 2)
+    |> rr_arbiter()
+    |> pipe(1)
+    |> atomic_fork(2)
     |> parallel(
          (
-           map_flow(TaggedReq(), tagged => tagged.request)
-             |> pipe(SimpleMemoryReq(address_width, data_bytes), 1)
+           TaggedReq()
+             |> map_flow(tagged => tagged.request)
+             |> pipe(1)
          ) <=> ram.port.request,
-         map_flow(TaggedReq(), tagged => tagged.processor)
+         (TaggedReq() |> map_flow(tagged => tagged.processor))
            <=> owners.ingress
        )
 
   // Buffer returned data together with its oldest owner before exposing it to
   // either client. This keeps response readiness independent of client
   // backpressure and therefore separates the two memory directions.
-  Array(ram.port.response, owners.egress) |> (
-      zip_flow(SimpleMemoryResp(data_bytes), response,
-               Bool, owner):
+  (
+    Array(ram.port.response, owners.egress)
+      |> zip_flow(response, owner):
         TaggedResp():
           response: response
           processor: owner
-    ) |> queue(TaggedResp(), 2)
-      |> demux_flow(Irrevocable(TaggedResp()), 2,
-                    tagged => tagged.processor)
+  ) |> queue(2)
+      |> demux_flow(2, tagged => tagged.processor)
       |> parallel(
-           map_flow(Irrevocable(TaggedResp()),
-                    tagged => tagged.response) <=> fesvr.response,
-           map_flow(Irrevocable(TaggedResp()),
-                    tagged => tagged.response) <=> processor.response
+           (Irrevocable(TaggedResp()) |> map_flow(tagged => tagged.response))
+             <=> fesvr.response,
+           (Irrevocable(TaggedResp()) |> map_flow(tagged => tagged.response))
+             <=> processor.response
          )
 
 export:

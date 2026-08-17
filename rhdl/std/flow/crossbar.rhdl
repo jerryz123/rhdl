@@ -44,17 +44,21 @@ circuit GrantCrossbar(T,
     egress[output_index] <=> output_stage.egress
     output_stage
 
-// Connects an endpoint array through a grant-controlled crossbar and returns
-// its output endpoint array for further flow composition. Grants remain an
-// explicit sideband because they control, rather than participate in, payload
-// transfer.
-fun grant_crossbar(inputs :: Array,
-                   output_count :: PosInt,
-                   ~grants):
-  unless inputs.length() > 0
-  | error(~who: #'grant_crossbar,
-          "grant crossbar requires at least one input endpoint")
-  def T = flow_payload_type(inputs[0])
-  inst crossbar_stage(GrantCrossbar(T, inputs.length(), output_count))
-  crossbar_stage.grants <== grants
-  InterfaceHandle(crossbar_stage.ingress, crossbar_stage.egress)(inputs)
+// Configures a grant-controlled crossbar for an eventual endpoint or type
+// array. Grants remain an explicit sideband because they control, rather than
+// participate in, payload transfer.
+fun grant_crossbar(output_count :: PosInt,
+                   ~grants)
+  :: ((source :: Any) -> StageResult(source, InterfaceArrayFields)):
+  fun (source) :~ StageResult(source, InterfaceArrayFields):
+    def inputs = if source is_a Handle | source.right | source
+    unless inputs is_a Array && inputs.length() > 0
+    | error(~who: #'grant_crossbar,
+            "grant crossbar requires at least one input endpoint or type")
+    def T = flow_payload_type(inputs[0])
+    inst crossbar_stage(GrantCrossbar(T, inputs.length(), output_count))
+    crossbar_stage.grants <== grants
+    finish_flow_stage(
+      source,
+      InterfaceHandle(crossbar_stage.ingress, crossbar_stage.egress)
+    )

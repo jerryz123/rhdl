@@ -4,6 +4,7 @@
 import:
   rhombus/meta open
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
 
 fun finish_zip_flow_handle(left_link :: Handle,
                            right_link :: Handle,
@@ -27,32 +28,32 @@ fun finish_zip_flow_handle(left_link :: Handle,
     output_link.right
   )
 
-// Payload types construct a reusable two-input handle. Supplying two concrete
-// endpoints applies the same handle immediately. The arrow form is convenient
-// inside a larger expression; the block form supports multiline bodies.
+// The source is a two-element Array of payload/protocol types or endpoints.
+// Configuration produces a unary heterogeneous join stage.
 expr.macro
-| 'zip_flow($left_source_or_type, $(left_payload :: Identifier),
-            $right_source_or_type, $(right_payload :: Identifier) => $body ...)':
-    'zip_flow($left_source_or_type, $left_payload,
-              $right_source_or_type, $right_payload): $body ...'
-| 'zip_flow($left_source_or_type, $(left_payload :: Identifier),
-            $right_source_or_type, $(right_payload :: Identifier)): $body':
-    'block:
-       def zip_left_argument = $left_source_or_type
-       def zip_right_argument = $right_source_or_type
-       def zip_left_type:
-         if zip_left_argument is_a Endpoint
-         | decoupled_payload_type(zip_left_argument)
-         | zip_left_argument
-       def zip_right_type:
-         if zip_right_argument is_a Endpoint
-         | decoupled_payload_type(zip_right_argument)
-         | zip_right_argument
-       unless (zip_left_argument is_a Endpoint) == (zip_right_argument is_a Endpoint)
+| 'zip_flow($(left_payload :: Identifier),
+            $(right_payload :: Identifier) => $body ...)':
+    'zip_flow($left_payload, $right_payload): $body ...'
+| 'zip_flow($(left_payload :: Identifier),
+            $(right_payload :: Identifier)): $body':
+    'fun (zip_flow_source) :~ StageResult(zip_flow_source, Endpoint):
+       def zip_inputs:
+         if zip_flow_source is_a Handle
+         | zip_flow_source.right
+         | zip_flow_source
+       unless zip_inputs is_a Array && zip_inputs.length() == 2
        | error(~who: #'zip_flow,
-               "zip_flow inputs must both be types or both be endpoints")
-       def zip_left_link = interface_link(Decoupled(zip_left_type), "zip_left")
-       def zip_right_link = interface_link(Decoupled(zip_right_type), "zip_right")
+               "zip_flow source must contain exactly two inputs")
+       def zip_left_argument = zip_inputs[0]
+       def zip_right_argument = zip_inputs[1]
+       def zip_left_link = interface_link(
+         flow_protocol_type(zip_left_argument),
+         "zip_left"
+       )
+       def zip_right_link = interface_link(
+         flow_protocol_type(zip_right_argument),
+         "zip_right"
+       )
        def zip_left_endpoint :: Endpoint = zip_left_link.right
        def zip_right_endpoint :: Endpoint = zip_right_link.right
        def $left_payload = zip_left_endpoint.bits
@@ -69,9 +70,7 @@ expr.macro
          zip_output_link,
          zipped_bits
        )
-       if zip_left_argument is_a Endpoint
-       | zip_handle(Array(zip_left_argument, zip_right_argument))
-       | zip_handle'
+       finish_flow_stage(zip_flow_source, zip_handle)'
 
 export:
   zip_flow

@@ -22,7 +22,7 @@ circuit MapFlowExample():
   interface egress(Decoupled(MappedByte()), ~role: producer)
 
   def mapping:
-    map_flow(Bits(8), payload):
+    map_flow(payload):
       MappedByte():
         data: payload
         tag: tag
@@ -37,14 +37,14 @@ circuit FilterFlowExample():
   input keep: Bool
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  filter_flow(ingress, payload => keep & or_reduce(payload)) <=> egress
+  (ingress |> filter_flow(payload => keep & or_reduce(payload))) <=> egress
 
 circuit GateFlowExample():
   interface ingress(Irrevocable(Bits(8)), ~role: consumer)
   input enabled: Bool
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  gate_flow(ingress, enabled) <=> egress
+  (ingress |> gate_flow(enabled)) <=> egress
 
 // With concrete endpoints on the left, each handle is applied immediately and
 // the final value is the only still-unconnected endpoint.
@@ -53,8 +53,8 @@ sync_circuit EndpointFirstTopology():
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
   def selected = ingress
-                 |> rr_arbiter(_)
-                 |> pipe(_, 1)
+                 |> rr_arbiter()
+                 |> pipe(1)
   egress <=> selected
 
 // With types on the left, the same operations construct one reusable handle:
@@ -65,24 +65,25 @@ sync_circuit FanInProjectTopology():
   interface data_egress(Irrevocable(Bits(8)), ~role: producer)
   interface origin_egress(Decoupled(Bool), ~role: producer)
 
-  def data_path = map_flow(TaggedByte(), tagged => tagged.data)
-                  |> pipe(Bits(8), 1)
+  def data_path = TaggedByte()
+                  |> map_flow(tagged => tagged.data)
+                  |> pipe(1)
   def path:
-    parallel(
-      map_flow(Bits(8), payload):
+    Array(Bits(8), Bits(8)) |> parallel(
+      map_flow(payload):
         TaggedByte():
           data: payload
           from_second: Bool(#false),
-      map_flow(Bits(8), payload):
+      map_flow(payload):
         TaggedByte():
           data: payload
           from_second: Bool(#true)
-    ) |> rr_arbiter(TaggedByte(), 2)
-      |> pipe(TaggedByte(), 1)
-      |> atomic_fork(TaggedByte(), 2)
+    ) |> rr_arbiter()
+      |> pipe(1)
+      |> atomic_fork(2)
       |> parallel(
            data_path <=> data_egress,
-           map_flow(TaggedByte(), tagged => tagged.from_second)
+           (TaggedByte() |> map_flow(tagged => tagged.from_second))
              <=> origin_egress
          )
   ingress |> path
@@ -97,18 +98,16 @@ sync_circuit ZipRouteTopology():
 
   def path:
     (
-      zip_flow(Bits(8), data,
-               Bool, destination):
+      Array(Bits(8), Bool) |> zip_flow(data, destination):
         RoutedByte():
           data: data
           destination: destination
-    ) |> queue(RoutedByte(), 2)
-      |> demux_flow(Irrevocable(RoutedByte()), 2,
-                    routed => routed.destination)
+    ) |> queue(2)
+      |> demux_flow(2, routed => routed.destination)
       |> parallel(
-           map_flow(Irrevocable(RoutedByte()), routed => routed.data)
+           (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
              <=> egress[0],
-           map_flow(Irrevocable(RoutedByte()), routed => routed.data)
+           (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
              <=> egress[1]
          )
   Array(data_ingress, destination_ingress) |> path

@@ -721,13 +721,15 @@ views over forward-readable, exactly-one-driver wires. An `InterfaceHandle`
 owns a left endpoint shape and a right endpoint shape. Endpoint shapes are an
 `Endpoint` or recursively matching `Array`s of endpoints.
 
-A binding annotated as `Handle` exposes `.left` and `.right` with `Endpoint`
-static information. This supports named local links such as `Valid(T)`
-sidebands: drive the fields on `.left` and read the corresponding fields on
-`.right` without materializing a circuit instance.
+A binding annotated as `Handle` exposes `.left` and `.right` as endpoint
+shapes: either one `Endpoint` or a recursively matching endpoint `Array`.
+Static information preserves field access on scalar sides and indexing on
+array sides. This supports named local links such as `Valid(T)` sidebands:
+drive the fields on `.left` and read the corresponding fields on `.right`
+without materializing a circuit instance.
 
 - `endpoint |> handle` connects the endpoint to the left end and returns the
-  right end.
+  right end while preserving endpoint-shape static information.
 - `first_handle |> second_handle` connects their adjacent ends and returns a
   handle owning the two outside ends.
 - `handle <=> endpoint` closes the handle's right end and returns an
@@ -743,6 +745,14 @@ twice would attempt to drive an interface destination twice. `<=>` between
 concrete endpoint shapes performs the hardware wiring effect and returns
 `#void`; only the ordered `handle <=> endpoint` form performs partial
 termination and returns a sink.
+
+Configured standard flow stages use the interface topology static-information
+key to select a dependent result. A known endpoint or endpoint array exposes
+the connected stage's exact result shape, a handle remains a handle, and a
+generic expression receives a conservative topology annotation that permits
+endpoint fields, array indexing, and handle-side access until elaboration
+chooses the concrete shape. This is frontend information only; it creates no
+flow-specific runtime graph or core IR type.
 
 Ready-valid protocols and reusable flow circuits are documented in
 [`../../std/README.md`](../../std/README.md). Canonical feature programs live
