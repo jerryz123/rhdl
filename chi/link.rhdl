@@ -1,11 +1,12 @@
 #lang rhdl
-// Defines CHI node roles, channel capabilities, credited links, and static connection legality.
+// Defines CHI node roles, channel capabilities, credited links, legality, and monitor attachment.
 
 import:
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/credited.rhdl") open
   lib("chi/params.rhdl") open
   lib("chi/flits.rhdl") open
+  lib("chi/monitor.rhdl") open
 
 enum CHINodeKind
 | RNF
@@ -117,12 +118,12 @@ class CHIICNPortParams(name, node_id, kind, emits, supports):
     super(name, node_id, kind, emits, supports)
 
 class CHIRNLinkParams(flit :: CHIFlitParams,
-                      tx_req_credits :: PosInt,
-                      tx_rsp_credits :: PosInt,
-                      tx_dat_credits :: PosInt,
-                      rx_rsp_credits :: PosInt,
-                      rx_dat_credits :: PosInt,
-                      rx_snp_credits :: PosInt):
+                      tx_req_credits :: Nat,
+                      tx_rsp_credits :: Nat,
+                      tx_dat_credits :: Nat,
+                      rx_rsp_credits :: Nat,
+                      rx_dat_credits :: Nat,
+                      rx_snp_credits :: Nat):
   constructor (flit,
                ~tx_req_credits: tx_req_credits = 2,
                ~tx_rsp_credits: tx_rsp_credits = 2,
@@ -139,11 +140,11 @@ class CHIRNLinkParams(flit :: CHIFlitParams,
           rx_snp_credits)
 
 class CHIRNILinkParams(flit :: CHIFlitParams,
-                       tx_req_credits :: PosInt,
-                       tx_rsp_credits :: PosInt,
-                       tx_dat_credits :: PosInt,
-                       rx_rsp_credits :: PosInt,
-                       rx_dat_credits :: PosInt):
+                       tx_req_credits :: Nat,
+                       tx_rsp_credits :: Nat,
+                       tx_dat_credits :: Nat,
+                       rx_rsp_credits :: Nat,
+                       rx_dat_credits :: Nat):
   constructor (flit,
                ~tx_req_credits: tx_req_credits = 2,
                ~tx_rsp_credits: tx_rsp_credits = 2,
@@ -158,10 +159,10 @@ class CHIRNILinkParams(flit :: CHIFlitParams,
           rx_dat_credits)
 
 class CHISNLinkParams(flit :: CHIFlitParams,
-                      tx_rsp_credits :: PosInt,
-                      tx_dat_credits :: PosInt,
-                      rx_req_credits :: PosInt,
-                      rx_dat_credits :: PosInt):
+                      tx_rsp_credits :: Nat,
+                      tx_dat_credits :: Nat,
+                      rx_req_credits :: Nat,
+                      rx_dat_credits :: Nat):
   constructor (flit,
                ~tx_rsp_credits: tx_rsp_credits = 2,
                ~tx_dat_credits: tx_dat_credits = 2,
@@ -264,12 +265,86 @@ fun checked_sn_link(link, endpoint):
   | error(~who: #'CHISNLink, "endpoint kind must be SN-F or SN-I")
   link
 
+fun node_emitted_capabilities(endpoint):
+  if endpoint is_a CHINodeParams | endpoint.emits | endpoint.supports
+
+fun node_received_capabilities(endpoint):
+  if endpoint is_a CHINodeParams | endpoint.supports | endpoint.emits
+
 interface CHIRNLink(link, endpoint):
   role node
   role icn
   provider node
   connection_compatible node (provided, required):
     rn_connection_legal(provided, required)
+  monitor (observed, endpoint_role):
+    def emitted = node_emitted_capabilities(endpoint)
+    def received = node_received_capabilities(endpoint)
+    reg tx_previous_request(~init: Bool(#false))
+    reg tx_previous_ack(~init: Bool(#false))
+    reg rx_previous_request(~init: Bool(#false))
+    reg rx_previous_ack(~init: Bool(#false))
+    reg tx_req_credit_balance(~init: bits(0, index_width(link.tx_req_credits + 1)))
+    reg tx_rsp_credit_balance(~init: bits(0, index_width(link.tx_rsp_credits + 1)))
+    reg tx_dat_credit_balance(~init: bits(0, index_width(link.tx_dat_credits + 1)))
+    reg rx_rsp_credit_balance(~init: bits(0, index_width(link.rx_rsp_credits + 1)))
+    reg rx_dat_credit_balance(~init: bits(0, index_width(link.rx_dat_credits + 1)))
+    reg rx_snp_credit_balance(~init: bits(0, index_width(link.rx_snp_credits + 1)))
+    monitor_chi_activation(observed.tx_link_active_request,
+                           observed.tx_link_active_ack,
+                           tx_previous_request,
+                           tx_previous_ack,
+                           "chi_tx_link")
+    monitor_chi_activation(observed.rx_link_active_request,
+                           observed.rx_link_active_ack,
+                           rx_previous_request,
+                           rx_previous_ack,
+                           "chi_rx_link")
+    monitor_chi_req(observed.tx_req.valid, observed.tx_req.bits.opcode,
+                    observed.tx_req.bits.txn_id, observed.tx_req.bits.src_id,
+                    observed.tx_req.bits.size_or_num_req, observed.tx_req.bits.multi_req,
+                    observed.tx_req.credit,
+                    tx_req_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_req_credits, emitted.req, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_req")
+    monitor_chi_rsp(observed.tx_rsp.valid, observed.tx_rsp.bits.opcode,
+                    observed.tx_rsp.bits.txn_id, observed.tx_rsp.bits.src_id,
+                    observed.tx_rsp.credit,
+                    tx_rsp_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_rsp_credits, emitted.rsp, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_rsp")
+    monitor_chi_dat(observed.tx_dat.valid, observed.tx_dat.bits.opcode,
+                    observed.tx_dat.bits.txn_id, observed.tx_dat.bits.src_id,
+                    observed.tx_dat.bits.data_id, observed.tx_dat.credit,
+                    tx_dat_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_dat_credits, emitted.dat, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_dat")
+    monitor_chi_rsp(observed.rx_rsp.valid, observed.rx_rsp.bits.opcode,
+                    observed.rx_rsp.bits.txn_id, observed.rx_rsp.bits.tgt_id,
+                    observed.rx_rsp.credit,
+                    rx_rsp_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_rsp_credits, received.rsp, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_rsp")
+    monitor_chi_dat(observed.rx_dat.valid, observed.rx_dat.bits.opcode,
+                    observed.rx_dat.bits.txn_id, observed.rx_dat.bits.tgt_id,
+                    observed.rx_dat.bits.data_id, observed.rx_dat.credit,
+                    rx_dat_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_dat")
+    monitor_chi_snp(observed.rx_snp.valid, observed.rx_snp.bits.opcode,
+                    observed.rx_snp.bits.txn_id, observed.rx_snp.credit,
+                    rx_snp_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_snp_credits, received.snp, "chi_rx_snp")
+    tx_previous_request <== observed.tx_link_active_request
+    tx_previous_ack <== observed.tx_link_active_ack
+    rx_previous_request <== observed.rx_link_active_request
+    rx_previous_ack <== observed.rx_link_active_ack
 
   node -> icn:
     tx_link_active_request: Bool
@@ -291,6 +366,68 @@ interface CHIRNILink(link, endpoint):
   provider node
   connection_compatible node (provided, required):
     rni_connection_legal(provided, required)
+  monitor (observed, endpoint_role):
+    def emitted = node_emitted_capabilities(endpoint)
+    def received = node_received_capabilities(endpoint)
+    reg tx_previous_request(~init: Bool(#false))
+    reg tx_previous_ack(~init: Bool(#false))
+    reg rx_previous_request(~init: Bool(#false))
+    reg rx_previous_ack(~init: Bool(#false))
+    reg tx_req_credit_balance(~init: bits(0, index_width(link.tx_req_credits + 1)))
+    reg tx_rsp_credit_balance(~init: bits(0, index_width(link.tx_rsp_credits + 1)))
+    reg tx_dat_credit_balance(~init: bits(0, index_width(link.tx_dat_credits + 1)))
+    reg rx_rsp_credit_balance(~init: bits(0, index_width(link.rx_rsp_credits + 1)))
+    reg rx_dat_credit_balance(~init: bits(0, index_width(link.rx_dat_credits + 1)))
+    monitor_chi_activation(observed.tx_link_active_request,
+                           observed.tx_link_active_ack,
+                           tx_previous_request,
+                           tx_previous_ack,
+                           "chi_tx_link")
+    monitor_chi_activation(observed.rx_link_active_request,
+                           observed.rx_link_active_ack,
+                           rx_previous_request,
+                           rx_previous_ack,
+                           "chi_rx_link")
+    monitor_chi_req(observed.tx_req.valid, observed.tx_req.bits.opcode,
+                    observed.tx_req.bits.txn_id, observed.tx_req.bits.src_id,
+                    observed.tx_req.bits.size_or_num_req, observed.tx_req.bits.multi_req,
+                    observed.tx_req.credit,
+                    tx_req_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_req_credits, emitted.req, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_req")
+    monitor_chi_rsp(observed.tx_rsp.valid, observed.tx_rsp.bits.opcode,
+                    observed.tx_rsp.bits.txn_id, observed.tx_rsp.bits.src_id,
+                    observed.tx_rsp.credit,
+                    tx_rsp_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_rsp_credits, emitted.rsp, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_rsp")
+    monitor_chi_dat(observed.tx_dat.valid, observed.tx_dat.bits.opcode,
+                    observed.tx_dat.bits.txn_id, observed.tx_dat.bits.src_id,
+                    observed.tx_dat.bits.data_id, observed.tx_dat.credit,
+                    tx_dat_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_dat_credits, emitted.dat, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_dat")
+    monitor_chi_rsp(observed.rx_rsp.valid, observed.rx_rsp.bits.opcode,
+                    observed.rx_rsp.bits.txn_id, observed.rx_rsp.bits.tgt_id,
+                    observed.rx_rsp.credit,
+                    rx_rsp_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_rsp_credits, received.rsp, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_rsp")
+    monitor_chi_dat(observed.rx_dat.valid, observed.rx_dat.bits.opcode,
+                    observed.rx_dat.bits.txn_id, observed.rx_dat.bits.tgt_id,
+                    observed.rx_dat.bits.data_id, observed.rx_dat.credit,
+                    rx_dat_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_dat")
+    tx_previous_request <== observed.tx_link_active_request
+    tx_previous_ack <== observed.tx_link_active_ack
+    rx_previous_request <== observed.rx_link_active_request
+    rx_previous_ack <== observed.rx_link_active_ack
 
   node -> icn:
     tx_link_active_request: Bool
@@ -311,6 +448,60 @@ interface CHISNLink(link, endpoint):
   provider node
   connection_compatible node (provided, required):
     sn_connection_legal(provided, required)
+  monitor (observed, endpoint_role):
+    def emitted = node_emitted_capabilities(endpoint)
+    def received = node_received_capabilities(endpoint)
+    reg tx_previous_request(~init: Bool(#false))
+    reg tx_previous_ack(~init: Bool(#false))
+    reg rx_previous_request(~init: Bool(#false))
+    reg rx_previous_ack(~init: Bool(#false))
+    reg tx_rsp_credit_balance(~init: bits(0, index_width(link.tx_rsp_credits + 1)))
+    reg tx_dat_credit_balance(~init: bits(0, index_width(link.tx_dat_credits + 1)))
+    reg rx_req_credit_balance(~init: bits(0, index_width(link.rx_req_credits + 1)))
+    reg rx_dat_credit_balance(~init: bits(0, index_width(link.rx_dat_credits + 1)))
+    monitor_chi_activation(observed.tx_link_active_request,
+                           observed.tx_link_active_ack,
+                           tx_previous_request,
+                           tx_previous_ack,
+                           "chi_tx_link")
+    monitor_chi_activation(observed.rx_link_active_request,
+                           observed.rx_link_active_ack,
+                           rx_previous_request,
+                           rx_previous_ack,
+                           "chi_rx_link")
+    monitor_chi_rsp(observed.tx_rsp.valid, observed.tx_rsp.bits.opcode,
+                    observed.tx_rsp.bits.txn_id, observed.tx_rsp.bits.src_id,
+                    observed.tx_rsp.credit,
+                    tx_rsp_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_rsp_credits, emitted.rsp, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_rsp")
+    monitor_chi_dat(observed.tx_dat.valid, observed.tx_dat.bits.opcode,
+                    observed.tx_dat.bits.txn_id, observed.tx_dat.bits.src_id,
+                    observed.tx_dat.bits.data_id, observed.tx_dat.credit,
+                    tx_dat_credit_balance,
+                    observed.tx_link_active_request, observed.tx_link_active_ack,
+                    tx_previous_request, link.tx_dat_credits, emitted.dat, link.flit,
+                    endpoint.node_id, "_source_id", "chi_tx_dat")
+    monitor_chi_req(observed.rx_req.valid, observed.rx_req.bits.opcode,
+                    observed.rx_req.bits.txn_id, observed.rx_req.bits.tgt_id,
+                    observed.rx_req.bits.size_or_num_req, observed.rx_req.bits.multi_req,
+                    observed.rx_req.credit,
+                    rx_req_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_req_credits, received.req, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_req")
+    monitor_chi_dat(observed.rx_dat.valid, observed.rx_dat.bits.opcode,
+                    observed.rx_dat.bits.txn_id, observed.rx_dat.bits.tgt_id,
+                    observed.rx_dat.bits.data_id, observed.rx_dat.credit,
+                    rx_dat_credit_balance,
+                    observed.rx_link_active_request, observed.rx_link_active_ack,
+                    rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
+                    endpoint.node_id, "_target_id", "chi_rx_dat")
+    tx_previous_request <== observed.tx_link_active_request
+    tx_previous_ack <== observed.tx_link_active_ack
+    rx_previous_request <== observed.rx_link_active_request
+    rx_previous_ack <== observed.rx_link_active_ack
 
   node -> icn:
     tx_link_active_request: Bool

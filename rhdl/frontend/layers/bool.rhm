@@ -90,46 +90,79 @@ fun bool_ne(left, right, name = #false, location = Location()):
   )
   kernel.bit_not(equal, name, location)
 
+// Packs a nonempty host list without introducing a zero-length hardware type.
+fun packed_reduction_list(entities, who, spelling :: String, location):
+  def packed_elements = for List (entity in entities):
+    def value = kernel.read(entity, location)
+    def width = packed_width(value.type)
+    unless data_type(value.type) && width != #false
+    | error(~who: who,
+            location.describe() ++ ": " ++ spelling ++ " list elements must have packable DataTypes")
+    hardware_as_bits(value, who, spelling ++ " list element", #false, location)
+  def packed:
+    if packed_elements.length() == 1
+    | packed_elements[0]
+    | kernel.concat(packed_elements, #false, location)
+  def mutable total_width = 0
+  for (element in packed_elements):
+    total_width := total_width + element.type.width
+  values(packed, total_width)
+
 // Validates and packs the common operand accepted by Boolean bit reductions.
 fun packed_reduction_operand(entity, who, spelling :: String, location):
-  def value = kernel.read(entity, location)
-  def width = packed_width(value.type)
-  unless data_type(value.type) && width != #false
-  | error(~who: who,
-          location.describe() ++ ": " ++ spelling ++ " operand must have a packable DataType")
-  values(hardware_as_bits(value, who, spelling ++ " operand", #false, location), width)
+  if entity is_a List
+  | packed_reduction_list(entity, who, spelling, location)
+  | block:
+      def value = kernel.read(entity, location)
+      def width = packed_width(value.type)
+      unless data_type(value.type) && width != #false
+      | error(~who: who,
+              location.describe() ++ ": " ++ spelling ++ " operand must have a packable DataType")
+      values(hardware_as_bits(value, who, spelling ++ " operand", #false, location), width)
+
+fun reduction_identity(value :: Int, name, location):
+  kernel.cast(kernel.literal(Bits(1), value, #false, location),
+              Bool,
+              name,
+              location)
 
 // Reduces the canonical packed representation of hardware data to whether any
 // bit is asserted. Existing equality and inversion IR fully express the
 // operation, so the frontend does not introduce a reduction-specific opcode.
 fun or_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
-  def (packed, width) = packed_reduction_operand(entity, #'or_reduce, "or_reduce", location)
-  def equal_zero = kernel.cast(
-    kernel.hw_eq(packed,
-                 kernel.literal(Bits(width), 0, #false, location),
-                 #false,
-                 location),
-    Bool,
-    #false,
-    location
-  )
-  kernel.bit_not(equal_zero, name, location)
+  if entity is_a List && entity.length() == 0
+  | reduction_identity(0, name, location)
+  | block:
+      def (packed, width) = packed_reduction_operand(entity, #'or_reduce, "or_reduce", location)
+      def equal_zero = kernel.cast(
+        kernel.hw_eq(packed,
+                     kernel.literal(Bits(width), 0, #false, location),
+                     #false,
+                     location),
+        Bool,
+        #false,
+        location
+      )
+      kernel.bit_not(equal_zero, name, location)
 
 // Reduces the canonical packed representation of hardware data to whether
 // every bit is asserted. Equality with the packed all-ones value avoids a new
 // core reduction operation.
 fun and_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
-  def (packed, width) = packed_reduction_operand(entity, #'and_reduce, "and_reduce", location)
-  def all_ones = (1 bits.(<<) width) - 1
-  kernel.cast(
-    kernel.hw_eq(packed,
-                 kernel.literal(Bits(width), all_ones, #false, location),
-                 #false,
-                 location),
-    Bool,
-    name,
-    location
-  )
+  if entity is_a List && entity.length() == 0
+  | reduction_identity(1, name, location)
+  | block:
+      def (packed, width) = packed_reduction_operand(entity, #'and_reduce, "and_reduce", location)
+      def all_ones = (1 bits.(<<) width) - 1
+      kernel.cast(
+        kernel.hw_eq(packed,
+                     kernel.literal(Bits(width), all_ones, #false, location),
+                     #false,
+                     location),
+        Bool,
+        name,
+        location
+      )
 
 operator (left =/= right):
   ~same_as: ===
@@ -140,19 +173,29 @@ operator (left =/= right):
 fun is_one_of(value, candidate, ...) :~ HardwareFields:
   def location = Location()
   def value_read = kernel.read(value, location)
-  def candidates = [candidate, ...]
-  def comparisons = candidates.map(
-    fun (alternative):
-      equality_bits(value_read,
-                    alternative,
-                    #'is_one_of,
-                    "is_one_of",
-                    location)
-  )
-  def mutable combined = comparisons[0]
-  for (comparison in comparisons.drop(1)):
-    combined := kernel.bit_or(combined, comparison, #false, location)
-  kernel.cast(combined, Bool, #false, location)
+  unless flat_data_type(value_read.type)
+  | error(~who: #'is_one_of,
+          location.describe() ++ ": is_one_of subject must have a FlatDataType")
+  def supplied = [candidate, ...]
+  def candidates:
+    if supplied.length() == 1 && supplied[0] is_a List
+    | supplied[0]
+    | supplied
+  if candidates.length() == 0
+  | reduction_identity(0, #false, location)
+  | block:
+      def comparisons = candidates.map(
+        fun (alternative):
+          equality_bits(value_read,
+                        alternative,
+                        #'is_one_of,
+                        "is_one_of",
+                        location)
+      )
+      def mutable combined = comparisons[0]
+      for (comparison in comparisons.drop(1)):
+        combined := kernel.bit_or(combined, comparison, #false, location)
+      kernel.cast(combined, Bool, #false, location)
 
 // Generates a runtime membership predicate from the enum type's declared
 // encodings, keeping sparse wire encodings distinct from host type safety.

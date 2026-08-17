@@ -122,18 +122,21 @@ all_set <== and_reduce(value)
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
 and inequality work on exactly equal flat types and return `Bool`; `=/=` is
 the Boolean complement of `===` and lowers to equality followed by negation.
-`is_one_of(value, alternative, ...)` accepts one or more alternatives of that
-same exact flat type and lowers to typed equalities joined by hardware OR.
+`is_one_of(value, alternative, ...)` accepts alternatives of the same exact
+flat type either variadically or as one host list and lowers to typed
+equalities joined by hardware OR. Membership in an empty host list is false.
 `enum_valid(value)` derives the complete runtime membership test from a
 hardware enum's declared encodings. This matters at ports and cast boundaries:
 the enum type prevents unrelated typed operations, but its physical wire can
 still carry an unused packed encoding. The predicate works for sequential,
 explicit, and one-hot enums; a non-enum operand is rejected.
 `or_reduce(value)` and `and_reduce(value)` accept any packable hardware
-`DataType`, reduce its canonical packed representation, and return `Bool`.
-They lower respectively to inequality with zero and equality with an all-ones
-value, expressed through existing equality and inversion operations without
-adding core reduction operations.
+`DataType` or a host list of packable hardware values, reduce the canonical
+packed representation, and return `Bool`. Empty host lists use the Boolean
+identities: `or_reduce([])` is false and `and_reduce([])` is true. Nonempty
+operands lower respectively to inequality with zero and equality with an
+all-ones value, expressed through existing equality and inversion operations
+without adding core reduction operations or zero-width hardware types.
 Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from

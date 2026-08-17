@@ -1,4 +1,4 @@
-<!-- Defines the planned standalone AMBA CHI package, its non-coherent-first scope, and required generic credit-flow support. -->
+<!-- Defines the standalone AMBA CHI package, its implemented layers, and non-coherent-first roadmap. -->
 
 # AMBA CHI domain library
 
@@ -13,8 +13,9 @@ Architecture Specification. This identifies the source used for the implemented
 wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
-protocol classifiers, node capabilities, and credited node-role links.
-Monitors, fabrics, and endpoints remain planned below.
+protocol classifiers, node capabilities, credited node-role links, and
+link-local monitors. Transaction monitors, fabrics, and endpoints remain
+planned below.
 
 ## Architectural boundary
 
@@ -69,16 +70,16 @@ CHI assigns several semantic names to the same physical bits depending on the
 opcode. The RHDL records expose one deliberately explicit field for each such
 physical location, including `snp_attr_or_do_dwt`,
 `return_nid_or_stash_nid_or_data_target`, `dbid_or_group_id`, and
-`dbid_or_mecid`. Protocol helpers and future monitors interpret the aliases;
+`dbid_or_mecid`. Protocol helpers and monitors interpret the aliases;
 the flit type does not incorrectly allocate separate storage for them.
 
 [`protocol.rhdl`](protocol.rhdl) classifies atomics, non-snoopable reads and
 writes, DBID responses, and DAT message direction, rejects the reserved Size
 encoding, and derives physical DAT packet counts and legal DataID values from
 `Data_Width`. Generic `enum_valid` checks whether a channel opcode carries one
-of the encodings declared by its CHI hardware enum; later monitors add the
-node-role and negotiated-feature constraints. These helpers are hardware
-expressions intended for endpoint construction and later monitors.
+of the encodings declared by its CHI hardware enum; the link monitor further
+checks each endpoint's advertised opcode capabilities. These helpers are
+hardware expressions intended for endpoint construction and monitoring.
 
 ## Node-role links
 
@@ -93,16 +94,14 @@ It provides three physical shapes matching the channel sets in B13.6:
 
 Each protocol channel is a generic `Credited(flit, credit_limit)` interface.
 The link parameter classes (`CHIRNLinkParams`, `CHIRNILinkParams`, and
-`CHISNLinkParams`) carry the common `CHIFlitParams` and an explicit positive
-credit limit for every physically present channel.
+`CHISNLinkParams`) carry the common `CHIFlitParams` and a natural-number Link
+Credit count for every physically present channel.
 
 The four activation wires use names relative to the node. The node drives
 `tx_link_active_request` for its transmit channels and
 `rx_link_active_ack` for its receive channels; the ICN drives the complementary
 `tx_link_active_ack` and `rx_link_active_request`. One request/ack pair covers
-all protocol channels in that direction, as specified in B14.5. This milestone
-defines the activation contract's wires; the next monitor milestone checks the
-four-phase state transitions and gates legal credit and flit activity.
+all protocol channels in that direction, as specified in B14.5.
 
 `CHINodeParams` and `CHIICNPortParams` give both sides the same NodeID and
 `CHINodeKind` enum value while separately declaring channel opcodes emitted
@@ -120,6 +119,33 @@ to `SnpDVMOp`. A connection is legal only when:
 The RN-F/RN-D and SN-F/SN-I pairs intentionally share physical interface
 types. Their exact kind remains endpoint metadata so later monitors can apply
 the distinct protocol rules without duplicating identical wiring.
+
+## Link-local monitoring
+
+Each node-role interface defines an opt-in whole-link monitor. Add `~monitor`
+to either endpoint declaration; one monitor observes both node-to-ICN and
+ICN-to-node paths and uses that endpoint's parameters to interpret them.
+
+[`monitor.rhdl`](monitor.rhdl) checks the four-state activation handshake in
+each direction, permits flits only after the receiver acknowledges activation,
+and permits credit returns only while running or on the first deactivation
+cycle. Every physical channel has an independent balance checked through the
+generic credited-transport checker. Reaching STOP requires all granted credits
+to have been consumed or returned.
+
+On a valid flit, the monitor checks:
+
+- that the opcode is a declared encoding and is either `LCrdReturn` or appears
+  in the transmitting endpoint's advertised capabilities;
+- that ordinary node-transmitted flits carry the node's `SrcID`, and ordinary
+  node-received REQ, RSP, and DAT flits carry its `TgtID`;
+- that `LCrdReturn` occurs during deactivation and carries a zero `TxnID`;
+- that an ordinary REQ has a legal Size encoding with reserved Size bits zero;
+- that an ordinary DAT has a `DataID` legal for the configured data width.
+
+Opcode-dependent response fields, complete multibeat data accounting, TxnID
+and DBID lifetime, retry, and ordering require transaction history and belong
+to the next stateful-monitor milestone.
 
 ## Non-coherent-first scope
 
@@ -216,7 +242,8 @@ interface behavior:
 | `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T, max_credits)`, track the received-credit balance, and expose `ready` only when a credit is available |
 | `CreditBuffer(T, depth)` | Accept every legal credited transfer into real storage, expose an internal `Irrevocable(T)` dequeue, grant initial credits, and return a credit whenever a slot is freed |
 | `CreditCounter(max_credits)` | Reusable bounded balance primitive with simultaneous grant/consume support |
-| `monitor_credited(valid, credit, max_credits)` | Assert credit underflow, overflow, and conservation without driving either direction |
+| `check_credited(valid, credit, max_credits, balance)` | Apply the generic credit assertions and update caller-owned balance state |
+| `monitor_credited(valid, credit, max_credits)` | Allocate balance state and apply `check_credited` for a single monitored channel |
 
 Activation is intentionally outside the generic interface. CHI-specific link
 code will gate initial credit grants with CHI link activation and add any CHI
@@ -234,8 +261,8 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
 | [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
 | [`protocol.rhdl`](protocol.rhdl) | Implemented initial operation groups, Size checking, and DAT packetization; transaction relationships remain planned |
-| [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, link activation wires, and static connection compatibility |
-| `monitor.rhdl` | Link-credit, channel, endpoint-transaction, ordering, retry, and eventually coherence checks |
+| [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, static connection compatibility, and monitor attachment |
+| [`monitor.rhdl`](monitor.rhdl) | Implemented link-local activation, credit, opcode, NodeID, Size, and DataID checks; transaction, ordering, retry, and coherence checks remain planned |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
 | `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
@@ -248,8 +275,8 @@ turns an externally credited flit channel into a buffered internal flow.
    opcode, exact parameterized flit layouts, and initial protocol classifiers.
 3. **Complete:** Define node capabilities, node-role interfaces, link
    activation signals, and static connection legality.
-4. Add link-local activation, credit, opcode, conditional-field, and NodeID
-   monitoring.
+4. **Complete:** Add link-local activation, credit, opcode, conditional-field,
+   and NodeID monitoring.
 5. Add bounded TxnID/DBID, response, retry, ordering, and data-completeness
    transaction monitors.
 6. Define `CHIFabricParams`, validate the System Address Map, and generate a
@@ -266,8 +293,8 @@ test of the supported transaction flows.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link' bash tests/backend/run-circt.sh` for CIRCT
-lowering and cycle-level classifier and link simulations.
+`FIXTURES='chi-foundation chi-link chi-monitor' bash tests/backend/run-circt.sh`
+for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
 
 ## Specification references
 

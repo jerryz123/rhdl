@@ -1,0 +1,229 @@
+#lang rhdl
+// Defines link-local CHI activation, credit, and flit legality monitors.
+
+import:
+  lib("rhdl/std/credited.rhdl").check_credited
+  lib("chi/params.rhdl").CHIFlitParams
+  lib("chi/flits.rhdl") open
+  lib("chi/protocol.rhdl") open
+
+fun chi_opcode_supported(opcode, capabilities):
+  is_one_of(opcode, capabilities)
+
+// Checks one direction's four-state activation sequence against prior state.
+fun monitor_chi_activation(request,
+                           ack,
+                           previous_request,
+                           previous_ack,
+                           label_prefix :: String):
+  def request_rise = request & !previous_request
+  def request_fall = !request & previous_request
+  def ack_rise = ack & !previous_ack
+  def ack_fall = !ack & previous_ack
+
+  assert(!request_rise ||| !previous_ack,
+         label_prefix ++ "_request_after_ack_low")
+  assert(!ack_rise ||| request,
+         label_prefix ++ "_ack_after_request")
+  assert(!request_fall ||| previous_ack,
+         label_prefix ++ "_request_drop_after_ack")
+  assert(!ack_fall ||| !request,
+         label_prefix ++ "_ack_drop_after_request")
+
+fun monitor_chi_transport(valid,
+                          credit,
+                          credit_balance,
+                          request,
+                          ack,
+                          previous_request,
+                          credit_limit :: Int,
+                          lcrd_return,
+                          label_prefix :: String):
+  check_credited(valid, credit, credit_limit, credit_balance)
+  def stopped = !request & !ack
+  def credit_active = ack & (request ||| previous_request)
+
+  assert(!valid ||| ack, label_prefix ++ "_flit_active")
+  assert(!credit ||| credit_active, label_prefix ++ "_credit_active")
+  when stopped:
+    assert(!or_reduce(credit_balance), label_prefix ++ "_credits_returned")
+  when (valid & lcrd_return):
+    assert(!request & ack, label_prefix ++ "_lcrd_during_deactivate")
+
+fun monitor_chi_identity(valid,
+                         identity_value,
+                         lcrd_return,
+                         node_id :: Int,
+                         node_id_width :: Int,
+                         label_prefix :: String):
+  when (valid & !lcrd_return):
+    assert(identity_value === bits(node_id, node_id_width),
+           label_prefix)
+
+fun monitor_chi_req(valid,
+                    opcode,
+                    txn_id,
+                    identity_value,
+                    size_or_num_req :: Hardware,
+                    multi_req,
+                    credit,
+                    credit_balance,
+                    request,
+                    ack,
+                    previous_request,
+                    credit_limit :: Int,
+                    capabilities,
+                    p :: CHIFlitParams,
+                    node_id :: Int,
+                    identity_label :: String,
+                    label_prefix :: String):
+  def lcrd_return = opcode === CHIReqOpcode.ReqLCrdReturn
+  monitor_chi_transport(valid,
+                        credit,
+                        credit_balance,
+                        request,
+                        ack,
+                        previous_request,
+                        credit_limit,
+                        lcrd_return,
+                        label_prefix)
+  monitor_chi_identity(valid,
+                       identity_value,
+                       lcrd_return,
+                       node_id,
+                       p.node_id_width,
+                       label_prefix ++ identity_label)
+  when valid:
+    assert(enum_valid(opcode), label_prefix ++ "_opcode_valid")
+    assert(lcrd_return ||| chi_opcode_supported(opcode,
+                                                capabilities),
+           label_prefix ++ "_opcode_supported")
+    when lcrd_return:
+      assert(txn_id === bits(0, 12),
+             label_prefix ++ "_lcrd_txn_id_zero")
+    when (!lcrd_return & !multi_req):
+      assert(!or_reduce(size_or_num_req[3..6]),
+             label_prefix ++ "_size_reserved_zero")
+      assert(chi_size_valid(size_or_num_req[0..3]),
+             label_prefix ++ "_size_valid")
+
+fun monitor_chi_rsp(valid,
+                    opcode,
+                    txn_id,
+                    identity_value,
+                    credit,
+                    credit_balance,
+                    request,
+                    ack,
+                    previous_request,
+                    credit_limit :: Int,
+                    capabilities,
+                    p :: CHIFlitParams,
+                    node_id :: Int,
+                    identity_label :: String,
+                    label_prefix :: String):
+  def lcrd_return = opcode === CHIRspOpcode.RespLCrdReturn
+  monitor_chi_transport(valid,
+                        credit,
+                        credit_balance,
+                        request,
+                        ack,
+                        previous_request,
+                        credit_limit,
+                        lcrd_return,
+                        label_prefix)
+  monitor_chi_identity(valid,
+                       identity_value,
+                       lcrd_return,
+                       node_id,
+                       p.node_id_width,
+                       label_prefix ++ identity_label)
+  when valid:
+    assert(enum_valid(opcode), label_prefix ++ "_opcode_valid")
+    assert(lcrd_return ||| chi_opcode_supported(opcode,
+                                                capabilities),
+           label_prefix ++ "_opcode_supported")
+    when lcrd_return:
+      assert(txn_id === bits(0, 12),
+             label_prefix ++ "_lcrd_txn_id_zero")
+
+fun monitor_chi_snp(valid,
+                    opcode,
+                    txn_id,
+                    credit,
+                    credit_balance,
+                    request,
+                    ack,
+                    previous_request,
+                    credit_limit :: Int,
+                    capabilities,
+                    label_prefix :: String):
+  def lcrd_return = opcode === CHISnpOpcode.SnpLCrdReturn
+  monitor_chi_transport(valid,
+                        credit,
+                        credit_balance,
+                        request,
+                        ack,
+                        previous_request,
+                        credit_limit,
+                        lcrd_return,
+                        label_prefix)
+  when valid:
+    assert(enum_valid(opcode), label_prefix ++ "_opcode_valid")
+    assert(lcrd_return ||| chi_opcode_supported(opcode,
+                                                capabilities),
+           label_prefix ++ "_opcode_supported")
+    when lcrd_return:
+      assert(txn_id === bits(0, 12),
+             label_prefix ++ "_lcrd_txn_id_zero")
+
+fun monitor_chi_dat(valid,
+                    opcode,
+                    txn_id,
+                    identity_value,
+                    data_id,
+                    credit,
+                    credit_balance,
+                    request,
+                    ack,
+                    previous_request,
+                    credit_limit :: Int,
+                    capabilities,
+                    p :: CHIFlitParams,
+                    node_id :: Int,
+                    identity_label :: String,
+                    label_prefix :: String):
+  def lcrd_return = opcode === CHIDatOpcode.DataLCrdReturn
+  monitor_chi_transport(valid,
+                        credit,
+                        credit_balance,
+                        request,
+                        ack,
+                        previous_request,
+                        credit_limit,
+                        lcrd_return,
+                        label_prefix)
+  monitor_chi_identity(valid,
+                       identity_value,
+                       lcrd_return,
+                       node_id,
+                       p.node_id_width,
+                       label_prefix ++ identity_label)
+  when valid:
+    assert(enum_valid(opcode), label_prefix ++ "_opcode_valid")
+    assert(lcrd_return ||| chi_opcode_supported(opcode,
+                                                capabilities),
+           label_prefix ++ "_opcode_supported")
+    when lcrd_return:
+      assert(txn_id === bits(0, 12),
+             label_prefix ++ "_lcrd_txn_id_zero")
+    when (!lcrd_return):
+      assert(chi_data_id_valid(data_id, p),
+             label_prefix ++ "_data_id_valid")
+
+export:
+  monitor_chi_activation
+  monitor_chi_req
+  monitor_chi_rsp
+  monitor_chi_snp
+  monitor_chi_dat

@@ -42,6 +42,7 @@
  ("bad-enum-inequality.rhdl" "=/= operands must have exactly the same FlatDataType")
  ("bad-is-one-of.rhdl" "is_one_of operands must have exactly the same FlatDataType")
  ("bad-or-reduce-type.rhdl" "or_reduce operand must have a packable DataType")
+ ("bad-or-reduce-list-type.rhdl" "or_reduce list elements must have packable DataTypes")
  ("bad-and-reduce-type.rhdl" "and_reduce operand must have a packable DataType")
  ("bad-invert-enum.rhdl" "bit_not operand must have a bitwise type")
  ("bad-enum-member.rhdl" "enum State has no member named Missing")

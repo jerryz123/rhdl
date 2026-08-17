@@ -58,7 +58,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
-  chi-foundation chi-full-flits chi-link
+  chi-foundation chi-full-flits chi-link chi-monitor
   tilelink-protocol tilelink-ram
   ricket-pipeline ricket-dcache
 )
@@ -479,6 +479,7 @@ direct_fixture_specs=(
   'chi-foundation|chi_foundation_tb'
   'chi-full-flits|'
   'chi-link|chi_link_tb'
+  'chi-monitor|chi_monitor_tb'
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'
@@ -580,5 +581,9 @@ run_expected_assertion_failure credited-monitor-overgrant \
   credited_monitor_overgrant_tb \
   tests/backend/verilog/credited-monitor-overgrant_tb.sv \
   credited_grant_within_limit
+run_expected_assertion_failure chi-monitor \
+  chi_monitor_unsupported_opcode_tb \
+  tests/backend/verilog/chi-monitor-unsupported-opcode_tb.sv \
+  chi_tx_req_opcode_supported
 run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \
   tests/backend/verilog/tilelink-ram-invalid_tb.sv tilelink_a_mask_supported
