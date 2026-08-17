@@ -109,7 +109,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/clocked-dpi.rhdl`](rhdl/clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
 | [`rhdl/assertions.rhdl`](rhdl/assertions.rhdl) | Reset-suppressed assertions with branch-derived activation guards |
 | [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
-| [`rhdl/bundle.rhdl`](rhdl/bundle.rhdl) | Type-named bundle construction, recursive literal shadows, muxes, casts, and state |
+| [`rhdl/bundle.rhdl`](rhdl/bundle.rhdl) | Type-named fixed and elaboration-conditional bundles, recursive literal shadows, muxes, casts, and state |
 | [`rhdl/vector.rhdl`](rhdl/vector.rhdl) | Fixed vectors, selection, packing, aggregate drives, and state |
 | [`rhdl/vector-update.rhdl`](rhdl/vector-update.rhdl) | Functional hardware-selected replacement |
 | [`rhdl/table.rhdl`](rhdl/table.rhdl) | Host-generated combinational vector table |

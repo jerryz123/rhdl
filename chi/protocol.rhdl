@@ -1,0 +1,110 @@
+#lang rhdl
+// Defines AMBA CHI opcode groups and physical data-packet classifiers.
+
+import:
+  lib("chi/params.rhdl").CHIFlitParams
+  lib("chi/flits.rhdl") open
+
+fun chi_req_is_atomic_store(opcode):
+  is_one_of(opcode,
+            CHIReqOpcode.AtomicStoreAdd,
+            CHIReqOpcode.AtomicStoreClr,
+            CHIReqOpcode.AtomicStoreEor,
+            CHIReqOpcode.AtomicStoreSet,
+            CHIReqOpcode.AtomicStoreSMax,
+            CHIReqOpcode.AtomicStoreSMin,
+            CHIReqOpcode.AtomicStoreUMax,
+            CHIReqOpcode.AtomicStoreUMin)
+
+fun chi_req_is_atomic_load(opcode):
+  is_one_of(opcode,
+            CHIReqOpcode.AtomicLoadAdd,
+            CHIReqOpcode.AtomicLoadClr,
+            CHIReqOpcode.AtomicLoadEor,
+            CHIReqOpcode.AtomicLoadSet,
+            CHIReqOpcode.AtomicLoadSMax,
+            CHIReqOpcode.AtomicLoadSMin,
+            CHIReqOpcode.AtomicLoadUMax,
+            CHIReqOpcode.AtomicLoadUMin)
+
+fun chi_req_is_atomic(opcode):
+  chi_req_is_atomic_store(opcode) ||| chi_req_is_atomic_load(opcode) ||| is_one_of(
+    opcode,
+    CHIReqOpcode.AtomicSwap,
+    CHIReqOpcode.AtomicCompare
+  )
+
+fun chi_req_is_read_no_snp(opcode):
+  is_one_of(opcode, CHIReqOpcode.ReadNoSnp, CHIReqOpcode.ReadNoSnpSep)
+
+fun chi_req_is_write_no_snp(opcode):
+  is_one_of(opcode,
+            CHIReqOpcode.WriteNoSnpPtl,
+            CHIReqOpcode.WriteNoSnpFull,
+            CHIReqOpcode.WriteNoSnpZero,
+            CHIReqOpcode.WriteNoSnpDef,
+            CHIReqOpcode.WriteNoSnpFullCleanSh,
+            CHIReqOpcode.WriteNoSnpFullCleanInv,
+            CHIReqOpcode.WriteNoSnpFullCleanShPerSep,
+            CHIReqOpcode.WriteNoSnpPtlCleanSh,
+            CHIReqOpcode.WriteNoSnpPtlCleanInv,
+            CHIReqOpcode.WriteNoSnpPtlCleanShPerSep,
+            CHIReqOpcode.WriteNoSnpPtlCleanInvPoPA,
+            CHIReqOpcode.WriteNoSnpFullCleanInvPoPA,
+            CHIReqOpcode.WriteNoSnpFullCleanInvStrg)
+
+fun chi_rsp_allocates_dbid(opcode):
+  is_one_of(opcode,
+            CHIRspOpcode.CompDBIDResp,
+            CHIRspOpcode.DBIDResp,
+            CHIRspOpcode.DBIDRespOrd)
+
+fun chi_dat_is_write_data(opcode):
+  is_one_of(opcode,
+            CHIDatOpcode.CopyBackWriteData,
+            CHIDatOpcode.NonCopyBackWriteData,
+            CHIDatOpcode.WriteDataCancel,
+            CHIDatOpcode.NonCopyBackWriteDataCompAck)
+
+fun chi_dat_is_response_data(opcode):
+  is_one_of(opcode,
+            CHIDatOpcode.SnpRespData,
+            CHIDatOpcode.CompData,
+            CHIDatOpcode.SnpRespDataPtl,
+            CHIDatOpcode.SnpRespDataFwded,
+            CHIDatOpcode.DataSepResp)
+
+fun chi_size_valid(size):
+  size =/= bits(7, 3)
+
+// Returns one less than the physical DAT packet count. Sizes through 16 bytes
+// always occupy one packet; larger transfers are split by Data_Width.
+fun chi_data_beats_minus_one(size, p :: CHIFlitParams):
+  def size_32_beats_minus_one = if p.data_width == 128 | 1 | 0
+  def size_64_beats_minus_one:
+    cond
+    | p.data_width == 128: 3
+    | p.data_width == 256: 1
+    | ~else: 0
+  mux_lookup(size, ~default: bits(0, 2)):
+    5: bits(size_32_beats_minus_one, 2)
+    6: bits(size_64_beats_minus_one, 2)
+
+fun chi_data_id_valid(data_id, p :: CHIFlitParams):
+  cond
+  | p.data_width == 128: Bool(#true)
+  | p.data_width == 256: is_one_of(data_id, bits(0, 2), bits(2, 2))
+  | ~else: data_id === bits(0, 2)
+
+export:
+  chi_req_is_atomic_store
+  chi_req_is_atomic_load
+  chi_req_is_atomic
+  chi_req_is_read_no_snp
+  chi_req_is_write_no_snp
+  chi_rsp_allocates_dbid
+  chi_dat_is_write_data
+  chi_dat_is_response_data
+  chi_size_valid
+  chi_data_beats_minus_one
+  chi_data_id_valid

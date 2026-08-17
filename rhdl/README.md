@@ -21,6 +21,7 @@ user base-profile imports -----> selected frontend/layers/*
 
 std/* -------------------------> public #lang rhdl authoring surface
 tilelink/* --------------------> public #lang rhdl and generic std/* libraries
+chi/* -------------------------> public #lang rhdl and generic std/* libraries
 sim/* -------------------------> public #lang rhdl authoring surface
 riscv/rhdl --------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* and domain libraries
@@ -54,6 +55,7 @@ internal module implementing its shared frontend forms is called the
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, monitored interfaces, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
+| [`../chi/`](../chi/README.md) | AMBA CHI Issue H physical parameters, exact flit types, protocol classifiers, and implementation roadmap | Public `#lang rhdl`; protocol-neutral `std/` libraries as later layers require them |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
@@ -134,8 +136,8 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed OR reduction, equality, typed membership, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, field support, hardware-literal support |
-| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, mux-lookup support |
+| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed OR reduction, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support |
+| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, finite-enum support, mux-lookup support |
 | `one-hot.rhm` | One-hot selector types, literals, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, type-named construction, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |

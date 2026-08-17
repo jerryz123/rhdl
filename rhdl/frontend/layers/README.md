@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions, equality, typed membership, ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions, equality, typed membership, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
@@ -114,6 +114,7 @@ equal <== a === b
 different <== a =/= b
 less <== a < b
 active <== is_one_of(state, State.Refill, State.Respond)
+encoding_valid <== enum_valid(state)
 nonzero <== or_reduce(value)
 all_set <== and_reduce(value)
 ```
@@ -123,6 +124,11 @@ and inequality work on exactly equal flat types and return `Bool`; `=/=` is
 the Boolean complement of `===` and lowers to equality followed by negation.
 `is_one_of(value, alternative, ...)` accepts one or more alternatives of that
 same exact flat type and lowers to typed equalities joined by hardware OR.
+`enum_valid(value)` derives the complete runtime membership test from a
+hardware enum's declared encodings. This matters at ports and cast boundaries:
+the enum type prevents unrelated typed operations, but its physical wire can
+still carry an unused packed encoding. The predicate works for sequential,
+explicit, and one-hot enums; a non-enum operand is rejected.
 `or_reduce(value)` and `and_reduce(value)` accept any packable hardware
 `DataType`, reduce its canonical packed representation, and return `Bool`.
 They lower respectively to inequality with zero and equality with an all-ones
@@ -523,6 +529,25 @@ be passed to a function and called later. The declaration also supplies a
 preferred emitted type name without changing structural type equality. When
 multiple concrete specializations request that name, the backend retains the
 first and adds numeric suffixes to the rest.
+
+A bundle can conditionally include one or more fields using a host `if` group:
+
+```rhombus
+bundle TaggedPayload(T, include_tag):
+  payload: T
+  if include_tag:
+    tag: Bits(4)
+```
+
+The condition is evaluated during elaboration and must produce a host
+`Boolean`; a hardware `Bool` is rejected. `TaggedPayload(Bits(8), #false)` is
+an eight-bit record containing only `payload`, while the `#true`
+specialization is a twelve-bit record that also requires `tag`. An absent
+field is not evaluated, consumes no width, cannot be projected, and must not be
+supplied during construction. Remaining fields retain source order, duplicate
+realized names are rejected, and every concrete specialization must contain at
+least one field. Structural equality continues to compare the resulting
+record fields rather than the conditions that produced them.
 
 Complete field-wise drives canonicalize to nested record construction and one
 whole-record drive. Partial assignment and mixing whole with field-wise drives

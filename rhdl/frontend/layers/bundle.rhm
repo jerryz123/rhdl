@@ -54,18 +54,72 @@ fun build_record(type, fields) :~ HardwareFields:
   | RecordLiteral(type, fields)
   | kernel.record_create(type, fields)
 
-defn.macro 'bundle $(name :: Identifier)($parameter, ...):
-              $field_name: $field_type
-              ...':
+fun conditional_bundle_fields(condition, fields_thunk):
+  unless condition is_a Boolean
+  | error(~who: #'bundle,
+          "conditional field condition must be a host Boolean")
+  if condition | fields_thunk() | []
+
+fun build_bundle_type(name, field_groups):
+  def mutable fields = []
+  for (group in field_groups):
+    fields := fields ++ group
+  unless fields.length() > 0
+  | error(~who: #'bundle,
+          "bundle specialization must contain at least one field")
+  RecordType(fields, name)
+
+defn.macro 'bundle $(name :: Identifier)($parameter, ...): $clause; ...':
   def type_constructor = Syntax.make_id(
     name.to_source_string() ++ "_bundle_type",
     name
   )
   def bundle_name = name.to_source_string()
-  let [field_string, ...] = [field_name.to_source_string(), ...]
+  def mutable field_groups = []
+  for (item in [clause, ...]):
+    match item
+    | '$(field_name :: Identifier): $field_type':
+        def field_string = field_name.to_source_string()
+        field_groups := field_groups ++ [
+          '[RecordField($field_string, $field_type)]'
+        ]
+    | 'if $condition ...: $conditional_clause; ...':
+        def mutable conditional_fields = []
+        for (conditional_item in [conditional_clause, ...]):
+          match conditional_item
+          | '$(field_name :: Identifier): $field_type':
+              def field_string = field_name.to_source_string()
+              conditional_fields := conditional_fields ++ [
+                'RecordField($field_string, $field_type)'
+              ]
+          | ~else:
+              syntax_meta.error(
+                "expected a bundle field in conditional field group",
+                conditional_item
+              )
+        when conditional_fields.length() == 0
+        | syntax_meta.error(
+            "conditional bundle field group requires at least one field",
+            item
+          )
+        let [conditional_field, ...] = conditional_fields
+        field_groups := field_groups ++ [
+          'conditional_bundle_fields(
+             ($condition ...),
+             fun (): [$conditional_field, ...]
+           )'
+        ]
+    | ~else:
+        syntax_meta.error(
+          "expected a bundle field or conditional field group",
+          item
+        )
+  when field_groups.length() == 0
+  | syntax_meta.error("bundle requires at least one field clause", name)
+  let [field_group, ...] = field_groups
   '«
      fun $type_constructor($parameter, ...):
-       RecordType([RecordField($field_string, $field_type), ...], $bundle_name)
+       build_bundle_type($bundle_name, [$field_group, ...])
      expr.macro
      | '$name($('$')type_argument, $'...'):
           $('$')field; $('...')':

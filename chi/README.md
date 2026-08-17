@@ -8,15 +8,13 @@
 and components are protocol-specific. Only reusable transport mechanisms
 belong in the generic standard library.
 
-The initial implementation targets
-[AMBA CHI Architecture Specification Issue H](https://documentation-service.arm.com/static/68d13eb5bd7cab51328bee7a).
-The selected issue is part of the elaborated interface specialization, not a
-runtime signal. Earlier CHI issues have physically incompatible channel
-layouts, so connections must require the same supported issue rather than
-silently widening both sides to a union of all revisions.
+The initial implementation targets revision IHI 0050H of the AMBA CHI
+Architecture Specification. This identifies the source used for the implemented
+wire definitions; it is not a configurable parameter in the API.
 
-This directory currently records the package contract. It contains no CHI RTL
-yet.
+The package currently implements the physical parameter, flit, and classifier
+foundation. Node-role links, monitors, fabrics, and endpoints remain planned
+below.
 
 ## Architectural boundary
 
@@ -35,10 +33,52 @@ will preserve those boundaries:
   interfaces, connection compatibility, registers, memories, and assertions
   can express the initial implementation.
 
-The planned public facade is `chi/main.rhdl`. Package modules may import the
+The public facade is [`main.rhdl`](main.rhdl). Package modules may import the
 public `#lang rhdl` surface, protocol-neutral modules under `rhdl/std`, and
 other `chi/` modules. They must not import RHDL core, frontend, or backend
 implementation modules.
+
+## Wire foundation
+
+Import the implemented foundation with:
+
+```rhombus
+import:
+  lib("chi/main.rhdl") open
+```
+
+[`params.rhdl`](params.rhdl) defines `CHIFlitParams`, the physical configuration
+shared by all four protocol flits. It validates `NodeID_Width`,
+`Req_Addr_Width`, `Data_Width`, MPAM, PBHA, MECID,
+StreamID/SecSID1, REQ and DAT RSVDC widths, DataCheck, and Poison selections.
+The standard defaults produce 137-bit REQ, 71-bit RSP, 94-bit SNP, and 240-bit
+DAT flits. Optional fields are physically absent when disabled; they are not
+represented by placeholder one-bit fields.
+
+[`flits.rhdl`](flits.rhdl) defines every non-reserved REQ, RSP, SNP, and DAT
+opcode from Tables B13.12 through B13.16. `CHIReqFlit`, `CHIRspFlit`,
+`CHISnpFlit`, and `CHIDatFlit` construct exact packed record types from a
+`CHIFlitParams`. Their fields are declared most-significant first so the
+specification's first field, QoS, occupies bits `[3:0]`.
+REQ, SNP, and DAT use the generic bundle layer's elaboration-conditional field
+groups, so disabled CHI options are absent from both the record and its
+packed representation. RSP is an ordinary bundle because all of its fields
+are always present.
+
+CHI assigns several semantic names to the same physical bits depending on the
+opcode. The RHDL records expose one deliberately explicit field for each such
+physical location, including `snp_attr_or_do_dwt`,
+`return_nid_or_stash_nid_or_data_target`, `dbid_or_group_id`, and
+`dbid_or_mecid`. Protocol helpers and future monitors interpret the aliases;
+the flit type does not incorrectly allocate separate storage for them.
+
+[`protocol.rhdl`](protocol.rhdl) classifies atomics, non-snoopable reads and
+writes, DBID responses, and DAT message direction, rejects the reserved Size
+encoding, and derives physical DAT packet counts and legal DataID values from
+`Data_Width`. Generic `enum_valid` checks whether a channel opcode carries one
+of the encodings declared by its CHI hardware enum; later monitors add the
+node-role and negotiated-feature constraints. These helpers are hardware
+expressions intended for endpoint construction and later monitors.
 
 ## Non-coherent-first scope
 
@@ -47,7 +87,7 @@ Subordinate Node. It is not a Home Node and does not implement coherence. A
 Home Node performs any required ordering and coherence work before issuing a
 non-snoopable transaction to this RAM.
 
-Issue H defines both SN-F and SN-I Subordinate Nodes as possible completers for
+CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
 operations. SN-F is the normal-memory backing role; SN-I additionally covers
 peripherals and explicitly non-coherent memory. `CHIRam` will therefore
@@ -62,7 +102,7 @@ the upstream HN-F owns coherence and sends the SN-F only non-snoopable traffic.
 | Partial write | Receive `WriteNoSnpPtl`, use byte enables when committing `NonCopyBackWriteData`, then return `Comp` |
 
 The initial write path deliberately uses separate `DBIDResp` and `Comp`
-responses. Issue H permits a combined `CompDBIDResp` before the write data is
+responses. CHI permits a combined `CompDBIDResp` before the write data is
 sent, but completing only after the RAM update gives `CHIRam` the same
 observable storage discipline as `TLRam`.
 
@@ -84,7 +124,7 @@ The first profile will have these explicit limits:
 
 Later non-coherent milestones can add multi-flit data, ordering and
 `ReadReceipt`, request retry and Protocol Credits, atomics, exclusives, write
-zero, cache maintenance, and optional Issue H features without changing the
+zero, cache maintenance, and optional CHI features without changing the
 meaning of the initial subset. Coherent RN-F/HN-F behavior is a separate
 milestone layered above this backing-memory endpoint.
 
@@ -96,8 +136,7 @@ consumes one previously granted credit. Link Credits cover one physical hop.
 They are distinct from CHI Protocol Credits, which are transaction messages
 used to guarantee that a retried request will be accepted.
 
-The generic standard library should therefore add a minimal protocol-neutral
-interface resembling:
+The generic standard library provides the protocol-neutral interface:
 
 ```rhombus
 interface Credited(T, credit_limit):
@@ -131,7 +170,7 @@ does not add a physical field. The interface describes the wire contract;
 buffering and accounting are ordinary reusable modules rather than hidden
 interface behavior:
 
-| Proposed utility | Responsibility |
+| Utility | Responsibility |
 |---|---|
 | `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T, max_credits)`, track the received-credit balance, and expose `ready` only when a credit is available |
 | `CreditBuffer(T, depth)` | Accept every legal credited transfer into real storage, expose an internal `Irrevocable(T)` dequeue, grant initial credits, and return a credit whenever a slot is freed |
@@ -151,34 +190,45 @@ turns an externally credited flit channel into a buffered internal flow.
 
 | Module | Responsibility |
 |---|---|
-| `params.rhdl` | Issue H wire parameters, node capabilities, Node IDs, address ownership, port descriptions, and legal edge construction |
-| `flits.rhdl` | Exact Issue H REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
-| `protocol.rhdl` | Opcode groups, permitted field values, ID flows, response relationships, and data-flit counts |
+| [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
+| [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
+| [`protocol.rhdl`](protocol.rhdl) | Implemented initial operation groups, Size checking, and DAT packetization; transaction relationships remain planned |
 | `link.rhdl` | CHI node-role interfaces composed from credited channels, link activation, and static connection compatibility |
 | `monitor.rhdl` | Link-credit, channel, endpoint-transaction, ordering, retry, and eventually coherence checks |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
 | `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |
-| `main.rhdl` | Public CHI facade |
+| [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
 ## Implementation order
 
-1. Add and verify `Credited`, `CreditSender`, `CreditBuffer`, credit accounting,
-   and their monitors under `rhdl/std`.
-2. Define Issue H parameters and the exact four flit payload families.
-3. Define the minimal SN-F link specialization and static capability checks.
-4. Add link-credit and non-coherent request/data/response monitoring.
-5. Implement the single-flit `CHIRam` read and write flows over `SyncRam1RW`.
-6. Add multi-flit data and the remaining non-coherent operations.
-7. Add generated transport fabrics and comprehensive channel monitors.
-8. Add coherent Request and Home Node behavior only after the non-coherent
-   endpoint and transport foundations are stable.
+1. **Complete:** Add and verify `Credited`, `CreditSender`, `CreditBuffer`,
+   credit accounting, and their monitors under `rhdl/std`.
+2. **Complete:** Define validated physical parameters, every defined
+   opcode, exact parameterized flit layouts, and initial protocol classifiers.
+3. Define node capabilities, node-role interfaces, link activation signals,
+   and static connection legality.
+4. Add link-local activation, credit, opcode, conditional-field, and NodeID
+   monitoring.
+5. Add bounded TxnID/DBID, response, retry, ordering, and data-completeness
+   transaction monitors.
+6. Define `CHIFabricParams`, validate the System Address Map, and generate a
+   small credit-terminating crossbar.
+7. Implement the RN-I-facing non-coherent memory subsystem and `CHIRam` over
+   `SyncRam1RW`, first for single-flit reads and writes and then multibeat
+   traffic.
+8. Add RN-F/HN-F coherence and snoop tracking, followed by optional CHI
+   features as independently verified vertical slices.
 
 Each milestone requires host elaboration tests, invalid-parameter and invalid
 connection tests, generated CIRCT verification, and a cycle-level Verilator
 test of the supported transaction flows.
 
+Run `make chi-test` for the package boundary, parameter, flit-layout, and
+classifier tests. Run `FIXTURE=chi-foundation bash tests/backend/run-circt.sh`
+for CIRCT lowering and the cycle-level classifier simulation.
+
 ## Specification references
 
-- [AMBA CHI Architecture Specification Issue H](https://documentation-service.arm.com/static/68d13eb5bd7cab51328bee7a)
+- [AMBA CHI Architecture Specification Issue H](https://developer.arm.com/documentation/ihi0050/h/)
 - [Introducing AMBA CHI](https://documentation-service.arm.com/static/68590853961937560be90eb2)
 - [Arm AMBA specifications](https://www.arm.com/architecture/system-architectures/amba/amba-specifications)

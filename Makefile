@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
@@ -10,6 +10,7 @@ LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 TILELINK_TESTS := $(sort $(wildcard tilelink/tests/*-test.rhm))
+CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
@@ -26,6 +27,7 @@ check-boundaries:
 	bash rfpl/check-boundaries.sh
 	bash riscv/check-boundaries.sh
 	bash tilelink/check-boundaries.sh
+	bash chi/check-boundaries.sh
 	bash cores/check-boundaries.sh
 
 check-example-verilog:
@@ -67,6 +69,9 @@ tilelink-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_TESTS)
 	bash tilelink/tests/run-negative.sh
 
+chi-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CHI_TESTS)
+
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
@@ -95,7 +100,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: unit-test rfpl-unit-test noc-test riscv-test tilelink-test ricket-host-test
+host-checks: unit-test rfpl-unit-test noc-test riscv-test tilelink-test chi-test ricket-host-test
 
 host-test: host-checks examples
 

@@ -1,10 +1,11 @@
 #lang rhombus/and_meta
-// Defines Bool literals, packed reduction, Boolean comparisons, and binary-selection syntax.
+// Defines Bool literals, reductions, enum validity, comparisons, and binary-selection syntax.
 
 import:
   "../../core/ir.rhm" open
   "../../core/types.rhm".signed_arithmetic_type
   "../kernel.rhm" as kernel
+  "../support/finite-enum.rhm" as finite_enum_support
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_as_bits
   "../support/hardware-literal.rhm".HardwareLiteral
@@ -17,6 +18,7 @@ export:
   or_reduce
   and_reduce
   is_one_of
+  enum_valid
   unsigned_lt
   signed_lt
   unsigned_gt
@@ -151,6 +153,32 @@ fun is_one_of(value, candidate, ...) :~ HardwareFields:
   for (comparison in comparisons.drop(1)):
     combined := kernel.bit_or(combined, comparison, #false, location)
   kernel.cast(combined, Bool, #false, location)
+
+// Generates a runtime membership predicate from the enum type's declared
+// encodings, keeping sparse wire encodings distinct from host type safety.
+fun enum_valid(value, name = #false, location = Location()) :~ HardwareFields:
+  def value_read = kernel.read(value, location)
+  def type = value_read.type
+  unless type is_a finite_enum_support.FiniteEnumType
+  | error(~who: #'enum_valid,
+          location.describe() ++ ": enum_valid operand must have a hardware enum type")
+  def width = packed_width(type)
+  def packed = hardware_as_bits(value_read,
+                                #'enum_valid,
+                                "enum_valid operand",
+                                #false,
+                                location)
+  def comparisons = type.enum_encodings().map(
+    fun (encoding):
+      kernel.hw_eq(packed,
+                   kernel.literal(Bits(width), encoding, #false, location),
+                   #false,
+                   location)
+  )
+  def mutable combined = comparisons[0]
+  for (comparison in comparisons.drop(1)):
+    combined := kernel.bit_or(combined, comparison, #false, location)
+  kernel.cast(combined, Bool, name, location)
 
 fun require_unsigned_bits(left, right, who, location):
   def left_value = kernel.read(left, location)

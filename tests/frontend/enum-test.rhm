@@ -1,13 +1,15 @@
 #lang rhombus
-// Checks nominal enums, switch keys, literals, equality, state, and composition.
+// Checks nominal enums, runtime validity, switch keys, literals, state, and composition.
 
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
   "../../rhdl/frontend/layers/enum.rhm" as enum
   "../../rhdl/frontend/layers/one-hot.rhm" as one_hot
   "../../rhdl/frontend/support/mux-lookup.rhm" as mux_support
   "../../examples/rhdl/enum-state.rhdl" as fixture
+  "enum-valid-fixture.rhdl" as valid_fixture
   "enum-composed.rhdl" as composed_fixture
   "../../examples/rhdl/one-hot-enum.rhdl" as one_hot_fixture
 
@@ -51,6 +53,16 @@ def one_hot_design = one_hot_fixture.design
 def one_hot_module = one_hot_design.modules[0]
 def one_hot_mux = one_hot_module.operations.find(
   fun (operation): operation.opcode == "rtl.onehot_mux"
+)
+def validity_module = valid_fixture.design.modules[0]
+def validity_equalities = validity_module.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.eq"
+)
+def validity_ors = validity_module.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.or"
+)
+def validity_constants = validity_module.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.constant"
 )
 
 check:
@@ -120,6 +132,16 @@ check:
   (for all (choice in one_hot_mux.operands.drop(1)):
      type_equal(choice.type, Bits(8))) ~is #true
   type_equal(one_hot_mux.results[0].type, Bits(8)) ~is #true
+  validity_equalities.length() ~is 9
+  validity_ors.length() ~is 6
+  validity_constants.map(
+    fun (operation): operation.attribute("value")
+  ) ~is [0, 3, 7, 0, 1, 2, 3, 1, 2]
+  bool.bool_type(validity_module.find_output("sparse_valid").type) ~is #true
+  verify_design(valid_fixture.design) ~is #void
+  embedded.run_elaboration(
+    fun (): valid_fixture.InvalidEnumValidity()
+  ) ~throws "enum_valid operand must have a hardware enum type"
   verify_design(design) ~is #void
   verify_design(lookup_design) ~is #void
   verify_design(composed_fixture.design) ~is #void

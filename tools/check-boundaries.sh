@@ -41,6 +41,8 @@ fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|backend/|frontend/)' rhdl/std
 fail_matches "RHDL packages must not import the external TileLink domain library" \
   '^[[:space:]]+.*tilelink/' rhdl
+fail_matches "RHDL packages must not import the external CHI domain library" \
+  '^[[:space:]]+.*chi/' rhdl
 fail_matches "simulation adapters must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|backend/|frontend/)' sim
 fail_matches "standard language assembly must not import core or backend modules" \
@@ -94,7 +96,7 @@ fi
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './examples/*' ! -path './tests/frontend/*' ! -path './tests/fesvr/*' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
-  ! -path './tilelink/*' \
+  ! -path './tilelink/*' ! -path './chi/*' \
   ! -path './sim/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
   echo ".rhdl files may appear only in std, domain libraries, public adapters, examples, concrete cores, simulation adapters, physical-design fixtures, and frontend or FESVR fixtures" >&2

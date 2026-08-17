@@ -58,6 +58,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
+  chi-foundation chi-full-flits
   tilelink-protocol tilelink-ram
   ricket-pipeline ricket-dcache
 )
@@ -474,6 +475,8 @@ direct_fixture_specs=(
   'credited-flow|credited_flow_tb'
   'credited-monitor|'
   'credited-monitor-overgrant|'
+  'chi-foundation|chi_foundation_tb'
+  'chi-full-flits|'
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'

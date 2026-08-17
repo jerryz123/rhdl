@@ -13,7 +13,7 @@ Tests mirror the implementation boundaries:
 | [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
 Domain-library tests live with their owning packages, including
-[`../tilelink/tests/`](../tilelink/tests/).
+[`../tilelink/tests/`](../tilelink/tests/) and [`../chi/tests/`](../chi/tests/).
 
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
 Intentional language failures live under `frontend/invalid/` and are exercised
@@ -39,6 +39,7 @@ make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses
+make chi-test               # CHI boundaries, Issue H parameters, flits, and classifiers
 make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses

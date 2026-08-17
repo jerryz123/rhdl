@@ -1,0 +1,108 @@
+#lang rhdl
+// Exercises elaboration-conditional bundle fields across types, literals, and circuits.
+
+bundle OptionalPacket(has_tag, has_metadata):
+  payload: Bits(8)
+  if has_tag:
+    tag: Bits(4)
+  parity: Bool
+  if has_metadata:
+    source: Bits(3)
+    sequence: Bits(5)
+
+bundle EmptyablePacket(enabled):
+  if enabled:
+    payload: Bits(8)
+
+bundle DuplicateConditionalField(enabled):
+  payload: Bits(8)
+  if enabled:
+    payload: Bits(4)
+
+bundle WidthOptional(width):
+  present: Bool
+  if width > 0:
+    payload: Bits(width)
+
+def plain_literal = OptionalPacket(#false, #false):
+  payload: bits(0xa5, 8)
+  parity: Bool(#true)
+
+def tagged_literal = OptionalPacket(#true, #true):
+  payload: bits(0xa5, 8)
+  tag: bits(0xb, 4)
+  parity: Bool(#true)
+  source: bits(0x3, 3)
+  sequence: bits(0x12, 5)
+
+circuit ConditionalBundleShapes():
+  input plain: OptionalPacket(#false, #false)
+  input tagged: OptionalPacket(#true, #true)
+  output plain_out: OptionalPacket(#false, #false)
+  output tagged_out: OptionalPacket(#true, #true)
+
+  plain_out <== plain
+  tagged_out <== tagged
+
+circuit ConditionalBundleConstruction():
+  input payload: Bits(8)
+  input tag: Bits(4)
+  output plain: OptionalPacket(#false, #false)
+  output tagged: OptionalPacket(#true, #false)
+
+  plain <== OptionalPacket(#false, #false):
+    payload: payload
+    parity: Bool(#false)
+  tagged <== OptionalPacket(#true, #false):
+    payload: payload
+    tag: tag
+    parity: Bool(#true)
+
+circuit InvalidConditionalBundleCondition():
+  input packet: OptionalPacket(Bool(#true), #false)
+
+circuit EmptyConditionalBundle():
+  input packet: EmptyablePacket(#false)
+
+circuit DuplicatePresentConditionalField():
+  input packet: DuplicateConditionalField(#true)
+
+circuit AbsentConditionalProjection():
+  input packet: OptionalPacket(#false, #false)
+  output tag: Bits(4)
+
+  tag <== packet.tag
+
+circuit SuppliedAbsentConditionalField():
+  def invalid = OptionalPacket(#false, #false):
+    payload: bits(0, 8)
+    tag: bits(0, 4)
+    parity: Bool(#false)
+  #void
+
+circuit MissingPresentConditionalField():
+  def invalid = OptionalPacket(#true, #false):
+    payload: bits(0, 8)
+    parity: Bool(#false)
+  #void
+
+def shapes_design = elaborate(ConditionalBundleShapes())
+def construction_design = elaborate(ConditionalBundleConstruction())
+
+export:
+  OptionalPacket
+  EmptyablePacket
+  DuplicateConditionalField
+  WidthOptional
+  ConditionalBundleShapes
+  ConditionalBundleConstruction
+  InvalidConditionalBundleCondition
+  EmptyConditionalBundle
+  DuplicatePresentConditionalField
+  AbsentConditionalProjection
+  SuppliedAbsentConditionalField
+  MissingPresentConditionalField
+  plain_literal
+  tagged_literal
+  shapes_design
+  construction_design

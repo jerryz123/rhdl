@@ -1,0 +1,105 @@
+#lang rhombus
+// Checks CHI physical parameter defaults, exact flit layouts, and invalid selections.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../main.rhdl" as chi
+
+def base = chi.CHIFlitParams()
+def full = chi.CHIFlitParams(
+  ~node_id_width: 16,
+  ~request_address_width: 52,
+  ~data_width: 512,
+  ~mpam_width: 15,
+  ~req_rsvdc_width: 32,
+  ~dat_rsvdc_width: 32,
+  ~data_check: #true,
+  ~poison: #true,
+  ~pbha_width: 4,
+  ~mecid_width: 16,
+  ~stream_id_width: 16,
+  ~sec_sid_width: 1
+)
+def base_req = chi.CHIReqFlit(base)
+def base_rsp = chi.CHIRspFlit(base)
+def base_snp = chi.CHISnpFlit(base)
+def base_dat = chi.CHIDatFlit(base)
+def full_req = chi.CHIReqFlit(full)
+def full_snp = chi.CHISnpFlit(full)
+def full_dat = chi.CHIDatFlit(full)
+
+fun field_names(type):
+  type.fields.map(fun (field): field.name)
+
+check:
+  base.node_id_width ~is 7
+  base.request_address_width ~is 44
+  base.snoop_address_width ~is 41
+  base.data_width ~is 128
+  base.data_bytes ~is 16
+  base.byte_enable_width ~is 16
+  base.tag_width ~is 4
+  base.tag_update_width ~is 1
+  base.data_check_width ~is 0
+  base.poison_width ~is 0
+  base.request_security_width ~is 0
+  packed_width(base_req) ~is 137
+  packed_width(base_rsp) ~is 71
+  packed_width(base_snp) ~is 94
+  packed_width(base_dat) ~is 240
+  base_req.fields[base_req.fields.length() - 1].name ~is "qos"
+  base_rsp.fields[base_rsp.fields.length() - 1].name ~is "qos"
+  base_snp.fields[base_snp.fields.length() - 1].name ~is "qos"
+  base_dat.fields[base_dat.fields.length() - 1].name ~is "qos"
+  field_names(base_req).contains("mpam") ~is #false
+  field_names(base_req).contains("mecid_or_stream_id") ~is #false
+  field_names(base_dat).contains("data_check") ~is #false
+  field_names(base_dat).contains("poison") ~is #false
+  base_req.field("opcode").type.width ~is 7
+  base_req.field("size_or_num_req").type.width ~is 6
+  base_rsp.field("opcode").type.width ~is 5
+  base_snp.field("address").type.width ~is 41
+  base_dat.field("opcode").type.width ~is 4
+  base_dat.field("dbid_or_mecid").type.width ~is 16
+
+  full.data_bytes ~is 64
+  full.tag_width ~is 16
+  full.tag_update_width ~is 4
+  full.data_check_width ~is 64
+  full.poison_width ~is 8
+  full.request_security_width ~is 16
+  packed_width(full_req) ~is 240
+  packed_width(chi.CHIRspFlit(full)) ~is 89
+  packed_width(full_snp) ~is 151
+  packed_width(full_dat) ~is 818
+  full_req.fields[0].name ~is "rsvdc"
+  full_req.field("mecid_or_stream_id").type.width ~is 16
+  full_req.field("mpam").type.width ~is 15
+  full_snp.field("mecid").type.width ~is 16
+  full_dat.fields[0].name ~is "poison"
+  full_dat.field("data_check").type.width ~is 64
+  full_dat.field("byte_enable").type.width ~is 64
+
+  chi.CHIReqOpcode.ReadNoSnp.packed_value() ~is 0x04
+  chi.CHIReqOpcode.MakeReadUnique.packed_value() ~is 0x41
+  chi.CHIReqOpcode.WriteBackFullCleanInvPoPA.packed_value() ~is 0x79
+  chi.CHIRspOpcode.CompDBIDResp.packed_value() ~is 0x05
+  chi.CHISnpOpcode.SnpUniqueFwd.packed_value() ~is 0x17
+  chi.CHIDatOpcode.NonCopyBackWriteDataCompAck.packed_value() ~is 0x0c
+
+  chi.CHIFlitParams(~node_id_width: 6) ~throws "NodeID width"
+  chi.CHIFlitParams(~node_id_width: 17) ~throws "NodeID width"
+  chi.CHIFlitParams(~request_address_width: 43) ~throws "request address width"
+  chi.CHIFlitParams(~request_address_width: 53) ~throws "request address width"
+  chi.CHIFlitParams(~data_width: 64) ~throws "data width"
+  chi.CHIFlitParams(~mpam_width: 13) ~throws "MPAM width"
+  chi.CHIFlitParams(~req_rsvdc_width: 20) ~throws "REQ RSVDC width"
+  chi.CHIFlitParams(~dat_rsvdc_width: 20) ~throws "DAT RSVDC width"
+  chi.CHIFlitParams(~data_check: 1) ~throws "host Boolean"
+  chi.CHIFlitParams(~poison: 1) ~throws "host Boolean"
+  chi.CHIFlitParams(~pbha_width: 1) ~throws "PBHA width"
+  chi.CHIFlitParams(~mecid_width: 8) ~throws "MECID width"
+  chi.CHIFlitParams(~stream_id_width: 8) ~throws "StreamID width"
+  chi.CHIFlitParams(~sec_sid_width: 2) ~throws "SecSID width"
+  chi.CHIFlitParams(~stream_id_width: 16) ~throws "present together"
+  chi.CHIFlitParams(~sec_sid_width: 1) ~throws "present together"
