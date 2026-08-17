@@ -180,35 +180,6 @@ def combined_outputs = zip_decode_cases(
 shows all three independent extensions in one executable example: concatenated
 rows, zipped output fields, and lifted input fields.
 
-## Validated NoC route computation
-
-[`noc/route-computer.rhdl`](noc/route-computer.rhdl) is a one-way bridge from
-the pure NoC planner to hardware. `RouteComputerABI` accepts only a
-`RouterPlan` projected from opaque `ValidatedRouting`; it cannot consume an
-unchecked routing relation or run topology, reachability, dependency, or
-deadlock analysis itself.
-
-The ABI retains the validated artifact's dense stable route keys, but origin
-keys and next-VC mask bits are local to one router. Origins cover its optional
-injection slot and incoming physical VCs; output bits correspond to outgoing
-physical VCs. Every local mask is projected from the exact validated table
-row. The packed lookup result appends `eject` and `valid` bits. Invalid or
-unreachable route/origin encodings return all zeros, while a valid ejection row
-has `valid=1`, `eject=1`, and an empty next-VC mask. An ejection-only router
-uses one constant-zero padding bit because RHDL has no zero-width `Bits` type;
-its plan still reports zero output VCs.
-
-`RouteComputer(abi)` lowers the resulting finite rows through the ordinary
-typed decode generator and exposes only combinational `Bits` ports. It accepts
-the decode generator's `~espresso` selection; the canonical fixture requests
-fallback explicitly so its exact generated Verilog is reproducible. The pure
-modules under `noc/model`, `noc/analysis`, and `noc/plan` do not import RHDL or
-CIRCT. See
-[`../../examples/std/noc-route-computer.rhdl`](../../examples/std/noc-route-computer.rhdl)
-for the validated two-hop fixture and its exact generated Verilog.
-The fixture instantiates and exhaustively checks separate source, transit, and
-ejection-only route computers.
-
 ## Ready-valid protocols
 
 Import the protocol family directly:
@@ -473,6 +444,10 @@ under [`flow/`](flow/):
 | `CreditBuffer(T, depth)` | Owns receiver capacity, returns credits, and converts credited transport to an irrevocable egress |
 | `CreditCounter(limit)` | Tracks a bounded resource balance with simultaneous increment and decrement |
 
+| Allocation generator | Behavior |
+|---|---|
+| `GreedyMatcher(inputs, outputs)` | Fixed-priority maximal matching over an input-major request matrix |
+
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|
 | `Pipe(T, stages)` | `CtrlPipe(stages)` | Registered elastic pipeline with stable output under backpressure |
@@ -480,6 +455,9 @@ under [`flow/`](flow/):
 | `Arbiter(T, n)` | `CtrlArbiter(n)` | Fixed-priority, index-zero-first arbitration |
 | `RRArbiter(T, n)` | `CtrlRRArbiter(n)` | Fair round-robin arbitration |
 | `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
+| `GrantDemux(T, outputs)` | -- | Optional-one-hot grant routing to ready-valid outputs |
+| `GrantMerge(T, inputs)` | -- | Optional-one-hot grant selection from ready-valid inputs |
+| `GrantCrossbar(T, inputs, outputs)` | -- | Grant-controlled one-to-one ready-valid payload traversal; endpoint-first `grant_crossbar(inputs, outputs, ~grants)` helper |
 | `Join(T, n)` | `CtrlJoin(n)` | Atomic join that never partially consumes inputs |
 | `Broadcast(T, n)` | `CtrlBroadcast(n)` | Buffered exactly-once delivery tracked independently per recipient |
 | `AtomicFork(T, n)` | `CtrlAtomicFork(n)` | Combinational fanout where every recipient transfers together or none do |
@@ -584,6 +562,33 @@ form remains available for multiline selectors. The handle retains the input
 protocol and returns an array of `n` endpoints; an out-of-range selector blocks
 the input. This distinguishes exclusive routing from `atomic_fork`, which
 requires every output to accept the same item.
+
+`GreedyMatcher(inputs, outputs)` maps an input-major Boolean request matrix to
+a Boolean one-to-one grant matrix. Lower input indices have priority, and each
+input takes its lowest still-unclaimed requested output. The result is maximal
+but not fair; readiness and the application-specific meaning of rows and
+columns remain outside the matcher.
+
+`GrantDemux(T, outputs)` routes one input according to an optional-one-hot grant
+row, while `GrantMerge(T, inputs)` selects one input according to an
+optional-one-hot grant column. A zero grant blocks the corresponding flow;
+asserting multiple bits violates each primitive's contract.
+
+`GrantCrossbar(T, inputs, outputs)` structurally composes one `GrantDemux` per
+input with one `GrantMerge` per output around an externally generated
+one-to-one grant matrix. It does not perform routing, arbitration, or
+buffering. Because grants may change while an output is stalled, all three
+primitives expose `Decoupled` outputs; add a queue or pipe when the consumer
+requires an irrevocable pending offer. The endpoint-first `grant_crossbar`
+helper infers the payload and input count from an input array, connects the
+grant sideband, and returns its output endpoint array for continued flow
+composition:
+
+```rhombus
+(buffered_inputs
+ |> grant_crossbar(_, output_count, ~grants: allocator.grants)
+) <=> egress
+```
 
 `zip_flow(T, left_payload, U, right_payload => expression)` constructs an
 array-input handle that atomically consumes one item from each payload type and

@@ -4,7 +4,7 @@
 import:
   "../../noc/model/main.rhm" open
   "../../noc/plan/main.rhm" open
-  lib("rhdl/std/noc/route-computer.rhdl") open
+  "../../noc/rtl/main.rhdl" open
 
 def n0 = NodeId(0)
 def n1 = NodeId(1)
@@ -35,32 +35,37 @@ unless routing is_a ValidatedRouting
 def source_plan = RouterPlan(routing, n0)
 def middle_plan = RouterPlan(routing, n1)
 def destination_plan = RouterPlan(routing, n2)
-def source_abi = RouteComputerABI(source_plan)
-def middle_abi = RouteComputerABI(middle_plan)
-def destination_abi = RouteComputerABI(destination_plan)
+// Select the fallback once at ABI construction so the checked-in generated
+// reference is independent of whether Espresso is installed on the host.
+def source_decoder = compile_route_decoder(source_plan, ~espresso: #false)
+def middle_decoder = compile_route_decoder(middle_plan, ~espresso: #false)
+def destination_decoder = compile_route_decoder(
+  destination_plan,
+  ~espresso: #false
+)
 
 circuit RouteComputerFixture():
-  input source_route_key: Bits(source_abi.route_width)
-  input source_origin_key: Bits(source_abi.origin_width)
-  output source_allowed_mask: Bits(source_abi.mask_width)
-  output source_eject: Bits(1)
-  output source_valid: Bits(1)
+  input source_route_key: Bits(source_decoder.route_width)
+  input source_origin_key: Bits(source_decoder.origin_width)
+  output source_allowed_mask: Bits(source_decoder.mask_width)
+  output source_eject: Bool
+  output source_valid: Bool
 
-  input middle_route_key: Bits(middle_abi.route_width)
-  input middle_origin_key: Bits(middle_abi.origin_width)
-  output middle_allowed_mask: Bits(middle_abi.mask_width)
-  output middle_eject: Bits(1)
-  output middle_valid: Bits(1)
+  input middle_route_key: Bits(middle_decoder.route_width)
+  input middle_origin_key: Bits(middle_decoder.origin_width)
+  output middle_allowed_mask: Bits(middle_decoder.mask_width)
+  output middle_eject: Bool
+  output middle_valid: Bool
 
-  input destination_route_key: Bits(destination_abi.route_width)
-  input destination_origin_key: Bits(destination_abi.origin_width)
-  output destination_allowed_mask: Bits(destination_abi.mask_width)
-  output destination_eject: Bits(1)
-  output destination_valid: Bits(1)
+  input destination_route_key: Bits(destination_decoder.route_width)
+  input destination_origin_key: Bits(destination_decoder.origin_width)
+  output destination_allowed_mask: Bits(destination_decoder.mask_width)
+  output destination_eject: Bool
+  output destination_valid: Bool
 
-  inst source(RouteComputer(source_abi, ~espresso: #false))
-  inst middle(RouteComputer(middle_abi, ~espresso: #false))
-  inst destination(RouteComputer(destination_abi, ~espresso: #false))
+  inst source(RouteComputer(source_decoder))
+  inst middle(RouteComputer(middle_decoder))
+  inst destination(RouteComputer(destination_decoder))
 
   source.route_key <== source_route_key
   source.origin_key <== source_origin_key
@@ -84,6 +89,13 @@ def design = elaborate(RouteComputerFixture())
 
 // Exact normalized SystemVerilog reference for the focused backend fixture.
 def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic route_key; logic origin_key; } RouteLookupKey;
+  typedef struct packed {logic [1:0] allowed_mask; logic eject; logic valid; }
+    RouteDecision;
+  typedef struct packed {logic allowed_mask; logic eject; logic valid; } RouteDecision_1;
+`endif // _TYPESCOPE_rhdl_types
 module RouteComputerFixture(
   input        source_route_key,
                source_origin_key,
@@ -133,10 +145,14 @@ module RouteComputer(
                valid
 );
 
-  wire [3:0] _GEN = {route_key, origin_key} == 2'h0 ? 4'hD : 4'h0;
-  assign allowed_mask = _GEN[3:2];
-  assign eject = _GEN[1];
-  assign valid = _GEN[0];
+  wire RouteDecision  _GEN = '{allowed_mask: 2'h3, eject: 1'h0, valid: 1'h1};
+  wire RouteDecision  _GEN_0 = '{allowed_mask: 2'h0, eject: 1'h0, valid: 1'h0};
+  wire RouteLookupKey _GEN_1 = '{route_key: route_key, origin_key: origin_key};
+  wire [1:0]          _GEN_2 = /*cast(bit[1:0])*/_GEN_1;
+  wire RouteDecision  _GEN_3 = _GEN_2 == 2'h0 ? _GEN : _GEN_0;
+  assign allowed_mask = _GEN_3.allowed_mask;
+  assign eject = _GEN_3.eject;
+  assign valid = _GEN_3.valid;
 endmodule
 
 module RouteComputer_1(
@@ -147,11 +163,15 @@ module RouteComputer_1(
                valid
 );
 
-  wire [1:0] _GEN = {route_key, origin_key};
-  wire [3:0] _GEN_0 = _GEN == 2'h0 ? 4'h5 : _GEN == 2'h1 ? 4'h9 : 4'h0;
-  assign allowed_mask = _GEN_0[3:2];
-  assign eject = _GEN_0[1];
-  assign valid = _GEN_0[0];
+  wire RouteDecision  _GEN = '{allowed_mask: 2'h2, eject: 1'h0, valid: 1'h1};
+  wire RouteDecision  _GEN_0 = '{allowed_mask: 2'h1, eject: 1'h0, valid: 1'h1};
+  wire RouteDecision  _GEN_1 = '{allowed_mask: 2'h0, eject: 1'h0, valid: 1'h0};
+  wire RouteLookupKey _GEN_2 = '{route_key: route_key, origin_key: origin_key};
+  wire [1:0]          _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
+  wire RouteDecision  _GEN_4 = _GEN_3 == 2'h0 ? _GEN_0 : _GEN_3 == 2'h1 ? _GEN : _GEN_1;
+  assign allowed_mask = _GEN_4.allowed_mask;
+  assign eject = _GEN_4.eject;
+  assign valid = _GEN_4.valid;
 endmodule
 
 module RouteComputer_2(
@@ -162,11 +182,14 @@ module RouteComputer_2(
          valid
 );
 
-  wire [1:0] _GEN = {route_key, origin_key};
-  wire [2:0] _GEN_0 = _GEN == 2'h0 | _GEN == 2'h1 ? 3'h3 : 3'h0;
-  assign allowed_mask = _GEN_0[2];
-  assign eject = _GEN_0[1];
-  assign valid = _GEN_0[0];
+  wire RouteDecision_1 _GEN = '{allowed_mask: 1'h0, eject: 1'h1, valid: 1'h1};
+  wire RouteDecision_1 _GEN_0 = '{allowed_mask: 1'h0, eject: 1'h0, valid: 1'h0};
+  wire RouteLookupKey  _GEN_1 = '{route_key: route_key, origin_key: origin_key};
+  wire [1:0]           _GEN_2 = /*cast(bit[1:0])*/_GEN_1;
+  wire RouteDecision_1 _GEN_3 = _GEN_2 == 2'h0 | _GEN_2 == 2'h1 ? _GEN : _GEN_0;
+  assign allowed_mask = _GEN_3.allowed_mask;
+  assign eject = _GEN_3.eject;
+  assign valid = _GEN_3.valid;
 endmodule
 }>>|
 
@@ -182,9 +205,9 @@ export:
   source_plan
   middle_plan
   destination_plan
-  source_abi
-  middle_abi
-  destination_abi
+  source_decoder
+  middle_decoder
+  destination_decoder
   RouteComputerFixture
   design
   verilog_reference

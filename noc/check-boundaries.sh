@@ -9,9 +9,10 @@ search_sources() {
   local pattern="$1"
   shift
   if command -v rg >/dev/null 2>&1; then
-    rg -n "$pattern" "$@" --glob '*.rhm'
+    rg -n "$pattern" "$@" --glob '*.rhm' --glob '*.rhdl'
   else
-    find "$@" -type f -name '*.rhm' -exec grep -nHE "$pattern" {} +
+    find "$@" -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
+      -exec grep -nHE "$pattern" {} +
   fi
 }
 
@@ -29,9 +30,16 @@ if [[ -n "$forbidden_std_imports" ]]; then
   exit 1
 fi
 
-unexpected_rhdl="$(find noc -type f -name '*.rhdl' -print)"
+forbidden_rtl_imports="$(search_sources '^[[:space:]]+.*(rhdl/core/|rhdl/backend/|rhdl/frontend/|circt)' noc/rtl || true)"
+if [[ -n "$forbidden_rtl_imports" ]]; then
+  echo "NoC RTL must use public RHDL language and standard-library APIs, not implementation or backend modules" >&2
+  echo "$forbidden_rtl_imports" >&2
+  exit 1
+fi
+
+unexpected_rhdl="$(find noc -type f -name '*.rhdl' ! -path 'noc/rtl/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
-  echo "pure NoC sources and tests must use #lang rhombus modules" >&2
+  echo "NoC .rhdl files may appear only in noc/rtl; pure sources and tests use #lang rhombus" >&2
   echo "$unexpected_rhdl" >&2
   exit 1
 fi

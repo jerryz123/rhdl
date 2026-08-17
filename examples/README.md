@@ -13,6 +13,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 |---|---|
 | [`rhdl/`](rhdl/) | Built-in `#lang rhdl` syntax, elaboration, and hardware semantics |
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
+| [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`tilelink/`](tilelink/) | Examples owned by the TileLink domain library |
@@ -135,7 +136,6 @@ instances, or logic to the generated RTL.
 | [`std/dont-care.rhdl`](std/dont-care.rhdl) | Typed synthesis freedom and Pattern-selected fixed bits |
 | [`std/decode.rhdl`](std/decode.rhdl) | Callable typed decode relation with named aggregate fields and semantic enum values |
 | [`std/decode-composition.rhdl`](std/decode-composition.rhdl) | Independent decode expansion across rows, output fields, and input fields |
-| [`std/noc-route-computer.rhdl`](std/noc-route-computer.rhdl) | Validated NoC route rows lowered into an exhaustively checked combinational decoder |
 | [`std/ready-valid-compatibility.rhdl`](std/ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
 | [`std/flow-control.rhdl`](std/flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
 | [`std/valid-pipe.rhdl`](std/valid-pipe.rhdl) | Fixed-latency Valid-only pipelining without a readiness channel |
@@ -146,6 +146,8 @@ instances, or logic to the generated RTL.
 
 | Example | Primary lesson |
 |---|---|
+| [`noc/noc-route-computer.rhdl`](noc/noc-route-computer.rhdl) | Validated NoC route rows lowered into an exhaustively checked combinational decoder |
+| [`noc/noc-router.rhdl`](noc/noc-router.rhdl) | Validated one-beat NoC routing with per-origin buffers, one-to-one allocation, ejection, and backpressure |
 | [`tilelink/tilelink.rhdl`](tilelink/tilelink.rhdl) | Parameterized uncached and cached TileLink interface adapters |
 
 ## Interface topology composition

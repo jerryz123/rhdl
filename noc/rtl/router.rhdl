@@ -1,0 +1,116 @@
+#lang rhdl
+// Implements a buffered one-beat NoC router driven only by a validated router plan.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/queue.rhdl") open
+  lib("rhdl/std/flow/matcher.rhdl") open
+  lib("rhdl/std/flow/crossbar.rhdl") open
+  "route-computer.rhdl" open
+  "../plan/router-plan.rhm" open
+
+export:
+  RoutedBeat
+  OneBeatRouterConfig
+  compile_one_beat_router
+  OneBeatRouter
+
+// One beat is one complete packet in this first router implementation. The
+// route key is transport metadata; the payload remains entirely opaque.
+bundle RoutedBeat(T, route_width):
+  route_key: Bits(route_width)
+  payload: T
+
+// Fixes all widths and local port meanings before circuit elaboration. The
+// current fixed-priority allocator satisfies whole-graph acyclicity but does
+// not yet promise the fairness required by an escape-routing certificate.
+class OneBeatRouterConfig(router_plan,
+                          route_decoder,
+                          input_count,
+                          output_count,
+                          target_count,
+                          ejection_target):
+  opaque
+  internal _OneBeatRouterConfig
+  constructor ~none
+
+// Validates the supported proof regime and freezes the router's hardware shape.
+fun compile_one_beat_router(router_plan :: RouterPlan,
+                            ~espresso: espresso = #'auto) :: OneBeatRouterConfig:
+  if router_plan.validated_routing.assumptions.eventual_escape_grant
+  | error(~who: #'compile_one_beat_router,
+          "one-beat router currently requires whole-graph acyclic routing")
+  | #void
+  def route_decoder = compile_route_decoder(
+    router_plan,
+    ~espresso: espresso
+  )
+  def input_count = router_plan.origins.length()
+  def output_count = router_plan.output_vcs.length()
+  def ejection_target:
+    if router_plan.has_ejection | output_count | #false
+  def target_count = output_count + (if ejection_target != #false | 1 | 0)
+  unless target_count > 0
+  | error(~who: #'compile_one_beat_router,
+          "router plan must have an outgoing VC or an ejection target")
+  _OneBeatRouterConfig(router_plan,
+                       route_decoder,
+                       input_count,
+                       output_count,
+                       target_count,
+                       ejection_target)
+
+// Checks the route metadata contract on each external ingress offer. The
+// physical ingress index supplies the origin key that is intentionally absent
+// from the transported beat.
+fun monitor_router_ingress(inputs :: Array,
+                           route_decoder :: RouteDecoder):
+  for (input_index in 0..inputs.length()):
+    def input :: Endpoint = inputs[input_index]
+    def decision = route_decoder.lookup(
+      input.bits.route_key,
+      bits(input_index, route_decoder.origin_width)
+    )
+    assert(!input.valid ||| decision.valid,
+           String.append("one_beat_router_ingress_valid_route_",
+                         to_string(input_index)))
+
+// Each local origin owns one standard depth-one queue. A transfer releases that
+// origin and acquires exactly the selected outgoing VC at the neighboring
+// router, matching the validated one-beat resource model.
+sync_circuit OneBeatRouter(T, config :: OneBeatRouterConfig):
+  def Beat = RoutedBeat(T, config.route_decoder.route_width)
+  interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  interface egress[config.target_count](Decoupled(Beat), ~role: producer)
+  monitor_router_ingress(ingress, config.route_decoder)
+
+  // Compose the ingress array with one ordinary depth-one queue per VC.
+  // Leaving pipe and flow disabled preserves the original registered timing.
+  def input_buffers = ingress |> parallel_handles(for Array (_ in 0..config.input_count): queue(Beat, 1))
+
+  def route_decisions = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      config.route_decoder.lookup(
+        input_buffer.bits.route_key,
+        bits(input_index, config.route_decoder.origin_width)
+      )
+  )
+
+  def requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      def row = vec(
+        for List (target_index in 0..config.target_count):
+          def candidate:
+            if target_index < config.output_count
+            | route_decisions[input_index].allowed_mask[target_index].into(Bool)
+            | route_decisions[input_index].eject
+          input_buffer.valid & route_decisions[input_index].valid & candidate
+      )
+      row
+  )
+
+  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  allocator.requests <== requests
+  (input_buffers |> grant_crossbar(_, config.target_count, ~grants: allocator.grants)) <=> egress

@@ -72,11 +72,11 @@ The current implementation provides:
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The pure package does not lower route tables into RHDL or generate router RTL.
-The optional one-way consumer under `rhdl/std/noc/` accepts only
-`RouterPlan` values derived from `ValidatedRouting` and lowers one router's
-finite local rows into a combinational route computer without adding an RHDL
-dependency here.
+The pure packages do not lower route tables into RHDL or generate router RTL.
+The separate [`rtl/`](rtl/README.md) package accepts only `RouterPlan` values
+derived from `ValidatedRouting`. It lowers one router's finite local rows into
+a combinational route computer and, for whole-graph-acyclic routing, a
+buffered one-beat router. No RHDL dependency flows back into the pure layers.
 
 ## Dependency boundary
 
@@ -87,11 +87,16 @@ modules, or CIRCT integration. Core model, authoring, analysis, and planning
 modules must not import `noc/std`; reusable topology and routing definitions
 depend on the core abstractions, never the reverse.
 
-The hardware bridge is tested separately by
-`tests/frontend/noc-route-computer-test.rhm` and the focused
-`noc-route-computer` CIRCT/Verilator fixture. Those consumers exhaust every
-encoded input of every router in a small validated network; they do not grant
-hardware code access to unvalidated relations or proof construction.
+Files under `noc/rtl/` may import the public `#lang rhdl` language and reusable
+RHDL standard primitives, plus the pure NoC model and plan. They must not
+import RHDL core, frontend implementation, backend, or CIRCT modules.
+
+The hardware bridge is tested separately by the focused route-computer and
+one-beat-router frontend, CIRCT, and Verilator fixtures. The route-computer
+fixture exhausts every encoded input of every router in a small validated
+network. The router fixture checks one-to-one allocation, independent
+backpressure, ejection contention, and packet conservation. Neither consumer
+grants hardware code access to unvalidated relations or proof construction.
 
 Run the focused checks from the repository root:
 

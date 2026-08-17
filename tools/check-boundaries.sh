@@ -98,6 +98,7 @@ fi
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './examples/*' ! -path './tests/frontend/*' ! -path './tests/fesvr/*' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
+  ! -path './noc/rtl/*' \
   ! -path './tilelink/*' ! -path './chi/*' \
   ! -path './sim/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then

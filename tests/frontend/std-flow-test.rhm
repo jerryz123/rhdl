@@ -4,12 +4,16 @@
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bool.rhm" as bool
   "../../rhdl/std/flow.rhdl" as flow
   "../../rhdl/std/flow/pipe.rhdl" as pipe
   "../../rhdl/std/flow/queue.rhdl" as queue
   "../../rhdl/std/flow/arbiter.rhdl" as arbiter
   "../../rhdl/std/flow/rr-arbiter.rhdl" as rr_arbiter
   "../../rhdl/std/flow/demux.rhdl" as demux
+  "../../rhdl/std/flow/matcher.rhdl" as matcher
+  "../../rhdl/std/flow/grant.rhdl" as grant
+  "../../rhdl/std/flow/crossbar.rhdl" as crossbar
   "../../rhdl/std/flow/join.rhdl" as join
   "../../rhdl/std/flow/broadcast.rhdl" as broadcast
   "../../rhdl/std/flow/atomic-fork.rhdl" as atomic_fork
@@ -32,6 +36,18 @@ def direct_rr_arbiter_design = embedded.run_elaboration(
 )
 def direct_demux_design = embedded.run_elaboration(
   fun (): demux.Demux(Bits(8), 1)
+)
+def direct_matcher_design = embedded.run_elaboration(
+  fun (): matcher.GreedyMatcher(1, 1)
+)
+def direct_grant_demux_design = embedded.run_elaboration(
+  fun (): grant.GrantDemux(Bits(8), 1)
+)
+def direct_grant_merge_design = embedded.run_elaboration(
+  fun (): grant.GrantMerge(Bits(8), 1)
+)
+def direct_crossbar_design = embedded.run_elaboration(
+  fun (): crossbar.GrantCrossbar(Bits(8), 1, 1)
 )
 def direct_join_design = embedded.run_elaboration(
   fun (): join.Join(Bits(8), 1)
@@ -121,6 +137,22 @@ def demux_three_design = embedded.run_elaboration(
   fun (): flow.Demux(Bits(8), 3)
 )
 def demux_three = demux_three_design.modules[0]
+def matcher_design = embedded.run_elaboration(
+  fun (): flow.GreedyMatcher(2, 3)
+)
+def matcher_module = matcher_design.modules[0]
+def grant_demux_design = embedded.run_elaboration(
+  fun (): flow.GrantDemux(Bits(8), 3)
+)
+def grant_demux_module = grant_demux_design.modules[0]
+def grant_merge_design = embedded.run_elaboration(
+  fun (): flow.GrantMerge(Bits(8), 3)
+)
+def grant_merge_module = grant_merge_design.modules[0]
+def crossbar_design = embedded.run_elaboration(
+  fun (): flow.GrantCrossbar(Bits(8), 2, 3)
+)
+def crossbar_module = crossbar_design.modules[0]
 def join_three_design = embedded.run_elaboration(
   fun (): flow.Join(Bits(8), 3)
 )
@@ -194,6 +226,9 @@ def aggregate_rr_arbiter_design = embedded.run_elaboration(
 def aggregate_demux_design = embedded.run_elaboration(
   fun (): flow.Demux(aggregate_type, 2)
 )
+def aggregate_crossbar_design = embedded.run_elaboration(
+  fun (): flow.GrantCrossbar(aggregate_type, 2, 2)
+)
 def aggregate_join_design = embedded.run_elaboration(
   fun (): flow.Join(aggregate_type, 2)
 )
@@ -221,6 +256,10 @@ check:
   verify_design(direct_arbiter_design) ~is #void
   verify_design(direct_rr_arbiter_design) ~is #void
   verify_design(direct_demux_design) ~is #void
+  verify_design(direct_matcher_design) ~is #void
+  verify_design(direct_grant_demux_design) ~is #void
+  verify_design(direct_grant_merge_design) ~is #void
+  verify_design(direct_crossbar_design) ~is #void
   verify_design(direct_join_design) ~is #void
   verify_design(direct_broadcast_design) ~is #void
   verify_design(direct_atomic_fork_design) ~is #void
@@ -303,6 +342,57 @@ check:
     "ingress_out", "egress_0_out", "egress_1_out", "egress_2_out"
   ]
 
+  matcher_module.find_input("requests").type.length ~is 2
+  matcher_module.find_input("requests").type.element_type.length ~is 3
+  bool.bool_type(
+    matcher_module.find_input("requests").type.element_type.element_type
+  ) ~is #true
+  matcher_module.find_output("grants").type.length ~is 2
+  matcher_module.find_output("grants").type.element_type.length ~is 3
+  bool.bool_type(
+    matcher_module.find_output("grants").type.element_type.element_type
+  ) ~is #true
+  operations(matcher_module, "rtl.register_reset").length() ~is 0
+  operations(matcher_module, "rtl.register").length() ~is 0
+
+  grant_demux_module.inputs.map(fun (port): port.name) ~is [
+    "ingress_in", "grants",
+    "egress_0_in", "egress_1_in", "egress_2_in"
+  ]
+  grant_demux_module.outputs.map(fun (port): port.name) ~is [
+    "ingress_out", "egress_0_out", "egress_1_out", "egress_2_out"
+  ]
+  grant_demux_module.find_input("grants").type.length ~is 3
+  bool.bool_type(
+    grant_demux_module.find_input("grants").type.element_type
+  ) ~is #true
+  grant_merge_module.inputs.map(fun (port): port.name) ~is [
+    "ingress_0_in", "ingress_1_in", "ingress_2_in", "grants", "egress_in"
+  ]
+  grant_merge_module.outputs.map(fun (port): port.name) ~is [
+    "ingress_0_out", "ingress_1_out", "ingress_2_out", "egress_out"
+  ]
+  grant_merge_module.find_input("grants").type.length ~is 3
+  bool.bool_type(
+    grant_merge_module.find_input("grants").type.element_type
+  ) ~is #true
+
+  crossbar_module.inputs.map(fun (port): port.name) ~is [
+    "ingress_0_in", "ingress_1_in", "grants",
+    "egress_0_in", "egress_1_in", "egress_2_in"
+  ]
+  crossbar_module.outputs.map(fun (port): port.name) ~is [
+    "ingress_0_out", "ingress_1_out",
+    "egress_0_out", "egress_1_out", "egress_2_out"
+  ]
+  crossbar_module.find_input("grants").type.element_type.length ~is 3
+  bool.bool_type(
+    crossbar_module.find_input("grants").type.element_type.element_type
+  ) ~is #true
+  operations(crossbar_module, "rtl.register_reset").length() ~is 0
+  operations(crossbar_module, "rtl.register").length() ~is 0
+  operations(crossbar_module, "rtl.instance").length() ~is 5
+
   join_three.find_output("egress_out").type.field("bits").type.length ~is 3
   join_three.find_output("egress_out").type.field("bits").type.element_type.width ~is 8
 
@@ -371,6 +461,10 @@ check:
   verify_design(arbiter_three_design) ~is #void
   verify_design(rr_arbiter_three_design) ~is #void
   verify_design(demux_three_design) ~is #void
+  verify_design(matcher_design) ~is #void
+  verify_design(grant_demux_design) ~is #void
+  verify_design(grant_merge_design) ~is #void
+  verify_design(crossbar_design) ~is #void
   verify_design(join_three_design) ~is #void
   verify_design(broadcast_three_design) ~is #void
   verify_design(atomic_fork_three_design) ~is #void
@@ -379,6 +473,7 @@ check:
   verify_design(aggregate_arbiter_design) ~is #void
   verify_design(aggregate_rr_arbiter_design) ~is #void
   verify_design(aggregate_demux_design) ~is #void
+  verify_design(aggregate_crossbar_design) ~is #void
   verify_design(aggregate_join_design) ~is #void
   verify_design(aggregate_broadcast_design) ~is #void
   verify_design(aggregate_atomic_fork_design) ~is #void
@@ -411,6 +506,12 @@ check:
   embedded.run_elaboration(fun (): flow.Broadcast(Bits(8), -1)) ~throws "PosInt"
   embedded.run_elaboration(fun (): flow.AtomicFork(Bits(8), 0)) ~throws "PosInt"
   embedded.run_elaboration(fun (): flow.AtomicFork(Bits(8), -1)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GreedyMatcher(0, 1)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GreedyMatcher(1, 0)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GrantDemux(Bits(8), 0)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GrantMerge(Bits(8), 0)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GrantCrossbar(Bits(8), 0, 1)) ~throws "PosInt"
+  embedded.run_elaboration(fun (): flow.GrantCrossbar(Bits(8), 1, 0)) ~throws "PosInt"
   embedded.run_elaboration(fun (): flow.Pipe(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.ValidPipe(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Queue(Bits(8), "two")) ~throws "argument does not satisfy annotation"
@@ -423,6 +524,12 @@ check:
   embedded.run_elaboration(fun (): flow.Arbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.RRArbiter(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Demux(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GreedyMatcher("two", 1)) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GreedyMatcher(1, "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GrantDemux(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GrantMerge(Bits(8), "two")) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GrantCrossbar(Bits(8), "two", 1)) ~throws "argument does not satisfy annotation"
+  embedded.run_elaboration(fun (): flow.GrantCrossbar(Bits(8), 1, "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Join(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.Broadcast(Bits(8), "two")) ~throws "argument does not satisfy annotation"
   embedded.run_elaboration(fun (): flow.AtomicFork(Bits(8), "two")) ~throws "argument does not satisfy annotation"

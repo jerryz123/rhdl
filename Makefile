@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-noc examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 HOST_ANNOTATION_TESTS := $(sort $(wildcard host/tests/*-test.rhm))
@@ -18,6 +18,7 @@ RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
 RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
 RHDL_EXAMPLES := $(sort $(shell find examples/rhdl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 STD_EXAMPLES := $(sort $(shell find examples/std -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+NOC_EXAMPLES := $(sort $(shell find examples/noc -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 LOP_EXAMPLES := $(sort $(shell find examples/lop -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 RFPL_LOGICAL_EXAMPLES := $(sort $(shell find examples/rfpl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 TILELINK_EXAMPLES := $(sort $(shell find examples/tilelink -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -124,6 +125,10 @@ examples-rhdl:
 examples-std:
 	bash tools/check-example-verilog.sh examples/std
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(STD_EXAMPLES)
+
+examples-noc:
+	bash tools/check-example-verilog.sh examples/noc
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(NOC_EXAMPLES)
 
 examples-lop:
 	bash tools/check-example-verilog.sh examples/lop

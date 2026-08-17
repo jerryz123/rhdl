@@ -1,0 +1,60 @@
+#lang rhdl
+// Defines grant-controlled payload traversal between ready-valid flow arrays.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+  lib("rhdl/std/flow/grant.rhdl") open
+
+export:
+  GrantCrossbar
+  grant_crossbar
+
+// The grant matrix is input-major and must be a one-to-one matching: at most
+// one output may select each input, and at most one input may select each
+// output. Grant generation is deliberately separate so arbitration policy,
+// fairness, and domain-specific eligibility remain outside this datapath.
+//
+// Selection may change while an output is stalled, so outputs expose the
+// Decoupled rather than Irrevocable contract. Insert a queue or pipe after the
+// crossbar when a stable pending offer is required.
+circuit GrantCrossbar(T,
+                      input_count :: PosInt,
+                      output_count :: PosInt):
+  interface ingress[input_count](Decoupled(T), ~role: consumer)
+  input grants: Vec(input_count, Vec(output_count, Bool))
+  interface egress[output_count](Decoupled(T), ~role: producer)
+
+  def input_stages = for InstanceArray (input_index in 0..input_count):
+    inst input_stage(GrantDemux(T, output_count))
+    input_stage.ingress <=> ingress[input_index]
+    input_stage.grants <== grants[input_index]
+    input_stage
+
+  def output_stages = for InstanceArray (output_index in 0..output_count):
+    inst output_stage(GrantMerge(T, input_count))
+    output_stage.grants <== vec(
+      for List (input_index in 0..input_count):
+        grants[input_index][output_index]
+    )
+    for (input_index in 0..input_count):
+      output_stage.ingress[input_index] <=> (
+        input_stages[input_index].egress[output_index]
+      )
+    egress[output_index] <=> output_stage.egress
+    output_stage
+
+// Connects an endpoint array through a grant-controlled crossbar and returns
+// its output endpoint array for further flow composition. Grants remain an
+// explicit sideband because they control, rather than participate in, payload
+// transfer.
+fun grant_crossbar(inputs :: Array,
+                   output_count :: PosInt,
+                   ~grants):
+  unless inputs.length() > 0
+  | error(~who: #'grant_crossbar,
+          "grant crossbar requires at least one input endpoint")
+  def T = flow_payload_type(inputs[0])
+  inst crossbar_stage(GrantCrossbar(T, inputs.length(), output_count))
+  crossbar_stage.grants <== grants
+  InterfaceHandle(crossbar_stage.ingress, crossbar_stage.egress)(inputs)

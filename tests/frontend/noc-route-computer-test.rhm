@@ -3,52 +3,89 @@
 
 import:
   "../../rhdl/core/main.rhm" open
-  "../../rhdl/std/noc/route-computer.rhdl" open
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "../../rhdl/frontend/layers/comb.rhm" as comb
+  "../../noc/rtl/main.rhdl" open
   "../../noc/model/main.rhm" open
   "../../noc/plan/main.rhm" open
-  "../../examples/std/noc-route-computer.rhdl" as fixture
+  "../../examples/noc/noc-route-computer.rhdl" as fixture
 
-fun decoded_result(abi, encoded_key):
-  def table = abi.decoder(~espresso: #false).table
+fun pattern_field(cube, field_name):
+  def field = cube.value.fields.find(
+    fun (candidate): candidate[0] == field_name
+  )
+  field[1].packed_value()
+
+fun decision_result(cube):
+  [pattern_field(cube, "allowed_mask"),
+   pattern_field(cube, "eject") != 0,
+   pattern_field(cube, "valid") != 0]
+
+fun decoded_result(route_decoder, encoded_key):
+  def origin_mask = (1 bits.(<<) route_decoder.origin_width) - 1
+  def selector = RouteLookupKey(
+    route_decoder.route_width,
+    route_decoder.origin_width
+  ):
+    route_key: comb.bits(
+      encoded_key bits.(>>) route_decoder.origin_width,
+      route_decoder.route_width
+    )
+    origin_key: comb.bits(
+      encoded_key bits.and origin_mask,
+      route_decoder.origin_width
+    )
+  def table = route_decoder.decoder.table
   def matching = table.cases.find(
-    fun (case): case.input.value_bits == encoded_key
+    fun (case): case.input.matches(selector)
   )
   if matching
-  | matching.output.value_bits
-  | table.default.value_bits
+  | decision_result(matching.output)
+  | decision_result(table.default)
 
-fun expected_result(abi, encoded_key):
-  def origin_mask = (1 bits.(<<) abi.origin_width) - 1
-  def route_key = encoded_key bits.(>>) abi.origin_width
+fun expected_result(route_decoder, encoded_key):
+  def origin_mask = (1 bits.(<<) route_decoder.origin_width) - 1
+  def route_key = encoded_key bits.(>>) route_decoder.origin_width
   def origin_key = encoded_key bits.and origin_mask
-  def entry = abi.entry_for_keys(route_key, origin_key)
-  if entry | entry.result_bits() | 0
+  def entry = route_decoder.router_plan.rows.find(
+    fun (candidate):
+      candidate.route_key == route_key && candidate.origin_key == origin_key
+  )
+  if entry
+  | [entry.allowed_mask, entry.route_row.eject, #true]
+  | [0, #false, #false]
 
-fun decoded_results(abi):
-  for List (key in 0..(1 bits.(<<) abi.key_width)):
-    decoded_result(abi, key)
+fun key_space_size(route_decoder):
+  1 bits.(<<) (route_decoder.route_width + route_decoder.origin_width)
 
-fun expected_results(abi):
-  for List (key in 0..(1 bits.(<<) abi.key_width)):
-    expected_result(abi, key)
+fun decoded_results(route_decoder):
+  for List (key in 0..key_space_size(route_decoder)):
+    decoded_result(route_decoder, key)
 
-fun materialized_mask(abi, entry):
+fun expected_results(route_decoder):
+  for List (key in 0..key_space_size(route_decoder)):
+    expected_result(route_decoder, key)
+
+fun materialized_mask(route_decoder, entry):
   def mutable mask = 0
   for (vc in fixture.routing.materialized.allowed_candidates(
-             entry.plan_row.route_row.route_class,
-             entry.plan_row.route_row.origin
+             entry.route_row.route_class,
+             entry.route_row.origin
            )):
-    mask := mask bits.or (1 bits.(<<) abi.output_bit(vc))
+    mask := mask bits.or (
+      1 bits.(<<) route_decoder.router_plan.output_bit(vc)
+    )
   mask
 
-fun masks_match_materialized(abi):
-  abi.entries.map(fun (entry): entry.allowed_mask) == abi.entries.map(
-    fun (entry): materialized_mask(abi, entry)
+fun masks_match_materialized(route_decoder):
+  def rows = route_decoder.router_plan.rows
+  rows.map(fun (entry): entry.allowed_mask) == rows.map(
+    fun (entry): materialized_mask(route_decoder, entry)
   )
 
-def source_abi = fixture.source_abi
-def middle_abi = fixture.middle_abi
-def destination_abi = fixture.destination_abi
+def source_decoder = fixture.source_decoder
+def middle_decoder = fixture.middle_decoder
+def destination_decoder = fixture.destination_decoder
 def top = fixture.design.modules.find(
   fun (module_def): module_def.name == "RouteComputerFixture"
 )
@@ -63,53 +100,65 @@ def decode_modules = fixture.design.modules.filter(
 )
 
 check:
-  source_abi.router_plan === fixture.source_plan ~is #true
-  source_abi.route_width ~is 1
-  source_abi.origin_width ~is 1
-  source_abi.key_width ~is 2
-  source_abi.output_count ~is 2
-  source_abi.mask_width ~is 2
-  source_abi.encode(fixture.route, Injection(fixture.n0)) ~is 0
-  source_abi.output_bit(VCId(fixture.first.id, 1)) ~is 1
-  source_abi.entries.map(fun (entry): entry.encoded_key) ~is [0]
-  source_abi.entries.map(fun (entry): entry.allowed_mask) ~is [0b11]
-  source_abi.entries.map(fun (entry): entry.result_bits()) ~is [0b1101]
-  masks_match_materialized(source_abi) ~is #true
-  decoded_results(source_abi) ~is expected_results(source_abi)
-  decoded_results(source_abi) ~is [0b1101, 0, 0, 0]
+  source_decoder.router_plan === fixture.source_plan ~is #true
+  source_decoder.route_width ~is 1
+  source_decoder.origin_width ~is 1
+  source_decoder.mask_width ~is 2
+  fixture.source_plan.row(
+    fixture.route,
+    Injection(fixture.n0)
+  ) === fixture.source_plan.rows[0] ~is #true
+  fixture.source_plan.output_bit(VCId(fixture.first.id, 1)) ~is 1
+  fixture.source_plan.rows.map(fun (entry): entry.route_key) ~is [0]
+  fixture.source_plan.rows.map(fun (entry): entry.origin_key) ~is [0]
+  fixture.source_plan.rows.map(fun (entry): entry.allowed_mask) ~is [0b11]
+  masks_match_materialized(source_decoder) ~is #true
+  decoded_results(source_decoder) ~is expected_results(source_decoder)
+  decoded_results(source_decoder) ~is [
+    [0b11, #false, #true],
+    [0, #false, #false],
+    [0, #false, #false],
+    [0, #false, #false]
+  ]
 
 check:
-  middle_abi.router_plan === fixture.middle_plan ~is #true
-  middle_abi.route_width ~is 1
-  middle_abi.origin_width ~is 1
-  middle_abi.key_width ~is 2
-  middle_abi.output_count ~is 2
-  middle_abi.mask_width ~is 2
-  middle_abi.encode(
+  middle_decoder.router_plan === fixture.middle_plan ~is #true
+  middle_decoder.route_width ~is 1
+  middle_decoder.origin_width ~is 1
+  middle_decoder.mask_width ~is 2
+  fixture.middle_plan.row(
     fixture.route,
     HeldVC(VCId(fixture.first.id, 1))
-  ) ~is 1
-  middle_abi.output_bit(VCId(fixture.second.id, 1)) ~is 1
-  middle_abi.entries.map(fun (entry): entry.encoded_key) ~is [0, 1]
-  middle_abi.entries.map(fun (entry): entry.allowed_mask) ~is [0b01, 0b10]
-  middle_abi.entries.map(fun (entry): entry.result_bits()) ~is [0b0101, 0b1001]
-  masks_match_materialized(middle_abi) ~is #true
-  decoded_results(middle_abi) ~is expected_results(middle_abi)
-  decoded_results(middle_abi) ~is [0b0101, 0b1001, 0, 0]
+  ) === fixture.middle_plan.rows[1] ~is #true
+  fixture.middle_plan.output_bit(VCId(fixture.second.id, 1)) ~is 1
+  fixture.middle_plan.rows.map(fun (entry): entry.route_key) ~is [0, 0]
+  fixture.middle_plan.rows.map(fun (entry): entry.origin_key) ~is [0, 1]
+  fixture.middle_plan.rows.map(fun (entry): entry.allowed_mask) ~is [0b01, 0b10]
+  masks_match_materialized(middle_decoder) ~is #true
+  decoded_results(middle_decoder) ~is expected_results(middle_decoder)
+  decoded_results(middle_decoder) ~is [
+    [0b01, #false, #true],
+    [0b10, #false, #true],
+    [0, #false, #false],
+    [0, #false, #false]
+  ]
 
 check:
-  destination_abi.router_plan === fixture.destination_plan ~is #true
-  destination_abi.route_width ~is 1
-  destination_abi.origin_width ~is 1
-  destination_abi.key_width ~is 2
-  destination_abi.output_count ~is 0
-  destination_abi.mask_width ~is 1
-  destination_abi.entries.map(fun (entry): entry.encoded_key) ~is [0, 1]
-  destination_abi.entries.map(fun (entry): entry.allowed_mask) ~is [0, 0]
-  destination_abi.entries.map(fun (entry): entry.result_bits()) ~is [0b011, 0b011]
-  masks_match_materialized(destination_abi) ~is #true
-  decoded_results(destination_abi) ~is expected_results(destination_abi)
-  decoded_results(destination_abi) ~is [0b011, 0b011, 0, 0]
+  destination_decoder.router_plan === fixture.destination_plan ~is #true
+  destination_decoder.route_width ~is 1
+  destination_decoder.origin_width ~is 1
+  destination_decoder.mask_width ~is 1
+  fixture.destination_plan.rows.map(fun (entry): entry.route_key) ~is [0, 0]
+  fixture.destination_plan.rows.map(fun (entry): entry.origin_key) ~is [0, 1]
+  fixture.destination_plan.rows.map(fun (entry): entry.allowed_mask) ~is [0, 0]
+  masks_match_materialized(destination_decoder) ~is #true
+  decoded_results(destination_decoder) ~is expected_results(destination_decoder)
+  decoded_results(destination_decoder) ~is [
+    [0, #true, #true],
+    [0, #true, #true],
+    [0, #false, #false],
+    [0, #false, #false]
+  ]
 
 check:
   top != #false ~is #true
@@ -118,7 +167,23 @@ check:
   type_equal(top.find_output("source_allowed_mask").type, Bits(2)) ~is #true
   type_equal(top.find_output("middle_allowed_mask").type, Bits(2)) ~is #true
   type_equal(top.find_output("destination_allowed_mask").type, Bits(1)) ~is #true
+  bool.bool_type(top.find_output("source_eject").type) ~is #true
+  bool.bool_type(top.find_output("source_valid").type) ~is #true
+  bool.bool_type(top.find_output("destination_eject").type) ~is #true
+  bool.bool_type(top.find_output("destination_valid").type) ~is #true
   decode_modules.length() ~is 3
+  decode_modules.map(
+    fun (module_def):
+      module_def.operations.filter(
+        ~keep: fun (operation): operation.opcode == "rtl.record_create"
+      ).length()
+  ) ~is [1, 1, 1]
+  decode_modules.map(
+    fun (module_def):
+      module_def.operations.filter(
+        ~keep: fun (operation): operation.opcode == "rtl.record_get"
+      ).length()
+  ) ~is [3, 3, 3]
   verify_design(fixture.design) ~is #void
 
 def isolated_node = NodeId(0)
@@ -132,18 +197,13 @@ def no_vc_routing = compile_routing(
   )
 )
 def local_plan = RouterPlan(no_vc_routing, isolated_node)
-def local_abi = RouteComputerABI(local_plan)
+def local_decoder = compile_route_decoder(local_plan, ~espresso: #false)
 def unused_plan = RouterPlan(no_vc_routing, unused_node)
 
 check:
-  RouteComputerABI("not a plan") ~throws "RouterPlan"
-  RouteComputerABI(no_vc_routing) ~throws "RouterPlan"
-  RouteComputerABI(unused_plan) ~throws "at least one local route row"
-  source_abi.route_key("not a route") ~throws "RouteClass"
-  source_abi.encode(
-    fixture.route,
-    Injection(fixture.n1)
-  ) ~throws "must equal the route-class source"
-  local_abi.output_count ~is 0
-  local_abi.mask_width ~is 1
-  local_abi.entries.map(fun (entry): entry.result_bits()) ~is [0b011]
+  compile_route_decoder("not a plan") ~throws "RouterPlan"
+  compile_route_decoder(no_vc_routing) ~throws "RouterPlan"
+  compile_route_decoder(unused_plan) ~throws "at least one local route row"
+  fixture.source_plan.route_key("not a route") ~throws "RouteClass"
+  local_decoder.mask_width ~is 1
+  local_decoder.router_plan.rows.map(fun (entry): entry.allowed_mask) ~is [0]

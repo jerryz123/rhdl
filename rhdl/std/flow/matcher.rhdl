@@ -1,0 +1,31 @@
+#lang rhdl
+// Defines deterministic one-to-one matching over a hardware request matrix.
+
+export:
+  GreedyMatcher
+
+// Requests and grants use the same input-major matrix shape. Matching is
+// independent of payloads, ready signals, and any domain-specific resource
+// meaning assigned to rows or columns. Lower input indices have priority, and
+// each input takes the lowest still-unclaimed requested output. The result is
+// maximal, but the fixed priority provides no fairness guarantee.
+circuit GreedyMatcher(input_count :: PosInt, output_count :: PosInt):
+  input requests: Vec(input_count, Vec(output_count, Bool))
+  output grants: Vec(input_count, Vec(output_count, Bool))
+
+  def output_taken = Array.make(output_count)
+  for (output_index in 0..output_count):
+    output_taken[output_index] := Bool(#false)
+  def mutable grant_rows = []
+  for (input_index in 0..input_count):
+    def mutable input_taken = Bool(#false)
+    def mutable row = []
+    for (output_index in 0..output_count):
+      def requested = requests[input_index][output_index]
+      def grant = requested & !input_taken & !output_taken[output_index]
+      row := row ++ [grant]
+      input_taken := input_taken ||| grant
+      output_taken[output_index] := output_taken[output_index] ||| grant
+    grant_rows := grant_rows ++ [vec(row)]
+
+  grants <== vec(grant_rows)
