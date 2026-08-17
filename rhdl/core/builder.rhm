@@ -28,14 +28,12 @@ fun ensure_data_type(type, who):
 
 fun ensure_packable_data_type(type, who):
   ensure_data_type(type, who)
-  unless packed_width(type) is_a Int && packed_width(type) > 0
+  unless packed_width(type) is_a PosInt
   | fail(who, "expected a packable DataType")
 
-fun normalize_decode_pattern(value, care, width, who, role):
-  unless value is_a Int && care is_a Int
-  | fail(who, role ++ " value and care must be host Int values")
+fun normalize_decode_pattern(value :: Nat, care :: Nat, width :: PosInt, who, role):
   def limit = 1 bits.(<<) width
-  unless value >= 0 && value < limit && care >= 0 && care < limit
+  unless value < limit && care < limit
   | fail(who, role ++ " value or care does not fit its packed width")
   [value bits.and care, care]
 
@@ -343,9 +341,9 @@ fun build_mux_lookup(design,
     | fail(who, "mux lookup cases must be [key, value] pairs")
     def key = case[0]
     def value = case[1]
-    unless key is_a Int
-    | fail(who, "mux lookup keys must be host Int values")
-    unless key >= 0 && key < (1 bits.(<<) width)
+    unless key is_a Nat
+    | fail(who, "mux lookup keys must be host natural numbers")
+    unless key < (1 bits.(<<) width)
     | fail(who, "mux lookup key does not fit its selector type")
     ensure_value_in(module_def, value, who)
     unless data_type(value.type) && type_equal(default_value.type, value.type)
@@ -727,16 +725,14 @@ class Builder(design):
 
   method constant(module_def,
                   type,
-                  integer,
+                  integer :: Nat,
                   name = #false,
                   location = Location(),
                   origin = Origin("constant")):
     ensure_module_in_design(design, module_def, #'constant)
     ensure_open(module_def, #'constant)
     ensure_bits(type, #'constant)
-    unless integer is_a Int
-    | fail(#'constant, "constant value must be a host Int")
-    unless integer >= 0 && integer < (1 bits.(<<) type.width)
+    unless integer < (1 bits.(<<) type.width)
     | fail(#'constant,
            "constant " ++ to_string(integer) ++ " does not fit " ++ type.describe())
     def operation_id = design.fresh_id()
@@ -1106,8 +1102,8 @@ class Builder(design):
 
   method extract(module_def,
                  value,
-                 high,
-                 low,
+                 high :: Nat,
+                 low :: Nat,
                  name = #false,
                  location = Location(),
                  origin = Origin("extract")):
@@ -1116,9 +1112,7 @@ class Builder(design):
     ensure_value_in(module_def, value, #'extract)
     unless bits_type(value.type)
     | fail(#'extract, "extract operand must have a Bits type")
-    unless high is_a Int && low is_a Int
-    | fail(#'extract, "extract indices must be host Int values")
-    unless 0 <= low && low <= high && high < value.type.width
+    unless low <= high && high < value.type.width
     | fail(#'extract,
            "extract indices must satisfy 0 <= low <= high < source width")
     build_value_operation(design,
@@ -1134,7 +1128,7 @@ class Builder(design):
 
   method zext(module_def,
               value,
-              target_width,
+              target_width :: PosInt,
               name = #false,
               location = Location(),
               origin = Origin("zext")):
@@ -1143,8 +1137,6 @@ class Builder(design):
     ensure_value_in(module_def, value, #'zext)
     unless bits_type(value.type)
     | fail(#'zext, "zext operand must have a Bits type")
-    unless target_width is_a Int && target_width > 0
-    | fail(#'zext, "zext target width must be a positive host Int")
     unless target_width > value.type.width
     | fail(#'zext, "zext target width must be larger than the source width")
     build_value_operation(design,
@@ -1160,7 +1152,7 @@ class Builder(design):
 
   method sext(module_def,
               value,
-              target_width,
+              target_width :: PosInt,
               name = #false,
               location = Location(),
               origin = Origin("sext")):
@@ -1169,8 +1161,6 @@ class Builder(design):
     ensure_value_in(module_def, value, #'sext)
     unless signed_arithmetic_type(value.type)
     | fail(#'sext, "sext operand must have a SignedArithmeticType")
-    unless target_width is_a Int && target_width > 0
-    | fail(#'sext, "sext target width must be a positive host Int")
     unless target_width > data_width(value.type)
     | fail(#'sext, "sext target width must be larger than the source width")
     def result_type = value.type.with_bit_width(target_width)
@@ -1189,7 +1179,7 @@ class Builder(design):
 
   method trunc(module_def,
                value,
-               target_width,
+               target_width :: PosInt,
                name = #false,
                location = Location(),
                origin = Origin("trunc")):
@@ -1198,8 +1188,6 @@ class Builder(design):
     ensure_value_in(module_def, value, #'trunc)
     unless bits_type(value.type)
     | fail(#'trunc, "trunc operand must have a Bits type")
-    unless target_width is_a Int && target_width > 0
-    | fail(#'trunc, "trunc target width must be a positive host Int")
     unless target_width < value.type.width
     | fail(#'trunc, "trunc target width must be smaller than the source width")
     build_value_operation(design,
@@ -1314,7 +1302,7 @@ class Builder(design):
 
   method vector_get(module_def,
                     vector,
-                    index,
+                    index :: Nat,
                     name = #false,
                     location = Location(),
                     origin = Origin("vector_get")):
@@ -1323,7 +1311,7 @@ class Builder(design):
     ensure_value_in(module_def, vector, #'vector_get)
     unless vector_type(vector.type)
     | fail(#'vector_get, "vector_get operand must have a VectorType")
-    unless index is_a Int && 0 <= index && index < vector.type.length
+    unless index < vector.type.length
     | fail(#'vector_get, "vector index must satisfy 0 <= index < vector length")
     build_value_operation(design,
                           module_def,
@@ -1365,7 +1353,7 @@ class Builder(design):
         place.projected_places := place.projected_places ++ [projected]
         projected
 
-  method project_vector(place, index):
+  method project_vector(place, index :: Nat):
     unless place is_a Place
     | fail(#'project_vector, "vector projection target must be a hardware Place")
     def module_def = design.find_module(place.module_id)
@@ -1374,7 +1362,7 @@ class Builder(design):
     ensure_place_in(module_def, place, #'project_vector)
     unless vector_type(place.type)
     | fail(#'project_vector, "vector projection target must have a VectorType")
-    unless index is_a Int && 0 <= index && index < place.type.length
+    unless index < place.type.length
     | fail(#'project_vector, "vector index must satisfy 0 <= index < vector length")
     def existing = place.projected_place(index)
     if existing
@@ -1446,15 +1434,13 @@ class Builder(design):
   // hardware data. Access operations retain an explicit resource reference.
   method memory(module_def,
                 name,
-                depth,
+                depth :: PosInt,
                 element_type,
                 location = Location(),
                 origin = Origin("memory", name)):
     ensure_module_in_design(design, module_def, #'memory)
     ensure_open(module_def, #'memory)
     ensure_hardware_name(name, #'memory)
-    unless depth is_a Int && depth > 0
-    | fail(#'memory, "memory depth must be a positive host Int")
     ensure_data_type(element_type, #'memory)
     ensure_unique_hardware_name(module_def, name, #'memory)
     def operation_id = design.fresh_id()
@@ -1556,7 +1542,7 @@ class Builder(design):
   // write ports are declared here and subsequently wired through Places.
   method sync_memory(module_def,
                      name,
-                     depth,
+                     depth :: PosInt,
                      element_type,
                      clock,
                      has_read = #true,
@@ -1569,8 +1555,6 @@ class Builder(design):
     ensure_open(module_def, #'sync_memory)
     ensure_hardware_name(name, #'sync_memory)
     ensure_unique_hardware_name(module_def, name, #'sync_memory)
-    unless depth is_a Int && depth > 0
-    | fail(#'sync_memory, "synchronous memory depth must be a positive host Int")
     ensure_data_type(element_type, #'sync_memory)
     ensure_value_in(module_def, clock, #'sync_memory)
     unless clock_type(clock.type)
@@ -1582,14 +1566,14 @@ class Builder(design):
     | fail(#'sync_memory,
            "a read-write port cannot be combined with separate read or write ports yet")
     when mask_granularity != #false
-    | unless mask_granularity is_a Int && mask_granularity > 0
+    | unless mask_granularity is_a PosInt
       | fail(#'sync_memory,
-             "synchronous memory mask granularity must be a positive host Int")
+             "synchronous memory mask granularity must be PosInt")
       unless has_write || has_read_write
       | fail(#'sync_memory,
              "synchronous memory masking requires a write-capable port")
       def element_width = packed_width(element_type)
-      unless element_width is_a Int && element_width > 0
+      unless element_width is_a PosInt
       | fail(#'sync_memory,
              "masked synchronous memory element type must have a packed width")
       unless element_width mod mask_granularity == 0

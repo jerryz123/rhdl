@@ -10,9 +10,7 @@ import:
 // Tracks an owned resource balance. A decrement requires a resource present
 // before the edge; simultaneous increment and decrement therefore cannot
 // manufacture a zero-balance resource for immediate use.
-sync_circuit CreditCounter(limit :: Int):
-  unless limit > 0
-  | error(~who: #'CreditCounter, "limit must be a positive host Int")
+sync_circuit CreditCounter(limit :: PosInt):
 
   def count_width = index_width(limit + 1)
   input increment: Bool
@@ -43,10 +41,7 @@ sync_circuit CreditCounter(limit :: Int):
 
 // Converts internal ready-valid traffic to credited transport. Readiness is
 // based only on registered credits, never on a grant arriving this cycle.
-sync_circuit CreditSender(T, credit_limit :: Int):
-  unless credit_limit > 0
-  | error(~who: #'CreditSender,
-          "credit limit must be a positive host Int")
+sync_circuit CreditSender(T, credit_limit :: PosInt):
 
   interface ingress(Decoupled(T), ~role: consumer)
   interface link(Credited(T, credit_limit), ~role: transmitter)
@@ -64,9 +59,7 @@ sync_circuit CreditSender(T, credit_limit :: Int):
 
 // Converts credited transport back to a buffered ready-valid flow. Reserved
 // capacity includes both buffered payloads and credits still held remotely.
-sync_circuit CreditBuffer(T, depth :: Int):
-  unless depth > 0
-  | error(~who: #'CreditBuffer, "depth must be a positive host Int")
+sync_circuit CreditBuffer(T, depth :: PosInt):
 
   input grant_enable: Bool
   interface link(Credited(T, depth), ~role: receiver, ~monitor)
@@ -98,7 +91,7 @@ fun finish_credit_stage(source_or_type, handle :: Handle):
   | handle(source_or_type)
   | handle
 
-fun credited_stage_protocol(source_or_type, credit_limit :: Int):
+fun credited_stage_protocol(source_or_type, credit_limit :: PosInt):
   def protocol:
     cond
     | source_or_type is_a Endpoint: source_or_type.type
@@ -122,7 +115,7 @@ fun credited_stage_protocol(source_or_type, credit_limit :: Int):
           "credit buffer depth must match the protocol credit limit")
   normalized
 
-fun credit_sender(source_or_type, credit_limit :: Int):
+fun credit_sender(source_or_type, credit_limit :: PosInt):
   def T = flow_payload_type(source_or_type)
   inst credit_sender_stage(CreditSender(T, credit_limit))
   finish_flow_stage(
@@ -131,7 +124,7 @@ fun credit_sender(source_or_type, credit_limit :: Int):
   )
 
 fun credit_buffer(source_or_type,
-                  depth :: Int,
+                  depth :: PosInt,
                   ~grant_enable: grant_enable = Bool(#true)):
   def protocol = credited_stage_protocol(source_or_type, depth)
   def T = protocol.members.find(fun (member): member.name == "bits").type
