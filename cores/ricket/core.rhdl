@@ -21,18 +21,12 @@ import:
   lib("rhdl/std/flow.rhdl") open
   lib("rhdl/std/scoreboard.rhdl") open
 
-sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
+sync_circuit RicketCore(xlen :: XLen):
   def width = xlen_width(xlen)
-  unless address_width >= 3
-  | error(~who: #'RicketCore,
-          "address width must cover an eight-byte data transfer")
-  unless address_width <= width
-  | error(~who: #'RicketCore,
-          "address width must not exceed the architectural integer width")
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
-  interface instruction_access(RicketInstructionAccess(address_width), ~role: requester)
-  interface data_access(RicketDataAccess(xlen, address_width), ~role: requester)
+  interface instruction_access(RicketInstructionAccess(xlen), ~role: requester)
+  interface data_access(RicketDataAccess(xlen), ~role: requester)
   output fault: Bool
 
   def zero = bits(0, width)
@@ -99,7 +93,7 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def fetch_wants_request = started & !(faulted ||| execute_fault_event) & !redirect_link.right.valid
   instruction_access.flush <== fetch_flush
   instruction_access.request.valid <== fetch_wants_request & fetch_pcs.ingress.ready
-  instruction_access.request.bits.address <== fetch_pc[0..address_width]
+  instruction_access.request.bits.address <== fetch_pc
   fetch_pcs.ingress.valid <== fetch_wants_request & instruction_access.request.ready
   fetch_pcs.ingress.bits <== fetch_pc
 
@@ -112,9 +106,9 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
         FetchDecode(xlen):
           pc: pc
           instruction: response.instruction
-    ) |> filter_flow(FetchDecode(xlen), fetch_token => !squash)
+    ) |> filter_flow(FetchDecode(xlen), _ => !squash)
       |> pipe(_, 1)
-      |> filter_flow(FetchDecode(xlen), fetch_token => !squash)
+      |> filter_flow(FetchDecode(xlen), _ => !squash)
   )
 
   def fetch_request_fire = fire(instruction_access.request)
@@ -294,8 +288,8 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   // edge that captures the instruction in EX/MEM. A hit therefore occupies
   // the ordinary MEM stage instead of adding a request cycle after it.
   data_access.request.valid <== id_ex.valid & !execute_fault & execute_is_memory
-  data_access.request.bits <== RicketDataReq(xlen, address_width):
-    address: alu.result[0..address_width]
+  data_access.request.bits <== RicketDataReq(xlen):
+    address: alu.result
     write: id_ex.bits.memory_operation === MemoryOperation.Write
     width: id_ex.bits.memory_width
     unsigned: id_ex.bits.memory_unsigned

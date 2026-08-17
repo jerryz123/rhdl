@@ -3,20 +3,23 @@
 # Ricket instruction cache
 
 `protocol.rhdl` defines `RicketInstructionAccess`, an ordered `Irrevocable`
-request/response interface carrying byte addresses, returning 32-bit
+request/response interface carrying XLEN-wide byte addresses, returning 32-bit
 instructions, and accepting an explicit speculative flush from Fetch. The
 pipeline checks architectural alignment; the cache translates requests into
-aligned eight-byte backing-memory beats.
+aligned eight-byte backing-memory beats without truncating the address.
 
 `cache.rhdl` implements a direct-mapped read-only cache with host-configured
-power-of-two set and line counts. Its synchronous tag/data lookup is a
-one-cycle pipeline: on consecutive hits it accepts one request and returns one
-ordered instruction every cycle. A two-entry response queue preserves results
+power-of-two set and line counts. A one-stage `Pipe` carries each address beside
+the synchronous tag/data lookup, so consecutive hits accept and return one
+ordered instruction every cycle. A hit maps directly into a response flow; a
+miss is filtered and mapped into the shared `../refill.rhdl` transaction engine.
+The engine owns the address context, ordered backing requests, response count,
+and line accumulator, then returns the address with the completed line. Hit and
+live-refill responses merge before a two-entry queue that preserves results
 under fetch backpressure. A flush clears buffered hits and kills the active
-lookup. A discovered miss blocks new lookups until its line is installed; the
-refill may have multiple ordered `SimpleMemory` requests outstanding. A flush
-during refill lets the cache drain and install that line but suppresses its
-core response. Reset clears the lookup pipeline and valid bits.
+lookup. A wrong-path refill still drains and installs its line but its completion
+is filtered from the core response flow. Reset clears the lookup pipeline and
+valid bits.
 
 The first cut has no associativity, prefetching, invalidation, `FENCE.I`, or
 coherence with the data cache. Program loading must finish before the core

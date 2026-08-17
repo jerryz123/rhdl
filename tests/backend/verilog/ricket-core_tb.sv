@@ -2,14 +2,14 @@
 module ricket_core_tb;
   typedef struct packed { logic valid; logic [63:0] bits; } start_in_t;
   typedef struct packed { logic ready; } ready_t;
-  typedef struct packed { logic [31:0] address; } instruction_req_bits_t;
+  typedef struct packed { logic [63:0] address; } instruction_req_bits_t;
   typedef struct packed { logic valid; instruction_req_bits_t bits; } instruction_req_t;
   typedef struct packed { logic [31:0] instruction; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
   typedef struct packed { logic flush; instruction_req_t request; ready_t response; } instruction_out_t;
   typedef struct packed {
-    logic [31:0] address;
+    logic [63:0] address;
     logic write;
     logic [1:0] width;
     logic unsigned_0;
@@ -48,17 +48,17 @@ module ricket_core_tb;
   RicketCore dut (.*);
   always #5 clock = ~clock;
 
-  function automatic logic [31:0] instruction_at(input logic [31:0] address);
+  function automatic logic [31:0] instruction_at(input logic [63:0] address);
     case (address)
-      32'd0: instruction_at = 32'h00003283;  // ld x5, 0(x0)
-      32'd4: instruction_at = 32'h00028533;  // add x10, x5, x0
-      32'd8: instruction_at = 32'h01003403;  // ld x8, 16(x0)
-      32'd12: instruction_at = 32'h00100313; // addi x6, x0, 1
-      32'd16: instruction_at = 32'h02031863; // bne x6, x0, +48
-      32'd64: instruction_at = 32'h006503b3; // add x7, x10, x6
-      32'd68: instruction_at = 32'h00900413; // addi x8, x0, 9
-      32'd72: instruction_at = 32'h00703423; // sd x7, 8(x0)
-      32'd76: instruction_at = 32'h00803823; // sd x8, 16(x0)
+      64'h00000001_00000000: instruction_at = 32'h00003283;  // ld x5, 0(x0)
+      64'h00000001_00000004: instruction_at = 32'h00028533;  // add x10, x5, x0
+      64'h00000001_00000008: instruction_at = 32'h01003403;  // ld x8, 16(x0)
+      64'h00000001_0000000c: instruction_at = 32'h00100313; // addi x6, x0, 1
+      64'h00000001_00000010: instruction_at = 32'h02031863; // bne x6, x0, +48
+      64'h00000001_00000040: instruction_at = 32'h006503b3; // add x7, x10, x6
+      64'h00000001_00000044: instruction_at = 32'h00900413; // addi x8, x0, 9
+      64'h00000001_00000048: instruction_at = 32'h00703423; // sd x7, 8(x0)
+      64'h00000001_0000004c: instruction_at = 32'h00803823; // sd x8, 16(x0)
       default: instruction_at = 32'h00000013;
     endcase
   endfunction
@@ -98,7 +98,7 @@ module ricket_core_tb;
         if (instruction_access_out.request.valid && instruction_access_in.request.ready) begin
           instruction_response_valid <= 1'b1;
           instruction_response_bits <= instruction_at(instruction_access_out.request.bits.address);
-          if (instruction_access_out.request.bits.address == 32'd64) begin
+          if (instruction_access_out.request.bits.address == 64'h00000001_00000040) begin
             assert (saw_fetch_flush)
               else $fatal(1, "branch target fetched without flushing wrong-path requests");
             assert (first_response_sent && !second_response_sent)
@@ -141,12 +141,12 @@ module ricket_core_tb;
       if (data_access_out.request.valid && data_access_in.request.ready) begin
         if (!data_access_out.request.bits.write) begin
           if (load_requests == 0)
-            assert (data_access_out.request.bits.address == 32'd0 &&
+            assert (data_access_out.request.bits.address == 64'd0 &&
                     data_access_out.request.bits.tag == 5'd5)
               else $fatal(1, "first load lost its address or destination tag");
           else
             assert (load_requests == 1 &&
-                    data_access_out.request.bits.address == 32'd16 &&
+                    data_access_out.request.bits.address == 64'd16 &&
                     data_access_out.request.bits.tag == 5'd8)
               else $fatal(1, "second load lost its address or destination tag");
           if (load_requests == 0)
@@ -156,14 +156,14 @@ module ricket_core_tb;
           assert (second_response_sent)
             else $fatal(1, "a younger store passed a RAW or WAW hazard");
           if (stores_seen == 0) begin
-            assert (data_access_out.request.bits.address == 32'd8 &&
+            assert (data_access_out.request.bits.address == 64'd8 &&
                     data_access_out.request.bits.data == 64'd43 &&
                     data_access_out.request.bits.tag == 5'd0)
               else $fatal(1, "RAW-dependent result was incorrect");
             stores_seen <= 1;
           end else begin
             assert (stores_seen == 1 &&
-                    data_access_out.request.bits.address == 32'd16 &&
+                    data_access_out.request.bits.address == 64'd16 &&
                     data_access_out.request.bits.data == 64'd9 &&
                     data_access_out.request.bits.tag == 5'd0)
               else $fatal(1, "WAW ordering was not preserved");
@@ -178,7 +178,7 @@ module ricket_core_tb;
 
   initial begin
     start_in.valid = 1'b0;
-    start_in.bits = '0;
+    start_in.bits = 64'h00000001_00000000;
     repeat (2) @(posedge clock);
     #1;
     reset = 1'b0;

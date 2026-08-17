@@ -1,6 +1,6 @@
 // Verifies Ricket L1I hit throughput, refill correctness, and speculative flushes.
 module ricket_icache_tb;
-  typedef struct packed { logic [31:0] address; } core_req_bits_t;
+  typedef struct packed { logic [63:0] address; } core_req_bits_t;
   typedef struct packed { logic valid; core_req_bits_t bits; } core_req_t;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [31:0] instruction; } instruction_bits_t;
@@ -9,7 +9,7 @@ module ricket_icache_tb;
   typedef struct packed { ready_t request; instruction_resp_t response; } core_out_t;
 
   typedef struct packed {
-    logic [31:0] address;
+    logic [63:0] address;
     logic write;
     logic [63:0] data;
     logic [7:0] mask;
@@ -30,11 +30,11 @@ module ricket_icache_tb;
   RicketL1ICache dut (.*);
   always #5 clock = ~clock;
 
-  function automatic logic [63:0] backing_data(input logic [31:0] address);
+  function automatic logic [63:0] backing_data(input logic [63:0] address);
     case (address)
-      32'h00000000: backing_data = 64'h22222222_11111111;
-      32'h00000008: backing_data = 64'h44444444_33333333;
-      32'h00000010: backing_data = 64'h66666666_55555555;
+      64'h00000001_00000000: backing_data = 64'h22222222_11111111;
+      64'h00000001_00000008: backing_data = 64'h44444444_33333333;
+      64'h00000001_00000010: backing_data = 64'h66666666_55555555;
       default:       backing_data = 64'h88888888_77777777;
     endcase
   endfunction
@@ -57,7 +57,7 @@ module ricket_icache_tb;
     end
   end
 
-  task automatic send_request(input logic [31:0] address);
+  task automatic send_request(input logic [63:0] address);
     core_in.request.bits.address = address;
     core_in.request.valid = 1'b1;
     do begin
@@ -89,7 +89,7 @@ module ricket_icache_tb;
     #1;
     reset = 1'b0;
 
-    send_request(32'h00000000);
+    send_request(64'h00000001_00000000);
     expect_response(32'h11111111);
 
     while (!core_out.request.ready) begin
@@ -97,7 +97,7 @@ module ricket_icache_tb;
       #1;
     end
     core_in.request.valid = 1'b1;
-    core_in.request.bits.address = 32'h00000000;
+    core_in.request.bits.address = 64'h00000001_00000000;
     @(posedge clock);
     #1;
     assert (core_out.request.ready)
@@ -105,7 +105,7 @@ module ricket_icache_tb;
     assert (core_out.response.valid &&
             core_out.response.bits.instruction == 32'h11111111)
       else $fatal(1, "first hit did not return after one lookup cycle");
-    core_in.request.bits.address = 32'h00000004;
+    core_in.request.bits.address = 64'h00000001_00000004;
     @(posedge clock);
     #1;
     core_in.request.valid = 1'b0;
@@ -118,10 +118,10 @@ module ricket_icache_tb;
     #1;
     core_in.response.ready = 1'b0;
     core_in.request.valid = 1'b1;
-    core_in.request.bits.address = 32'h00000000;
+    core_in.request.bits.address = 64'h00000001_00000000;
     @(posedge clock);
     #1;
-    core_in.request.bits.address = 32'h00000004;
+    core_in.request.bits.address = 64'h00000001_00000004;
     @(posedge clock);
     #1;
     core_in.request.valid = 1'b0;
@@ -139,12 +139,12 @@ module ricket_icache_tb;
       #1;
     end
 
-    send_request(32'h00000000);
+    send_request(64'h00000001_00000000);
     expect_response(32'h11111111);
 
     // A wrong-path miss may finish refilling, but flush suppresses its core
     // response and permits a later request to hit the installed line.
-    send_request(32'h00000020);
+    send_request(64'h00000001_00000020);
     while (!memory_out.request.valid) begin
       @(posedge clock);
       #1;
@@ -163,7 +163,7 @@ module ricket_icache_tb;
     end
     assert (!core_out.response.valid)
       else $fatal(1, "flushed refill response remained buffered");
-    send_request(32'h00000020);
+    send_request(64'h00000001_00000020);
     expect_response(32'h77777777);
 
     $display("Ricket instruction-cache hit pipeline passed");

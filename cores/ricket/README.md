@@ -20,10 +20,10 @@ ricket.rhdl                         composition only
   |     |--> icache/protocol.rhdl
   |     |--> dcache/protocol.rhdl
   |     `--> ../../rhdl/std/scoreboard.rhdl
-  |--> icache/cache.rhdl            instruction access -> SimpleMemory(8 B)
-  `--> dcache/cache.rhdl            data access -> SimpleMemory(8 B)
-        |--> ../load-store.rhdl
-        `--> refill.rhdl             ordered cache-line transaction engine
+  |--> refill.rhdl                  ordered cache-line transaction engine
+  |--> icache/cache.rhdl            instruction access -> refill -> SimpleMemory(8 B)
+  `--> dcache/cache.rhdl            data access -> refill -> SimpleMemory(8 B)
+        `--> ../load-store.rhdl
 ```
 
 `RicketCore` does not import `SimpleMemory`: it speaks Ricket's semantic
@@ -85,22 +85,23 @@ whether decoded values have architectural meaning.
 ## Top-level core
 
 [`ricket.rhdl`](ricket.rhdl) defines
-`Ricket(xlen, address_width, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` is an
-`XLen` enum value, and `address_width` must not exceed `xlen_width(xlen)`. The
-core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer, separate
-eight-byte `SimpleMemory` instruction and data requester ports, and a sticky
-`fault` output. L1I hits have one-cycle latency and one-request-per-cycle
-throughput. L1D load hits have the same throughput and pass through a mandatory
+`Ricket(xlen, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` is an `XLen` enum
+value. Architectural addresses, cache tags, and external memory address ports
+all use `xlen_width(xlen)`; Ricket has no implicit narrower-address truncation
+boundary. The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start
+consumer, separate eight-byte `SimpleMemory` instruction and data requester
+ports, and a sticky `fault` output. L1I hits have one-cycle latency and
+one-request-per-cycle throughput. In both caches, a one-stage lookup flow
+carries request context beside the SRAM access; a miss is filtered and mapped
+into the shared refill engine, which returns that context with the completed
+line. L1I maps hits and live refill completions into response flows and merges
+them before its response queue. L1D load hits have the same throughput and pass through a mandatory
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
-completion tag. A one-stage lookup flow carries request context beside the SRAM
-access and holds it across refill. A separate refill engine owns the aligned
-line address, backing-read counters, and line accumulator; stores complete
-through the registered response path and drain through an ordered one-entry
-write buffer. The two
+completion tag. Stores complete through the registered response path and drain
+through an ordered one-entry write buffer. The two
 external ports intentionally remain separate; SoC arbitration and integration
 are outside the core. The backing-memory data width stays fixed at 64 bits in
-both specializations; only the architectural and core-facing values follow
-`xlen`.
+both specializations, while its address width follows `xlen`.
 
 ## Verification
 

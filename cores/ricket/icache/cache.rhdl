@@ -3,145 +3,156 @@
 
 import:
   "protocol.rhdl" open
+  "../refill.rhdl" open
+  "../../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/read-write.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/simple-memory.rhdl") open
   lib("rhdl/std/sync-ram.rhdl") open
-  lib("rhdl/std/flow/queue.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
 
-fun check_l1i_geometry(address_width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
+fun check_l1i_geometry(width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
   unless sets >= 2
   | error(~who: #'RicketL1ICache,
           "set count must be a power of two of at least two")
   unless line_bytes >= 8
   | error(~who: #'RicketL1ICache,
           "line byte count must be a power of two of at least eight")
-  unless address_width > (alignment_bits(line_bytes) + alignment_bits(sets))
+  unless width > (alignment_bits(line_bytes) + alignment_bits(sets))
   | error(~who: #'RicketL1ICache,
           "address width must include line offset, set, and tag bits")
 
-sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
-  check_l1i_geometry(address_width, sets, line_bytes)
+sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int):
+  def width = xlen_width(xlen)
+  check_l1i_geometry(width, sets, line_bytes)
   def beats = line_bytes / 8
-  def line_bits = line_bytes * 8
   def offset_width = alignment_bits(line_bytes)
   def set_width = alignment_bits(sets)
-  def tag_width = address_width - offset_width - set_width
+  def tag_width = width - offset_width - set_width
   def beat_width = index_width(beats)
-  def count_width = index_width(beats + 1)
   def outstanding_width = index_width(3)
-  def Line = Vec(beats, Bits(64))
 
-  interface core(RicketInstructionAccess(address_width), ~role: responder)
-  interface memory(SimpleMemory(address_width, 8), ~role: requester)
+  interface core(RicketInstructionAccess(xlen), ~role: responder)
+  interface memory(SimpleMemory(width, 8), ~role: requester)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst lines(SyncRam1RW(sets, Bits(64), beats))
+  inst refill(RicketLineRefill(Bits(width), width, line_bytes))
+  inst lookup(Pipe(Bits(width), 1))
+  inst response_arbiter(Arbiter(RicketInstructionResp(), 2))
   def response_queue_reset = cast(cast(reset, Bool) ||| core.flush, Reset)
   inst responses(Queue(RicketInstructionResp(), 2, ~pipe: #true, ~flow: #true),
                  ~clock: clock,
                  ~reset: response_queue_reset)
 
   reg valid_bits(~init: bits(0, sets))
-  reg lookup_address(~init: bits(0, address_width))
-  reg lookup_set(~init: bits(0, set_width))
-  reg lookup_tag(~init: bits(0, tag_width))
-  reg lookup_beat(~init: bits(0, beat_width))
-  reg refilling(~init: Bool(#false))
-  reg refill_requested(~init: bits(0, count_width))
-  reg refill_received(~init: bits(0, count_width))
-  reg refill_line(~init: cast(bits(0, line_bits), Line))
   reg refill_live(~init: Bool(#false))
   reg outstanding(~init: bits(0, outstanding_width))
 
   core.response.valid <== responses.egress.valid & !core.flush
   core.response.bits <== responses.egress.bits
   responses.egress.ready <== core.response.ready & !core.flush
-  memory.response.ready <== refilling
+  refill.memory <=> memory
 
   def response_fire = fire(core.response)
-  def refill_response_fire = fire(memory.response)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
-  def request_tag_value = core.request.bits.address[(offset_width + set_width)..address_width]
-  def request_beat_value:
+  def lookup_address = lookup.egress.bits
+  def lookup_set = lookup_address[offset_width..(offset_width + set_width)]
+  def lookup_tag = lookup_address[(offset_width + set_width)..width]
+  def lookup_beat:
     if beats == 1
     | bits(0, beat_width)
-    | core.request.bits.address[3..offset_width]
+    | lookup_address[3..offset_width]
   def valid_vector = cast(valid_bits, Vec(sets, Bool))
   def line_hit = valid_vector.lookup(
     lookup_set,
     ~default: Bool(#false)
   ) & (tags.port.response.bits[0] === lookup_tag)
-  def lookup_miss = tags.port.response.valid & !line_hit
+  def lookup_miss = lookup.egress.valid & tags.port.response.valid & !line_hit
   def cached_beat = lines.port.response.bits.lookup(lookup_beat, ~default: bits(0, 64))
-  def hit_instruction = mux(cast(lookup_address[2], Bool), cached_beat[32..64], cached_beat[0..32])
-  def refill_index = refill_received[0..beat_width]
-  def line_with_response = refill_line.updated(refill_index, memory.response.bits.data)
-  def refilled_beat = line_with_response.lookup(lookup_beat, ~default: bits(0, 64))
-  def refill_instruction = mux(cast(lookup_address[2], Bool), refilled_beat[32..64], refilled_beat[0..32])
-  def last_refill_response = refill_received === bits(beats - 1, count_width)
-  def install = refilling & refill_response_fire & last_refill_response
+  def completion_address = as_bits(refill.completion.bits.context)
+  def completion_set = completion_address[offset_width..(offset_width + set_width)]
+  def completion_tag = completion_address[(offset_width + set_width)..width]
+  def completion_beat:
+    if beats == 1
+    | bits(0, beat_width)
+    | completion_address[3..offset_width]
+  def completed_beat = refill.completion.bits.line.lookup(
+    completion_beat,
+    ~default: bits(0, 64)
+  )
+  def completion_instruction = mux(
+    cast(completion_address[2], Bool),
+    completed_beat[32..64],
+    completed_beat[0..32]
+  )
   def response_capacity = (outstanding < bits(2, outstanding_width)) ||| response_fire
   assert(outstanding <= bits(2, outstanding_width), "l1i_outstanding_in_range")
   when response_fire:
     assert(or_reduce(outstanding), "l1i_response_has_request")
 
-  // A lookup result is known before the next request handshake. A discovered
-  // miss therefore blocks that handshake, while a hit permits another array
-  // read at the same edge and sustains one accepted request per cycle.
-  core.request.ready <== !core.flush & !refilling & !lookup_miss & response_capacity
+  // Lookup and SRAM response tokens advance together. A hit can admit the
+  // next request, while a miss transfers its address into the refill engine
+  // and blocks new requests until that transaction completes.
+  def lookup_accepts_input = !core.flush & refill.command.ready & !lookup_miss & response_capacity
+  core.request.ready <== lookup.ingress.ready & lookup_accepts_input
+  lookup.ingress.valid <== core.request.valid & lookup_accepts_input
+  lookup.ingress.bits <== core.request.bits.address
   def request_fire = fire(core.request)
 
-  def line_base = align_down(as_bits(lookup_address), line_bytes)
-  def refill_byte_offset = zext(refill_requested, address_width) << 3
-  memory.request.valid <== refilling & (refill_requested < bits(beats, count_width))
-  memory.request.bits <== SimpleMemoryReq(address_width, 8):
-    address: line_base + refill_byte_offset
-    write: Bool(#false)
-    data: bits(0, 64)
-    mask: !bits(0, 8)
+  def Array(miss_path, hit_path) = (
+    lookup.egress
+      |> filter_flow(Bits(width), _ => tags.port.response.valid & !core.flush)
+      |> demux_flow(Decoupled(Bits(width)), 2, _ => as_bits(line_hit))
+  )
+  def refill_commands = (
+    miss_path
+      |> map_flow(Decoupled(Bits(width)),
+                  address => RicketLineRefillCommand(Bits(width), width)):
+        line_address: align_down(address, line_bytes)
+        context: address
+  )
+  refill.command <=> refill_commands
+  assert(!lookup_miss ||| core.flush ||| refill.command.ready,
+         "l1i_refill_command_accepted")
 
-  def produces_hit = tags.port.response.valid & line_hit
-  def produces_response = !core.flush & (produces_hit ||| (install & refill_live))
-  responses.ingress.valid <== produces_response
-  responses.ingress.bits.instruction <== mux(install, refill_instruction, hit_instruction)
-  when produces_response:
-    assert(responses.ingress.ready, "l1i_response_slot_reserved")
+  def hit_responses = (
+    hit_path
+      |> map_flow(Decoupled(Bits(width)), address => RicketInstructionResp()):
+        instruction: mux(cast(address[2], Bool), cached_beat[32..64], cached_beat[0..32])
+  )
+  response_arbiter.ingress[0] <=> hit_responses
+
+  def refill_results = RicketLineRefillResult(Bits(width), width, line_bytes)
+  def refill_responses = (
+    refill.completion
+      |> filter_flow(refill_results, _ => refill_live)
+      |> map_flow(Decoupled(refill_results), _ => RicketInstructionResp()):
+        instruction: completion_instruction
+  )
+  response_arbiter.ingress[1] <=> refill_responses
+  responses.ingress <=> response_arbiter.egress
+  when (response_arbiter.egress.valid):
+    assert(response_arbiter.egress.ready, "l1i_response_slot_reserved")
+
+  def install = fire(refill.completion)
 
   tags.port.request.valid <== request_fire ||| install
   tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
-    address: mux(install, lookup_set, request_set_value)
+    address: mux(install, completion_set, request_set_value)
     write: install
-    data: vec(lookup_tag)
+    data: vec(completion_tag)
     mask: bits(1, 1)
   lines.port.request.valid <== request_fire ||| install
   lines.port.request.bits <== ReadWriteRequest(set_width, Bits(64), beats):
-    address: mux(install, lookup_set, request_set_value)
+    address: mux(install, completion_set, request_set_value)
     write: install
-    data: line_with_response
+    data: refill.completion.bits.line
     mask: !bits(0, beats)
 
-  when request_fire:
-    lookup_address <== core.request.bits.address
-    lookup_set <== request_set_value
-    lookup_tag <== request_tag_value
-    lookup_beat <== request_beat_value
-
-  when (lookup_miss & !core.flush):
-    refilling <== Bool(#true)
-    refill_requested <== bits(0, count_width)
-    refill_received <== bits(0, count_width)
-    refill_line <== cast(bits(0, line_bits), Line)
-  elsewhen refilling:
-    when (fire(memory.request)):
-      refill_requested <== refill_requested + bits(1, count_width)
-    when refill_response_fire:
-      refill_line <== line_with_response
-      refill_received <== refill_received + bits(1, count_width)
-      when last_refill_response:
-        refilling <== Bool(#false)
-        valid_bits <== as_bits(valid_vector.updated(lookup_set, Bool(#true)))
+  when install:
+    valid_bits <== as_bits(valid_vector.updated(completion_set, Bool(#true)))
 
   when (core.flush):
     refill_live <== Bool(#false)

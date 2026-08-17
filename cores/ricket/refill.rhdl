@@ -6,11 +6,20 @@ import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/simple-memory.rhdl") open
 
-bundle RicketLineRefillResult(address_width :: PosInt, line_bytes :: Pow2Int):
+bundle RicketLineRefillCommand(Context, address_width :: PosInt):
   line_address: Bits(address_width)
+  context: Context
+
+bundle RicketLineRefillResult(Context,
+                              address_width :: PosInt,
+                              line_bytes :: Pow2Int):
+  line_address: Bits(address_width)
+  context: Context
   line: Vec(line_bytes / 8, Bits(64))
 
-sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
+sync_circuit RicketLineRefill(Context,
+                              address_width :: PosInt,
+                              line_bytes :: Pow2Int):
   unless line_bytes >= 8
   | error(~who: #'RicketLineRefill,
           "line byte count must be a power of two of at least eight")
@@ -23,20 +32,22 @@ sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
   def count_width = index_width(beats + 1)
   def Line = Vec(beats, Bits(64))
 
-  interface command(Irrevocable(Bits(address_width)), ~role: consumer)
-  interface completion(Irrevocable(RicketLineRefillResult(address_width, line_bytes)),
+  interface command(Decoupled(RicketLineRefillCommand(Context, address_width)),
+                    ~role: consumer)
+  interface completion(Irrevocable(RicketLineRefillResult(Context, address_width, line_bytes)),
                        ~role: producer)
   interface memory(SimpleMemory(address_width, 8), ~role: requester)
 
   reg active_state(~init: Bool(#false))
   reg line_address(~init: bits(0, address_width))
+  reg context(Context)
   reg requested(~init: bits(0, count_width))
   reg received(~init: bits(0, count_width))
   reg line(~init: cast(bits(0, line_bytes * 8), Line))
 
   command.ready <== !active_state
   def command_fire = fire(command)
-  assert(!command_fire ||| is_aligned(command.bits, line_bytes),
+  assert(!command_fire ||| is_aligned(command.bits.line_address, line_bytes),
          "line_refill_address_aligned")
 
   def request_valid = active_state & (requested < bits(beats, count_width))
@@ -52,8 +63,9 @@ sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
   def line_with_response = line.updated(response_index, memory.response.bits.data)
   def last_response = received === bits(beats - 1, count_width)
   completion.valid <== active_state & memory.response.valid & last_response
-  completion.bits <== RicketLineRefillResult(address_width, line_bytes):
+  completion.bits <== RicketLineRefillResult(Context, address_width, line_bytes):
     line_address: line_address
+    context: context
     line: line_with_response
   memory.response.ready <== active_state & (!last_response ||| completion.ready)
 
@@ -63,7 +75,8 @@ sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
     active_state.next <== Bool(#false)
 
   when command_fire:
-    line_address.next <== command.bits
+    line_address.next <== command.bits.line_address
+    context.next <== command.bits.context
 
   when command_fire:
     requested.next <== bits(0, count_width)
@@ -81,5 +94,6 @@ sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
     line.next <== line_with_response
 
 export:
+  RicketLineRefillCommand
   RicketLineRefillResult
   RicketLineRefill

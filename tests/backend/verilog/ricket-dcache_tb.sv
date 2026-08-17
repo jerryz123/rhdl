@@ -1,7 +1,7 @@
 // Verifies Ricket L1D refill and the registered, full-throughput hit-response path.
 module ricket_dcache_tb;
   typedef struct packed {
-    logic [31:0] address;
+    logic [63:0] address;
     logic write;
     logic [1:0] width;
     logic unsigned_load;
@@ -16,7 +16,7 @@ module ricket_dcache_tb;
   typedef struct packed { ready_t request; core_resp_t response; } core_out_t;
 
   typedef struct packed {
-    logic [31:0] address;
+    logic [63:0] address;
     logic write;
     logic [63:0] data;
     logic [7:0] mask;
@@ -38,8 +38,8 @@ module ricket_dcache_tb;
   RicketL1DCache dut (.*);
   always #5 clock = ~clock;
 
-  function automatic logic [63:0] backing_data(input logic [31:0] address);
-    backing_data = 64'h88776655_44332211 + {32'b0, address};
+  function automatic logic [63:0] backing_data(input logic [63:0] address);
+    backing_data = 64'h88776655_44332211 + {32'b0, address[31:0]};
   endfunction
 
   always_ff @(posedge clock) begin
@@ -57,7 +57,8 @@ module ricket_dcache_tb;
         );
         if (memory_out.request.bits.write) begin
           saw_store <= 1'b1;
-          assert (memory_out.request.bits.data == 64'hdeadbeef_cafef00d &&
+          assert (memory_out.request.bits.address == 64'h00000001_00000000 &&
+                  memory_out.request.bits.data == 64'hdeadbeef_cafef00d &&
                   memory_out.request.bits.mask == 8'hff)
             else $fatal(1, "store buffer changed data or mask");
         end
@@ -65,7 +66,7 @@ module ricket_dcache_tb;
     end
   end
 
-  task automatic send_load(input logic [31:0] address, input logic [4:0] tag);
+  task automatic send_load(input logic [63:0] address, input logic [4:0] tag);
     core_in.request.bits = '{address: address,
                              write: 1'b0,
                              width: 2'd3,
@@ -102,7 +103,7 @@ module ricket_dcache_tb;
     #1;
     reset = 1'b0;
 
-    send_load(32'h00000000, 5'd3);
+    send_load(64'h00000001_00000000, 5'd3);
     expect_data(64'h88776655_44332211, 5'd3);
 
     while (!core_out.request.ready) begin
@@ -110,7 +111,7 @@ module ricket_dcache_tb;
       #1;
     end
     core_in.request.valid = 1'b1;
-    core_in.request.bits = '{address: 32'h00000000,
+    core_in.request.bits = '{address: 64'h00000001_00000000,
                              write: 1'b0,
                              width: 2'd3,
                              unsigned_load: 1'b0,
@@ -141,7 +142,7 @@ module ricket_dcache_tb;
       #1;
     end
     core_in.request.valid = 1'b1;
-    core_in.request.bits = '{address: 32'h00000000,
+    core_in.request.bits = '{address: 64'h00000001_00000000,
                              write: 1'b1,
                              width: 2'd3,
                              unsigned_load: 1'b0,

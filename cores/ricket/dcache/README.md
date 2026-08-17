@@ -9,17 +9,18 @@ XLEN-wide normalized load value and echoes the request's five-bit completion tag
 store response data and tag have no meaning. The pipeline uses the tag to clear
 the destination scoreboard entry when a delayed load returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation. `RicketL1DCache(xlen, address_width, ...)` accepts
-`XLen.X32` or `XLen.X64` while retaining eight-byte line beats and
-an eight-byte `SimpleMemory` backing port.
+load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
+`XLen.X64`; its core-facing and backing-memory addresses use the selected XLEN
+while retaining eight-byte line beats and an eight-byte `SimpleMemory` backing
+port.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,
 write-through/write-no-allocate cache. A one-stage `Pipe` carries lookup
-context alongside the synchronous SRAM access, advances on consecutive hits,
-and holds the request across a refill. Set, tag, and beat are derived from that
-context instead of stored independently. The Ricket-local `../refill.rhdl`
-transaction engine accepts the aligned line address, owns the request and
-response counters and line accumulator, and returns one completed line over an
+context alongside the synchronous SRAM access and advances on consecutive
+hits. A miss passes through typed `filter_flow` and `map_flow` stages into the
+Ricket-local `../refill.rhdl` transaction engine. The engine owns the aligned
+line address, complete client context, request and response counters, and line
+accumulator, then returns the context with one completed line over an
 irrevocable flow. The cache retains backing-port arbitration and installs that
 result into its tag and data arrays. A mandatory non-backpressurable
 `ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while

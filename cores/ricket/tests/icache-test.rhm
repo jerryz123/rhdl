@@ -4,32 +4,54 @@
 import:
   "../../../rhdl/core/main.rhm" open
   "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../../../riscv/isa/xlen.rhm" open
   "../icache/cache.rhdl" as l1i
 
-def instruction_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(32, 8, 32))
+def instruction_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(XLen.X64, 8, 32))
 def instruction_cache = instruction_design.modules.find(fun (module_def): module_def.name == "RicketL1ICache")
-def one_beat_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(32, 8, 8))
+def refill = instruction_design.modules.find(fun (module_def): module_def.name == "RicketLineRefill")
+def one_beat_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(XLen.X64, 8, 8))
 fun register_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
   ).map(fun (operation): operation.attribute("name"))
+fun instance_names(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.instance"
+  ).map(fun (operation): operation.attribute("module").name)
 
 check:
   data_width(instruction_cache.find_input("core_in").type.field("flush").type) ~is 1
-  instruction_cache.find_input("core_in").type.field("request").type.field("bits").type.field("address").type.width ~is 32
+  instruction_cache.find_input("core_in").type.field("request").type.field("bits").type.field("address").type.width ~is 64
   instruction_cache.find_output("core_out").type.field("response").type.field("bits").type.field("instruction").type.width ~is 32
   register_names(instruction_cache).contains("valid_bits") ~is #true
   register_names(instruction_cache).contains("lookup_valid") ~is #false
-  register_names(instruction_cache).contains("refilling") ~is #true
-  register_names(instruction_cache).contains("refill_requested") ~is #true
+  register_names(instruction_cache).contains("lookup_address") ~is #false
+  register_names(instruction_cache).contains("lookup_set") ~is #false
+  register_names(instruction_cache).contains("lookup_tag") ~is #false
+  register_names(instruction_cache).contains("lookup_beat") ~is #false
+  register_names(instruction_cache).contains("refilling") ~is #false
+  register_names(instruction_cache).contains("refill_requested") ~is #false
+  register_names(instruction_cache).contains("refill_received") ~is #false
+  register_names(instruction_cache).contains("refill_line") ~is #false
   register_names(instruction_cache).contains("refill_live") ~is #true
   register_names(instruction_cache).contains("outstanding") ~is #true
   register_names(instruction_cache).contains("state") ~is #false
+  instance_names(instruction_cache).filter(
+    ~keep: fun (name): name.starts_with("Pipe")
+  ).length() ~is 1
+  instance_names(instruction_cache).filter(
+    ~keep: fun (name): name.starts_with("Arbiter")
+  ).length() ~is 1
+  instance_names(instruction_cache).contains("RicketLineRefill") ~is #true
+  register_names(refill) ~is [
+    "active_state", "line_address", "context", "requested", "received", "line"
+  ]
   verify_design(instruction_design) ~is #void
   verify_design(one_beat_design) ~is #void
   embedded.run_elaboration(
-    fun (): l1i.RicketL1ICache(32, 3, 32)
+    fun (): l1i.RicketL1ICache(XLen.X64, 3, 32)
   ) ~throws "Pow2Int"
   embedded.run_elaboration(
-    fun (): l1i.RicketL1ICache(32, 1, 32)
+    fun (): l1i.RicketL1ICache(XLen.X64, 1, 32)
   ) ~throws "set count"
