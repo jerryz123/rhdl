@@ -183,17 +183,20 @@ rows, zipped output fields, and lifted input fields.
 ## Validated NoC route computation
 
 [`noc/route-computer.rhdl`](noc/route-computer.rhdl) is a one-way bridge from
-the pure NoC planner to hardware. `RouteComputerABI` accepts only an opaque
-`ValidatedRouting`; it cannot consume an unchecked routing relation or run
-topology, reachability, dependency, or deadlock analysis itself.
+the pure NoC planner to hardware. `RouteComputerABI` accepts only a
+`RouterPlan` projected from opaque `ValidatedRouting`; it cannot consume an
+unchecked routing relation or run topology, reachability, dependency, or
+deadlock analysis itself.
 
-The initial ABI gives every route class a dense stable key, encodes injection
-as origin zero and a held VC as one plus its stable global VC index, and emits
-a global next-VC mask. Every valid row's mask is checked against the allowed
-candidates in the materialized relation. The packed lookup result appends
-`eject` and `valid` bits. Invalid or unreachable route/origin encodings return
-all zeros, while a valid ejection row has `valid=1`, `eject=1`, and an empty
-next-VC mask.
+The ABI retains the validated artifact's dense stable route keys, but origin
+keys and next-VC mask bits are local to one router. Origins cover its optional
+injection slot and incoming physical VCs; output bits correspond to outgoing
+physical VCs. Every local mask is projected from the exact validated table
+row. The packed lookup result appends `eject` and `valid` bits. Invalid or
+unreachable route/origin encodings return all zeros, while a valid ejection row
+has `valid=1`, `eject=1`, and an empty next-VC mask. An ejection-only router
+uses one constant-zero padding bit because RHDL has no zero-width `Bits` type;
+its plan still reports zero output VCs.
 
 `RouteComputer(abi)` lowers the resulting finite rows through the ordinary
 typed decode generator and exposes only combinational `Bits` ports. It accepts
@@ -203,6 +206,8 @@ modules under `noc/model`, `noc/analysis`, and `noc/plan` do not import RHDL or
 CIRCT. See
 [`../../examples/std/noc-route-computer.rhdl`](../../examples/std/noc-route-computer.rhdl)
 for the validated two-hop fixture and its exact generated Verilog.
+The fixture instantiates and exhaustively checks separate source, transit, and
+ejection-only route computers.
 
 ## Ready-valid protocols
 

@@ -66,14 +66,17 @@ The current implementation provides:
 - Deterministic unit-hop distances and complete minimal-next-link sets for any
   directed topology.
 - An opaque validated-routing artifact and deterministic host route-table rows.
+- Deterministic router-local input and output encodings projected from that
+  validated artifact.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
 The pure package does not lower route tables into RHDL or generate router RTL.
 The optional one-way consumer under `rhdl/std/noc/` accepts only
-`ValidatedRouting` and lowers its finite rows into a combinational route
-computer without adding an RHDL dependency here.
+`RouterPlan` values derived from `ValidatedRouting` and lowers one router's
+finite local rows into a combinational route computer without adding an RHDL
+dependency here.
 
 ## Dependency boundary
 
@@ -87,8 +90,8 @@ depend on the core abstractions, never the reverse.
 The hardware bridge is tested separately by
 `tests/frontend/noc-route-computer-test.rhm` and the focused
 `noc-route-computer` CIRCT/Verilator fixture. Those consumers exhaust every
-encoded input for a small validated network; they do not grant hardware code
-access to unvalidated relations or proof construction.
+encoded input of every router in a small validated network; they do not grant
+hardware code access to unvalidated relations or proof construction.
 
 Run the focused checks from the repository root:
 
@@ -109,6 +112,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/adaptive-escape-three-
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/composition-three-way-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/authored-diagnostics-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/router-plan-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -594,3 +598,18 @@ excluded from the dependency proof cannot leak into generated hardware. No
 route-table operation can reach or re-run the user callback. Escape-certified
 tables are still projected from the complete materialized relation, so legal
 adaptive choices outside the escape proof graph are retained exactly.
+
+`RouterPlan(validated_routing, node)` is the only per-node projection consumed
+by route-computer RTL. It retains the validated artifact, uses the global
+stable route encoding, and assigns dense local origin and output-VC indices.
+It states whether the node has injection and ejection endpoints. Local origins
+consist of an injection slot when a route starts at the node plus every VC on
+its incoming physical links. Local output bits correspond exactly to VCs on
+outgoing physical links. Unused physical slots remain representable but have
+no route row and therefore decode invalid.
+
+Each `RouterPlanRow` points back to its validated `RouteTableRow` and records
+the global route key, local origin key, and local output mask. An ejection-only
+router legitimately has zero output VCs; the RHDL ABI uses one constant-zero
+padding bit because hardware `Bits` values cannot have width zero. The padding
+does not denote a VC and `output_count` remains zero.

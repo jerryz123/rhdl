@@ -1,147 +1,87 @@
 #lang rhdl
-// Lowers validated NoC route rows into a deterministic combinational hardware lookup.
+// Lowers one validated router plan into a local combinational route lookup.
 
 import:
   lib("rhdl/std/decode.rhdl") open
   "../../../noc/model/main.rhm" open
-  "../../../noc/plan/validated-routing.rhm" open
+  "../../../noc/plan/router-plan.rhm" open
 
 export:
   RouteComputerEntry
   RouteComputerABI
   RouteComputer
 
-fun list_index(items, predicate, who, description):
-  def mutable found = #false
-  for (item in items, index in 0..items.length()):
-    if predicate(item)
-    | found := index
-    | #void
-  unless found != #false
-  | error(~who: who, "unknown " ++ description)
-  found
-
-fun origin_equal(left, right):
-  cond
-  | left is_a Injection && right is_a Injection:
-      node_id_equal(left.node, right.node)
-  | left is_a HeldVC && right is_a HeldVC:
-      vc_id_equal(left.vc, right.vc)
-  | ~else: #false
-
-class RouteComputerEntry(route_row,
+class RouteComputerEntry(plan_row,
                          route_key,
                          origin_key,
                          encoded_key,
                          allowed_mask):
   method result_bits():
-    (allowed_mask bits.(<<) 2) + (if route_row.eject | 2 | 0) + 1
+    (allowed_mask bits.(<<) 2) + (
+      if plan_row.route_row.eject | 2 | 0
+    ) + 1
 
   method describe():
     String.append("key=", to_string(encoded_key), ": ",
-                  route_row.describe(), "; mask=",
+                  plan_row.route_row.describe(), "; local-mask=",
                   to_string(allowed_mask))
 
-class RouteComputerABI(validated_routing,
+class RouteComputerABI(router_plan,
                        route_classes,
-                       virtual_channels,
+                       origins,
+                       output_vcs,
                        route_width,
                        origin_width,
                        key_width,
-                       vc_count,
+                       output_count,
+                       mask_width,
                        entries):
-  constructor (validated_routing):
-    unless validated_routing is_a ValidatedRouting
+  constructor (router_plan):
+    unless router_plan is_a RouterPlan
     | error(~who: #'RouteComputerABI,
-            "route-computer generation requires ValidatedRouting")
-    def route_classes = validated_routing.route_classes
-    def virtual_channels = validated_routing.topology.virtual_channels()
-    unless virtual_channels.length() > 0
+            "route-computer generation requires a RouterPlan")
+    unless router_plan.rows.length() > 0
     | error(~who: #'RouteComputerABI,
-            "route-computer generation requires at least one virtual channel")
+            "route-computer generation requires at least one local route row")
+    def route_classes = router_plan.route_classes
+    def origins = router_plan.origins
+    def output_vcs = router_plan.output_vcs
     def route_width = index_width(route_classes.length())
-    // Zero denotes injection. A held VC uses one plus its global stable index.
-    def origin_width = index_width(virtual_channels.length() + 1)
+    def origin_width = index_width(origins.length())
     def key_width = route_width + origin_width
-    def mutable entries = []
-    for (row in validated_routing.route_table.rows):
-      def route_key = list_index(
-        route_classes,
-        fun (route_class): route_class_id_equal(route_class.id, row.route_class.id),
-        #'RouteComputerABI,
-        "route class in validated route table"
-      )
-      def origin_key:
-        cond
-        | row.origin is_a Injection: 0
-        | row.origin is_a HeldVC:
-            list_index(
-              virtual_channels,
-              fun (vc): vc_id_equal(vc, row.origin.vc),
-              #'RouteComputerABI,
-              "held VC in validated route table"
-            ) + 1
-        | ~else:
-            error(~who: #'RouteComputerABI,
-                  "validated route-table origin must be injection or a held VC")
-      def mutable allowed_mask = 0
-      for (vc in row.allowed_vcs):
-        def bit = list_index(
-          virtual_channels,
-          fun (candidate): vc_id_equal(candidate, vc),
-          #'RouteComputerABI,
-          "allowed VC in validated route table"
-        )
-        allowed_mask := allowed_mask bits.or (1 bits.(<<) bit)
-      entries := entries ++ [
+    def output_count = output_vcs.length()
+    // RHDL has no zero-width Bits value. An ejection-only router therefore
+    // carries one constant-zero padding bit without inventing an output VC.
+    def mask_width = if output_count > 0 | output_count | 1
+    def entries = router_plan.rows.map(
+      fun (row):
         RouteComputerEntry(
           row,
-          route_key,
-          origin_key,
-          (route_key bits.(<<) origin_width) + origin_key,
-          allowed_mask
+          row.route_key,
+          row.origin_key,
+          (row.route_key bits.(<<) origin_width) + row.origin_key,
+          row.allowed_mask
         )
-      ]
-    super(validated_routing,
+    )
+    super(router_plan,
           route_classes,
-          virtual_channels,
+          origins,
+          output_vcs,
           route_width,
           origin_width,
           key_width,
-          virtual_channels.length(),
+          output_count,
+          mask_width,
           entries)
 
   method route_key(route_class):
-    unless route_class is_a RouteClass
-    | error(~who: #'RouteComputerABI, "route key requires a RouteClass")
-    list_index(
-      route_classes,
-      fun (candidate): route_class_id_equal(candidate.id, route_class.id),
-      #'RouteComputerABI,
-      "route class"
-    )
+    router_plan.route_key(route_class)
 
   method origin_key(origin):
-    cond
-    | origin is_a Injection: 0
-    | origin is_a HeldVC:
-        list_index(
-          virtual_channels,
-          fun (candidate): vc_id_equal(candidate, origin.vc),
-          #'RouteComputerABI,
-          "held VC"
-        ) + 1
-    | ~else:
-        error(~who: #'RouteComputerABI,
-              "route-computer origin must be injection or a held VC")
+    router_plan.origin_key(origin)
 
-  method vc_bit(vc):
-    list_index(
-      virtual_channels,
-      fun (candidate): vc_id_equal(candidate, vc),
-      #'RouteComputerABI,
-      "virtual channel"
-    )
+  method output_bit(vc):
+    router_plan.output_bit(vc)
 
   method encode(route_class, origin):
     def encoded_route = route_key(route_class)
@@ -154,13 +94,9 @@ class RouteComputerABI(validated_routing,
     (encoded_route bits.(<<) origin_width) + origin_key(origin)
 
   method entry(route_class, origin):
+    def encoded_key = encode(route_class, origin)
     entries.find(
-      fun (candidate):
-        route_class_id_equal(candidate.route_row.route_class.id,
-                             route_class.id) && origin_equal(
-          candidate.route_row.origin,
-          origin
-        )
+      fun (candidate): candidate.encoded_key == encoded_key
     )
 
   method entry_for_keys(route_key, origin_key):
@@ -170,7 +106,7 @@ class RouteComputerABI(validated_routing,
     )
 
   method decoder(~espresso: espresso = #'auto):
-    def result_width = vc_count + 2
+    def result_width = mask_width + 2
     def cases = entries.map(
       fun (entry):
         DecodeCase(
@@ -190,11 +126,11 @@ circuit RouteComputer(abi, ~espresso: espresso = #'auto):
 
   input route_key: Bits(abi.route_width)
   input origin_key: Bits(abi.origin_width)
-  output allowed_mask: Bits(abi.vc_count)
+  output allowed_mask: Bits(abi.mask_width)
   output eject: Bits(1)
   output valid: Bits(1)
 
   def result = abi.decoder(~espresso: espresso)(concat(route_key, origin_key))
-  allowed_mask <== extract(result, abi.vc_count + 1, 2)
+  allowed_mask <== extract(result, abi.mask_width + 1, 2)
   eject <== extract(result, 1, 1)
   valid <== extract(result, 0, 0)

@@ -1,0 +1,101 @@
+#lang rhombus
+// Checks deterministic per-node projection of validated routes into local router encodings.
+
+import:
+  "../../model/main.rhm" open
+  "../../plan/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def first = PhysicalLink(LinkId(0), n0, n1, 2)
+def second = PhysicalLink(LinkId(1), n1, n2, 2)
+def topology = Topology([n3, n2, n0, n1], [second, first])
+def route = RouteClass(RouteClassId(0), n0, n2)
+
+fun on_link(vc, link):
+  link_id_equal(vc.link_id, link.id)
+
+fun allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      on_link(candidate, first)
+  | origin is_a HeldVC:
+      on_link(origin.vc, first) && on_link(candidate, second) && (
+        origin.vc.index == candidate.index
+      )
+  | ~else: #false
+
+def routing = compile_routing(
+  RoutingProblem(topology, [route], RoutingRelation(allows))
+)
+def source_plan = RouterPlan(routing, n0)
+def middle_plan = RouterPlan(routing, n1)
+def destination_plan = RouterPlan(routing, n2)
+def unused_plan = RouterPlan(routing, n3)
+
+def first_vc0 = VCId(first.id, 0)
+def first_vc1 = VCId(first.id, 1)
+def second_vc1 = VCId(second.id, 1)
+
+check:
+  source_plan.validated_routing === routing ~is #true
+  source_plan.node === n0 ~is #true
+  source_plan.route_classes === routing.route_classes ~is #true
+  source_plan.has_injection ~is #true
+  source_plan.has_ejection ~is #false
+  source_plan.origins.map(fun (origin): origin.describe()) ~is ["inject(n0)"]
+  source_plan.output_vcs.map(fun (vc): vc.describe()) ~is ["l0.vc0", "l0.vc1"]
+  source_plan.rows.length() ~is 1
+  source_plan.rows[0].route_key ~is 0
+  source_plan.rows[0].origin_key ~is 0
+  source_plan.rows[0].allowed_mask ~is 0b11
+  source_plan.rows[0].route_row.eject ~is #false
+  source_plan.describe() ~is "router plan n0: routes=1, inputs=1, outputs=2, rows=1"
+
+check:
+  middle_plan.has_injection ~is #false
+  middle_plan.has_ejection ~is #false
+  middle_plan.origins.map(fun (origin): origin.describe()) ~is [
+    "hold(l0.vc0)",
+    "hold(l0.vc1)"
+  ]
+  middle_plan.output_vcs.map(fun (vc): vc.describe()) ~is ["l1.vc0", "l1.vc1"]
+  middle_plan.rows.map(fun (row): row.origin_key) ~is [0, 1]
+  middle_plan.rows.map(fun (row): row.allowed_mask) ~is [0b01, 0b10]
+  middle_plan.origin_key(HeldVC(first_vc1)) ~is 1
+  middle_plan.output_bit(second_vc1) ~is 1
+  middle_plan.row(route, HeldVC(first_vc0)) === middle_plan.rows[0] ~is #true
+
+check:
+  destination_plan.has_injection ~is #false
+  destination_plan.has_ejection ~is #true
+  destination_plan.origins.map(fun (origin): origin.describe()) ~is [
+    "hold(l1.vc0)",
+    "hold(l1.vc1)"
+  ]
+  destination_plan.output_vcs ~is []
+  destination_plan.rows.map(fun (row): row.allowed_mask) ~is [0, 0]
+  destination_plan.rows.map(fun (row): row.route_row.eject) ~is [#true, #true]
+  destination_plan.describe() ~is "router plan n2: routes=1, inputs=2, outputs=0, rows=2"
+
+check:
+  unused_plan.has_injection ~is #false
+  unused_plan.has_ejection ~is #false
+  unused_plan.origins ~is []
+  unused_plan.output_vcs ~is []
+  unused_plan.rows ~is []
+  unused_plan.describe() ~is "router plan n3: routes=1, inputs=0, outputs=0, rows=0"
+
+check:
+  RouterPlan("not validated", n0) ~throws "requires ValidatedRouting"
+  RouterPlan(routing, "n0") ~throws "must be a NodeId"
+  RouterPlan(routing, NodeId(99)) ~throws "does not belong to the topology"
+  source_plan.route_key("route") ~throws "requires a RouteClass"
+  source_plan.route_key(RouteClass(RouteClassId(0), n0, n2)) ~throws "does not belong"
+  source_plan.origin_key("origin") ~throws "must be an Injection or HeldVC"
+  source_plan.origin_key(Injection(n1)) ~throws "origin does not belong"
+  middle_plan.output_bit("vc") ~throws "requires a VCId"
+  middle_plan.output_bit(first_vc0) ~throws "output VC does not belong"
+  middle_plan.row(route, Injection(n0)) ~throws "origin does not belong"

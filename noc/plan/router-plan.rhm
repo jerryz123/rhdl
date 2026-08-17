@@ -1,0 +1,165 @@
+#lang rhombus
+// Projects one validated network into deterministic router-local route encodings.
+
+import:
+  "../model/main.rhm" open
+  "validated-routing.rhm" open
+
+export:
+  RouterPlanRow
+  RouterPlan
+
+fun origin_equal(left, right):
+  cond
+  | left is_a Injection && right is_a Injection:
+      node_id_equal(left.node, right.node)
+  | left is_a HeldVC && right is_a HeldVC:
+      vc_id_equal(left.vc, right.vc)
+  | ~else: #false
+
+fun list_index(items, predicate):
+  def mutable found = #false
+  for (item in items, index in 0..items.length()):
+    when predicate(item)
+    | found := index
+  found
+
+fun incoming_vcs(topology, node):
+  def mutable vcs = []
+  for (link in topology.incoming_links(node)):
+    vcs := vcs ++ link.virtual_channels()
+  vcs
+
+fun node_has_injection(route_classes, node):
+  route_classes.find(
+    fun (route_class): node_id_equal(route_class.source, node)
+  ) != #false
+
+fun node_has_ejection(route_classes, node):
+  route_classes.find(
+    fun (route_class): node_id_equal(route_class.destination, node)
+  ) != #false
+
+fun require_route_key(route_classes, route_class):
+  unless route_class is_a RouteClass
+  | error(~who: #'RouterPlan, "route key requires a RouteClass")
+  def found = list_index(
+    route_classes,
+    fun (candidate): candidate === route_class
+  )
+  unless found != #false
+  | error(~who: #'RouterPlan,
+          "route class does not belong to this router plan")
+  found
+
+fun require_origin_key(origins, origin):
+  unless injection_origin(origin) || held_vc_origin(origin)
+  | error(~who: #'RouterPlan,
+          "router-plan origin must be an Injection or HeldVC")
+  def found = list_index(
+    origins,
+    fun (candidate): origin_equal(candidate, origin)
+  )
+  unless found != #false
+  | error(~who: #'RouterPlan, "origin does not belong to this router plan")
+  found
+
+fun require_output_bit(output_vcs, vc):
+  unless vc is_a VCId
+  | error(~who: #'RouterPlan, "router-plan output requires a VCId")
+  def found = list_index(
+    output_vcs,
+    fun (candidate): vc_id_equal(candidate, vc)
+  )
+  unless found != #false
+  | error(~who: #'RouterPlan, "output VC does not belong to this router plan")
+  found
+
+class RouterPlanRow(route_row, route_key, origin_key, allowed_mask):
+  opaque
+  internal _RouterPlanRow
+  constructor ~none
+
+  method describe():
+    String.append(route_row.describe(), "; route-key=", to_string(route_key),
+                  "; origin-key=", to_string(origin_key),
+                  "; local-mask=", to_string(allowed_mask))
+
+fun make_plan_row(route_classes, origins, output_vcs, route_row):
+  def route_key = require_route_key(route_classes, route_row.route_class)
+  def origin_key = require_origin_key(origins, route_row.origin)
+  def mutable allowed_mask = 0
+  for (vc in route_row.allowed_vcs):
+    def bit = require_output_bit(output_vcs, vc)
+    allowed_mask := allowed_mask bits.or (1 bits.(<<) bit)
+  _RouterPlanRow(route_row, route_key, origin_key, allowed_mask)
+
+class RouterPlan(validated_routing,
+                 node,
+                 route_classes,
+                 has_injection,
+                 has_ejection,
+                 origins,
+                 output_vcs,
+                 rows):
+  constructor (validated_routing, node):
+    unless validated_routing is_a ValidatedRouting
+    | error(~who: #'RouterPlan,
+            "router planning requires ValidatedRouting")
+    unless node is_a NodeId
+    | error(~who: #'RouterPlan, "router node must be a NodeId")
+    unless validated_routing.topology.contains_node(node)
+    | error(~who: #'RouterPlan, "router node does not belong to the topology")
+    def route_classes = validated_routing.route_classes
+    def has_injection = node_has_injection(route_classes, node)
+    def has_ejection = node_has_ejection(route_classes, node)
+    def held_origins = incoming_vcs(
+      validated_routing.topology,
+      node
+    ).map(fun (vc): HeldVC(vc))
+    def origins:
+      if has_injection
+      | [Injection(node)] ++ held_origins
+      | held_origins
+    def output_vcs = validated_routing.topology.outgoing_vcs(node)
+    def rows = validated_routing.route_table.rows_at(node).map(
+      fun (route_row):
+        make_plan_row(route_classes, origins, output_vcs, route_row)
+    )
+    super(validated_routing,
+          node,
+          route_classes,
+          has_injection,
+          has_ejection,
+          origins,
+          output_vcs,
+          rows)
+
+  method route_key(route_class):
+    require_route_key(route_classes, route_class)
+
+  method origin_key(origin):
+    require_origin_key(origins, origin)
+
+  method output_bit(vc):
+    require_output_bit(output_vcs, vc)
+
+  method row(route_class, origin):
+    def encoded_route = route_key(route_class)
+    def encoded_origin = origin_key(origin)
+    def found = rows.find(
+      fun (candidate):
+        candidate.route_key == encoded_route && (
+          candidate.origin_key == encoded_origin
+        )
+    )
+    unless found
+    | error(~who: #'RouterPlan, "unknown local route row")
+    found
+
+  method describe():
+    String.append("router plan ", node.describe(),
+                  ": routes=", to_string(route_classes.length()),
+                  ", inputs=", to_string(origins.length()),
+                  ", outputs=", to_string(output_vcs.length()),
+                  ", rows=", to_string(rows.length()))

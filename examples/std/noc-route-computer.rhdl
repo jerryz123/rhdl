@@ -1,5 +1,5 @@
 #lang rhdl
-// Builds a route computer exclusively from a validated two-hop NoC routing artifact.
+// Builds router-local route computers for every node in a validated two-hop NoC.
 
 import:
   "../../noc/model/main.rhm" open
@@ -32,27 +32,139 @@ unless routing is_a ValidatedRouting
 | error(~who: #'RouteComputer,
         "example routing must pass validation before hardware generation")
 
-def abi = RouteComputerABI(routing)
-def design = elaborate(RouteComputer(abi, ~espresso: #false))
+def source_plan = RouterPlan(routing, n0)
+def middle_plan = RouterPlan(routing, n1)
+def destination_plan = RouterPlan(routing, n2)
+def source_abi = RouteComputerABI(source_plan)
+def middle_abi = RouteComputerABI(middle_plan)
+def destination_abi = RouteComputerABI(destination_plan)
+
+circuit RouteComputerFixture():
+  input source_route_key: Bits(source_abi.route_width)
+  input source_origin_key: Bits(source_abi.origin_width)
+  output source_allowed_mask: Bits(source_abi.mask_width)
+  output source_eject: Bits(1)
+  output source_valid: Bits(1)
+
+  input middle_route_key: Bits(middle_abi.route_width)
+  input middle_origin_key: Bits(middle_abi.origin_width)
+  output middle_allowed_mask: Bits(middle_abi.mask_width)
+  output middle_eject: Bits(1)
+  output middle_valid: Bits(1)
+
+  input destination_route_key: Bits(destination_abi.route_width)
+  input destination_origin_key: Bits(destination_abi.origin_width)
+  output destination_allowed_mask: Bits(destination_abi.mask_width)
+  output destination_eject: Bits(1)
+  output destination_valid: Bits(1)
+
+  inst source(RouteComputer(source_abi, ~espresso: #false))
+  inst middle(RouteComputer(middle_abi, ~espresso: #false))
+  inst destination(RouteComputer(destination_abi, ~espresso: #false))
+
+  source.route_key <== source_route_key
+  source.origin_key <== source_origin_key
+  source_allowed_mask <== source.allowed_mask
+  source_eject <== source.eject
+  source_valid <== source.valid
+
+  middle.route_key <== middle_route_key
+  middle.origin_key <== middle_origin_key
+  middle_allowed_mask <== middle.allowed_mask
+  middle_eject <== middle.eject
+  middle_valid <== middle.valid
+
+  destination.route_key <== destination_route_key
+  destination.origin_key <== destination_origin_key
+  destination_allowed_mask <== destination.allowed_mask
+  destination_eject <== destination.eject
+  destination_valid <== destination.valid
+
+def design = elaborate(RouteComputerFixture())
 
 // Exact normalized SystemVerilog reference for the focused backend fixture.
 def verilog_reference = @str|<<{
+module RouteComputerFixture(
+  input        source_route_key,
+               source_origin_key,
+               middle_route_key,
+               middle_origin_key,
+               destination_route_key,
+               destination_origin_key,
+  output [1:0] source_allowed_mask,
+  output       source_eject,
+               source_valid,
+  output [1:0] middle_allowed_mask,
+  output       middle_eject,
+               middle_valid,
+               destination_allowed_mask,
+               destination_eject,
+               destination_valid
+);
+
+  RouteComputer source (
+    .route_key    (source_route_key),
+    .origin_key   (source_origin_key),
+    .allowed_mask (source_allowed_mask),
+    .eject        (source_eject),
+    .valid        (source_valid)
+  );
+  RouteComputer_1 middle (
+    .route_key    (middle_route_key),
+    .origin_key   (middle_origin_key),
+    .allowed_mask (middle_allowed_mask),
+    .eject        (middle_eject),
+    .valid        (middle_valid)
+  );
+  RouteComputer_2 destination (
+    .route_key    (destination_route_key),
+    .origin_key   (destination_origin_key),
+    .allowed_mask (destination_allowed_mask),
+    .eject        (destination_eject),
+    .valid        (destination_valid)
+  );
+endmodule
+
 module RouteComputer(
   input        route_key,
-  input  [2:0] origin_key,
-  output [3:0] allowed_mask,
+               origin_key,
+  output [1:0] allowed_mask,
   output       eject,
                valid
 );
 
-  wire [3:0] _GEN = {route_key, origin_key};
-  wire [5:0] _GEN_0 =
-    _GEN == 4'h0
-      ? 6'hD
-      : _GEN == 4'h1
-          ? 6'h11
-          : _GEN == 4'h2 ? 6'h21 : _GEN == 4'h3 | _GEN == 4'h4 ? 6'h3 : 6'h0;
-  assign allowed_mask = _GEN_0[5:2];
+  wire [3:0] _GEN = {route_key, origin_key} == 2'h0 ? 4'hD : 4'h0;
+  assign allowed_mask = _GEN[3:2];
+  assign eject = _GEN[1];
+  assign valid = _GEN[0];
+endmodule
+
+module RouteComputer_1(
+  input        route_key,
+               origin_key,
+  output [1:0] allowed_mask,
+  output       eject,
+               valid
+);
+
+  wire [1:0] _GEN = {route_key, origin_key};
+  wire [3:0] _GEN_0 = _GEN == 2'h0 ? 4'h5 : _GEN == 2'h1 ? 4'h9 : 4'h0;
+  assign allowed_mask = _GEN_0[3:2];
+  assign eject = _GEN_0[1];
+  assign valid = _GEN_0[0];
+endmodule
+
+module RouteComputer_2(
+  input  route_key,
+         origin_key,
+  output allowed_mask,
+         eject,
+         valid
+);
+
+  wire [1:0] _GEN = {route_key, origin_key};
+  wire [2:0] _GEN_0 = _GEN == 2'h0 | _GEN == 2'h1 ? 3'h3 : 3'h0;
+  assign allowed_mask = _GEN_0[2];
   assign eject = _GEN_0[1];
   assign valid = _GEN_0[0];
 endmodule
@@ -67,6 +179,12 @@ export:
   topology
   route
   routing
-  abi
+  source_plan
+  middle_plan
+  destination_plan
+  source_abi
+  middle_abi
+  destination_abi
+  RouteComputerFixture
   design
   verilog_reference
