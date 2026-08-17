@@ -3,6 +3,7 @@
 
 import:
   "protocol.rhdl" open
+  "../refill.rhdl" open
   "../../load-store.rhdl" open
   "../../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl") open
@@ -29,12 +30,10 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   | error(~who: #'RicketL1DCache, "address width must not exceed integer width")
   check_l1d_geometry(address_width, sets, line_bytes)
   def beats = line_bytes / 8
-  def line_bits = line_bytes * 8
   def offset_width = alignment_bits(line_bytes)
   def set_width = alignment_bits(sets)
   def tag_width = address_width - offset_width - set_width
   def beat_width = index_width(beats)
-  def count_width = index_width(beats + 1)
   def Line = Vec(beats, Bits(64))
   def ByteLine = Vec(line_bytes, Bits(8))
 
@@ -45,6 +44,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
   inst load_gen(LoadGen(xlen))
   inst store_gen(StoreGen(xlen))
+  inst refill(RicketLineRefill(address_width, line_bytes))
   // The lookup token advances with consecutive hits and remains stable while
   // a miss owns the refill path.
   inst lookup(Pipe(RicketDataReq(xlen, address_width), 1))
@@ -53,10 +53,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   inst responses(ValidPipe(RicketDataResp(xlen), 1))
 
   reg valid_bits(~init: bits(0, sets))
-  reg refilling(~init: Bool(#false))
-  reg refill_requested(~init: bits(0, count_width))
-  reg refill_received(~init: bits(0, count_width))
-  reg refill_line(~init: cast(bits(0, line_bits), Line))
   reg store_active(~init: Bool(#false))
   reg store_sent(~init: Bool(#false))
   reg store_address(~init: bits(0, address_width))
@@ -65,7 +61,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
 
   core.response.valid <== responses.egress.valid
   core.response.bits <== responses.egress.bits
-  memory.response.ready <== refilling ||| (store_active & store_sent)
 
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def lookup_request = lookup.egress.bits
@@ -92,11 +87,8 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
     | zext(lookup_request.address, width)
   load_gen.address <== lookup_address_xlen
   load_gen.data <== mux(
-    refilling,
-    refill_line.updated(
-      refill_received[0..beat_width],
-      memory.response.bits.data
-    ).lookup(lookup_beat, ~default: bits(0, 64)),
+    refill.completion.valid,
+    refill.completion.bits.line.lookup(lookup_beat, ~default: bits(0, 64)),
     cached_beat
   )
   load_gen.width <== lookup_request.width
@@ -105,12 +97,9 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   store_gen.value <== lookup_request.data
   store_gen.width <== lookup_request.width
 
-  def refill_index = refill_received[0..beat_width]
-  def line_with_response = refill_line.updated(refill_index, memory.response.bits.data)
   def store_line = cached_line.updated(lookup_beat, store_gen.data)
-  def last_refill_response = refill_received === bits(beats - 1, count_width)
-  def refill_response_fire = refilling & fire(memory.response)
-  def install_refill = refill_response_fire & last_refill_response
+  refill.completion.ready <== Bool(#true)
+  def install_refill = fire(refill.completion)
   def update_store_hit = lookup_store & line_hit
   def cache_write = install_refill ||| update_store_hit
   def store_line_mask:
@@ -120,36 +109,41 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
         concat(lookup_beat, bits(0, 3)),
         line_bytes
       )
-  assert(!(refilling & store_active), "l1d_backing_owner_exclusive")
+  assert(refill.command.ready ||| !store_active, "l1d_backing_owner_exclusive")
 
   // A miss holds its lookup context until the installed refill consumes it.
   // Hits and stores release immediately, allowing another request each cycle.
-  lookup.egress.ready <== (!refilling & !lookup_miss) ||| install_refill
+  lookup.egress.ready <== (refill.command.ready & !lookup_miss) ||| install_refill
 
   // Loads can follow hit lookups every cycle. A miss blocks until refill, and
   // a store blocks only the cache-request stream while its one-entry backing
   // write buffer drains; the store completion enters the response register at
   // lookup and reaches the pipeline in WB.
-  def lookup_accepts_input = !refilling & !store_active & !lookup_miss & !lookup_store
+  def lookup_accepts_input = refill.command.ready & !store_active & !lookup_miss & !lookup_store
   core.request.ready <== lookup.ingress.ready & lookup_accepts_input
   lookup.ingress.valid <== core.request.valid & lookup_accepts_input
   lookup.ingress.bits <== core.request.bits
   def request_fire = fire(core.request)
 
   def refill_line_base = align_down(as_bits(lookup_request.address), line_bytes)
-  def refill_byte_offset = zext(refill_requested, address_width) << 3
-  def refill_request_valid = refilling & (refill_requested < bits(beats, count_width))
+  refill.command.valid <== lookup_miss
+  refill.command.bits <== refill_line_base
+  assert(!lookup_miss ||| refill.command.ready, "l1d_refill_command_accepted")
   def store_request_valid = store_active & !store_sent
-  memory.request.valid <== refill_request_valid ||| store_request_valid
+  memory.request.valid <== refill.memory.request.valid ||| store_request_valid
   memory.request.bits <== SimpleMemoryReq(address_width, 8):
     address: mux(
       store_request_valid,
       store_address,
-      refill_line_base + refill_byte_offset
+      refill.memory.request.bits.address
     )
     write: store_request_valid
-    data: mux(store_request_valid, store_data, bits(0, 64))
-    mask: mux(store_request_valid, store_mask, !bits(0, 8))
+    data: mux(store_request_valid, store_data, refill.memory.request.bits.data)
+    mask: mux(store_request_valid, store_mask, refill.memory.request.bits.mask)
+  refill.memory.request.ready <== memory.request.ready & !store_request_valid
+  refill.memory.response.valid <== memory.response.valid
+  refill.memory.response.bits <== memory.response.bits
+  memory.response.ready <== refill.memory.response.ready ||| (store_active & store_sent)
   def produces_load_hit = lookup_load & line_hit
   def produces_response = produces_load_hit ||| lookup_store ||| install_refill
   responses.ingress.valid <== produces_response
@@ -167,23 +161,11 @@ sync_circuit RicketL1DCache(xlen :: XLen, address_width :: PosInt, sets :: Pow2I
   lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), line_bytes):
     address: mux(cache_write, lookup_set, request_set_value)
     write: cache_write
-    data: cast(mux(install_refill, line_with_response, store_line), ByteLine)
+    data: cast(mux(install_refill, refill.completion.bits.line, store_line), ByteLine)
     mask: mux(install_refill, !bits(0, line_bytes), store_line_mask)
 
-  when lookup_miss:
-    refilling <== Bool(#true)
-    refill_requested <== bits(0, count_width)
-    refill_received <== bits(0, count_width)
-    refill_line <== cast(bits(0, line_bits), Line)
-  elsewhen refilling:
-    when (fire(memory.request)):
-      refill_requested <== refill_requested + bits(1, count_width)
-    when refill_response_fire:
-      refill_line <== line_with_response
-      refill_received <== refill_received + bits(1, count_width)
-      when last_refill_response:
-        refilling <== Bool(#false)
-        valid_bits <== as_bits(valid_vector.updated(lookup_set, Bool(#true)))
+  when install_refill:
+    valid_bits <== as_bits(valid_vector.updated(lookup_set, Bool(#true)))
 
   when lookup_store:
     store_address.next <== align_down(as_bits(lookup_request.address), 8)

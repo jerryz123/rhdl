@@ -1,0 +1,32 @@
+#lang rhombus
+// Checks Ricket's cache-line refill flow contract, state ownership, and geometry.
+
+import:
+  "../../../rhdl/core/main.rhm" open
+  "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../refill.rhdl" as refill
+
+def design = embedded.run_elaboration(fun (): refill.RicketLineRefill(32, 32))
+def engine = design.modules.find(fun (module_def): module_def.name == "RicketLineRefill")
+def one_beat_design = embedded.run_elaboration(fun (): refill.RicketLineRefill(32, 8))
+fun register_names(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+  ).map(fun (operation): operation.attribute("name"))
+
+check:
+  engine.find_input("command_in").type.field("bits").type.width ~is 32
+  engine.find_output("completion_out").type.field("bits").type.field("line").type.length ~is 4
+  engine.find_output("completion_out").type.field("bits").type.field("line").type.element_type.width ~is 64
+  engine.find_output("memory_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  register_names(engine) ~is [
+    "active_state", "line_address", "requested", "received", "line"
+  ]
+  verify_design(design) ~is #void
+  verify_design(one_beat_design) ~is #void
+  embedded.run_elaboration(
+    fun (): refill.RicketLineRefill(32, 4)
+  ) ~throws "line byte count"
+  embedded.run_elaboration(
+    fun (): refill.RicketLineRefill(2, 8)
+  ) ~throws "address width"

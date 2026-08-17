@@ -22,7 +22,8 @@ ricket.rhdl                         composition only
   |     `--> ../../rhdl/std/scoreboard.rhdl
   |--> icache/cache.rhdl            instruction access -> SimpleMemory(8 B)
   `--> dcache/cache.rhdl            data access -> SimpleMemory(8 B)
-        `--> ../load-store.rhdl
+        |--> ../load-store.rhdl
+        `--> refill.rhdl             ordered cache-line transaction engine
 ```
 
 `RicketCore` does not import `SimpleMemory`: it speaks Ricket's semantic
@@ -92,8 +93,10 @@ eight-byte `SimpleMemory` instruction and data requester ports, and a sticky
 throughput. L1D load hits have the same throughput and pass through a mandatory
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
 completion tag. A one-stage lookup flow carries request context beside the SRAM
-access and holds it across refill; stores complete through the registered
-response path and drain through an ordered one-entry write buffer. The two
+access and holds it across refill. A separate refill engine owns the aligned
+line address, backing-read counters, and line accumulator; stores complete
+through the registered response path and drain through an ordered one-entry
+write buffer. The two
 external ports intentionally remain separate; SoC arbitration and integration
 are outside the core. The backing-memory data width stays fixed at 64 bits in
 both specializations; only the architectural and core-facing values follow
@@ -111,6 +114,7 @@ For only the changed core/cache hierarchy:
 
 ```sh
 env PLTCOLLECTS="$PWD": raco test --direct \
+  cores/ricket/tests/refill-test.rhm \
   cores/ricket/tests/icache-test.rhm \
   cores/ricket/tests/dcache-test.rhm \
   cores/ricket/tests/ricket-test.rhm

@@ -17,7 +17,11 @@ an eight-byte `SimpleMemory` backing port.
 write-through/write-no-allocate cache. A one-stage `Pipe` carries lookup
 context alongside the synchronous SRAM access, advances on consecutive hits,
 and holds the request across a refill. Set, tag, and beat are derived from that
-context instead of stored independently. A mandatory non-backpressurable
+context instead of stored independently. The Ricket-local `../refill.rhdl`
+transaction engine accepts the aligned line address, owns the request and
+response counters and line accumulator, and returns one completed line over an
+irrevocable flow. The cache retains backing-port arbitration and installs that
+result into its tag and data arrays. A mandatory non-backpressurable
 `ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
 aligning an EX request's hit response with WB. A miss blocks
 new cache requests until refill completes. A store produces its registered

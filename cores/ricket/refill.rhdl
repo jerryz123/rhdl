@@ -1,0 +1,85 @@
+#lang rhdl
+// Implements Ricket's ordered multi-beat cache-line refill transaction engine.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/simple-memory.rhdl") open
+
+bundle RicketLineRefillResult(address_width :: PosInt, line_bytes :: Pow2Int):
+  line_address: Bits(address_width)
+  line: Vec(line_bytes / 8, Bits(64))
+
+sync_circuit RicketLineRefill(address_width :: PosInt, line_bytes :: Pow2Int):
+  unless line_bytes >= 8
+  | error(~who: #'RicketLineRefill,
+          "line byte count must be a power of two of at least eight")
+  unless address_width >= alignment_bits(line_bytes)
+  | error(~who: #'RicketLineRefill,
+          "address width must cover the line offset")
+
+  def beats = line_bytes / 8
+  def beat_width = index_width(beats)
+  def count_width = index_width(beats + 1)
+  def Line = Vec(beats, Bits(64))
+
+  interface command(Irrevocable(Bits(address_width)), ~role: consumer)
+  interface completion(Irrevocable(RicketLineRefillResult(address_width, line_bytes)),
+                       ~role: producer)
+  interface memory(SimpleMemory(address_width, 8), ~role: requester)
+
+  reg active_state(~init: Bool(#false))
+  reg line_address(~init: bits(0, address_width))
+  reg requested(~init: bits(0, count_width))
+  reg received(~init: bits(0, count_width))
+  reg line(~init: cast(bits(0, line_bytes * 8), Line))
+
+  command.ready <== !active_state
+  def command_fire = fire(command)
+  assert(!command_fire ||| is_aligned(command.bits, line_bytes),
+         "line_refill_address_aligned")
+
+  def request_valid = active_state & (requested < bits(beats, count_width))
+  def request_offset = zext(requested, address_width) << 3
+  memory.request.valid <== request_valid
+  memory.request.bits <== SimpleMemoryReq(address_width, 8):
+    address: line_address + request_offset
+    write: Bool(#false)
+    data: bits(0, 64)
+    mask: !bits(0, 8)
+
+  def response_index = received[0..beat_width]
+  def line_with_response = line.updated(response_index, memory.response.bits.data)
+  def last_response = received === bits(beats - 1, count_width)
+  completion.valid <== active_state & memory.response.valid & last_response
+  completion.bits <== RicketLineRefillResult(address_width, line_bytes):
+    line_address: line_address
+    line: line_with_response
+  memory.response.ready <== active_state & (!last_response ||| completion.ready)
+
+  when command_fire:
+    active_state.next <== Bool(#true)
+  elsewhen (active_state & fire(memory.response) & last_response):
+    active_state.next <== Bool(#false)
+
+  when command_fire:
+    line_address.next <== command.bits
+
+  when command_fire:
+    requested.next <== bits(0, count_width)
+  elsewhen (active_state & fire(memory.request)):
+    requested.next <== requested + bits(1, count_width)
+
+  when command_fire:
+    received.next <== bits(0, count_width)
+  elsewhen (active_state & fire(memory.response) & !last_response):
+    received.next <== received + bits(1, count_width)
+
+  when command_fire:
+    line.next <== cast(bits(0, line_bytes * 8), Line)
+  elsewhen (active_state & fire(memory.response) & !last_response):
+    line.next <== line_with_response
+
+export:
+  RicketLineRefillResult
+  RicketLineRefill
