@@ -93,7 +93,7 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
     busy_bits <== effective_busy_bits
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
-  // its Pipe. Redirects and faults flush both pending metadata and the L1I's
+  // its Pipe. Redirects and faults flush both pending PCs and the L1I's
   // lookup/response path, so no generation tag crosses this interface.
   def squash = faulted ||| execute_fault_event ||| redirect_link.right.valid
   def start_aligned = is_aligned(start.bits, 4)
@@ -103,25 +103,24 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def start_fault = fire(start) & !start_aligned
   def fetch_flush = start_fault ||| execute_fault_event ||| redirect_link.right.valid
   def fetch_queue_reset = cast(cast(reset, Bool) ||| fetch_flush, Reset)
-  inst fetch_metadata(Queue(FetchMetadata(xlen), 2, ~pipe: #true),
-                      ~clock: clock,
-                      ~reset: fetch_queue_reset)
+  inst fetch_pcs(Queue(Bits(width), 2, ~pipe: #true),
+                 ~clock: clock,
+                 ~reset: fetch_queue_reset)
   def fetch_wants_request = started & !(faulted ||| execute_fault_event) & !redirect_link.right.valid
   instruction_access.flush <== fetch_flush
-  instruction_access.request.valid <== fetch_wants_request & fetch_metadata.ingress.ready
+  instruction_access.request.valid <== fetch_wants_request & fetch_pcs.ingress.ready
   instruction_access.request.bits.address <== fetch_pc[0..address_width]
-  fetch_metadata.ingress.valid <== fetch_wants_request & instruction_access.request.ready
-  fetch_metadata.ingress.bits <== FetchMetadata(xlen):
-    pc: fetch_pc
+  fetch_pcs.ingress.valid <== fetch_wants_request & instruction_access.request.ready
+  fetch_pcs.ingress.bits <== fetch_pc
 
-  def fetch_pair_valid = instruction_access.response.valid & fetch_metadata.egress.valid
+  def fetch_pair_valid = instruction_access.response.valid & fetch_pcs.egress.valid
   def fetch_pair_ready = squash ||| if_id_pipe.ingress.ready
   if_id_pipe.ingress.valid <== fetch_pair_valid & !squash
   if_id_pipe.ingress.bits <== FetchDecode(xlen):
-    pc: fetch_metadata.egress.bits.pc
+    pc: fetch_pcs.egress.bits
     instruction: instruction_access.response.bits.instruction
-  instruction_access.response.ready <== fetch_metadata.egress.valid & fetch_pair_ready
-  fetch_metadata.egress.ready <== instruction_access.response.valid & fetch_pair_ready
+  instruction_access.response.ready <== fetch_pcs.egress.valid & fetch_pair_ready
+  fetch_pcs.egress.ready <== instruction_access.response.valid & fetch_pair_ready
 
   def fetch_request_fire = fire(instruction_access.request)
   when start_fire:
