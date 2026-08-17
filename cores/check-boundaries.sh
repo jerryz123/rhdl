@@ -40,7 +40,7 @@ if [[ -n "$component_control_imports" ]]; then
 fi
 
 pipeline_transport_imports="$(rg -n 'simple-memory' \
-  cores/ricket/core-pipeline.rhdl || true)"
+  cores/ricket/core.rhdl || true)"
 if [[ -n "$pipeline_transport_imports" ]]; then
   echo "Ricket pipeline must depend on its cache protocol, not SimpleMemory" >&2
   echo "$pipeline_transport_imports" >&2

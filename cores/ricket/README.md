@@ -14,7 +14,7 @@ caches live here. Reusable execution components remain directly under
 
 ```text
 ricket.rhdl                         composition only
-  |--> core-pipeline.rhdl           IF/ID/EX/MEM/WB logic
+  |--> core.rhdl                    IF/ID/EX/MEM/WB logic
   |     |--> bundles + decode + register-file + scoreboard
   |     |--> ../{alu,branch-resolver,load-store}.rhdl
   |     |--> icache/protocol.rhdl
@@ -38,7 +38,7 @@ contracts.
 
 ## Pipeline
 
-[`core-pipeline.rhdl`](core-pipeline.rhdl) keeps Fetch, Decode, Execute,
+[`core.rhdl`](core.rhdl) keeps Fetch, Decode, Execute,
 Memory, and Writeback as logical regions of one circuit. Individual stages are
 not module boundaries. `Pipe(_, 1)` instances make IF/ID and ID/EX elastic, so
 instructions wait before Execute until required operands and cache request
