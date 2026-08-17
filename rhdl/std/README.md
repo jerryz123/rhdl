@@ -300,10 +300,18 @@ import:
 
 def aligned = is_aligned(address, 8)
 def base = align_down(address, 8)
+
+fun bank_index_width(bank_count :: Pow2Int):
+  alignment_bits(bank_count)
 ```
 
-`power_of_two(value)` is the shared host-side predicate for positive
-power-of-two `Int` values. It returns false for zero and negative integers.
+`Pow2Int` composes Rhombus's built-in `PosInt` annotation with the
+power-of-two predicate. Annotated generator parameters remain ordinary
+integers, so host arithmetic and specialization use the original value without
+wrapping.
+`power_of_two(value)` is the corresponding predicate for conditional queries;
+it returns false for non-integers, zero, negative integers, and other
+non-power-of-two values.
 `unsigned_value_count(width)` returns the number of distinct values represented
 by a nonnegative unsigned width, including one value for width zero.
 The alignment is a positive power-of-two host parameter and must fit the

@@ -1,8 +1,14 @@
 #lang rhdl
-// Defines host-parameterized alignment operations for hardware bit vectors.
+// Defines the Pow2Int host refinement and aligned hardware bit-vector operations.
 
-fun power_of_two(value :: Int):
-  value > 0 && (value bits.and (value - 1)) == 0
+import:
+  rhombus/meta open
+
+fun power_of_two(value):
+  value is_a PosInt && (value bits.and (value - 1)) == 0
+
+annot.macro 'Pow2Int':
+  'PosInt && satisfying(power_of_two)'
 
 fun unsigned_value_count(width :: Int):
   unless width >= 0
@@ -17,25 +23,19 @@ fun unchecked_alignment_bits(alignment :: Int):
     | loop(value / 2, bits + 1)
   loop(alignment, 0)
 
-fun alignment_bits(alignment :: Int):
-  unless power_of_two(alignment)
-  | error(~who: #'alignment_bits,
-          "alignment must be a positive power-of-two host Int")
+fun alignment_bits(alignment :: Pow2Int):
   unchecked_alignment_bits(alignment)
 
-fun checked_alignment_width(value, alignment :: Int, who):
+fun checked_alignment_width(value, alignment :: Pow2Int, who):
   def width = value.type.bit_width()
   unless value.type.type_equal(Bits(width)) && Bits(width).type_equal(value.type)
   | error(~who: who, "alignment value must have a Bits type")
-  unless power_of_two(alignment)
-  | error(~who: who,
-          "alignment must be a positive power-of-two host Int")
   def low_width = unchecked_alignment_bits(alignment)
   unless low_width <= width
   | error(~who: who, "alignment must fit the Bits width")
   values(width, low_width)
 
-fun is_aligned(value :: Hardware, alignment :: Int) :~ Bool:
+fun is_aligned(value :: Hardware, alignment :: Pow2Int) :~ Bool:
   def (_width, low_width) = checked_alignment_width(
     value,
     alignment,
@@ -45,7 +45,7 @@ fun is_aligned(value :: Hardware, alignment :: Int) :~ Bool:
   | Bool(#true)
   | !or_reduce(value[0..low_width])
 
-fun align_down(value, alignment :: Int) :~ Bits(value.type.bit_width()):
+fun align_down(value, alignment :: Pow2Int) :~ Bits(value.type.bit_width()):
   def (width, _low_width) = checked_alignment_width(
     value,
     alignment,
@@ -56,6 +56,7 @@ fun align_down(value, alignment :: Int) :~ Bits(value.type.bit_width()):
   | value & bits((1 bits.(<<) width) - alignment, width)
 
 export:
+  Pow2Int
   power_of_two
   unsigned_value_count
   alignment_bits

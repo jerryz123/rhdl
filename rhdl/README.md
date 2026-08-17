@@ -91,7 +91,7 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
-| `std/bits.rhdl` | Host power-of-two testing plus alignment width, checking, and downward alignment for `Bits` | None |
+| `std/bits.rhdl` | Host `Pow2Int` refinement and power-of-two testing plus alignment width, checking, and downward alignment for `Bits` | None |
 | `std/interconnect.rhdl` | Protocol-neutral host-side ID ranges, masked address sets, and transfer-size sets | `std/bits.rhdl` |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes, exact-literal normalization, partial records, and recursive aggregate construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
