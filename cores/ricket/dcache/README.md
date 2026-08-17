@@ -2,12 +2,14 @@
 
 # Ricket data cache
 
-`protocol.rhdl` defines `RicketDataAccess`, an ordered `Irrevocable`
-request/response interface carrying the original byte address, read/write
-intent, scalar width, load signedness, and XLEN-wide store source. It returns an
-XLEN-wide normalized load value and echoes the request's five-bit completion tag;
-store response data and tag have no meaning. The pipeline uses the tag to clear
-the destination scoreboard entry when a delayed load returns. It checks
+`protocol.rhdl` defines `RicketDataAccess`, an ordered `Decoupled` request and
+`Valid` response interface carrying the original byte address, read/write
+intent, scalar width, load signedness, and XLEN-wide store source. The request
+is deliberately Decoupled because live Execute forwarding may change its
+payload before the cache accepts the instruction. The response returns an
+XLEN-wide normalized load value and echoes the request's five-bit completion
+tag; store response data and tag have no meaning. The pipeline uses the tag to
+clear the destination scoreboard entry when a delayed load returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
 load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
 `XLen.X64`; its core-facing and backing-memory addresses use the selected XLEN

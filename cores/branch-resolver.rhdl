@@ -1,6 +1,9 @@
 #lang rhdl
 // Resolves conditional and unconditional control transfers from orthogonal controls.
 
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
 bundle BranchResolverControl():
   enable: Bool
   unconditional: Bool
@@ -8,11 +11,22 @@ bundle BranchResolverControl():
   signed_mode: Bool
   invert: Bool
 
-circuit BranchResolver(width :: PosInt):
+bundle BranchResolverRequest(width :: PosInt):
+  left: Bits(width)
+  right: Bits(width)
+  control: BranchResolverControl()
 
-  input(left, right): Bits(width)
-  input control: BranchResolverControl()
-  output taken: Bool
+bundle BranchResult():
+  taken: Bool
+
+circuit BranchResolver(width :: PosInt):
+  interface request(Valid(BranchResolverRequest(width)), ~role: consumer)
+  interface result(Valid(BranchResult()), ~role: producer)
+
+  def request_bits = request.bits
+  def left = request_bits.left
+  def right = request_bits.right
+  def control = request_bits.control
 
   def equal = left === right
   def unsigned_less = left < right
@@ -30,8 +44,12 @@ circuit BranchResolver(width :: PosInt):
     Bool(#true),
     comparison ^ control.invert
   )
-  taken <== control.enable & condition
+  result.valid <== request.valid
+  result.bits <== BranchResult():
+    taken: control.enable & condition
 
 export:
   BranchResolverControl
+  BranchResolverRequest
+  BranchResult
   BranchResolver

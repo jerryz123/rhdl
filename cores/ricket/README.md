@@ -54,9 +54,12 @@ may finish internally but cannot return an instruction to Fetch.
 Decode holds a token behind loads in ID/EX and EX/MEM until they reach WB.
 Execute owns forwarding, branch
 resolution, target and access alignment checks, and architectural fault
-generation. A legal data-cache request transfers at the same edge that places
-its instruction in EX/MEM. The L1D registers its SRAM lookup result so a hit
-arrives with the instruction in WB. WB is the ordered commit point: a load whose
+generation. An atomic flow fork admits each Execute token simultaneously into
+branch resolution, its optional data-cache request, and the feed-forward
+pipeline continuation. The cache leg alone contributes backpressure, and a
+legal request transfers at the same edge that places its instruction in
+EX/MEM. The L1D registers its SRAM lookup result so a hit arrives with the
+instruction in WB. WB is the ordered commit point: a load whose
 result has not returned sets its destination in the standard `Scoreboard` and
 releases the pipeline before its tagged result returns. Decode stalls on
 scoreboard RAW and WAW

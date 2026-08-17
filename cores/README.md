@@ -60,12 +60,13 @@ instruction encodings, operand routing, memory, branches, or writeback.
 ## Branch resolver
 
 [`branch-resolver.rhdl`](branch-resolver.rhdl) defines a stateless,
-width-parameterized comparator with a `BranchResolverControl` input. Decode
-drives orthogonal `enable`, `unconditional`, `compare_equal`, `signed_mode`,
-and `invert` signals instead of an instruction-shaped condition enum. The
-resolver owns equality and signed or unsigned less-than comparison and emits a
-single `taken` result. It knows nothing about instruction encodings, target
-selection, PCs, or redirects.
+width-parameterized `Valid` transform from `BranchResolverRequest` to
+`BranchResult`. Decode drives orthogonal `enable`, `unconditional`,
+`compare_equal`, `signed_mode`, and `invert` signals instead of an
+instruction-shaped condition enum. The resolver owns equality and signed or
+unsigned less-than comparison and carries request validity to its `taken`
+result. It knows nothing about instruction encodings, target selection, PCs,
+execute-stage acceptance, or redirects.
 
 ## Load and store generators
 
