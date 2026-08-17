@@ -7,7 +7,7 @@ module ricket_pipeline_tb;
   typedef struct packed { logic [31:0] instruction; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
-  typedef struct packed { instruction_req_t request; ready_t response; } instruction_out_t;
+  typedef struct packed { logic flush; instruction_req_t request; ready_t response; } instruction_out_t;
   typedef struct packed {
     logic [31:0] address;
     logic write;
@@ -41,6 +41,7 @@ module ricket_pipeline_tb;
   logic second_response_sent;
   logic [2:0] second_response_delay;
   logic [1:0] stores_seen;
+  logic saw_fetch_flush;
   logic saw_redirect;
 
   RicketPipeline dut (.*);
@@ -82,17 +83,25 @@ module ricket_pipeline_tb;
       second_response_sent <= 1'b0;
       second_response_delay <= '0;
       stores_seen <= '0;
+      saw_fetch_flush <= 1'b0;
       saw_redirect <= 1'b0;
     end else begin
-      if (instruction_response_valid && instruction_access_out.response.ready)
+      if (instruction_access_out.flush) begin
         instruction_response_valid <= 1'b0;
-      if (instruction_access_out.request.valid && instruction_access_in.request.ready) begin
-        instruction_response_valid <= 1'b1;
-        instruction_response_bits <= instruction_at(instruction_access_out.request.bits.address);
-        if (instruction_access_out.request.bits.address == 32'd64) begin
-          assert (!first_response_sent && !second_response_sent)
-            else $fatal(1, "branch redirect waited for deferred loads");
-          saw_redirect <= 1'b1;
+        saw_fetch_flush <= 1'b1;
+      end else begin
+        if (instruction_response_valid && instruction_access_out.response.ready)
+          instruction_response_valid <= 1'b0;
+        if (instruction_access_out.request.valid && instruction_access_in.request.ready) begin
+          instruction_response_valid <= 1'b1;
+          instruction_response_bits <= instruction_at(instruction_access_out.request.bits.address);
+          if (instruction_access_out.request.bits.address == 32'd64) begin
+            assert (saw_fetch_flush)
+              else $fatal(1, "branch target fetched without flushing wrong-path requests");
+            assert (!first_response_sent && !second_response_sent)
+              else $fatal(1, "branch redirect waited for deferred loads");
+            saw_redirect <= 1'b1;
+          end
         end
       end
 

@@ -38,7 +38,10 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst lines(SyncRam1RW(sets, Bits(64), beats))
-  inst responses(Queue(RicketInstructionResp(), 2, ~pipe: #true, ~flow: #true))
+  def response_queue_reset = cast(cast(reset, Bool) ||| core.flush, Reset)
+  inst responses(Queue(RicketInstructionResp(), 2, ~pipe: #true, ~flow: #true),
+                 ~clock: clock,
+                 ~reset: response_queue_reset)
 
   reg valid_bits(~init: bits(0, sets))
   reg lookup_address(~init: bits(0, address_width))
@@ -49,11 +52,12 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
   reg refill_requested(~init: bits(0, count_width))
   reg refill_received(~init: bits(0, count_width))
   reg refill_line(~init: cast(bits(0, line_bits), Line))
+  reg refill_live(~init: Bool(#false))
   reg outstanding(~init: bits(0, outstanding_width))
 
-  core.response.valid <== responses.egress.valid
+  core.response.valid <== responses.egress.valid & !core.flush
   core.response.bits <== responses.egress.bits
-  responses.egress.ready <== core.response.ready
+  responses.egress.ready <== core.response.ready & !core.flush
   memory.response.ready <== refilling
 
   def response_fire = fire(core.response)
@@ -86,7 +90,7 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
   // A lookup result is known before the next request handshake. A discovered
   // miss therefore blocks that handshake, while a hit permits another array
   // read at the same edge and sustains one accepted request per cycle.
-  core.request.ready <== !refilling & !lookup_miss & response_capacity
+  core.request.ready <== !core.flush & !refilling & !lookup_miss & response_capacity
   def request_fire = fire(core.request)
 
   def line_base = align_down(as_bits(lookup_address), line_bytes)
@@ -99,7 +103,7 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
     mask: !bits(0, 8)
 
   def produces_hit = tags.port.response.valid & line_hit
-  def produces_response = produces_hit ||| install
+  def produces_response = !core.flush & (produces_hit ||| (install & refill_live))
   responses.ingress.valid <== produces_response
   responses.ingress.bits.instruction <== mux(install, refill_instruction, hit_instruction)
   when produces_response:
@@ -124,7 +128,7 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
     lookup_tag <== request_tag_value
     lookup_beat <== request_beat_value
 
-  when lookup_miss:
+  when (lookup_miss & !core.flush):
     refilling <== Bool(#true)
     refill_requested <== bits(0, count_width)
     refill_received <== bits(0, count_width)
@@ -139,12 +143,21 @@ sync_circuit RicketL1ICache(address_width :: PosInt, sets :: Pow2Int, line_bytes
         refilling <== Bool(#false)
         valid_bits <== as_bits(valid_vector.updated(lookup_set, Bool(#true)))
 
+  when (core.flush):
+    refill_live <== Bool(#false)
+  elsewhen (lookup_miss):
+    refill_live <== Bool(#true)
+  elsewhen install:
+    refill_live <== Bool(#false)
+
   def next_outstanding = mux(
     request_fire,
     outstanding + bits(1, outstanding_width),
     outstanding - bits(1, outstanding_width)
   )
-  when (request_fire ^ response_fire):
+  when (core.flush):
+    outstanding <== bits(0, outstanding_width)
+  elsewhen (request_fire ^ response_fire):
     outstanding <== next_outstanding
 
 export:

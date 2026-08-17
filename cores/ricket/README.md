@@ -45,9 +45,10 @@ instructions wait before Execute until required operands and cache request
 capacity are available. `ValidPipe(_, 1)` instances make EX/MEM and MEM/WB
 feed-forward: once an instruction leaves Execute, no later stage can stall it.
 
-Fetch keeps accepted PCs and epochs in a two-entry ordered metadata queue.
-The pipelined L1I can therefore accept and return one hit per cycle. Redirects
-consume younger tokens and drain stale responses without confusing their PCs.
+Fetch keeps accepted PCs in a two-entry flushable metadata queue. The pipelined
+L1I can therefore accept and return one hit per cycle. Redirects synchronously
+flush the PC queue, lookup result, and buffered responses; a wrong-path refill
+may finish internally but cannot return an instruction to Fetch.
 Decode holds a load-use dependent token. Execute owns forwarding, branch
 resolution, target and access alignment checks, and architectural fault
 generation. A legal data-cache request transfers at the same edge that places

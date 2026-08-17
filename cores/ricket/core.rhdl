@@ -39,12 +39,10 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
-  reg fetch_epoch(~init: Bool(#false))
 
   // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
   // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
   inst if_id_pipe(Pipe(FetchDecode(xlen), 1))
-  inst fetch_metadata(Queue(FetchMetadata(xlen), 2, ~pipe: #true))
   inst id_ex_pipe(Pipe(DecodeExecute(xlen), 1))
   inst ex_mem_pipe(ValidPipe(ExecuteMemory(xlen), 1))
   inst mem_wb_pipe(ValidPipe(MemoryWriteback(xlen), 1))
@@ -66,31 +64,36 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
-  // its Pipe. Redirects and faults consume any younger registered token.
+  // its Pipe. Redirects and faults flush both pending metadata and the L1I's
+  // lookup/response path, so no generation tag crosses this interface.
   def squash = faulted ||| execute_fault_event ||| redirect_link.right.valid
-  def fetch_stale_response = fetch_metadata.egress.bits.epoch =/= fetch_epoch
   def start_aligned = is_aligned(start.bits, 4)
 
   start.ready <== !started & !(faulted ||| execute_fault_event)
+  def start_fire = fire(start)
   def start_fault = fire(start) & !start_aligned
+  def fetch_flush = start_fault ||| execute_fault_event ||| redirect_link.right.valid
+  def fetch_queue_reset = cast(cast(reset, Bool) ||| fetch_flush, Reset)
+  inst fetch_metadata(Queue(FetchMetadata(xlen), 2, ~pipe: #true),
+                      ~clock: clock,
+                      ~reset: fetch_queue_reset)
   def fetch_wants_request = started & !(faulted ||| execute_fault_event) & !redirect_link.right.valid
+  instruction_access.flush <== fetch_flush
   instruction_access.request.valid <== fetch_wants_request & fetch_metadata.ingress.ready
   instruction_access.request.bits.address <== fetch_pc[0..address_width]
   fetch_metadata.ingress.valid <== fetch_wants_request & instruction_access.request.ready
   fetch_metadata.ingress.bits <== FetchMetadata(xlen):
     pc: fetch_pc
-    epoch: fetch_epoch
 
   def fetch_pair_valid = instruction_access.response.valid & fetch_metadata.egress.valid
-  def fetch_pair_ready = squash ||| fetch_stale_response ||| if_id_pipe.ingress.ready
-  if_id_pipe.ingress.valid <== fetch_pair_valid & !squash & !fetch_stale_response
+  def fetch_pair_ready = squash ||| if_id_pipe.ingress.ready
+  if_id_pipe.ingress.valid <== fetch_pair_valid & !squash
   if_id_pipe.ingress.bits <== FetchDecode(xlen):
     pc: fetch_metadata.egress.bits.pc
     instruction: instruction_access.response.bits.instruction
   instruction_access.response.ready <== fetch_metadata.egress.valid & fetch_pair_ready
   fetch_metadata.egress.ready <== instruction_access.response.valid & fetch_pair_ready
 
-  def start_fire = fire(start)
   def fetch_request_fire = fire(instruction_access.request)
   when start_fire:
     started.next <== Bool(#true)
@@ -101,9 +104,6 @@ sync_circuit RicketPipeline(xlen :: XLen, address_width :: PosInt):
     fetch_pc.next <== start.bits
   elsewhen fetch_request_fire:
     fetch_pc.next <== fetch_pc + bits(4, width)
-
-  when (redirect_link.right.valid):
-    fetch_epoch.next <== !fetch_epoch
 
   when (start_fault ||| execute_fault_event):
     faulted.next <== Bool(#true)
