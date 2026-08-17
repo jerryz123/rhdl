@@ -126,6 +126,8 @@ import one primitive without loading unrelated generators.
 | `std/flow/map.rhdl` | Protocol-preserving inline payload-substitution handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/map-valid.rhdl` | Inline payload substitution for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/fork-valid.rhdl` | Inline one-to-many fanout for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/filter-valid.rhdl` | Inline predicate filtering for nonbackpressured `Valid` handles | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/accept.rhdl` | Always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/parallel.rhdl` | Parallel generic handle and terminated-sink composition | None |
 | `std/flow.rhdl` | Valid-only, ready-valid, and credited protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl`, `std/credited.rhdl`, and all `std/flow/` modules |
 

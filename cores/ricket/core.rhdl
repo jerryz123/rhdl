@@ -67,15 +67,20 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   // registers SRAM results to align hits with WB; completion wins when both
   // updates target the same register in one cycle.
   def memory = ex_mem_pipe.egress
-  def commit = mem_wb_pipe.egress
+  def Array(commit_path, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(_, 2)
+  def commit :: Endpoint = commit_path
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
-  def response_tag = data_access.response.bits.tag
-  def response_tag_nonzero = or_reduce(response_tag)
-  def load_completion_valid = data_access.response.valid & response_tag_nonzero
-  scoreboard.set.valid <== commit.valid & commit_is_load & commit.bits.write_enable & or_reduce(commit.bits.rd)
-  scoreboard.set.bits <== commit.bits.rd
-  scoreboard.clear.valid <== load_completion_valid
-  scoreboard.clear.bits <== response_tag
+  def scoreboard_set_filter = filter_valid(Valid(MemoryWriteback(xlen)), operation):
+    (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd)
+  def scoreboard_set_address = map_valid(Valid(MemoryWriteback(xlen)), operation => operation.rd)
+  (scoreboard_set_path |> scoreboard_set_filter |> scoreboard_set_address) <=> scoreboard.set
+
+  def load_completion_filter = filter_valid(Valid(RicketDataResp(xlen)), response => or_reduce(response.tag))
+  def valid_load_completions = data_access.response |> load_completion_filter
+  def Array(load_writeback_path, scoreboard_clear_path) = valid_load_completions |> fork_valid(_, 2)
+  def load_completion :: Endpoint = load_writeback_path
+  def load_completion_tag = map_valid(Valid(RicketDataResp(xlen)), response => response.tag)
+  (scoreboard_clear_path |> load_completion_tag) <=> scoreboard.clear
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -326,9 +331,9 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   registers.write_enable_1 <== immediate_write_valid
   registers.write_address_1 <== commit.bits.rd
   registers.write_data_1 <== commit.bits.value
-  registers.write_enable_2 <== load_completion_valid
-  registers.write_address_2 <== data_access.response.bits.tag
-  registers.write_data_2 <== data_access.response.bits.data
+  registers.write_enable_2 <== load_completion.valid
+  registers.write_address_2 <== load_completion.bits.tag
+  registers.write_data_2 <== load_completion.bits.data
 
 export:
   RicketCore

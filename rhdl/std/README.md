@@ -332,14 +332,16 @@ operation, and a combinational `busy` bitmap:
 
 ```rhombus
 import:
+  lib("rhdl/std/flow.rhdl") open
   lib("rhdl/std/scoreboard.rhdl") open
 
 inst hazards(Scoreboard(32))
-hazards.set.valid <== reserve
-hazards.set.bits <== destination
-hazards.clear.valid <== complete
-hazards.clear.bits <== completion_tag
-def dependent = scoreboard_busy(hazards.busy, source)
+def reserve_filter = filter_valid(Valid(Operation()), operation => operation.reserve)
+def reserve_index = map_valid(Valid(Operation()), operation => operation.destination)
+def completion_index = map_valid(Valid(Completion()), completion => completion.tag)
+(reservations |> reserve_filter |> reserve_index) <=> hazards.set
+(completions |> completion_index) <=> hazards.clear
+def permitted = requests |> gate_flow(_, !scoreboard_busy(hazards.busy, source))
 ```
 
 The power-of-two entry count must be at least two. Reset empties the scoreboard.
@@ -543,14 +545,24 @@ def tagged = ingress |> tagging
 ```
 
 `map_valid(T, payload => expression)` is the corresponding inline payload map
-for `Valid` flows. `fork_valid(source, n)` copies every asserted Valid payload
-to all `n` outputs in the same cycle. Neither helper adds an instance or a
-readiness path:
+for `Valid` flows. `filter_valid(source, payload => predicate)` drops asserted
+events whose predicate is false, and `fork_valid(source, n)` copies every
+retained event to all `n` outputs in the same cycle. None of these helpers adds
+an instance or a readiness path:
 
 ```rhombus
-def mapped = map_valid(issued, request => translate(request))
+def enabled_filter = filter_valid(Valid(Request()), request => request.enabled)
+def request_map = map_valid(Valid(Request()), request => translate(request))
+def mapped = issued |> enabled_filter |> request_map
 def copies = fork_valid(mapped, 2)
 ```
+
+`accept_flow(source)` terminates the readiness path of a `Decoupled` or
+`Irrevocable` source by permanently asserting `ready`. Every offered item is
+therefore transferred immediately and appears as a same-cycle `Valid` event.
+Use this explicit adapter when a nonbackpressured observer owns consumption of
+a ready-valid source; it must not be used where downstream backpressure still
+has meaning.
 
 `filter_flow(source, payload => predicate)` consumes an offered token without
 producing an output when the hardware predicate is false. Its input is ready

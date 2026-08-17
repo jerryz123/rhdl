@@ -1,0 +1,52 @@
+#lang rhdl
+// Defines inline filtering for nonbackpressured Valid flows.
+
+import:
+  rhombus/meta open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/stage.rhdl") open
+
+fun finish_filter_valid_handle(input_link :: Handle,
+                               output_link :: Handle,
+                               keep :: Bool):
+  def input_endpoint = input_link.right
+  def output_endpoint = output_link.left
+  output_endpoint.field("valid") <== input_endpoint.field("valid") & keep
+  output_endpoint.field("bits") <== input_endpoint.field("bits")
+  input_link.consumed := #true
+  output_link.consumed := #true
+  InterfaceHandle(input_link.left, output_link.right)
+
+// A rejected Valid event is dropped because the source cannot be
+// backpressured. The payload is forwarded combinationally when retained.
+expr.macro
+| 'filter_valid($source_or_type,
+                $(payload :: Identifier) => $predicate ...)':
+    'filter_valid($source_or_type, $payload): $predicate ...'
+| 'filter_valid($source_or_type, $(payload :: Identifier)): $predicate':
+    'block:
+       def filter_valid_argument = $source_or_type
+       def filter_valid_protocol = valid_flow_protocol_type(
+         filter_valid_argument
+       )
+       def filter_valid_input_link = interface_link(
+         filter_valid_protocol,
+         "filter_valid_input"
+       )
+       def filter_valid_input :: Endpoint = filter_valid_input_link.right
+       def $payload = filter_valid_input.bits
+       fun compute_filter_valid_predicate(): $predicate
+       def filter_valid_keep :: Bool = compute_filter_valid_predicate()
+       def filter_valid_output_link = interface_link(
+         filter_valid_protocol,
+         "filter_valid_output"
+       )
+       def filter_valid_handle = finish_filter_valid_handle(
+         filter_valid_input_link,
+         filter_valid_output_link,
+         filter_valid_keep
+       )
+       finish_flow_stage(filter_valid_argument, filter_valid_handle)'
+
+export:
+  filter_valid

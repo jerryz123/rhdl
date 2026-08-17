@@ -61,12 +61,14 @@ releases the pipeline before its tagged result returns. Decode stalls on
 scoreboard RAW and WAW
 hazards, while independent younger instructions may complete first. A returning
 load clears its destination and writes through the register file's second write
-port. The first write port independently accepts the ordinary MEM/WB result, so
-a load completion never backpressures either feed-forward stage. A WB-aligned
-hit sets and clears the entry without an extra busy cycle. Scoreboard WAW
-gating prevents both write ports from validly targeting the same register.
-Stores commit in WB; their earlier cache acceptance is safe because all Ricket
-faults have already been resolved before EX/MEM.
+port. Valid-flow filtering, mapping, and fanout connect both update streams to
+the scoreboard without making its continuously observable busy bitmap into a
+transaction stream. The first write port independently accepts the ordinary
+MEM/WB result, so a load completion never backpressures either feed-forward
+stage. A WB-aligned hit sets and clears the entry without an extra busy cycle.
+Scoreboard WAW gating prevents both write ports from validly targeting the same
+register. Stores commit in WB; their earlier cache acceptance is safe because
+all Ricket faults have already been resolved before EX/MEM.
 
 This is in-order commit with out-of-order register completion, not out-of-order
 instruction issue. D-cache responses remain ordered, and a blocking miss still

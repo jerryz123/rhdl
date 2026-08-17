@@ -14,6 +14,14 @@ circuit ValidMapForkChain():
   def outputs = mapped |> fork_valid(Valid(Bits(9)), 2)
   egress <=> outputs
 
+circuit AcceptedFilteredValid():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(Valid(Bits(8)), ~role: producer)
+
+  def keep_odd = filter_valid(Valid(Bits(8)), payload => payload[0].into(Bool))
+  def filtered = ingress |> accept_flow |> keep_odd
+  egress <=> filtered
+
 sync_circuit CompletionQueueWrapper():
   interface request(Decoupled(Bits(8)), ~role: consumer)
   interface issue(Valid(Bits(8)), ~role: producer)
@@ -38,10 +46,19 @@ circuit ForkValidZeroOutputs():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   fork_valid(ingress, 0)
 
+circuit FilterValidWrongProtocol():
+  interface ingress(Decoupled(Bits(8)), ~role: consumer)
+  filter_valid(ingress, payload => Bool(#true))
+
+circuit AcceptFlowWrongProtocol():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  accept_flow(ingress)
+
 sync_circuit CompletionQueueZeroDepth():
   inst invalid(CompletionQueue(Bits(8), Bits(8), 0))
 
 def valid_design = elaborate(ValidMapForkChain())
+def accepted_design = elaborate(AcceptedFilteredValid())
 def completion_design = elaborate(CompletionQueueWrapper())
 def single_completion_design = elaborate(
   CompletionQueue(Bits(8), Bits(16), 1)
@@ -49,11 +66,15 @@ def single_completion_design = elaborate(
 
 export:
   ValidMapForkChain
+  AcceptedFilteredValid
   CompletionQueueWrapper
   MapValidWrongProtocol
   ForkValidWrongProtocol
   ForkValidZeroOutputs
+  FilterValidWrongProtocol
+  AcceptFlowWrongProtocol
   CompletionQueueZeroDepth
   valid_design
+  accepted_design
   completion_design
   single_completion_design

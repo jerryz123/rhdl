@@ -7,6 +7,7 @@ import:
   "std-valid-flow.rhdl" as fixture
 
 def valid_top = fixture.valid_design.modules[0]
+def accepted_top = fixture.accepted_design.modules[0]
 def completion_top = fixture.completion_design.modules.find(
   fun (module_def): module_def.name == "CompletionQueue"
 )
@@ -28,6 +29,15 @@ check:
   valid_top.find_output("egress_0_out").type.field("bits").type.width ~is 9
   valid_top.find_output("egress_1_out").type.field("bits").type.width ~is 9
   verify_design(fixture.valid_design) ~is #void
+
+  fixture.accepted_design.modules.map(fun (module_def): module_def.name) ~is [
+    "AcceptedFilteredValid"
+  ]
+  accepted_top.find_output("ingress_out").type.field("ready").type.bit_width() ~is 1
+  accepted_top.find_output("egress_out").type.field("bits").type.width ~is 8
+  operations(accepted_top, "rtl.instance").length() ~is 0
+  operations(accepted_top, "rtl.and").length() ~is 1
+  verify_design(fixture.accepted_design) ~is #void
 
   fixture.completion_design.modules.map(fun (module_def): module_def.name) ~is [
     "CompletionQueueWrapper", "CompletionQueue", "Queue", "Counter"
@@ -54,6 +64,12 @@ check:
   embedded.run_elaboration(
     fun (): fixture.ForkValidZeroOutputs()
   ) ~throws "PosInt"
+  embedded.run_elaboration(
+    fun (): fixture.FilterValidWrongProtocol()
+  ) ~throws "Valid-flow chaining requires a Valid endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.AcceptFlowWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
   embedded.run_elaboration(
     fun (): fixture.CompletionQueueZeroDepth()
   ) ~throws "PosInt"
