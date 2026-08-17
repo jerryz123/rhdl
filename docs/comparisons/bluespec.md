@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 RHDL and Bluespec SystemVerilog (BSV) give source code different denotations.
 An RHDL circuit generator elaborates into one particular graph of values,
@@ -20,6 +20,12 @@ datapath, enables, and arbitration the unit of construction. Bluespec is more
 expressive when transactions should compose before their schedule is known;
 RHDL is more local when the authored structure is itself the contract.
 
+RHDL's standard flow layer adds a strong middle ground for elastic hardware:
+serial, parallel, fan-in, fanout, and routing stages compose as one explicitly
+owned topology. It reduces wiring ceremony without acquiring Bluespec's
+transaction scheduler. Bluespec remains more powerful when one atomic action
+must coordinate several independently guarded resources.
+
 ## Summary
 
 | Question | RHDL | Bluespec |
@@ -29,8 +35,9 @@ RHDL is more local when the authored structure is itself the contract.
 | Concurrency | Circuit graph is concurrent; state edges are explicit | Compiler selects a serializable subset of rules per clock |
 | Conflicting state effects | Rejected unless the author constructs explicit selection | Permitted across rules and resolved by scheduling |
 | Static guarantees | Exact hardware types, one effective driver, legal ownership, no combinational cycles | Static types plus rule atomicity and method-schedule consistency |
+| Flow composition | Linear `InterfaceHandle` topology with explicit buffers, readiness, fan-in, and fanout | Rules compose guarded operations across interfaces and let the compiler schedule resource conflicts |
 | Main source of locality | The operation and enable graph is directly authored | A transaction is locally stated, but its realized schedule is global |
-| Syntactic compression | Concise for direct datapaths; explicit for arbitration | Concise for concurrent control and shared resources |
+| Syntactic compression | Concise for explicit elastic topology; arbitration remains explicit | Concise for concurrent control and shared resources |
 
 ## Denotation and staging
 
@@ -84,6 +91,39 @@ of a call now includes facts declared by the callee and decisions made by the
 whole-module scheduler. RHDL writes more source in that case, while keeping the
 composition result visible at the use site.
 
+## Flow composition
+
+RHDL's standard flow layer packages explicit handshake topology without hiding
+its microarchitecture. Configured stages are ordinary unary functions joined by
+`|>`; their input can be a concrete endpoint or a disconnected, one-shot
+`InterfaceHandle`. Serial stages, `parallel` branches, arbitration, joins,
+forks, demultiplexing, and crossbars compose even when the path changes
+cardinality. Terminated sinks participate in the same linear ownership model,
+while a configured stage function can be reused to construct fresh paths.
+
+The distinction between pure topology and state is visible in the result.
+Combinational mapping and routing adapters lower to local interface links;
+queues, pipes, arbiters, and buffered broadcast remain explicit instances.
+Stages also expose protocol-strength transitions rather than pretending every
+ready-valid edge has the same guarantee. The layer is implemented entirely
+through generic interfaces and ordinary core bindings, and the completed
+design receives whole-graph combinational-cycle verification.
+
+Bluespec composes at a more semantic level. A rule can atomically call methods
+on several FIFOs, memories, or services, and each method's implicit readiness
+joins the rule guard. The compiler then reconciles method conflicts and chooses
+which compatible transactions share a cycle. That is strictly more powerful
+for multi-resource transactions whose arbitration should follow from atomic
+intent. RHDL requires the arbitration, buffering, and enable paths to be
+chosen explicitly, but consequently makes their latency and priority visible
+where the topology is written.
+
+RHDL's protocol-strength transitions remain nominal: `Irrevocable` stability
+is documented rather than automatically asserted. Bluespec's guarded atomic
+semantics prevents a different class of partial transaction, but it likewise
+does not imply fairness or liveness. The comparison is exact topology versus
+atomic transaction composition with a compiler-selected schedule.
+
 ## Time, state, and concurrency
 
 RHDL state is structurally explicit. A register has a current readable value
@@ -136,8 +176,10 @@ substitutes for a functional proof of the design.
 RHDL has strong structural locality. Following a destination's single binding
 reveals the selected expression or state enable, and unrelated operations do
 not silently acquire a shared scheduling relationship. The cost is that a
-protocol or resource policy is repeated as graph structure unless the author
-packages it behind a circuit abstraction.
+resource policy is repeated as graph structure unless the author packages it
+behind a circuit abstraction. Its flow handles now package common ready-valid
+policies and path ownership cleanly, but do not infer arbitration from several
+independent transactions.
 
 Bluespec has stronger transactional locality. A rule states one coherent
 operation even when it spans several module interfaces. But realized
@@ -161,10 +203,11 @@ whose natural specification is a set of possible transactions.
 
 RHDL's exact-construction policy is smaller and more literal than Bluespec's
 rule semantics. It requires final bindings, priority, and state boundaries to
-be explicit rather than hiding arbitration behind method calls. That makes
-datapaths, exact pipeline structure, and local priority easy to audit, but it
-offers no language-level way to postpone a scheduling choice while retaining
-an atomic specification.
+be explicit rather than deriving arbitration from method calls. Its flow layer
+makes exact elastic pipelines substantially more compositional without
+changing that policy. Datapaths, buffering, readiness paths, and local priority
+remain easy to audit, but RHDL offers no language-level way to postpone a
+scheduling choice while retaining an atomic specification.
 
 The crucial distinction is representational. RHDL can construct the circuit
 produced by a Bluespec schedule, but its current language cannot state a set of
@@ -190,8 +233,9 @@ That is a missing semantic layer, not a missing mux primitive.
 
 ## Sources
 
-- RHDL [core semantics](../../rhdl/core/README.md) and
-  [frontend model](../../rhdl/frontend/README.md)
+- RHDL [core semantics](../../rhdl/core/README.md),
+  [frontend model](../../rhdl/frontend/README.md), and
+  [standard interfaces and flow composition](../../rhdl/std/README.md)
 - [Bluespec Compiler project](https://github.com/B-Lang-org/bsc)
 - [BSV Language Reference Guide](https://github.com/B-Lang-org/bsc/releases/latest/download/BSV_lang_ref_guide.pdf)
 - [Official Bluespec language materials](https://github.com/BSVLang/Main)

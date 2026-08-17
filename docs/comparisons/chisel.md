@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 This comparison is about the languages' central authoring models. It uses the current
 [Chisel documentation](https://www.chisel-lang.org/docs) and
@@ -29,6 +29,7 @@ separate current- and next-state semantics.
 | State | Current value plus a distinct next-state place | `Reg` is read and connected through the usual `Data` surface |
 | Hierarchy | Circuit generators create definitions; instances cross explicit ports | Scala `Module` construction creates hierarchy; `RawModule` removes ambient clock/reset |
 | Interface relation | Nominal identity, named roles, refinement, and support | Aggregate structure, orientation, `Flipped`, and `Connectable` relations |
+| Flow composition | One-shot `InterfaceHandle` topologies compose serially, in parallel, and across cardinality changes | `DecoupledIO`, connections, and components compose through ordinary Scala construction and explicit wiring |
 | Primary abstraction tools | Rhombus functions, macros, classes, frontend layers, semantic type capabilities | Scala functions, classes, traits, generics, collections, and compiler-supported `Data` APIs |
 
 ## Denotation and staging
@@ -157,6 +158,40 @@ for topology-building APIs. Chisel's model adapts structural aggregates more
 freely; RHDL's model can state that two similarly shaped interfaces mean
 different protocols or that one nominal protocol supports another.
 
+## Ready-valid flow composition
+
+Chisel's standard [`ReadyValidIO` and `DecoupledIO`](https://www.chisel-lang.org/docs/explanations/interfaces-and-connections)
+give ready-valid channels a uniform signal vocabulary, and utilities such as
+`Queue` and the arbiters package common transport structures. These pieces
+compose through ordinary module construction, `Bundle` connection, or a
+project-defined Scala function. The standard abstraction does not make a
+whole serial or branching topology one uniform value: the author normally
+creates each component and wires the intermediate `DecoupledIO` objects.
+
+RHDL's standard flow layer treats topology itself as a composable value.
+`source |> queue(4) |> pipe(2)` is serial composition; `parallel` composes
+independent branches; arbiters, demultiplexers, forks, joins, and zips change
+cardinality in the same notation. A path may begin with a payload or protocol
+type and remain disconnected until later. The result is a linear, one-shot
+`InterfaceHandle`, while each configured stage function remains reusable.
+Dependent static information preserves whether the current result is an
+endpoint, endpoint array, or open handle.
+
+This is a frontend interpretation of RHDL's generic interface mechanism, not
+a flow graph added to core IR. Pure maps, filters, gates, and routing adapters
+stay inline; stages with storage or intentional structure remain module
+instances. Verification then checks the realized graph, including
+combinational cycles that cross instances.
+
+RHDL also distinguishes `Valid`, `Decoupled`, `Irrevocable`, and credited
+transport, so a stage can explicitly preserve, weaken, or strengthen its
+contract. Chisel's `IrrevocableIO` is likewise a convention rather than an
+automatically enforced property. RHDL's nominal distinction is more expressive
+but does not itself prove temporal behavior: it generates no general stability
+assertions. The flow syntax is therefore substantially more compositional than
+Chisel's standard ready-valid surface, while its strongest temporal label still
+depends partly on author discipline.
+
 ## Abstraction, locality, and predictability
 
 Chisel inherits Scala's mature abstraction vocabulary. Higher-order
@@ -183,9 +218,12 @@ the priority: one `Data` vocabulary, contextual widths, and ordered connections
 make common RTL compact. RHDL's frontend is also intentionally uniform; its
 language-level advantage is not that core uses two object classes, but that
 exact result types, one final binding, explicit priority, and current/next
-state remain straightforward to recover. Chisel's abstractions are broader
-and smoother; RHDL's ordinary denotation is smaller and less dependent on
-replaying surrounding connection order.
+state remain straightforward to recover. For ready-valid networks, RHDL also
+has the more coherent topology abstraction: the same expression covers direct
+connection, detached path construction, parallel structure, and cardinality
+changes. Chisel's host abstractions are broader and smoother; RHDL's ordinary
+denotation is smaller and less dependent on replaying surrounding construction
+and connection order.
 
 ## Lessons for RHDL
 
@@ -198,6 +236,9 @@ replaying surrounding connection order.
    module hierarchy while making reusable-definition syntax economical.
 4. Keep semantic type and protocol invariants visible in ordinary authoring,
    rather than relying on project conventions over raw aggregates.
+5. Make every advertised flow-strength preservation true by construction or
+   conservatively weaken the result; nominal `Irrevocable` should not outpace
+   what an adapter can establish.
 
 ## Sources
 
@@ -208,6 +249,7 @@ replaying surrounding connection order.
 - [Chisel sequential circuits](https://www.chisel-lang.org/docs/explanations/sequential-circuits)
 - [Chisel interfaces and connections](https://www.chisel-lang.org/docs/explanations/interfaces-and-connections)
 - [Chisel `Connectable`](https://www.chisel-lang.org/docs/explanations/connectable)
+- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

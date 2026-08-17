@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 This comparison uses the current
 [SpinalHDL documentation](https://spinalhdl.github.io/SpinalDoc-RTD/master/index.html)
@@ -29,6 +29,7 @@ and current/next-state semantics.
 | State | Current value plus distinct next-state place | `Reg` declaration makes state; assignment syntax remains uniform |
 | Hierarchy | Circuit definitions and instances; pure helpers stay inline | `Component` makes hierarchy; `Area` groups inline structure |
 | Interface relation | Nominal roles, refinement, support, and linear handles | `Bundle` structure, port directions, `IMasterSlave`, and inferred bulk connection |
+| Flow composition | One-shot topology values compose serial, parallel, and cardinality-changing stages | Fluent `Stream` methods and connection operators compose concrete connected streams |
 | Primary abstraction tools | Rhombus functions, macros, classes, frontend layers, semantic type capabilities | Scala functions, classes, traits, generics, collections, `Area`, and library-defined data types |
 
 ## Denotation and staging
@@ -153,6 +154,43 @@ approach is lightweight and lets ordinary bundle methods become a fluent
 interface API. RHDL's approach carries more compatibility meaning than field
 shape and direction alone.
 
+## Ready-valid flow composition
+
+SpinalHDL's [`Stream`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/stream.html)
+is the closest direct comparison to RHDL's flow syntax. Methods such as
+`queue`, `stage`, `m2sPipe`, `s2mPipe`, `haltWhen`, `throwWhen`, and `map`
+return another connected stream, while dedicated operators insert particular
+timing cuts during connection. Fork, join, arbitration, mux, and demux
+utilities extend that fluent model to branching topologies. It is a coherent
+stream language rather than merely a ready-valid bundle convention.
+
+RHDL moves one step further toward treating the entire topology as a value.
+The same `|>` application accepts a concrete endpoint or a disconnected
+payload/protocol seed, and the result may be an endpoint, endpoint array, or
+linear `InterfaceHandle`. `parallel` combines independent or heterogeneous
+branches, while fan-in, fanout, joins, and routing change cardinality without
+leaving the notation. Configured unary stages are reusable, but each resulting
+handle is deliberately consumed once so topology ownership is unambiguous.
+
+The two systems expose ready-valid meaning differently, and their contracts do
+not form a simple precision ordering. SpinalHDL's `Stream` keeps `valid`
+asserted until acceptance but permits a stalled payload to change. RHDL's
+`Decoupled` makes a weaker pre-transfer promise, while `Irrevocable` requires
+both the offer and payload to remain stable; RHDL has no exact payload-bearing
+name for SpinalHDL's intermediate contract. SpinalHDL also separately provides
+nonbackpressured `Flow`; RHDL separately models nonbackpressured `Valid` and
+credited transport. RHDL stages can make their chosen nominal strengthening or
+weakening visible. It also keeps pure adapters inline, stateful stages as
+module instances, and lowers both through generic interfaces rather than a
+flow-specific core IR; its whole-design verifier checks the resulting
+combinational graph across instance boundaries.
+
+RHDL's additional nominal contract is not backed by generated protocol
+assertions today. Overall SpinalHDL remains at least as fluent for connected
+streams and offers finer ready/valid timing-cut operators; RHDL is cleaner for
+detached topology construction, linear ownership, and explicit—though partly
+author-enforced—protocol strength.
+
 ## Abstraction, locality, and predictability
 
 SpinalHDL derives much of its elegance from the fact that hardware types are
@@ -184,8 +222,11 @@ predictable RTL among these Scala-style designs. Its overlap checks, width
 checks, `Component`/`Area` distinction, and explicit resize forms show that a
 unified `Data` surface can be disciplined. RHDL is cleaner where exact type,
 one final binding, explicit conditional priority, and current/next state should
-be recoverable without replaying assignment order. SpinalHDL wins syntactic
-economy; RHDL wins locality of denotation.
+be recoverable without replaying assignment order. Their stream surfaces are
+close: SpinalHDL is exceptionally fluent over concrete streams, while RHDL's
+topology values make serial, parallel, detached, and cardinality-changing
+composition more uniform. SpinalHDL wins syntactic economy; RHDL wins locality
+of denotation and explicit protocol-strength tracking.
 
 ## Lessons for RHDL
 
@@ -197,6 +238,8 @@ economy; RHDL wins locality of denotation.
    register-level denotation equally inspectable.
 4. Continue deriving rich protocol composition from nominal interfaces rather
    than accumulating unrelated connection operators.
+5. Close the gap between nominal flow strength and what mapping or routing
+   bodies actually guarantee before treating that distinction as enforced.
 
 ## Sources
 
@@ -208,6 +251,8 @@ economy; RHDL wins locality of denotation.
 - [SpinalHDL components and hierarchy](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/components_hierarchy.html)
 - [SpinalHDL clock domains](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/clock_domain.html)
 - [SpinalHDL design checks](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Design%20errors/index.html)
+- [SpinalHDL streams](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/stream.html)
+- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

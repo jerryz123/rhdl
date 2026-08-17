@@ -4,10 +4,11 @@
 
 ## Scope and thesis
 
-Snapshot: 2026-08-15. “SystemVerilog” here means the core design semantics of
+Snapshot: 2026-08-17. “SystemVerilog” here means the core design semantics of
 [IEEE Std 1800-2023](https://standards.ieee.org/ieee/1800/7743/). The standard
 also defines event-driven testbench, assertion, coverage, object, and foreign
-interface facilities, but those are outside this core-design comparison.
+interface facilities. Those are outside this core-design comparison except
+where assertions directly illuminate flow-contract enforcement below.
 
 Two levels must remain separate. Full SystemVerilog denotes event-driven
 simulation with four-state values and many constructs that do not synthesize.
@@ -33,6 +34,7 @@ trade is syntactic breadth for local predictability.
 | Assignment | One final binding per driveable destination | Variables follow procedural-driver rules; nets can resolve multiple drivers |
 | Types | Exact semantic hardware types and explicit conversion | Rich two-/four-state, signed, packed/unpacked, aggregate, and context-sized types |
 | Composition | Modules plus nominal complementary protocol roles | Modules, interfaces/modports, packages, and retained parameters |
+| Elastic flow | First-class serial/parallel topology with fan-in, fanout, rendezvous, routing, explicit buffering, and credits | All structures are encodable, but there is no standard ready-valid composition algebra |
 | Compiler freedom | Preserve explicit cycle and resource structure | RTL synthesis preserves sequential boundaries; full behavioral syntax is broader than synthesis |
 | Syntactic center | Circuit construction forms inside Rhombus | Declarations plus continuous and procedural HDL statements |
 
@@ -140,6 +142,41 @@ constructors. Modports do not by themselves define RHDL-style nominal
 refinement or elaboration-time linear consumption; RHDL interfaces do not
 retain SystemVerilog-style behavioral members.
 
+## Elastic flow composition
+
+RHDL's standard flow layer supplies a language abstraction that SystemVerilog
+leaves to project conventions and libraries. A configured stage is a unary
+elaboration-time function, so `|>` builds serial paths. The same model covers
+parallel paths, fan-in and joins, atomic or buffered fanout, rendezvous,
+routing, payload transforms, queues, pipes, and credit transport. Detached
+handles let a path be named before it is attached and enforce single
+consumption during elaboration; configured stage functions remain reusable.
+Combinational transforms lower inline; token-holding stages remain explicit
+modules.
+
+The interface subsystem is intentionally only the substrate. Flow composition
+ultimately becomes ordinary ports, connections, operations, and instances in
+the protocol-independent core. This preserves exact visibility of readiness
+dependencies, state placement, and buffer capacity without adding a flow graph
+to the IR.
+
+SystemVerilog can encode every one of these circuits. Interfaces and modports
+can bundle a ready-valid protocol, modules can implement stages, and functions,
+generate constructs, or macros can reduce repetition. What the standard does
+not provide is one first-class algebra that makes serial, parallel,
+cardinality-changing, and terminating flow paths compose through a common
+typed value. Each codebase must choose its own conventions for ownership,
+protocol stability, and stage construction.
+
+SystemVerilog Assertions provide a major complementary advantage: an author
+can assert that `valid` and payload remain stable while stalled and can state
+bounded progress or environmental fairness properties. RHDL's `Irrevocable`
+contract is currently not automatically checked. Worse, `map_flow` and
+`demux_flow` can appear to preserve it while capturing a changing sideband.
+RHDL also has no latency, throughput, liveness, or deadlock types. Its advantage
+is therefore the cleanliness of constructing an exact elastic topology, not a
+stronger temporal verification language.
+
 ## Locality, predictability, and syntax
 
 Disciplined SystemVerilog RTL can be exceptionally concise. `always_comb` with
@@ -201,4 +238,5 @@ is compelling only if extensions preserve its local rules.
 - [Accellera access to IEEE 1800-2023](https://www.accellera.org/downloads/ieee)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend staging](../../rhdl/frontend/README.md), and
-  [interface layer](../../rhdl/frontend/layers/README.md#interfaces)
+  [interface layer](../../rhdl/frontend/layers/README.md#interfaces), plus the
+  [standard flow composition model](../../rhdl/std/README.md#flow-control-circuits)

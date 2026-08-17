@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-Snapshot: 2026-08-15. This comparison uses the checked-in RHDL implementation
+Snapshot: 2026-08-17. This comparison uses the checked-in RHDL implementation
 and PyMTL3's current official documentation and primary repository.
 
 At the synthesizable RTL level, RHDL and PyMTL3 are close peers: both execute a
@@ -32,6 +32,7 @@ executable modeling levels.
 | Control | Hardware `when` / `switch` lower to muxes and guards | Python `if` / `for` in a decorated, translatable block |
 | Types | Exact semantic hardware types and explicit conversions | Concrete `BitsN`, `BitStruct`, ports, wires, and Python values |
 | Composition | Modules plus nominal two-role interface descriptors | Components plus hierarchical signal or method interfaces |
+| Flow composition | One-shot topology values compose serial, parallel, and cardinality-changing stages | Ready-valid interfaces and components compose through explicit construction and wiring |
 | Scheduling | Source fixes every sequential boundary | RTL source fixes boundaries; simulator schedules concurrent update blocks |
 | Syntactic center | Dedicated circuit forms inside Rhombus | Familiar Python statements under decorators and overloaded operators |
 
@@ -135,6 +136,36 @@ same-shaped but semantically different RTL protocols noninterchangeable. The
 former favors model substitution by convention; the latter favors static
 protocol identity after physical signals have been chosen.
 
+## Ready-valid flow composition
+
+PyMTL3's standard stream interfaces provide conventional ready-valid message
+ports, and stream queues and other components can share that shape. Composition
+remains ordinary PyMTL3 hierarchy construction: instantiate components, place
+them on the parent, and connect each intermediate interface with `//=`. Python
+functions can package the pattern, but the RTL stream interface itself is not a
+uniform serial, parallel, or branching topology value. PyMTL3's method-level
+interfaces provide a higher-level transaction abstraction for CL models, but
+that is a different denotation rather than a ready-valid RTL algebra.
+
+RHDL makes the RTL topology itself composable. A configured stage is an
+ordinary unary function used with `|>`; starting with a payload or protocol
+type creates a detached `InterfaceHandle`, while starting with an endpoint
+connects immediately. `parallel` composes independent branches and the same
+notation covers fan-in, fanout, rendezvous, and routing. Dependent static
+information retains endpoint fields and array shape through those cardinality
+changes. Handles are consumed once, whereas the functions that materialize
+them remain reusable.
+
+The abstraction preserves physical intent. Pure transformations are inline,
+storage remains in explicit module instances, and everything lowers through
+the generic interface subsystem into the ordinary core IR. Whole-design
+verification checks the realized combinational graph across instances. RHDL
+also distinguishes `Valid`, `Decoupled`, `Irrevocable`, and credited transport,
+where PyMTL3's common ready-valid shape leaves stability meaning to the
+component contract. RHDL therefore has the stronger language-level abstraction
+for exact elastic RTL; PyMTL3 instead offers explicit wiring plus the separate
+advantage of substitutable FL, CL, and RTL models.
+
 ## Locality, predictability, and syntax
 
 PyMTL3's greatest syntactic advantage is familiarity. A combinational block
@@ -170,9 +201,11 @@ Python denotes.
 RHDL is more orthogonal as an exact RTL construction language. Exact types,
 one final binding per destination, explicit conditional priority, and visible
 state boundaries determine connectivity without consulting a simulator
-schedule or translation subset. PyMTL3's wider modeling continuum is genuine
-abstraction expressivity, however; RHDL's smaller core does not replace the
-ability to state useful non-RTL models in the same component vocabulary.
+schedule or translation subset. Its standard flow topology syntax is also more
+compositional than PyMTL3's explicit ready-valid component wiring. PyMTL3's
+wider modeling continuum is genuine abstraction expressivity, however; RHDL's
+smaller core does not replace the ability to state useful non-RTL models in the
+same component vocabulary.
 
 ## Lessons for RHDL
 
@@ -187,6 +220,9 @@ ability to state useful non-RTL models in the same component vocabulary.
 4. Structural model substitution and nominal protocol compatibility solve
    different composition problems. RHDL should preserve the latter even if it
    adds higher-level executable models.
+5. Keep flow composition independent of hierarchy: inline transformation and
+   deliberate stateful module boundaries should remain visible after the
+   topology syntax elaborates.
 
 ## Sources
 
@@ -195,7 +231,9 @@ ability to state useful non-RTL models in the same component vocabulary.
 - PyMTL3 [hardware data types](https://pymtl3.readthedocs.io/en/latest/ref/datatypes.html)
 - PyMTL3 [RTL translation language](https://pymtl3.readthedocs.io/en/latest/ref/passes-translation-intro.html)
 - PyMTL3 [primary repository](https://github.com/pymtl/pymtl3)
+- PyMTL3 [standard stream interfaces](https://github.com/pymtl/pymtl3/blob/master/pymtl3/stdlib/stream/ifcs.py)
 - PyMTL3 [multi-level modeling paper](https://www.csl.cornell.edu/~cbatten/pdfs/batten-pymtl3-nvidia2023.pdf)
+- RHDL [standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend staging](../../rhdl/frontend/README.md), and
   [interface layer](../../rhdl/frontend/layers/README.md#interfaces)

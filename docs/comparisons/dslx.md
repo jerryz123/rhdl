@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-Snapshot: 2026-08-15. This comparison uses the checked-in RHDL implementation
+Snapshot: 2026-08-17. This comparison uses the checked-in RHDL implementation
 and the current official DSLX and XLS language and IR documentation.
 
 DSLX is the hardware-oriented source language of XLS. Its functions describe
@@ -31,6 +31,7 @@ microarchitecture itself is the design.
 | Control | Host structure plus hardware muxes and guarded effects | Immutable `if`, `match`, loops, channel operations, and proc recurrence |
 | Types | Exact hardware types and nominal protocols | Fixed-size bits, arrays, tuples, nominal structs, enums, and parametrics |
 | Composition | Modules and directional interface endpoints | Function calls, proc networks, and typed channels |
+| Streaming topology | Exact serial/parallel ready-valid and credited paths with explicit buffers, routing, fanout, and rendezvous | Higher-level proc/channel network; metadata and code-generation policy can constrain its eventual buffering and handshake realization |
 | Compiler freedom | Preserve author-selected stage boundaries | Optimize and pipeline before producing a concrete block |
 | Syntactic center | Structural construction embedded in Rhombus | Rust-like expression language for analyzable dataflow |
 
@@ -132,6 +133,37 @@ signals, but they are not the same semantic object. The channel belongs to a
 process model whose physical realization is chosen later. The RHDL interface
 describes a role over already physical signals, and its linear handles constrain
 how elaboration consumes the topology.
+
+## Elastic flow composition
+
+RHDL's standard flow layer turns those physical interfaces into a compact
+topology language. Configured stages are unary elaboration-time functions, so
+serial paths use ordinary `|>` composition. Parallel paths, arbitration and
+joins, atomic or buffered fanout, rendezvous, routing, payload transforms,
+queues, pipes, and credit adapters share the same model. A path may connect to
+a concrete endpoint immediately or remain a detached, linearly consumed handle
+until a caller attaches it. Pure transforms lower inline, while buffers and
+other token-holding stages remain explicit instances.
+
+The abstraction is powerful precisely because it does not make the flow graph
+abstract. It determines the actual readiness dependencies, state placement,
+queue capacities, and protocol conversions. Generic interfaces carry the
+topology during elaboration, and the entire flow layer lowers into the same
+minimal operations, connections, and modules as hand-built RHDL.
+
+An XLS proc network is higher-level. Typed channels default to expressing
+communication and token ordering without a source-local commitment to a
+particular ready path, finite FIFO placement, credit scheme, or port-level
+handshake. Channel metadata and code-generation configuration can constrain
+FIFO depth and buffering as XLS lowers the process network into concrete
+blocks. This makes procs cleaner for behavioral, timing-insensitive
+concurrency; RHDL is cleaner when the buffering and backpressure architecture
+is itself the design.
+
+RHDL does not derive the guarantees that this exactness might suggest. Its flow
+types do not describe latency, throughput, liveness, or deadlock freedom. XLS
+keeps more implementation freedom, but that freedom also enables global
+scheduling and channel lowering that exact RHDL deliberately declines.
 
 ## Locality, predictability, and syntax
 

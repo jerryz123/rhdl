@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-Snapshot: 2026-08-15. This comparison uses the checked-in RHDL implementation
+Snapshot: 2026-08-17. This comparison uses the checked-in RHDL implementation
 and Calyx's current official language documentation.
 
 Calyx is a compiler intermediate language for accelerators, not primarily a
@@ -31,6 +31,7 @@ protocol boundaries more local and predictable.
 | Assignment | One final binding per driveable destination | Guarded assignments may share a destination when mutually exclusive |
 | Types | Exact semantic types, records, vectors, and nominal protocols | Concrete-width ports, parameters, and semantic attributes |
 | Composition | Module hierarchy plus directional protocol interfaces | Component invocation and caller-supplied `ref` cells |
+| Elastic flow | Exact serial/parallel topology with fan-in, fanout, rendezvous, routing, buffering, and credits | No standard continuously active token-flow algebra; control composes go/done actions |
 | Compiler freedom | Cycle boundaries are author-selected | Control and static schedules remain available for lowering |
 | Syntactic center | Circuit construction embedded in Rhombus | Explicit `cells` / `wires` / `control` sections |
 
@@ -130,6 +131,36 @@ module boundaries and protocol roles after cycle scheduling is already fixed.
 A continuously operating elastic network is natural in RHDL; an
 invoke-to-completion accelerator step is natural in Calyx.
 
+## Elastic flow composition
+
+RHDL's standard flow layer is more than a ready-valid component catalog. A
+configured stage is an ordinary unary elaboration-time function, making `|>` a
+serial topology operator. The same abstraction supports parallel paths,
+arbitration and joins, atomic or independently buffered fanout, routing,
+payload transforms, queues, pipes, and credit transport. A path can be built
+from a live endpoint or as a detached, linearly consumed handle. Combinational
+transforms lower inline; token-holding stages remain visible stateful modules.
+
+That composition lives above generic interface endpoints and then disappears
+into ordinary ports, connections, operations, and instances. It is evidence
+that an expressive elastic topology language does not require flow-specific
+core IR. The resulting ready paths, buffer depths, state boundaries, and
+credit conversions are all author-selected and cycle-exact.
+
+Calyx's control algebra composes a different temporal unit. A group or
+component is activated as an action and completes through `done`; `seq`, `par`,
+conditionals, loops, and `invoke` arrange those actions into a schedule. Calyx
+can of course contain cells and wiring that implement ready-valid behavior,
+but the standard control forms do not themselves denote continuously active
+tokens propagating through runtime-backpressured branches and rendezvous.
+
+RHDL consequently has the cleaner source abstraction for an elastic network,
+while Calyx has the cleaner one for a scheduled accelerator. RHDL does not,
+however, infer or prove latency, initiation interval, liveness, fairness, or
+deadlock freedom. Calyx's dynamic completion and static timing contracts
+provide guarantees along a different axis rather than filling that gap
+directly.
+
 ## Locality, predictability, and syntax
 
 Calyx's three-section syntax is economical for its semantic level. `cells`
@@ -192,4 +223,5 @@ Neither model subsumes the other without adding a semantic level.
 - Calyx [frontend tutorial](https://docs.calyxir.org/tutorial/frontend-tut.html)
 - Calyx [primary repository](https://github.com/calyxir/calyx)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
-  and [frontend interfaces](../../rhdl/frontend/layers/README.md#interfaces)
+  [frontend interfaces](../../rhdl/frontend/layers/README.md#interfaces), and
+  [standard flow composition](../../rhdl/std/README.md#flow-control-circuits)

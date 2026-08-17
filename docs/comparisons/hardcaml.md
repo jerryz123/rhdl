@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 This comparison uses the current Hardcaml manual and
 [Hardcaml 0.17.1 API](https://ocaml.org/p/hardcaml/latest/hardcaml/Hardcaml/index.html).
@@ -31,6 +31,7 @@ types, one final binding, explicit priority, and current/next-state semantics.
 | State | Current value and next-state place; explicit clock | `Signal.reg` and memories are graph nodes configured by `Reg_spec` |
 | Hierarchy | Circuit definitions and explicit instances | Circuits formed from named outputs; scopes can flatten calls or record module instances |
 | Interface relation | Nominal roles, refinement, support, and linear handles | PPX-derived polymorphic records carrying field names and widths |
+| Flow composition | Linear interface topologies with protocol-aware serial, parallel, and cardinality-changing stages | A separate handshake library supplies pure typed arrows and serial composition |
 | Primary abstraction tools | Rhombus functions, macros, classes, language layers, type capabilities | OCaml functions, modules, functors, records, PPX derivation, and shared module signatures |
 
 ## Denotation and staging
@@ -167,6 +168,40 @@ consumption. Hardcaml's record functors are more general for uniform host
 operations over fields; RHDL's interface semantics carry more information
 about compatibility and direction between endpoints.
 
+## Ready-valid flow composition
+
+The separate
+[`hardcaml_handshake`](https://github.com/janestreet/hardcaml_handshake/blob/master/src/handshake.mli)
+library gives Hardcaml an unusually principled answer to composition. A
+handshake circuit is a typed reusable arrow; pure lifting with `arr` and serial
+composition with `>>>` obey an ordinary functional shape. Unlike a mutable
+connected endpoint, the arrow value can be named, reused, and composed before
+it is interpreted as signals. On this narrow axis, its abstraction is purer
+than RHDL's linear topology handle.
+
+RHDL's flow language carries considerably more hardware semantics in the
+composed value. Configured unary stages apply through `|>` to either concrete
+endpoints or detached protocol seeds. `parallel` forms products, and arbiters,
+demultiplexers, forks, joins, and zips change cardinality while preserving the
+same notation and dependent endpoint shape. The resulting
+`InterfaceHandle` is intentionally one-shot, although the configured function
+that creates it is reusable. This trades the equational reuse of a pure arrow
+for explicit ownership of a physical topology.
+
+RHDL also tracks `Valid`, `Decoupled`, `Irrevocable`, and credited protocols,
+keeps pure transformations inline and stateful stages as modules, and checks
+the realized graph for combinational cycles across hierarchy. None of this
+requires flow-specific core IR; the abstraction erases through generic
+interfaces. The Hardcaml arrow is the more elegant skeleton, while RHDL is the
+more complete language for actual elastic topology and protocol-strength
+changes.
+
+RHDL's richer protocol description is not itself a temporal proof:
+`Irrevocable` currently lacks generated stability assertions. A pure typed
+arrow gives composition laws about shape rather than temporal correctness too,
+but Hardcaml's design is a useful reminder to distinguish algebraic structure
+from the properties established by an implementation.
+
 ## Abstraction, locality, and predictability
 
 Hardcaml uses OCaml's module system unusually well. Functions and functors can
@@ -195,11 +230,12 @@ the cost of less uniform reuse across bit-vector meanings.
 Hardcaml has the more elegant expression-level abstraction: the same
 combinational program can run shallowly over `Bits.t` or elaborate deeply over
 `Signal.t`, and its unified signal vocabulary still supports disciplined
-one-driver wires. RHDL is cleaner after elaboration where complete semantic
-types, one final binding, explicit priority, current/next state, and modules
-should remain directly inspectable. Hardcaml optimizes reuse across
-interpretations; RHDL optimizes preservation of hardware intent through
-interpretation.
+one-driver wires. Its handshake arrow is also the purer reusable serial
+composition value. RHDL is cleaner after elaboration where complete semantic
+types, one final binding, explicit priority, current/next state, modules, and
+the ownership and strength of an elastic topology should remain directly
+inspectable. Hardcaml optimizes reuse across interpretations; RHDL optimizes
+preservation of hardware intent through interpretation.
 
 ## Lessons for RHDL
 
@@ -212,6 +248,9 @@ interpretation.
    declarations rather than hand-writing parallel record machinery.
 4. Maintain one-driver semantics even if a more procedural control notation is
    added; compile ordered syntax to one explicit selected drive.
+5. Preserve the richer flow semantics, but learn from `hardcaml_handshake`'s
+   pure arrow: reusable topology descriptions should be distinct from their
+   one-shot materialization.
 
 ## Sources
 
@@ -222,7 +261,9 @@ interpretation.
 - [Hardcaml `Always` DSL](https://docs.hardcaml.org/hardcaml-docs/more-on-circuit-design/always/)
 - [Hardcaml interfaces](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/hardcaml_interfaces/)
 - [Hardcaml module hierarchy](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/module_hierarchies/)
+- [Hardcaml Handshake interface](https://github.com/janestreet/hardcaml_handshake/blob/master/src/handshake.mli)
 - [Hardcaml API](https://ocaml.org/p/hardcaml/latest/hardcaml/Hardcaml/index.html)
+- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

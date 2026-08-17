@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 This comparison uses the current
 [Amaranth documentation](https://amaranth-lang.org/docs/amaranth/latest/intro.html)
@@ -30,6 +30,7 @@ semantics.
 | State | Explicit register with current value, next place, clock, and optional synchronous reset | Synchronous domains hold state; domain assignments update it at the active edge |
 | Hierarchy | Circuit definitions and explicit instances | `Elaboratable` objects return fragments; `Module.submodules` establishes hierarchy |
 | Interface relation | Nominal roles, refinement, support, and linear handles | Immutable signatures, nested directions, flipping, equality, and structural connection |
+| Flow composition | Linear topology values compose serial, parallel, and cardinality-changing stages | A deliberately minimal strong `stream.Interface` connected through ordinary wiring |
 | Primary abstraction tools | Rhombus functions, macros, classes, language layers, type capabilities | Python functions, classes, generators, castable protocols, and signatures |
 
 ## Denotation and staging
@@ -154,6 +155,34 @@ topologies. Amaranth offers the more general structural wiring object; RHDL
 puts protocol meaning and topology consumption directly into connection
 semantics.
 
+## Ready-valid flow composition
+
+Amaranth's [`stream.Interface`](https://amaranth-lang.org/docs/amaranth/latest/stdlib/stream.html)
+deliberately defines a minimal ready-valid protocol. Its contract is strong:
+once `valid` is asserted, neither it nor the payload may change before
+transfer, and the producer may not make `valid` combinationally depend on
+`ready`. `always_valid` and `always_ready` record compatible restrictions in
+the signature. Components and FIFOs then compose through ordinary
+`wiring.connect` calls and explicit submodule construction.
+
+RHDL's standard flow layer provides a substantially broader composition
+abstraction without adding flow nodes to its core IR. A configured stage is an
+ordinary unary host function, so `source |> queue(4) |> pipe(2)` constructs a
+serial path. Starting from a payload or protocol type constructs a detached
+one-shot `InterfaceHandle`; `parallel` composes branches; arbiters,
+demultiplexers, forks, joins, and zips change cardinality in that same
+expression language. Pure transformations stay inline and stateful stages
+remain explicit module instances. The completed ordinary graph is then checked
+for combinational cycles, including paths through instances.
+
+RHDL also distinguishes weak `Decoupled` offers from stable `Irrevocable`
+offers, and separately models nonbackpressured `Valid` and credited transport.
+That is more expressive than Amaranth's single strong stream contract when a
+network intentionally permits a stalled offer to change. It is not currently
+a stronger guarantee because RHDL emits no general stability assertions.
+Amaranth's stream API is much less of a topology algebra, but the behavioral
+rule it does state is simpler and more uniform.
+
 ## Abstraction, locality, and predictability
 
 Amaranth benefits from Python's functions, classes, generators, containers,
@@ -183,8 +212,11 @@ mathematically growing expressions, named domains, and concise ordered
 assignment. Its unified `Signal` is a coherent abstraction, not a semantic
 defect. RHDL is cleaner when implementation width, semantic type, final
 binding, and the point of priority should be apparent at the operation itself.
-Amaranth optimizes low-friction construction; RHDL optimizes local
-reconstruction of the elaborated circuit.
+For ready-valid networks, RHDL additionally supplies the more expressive and
+uniform topology syntax, while Amaranth supplies a deliberately smaller and
+more categorical stream contract. Amaranth optimizes low-friction
+construction; RHDL optimizes local reconstruction and explicit composition of
+the elaborated circuit.
 
 ## Lessons for RHDL
 
@@ -194,6 +226,8 @@ reconstruction of the elaborated circuit.
    object rather than adding unrelated register options.
 3. Preserve nominal protocol relations and linear handles, but borrow the
    immutability and introspection discipline of Amaranth signatures.
+4. Make `Irrevocable` transformations satisfy Amaranth's simple standard:
+   preserve stalled payload stability by construction or do not claim it.
 
 ## Sources
 
@@ -201,6 +235,8 @@ reconstruction of the elaborated circuit.
 - [Amaranth language guide](https://amaranth-lang.org/docs/amaranth/latest/guide.html)
 - [Amaranth elaboration model](https://amaranth-lang.org/docs/amaranth/latest/guide.html#elaboration)
 - [Amaranth interfaces and connections](https://amaranth-lang.org/docs/amaranth/latest/stdlib/wiring.html)
+- [Amaranth data streams](https://amaranth-lang.org/docs/amaranth/latest/stdlib/stream.html)
+- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

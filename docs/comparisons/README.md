@@ -9,7 +9,7 @@ a feature-count leaderboard. Each comparison starts from what a source program
 denotes, then asks how time, state, concurrency, types, and reusable
 abstractions compose—and how clearly the syntax exposes those semantics.
 
-The comparisons describe the repository as of **2026-08-15**. RHDL and the
+The comparisons describe the repository as of **2026-08-17**. RHDL and the
 other projects are evolving, so capability claims should be read as
 snapshot-specific.
 
@@ -49,6 +49,10 @@ The individual documents compare against the same RHDL model:
   hardware IR. The optional CIRCT backend consumes only verified core IR.
 - Interfaces have nominal identities, named complementary roles, refinement,
   structural member checks, and linear topology handles.
+- The standard flow layer interprets those generic handles as `Valid`,
+  ready-valid, and credited paths. Ordinary unary functions compose serial,
+  parallel, fan-in, fanout, rendezvous, routing, and buffering topology without
+  adding flow-specific nodes to the core IR.
 - Current sequential policy is deliberately narrow: rising-edge clocks and,
   when reset is present, active-high synchronous reset, without clock-domain
   identities in the type system.
@@ -127,6 +131,56 @@ RHDL hardware. At the direct-construction level, Chisel, Amaranth, SpinalHDL,
 Hardcaml, and disciplined SystemVerilog expose the more immediate design trade:
 RHDL usually gains locality and loses syntactic economy.
 
+## Flow composition across the comparison set
+
+Flow composition is an important exception to the claim that RHDL generally
+trades concision for locality. The current
+[`std/flow`](../../rhdl/std/README.md#flow-control-circuits) surface is itself a
+compact topology language. A configured stage is an ordinary unary host
+function, so the same `|>` notation composes concrete endpoints and detached
+paths. The result may change cardinality, split into independent parallel
+branches, terminate at a sink, or use explicit adapters among selected
+`Valid`, `Decoupled`, `Irrevocable`, and credited paths. Pure adapters remain
+direct wiring, while stateful or structurally meaningful stages remain visible
+instances rather than hidden scheduling.
+
+This abstraction is intentionally implemented by the generic frontend
+[`InterfaceHandle`](../../rhdl/frontend/layers/interface.rhm), not by a second
+flow graph or new core operations. It is evidence for the project's layering
+claim: a minimal exact IR can support a substantially richer composition
+language that elaborates away.
+
+| Comparison system | Flow-composition judgment |
+|---|---|
+| Chisel | Standard ready-valid interfaces and components do not form one comparably uniform topology algebra; RHDL makes nontrivial transport graphs more direct. |
+| SpinalHDL | The closest direct peer: `Stream` composition is at least as fluent and more mature in timing control, while RHDL makes protocol strength and single-use topology ownership more explicit. |
+| Amaranth | Its deliberately minimal stream contract is stricter than `Decoupled`, but RHDL provides a much broader closed composition surface. |
+| Hardcaml | `hardcaml_handshake` has the purer host-typed reusable arrow; RHDL's nominal endpoints and flow stages express much richer ready-valid meaning while topology materialization remains one-shot. |
+| PyMTL3 | Ready-valid interfaces connect cleanly, but larger paths remain explicit component wiring rather than first-class transformations. |
+| HazardFlow | Its payload/resolver/transfer abstraction and generic FSM form the more general handshake algebra; RHDL instead verifies the complete realized combinational graph. |
+| Clash Protocols | `Circuit` is the more general reusable typed circuit algebra; RHDL gives buffering, readiness paths, ownership, and module boundaries more source-visible structure. |
+| Bluespec | Guarded atomic rules compose multi-resource transactions and let the compiler schedule conflicts; RHDL is more predictable for author-controlled elastic microarchitecture. |
+| Filament | Timeline and initiation-interval types provide stronger fixed-schedule guarantees; RHDL handles runtime stalls and backpressure that are outside Filament's design center. |
+| Calyx | Calyx composes multi-cycle actions and control schedules rather than continuously active token paths. |
+| DSLX/XLS | Proc channels default to a higher-level behavioral network; metadata and code-generation policy can constrain buffering during lowering, while RHDL exposes the exact transport topology in source. |
+| SystemVerilog | Interfaces and assertions can encode and check any chosen convention, but the language defines no standard first-class ready-valid composition algebra. |
+
+The current weakness is semantic enforcement rather than structural reach.
+`Irrevocable` stability is documented but not backed by generated assertions.
+Moreover, [`map_flow`](../../rhdl/std/flow/map.rhdl) and
+[`demux_flow`](../../rhdl/std/flow/demux.rhdl) preserve an irrevocable protocol
+even though their bodies may capture changing ambient hardware. Those helpers
+can therefore promise stability that their implementation does not establish.
+The layer also has no generic arbitrary forward/backward protocol algebra and
+no compositional latency, initiation-interval, deadlock, fairness, or liveness
+contracts.
+
+The principled next step is consequently not a flow-specific core IR or a
+larger component inventory. It is an enforceable distinction between
+payload-only transformations and transformations that observe live hardware,
+followed by a protocol-polymorphic stage abstraction over the existing generic
+interface subsystem.
+
 ## Comparison map
 
 | Comparison | Kind | Primary question for RHDL |
@@ -145,6 +199,12 @@ RHDL usually gains locality and loses syntactic economy.
 | [SystemVerilog](systemverilog.md) | Standard hardware language | Does RHDL's smaller expression-and-place model improve compositional reasoning over continuous assignments, procedural blocks, nets, and variables? |
 
 ## Highest-value reading paths
+
+For the flow-composition thread specifically, start with
+[SpinalHDL](spinalhdl.md) as the closest direct peer, then
+[HazardFlow](hazardflow.md) and [Clash](clash.md) for more general protocol
+algebras, [Bluespec](bluespec.md) for atomic transaction composition, and
+[Filament](filament.md) for static timing guarantees.
 
 For the closest tests of RHDL's current construction model, start with
 [Amaranth](amaranth.md), [SpinalHDL](spinalhdl.md), and

@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 HazardFlow makes a bidirectional communication protocol the central object of
 hardware composition. A hazard interface carries an optional forward payload,
@@ -12,12 +12,14 @@ a backward resolver, a predicate defining transfer, and a type-level account
 of whether forward signals depend on backward signals. Modules consume and
 produce those interfaces through Rust-shaped functions and combinators.
 
-RHDL begins one level lower. Its source constructs arbitrary typed expressions,
-explicit bindings, operations, state, and module ports. Ready/valid is one
-protocol expressible over that core, not the denotation of every circuit.
-HazardFlow is therefore more semantically economical for elastic pipelines;
-RHDL is more orthogonal to protocols and more direct for hardware that does not
-naturally form a flow graph.
+RHDL's core begins one level lower. Its source constructs arbitrary typed
+expressions, explicit bindings, operations, state, and module ports. Its
+standard flow layer nevertheless provides a substantial topology language:
+one-shot interface handles pass through serial, parallel, fan-in, fanout, and
+routing stages with `|>`, while every stage lowers through protocol-neutral
+interfaces into the same minimal IR. HazardFlow remains more semantically
+general for elastic pipelines; RHDL is more structurally explicit and remains
+orthogonal to protocols outside that authoring layer.
 
 ## Summary
 
@@ -28,8 +30,9 @@ naturally form a flow graph.
 | Transfer semantics | Written as ordinary signal logic for a chosen protocol | Intrinsic `Hazard` payload, resolver, and ready predicate |
 | State | Explicit registers and next-state bindings | Interface-attached FSM with explicit state transition callback |
 | Dependency guarantee | Whole-design combinational-cycle verification after elaboration | Local `Helpful`/`Demanding` interface dependency types |
+| Flow topology | Linear `InterfaceHandle` paths with serial, parallel, and cardinality-changing stages | Protocol-generic consumed-interface combinators and FSMs |
 | Main source of locality | Every driver and state edge is directly represented | Payload, backpressure, and transfer behavior travel together |
-| Syntactic compression | General but explicit | Very high for stream transformations and elastic pipelines |
+| Syntactic compression | High for explicit ready-valid topology; general RTL remains explicit | Very high for protocol-generic transformations and elastic pipelines |
 
 ## Denotation and staging
 
@@ -80,6 +83,34 @@ RHDL's nominal protocol identity answers a different question: which named
 contract do these two endpoints claim to implement? HazardFlow's hazard type
 answers how a transfer is computed. Nominality and transfer algebra are
 orthogonal; neither makes the other redundant.
+
+## Flow composition
+
+RHDL's standard flow layer closes much of the syntactic gap without changing
+the core denotation. Each configured stage is an ordinary unary host function,
+so a concrete endpoint or a disconnected `InterfaceHandle` can pass through
+`pipe`, `queue`, mapping, filtering, arbitration, rendezvous, fork, demux, and
+crossbar stages with `|>`. `parallel` forms the structural product of
+independent paths, while joins and routing stages change cardinality. A handle
+or terminated sink can be consumed at most once, making ownership of the open
+topology local during elaboration; a configured stage function itself remains
+reusable and constructs fresh topology on every application.
+
+That is a coherent embedded topology DSL, not just shorthand for a component
+catalog. Pure combinational adapters elaborate as local interface links, while
+stateful or structurally meaningful stages remain explicit instances. Stages
+also state meaningful protocol-strength transitions: storage may establish an
+`Irrevocable` output, while an adapter observing live control conservatively
+returns `Decoupled`. The entire layer is implemented by the generic interface
+subsystem and ordinary core bindings rather than flow-specific IR nodes.
+
+HazardFlow is more general at the same authoring level. Its
+[combinators](https://kaist-cp.github.io/hazardflow/book/lang/combinator.html)
+operate over the `Hazard` algebra rather than a fixed ready-valid family, and
+its generic `fsm` describes stateful protocol transformations without requiring
+a new stage abstraction for each pattern. RHDL's flow language is therefore
+stronger in source-visible structural ownership, while HazardFlow is stronger
+in protocol-parametric reuse.
 
 ## Time, state, and concurrency
 
@@ -133,6 +164,15 @@ HazardFlow's guarantee is narrower and more protocol-aware. The strongest
 language design would not confuse these layers: a local dependency type is a
 composition aid, while whole-graph cycle verification remains the final fact.
 
+RHDL's nominal flow contracts currently exceed what it proves. `Irrevocable`
+stability is documented rather than automatically asserted, and the bodies of
+`map_flow` and `demux_flow` may capture changing hardware sidebands while the
+result retains the input's `Irrevocable` contract. HazardFlow's dependency
+types do not solve every temporal property either, but its generic protocol
+signature states more of the transfer relation. RHDL should either constrain
+those dependencies, conservatively weaken the result to `Decoupled`, or verify
+the retained promise.
+
 ## Locality and predictability
 
 HazardFlow gives excellent protocol locality. The payload, feedback information,
@@ -166,13 +206,13 @@ well.
 Its specialization is also its boundary. Not every register, memory port, or
 control relation is most naturally understood as a stream transformation, and
 the two-valued dependency summary cannot replace full circuit analysis. RHDL's
-smaller graph primitives are less expressive about protocols but compose
-uniformly across arbitrary RTL.
+flow surface is less protocol-general but preserves more of the selected
+buffering, routing, module boundaries, and final dependency graph.
 
-RHDL can construct the same handshake equations and state machines, but it
+RHDL can compose sophisticated ready-valid and credited topologies, but it
 cannot currently state “this interface's transfer predicate is part of its
 type” or “forward data is independent of backward resolution.” Those are real
-language-level contract gaps, not missing Boolean expressivity.
+language-level contract gaps, not missing components or Boolean expressivity.
 
 ## Lessons for RHDL
 
@@ -194,7 +234,7 @@ language-level contract gaps, not missing Boolean expressivity.
 
 - RHDL [core semantics](../../rhdl/core/README.md),
   [frontend model](../../rhdl/frontend/README.md), and
-  [standard interfaces](../../rhdl/std/README.md)
+  [standard interfaces and flow composition](../../rhdl/std/README.md)
 - [HazardFlow project](https://github.com/kaist-cp/hazardflow)
 - [HazardFlow signal types](https://kaist-cp.github.io/hazardflow/book/lang/signal.html)
 - [HazardFlow interface and hazard model](https://kaist-cp.github.io/hazardflow/book/lang/interface.html)

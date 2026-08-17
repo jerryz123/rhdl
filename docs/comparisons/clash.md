@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 RHDL and Clash both describe synchronous circuits without asking an HLS
 scheduler to choose register placement. They differ in what their source
@@ -21,6 +21,12 @@ register, and preserve a chosen module boundary. The core question is whether
 functional uniformity or explicit graph-construction semantics gives the
 better local model for the design at hand.
 
+For elastic networks, the current `clash-protocols` `Circuit` abstraction and
+RHDL's standard flow layer make the comparison sharper. Clash provides the
+more general typed algebra of reusable protocol circuits. RHDL provides the
+more source-visible topology language, with linear ownership of open paths and
+explicit distinctions among combinational adapters, buffers, and instances.
+
 ## Summary
 
 | Question | RHDL | Clash |
@@ -29,6 +35,7 @@ better local model for the design at hand.
 | Core composition unit | Explicit definition/binding connections and circuit instances | Typed functions and function application |
 | Time | Explicit registers, memories, clocks, and next-state drives | `Signal dom a` streams plus explicit state primitives and combinators |
 | Static dimension | Realized hardware types checked during elaboration and verification | Widths, lengths, data types, and domains participate in Haskell types |
+| Flow composition | One-shot interface handles; serial, parallel, and cardinality-changing `|>` paths | Reusable, protocol-indexed `Circuit a b` values with typed forward and backward channels |
 | Concurrency | The constructed graph is concurrent; no scheduler | Pure signal network is concurrent; no general operation scheduler |
 | Main source of locality | Source forms say which hardware object is being constructed | One functional syntax composes values, structures, and temporal signals |
 | Syntactic compression | Direct for named RTL structure and local control | High for generic datapaths, vectors, products, and state machines |
@@ -79,6 +86,43 @@ the result is expressed through construction actions rather than by giving the
 network a pure functional denotation. Conversely, RHDL's explicit destination
 syntax is clearer when output ownership, final connectivity, or a chosen
 module boundary is the important fact.
+
+## Flow composition
+
+RHDL's standard flow layer gives ready-valid topology an expression-oriented
+surface without changing the core language. A configured stage is an ordinary
+unary function applied with `|>` to either a live endpoint or a disconnected
+`InterfaceHandle`. Serial stages, `parallel` products, arbitration, joins,
+forks, demultiplexing, and crossbars can therefore form one path even as its
+endpoint cardinality changes. Handles and terminated sinks are consumed once,
+whereas configured stage functions are reusable and build fresh topology when
+applied.
+
+The abstraction retains unusually direct structural meaning. Payload maps and
+other combinational adapters become local interface links; stateful or
+structurally meaningful stages remain explicit instances. Stages also make
+protocol-strength changes visible, such as storage establishing an
+`Irrevocable` output or live control weakening one to `Decoupled`. All of this
+lowers through RHDL's generic interface subsystem and ordinary bindings, so the
+minimal IR needs no flow graph or protocol operation.
+
+[`clash-protocols`](https://github.com/clash-lang/clash-protocols) offers the
+more general mathematical abstraction. A `Circuit a b` relates the `Fwd` and
+`Bwd` representations of arbitrary protocols, and `Df dom a` supplies one
+dataflow protocol with acknowledgment and stability laws. Circuit values are
+typed, reusable descriptions that compose independently of a particular
+connection; serial and product structure are instances of the same general
+protocol algebra rather than special ready-valid topology operations. This is
+more uniform and protocol-parametric than RHDL's fixed flow family.
+
+The static types do not by themselves prove every `Df` law. The project states
+that its harnesses check invariants where possible and explicitly notes that
+stable data until acknowledgment is not yet checked. RHDL has a corresponding,
+unproven contract: `Irrevocable` stability is documentary, and `map_flow` or
+`demux_flow` bodies can capture changing sidebands while preserving the nominal
+promise. Clash has the cleaner reusable circuit algebra; RHDL has clearer
+source-level ownership of the realized buffering, readiness paths, hierarchy,
+and cycle-verified whole-design dependency graph.
 
 ## Time, state, and concurrency
 
@@ -148,9 +192,10 @@ look less declarative than a typed `map` over `Vec n a`.
 
 Protocol composition exposes another boundary. RHDL has nominal two-role
 interfaces whose directions and identities survive authoring composition.
-Clash's base composition unit is a function over typed data or signals; a
-handshake discipline is not implied by `Signal` itself. Clash can encode such
-disciplines in types, but they are not part of the core signal denotation.
+Clash's base `Signal` does not imply a handshake discipline, but
+`clash-protocols` adds a first-class typed `Circuit` layer over it. RHDL's flow
+surface is more specialized and structurally owned; Clash's protocol circuit
+surface is more generic and equational.
 
 ## Language-level judgment
 
@@ -169,8 +214,10 @@ particular core representation is secondary to those guarantees.
 The systems therefore optimize different forms of elegance. Clash minimizes
 the conceptual distance between reusable functions and circuits. RHDL
 minimizes the conceptual distance between source construction and the realized
-hardware graph. Neither should be judged by whether it can manually reproduce
-the other's final Boolean network.
+hardware graph. Their flow abstractions preserve the same divide: Clash gives
+the cleaner general composition algebra, while RHDL gives the clearer exact
+elastic topology. Neither should be judged by whether it can manually
+reproduce the other's final Boolean network.
 
 ## Lessons for RHDL
 
@@ -195,3 +242,4 @@ the other's final Boolean network.
 - [Clash FAQ](https://docs.clash-lang.org/compiler-user-guide/general/faqs.html)
 - [Clash Prelude: signals, domains, and state](https://docs.clash-lang.org/compiler-user-guide/developing-hardware/prelude.html)
 - [Clash first-circuit tutorial](https://docs.clash-lang.org/tutorial/first-steps/first-circuit.html)
+- [`clash-protocols` circuits, `Df`, and invariants](https://github.com/clash-lang/clash-protocols)

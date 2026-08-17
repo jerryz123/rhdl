@@ -4,7 +4,7 @@
 
 ## Scope and thesis
 
-*Snapshot: 2026-08-15.*
+*Snapshot: 2026-08-17.*
 
 RHDL and Filament are both structurally minded languages: neither treats a
 software procedure as an unconstrained request for HLS. Their source programs
@@ -18,7 +18,10 @@ RHDL can build a balanced pipeline or a resource-sharing controller, but it
 cannot state their latency, initiation interval, or legal use windows as
 compositional source contracts. Filament gains that power by specializing its
 language around statically timed pipelines. RHDL remains more direct for
-general synchronous RTL and dynamically stalled protocols.
+general synchronous RTL and dynamically stalled protocols. In particular,
+RHDL's standard flow layer is a compact language for constructing exact
+runtime-backpressured topologies rather than merely wiring ready and valid
+signals by hand.
 
 ## Summary
 
@@ -28,6 +31,7 @@ general synchronous RTL and dynamically stalled protocols.
 | Core composition unit | Explicit definition/binding connection | Component invocation at a symbolic event |
 | Time | Emerges from explicit state edges and protocol logic | Appears in port availability intervals and event expressions |
 | Resource sharing | Author constructs arbitration, enables, and state | Repeated invocations checked against a component's initiation interval |
+| Elastic composition | Serial and parallel stages, fan-in, fanout, rendezvous, routing, buffering, and credit transport | No corresponding dynamic-flow algebra; event timelines describe a static schedule |
 | Static guarantee | Concrete graph is typed, single-driver, and cycle-safe | Composed values and resource uses satisfy declared timeline constraints |
 | Main source of locality | Exact register and connection structure is visible | Latency and use windows travel with component signatures |
 | Syntactic compression | Direct for arbitrary RTL | High for balanced, statically scheduled pipelines |
@@ -76,6 +80,38 @@ the mux, enable, and controller at every use site, while the event argument
 makes the scheduling decision visible. RHDL requires those implementation
 objects to be constructed explicitly. Filament writes less control structure,
 but its source is less literal about the final registers and controller states.
+
+## Elastic flow composition
+
+RHDL's standard flow layer gives exact elastic hardware a higher-level syntax
+without changing what the circuit denotes. A configured flow stage is an
+ordinary unary elaboration-time function, so `|>` expresses serial topology.
+The same model covers parallel branches, arbitration and joins, atomic or
+buffered fanout, demultiplexing and crossbars, payload transforms, queues,
+pipes, and credit adapters. A path may be connected immediately or constructed
+as a detached, linearly consumed handle and attached later. Pure combinational
+transforms lower inline, while stages that hold tokens remain explicit module
+instances.
+
+This is unusually powerful for exact RTL because it composes both topology and
+state placement. The generic interface subsystem carries the endpoints, and
+the flow vocabulary elaborates into ordinary ports, connections, operations,
+and instances; the minimal core IR needs no flow node or protocol-specific
+semantics.
+
+Filament's event, interval, and invocation algebra solves a different problem.
+It checks that a statically scheduled value exists when used and that a resource
+is not invoked more frequently than its initiation interval permits. It does
+not provide an equivalent algebra for a token whose transfer may be delayed an
+unbounded, runtime-dependent number of cycles by downstream readiness. Such a
+network can be implemented as explicit component logic, but it falls outside
+the central timeline abstraction.
+
+RHDL's advantage here should not be mistaken for temporal proof. Flow types do
+not state latency, initiation interval, throughput, liveness, or deadlock
+freedom, and `Irrevocable` stability is not automatically asserted. Filament
+is therefore much stronger for static time and resource safety even though
+RHDL is more expressive for dynamically elastic topology.
 
 ## Time, state, and concurrency
 
@@ -190,7 +226,8 @@ the natural specification.
 
 - RHDL [core semantics](../../rhdl/core/README.md),
   [frontend model](../../rhdl/frontend/README.md), and
-  [frontend layers](../../rhdl/frontend/layers/README.md)
+  [frontend layers](../../rhdl/frontend/layers/README.md), plus the
+  [standard flow composition model](../../rhdl/std/README.md#flow-control-circuits)
 - [Filament language overview](https://filamenthdl.com/)
 - [Filament language tutorial](https://filamenthdl.com/docs/lang/tutorial.html)
 - [Filament loops and timed bundles](https://filamenthdl.com/docs/meta/loops-and-bundles.html)
