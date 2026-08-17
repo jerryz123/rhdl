@@ -19,6 +19,7 @@ import:
   "../../riscv/rhdl/instruction-fields.rhdl" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/flow.rhdl") open
+  lib("rhdl/std/scoreboard.rhdl") open
 
 sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def width = xlen_width(xlen)
@@ -38,7 +39,6 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
-  reg busy_bits(~init: bits(0, 32))
 
   // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
   // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
@@ -50,6 +50,7 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   inst registers(RicketRegisterFile(xlen))
   inst alu(ALU(xlen))
   inst branch_resolver(BranchResolver(width))
+  inst scoreboard(Scoreboard(32))
 
   fault <== faulted
 
@@ -67,29 +68,10 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
   def commit = ex_mem_pipe.egress
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
   def load_completion_valid = data_access.response.valid & or_reduce(data_access.response.bits.tag)
-  def scoreboard_set_valid = commit.valid & commit_is_load & commit.bits.writeback_enable
-  def scoreboard_set_address = commit.bits.rd
-  def scoreboard_clear_valid = load_completion_valid
-  def scoreboard_clear_address = data_access.response.bits.tag
-  def scoreboard_set_nonzero = scoreboard_set_valid & or_reduce(scoreboard_set_address)
-  def scoreboard_clear_nonzero = scoreboard_clear_valid & or_reduce(scoreboard_clear_address)
-  def scoreboard_set_bit = as_bits(one_hot(scoreboard_set_address))
-  def scoreboard_clear_bit = as_bits(one_hot(scoreboard_clear_address))
-  def scoreboard_set_mask = mux(scoreboard_set_nonzero, scoreboard_set_bit, bits(0, 32))
-  def scoreboard_clear_mask = mux(scoreboard_clear_nonzero, scoreboard_clear_bit, bits(0, 32))
-  def scoreboard_set_was_free = !or_reduce(busy_bits & scoreboard_set_bit) ||| (
-    scoreboard_clear_nonzero & (scoreboard_clear_address === scoreboard_set_address)
-  )
-  def scoreboard_clear_was_busy = or_reduce(busy_bits & scoreboard_clear_bit) ||| (
-    scoreboard_set_nonzero & (scoreboard_set_address === scoreboard_clear_address)
-  )
-  when scoreboard_set_nonzero:
-    assert(scoreboard_set_was_free, "ricket_scoreboard_set_free")
-  when scoreboard_clear_nonzero:
-    assert(scoreboard_clear_was_busy, "ricket_scoreboard_clear_busy")
-  def effective_busy_bits = (busy_bits ||| scoreboard_set_mask) & !scoreboard_clear_mask
-  when (scoreboard_set_nonzero ||| scoreboard_clear_nonzero):
-    busy_bits <== effective_busy_bits
+  scoreboard.set.valid <== commit.valid & commit_is_load & commit.bits.writeback_enable & or_reduce(commit.bits.rd)
+  scoreboard.set.bits <== commit.bits.rd
+  scoreboard.clear.valid <== load_completion_valid
+  scoreboard.clear.bits <== data_access.response.bits.tag
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -170,9 +152,9 @@ sync_circuit RicketCore(xlen :: XLen, address_width :: PosInt):
 
   registers.read_address_1 <== rs1
   registers.read_address_2 <== rs2
-  def rs1_busy = or_reduce(rs1) & or_reduce(effective_busy_bits & as_bits(one_hot(rs1)))
-  def rs2_busy = or_reduce(rs2) & or_reduce(effective_busy_bits & as_bits(one_hot(rs2)))
-  def rd_busy = or_reduce(rd) & or_reduce(effective_busy_bits & as_bits(one_hot(rd)))
+  def rs1_busy = or_reduce(rs1) & scoreboard_busy(scoreboard.busy, rs1)
+  def rs2_busy = or_reduce(rs2) & scoreboard_busy(scoreboard.busy, rs2)
+  def rd_busy = or_reduce(rd) & scoreboard_busy(scoreboard.busy, rd)
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
   def load_destination = id_ex.bits.rd

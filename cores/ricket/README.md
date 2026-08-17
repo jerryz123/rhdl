@@ -18,7 +18,8 @@ ricket.rhdl                         composition only
   |     |--> bundles + decode + register-file
   |     |--> ../{alu,branch-resolver,load-store}.rhdl
   |     |--> icache/protocol.rhdl
-  |     `--> dcache/protocol.rhdl
+  |     |--> dcache/protocol.rhdl
+  |     `--> ../../rhdl/std/scoreboard.rhdl
   |--> icache/cache.rhdl            instruction access -> SimpleMemory(8 B)
   `--> dcache/cache.rhdl            data access -> SimpleMemory(8 B)
         `--> ../load-store.rhdl
@@ -53,7 +54,7 @@ Decode holds a load-use dependent token. Execute owns forwarding, branch
 resolution, target and access alignment checks, and architectural fault
 generation. A legal data-cache request transfers at the same edge that places
 its instruction in EX/MEM. Memory is the ordered commit point: a committed load
-sets its destination in the core's scoreboard state and releases the pipeline
+sets its destination in the standard `Scoreboard` and releases the pipeline
 before its tagged result returns. Decode stalls on scoreboard RAW and WAW
 hazards, while independent younger instructions may complete first. A returning
 load clears its destination and writes through the register file's second write

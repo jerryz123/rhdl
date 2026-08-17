@@ -324,6 +324,32 @@ the identity for `align_down` and always true for `is_aligned`.
 `alignment_bits(alignment)` exposes the exact host-side base-two width for
 protocols and generators that need to size or remove those low bits.
 
+## Scoreboard
+
+[`scoreboard.rhdl`](scoreboard.rhdl) provides a reusable occupancy bitmap with
+one nonbackpressured `Valid` set operation, one nonbackpressured `Valid` clear
+operation, and a combinational `busy` bitmap:
+
+```rhombus
+import:
+  lib("rhdl/std/scoreboard.rhdl") open
+
+inst hazards(Scoreboard(32))
+hazards.set.valid <== reserve
+hazards.set.bits <== destination
+hazards.clear.valid <== complete
+hazards.clear.bits <== completion_tag
+def dependent = scoreboard_busy(hazards.busy, source)
+```
+
+The power-of-two entry count must be at least two. Reset empties the scoreboard.
+The `busy` output includes current-cycle operations, so consumers see a set or
+clear without an extra cycle; clear wins when both operations address the same
+entry. Assertions reject setting an occupied entry and clearing a free entry,
+except for a simultaneous opposite operation on that entry. The component has
+no reserved-entry policy: callers that treat an index such as register zero as
+permanently free must filter that policy at their own boundary.
+
 ## Fixed-latency synchronous RAM
 
 [`read-write.rhdl`](read-write.rhdl) defines

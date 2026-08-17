@@ -1,0 +1,47 @@
+#lang rhdl
+// Defines a reusable single-set, single-clear occupancy scoreboard.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl").Valid
+
+fun scoreboard_busy(busy :: Hardware, index :: Hardware) :~ Bool:
+  or_reduce(busy & as_bits(one_hot(index)))
+
+// Set and clear are nonbackpressured operations. The combinational busy output
+// includes both operations from the current cycle, with clear winning when
+// they address the same entry.
+sync_circuit Scoreboard(entries :: Pow2Int):
+  unless entries > 1
+  | error(~who: #'Scoreboard, "entry count must be at least two")
+  def Index = Bits(index_width(entries))
+
+  interface set(Valid(Index), ~role: consumer)
+  interface clear(Valid(Index), ~role: consumer)
+  output busy: Bits(entries)
+
+  reg state(~init: bits(0, entries))
+  def set_bit = as_bits(one_hot(set.bits))
+  def clear_bit = as_bits(one_hot(clear.bits))
+  def set_mask = mux(set.valid, set_bit, bits(0, entries))
+  def clear_mask = mux(clear.valid, clear_bit, bits(0, entries))
+  def set_was_free = !scoreboard_busy(state, set.bits) ||| (
+    clear.valid & (clear.bits === set.bits)
+  )
+  def clear_was_busy = scoreboard_busy(state, clear.bits) ||| (
+    set.valid & (set.bits === clear.bits)
+  )
+
+  when (set.valid):
+    assert(set_was_free, "scoreboard_set_free")
+  when (clear.valid):
+    assert(clear_was_busy, "scoreboard_clear_busy")
+
+  def effective_busy = (state ||| set_mask) & !clear_mask
+  when (set.valid ||| clear.valid):
+    state <== effective_busy
+  busy <== effective_busy
+
+export:
+  Scoreboard
+  scoreboard_busy

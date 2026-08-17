@@ -1,0 +1,39 @@
+#lang rhombus
+// Checks standard scoreboard interfaces, state, lookup, assertions, and bounds.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/std/scoreboard.rhdl" as scoreboard
+  "std-scoreboard.rhdl" as fixture
+
+def design = embedded.run_elaboration(fun (): scoreboard.Scoreboard(8))
+def module_def = design.modules[0]
+def lookup_module = fixture.lookup_design.modules[0]
+
+fun operations(module_def, opcode):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == opcode
+  )
+
+check:
+  module_def.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "set_in", "clear_in"
+  ]
+  module_def.outputs.map(fun (port): port.name) ~is ["busy"]
+  module_def.find_input("set_in").type.field("valid").type.bit_width() ~is 1
+  module_def.find_input("set_in").type.field("bits").type.width ~is 3
+  module_def.find_input("clear_in").type.field("bits").type.width ~is 3
+  module_def.find_output("busy").type.width ~is 8
+  operations(module_def, "rtl.register_reset").map(
+    fun (operation): operation.attribute("name")
+  ) ~is ["state"]
+  operations(module_def, "verif.assert").map(
+    fun (operation): operation.attribute("label")
+  ) ~is ["scoreboard_set_free", "scoreboard_clear_busy"]
+  operations(lookup_module, "rtl.shl").length() ~is 1
+  verify_design(design) ~is #void
+  verify_design(fixture.lookup_design) ~is #void
+  embedded.run_elaboration(fun (): scoreboard.Scoreboard(1)) ~throws "at least two"
+  embedded.run_elaboration(fun (): scoreboard.Scoreboard(3)) ~throws "Pow2Int"
+  embedded.run_elaboration(fun (): fixture.BadScoreboardLookup()) ~throws "same bitwise type"

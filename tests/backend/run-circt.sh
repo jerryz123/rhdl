@@ -483,6 +483,7 @@ direct_fixture_specs=(
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'
+  'scoreboard|scoreboard_tb'
   'ricket-register-file|ricket_register_file_tb'
   'ricket-core|ricket_core_tb'
   'ricket-core-rv32|'
