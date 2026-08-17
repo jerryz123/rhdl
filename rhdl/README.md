@@ -128,7 +128,8 @@ import one primitive without loading unrelated generators.
 | `std/flow/map-valid.rhdl` | Configured inline payload substitution for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/fork-valid.rhdl` | Configured inline one-to-many fanout for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/filter-valid.rhdl` | Configured inline predicate filtering for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
-| `std/flow/accept.rhdl` | Configured always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/to-valid.rhdl` | Explicit always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
+| `std/flow/boundary.rhdl` | Named protocol-preserving injection from and ejection to ordinary circuit-side hardware | None |
 | `std/flow/filter.rhdl` | Configured inline predicate filtering for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/gate.rhdl` | Configured combinational enable gating for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/stage.rhdl` |
 | `std/flow/parallel.rhdl` | Configured parallel stage, generic handle, and terminated-sink composition | `std/flow/stage.rhdl` |

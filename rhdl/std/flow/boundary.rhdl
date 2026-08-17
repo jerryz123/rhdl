@@ -1,0 +1,157 @@
+#lang rhdl
+// Connects arbitrary interface flows to ordinary circuit-side hardware.
+
+// Records one flattened interface leaf and whether the protocol provider owns
+// its direction. Nested interfaces retain their structural declaration order.
+class FlowBoundaryLeaf(path, from_provider)
+
+fun flow_boundary_leaves(type,
+                         provider_role,
+                         first_root_role,
+                         second_root_role,
+                         path = []):
+  def mutable leaves = []
+  for (member in type.members):
+    def from_root_role:
+      if member.from_role == type.roles[0]
+      | first_root_role
+      | second_root_role
+    def to_root_role:
+      if member.to_role == type.roles[0]
+      | first_root_role
+      | second_root_role
+    def member_path = path ++ [member.name]
+    if member.type is_a InterfaceType
+    | leaves := leaves ++ flow_boundary_leaves(
+        member.type,
+        provider_role,
+        from_root_role,
+        to_root_role,
+        member_path
+      )
+    | leaves := leaves ++ [
+        FlowBoundaryLeaf(member_path, from_root_role == provider_role)
+      ]
+  leaves
+
+fun flow_boundary_field(endpoint, path):
+  def mutable field = endpoint
+  for (name in path):
+    field := field.field(name)
+  field
+
+fun validate_flow_boundary_bindings(type, bindings, who):
+  unless type is_a InterfaceType
+  | error(~who: who, "flow boundary requires an InterfaceType")
+  unless bindings is_a Map
+  | error(~who: who, "nested interface members require named binding maps")
+  unless bindings.length() == type.members.length()
+  | error(~who: who, "flow boundary requires exactly one named binding for every interface member")
+  for (member in type.members):
+    def key = Keyword.from_string(member.name)
+    unless bindings.has_key(key)
+    | error(~who: who, "flow boundary is missing the ~" ++ member.name ++ " binding")
+    if member.type is_a InterfaceType
+    | validate_flow_boundary_bindings(member.type, bindings[key], who)
+    | #void
+
+fun flow_boundary_binding(bindings, path):
+  def mutable binding = bindings
+  for (name in path):
+    binding := binding[Keyword.from_string(name)]
+  binding
+
+fun validated_flow_boundary_leaves(type, bindings, who):
+  validate_flow_boundary_bindings(type, bindings, who)
+  flow_boundary_leaves(
+    type,
+    type.provider_role,
+    type.roles[0],
+    type.roles[1]
+  )
+
+// Captures a nested interface member's named leaves without exposing the host
+// map representation at the call site.
+fun flow_fields(~& bindings):
+  bindings
+
+// The local circuit side owns provider-origin destinations and receives the
+// reverse path. The complementary endpoint is returned for ordinary chaining.
+fun inject_flow(type, ~& bindings) :: Endpoint:
+  def leaves = validated_flow_boundary_leaves(type, bindings, #'inject_flow)
+  def link :: Handle = interface_link(type, "inject_flow")
+  def circuit_endpoint:
+    if type.provider_role == type.roles[0] | link.left | link.right
+  def flow_endpoint :: Endpoint:
+    if type.provider_role == type.roles[0] | link.right | link.left
+  for (leaf in leaves):
+    def entity = flow_boundary_field(circuit_endpoint, leaf.path)
+    def binding = flow_boundary_binding(bindings, leaf.path)
+    if leaf.from_provider
+    | entity <== binding
+    | binding <== entity
+  link.consumed := #true
+  flow_endpoint
+
+fun flow_provider_end(handle :: Handle):
+  cond
+  | handle.right is_a Endpoint && handle.right.represented_role == handle.right.type.provider_role:
+      [handle.right, handle.left]
+  | handle.left is_a Endpoint && handle.left.represented_role == handle.left.type.provider_role:
+      [handle.left, handle.right]
+  | ~else:
+      error(~who: #'eject_flow,
+            "flow ejection requires a handle with one provider-facing endpoint")
+
+// A terminal can consume a concrete endpoint immediately or retain the input
+// end of a detached handle as an InterfaceSink for later composition.
+fun finish_ejected_flow(source, bindings):
+  def detached_link:
+    if source is_a InterfaceType
+    | interface_link(source, "eject_flow")
+    | #false
+  def handle:
+    if source is_a Handle | source | detached_link
+  if handle
+  | unless !handle.consumed
+    | error(~who: #'eject_flow, "an interface handle can be consumed only once")
+  | #void
+  def handle_ends:
+    if handle | flow_provider_end(handle) | #false
+  def flow_endpoint:
+    cond
+    | source is_a Endpoint: source
+    | handle: handle_ends[0]
+    | ~else:
+        error(~who: #'eject_flow,
+              "flow ejection requires an InterfaceType, endpoint, or handle")
+  unless flow_endpoint.represented_role == flow_endpoint.type.provider_role
+  | error(~who: #'eject_flow,
+          "flow ejection requires an endpoint representing the provider role")
+  def leaves = validated_flow_boundary_leaves(
+    flow_endpoint.type,
+    bindings,
+    #'eject_flow
+  )
+  for (leaf in leaves):
+    def entity = flow_boundary_field(flow_endpoint, leaf.path)
+    def binding = flow_boundary_binding(bindings, leaf.path)
+    if leaf.from_provider
+    | binding <== entity
+    | entity <== binding
+  if handle
+  | block:
+      handle.consumed := #true
+      InterfaceSink(handle_ends[1])
+  | #void
+
+// Configures a unary terminal stage so it naturally occupies the rightmost
+// position of a Rhombus pipeline.
+fun eject_flow(~& bindings):
+  fun (eject_flow_source):
+    finish_ejected_flow(eject_flow_source, bindings)
+
+export:
+  flow_fields
+  inject_flow
+  eject_flow

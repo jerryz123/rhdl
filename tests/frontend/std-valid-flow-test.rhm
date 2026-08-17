@@ -8,6 +8,13 @@ import:
 
 def valid_top = fixture.valid_design.modules[0]
 def accepted_top = fixture.accepted_design.modules[0]
+def generic_boundary_top = fixture.generic_boundary_design.modules[0]
+def control_boundary_top = fixture.control_boundary_design.modules[0]
+def reverse_provider_boundary_top = fixture.reverse_provider_boundary_design.modules[0]
+def detached_boundary_top = fixture.detached_boundary_design.modules.find(
+  fun (module_def): module_def.name == "DetachedFlowBoundary"
+)
+def nested_boundary_top = fixture.nested_boundary_design.modules[0]
 def completion_top = fixture.completion_design.modules.find(
   fun (module_def): module_def.name == "CompletionQueue"
 )
@@ -39,6 +46,47 @@ check:
   operations(accepted_top, "rtl.and").length() ~is 1
   verify_design(fixture.accepted_design) ~is #void
 
+  fixture.generic_boundary_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["GenericFlowBoundary"]
+  generic_boundary_top.find_output("source_ready").type.bit_width() ~is 1
+  generic_boundary_top.find_output("sink_bits").type.width ~is 8
+  generic_boundary_top.find_output("sink_tag").type.width ~is 2
+  operations(generic_boundary_top, "rtl.instance").length() ~is 0
+  verify_design(fixture.generic_boundary_design) ~is #void
+
+  fixture.control_boundary_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["ControlFlowBoundary"]
+  control_boundary_top.find_output("source_ready").type.bit_width() ~is 1
+  control_boundary_top.find_output("sink_valid").type.bit_width() ~is 1
+  operations(control_boundary_top, "rtl.instance").length() ~is 0
+  verify_design(fixture.control_boundary_design) ~is #void
+
+  fixture.reverse_provider_boundary_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["ReverseProviderFlowBoundary"]
+  reverse_provider_boundary_top.find_output("source_request").type.width ~is 8
+  reverse_provider_boundary_top.find_output("sink_response").type.width ~is 16
+  operations(reverse_provider_boundary_top, "rtl.instance").length() ~is 0
+  verify_design(fixture.reverse_provider_boundary_design) ~is #void
+
+  fixture.detached_boundary_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["DetachedFlowBoundary", "Pipe"]
+  detached_boundary_top.find_output("source_ready").type.bit_width() ~is 1
+  detached_boundary_top.find_output("sink_bits").type.width ~is 8
+  operations(detached_boundary_top, "rtl.instance").length() ~is 1
+  verify_design(fixture.detached_boundary_design) ~is #void
+
+  fixture.nested_boundary_design.modules.map(
+    fun (module_def): module_def.name
+  ) ~is ["NestedFlowBoundary"]
+  nested_boundary_top.find_output("source_acknowledge").type.bit_width() ~is 1
+  nested_boundary_top.find_output("sink_data").type.width ~is 8
+  operations(nested_boundary_top, "rtl.instance").length() ~is 0
+  verify_design(fixture.nested_boundary_design) ~is #void
+
   fixture.completion_design.modules.map(fun (module_def): module_def.name) ~is [
     "CompletionQueueWrapper", "CompletionQueue", "Queue", "Counter"
   ]
@@ -68,7 +116,13 @@ check:
     fun (): fixture.FilterValidWrongProtocol()
   ) ~throws "Valid-flow chaining requires a Valid endpoint"
   embedded.run_elaboration(
-    fun (): fixture.AcceptFlowWrongProtocol()
+    fun (): fixture.InjectFlowMissingBinding()
+  ) ~throws "flow boundary requires exactly one named binding for every interface member"
+  embedded.run_elaboration(
+    fun (): fixture.EjectFlowMissingBinding()
+  ) ~throws "flow boundary requires exactly one named binding for every interface member"
+  embedded.run_elaboration(
+    fun (): fixture.ToValidWrongProtocol()
   ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
   embedded.run_elaboration(
     fun (): fixture.CompletionQueueZeroDepth()

@@ -555,12 +555,43 @@ def mapped = issued |> enabled_filter |> request_map
 def copies = mapped |> fork_valid(2)
 ```
 
-`accept_flow()` terminates the readiness path of a `Decoupled` or
-`Irrevocable` source by permanently asserting `ready`. Every offered item is
-therefore transferred immediately and appears as a same-cycle `Valid` event.
-Use this explicit adapter when a nonbackpressured observer owns consumption of
-a ready-valid source; it must not be used where downstream backpressure still
-has meaning.
+`to_valid()` explicitly converts a `Decoupled(T)` or `Irrevocable(T)` flow into
+same-cycle `Valid(T)` events. It permanently asserts input readiness and adds
+neither storage nor hierarchy. Use it only where losing downstream
+backpressure is intentional:
+
+```rhombus
+source |> to_valid()
+  |> eject_flow(~valid: sink_valid, ~bits: sink_bits)
+```
+
+`inject_flow(protocol, ...)` starts a chain from ordinary circuit-side hardware,
+and `eject_flow(...)` terminates one back into ordinary hardware. Each named
+binding corresponds to a declared protocol member. A `Decoupled(T)` boundary
+therefore names `~valid`, `~bits`, and `~ready`, while a `Valid(T)` boundary
+names only `~valid` and `~bits`:
+
+```rhombus
+inject_flow(
+  Decoupled(Request()),
+  ~valid: source_valid,
+  ~bits: source_bits,
+  ~ready: source_ready
+)
+  |> pipe(1)
+  |> map_flow(request => translate(request))
+  |> eject_flow(~valid: sink_valid, ~bits: sink_bits, ~ready: sink_ready)
+```
+
+On injection, forward arguments are readable hardware values and return-path
+arguments are driveable places. Ejection reverses those requirements: forward
+arguments are driveable places and return-path arguments are readable values.
+Nested interface members use `flow_fields(~field: value, ...)` to group their
+named leaves. The helpers work from declared member directions, including
+custom protocols and control-only interfaces; they add neither storage nor
+hierarchy.
+Neither boundary helper changes the protocol; use an explicit transformation
+such as `to_valid()` before ejection when the circuit-side contract differs.
 
 `filter_flow(payload => predicate)` consumes an offered token without producing
 an output when the hardware predicate is false. Its input is ready for a

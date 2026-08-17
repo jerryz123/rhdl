@@ -17,9 +17,135 @@ circuit AcceptedFilteredValid():
   interface ingress(Irrevocable(Bits(8)), ~role: consumer)
   interface egress(Valid(Bits(8)), ~role: producer)
 
-  def keep_odd = filter_valid(payload => payload[0].into(Bool))
-  def filtered = ingress |> accept_flow() |> keep_odd
-  egress <=> filtered
+  ingress |> to_valid()
+    |> filter_valid(payload => payload[0].into(Bool))
+    |> eject_flow(~valid: egress.valid, ~bits: egress.bits)
+
+interface TaggedFlow(T):
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+    tag: Bits(2)
+
+  consumer -> producer:
+    ready: Bool
+
+circuit GenericFlowBoundary():
+  input source_valid: Bool
+  input source_bits: Bits(8)
+  input source_tag: Bits(2)
+  input sink_ready: Bool
+  output source_ready: Bool
+  output sink_valid: Bool
+  output sink_bits: Bits(8)
+  output sink_tag: Bits(2)
+
+  inject_flow(
+    TaggedFlow(Bits(8)),
+    ~valid: source_valid,
+    ~bits: source_bits,
+    ~tag: source_tag,
+    ~ready: source_ready
+  ) |> eject_flow(
+         ~valid: sink_valid,
+         ~bits: sink_bits,
+         ~tag: sink_tag,
+         ~ready: sink_ready
+       )
+
+circuit ControlFlowBoundary():
+  input source_valid: Bool
+  input sink_ready: Bool
+  output source_ready: Bool
+  output sink_valid: Bool
+
+  inject_flow(
+    DecoupledCtrl(),
+    ~valid: source_valid,
+    ~ready: source_ready
+  ) |> eject_flow(~valid: sink_valid, ~ready: sink_ready)
+
+interface ResponseFlow():
+  role requester
+  role responder
+  provider responder
+
+  requester -> responder:
+    request: Bits(8)
+
+  responder -> requester:
+    response: Bits(16)
+
+circuit ReverseProviderFlowBoundary():
+  input source_response: Bits(16)
+  input sink_request: Bits(8)
+  output source_request: Bits(8)
+  output sink_response: Bits(16)
+
+  inject_flow(
+    ResponseFlow(),
+    ~response: source_response,
+    ~request: source_request
+  ) |> eject_flow(~response: sink_response, ~request: sink_request)
+
+sync_circuit DetachedFlowBoundary():
+  input source_valid: Bool
+  input source_bits: Bits(8)
+  input sink_ready: Bool
+  output source_ready: Bool
+  output sink_valid: Bool
+  output sink_bits: Bits(8)
+
+  def sink = Decoupled(Bits(8)) |> pipe(1)
+    |> eject_flow(~valid: sink_valid, ~bits: sink_bits, ~ready: sink_ready)
+  inject_flow(
+    Decoupled(Bits(8)),
+    ~valid: source_valid,
+    ~bits: source_bits,
+    ~ready: source_ready
+  ) |> sink
+
+interface NestedChannel():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    data: Bits(8)
+
+  consumer -> producer:
+    acknowledge: Bool
+
+interface NestedFlow():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    channel: NestedChannel()
+
+circuit NestedFlowBoundary():
+  input source_data: Bits(8)
+  input sink_acknowledge: Bool
+  output source_acknowledge: Bool
+  output sink_data: Bits(8)
+
+  inject_flow(
+    NestedFlow(),
+    ~channel: flow_fields(
+      ~data: source_data,
+      ~acknowledge: source_acknowledge
+    )
+  ) |> eject_flow(
+         ~channel: flow_fields(
+           ~data: sink_data,
+           ~acknowledge: sink_acknowledge
+         )
+       )
 
 sync_circuit CompletionQueueWrapper():
   interface request(Decoupled(Bits(8)), ~role: consumer)
@@ -49,15 +175,29 @@ circuit FilterValidWrongProtocol():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   ingress |> filter_valid(payload => Bool(#true))
 
-circuit AcceptFlowWrongProtocol():
+circuit InjectFlowMissingBinding():
+  input source_valid: Bool
+  inject_flow(Valid(Bits(8)), ~valid: source_valid)
+
+circuit EjectFlowMissingBinding():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  ingress |> accept_flow()
+  output sink_valid: Bool
+  ingress |> eject_flow(~valid: sink_valid)
+
+circuit ToValidWrongProtocol():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  ingress |> to_valid()
 
 sync_circuit CompletionQueueZeroDepth():
   inst invalid(CompletionQueue(Bits(8), Bits(8), 0))
 
 def valid_design = elaborate(ValidMapForkChain())
 def accepted_design = elaborate(AcceptedFilteredValid())
+def generic_boundary_design = elaborate(GenericFlowBoundary())
+def control_boundary_design = elaborate(ControlFlowBoundary())
+def reverse_provider_boundary_design = elaborate(ReverseProviderFlowBoundary())
+def detached_boundary_design = elaborate(DetachedFlowBoundary())
+def nested_boundary_design = elaborate(NestedFlowBoundary())
 def completion_design = elaborate(CompletionQueueWrapper())
 def single_completion_design = elaborate(
   CompletionQueue(Bits(8), Bits(16), 1)
@@ -66,14 +206,26 @@ def single_completion_design = elaborate(
 export:
   ValidMapForkChain
   AcceptedFilteredValid
+  GenericFlowBoundary
+  ControlFlowBoundary
+  ReverseProviderFlowBoundary
+  DetachedFlowBoundary
+  NestedFlowBoundary
   CompletionQueueWrapper
   MapValidWrongProtocol
   ForkValidWrongProtocol
   ForkValidZeroOutputs
   FilterValidWrongProtocol
-  AcceptFlowWrongProtocol
+  InjectFlowMissingBinding
+  EjectFlowMissingBinding
+  ToValidWrongProtocol
   CompletionQueueZeroDepth
   valid_design
   accepted_design
+  generic_boundary_design
+  control_boundary_design
+  reverse_provider_boundary_design
+  detached_boundary_design
+  nested_boundary_design
   completion_design
   single_completion_design
