@@ -2,7 +2,7 @@
 // Builds well-owned RHDL IR while enforcing local type, naming, and driver rules.
 
 import:
-  rhombus/rx open
+  "../../host/annotations.rhm" open
   "types.rhm" open
   "ir.rhm" open
 
@@ -42,51 +42,45 @@ fun decode_patterns_overlap(left, right):
   def jointly_cared = left[1] bits.and right[1]
   (differing bits.and jointly_cared) == 0
 
-def hardware_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
-
-fun ensure_hardware_name(name, who):
-  unless name is_a String && hardware_identifier.is_match(name)
-  | fail(who, "hardware name must be an ASCII identifier")
+fun ensure_hardware_name(name :: AsciiIdentifier, who):
   when name.starts_with("__rhdl_")
   | fail(who, "hardware names beginning with __rhdl_ are reserved")
 
-fun ensure_module_in_design(design, module_def, who):
-  def owned = module_def is_a Module && module_def.design === design && design.modules.find(fun (candidate): candidate === module_def)
+fun ensure_module_in_design(design :: Design, module_def :: Module, who):
+  def owned = module_def.design === design && design.modules.find(fun (candidate): candidate === module_def)
   unless owned
   | fail(who, "module belongs to a different design")
 
-fun ensure_open(module_def, who):
+fun ensure_open(module_def :: Module, who):
   when module_def.finished
   | fail(who, "module " ++ module_def.name ++ " is already finished")
 
-fun ensure_value_in(module_def, value, who):
-  unless value is_a Value
-  | fail(who, "expected a readable hardware Value")
+fun ensure_value_in(module_def :: Module, value :: Value, who):
   def owned = value.module_def === module_def && module_def.values.find(fun (candidate): candidate === value)
   unless owned
   | fail(who, "hardware value belongs to a different module")
 
-fun ensure_memory_in(module_def, memory, who):
-  def owned = memory is_a Memory && memory.module_def === module_def && module_def.memories.find(fun (candidate): candidate === memory)
+fun ensure_memory_in(module_def :: Module, memory :: Memory, who):
+  def owned = memory.module_def === module_def && module_def.memories.find(fun (candidate): candidate === memory)
   unless owned
   | fail(who, "memory belongs to a different module")
 
-fun ensure_dpi_import_in(design, dpi_import, who):
-  def owned = dpi_import is_a DpiImport && dpi_import.design === design && design.dpi_imports.find(fun (candidate): candidate === dpi_import)
+fun ensure_dpi_import_in(design :: Design, dpi_import :: DpiImport, who):
+  def owned = dpi_import.design === design && design.dpi_imports.find(fun (candidate): candidate === dpi_import)
   unless owned
   | fail(who, "DPI import belongs to a different design")
 
-fun check_dpi_operands(design,
-                       module_def,
-                       dpi_import,
-                       inputs,
-                       clock,
-                       enable,
+fun check_dpi_operands(design :: Design,
+                       module_def :: Module,
+                       dpi_import :: DpiImport,
+                       inputs :: List.of(Value),
+                       clock :: Value,
+                       enable :: Value,
                        who):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_dpi_import_in(design, dpi_import, who)
-  unless inputs is_a List && inputs.length() == dpi_import.input_types.length()
+  unless inputs.length() == dpi_import.input_types.length()
   | fail(who, "DPI input count does not match its import")
   for (input in inputs, expected_type in dpi_import.input_types):
     ensure_value_in(module_def, input, who)
@@ -105,8 +99,8 @@ fun root_place(place):
   | root_place(place.parent)
   | place
 
-fun ensure_place_in(module_def, place, who):
-  def root = if place is_a Place | root_place(place) | #false
+fun ensure_place_in(module_def :: Module, place :: Place, who):
+  def root = root_place(place)
   def owned = root && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
   unless owned
   | fail(who, "hardware place belongs to a different module")
@@ -320,7 +314,7 @@ fun build_mux_lookup(design,
                      module_def,
                      selector,
                      default_value,
-                     cases,
+                     cases :: NonemptyList,
                      name,
                      location,
                      origin,
@@ -333,8 +327,6 @@ fun build_mux_lookup(design,
   | fail(who, "mux lookup selector must be Bits")
   unless data_type(default_value.type)
   | fail(who, "mux lookup values must have a DataType")
-  unless cases is_a List && cases.length() >= 1
-  | fail(who, "mux lookup requires at least one case")
   def width = selector_width(selector.type)
   for (case in cases):
     unless case is_a List && case.length() == 2
@@ -371,7 +363,7 @@ fun build_mux_lookup(design,
 fun build_onehot_mux(design,
                      module_def,
                      selector,
-                     choices,
+                     choices :: List.of(Value),
                      name,
                      location,
                      origin,
@@ -381,8 +373,6 @@ fun build_onehot_mux(design,
   ensure_value_in(module_def, selector, who)
   unless bits_type(selector.type)
   | fail(who, "one-hot mux selector must be Bits")
-  unless choices is_a List
-  | fail(who, "one-hot mux choices must be supplied as a List")
   unless choices.length() == selector.type.width
   | fail(who, "one-hot mux choice count must equal selector width")
   for (choice in choices):
@@ -403,7 +393,7 @@ fun build_onehot_mux(design,
                         origin,
                         who)
 
-class Builder(design):
+class Builder(design :: Design):
   // Materializes a design-level declaration lazily so reusable frontend
   // descriptors can be called from any circuit in one elaborated design.
   method dpi_import(name,
@@ -424,16 +414,14 @@ class Builder(design):
                             results,
                             location)
 
-  method dpi_import_results(name,
-                            input_names,
-                            input_types,
-                            results,
+  method dpi_import_results(name :: AsciiIdentifier,
+                            input_names :: NonemptyList.of(AsciiIdentifier),
+                            input_types :: NonemptyList.of(FlatDataType),
+                            results :: List.of(DpiResult),
                             location = Location()):
     ensure_hardware_name(name, #'dpi_import)
-    unless input_names is_a List && input_types is_a List && input_names.length() == input_types.length()
+    unless input_names.length() == input_types.length()
     | fail(#'dpi_import, "DPI input names and types must be equal-length Lists")
-    unless input_names.length() >= 1
-    | fail(#'dpi_import, "DPI import requires at least one input")
     for (input_name in input_names):
       ensure_hardware_name(input_name, #'dpi_import)
       when input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
@@ -441,11 +429,7 @@ class Builder(design):
     for (input_type in input_types):
       unless flat_data_type(input_type) && type_well_formed(input_type)
       | fail(#'dpi_import, "DPI inputs must have well-formed FlatDataType types")
-    unless results is_a List
-    | fail(#'dpi_import, "DPI results must be supplied as a List")
     for (result in results):
-      unless result is_a DpiResult
-      | fail(#'dpi_import, "DPI results must be DpiResult values")
       ensure_hardware_name(result.name, #'dpi_import)
       unless flat_data_type(result.type) && type_well_formed(result.type)
       | fail(#'dpi_import, "DPI results must have well-formed FlatDataType types")
@@ -561,13 +545,13 @@ class Builder(design):
   // explicit in both its operation name and its required hardware binding.
   method dpi_register(module_def,
                       name,
-                      dpi_import,
+                      dpi_import :: DpiImport,
                       inputs,
                       clock,
                       enable,
                       location = Location(),
                       origin = Origin("DPI register")):
-    unless dpi_import is_a DpiImport && dpi_import.results.length() == 1
+    unless dpi_import.results.length() == 1
     | fail(#'dpi_register, "dpi_register requires a function with exactly one result")
     this.dpi_register_results(module_def,
                               [name],
@@ -579,8 +563,8 @@ class Builder(design):
                               origin)[0]
 
   method dpi_register_results(module_def,
-                              result_names,
-                              dpi_import,
+                              result_names :: List.of(AsciiIdentifier),
+                              dpi_import :: DpiImport,
                               inputs,
                               clock,
                               enable,
@@ -596,7 +580,7 @@ class Builder(design):
                                       clock,
                                       enable,
                                       #'dpi_register)
-    unless result_names is_a List && result_names.length() == dpi_import.results.length()
+    unless result_names.length() == dpi_import.results.length()
     | fail(#'dpi_register,
            "DPI register result names must match the function result count")
     for (value_name in result_names):
@@ -778,7 +762,7 @@ class Builder(design):
                 selector,
                 input_type,
                 result_type,
-                cases,
+                cases :: List,
                 default_value,
                 default_care,
                 name = #false,
@@ -791,8 +775,6 @@ class Builder(design):
     unless type_equal(selector.type, input_type)
     | fail(#'decode, "decode selector has the wrong DataType")
     ensure_packable_data_type(result_type, #'decode)
-    unless cases is_a List
-    | fail(#'decode, "decode cases must be a List")
     def input_width = packed_width(input_type)
     def output_width = packed_width(result_type)
     def normalized_default = normalize_decode_pattern(default_value,
@@ -1074,14 +1056,12 @@ class Builder(design):
                           #'cast)
 
   method concat(module_def,
-                operands,
+                operands :: List.of(Value),
                 name = #false,
                 location = Location(),
                 origin = Origin("concat")):
     ensure_module_in_design(design, module_def, #'concat)
     ensure_open(module_def, #'concat)
-    unless operands is_a List
-    | fail(#'concat, "concat operands must be supplied as a List")
     unless operands.length() >= 2
     | fail(#'concat, "concat requires at least two operands")
     def mutable result_width = 0
@@ -1203,7 +1183,7 @@ class Builder(design):
 
   method record_create(module_def,
                        type,
-                       field_values,
+                       field_values :: List,
                        name = #false,
                        location = Location(),
                        origin = Origin("record_create")):
@@ -1211,8 +1191,6 @@ class Builder(design):
     ensure_open(module_def, #'record_create)
     unless record_type(type) && type_well_formed(type)
     | fail(#'record_create, "record_create type must be a well-formed RecordType")
-    unless field_values is_a List
-    | fail(#'record_create, "record fields must be supplied as a List")
     for (binding in field_values):
       unless binding is_a List && binding.length() == 2 && binding[0] is_a String
       | fail(#'record_create, "record fields must be [name, value] pairs")
@@ -1247,7 +1225,7 @@ class Builder(design):
 
   method record_get(module_def,
                     record,
-                    field_name,
+                    field_name :: String,
                     name = #false,
                     location = Location(),
                     origin = Origin("record_get")):
@@ -1256,8 +1234,6 @@ class Builder(design):
     ensure_value_in(module_def, record, #'record_get)
     unless record_type(record.type)
     | fail(#'record_get, "record_get operand must have a RecordType")
-    unless field_name is_a String
-    | fail(#'record_get, "record field name must be a String")
     def field = record.type.field(field_name)
     unless field
     | fail(#'record_get, "record has no field named " ++ field_name)
@@ -1274,7 +1250,7 @@ class Builder(design):
 
   method vector_create(module_def,
                        type,
-                       elements,
+                       elements :: List.of(Value),
                        name = #false,
                        location = Location(),
                        origin = Origin("vector_create")):
@@ -1282,8 +1258,6 @@ class Builder(design):
     ensure_open(module_def, #'vector_create)
     unless vector_type(type) && type_well_formed(type)
     | fail(#'vector_create, "vector_create type must be a well-formed VectorType")
-    unless elements is_a List
-    | fail(#'vector_create, "vector elements must be supplied as a List")
     unless elements.length() == type.length
     | fail(#'vector_create, "vector_create requires exactly one value per element")
     for (element in elements):
@@ -1324,17 +1298,13 @@ class Builder(design):
                           #'vector_get,
                           {"index": index})
 
-  method project(place, field_name):
-    unless place is_a Place
-    | fail(#'project, "field projection target must be a hardware Place")
+  method project(place :: Place, field_name :: String):
     def module_def = design.find_module(place.module_id)
     ensure_module_in_design(design, module_def, #'project)
     ensure_open(module_def, #'project)
     ensure_place_in(module_def, place, #'project)
     unless record_type(place.type)
     | fail(#'project, "field projection target must have a RecordType")
-    unless field_name is_a String
-    | fail(#'project, "record field name must be a String")
     def field = place.type.field(field_name)
     unless field
     | fail(#'project, "record has no field named " ++ field_name)
@@ -1353,9 +1323,7 @@ class Builder(design):
         place.projected_places := place.projected_places ++ [projected]
         projected
 
-  method project_vector(place, index :: Nat):
-    unless place is_a Place
-    | fail(#'project_vector, "vector projection target must be a hardware Place")
+  method project_vector(place :: Place, index :: Nat):
     def module_def = design.find_module(place.module_id)
     ensure_module_in_design(design, module_def, #'project_vector)
     ensure_open(module_def, #'project_vector)
@@ -1545,9 +1513,9 @@ class Builder(design):
                      depth :: PosInt,
                      element_type,
                      clock,
-                     has_read = #true,
-                     has_write = #true,
-                     has_read_write = #false,
+                     has_read :: Boolean = #true,
+                     has_write :: Boolean = #true,
+                     has_read_write :: Boolean = #false,
                      mask_granularity = #false,
                      location = Location(),
                      origin = Origin("synchronous memory", name)):
@@ -1559,7 +1527,7 @@ class Builder(design):
     ensure_value_in(module_def, clock, #'sync_memory)
     unless clock_type(clock.type)
     | fail(#'sync_memory, "synchronous memory clock must be Clock")
-    unless has_read is_a Boolean && has_write is_a Boolean && has_read_write is_a Boolean && (has_read || has_write || has_read_write)
+    unless has_read || has_write || has_read_write
     | fail(#'sync_memory,
            "synchronous memory requires a read, write, or read-write port")
     when has_read_write && (has_read || has_write)
@@ -1760,14 +1728,14 @@ class Builder(design):
     Register(operation, current, next)
 
   method instance(module_def,
-                  child,
+                  child :: Module,
                   name,
                   location = Location(),
                   origin = Origin("instance", name)):
     ensure_module_in_design(design, module_def, #'instance)
     ensure_open(module_def, #'instance)
     ensure_hardware_name(name, #'instance)
-    unless child is_a Module && child.finished
+    unless child.finished
     | fail(#'instance, "instance target must be a finished module definition")
     def child_owned = child.design === design && design.modules.find(fun (candidate): candidate === child)
     unless child_owned
@@ -1825,14 +1793,10 @@ class Builder(design):
                   location,
                   origin)
 
-  method drive(place,
-               value,
+  method drive(place :: Place,
+               value :: Value,
                location = Location(),
                origin = Origin("drive")):
-    unless place is_a Place
-    | fail(#'drive, "drive target must be a hardware Place")
-    unless value is_a Value
-    | fail(#'drive, "drive source must be a hardware Value")
     def module_def = design.find_module(place.module_id)
     def root = root_place(place)
     def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
@@ -1863,9 +1827,7 @@ class Builder(design):
       module_def.add_operation(operation)
     #void
 
-  method read(place):
-    unless place is_a Place
-    | fail(#'read, "read target must be a hardware Place")
+  method read(place :: Place):
     def module_def = design.find_module(place.module_id)
     def root = root_place(place)
     def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)

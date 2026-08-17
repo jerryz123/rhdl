@@ -17,14 +17,10 @@ fun duplicate_node_id(nodes, id):
 fun duplicate_link_id(links, id):
   links.filter(~keep: fun (candidate): link_id_equal(candidate.id, id)).length() > 1
 
-class PhysicalLink(id, source, destination, vc_count :: PosInt):
-  constructor (id, source, destination, vc_count :: PosInt):
-    unless id is_a LinkId
-    | error(~who: #'PhysicalLink, "physical-link ID must be a LinkId")
-    unless source is_a NodeId && destination is_a NodeId
-    | error(~who: #'PhysicalLink,
-            "physical-link endpoints must be NodeId values")
-    super(id, source, destination, vc_count)
+class PhysicalLink(id :: LinkId,
+                   source :: NodeId,
+                   destination :: NodeId,
+                   vc_count :: PosInt):
 
   method virtual_channels():
     for List (index in 0..vc_count):
@@ -34,22 +30,13 @@ class PhysicalLink(id, source, destination, vc_count :: PosInt):
     String.append(id.describe(), ": ", source.describe(), " -> ",
                   destination.describe(), " (", to_string(vc_count), " VCs)")
 
-class Topology(nodes, links):
-  constructor (nodes, links):
-    unless nodes is_a List && nodes.length() > 0
-    | error(~who: #'Topology, "topology nodes must be a nonempty List")
-    unless links is_a List
-    | error(~who: #'Topology, "topology links must be a List")
+class Topology(nodes :: NonemptyList.of(NodeId), links :: List.of(PhysicalLink)):
+  constructor (nodes :: NonemptyList.of(NodeId), links :: List.of(PhysicalLink)):
     for (node in nodes):
-      unless node is_a NodeId
-      | error(~who: #'Topology, "topology nodes must contain only NodeId values")
       when duplicate_node_id(nodes, node)
       | error(~who: #'Topology,
               "duplicate topology node " ++ node.describe())
     for (link in links):
-      unless link is_a PhysicalLink
-      | error(~who: #'Topology,
-              "topology links must contain only PhysicalLink values")
       when duplicate_link_id(links, link.id)
       | error(~who: #'Topology,
               "duplicate topology link " ++ link.id.describe())
@@ -67,9 +54,7 @@ class Topology(nodes, links):
   method contains_node(id):
     id is_a NodeId && contains_node_id(nodes, id)
 
-  method find_link(id):
-    unless id is_a LinkId
-    | error(~who: #'find_link, "expected a LinkId")
+  method find_link(id :: LinkId):
     def found = links.find(fun (link): link_id_equal(link.id, id))
     unless found
     | error(~who: #'find_link, "unknown link " ++ id.describe())
@@ -82,29 +67,27 @@ class Topology(nodes, links):
         def link = links.find(fun (candidate): link_id_equal(candidate.id, id.link_id))
         link && id.index < link.vc_count
 
-  method find_vc_link(id):
-    unless id is_a VCId
-    | error(~who: #'find_vc_link, "expected a VCId")
+  method find_vc_link(id :: VCId):
     def link = find_link(id.link_id)
     unless id.index < link.vc_count
     | error(~who: #'find_vc_link, "unknown VC " ++ id.describe())
     link
 
-  method outgoing_links(node):
+  method outgoing_links(node :: NodeId):
     unless contains_node(node)
     | error(~who: #'outgoing_links,
             String.append("unknown node ",
-                          (if node is_a NodeId | node.describe() | to_string(node))))
+                          node.describe()))
     links.filter(~keep: fun (link): node_id_equal(link.source, node))
 
-  method incoming_links(node):
+  method incoming_links(node :: NodeId):
     unless contains_node(node)
     | error(~who: #'incoming_links,
             String.append("unknown node ",
-                          (if node is_a NodeId | node.describe() | to_string(node))))
+                          node.describe()))
     links.filter(~keep: fun (link): node_id_equal(link.destination, node))
 
-  method outgoing_vcs(node):
+  method outgoing_vcs(node :: NodeId):
     def mutable vcs = []
     for (link in outgoing_links(node)):
       vcs := vcs ++ link.virtual_channels()

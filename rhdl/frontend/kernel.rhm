@@ -132,9 +132,7 @@ fun hardware_entity(value):
 class CircuitIdentity(name)
 class ActiveCircuit(identity, name, mutable finalizers = [])
 
-fun new_circuit_identity(name):
-  unless name is_a String
-  | frontend_fail("circuit name must be a String")
+fun new_circuit_identity(name :: String):
   CircuitIdentity(name)
 
 class FrontendContext(design,
@@ -210,9 +208,7 @@ fun active_module(location = Location()):
 
 // Allocates a deterministic elaboration-local hardware name for frontend
 // facilities that introduce anonymous connection structure.
-fun fresh_name(base, location = Location()):
-  unless base is_a String
-  | frontend_fail("fresh hardware name base must be a String", location)
+fun fresh_name(base :: String, location = Location()):
   require_context(location).allocate_symbol(base)
 
 fun read(entity, location = Location()):
@@ -229,9 +225,7 @@ fun read(entity, location = Location()):
 
 // Defers source-order-independent elaboration collateral until the active
 // circuit body has created and driven all of its declared hardware places.
-fun defer_circuit_finalizer(finalizer, location = Location()):
-  unless finalizer is_a Function
-  | frontend_fail("circuit finalizer must be a Function", location)
+fun defer_circuit_finalizer(finalizer :: Function, location = Location()):
   def context = require_context(location)
   unless context.active_circuits.length() > 0
   | frontend_fail("circuit finalizer requires an active circuit", location)
@@ -249,14 +243,12 @@ fun run_circuit_finalizers(location = Location()):
   for (finalizer in finalizers): finalizer()
   #void
 
-fun build_circuit(identity, name, arguments, implementation, location = Location()):
+fun build_circuit(identity :: CircuitIdentity,
+                  name :: String,
+                  arguments :: List,
+                  implementation :: Function,
+                  location = Location()):
   def context = require_context(location)
-  unless identity is_a CircuitIdentity
-  | frontend_fail("circuit generator must supply its declaration identity", location)
-  unless name is_a String
-  | frontend_fail("circuit name must be a String", location)
-  unless arguments is_a List
-  | frontend_fail("circuit arguments must be supplied as a List", location)
   for (argument in arguments):
     when hardware_entity(argument) && !(argument is_a StaticHardwareValue)
     | frontend_fail("circuit parameters must be host values, not hardware values", location)
@@ -411,14 +403,12 @@ fun assert(condition,
   emit_conditional_assertion(assertion)
 
 fun dpi_call(dpi_import,
-             inputs,
+             inputs :: List,
              clock,
              enable,
              location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI call", location)
-  unless inputs is_a List
-  | frontend_fail("DPI call inputs must be supplied as a List", location)
   context.builder.dpi_call(require_module(location),
                            dpi_import,
                            inputs.map(fun (input): read(input, location)),
@@ -429,14 +419,12 @@ fun dpi_call(dpi_import,
 
 fun dpi_register(name,
                  dpi_import,
-                 inputs,
+                 inputs :: List,
                  clock,
                  enable,
                  location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI register", location)
-  unless inputs is_a List
-  | frontend_fail("DPI register inputs must be supplied as a List", location)
   context.builder.dpi_register(require_module(location),
                                name,
                                dpi_import,
@@ -448,14 +436,12 @@ fun dpi_register(name,
 
 fun dpi_register_results(result_names,
                          dpi_import,
-                         inputs,
+                         inputs :: List,
                          clock,
                          enable,
                          location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI register", location)
-  unless inputs is_a List
-  | frontend_fail("DPI register inputs must be supplied as a List", location)
   context.builder.dpi_register_results(require_module(location),
                                        result_names,
                                        dpi_import,
@@ -596,13 +582,11 @@ fun hw_mux_lookup(selector,
   )
 
 fun hw_onehot_mux(selector,
-                  choices,
+                  choices :: List,
                   name = #false,
                   location = Location(),
                   origin = #false):
   def context = require_context(location)
-  unless choices is_a List
-  | frontend_fail("one-hot mux choices must be supplied as a List", location)
   context.builder.onehot_mux(
     require_module(location),
     read(selector, location),
@@ -689,10 +673,8 @@ fun trunc(entity, target_width, name = #false, location = Location()):
                         location,
                         Origin("embedded trunc", name || ""))
 
-fun record_create(type, fields, name = #false, location = Location()):
+fun record_create(type, fields :: List, name = #false, location = Location()):
   def context = require_context(location)
-  unless fields is_a List
-  | frontend_fail("record fields must be supplied as a List", location)
   context.builder.record_create(
     require_module(location),
     type,
@@ -731,10 +713,8 @@ fun project(entity, field_name, name = #false, location = Location()):
                                  location,
                                  Origin("embedded record get", field_name))
 
-fun vector_create(type, elements, name = #false, location = Location()):
+fun vector_create(type, elements :: List, name = #false, location = Location()):
   def context = require_context(location)
-  unless elements is_a List
-  | frontend_fail("vector elements must be supplied as a List", location)
   context.builder.vector_create(
     require_module(location),
     type,
@@ -1126,9 +1106,9 @@ fun resolve_conditional_branches(branch_results,
   #void
 
 // Elaborates an ordered hardware-conditional chain into priority mux trees.
-fun conditional_chain(branches, otherwise_body = #false, location = Location()):
-  unless branches is_a List && branches.length() >= 1
-  | frontend_fail("conditional chain requires at least one branch", location)
+fun conditional_chain(branches :: NonemptyList,
+                      otherwise_body = #false,
+                      location = Location()):
   def conditions:
     for List (branch in branches):
       validate_conditional_value(branch[0](), location)
@@ -1178,14 +1158,12 @@ fun conditional_chain(branches, otherwise_body = #false, location = Location()):
 // Elaborates unordered exact-key cases into direct keyed mux lookups. Keys are
 // normalized host integers, so no switch control-flow operation enters core.
 fun switch_chain(selector,
-                 cases,
+                 cases :: NonemptyList,
                  otherwise_body = #false,
                  location = Location()):
   def selector_value = read(selector, location)
   unless bits_type(selector_value.type)
   | frontend_fail("switch selector must lower to Bits", location)
-  unless cases is_a List && cases.length() >= 1
-  | frontend_fail("switch requires at least one case", location)
   def width = data_width(selector_value.type)
   def mutable keys = []
   for (case in cases):

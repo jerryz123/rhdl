@@ -2,6 +2,7 @@
 // Defines inspectable symbolic routing contexts and topology-independent policy expressions.
 
 import:
+  "../../host/annotations.rhm" open
   "names.rhm" open
   "route-classes.rhm" open
 
@@ -44,42 +45,26 @@ export:
 interface RoutingOrigin:
   method describe()
 
-class RoutingInjection(node):
+class RoutingInjection(node :: NodeRef):
   implements RoutingOrigin
-  constructor (node):
-    unless node is_a NodeRef
-    | error(~who: #'RoutingInjection,
-            "symbolic injection origin must contain a NodeRef")
-    super(node)
 
   override method describe():
     "inject(" ++ node.describe() ++ ")"
 
-class RoutingForwarding(vc):
+class RoutingForwarding(vc :: VCRef):
   implements RoutingOrigin
-  constructor (vc):
-    unless vc is_a VCRef
-    | error(~who: #'RoutingForwarding,
-            "symbolic forwarding origin must contain a VCRef")
-    super(vc)
 
   override method describe():
     "forward(" ++ vc.describe() ++ ")"
 
-class RoutingContext(route_class, origin, current_node, candidate_vc):
-  constructor (route_class, origin, current_node, candidate_vc):
-    unless route_class is_a RouteClassSpec
-    | error(~who: #'RoutingContext,
-            "routing context route class must be a RouteClassSpec")
-    unless origin is_a RoutingOrigin
-    | error(~who: #'RoutingContext,
-            "routing context origin must be a RoutingOrigin")
-    unless current_node is_a NodeRef
-    | error(~who: #'RoutingContext,
-            "routing context current node must be a NodeRef")
-    unless candidate_vc is_a VCRef
-    | error(~who: #'RoutingContext,
-            "routing context candidate must be a VCRef")
+class RoutingContext(route_class :: RouteClassSpec,
+                     origin :: RoutingOrigin,
+                     current_node :: NodeRef,
+                     candidate_vc :: VCRef):
+  constructor (route_class :: RouteClassSpec,
+               origin :: RoutingOrigin,
+               current_node :: NodeRef,
+               candidate_vc :: VCRef):
     when origin is_a RoutingInjection && !node_ref_equal(origin.node, current_node)
     | error(~who: #'RoutingContext,
             "routing injection node must equal the current node")
@@ -97,19 +82,8 @@ interface RoutingPolicy:
   method allows(context)
   method describe()
 
-class RoutingPolicyEvaluation(allowed, rule_names):
-  constructor (allowed, rule_names):
-    unless allowed is_a Boolean
-    | error(~who: #'RoutingPolicyEvaluation,
-            "routing-policy evaluation result must be a Boolean")
-    unless rule_names is_a List
-    | error(~who: #'RoutingPolicyEvaluation,
-            "routing-policy rule names must be a List")
-    for (name in rule_names):
-      unless name is_a String && name.length() > 0
-      | error(~who: #'RoutingPolicyEvaluation,
-              "routing-policy rule names must be nonempty Strings")
-    super(allowed, rule_names)
+class RoutingPolicyEvaluation(allowed :: Boolean,
+                              rule_names :: List.of(NonemptyString))
 
 class AllowAllPolicy():
   implements RoutingPolicy
@@ -121,19 +95,9 @@ class DenyAllPolicy():
   override method allows(_context): #false
   override method describe(): "deny-all"
 
-fun require_nonempty_route_refs(refs):
-  unless refs is_a List && refs.length() > 0
-  | error(~who: #'match_route_classes,
-          "route-class selection must be a nonempty List")
-  for (ref in refs):
-    unless ref is_a RouteClassRef
-    | error(~who: #'match_route_classes,
-            "route-class selection must contain only RouteClassRef values")
-
-class RouteClassPolicy(refs):
+class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
   implements RoutingPolicy
-  constructor (refs):
-    require_nonempty_route_refs(refs)
+  constructor (refs :: NonemptyList.of(RouteClassRef)):
     super(refs.sort(route_class_ref_less))
 
   override method allows(context):
@@ -157,19 +121,9 @@ class ForwardingPolicy():
   override method allows(context): context.origin is_a RoutingForwarding
   override method describe(): "origin(forwarding)"
 
-fun require_nonempty_link_refs(refs):
-  unless refs is_a List && refs.length() > 0
-  | error(~who: #'select_candidate_links,
-          "candidate-link selection must be a nonempty List")
-  for (ref in refs):
-    unless ref is_a LinkRef
-    | error(~who: #'select_candidate_links,
-            "candidate-link selection must contain only LinkRef values")
-
-class CandidateLinkPolicy(refs):
+class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
   implements RoutingPolicy
-  constructor (refs):
-    require_nonempty_link_refs(refs)
+  constructor (refs :: NonemptyList.of(LinkRef)):
     super(refs.sort(link_ref_less))
 
   override method allows(context):
@@ -183,16 +137,16 @@ class CandidateLinkPolicy(refs):
       ", "
     ) ++ ")"
 
-fun require_nonempty_vc_group_names(who, subject, names):
-  unless names is_a List && names.length() > 0
-  | error(~who: who, subject ++ " must be a nonempty List")
+fun require_nonempty_vc_group_names(who,
+                                    subject,
+                                    names :: NonemptyList.of(NonemptyString)):
   for (name in names):
-    unless name is_a String && name.length() > 0 && !name.contains("/")
+    unless !name.contains("/")
     | error(~who: who, subject ++ " must contain names without '/'")
 
-class CurrentVCGroupPolicy(names):
+class CurrentVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
   implements RoutingPolicy
-  constructor (names):
+  constructor (names :: NonemptyList.of(NonemptyString)):
     require_nonempty_vc_group_names(
       #'match_current_vc_groups,
       "current-VC-group match",
@@ -208,9 +162,9 @@ class CurrentVCGroupPolicy(names):
   override method describe():
     "current-vc-group(" ++ String.join(names, ", ") ++ ")"
 
-class CandidateVCGroupPolicy(names):
+class CandidateVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
   implements RoutingPolicy
-  constructor (names):
+  constructor (names :: NonemptyList.of(NonemptyString)):
     require_nonempty_vc_group_names(
       #'restrict_vc_groups,
       "VC-group restriction",
@@ -224,23 +178,14 @@ class CandidateVCGroupPolicy(names):
   override method describe():
     "candidate-vc-group(" ++ String.join(names, ", ") ++ ")"
 
-fun require_policies(who, policies):
-  unless policies is_a List && policies.length() > 0
-  | error(~who: who, "policy composition must be a nonempty List")
-  for (policy in policies):
-    unless policy is_a RoutingPolicy
-    | error(~who: who,
-            "policy composition must contain only RoutingPolicy values")
-
-fun sort_policies(policies):
+fun sort_policies(policies :: NonemptyList.of(RoutingPolicy)):
   policies.sort(
     fun (left, right): left.describe() < right.describe()
   )
 
-class UnionPolicy(policies):
+class UnionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
   implements RoutingPolicy
-  constructor (policies):
-    require_policies(#'policy_union, policies)
+  constructor (policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
   override method allows(context):
@@ -254,10 +199,9 @@ class UnionPolicy(policies):
       ", "
     ) ++ ")"
 
-class IntersectionPolicy(policies):
+class IntersectionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
   implements RoutingPolicy
-  constructor (policies):
-    require_policies(#'policy_intersection, policies)
+  constructor (policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
   override method allows(context):
@@ -270,16 +214,8 @@ class IntersectionPolicy(policies):
       ", "
     ) ++ ")"
 
-class RoutingPhasePolicy(name, policy):
+class RoutingPhasePolicy(name :: NonemptyString, policy :: RoutingPolicy):
   implements RoutingPolicy
-  constructor (name, policy):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'routing_phase,
-            "routing-phase name must be a nonempty String")
-    unless policy is_a RoutingPolicy
-    | error(~who: #'routing_phase,
-            "routing phase must contain a RoutingPolicy")
-    super(name, policy)
 
   override method allows(context):
     routing_policy_result(policy, context)
@@ -287,35 +223,23 @@ class RoutingPhasePolicy(name, policy):
   override method describe():
     "phase(" ++ name ++ ": " ++ policy.describe() ++ ")"
 
-class CustomPolicy(label, predicate):
+class CustomPolicy(label :: NonemptyString,
+                   predicate :: Function.of_arity(1)):
   implements RoutingPolicy
-  constructor (label, predicate):
-    unless label is_a String && label.length() > 0
-    | error(~who: #'custom_policy,
-            "custom routing-policy label must be a nonempty String")
-    unless predicate is_a Function.of_arity(1)
-    | error(~who: #'custom_policy,
-            "custom routing-policy predicate must accept one argument")
-    super(label, predicate)
 
   override method allows(context): predicate(context)
   override method describe(): "custom(" ++ label ++ ")"
 
-fun require_policy_context(who, policy, context):
-  unless policy is_a RoutingPolicy
-  | error(~who: who, "expected a RoutingPolicy")
-  unless context is_a RoutingContext
-  | error(~who: who, "expected a RoutingContext")
-
-fun atomic_policy_evaluation(policy, context):
+fun atomic_policy_evaluation(policy :: RoutingPolicy,
+                             context :: RoutingContext):
   def result = policy.allows(context)
   unless result is_a Boolean
   | error(~who: #'routing_policy_evaluation,
           "routing policy " ++ policy.describe() ++ " must return a Boolean")
   RoutingPolicyEvaluation(result, [])
 
-fun routing_policy_evaluation(policy, context):
-  require_policy_context(#'routing_policy_evaluation, policy, context)
+fun routing_policy_evaluation(policy :: RoutingPolicy,
+                              context :: RoutingContext):
   cond
   | policy is_a RoutingPhasePolicy:
       def child = routing_policy_evaluation(policy.policy, context)
@@ -347,8 +271,7 @@ fun routing_policy_evaluation(policy, context):
   | ~else:
       atomic_policy_evaluation(policy, context)
 
-fun routing_policy_result(policy, context):
-  require_policy_context(#'routing_policy_result, policy, context)
+fun routing_policy_result(policy :: RoutingPolicy, context :: RoutingContext):
   routing_policy_evaluation(policy, context).allowed
 
 def allow_all = AllowAllPolicy()

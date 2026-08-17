@@ -23,21 +23,10 @@ fun decision_has_origin(decision, route_class, origin):
 fun decision_matches(decision, route_class, origin, candidate_vc):
   decision_has_origin(decision, route_class, origin) && vc_id_equal(decision.candidate_vc, candidate_vc)
 
-class MaterializedDecision(route_class, origin, candidate_vc, allowed):
-  constructor (route_class, origin, candidate_vc, allowed):
-    unless route_class is_a RouteClass
-    | error(~who: #'MaterializedDecision,
-            "decision route class must be a RouteClass")
-    unless injection_origin(origin) || held_vc_origin(origin)
-    | error(~who: #'MaterializedDecision,
-            "decision origin must be an Injection or HeldVC")
-    unless candidate_vc is_a VCId
-    | error(~who: #'MaterializedDecision,
-            "decision candidate must be a VCId")
-    unless allowed is_a Boolean
-    | error(~who: #'MaterializedDecision,
-            "decision result must be a Boolean")
-    super(route_class, origin, candidate_vc, allowed)
+class MaterializedDecision(route_class :: RouteClass,
+                           origin :: (Injection || HeldVC),
+                           candidate_vc :: VCId,
+                           allowed :: Boolean):
 
   method describe():
     String.append(route_class.id.describe(), " ", origin.describe(), " -> ",
@@ -82,10 +71,8 @@ class MaterializedRouting(topology, route_classes, decisions):
       ~keep: fun (decision): decision.allowed
     ).map(fun (decision): decision.candidate_vc)
 
-  method decision(route_class, origin, candidate_vc):
+  method decision(route_class, origin, candidate_vc :: VCId):
     validate_origin(route_class, origin)
-    unless candidate_vc is_a VCId
-    | error(~who: #'MaterializedRouting, "expected a candidate VCId")
     def found = decisions.find(
       fun (candidate): decision_matches(candidate, route_class, origin, candidate_vc)
     )
@@ -112,10 +99,7 @@ fun materialize_origin(problem, route_class, origin):
                           " -> ", candidate_vc.describe()))
     MaterializedDecision(route_class, origin, candidate_vc, allowed)
 
-fun materialize_routing(problem):
-  unless problem is_a RoutingProblem
-  | error(~who: #'materialize_routing,
-          "expected a RoutingProblem")
+fun materialize_routing(problem :: RoutingProblem):
   def mutable decisions = []
   // This stable order also becomes the canonical order used by later passes.
   for (route_class in problem.route_classes):

@@ -13,18 +13,15 @@ fun require_word(word :: Nat, width :: PosInt, who):
   | error(~who: who, "instruction word must fit the encoding width")
   word
 
-class InstructionEncoding(width :: PosInt, constraints, value :: Nat, care :: Nat):
-  constructor (constraints, width :: PosInt = 32):
-    unless constraints is_a List && constraints.length() > 0
-    | error(~who: #'InstructionEncoding,
-            "encoding constraints must be a nonempty List")
+class InstructionEncoding(width :: PosInt,
+                          constraints :: NonemptyList.of(FieldConstraint),
+                          value :: Nat,
+                          care :: Nat):
+  constructor (constraints :: NonemptyList.of(FieldConstraint), width :: PosInt = 32):
     def all_bits = width_mask(width)
     def mutable value = 0
     def mutable care = 0
     for (constraint in constraints):
-      unless constraint is_a FieldConstraint
-      | error(~who: #'InstructionEncoding,
-              "encoding constraints must contain only FieldConstraint values")
       unless constraint.field.high < width
       | error(~who: #'InstructionEncoding,
               "encoding constraint lies outside the instruction width")
@@ -37,20 +34,20 @@ class InstructionEncoding(width :: PosInt, constraints, value :: Nat, care :: Na
       care := care bits.or constraint.mask
     super(width, constraints, value bits.and care, care)
 
-  method matches(word):
+  method matches(word :: Nat):
     def candidate = require_word(word, width, #'matches)
     (candidate bits.and care) == value
 
-  method overlaps(other):
-    unless other is_a InstructionEncoding && other.width == width
+  method overlaps(other :: InstructionEncoding):
+    unless other.width == width
     | error(~who: #'overlaps,
             "encoding overlap requires an InstructionEncoding of equal width")
     def differing = value bits.xor other.value
     def jointly_cared = care bits.and other.care
     (differing bits.and jointly_cared) == 0
 
-  method subsumes(other):
-    unless other is_a InstructionEncoding && other.width == width
+  method subsumes(other :: InstructionEncoding):
+    unless other.width == width
     | error(~who: #'subsumes,
             "encoding subsumption requires an InstructionEncoding of equal width")
     def shared_care = care bits.and other.care

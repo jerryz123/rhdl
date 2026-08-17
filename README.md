@@ -16,6 +16,9 @@ standard syntax without creating competing hardware semantics.
 
 RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 
+Dependency-neutral host refinements shared by the pure model and hardware
+packages live under [`host/`](host/README.md).
+
 RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
 exact rectangular dimensions and child-instance coordinates, and leaves the
@@ -120,6 +123,7 @@ Detailed documentation lives with the component that owns it:
 
 | Topic | Document |
 |---|---|
+| Shared dependency-neutral host refinements | [`host/README.md`](host/README.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
 | RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |

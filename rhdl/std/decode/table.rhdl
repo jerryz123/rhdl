@@ -15,24 +15,12 @@ export:
 fun exact_type_equal(left, right):
   left.type_equal(right) && right.type_equal(left)
 
-fun require_pattern(value, role, who):
-  unless value is_a Pattern
-  | error(~who: who, role ++ " must be a Pattern")
+fun require_pattern(value :: Pattern, role, who):
   value
 
-class DecodeCase(input, output):
-  constructor (input, output):
-    require_pattern(input, "decode input", #'DecodeCase)
-    require_pattern(output, "decode output", #'DecodeCase)
-    super(input, output)
+class DecodeCase(input :: Pattern, output :: Pattern)
 
-fun require_decode_cases(cases, role, who):
-  unless cases is_a List && cases.length() > 0
-  | error(~who: who, role ++ " must be a nonempty List")
-  for (case in cases, index in 0..cases.length()):
-    unless case is_a DecodeCase
-    | error(~who: who,
-            role ++ " element " ++ to_string(index) ++ " must be a DecodeCase")
+fun require_decode_cases(cases :: NonemptyList.of(DecodeCase), role, who):
   cases
 
 fun exact_pattern_equal(left, right):
@@ -40,21 +28,18 @@ fun exact_pattern_equal(left, right):
 
 // Explicitly embeds every input cube into a new domain while preserving each
 // output cube. DecodeTable remains responsible for type and overlap checks.
-fun lift_decode_inputs(cases, lift):
+fun lift_decode_inputs(cases, lift :: Function):
   def checked_cases = require_decode_cases(
     cases,
     "lifted decode cases",
     #'lift_decode_inputs
   )
-  unless lift is_a Function
-  | error(~who: #'lift_decode_inputs,
-          "decode input lift must be a Function")
   for List (case in checked_cases):
     DecodeCase(as_pattern(lift(case.input)), case.output)
 
 // Forms an output product from two relations with exactly the same input
 // cubes. Row order is irrelevant; missing or duplicate counterparts are errors.
-fun zip_decode_cases(left_cases, right_cases, combine):
+fun zip_decode_cases(left_cases, right_cases, combine :: Function):
   def left = require_decode_cases(
     left_cases,
     "left decode cases",
@@ -68,9 +53,6 @@ fun zip_decode_cases(left_cases, right_cases, combine):
   unless left.length() == right.length()
   | error(~who: #'zip_decode_cases,
           "zipped decode relations must have the same number of input cubes")
-  unless combine is_a Function
-  | error(~who: #'zip_decode_cases,
-          "decode output combiner must be a Function")
   for (case in left):
     unless right.filter(
       ~keep: fun (candidate): exact_pattern_equal(case.input, candidate.input)
@@ -92,13 +74,7 @@ fun zip_decode_cases(left_cases, right_cases, combine):
       as_pattern(combine(left_case.output, right_case.output))
     )
 
-fun build_decode_group(inputs, output, input_pattern):
-  unless inputs is_a List && inputs.length() > 0
-  | error(~who: #'decode_groups,
-          "decode group inputs must be a nonempty List")
-  unless input_pattern is_a Function
-  | error(~who: #'decode_groups,
-          "decode group input adapter must be a Function")
+fun build_decode_group(inputs :: NonemptyList, output, input_pattern :: Function):
   for List (input in inputs):
     DecodeCase(as_pattern(input_pattern(input)), output)
 
@@ -158,17 +134,10 @@ class DecodeTable(cases,
                   input_width,
                   output_width,
                   packed_cases):
-  constructor (supplied_cases, ~default: supplied_default):
-    unless supplied_cases is_a List && supplied_cases.length() > 0
-    | error(~who: #'DecodeTable,
-            "decode cases must be a nonempty List of DecodeCase values")
+  constructor (supplied_cases :: NonemptyList.of(DecodeCase), ~default: supplied_default):
     def default = require_pattern(supplied_default,
                                   "decode default",
                                   #'DecodeTable)
-    for (case in supplied_cases, index in 0..supplied_cases.length()):
-      unless case is_a DecodeCase
-      | error(~who: #'DecodeTable,
-              "decode case " ++ to_string(index) ++ " must be a DecodeCase")
     def first = supplied_cases[0]
     def input_type = first.input.type
     def output_type = default.type

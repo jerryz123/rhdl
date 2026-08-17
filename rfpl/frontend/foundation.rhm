@@ -25,25 +25,15 @@ export:
 
 class Length(picometers :: Nat)
 
-class RectOutline(width, height):
-  constructor (width, height):
-    unless width is_a Length
-    | error(~who: #'RectOutline, "width must be a Length")
-    unless height is_a Length
-    | error(~who: #'RectOutline, "height must be a Length")
+class RectOutline(width :: Length, height :: Length):
+  constructor (width :: Length, height :: Length):
     unless width.picometers > 0
     | error(~who: #'RectOutline, "width must be positive")
     unless height.picometers > 0
     | error(~who: #'RectOutline, "height must be positive")
     super(width, height)
 
-class Coordinate(x, y):
-  constructor (x, y):
-    unless x is_a Length
-    | error(~who: #'Coordinate, "x must be a Length")
-    unless y is_a Length
-    | error(~who: #'Coordinate, "y must be a Length")
-    super(x, y)
+class Coordinate(x :: Length, y :: Length)
 
 class HardMacro(module_def, outline, location = Location())
 
@@ -74,26 +64,20 @@ fun um(magnitude :: Nat):
 fun physical_view(value):
   value is_a HardMacro || value is_a CompositeFloorplan
 
-fun require_module(module_def, location = Location()):
-  unless module_def is_a Module && module_def.finished
+fun require_module(module_def :: Module, location = Location()):
+  unless module_def.finished
   | rfpl_fail("physical views require a finished RHDL module", location)
   module_def
 
-fun require_outline(width, height, location = Location()):
-  unless width is_a Length
-  | rfpl_fail("physical width must be a Length", location)
-  unless height is_a Length
-  | rfpl_fail("physical height must be a Length", location)
+fun require_outline(width :: Length, height :: Length, location = Location()):
   unless width.picometers > 0
   | rfpl_fail("physical width must be positive", location)
   unless height.picometers > 0
   | rfpl_fail("physical height must be positive", location)
   RectOutline(width, height)
 
-fun child_instance(module_def, name, location = Location()):
+fun child_instance(module_def :: Module, name :: String, location = Location()):
   require_module(module_def, location)
-  unless name is_a String
-  | rfpl_fail("child instance name must be a String", location)
   def operation = module_def.find_instance(name)
   unless operation
   | rfpl_fail(
@@ -103,8 +87,8 @@ fun child_instance(module_def, name, location = Location()):
     )
   operation
 
-fun instance_target(instance, location = Location()):
-  unless instance is_a Operation && instance.opcode == "rtl.instance"
+fun instance_target(instance :: Operation, location = Location()):
+  unless instance.opcode == "rtl.instance"
   | rfpl_fail("instance_target requires an RHDL instance operation", location)
   def target = instance.attribute("module", #false)
   unless target is_a Module
@@ -115,14 +99,15 @@ fun build_hard_macro(module_def, width, height, location = Location()):
   require_module(module_def, location)
   HardMacro(module_def, require_outline(width, height, location), location)
 
-fun build_placement(instance, child, coordinate, location = Location()):
-  unless instance is_a Operation && instance.opcode == "rtl.instance"
+fun build_placement(instance :: Operation,
+                    child,
+                    coordinate :: Coordinate,
+                    location = Location()):
+  unless instance.opcode == "rtl.instance"
   | rfpl_fail("place requires an RHDL instance operation", location)
   unless physical_view(child)
   | rfpl_fail("place requires a hard-macro or composite-floorplan child view",
               location)
-  unless coordinate is_a Coordinate
-  | rfpl_fail("place requires an exact physical coordinate", location)
   def target = instance_target(instance, location)
   unless target === child.module_def
   | rfpl_fail(
@@ -153,14 +138,10 @@ fun verify_containment(parent, placement):
 fun build_composite_floorplan(module_def,
                               width,
                               height,
-                              placements,
+                              placements :: List.of(FloorplanPlacement),
                               location = Location()):
   require_module(module_def, location)
-  unless placements is_a List
-  | rfpl_fail("floorplan placements must be supplied as a List", location)
   for (placement in placements):
-    unless placement is_a FloorplanPlacement
-    | rfpl_fail("floorplan placements must be created with place", location)
     unless placement.parent_module === module_def
     | rfpl_fail("placement selects an instance from a different parent circuit",
                 placement.location)
@@ -212,9 +193,7 @@ fun validate_view(view):
     )
   view
 
-fun annotate(logical, top, location = Location()):
-  unless logical is_a DesignElaboration
-  | rfpl_fail("annotate requires an RHDL DesignElaboration", location)
+fun annotate(logical :: DesignElaboration, top, location = Location()):
   unless physical_view(top)
   | rfpl_fail("annotate requires a hard-macro or composite-floorplan top view",
               location)

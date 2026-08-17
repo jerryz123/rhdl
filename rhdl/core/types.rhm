@@ -2,7 +2,7 @@
 // Defines RHDL's canonical hardware-type abstraction and structural predicates.
 
 import:
-  rhombus/rx open
+  "../../host/annotations.rhm" open
 
 export:
   HardwareType
@@ -91,30 +91,15 @@ class _ResetType():
 def Clock = _ClockType()
 def Reset = _ResetType()
 
-def record_field_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
+class RecordField(name :: AsciiIdentifier, type :: DataType)
 
-class RecordField(name, type):
-  constructor (name, type):
-    unless name is_a String && record_field_identifier.is_match(name)
-    | error(~who: #'RecordField,
-            "field name must be an ASCII identifier")
-    unless type is_a DataType
-    | error(~who: #'RecordField, "field type must be a DataType")
-    super(name, type)
-
-class RecordType(fields, preferred_name = #false):
+class RecordType(fields :: NonemptyList.of(RecordField), preferred_name = #false):
   implements DataType
-  constructor (fields, preferred_name = #false):
-    unless fields is_a List && fields.length() >= 1
-    | error(~who: #'RecordType,
-            "fields must be a nonempty List of RecordField values")
-    unless preferred_name == #false || (preferred_name is_a String && record_field_identifier.is_match(preferred_name))
+  constructor (fields :: NonemptyList.of(RecordField), preferred_name = #false):
+    unless preferred_name == #false || preferred_name is_a AsciiIdentifier
     | error(~who: #'RecordType,
             "preferred name must be an ASCII identifier or #false")
     for (field in fields):
-      unless field is_a RecordField
-      | error(~who: #'RecordType,
-              "fields must be a nonempty List of RecordField values")
       when fields.filter(~keep: fun (candidate): candidate.name == field.name).length() != 1
       | error(~who: #'RecordType,
               "record field names must be unique")
@@ -138,12 +123,8 @@ class RecordType(fields, preferred_name = #false):
 
 // Models a fixed-length packed hardware vector. Logical element zero occupies
 // the least-significant element-width bits of the canonical representation.
-class VectorType(length :: PosInt, element_type):
+class VectorType(length :: PosInt, element_type :: DataType):
   implements DataType
-  constructor (length :: PosInt, element_type):
-    unless element_type is_a DataType
-    | error(~who: #'VectorType, "element type must be a DataType")
-    super(length, element_type)
 
   override method describe():
     "vector<" ++ to_string(length) ++ " x " ++ element_type.describe() ++ ">"

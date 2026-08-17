@@ -31,6 +31,8 @@ fail_matches() {
 
 fail_matches "core must not import frontend or backend modules" \
   '^[[:space:]]+"[^"]*(frontend|backend)/' rhdl/core
+fail_matches "host annotations must remain dependency-neutral" \
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' host
 fail_matches "frontend must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' rhdl/frontend
 fail_matches "frontend must not import the optional standard library" \

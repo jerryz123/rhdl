@@ -1,8 +1,9 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
+HOST_ANNOTATION_TESTS := $(sort $(wildcard host/tests/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
 BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
 LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
@@ -32,6 +33,9 @@ check-boundaries:
 
 check-example-verilog:
 	bash tools/check-example-verilog.sh
+
+host-annotation-test:
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(HOST_ANNOTATION_TESTS)
 
 frontend-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_TESTS) $(FRONTEND_TESTS)
@@ -101,7 +105,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: unit-test rfpl-unit-test noc-test riscv-test tilelink-test chi-test ricket-host-test
+host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test tilelink-test chi-test ricket-host-test
 
 host-test: host-checks examples
 

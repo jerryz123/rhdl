@@ -2,6 +2,7 @@
 // Defines validated host-side TileLink widths, endpoint parameters, and capabilities.
 
 import:
+  lib("host/annotations.rhm") open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/interconnect.rhdl") open
 
@@ -77,23 +78,14 @@ class TLBOperationSizes(probe,
           put_partial,
           intent)
 
-class TLClientParams(name, source_ids, emits, supports):
-  constructor (name,
-               source_ids,
-               ~emits,
-               ~supports: supports = TLBOperationSizes()):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'TLClientParams,
-            "name must be a nonempty String")
-    unless source_ids is_a IdRange
-    | error(~who: #'TLClientParams,
-            "source_ids must be an IdRange")
-    unless emits is_a TLAOperationSizes
-    | error(~who: #'TLClientParams,
-            "emits must be TLAOperationSizes")
-    unless supports is_a TLBOperationSizes
-    | error(~who: #'TLClientParams,
-            "supports must be TLBOperationSizes")
+class TLClientParams(name :: NonemptyString,
+                     source_ids :: IdRange,
+                     emits :: TLAOperationSizes,
+                     supports :: TLBOperationSizes):
+  constructor (name :: NonemptyString,
+               source_ids :: IdRange,
+               ~emits: emits :: TLAOperationSizes,
+               ~supports: supports :: TLBOperationSizes = TLBOperationSizes()):
     super(name, source_ids, emits, supports)
 
 class TLManagerParams(name,
@@ -103,35 +95,13 @@ class TLManagerParams(name,
                       emits,
                       may_deny_get,
                       may_deny_put):
-  constructor (name,
-               address_sets,
-               sink_ids,
-               ~supports,
-               ~emits: emits = TLBOperationSizes(),
-               ~may_deny_get: may_deny_get = #false,
-               ~may_deny_put: may_deny_put = #false):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'TLManagerParams,
-            "name must be a nonempty String")
-    unless address_sets is_a List && address_sets.length() > 0
-    | error(~who: #'TLManagerParams,
-            "address_sets must be a nonempty List")
-    for (address_set in address_sets):
-      unless address_set is_a AddressSet
-      | error(~who: #'TLManagerParams,
-              "address_sets elements must be AddressSet values")
-    unless sink_ids is_a IdRange
-    | error(~who: #'TLManagerParams,
-            "sink_ids must be an IdRange")
-    unless supports is_a TLAOperationSizes
-    | error(~who: #'TLManagerParams,
-            "supports must be TLAOperationSizes")
-    unless emits is_a TLBOperationSizes
-    | error(~who: #'TLManagerParams,
-            "emits must be TLBOperationSizes")
-    unless may_deny_get is_a Boolean && may_deny_put is_a Boolean
-    | error(~who: #'TLManagerParams,
-            "denial flags must be host Boolean values")
+  constructor (name :: NonemptyString,
+               address_sets :: NonemptyList.of(AddressSet),
+               sink_ids :: IdRange,
+               ~supports: supports :: TLAOperationSizes,
+               ~emits: emits :: TLBOperationSizes = TLBOperationSizes(),
+               ~may_deny_get: may_deny_get :: Boolean = #false,
+               ~may_deny_put: may_deny_put :: Boolean = #false):
     super(name,
           address_sets,
           sink_ids,
@@ -168,14 +138,7 @@ fun require_disjoint_manager_addresses(managers, who):
           | #void
 
 class TLClientPortParams(clients, source_ids):
-  constructor (clients):
-    unless clients is_a List && clients.length() > 0
-    | error(~who: #'TLClientPortParams,
-            "clients must be a nonempty List")
-    for (client in clients):
-      unless client is_a TLClientParams
-      | error(~who: #'TLClientPortParams,
-              "clients elements must be TLClientParams values")
+  constructor (clients :: NonemptyList.of(TLClientParams)):
     require_disjoint_id_ranges(clients,
                                fun (client): client.source_ids,
                                "client source",
@@ -184,14 +147,7 @@ class TLClientPortParams(clients, source_ids):
           covering_id_range(clients.map(fun (client): client.source_ids)))
 
 class TLManagerPortParams(managers, sink_ids, address_sets):
-  constructor (managers):
-    unless managers is_a List && managers.length() > 0
-    | error(~who: #'TLManagerPortParams,
-            "managers must be a nonempty List")
-    for (manager in managers):
-      unless manager is_a TLManagerParams
-      | error(~who: #'TLManagerPortParams,
-              "managers elements must be TLManagerParams values")
+  constructor (managers :: NonemptyList.of(TLManagerParams)):
     require_disjoint_id_ranges(managers,
                                fun (manager): manager.sink_ids,
                                "manager sink",
@@ -259,10 +215,7 @@ fun validate_manager_port(bundle, port, who):
               "manager address set must fit the bundle address width")
 
 class TLEdgeParams(bundle, client_port, manager_port):
-  constructor (bundle, client, manager):
-    unless bundle is_a TLBundleParams
-    | error(~who: #'TLEdgeParams,
-            "bundle must be a TLBundleParams")
+  constructor (bundle :: TLBundleParams, client, manager):
     def normalized_client = client_port_params(client)
     def normalized_manager = manager_port_params(manager)
     validate_client_port(bundle, normalized_client, #'TLEdgeParams)
@@ -299,16 +252,9 @@ class TLXbarParams(bundle,
                    sink_maps,
                    downstream_client_port,
                    upstream_manager_port):
-  constructor (bundle, clients, managers):
-    unless bundle is_a TLBundleParams
-    | error(~who: #'TLXbarParams,
-            "bundle must be a TLBundleParams")
-    unless clients is_a List && clients.length() > 0
-    | error(~who: #'TLXbarParams,
-            "clients must be a nonempty List")
-    unless managers is_a List && managers.length() > 0
-    | error(~who: #'TLXbarParams,
-            "managers must be a nonempty List")
+  constructor (bundle :: TLBundleParams,
+               clients :: NonemptyList,
+               managers :: NonemptyList):
     def normalized_clients = clients.map(client_port_params)
     def normalized_managers = managers.map(manager_port_params)
     for (port in normalized_clients):
@@ -353,23 +299,11 @@ class TLXbarParams(bundle,
           upstream_managers)
 
 class TLClientLinkParams(bundle, client):
-  constructor (bundle, client):
-    unless bundle is_a TLBundleParams
-    | error(~who: #'TLClientLinkParams,
-            "bundle must be a TLBundleParams")
-    unless client is_a TLClientParams
-    | error(~who: #'TLClientLinkParams,
-            "client must be a TLClientParams")
+  constructor (bundle :: TLBundleParams, client :: TLClientParams):
     super(bundle, client)
 
 class TLManagerLinkParams(bundle, manager):
-  constructor (bundle, manager):
-    unless bundle is_a TLBundleParams
-    | error(~who: #'TLManagerLinkParams,
-            "bundle must be a TLBundleParams")
-    unless manager is_a TLManagerParams
-    | error(~who: #'TLManagerLinkParams,
-            "manager must be a TLManagerParams")
+  constructor (bundle :: TLBundleParams, manager :: TLManagerParams):
     super(bundle, manager)
 
 export:

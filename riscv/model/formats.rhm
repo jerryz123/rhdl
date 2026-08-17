@@ -2,6 +2,7 @@
 // Defines RV32I/RV64I operand fields, immediate layouts, and instruction formats.
 
 import:
+  "../../host/annotations.rhm" open
   "fields.rhm" open
 
 export:
@@ -38,12 +39,9 @@ export:
   Shift64Immediate
   Shift32Immediate
 
-class RegisterOperand(name, field, role):
-  constructor (name, field, role):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'RegisterOperand,
-            "operand name must be a nonempty String")
-    unless field is_a BitField && field.width == 5
+class RegisterOperand(name :: NonemptyString, field :: BitField, role :: String):
+  constructor (name :: NonemptyString, field :: BitField, role :: String):
+    unless field.width == 5
     | error(~who: #'RegisterOperand,
             "register operand field must be a five-bit BitField")
     unless role == "source" || role == "destination"
@@ -51,10 +49,8 @@ class RegisterOperand(name, field, role):
             "register operand role must be source or destination")
     super(name, field, role)
 
-class ImmediatePiece(source, output_high :: Nat, output_low :: Nat):
-  constructor (source, output_high :: Nat, output_low :: Nat):
-    unless source is_a BitField
-    | error(~who: #'ImmediatePiece, "immediate source must be a BitField")
+class ImmediatePiece(source :: BitField, output_high :: Nat, output_low :: Nat):
+  constructor (source :: BitField, output_high :: Nat, output_low :: Nat):
     unless output_low <= output_high
     | error(~who: #'ImmediatePiece,
             "immediate output bounds must satisfy high >= low >= 0")
@@ -66,23 +62,18 @@ class ImmediatePiece(source, output_high :: Nat, output_low :: Nat):
   method output_mask():
     width_mask(output_high - output_low + 1) bits.(<<) output_low
 
-class ImmediateLayout(name, width :: PosInt, signed, pieces, zero_bits):
-  constructor (name, width :: PosInt, signed, pieces, zero_bits = []):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'ImmediateLayout,
-            "immediate name must be a nonempty String")
-    unless signed is_a Boolean
-    | error(~who: #'ImmediateLayout, "immediate signedness must be Boolean")
-    unless pieces is_a List && pieces.length() > 0
-    | error(~who: #'ImmediateLayout,
-            "immediate pieces must be a nonempty List")
-    unless zero_bits is_a List
-    | error(~who: #'ImmediateLayout, "immediate zero bits must be a List")
+class ImmediateLayout(name :: NonemptyString,
+                      width :: PosInt,
+                      signed :: Boolean,
+                      pieces :: NonemptyList.of(ImmediatePiece),
+                      zero_bits :: List.of(Nat)):
+  constructor (name :: NonemptyString,
+               width :: PosInt,
+               signed :: Boolean,
+               pieces :: NonemptyList.of(ImmediatePiece),
+               zero_bits :: List.of(Nat) = []):
     def mutable covered = 0
     for (piece in pieces):
-      unless piece is_a ImmediatePiece
-      | error(~who: #'ImmediateLayout,
-              "immediate pieces must contain only ImmediatePiece values")
       unless piece.source.high < 32 && piece.output_high < width
       | error(~who: #'ImmediateLayout,
               "immediate piece lies outside its source or destination width")
@@ -91,7 +82,7 @@ class ImmediateLayout(name, width :: PosInt, signed, pieces, zero_bits):
               "immediate output pieces must not overlap")
       covered := covered bits.or piece.output_mask()
     for (bit in zero_bits):
-      unless bit is_a Nat && bit < width
+      unless bit < width
       | error(~who: #'ImmediateLayout,
               "immediate zero bit lies outside the output width")
       def bit_mask = 1 bits.(<<) bit
@@ -115,38 +106,27 @@ class ImmediateLayout(name, width :: PosInt, signed, pieces, zero_bits):
       result := result + (piece.source.extract(word) bits.(<<) piece.output_low)
     result
 
-fun fields_mask(fields, who):
+fun fields_mask(fields :: List.of(BitField), who):
   def mutable mask = 0
   for (field in fields):
-    unless field is_a BitField
-    | error(~who: who, "format fields must contain only BitField values")
     when (mask bits.and field.mask()) != 0
     | error(~who: who, "instruction format fields must not overlap")
     mask := mask bits.or field.mask()
   mask
 
-class InstructionFormat(name,
-                        operands,
+class InstructionFormat(name :: NonemptyString,
+                        operands :: List.of(RegisterOperand),
                         immediate,
-                        auxiliary_fields,
-                        variable_fields,
+                        auxiliary_fields :: List.of(BitField),
+                        variable_fields :: List.of(BitField),
                         variable_mask):
-  constructor (name, operands, immediate = #false, auxiliary_fields = []):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'InstructionFormat,
-            "format name must be a nonempty String")
-    unless operands is_a List
-    | error(~who: #'InstructionFormat, "format operands must be a List")
-    for (operand in operands):
-      unless operand is_a RegisterOperand
-      | error(~who: #'InstructionFormat,
-              "format operands must contain only RegisterOperand values")
+  constructor (name :: NonemptyString,
+               operands :: List.of(RegisterOperand),
+               immediate = #false,
+               auxiliary_fields :: List.of(BitField) = []):
     unless immediate == #false || immediate is_a ImmediateLayout
     | error(~who: #'InstructionFormat,
             "format immediate must be an ImmediateLayout or #false")
-    unless auxiliary_fields is_a List
-    | error(~who: #'InstructionFormat,
-            "format auxiliary fields must be a List")
     def immediate_fields:
       if immediate | immediate.source_fields() | []
     def variable_fields = operands.map(fun (operand): operand.field) ++ immediate_fields ++ auxiliary_fields

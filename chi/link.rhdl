@@ -2,6 +2,7 @@
 // Defines CHI node roles, channel capabilities, credited links, legality, and monitor attachment.
 
 import:
+  lib("host/annotations.rhm") open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/credited.rhdl") open
   lib("chi/params.rhdl") open
@@ -47,9 +48,11 @@ fun dvm_snoop_capabilities(capabilities):
   for all (opcode in capabilities.snp):
     opcode.packed_value() == CHISnpOpcode.SnpDVMOp.packed_value()
 
-fun validate_endpoint_capabilities(kind, emits, supports, side, who):
-  unless emits is_a CHIChannelCapabilities && supports is_a CHIChannelCapabilities
-  | error(~who: who, "emits and supports must be CHIChannelCapabilities")
+fun validate_endpoint_capabilities(kind :: CHINodeKind,
+                                   emits :: CHIChannelCapabilities,
+                                   supports :: CHIChannelCapabilities,
+                                   side,
+                                   who):
   def legal:
     cond
     | side == "node" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
@@ -95,21 +98,23 @@ fun validate_endpoint_capabilities(kind, emits, supports, side, who):
   | error(~who: who,
           "channel capabilities are not valid for the " ++ to_string(kind) ++ " " ++ side ++ " role")
 
-class CHINodeParams(name, node_id :: Nat, kind, emits, supports):
-  constructor (name, node_id :: Nat, kind, ~emits, ~supports):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'CHINodeParams, "name must be a nonempty String")
-    unless kind is_a CHINodeKind
-    | error(~who: #'CHINodeParams, "kind must be a CHINodeKind")
+class CHINodeParams(name :: NonemptyString, node_id :: Nat, kind :: CHINodeKind,
+                    emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities):
+  constructor (name :: NonemptyString,
+               node_id :: Nat,
+               kind :: CHINodeKind,
+               ~emits: emits :: CHIChannelCapabilities,
+               ~supports: supports :: CHIChannelCapabilities):
     validate_endpoint_capabilities(kind, emits, supports, "node", #'CHINodeParams)
     super(name, node_id, kind, emits, supports)
 
-class CHIICNPortParams(name, node_id :: Nat, kind, emits, supports):
-  constructor (name, node_id :: Nat, kind, ~emits, ~supports):
-    unless name is_a String && name.length() > 0
-    | error(~who: #'CHIICNPortParams, "name must be a nonempty String")
-    unless kind is_a CHINodeKind
-    | error(~who: #'CHIICNPortParams, "kind must be a CHINodeKind")
+class CHIICNPortParams(name :: NonemptyString, node_id :: Nat, kind :: CHINodeKind,
+                       emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities):
+  constructor (name :: NonemptyString,
+               node_id :: Nat,
+               kind :: CHINodeKind,
+               ~emits: emits :: CHIChannelCapabilities,
+               ~supports: supports :: CHIChannelCapabilities):
     validate_endpoint_capabilities(kind, emits, supports, "icn", #'CHIICNPortParams)
     super(name, node_id, kind, emits, supports)
 
@@ -231,30 +236,24 @@ fun sn_connection_legal(provided, required):
         condition
   | #false
 
-fun checked_rn_link(link, endpoint):
-  unless link is_a CHIRNLinkParams && (
-    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
-  )
+fun checked_rn_link(link :: CHIRNLinkParams, endpoint):
+  unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHIRNLink,
           "requires CHIRNLinkParams and CHINodeParams or CHIICNPortParams")
   unless [CHINodeKind.RNF, CHINodeKind.RND].contains(endpoint.kind)
   | error(~who: #'CHIRNLink, "endpoint kind must be RN-F or RN-D")
   link
 
-fun checked_rni_link(link, endpoint):
-  unless link is_a CHIRNILinkParams && (
-    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
-  )
+fun checked_rni_link(link :: CHIRNILinkParams, endpoint):
+  unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHIRNILink,
           "requires CHIRNILinkParams and CHINodeParams or CHIICNPortParams")
   unless endpoint.kind == CHINodeKind.RNI
   | error(~who: #'CHIRNILink, "endpoint kind must be RN-I")
   link
 
-fun checked_sn_link(link, endpoint):
-  unless link is_a CHISNLinkParams && (
-    endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
-  )
+fun checked_sn_link(link :: CHISNLinkParams, endpoint):
+  unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHISNLink,
           "requires CHISNLinkParams and CHINodeParams or CHIICNPortParams")
   unless chi_subordinate_node_kind(endpoint.kind)

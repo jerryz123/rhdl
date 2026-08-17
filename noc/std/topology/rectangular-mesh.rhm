@@ -25,8 +25,8 @@ class MeshCoordinate(x :: Nat, y :: Nat):
   method describe():
     "[" ++ to_string(x) ++ "," ++ to_string(y) ++ "]"
 
-class MeshDirection(axis, step):
-  constructor (axis, step):
+class MeshDirection(axis :: String, step :: Int):
+  constructor (axis :: String, step :: Int):
     unless axis == "x" || axis == "y"
     | error(~who: #'MeshDirection, "mesh direction axis must be 'x' or 'y'")
     unless step == -1 || step == 1
@@ -59,25 +59,18 @@ fun mesh_coordinate_less(left, right):
   | left.y < right.y
   | left.x < right.x
 
-fun require_mesh_coordinate(who, coordinate):
-  unless coordinate is_a MeshCoordinate
-  | error(~who: who, "expected a MeshCoordinate")
-
-fun require_mesh_direction(who, direction):
-  unless direction is_a MeshDirection
-  | error(~who: who, "expected a MeshDirection")
-
 fun mesh_node_ref(x :: Nat, y :: Nat):
   def coordinate = MeshCoordinate(x, y)
   NodeRef("router" ++ coordinate.describe())
 
-fun mesh_link_ref(source, direction):
-  require_mesh_coordinate(#'mesh_link_ref, source)
-  require_mesh_direction(#'mesh_link_ref, direction)
+fun mesh_link_ref(source :: MeshCoordinate, direction :: MeshDirection):
   LinkRef(["router" ++ source.describe(), direction.describe()])
 
-class MeshNodeBinding(coordinate, ref)
-class MeshLinkBinding(source, destination, direction, ref)
+class MeshNodeBinding(coordinate :: MeshCoordinate, ref :: NodeRef)
+class MeshLinkBinding(source :: MeshCoordinate,
+                      destination :: MeshCoordinate,
+                      direction :: MeshDirection,
+                      ref :: LinkRef)
 
 fun find_mesh_node_by_coordinate(bindings, coordinate):
   bindings.find(
@@ -96,13 +89,13 @@ fun find_outgoing_mesh_link(bindings, source, direction):
       mesh_coordinate_equal(binding.source, source) && mesh_direction_equal(binding.direction, direction)
   )
 
-class RectangularMesh(width,
-                      height,
-                      spec,
-                      node_bindings,
-                      link_bindings,
-                      vc_groups):
-  method node_at(x, y):
+class RectangularMesh(width :: PosInt,
+                      height :: PosInt,
+                      spec :: TopologySpec,
+                      node_bindings :: NonemptyList.of(MeshNodeBinding),
+                      link_bindings :: List.of(MeshLinkBinding),
+                      vc_groups :: NonemptyList.of(VCGroup)):
+  method node_at(x :: Nat, y :: Nat):
     def coordinate = MeshCoordinate(x, y)
     def found = find_mesh_node_by_coordinate(node_bindings, coordinate)
     unless found
@@ -110,31 +103,24 @@ class RectangularMesh(width,
             "coordinate outside mesh " ++ coordinate.describe())
     found.ref
 
-  method coordinate_of(ref):
-    unless ref is_a NodeRef
-    | error(~who: #'coordinate_of, "expected a NodeRef")
+  method coordinate_of(ref :: NodeRef):
     def found = find_mesh_node_by_ref(node_bindings, ref)
     unless found
     | error(~who: #'coordinate_of, "node is not in mesh " ++ ref.describe())
     found.coordinate
 
-  method direction_of(ref):
-    unless ref is_a LinkRef
-    | error(~who: #'direction_of, "expected a LinkRef")
+  method direction_of(ref :: LinkRef):
     def found = find_mesh_link_by_ref(link_bindings, ref)
     unless found
     | error(~who: #'direction_of, "link is not in mesh " ++ ref.describe())
     found.direction
 
-  method outgoing_link(node, direction):
-    require_mesh_direction(#'outgoing_link, direction)
+  method outgoing_link(node :: NodeRef, direction :: MeshDirection):
     def coordinate = coordinate_of(node)
     def found = find_outgoing_mesh_link(link_bindings, coordinate, direction)
     if found | found.ref | #false
 
-  method inverse_link(ref):
-    unless ref is_a LinkRef
-    | error(~who: #'inverse_link, "expected a LinkRef")
+  method inverse_link(ref :: LinkRef):
     def found = find_mesh_link_by_ref(link_bindings, ref)
     unless found
     | error(~who: #'inverse_link, "link is not in mesh " ++ ref.describe())
@@ -169,21 +155,17 @@ class RectangularMesh(width,
                     prefixed_links,
                     vc_groups)
 
-fun require_mesh_vc_groups(vc_groups):
-  unless vc_groups is_a List && vc_groups.length() > 0
-  | error(~who: #'rectangular_mesh,
-          "mesh VC groups must be a nonempty List")
+fun require_mesh_vc_groups(vc_groups :: NonemptyList.of(VCGroup)):
   for (group in vc_groups):
-    unless group is_a VCGroup
-    | error(~who: #'rectangular_mesh,
-            "mesh VC groups must contain only VCGroup values")
     when vc_groups.filter(
       ~keep: fun (candidate): candidate.name == group.name
     ).length() > 1
     | error(~who: #'rectangular_mesh,
             "duplicate VC group " ++ group.name)
 
-fun rectangular_mesh(width :: PosInt, height :: PosInt, vc_groups):
+fun rectangular_mesh(width :: PosInt,
+                     height :: PosInt,
+                     vc_groups :: NonemptyList.of(VCGroup)):
   require_mesh_vc_groups(vc_groups)
 
   def mutable node_bindings = []

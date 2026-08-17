@@ -33,9 +33,9 @@ export:
   Sink
   InterfaceFields
 
-class InterfaceFlow(from_role, to_role, type):
-  constructor (from_role, to_role, type):
-    unless from_role is_a String && to_role is_a String && from_role != to_role
+class InterfaceFlow(from_role :: String, to_role :: String, type :: RecordType):
+  constructor (from_role :: String, to_role :: String, type :: RecordType):
+    unless from_role != to_role
     | error(~who: #'InterfaceFlow, "interface flow requires two distinct role names")
     unless record_type(type) && type_well_formed(type)
     | error(~who: #'InterfaceFlow, "interface flow type must be a well-formed RecordType")
@@ -43,21 +43,8 @@ class InterfaceFlow(from_role, to_role, type):
 
 class InterfaceMember(name, type, from_role, to_role)
 class InterfaceSupport(role, type)
-class InterfaceCompatibility(role, predicate):
-  constructor (role, predicate):
-    unless role is_a String
-    | error(~who: #'InterfaceCompatibility,
-            "interface compatibility role must be a String")
-    unless predicate is_a Function
-    | error(~who: #'InterfaceCompatibility,
-            "interface compatibility predicate must be a Function")
-    super(role, predicate)
-class InterfaceMonitor(factory):
-  constructor (factory):
-    unless factory is_a Function
-    | error(~who: #'InterfaceMonitor,
-            "interface monitor factory must be a Function")
-    super(factory)
+class InterfaceCompatibility(role :: String, predicate :: Function)
+class InterfaceMonitor(factory :: Function)
 class InterfaceIdentity()
 
 // The parent supplies inherited layout. Additional supported types declare
@@ -74,22 +61,18 @@ class InterfaceType(name,
                     specialization_arguments = [],
                     connection_compatibility = #false,
                     monitor = #false):
-  constructor (name,
-               roles,
-               declarations,
+  constructor (name :: String,
+               roles :: List.of(String),
+               declarations :: List,
                parent = #false,
-               supported_contracts = [],
+               supported_contracts :: List.of(InterfaceSupport) = [],
                ~provider_role: supplied_provider_role = #false,
                ~identity: identity = InterfaceIdentity(),
-               ~specialization_arguments: specialization_arguments = [],
+               ~specialization_arguments: specialization_arguments :: List = [],
                ~connection_compatibility: connection_compatibility = #false,
                ~monitor: supplied_monitor = #false):
-    unless name is_a String
-    | error(~who: #'InterfaceType, "interface name must be a String")
-    unless roles is_a List && roles.length() == 2 && roles[0] != roles[1]
+    unless roles.length() == 2 && roles[0] != roles[1]
     | error(~who: #'InterfaceType, "interfaces require exactly two distinct roles")
-    unless declarations is_a List
-    | error(~who: #'InterfaceType, "interface declarations must be a List")
     def provider_role = supplied_provider_role || roles[0]
     unless provider_role is_a String && provider_role in roles
     | error(~who: #'InterfaceType,
@@ -104,12 +87,6 @@ class InterfaceType(name,
       unless provider_role == parent.provider_role
       | error(~who: #'InterfaceType,
               "refined interface provider role must match the parent provider role")
-    unless supported_contracts is_a List
-    | error(~who: #'InterfaceType,
-            "supported interface contracts must be supplied as a List")
-    unless specialization_arguments is_a List
-    | error(~who: #'InterfaceType,
-            "interface specialization arguments must be supplied as a List")
     when connection_compatibility
     | unless connection_compatibility is_a InterfaceCompatibility
       | error(~who: #'InterfaceType,
@@ -154,9 +131,6 @@ class InterfaceType(name,
       ).length() != 1
       | error(~who: #'InterfaceType, "interface member names must be unique")
     for (supported_contract in supported_contracts):
-      unless supported_contract is_a InterfaceSupport
-      | error(~who: #'InterfaceType,
-              "supported interface contracts must be InterfaceSupport values")
       unless supported_contract.role == provider_role
       | error(~who: #'InterfaceType,
               "supported interface contract role must match the provider role")
@@ -533,10 +507,8 @@ fun nested_endpoint(endpoint, member):
                     nested_bindings,
                     endpoint.view ++ "." ++ member.name)
 
-fun validate_interface_declaration(type, role):
-  unless type is_a InterfaceType
-  | error(~who: #'interface, "endpoint type must be an InterfaceType")
-  unless role is_a String && role in type.roles
+fun validate_interface_declaration(type :: InterfaceType, role :: String):
+  unless role in type.roles
   | error(~who: #'interface, "unknown interface role " ++ to_string(role))
 
 fun interface_name_taken(module_def, name):
@@ -578,10 +550,10 @@ fun activate_interface_monitor(endpoint):
   )
   #void
 
-fun declare_interface(name, type, role, monitor_enabled = #false):
-  unless monitor_enabled is_a Boolean
-  | error(~who: #'interface,
-          "interface monitor option must be a host Boolean")
+fun declare_interface(name,
+                      type,
+                      role,
+                      monitor_enabled :: Boolean = #false):
   validate_interface_declaration(type, role)
   def module_def = kernel.active_module()
   when interface_name_taken(module_def, name)
@@ -591,10 +563,11 @@ fun declare_interface(name, type, role, monitor_enabled = #false):
   | activate_interface_monitor(endpoint)
   endpoint
 
-fun declare_interface_array(name, count :: PosInt, type, role, monitor_enabled = #false):
-  unless monitor_enabled is_a Boolean
-  | error(~who: #'interface,
-          "interface monitor option must be a host Boolean")
+fun declare_interface_array(name,
+                            count :: PosInt,
+                            type,
+                            role,
+                            monitor_enabled :: Boolean = #false):
   validate_interface_declaration(type, role)
   def module_def = kernel.active_module()
   def element_names:
@@ -839,9 +812,8 @@ fun interface_connection_direction(left, right):
               "compatible interface endpoints do not represent the provider role")
   [source, if source === left | right | left]
 
-fun exact_interface_connection_pairs(left, right):
-  unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
-  | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
+fun exact_interface_connection_pairs(left :: InterfaceEndpoint,
+                                     right :: InterfaceEndpoint):
   def pairs:
     for List (left_binding in left.bindings):
       def right_binding = right.bindings.find(
@@ -943,9 +915,10 @@ fun compatible_interface_connection_pairs(left, right, extra_values, extra_field
     pairs := pairs ++ explicit_member_connection_pairs(richer, binding[0], binding[1])
   pairs
 
-fun interface_connection_pairs(left, right, extra_values = [], extra_fields = {}):
-  unless left is_a InterfaceEndpoint && right is_a InterfaceEndpoint
-  | error(~who: #'connect_interfaces, "bulk interface connection requires two interface endpoints")
+fun interface_connection_pairs(left :: InterfaceEndpoint,
+                               right :: InterfaceEndpoint,
+                               extra_values = [],
+                               extra_fields = {}):
   if interface_type_same_specialization(left.type, right.type) && !interface_type_has_connection_policy(left.type) && !interface_type_has_connection_policy(right.type) && extra_values.length() == 0 && extra_fields.length() == 0
   | exact_interface_connection_pairs(left, right)
   | compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
@@ -1057,13 +1030,10 @@ fun connect_interface_fields(left,
 
 fun make_refined_interface(identity,
                            name,
-                           parent,
+                           parent :: InterfaceType,
                            declarations,
                            supported_contracts = [],
                            ~specialization_arguments: specialization_arguments = []):
-  unless parent is_a InterfaceType
-  | error(~who: #'interface,
-          "interface refinement parent must be an InterfaceType")
   InterfaceType(name,
                 parent.roles,
                 declarations,
