@@ -3,6 +3,7 @@
 (("bad-chi-request-capability.rhdl" "does not support")
  ("bad-chi-credit-compatibility.rhdl" "does not support")
  ("bad-chi-node-id.rhdl" "does not support")
+ ("bad-chi-outstanding-limit.rhdl" "does not support")
  ("bad-chi-node-id-width.rhdl" "does not support")
  ("bad-chi-flit-shape.rhdl" "does not support")
  ("bad-chi-role-channel.rhdl" "channel capabilities are not valid")

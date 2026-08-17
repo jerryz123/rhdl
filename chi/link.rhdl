@@ -8,6 +8,7 @@ import:
   lib("chi/params.rhdl") open
   lib("chi/flits.rhdl") open
   lib("chi/monitor.rhdl") open
+  lib("chi/transaction.rhdl") open
 
 enum CHINodeKind
 | RNF
@@ -19,12 +20,10 @@ enum CHINodeKind
 fun chi_subordinate_node_kind(kind):
   [CHINodeKind.SNF, CHINodeKind.SNI].contains(kind)
 
-class CHIChannelCapabilities(req :: List.of(CHIReqOpcode),
-                             rsp :: List.of(CHIRspOpcode),
-                             snp :: List.of(CHISnpOpcode),
-                             dat :: List.of(CHIDatOpcode)):
-  constructor (~req: req = [], ~rsp: rsp = [], ~snp: snp = [], ~dat: dat = []):
-    super(req, rsp, snp, dat)
+class CHIChannelCapabilities(~req: req :: List.of(CHIReqOpcode) = [],
+                             ~rsp: rsp :: List.of(CHIRspOpcode) = [],
+                             ~snp: snp :: List.of(CHISnpOpcode) = [],
+                             ~dat: dat :: List.of(CHIDatOpcode) = [])
 
 fun opcode_lists_contain(supported, emitted):
   for all (opcode in emitted):
@@ -99,83 +98,56 @@ fun validate_endpoint_capabilities(kind :: CHINodeKind,
           "channel capabilities are not valid for the " ++ to_string(kind) ++ " " ++ side ++ " role")
 
 class CHINodeParams(name :: NonemptyString, node_id :: Nat, kind :: CHINodeKind,
-                    emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities):
+                    emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities,
+                    max_outstanding :: Int.in(1 ..= 1024)):
   constructor (name :: NonemptyString,
                node_id :: Nat,
                kind :: CHINodeKind,
                ~emits: emits :: CHIChannelCapabilities,
-               ~supports: supports :: CHIChannelCapabilities):
+               ~supports: supports :: CHIChannelCapabilities,
+               ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024)):
     validate_endpoint_capabilities(kind, emits, supports, "node", #'CHINodeParams)
-    super(name, node_id, kind, emits, supports)
+    super(name, node_id, kind, emits, supports, max_outstanding)
 
 class CHIICNPortParams(name :: NonemptyString, node_id :: Nat, kind :: CHINodeKind,
-                       emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities):
+                       emits :: CHIChannelCapabilities, supports :: CHIChannelCapabilities,
+                       max_outstanding :: Int.in(1 ..= 1024)):
   constructor (name :: NonemptyString,
                node_id :: Nat,
                kind :: CHINodeKind,
                ~emits: emits :: CHIChannelCapabilities,
-               ~supports: supports :: CHIChannelCapabilities):
+               ~supports: supports :: CHIChannelCapabilities,
+               ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024)):
     validate_endpoint_capabilities(kind, emits, supports, "icn", #'CHIICNPortParams)
-    super(name, node_id, kind, emits, supports)
+    super(name, node_id, kind, emits, supports, max_outstanding)
 
 class CHIRNLinkParams(flit :: CHIFlitParams,
-                      tx_req_credits :: PosInt,
-                      tx_rsp_credits :: PosInt,
-                      tx_dat_credits :: PosInt,
-                      rx_rsp_credits :: PosInt,
-                      rx_dat_credits :: PosInt,
-                      rx_snp_credits :: PosInt):
-  constructor (flit,
-               ~tx_req_credits: tx_req_credits :: PosInt = 2,
-               ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
-               ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
-               ~rx_rsp_credits: rx_rsp_credits :: PosInt = 2,
-               ~rx_dat_credits: rx_dat_credits :: PosInt = 2,
-               ~rx_snp_credits: rx_snp_credits :: PosInt = 2):
-    super(flit,
-          tx_req_credits,
-          tx_rsp_credits,
-          tx_dat_credits,
-          rx_rsp_credits,
-          rx_dat_credits,
-          rx_snp_credits)
+                      ~tx_req_credits: tx_req_credits :: PosInt = 2,
+                      ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
+                      ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
+                      ~rx_rsp_credits: rx_rsp_credits :: PosInt = 2,
+                      ~rx_dat_credits: rx_dat_credits :: PosInt = 2,
+                      ~rx_snp_credits: rx_snp_credits :: PosInt = 2)
 
 class CHIRNILinkParams(flit :: CHIFlitParams,
-                       tx_req_credits :: PosInt,
-                       tx_rsp_credits :: PosInt,
-                       tx_dat_credits :: PosInt,
-                       rx_rsp_credits :: PosInt,
-                       rx_dat_credits :: PosInt):
-  constructor (flit,
-               ~tx_req_credits: tx_req_credits :: PosInt = 2,
-               ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
-               ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
-               ~rx_rsp_credits: rx_rsp_credits :: PosInt = 2,
-               ~rx_dat_credits: rx_dat_credits :: PosInt = 2):
-    super(flit,
-          tx_req_credits,
-          tx_rsp_credits,
-          tx_dat_credits,
-          rx_rsp_credits,
-          rx_dat_credits)
+                       ~tx_req_credits: tx_req_credits :: PosInt = 2,
+                       ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
+                       ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
+                       ~rx_rsp_credits: rx_rsp_credits :: PosInt = 2,
+                       ~rx_dat_credits: rx_dat_credits :: PosInt = 2)
 
 class CHISNLinkParams(flit :: CHIFlitParams,
-                      tx_rsp_credits :: PosInt,
-                      tx_dat_credits :: PosInt,
-                      rx_req_credits :: PosInt,
-                      rx_dat_credits :: PosInt):
-  constructor (flit,
-               ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
-               ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
-               ~rx_req_credits: rx_req_credits :: PosInt = 2,
-               ~rx_dat_credits: rx_dat_credits :: PosInt = 2):
-    super(flit, tx_rsp_credits, tx_dat_credits, rx_req_credits, rx_dat_credits)
+                      ~tx_rsp_credits: tx_rsp_credits :: PosInt = 2,
+                      ~tx_dat_credits: tx_dat_credits :: PosInt = 2,
+                      ~rx_req_credits: rx_req_credits :: PosInt = 2,
+                      ~rx_dat_credits: rx_dat_credits :: PosInt = 2)
 
 fun endpoint_pair_legal(node, icn, flit, kinds):
   node is_a CHINodeParams && icn is_a CHIICNPortParams && for all (condition in [
     kinds.contains(node.kind),
     node.kind == icn.kind,
     node.node_id == icn.node_id,
+    node.max_outstanding == icn.max_outstanding,
     node.node_id < (1 bits.(<<) flit.node_id_width),
     capabilities_contain(icn.supports, node.emits),
     capabilities_contain(node.supports, icn.emits)
@@ -419,6 +391,19 @@ interface CHIRNILink(link, endpoint):
                     observed.rx_link_active_request, observed.rx_link_active_ack,
                     rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
                     endpoint.node_id, "_target_id", "chi_rx_dat")
+    if chi_initial_requester_capabilities(emitted, received)
+    | requester_transaction_monitor(observed.tx_req.valid,
+                                    observed.tx_req.bits,
+                                    observed.rx_rsp.valid,
+                                    observed.rx_rsp.bits,
+                                    observed.tx_dat.valid,
+                                    observed.tx_dat.bits,
+                                    observed.rx_dat.valid,
+                                    observed.rx_dat.bits,
+                                    link.flit,
+                                    endpoint.max_outstanding,
+                                    "chi_transaction")
+    | #void
     tx_previous_request <== observed.tx_link_active_request
     tx_previous_ack <== observed.tx_link_active_ack
     rx_previous_request <== observed.rx_link_active_request
@@ -493,6 +478,19 @@ interface CHISNLink(link, endpoint):
                     observed.rx_link_active_request, observed.rx_link_active_ack,
                     rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
                     endpoint.node_id, "_target_id", "chi_rx_dat")
+    if chi_initial_subordinate_capabilities(emitted, received)
+    | subordinate_transaction_monitor(observed.rx_req.valid,
+                                      observed.rx_req.bits,
+                                      observed.tx_rsp.valid,
+                                      observed.tx_rsp.bits,
+                                      observed.rx_dat.valid,
+                                      observed.rx_dat.bits,
+                                      observed.tx_dat.valid,
+                                      observed.tx_dat.bits,
+                                      link.flit,
+                                      endpoint.max_outstanding,
+                                      "chi_transaction")
+    | #void
     tx_previous_request <== observed.tx_link_active_request
     tx_previous_ack <== observed.tx_link_active_ack
     rx_previous_request <== observed.rx_link_active_request

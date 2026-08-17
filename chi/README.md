@@ -13,9 +13,9 @@ Architecture Specification. This identifies the source used for the implemented
 wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
-protocol classifiers, node capabilities, credited node-role links, and
-link-local monitors. Transaction monitors, fabrics, and endpoints remain
-planned below.
+protocol classifiers, node capabilities, credited node-role links, link-local
+monitors, and bounded initial non-coherent transaction checking. Fabrics and
+endpoints remain planned below.
 
 ## Architectural boundary
 
@@ -143,9 +143,46 @@ On a valid flit, the monitor checks:
 - that an ordinary REQ has a legal Size encoding with reserved Size bits zero;
 - that an ordinary DAT has a `DataID` legal for the configured data width.
 
-Opcode-dependent response fields, complete multibeat data accounting, TxnID
-and DBID lifetime, retry, and ordering require transaction history and belong
-to the next stateful-monitor milestone.
+Opcode-dependent rules outside the initial non-coherent subset, multibeat
+data accounting, retry, and general ordering remain later stateful-monitor
+milestones.
+
+## Initial non-coherent transaction monitoring
+
+Every `CHINodeParams` and `CHIICNPortParams` supplies an endpoint resource
+bound through `~max_outstanding`. The value must be from 1 through CHI's
+architectural maximum of 1024 outstanding transactions, and corresponding
+node and ICN-port descriptions must agree. It gives stateful monitors a finite
+CAM size without introducing a checker-specific profile or a hidden capacity.
+
+The whole-link monitor automatically adds the initial transaction checker for
+an RN-I, SN-F, or SN-I endpoint when its advertised request, response, and data
+opcode capabilities are wholly within the non-coherent subset below. At least
+one supported request opcode is required. Capabilities remain the single
+description of protocol behavior; `max_outstanding` describes only endpoint
+capacity.
+
+The requester and subordinate views both check these exact successful flows:
+
+| Operation | Checked packet sequence |
+|---|---|
+| Read | `ReadNoSnp` then exactly one `CompData` |
+| Full write | `WriteNoSnpFull`, `DBIDResp`, exactly one `NonCopyBackWriteData`, then `Comp` |
+| Partial write | `WriteNoSnpPtl`, `DBIDResp`, exactly one `NonCopyBackWriteData`, then `Comp` |
+
+The monitor rejects live TxnID reuse, table overflow, a response without the
+required transaction phase, DBID reuse while the initial transaction remains
+live, write data before its DBID response, mismatched response identifiers,
+and completion before write data. The subordinate view also checks the
+Home-to-Subordinate `ReturnNID` and `ReturnTxnID` flow for read data and rejects
+Direct Write Transfer in this initial subset.
+
+The initial checker requires a transfer size no wider than one physical DAT flit,
+`DataID = 0`, `NumDat = 0`, and no replication. It also fixes the currently
+unsupported structural options to no multi-request, no ordering requirement,
+zero Protocol Credit type, no completion acknowledge, and invalid `TagOp`.
+Control Link Credit Return flits remain link-local and do not allocate
+transaction state.
 
 ## Non-coherent-first scope
 
@@ -173,7 +210,7 @@ responses. CHI permits a combined `CompDBIDResp` before the write data is
 sent, but completing only after the RAM update gives `CHIRam` the same
 observable storage discipline as `TLRam`.
 
-The first profile will have these explicit limits:
+The first implementation will have these explicit limits:
 
 - One power-of-two, naturally aligned address region backed by `SyncRam1RW`.
 - Configurable physical data width, initially restricted to transfers that fit
@@ -184,7 +221,7 @@ The first profile will have these explicit limits:
   behavior.
 - No atomics, exclusives, cache maintenance, DVM, request retry, direct memory
   transfer, direct cache transfer, direct write transfer, data separation, or
-  memory tagging in the first profile.
+  memory tagging in the first implementation.
 - Unsupported opcodes and field combinations are rejected by the advertised
   capabilities and checked by the interface monitor; they are not silently
   treated as ordinary reads or writes.
@@ -260,9 +297,10 @@ turns an externally credited flit channel into a buffered internal flow.
 |---|---|
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
 | [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
-| [`protocol.rhdl`](protocol.rhdl) | Implemented initial operation groups, Size checking, and DAT packetization; transaction relationships remain planned |
+| [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, Size checking, and DAT packetization |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, static connection compatibility, and monitor attachment |
-| [`monitor.rhdl`](monitor.rhdl) | Implemented link-local activation, credit, opcode, NodeID, Size, and DataID checks; transaction, ordering, retry, and coherence checks remain planned |
+| [`monitor.rhdl`](monitor.rhdl) | Implemented link-local activation, credit, opcode, NodeID, Size, and DataID checks |
+| [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
 | `fabric.rhdl` | Node routing, arbitration, per-hop credit termination and regeneration, and generated crossbar/ring/mesh fabrics |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
@@ -277,8 +315,9 @@ turns an externally credited flit channel into a buffered internal flow.
    activation signals, and static connection legality.
 4. **Complete:** Add link-local activation, credit, opcode, conditional-field,
    and NodeID monitoring.
-5. Add bounded TxnID/DBID, response, retry, ordering, and data-completeness
-   transaction monitors.
+5. **Initial non-coherent subset complete:** Add bounded TxnID/DBID,
+   response, and single-flit data-completeness transaction monitors. General
+   ordering, retry and Protocol Credits, and other transaction families remain.
 6. Define `CHIFabricParams`, validate the System Address Map, and generate a
    small credit-terminating crossbar.
 7. Implement the RN-I-facing non-coherent memory subsystem and `CHIRam` over
@@ -293,7 +332,7 @@ test of the supported transaction flows.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link chi-monitor' bash tests/backend/run-circt.sh`
+`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn' bash tests/backend/run-circt.sh`
 for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
 
 ## Specification references

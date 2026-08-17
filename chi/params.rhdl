@@ -1,76 +1,57 @@
 #lang rhdl
 // Defines the validated AMBA CHI physical flit parameterization.
 
-class CHIFlitParams(node_id_width :: PosInt,
-                    request_address_width :: PosInt,
-                    data_width :: PosInt,
-                    mpam_width :: Nat,
-                    req_rsvdc_width :: Nat,
-                    dat_rsvdc_width :: Nat,
-                    data_check :: Boolean,
-                    poison :: Boolean,
-                    pbha_width :: Nat,
-                    mecid_width :: Nat,
-                    stream_id_width :: Nat,
-                    sec_sid_width :: Nat):
-  constructor (~node_id_width: node_id_width :: PosInt = 7,
-               ~request_address_width: request_address_width :: PosInt = 44,
-               ~data_width: data_width :: PosInt = 128,
-               ~mpam_width: mpam_width :: Nat = 0,
-               ~req_rsvdc_width: req_rsvdc_width :: Nat = 0,
-               ~dat_rsvdc_width: dat_rsvdc_width :: Nat = 0,
-               ~data_check: data_check :: Boolean = #false,
-               ~poison: poison :: Boolean = #false,
-               ~pbha_width: pbha_width :: Nat = 0,
-               ~mecid_width: mecid_width :: Nat = 0,
-               ~stream_id_width: stream_id_width :: Nat = 0,
-               ~sec_sid_width: sec_sid_width :: Nat = 0):
-    unless node_id_width >= 7 && node_id_width <= 16
-    | error(~who: #'CHIFlitParams,
-            "NodeID width must be from 7 through 16")
-    unless request_address_width >= 44 && request_address_width <= 52
-    | error(~who: #'CHIFlitParams,
-            "request address width must be from 44 through 52")
-    unless [128, 256, 512].contains(data_width)
-    | error(~who: #'CHIFlitParams,
-            "data width must be 128, 256, or 512")
-    unless [0, 12, 15].contains(mpam_width)
-    | error(~who: #'CHIFlitParams,
-            "MPAM width must be 0, 12, or 15")
-    def legal_rsvdc_widths = [0, 4, 8, 12, 16, 24, 32]
-    unless legal_rsvdc_widths.contains(req_rsvdc_width)
-    | error(~who: #'CHIFlitParams,
-            "REQ RSVDC width must be 0, 4, 8, 12, 16, 24, or 32")
-    unless legal_rsvdc_widths.contains(dat_rsvdc_width)
-    | error(~who: #'CHIFlitParams,
-            "DAT RSVDC width must be 0, 4, 8, 12, 16, 24, or 32")
-    unless [0, 4].contains(pbha_width)
-    | error(~who: #'CHIFlitParams,
-            "PBHA width must be 0 or 4")
-    unless [0, 16].contains(mecid_width)
-    | error(~who: #'CHIFlitParams,
-            "MECID width must be 0 or 16")
-    unless [0, 16].contains(stream_id_width)
-    | error(~who: #'CHIFlitParams,
-            "StreamID width must be 0 or 16")
-    unless [0, 1].contains(sec_sid_width)
-    | error(~who: #'CHIFlitParams,
-            "SecSID width must be 0 or 1")
-    unless (stream_id_width == 16 && sec_sid_width == 1) || (stream_id_width == 0 && sec_sid_width == 0)
-    | error(~who: #'CHIFlitParams,
-            "StreamID and SecSID1 must be present together")
-    super(node_id_width,
-          request_address_width,
-          data_width,
-          mpam_width,
-          req_rsvdc_width,
-          dat_rsvdc_width,
-          data_check,
-          poison,
-          pbha_width,
-          mecid_width,
-          stream_id_width,
-          sec_sid_width)
+import:
+  rhombus/meta open
+
+annot.macro 'CHINodeIDWidth':
+  'Int.in(7 ..= 16)'
+
+annot.macro 'CHIRequestAddressWidth':
+  'Int.in(44 ..= 52)'
+
+fun chi_data_width(value): [128, 256, 512].contains(value)
+annot.macro 'CHIDataWidth':
+  'Nat && satisfying(chi_data_width)'
+
+fun chi_mpam_width(value): [0, 12, 15].contains(value)
+annot.macro 'CHIMPAMWidth':
+  'Nat && satisfying(chi_mpam_width)'
+
+fun chi_reserved_width(value): [0, 4, 8, 12, 16, 24, 32].contains(value)
+annot.macro 'CHIReservedWidth':
+  'Nat && satisfying(chi_reserved_width)'
+
+fun chi_pbha_width(value): [0, 4].contains(value)
+annot.macro 'CHIPBHAWidth':
+  'Nat && satisfying(chi_pbha_width)'
+
+fun chi_mecid_width(value): [0, 16].contains(value)
+annot.macro 'CHIMECIDWidth':
+  'Nat && satisfying(chi_mecid_width)'
+
+fun chi_stream_id_width(value): [0, 16].contains(value)
+annot.macro 'CHIStreamIDWidth':
+  'Nat && satisfying(chi_stream_id_width)'
+
+fun chi_sec_sid_width(value, stream_id_width):
+  (stream_id_width == 0 && value == 0) || (stream_id_width == 16 && value == 1)
+
+annot.macro 'CHISecSIDWidth($stream_id_width)':
+  'Nat && satisfying(fun (value): chi_sec_sid_width(value, $stream_id_width))'
+
+class CHIFlitParams(~node_id_width: node_id_width :: CHINodeIDWidth = 7,
+                    ~request_address_width: request_address_width :: CHIRequestAddressWidth = 44,
+                    ~data_width: data_width :: CHIDataWidth = 128,
+                    ~mpam_width: mpam_width :: CHIMPAMWidth = 0,
+                    ~req_rsvdc_width: req_rsvdc_width :: CHIReservedWidth = 0,
+                    ~dat_rsvdc_width: dat_rsvdc_width :: CHIReservedWidth = 0,
+                    ~data_check: data_check :: Boolean = #false,
+                    ~poison: poison :: Boolean = #false,
+                    ~pbha_width: pbha_width :: CHIPBHAWidth = 0,
+                    ~mecid_width: mecid_width :: CHIMECIDWidth = 0,
+                    ~stream_id_width: stream_id_width :: CHIStreamIDWidth = 0,
+                    ~sec_sid_width: sec_sid_width :: CHISecSIDWidth(stream_id_width) = 0):
 
   property data_bytes: data_width / 8
   property byte_enable_width: data_width / 8
