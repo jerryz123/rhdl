@@ -68,6 +68,9 @@ The current implementation provides:
 - An opaque validated-routing artifact and deterministic host route-table rows.
 - Deterministic router-local input and output encodings projected from that
   validated artifact.
+- Deterministic whole-network plans assigning router indices, external
+  injection and ejection ports, and every physical VC's source-target and
+  destination-input indices without importing RHDL.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
@@ -118,6 +121,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/composition-three-way-
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/authored-diagnostics-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/router-plan-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/network-plan-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm

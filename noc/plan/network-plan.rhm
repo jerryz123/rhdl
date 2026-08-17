@@ -1,0 +1,157 @@
+#lang rhombus
+// Projects validated routing into deterministic router, external-port, and VC wiring assignments.
+
+import:
+  "../model/main.rhm" open
+  "validated-routing.rhm" open
+  "router-plan.rhm" open
+
+export:
+  NetworkInjectionPort
+  NetworkEjectionPort
+  NetworkVCConnection
+  NetworkPlan
+
+fun require_node_index(nodes, node):
+  def found = nodes.find_index(
+    fun (candidate): node_id_equal(candidate, node)
+  )
+  unless found != #false
+  | error(~who: #'NetworkPlan, "internal error: missing topology node")
+  found
+
+class NetworkInjectionPort(node :: NodeId,
+                           router_index :: Nat,
+                           input_index :: Nat):
+  opaque
+  internal _NetworkInjectionPort
+  constructor ~none
+
+  method describe():
+    String.append("inject ", node.describe(), " -> router[",
+                  to_string(router_index), "].input[",
+                  to_string(input_index), "]")
+
+class NetworkEjectionPort(node :: NodeId,
+                          router_index :: Nat,
+                          target_index :: Nat):
+  opaque
+  internal _NetworkEjectionPort
+  constructor ~none
+
+  method describe():
+    String.append("eject ", node.describe(), " <- router[",
+                  to_string(router_index), "].target[",
+                  to_string(target_index), "]")
+
+class NetworkVCConnection(vc :: VCId,
+                          source_router_index :: Nat,
+                          source_target_index :: Nat,
+                          destination_router_index :: Nat,
+                          destination_input_index :: Nat):
+  opaque
+  internal _NetworkVCConnection
+  constructor ~none
+
+  method describe():
+    String.append(vc.describe(), ": router[",
+                  to_string(source_router_index), "].target[",
+                  to_string(source_target_index), "] -> router[",
+                  to_string(destination_router_index), "].input[",
+                  to_string(destination_input_index), "]")
+
+class NetworkPlan(validated_routing :: ValidatedRouting,
+                  router_plans :: NonemptyList.of(RouterPlan),
+                  injection_ports :: List.of(NetworkInjectionPort),
+                  ejection_ports :: List.of(NetworkEjectionPort),
+                  vc_connections :: List.of(NetworkVCConnection)):
+  constructor (validated_routing :: ValidatedRouting):
+    def topology = validated_routing.topology
+    def router_plans:
+      for List (node in topology.nodes):
+        RouterPlan(validated_routing, node)
+
+    def mutable injection_ports = []
+    def mutable ejection_ports = []
+    for (router_plan in router_plans,
+         router_index in 0..router_plans.length()):
+      when router_plan.has_injection
+      | injection_ports := injection_ports ++ [
+          _NetworkInjectionPort(
+            router_plan.node,
+            router_index,
+            router_plan.origin_key(Injection(router_plan.node))
+          )
+        ]
+      when router_plan.has_ejection
+      | ejection_ports := ejection_ports ++ [
+          _NetworkEjectionPort(
+            router_plan.node,
+            router_index,
+            router_plan.output_vcs.length()
+          )
+        ]
+
+    def vc_connections:
+      for List (vc in topology.virtual_channels()):
+        def link = topology.find_vc_link(vc)
+        def source_router_index = require_node_index(
+          topology.nodes,
+          link.source
+        )
+        def destination_router_index = require_node_index(
+          topology.nodes,
+          link.destination
+        )
+        def source_router = router_plans[source_router_index]
+        def destination_router = router_plans[destination_router_index]
+        _NetworkVCConnection(
+          vc,
+          source_router_index,
+          source_router.output_bit(vc),
+          destination_router_index,
+          destination_router.origin_key(HeldVC(vc))
+        )
+
+    super(validated_routing,
+          router_plans,
+          injection_ports,
+          ejection_ports,
+          vc_connections)
+
+  method router_plan(node :: NodeId):
+    unless validated_routing.topology.contains_node(node)
+    | error(~who: #'NetworkPlan, "unknown network-plan node")
+    router_plans[require_node_index(validated_routing.topology.nodes, node)]
+
+  method injection_port(node :: NodeId):
+    def found = injection_ports.find(
+      fun (port): node_id_equal(port.node, node)
+    )
+    unless found
+    | error(~who: #'NetworkPlan,
+            "node does not have an external injection port")
+    found
+
+  method ejection_port(node :: NodeId):
+    def found = ejection_ports.find(
+      fun (port): node_id_equal(port.node, node)
+    )
+    unless found
+    | error(~who: #'NetworkPlan,
+            "node does not have an external ejection port")
+    found
+
+  method vc_connection(vc :: VCId):
+    def found = vc_connections.find(
+      fun (connection): vc_id_equal(connection.vc, vc)
+    )
+    unless found
+    | error(~who: #'NetworkPlan, "unknown network-plan VC")
+    found
+
+  method describe():
+    String.append("network plan: routers=", to_string(router_plans.length()),
+                  ", injections=", to_string(injection_ports.length()),
+                  ", ejections=", to_string(ejection_ports.length()),
+                  ", vcs=", to_string(vc_connections.length()))

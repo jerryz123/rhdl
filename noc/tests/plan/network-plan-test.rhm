@@ -1,0 +1,85 @@
+#lang rhombus
+// Checks deterministic whole-network port and VC wiring projected from validated routing.
+
+import:
+  "../../model/main.rhm" open
+  "../../plan/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def first = PhysicalLink(LinkId(0), n0, n1, 2)
+def second = PhysicalLink(LinkId(1), n1, n2, 2)
+def topology = Topology([n3, n2, n0, n1], [second, first])
+def transit_route = RouteClass(RouteClassId(0), n0, n2)
+def local_route = RouteClass(RouteClassId(1), n1, n1)
+
+fun on_link(vc, link):
+  link_id_equal(vc.link_id, link.id)
+
+fun allows(route_class, origin, candidate):
+  cond
+  | route_class === local_route: #false
+  | origin is_a Injection:
+      on_link(candidate, first)
+  | origin is_a HeldVC:
+      on_link(origin.vc, first) && on_link(candidate, second) && (
+        origin.vc.index == candidate.index
+      )
+  | ~else: #false
+
+def routing = compile_routing(
+  RoutingProblem(
+    topology,
+    [local_route, transit_route],
+    RoutingRelation(allows)
+  )
+)
+def network = NetworkPlan(routing)
+
+check:
+  network.validated_routing === routing ~is #true
+  network.router_plans.map(fun (router): router.node.describe()) ~is [
+    "n0", "n1", "n2", "n3"
+  ]
+  network.router_plans.map(fun (router): router.has_injection) ~is [
+    #true, #true, #false, #false
+  ]
+  network.router_plans.map(fun (router): router.has_ejection) ~is [
+    #false, #true, #true, #false
+  ]
+  network.describe() ~is "network plan: routers=4, injections=2, ejections=2, vcs=4"
+
+check:
+  network.injection_ports.map(fun (port): port.describe()) ~is [
+    "inject n0 -> router[0].input[0]",
+    "inject n1 -> router[1].input[0]"
+  ]
+  network.ejection_ports.map(fun (port): port.describe()) ~is [
+    "eject n1 <- router[1].target[2]",
+    "eject n2 <- router[2].target[0]"
+  ]
+  network.injection_port(n1) === network.injection_ports[1] ~is #true
+  network.ejection_port(n2) === network.ejection_ports[1] ~is #true
+
+check:
+  network.vc_connections.map(fun (connection): connection.describe()) ~is [
+    "l0.vc0: router[0].target[0] -> router[1].input[1]",
+    "l0.vc1: router[0].target[1] -> router[1].input[2]",
+    "l1.vc0: router[1].target[0] -> router[2].input[0]",
+    "l1.vc1: router[1].target[1] -> router[2].input[1]"
+  ]
+  network.vc_connection(VCId(first.id, 1)) === (
+    network.vc_connections[1]
+  ) ~is #true
+  network.router_plan(n2) === network.router_plans[2] ~is #true
+
+check:
+  NetworkPlan("not validated") ~throws "ValidatedRouting"
+  network.router_plan("n0") ~throws "NodeId"
+  network.router_plan(NodeId(99)) ~throws "unknown network-plan node"
+  network.injection_port(n2) ~throws "does not have an external injection port"
+  network.ejection_port(n0) ~throws "does not have an external ejection port"
+  network.vc_connection("vc") ~throws "VCId"
+  network.vc_connection(VCId(LinkId(99), 0)) ~throws "unknown network-plan VC"
