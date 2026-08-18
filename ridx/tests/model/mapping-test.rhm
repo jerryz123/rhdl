@@ -1,0 +1,94 @@
+#lang rhombus
+// Checks exact domain compatibility, validated mappings, inverse fibers, and partitions.
+
+import:
+  "../../model/main.rhm" open
+
+def source = IndexSpace([Axis("i", 4)], ~name: "source")
+def target = IndexSpace([Axis("part", 3)], ~name: "target")
+def even_sources = select_view(
+  source,
+  fun (point): point.coordinate("i") == 0 || point.coordinate("i") == 2,
+  ~name: "even_sources"
+)
+def same_even_sources = IndexView(
+  source,
+  [source.point([2]), source.point([0])],
+  ~name: "same_even_sources"
+)
+def all_sources = IndexView(source, source.points(), ~name: "all_sources")
+
+check:
+  index_domain_equal(even_sources, same_even_sources) ~is #true
+  index_domain_equal(source, all_sources) ~is #true
+  index_domain_equal(source,
+                     IndexSpace([Axis("i", 4)], ~name: "foreign")) ~is #false
+
+def partition = mapping_by(
+  source,
+  target,
+  fun (point):
+    if point.coordinate("i") < 2
+    | target.point([0])
+    | target.point([1])
+)
+def fibers = partition.fibers()
+
+check:
+  partition.get(source.point([0])).coordinates ~is [0]
+  partition.get(source.point([3])).coordinates ~is [1]
+  partition.inverse_view(target.point([0])).points.map(
+    fun (point): point.coordinates
+  ) ~is [[0], [1]]
+  partition.inverse_view(target.point([1])).points.map(
+    fun (point): point.coordinates
+  ) ~is [[2], [3]]
+  partition.inverse_view(target.point([2])).points ~is []
+  fibers.values().map(
+    fun (view): view.points.map(fun (point): point.coordinates)
+  ) ~is [[[0], [1]], [[2], [3]], []]
+
+def target_view = IndexView(
+  target,
+  [target.point([0]), target.point([1])],
+  ~name: "used_parts"
+)
+def partial_mapping = mapping_by(
+  even_sources,
+  target_view,
+  fun (point): target.point([point.coordinate("i") / 2])
+)
+
+check:
+  partial_mapping.assignments.length() ~is 2
+  partial_mapping.get(source.point([0])).coordinates ~is [0]
+  partial_mapping.get(source.point([2])).coordinates ~is [1]
+  partial_mapping.get(source.point([1])) ~throws "does not belong to even_sources"
+  partial_mapping.inverse_view(target.point([2])) ~throws "does not belong to target domain used_parts"
+
+def foreign_source = IndexSpace([Axis("i", 4)], ~name: "foreign_source")
+def foreign_target = IndexSpace([Axis("part", 3)], ~name: "foreign_target")
+
+check:
+  Mapping(source,
+          target,
+          index_by(foreign_source,
+                   fun (_point): target.point([0]))) ~throws "does not equal source domain source"
+  mapping_by(source,
+             target,
+             fun (_point): "not a point") ~throws "must be an IndexPoint"
+  mapping_by(source,
+             target,
+             fun (_point): foreign_target.point([0])) ~throws "does not belong to target domain target"
+  Mapping(source,
+          target,
+          Indexed(source,
+                  [IndexEntry(source.point([0]), target.point([0]))])) ~throws "missing indexed point source{i=1}"
+  Mapping(source,
+          target,
+          Indexed(source,
+                  [IndexEntry(source.point([0]), target.point([0])),
+                   IndexEntry(source.point([0]), target.point([1])),
+                   IndexEntry(source.point([1]), target.point([0])),
+                   IndexEntry(source.point([2]), target.point([1])),
+                   IndexEntry(source.point([3]), target.point([1]))])) ~throws "duplicate indexed point source{i=0}"

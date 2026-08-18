@@ -4,10 +4,11 @@
 
 ## Status
 
-Milestone 1 is implemented. Ridx now provides dependency-neutral Rhombus axes,
-nominal finite product spaces and points, canonical subset views, and total
-indexed host values, with focused valid and invalid tests. Symbolic relations,
-mappings, materialization, incidence, and the RHDL experiment remain planned.
+Milestones 1 and 2 are implemented. Ridx now provides dependency-neutral
+Rhombus finite domains, total indexed values, validated mappings and inverse
+fibers, inspectable symbolic relations, and immutable canonical relation
+materialization with exactly-once opaque queries. Incidence, the two consumer
+experiments, and the RHDL adapter remain planned.
 
 RHDL will be one consumer; Ridx is not an RHDL frontend layer, a hardware IR,
 or an automatic hardware scheduler.
@@ -340,7 +341,7 @@ following:
 - Establish canonical enumeration, membership, provenance, and diagnostics.
 - Add focused valid and invalid tests.
 
-### Milestone 2: symbolic relations and mappings
+### Milestone 2: symbolic relations and mappings — implemented
 
 - Implement the initial symbolic relation constructors and algebra.
 - Add opaque finite predicates and immutable exactly-once materialization.

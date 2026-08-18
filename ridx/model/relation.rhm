@@ -1,0 +1,264 @@
+#lang rhombus
+// Defines inspectable symbolic finite relations and their validated algebra.
+
+import:
+  "../../host/annotations.rhm" open
+  "space.rhm" open
+  "view.rhm" open
+
+export:
+  Relation
+  IdentityRelation
+  UniversalRelation
+  ShiftRelation
+  PermutationRelation
+  DomainRestrictionRelation
+  RangeRestrictionRelation
+  ConverseRelation
+  UnionRelation
+  IntersectionRelation
+  CompositionRelation
+  OpaquePredicateRelation
+  identity_relation
+  universal_relation
+  shift_relation
+  permute_axes
+  restrict_domain
+  restrict_range
+  converse
+  relation_union
+  relation_intersection
+  compose_relations
+  opaque_relation
+
+interface Relation:
+  method source_domain()
+  method target_domain()
+  method describe()
+
+fun require_same_domain(who, subject, left, right):
+  unless index_domain_equal(left, right)
+  | error(~who: who,
+          String.append(subject, " requires equal domains, received ",
+                        index_domain_describe(left), " and ",
+                        index_domain_describe(right)))
+
+fun require_subdomain(who, subject, view :: IndexView, domain):
+  def same_space = index_domain_space(domain) === view.space
+  def foreign_point = view.points.find(
+    fun (point): !index_domain_contains(domain, point)
+  )
+  unless same_space && foreign_point == #false
+  | error(~who: who,
+          String.append(subject, " ", view.describe(),
+                        " is not a subdomain of ",
+                        index_domain_describe(domain)))
+
+class IdentityRelation(domain):
+  implements Relation
+
+  constructor (domain):
+    index_domain_points(domain)
+    super(domain)
+
+  override method source_domain(): domain
+  override method target_domain(): domain
+  override method describe():
+    "identity(" ++ index_domain_describe(domain) ++ ")"
+
+class UniversalRelation(source, target):
+  implements Relation
+
+  constructor (source, target):
+    index_domain_points(source)
+    index_domain_points(target)
+    super(source, target)
+
+  override method source_domain(): source
+  override method target_domain(): target
+  override method describe():
+    String.append("universal(", index_domain_describe(source), " -> ",
+                  index_domain_describe(target), ")")
+
+class ShiftRelation(space :: IndexSpace,
+                    axis_name :: AsciiIdentifier,
+                    delta :: Int,
+                    boundary :: String):
+  implements Relation
+
+  constructor (space :: IndexSpace,
+               axis_name :: AsciiIdentifier,
+               delta :: Int,
+               boundary :: String):
+    space.axis(axis_name)
+    unless boundary == "drop" || boundary == "wrap"
+    | error(~who: #'ShiftRelation,
+            "boundary must be \"drop\" or \"wrap\"")
+    super(space, axis_name, delta, boundary)
+
+  override method source_domain(): space
+  override method target_domain(): space
+  override method describe():
+    String.append("shift(", space.describe(), ", ", axis_name, ", ",
+                  to_string(delta), ", ", boundary, ")")
+
+fun duplicate_name(names, name):
+  names.filter(~keep: fun (candidate): candidate == name).length() > 1
+
+class PermutationRelation(source :: IndexSpace,
+                          target :: IndexSpace,
+                          target_axis_sources :: List.of(AsciiIdentifier)):
+  implements Relation
+
+  constructor (source :: IndexSpace,
+               target :: IndexSpace,
+               target_axis_sources :: List.of(AsciiIdentifier)):
+    def ranks_match = source.rank() == target.rank() && target_axis_sources.length() == target.rank()
+    unless ranks_match
+    | error(~who: #'PermutationRelation,
+            "axis permutation requires equal ranks and one source axis per target axis")
+    for (source_name in target_axis_sources):
+      when duplicate_name(target_axis_sources, source_name)
+      | error(~who: #'PermutationRelation,
+              "axis permutation repeats source axis " ++ source_name)
+      source.axis(source_name)
+    for (target_axis in target.axes,
+         source_name in target_axis_sources):
+      def source_axis = source.axis(source_name)
+      unless target_axis.extent == source_axis.extent
+      | error(~who: #'PermutationRelation,
+              String.append("target axis ", target_axis.describe(),
+                            " does not match source axis ",
+                            source_axis.describe()))
+    super(source, target, target_axis_sources)
+
+  override method source_domain(): source
+  override method target_domain(): target
+  override method describe():
+    String.append("permute(", source.describe(), " -> ", target.describe(),
+                  ": ", String.join(target_axis_sources, ","), ")")
+
+class DomainRestrictionRelation(relation :: Relation, view :: IndexView):
+  implements Relation
+
+  constructor (relation :: Relation, view :: IndexView):
+    require_subdomain(#'DomainRestrictionRelation,
+                      "domain restriction", view,
+                      relation.source_domain())
+    super(relation, view)
+
+  override method source_domain(): view
+  override method target_domain(): relation.target_domain()
+  override method describe():
+    String.append("restrict-domain(", relation.describe(), ", ",
+                  view.describe(), ")")
+
+class RangeRestrictionRelation(relation :: Relation, view :: IndexView):
+  implements Relation
+
+  constructor (relation :: Relation, view :: IndexView):
+    require_subdomain(#'RangeRestrictionRelation,
+                      "range restriction", view,
+                      relation.target_domain())
+    super(relation, view)
+
+  override method source_domain(): relation.source_domain()
+  override method target_domain(): view
+  override method describe():
+    String.append("restrict-range(", relation.describe(), ", ",
+                  view.describe(), ")")
+
+class ConverseRelation(relation :: Relation):
+  implements Relation
+
+  override method source_domain(): relation.target_domain()
+  override method target_domain(): relation.source_domain()
+  override method describe():
+    "converse(" ++ relation.describe() ++ ")"
+
+fun relation_less(left :: Relation, right :: Relation):
+  left.describe() < right.describe()
+
+class UnionRelation(operands :: List.of(Relation)):
+  implements Relation
+
+  constructor (left :: Relation, right :: Relation):
+    require_same_domain(#'UnionRelation, "relation union source",
+                        left.source_domain(), right.source_domain())
+    require_same_domain(#'UnionRelation, "relation union target",
+                        left.target_domain(), right.target_domain())
+    super([left, right].sort(relation_less))
+
+  override method source_domain(): operands[0].source_domain()
+  override method target_domain(): operands[0].target_domain()
+  override method describe():
+    "union(" ++ String.join(
+      operands.map(fun (operand): operand.describe()), ", "
+    ) ++ ")"
+
+class IntersectionRelation(operands :: List.of(Relation)):
+  implements Relation
+
+  constructor (left :: Relation, right :: Relation):
+    require_same_domain(#'IntersectionRelation, "relation intersection source",
+                        left.source_domain(), right.source_domain())
+    require_same_domain(#'IntersectionRelation, "relation intersection target",
+                        left.target_domain(), right.target_domain())
+    super([left, right].sort(relation_less))
+
+  override method source_domain(): operands[0].source_domain()
+  override method target_domain(): operands[0].target_domain()
+  override method describe():
+    "intersection(" ++ String.join(
+      operands.map(fun (operand): operand.describe()), ", "
+    ) ++ ")"
+
+class CompositionRelation(first :: Relation, second :: Relation):
+  implements Relation
+
+  constructor (first :: Relation, second :: Relation):
+    require_same_domain(#'CompositionRelation,
+                        "relation composition intermediate",
+                        first.target_domain(), second.source_domain())
+    super(first, second)
+
+  override method source_domain(): first.source_domain()
+  override method target_domain(): second.target_domain()
+  override method describe():
+    "compose(" ++ first.describe() ++ ", " ++ second.describe() ++ ")"
+
+class OpaquePredicateRelation(source,
+                              target,
+                              label :: NonemptyString,
+                              predicate :: Function.of_arity(2)):
+  implements Relation
+
+  constructor (source,
+               target,
+               label :: NonemptyString,
+               predicate :: Function.of_arity(2)):
+    index_domain_points(source)
+    index_domain_points(target)
+    super(source, target, label, predicate)
+
+  override method source_domain(): source
+  override method target_domain(): target
+  override method describe():
+    String.append("opaque(", label, ": ",
+                  index_domain_describe(source), " -> ",
+                  index_domain_describe(target), ")")
+
+fun identity_relation(domain): IdentityRelation(domain)
+fun universal_relation(source, target): UniversalRelation(source, target)
+fun shift_relation(space, axis_name, delta, ~boundary: boundary = "drop"):
+  ShiftRelation(space, axis_name, delta, boundary)
+fun permute_axes(source, target, target_axis_sources):
+  PermutationRelation(source, target, target_axis_sources)
+fun restrict_domain(relation, view): DomainRestrictionRelation(relation, view)
+fun restrict_range(relation, view): RangeRestrictionRelation(relation, view)
+fun converse(relation): ConverseRelation(relation)
+fun relation_union(left, right): UnionRelation(left, right)
+fun relation_intersection(left, right): IntersectionRelation(left, right)
+fun compose_relations(first, second): CompositionRelation(first, second)
+fun opaque_relation(source, target, label, predicate):
+  OpaquePredicateRelation(source, target, label, predicate)
