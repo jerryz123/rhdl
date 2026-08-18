@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-std examples-noc examples-lop examples-golf examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-golf examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -22,6 +22,7 @@ RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ri
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
 RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
 RHDL_EXAMPLES := $(sort $(shell find examples/rhdl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+CLOCKING_EXAMPLES := $(sort $(shell find examples/clocking -type f -name '*.rhm'))
 STD_EXAMPLES := $(sort $(shell find examples/std -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 NOC_EXAMPLES := $(sort $(shell find examples/noc -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 LOP_EXAMPLES := $(sort $(shell find examples/lop -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -181,6 +182,10 @@ examples: check-example-verilog
 examples-rhdl:
 	bash tools/check-example-verilog.sh examples/rhdl
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RHDL_EXAMPLES)
+
+examples-clocking:
+	bash tools/check-example-verilog.sh examples/clocking
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CLOCKING_EXAMPLES)
 
 examples-std:
 	bash tools/check-example-verilog.sh examples/std

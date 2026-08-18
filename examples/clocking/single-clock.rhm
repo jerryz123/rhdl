@@ -1,0 +1,50 @@
+#lang rhombus
+// Shows one top-level timing contract certifying data sampled throughout a sync_circuit.
+
+import:
+  lib("rhdl/core/main.rhm") open
+  lib("rhdl/analysis/clocking.rhm") open
+  "../rhdl/reset-shift-register.rhdl" as shift_register
+
+fun local_sink(summary, name):
+  summary.sinks.find(
+    fun (sink): sink.instance_path.length() == 0 && sink.operation.attribute("name", #false) == name
+  )
+
+fun next_classification(sink):
+  sink.inputs.find(fun (input): input.name == "next").classification
+
+def system = shift_register.design
+def top = system.modules.find(
+  fun (module_def): module_def.name == "ResetShiftRegister"
+)
+def clock = top.find_input("clock").value
+def data_in = top.find_input("data_in").value
+def shift = top.find_input("shift").value
+
+// The sync_circuit has already certified that its registers use `clock`, so
+// the environment describes each external data input only once at the top.
+def environment = TemporalEnvironment(
+  [TopInputContract(data_in, [], SynchronousInputTiming(clock)),
+   TopInputContract(shift, [], SynchronousInputTiming(clock))]
+)
+def summary = summarize_design_temporal(
+  DesignElaboration(system, top),
+  environment
+)
+def report = dump_design_temporal_report(summary)
+
+check:
+  next_classification(local_sink(summary, "r0")) is_a SameClock ~is #true
+  next_classification(local_sink(summary, "r1")) is_a SameClock ~is #true
+  report.contains("input data_in: synchronous %clock") ~is #true
+  report.contains("input shift: synchronous %clock") ~is #true
+  // Reset timing remains unknown until the later RDC environment slice.
+  report.contains("reset: unknown_input <- input reset") ~is #true
+
+print(report ++ "\n")
+
+export:
+  environment
+  summary
+  report

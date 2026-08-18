@@ -35,6 +35,7 @@ make check-boundaries       # package, dependency, and file-type rules
 make analysis-test          # optional analyses over completed core IR
 make examples               # all canonical example modules
 make examples-rhdl          # built-in language examples only
+make examples-clocking      # optional clocking-analysis examples only
 make examples-std           # standard-library examples only
 make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only

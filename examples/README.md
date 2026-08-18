@@ -12,6 +12,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | Directory | Contents |
 |---|---|
 | [`rhdl/`](rhdl/) | Built-in `#lang rhdl` syntax, elaboration, and hardware semantics |
+| [`clocking/`](clocking/) | Backend-independent clock-use and temporal-provenance analysis over completed RHDL IR |
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
@@ -63,6 +64,29 @@ The aggregate equivalence examples make the same boundary executable:
 
 The [frontend guide](../rhdl/frontend/README.md) explains the profiles, and
 the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
+
+## Clocking-analysis examples
+
+The examples under [`clocking/`](clocking/) import the optional
+`rhdl/analysis/clocking.rhm` API explicitly; these report objects and
+environment contracts are not part of core IR and do not change generated
+hardware.
+
+- [`clocking/single-clock.rhm`](clocking/single-clock.rhm) applies one set of
+  top-level synchronous input contracts to an existing `sync_circuit` shift
+  register and shows that its certified subtree samples those inputs on the
+  same clock. Reset timing remains explicitly unknown until the planned RDC
+  environment work.
+- [`clocking/relationships.rhm`](clocking/relationships.rhm) compares exact,
+  declared-identical, derived, asynchronous, and unknown clock relationships.
+- [`clocking/hierarchy.rhm`](clocking/hierarchy.rhm) reuses one child module at
+  two clock bindings and obtains a separate classification for each instance.
+
+Run only these analysis examples with:
+
+```sh
+make examples-clocking
+```
 
 ## Golf examples
 

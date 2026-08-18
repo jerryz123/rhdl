@@ -1,0 +1,59 @@
+#lang rhombus
+// Shows one reusable child receiving distinct temporal classifications at two instances.
+
+import:
+  lib("rhdl/core/main.rhm") open
+  lib("rhdl/analysis/clocking.rhm") open
+
+fun nested_next_classification(summary, instance_name):
+  def sink = summary.sinks.find(
+    fun (candidate):
+      candidate.instance_path.length() == 1 && candidate.instance_path[0].attribute("name") == instance_name && candidate.operation.attribute("name", #false) == "state"
+  )
+  sink.inputs.find(fun (input): input.name == "next").classification
+
+def system = Design()
+def builder = Builder(system)
+
+def child = builder.module("SampleChild")
+def child_clock = builder.input(child, "clock", Clock)
+def child_data = builder.input(child, "data", Bits(8))
+def child_state = builder.register(child, "state", Bits(8), child_clock)
+builder.drive(child_state.next, child_data)
+def finished_child = builder.finish(child)
+
+def top = builder.module("ClockedHierarchy")
+def clock_a = builder.input(top, "clock_a", Clock)
+def clock_b = builder.input(top, "clock_b", Clock)
+def data = builder.input(top, "data", Bits(8))
+def first = builder.instance(top, child, "first")
+builder.drive(first.input("clock"), clock_a)
+builder.drive(first.input("data"), data)
+def second = builder.instance(top, child, "second")
+builder.drive(second.input("clock"), clock_b)
+builder.drive(second.input("data"), data)
+def finished_top = builder.finish(top)
+def verified_system = verify_design(system)
+
+def environment = TemporalEnvironment(
+  [TopInputContract(data, [], SynchronousInputTiming(clock_a))],
+  [AsynchronousClockRelationship(clock_a, clock_b)]
+)
+def summary = summarize_design_temporal(
+  DesignElaboration(system, top),
+  environment
+)
+def report = dump_design_temporal_report(summary)
+
+check:
+  nested_next_classification(summary, "first") is_a SameClock ~is #true
+  nested_next_classification(summary, "second") is_a AsynchronousClock ~is #true
+  report.contains("sink first.state") ~is #true
+  report.contains("sink second.state") ~is #true
+
+print(report ++ "\n")
+
+export:
+  environment
+  summary
+  report

@@ -1,0 +1,70 @@
+#lang rhombus
+// Compares exact, identical, derived, asynchronous, and unknown clock relationships.
+
+import:
+  lib("rhdl/core/main.rhm") open
+  lib("rhdl/analysis/clocking.rhm") open
+
+fun next_classification(summary, name):
+  def sink = summary.sinks.find(
+    fun (candidate): candidate.instance_path.length() == 0 && candidate.operation.attribute("name", #false) == name
+  )
+  sink.inputs.find(fun (input): input.name == "next").classification
+
+def system = Design()
+def builder = Builder(system)
+def top = builder.module("ClockRelationships")
+def destination_clock = builder.input(top, "destination_clock", Clock)
+def identical_clock = builder.input(top, "identical_clock", Clock)
+def derived_clock = builder.input(top, "derived_clock", Clock)
+def asynchronous_clock = builder.input(top, "asynchronous_clock", Clock)
+def unknown_clock = builder.input(top, "unknown_clock", Clock)
+def exact_data = builder.input(top, "exact_data", Bits(8))
+def identical_data = builder.input(top, "identical_data", Bits(8))
+def derived_data = builder.input(top, "derived_data", Bits(8))
+def asynchronous_data = builder.input(top, "asynchronous_data", Bits(8))
+def unknown_data = builder.input(top, "unknown_data", Bits(8))
+def exact_sink = builder.register(top, "exact_sink", Bits(8), destination_clock)
+def identical_sink = builder.register(top, "identical_sink", Bits(8), destination_clock)
+def derived_sink = builder.register(top, "derived_sink", Bits(8), destination_clock)
+def asynchronous_sink = builder.register(top, "asynchronous_sink", Bits(8), destination_clock)
+def unknown_sink = builder.register(top, "unknown_sink", Bits(8), destination_clock)
+builder.drive(exact_sink.next, exact_data)
+builder.drive(identical_sink.next, identical_data)
+builder.drive(derived_sink.next, derived_data)
+builder.drive(asynchronous_sink.next, asynchronous_data)
+builder.drive(unknown_sink.next, unknown_data)
+def finished_top = builder.finish(top)
+def verified_system = verify_design(system)
+
+def environment = TemporalEnvironment(
+  [TopInputContract(exact_data, [], SynchronousInputTiming(destination_clock)),
+   TopInputContract(identical_data, [], SynchronousInputTiming(identical_clock)),
+   TopInputContract(derived_data, [], SynchronousInputTiming(derived_clock)),
+   TopInputContract(asynchronous_data, [], SynchronousInputTiming(asynchronous_clock)),
+   TopInputContract(unknown_data, [], SynchronousInputTiming(unknown_clock))],
+  [IdenticalClockRelationship(destination_clock, identical_clock),
+   DerivedClockRelationship(derived_clock,
+                            destination_clock,
+                            "source clock is frequency-related"),
+   AsynchronousClockRelationship(destination_clock, asynchronous_clock)]
+)
+def summary = summarize_design_temporal(
+  DesignElaboration(system, top),
+  environment
+)
+def report = dump_design_temporal_report(summary)
+
+check:
+  next_classification(summary, "exact_sink") is_a SameClock ~is #true
+  next_classification(summary, "identical_sink") is_a IdenticalClock ~is #true
+  next_classification(summary, "derived_sink") is_a DerivedClock ~is #true
+  next_classification(summary, "asynchronous_sink") is_a AsynchronousClock ~is #true
+  next_classification(summary, "unknown_sink") is_a UnknownClockRelationship ~is #true
+
+print(report ++ "\n")
+
+export:
+  environment
+  summary
+  report

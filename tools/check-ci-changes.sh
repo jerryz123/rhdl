@@ -81,6 +81,7 @@ check_matrix_entry cores/ricket/core.rhdl host_matrix ci-host-cores-test
 check_matrix_entry cores/ricket/core.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry examples/rhdl/alu.rhdl example_matrix examples-rhdl
 check_matrix_entry examples/rhdl/alu.rhdl circt_matrix ci-circt-language-test
+check_matrix_entry examples/clocking/single-clock.rhm example_matrix examples-clocking
 check_matrix_entry examples/std/flow-control.rhdl example_matrix examples-std
 check_matrix_entry examples/noc/noc-router.rhdl example_matrix examples-noc
 check_matrix_entry examples/noc/noc-router.rhdl circt_matrix ci-circt-protocols-test

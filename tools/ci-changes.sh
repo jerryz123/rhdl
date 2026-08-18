@@ -16,6 +16,7 @@ circt_rfpl=false
 fesvr=false
 examples=false
 example_rhdl=false
+example_clocking=false
 example_std=false
 example_noc=false
 example_lop=false
@@ -40,6 +41,7 @@ mark_all_circt() {
 }
 
 mark_example_rhdl() { examples=true; example_rhdl=true; }
+mark_example_clocking() { examples=true; example_clocking=true; }
 mark_example_std() { examples=true; example_std=true; }
 mark_example_noc() { examples=true; example_noc=true; }
 mark_example_lop() { examples=true; example_lop=true; }
@@ -48,6 +50,7 @@ mark_example_tilelink() { examples=true; example_tilelink=true; }
 
 mark_all_examples() {
   mark_example_rhdl
+  mark_example_clocking
   mark_example_std
   mark_example_noc
   mark_example_lop
@@ -124,6 +127,7 @@ emit_jobs() {
   fi
 
   [[ "$example_rhdl" == true ]] && append_matrix_entry example_matrix '{"name":"RHDL","target":"examples-rhdl"}'
+  [[ "$example_clocking" == true ]] && append_matrix_entry example_matrix '{"name":"clocking analysis","target":"examples-clocking"}'
   [[ "$example_std" == true ]] && append_matrix_entry example_matrix '{"name":"standard library","target":"examples-std"}'
   [[ "$example_noc" == true ]] && append_matrix_entry example_matrix '{"name":"NoC","target":"examples-noc"}'
   [[ "$example_lop" == true ]] && append_matrix_entry example_matrix '{"name":"language-oriented programming","target":"examples-lop"}'
@@ -195,6 +199,9 @@ classify_path() {
     examples/rhdl/*)
       mark_example_rhdl
       circt_language=true
+      ;;
+    examples/clocking/*)
+      mark_example_clocking
       ;;
     examples/std/*)
       mark_example_std
