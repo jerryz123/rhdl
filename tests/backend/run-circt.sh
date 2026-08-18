@@ -86,6 +86,7 @@ esac
 # always selects an explicit fixture, including fixtures outside this set.
 integration_fixtures=(
   alu enum-state shifts signed-integers generated-adder
+  formal-differential
   vector-update vec-shift-register-param
   async-read-memory sync-memory-masked simple-memory-ram sync-ram
   clocked-dpi assertions hierarchy bundle interface-array
@@ -174,7 +175,7 @@ fixture_in_group() {
   done
 
   case "$group:$wanted" in
-    language:nested-bundle|language:aggregate-memory|language:one-hot-aggregate|language:priority-encoder)
+    language:nested-bundle|language:aggregate-memory|language:one-hot-aggregate|language:priority-encoder|language:formal-differential)
       return 0
       ;;
     std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
@@ -378,6 +379,7 @@ verify_fixture() {
   )
   local object_dir="$test_tmp_dir/${fixture}_obj"
   local build_log="$test_tmp_dir/$fixture.verilator.log"
+  local -a run_args=()
 
   direct_fixture_selected "$fixture" "$top" || return 0
 
@@ -401,6 +403,19 @@ verify_fixture() {
   "$circt_opt" "${circt_args[@]}" "$mlir" -o /dev/null > "$verilog"
 
   if [[ "$simulate_fixtures" == true && -n "$top" ]]; then
+    if [[ "$fixture" == formal-differential && -n "${FORMAL_REPLAY_FILE:-}" ]]; then
+      if [[ ! -f "$FORMAL_REPLAY_FILE" ]]; then
+        echo "formal replay model file does not exist: $FORMAL_REPLAY_FILE" >&2
+        return 1
+      fi
+      while IFS= read -r model_assignment; do
+        if [[ ! "$model_assignment" =~ ^[A-Z_]+=[0-9]+$ ]]; then
+          echo "invalid formal replay assignment: $model_assignment" >&2
+          return 1
+        fi
+        run_args+=("+$model_assignment")
+      done < "$FORMAL_REPLAY_FILE"
+    fi
     if ! verilator --binary --timing --assert --build-jobs 0 --top-module "$top" \
         --Mdir "$object_dir" \
         "$verilog" "tests/backend/verilog/${fixture}_tb.sv" \
@@ -408,7 +423,11 @@ verify_fixture() {
       cat "$build_log" >&2
       return 1
     fi
-    "$object_dir/V$top"
+    if (( ${#run_args[@]} > 0 )); then
+      "$object_dir/V$top" "${run_args[@]}"
+    else
+      "$object_dir/V$top"
+    fi
   fi
 }
 
@@ -552,6 +571,7 @@ direct_fixture_specs=(
   'aggregate-memory|'
   'one-hot-aggregate|'
   'noc-wormhole|noc_wormhole_tb'
+  'formal-differential|formal_differential_tb'
   'priority-encoder|priority_encoder_tb'
   'rv32i-alu|rv32i_alu_tb'
   'rv64i-alu|rv64i_alu_tb'

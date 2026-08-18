@@ -753,8 +753,10 @@ Milestone 1a is complete only when all of the following are true:
   design, and one hierarchical design prove equivalent.
 - [x] At least one defect in each of those categories produces a
   counterexample.
-- [ ] `make formal-test`, focused differential checks, `git diff --check`, and
-  `make check-boundaries` pass from a clean checkout.
+- [x] `make formal-test`, focused differential checks, `git diff --check`, and
+  `make check-boundaries` pass in the validated development environment.
+- [x] A clean checkout can install the pinned Rosette dependencies and
+  reproduce both formal targets without a linked package workaround.
 - [x] Ordinary RHDL elaboration and host tests do not load or require Rosette.
 
 After this checklist is satisfied, milestone 1b may add deterministic fully

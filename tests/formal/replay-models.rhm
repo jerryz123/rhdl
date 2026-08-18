@@ -1,0 +1,65 @@
+#lang rhombus
+// Proves differential identities and prints replayable Rosette counterexample vectors.
+
+import:
+  "../../rhdl/formal/main.rhm" open
+  "differential-fixture.rhm" as fixture
+
+fun require_equivalent(label, left, right):
+  def result = check_equivalent(left, right)
+  unless result.equivalent()
+  | error(~who: #'replay_models, label ++ " did not prove equivalent: " ++ result.describe())
+
+fun require_counterexample(label, left, right):
+  def result = check_equivalent(left, right)
+  unless result.counterexample()
+  | error(~who: #'replay_models,
+          label ++ " did not produce a counterexample: " ++ result.describe())
+  result
+
+fun assignment(result, port):
+  def found = result.assignments.find(fun (candidate): candidate.port == port)
+  unless found
+  | error(~who: #'replay_models, "counterexample omitted input " ++ port)
+  found.packed_value
+
+fun difference(result, port):
+  def found = result.differences.find(fun (candidate): candidate.port == port)
+  unless found
+  | error(~who: #'replay_models, "counterexample omitted differing output " ++ port)
+  found
+
+fun emit(name, value):
+  print(name ++ "=" ++ to_string(value) ++ "\n")
+
+require_equivalent("unequal-width shift", fixture.shift_reference, fixture.shift_candidate)
+require_equivalent("aggregate layout", fixture.aggregate_reference, fixture.aggregate_candidate)
+require_equivalent("hierarchy", fixture.hierarchy_reference, fixture.hierarchy_candidate)
+
+def shift_result:
+  require_counterexample("shift defect", fixture.shift_reference, fixture.shift_defect)
+def shift_difference = difference(shift_result, "left")
+emit("SHIFT_VALUE", assignment(shift_result, "value"))
+emit("SHIFT_AMOUNT", assignment(shift_result, "amount"))
+emit("SHIFT_REFERENCE", shift_difference.left_value)
+emit("SHIFT_DEFECT", shift_difference.right_value)
+
+def aggregate_result:
+  require_counterexample("aggregate defect",
+                         fixture.aggregate_reference,
+                         fixture.aggregate_defect)
+def aggregate_difference = difference(aggregate_result, "record_bits")
+emit("RECORD_HIGH", assignment(aggregate_result, "high"))
+emit("RECORD_LOW", assignment(aggregate_result, "low"))
+emit("RECORD_REFERENCE", aggregate_difference.left_value)
+emit("RECORD_DEFECT", aggregate_difference.right_value)
+
+def hierarchy_result:
+  require_counterexample("hierarchy defect",
+                         fixture.hierarchy_reference,
+                         fixture.hierarchy_defect)
+def hierarchy_difference = difference(hierarchy_result, "difference")
+emit("PAIR_LEFT", assignment(hierarchy_result, "left"))
+emit("PAIR_RIGHT", assignment(hierarchy_result, "right"))
+emit("PAIR_REFERENCE", hierarchy_difference.left_value)
+emit("PAIR_DEFECT", hierarchy_difference.right_value)

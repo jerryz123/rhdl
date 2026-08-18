@@ -52,6 +52,7 @@ make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering; decode tests require Espresso
 make formal-test            # Rosette combinational equivalence and counterexample checks
+make formal-differential-test # replay Rosette models through CIRCT and Verilator
 make rfpl-test              # structural RFPL semantics and invalid uses
 make rfpl-circt-test        # RFPL CIRCT and example-owned Verilog golden
 make unit-test              # frontend plus backend Rhombus tests

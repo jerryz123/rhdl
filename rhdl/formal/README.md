@@ -20,10 +20,11 @@ raco pkg install --auto rosette
 The milestone-1 implementation is validated with Racket 9.2, Rosette 4.0,
 and Rosette's pinned Z3 4.8.8 binary. Rosette declares Racket 8.1 or newer;
 other compatible Racket releases have not yet been exercised by this target.
-During the implementation spike, a clean catalog install could not resolve
-Rosette's transitive `rfc6455` source at `git.leastfixedpoint.com`; the tests
-therefore used an isolated linked Rosette 4.0 checkout. This is still a clean
-setup/CI packaging blocker, and the repository does not vendor the dependency.
+A clean catalog installation was validated from an empty `PLTUSERHOME` with
+Rosette checksum `373c8c35e4a7667f38fce10cf0b74ae17de07f1d` and its transitive
+`rfc6455` checksum `e3a87e914e25841a6e1bb996aa001aeb178284bf`. The earlier
+`rfc6455` resolution failure was caused by a restricted test environment, not
+an unavailable package source; the repository does not vendor either package.
 
 Confirm that Rosette and its solver are usable:
 
@@ -37,6 +38,22 @@ formal suite with:
 ```sh
 make formal-test
 ```
+
+Run the independent backend differential check when CIRCT and Verilator are
+available:
+
+```sh
+make formal-differential-test
+```
+
+That target proves structurally different shift, aggregate, and hierarchical
+implementations equivalent, obtains live counterexamples for defects in each
+category, and passes those exact packed inputs and outputs to a shared
+CIRCT-generated Verilator DUT. The testbench also exhaustively checks all 128
+reduced-width unequal-shift inputs, 80 aggregate layouts and projections, and
+256 hierarchical arithmetic inputs against independent SystemVerilog oracles.
+Set `CIRCT_OPT=/path/to/circt-opt` when the pinned tool is not installed under
+the current checkout's `.tools/` directory.
 
 ## Milestone 1 API
 

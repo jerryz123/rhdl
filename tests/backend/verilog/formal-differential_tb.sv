@@ -1,0 +1,181 @@
+// Exhaustively checks reduced-width formal semantics and replays solver counterexamples.
+module formal_differential_tb;
+  logic [2:0] shift_value;
+  logic [3:0] shift_amount;
+  logic [1:0] high;
+  logic [1:0] low;
+  logic [1:0] element0;
+  logic [1:0] element1;
+  logic [1:0] element2;
+  logic [3:0] pair_left;
+  logic [3:0] pair_right;
+  logic [2:0] shift_left;
+  logic [2:0] shift_right;
+  logic [2:0] shift_defect;
+  logic [3:0] record_bits;
+  logic [1:0] record_high;
+  logic [5:0] vector_bits;
+  logic [1:0] vector_one;
+  logic [3:0] record_defect;
+  logic [3:0] pair_sum;
+  logic [3:0] pair_difference;
+  logic [3:0] pair_defect;
+
+  integer model_shift_value = 1;
+  integer model_shift_amount = 1;
+  integer model_shift_reference = 2;
+  integer model_shift_defect = 0;
+  integer model_record_high = 1;
+  integer model_record_low = 2;
+  integer model_record_reference = 6;
+  integer model_record_defect = 9;
+  integer model_pair_left = 1;
+  integer model_pair_right = 2;
+  integer model_pair_reference = 15;
+  integer model_pair_defect = 1;
+  integer expected_shift_left;
+  integer expected_shift_right;
+  integer expected_pair_sum;
+  integer expected_pair_difference;
+
+  FormalDifferentialDut dut (
+    .shift_value(shift_value),
+    .shift_amount(shift_amount),
+    .high(high),
+    .low(low),
+    .element0(element0),
+    .element1(element1),
+    .element2(element2),
+    .pair_left(pair_left),
+    .pair_right(pair_right),
+    .shift_left(shift_left),
+    .shift_right(shift_right),
+    .shift_defect(shift_defect),
+    .record_bits(record_bits),
+    .record_high(record_high),
+    .vector_bits(vector_bits),
+    .vector_one(vector_one),
+    .record_defect(record_defect),
+    .pair_sum(pair_sum),
+    .pair_difference(pair_difference),
+    .pair_defect(pair_defect)
+  );
+
+  initial begin
+    void'($value$plusargs("SHIFT_VALUE=%d", model_shift_value));
+    void'($value$plusargs("SHIFT_AMOUNT=%d", model_shift_amount));
+    void'($value$plusargs("SHIFT_REFERENCE=%d", model_shift_reference));
+    void'($value$plusargs("SHIFT_DEFECT=%d", model_shift_defect));
+    void'($value$plusargs("RECORD_HIGH=%d", model_record_high));
+    void'($value$plusargs("RECORD_LOW=%d", model_record_low));
+    void'($value$plusargs("RECORD_REFERENCE=%d", model_record_reference));
+    void'($value$plusargs("RECORD_DEFECT=%d", model_record_defect));
+    void'($value$plusargs("PAIR_LEFT=%d", model_pair_left));
+    void'($value$plusargs("PAIR_RIGHT=%d", model_pair_right));
+    void'($value$plusargs("PAIR_REFERENCE=%d", model_pair_reference));
+    void'($value$plusargs("PAIR_DEFECT=%d", model_pair_defect));
+
+    high = 0;
+    low = 0;
+    element0 = 0;
+    element1 = 0;
+    element2 = 0;
+    pair_left = 0;
+    pair_right = 0;
+    for (integer value = 0; value < 8; value = value + 1) begin
+      for (integer amount = 0; amount < 16; amount = amount + 1) begin
+        shift_value = value[2:0];
+        shift_amount = amount[3:0];
+        expected_shift_left = (value << amount) & 7;
+        expected_shift_right = (value >> amount) & 7;
+        #1;
+        assert (shift_left == expected_shift_left[2:0])
+          else $fatal(1, "unequal-width left shift mismatch");
+        assert (shift_right == expected_shift_right[2:0])
+          else $fatal(1, "unequal-width right shift mismatch");
+      end
+    end
+
+    shift_value = 0;
+    shift_amount = 0;
+    pair_left = 0;
+    pair_right = 0;
+    for (integer high_value = 0; high_value < 4; high_value = high_value + 1) begin
+      for (integer low_value = 0; low_value < 4; low_value = low_value + 1) begin
+        high = high_value[1:0];
+        low = low_value[1:0];
+        #1;
+        assert (record_bits == {high_value[1:0], low_value[1:0]})
+          else $fatal(1, "record packing mismatch");
+        assert (record_high == high_value[1:0])
+          else $fatal(1, "record projection mismatch");
+      end
+    end
+    for (integer first = 0; first < 4; first = first + 1) begin
+      for (integer second = 0; second < 4; second = second + 1) begin
+        for (integer third = 0; third < 4; third = third + 1) begin
+          element0 = first[1:0];
+          element1 = second[1:0];
+          element2 = third[1:0];
+          #1;
+          assert (vector_bits == {third[1:0], second[1:0], first[1:0]})
+            else $fatal(1, "vector packing mismatch");
+          assert (vector_one == second[1:0])
+            else $fatal(1, "vector projection mismatch");
+        end
+      end
+    end
+
+    high = 0;
+    low = 0;
+    element0 = 0;
+    element1 = 0;
+    element2 = 0;
+    for (integer left_value = 0; left_value < 16; left_value = left_value + 1) begin
+      for (integer right_value = 0; right_value < 16; right_value = right_value + 1) begin
+        pair_left = left_value[3:0];
+        pair_right = right_value[3:0];
+        expected_pair_sum = (left_value + right_value) & 15;
+        expected_pair_difference = (left_value - right_value) & 15;
+        #1;
+        assert (pair_sum == expected_pair_sum[3:0])
+          else $fatal(1, "hierarchical sum mismatch");
+        assert (pair_difference == expected_pair_difference[3:0])
+          else $fatal(1, "hierarchical difference mismatch");
+      end
+    end
+
+    shift_value = model_shift_value[2:0];
+    shift_amount = model_shift_amount[3:0];
+    #1;
+    assert (shift_left == model_shift_reference[2:0])
+      else $fatal(1, "Rosette shift reference replay mismatch");
+    assert (shift_defect == model_shift_defect[2:0])
+      else $fatal(1, "Rosette shift defect replay mismatch");
+    assert (shift_left != shift_defect)
+      else $fatal(1, "Rosette shift counterexample did not reproduce");
+
+    high = model_record_high[1:0];
+    low = model_record_low[1:0];
+    #1;
+    assert (record_bits == model_record_reference[3:0])
+      else $fatal(1, "Rosette record reference replay mismatch");
+    assert (record_defect == model_record_defect[3:0])
+      else $fatal(1, "Rosette record defect replay mismatch");
+    assert (record_bits != record_defect)
+      else $fatal(1, "Rosette record counterexample did not reproduce");
+
+    pair_left = model_pair_left[3:0];
+    pair_right = model_pair_right[3:0];
+    #1;
+    assert (pair_difference == model_pair_reference[3:0])
+      else $fatal(1, "Rosette hierarchy reference replay mismatch");
+    assert (pair_defect == model_pair_defect[3:0])
+      else $fatal(1, "Rosette hierarchy defect replay mismatch");
+    assert (pair_difference != pair_defect)
+      else $fatal(1, "Rosette hierarchy counterexample did not reproduce");
+
+    $display("formal differential simulation passed");
+    $finish;
+  end
+endmodule
