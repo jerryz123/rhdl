@@ -44,4 +44,7 @@ Both temporal analyzers expose inspectable objects and deterministic reports.
 Their current classifications are findings only: they do not approve a
 crossing, reject CDCs, mutate core IR, or affect backend lowering. Future
 crossing operations that change hardware meaning must remain explicit core IR;
-optional authoring notation belongs in a frontend layer.
+optional authoring notation belongs in a frontend layer. The selectable
+[`../frontend/layers/clocking.rhm`](../frontend/layers/clocking.rhm) layer now
+collects root-owned environment declarations and invokes this analysis without
+changing the design.

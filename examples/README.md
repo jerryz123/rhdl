@@ -12,7 +12,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | Directory | Contents |
 |---|---|
 | [`rhdl/`](rhdl/) | Built-in `#lang rhdl` syntax, elaboration, and hardware semantics |
-| [`clocking/`](clocking/) | Backend-independent clock-use and temporal-provenance analysis over completed RHDL IR |
+| [`clocking/`](clocking/) | Frontend timing declarations and backend-independent temporal-provenance analysis over completed RHDL IR |
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
 | [`ridx/`](ridx/) | Ridx-driven structural hardware generation |
@@ -75,11 +75,15 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 
 ## Clocking-analysis examples
 
-The examples under [`clocking/`](clocking/) import the optional
-`rhdl/analysis/clocking.rhm` API explicitly; these report objects and
+The examples under [`clocking/`](clocking/) use the optional clocking frontend
+layer or import `rhdl/analysis/clocking.rhm` directly. Its report objects and
 environment contracts are not part of core IR and do not change generated
 hardware.
 
+- [`clocking/frontend-environment.rhdl`](clocking/frontend-environment.rhdl)
+  uses `#lang rhdl/base` with the selectable clocking layer to declare local,
+  asynchronous-clock, and asynchronous-pin input timing at the root circuit
+  and obtain the resolved report as part of elaboration.
 - [`clocking/single-clock.rhm`](clocking/single-clock.rhm) applies one set of
   top-level synchronous input contracts to an existing `sync_circuit` shift
   register and shows that its certified subtree samples those inputs on the
@@ -92,7 +96,7 @@ hardware.
 - [`clocking/report.rhm`](clocking/report.rhm) classifies a sync-counter
   hierarchy and prints its hierarchy-aware temporal-provenance report.
 
-Run only these analysis examples with:
+Run only these clocking examples with:
 
 ```sh
 make examples-clocking

@@ -164,7 +164,7 @@ fixture_in_group() {
     IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
     if [[ "$fixture" == "$wanted" ]]; then
       case "$group:$example" in
-        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|protocols:examples/tilelink/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
+        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|protocols:examples/tilelink/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
           return 0
           ;;
         *)
@@ -481,6 +481,7 @@ fixture_specs=(
   'sync-counter-explicit-clock||examples/rhdl/sync-counter.rhdl|explicit_clock_design|explicit_clock_verilog_reference'
   'enable-shift-register|enable_shift_register_tb|examples/rhdl/enable-shift-register.rhdl|design|verilog_reference'
   'reset-shift-register|reset_shift_register_tb|examples/rhdl/reset-shift-register.rhdl|design|verilog_reference'
+  'clocking-environment||examples/clocking/frontend-environment.rhdl|design|verilog_reference'
   'hierarchy|hierarchy_tb|examples/rhdl/hierarchy.rhdl|design|verilog_reference'
   'rfpl-circuit-pair||examples/rfpl/circuit-pair.rhdl|design|verilog_reference'
   'nested-circuit|nested_circuit_tb|examples/rhdl/nested-circuit.rhdl|design|verilog_reference'

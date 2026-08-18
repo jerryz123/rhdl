@@ -439,12 +439,37 @@ changing hardware or acceptance:
    declarations while continuing to report all valid designs without CDC
    enforcement.
 
-This slice is implemented as optional analysis over core IR. It adds no named frontend domains, clocking
-syntax, crossing evidence, verification hook, IR mutation, backend attributes,
-or timing exceptions. A certified `sync_circuit` subtree needs only its top
-boundary contract: its existing invariant already makes all local state and
-sync children share the ambient clock/reset, so contracts are not repeated at
-each child.
+This slice is implemented as optional analysis over core IR. It adds no named
+frontend domains, clocking syntax, crossing evidence, verification hook, IR
+mutation, backend attributes, or timing exceptions. A certified `sync_circuit`
+subtree needs only its top boundary contract: its existing invariant already
+makes all local state and sync children share the ambient clock/reset, so
+contracts are not repeated at each child.
+
+### First frontend environment slice
+
+The first bounded part of Phase 2 is implemented in
+`rhdl/frontend/layers/clocking.rhm`:
+
+1. `elaborate_with_clocking` retains the ordinary `DesignElaboration`, builds a
+   `TemporalEnvironment`, and resolves the existing closed-design summary.
+2. Top data inputs can be declared synchronous to a top clock, asynchronous,
+   or explicitly unknown, including existing aggregate-subtree paths.
+3. Top clock inputs can be declared identical, derived, asynchronous, or
+   exclusive through the existing analysis relationship objects.
+4. Declarations are collected per elaboration and must be structurally owned
+   by the explicit top. Child-owned, out-of-wrapper, driveable-place, malformed,
+   duplicate, contradictory, and hardware-conditional uses are rejected.
+5. The result is report-only: the hardware IR is unchanged and the layer does
+   not yet approve crossings, enforce CDC compatibility, or emit constraints.
+6. The layer is independently selectable from `#lang rhdl/base` and can be
+   explicitly imported beside `#lang rhdl`; it remains outside the standard
+   aggregate until durable domain and crossing semantics exist.
+
+The next frontend work is not more aliases for environment facts. It is to
+design durable domain declarations and scopes that preserve module reuse,
+then connect `sync_circuit`'s already-certified single clock/reset invariant to
+those declarations without moving report policy into core.
 
 ### Phase 1: Semantic inventory and analysis
 
@@ -466,14 +491,18 @@ and environment-contract behavior is specified.
 
 ### Phase 2: Frontend domain authoring
 
-1. Add the selectable `clocking.rhm` frontend layer.
+1. Add the selectable `clocking.rhm` frontend layer. The root-owned,
+   report-only environment slice is implemented.
 2. Generalize the existing ambient `SyncDomain` wrapper to reference durable
    core domain declarations.
 3. Keep existing single-domain `sync_circuit` source syntax working.
 4. Add explicit named domains and domain scopes for multi-domain circuits.
-5. Add top-level input-domain and clock-relationship declarations.
+5. Add top-level input-domain and clock-relationship declarations. The
+   analysis-owned timing and relationship vocabulary is now exposed; durable
+   named domains remain later work.
 6. Add negative fixtures for partial, contradictory, unknown, and cross-module
-   domain declarations.
+   domain declarations. Environment validation and root ownership are covered;
+   domain-scope cases await durable declarations.
 7. Add the layer to the curated standard profile only after its core semantics
    and explicit base-profile composition are tested as equivalent.
 

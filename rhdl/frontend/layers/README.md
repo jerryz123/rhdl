@@ -30,9 +30,42 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
 | [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
 | [`interface.rhm`](interface.rhm) | Roles, directional protocols, read-only observations, refinement, and bulk connection |
+| [`clocking.rhm`](clocking.rhm) | Root-owned temporal environment declarations and report-only closed-design analysis |
 
 `#lang rhdl` aggregates the curated set. A `#lang rhdl/base` program can import
-only the layers it needs.
+only the layers it needs. The clocking layer is selectable but is not yet in
+the standard aggregate.
+
+## Report-only clocking environments
+
+Import `clocking.rhm` explicitly and use `elaborate_with_clocking` when a
+completed design should be analyzed in a top-level temporal environment:
+
+```rhombus
+import:
+  lib("rhdl/frontend/layers/clocking.rhm") open
+
+circuit Top():
+  input clock: Clock
+  input data: Bits(8)
+  synchronous_input(data, clock)
+
+def clocked = elaborate_with_clocking(Top())
+def design = clocked.design
+def report = clocked.summary
+```
+
+`synchronous_input`, `asynchronous_input`, and `unknown_input_timing` attach a
+contract to a top data input or aggregate subtree. `identical_clocks`,
+`derived_clock`, `asynchronous_clocks`, and `exclusive_clocks` describe pairs
+of top `Clock` inputs. These declarations are legal only while the wrapper is
+elaborating its explicit top circuit; child-owned and hardware-conditional
+declarations are rejected. The result retains the `DesignElaboration`, the
+validated `TemporalEnvironment`, and the resolved `DesignTemporalSummary`.
+
+This first frontend slice is deliberately report-only. It does not mutate IR,
+add CDC crossing evidence, reject reported crossings, or emit backend timing
+constraints.
 
 ## Literals and combinational expressions
 

@@ -35,7 +35,7 @@ frontend/layers/* -------------+----> frontend/support/*
                                +----> frontend/kernel ----> core
 frontend/{foundation,layers,support} ---------------------> approved core APIs
 
-frontend/support/clocking ----> analysis/clocking --------> core
+frontend/layers/clocking -----> analysis/clocking --------> core
 backend and formal tools -----> optional analysis --------> core
 
 backend/circt ---------------------------------------------> core
@@ -58,7 +58,7 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/kernel.rhm`](frontend/kernel.rhm) | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
 | [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, static-information machinery, and policy certification; not a language profile | Kernel, approved core APIs, approved analyses, other support modules |
 | [`frontend/foundation.rhm`](frontend/foundation.rhm) | Circuits, ports, connections, elaboration, basic types, selection, and casts | Kernel, support, approved core type APIs |
-| [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
+| [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs and analyses |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
 | [`golf/`](golf/README.md) | Compact additive syntax over the complete standard RHDL profile | Standard frontend, generator-parameter support, and Golf-local syntax only |
@@ -173,6 +173,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `conditional.rhm` | Flat hardware `when`/`elsewhen` priority chains where omitted register updates hold, plus exact-key `switch`, memory-write, and assertion effects | core IR, kernel, mux-lookup support |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support, generator-parameter support |
+| `clocking.rhm` | Root-owned top-input timing and top-clock relationship declarations with an immediate closed-design report | core IR, kernel, clocking analysis |
 
 The support modules implement shared mechanisms without becoming selectable
 language profiles:

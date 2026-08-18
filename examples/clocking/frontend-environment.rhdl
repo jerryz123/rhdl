@@ -1,0 +1,83 @@
+#lang rhdl/base
+// Demonstrates root-owned timing declarations and an immediate report from the selectable clocking layer.
+
+import:
+  lib("rhdl/frontend/layers/sequential.rhm") open
+  lib("rhdl/frontend/layers/clocking.rhm") open
+  lib("rhdl/analysis/clocking.rhm") open
+
+circuit ClockingEnvironment():
+  input destination_clock: Clock
+  input source_clock: Clock
+  input local_data: Bits(8)
+  input remote_data: Bits(8)
+  input asynchronous_pin: Bits(1)
+  output local_sample: Bits(8)
+  output remote_sample: Bits(8)
+  output pin_sample: Bits(1)
+
+  reg local_state(Bits(8), ~clock: destination_clock)
+  reg remote_state(Bits(8), ~clock: destination_clock)
+  reg pin_state(Bits(1), ~clock: destination_clock)
+  local_state <== local_data
+  remote_state <== remote_data
+  pin_state <== asynchronous_pin
+  local_sample <== local_state
+  remote_sample <== remote_state
+  pin_sample <== pin_state
+
+  synchronous_input(local_data, destination_clock)
+  synchronous_input(remote_data, source_clock)
+  asynchronous_input(asynchronous_pin)
+  asynchronous_clocks(destination_clock, source_clock)
+
+def clocked = elaborate_with_clocking(ClockingEnvironment())
+def design = clocked.design
+def report = dump_design_temporal_report(clocked.summary)
+
+fun next_classification(name):
+  def sink = clocked.summary.sinks.find(
+    fun (candidate): candidate.instance_path.length() == 0 && candidate.operation.attribute("name", #false) == name
+  )
+  sink.inputs.find(fun (input): input.name == "next").classification
+
+check:
+  next_classification("local_state") is_a SameClock ~is #true
+  next_classification("remote_state") is_a AsynchronousClock ~is #true
+  next_classification("pin_state") is_a AsynchronousEnvironmentInput ~is #true
+  report.contains("clock_relation asynchronous %destination_clock %source_clock") ~is #true
+
+print(report ++ "\n")
+
+def verilog_reference = @str|<<{
+module ClockingEnvironment(
+  input        destination_clock,
+               source_clock,
+  input  [7:0] local_data,
+               remote_data,
+  input        asynchronous_pin,
+  output [7:0] local_sample,
+               remote_sample,
+  output       pin_sample
+);
+
+  reg [7:0] local_state;
+  reg [7:0] remote_state;
+  reg       pin_state;
+  always @(posedge destination_clock) begin
+    local_state <= local_data;
+    remote_state <= remote_data;
+    pin_state <= asynchronous_pin;
+  end // always @(posedge)
+  assign local_sample = local_state;
+  assign remote_sample = remote_state;
+  assign pin_sample = pin_state;
+endmodule
+}>>|
+
+export:
+  ClockingEnvironment
+  clocked
+  design
+  report
+  verilog_reference

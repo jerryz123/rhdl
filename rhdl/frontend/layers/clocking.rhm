@@ -1,0 +1,138 @@
+#lang rhombus/and_meta
+// Adds root-owned temporal environment declarations and report-only closed-design clocking analysis.
+
+import:
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../../analysis/clocking.rhm" open
+  "../kernel.rhm" as kernel
+
+export:
+  ClockingElaboration
+  elaborate_with_clocking
+  synchronous_input
+  asynchronous_input
+  unknown_input_timing
+  identical_clocks
+  derived_clock
+  asynchronous_clocks
+  exclusive_clocks
+
+class ClockingElaboration(elaboration :: DesignElaboration,
+                          environment :: TemporalEnvironment,
+                          summary :: DesignTemporalSummary):
+  property design: elaboration.design
+  property top: elaboration.top
+
+class PendingInputContract(module_def :: Module,
+                           contract :: TopInputContract)
+class PendingClockRelationship(module_def :: Module,
+                               relationship)
+class ClockingCollector(mutable input_contracts = [],
+                        mutable clock_relationships = [])
+
+Parameter.def current_clocking_collector = #false
+
+fun require_collector():
+  def collector = current_clocking_collector()
+  unless collector is_a ClockingCollector
+  | kernel.frontend_fail("clocking declarations require elaborate_with_clocking")
+  collector
+
+fun prepare_declaration(kind):
+  def collector = require_collector()
+  kernel.reject_unsupported_conditional_effect(
+    kind,
+    Location(),
+    "declare timing intent structurally at the top circuit"
+  )
+  [collector, kernel.active_module()]
+
+fun declaration_value(entity, role):
+  unless entity is_a Value
+  | kernel.frontend_fail(role ++ " must reference a readable hardware value")
+  entity
+
+fun add_input_contract(input, path, timing):
+  let [collector, module_def] = prepare_declaration("input timing declaration")
+  collector.input_contracts := collector.input_contracts ++ [
+    PendingInputContract(module_def,
+                         TopInputContract(declaration_value(input,
+                                                            "input timing declaration"),
+                                          path,
+                                          timing))
+  ]
+  #void
+
+fun synchronous_input(input, clock, path = []):
+  add_input_contract(input,
+                     path,
+                     SynchronousInputTiming(declaration_value(clock,
+                                                              "synchronous input clock")))
+
+fun asynchronous_input(input, path = []):
+  add_input_contract(input, path, AsynchronousInputTiming())
+
+fun unknown_input_timing(input, path = []):
+  add_input_contract(input, path, UnknownInputTiming())
+
+fun add_clock_relationship(kind, make_relationship):
+  let [collector, module_def] = prepare_declaration(kind)
+  collector.clock_relationships := collector.clock_relationships ++ [
+    PendingClockRelationship(module_def, make_relationship())
+  ]
+  #void
+
+fun identical_clocks(left, right):
+  add_clock_relationship(
+    "clock relationship declaration",
+    fun (): IdenticalClockRelationship(declaration_value(left, "clock relationship"),
+                                       declaration_value(right, "clock relationship"))
+  )
+
+fun derived_clock(source, destination, description):
+  add_clock_relationship(
+    "clock relationship declaration",
+    fun (): DerivedClockRelationship(declaration_value(source, "clock relationship"),
+                                     declaration_value(destination, "clock relationship"),
+                                     description)
+  )
+
+fun asynchronous_clocks(left, right):
+  add_clock_relationship(
+    "clock relationship declaration",
+    fun (): AsynchronousClockRelationship(declaration_value(left, "clock relationship"),
+                                          declaration_value(right, "clock relationship"))
+  )
+
+fun exclusive_clocks(left, right, description):
+  add_clock_relationship(
+    "clock relationship declaration",
+    fun (): ExclusiveClockRelationship(declaration_value(left, "clock relationship"),
+                                       declaration_value(right, "clock relationship"),
+                                       description)
+  )
+
+fun ensure_root_declarations(elaboration, pending_declarations):
+  for (pending in pending_declarations):
+    unless pending.module_def === elaboration.top
+    | kernel.frontend_fail(
+        "clocking environment declarations must belong to the elaborated top circuit"
+      )
+
+fun run_clocking_elaboration(program :: Function):
+  def collector = ClockingCollector()
+  def elaboration = parameterize { current_clocking_collector: collector }:
+                      kernel.run_elaboration_with_top(program)
+  ensure_root_declarations(elaboration, collector.input_contracts)
+  ensure_root_declarations(elaboration, collector.clock_relationships)
+  def environment = TemporalEnvironment(
+    collector.input_contracts.map(fun (pending): pending.contract),
+    collector.clock_relationships.map(fun (pending): pending.relationship)
+  )
+  ClockingElaboration(elaboration,
+                      environment,
+                      summarize_design_temporal(elaboration, environment))
+
+expr.macro 'elaborate_with_clocking($body)':
+  'run_clocking_elaboration(fun (): $body)'

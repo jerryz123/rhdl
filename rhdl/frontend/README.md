@@ -108,6 +108,12 @@ def top = logical.top
 `Module.find_instance(name)` provides stable direct-instance inspection; tools
 must not infer the top or hierarchy from module-list positions.
 
+The optional [`layers/clocking.rhm`](layers/clocking.rhm) layer builds on that
+explicit-top seam. Its `elaborate_with_clocking` wrapper collects temporal
+environment declarations from the root circuit, validates them after ordinary
+elaboration, and returns the unchanged design together with its resolved
+clocking report. It is intentionally not part of the standard profile yet.
+
 Inputs are readable and cannot be driven. Outputs are driveable and become
 readable after they are driven. Outputs, instance inputs, and register
 next-state places use `<==`; every place has one effective driver.
