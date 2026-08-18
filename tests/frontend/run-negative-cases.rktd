@@ -50,6 +50,8 @@
  ("bad-enum-mux-duplicate-key.rhdl" "mux lookup keys must be unique")
  ("bad-sync-parent.rhdl" "implicit clock/reset use requires an active sync_circuit")
  ("bad-sync-partial-override.rhdl" "explicit sync child wiring requires both clock and reset")
+ ("bad-sync-foreign-clock.rhdl" "instead of expected clock %clock")
+ ("bad-sync-child-foreign-clock.rhdl" "a sync_circuit child must use the parent's ambient clock")
  ("bad-interface-parameter.rhdl" "circuit parameters must be host values, not hardware values")
  ("bad-recursion.rhdl" "recursive elaboration of circuit Recursive")
  ("bad-nested-circuit-capture.rhdl" "hardware value belongs to a different module")

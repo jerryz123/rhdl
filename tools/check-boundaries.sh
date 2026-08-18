@@ -78,9 +78,10 @@ fail_matches "frontend tests must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' tests/frontend
 
 unexpected_top_level="$(find rhdl -maxdepth 1 -type f \
-  ! -name 'README.md' ! -name 'main.rkt' ! -name 'language.rhm' -print)"
+  ! -name 'README.md' ! -name 'CLOCKING_PLAN.md' \
+  ! -name 'main.rkt' ! -name 'language.rhm' -print)"
 if [[ -n "$unexpected_top_level" ]]; then
-  echo "rhdl root may contain only its architecture README, reader shim, and language assembly" >&2
+  echo "rhdl root may contain only architecture documents, the reader shim, and language assembly" >&2
   echo "$unexpected_top_level" >&2
   exit 1
 fi

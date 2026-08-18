@@ -289,7 +289,8 @@ The public object model includes:
 ```text
 Design        DesignElaboration  DpiImport   DpiResult   Module       Operation
 Value         Place              Port        Register    Memory       SyncMemory
-Instance      HardwareType       Location    Origin
+Instance      HardwareType       Location    Origin      Combinational
+SingleClock   MultiClock         ClockGroup  ClockUse
 ```
 
 An operation owns operands, results, places, attributes, a location, and an
@@ -334,6 +335,21 @@ boundaries. `Builder.instance` uses an exact name, while
 
 The core API is exported by [`main.rhm`](main.rhm). CIRCT is imported
 separately from [`../backend/circt.rhm`](../backend/circt.rhm).
+
+### Clock-use certification
+
+`summarize_module_clocking` inventories every clocked register, memory effect,
+assertion, and DPI effect in one completed module. It returns
+`Combinational`, `SingleClock`, or `MultiClock`; reset use is reported
+separately as `NoReset`, `AmbientReset`, or `LocalReset`. The operation-schema
+dispatcher is exhaustive for sequential and verification operations, so a new
+clocked operation cannot silently escape the inventory.
+
+Clock identity follows only transparent `rtl.wire` aliases. An equal-width
+`rtl.cast` to `Clock` is deliberately not proof that two event streams are the
+same. `verify_single_clock` checks a module's locally owned clocked effects
+against an expected clock without changing the IR or backend output. It does
+not yet infer value provenance or diagnose CDC paths through module inputs.
 
 ## Verification contract
 

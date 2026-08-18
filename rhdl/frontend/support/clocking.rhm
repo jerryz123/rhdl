@@ -4,6 +4,8 @@
 import:
   "../../core/ir.rhm" open
   "../../core/types.rhm" open
+  "../../core/domain-verify.rhm".verify_single_clock
+  "../../core/domain-verify.rhm".same_clock_value
   "../kernel.rhm" as kernel
   "../kernel.rhm".CircuitDefinition
 
@@ -57,6 +59,9 @@ fun build_sync_circuit(identity,
         kernel.run_circuit_finalizers(),
     location
   )
+  verify_single_clock(module_def,
+                      module_def.find_input("clock").value,
+                      module_def.find_input("reset").value)
   SyncCircuitDefinition(module_def)
 
 fun ambient_register(name, type, location = Location()):
@@ -137,12 +142,20 @@ fun instantiate(name,
                 location = Location()):
   if child is_a SyncCircuitDefinition
   | block:
+      def ambient_domain = current_sync_domain()
       def domain:
         if clock || reset
         | block:
             unless clock && reset
             | sync_fail("explicit sync child wiring requires both clock and reset",
                         location)
+            when ambient_domain is_a SyncDomain
+            | unless same_clock_value(kernel.read(clock, location),
+                                      kernel.read(ambient_domain.clock, location))
+              | sync_fail(
+                  "a sync_circuit child must use the parent's ambient clock; use an ordinary circuit for an explicit multi-clock boundary",
+                  location
+                )
             SyncDomain(clock, reset)
         | require_sync_domain(location)
       def instance = kernel.inst(name, child, location)

@@ -1,0 +1,172 @@
+#lang rhombus
+// Summarizes module clock use and certifies a module against one expected clock.
+
+import:
+  "types.rhm" open
+  "ir.rhm" open
+  "ops.rhm" open
+  "domains.rhm" open
+
+export:
+  all_from("domains.rhm")
+  summarize_module_clocking
+  verify_single_clock
+  same_clock_value
+
+class ClockedOperationSpec(clock_operand :: Nat,
+                           reset_operand = #false)
+class UnclockedSequentialOperationSpec()
+class PendingResetUse(kind :: String,
+                      reset,
+                      mutable operations = [])
+
+def unclocked_sequential_operation = UnclockedSequentialOperationSpec()
+
+// This dispatcher is deliberately exhaustive over every sequential or
+// verification schema. Adding such an operation requires an explicit clock
+// operand mapping or an explicit declaration that it owns no clocked effect.
+fun clock_operation_spec(opcode):
+  match opcode
+  | "rtl.memory": unclocked_sequential_operation
+  | "rtl.memory_write": ClockedOperationSpec(2)
+  | "rtl.sync_memory": ClockedOperationSpec(0)
+  | "verif.assert": ClockedOperationSpec(1, 2)
+  | "sim.dpi_call": ClockedOperationSpec(0)
+  | "sim.dpi_register": ClockedOperationSpec(0)
+  | "rtl.register": ClockedOperationSpec(0)
+  | "rtl.register_reset": ClockedOperationSpec(0, 1)
+  | ~else: #false
+
+fun check_clock_operation_coverage():
+  for (schema in schemas):
+    when schema.kind == "sequential" || schema.kind == "verification"
+    | unless clock_operation_spec(schema.opcode)
+      | error(~who: #'summarize_module_clocking,
+              "clock classification is missing for " ++ schema.opcode)
+  #void
+
+// Only a structural rtl.wire is transparent for clock identity. In
+// particular, an equal-width rtl.cast to Clock starts a distinct identity.
+fun canonical_wire_value(value :: Value):
+  fun loop(current, visited):
+    if visited.find(fun (candidate): candidate === current)
+    | current
+    | block:
+        def operation = current.module_def.find_operation(current.defining_op_id)
+        if operation && operation.opcode == "rtl.wire" && operation.places[0].driver
+        | loop(operation.places[0].driver, visited ++ [current])
+        | current
+  loop(value, [])
+
+fun same_clock_value(left :: Value, right :: Value):
+  canonical_wire_value(left) === canonical_wire_value(right)
+
+fun add_clock_use(groups, use):
+  def existing = groups.find(
+    fun (group): group.clock === use.clock
+  )
+  if existing
+  | for List (group in groups):
+      if group === existing
+      | ClockGroup(group.clock, group.uses ++ [use])
+      | group
+  | groups ++ [ClockGroup(use.clock, [use])]
+
+fun reset_use_kind(reset, ambient_reset):
+  cond
+  | !reset: "none"
+  | ambient_reset && reset === ambient_reset: "ambient"
+  | ~else: "local"
+
+fun same_pending_reset_use(pending, kind, reset):
+  pending.kind == kind && (kind == "none" || pending.reset === reset)
+
+fun summarize_reset_uses(clock_uses, ambient_reset):
+  def canonical_ambient_reset:
+    if ambient_reset is_a Value
+    | canonical_wire_value(ambient_reset)
+    | #false
+  def mutable pending_uses = []
+  for (use in clock_uses):
+    def reset:
+      if use.reset is_a Value
+      | canonical_wire_value(use.reset)
+      | #false
+    def kind = reset_use_kind(reset, canonical_ambient_reset)
+    def pending = pending_uses.find(
+      fun (candidate): same_pending_reset_use(candidate, kind, reset)
+    )
+    if pending
+    | pending.operations := pending.operations ++ [use.operation]
+    | pending_uses := pending_uses ++ [PendingResetUse(kind, reset, [use.operation])]
+  for List (pending in pending_uses):
+    match pending.kind
+    | "none": NoReset(pending.operations)
+    | "ambient": AmbientReset(pending.reset, pending.operations)
+    | "local": LocalReset(pending.reset, pending.operations)
+
+fun summarize_module_clocking(module_def :: Module,
+                              ambient_reset = #false):
+  unless module_def.finished
+  | error(~who: #'summarize_module_clocking,
+          "module must be finished before clock use is summarized")
+  check_clock_operation_coverage()
+  def mutable clock_groups = []
+  def mutable clock_uses = []
+  for (operation in module_def.operations):
+    def spec = clock_operation_spec(operation.opcode)
+    when spec is_a ClockedOperationSpec
+    | def clock = canonical_wire_value(operation.operands[spec.clock_operand])
+      def reset:
+        if spec.reset_operand is_a Nat
+        | operation.operands[spec.reset_operand]
+        | #false
+      def use = ClockUse(operation, clock, reset)
+      clock_uses := clock_uses ++ [use]
+      clock_groups := add_clock_use(clock_groups, use)
+  def reset_uses = summarize_reset_uses(clock_uses, ambient_reset)
+  match clock_groups.length()
+  | 0: Combinational(module_def, reset_uses)
+  | 1: SingleClock(module_def,
+                   clock_groups[0].clock,
+                   reset_uses,
+                   clock_uses.map(fun (use): use.operation))
+  | ~else: MultiClock(module_def, clock_groups, reset_uses)
+
+fun summary_clock_groups(summary):
+  cond
+  | summary is_a Combinational: []
+  | summary is_a SingleClock:
+      [ClockGroup(summary.clock,
+                  summary.clocked_operations.map(
+                    fun (operation):
+                      def spec = clock_operation_spec(operation.opcode)
+                      ClockUse(operation,
+                               canonical_wire_value(operation.operands[spec.clock_operand]),
+                               if spec.reset_operand is_a Nat
+                               | operation.operands[spec.reset_operand]
+                               | #false)
+                  ))]
+  | summary is_a MultiClock: summary.clock_groups
+
+fun verify_single_clock(module_def :: Module,
+                        expected_clock :: Value,
+                        ambient_reset = #false):
+  unless expected_clock.module_def === module_def && clock_type(expected_clock.type)
+  | error(~who: #'verify_single_clock,
+          "expected clock must be a Clock value owned by the module")
+  def summary = summarize_module_clocking(module_def, ambient_reset)
+  def canonical_expected_clock = canonical_wire_value(expected_clock)
+  def mismatched_group = summary_clock_groups(summary).find(
+    fun (group): !(group.clock === canonical_expected_clock)
+  )
+  when mismatched_group
+  | def operation = mismatched_group.uses[0].operation
+    error(~who: #'verify_single_clock,
+          String.append(operation.location.describe(),
+                        ": clocked operation ", operation.opcode,
+                        " in module ", module_def.name,
+                        " uses clock ", mismatched_group.clock.ref(),
+                        " instead of expected clock ",
+                        canonical_expected_clock.ref()))
+  summary

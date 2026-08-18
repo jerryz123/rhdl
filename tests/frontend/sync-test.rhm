@@ -47,6 +47,23 @@ def mixed_instance = mixed_top.operations.find(
   fun (operation): operation.opcode == "rtl.instance"
 )
 
+def local_reset_design = embedded.run_elaboration(
+  fun (): composed_fixture.LocalResetCounter()
+)
+def local_reset_module = local_reset_design.modules[0]
+def local_reset_summary = summarize_module_clocking(
+  local_reset_module,
+  local_reset_module.find_input("reset").value
+)
+
+def local_reset_child_design = embedded.run_elaboration(
+  fun (): composed_fixture.LocalResetChildTop()
+)
+def local_reset_child_top = local_reset_child_design.modules.find(
+  fun (module_def): module_def.name == "LocalResetChildTop"
+)
+def local_reset_child_instance = local_reset_child_top.find_instance("counter")
+
 check:
   dump_ir(implicit_design) ~is dump_ir(explicit_fixture.design)
   dump_ir(composed_fixture.design) ~is dump_ir(explicit_fixture.design)
@@ -66,7 +83,15 @@ check:
   override_instance.places[1].driver === override_top.find_input("source_reset").value ~is #true
   mixed_instance.places[0].driver === mixed_top.find_input("clock").value ~is #true
   mixed_instance.places[1].driver === mixed_top.find_input("reset").value ~is #true
+  local_reset_summary is_a SingleClock ~is #true
+  local_reset_summary.reset_uses.find(
+    fun (use): use is_a LocalReset
+  ).reset === local_reset_module.find_input("local_reset").value ~is #true
+  local_reset_child_instance.places[0].driver === local_reset_child_top.find_input("clock").value ~is #true
+  local_reset_child_instance.places[1].driver === local_reset_child_top.find_input("local_reset").value ~is #true
   verify_design(implicit_design) ~is #void
   verify_design(resetless_design) ~is #void
   verify_design(override_design) ~is #void
   verify_design(mixed_design) ~is #void
+  verify_design(local_reset_design) ~is #void
+  verify_design(local_reset_child_design) ~is #void

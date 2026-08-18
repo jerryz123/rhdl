@@ -172,7 +172,9 @@ language profiles:
 - `instance-members.rhm` lets layers contribute virtual instance members
   without creating sibling-layer dependencies.
 - `clocking.rhm` expands frontend sync policy into explicit ports, register
-  operands, instance inputs, and drives.
+  operands, instance inputs, and drives, then certifies that every locally
+  owned clocked effect uses the ambient clock. Resetless and locally reset
+  state remain legal and are inventoried separately.
 - `generator-parameters.rhm` extracts runtime bindings from the ordinary
   Rhombus parameter forms shared by circuit generators.
 - `mux-lookup.rhm` lets independent layers contribute typed static keys,
