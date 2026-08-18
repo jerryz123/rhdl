@@ -1,0 +1,104 @@
+#lang rhdl
+// Implements packet-retaining wormhole routing from a validated router plan.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/queue.rhdl") open
+  lib("rhdl/std/flow/matcher.rhdl") open
+  lib("rhdl/std/flow/crossbar.rhdl") open
+  "route-computer.rhdl" open
+  "../plan/router-plan.rhm" open
+
+export:
+  WormholeBeat
+  WormholeRouterConfig
+  compile_wormhole_router
+  WormholeRouter
+
+// Head and tail delimit one packet. The route key is meaningful on the head;
+// every other fragment follows the output VC retained by the router.
+bundle WormholeBeat(T, route_width):
+  route_key: Bits(route_width)
+  head: Bool
+  tail: Bool
+  payload: T
+
+// Freezes the validated route decoder and local port shape before elaboration.
+class WormholeRouterConfig(router_plan,
+                           route_decoder,
+                           input_count,
+                           target_count):
+  opaque
+  internal _WormholeRouterConfig
+  constructor ~none
+
+// The first implementation supports only the whole-graph acyclic proof regime.
+fun compile_wormhole_router(router_plan :: RouterPlan) :: WormholeRouterConfig:
+  if router_plan.validated_routing.assumptions.eventual_escape_grant
+  | error(~who: #'compile_wormhole_router,
+          "wormhole router currently requires whole-graph acyclic routing")
+  | #void
+  def route_decoder = compile_route_decoder(router_plan)
+  def input_count = router_plan.origins.length()
+  def target_count = router_plan.targets.length()
+  unless target_count > 0
+  | error(~who: #'compile_wormhole_router,
+          "router plan must have an outgoing VC or an ejection target")
+  _WormholeRouterConfig(router_plan, route_decoder, input_count, target_count)
+
+// A head acquires one validated target. Body and tail fragments retain that
+// target until the tail transfer releases it. Physical-link arbitration is a
+// separate concern and can backpressure these logical per-VC egress streams.
+sync_circuit WormholeRouter(T, config :: WormholeRouterConfig):
+  def Beat = WormholeBeat(T, config.route_decoder.route_width)
+  interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  interface egress[config.target_count](Decoupled(Beat), ~role: producer)
+
+  def input_buffers = ingress |> parallel_handles(for Array (_ in 0..config.input_count): Beat |> queue(1))
+  def inactive = as_vec(bits(0, config.input_count), Bool)
+  def unreserved = as_vec(bits(0, config.target_count), Bool)
+  def empty_reservations = vec(for List (_ in 0..config.input_count): unreserved)
+  reg packet_active(~init: inactive)
+  reg reservations(~init: empty_reservations)
+
+  def route_decisions = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      route_decoder_lookup(config.route_decoder, input_buffer.bits.route_key, bits(input_index, config.route_decoder.origin_width))
+  )
+
+  def target_busy = vec(
+    for List (target_index in 0..config.target_count):
+      or_reduce(vec(for List (input_index in 0..config.input_count): packet_active[input_index] & reservations[input_index][target_index]))
+  )
+
+  def requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      vec(
+        for List (target_index in 0..config.target_count):
+          def candidate = route_decisions[input_index].target_mask[target_index].into(Bool)
+          def new_request = input_buffer.valid & input_buffer.bits.head & route_decisions[input_index].valid & candidate & !target_busy[target_index]
+          mux(packet_active[input_index], reservations[input_index][target_index], new_request)
+      )
+  )
+
+  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  allocator.requests <== requests
+  (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
+
+  def next_active = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      def transfer = input_buffer.valid & input_buffer.ready
+      mux(transfer, !input_buffer.bits.tail, packet_active[input_index])
+  )
+  def next_reservations = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      def transfer = input_buffer.valid & input_buffer.ready
+      def retained = mux(packet_active[input_index], reservations[input_index], allocator.grants[input_index])
+      mux(transfer, mux(input_buffer.bits.tail, unreserved, retained), reservations[input_index])
+  )
+  packet_active <== next_active
+  reservations <== next_reservations

@@ -1,4 +1,4 @@
-// Exercises one-beat router matching, buffering, ejection, and backpressure.
+// Exercises simple-router matching, buffering, ejection, and backpressure.
 module noc_router_tb;
     logic clock;
     logic reset;
@@ -21,7 +21,7 @@ module noc_router_tb;
     struct packed {logic ready;} destination_ingress_1_out;
     struct packed {logic valid; RoutedBeat bits;} destination_egress_0_out;
 
-    OneBeatRouterFixture dut (
+    SimpleRouterFixture dut (
         .clock(clock),
         .reset(reset),
         .allocator_requests(allocator_requests),
@@ -202,7 +202,7 @@ module noc_router_tb;
         assert (sent0 == 4 && sent1 == 4)
             else $fatal(1, "not every offered packet entered the router");
 
-        $display("NoC one-beat router simulation passed");
+        $display("NoC simple router simulation passed");
         $finish;
     end
 endmodule

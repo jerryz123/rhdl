@@ -23,8 +23,8 @@ by Espresso or CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 
-`router.rhdl` defines `RoutedBeat`, opaque `OneBeatRouterConfig`,
-`compile_one_beat_router`, and `OneBeatRouter`. Compilation checks the supported
+`router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
+`compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
 proof regime, compiles the route decoder, and freezes the hardware port and
 target shape. One beat is one complete packet. Each local origin has one
 standard depth-one `Queue`; bypass (`flow`) and same-cycle replacement (`pipe`)
@@ -44,6 +44,31 @@ Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
 ordinary field projection and indexing instead of explicit packed extraction.
 
+`wormhole-router.rhdl` defines the sibling `WormholeBeat`,
+`WormholeRouterConfig`, `compile_wormhole_router`, and `WormholeRouter`
+transport. A head fragment is the only fragment whose route key is decoded.
+After the head transfers, the selected output VC or local ejection target is
+owned by that input until its tail transfers. Body and tail fragments therefore
+cannot be rerouted or interleaved with a different packet on the reserved VC.
+
+`wormhole-link.rhdl` keeps logical VC routing distinct from physical-link
+sharing. `WormholeLinkMux` fairly selects at most one logical VC beat per cycle
+and adds its link-local VC index; `WormholeLinkDemux` validates that index and
+delivers the beat to the corresponding downstream VC. The demultiplexer also
+returns a readiness bit for every VC, allowing the multiplexer to select a
+ready VC instead of letting one blocked VC stall the entire link. Link
+arbitration is per beat and retains no physical-link resource across cycles, so
+the only retained network resources remain the VCs represented in the
+validated dependency graph. The ready-valid physical link plus per-VC reverse
+readiness is the initial same-clock realization; an eventual credited or
+pipelined link adapter must preserve the same logical VC acceptance contract.
+
+Protocol packetization remains outside `noc/rtl`. A protocol adapter may map a
+wide object such as a CHI flit into any finite head/body/tail sequence and
+reassemble it after ejection without changing topology, routing, or VC
+analysis. CHI link credits and internal physical-link credits remain separate
+protocol layers.
+
 The initial router accepts only whole-graph-acyclic validation. Escape
 certificates require persistent escape requests and eventual grants; the
 fixed-priority allocator does not yet claim that fairness contract, so router
@@ -53,10 +78,11 @@ There is intentionally no whole-network circuit or router-instantiating
 network helper in this package. Real routers live in independently owned tile,
 switch, or subsystem modules and may be separated by arbitrary hierarchy.
 Integration code obtains each node's `RouterPlan` from the pure `NetworkPlan`,
-compiles only that local `OneBeatRouterConfig`, and exposes the physical VC
-ports appropriate to its own boundary. A user-owned parent connects those
-boundaries using `NetworkVCConnection`; `noc/rtl` neither owns the system
-hierarchy nor inserts a wrapper around the complete transport.
+compiles only its selected local router configuration, and exposes the VC or
+physical-link ports appropriate to its own boundary. A user-owned parent
+connects those boundaries from the corresponding `NetworkPlan` assignments;
+`noc/rtl` neither owns the system hierarchy nor inserts a wrapper around the
+complete transport.
 
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar

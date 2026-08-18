@@ -1,0 +1,53 @@
+#lang rhdl
+// Multiplexes logical wormhole VCs onto one physical ready-valid link.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/demux.rhdl") open
+  lib("rhdl/std/flow/gate.rhdl") open
+  lib("rhdl/std/flow/map.rhdl") open
+  lib("rhdl/std/flow/rr-arbiter.rhdl") open
+  "wormhole-router.rhdl" open
+
+export:
+  WormholeLinkBeat
+  WormholeLinkMux
+  WormholeLinkDemux
+
+// The physical transfer identifies the destination VC carried by this beat.
+bundle WormholeLinkBeat(T, route_width, vc_count):
+  vc: Bits(index_width(vc_count))
+  beat: WormholeBeat(T, route_width)
+
+// Fairly selects at most one logical VC transfer on the physical link.
+sync_circuit WormholeLinkMux(T, route_width :: PosInt, vc_count :: PosInt):
+  def Beat = WormholeBeat(T, route_width)
+  def LinkBeat = WormholeLinkBeat(T, route_width, vc_count)
+  interface ingress[vc_count](Decoupled(Beat), ~role: consumer)
+  input vc_ready: Vec(vc_count, Bool)
+  interface egress(Decoupled(LinkBeat), ~role: producer)
+
+  fun tag_vc(vc_index):
+    map_flow(beat):
+      WormholeLinkBeat(T, route_width, vc_count):
+        vc: bits(vc_index, index_width(vc_count))
+        beat: beat
+  def tagged:
+    for Array (vc_index in 0..vc_count):
+      ingress[vc_index] |> gate_flow(vc_ready[vc_index]) |> tag_vc(vc_index)
+  (tagged |> rr_arbiter()) <=> egress
+
+// Delivers a physical beat to exactly the VC named in its link-local header.
+sync_circuit WormholeLinkDemux(T, route_width :: PosInt, vc_count :: PosInt):
+  def Beat = WormholeBeat(T, route_width)
+  def LinkBeat = WormholeLinkBeat(T, route_width, vc_count)
+  interface ingress(Decoupled(LinkBeat), ~role: consumer)
+  interface egress[vc_count](Decoupled(Beat), ~role: producer)
+  output vc_ready: Vec(vc_count, Bool)
+
+  def vc_valid = ingress.bits.vc <= bits(vc_count - 1, index_width(vc_count))
+  assert(!ingress.valid ||| vc_valid, "wormhole_link_vc_in_range")
+  vc_ready <== vec(for List (vc_index in 0..vc_count): egress[vc_index].ready)
+  def demuxed = ingress |> demux_flow(vc_count, link_beat => link_beat.vc)
+  def beats = for Array (vc_index in 0..vc_count): demuxed[vc_index] |> map_flow(link_beat => link_beat.beat)
+  beats <=> egress

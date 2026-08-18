@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements a buffered one-beat NoC router driven only by a validated router plan.
+// Implements the simple buffered NoC router driven by a validated router plan.
 
 import:
   lib("rhdl/std/ready-valid.rhdl") open
@@ -11,9 +11,9 @@ import:
 
 export:
   RoutedBeat
-  OneBeatRouterConfig
-  compile_one_beat_router
-  OneBeatRouter
+  SimpleRouterConfig
+  compile_simple_router
+  SimpleRouter
 
 // One beat is one complete packet in this first router implementation. The
 // route key is transport metadata; the payload remains entirely opaque.
@@ -24,30 +24,24 @@ bundle RoutedBeat(T, route_width):
 // Fixes all widths and local port meanings before circuit elaboration. The
 // current fixed-priority allocator satisfies whole-graph acyclicity but does
 // not yet promise the fairness required by an escape-routing certificate.
-class OneBeatRouterConfig(router_plan,
-                          route_decoder,
-                          input_count,
-                          target_count):
+class SimpleRouterConfig(router_plan, route_decoder, input_count, target_count):
   opaque
-  internal _OneBeatRouterConfig
+  internal _SimpleRouterConfig
   constructor ~none
 
 // Validates the supported proof regime and freezes the router's hardware shape.
-fun compile_one_beat_router(router_plan :: RouterPlan) :: OneBeatRouterConfig:
+fun compile_simple_router(router_plan :: RouterPlan) :: SimpleRouterConfig:
   if router_plan.validated_routing.assumptions.eventual_escape_grant
-  | error(~who: #'compile_one_beat_router,
-          "one-beat router currently requires whole-graph acyclic routing")
+  | error(~who: #'compile_simple_router,
+          "simple router currently requires whole-graph acyclic routing")
   | #void
   def route_decoder = compile_route_decoder(router_plan)
   def input_count = router_plan.origins.length()
   def target_count = router_plan.targets.length()
   unless target_count > 0
-  | error(~who: #'compile_one_beat_router,
+  | error(~who: #'compile_simple_router,
           "router plan must have an outgoing VC or an ejection target")
-  _OneBeatRouterConfig(router_plan,
-                       route_decoder,
-                       input_count,
-                       target_count)
+  _SimpleRouterConfig(router_plan, route_decoder, input_count, target_count)
 
 // Checks the route metadata contract on each external ingress offer. The
 // physical ingress index supplies the origin key that is intentionally absent
@@ -62,13 +56,13 @@ fun monitor_router_ingress(inputs :: Array,
       bits(input_index, route_decoder.origin_width)
     )
     assert(!input.valid ||| decision.valid,
-           String.append("one_beat_router_ingress_valid_route_",
+           String.append("simple_router_ingress_valid_route_",
                          to_string(input_index)))
 
 // Each local origin owns one standard depth-one queue. A transfer releases that
 // origin and acquires exactly the selected outgoing VC at the neighboring
 // router, matching the validated one-beat resource model.
-sync_circuit OneBeatRouter(T, config :: OneBeatRouterConfig):
+sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)

@@ -1,0 +1,51 @@
+#lang rhdl
+// Elaborates retained packet routing and two VCs sharing one physical link.
+
+import:
+  "../../model/main.rhm" open
+  "../../plan/main.rhm" open
+  "../main.rhdl" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def first = PhysicalLink(LinkId(0), n0, n1, 2)
+def second = PhysicalLink(LinkId(1), n1, n2, 2)
+def topology = Topology([n0, n1, n2], [first, second])
+def route = RouteClass(RouteClassId(0), n0, n2)
+
+fun on_link(vc, link): link_id_equal(vc.link_id, link.id)
+
+fun allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection: on_link(candidate, first)
+  | origin is_a HeldVC: on_link(origin.vc, first) && on_link(candidate, second)
+  | ~else: #false
+
+def routing = compile_routing(RoutingProblem(topology, [route], RoutingRelation(allows)))
+unless routing is_a ValidatedRouting
+| error(~who: #'WormholeRouterFixture,
+        "wormhole fixture requires validated routing")
+def config = compile_wormhole_router(RouterPlan(routing, n1))
+def link_connection = NetworkPlan(routing).link_connection(second.id)
+
+sync_circuit WormholeRouterFixture():
+  def Beat = WormholeBeat(Bits(8), config.route_decoder.route_width)
+  interface ingress[2](Decoupled(Beat), ~role: consumer)
+  interface egress[2](Decoupled(Beat), ~role: producer)
+
+  inst router(WormholeRouter(Bits(8), config))
+  inst link_mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
+  inst link_demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
+  router.ingress <=> ingress
+  for (vc_index in 0..second.vc_count):
+    link_mux.ingress[vc_index] <=> router.egress[link_connection.source_target_indices[vc_index]]
+  link_mux.vc_ready <== link_demux.vc_ready
+  link_demux.ingress <=> link_mux.egress
+  egress <=> link_demux.egress
+
+def design = elaborate(WormholeRouterFixture())
+
+export:
+  design

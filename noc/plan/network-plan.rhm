@@ -10,6 +10,7 @@ export:
   NetworkInjectionPort
   NetworkEjectionPort
   NetworkVCConnection
+  NetworkLinkConnection
   NetworkPlan
 
 fun require_node_index(nodes, node):
@@ -60,11 +61,28 @@ class NetworkVCConnection(vc :: VCId,
                   to_string(destination_router_index), "].input[",
                   to_string(destination_input_index), "]")
 
+class NetworkLinkConnection(link :: PhysicalLink,
+                            source_router_index :: Nat,
+                            source_target_indices :: List.of(Nat),
+                            destination_router_index :: Nat,
+                            destination_input_indices :: List.of(Nat)):
+  opaque
+  internal _NetworkLinkConnection
+  constructor ~none
+
+  method describe():
+    String.append(link.id.describe(), ": router[",
+                  to_string(source_router_index), "].targets",
+                  to_string(source_target_indices), " -> router[",
+                  to_string(destination_router_index), "].inputs",
+                  to_string(destination_input_indices))
+
 class NetworkPlan(validated_routing :: ValidatedRouting,
                   router_plans :: NonemptyList.of(RouterPlan),
                   injection_ports :: List.of(NetworkInjectionPort),
                   ejection_ports :: List.of(NetworkEjectionPort),
-                  vc_connections :: List.of(NetworkVCConnection)):
+                  vc_connections :: List.of(NetworkVCConnection),
+                  link_connections :: List.of(NetworkLinkConnection)):
   constructor (validated_routing :: ValidatedRouting):
     def topology = validated_routing.topology
     def router_plans:
@@ -113,11 +131,26 @@ class NetworkPlan(validated_routing :: ValidatedRouting,
           destination_router.origin_key(HeldVC(vc))
         )
 
+    def link_connections:
+      for List (link in topology.links):
+        def source_router_index = require_node_index(topology.nodes, link.source)
+        def destination_router_index = require_node_index(topology.nodes, link.destination)
+        def source_router = router_plans[source_router_index]
+        def destination_router = router_plans[destination_router_index]
+        _NetworkLinkConnection(
+          link,
+          source_router_index,
+          link.virtual_channels().map(fun (vc): source_router.target_bit(vc)),
+          destination_router_index,
+          link.virtual_channels().map(fun (vc): destination_router.origin_key(HeldVC(vc)))
+        )
+
     super(validated_routing,
           router_plans,
           injection_ports,
           ejection_ports,
-          vc_connections)
+          vc_connections,
+          link_connections)
 
   method router_plan(node :: NodeId):
     unless validated_routing.topology.contains_node(node)
@@ -148,6 +181,14 @@ class NetworkPlan(validated_routing :: ValidatedRouting,
     )
     unless found
     | error(~who: #'NetworkPlan, "unknown network-plan VC")
+    found
+
+  method link_connection(id :: LinkId):
+    def found = link_connections.find(
+      fun (connection): link_id_equal(connection.link.id, id)
+    )
+    unless found
+    | error(~who: #'NetworkPlan, "unknown network-plan link")
     found
 
   method describe():

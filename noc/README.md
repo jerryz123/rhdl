@@ -83,9 +83,10 @@ duplicate identities, missing link endpoints, and nonpositive VC counts.
 The pure packages do not lower route tables into RHDL or generate router RTL.
 The separate [`rtl/`](rtl/README.md) package accepts only `RouterPlan` values
 derived from `ValidatedRouting`. It lowers finite local rows into combinational
-route computers and, for whole-graph-acyclic routing, buffered one-beat
-routers. User-owned hierarchy uses pure `NetworkPlan` mappings to place those
-routers in independent subsystems and connect their physical VC boundaries.
+route computers and, for whole-graph-acyclic routing, simple buffered routers
+for single-beat packets. User-owned hierarchy uses pure `NetworkPlan` mappings
+to place those routers in independent subsystems and connect their physical VC
+boundaries.
 No RHDL dependency flows back into the pure layers.
 
 ## Dependency boundary
@@ -102,7 +103,7 @@ RHDL standard primitives, plus the pure NoC model and plan. They must not
 import RHDL core, frontend implementation, backend, or CIRCT modules.
 
 The hardware bridge is tested separately by focused route-computer,
-one-beat-router, and hierarchical-assembly frontend, CIRCT, and Verilator
+simple-router, and hierarchical-assembly frontend, CIRCT, and Verilator
 fixtures. The route-computer fixture exhausts every encoded input of every
 router in a small validated network. The router fixture checks one-to-one
 allocation, independent backpressure, ejection contention, and packet

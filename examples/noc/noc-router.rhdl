@@ -33,16 +33,16 @@ def routing = compile_routing(
   RoutingProblem(topology, [route], RoutingRelation(allows))
 )
 unless routing is_a ValidatedRouting
-| error(~who: #'OneBeatRouter,
+| error(~who: #'SimpleRouter,
         "example routing must pass validation before hardware generation")
 
 def middle_plan = RouterPlan(routing, n1)
 def destination_plan = RouterPlan(routing, n2)
-def middle_config = compile_one_beat_router(middle_plan)
-def destination_config = compile_one_beat_router(destination_plan)
+def middle_config = compile_simple_router(middle_plan)
+def destination_config = compile_simple_router(destination_plan)
 def Beat = RoutedBeat(Bits(8), middle_config.route_decoder.route_width)
 
-sync_circuit OneBeatRouterFixture():
+sync_circuit SimpleRouterFixture():
   input allocator_requests: Vec(2, Vec(2, Bool))
   output allocator_grants: Vec(2, Vec(2, Bool))
   interface middle_ingress[2](Decoupled(Beat), ~role: consumer)
@@ -51,8 +51,8 @@ sync_circuit OneBeatRouterFixture():
   interface destination_egress[1](Decoupled(Beat), ~role: producer)
 
   inst allocator(GreedyMatcher(2, 2))
-  inst middle(OneBeatRouter(Bits(8), middle_config))
-  inst destination(OneBeatRouter(Bits(8), destination_config))
+  inst middle(SimpleRouter(Bits(8), middle_config))
+  inst destination(SimpleRouter(Bits(8), destination_config))
 
   allocator.requests <== allocator_requests
   allocator_grants <== allocator.grants
@@ -61,7 +61,7 @@ sync_circuit OneBeatRouterFixture():
   destination.ingress <=> destination_ingress
   destination_egress <=> destination.egress
 
-def design = elaborate(OneBeatRouterFixture())
+def design = elaborate(SimpleRouterFixture())
 
 // Exact normalized SystemVerilog reference for the focused backend fixture.
 def verilog_reference = @str|<<{
@@ -72,7 +72,7 @@ def verilog_reference = @str|<<{
   typedef struct packed {logic [1:0] target_mask; logic valid; } RouteDecision;
   typedef struct packed {logic target_mask; logic valid; } RouteDecision_1;
 `endif // _TYPESCOPE_rhdl_types
-module OneBeatRouterFixture(
+module SimpleRouterFixture(
   input                                                 clock,
                                                         reset,
   input  [1:0][1:0]                                     allocator_requests,
@@ -97,7 +97,7 @@ module OneBeatRouterFixture(
     .requests (allocator_requests),
     .grants   (allocator_grants)
   );
-  OneBeatRouter middle (
+  SimpleRouter middle (
     .clock         (clock),
     .reset         (reset),
     .ingress_0_in  (middle_ingress_0_in),
@@ -109,7 +109,7 @@ module OneBeatRouterFixture(
     .egress_0_out  (middle_egress_0_out),
     .egress_1_out  (middle_egress_1_out)
   );
-  OneBeatRouter_1 destination (
+  SimpleRouter_1 destination (
     .clock         (clock),
     .reset         (reset),
     .ingress_0_in  (destination_ingress_0_in),
@@ -133,7 +133,7 @@ module GreedyMatcher(
      {{{_GEN}, {requests[1'h0][1'h0]}}}};
 endmodule
 
-module OneBeatRouter(
+module SimpleRouter(
   input                                                 clock,
                                                         reset,
   input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
@@ -156,7 +156,7 @@ module OneBeatRouter(
   wire [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
   wire RouteDecision                 _GEN_1 = /*cast(bit)*/{3{~(_GEN_0[1])}};
   `ifndef SYNTHESIS
-    one_beat_router_ingress_valid_route_0:
+    simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_0_in.valid | _GEN_1.valid);
   `endif // not def SYNTHESIS
@@ -165,7 +165,7 @@ module OneBeatRouter(
   wire [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
   wire RouteDecision                 _GEN_4 = /*cast(bit)*/{3{~(_GEN_3[1])}};
   `ifndef SYNTHESIS
-    one_beat_router_ingress_valid_route_1:
+    simple_router_ingress_valid_route_1:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_1_in.valid | _GEN_4.valid);
   `endif // not def SYNTHESIS
@@ -414,7 +414,7 @@ module GrantMerge_1(
       bits: (_GEN_0 ? ingress_1_in.bits : _GEN ? ingress_0_in.bits : ingress_0_in.bits)};
 endmodule
 
-module OneBeatRouter_1(
+module SimpleRouter_1(
   input                                                 clock,
                                                         reset,
   input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
@@ -435,7 +435,7 @@ module OneBeatRouter_1(
   wire [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
   wire RouteDecision_1               _GEN_1 = /*cast(bit)*/{2{~(_GEN_0[1])}};
   `ifndef SYNTHESIS
-    one_beat_router_ingress_valid_route_0:
+    simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_0_in.valid | _GEN_1.valid);
   `endif // not def SYNTHESIS
@@ -444,7 +444,7 @@ module OneBeatRouter_1(
   wire [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
   wire RouteDecision_1               _GEN_4 = /*cast(bit)*/{2{~(_GEN_3[1])}};
   `ifndef SYNTHESIS
-    one_beat_router_ingress_valid_route_1:
+    simple_router_ingress_valid_route_1:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_1_in.valid | _GEN_4.valid);
   `endif // not def SYNTHESIS
@@ -653,6 +653,6 @@ export:
   middle_config
   destination_config
   Beat
-  OneBeatRouterFixture
+  SimpleRouterFixture
   design
   verilog_reference

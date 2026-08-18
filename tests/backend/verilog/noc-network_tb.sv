@@ -109,7 +109,7 @@ module noc_network_tb;
         assert (near_expected == 8 && far_expected == 9)
             else $fatal(1, "destination delivery counts were incorrect");
 
-        $display("NoC one-beat network simulation passed");
+        $display("NoC simple-router network simulation passed");
         $finish;
     end
 endmodule
