@@ -461,6 +461,7 @@ under [`flow/`](flow/):
 | Allocation generator | Behavior |
 |---|---|
 | `GreedyMatcher(inputs, outputs)` | Fixed-priority maximal matching over an input-major request matrix |
+| `RoundRobinMatcher(inputs, outputs)` | Per-output round-robin matching that advances accepted grants |
 
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|
@@ -641,6 +642,16 @@ a Boolean one-to-one grant matrix. Lower input indices have priority, and each
 input takes its lowest still-unclaimed requested output. The result is maximal
 but not fair; readiness and the application-specific meaning of rows and
 columns remain outside the matcher.
+
+`RoundRobinMatcher(inputs, outputs)` exposes the same input-major request and
+grant matrices plus one `accepts` bit per output. Each output selects the first
+still-unmatched requester beginning at its independent rotating priority. A
+priority advances past the selected input only when that output's grant is
+accepted, so stalls do not consume turns. Output index order resolves
+cross-output input conflicts; the result is one-to-one and maximal, while the
+meaning of requests and acceptance remains application-owned. `RRArbiter` and
+`CtrlRRArbiter` are the one-output payload-bearing and control-only clients of
+this matcher.
 
 `GrantDemux(T, outputs)` routes one input according to an optional-one-hot grant
 row, while `GrantMerge(T, inputs)` selects one input according to an

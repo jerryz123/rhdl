@@ -121,11 +121,6 @@ def fan_in_project_design = elaborate(FanInProjectTopology())
 def zip_route_design = elaborate(ZipRouteTopology())
 
 def rr_arbiter_verilog_reference = @str|<<{
-`ifndef _TYPESCOPE_rhdl_types
-`define _TYPESCOPE_rhdl_types
-  typedef struct packed {logic valid; logic [7:0] bits; logic [1:0] index; }
-    RoundRobinChoice;
-`endif // _TYPESCOPE_rhdl_types
 module RRArbiter(
   input                                                  clock,
                                                          reset,
@@ -140,66 +135,76 @@ module RRArbiter(
   output [1:0]                                           chosen
 );
 
-  reg  [1:0]                 next_priority;
-  `ifndef SYNTHESIS
-    rr_priority_in_range:
-      assert property (@(posedge clock) disable iff (reset) next_priority != 2'h3);
-  `endif // not def SYNTHESIS
-  wire                       _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
-  wire                       _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
-  wire                       _GEN_1 = ingress_2_in.valid & ~_GEN_0;
-  wire RoundRobinChoice      _GEN_2 =
-    '{valid: (_GEN_0 | ingress_2_in.valid),
+  wire [2:0][0:0] _matcher_grants;
+  wire [2:0]      _GEN =
+    {{_matcher_grants[2'h2][1'h0]},
+     {_matcher_grants[2'h1][1'h0]},
+     {_matcher_grants[2'h0][1'h0]}};
+  RoundRobinMatcher matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests
+      ({{{1{ingress_2_in.valid}}}, {{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
+    .accepts  ({1{egress_in.ready}}),
+    .grants   (_matcher_grants)
+  );
+  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[2'h0][1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[2'h1][1'h0])};
+  assign ingress_2_out = '{ready: (egress_in.ready & _matcher_grants[2'h2][1'h0])};
+  assign egress_out =
+    '{valid: (|_GEN),
       bits:
-        (_GEN_1
+        (_matcher_grants[2'h2][1'h0]
            ? ingress_2_in.bits
-           : _GEN
+           : _matcher_grants[2'h1][1'h0]
                ? ingress_1_in.bits
-               : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits),
-      index: (_GEN_1 ? 2'h2 : {1'h0, _GEN})};
-  wire                       _GEN_3 = ingress_2_in.valid & ~ingress_1_in.valid;
-  wire                       _GEN_4 = ingress_1_in.valid | ingress_2_in.valid;
-  wire                       _GEN_5 = ingress_0_in.valid & ~_GEN_4;
-  wire RoundRobinChoice      _GEN_6 =
-    '{valid: (_GEN_4 | ingress_0_in.valid),
-      bits:
-        (_GEN_5
-           ? ingress_0_in.bits
-           : _GEN_3
-               ? ingress_2_in.bits
-               : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits),
-      index: (_GEN_5 ? 2'h0 : _GEN_3 ? 2'h2 : 2'h1)};
-  wire                       _GEN_7 = ingress_0_in.valid & ~ingress_2_in.valid;
-  wire                       _GEN_8 = ingress_2_in.valid | ingress_0_in.valid;
-  wire                       _GEN_9 = ingress_1_in.valid & ~_GEN_8;
-  wire RoundRobinChoice      _GEN_10 =
-    '{valid: (_GEN_8 | ingress_1_in.valid),
-      bits:
-        (_GEN_9
-           ? ingress_1_in.bits
-           : _GEN_7
-               ? ingress_0_in.bits
-               : ingress_2_in.valid ? ingress_2_in.bits : ingress_2_in.bits),
-      index: (_GEN_9 ? 2'h1 : {~_GEN_7, 1'h0})};
-  wire RoundRobinChoice[2:0] _GEN_11 = {{_GEN_10}, {_GEN_6}, {_GEN_2}};
-  wire RoundRobinChoice      _GEN_12 = _GEN_11[next_priority];
-  wire                       _GEN_13 = _GEN_12.index == 2'h2;
+               : _matcher_grants[2'h0][1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN[2:1] & ~(_GEN[1:0] | {_GEN[0], 1'h0});
+endmodule
+
+module RoundRobinMatcher(
+  input             clock,
+                    reset,
+  input  [2:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [2:0][0:0] grants
+);
+
+  reg  [0:0][1:0] next_priorities;
+  `ifndef SYNTHESIS
+    round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset)
+                         next_priorities[1'h0] != 2'h3);
+  `endif // not def SYNTHESIS
+  wire            _GEN = requests[2'h1][1'h0] & ~requests[2'h0][1'h0];
+  wire            _GEN_0 = requests[2'h2][1'h0] & ~(requests[2'h0][1'h0] | _GEN);
+  wire            _GEN_1 = requests[2'h2][1'h0] & ~requests[2'h1][1'h0];
+  wire            _GEN_2 = requests[2'h0][1'h0] & ~(requests[2'h1][1'h0] | _GEN_1);
+  wire            _GEN_3 = requests[2'h0][1'h0] & ~requests[2'h2][1'h0];
+  wire            _GEN_4 = requests[2'h1][1'h0] & ~(requests[2'h2][1'h0] | _GEN_3);
+  wire [2:0][2:0] _GEN_5 =
+    {{{{requests[2'h2][1'h0]}, {_GEN_4}, {_GEN_3}}},
+     {{{_GEN_1}, {requests[2'h1][1'h0]}, {_GEN_2}}},
+     {{{_GEN_0}, {_GEN}, {requests[2'h0][1'h0]}}}};
+  wire [2:0]      _GEN_6 = {{_GEN_3}, {_GEN_2}, {requests[2'h0][1'h0]}};
+  wire [2:0]      _GEN_7 = {{_GEN_4}, {requests[2'h1][1'h0]}, {_GEN}};
+  wire [2:0]      _GEN_8 = {{requests[2'h2][1'h0]}, {_GEN_1}, {_GEN_0}};
+  wire [2:0]      _GEN_9 = _GEN_5[next_priorities[1'h0]];
+  wire [1:0]      _GEN_10 = _GEN_9[2:1] & ~(_GEN_9[1:0] | {_GEN_9[0], 1'h0});
+  wire [1:0]      _GEN_11 =
+    (|_GEN_9) & accepts[1'h0]
+      ? (_GEN_10 == 2'h2 ? 2'h0 : _GEN_10 + 2'h1)
+      : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
-      next_priority <= 2'h0;
+      next_priorities <= '{2'h0};
     else
-      next_priority <=
-        _GEN_12.valid & egress_in.ready
-          ? (_GEN_13 ? 2'h0 : _GEN_12.index + 2'h1)
-          : next_priority;
+      next_priorities[1'h0] <= _GEN_11;
   end // always @(posedge)
-  assign ingress_0_out =
-    '{ready: (egress_in.ready & _GEN_12.valid & _GEN_12.index == 2'h0)};
-  assign ingress_1_out =
-    '{ready: (egress_in.ready & _GEN_12.valid & _GEN_12.index == 2'h1)};
-  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_12.valid & _GEN_13)};
-  assign egress_out = '{valid: _GEN_12.valid, bits: _GEN_12.bits};
-  assign chosen = _GEN_12.index;
+  assign grants =
+    {{{1{_GEN_8[next_priorities[1'h0]]}}},
+     {{1{_GEN_7[next_priorities[1'h0]]}}},
+     {{1{_GEN_6[next_priorities[1'h0]]}}}};
 endmodule
 }>>|
 

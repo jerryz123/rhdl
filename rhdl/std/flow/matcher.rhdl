@@ -3,6 +3,7 @@
 
 export:
   GreedyMatcher
+  RoundRobinMatcher
 
 // Requests and grants use the same input-major matrix shape. Matching is
 // independent of payloads, ready signals, and any domain-specific resource
@@ -29,3 +30,75 @@ circuit GreedyMatcher(input_count :: PosInt, output_count :: PosInt):
     grant_rows := grant_rows ++ [vec(row)]
 
   grants <== vec(grant_rows)
+
+// Gives each output an independent rotating input priority while preserving a
+// one-to-one matching across the whole matrix. Outputs are considered in index
+// order, and each selects the first still-unmatched requester at or after its
+// priority, wrapping once. A selected output advances only when its grant is
+// accepted, so backpressure cannot consume arbitration priority.
+sync_circuit RoundRobinMatcher(input_count :: PosInt,
+                               output_count :: PosInt):
+  input requests: Vec(input_count, Vec(output_count, Bool))
+  input accepts: Vec(output_count, Bool)
+  output grants: Vec(input_count, Vec(output_count, Bool))
+
+  def priority_width = index_width(input_count)
+  def initial_priorities = vec(
+    for List (_ in 0..output_count): bits(0, priority_width)
+  )
+  reg next_priorities(~init: initial_priorities)
+
+  def input_taken = Array.make(input_count)
+  for (input_index in 0..input_count):
+    input_taken[input_index] := Bool(#false)
+
+  def mutable output_grant_rows = []
+  for (output_index in 0..output_count):
+    assert(next_priorities[output_index] <= bits(input_count - 1, priority_width),
+           String.append("round_robin_matcher_priority_in_range_",
+                         to_string(output_index)))
+    def candidates = vec(
+      for List (start in 0..input_count):
+        def candidate_row = Array.make(input_count)
+        for (input_index in 0..input_count):
+          candidate_row[input_index] := Bool(#false)
+        def mutable selected = Bool(#false)
+        def priority_order = (
+          for List (input_index in start..input_count): input_index
+        ) ++ (
+          for List (input_index in 0..start): input_index
+        )
+        for (input_index in priority_order):
+          def take = requests[input_index][output_index] & !input_taken[input_index] & !selected
+          candidate_row[input_index] := take
+          selected := selected ||| take
+        vec(for List (input_index in 0..input_count): candidate_row[input_index])
+    )
+    def selected_row = candidates[next_priorities[output_index]]
+    output_grant_rows := output_grant_rows ++ [selected_row]
+    for (input_index in 0..input_count):
+      input_taken[input_index] := input_taken[input_index] ||| selected_row[input_index]
+
+  def output_grants = vec(output_grant_rows)
+  grants <== vec(
+    for List (input_index in 0..input_count):
+      vec(
+        for List (output_index in 0..output_count):
+          output_grants[output_index][input_index]
+      )
+  )
+
+  next_priorities <== vec(
+    for List (output_index in 0..output_count):
+      def row = output_grants[output_index]
+      def selected = or_reduce(row)
+      def selected_index = priority_encoder(row)
+      def following_index = mux(
+        selected_index === bits(input_count - 1, priority_width),
+        bits(0, priority_width),
+        selected_index + bits(1, priority_width)
+      )
+      mux(selected & accepts[output_index],
+          following_index,
+          next_priorities[output_index])
+  )

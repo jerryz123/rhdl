@@ -90,7 +90,7 @@ integration_fixtures=(
   vector-update vec-shift-register-param
   async-read-memory sync-memory-masked simple-memory-ram sync-ram
   clocked-dpi assertions hierarchy bundle interface-array
-  queue-options rr-arbiter ctrl-queue-options
+  queue-options rr-arbiter round-robin-matcher ctrl-queue-options
   dont-care decode noc-route-computer noc-router noc-network noc-wormhole noc-router-family
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
@@ -178,7 +178,7 @@ fixture_in_group() {
     language:nested-bundle|language:aggregate-memory|language:one-hot-aggregate|language:priority-encoder|language:formal-differential)
       return 0
       ;;
-    std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
+    std:round-robin-matcher|std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
       return 0
       ;;
     protocols:noc-wormhole|protocols:noc-router-family|protocols:chi-*|protocols:tilelink-*)
@@ -598,6 +598,7 @@ direct_fixture_specs=(
   'nested-bundle|'
   'aggregate-memory|'
   'one-hot-aggregate|'
+  'round-robin-matcher|round_robin_matcher_tb'
   'noc-wormhole|noc_wormhole_tb'
   'formal-differential|formal_differential_tb'
   'noc-router-family|noc_router_family_tb'

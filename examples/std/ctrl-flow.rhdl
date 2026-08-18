@@ -139,10 +139,6 @@ endmodule
 }>>|
 
 def ctrl_rr_arbiter_verilog_reference = @str|<<{
-`ifndef _TYPESCOPE_rhdl_types
-`define _TYPESCOPE_rhdl_types
-  typedef struct packed {logic valid; logic [1:0] index; } CtrlRoundRobinChoice;
-`endif // _TYPESCOPE_rhdl_types
 module CtrlRRArbiter(
   input                                clock,
                                        reset,
@@ -157,51 +153,69 @@ module CtrlRRArbiter(
   output [1:0]                         chosen
 );
 
-  reg  [1:0]                     next_priority;
+  wire [2:0][0:0] _matcher_grants;
+  wire [2:0]      _GEN =
+    {{_matcher_grants[2'h2][1'h0]},
+     {_matcher_grants[2'h1][1'h0]},
+     {_matcher_grants[2'h0][1'h0]}};
+  RoundRobinMatcher matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests
+      ({{{1{ingress_2_in.valid}}}, {{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
+    .accepts  ({1{egress_in.ready}}),
+    .grants   (_matcher_grants)
+  );
+  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[2'h0][1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[2'h1][1'h0])};
+  assign ingress_2_out = '{ready: (egress_in.ready & _matcher_grants[2'h2][1'h0])};
+  assign egress_out = '{valid: (|_GEN)};
+  assign chosen = _GEN[2:1] & ~(_GEN[1:0] | {_GEN[0], 1'h0});
+endmodule
+
+module RoundRobinMatcher(
+  input             clock,
+                    reset,
+  input  [2:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [2:0][0:0] grants
+);
+
+  reg  [0:0][1:0] next_priorities;
   `ifndef SYNTHESIS
-    ctrl_rr_priority_in_range:
-      assert property (@(posedge clock) disable iff (reset) next_priority != 2'h3);
+    round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset)
+                         next_priorities[1'h0] != 2'h3);
   `endif // not def SYNTHESIS
-  wire                           _GEN = ingress_0_in.valid | ingress_1_in.valid;
-  wire CtrlRoundRobinChoice      _GEN_0 =
-    '{valid: (_GEN | ingress_2_in.valid),
-      index:
-        (ingress_2_in.valid & ~_GEN
-           ? 2'h2
-           : {1'h0, ingress_1_in.valid & ~ingress_0_in.valid})};
-  wire                           _GEN_1 = ingress_1_in.valid | ingress_2_in.valid;
-  wire CtrlRoundRobinChoice      _GEN_2 =
-    '{valid: (_GEN_1 | ingress_0_in.valid),
-      index:
-        (ingress_0_in.valid & ~_GEN_1
-           ? 2'h0
-           : ingress_2_in.valid & ~ingress_1_in.valid ? 2'h2 : 2'h1)};
-  wire                           _GEN_3 = ingress_2_in.valid | ingress_0_in.valid;
-  wire CtrlRoundRobinChoice      _GEN_4 =
-    '{valid: (_GEN_3 | ingress_1_in.valid),
-      index:
-        (ingress_1_in.valid & ~_GEN_3
-           ? 2'h1
-           : {~(ingress_0_in.valid & ~ingress_2_in.valid), 1'h0})};
-  wire CtrlRoundRobinChoice[2:0] _GEN_5 = {{_GEN_4}, {_GEN_2}, {_GEN_0}};
-  wire CtrlRoundRobinChoice      _GEN_6 = _GEN_5[next_priority];
-  wire                           _GEN_7 = _GEN_6.index == 2'h2;
+  wire            _GEN = requests[2'h1][1'h0] & ~requests[2'h0][1'h0];
+  wire            _GEN_0 = requests[2'h2][1'h0] & ~(requests[2'h0][1'h0] | _GEN);
+  wire            _GEN_1 = requests[2'h2][1'h0] & ~requests[2'h1][1'h0];
+  wire            _GEN_2 = requests[2'h0][1'h0] & ~(requests[2'h1][1'h0] | _GEN_1);
+  wire            _GEN_3 = requests[2'h0][1'h0] & ~requests[2'h2][1'h0];
+  wire            _GEN_4 = requests[2'h1][1'h0] & ~(requests[2'h2][1'h0] | _GEN_3);
+  wire [2:0][2:0] _GEN_5 =
+    {{{{requests[2'h2][1'h0]}, {_GEN_4}, {_GEN_3}}},
+     {{{_GEN_1}, {requests[2'h1][1'h0]}, {_GEN_2}}},
+     {{{_GEN_0}, {_GEN}, {requests[2'h0][1'h0]}}}};
+  wire [2:0]      _GEN_6 = {{_GEN_3}, {_GEN_2}, {requests[2'h0][1'h0]}};
+  wire [2:0]      _GEN_7 = {{_GEN_4}, {requests[2'h1][1'h0]}, {_GEN}};
+  wire [2:0]      _GEN_8 = {{requests[2'h2][1'h0]}, {_GEN_1}, {_GEN_0}};
+  wire [2:0]      _GEN_9 = _GEN_5[next_priorities[1'h0]];
+  wire [1:0]      _GEN_10 = _GEN_9[2:1] & ~(_GEN_9[1:0] | {_GEN_9[0], 1'h0});
+  wire [1:0]      _GEN_11 =
+    (|_GEN_9) & accepts[1'h0]
+      ? (_GEN_10 == 2'h2 ? 2'h0 : _GEN_10 + 2'h1)
+      : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
-      next_priority <= 2'h0;
+      next_priorities <= '{2'h0};
     else
-      next_priority <=
-        _GEN_6.valid & egress_in.ready
-          ? (_GEN_7 ? 2'h0 : _GEN_6.index + 2'h1)
-          : next_priority;
+      next_priorities[1'h0] <= _GEN_11;
   end // always @(posedge)
-  assign ingress_0_out =
-    '{ready: (egress_in.ready & _GEN_6.valid & _GEN_6.index == 2'h0)};
-  assign ingress_1_out =
-    '{ready: (egress_in.ready & _GEN_6.valid & _GEN_6.index == 2'h1)};
-  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_6.valid & _GEN_7)};
-  assign egress_out = '{valid: _GEN_6.valid};
-  assign chosen = _GEN_6.index;
+  assign grants =
+    {{{1{_GEN_8[next_priorities[1'h0]]}}},
+     {{1{_GEN_7[next_priorities[1'h0]]}}},
+     {{1{_GEN_6[next_priorities[1'h0]]}}}};
 endmodule
 }>>|
 
