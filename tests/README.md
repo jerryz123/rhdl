@@ -9,6 +9,7 @@ Tests mirror the implementation boundaries:
 | [`core/`](core/) | Backend-independent types, IR construction, verification, and primitive semantics |
 | [`frontend/`](frontend/) | Language profiles, layers, elaboration, examples, and invalid frontend uses |
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
+| [`formal/`](formal/) | Optional Rosette semantics, equivalence queries, counterexamples, and unsupported cases |
 | [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
 | [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
@@ -44,6 +45,7 @@ make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses
 make backend-test           # textual CIRCT lowering; decode tests require Espresso
+make formal-test            # Rosette combinational equivalence and counterexample checks
 make rfpl-test              # structural RFPL semantics and invalid uses
 make rfpl-circt-test        # RFPL CIRCT and example-owned Verilog golden
 make unit-test              # frontend plus backend Rhombus tests

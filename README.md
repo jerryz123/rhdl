@@ -40,12 +40,12 @@ logical IR and generated RTL unchanged. See the
                                              |
                                              v
                                        public core IR
-                                        /           \
-                                       v             v
-                             inspection tools   optional CIRCT backend
-                                                     |
-                                                     v
-                                               SystemVerilog
+                                      /       |       \
+                                     v        v        v
+                           inspection tools  formal  optional CIRCT backend
+                                             engine          |
+                                                             v
+                                                       SystemVerilog
 ```
 
 Macro expansion is not a second hardware IR. A concept belongs in core only
@@ -72,6 +72,7 @@ The authoritative package graph and dependency contract are in
 - The [Espresso logic minimizer](https://github.com/chipsalliance/espresso) for
   CIRCT emission of any design containing `rtl.decode`
 - CIRCT and Verilator only for external backend integration tests
+- Rosette only for optional behavioral-equivalence tests
 
 On a Homebrew-based macOS setup:
 
@@ -141,6 +142,7 @@ Detailed documentation lives with the component that owns it:
 | TileLink parameters, endpoint monitors, legality checks, and RAM manager | [`tilelink/README.md`](tilelink/README.md) |
 | AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
+| Rosette behavioral equivalence and counterexamples | [`rhdl/formal/README.md`](rhdl/formal/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
 | Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
@@ -169,6 +171,8 @@ The current vertical slice includes:
   protocol libraries.
 - Deterministic CIRCT lowering with example-owned SystemVerilog references and
   Verilator simulations.
+- Optional Rosette-backed deterministic combinational equivalence with typed
+  counterexamples over verified public IR.
 - Ricket, a standalone five-stage RV32I/RV64I integer core with direct component-oriented
   structured decode, separate instruction and data memory ports, forwarding,
   load-use stalls, redirect flushing, and fault-stop behavior. Its typed,

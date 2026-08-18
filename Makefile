@@ -1,11 +1,12 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-noc examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test formal-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-noc examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 HOST_ANNOTATION_TESTS := $(sort $(wildcard host/tests/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
 BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
+FORMAL_TESTS := tests/formal/suite.rkt
 LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
 LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
@@ -44,6 +45,15 @@ frontend-test: check-boundaries
 
 backend-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(BACKEND_TESTS)
+
+formal-test: check-boundaries
+	@formal_compiled_root="$$(mktemp -d)"; \
+	trap 'rm -rf "$$formal_compiled_root"' EXIT; \
+	if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''formal-test "Rosette solver probe failed"))'; then \
+		echo 'formal-test requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; \
+		exit 1; \
+	fi; \
+	env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_TESTS)
 
 unit-test: frontend-test backend-test
 

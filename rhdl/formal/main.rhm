@@ -1,0 +1,134 @@
+#lang rhombus
+// Exposes typed combinational equivalence results over verified RHDL subjects.
+
+import:
+  "../core/main.rhm" open
+  "snapshot.rhm" open
+  "engine.rkt" as engine
+  lib("racket/base.rkt") as rkt
+
+export:
+  FormalAssignment
+  FormalDifference
+  FormalDiagnostic
+  FormalResult
+  check_equivalent
+
+class FormalAssignment(port :: String, type, packed_value :: Nat)
+
+class FormalDifference(port :: String,
+                       type,
+                       left_value :: Nat,
+                       right_value :: Nat)
+
+class FormalDiagnostic(module_path,
+                       opcode,
+                       operation_id,
+                       location,
+                       origin,
+                       message :: String)
+
+class FormalResult(status :: String,
+                   assignments = [],
+                   differences = [],
+                   diagnostic = #false):
+  method equivalent(): status == "equivalent"
+  method counterexample(): status == "counterexample"
+  method unsupported(): status == "unsupported"
+  method unknown(): status == "unknown"
+
+  method describe():
+    match status
+    | "equivalent": "equivalent"
+    | "counterexample":
+        "counterexample with " ++ to_string(differences.length()) ++ " differing output(s)"
+    | "unsupported" || "unknown":
+        if diagnostic | status ++ ": " ++ diagnostic.message | status
+    | ~else: status
+
+fun interface_error(left_top, right_top):
+  fun compare(kind, left_ports, right_ports):
+    if left_ports.length() != right_ports.length()
+    | "formal subjects have different " ++ kind ++ " port names"
+    | block:
+        def mutable message = #false
+        for (left_port in left_ports):
+          unless message
+          | def right_port = right_ports.find(
+              fun (candidate): candidate.name == left_port.name
+            )
+            cond
+            | !right_port:
+                message := "formal subjects have different " ++ kind ++ " port names"
+            | !type_equal(left_port.type, right_port.type) || !type_equal(right_port.type, left_port.type):
+                message := String.append(
+                  "formal subjects have different RHDL types for ", kind,
+                  " port ", left_port.name, ": ",
+                  type_text(left_port.type), " versus ", type_text(right_port.type)
+                )
+            | ~else: #void
+        message
+  def input_error = compare("input", left_top.inputs, right_top.inputs)
+  input_error || compare("output", left_top.outputs, right_top.outputs)
+
+fun interface_diagnostic(top, message):
+  FormalDiagnostic(top.name, #false, #false, #false, #false, message)
+
+fun entry_value(entry, key):
+  rkt.#{hash-ref}(entry, key)
+
+fun optional_string(value):
+  if value | to_string(value) | #false
+
+fun convert_diagnostic(raw):
+  if raw
+  | FormalDiagnostic(optional_string(entry_value(raw, "module_path")),
+                     optional_string(entry_value(raw, "opcode")),
+                     entry_value(raw, "operation_id"),
+                     optional_string(entry_value(raw, "location")),
+                     optional_string(entry_value(raw, "origin")),
+                     to_string(entry_value(raw, "message")))
+  | #false
+
+fun convert_engine_result(raw, left_top):
+  def status = to_string(engine.engine_result_status(raw))
+  def raw_assignments = PairList.to_list(engine.engine_result_inputs(raw))
+  def raw_differences = PairList.to_list(engine.engine_result_differences(raw))
+  def assignments:
+    raw_assignments.map(
+      fun (entry):
+        def name = to_string(entry_value(entry, "port"))
+        def port = left_top.inputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_equivalent,
+                "formal engine returned an unknown input port " ++ name)
+        FormalAssignment(name, port.type, entry_value(entry, "value"))
+    )
+  def differences:
+    raw_differences.map(
+      fun (entry):
+        def name = to_string(entry_value(entry, "port"))
+        def port = left_top.outputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_equivalent,
+                "formal engine returned an unknown output port " ++ name)
+        FormalDifference(name,
+                         port.type,
+                         entry_value(entry, "left"),
+                         entry_value(entry, "right"))
+    )
+  FormalResult(status,
+               assignments,
+               differences,
+               convert_diagnostic(engine.engine_result_diagnostic(raw)))
+
+fun check_equivalent(left, right):
+  def left_top = formal_subject_top(left)
+  def right_top = formal_subject_top(right)
+  def mismatch = interface_error(left_top, right_top)
+  if mismatch
+  | FormalResult("unsupported", [], [], interface_diagnostic(left_top, mismatch))
+  | convert_engine_result(
+      engine.check_equivalent_snapshots(formal_snapshot(left), formal_snapshot(right)),
+      left_top
+    )

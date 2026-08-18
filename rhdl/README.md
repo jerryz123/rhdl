@@ -34,6 +34,7 @@ frontend/layers/* -------------+----> frontend/support/*
 frontend/{foundation,layers,support} ---------------------> approved core APIs
 
 backend/circt ---------------------------------------------> core
+formal ----------------------------------------------------> core
 ```
 
 `#lang rhdl` is the curated language. `#lang rhdl/base` is the composition
@@ -57,6 +58,7 @@ internal module implementing its shared frontend forms is called the
 | [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
+| [`formal/`](formal/README.md) | Optional Rosette-backed behavioral equivalence over verified public IR | Core only; Rosette through one Racket interoperability module |
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, endpoint monitors, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../chi/`](../chi/README.md) | AMBA CHI Issue H parameters, exact flits, protocol classifiers, credited node-role links, and link-local monitors | Public `#lang rhdl`; protocol-neutral `std/` libraries as later layers require them |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
@@ -201,8 +203,8 @@ locations. Run `make check-boundaries` after moving or adding modules.
 designs, simulation adapters, physical-design integration fixtures, and
 frontend or FESVR fixtures. `.rhm` contains Rhombus implementation and library
 modules.
-`.rkt` is restricted to reader shims and Racket interoperability where
-collection lookup requires it.
+`.rkt` is restricted to reader shims and the Rosette engine whose solver-aided
+language requires a Racket module boundary.
 
 The equivalence tests under [`../tests/frontend/`](../tests/frontend/) and
 [`../tests/backend/`](../tests/backend/) check that direct core construction,
