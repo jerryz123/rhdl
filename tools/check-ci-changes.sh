@@ -88,6 +88,14 @@ check_matrix_entry examples/noc/noc-router.rhdl circt_matrix ci-circt-protocols-
 check_matrix_entry examples/lop/adder-core.rhm example_matrix examples-lop
 check_matrix_entry examples/rfpl/circuit-pair.rhdl example_matrix examples-rfpl
 check_matrix_entry examples/rfpl/circuit-pair.rhdl circt_matrix rfpl-circt-test
+check_matrix_entry examples/ridx/grid.rhdl example_matrix examples-ridx
+check_matrix_entry examples/ridx/grid.rhdl circt_matrix ci-circt-protocols-test
+check_matrix_entry examples/riscv/instruction-fields.rhdl example_matrix examples-riscv
+check_matrix_entry examples/riscv/instruction-fields.rhdl circt_matrix ci-circt-cores-test
+check_matrix_entry examples/chi/ram.rhdl example_matrix examples-chi
+check_matrix_entry examples/chi/ram.rhdl circt_matrix ci-circt-protocols-test
+check_matrix_entry examples/cores/ricket.rhdl example_matrix examples-cores
+check_matrix_entry examples/cores/ricket.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry examples/tilelink/tilelink.rhdl example_matrix examples-tilelink
 check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sim/fesvr/direct_mem_htif.cc fesvr true

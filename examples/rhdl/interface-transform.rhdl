@@ -1,5 +1,5 @@
 #lang rhdl/base
-// Proves custom bidirectional protocols can define typed transforms without flow libraries.
+// Demonstrates typed transforms over custom bidirectional interfaces without flow libraries.
 
 import:
   lib("rhdl/frontend/layers/interface.rhm") open
@@ -104,6 +104,50 @@ def design = elaborate(CustomInterfaceTransforms())
 def boundary_design = elaborate(CustomInterfaceBoundary())
 def detached_terminal_design = elaborate(DetachedInterfaceTerminal())
 
+def verilog_reference = @str|<<{
+module CustomInterfaceTransforms(
+  input  struct packed {logic [7:0] command; } commands_in,
+  input  struct packed {logic ready; }         renamed_in,
+  input  struct packed {logic [7:0] payload; } event_in,
+  output struct packed {logic accepted; }      commands_out,
+  output struct packed {logic [7:0] payload; } renamed_out,
+                                               copies_0_out,
+                                               copies_1_out
+);
+
+  assign commands_out = '{accepted: renamed_in.ready};
+  assign renamed_out = '{payload: commands_in.command};
+  assign copies_0_out = event_in;
+  assign copies_1_out = event_in;
+endmodule
+}>>|
+
+def boundary_verilog_reference = @str|<<{
+module CustomInterfaceBoundary(
+  input  [7:0] command,
+  input        ready,
+  output       accepted,
+  output [7:0] payload
+);
+
+  assign accepted = ready;
+  assign payload = command;
+endmodule
+}>>|
+
+def detached_terminal_verilog_reference = @str|<<{
+module DetachedInterfaceTerminal(
+  input  struct packed {logic [7:0] command; } commands_in,
+  input  struct packed {logic ready; }         renamed_in,
+  output struct packed {logic accepted; }      commands_out,
+  output struct packed {logic [7:0] payload; } renamed_out
+);
+
+  assign commands_out = '{accepted: renamed_in.ready};
+  assign renamed_out = '{payload: commands_in.command};
+endmodule
+}>>|
+
 export:
   CommandChannel
   RenamedChannel
@@ -116,3 +160,6 @@ export:
   design
   boundary_design
   detached_terminal_design
+  verilog_reference
+  boundary_verilog_reference
+  detached_terminal_verilog_reference

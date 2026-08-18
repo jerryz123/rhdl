@@ -15,9 +15,14 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`clocking/`](clocking/) | Backend-independent clock-use and temporal-provenance analysis over completed RHDL IR |
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
+| [`ridx/`](ridx/) | Ridx-driven structural hardware generation |
+| [`riscv/`](riscv/) | RISC-V descriptor adapters and field extraction |
+| [`chi/`](chi/) | AMBA CHI endpoints and finite components |
+| [`cores/`](cores/) | Reusable processor datapaths and complete named cores |
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
 | [`golf/`](golf/) | Compact `#lang rhdl/golf` syntax over the standard RHDL profile |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
+| [`formal/`](formal/) | Optional Rosette-backed behavioral proofs |
 | [`tilelink/`](tilelink/) | Examples owned by the TileLink domain library |
 
 ## One IR, layered languages
@@ -61,6 +66,9 @@ The aggregate equivalence examples make the same boundary executable:
 - [`lop/width-ops-kernel.rhm`](lop/width-ops-kernel.rhm) and
   [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) compare explicit kernel operations with
   concise indexing and width syntax.
+- [`lop/counter-composed.rhdl`](lop/counter-composed.rhdl) and
+  [`rhdl/sync-counter.rhdl`](rhdl/sync-counter.rhdl) show that explicitly selected
+  sequential layers and the standard profile construct the same clocked IR.
 
 The [frontend guide](../rhdl/frontend/README.md) explains the profiles, and
 the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
@@ -81,6 +89,8 @@ hardware.
   declared-identical, derived, asynchronous, and unknown clock relationships.
 - [`clocking/hierarchy.rhm`](clocking/hierarchy.rhm) reuses one child module at
   two clock bindings and obtains a separate classification for each instance.
+- [`clocking/report.rhm`](clocking/report.rhm) classifies a sync-counter
+  hierarchy and prints its hierarchy-aware temporal-provenance report.
 
 Run only these analysis examples with:
 
@@ -168,6 +178,10 @@ instances, or logic to the generated RTL.
 | [`rhdl/interface-specialization.rhdl`](rhdl/interface-specialization.rhdl) | Directional parameter compatibility, nested rules, operand reversal, and explicit width adaptation |
 | [`rhdl/interface-array.rhdl`](rhdl/interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
 | [`rhdl/nested-interface.rhdl`](rhdl/nested-interface.rhdl) | Recursive interface composition and orientation |
+| [`rhdl/interface-monitor.rhdl`](rhdl/interface-monitor.rhdl) | Read-only endpoint observations and explicit protocol assertions |
+| [`rhdl/interface-transform.rhdl`](rhdl/interface-transform.rhdl) | Typed custom interface transforms, fanout, and detached terminals |
+| [`rhdl/priority-encoder.rhdl`](rhdl/priority-encoder.rhdl) | Lower-index-first priority selection over packed and aggregate inputs |
+| [`rhdl/bit-utilities.rhdl`](rhdl/bit-utilities.rhdl) | Negation, reductions, membership predicates, and enum validity |
 
 ## Standard-library examples
 
@@ -186,6 +200,10 @@ instances, or logic to the generated RTL.
 | [`std/valid-pipe.rhdl`](std/valid-pipe.rhdl) | Fixed-latency Valid-only pipelining without a readiness channel |
 | [`std/flow-topology.rhdl`](std/flow-topology.rhdl) | Endpoint-first and precomposed flow topology over map, filter, gate, zip, parallel, arbitration, buffering, fork, and payload routing |
 | [`std/ctrl-flow.rhdl`](std/ctrl-flow.rhdl) | Payloadless token-flow versions of pipe, queue, arbitration, routing, join, and broadcast |
+| [`std/valid-flow.rhdl`](std/valid-flow.rhdl) | Valid-only map, filter, fanout, and conversion from accepted flow |
+| [`std/completion-queue.rhdl`](std/completion-queue.rhdl) | Response-capacity reservation before nonstallable issue |
+| [`std/credited-transport.rhdl`](std/credited-transport.rhdl) | Monitored sender/buffer composition with explicit credit return |
+| [`std/scoreboard.rhdl`](std/scoreboard.rhdl) | Set/clear occupancy tracking with range and state assertions |
 
 ## Domain-library examples
 
@@ -195,7 +213,25 @@ instances, or logic to the generated RTL.
 | [`noc/noc-router.rhdl`](noc/noc-router.rhdl) | Validated one-beat NoC routing with per-origin buffers, one-to-one allocation, ejection, and backpressure |
 | [`noc/noc-network.rhdl`](noc/noc-network.rhdl) | Three user-owned router subsystems assembled hierarchically from pure router and VC wiring plans |
 | [`noc/noc-crossbar.rhdl`](noc/noc-crossbar.rhdl) | Linkless one-router NoC elaborated as a three-ingress, three-ejection generalized crossbar |
+| [`ridx/grid.rhdl`](ridx/grid.rhdl) | Ridx views, relations, and mappings generating a finite RHDL grid |
+| [`riscv/instruction-pattern.rhdl`](riscv/instruction-pattern.rhdl) | RV32I and RV64I descriptors materialized as typed patterns |
+| [`riscv/instruction-fields.rhdl`](riscv/instruction-fields.rhdl) | Descriptor-generated instruction fields and sign-extended immediates |
+| [`chi/ram.rhdl`](chi/ram.rhdl) | Finite initial-profile non-coherent CHI backing RAM |
+| [`chi/home.rhdl`](chi/home.rhdl) | Bounded HN-I between one requester and one subordinate port |
+| [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
+| [`cores/ricket.rhdl`](cores/ricket.rhdl) | Complete RV64 Ricket core with private instruction and data caches |
 | [`tilelink/tilelink.rhdl`](tilelink/tilelink.rhdl) | Parameterized uncached and cached TileLink interface adapters |
+
+## Formal example
+
+[`formal/equivalence.rhm`](formal/equivalence.rhm) asks the optional Rosette
+engine to prove that standard-profile and explicitly composed adders are
+behaviorally equivalent. It is excluded from the default example suite so
+ordinary RHDL use does not require Rosette:
+
+```sh
+make examples-formal
+```
 
 ## Interface topology composition
 
@@ -247,8 +283,10 @@ Run every example with:
 make examples
 ```
 
-The directory-specific targets `examples-rhdl`, `examples-std`, `examples-lop`,
-`examples-golf`, `examples-rfpl`, and `examples-tilelink` run one ownership group. CI selects
+The directory-specific targets `examples-rhdl`, `examples-clocking`,
+`examples-std`, `examples-noc`, `examples-lop`, `examples-golf`,
+`examples-rfpl`, `examples-ridx`, `examples-riscv`, `examples-chi`,
+`examples-cores`, and `examples-tilelink` run one ownership group. CI selects
 only groups affected by the changed implementation layer: core and frontend
 changes reach every group, standard-library changes reach the RHDL, standard,
 and TileLink groups that import `rhdl/std`, and domain changes remain local to

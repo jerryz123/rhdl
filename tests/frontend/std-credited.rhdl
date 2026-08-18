@@ -1,19 +1,8 @@
 #lang rhdl
-// Provides elaboration fixtures for credited transport, adapters, and monitors.
+// Provides focused adapter wrappers and invalid credited-transport test cases.
 
 import:
   lib("rhdl/std/flow.rhdl") open
-
-interface RefinedCredited8() refines Credited(Bits(8), 2)
-
-sync_circuit MonitoredCreditedTransmitter():
-  input send: Bool
-  input payload: Bits(8)
-  interface link(Credited(Bits(8), 2), ~role: transmitter)
-
-  link.valid <== send
-  link.bits <== payload
-  monitor_credited(link)
 
 sync_circuit CreditSenderWrapper():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
@@ -39,34 +28,6 @@ sync_circuit CreditBufferWrapper():
   count <== buffer.count
   reserved <== buffer.reserved
 
-sync_circuit CreditedRoundTrip():
-  input grant_enable: Bool
-  interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  interface egress(Irrevocable(Bits(8)), ~role: producer)
-  output credit_count: Bits(2)
-  output count: Bits(2)
-  output reserved: Bits(2)
-
-  inst sender(CreditSender(Bits(8), 2))
-  inst buffer(CreditBuffer(Bits(8), 2))
-  ingress <=> sender.ingress
-  sender.link <=> buffer.link
-  buffer.grant_enable <== grant_enable
-  egress <=> buffer.egress
-  credit_count <== sender.credit_count
-  count <== buffer.count
-  reserved <== buffer.reserved
-
-sync_circuit CreditedChainedRoundTrip():
-  input grant_enable: Bool
-  interface ingress(Decoupled(Bits(8)), ~role: consumer)
-  interface egress(Irrevocable(Bits(8)), ~role: producer)
-
-  ingress
-    |> credit_sender(2)
-    |> credit_buffer(2, ~grant_enable: grant_enable)
-    |> egress
-
 sync_circuit InvalidCreditLimit():
   interface link(Credited(Bits(8), 0), ~role: transmitter)
   link.valid <== Bool(#false)
@@ -91,27 +52,17 @@ sync_circuit WrongCreditBufferLimit():
   interface ingress(Credited(Bits(8), 3), ~role: transmitter)
   ingress |> credit_buffer(2)
 
-def monitor_design = elaborate(MonitoredCreditedTransmitter())
 def sender_design = elaborate(CreditSenderWrapper())
 def buffer_design = elaborate(CreditBufferWrapper())
-def round_trip_design = elaborate(CreditedRoundTrip())
-def chained_round_trip_design = elaborate(CreditedChainedRoundTrip())
 
 export:
-  RefinedCredited8
-  MonitoredCreditedTransmitter
   CreditSenderWrapper
   CreditBufferWrapper
-  CreditedRoundTrip
-  CreditedChainedRoundTrip
   InvalidCreditLimit
   InvalidSenderLimit
   InvalidBufferDepth
   MismatchedCreditLimits
   WrongCreditBufferProtocol
   WrongCreditBufferLimit
-  monitor_design
   sender_design
   buffer_design
-  round_trip_design
-  chained_round_trip_design

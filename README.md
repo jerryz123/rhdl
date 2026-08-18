@@ -136,6 +136,7 @@ Detailed documentation lives with the component that owns it:
 | RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
+| Clock/reset inventory and temporal provenance analysis | [`rhdl/analysis/README.md`](rhdl/analysis/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
@@ -179,6 +180,9 @@ The current vertical slice includes:
   Verilator simulations.
 - Optional Rosette-backed deterministic combinational equivalence with typed
   counterexamples over verified public IR.
+- Backend-independent clock/reset inventory and hierarchy-aware temporal
+  provenance reports that distinguish same-clock, foreign-clock, external,
+  static, and multi-clock fan-in sources.
 - Ricket, a standalone five-stage RV32I/RV64I integer core with direct component-oriented
   structured decode, separate instruction and data memory ports, forwarding,
   load-use stalls, redirect flushing, and fault-stop behavior. Its typed,
@@ -192,7 +196,8 @@ The current vertical slice includes:
   width inference
 - Memory initialization, masks on asynchronous-read memories, general
   multi-port synchronous memories, and defined inter-port collisions
-- Asynchronous reset, reset-polarity metadata, and multi-domain analysis
+- Asynchronous reset, reset-polarity metadata, and policy/approval semantics
+  for crossings identified by multi-domain temporal analysis
 - General IR regions and control-flow blocks
 - Runtime-loaded operation dialects
 - Multi-role protocols, optional interface fields, and generated protocol

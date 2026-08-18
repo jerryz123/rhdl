@@ -1,30 +1,8 @@
 #lang rhdl
-// Exercises inline Valid composition and reserved nonstallable completion buffering.
+// Provides interface-boundary coverage and invalid Valid-flow test cases.
 
 import:
   lib("rhdl/std/flow.rhdl") open
-
-circuit ValidMapForkChain():
-  interface ingress(Valid(Bits(8)), ~role: consumer)
-  interface egress[2](Valid(Bits(9)), ~role: producer)
-
-  def mapped = ingress |> map_valid(payload => concat(bits(0, 1), payload))
-  def outputs = mapped |> fork_valid(2)
-  egress <=> outputs
-
-circuit AcceptedFilteredValid():
-  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
-  interface egress(Valid(Bits(8)), ~role: producer)
-
-  ingress |> to_valid()
-    |> filter_valid(payload => payload[0].into(Bool))
-    |> eject_flow(~valid: egress.valid, ~bits: egress.bits)
-
-sync_circuit CheckedValidToDecoupled():
-  interface ingress(Valid(Bits(8)), ~role: consumer)
-  interface egress(Decoupled(Bits(8)), ~role: producer)
-
-  ingress |> to_decoupled() |> egress
 
 interface TaggedFlow(T):
   role producer
@@ -152,18 +130,6 @@ circuit NestedFlowBoundary():
          )
        )
 
-sync_circuit CompletionQueueWrapper():
-  interface request(Decoupled(Bits(8)), ~role: consumer)
-  interface issue(Valid(Bits(8)), ~role: producer)
-  interface completion(Valid(Bits(16)), ~role: consumer)
-  interface response(Irrevocable(Bits(16)), ~role: producer)
-
-  inst bridge(CompletionQueue(Bits(8), Bits(16), 2))
-  request |> bridge.request
-  bridge.issue |> issue
-  completion |> bridge.completion
-  bridge.response |> response
-
 circuit MapValidWrongProtocol():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
   ingress |> map_valid(payload => payload)
@@ -200,29 +166,17 @@ sync_circuit ToDecoupledWrongProtocol():
 sync_circuit CompletionQueueZeroDepth():
   inst invalid(CompletionQueue(Bits(8), Bits(8), 0))
 
-def valid_design = elaborate(ValidMapForkChain())
-def accepted_design = elaborate(AcceptedFilteredValid())
-def checked_decoupled_design = elaborate(CheckedValidToDecoupled())
 def generic_boundary_design = elaborate(GenericFlowBoundary())
 def control_boundary_design = elaborate(ControlFlowBoundary())
 def reverse_provider_boundary_design = elaborate(ReverseProviderFlowBoundary())
 def detached_boundary_design = elaborate(DetachedFlowBoundary())
 def nested_boundary_design = elaborate(NestedFlowBoundary())
-def completion_design = elaborate(CompletionQueueWrapper())
-def single_completion_design = elaborate(
-  CompletionQueue(Bits(8), Bits(16), 1)
-)
-
 export:
-  ValidMapForkChain
-  AcceptedFilteredValid
-  CheckedValidToDecoupled
   GenericFlowBoundary
   ControlFlowBoundary
   ReverseProviderFlowBoundary
   DetachedFlowBoundary
   NestedFlowBoundary
-  CompletionQueueWrapper
   MapValidWrongProtocol
   ForkValidWrongProtocol
   ForkValidZeroOutputs
@@ -232,13 +186,8 @@ export:
   ToValidWrongProtocol
   ToDecoupledWrongProtocol
   CompletionQueueZeroDepth
-  valid_design
-  accepted_design
-  checked_decoupled_design
   generic_boundary_design
   control_boundary_design
   reverse_provider_boundary_design
   detached_boundary_design
   nested_boundary_design
-  completion_design
-  single_completion_design

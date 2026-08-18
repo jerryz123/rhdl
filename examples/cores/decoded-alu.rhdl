@@ -1,0 +1,142 @@
+#lang rhdl
+// Demonstrates RV64I instruction decoding connected directly to the reusable ALU.
+
+import:
+  lib("cores/alu.rhdl") open
+  lib("cores/ricket/decode/alu-ctrl.rhdl") open
+  lib("riscv/isa/xlen.rhm") open
+
+circuit DecodedALU():
+  input instruction: Bits(32)
+  input(left, right): Bits(64)
+  output valid: Bool
+  output result: Bits(64)
+
+  inst decoder(RV64IAluInstructionDecoder())
+  inst alu(ALU(XLen.X64))
+  decoder.instruction <== instruction
+  alu.left <== left
+  alu.right <== right
+  alu.control <== decoder.control
+  valid <== decoder.valid
+  result <== alu.result
+
+def design = elaborate(DecodedALU())
+
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef
+    struct packed {logic [5:0] result_select; logic subtract; logic signed_mode; logic shift_right; logic word; }
+    AluControl;
+  typedef struct packed {logic valid; AluControl value; } DecodeResult;
+`endif // _TYPESCOPE_rhdl_types
+module DecodedALU(
+  input  [31:0] instruction,
+  input  [63:0] left,
+                right,
+  output        valid,
+  output [63:0] result
+);
+
+  wire AluControl _decoder_control;
+  RV64IAluInstructionDecoder decoder (
+    .instruction (instruction),
+    .valid       (valid),
+    .control     (_decoder_control)
+  );
+  ALU alu (
+    .left    (left),
+    .right   (right),
+    .control (_decoder_control),
+    .result  (result)
+  );
+endmodule
+
+module RV64IAluInstructionDecoder(
+  input  [31:0]     instruction,
+  output            valid,
+  output AluControl control
+);
+
+  wire DecodeResult _GEN =
+    /*cast(bit)*/{instruction[0] & instruction[1] & ~(instruction[2]) & instruction[4]
+                    & ~(instruction[6]) & instruction[12] & ~(instruction[13])
+                    & instruction[14] & ~(instruction[25]) & ~(instruction[26])
+                    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29])
+                    & ~(instruction[31]) | instruction[0] & instruction[1]
+                    & ~(instruction[2]) & instruction[4] & ~(instruction[6])
+                    & ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14])
+                    & ~(instruction[25]) & ~(instruction[26]) & ~(instruction[27])
+                    & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[31])
+                    | instruction[0] & instruction[1] & ~(instruction[2]) & instruction[4]
+                    & ~(instruction[6]) & instruction[12] & ~(instruction[13])
+                    & ~(instruction[25]) & ~(instruction[26]) & ~(instruction[27])
+                    & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
+                    & ~(instruction[31]) | instruction[0] & instruction[1]
+                    & ~(instruction[2]) & ~(instruction[3]) & instruction[4]
+                    & ~(instruction[5]) & ~(instruction[6]) & instruction[14]
+                    & ~(instruction[26]) & ~(instruction[27]) & ~(instruction[28])
+                    & ~(instruction[29]) & ~(instruction[31]) | instruction[0]
+                    & instruction[1] & ~(instruction[2]) & ~(instruction[3])
+                    & instruction[4] & ~(instruction[6]) & ~(instruction[25])
+                    & ~(instruction[26]) & ~(instruction[27]) & ~(instruction[28])
+                    & ~(instruction[29]) & ~(instruction[30]) & ~(instruction[31])
+                    | instruction[0] & instruction[1] & ~(instruction[2])
+                    & ~(instruction[3]) & instruction[4] & ~(instruction[5])
+                    & ~(instruction[6]) & ~(instruction[26]) & ~(instruction[27])
+                    & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
+                    & ~(instruction[31]) | instruction[0] & instruction[1]
+                    & ~(instruction[2]) & instruction[4] & ~(instruction[5])
+                    & ~(instruction[6]) & ~(instruction[12]) & ~(instruction[13])
+                    & ~(instruction[14]) | instruction[0] & instruction[1]
+                    & ~(instruction[2]) & ~(instruction[3]) & instruction[4]
+                    & ~(instruction[5]) & ~(instruction[6]) & instruction[13]
+                    | instruction[0] & instruction[1] & ~(instruction[2])
+                    & ~(instruction[3]) & instruction[4] & ~(instruction[5])
+                    & ~(instruction[6]) & ~(instruction[12]),
+                  instruction[12] & instruction[13] & instruction[14],
+                  ~(instruction[12]) & instruction[13] & instruction[14],
+                  ~(instruction[12]) & ~(instruction[13]) & instruction[14],
+                  instruction[13] & ~(instruction[14]),
+                  instruction[12] & ~(instruction[13]),
+                  ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14]),
+                  instruction[5] & instruction[30],
+                  ~(instruction[13]) & instruction[30] | ~(instruction[12]),
+                  instruction[14],
+                  instruction[3]};
+  assign valid = _GEN.valid;
+  assign control = _GEN.value;
+endmodule
+
+module ALU(
+  input  [63:0]     left,
+                    right,
+  input  AluControl control,
+  output [63:0]     result
+);
+
+  wire [63:0] _GEN = {58'h0, control.word ? {1'h0, right[4:0]} : right[5:0]};
+  wire [63:0] _GEN_0 =
+    (control.subtract ? left - right : left + right) & {64{control.result_select[0]}}
+    | (control.shift_right
+         ? (control.signed_mode
+              ? $signed($signed(control.word ? {{32{left[31]}}, left[31:0]} : left)
+                        >>> _GEN)
+              : (control.word ? {32'h0, left[31:0]} : left) >> _GEN)
+         : left << _GEN) & {64{control.result_select[1]}}
+    | {63'h0, control.signed_mode & (left[63] ^ right[63]) ? left[63] : left < right}
+    & {64{control.result_select[2]}} | (left ^ right) & {64{control.result_select[3]}}
+    | (left | right) & {64{control.result_select[4]}} | left & right
+    & {64{control.result_select[5]}};
+  assign result =
+    control.word & (control.result_select == 6'h1 | control.result_select == 6'h2)
+      ? {{32{_GEN_0[31]}}, _GEN_0[31:0]}
+      : _GEN_0;
+endmodule
+}>>|
+
+export:
+  DecodedALU
+  design
+  verilog_reference

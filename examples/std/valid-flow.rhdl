@@ -1,0 +1,86 @@
+#lang rhdl
+// Demonstrates composable Valid mapping, fanout, filtering, and Decoupled conversion.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+circuit ValidMapForkChain():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  interface egress[2](Valid(Bits(9)), ~role: producer)
+
+  def mapped = ingress |> map_valid(payload => concat(bits(0, 1), payload))
+  def outputs = mapped |> fork_valid(2)
+  egress <=> outputs
+
+circuit AcceptedFilteredValid():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(Valid(Bits(8)), ~role: producer)
+
+  ingress |> to_valid()
+    |> filter_valid(payload => payload[0].into(Bool))
+    |> eject_flow(~valid: egress.valid, ~bits: egress.bits)
+
+sync_circuit CheckedValidToDecoupled():
+  interface ingress(Valid(Bits(8)), ~role: consumer)
+  interface egress(Decoupled(Bits(8)), ~role: producer)
+
+  ingress |> to_decoupled() |> egress
+
+def design = elaborate(ValidMapForkChain())
+def accepted_design = elaborate(AcceptedFilteredValid())
+def decoupled_design = elaborate(CheckedValidToDecoupled())
+
+def verilog_reference = @str|<<{
+module ValidMapForkChain(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic valid; logic [8:0] bits; } egress_0_out,
+                                                         egress_1_out
+);
+
+  wire struct packed {logic valid; logic [8:0] bits; } _GEN =
+    '{valid: ingress_in.valid, bits: {1'h0, ingress_in.bits}};
+  assign egress_0_out = _GEN;
+  assign egress_1_out = _GEN;
+endmodule
+}>>|
+
+def accepted_verilog_reference = @str|<<{
+module AcceptedFilteredValid(
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  output struct packed {logic ready; }                   ingress_out,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  assign ingress_out = '{ready: 1'h1};
+  assign egress_out =
+    '{valid: (ingress_in.valid & ingress_in.bits[0]), bits: ingress_in.bits};
+endmodule
+}>>|
+
+def decoupled_verilog_reference = @str|<<{
+module CheckedValidToDecoupled(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                   egress_in,
+  output struct packed {logic valid; logic [7:0] bits; } egress_out
+);
+
+  `ifndef SYNTHESIS
+    assert property (@(posedge clock) disable iff (reset)
+                       ~ingress_in.valid | egress_in.ready);
+  `endif // not def SYNTHESIS
+  assign egress_out = ingress_in;
+endmodule
+}>>|
+
+export:
+  ValidMapForkChain
+  AcceptedFilteredValid
+  CheckedValidToDecoupled
+  design
+  accepted_design
+  decoupled_design
+  verilog_reference
+  accepted_verilog_reference
+  decoupled_verilog_reference

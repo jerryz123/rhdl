@@ -1,0 +1,63 @@
+#lang rhdl/base
+// Builds a counter hierarchy from only explicitly selected sequential frontend layers.
+
+import:
+  lib("rhdl/frontend/layers/comb.rhm") open
+  lib("rhdl/frontend/layers/sequential.rhm") open
+  lib("rhdl/frontend/layers/hierarchy.rhm") open
+  lib("rhdl/frontend/layers/sync.rhm") open
+
+sync_circuit Counter(width):
+  output count: Bits(width)
+
+  def zero = bits(0, width)
+  reg state(Bits(width), ~init: zero)
+  def one = bits(1, width)
+  state <== state + one
+  count <== state
+
+sync_circuit CounterTop(width):
+  output count: Bits(width)
+
+  def CounterModule = Counter(width)
+  inst counter(CounterModule)
+  count <== counter.count
+
+def design = elaborate(CounterTop(8))
+
+def verilog_reference = @str|<<{
+module CounterTop(
+  input        clock,
+               reset,
+  output [7:0] count
+);
+
+  Counter counter (
+    .clock (clock),
+    .reset (reset),
+    .count (count)
+  );
+endmodule
+
+module Counter(
+  input        clock,
+               reset,
+  output [7:0] count
+);
+
+  reg [7:0] state;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 8'h0;
+    else
+      state <= state + 8'h1;
+  end // always @(posedge)
+  assign count = state;
+endmodule
+}>>|
+
+export:
+  Counter
+  CounterTop
+  design
+  verilog_reference

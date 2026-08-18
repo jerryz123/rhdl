@@ -1,0 +1,268 @@
+#lang rhdl
+// Demonstrates a completion queue that reserves response capacity before issue.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+sync_circuit CompletionQueueWrapper():
+  interface request(Decoupled(Bits(8)), ~role: consumer)
+  interface issue(Valid(Bits(8)), ~role: producer)
+  interface completion(Valid(Bits(16)), ~role: consumer)
+  interface response(Irrevocable(Bits(16)), ~role: producer)
+
+  inst bridge(CompletionQueue(Bits(8), Bits(16), 2))
+  request |> bridge.request
+  bridge.issue |> issue
+  completion |> bridge.completion
+  bridge.response |> response
+
+def design = elaborate(CompletionQueueWrapper())
+def single_design = elaborate(CompletionQueue(Bits(8), Bits(16), 1))
+
+def verilog_reference = @str|<<{
+module CompletionQueueWrapper(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; logic [7:0] bits; }  request_in,
+  input  struct packed {logic valid; logic [15:0] bits; } completion_in,
+  input  struct packed {logic ready; }                    response_in,
+  output struct packed {logic ready; }                    request_out,
+  output struct packed {logic valid; logic [7:0] bits; }  issue_out,
+  output struct packed {logic valid; logic [15:0] bits; } response_out
+);
+
+  CompletionQueue bridge (
+    .clock         (clock),
+    .reset         (reset),
+    .request_in    (request_in),
+    .completion_in (completion_in),
+    .response_in   (response_in),
+    .request_out   (request_out),
+    .issue_out     (issue_out),
+    .response_out  (response_out)
+  );
+endmodule
+
+module CompletionQueue(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; logic [7:0] bits; }  request_in,
+  input  struct packed {logic valid; logic [15:0] bits; } completion_in,
+  input  struct packed {logic ready; }                    response_in,
+  output struct packed {logic ready; }                    request_out,
+  output struct packed {logic valid; logic [7:0] bits; }  issue_out,
+  output struct packed {logic valid; logic [15:0] bits; } response_out
+);
+
+  wire struct packed {logic ready; } _completed_ingress_out;
+  wire struct packed {logic valid; logic [15:0] bits; } _completed_egress_out;
+  wire [1:0]                         _completed_count;
+  reg  [1:0]                         outstanding;
+  wire                               _GEN =
+    _completed_egress_out.valid & response_in.ready;
+  wire                               _GEN_0 = ~(outstanding[1]) | _GEN;
+  wire                               _GEN_1 = request_in.valid & _GEN_0;
+  `ifndef SYNTHESIS
+    completion_queue_completion_has_request:
+      assert property (@(posedge clock) disable iff (reset)
+                         {1'h0, outstanding} + {2'h0, _GEN_1} >= {1'h0, _completed_count}
+                         + {2'h0, completion_in.valid});
+  `endif // not def SYNTHESIS
+  wire                               _GEN_2 = ~(completion_in.valid & ~reset);
+  `ifndef SYNTHESIS
+    completion_queue_slot_reserved:
+      assert property (@(posedge clock) disable iff (_GEN_2)
+                         _completed_ingress_out.ready);
+  `endif // not def SYNTHESIS
+  `ifndef SYNTHESIS
+    completion_queue_reservations_in_range:
+      assert property (@(posedge clock) disable iff (reset) outstanding != 2'h3);
+  `endif // not def SYNTHESIS
+  Queue completed (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (completion_in),
+    .egress_in   (response_in),
+    .ingress_out (_completed_ingress_out),
+    .egress_out  (_completed_egress_out),
+    .count       (_completed_count)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      outstanding <= 2'h0;
+    else
+      outstanding <=
+        _GEN_1 ^ _GEN ? (_GEN_1 ? outstanding + 2'h1 : outstanding - 2'h1) : outstanding;
+  end // always @(posedge)
+  assign request_out = '{ready: _GEN_0};
+  assign issue_out = '{valid: _GEN_1, bits: request_in.bits};
+  assign response_out = _completed_egress_out;
+endmodule
+
+module Queue(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; logic [15:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                    egress_in,
+  output struct packed {logic ready; }                    ingress_out,
+  output struct packed {logic valid; logic [15:0] bits; } egress_out,
+  output [1:0]                                            count
+);
+
+  wire [15:0] _GEN;
+  wire        _GEN_0;
+  wire        _write_pointer_value;
+  wire        _read_pointer_value;
+  wire        _GEN_1 = 1'h0;
+  reg  [15:0] storage[0:1];
+  always_ff @(posedge clock) begin
+    if (_GEN_1) begin
+    end
+    else begin
+      if (_GEN_0)
+        storage[_write_pointer_value] <= _GEN;
+    end
+  end // always_ff @(posedge)
+  reg  [1:0]  occupancy;
+  wire        _GEN_2 = occupancy == 2'h0;
+  `ifndef SYNTHESIS
+    queue_occupancy_in_range:
+      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
+  `endif // not def SYNTHESIS
+  wire        _GEN_3 = occupancy != 2'h2 | egress_in.ready;
+  assign _GEN_0 = ingress_in.valid & _GEN_3;
+  wire        _GEN_4 = ~_GEN_2 & egress_in.ready;
+  assign _GEN = ingress_in.bits;
+  Counter read_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_4),
+    .value  (_read_pointer_value),
+    .wrap   (/* unused */)
+  );
+  Counter write_pointer (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (_GEN_0),
+    .value  (_write_pointer_value),
+    .wrap   (/* unused */)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      occupancy <= 2'h0;
+    else
+      occupancy <=
+        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
+  end // always @(posedge)
+  assign ingress_out = '{ready: _GEN_3};
+  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
+  assign count = occupancy;
+endmodule
+
+module Counter(
+  input  clock,
+         reset,
+         enable,
+  output value,
+         wrap
+);
+
+  reg state;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 1'h0;
+    else
+      state <= enable ? ~state & state - 1'h1 : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & state;
+endmodule
+}>>|
+
+def single_verilog_reference = @str|<<{
+module CompletionQueue(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; logic [7:0] bits; }  request_in,
+  input  struct packed {logic valid; logic [15:0] bits; } completion_in,
+  input  struct packed {logic ready; }                    response_in,
+  output struct packed {logic ready; }                    request_out,
+  output struct packed {logic valid; logic [7:0] bits; }  issue_out,
+  output struct packed {logic valid; logic [15:0] bits; } response_out
+);
+
+  wire struct packed {logic ready; } _completed_ingress_out;
+  wire struct packed {logic valid; logic [15:0] bits; } _completed_egress_out;
+  wire                               _completed_count;
+  reg                                outstanding;
+  wire                               _GEN =
+    _completed_egress_out.valid & response_in.ready;
+  wire                               _GEN_0 = ~outstanding | _GEN;
+  wire                               _GEN_1 = request_in.valid & _GEN_0;
+  `ifndef SYNTHESIS
+    completion_queue_completion_has_request:
+      assert property (@(posedge clock) disable iff (reset)
+                         {1'h0, outstanding} + {1'h0, _GEN_1} >= {1'h0, _completed_count}
+                         + {1'h0, completion_in.valid});
+  `endif // not def SYNTHESIS
+  wire                               _GEN_2 = ~(completion_in.valid & ~reset);
+  `ifndef SYNTHESIS
+    completion_queue_slot_reserved:
+      assert property (@(posedge clock) disable iff (_GEN_2)
+                         _completed_ingress_out.ready);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_3 = outstanding - 1'h1;
+  Queue completed (
+    .clock       (clock),
+    .reset       (reset),
+    .ingress_in  (completion_in),
+    .egress_in   (response_in),
+    .ingress_out (_completed_ingress_out),
+    .egress_out  (_completed_egress_out),
+    .count       (_completed_count)
+  );
+  always @(posedge clock) begin
+    if (reset)
+      outstanding <= 1'h0;
+    else
+      outstanding <= _GEN_1 ^ _GEN ? (_GEN_1 ? _GEN_3 : _GEN_3) : outstanding;
+  end // always @(posedge)
+  assign request_out = '{ready: _GEN_0};
+  assign issue_out = '{valid: _GEN_1, bits: request_in.bits};
+  assign response_out = _completed_egress_out;
+endmodule
+
+module Queue(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; logic [15:0] bits; } ingress_in,
+  input  struct packed {logic ready; }                    egress_in,
+  output struct packed {logic ready; }                    ingress_out,
+  output struct packed {logic valid; logic [15:0] bits; } egress_out,
+  output                                                  count
+);
+
+  reg         occupied;
+  reg  [15:0] payload;
+  wire        _GEN = ~occupied | egress_in.ready;
+  wire        _GEN_0 = ingress_in.valid & _GEN;
+  always @(posedge clock) begin
+    if (reset)
+      occupied <= 1'h0;
+    else
+      occupied <= _GEN_0 ^ occupied & egress_in.ready ? _GEN_0 : occupied;
+  end // always @(posedge)
+  always @(posedge clock)
+    payload <= _GEN_0 ? ingress_in.bits : payload;
+  assign ingress_out = '{ready: _GEN};
+  assign egress_out = '{valid: occupied, bits: payload};
+  assign count = occupied;
+endmodule
+}>>|
+
+export:
+  CompletionQueueWrapper
+  design
+  single_design
+  verilog_reference
+  single_verilog_reference
