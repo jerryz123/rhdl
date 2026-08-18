@@ -33,6 +33,7 @@ trade is syntactic breadth for local predictability.
 | Time | Explicit rising-edge registers and memory/effect operations | Event controls, procedural regions, blocking/nonblocking assignment, delays in full language |
 | Assignment | One final binding per driveable destination | Variables follow procedural-driver rules; nets can resolve multiple drivers |
 | Types | Exact semantic hardware types and explicit conversion | Rich two-/four-state, signed, packed/unpacked, aggregate, and context-sized types |
+| Patterns and decode | Typed aggregate cubes form an unordered, overlap-checked finite relation with sparse outputs | `case`, `casez`, and `case inside` are general selected-control forms over packed values |
 | Composition | Modules plus nominal complementary protocol roles | Modules, interfaces/modports, packages, and retained parameters |
 | Elastic flow | First-class serial/parallel topology with fan-in, fanout, rendezvous, routing, explicit buffering, and credits | All structures are encodable, but there is no standard ready-valid composition algebra |
 | Compiler freedom | Preserve explicit cycle and resource structure | RTL synthesis preserves sequential boundaries; full behavioral syntax is broader than synthesis |
@@ -89,6 +90,35 @@ defined equality, case, conditional, and edge rules. RHDL's normal data model
 is two-state. Its synthesis don't-care denotes implementation freedom rather
 than a source-level runtime unknown, even if the eventual SystemVerilog uses an
 `X` token to convey that freedom to later tools.
+
+## Typed literals, patterns, and relational decode
+
+SystemVerilog has compact, general selection syntax. `case` selects exact
+packed values; `casez` provides wildcard-oriented matching; and `case inside`
+can express wildcard sets and ranges. Packed structs and enums let an arm
+construct a semantic result, while `unique` and `priority` state additional
+selection intent. Those arms remain ordinary control flow, however: their
+order matters when more than one can match, and the language does not make the
+complete set of masks a typed reusable relation with a portable overlap check
+or a multi-output minimization contract.
+
+RHDL separates that finite-relation problem from selected control. An exact
+`HardwareLiteral` may represent a scalar, recursive aggregate, or extension
+type; a `Pattern` adds field-level care while remaining typed host data.
+`DecodeTable` rejects overlapping input cubes, preserves sparse output care,
+and accepts composition by row extension, explicit input lifting, and output
+zipping. The resulting `DecodeGen` is one callable decoder. Output zipping is
+purposefully strict: both relations must already use the same input cubes,
+instead of introducing an implicit priority or partition refinement rule.
+
+For a large unordered control decoder, this is often more concise and gives a
+PLA implementation direct access to cross-output sharing and output
+don't-cares. It is not a claim that RHDL always synthesizes better hardware.
+A disciplined SystemVerilog `case` or comparison network can express the same
+function, and target synthesis may optimize it as well as or better than a
+source-level PLA. Nor is a SystemVerilog runtime `X` the same thing as RHDL's
+static synthesis freedom; using `casex` or assignment `X` as though it were
+would change simulation semantics.
 
 ## Time, state, and scheduling
 
@@ -238,5 +268,6 @@ is compelling only if extensions preserve its local rules.
 - [Accellera access to IEEE 1800-2023](https://www.accellera.org/downloads/ieee)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend staging](../../rhdl/frontend/README.md), and
-  [interface layer](../../rhdl/frontend/layers/README.md#interfaces), plus the
+  [interface layer](../../rhdl/frontend/layers/README.md#interfaces),
+  [typed decode relations](../../rhdl/std/README.md#typed-decode-patterns), plus the
   [standard flow composition model](../../rhdl/std/README.md#flow-control-circuits)

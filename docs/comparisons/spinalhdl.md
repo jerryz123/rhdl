@@ -30,6 +30,7 @@ and current/next-state semantics.
 | Hierarchy | Circuit definitions and instances; pure helpers stay inline | `Component` makes hierarchy; `Area` groups inline structure |
 | Interface relation | Nominal roles, refinement, support, and linear handles | `Bundle` structure, port directions, `IMasterSlave`, and inferred bulk connection |
 | Flow composition | One-shot topology values compose serial, parallel, and cardinality-changing stages | Fluent `Stream` methods and connection operators compose concrete connected streams |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations with partial output care | `MaskedLiteral` and `DecodingSpec` provide flat masked tables and Boolean minimization |
 | Primary abstraction tools | Rhombus functions, macros, classes, frontend layers, semantic type capabilities | Scala functions, classes, traits, generics, collections, `Area`, and library-defined data types |
 
 ## Denotation and staging
@@ -94,6 +95,31 @@ explicitness: most mismatches are errors, yet declarations and contextual
 `.resized` expressions can leave size to surrounding statements. RHDL makes
 the implemented width more local, while SpinalHDL saves repetition when the
 destination is already the clearest size specification.
+
+## Typed literals, patterns, and relational decode
+
+SpinalHDL's [`MaskedLiteral`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html)
+uses `-` bits in a flat `Bits` mask. It works directly in comparisons, `switch`,
+and muxes, which is a compact fit for a local decoder. The higher-level
+[`DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html#logic-simplification-utilities)
+builds decode tables from masked inputs and outputs, applies
+Quine–McCluskey-style simplification, and supports an explicit default. This is
+a genuine decoder generator, not merely syntax around a `switch`.
+
+RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+uses semantic literals and recursive aggregate cubes to validate one unordered
+decode relation before materializing it. Its sparse output patterns expose
+don't-care freedom, and independently authored rows or output relations can be
+combined before `DecodeGen` selects a shared implementation. RHDL's distinction
+is therefore recursive semantic aggregate structure and explicit relation
+composition, not the existence of masked tables or minimization. SpinalHDL
+remains terser for a local `switch` and competitive for a flat decode table.
+
+Minimizing same-default output groups and merging common products can give RHDL
+a more compact starting Boolean network than a literal comparison/mux chain.
+It does not guarantee better PPA than SpinalHDL's decoder minimization plus
+synthesis: target mapping and the surrounding logic determine the eventual
+result.
 
 ## State, assignment, and priority
 
@@ -247,12 +273,15 @@ of denotation and explicit protocol-strength tracking.
 - [SpinalHDL and Scala interaction](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Getting%20Started/Scala%20Guide/interaction.html)
 - [SpinalHDL assignments](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Semantic/assignments.html)
 - [SpinalHDL bit vectors](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html)
+- [SpinalHDL masked literals](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html)
+- [SpinalHDL `DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html#logic-simplification-utilities)
 - [SpinalHDL bundles](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bundle.html)
 - [SpinalHDL components and hierarchy](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/components_hierarchy.html)
 - [SpinalHDL clock domains](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/clock_domain.html)
 - [SpinalHDL design checks](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Design%20errors/index.html)
 - [SpinalHDL streams](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/stream.html)
 - [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

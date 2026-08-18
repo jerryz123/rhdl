@@ -32,6 +32,7 @@ types, one final binding, explicit priority, and current/next-state semantics.
 | Hierarchy | Circuit definitions and explicit instances | Circuits formed from named outputs; scopes can flatten calls or record module instances |
 | Interface relation | Nominal roles, refinement, support, and linear handles | PPX-derived polymorphic records carrying field names and widths |
 | Flow composition | Linear interface topologies with protocol-aware serial, parallel, and cardinality-changing stages | A separate handshake library supplies pure typed arrows and serial composition |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations and preserve partial output care | `Signal` muxes and enum matches construct selection; there is no comparable standard masked relation |
 | Primary abstraction tools | Rhombus functions, macros, classes, language layers, type capabilities | OCaml functions, modules, functors, records, PPX derivation, and shared module signatures |
 
 ## Denotation and staging
@@ -99,6 +100,31 @@ Both languages therefore make primitive datapath widths predictable.
 Hardcaml's uniform vectors maximize reuse through `Comb.S`; RHDL's nominal and
 structural hardware types maximize preservation of author intent after the
 host abstraction has disappeared.
+
+## Typed literals, patterns, and relational decode
+
+Hardcaml's `Comb.S` supplies constants, comparisons, muxes, priority selectors,
+and enum-specific `match_` helpers, so an ordinary decoder composes naturally
+as a `Signal.t` expression. The [enum support](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/enums_in_hardcaml/)
+also gives an exhaustive algebraic-case surface when the selector is an enum.
+It does not provide a standard object equivalent to a masked, multi-output
+decode relation that preserves partial output specifications for later
+minimization.
+
+RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+makes exact typed literals and recursive aggregate cubes reusable host data.
+A nonoverlapping relation can be assembled from independently authored rows or
+output fragments, then passed once to `DecodeGen`. This is more concise for a
+large control decoder whose meaningful outputs vary per instruction; Hardcaml's
+ordinary functional composition is more general for a decoder interleaved with
+arbitrary Boolean or arithmetic computation.
+
+RHDL can minimize same-default output groups, exploit output don't-cares, and
+merge shared products before it constructs the Boolean network. This may beat
+a naïve expression of separate muxes and comparisons. It is not a universal
+quality advantage: Hardcaml's graph and a downstream synthesizer can realize
+the same function differently, and target-specific optimization decides the
+final PPA.
 
 ## State, assignment, and priority
 
@@ -257,6 +283,7 @@ preservation of hardware intent through interpretation.
 - [Hardcaml manual](https://docs.hardcaml.org/)
 - [Hardcaml quick overview](https://docs.hardcaml.org/hardcaml-docs/introduction/quick_overview/)
 - [Hardcaml combinational logic](https://docs.hardcaml.org/hardcaml-docs/designing-circuits/combinational_logic/)
+- [Hardcaml enums and `match_`](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/enums_in_hardcaml/)
 - [Hardcaml sequential logic](https://docs.hardcaml.org/hardcaml-docs/designing-circuits/sequential_logic/)
 - [Hardcaml `Always` DSL](https://docs.hardcaml.org/hardcaml-docs/more-on-circuit-design/always/)
 - [Hardcaml interfaces](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/hardcaml_interfaces/)
@@ -264,6 +291,7 @@ preservation of hardware intent through interpretation.
 - [Hardcaml Handshake interface](https://github.com/janestreet/hardcaml_handshake/blob/master/src/handshake.mli)
 - [Hardcaml API](https://ocaml.org/p/hardcaml/latest/hardcaml/Hardcaml/index.html)
 - [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

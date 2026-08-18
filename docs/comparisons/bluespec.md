@@ -36,6 +36,7 @@ must coordinate several independently guarded resources.
 | Conflicting state effects | Rejected unless the author constructs explicit selection | Permitted across rules and resolved by scheduling |
 | Static guarantees | Exact hardware types, one effective driver, legal ownership, no combinational cycles | Static types plus rule atomicity and method-schedule consistency |
 | Flow composition | Linear `InterfaceHandle` topology with explicit buffers, readiness, fan-in, and fanout | Rules compose guarded operations across interfaces and let the compiler schedule resource conflicts |
+| Patterns and decode | Typed aggregate cubes form an unordered, overlap-checked finite relation with sparse outputs | General typed patterns destructure values and bind fields inside expressions, methods, and rules |
 | Main source of locality | The operation and enable graph is directly authored | A transaction is locally stated, but its realized schedule is global |
 | Syntactic compression | Concise for explicit elastic topology; arbitration remains explicit | Concise for concurrent control and shared resources |
 
@@ -90,6 +91,33 @@ derived schedule. Bluespec removes repeated control plumbing, but the meaning
 of a call now includes facts declared by the callee and decisions made by the
 whole-module scheduler. RHDL writes more source in that case, while keeping the
 composition result visible at the use site.
+
+## Typed literals, patterns, and relational decode
+
+BSV's tagged unions, enums, and `case` forms make a semantic value the natural
+subject of a decision. A case can distinguish constructors, destructure a
+payload, bind its fields, and compute an arbitrary result or action. That is a
+more expressive pattern language than RHDL's finite bit cubes: RHDL patterns
+cannot bind payloads, express guards, or describe an open-ended decision tree.
+
+RHDL instead makes a decoder a particular finite relation. `HardwareLiteral`
+preserves the exact semantic type of a scalar, aggregate, or extension value;
+`Pattern` adds recursive field-level care without becoming a hardware value.
+`DecodeTable` requires exact input and output types and rejects every pair of
+overlapping input cubes. Sparse output patterns say which control bits matter
+for a row, while `lift_decode_inputs` and `zip_decode_cases` compose input
+domains and independently authored output columns before the relation becomes
+hardware. The latter deliberately requires identical input partitions rather
+than silently refining or prioritizing them.
+
+This restriction has useful leverage for an instruction or control decoder:
+the complete, unordered relation can be checked before it becomes hardware and
+may be compiled as a shared multi-output PLA. It does not make RHDL universally
+more expressive or guarantee a better implementation. A BSV decision can
+encode the same Boolean function, and the final quality still depends on the
+selected logic form and downstream synthesis. RHDL's advantage is a concise,
+analyzable representation for the narrower finite-relation problem; BSV's is
+the more general typed decision embedded in atomic actions.
 
 ## Flow composition
 
@@ -235,6 +263,7 @@ That is a missing semantic layer, not a missing mux primitive.
 
 - RHDL [core semantics](../../rhdl/core/README.md),
   [frontend model](../../rhdl/frontend/README.md), and
+  [typed decode relations](../../rhdl/std/README.md#typed-decode-patterns), plus
   [standard interfaces and flow composition](../../rhdl/std/README.md)
 - [Bluespec Compiler project](https://github.com/B-Lang-org/bsc)
 - [BSV Language Reference Guide](https://github.com/B-Lang-org/bsc/releases/latest/download/BSV_lang_ref_guide.pdf)

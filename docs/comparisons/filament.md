@@ -33,6 +33,7 @@ signals by hand.
 | Resource sharing | Author constructs arbitration, enables, and state | Repeated invocations checked against a component's initiation interval |
 | Elastic composition | Serial and parallel stages, fan-in, fanout, rendezvous, routing, buffering, and credit transport | No corresponding dynamic-flow algebra; event timelines describe a static schedule |
 | Static guarantee | Concrete graph is typed, single-driver, and cycle-safe | Composed values and resource uses satisfy declared timeline constraints |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations with sparse outputs | Ordinary bit-vector logic is available inside a language centered on timed use |
 | Main source of locality | Exact register and connection structure is visible | Latency and use windows travel with component signatures |
 | Syntactic compression | Direct for arbitrary RTL | High for balanced, statically scheduled pipelines |
 
@@ -166,6 +167,36 @@ public language cannot quantify over a symbolic event or require callers to
 respect a time-indexed port contract. Filament's advantage is not a more
 convenient register helper; it is a different static proposition.
 
+## Typed literals, patterns, and relational decode
+
+RHDL's finite-relation vocabulary composes exact types along an axis that is
+orthogonal to time. `HardwareLiteral` supplies exact values for scalar,
+aggregate, and extension-defined types. A recursive `Pattern` can constrain
+selected record or vector parts while leaving others free, and it serves both
+as an input region and as a partially specified output value.
+
+An RHDL `DecodeTable` requires exact common types and pairwise nonoverlapping
+inputs, making its rows an unordered relation rather than a priority-ordered
+case statement. Tables can be extended by list concatenation subject to
+overlap validation, lifted into a wider input domain, and zipped across
+separately authored output relations. `DecodeGen` minimizes same-default output
+groups using don't-care outputs, then merges identical products across groups.
+
+Filament has bit-vector constants, expressions, conditions, and components
+from which the same Boolean decoder can be constructed. Its standard language
+abstraction instead tracks event-indexed availability and legal resource use;
+it has no comparable standard recursively typed masked pattern or
+partial-output decode relation. A user can generate repeated comparisons or
+encapsulate them in a component, but the timeline type does not preserve
+decoder cubes as a composable authoring object.
+
+RHDL is consequently more expressive and concise specifically for structured
+control decoding, while Filament is far more expressive for stating when the
+decoder's inputs and outputs may be used. Giving a minimizer the complete
+relation can produce better logic than naive compare-and-mux construction, but
+it does not establish universal PPA superiority over an equivalent Filament
+design passed through capable logic synthesis.
+
 ## Locality and predictability
 
 Filament makes timing local at component boundaries. A caller can see when an
@@ -228,6 +259,8 @@ the natural specification.
   [frontend model](../../rhdl/frontend/README.md), and
   [frontend layers](../../rhdl/frontend/layers/README.md), plus the
   [standard flow composition model](../../rhdl/std/README.md#flow-control-circuits)
+- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)
 - [Filament language overview](https://filamenthdl.com/)
 - [Filament language tutorial](https://filamenthdl.com/docs/lang/tutorial.html)
 - [Filament loops and timed bundles](https://filamenthdl.com/docs/meta/loops-and-bundles.html)

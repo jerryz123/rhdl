@@ -31,6 +31,7 @@ executable modeling levels.
 | Time | Explicit register and memory operations | `@update_ff` state transition plus simulator ticks; CL methods can model cycle timing |
 | Control | Hardware `when` / `switch` lower to muxes and guards | Python `if` / `for` in a decorated, translatable block |
 | Types | Exact semantic hardware types and explicit conversions | Concrete `BitsN`, `BitStruct`, ports, wires, and Python values |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations with sparse outputs | Update-block conditions and host-generated tables construct ordinary comparison and selection logic |
 | Composition | Modules plus nominal two-role interface descriptors | Components plus hierarchical signal or method interfaces |
 | Flow composition | One-shot topology values compose serial, parallel, and cardinality-changing stages | Ready-valid interfaces and components compose through explicit construction and wiring |
 | Scheduling | Source fixes every sequential boundary | RTL source fixes boundaries; simulator schedules concurrent update blocks |
@@ -87,6 +88,39 @@ execution, message construction, and RTL modeling. RHDL represents circuit
 expressions as graph-owned symbolic values. Its nominal protocol identity also
 lives outside the packed data type, while a PyMTL3 interface is primarily a
 Python composition object containing signals or methods.
+
+## Typed literals, patterns, and relational decode
+
+RHDL applies one typed abstraction across exact constants and decoder tables.
+A `HardwareLiteral` is the exact packed image of any supported packable type,
+including records, vectors, and extension-defined types. A `Pattern` adds a
+recursive care mask: named aggregate fields can be constrained, partially
+constrained, or left unconstrained without flattening the author's type. The
+same pattern representation describes selector regions and partially specified
+outputs.
+
+`DecodeTable` then treats rows as an unordered relation, requires exact common
+input and output types, and rejects overlapping input patterns rather than
+giving source order an accidental priority meaning. Tables can be extended by
+list concatenation subject to overlap validation, lifted into a wider input
+type, and zipped across independently authored output relations. `DecodeGen`
+can minimize same-default output groups using output don't-cares, then merge
+identical product terms across groups.
+
+PyMTL3 has excellent concrete `BitsN` and `BitStruct` values, but its standard
+synthesizable vocabulary has no corresponding typed partial-pattern and
+decode-relation abstraction. A decoder is normally written as Python
+comparisons, conditions, and assignments in an update block, or generated from
+Python data. That is more general for computed predicates and explicitly
+prioritized behavior; RHDL is more concise and analyzable for an unordered
+finite relation.
+
+Both can generate equivalent Boolean logic, and a downstream synthesis tool
+may optimize either form well. RHDL's advantage is that partitioned
+multi-output minimization, shared terms, and don't-care freedom are explicit
+inputs to generation rather than facts a translator must recover from
+procedural RTL. This can improve on naive compare-and-mux construction, but it
+is not a universal area, timing, or power advantage.
 
 ## Time, state, and scheduling
 
@@ -234,6 +268,8 @@ same component vocabulary.
 - PyMTL3 [standard stream interfaces](https://github.com/pymtl/pymtl3/blob/master/pymtl3/stdlib/stream/ifcs.py)
 - PyMTL3 [multi-level modeling paper](https://www.csl.cornell.edu/~cbatten/pdfs/batten-pymtl3-nvidia2023.pdf)
 - RHDL [standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend staging](../../rhdl/frontend/README.md), and
   [interface layer](../../rhdl/frontend/layers/README.md#interfaces)

@@ -30,6 +30,7 @@ separate current- and next-state semantics.
 | Hierarchy | Circuit generators create definitions; instances cross explicit ports | Scala `Module` construction creates hierarchy; `RawModule` removes ambient clock/reset |
 | Interface relation | Nominal identity, named roles, refinement, and support | Aggregate structure, orientation, `Flipped`, and `Connectable` relations |
 | Flow composition | One-shot `InterfaceHandle` topologies compose serially, in parallel, and across cardinality changes | `DecoupledIO`, connections, and components compose through ordinary Scala construction and explicit wiring |
+| Patterns and decode | Typed literals and aggregate cubes form validated unordered relations that `DecodeGen` may minimize by output-default group | `BitPat` and `TruthTable` form multi-output bit-vector tables; `DecodeTable` organizes structured fields and `decoder` selects a minimizer |
 | Primary abstraction tools | Rhombus functions, macros, classes, frontend layers, semantic type capabilities | Scala functions, classes, traits, generics, collections, and compiler-supported `Data` APIs |
 
 ## Denotation and staging
@@ -99,6 +100,52 @@ Chisel can encode the same hardware with `ChiselEnum`, wrappers, `Mux1H`, or a
 project type, but its ground `Data` operations are the more general building
 blocks. The tradeoff is semantic specificity versus a smaller number of
 widely composable primitives.
+
+## Typed literals, patterns, and relational decode
+
+RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+builds on `HardwareLiteral`: an exact, typed host value for scalars,
+extensions, records, and vectors. `Pattern` then describes a typed cube rather
+than a runtime value, so it can leave recursively nested input or output fields
+unconstrained. A `DecodeTable` is an unordered finite relation: overlapping
+input cubes are rejected, partial outputs supply optimization freedom, and
+ordinary host operations can extend rows, lift a relation into a wider input,
+or zip independently authored output relations on their shared input cubes.
+`ValidDecodeGen` adds validity as part of the same partial relation.
+
+Chisel is the close technical peer, not a counterexample that RHDL must
+outgrow. Its [decoder API](https://www.chisel-lang.org/docs/explanations/decoder)
+uses `BitPat` and `TruthTable` for bit-vector cubes with input and output
+don't-cares. `DecodePattern`, `DecodeField`, `DecodeTable`, and `DecodeBundle`
+also support an instruction-like host description whose independently defined
+fields become a decode result. Chisel's public minimizers handle a multi-input,
+multi-output truth table, using Espresso when available or QMC as an
+alternative. That is the same essential Boolean-optimization opportunity as
+RHDL's PLA path, so minimization is not unique to RHDL.
+
+The authoring difference is where the relation lives. Chisel associates a
+structured host pattern and output fields with a packed `BitPat` table; its
+field-oriented API is concise when a decoder grows one output column at a
+time. RHDL makes the typed input and partially cared aggregate output cubes
+the relation itself. This makes sparse aggregate controls, semantic-type
+checking, and explicit input/output relation composition direct, without
+requiring a separate packed encoding. Both decoder APIs treat their tables as
+relations rather than priority-ordered cases; RHDL additionally rejects every
+pair of distinct overlapping input cubes. Conversely, RHDL currently has only
+single cubes and exact-cube zipping; it does not offer the general set algebra
+of Chisel `BitSet`, nor does it automatically refine nonidentical input
+partitions while composing relations.
+
+Multi-output minimization can share product terms across output fields and
+exploit unconstrained outputs. RHDL minimizes each same-default output
+partition separately, then merges identical input products across partitions;
+Chisel's minimizer works from its own whole truth-table representation. Either
+can produce a more compact starting circuit than separately authored
+comparison-and-mux chains. It is not a portable PPA guarantee: Espresso is
+heuristic and target-independent, Chisel can choose a different minimizer, and
+downstream synthesis may equal or improve either source structure. RHDL's
+advantage is therefore more precise source meaning and explicit opportunities
+for sharing, not an inherent hardware-quality ceiling above Chisel.
 
 ## State, assignment, and priority
 
@@ -249,7 +296,10 @@ and connection order.
 - [Chisel sequential circuits](https://www.chisel-lang.org/docs/explanations/sequential-circuits)
 - [Chisel interfaces and connections](https://www.chisel-lang.org/docs/explanations/interfaces-and-connections)
 - [Chisel `Connectable`](https://www.chisel-lang.org/docs/explanations/connectable)
+- [Chisel decoders](https://www.chisel-lang.org/docs/explanations/decoder)
+- [Chisel experimental decode API](https://www.chisel-lang.org/api/latest/chisel3/util/experimental/decode/index.html)
 - [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

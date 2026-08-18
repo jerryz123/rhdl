@@ -31,6 +31,7 @@ semantics.
 | Hierarchy | Circuit definitions and explicit instances | `Elaboratable` objects return fragments; `Module.submodules` establishes hierarchy |
 | Interface relation | Nominal roles, refinement, support, and linear handles | Immutable signatures, nested directions, flipping, equality, and structural connection |
 | Flow composition | Linear topology values compose serial, parallel, and cardinality-changing stages | A deliberately minimal strong `stream.Interface` connected through ordinary wiring |
+| Patterns and decode | Typed aggregate cubes and unordered decode relations can retain partial output care | `matches` and `Case` accept exact values or flat masked bit strings inside ordinary control flow |
 | Primary abstraction tools | Rhombus functions, macros, classes, language layers, type capabilities | Python functions, classes, generators, castable protocols, and signatures |
 
 ## Denotation and staging
@@ -90,6 +91,31 @@ implemented datapath width without consulting its eventual destination. Both
 allow semantic types to be layered above bit vectors; Amaranth does so through
 castable Python protocols, while RHDL uses hardware-type objects with explicit
 operation capabilities.
+
+## Typed literals, patterns, and relational decode
+
+Amaranth's [`Value.matches`](https://amaranth-lang.org/docs/amaranth/latest/guide.html#match-operator)
+accepts exact constants or strings with `-` mask bits, and `m.Case` accepts the
+same patterns. This is concise for local control, but a `Case` is ordered: the
+first matching case supplies the active assignment. User-defined `ShapeCastable`
+and `ValueCastable` objects can add semantic data views, but the masked pattern
+itself is a flat value-level comparison rather than a recursively typed
+aggregate relation.
+
+RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+instead represents exact typed literals and recursive aggregate `Pattern` cubes
+as host data. `DecodeTable` validates an unordered, nonoverlapping relation;
+sparse output patterns preserve which fields are free, and `DecodeGen` can
+minimize same-default output groups and merge shared products across groups.
+This is more concise when several control fields or independently authored
+decoder fragments must remain one relation. Amaranth remains more general for
+arbitrary Python-generated tests and ordered conditional behavior.
+
+The resulting RHDL decoder may share Boolean work across outputs and use
+output don't-cares that a naïve sequence of comparisons would lose. That is an
+optimization opportunity, not a general QoR promise: an Amaranth design can
+state the same Boolean function and a downstream synthesis tool may recover
+the same or better implementation.
 
 ## State, assignment, and priority
 
@@ -234,9 +260,11 @@ the elaborated circuit.
 - [Amaranth introduction](https://amaranth-lang.org/docs/amaranth/latest/intro.html)
 - [Amaranth language guide](https://amaranth-lang.org/docs/amaranth/latest/guide.html)
 - [Amaranth elaboration model](https://amaranth-lang.org/docs/amaranth/latest/guide.html#elaboration)
+- [Amaranth pattern matching](https://amaranth-lang.org/docs/amaranth/latest/guide.html#match-operator)
 - [Amaranth interfaces and connections](https://amaranth-lang.org/docs/amaranth/latest/stdlib/wiring.html)
 - [Amaranth data streams](https://amaranth-lang.org/docs/amaranth/latest/stdlib/stream.html)
 - [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
 - [RHDL core semantics](../../rhdl/core/README.md)
 - [RHDL frontend semantics](../../rhdl/frontend/README.md)
 - [RHDL frontend layers](../../rhdl/frontend/layers/README.md)

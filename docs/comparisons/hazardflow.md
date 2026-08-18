@@ -31,6 +31,7 @@ orthogonal to protocols outside that authoring layer.
 | State | Explicit registers and next-state bindings | Interface-attached FSM with explicit state transition callback |
 | Dependency guarantee | Whole-design combinational-cycle verification after elaboration | Local `Helpful`/`Demanding` interface dependency types |
 | Flow topology | Linear `InterfaceHandle` paths with serial, parallel, and cardinality-changing stages | Protocol-generic consumed-interface combinators and FSMs |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations with sparse outputs | Ordinary typed selection sits inside a language centered on hazard and dependency transformations |
 | Main source of locality | Every driver and state edge is directly represented | Payload, backpressure, and transfer behavior travel together |
 | Syntactic compression | High for explicit ready-valid topology; general RTL remains explicit | Very high for protocol-generic transformations and elastic pipelines |
 
@@ -173,6 +174,36 @@ signature states more of the transfer relation. RHDL should either constrain
 those dependencies, conservatively weaken the result to `Decoupled`, or verify
 the retained promise.
 
+## Typed literals, patterns, and relational decode
+
+RHDL's decode vocabulary forms a second, independent algebra above its exact
+data types. `HardwareLiteral` supplies exact values for scalar, aggregate, and
+extension-defined types. A recursive `Pattern` adds cared and unconstrained
+parts without erasing record or vector structure, and the same representation
+can specify both input regions and partial output values.
+
+An RHDL `DecodeTable` is an unordered, nonoverlapping typed relation rather
+than a prioritized control construct. Ordinary table values can be combined by
+adding rows, lifting their selector patterns into a wider input type, or
+zipping independently authored output relations. `DecodeGen` retains all
+output don't-cares, minimizes same-default result groups, and merges identical
+products across groups.
+
+HazardFlow has typed literals, structs, tuples, arrays, enums, and Rust-shaped
+expressions for selection, but its standard language abstraction is the hazard
+interface and its transfer function, not a reusable masked decode relation.
+Authors can express or generate comparisons and conditional outputs, including
+the exact same Boolean function. What is absent is a standard value that
+retains recursive typed patterns, validates unordered coverage regions, and
+composes input and output dimensions before circuit generation.
+
+RHDL is consequently more concise for instruction and control decoding;
+HazardFlow remains more expressive for transformations whose central fact is
+forward/backward protocol behavior. Preserving the relation gives RHDL better
+optimization information than a naive collection of separate compares and
+muxes, but does not guarantee better PPA than HazardFlow plus an effective
+downstream optimizer.
+
 ## Locality and predictability
 
 HazardFlow gives excellent protocol locality. The payload, feedback information,
@@ -235,6 +266,8 @@ language-level contract gaps, not missing components or Boolean expressivity.
 - RHDL [core semantics](../../rhdl/core/README.md),
   [frontend model](../../rhdl/frontend/README.md), and
   [standard interfaces and flow composition](../../rhdl/std/README.md)
+- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)
 - [HazardFlow project](https://github.com/kaist-cp/hazardflow)
 - [HazardFlow signal types](https://kaist-cp.github.io/hazardflow/book/lang/signal.html)
 - [HazardFlow interface and hazard model](https://kaist-cp.github.io/hazardflow/book/lang/interface.html)

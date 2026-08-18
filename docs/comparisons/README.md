@@ -53,6 +53,10 @@ The individual documents compare against the same RHDL model:
   ready-valid, and credited paths. Ordinary unary functions compose serial,
   parallel, fan-in, fanout, rendezvous, routing, and buffering topology without
   adding flow-specific nodes to the core IR.
+- The standard decode layer carries extension-defined exact literals into
+  recursively typed aggregate patterns and then into unordered, non-overlapping
+  relations with partially specified aggregate outputs. Relations compose as
+  host data before one decoder is elaborated.
 - Current sequential policy is deliberately narrow: rising-edge clocks and,
   when reset is present, active-high synchronous reset, without clock-domain
   identities in the type system.
@@ -181,6 +185,91 @@ payload-only transformations and transformations that observe live hardware,
 followed by a protocol-polymorphic stage abstraction over the existing generic
 interface subsystem.
 
+## Decode, patterns, and literals across the comparison set
+
+Decode is one area where RHDL gains both locality and syntactic economy. The
+abstraction is a sequence of three ordinary, separately meaningful layers:
+
+1. [`HardwareLiteral`](../../rhdl/frontend/support/hardware-literal.rhm) is an
+   open host protocol for one exact packed image of a semantic hardware type.
+   Built-in scalars, enums, records, vectors, and extension-defined packable
+   types use the same protocol.
+2. [`Pattern`](../../rhdl/std/decode/pattern.rhdl) is a host-side typed bit cube,
+   deliberately not a connectable hardware value. Exact literals constrain all
+   bits; `_` leaves a field or element unconstrained; nested patterns preserve
+   partial care; and `partial_pattern` gives sparse named record syntax.
+3. [`DecodeTable`](../../rhdl/std/decode/table.rhdl) turns input and output
+   patterns into an unordered relation with exact common types, an explicit
+   default, and pairwise-disjoint input cubes. Rows concatenate as lists,
+   `lift_decode_inputs` changes the input domain, and `zip_decode_cases` forms an
+   output product before one callable `DecodeGen` is elaborated.
+
+The individual mechanisms are established ideas. Typed literals, masked bit
+patterns, truth tables, output don't-cares, and Espresso minimization all exist
+elsewhere. Exact aggregate constants in particular are routine in several
+comparison systems; RHDL's literal-level distinction is the open protocol that
+lets built-in and extension-defined semantic types feed the same recursive
+pattern machinery. Its broader contribution is their integration as one typed
+relation abstraction: the same pattern vocabulary describes named aggregate
+selectors and sparse named aggregate results, independent control relations
+can be combined before hardware exists, and one decoder plan can account for
+validity and every output field.
+
+| Comparison system | Decode-relation judgment |
+|---|---|
+| Chisel | The closest peer. [`BitPat`, `TruthTable`, and `DecodeTable`](https://www.chisel-lang.org/docs/explanations/decoder) also support partial inputs and outputs, typed result fields, multi-output Espresso, and QMC fallback. RHDL adds recursive semantic aggregate patterns, exact input/output type identity, explicit relation lifting/zipping, and uniform overlap rejection; Chisel's `BitSet` algebra and column-oriented `DecodeField` model are stronger in other directions. |
+| SpinalHDL | [`MaskedLiteral`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html) and [`DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html) provide flat masked selectors and Boolean minimization. RHDL's recursively typed aggregate relation and structured partial outputs are more general. |
+| Amaranth | [`Value.matches` and `Switch`/`Case`](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-flow) give concise flat masked matching and ordered choice. They do not form a standard typed partial-output relation or multi-output decoder generator. |
+| SystemVerilog | `casez`, `case inside`, packed aggregates, and `unique`/`priority` cover a broader range of local decisions. They remain control-flow syntax rather than one reusable relation value with composition and frontend minimization. |
+| Bluespec | Nested typed patterns, wildcard bit literals, bindings, and guards make one match expression more general than `DecodeGen`. RHDL is narrower but makes the complete finite relation first-class, unordered, and directly optimizable. |
+| Clash | Haskell patterns and [`bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html) support algebraic matching and bit capture. Clash has no standard equivalent to RHDL's typed partial-output table algebra. |
+| DSLX/XLS | DSLX [`match`](https://google.github.io/xls/dslx_reference/#match) supports nested patterns, bindings, alternatives, and ranges, while XLS performs general multi-level optimization. RHDL's matching language is less general but its decoder-specific input and output care is more explicit. |
+| Hardcaml and PyMTL3 | Both have typed aggregate constants and can generate comparisons and muxes through host code, but neither standard authoring model provides a recursively masked aggregate relation with partial outputs and multi-output minimization. |
+| HazardFlow, Calyx, and Filament | Their central abstractions concern transfer hazards, scheduled actions, and timeline types. Equivalent decoder hardware can be constructed, but these languages expose no comparable standard decode-relation abstraction. |
+
+This specialization is a real source-language advantage, not greater Boolean
+expressivity. RHDL directly states finite constant relations; it does not bind
+wildcarded fields, attach arbitrary guards, compute row results from captures,
+express ranges as primitives, or represent ordered priority between overlapping
+rows. Bluespec, Clash, DSLX, and SystemVerilog are more expressive for those
+general matching tasks. RHDL's restriction is what makes global validation and
+minimization straightforward.
+
+The hardware-quality claim is similarly bounded. `DecodeGen` can use output
+don't-cares, minimize same-default output groups together, merge identical
+products across groups, and elaborate balanced product AND and output OR
+trees. Validity and payload remain one semantic table, but their different
+defaults normally put them in separate minimization runs. The current
+[RV64I ALU relation](../../cores/ricket/decode/alu-ctrl.rhdl) demonstrates a
+more compact shared two-level cover than RHDL's own unminimized mux-chain
+fallback: in the snapshot audit, its 28-row relation became 20 shared PLA
+products, while the 52-row complete relation became 31; fallback lowering
+retained one masked comparison and mux arm per row. Those are structural
+counts, not gate-count, area, or timing measurements. They do not establish
+universal PPA superiority: Chisel uses the same class of multi-output Espresso
+optimization, Espresso is a target-independent two-level heuristic, and a
+strong downstream optimizer may choose a better multi-level or LUT-specific
+implementation.
+
+The current seams are important. `Pattern` denotes only one cube rather than a
+set algebra. `zip_decode_cases` requires exactly identical input partitions
+instead of refining compatible cubes. The low-level `Pattern(~value, ~care)`
+constructor also requires the care mask to have the value's semantic type even
+though care is representation-level information. Automatic Espresso discovery
+makes the chosen IR environment-dependent, and the returned cover is checked
+for syntax and dimensions but not semantic equivalence to the original
+relation. The optimized path also commits output don't-cares before
+target-aware synthesis, whereas the core
+[`rtl.decode`](../../rhdl/core/README.md#operation-model) contract can
+preserve that freedom longer.
+
+The principled next steps are therefore a first-class pattern-set algebra,
+partition-refining relation products, deterministic optimizer selection, and
+equivalence checking. Keeping the semantic relation intact until a backend pass
+chooses PLA, mux, AIG, or LUT structure would preserve RHDL's strongest part:
+one concise typed specification without pretending that one lowering is always
+best hardware.
+
 ## Comparison map
 
 | Comparison | Kind | Primary question for RHDL |
@@ -205,6 +294,11 @@ For the flow-composition thread specifically, start with
 [HazardFlow](hazardflow.md) and [Clash](clash.md) for more general protocol
 algebras, [Bluespec](bluespec.md) for atomic transaction composition, and
 [Filament](filament.md) for static timing guarantees.
+
+For typed pattern and decoder construction, start with [Chisel](chisel.md) as
+the closest direct peer, then [SpinalHDL](spinalhdl.md) and
+[Amaranth](amaranth.md) for masked RTL matching, and [Bluespec](bluespec.md),
+[Clash](clash.md), and [DSLX/XLS](dslx.md) for more general pattern languages.
 
 For the closest tests of RHDL's current construction model, start with
 [Amaranth](amaranth.md), [SpinalHDL](spinalhdl.md), and
@@ -236,6 +330,9 @@ Every comparison covers the following questions:
   compositional guarantee, or only a convenient compiler normal form?
 - How are state updates, assignment conflicts, priority, and concurrency
   represented?
+- Are exact literals, partial patterns, and decode tables merely syntax, or do
+  they form typed values that can be validated, transformed, and optimized as
+  a relation before hardware construction?
 - Do reusable abstractions compose as expressions, signal bundles, modules,
   methods, rules, streams, or typed transformations?
 - How local is the meaning of a line of code? Which surrounding scopes,

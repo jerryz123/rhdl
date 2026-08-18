@@ -30,6 +30,7 @@ microarchitecture itself is the design.
 | State | Explicit physical registers and memories | Typed proc state until lowering; explicit registers in block IR |
 | Control | Host structure plus hardware muxes and guarded effects | Immutable `if`, `match`, loops, channel operations, and proc recurrence |
 | Types | Exact hardware types and nominal protocols | Fixed-size bits, arrays, tuples, nominal structs, enums, and parametrics |
+| Patterns and decode | Typed aggregate cubes form an unordered, overlap-checked finite relation with sparse outputs | `match` is a typed, value-producing expression over structured values and literals |
 | Composition | Modules and directional interface endpoints | Function calls, proc networks, and typed channels |
 | Streaming topology | Exact serial/parallel ready-valid and credited paths with explicit buffers, routing, fanout, and rendezvous | Higher-level proc/channel network; metadata and code-generation policy can constrain its eventual buffering and handshake realization |
 | Compiler freedom | Preserve author-selected stage boundaries | Optimize and pipeline before producing a concrete block |
@@ -85,6 +86,32 @@ often checked when elaboration constructs hardware rather than proved as a
 DSL-level parametric signature. Conversely, RHDL's exact circuit types and
 nominal multi-signal protocols express RTL-specific constraints that are not
 data values in DSLX's functional type system.
+
+## Typed literals, patterns, and relational decode
+
+DSLX `match` is an immutable, value-producing decision expression. It can
+match structured values such as tuples and enums, bind components, combine
+alternatives, use ranges, and return arbitrary typed expressions. This is a
+more general and more proportionate language for a semantic decision than
+RHDL's fixed-width bit-cube patterns; RHDL cannot add bindings, guards, ranges,
+or an arbitrary computation to a `Pattern` row.
+
+RHDL instead represents a decoder as data before it constructs a decision
+network. `HardwareLiteral` provides exact typed scalar, aggregate, and
+extension values. `Pattern` adds recursive care bits, and `DecodeTable` checks
+that its typed input cubes are disjoint. A row's sparse output pattern records
+which result bits are architecturally relevant, while input lifting and output
+zipping compose finite relations before a `DecodeGen` consumes them. Zipping
+does not infer a join: it deliberately requires matching input partitions.
+
+Because the relation retains every output bit and its don't-care freedom,
+RHDL can minimize same-default groups and merge identical products into a
+shared PLA rather than spelling a separate comparison tree per result. That
+may improve the starting structure for a control decoder, but is not a claim
+of universally better hardware: XLS can optimize a `match`-derived dataflow
+graph, and its scheduler and target flow can choose a different implementation.
+The difference is explicit finite-relation algebra versus a general functional
+decision expression.
 
 ## Time, state, and scheduling
 
@@ -225,4 +252,5 @@ from retaining the higher function or proc denotation.
 - XLS [primary repository](https://github.com/google/xls)
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend staging](../../rhdl/frontend/README.md), and
+  [typed decode relations](../../rhdl/std/README.md#typed-decode-patterns), plus the
   [ready-valid composition](../../rhdl/std/README.md#flow-control-circuits)

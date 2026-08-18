@@ -36,6 +36,7 @@ explicit distinctions among combinational adapters, buffers, and instances.
 | Time | Explicit registers, memories, clocks, and next-state drives | `Signal dom a` streams plus explicit state primitives and combinators |
 | Static dimension | Realized hardware types checked during elaboration and verification | Widths, lengths, data types, and domains participate in Haskell types |
 | Flow composition | One-shot interface handles; serial, parallel, and cardinality-changing `|>` paths | Reusable, protocol-indexed `Circuit a b` values with typed forward and backward channels |
+| Patterns and decode | Typed aggregate cubes form an unordered, overlap-checked finite relation with sparse outputs | Haskell patterns destructure algebraic values and may bind nested fields in ordinary expressions |
 | Concurrency | The constructed graph is concurrent; no scheduler | Pure signal network is concurrent; no general operation scheduler |
 | Main source of locality | Source forms say which hardware object is being constructed | One functional syntax composes values, structures, and temporal signals |
 | Syntactic compression | Direct for named RTL structure and local control | High for generic datapaths, vectors, products, and state machines |
@@ -86,6 +87,36 @@ the result is expressed through construction actions rather than by giving the
 network a pure functional denotation. Conversely, RHDL's explicit destination
 syntax is clearer when output ownership, final connectivity, or a chosen
 module boundary is the important fact.
+
+## Typed literals, patterns, and relational decode
+
+Clash inherits Haskell's general pattern language. Pattern matching over
+algebraic data can name constructors, destructure nested products and sums,
+bind fields, and produce an arbitrary expression; compiler normalization then
+turns the reachable decision into hardware. That is the more expressive and
+often more elegant abstraction when a decoder is really a semantic function
+over an algebraic value. Clash also provides
+[`bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html),
+whose `0`, `1`, and wildcard positions can match and bind selected bits in a
+flat `BitVector` encoding.
+
+RHDL addresses a narrower but common RTL problem. `HardwareLiteral` is an
+open exact-value protocol for scalar, aggregate, and extension-defined types.
+`Pattern` is a recursive typed bit cube, so a record field or vector element
+may be exact, partly cared, or unconstrained without flattening the source
+description. `DecodeTable` validates a finite unordered relation by rejecting
+overlapping input cubes; sparse output patterns preserve which result bits are
+irrelevant. Its input-lift and output-product operations make relations
+composable before one `DecodeGen` consumes them, although output zipping
+intentionally requires identical input partitions.
+
+That representation can expose sharing and output don't-cares to a
+multi-output PLA implementation more directly than separately written
+comparisons and muxes. It is an optimization opportunity, not a general QoR
+guarantee: Clash can express the same Boolean relation, and normalization plus
+target synthesis may recover equal or better structure. RHDL gains a checked,
+decoder-specific relation; Clash retains the broader and more uniform
+functional pattern language.
 
 ## Flow composition
 
@@ -237,9 +268,11 @@ reproduce the other's final Boolean network.
 
 - RHDL [core semantics](../../rhdl/core/README.md),
   [frontend model](../../rhdl/frontend/README.md), and
+  [typed decode relations](../../rhdl/std/README.md#typed-decode-patterns), plus
   [frontend layers](../../rhdl/frontend/layers/README.md)
 - [Clash compiler model](https://docs.clash-lang.org/compiler-user-guide/general/index.html)
 - [Clash FAQ](https://docs.clash-lang.org/compiler-user-guide/general/faqs.html)
 - [Clash Prelude: signals, domains, and state](https://docs.clash-lang.org/compiler-user-guide/developing-hardware/prelude.html)
 - [Clash first-circuit tutorial](https://docs.clash-lang.org/tutorial/first-steps/first-circuit.html)
+- [Clash `bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html)
 - [`clash-protocols` circuits, `Df`, and invariants](https://github.com/clash-lang/clash-protocols)

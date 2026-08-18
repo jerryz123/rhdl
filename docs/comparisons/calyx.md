@@ -30,6 +30,7 @@ protocol boundaries more local and predictable.
 | Control | Muxes and guarded effects are already circuitry | `seq`, `par`, `if`, `while`, `repeat`, group activation, and `invoke` |
 | Assignment | One final binding per driveable destination | Guarded assignments may share a destination when mutually exclusive |
 | Types | Exact semantic types, records, vectors, and nominal protocols | Concrete-width ports, parameters, and semantic attributes |
+| Patterns and decode | Typed aggregate cubes form validated unordered relations with sparse outputs | Frontends lower decisions into comparisons, guards, assignments, and mux cells |
 | Composition | Module hierarchy plus directional protocol interfaces | Component invocation and caller-supplied `ref` cells |
 | Elastic flow | Exact serial/parallel topology with fan-in, fanout, rendezvous, routing, buffering, and credits | No standard continuously active token-flow algebra; control composes go/done actions |
 | Compiler freedom | Cycle boundaries are author-selected | Control and static schedules remain available for lowering |
@@ -79,6 +80,37 @@ This choice makes Calyx a relatively neutral target for different frontends.
 The tradeoff is that fewer source-level distinctions remain available to later
 passes. RHDL chooses the reverse: its supported semantic types survive in the
 same IR that states the final circuit.
+
+## Typed literals, patterns, and relational decode
+
+RHDL gives finite control relations a typed authoring form. `HardwareLiteral`
+represents exact packed values for scalar, aggregate, and extension-defined
+types. A recursive `Pattern` adds field-preserving don't-care structure, so a
+selector can constrain part of a record while an output pattern specifies only
+the controls relevant to that selector region.
+
+`DecodeTable` validates those rows as an unordered, nonoverlapping relation
+with exact input and output types. Relations can gain rows, be lifted into a
+wider selector, or be zipped across independently defined output structures.
+`DecodeGen` can then minimize same-default result groups, use output
+don't-cares, and merge identical product terms across groups.
+
+Calyx constants, guarded assignments, comparison primitives, groups, and
+control are sufficient to express the same circuit, and a Calyx frontend can
+generate a decoder from its own table representation. The Calyx language does
+not itself provide a comparable standard abstraction for recursively typed
+masked literals or an unordered partial-output relation. By the time such a
+frontend lowers to Calyx, semantic aggregate distinctions and relation-level
+composition may already have become widths, guards, and assignments.
+
+RHDL therefore offers substantially more concise decoder authorship and hands
+optimization an explicit multi-output relation instead of requiring it to
+rediscover one from a guarded mux network. That can beat naive lowering,
+particularly when several outputs share implicants, but it is not an inherent
+PPA advantage over a Calyx pipeline whose frontend or compiler preserves and
+optimizes the same information. This difference reflects Calyx's role as a
+scheduling and accelerator IR rather than an inability to represent decoder
+hardware.
 
 ## Time, state, and scheduling
 
@@ -225,3 +257,5 @@ Neither model subsumes the other without adding a semantic level.
 - RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
   [frontend interfaces](../../rhdl/frontend/layers/README.md#interfaces), and
   [standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
+- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)

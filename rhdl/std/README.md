@@ -113,11 +113,13 @@ circuit ControlPath():
 
 `DecodeGen` is an ordinary callable host value and can be passed as a circuit
 parameter. Construction looks for the `espresso` executable. When available,
-it minimizes the relation once and calling the generator elaborates the
+it constructs a minimized plan, and calling the generator elaborates the
 resulting shared PLA as product-term ANDs and per-output ORs. Output bits are
-partitioned by their default state, so zero, one, and don't-care defaults retain
-their intended optimization freedom. `ValidDecodeGen` minimizes its valid bit
-and payload together.
+partitioned by their zero, one, or don't-care default; each nonempty partition
+is minimized separately, and identical input products are merged across
+partitions. `ValidDecodeGen` therefore keeps validity and payload in one
+semantic relation, but their different defaults normally place them in
+separate minimization runs.
 
 When Espresso is absent, `DecodeGen` emits the existing typed `rtl.decode`
 operation and lets CIRCT lower it without local minimization. An executable
