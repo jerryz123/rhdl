@@ -1,8 +1,9 @@
 #lang rhombus/and_meta
-// Defines Bool literals, reductions, enum validity, comparisons, and binary-selection syntax.
+// Defines Bool literals, reductions, priority encoders, comparisons, and binary selection.
 
 import:
   "../../core/ir.rhm" open
+  "../../core/types.rhm".count_index_width
   "../../core/types.rhm".signed_arithmetic_type
   "../kernel.rhm" as kernel
   "../support/finite-enum.rhm" as finite_enum_support
@@ -17,6 +18,8 @@ export:
   bool_ne
   or_reduce
   and_reduce
+  priority_encoder
+  priority_encoder_oh
   is_one_of
   enum_valid
   unsigned_lt
@@ -161,6 +164,119 @@ fun and_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
         name,
         location
       )
+
+// Statically shifts a packed value toward higher-numbered bits without
+// introducing a dynamic shifter into the core IR.
+fun static_shift_left(value, width :: PosInt, amount :: PosInt, location):
+  if amount >= width
+  | kernel.literal(Bits(width), 0, #false, location)
+  | kernel.concat(
+      [kernel.extract(value, width - amount - 1, 0, #false, location),
+       kernel.literal(Bits(amount), 0, #false, location)],
+      #false,
+      location
+    )
+
+// Isolates the least-significant asserted bit using a logarithmic-depth
+// parallel prefix OR network. An all-zero operand produces all zeroes.
+fun packed_priority_encoder_oh(packed, width :: PosInt, name, location):
+  def mutable prefix = packed
+  def mutable distance = 1
+  while distance < width:
+    prefix := kernel.bit_or(
+      prefix,
+      static_shift_left(prefix, width, distance, location),
+      #false,
+      location
+    )
+    distance := distance * 2
+  kernel.bit_and(
+    packed,
+    kernel.bit_not(
+      static_shift_left(prefix, width, 1, location),
+      #false,
+      location
+    ),
+    name,
+    location
+  )
+
+// Returns an optional-one-hot Bits mask selecting the lowest asserted packed
+// bit. Bits zero is also the lowest logical lane of Vec values.
+fun priority_encoder_oh(entity,
+                        name = #false,
+                        location = Location()) :~ HardwareFields:
+  when entity is_a List
+  | error(~who: #'priority_encoder_oh,
+          location.describe() ++ ": priority_encoder_oh operand must be one packable DataType")
+  def value = kernel.read(entity, location)
+  def width = packed_width(value.type)
+  unless data_type(value.type) && width != #false
+  | error(~who: #'priority_encoder_oh,
+          location.describe() ++ ": priority_encoder_oh operand must have a packable DataType")
+  def packed = hardware_as_bits(
+    value,
+    #'priority_encoder_oh,
+    "priority_encoder_oh operand",
+    #false,
+    location
+  )
+  packed_priority_encoder_oh(packed, width, name, location)
+
+fun priority_index_mask(width :: PosInt, result_bit :: Nat):
+  def mutable mask = 0
+  for (index in 0..width):
+    when ((index bits.(>>) result_bit) bits.and 1) == 1
+    | mask := mask + (1 bits.(<<) index)
+  mask
+
+// Encodes the lowest asserted packed bit. Zero input returns index zero; use
+// or_reduce when the caller must distinguish that case from bit zero winning.
+fun priority_encoder(entity,
+                     name = #false,
+                     location = Location()) :~ HardwareFields:
+  when entity is_a List
+  | error(~who: #'priority_encoder,
+          location.describe() ++ ": priority_encoder operand must be one packable DataType")
+  def value = kernel.read(entity, location)
+  def width = packed_width(value.type)
+  unless data_type(value.type) && width != #false
+  | error(~who: #'priority_encoder,
+          location.describe() ++ ": priority_encoder operand must have a packable DataType")
+  def packed = hardware_as_bits(
+    value,
+    #'priority_encoder,
+    "priority_encoder operand",
+    #false,
+    location
+  )
+  def selected = packed_priority_encoder_oh(packed, width, #false, location)
+  def result_width = count_index_width(width)
+  def result_bits = for List (result_bit in 0..result_width):
+    def selected_for_bit = kernel.bit_and(
+      selected,
+      kernel.literal(
+        Bits(width),
+        priority_index_mask(width, result_bit),
+        #false,
+        location
+      ),
+      #false,
+      location
+    )
+    kernel.bit_not(
+      kernel.hw_eq(
+        selected_for_bit,
+        kernel.literal(Bits(width), 0, #false, location),
+        #false,
+        location
+      ),
+      if result_width == 1 | name | #false,
+      location
+    )
+  if result_width == 1
+  | result_bits[0]
+  | kernel.concat(result_bits.reverse(), name, location)
 
 operator (left =/= right):
   ~same_as: ===

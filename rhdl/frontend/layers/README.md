@@ -117,6 +117,8 @@ active <== is_one_of(state, State.Refill, State.Respond)
 encoding_valid <== enum_valid(state)
 nonzero <== or_reduce(value)
 all_set <== and_reduce(value)
+first_index <== priority_encoder(value)
+first_mask <== priority_encoder_oh(value)
 ```
 
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
@@ -137,6 +139,13 @@ identities: `or_reduce([])` is false and `and_reduce([])` is true. Nonempty
 operands lower respectively to inequality with zero and equality with an
 all-ones value, expressed through existing equality and inversion operations
 without adding core reduction operations or zero-width hardware types.
+`priority_encoder(value)` returns the index of the lowest asserted bit in the
+canonical packed representation, while `priority_encoder_oh(value)` returns a
+`Bits` mask containing only that bit. Both return zero for an all-zero operand;
+use `or_reduce(value)` when binary index zero must be distinguished from no
+asserted input. A `Vec`'s logical element zero is its lowest packed lane, so the
+same lower-index-first rule applies directly to vectors. The optional-one-hot
+result is `Bits` rather than `OneHot`, because an all-zero result is valid.
 Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from

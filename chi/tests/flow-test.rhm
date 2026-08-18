@@ -1,0 +1,37 @@
+#lang rhombus
+// Checks the SN flow adapter's channel conversion and activation status surface.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/layers/bool.rhm" as bool
+  "flow-fixture.rhdl" as fixture
+
+def top = fixture.flow_design.modules.find(
+  fun (module_def): module_def.name == "CHISNFlowAdapter"
+)
+def instances = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def senders = fixture.flow_design.modules.filter(
+  ~keep: fun (module_def): module_def.name.starts_with("CreditSender")
+)
+def buffers = fixture.flow_design.modules.filter(
+  ~keep: fun (module_def): module_def.name.starts_with("CreditBuffer")
+)
+
+check:
+  top != #false ~is #true
+  instances.filter(
+    ~keep: fun (operation): operation.attribute("module").name.starts_with("CreditSender")
+  ).length() ~is 2
+  instances.filter(
+    ~keep: fun (operation): operation.attribute("module").name.starts_with("CreditBuffer")
+  ).length() ~is 2
+  senders.length() ~is 2
+  buffers.length() ~is 2
+  top.find_output("transmit_running").type === bool.Bool ~is #true
+  top.find_output("transmit_deactivating").type === bool.Bool ~is #true
+  top.find_output("transmit_credit_empty").type === bool.Bool ~is #true
+  top.find_output("receive_running").type === bool.Bool ~is #true
+  top.find_output("receive_deactivating").type === bool.Bool ~is #true
+  verify_design(fixture.flow_design) ~is #void

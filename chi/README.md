@@ -14,8 +14,9 @@ wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
 protocol classifiers, node capabilities, credited node-role links, link-local
-monitors, bounded initial non-coherent transaction checking, and validated
-fabric/SAM metadata. Fabric RTL and endpoints remain planned below.
+monitors, bounded initial non-coherent transaction checking, validated
+fabric/SAM metadata, and an initial non-coherent backing RAM. Fabric RTL and
+coherent endpoints remain planned below.
 
 ## Architectural boundary
 
@@ -204,7 +205,7 @@ transaction state.
 
 ## Non-coherent-first scope
 
-The first executable endpoint will be `CHIRam`, a finite backing-memory
+[`ram.rhdl`](ram.rhdl) implements `CHIRam`, a finite backing-memory
 Subordinate Node. It is not a Home Node and does not implement coherence. A
 Home Node performs any required ordering and coherence work before issuing a
 non-snoopable transaction to this RAM.
@@ -212,7 +213,7 @@ non-snoopable transaction to this RAM.
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
 operations. SN-F is the normal-memory backing role; SN-I additionally covers
-peripherals and explicitly non-coherent memory. `CHIRam` will therefore
+peripherals and explicitly non-coherent memory. `CHIRam` therefore
 advertise an SN-F endpoint while initially supporting only the small common
 Subordinate subset analogous to `TLRam`. This does not make the RAM coherent:
 the upstream HN-F owns coherence and sends the SN-F only non-snoopable traffic.
@@ -228,13 +229,18 @@ responses. CHI permits a combined `CompDBIDResp` before the write data is
 sent, but completing only after the RAM update gives `CHIRam` the same
 observable storage discipline as `TLRam`.
 
-The first implementation will have these explicit limits:
+The initial implementation has these explicit limits:
 
-- One power-of-two, naturally aligned address region backed by `SyncRam1RW`.
-- Configurable physical data width, initially restricted to transfers that fit
-  in one DAT flit.
-- A bounded number of outstanding transactions with DBIDs allocated from the
-  actual write-data reservation table.
+- One power-of-two, naturally aligned address region containing at least two
+  physical data beats and backed by `SyncRam1RW`.
+- All supported physical data widths, restricted to transfers that fit in one
+  DAT flit.
+- A reusable subordinate transaction-slot module bounds outstanding reads and
+  writes. Allocation and matched write DAT use ready-valid flows; DBID-sent and
+  completion notifications are valid-only events because they cannot be
+  backpressured after the corresponding channel transfer.
+- DBIDs are occupied slot indices held through completion; only writes waiting
+  for DAT retain their original REQ payload in the write-request table.
 - No snoopable requests, snoop channel, cache-state tracking, or Home Node
   behavior.
 - No atomics, exclusives, cache maintenance, DVM, request retry, direct memory
@@ -294,16 +300,18 @@ interface behavior:
 
 | Utility | Responsibility |
 |---|---|
-| `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T, max_credits)`, track the received-credit balance, and expose `ready` only when a credit is available |
-| `CreditBuffer(T, depth)` | Accept every legal credited transfer into real storage, expose an internal `Irrevocable(T)` dequeue, grant initial credits, and return a credit whenever a slot is freed |
+| `CreditSender(T, max_credits)` | Adapt internal `Decoupled(T)` traffic to `Credited(T, max_credits)`, expose `ready` only when a prior credit is available, and report the credit count |
+| `CreditBuffer(T, depth)` | Accept every legal credited transfer into real storage, expose an internal `Irrevocable(T)` dequeue, and report buffered and reserved counts |
 | `CreditCounter(max_credits)` | Reusable bounded balance primitive with simultaneous grant/consume support |
 | `check_credited(valid, credit, max_credits, balance)` | Apply the generic credit assertions and update caller-owned balance state |
 | `monitor_credited(valid, credit, max_credits)` | Allocate balance state and apply `check_credited` for a single monitored channel |
 
-Activation is intentionally outside the generic interface. CHI-specific link
-code will gate initial credit grants with CHI link activation and add any CHI
-pending or low-power signals. Likewise, Protocol Credits remain CHI RSP
-messages and must not be represented by `Credited`.
+Activation is intentionally outside the generic interface. The CHI-specific
+[`flow.rhdl`](flow.rhdl) adapter gates initial credit grants with link
+activation, derives deactivation readiness from the existing credit and
+reservation counts, and presents internal ready-valid flows. Link Credit
+Return flits remain CHI payloads supplied through those flows; Protocol
+Credits remain CHI RSP messages and must not be represented by `Credited`.
 
 `CompletionQueue` is not this abstraction. It reserves local response capacity
 at a ready-valid request handshake; it neither transports Link Credits nor
@@ -319,7 +327,9 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
-| `ram.rhdl` | The non-snooping SN-F `CHIRam` backing-memory endpoint |
+| [`flow.rhdl`](flow.rhdl) | SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
+| [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
+| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F `CHIRam` backing-memory endpoint |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, subordinate services, and validated SAM metadata; routing, arbitration, credit termination, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
@@ -338,9 +348,9 @@ turns an externally credited flit channel into a buffered internal flow.
    ordering, retry and Protocol Credits, and other transaction families remain.
 6. **Parameters complete:** Define `CHIFabricParams` and validate the System
    Address Map. Next, generate a small credit-terminating crossbar.
-7. Implement the RN-I-facing non-coherent memory subsystem and `CHIRam` over
-   `SyncRam1RW`, first for single-flit reads and writes and then multibeat
-   traffic.
+7. **Initial backing RAM complete:** Implement `CHIRam` over `SyncRam1RW` for
+   single-flit reads and writes. Next, connect it through an RN-I-facing
+   non-coherent subsystem and then add multibeat traffic.
 8. Add RN-F/HN-F coherence and snoop tracking, followed by optional CHI
    features as independently verified vertical slices.
 
@@ -350,7 +360,7 @@ test of the supported transaction flows.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn' bash tests/backend/run-circt.sh`
+`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram' bash tests/backend/run-circt.sh`
 for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
 
 ## Specification references

@@ -55,10 +55,10 @@ integration_fixtures=(
   clocked-dpi assertions hierarchy bundle interface-array
   queue-options rr-arbiter ctrl-queue-options
   dont-care decode noc-route-computer noc-router noc-network
-  nested-bundle aggregate-memory one-hot-aggregate
+  nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
-  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn
+  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram
   tilelink-protocol tilelink-ram
   ricket-core ricket-dcache
 )
@@ -472,6 +472,7 @@ direct_fixture_specs=(
   'nested-bundle|'
   'aggregate-memory|'
   'one-hot-aggregate|'
+  'priority-encoder|priority_encoder_tb'
   'rv32i-alu|rv32i_alu_tb'
   'rv64i-alu|rv64i_alu_tb'
   'rv64i-alu-decode|'
@@ -485,6 +486,7 @@ direct_fixture_specs=(
   'chi-monitor|chi_monitor_tb'
   'chi-transaction|chi_transaction_tb'
   'chi-transaction-sn|chi_transaction_sn_tb'
+  'chi-ram|chi_ram_tb'
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'
@@ -589,5 +591,8 @@ run_expected_assertion_failure chi-transaction \
   chi_transaction_early_data_tb \
   tests/backend/verilog/chi-transaction-early-data_tb.sv \
   chi_transaction_write_data_has_dbid
+run_expected_assertion_failure chi-ram chi_ram_invalid_tb \
+  tests/backend/verilog/chi-ram-invalid_tb.sv \
+  chi_ram_request_address_supported
 run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \
   tests/backend/verilog/tilelink-ram-invalid_tb.sv tilelink_a_mask_supported

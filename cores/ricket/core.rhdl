@@ -64,6 +64,10 @@ sync_circuit RicketCore(xlen :: XLen):
   def memory = ex_mem_pipe.egress
   def Array(commit, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(2)
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
+  def scoreboard_set_valid = commit.valid & commit_is_load & (
+    commit.bits.write_enable
+  ) & or_reduce(commit.bits.rd)
+  def scoreboard_set_index = commit.bits.rd
   (
     scoreboard_set_path
       |> filter_valid(operation => (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
@@ -152,9 +156,14 @@ sync_circuit RicketCore(xlen :: XLen):
 
   registers.read_address_1 <== rs1
   registers.read_address_2 <== rs2
-  def rs1_busy = or_reduce(rs1) & scoreboard_busy(register_count, scoreboard.busy, rs1)
-  def rs2_busy = or_reduce(rs2) & scoreboard_busy(register_count, scoreboard.busy, rs2)
-  def rd_busy = or_reduce(rd) & scoreboard_busy(register_count, scoreboard.busy, rd)
+  fun ricket_register_busy(index):
+    def stored = scoreboard_busy(register_count, scoreboard.busy, index)
+    def setting = scoreboard_set_valid & (scoreboard_set_index === index)
+    def clearing = load_completion.valid & (load_completion.bits.tag === index)
+    (stored ||| setting) & !clearing
+  def rs1_busy = or_reduce(rs1) & ricket_register_busy(rs1)
+  def rs2_busy = or_reduce(rs2) & ricket_register_busy(rs2)
+  def rd_busy = or_reduce(rd) & ricket_register_busy(rd)
 
   def id_ex_is_load = id_ex.valid & (id_ex.bits.memory_operation === MemoryOperation.Read)
   def memory_is_load = memory.valid & (memory.bits.memory_operation === MemoryOperation.Read)

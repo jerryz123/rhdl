@@ -1,0 +1,112 @@
+#lang rhdl
+// Adapts an SN node's credited CHI channels to internal ready-valid flows.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+  lib("chi/flits.rhdl") open
+  lib("chi/link.rhdl") open
+
+class CHISNFlows(requests :: Endpoint,
+                 request_data :: Endpoint,
+                 responses :: Endpoint,
+                 response_data :: Endpoint,
+                 transmit_running :: Hardware,
+                 transmit_deactivating :: Hardware,
+                 transmit_credit_empty :: Hardware,
+                 receive_running :: Hardware,
+                 receive_deactivating :: Hardware)
+
+// Activation remains CHI-specific while each channel conversion uses the
+// protocol-neutral credited-flow primitives. During transmit deactivation,
+// the endpoint must inject required Link Credit Return flits through the
+// returned response flows.
+fun chi_sn_flow_adapter(port :: Endpoint,
+                        link :: CHISNLinkParams,
+                        transmit_enable :: Hardware,
+                        receive_enable :: Hardware):
+  def p = link.flit
+
+  inst request_receiver(CreditBuffer(CHIReqFlit(p), link.rx_req_credits))
+  inst request_data_receiver(CreditBuffer(CHIDatFlit(p), link.rx_dat_credits))
+  inst response_transmitter(CreditSender(CHIRspFlit(p), link.tx_rsp_credits))
+  inst response_data_transmitter(CreditSender(CHIDatFlit(p), link.tx_dat_credits))
+
+  port.rx_req <=> request_receiver.link
+  port.rx_dat <=> request_data_receiver.link
+  response_transmitter.link <=> port.tx_rsp
+  response_data_transmitter.link <=> port.tx_dat
+
+  reg transmit_request(~init: Bool(#false))
+  reg receive_ack(~init: Bool(#false))
+  def transmit_acked = port.tx_link_active_ack
+  def receive_requested = port.rx_link_active_request
+  def tx_credit_empty = !or_reduce(response_transmitter.credit_count) & (
+    !or_reduce(response_data_transmitter.credit_count)
+  )
+  def receive_drained = !or_reduce(request_receiver.reserved) & (
+    !or_reduce(request_data_receiver.reserved)
+  )
+
+  when (!transmit_request & !transmit_acked & transmit_enable):
+    transmit_request <== Bool(#true)
+  elsewhen (transmit_request & transmit_acked & !transmit_enable):
+    transmit_request <== Bool(#false)
+
+  when (!receive_ack & receive_requested & receive_enable):
+    receive_ack <== Bool(#true)
+  elsewhen (receive_ack & !receive_requested & receive_drained):
+    receive_ack <== Bool(#false)
+
+  port.tx_link_active_request <== transmit_request
+  port.rx_link_active_ack <== receive_ack
+  request_receiver.grant_enable <== receive_ack & receive_requested & receive_enable
+  request_data_receiver.grant_enable <== receive_ack & receive_requested & receive_enable
+
+  CHISNFlows(
+    request_receiver.egress,
+    request_data_receiver.egress,
+    response_transmitter.ingress,
+    response_data_transmitter.ingress,
+    transmit_request & transmit_acked,
+    !transmit_request & transmit_acked,
+    tx_credit_empty,
+    receive_requested & receive_ack,
+    !receive_requested & receive_ack
+  )
+
+// Provides a module boundary for standalone use and backend verification.
+sync_circuit CHISNFlowAdapter(link :: CHISNLinkParams,
+                              node :: CHINodeParams):
+  def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHISNLink(link, node), ~role: node)
+  interface requests(Irrevocable(CHIReqFlit(p)), ~role: producer)
+  interface request_data(Irrevocable(CHIDatFlit(p)), ~role: producer)
+  interface responses(Decoupled(CHIRspFlit(p)), ~role: consumer)
+  interface response_data(Decoupled(CHIDatFlit(p)), ~role: consumer)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
+
+  def flows = chi_sn_flow_adapter(port,
+                                  link,
+                                  transmit_enable,
+                                  receive_enable)
+  requests <=> flows.requests
+  request_data <=> flows.request_data
+  responses <=> flows.responses
+  response_data <=> flows.response_data
+  transmit_running <== flows.transmit_running
+  transmit_deactivating <== flows.transmit_deactivating
+  transmit_credit_empty <== flows.transmit_credit_empty
+  receive_running <== flows.receive_running
+  receive_deactivating <== flows.receive_deactivating
+
+export:
+  CHISNFlows
+  chi_sn_flow_adapter
+  CHISNFlowAdapter

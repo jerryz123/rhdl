@@ -12,6 +12,9 @@ module credited_flow_tb;
   egress_reverse_t egress_in;
   ingress_reverse_t ingress_out;
   egress_forward_t egress_out;
+  logic [1:0] credit_count;
+  logic [1:0] count;
+  logic [1:0] reserved;
 
   CreditedRoundTrip dut (.*);
   always #5 clock = ~clock;
@@ -31,6 +34,8 @@ module credited_flow_tb;
     #1;
     assert (!ingress_out.ready && !egress_out.valid)
       else $fatal(1, "traffic advanced without a prior credit");
+    assert (credit_count == 0 && count == 0 && reserved == 0)
+      else $fatal(1, "credited adapter status was not empty after reset");
 
     // The first grant is visible only after its clock edge. It cannot
     // authorize the already-present input during the grant cycle itself.
@@ -41,6 +46,8 @@ module credited_flow_tb;
     tick();
     assert (ingress_out.ready)
       else $fatal(1, "registered credit did not enable the sender");
+    assert (credit_count == 1 && count == 0 && reserved == 1)
+      else $fatal(1, "first credit reservation was not reported");
 
     // Fill the two receiver slots while its egress is stalled.
     tick();
@@ -82,12 +89,16 @@ module credited_flow_tb;
     tick();
     assert (!ingress_out.ready && egress_out.valid && egress_out.bits == 8'hD4)
       else $fatal(1, "outstanding credit did not carry payload D");
+    assert (credit_count == 0 && count == 1 && reserved == 1)
+      else $fatal(1, "outstanding payload status was incorrect");
 
     ingress_in.valid = 1'b0;
     egress_in.ready = 1'b1;
     tick();
     assert (!egress_out.valid && !ingress_out.ready)
       else $fatal(1, "disabled receiver unexpectedly granted another credit");
+    assert (credit_count == 0 && count == 0 && reserved == 0)
+      else $fatal(1, "credited adapter did not fully drain");
 
     $display("Credited flow simulation passed");
     $finish;

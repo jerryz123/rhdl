@@ -1,22 +1,35 @@
 #lang rhdl
-// Defines a reusable single-set, single-clear occupancy scoreboard.
+// Defines a reusable positive-sized single-set, single-clear occupancy scoreboard.
 
 import:
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/ready-valid.rhdl").Valid
 
-fun scoreboard_busy(entries :: Pow2Int,
+fun scoreboard_index_capacity(entries :: PosInt):
+  1 bits.(<<) index_width(entries)
+
+fun scoreboard_index_in_range(entries :: PosInt, index):
+  if scoreboard_index_capacity(entries) == entries
+  | Bool(#true)
+  | index < bits(entries, index_width(entries))
+
+fun scoreboard_busy(entries :: PosInt,
                     busy :: Bits(entries),
                     index :: Bits(index_width(entries))) :~ Bool:
-  // Power-of-two sizing makes every index encoding valid for this Vec view.
-  cast(busy, Vec(entries, Bool))[index]
+  def busy_vector = cast(busy, Vec(entries, Bool))
+  if scoreboard_index_capacity(entries) == entries
+  | busy_vector[index]
+  | busy_vector.lookup(index, ~default: Bool(#false))
 
-// Set and clear are nonbackpressured operations. The combinational busy output
-// includes both operations from the current cycle, with clear winning when
-// they address the same entry.
-sync_circuit Scoreboard(entries :: Pow2Int):
-  unless entries > 1
-  | error(~who: #'Scoreboard, "entry count must be at least two")
+fun scoreboard_index_bit(entries :: PosInt, index):
+  def encoded = as_bits(one_hot(index))
+  if scoreboard_index_capacity(entries) == entries
+  | encoded
+  | trunc(encoded, entries)
+
+// Set and clear are nonbackpressured operations. Updates take effect at the
+// edge, with clear winning when both operations address the same entry.
+sync_circuit Scoreboard(entries :: PosInt):
   def Index = Bits(index_width(entries))
 
   interface set(Valid(Index), ~role: consumer)
@@ -24,26 +37,30 @@ sync_circuit Scoreboard(entries :: Pow2Int):
   output busy: Bits(entries)
 
   reg state(~init: bits(0, entries))
-  def set_bit = as_bits(one_hot(set.bits))
-  def clear_bit = as_bits(one_hot(clear.bits))
+  def set_bit = scoreboard_index_bit(entries, set.bits)
+  def clear_bit = scoreboard_index_bit(entries, clear.bits)
   def set_mask = mux(set.valid, set_bit, bits(0, entries))
   def clear_mask = mux(clear.valid, clear_bit, bits(0, entries))
-  def set_was_free = !scoreboard_busy(entries, state, set.bits) ||| (
+  def set_was_free = !or_reduce(state & set_bit) ||| (
     clear.valid & (clear.bits === set.bits)
   )
-  def clear_was_busy = scoreboard_busy(entries, state, clear.bits) ||| (
+  def clear_was_busy = or_reduce(state & clear_bit) ||| (
     set.valid & (set.bits === clear.bits)
   )
 
   when (set.valid):
+    assert(scoreboard_index_in_range(entries, set.bits),
+           "scoreboard_set_index_in_range")
     assert(set_was_free, "scoreboard_set_free")
   when (clear.valid):
+    assert(scoreboard_index_in_range(entries, clear.bits),
+           "scoreboard_clear_index_in_range")
     assert(clear_was_busy, "scoreboard_clear_busy")
 
   def effective_busy = (state ||| set_mask) & !clear_mask
   when (set.valid ||| clear.valid):
     state <== effective_busy
-  busy <== effective_busy
+  busy <== state
 
 export:
   Scoreboard

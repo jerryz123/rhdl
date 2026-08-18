@@ -12,26 +12,20 @@ circuit Arbiter(T, n :: PosInt):
   interface egress(Decoupled(T), ~role: producer)
   output chosen: Bits(index_width(n))
 
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def grants = cast(priority_encoder_oh(requests), Vec(n, Bool))
   def mutable selected_bits = ingress[0].bits
-  def mutable selected_index = bits(0, index_width(n))
   for (offset in 0..n):
     def index = n - offset - 1
     selected_bits := mux(ingress[index].valid,
                          ingress[index].bits,
                          selected_bits)
-    selected_index := mux(ingress[index].valid,
-                          bits(index, index_width(n)),
-                          selected_index)
-
-  def mutable prior_valid = Bool(#false)
   for (index in 0..n):
-    def granted = ingress[index].valid & !prior_valid
-    ingress[index].ready <== egress.ready & granted
-    prior_valid := prior_valid ||| ingress[index].valid
+    ingress[index].ready <== egress.ready & grants[index]
 
-  egress.valid <== prior_valid
+  egress.valid <== or_reduce(requests)
   egress.bits <== selected_bits
-  chosen <== selected_index
+  chosen <== priority_encoder(requests)
 
 // Lower indices have higher priority among payloadless token offers.
 circuit CtrlArbiter(n :: PosInt):
@@ -40,21 +34,13 @@ circuit CtrlArbiter(n :: PosInt):
   interface egress(DecoupledCtrl(), ~role: producer)
   output chosen: Bits(index_width(n))
 
-  def mutable selected_index = bits(0, index_width(n))
-  for (offset in 0..n):
-    def index = n - offset - 1
-    selected_index := mux(ingress[index].valid,
-                          bits(index, index_width(n)),
-                          selected_index)
-
-  def mutable prior_valid = Bool(#false)
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def grants = cast(priority_encoder_oh(requests), Vec(n, Bool))
   for (index in 0..n):
-    def granted = ingress[index].valid & !prior_valid
-    ingress[index].ready <== egress.ready & granted
-    prior_valid := prior_valid ||| ingress[index].valid
+    ingress[index].ready <== egress.ready & grants[index]
 
-  egress.valid <== prior_valid
-  chosen <== selected_index
+  egress.valid <== or_reduce(requests)
+  chosen <== priority_encoder(requests)
 
 export:
   Arbiter

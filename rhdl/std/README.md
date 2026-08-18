@@ -313,7 +313,11 @@ def completion_index = map_valid(completion => completion.tag)
 def permitted = requests |> gate_flow(!scoreboard_busy(32, hazards.busy, source))
 ```
 
-The power-of-two entry count must be at least two. Reset empties the scoreboard.
+The entry count may be any positive integer. `busy` exposes only the registered
+bitmap; consumers that need same-cycle update visibility implement that bypass
+as part of their own timing policy. Clear wins when both updates target one
+entry. Out-of-range indices are assertion failures for updates and read as not
+busy through `scoreboard_busy`. Reset empties the scoreboard.
 The `busy` output includes current-cycle operations, so consumers see a set or
 clear without an extra cycle; clear wins when both operations address the same
 entry. Assertions reject setting an occupied entry and clearing a free entry,

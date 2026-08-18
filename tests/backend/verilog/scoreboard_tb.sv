@@ -1,12 +1,12 @@
-// Verifies standard scoreboard set, clear, retention, entry-zero, and bypass behavior.
+// Verifies registered non-power-of-two scoreboard set, clear, and retention behavior.
 module scoreboard_tb;
-  typedef struct packed { logic valid; logic [2:0] bits; } update_t;
+  typedef struct packed { logic valid; logic [1:0] bits; } update_t;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
   update_t set_in;
   update_t clear_in;
-  logic [7:0] busy;
+  logic [2:0] busy;
 
   Scoreboard dut (.*);
   always #5 clock = ~clock;
@@ -19,46 +19,51 @@ module scoreboard_tb;
     reset = 1'b0;
 
     set_in.valid = 1'b1;
-    set_in.bits = 3'd3;
+    set_in.bits = 2'd2;
     #1;
-    assert (busy == 8'h08)
-      else $fatal(1, "set was not visible in its cycle");
+    assert (busy == 3'b000)
+      else $fatal(1, "set changed registered occupancy before the edge");
     @(posedge clock);
     #1;
     set_in.valid = 1'b0;
-    assert (busy == 8'h08)
+    assert (busy == 3'b100)
       else $fatal(1, "set entry was not retained");
 
     clear_in.valid = 1'b1;
-    clear_in.bits = 3'd3;
+    clear_in.bits = 2'd2;
     #1;
-    assert (busy == 8'h00)
-      else $fatal(1, "clear was not visible in its cycle");
+    assert (busy == 3'b100)
+      else $fatal(1, "clear changed registered occupancy before the edge");
     @(posedge clock);
     #1;
     clear_in.valid = 1'b0;
-    assert (busy == 8'h00)
+    assert (busy == 3'b000)
       else $fatal(1, "cleared entry remained busy");
 
     set_in.valid = 1'b1;
-    set_in.bits = 3'd0;
+    set_in.bits = 2'd0;
     #1;
-    assert (busy == 8'h01)
-      else $fatal(1, "entry zero could not be set");
+    assert (busy == 3'b000)
+      else $fatal(1, "entry-zero set changed occupancy before the edge");
     @(posedge clock);
     #1;
-    set_in.bits = 3'd5;
+    set_in.bits = 2'd1;
     clear_in.valid = 1'b1;
-    clear_in.bits = 3'd5;
-    assert (busy == 8'h01)
+    clear_in.bits = 2'd1;
+    assert (busy == 3'b001)
       else $fatal(1, "same-cycle clear did not win");
     @(posedge clock);
     #1;
     set_in.valid = 1'b0;
-    clear_in.bits = 3'd0;
+    clear_in.bits = 2'd0;
     #1;
-    assert (busy == 8'h00)
-      else $fatal(1, "entry zero clear was not visible");
+    assert (busy == 3'b001)
+      else $fatal(1, "entry-zero clear changed occupancy before the edge");
+    @(posedge clock);
+    #1;
+    clear_in.valid = 1'b0;
+    assert (busy == 3'b000)
+      else $fatal(1, "entry zero clear was not retained");
 
     $display("standard scoreboard passed");
     $finish;
