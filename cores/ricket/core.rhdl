@@ -64,16 +64,16 @@ sync_circuit RicketCore(xlen :: XLen):
   def memory = ex_mem_pipe.egress
   def Array(commit, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(2)
   def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
-  def scoreboard_set_filter = filter_valid(operation):
-    (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd)
-  def scoreboard_set_address = map_valid(operation => operation.rd)
-  (scoreboard_set_path |> scoreboard_set_filter |> scoreboard_set_address) <=> scoreboard.set
+  (
+    scoreboard_set_path
+      |> filter_valid(operation => (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
+      |> map_valid(operation => operation.rd)
+  ) <=> scoreboard.set
 
-  def load_completion_filter = filter_valid(response => or_reduce(response.tag))
-  def valid_load_completions = data_access.response |> load_completion_filter
+  def valid_load_completions = data_access.response
+    |> filter_valid(response => or_reduce(response.tag))
   def Array(load_completion, scoreboard_clear_path) = valid_load_completions |> fork_valid(2)
-  def load_completion_tag = map_valid(response => response.tag)
-  (scoreboard_clear_path |> load_completion_tag) <=> scoreboard.clear
+  (scoreboard_clear_path |> map_valid(response => response.tag)) <=> scoreboard.clear
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -267,56 +267,53 @@ sync_circuit RicketCore(xlen :: XLen):
   // so only a legal memory operation contributes backpressure.
   def Array(branch_path, cache_path, pipeline_path) = id_ex |> atomic_fork(3)
 
-  def branch_request_mapping = map_flow(execute_token):
-    BranchResolverRequest(width):
-      left: forwarded_rs1
-      right: forwarded_rs2
-      control: execute_token.branch_control
-  branch_path |> branch_request_mapping
-    |> to_valid()
-    |> eject_flow(
-         ~valid: branch_resolver.request.valid,
-         ~bits: branch_resolver.request.bits
-       )
+  (
+    (
+      branch_path
+        |> map_flow(execute_token => BranchResolverRequest(width)):
+          left: forwarded_rs1
+          right: forwarded_rs2
+          control: execute_token.branch_control
+    ) |> to_valid()
+  ) <=> branch_resolver.request
 
   // A legal memory access starts its synchronous cache lookup at the same
   // edge that captures the instruction in EX/MEM.
-  def legal_memory_requests = filter_flow(execute_token):
-    execute_is_memory & !execute_nonredirect_fault
-  def cache_request_mapping = map_flow(execute_token):
-    RicketDataReq(xlen):
-      address: alu.result
-      write: execute_token.memory_operation === MemoryOperation.Write
-      width: execute_token.memory_width
-      unsigned: execute_token.memory_unsigned
-      data: forwarded_rs2
-      tag: mux(
-        execute_token.memory_operation === MemoryOperation.Read,
-        execute_token.rd,
-        bits(0, 5)
-      )
-  (cache_path |> legal_memory_requests |> cache_request_mapping) <=> data_access.request
+  (
+    cache_path
+      |> filter_flow(execute_token => execute_is_memory & !execute_nonredirect_fault)
+      |> map_flow(execute_token => RicketDataReq(xlen)):
+        address: alu.result
+        write: execute_token.memory_operation === MemoryOperation.Write
+        width: execute_token.memory_width
+        unsigned: execute_token.memory_unsigned
+        data: forwarded_rs2
+        tag: mux(
+          execute_token.memory_operation === MemoryOperation.Read,
+          execute_token.rd,
+          bits(0, 5)
+        )
+  ) <=> data_access.request
 
-  def successful_execute = filter_flow(execute_token => !execute_fault)
-  def execute_result_mapping = map_flow(execute_token):
-    ExecuteMemory(xlen):
-      memory_operation: execute_token.memory_operation
-      writeback_enable: execute_token.writeback_enable
-      rd: execute_token.rd
-      result: execute_result
-  pipeline_path |> successful_execute
-    |> execute_result_mapping
-    |> to_valid()
-    |> eject_flow(
-         ~valid: ex_mem_pipe.ingress.valid,
-         ~bits: ex_mem_pipe.ingress.bits
-       )
+  (
+    (
+      pipeline_path
+        |> filter_flow(execute_token => !execute_fault)
+        |> map_flow(execute_token => ExecuteMemory(xlen)):
+          memory_operation: execute_token.memory_operation
+          writeback_enable: execute_token.writeback_enable
+          rd: execute_token.rd
+          result: execute_result
+    ) |> to_valid()
+  ) <=> ex_mem_pipe.ingress
 
   def execute_transfer = branch_resolver.result.valid
   execute_fault_event <== execute_transfer & execute_fault
-  def taken_branches = filter_valid(branch_result => !execute_fault & branch_result.taken)
-  def redirect_targets = map_valid(branch_result => computed_redirect_target)
-  (branch_resolver.result |> taken_branches |> redirect_targets) <=> redirect_link.left
+  (
+    branch_resolver.result
+      |> filter_valid(branch_result => !execute_fault & branch_result.taken)
+      |> map_valid(branch_result => computed_redirect_target)
+  ) <=> redirect_link.left
 
   // Memory advances every non-faulting instruction into WB. Non-load results
   // can already bypass here, but no instruction commits at this boundary.
