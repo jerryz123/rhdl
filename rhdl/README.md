@@ -63,7 +63,7 @@ internal module implementing its shared frontend forms is called the
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`formal/`](formal/README.md) | Optional Rosette-backed behavioral equivalence over verified public IR | Core only; Rosette through one Racket interoperability module |
 | [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, endpoint monitors, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
-| [`../chi/`](../chi/README.md) | AMBA CHI Issue H parameters, exact flits, protocol classifiers, credited node-role links, and link-local monitors | Public `#lang rhdl`; protocol-neutral `std/` libraries as later layers require them |
+| [`../chi/`](../chi/README.md) | AMBA CHI parameters, exact flits, credited node-role links, monitors, fabric metadata, and initial non-coherent endpoints | Public `#lang rhdl`; protocol-neutral `std/` libraries |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |

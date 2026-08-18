@@ -258,16 +258,18 @@ used by the adapters.
 
 ## Generic interconnect parameters
 
-[`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral host-side sets
-used to describe interconnect endpoints. `IdRange(start, end)` is a nonempty
+[`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral sets used to
+describe interconnect endpoints. `IdRange(start, end)` is a nonempty
 half-open range of nonnegative IDs. `AddressSet(base, mask)` describes every
 nonnegative address formed by varying the one bits of `mask`; canonical bases
 keep those bits clear. `TransferSizes(min_bytes, max_bytes)` is an inclusive
-power-of-two byte-size range. These are immutable elaboration-time values and
-do not create hardware. `IdRange.fits_unsigned_width(width)` and
+power-of-two byte-size range. The set objects are immutable elaboration-time
+values and do not themselves create hardware. `IdRange.fits_unsigned_width(width)` and
 `AddressSet.fits_unsigned_width(width)` report whether every represented value
 fits a nonnegative unsigned host width. Both set types provide `overlaps` for
-host-time topology validation. `allocate_id_ranges` assigns exact contiguous
+host-time topology validation. `address_set_matches` turns one `AddressSet`
+into a hardware predicate, while `address_sets_match` OR-reduces any list of
+sets and returns false for an empty list. `allocate_id_ranges` assigns exact contiguous
 global ranges to a nonempty list of local ranges and returns reversible
 `IdRangeMap` records without requiring the local ranges to begin at zero.
 

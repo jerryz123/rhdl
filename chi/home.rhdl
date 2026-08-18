@@ -1,0 +1,309 @@
+#lang rhdl
+// Implements the initial single-flit non-coherent CHI Home Node bridge.
+
+import:
+  lib("host/annotations.rhm").NonemptyString
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+  lib("rhdl/std/interconnect.rhdl").address_sets_match
+  lib("rhdl/std/scoreboard.rhdl").Scoreboard
+  lib("chi/params.rhdl").CHIFlitParams
+  lib("chi/flits.rhdl") open
+  lib("chi/protocol.rhdl") open
+  lib("chi/transaction.rhdl") open
+  lib("chi/link.rhdl") open
+  lib("chi/flow.rhdl") open
+  lib("chi/fabric.rhdl") open
+  lib("chi/monitor.rhdl").monitor_chi_hni
+
+class CHIHNIParams(home :: CHIHomeParams,
+                   requester_port :: CHIFabricPortParams,
+                   subordinate_port :: CHIFabricPortParams,
+                   subordinate_service :: CHISubordinateServiceParams):
+  property flit: requester_port.link.flit
+  property requester_link: requester_port.link
+  property requester_endpoint: requester_port.endpoint
+  property subordinate_link: subordinate_port.link
+  property subordinate_endpoint: subordinate_port.endpoint
+
+fun checked_chi_hni_params(params :: CHIHNIParams):
+  unless params.home.kind == CHINodeKind.HNI
+  | error(~who: #'CHIHNI, "home kind must be HN-I")
+  unless params.requester_endpoint.kind == CHINodeKind.RNI && (
+    params.requester_link is_a CHIRNILinkParams
+  )
+  | error(~who: #'CHIHNI,
+          "requester port must terminate an RN-I link")
+  unless params.subordinate_endpoint.kind == CHINodeKind.SNI && (
+    params.subordinate_link is_a CHISNLinkParams
+  )
+  | error(~who: #'CHIHNI,
+          "subordinate port must originate an SN-I link")
+  unless params.subordinate_service.endpoint == params.subordinate_endpoint
+  | error(~who: #'CHIHNI,
+          "subordinate service must describe the subordinate port")
+  unless params.requester_link.flit == params.subordinate_link.flit
+  | error(~who: #'CHIHNI,
+          "requester and subordinate links must use the same flit parameters")
+  unless params.home.node_id < (1 bits.(<<) params.flit.node_id_width)
+  | error(~who: #'CHIHNI,
+          "Home NodeID must fit the physical NodeID width")
+  unless chi_initial_requester_capabilities(params.requester_endpoint.supports,
+                                            params.requester_endpoint.emits)
+  | error(~who: #'CHIHNI,
+          "requester port must use the initial non-coherent capabilities")
+  unless chi_initial_subordinate_capabilities(params.subordinate_endpoint.supports,
+                                              params.subordinate_endpoint.emits)
+  | error(~who: #'CHIHNI,
+          "subordinate port must use the initial non-coherent capabilities")
+  for (opcode in params.requester_endpoint.supports.req):
+    unless for any (request in params.subordinate_service.requests):
+      request.opcode == opcode
+    | error(~who: #'CHIHNI,
+            "subordinate service must support every requester opcode")
+  params
+
+fun chi_hni_service_supported(raw_request,
+                              service :: CHISubordinateServiceParams,
+                              p :: CHIFlitParams):
+  def request = cast(raw_request, CHIReqFlit(p))
+  def size = request.size_or_num_req[0..3]
+  or_reduce(vec(
+    for List (support in service.requests):
+      (request.opcode === support.opcode) & (
+        size >= bits(alignment_bits(support.sizes.min_bytes), 3)
+      ) & (size <= bits(alignment_bits(support.sizes.max_bytes), 3))
+  )) & address_sets_match(request.address, service.address_sets)
+
+sync_circuit CHIHNI(params :: CHIHNIParams):
+  def checked = checked_chi_hni_params(params)
+  def p :: CHIFlitParams = checked.flit
+  def home = checked.home
+  def requester_link = checked.requester_link
+  def requester_endpoint = checked.requester_endpoint
+  def subordinate_link = checked.subordinate_link
+  def subordinate_endpoint = checked.subordinate_endpoint
+  def limit = home.max_outstanding
+  def slot_width = index_width(limit)
+
+  interface requester(CHIRNILink(requester_link, requester_endpoint), ~role: icn)
+  interface subordinate(CHISNLink(subordinate_link, subordinate_endpoint), ~role: icn)
+
+  inst requester_adapter(CHIRNIICNFlowAdapter(requester_link,
+                                              requester_endpoint))
+  inst subordinate_adapter(CHISNICNFlowAdapter(subordinate_link,
+                                               subordinate_endpoint))
+  requester_adapter.transmit_enable <== Bool(#true)
+  requester_adapter.receive_enable <== Bool(#true)
+  forward_chi_rni_icn_port(requester, requester_adapter.port)
+  subordinate_adapter.transmit_enable <== Bool(#true)
+  subordinate_adapter.receive_enable <== Bool(#true)
+  forward_chi_sn_icn_port(subordinate, subordinate_adapter.port)
+  def requester_flows = CHIRNIICNFlows(
+    requester_adapter.requests,
+    requester_adapter.requester_responses,
+    requester_adapter.request_data,
+    requester_adapter.responses,
+    requester_adapter.response_data,
+    requester_adapter.transmit_running,
+    requester_adapter.transmit_deactivating,
+    requester_adapter.transmit_credit_empty,
+    requester_adapter.receive_running,
+    requester_adapter.receive_deactivating
+  )
+  def subordinate_flows = CHISNICNFlows(
+    subordinate_adapter.requests,
+    subordinate_adapter.request_data,
+    subordinate_adapter.responses,
+    subordinate_adapter.response_data,
+    subordinate_adapter.transmit_running,
+    subordinate_adapter.transmit_deactivating,
+    subordinate_adapter.transmit_credit_empty,
+    subordinate_adapter.receive_running,
+    subordinate_adapter.receive_deactivating
+  )
+
+  inst occupancy(Scoreboard(limit))
+  inst read_pending(Scoreboard(limit))
+  inst write_await_dbid(Scoreboard(limit))
+  inst write_await_data(Scoreboard(limit))
+  inst write_await_comp(Scoreboard(limit))
+  def occupied = cast(occupancy.busy, Vec(limit, Bool))
+  def reads = cast(read_pending.busy, Vec(limit, Bool))
+  def writes_waiting_dbid = cast(write_await_dbid.busy, Vec(limit, Bool))
+  def writes_waiting_data = cast(write_await_data.busy, Vec(limit, Bool))
+  def writes_waiting_comp = cast(write_await_comp.busy, Vec(limit, Bool))
+  mem requests(limit, CHIReqFlit(p))
+  mem subordinate_dbids(limit, Bits(12))
+
+  def free_slots = vec(for List (index in 0..limit): !occupied[index])
+  def allocation_available = or_reduce(free_slots)
+  def allocation_slot = priority_encoder(free_slots)
+  def upstream_request = requester_flows.requests.bits
+  def request_ordinary = upstream_request.opcode =/= CHIReqOpcode.ReqLCrdReturn
+  def request_supported = chi_initial_request_supported(upstream_request.opcode)
+  def request_discard = !request_ordinary ||| !request_supported
+  requester_flows.requests.ready <== request_discard ||| (
+    allocation_available & subordinate_flows.requests.ready
+  )
+  subordinate_flows.requests.valid <== requester_flows.requests.valid & (
+    request_ordinary & request_supported & allocation_available
+  )
+  subordinate_flows.requests.bits <== chi_hni_downstream_request(
+    upstream_request,
+    p,
+    home.node_id,
+    subordinate_endpoint.node_id,
+    allocation_slot
+  )
+  def allocate = fire(subordinate_flows.requests)
+  def allocate_write = allocate & chi_initial_write_request(upstream_request.opcode)
+  def allocate_read = allocate & !chi_initial_write_request(upstream_request.opcode)
+
+  when (requester_flows.requests.valid & request_ordinary):
+    assert(request_supported, "chi_hni_request_opcode_supported")
+    assert(upstream_request.tgt_id === bits(home.node_id, p.node_id_width),
+           "chi_hni_request_targets_home")
+    assert(chi_hni_service_supported(upstream_request,
+                                     checked.subordinate_service,
+                                     p),
+           "chi_hni_request_service_supported")
+
+  occupancy.set.valid <== allocate
+  occupancy.set.bits <== allocation_slot
+  read_pending.set.valid <== allocate_read
+  read_pending.set.bits <== allocation_slot
+  write_await_dbid.set.valid <== allocate_write
+  write_await_dbid.set.bits <== allocation_slot
+  requests.write(allocation_slot, upstream_request, ~enable: allocate)
+
+  def downstream_response = subordinate_flows.responses.bits
+  def response_ordinary = downstream_response.opcode =/= CHIRspOpcode.RespLCrdReturn
+  def response_dbid = downstream_response.opcode === CHIRspOpcode.DBIDResp
+  def response_comp = downstream_response.opcode === CHIRspOpcode.Comp
+  def response_slot = downstream_response.txn_id[0..slot_width]
+  def response_slot_valid = downstream_response.txn_id < bits(limit, 12)
+  def response_request = requests[response_slot]
+  def response_match = response_slot_valid & (
+    (response_dbid & writes_waiting_dbid[response_slot]) ||| (
+      response_comp & writes_waiting_comp[response_slot]
+    )
+  )
+  requester_flows.responses.valid <== subordinate_flows.responses.valid & (
+    response_ordinary & response_match
+  )
+  requester_flows.responses.bits <== chi_hni_upstream_response(
+    downstream_response,
+    response_request.txn_id,
+    response_request.src_id,
+    response_request.qos,
+    p,
+    home.node_id,
+    response_slot
+  )
+  subordinate_flows.responses.ready <== !response_ordinary ||| !response_match ||| (
+    requester_flows.responses.ready
+  )
+  def response_transfer = fire(requester_flows.responses)
+  def dbid_transfer = response_transfer & response_dbid
+  def write_completion = response_transfer & response_comp
+
+  when (subordinate_flows.responses.valid & response_ordinary):
+    assert(response_match, "chi_hni_response_has_transaction")
+
+  write_await_dbid.clear.valid <== dbid_transfer
+  write_await_dbid.clear.bits <== response_slot
+  write_await_data.set.valid <== dbid_transfer
+  write_await_data.set.bits <== response_slot
+  subordinate_dbids.write(response_slot,
+                          downstream_response.dbid_or_group_id,
+                          ~enable: dbid_transfer)
+
+  def upstream_write_data = requester_flows.request_data.bits
+  def write_data_ordinary = upstream_write_data.opcode =/= CHIDatOpcode.DataLCrdReturn
+  def write_data_slot = upstream_write_data.txn_id[0..slot_width]
+  def write_data_slot_valid = upstream_write_data.txn_id < bits(limit, 12)
+  def write_data_request = requests[write_data_slot]
+  def write_data_match = write_data_slot_valid & writes_waiting_data[write_data_slot] & (
+    upstream_write_data.src_id === write_data_request.src_id
+  )
+  requester_flows.request_data.ready <== !write_data_ordinary ||| !write_data_match ||| (
+    subordinate_flows.request_data.ready
+  )
+  subordinate_flows.request_data.valid <== requester_flows.request_data.valid & (
+    write_data_ordinary & write_data_match
+  )
+  subordinate_flows.request_data.bits <== chi_hni_downstream_write_data(
+    upstream_write_data,
+    write_data_request.qos,
+    p,
+    home.node_id,
+    subordinate_endpoint.node_id,
+    subordinate_dbids[write_data_slot]
+  )
+  def write_data_transfer = fire(subordinate_flows.request_data)
+
+  when (requester_flows.request_data.valid & write_data_ordinary):
+    assert(write_data_match, "chi_hni_write_data_has_dbid")
+
+  write_await_data.clear.valid <== write_data_transfer
+  write_await_data.clear.bits <== write_data_slot
+  write_await_comp.set.valid <== write_data_transfer
+  write_await_comp.set.bits <== write_data_slot
+  write_await_comp.clear.valid <== write_completion
+  write_await_comp.clear.bits <== response_slot
+
+  def downstream_read_data = subordinate_flows.response_data.bits
+  def read_data_ordinary = downstream_read_data.opcode =/= CHIDatOpcode.DataLCrdReturn
+  def read_data_slot = downstream_read_data.txn_id[0..slot_width]
+  def read_data_slot_valid = downstream_read_data.txn_id < bits(limit, 12)
+  def read_data_request = requests[read_data_slot]
+  def read_data_match = read_data_slot_valid & reads[read_data_slot]
+  def write_completion_now = write_completion
+  requester_flows.response_data.valid <== subordinate_flows.response_data.valid & (
+    read_data_ordinary & read_data_match & !write_completion_now
+  )
+  requester_flows.response_data.bits <== chi_hni_upstream_read_data(
+    downstream_read_data,
+    read_data_request.return_txn_id_or_stash_lpid,
+    read_data_request.return_nid_or_stash_nid_or_data_target,
+    read_data_request.qos,
+    p,
+    home.node_id
+  )
+  subordinate_flows.response_data.ready <== !read_data_ordinary ||| !read_data_match ||| (
+    !write_completion_now & requester_flows.response_data.ready
+  )
+  def read_completion = fire(requester_flows.response_data)
+
+  when (subordinate_flows.response_data.valid & read_data_ordinary):
+    assert(read_data_match, "chi_hni_read_data_has_transaction")
+
+  read_pending.clear.valid <== read_completion
+  read_pending.clear.bits <== read_data_slot
+  occupancy.clear.valid <== write_completion ||| read_completion
+  occupancy.clear.bits <== mux(write_completion,
+                               response_slot,
+                               read_data_slot)
+
+  requester_flows.requester_responses.ready <== Bool(#true)
+
+  monitor_chi_hni(home,
+                  requester_link,
+                  requester_endpoint,
+                  requester,
+                  subordinate_link,
+                  subordinate_endpoint,
+                  subordinate,
+                  requester_flows.requests,
+                  requester_flows.request_data,
+                  requester_flows.responses,
+                  requester_flows.response_data,
+                  subordinate_flows.requests,
+                  subordinate_flows.request_data,
+                  subordinate_flows.responses,
+                  subordinate_flows.response_data)
+
+export:
+  CHIHNIParams
+  CHIHNI

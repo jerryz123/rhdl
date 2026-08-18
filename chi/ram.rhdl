@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements an initial single-flit non-coherent CHI SN-F backing RAM.
+// Implements an initial single-flit non-coherent CHI SN-F/SN-I backing RAM.
 
 import:
   lib("host/annotations.rhm") open
@@ -33,6 +33,7 @@ class CHIRamParams(name :: NonemptyString,
                    link :: CHISNLinkParams,
                    size_bytes :: Pow2Int,
                    ~base_address: base_address :: Nat = 0,
+                   ~kind: kind :: CHINodeKind = CHINodeKind.SNF,
                    ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024) = 2):
   property flit: link.flit
   property transfers: TransferSizes(1, flit.data_bytes)
@@ -40,7 +41,7 @@ class CHIRamParams(name :: NonemptyString,
     CHINodeParams(
       name,
       node_id,
-      CHINodeKind.SNF,
+      kind,
       ~emits: CHIChannelCapabilities(
         ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
         ~dat: [CHIDatOpcode.CompData]
@@ -57,7 +58,7 @@ class CHIRamParams(name :: NonemptyString,
     CHIICNPortParams(
       name ++ "-icn",
       node_id,
-      CHINodeKind.SNF,
+      kind,
       ~emits: node.supports,
       ~supports: node.emits,
       ~max_outstanding: max_outstanding
@@ -74,6 +75,9 @@ class CHIRamParams(name :: NonemptyString,
 
 fun checked_chi_ram_params(params :: CHIRamParams):
   def p = params.flit
+  unless [CHINodeKind.SNF, CHINodeKind.SNI].contains(params.kind)
+  | error(~who: #'CHIRam,
+          "kind must be SN-F or SN-I")
   unless params.size_bytes >= (2 * p.data_bytes)
   | error(~who: #'CHIRam,
           "size must contain at least two physical data beats")

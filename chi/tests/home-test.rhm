@@ -1,0 +1,56 @@
+#lang rhombus
+// Checks initial HN-I construction, storage, translation monitors, and parameters.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../main.rhdl" as chi
+  "home-fixture.rhdl" as fixture
+
+def top = fixture.home_design.modules.find(
+  fun (module_def): module_def.name == "CHIHNI"
+)
+def instance_names = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+).map(fun (operation): operation.attribute("name"))
+def assertion_labels = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "verif.assert"
+).map(fun (operation): operation.attribute("label"))
+def register_names = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+).map(fun (operation): operation.attribute("name"))
+
+check:
+  fixture.home_params.flit === fixture.home_flit ~is #true
+  fixture.home_params.home.kind ~is chi.CHINodeKind.HNI
+  fixture.home_params.requester_endpoint.kind ~is chi.CHINodeKind.RNI
+  fixture.home_params.subordinate_endpoint.kind ~is chi.CHINodeKind.SNI
+  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "requester_in", "subordinate_in"]
+  top.outputs.map(fun (output): output.name) ~is ["requester_out", "subordinate_out"]
+  instance_names.contains("occupancy") ~is #true
+  instance_names.contains("read_pending") ~is #true
+  instance_names.contains("write_await_dbid") ~is #true
+  instance_names.contains("write_await_data") ~is #true
+  instance_names.contains("write_await_comp") ~is #true
+  top.memories.map(fun (memory): memory.name) ~is ["requests", "subordinate_dbids"]
+  register_names.contains("requests") ~is #false
+  register_names.contains("subordinate_dbids") ~is #false
+  assertion_labels.contains("chi_hni_request_targets_home") ~is #true
+  assertion_labels.contains("chi_hni_request_service_supported") ~is #true
+  assertion_labels.contains("chi_hni_transaction_request_target_subordinate") ~is #true
+  assertion_labels.contains("chi_hni_transaction_response_txn_restored") ~is #true
+  assertion_labels.contains("chi_hni_transaction_write_data_dbid_translated") ~is #true
+  assertion_labels.contains("chi_hni_transaction_read_data_txn_restored") ~is #true
+  verify_design(fixture.home_design) ~is #void
+
+  embedded.run_elaboration(
+    fun ():
+      chi.CHIHNI(
+        chi.CHIHNIParams(
+          chi.CHIHomeParams("bad-kind", 5, chi.CHINodeKind.HNF, ~max_outstanding: 2),
+          fixture.requester_port,
+          fixture.subordinate_port,
+          fixture.subordinate_service
+        )
+      )
+  ) ~throws "home kind must be HN-I"

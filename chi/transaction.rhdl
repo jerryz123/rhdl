@@ -28,6 +28,16 @@ bundle CHISubordinateTransaction(p :: CHIFlitParams):
   return_node_id: Bits(p.node_id_width)
   dbid: Bits(12)
 
+bundle CHIHomeTransaction(p :: CHIFlitParams):
+  phase: CHIInitialTransactionPhase
+  requester_id: Bits(p.node_id_width)
+  requester_txn_id: Bits(12)
+  requester_return_txn_id: Bits(12)
+  requester_data_target: Bits(p.node_id_width)
+  requester_qos: Bits(4)
+  subordinate_id: Bits(p.node_id_width)
+  subordinate_dbid: Bits(12)
+
 fun empty_chi_requester_transaction(p :: CHIFlitParams):
   CHIRequesterTransaction(p):
     phase: CHIInitialTransactionPhase.Free
@@ -44,6 +54,17 @@ fun empty_chi_subordinate_transaction(p :: CHIFlitParams):
     return_node_id: bits(0, p.node_id_width)
     dbid: bits(0, 12)
 
+fun empty_chi_home_transaction(p :: CHIFlitParams):
+  CHIHomeTransaction(p):
+    phase: CHIInitialTransactionPhase.Free
+    requester_id: bits(0, p.node_id_width)
+    requester_txn_id: bits(0, 12)
+    requester_return_txn_id: bits(0, 12)
+    requester_data_target: bits(0, p.node_id_width)
+    requester_qos: bits(0, 4)
+    subordinate_id: bits(0, p.node_id_width)
+    subordinate_dbid: bits(0, 12)
+
 fun chi_initial_request_supported(opcode):
   is_one_of(opcode,
             CHIReqOpcode.ReadNoSnp,
@@ -57,6 +78,165 @@ fun chi_initial_write_request(opcode):
 
 fun chi_initial_single_flit_size(size, p :: CHIFlitParams):
   size <= bits(alignment_bits(p.data_bytes), 3)
+
+// Reissues an RN request as an HN-owned subordinate transaction. Initial HN-I
+// traffic returns through the Home Node instead of using direct transfer.
+fun chi_hni_downstream_request(raw_request,
+                               p :: CHIFlitParams,
+                               home_node_id :: Nat,
+                               subordinate_node_id :: Nat,
+                               slot):
+  def request = cast(raw_request, CHIReqFlit(p))
+  wire downstream_request: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | downstream_request.rsvdc <== request.rsvdc
+  | #void
+  if p.sec_sid_width > 0
+  | downstream_request.sec_sid1 <== request.sec_sid1
+  | #void
+  if p.request_security_width > 0
+  | downstream_request.mecid_or_stream_id <== request.mecid_or_stream_id
+  | #void
+  if p.pbha_width > 0
+  | downstream_request.pbha <== request.pbha
+  | #void
+  if p.mpam_width > 0
+  | downstream_request.mpam <== request.mpam
+  | #void
+  downstream_request.trace_tag <== request.trace_tag
+  downstream_request.tag_op <== request.tag_op
+  downstream_request.exp_comp_ack <== Bool(#false)
+  downstream_request.excl_snoop_me_cah <== request.excl_snoop_me_cah
+  downstream_request.group_id_or_lpid <== request.group_id_or_lpid
+  downstream_request.snp_attr_or_do_dwt <== Bool(#false)
+  downstream_request.mem_attr <== request.mem_attr
+  downstream_request.pcrd_type <== bits(0, 4)
+  downstream_request.order <== bits(0, 2)
+  downstream_request.allow_retry <== Bool(#false)
+  downstream_request.likely_shared <== request.likely_shared
+  downstream_request.pas <== request.pas
+  downstream_request.address <== request.address
+  downstream_request.size_or_num_req <== request.size_or_num_req
+  downstream_request.multi_req <== Bool(#false)
+  downstream_request.opcode <== request.opcode
+  downstream_request.return_txn_id_or_stash_lpid <== zext(slot, 12)
+  downstream_request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
+  downstream_request.return_nid_or_stash_nid_or_data_target <== bits(home_node_id, p.node_id_width)
+  downstream_request.txn_id <== zext(slot, 12)
+  downstream_request.src_id <== bits(home_node_id, p.node_id_width)
+  downstream_request.tgt_id <== bits(subordinate_node_id, p.node_id_width)
+  downstream_request.qos <== request.qos
+  downstream_request
+
+fun chi_hni_upstream_response(raw_response,
+                              requester_txn_id,
+                              requester_id,
+                              requester_qos,
+                              p :: CHIFlitParams,
+                              home_node_id :: Nat,
+                              slot):
+  def response = cast(raw_response, CHIRspFlit(p))
+  CHIRspFlit(p):
+    cache_line_id: response.cache_line_id
+    trace_tag: response.trace_tag
+    tag_op: response.tag_op
+    pcrd_type: bits(0, 4)
+    dbid_or_group_id: zext(slot, 12)
+    c_busy: response.c_busy
+    fwd_state_or_data_pull: response.fwd_state_or_data_pull
+    resp: response.resp
+    resp_err: response.resp_err
+    opcode: response.opcode
+    txn_id: requester_txn_id
+    src_id: bits(home_node_id, p.node_id_width)
+    tgt_id: requester_id
+    qos: requester_qos
+
+fun chi_hni_downstream_write_data(raw_data,
+                                  requester_qos,
+                                  p :: CHIFlitParams,
+                                  home_node_id :: Nat,
+                                  subordinate_node_id :: Nat,
+                                  subordinate_dbid):
+  def data = cast(raw_data, CHIDatFlit(p))
+  wire downstream_data: CHIDatFlit(p)
+  if p.poison_width > 0
+  | downstream_data.poison <== data.poison
+  | #void
+  if p.data_check_width > 0
+  | downstream_data.data_check <== data.data_check
+  | #void
+  downstream_data.data <== data.data
+  downstream_data.byte_enable <== data.byte_enable
+  if p.dat_rsvdc_width > 0
+  | downstream_data.rsvdc <== data.rsvdc
+  | #void
+  downstream_data.replicate <== data.replicate
+  downstream_data.num_dat <== data.num_dat
+  downstream_data.cah <== data.cah
+  downstream_data.trace_tag <== data.trace_tag
+  downstream_data.tag_update <== data.tag_update
+  downstream_data.tag <== data.tag
+  downstream_data.tag_op <== data.tag_op
+  downstream_data.cache_line_id <== data.cache_line_id
+  downstream_data.data_id <== data.data_id
+  downstream_data.ccid <== data.ccid
+  downstream_data.dbid_or_mecid <== data.dbid_or_mecid
+  downstream_data.c_busy <== data.c_busy
+  downstream_data.data_pull <== data.data_pull
+  downstream_data.data_source_or_fwd_state <== data.data_source_or_fwd_state
+  downstream_data.resp <== data.resp
+  downstream_data.resp_err <== data.resp_err
+  downstream_data.opcode <== data.opcode
+  downstream_data.home_nid_or_pbha_or_mismatched_mecid <== bits(home_node_id, p.node_id_width)
+  downstream_data.txn_id <== subordinate_dbid
+  downstream_data.src_id <== bits(home_node_id, p.node_id_width)
+  downstream_data.tgt_id <== bits(subordinate_node_id, p.node_id_width)
+  downstream_data.qos <== requester_qos
+  downstream_data
+
+fun chi_hni_upstream_read_data(raw_data,
+                               requester_return_txn_id,
+                               requester_data_target,
+                               requester_qos,
+                               p :: CHIFlitParams,
+                               home_node_id :: Nat):
+  def data = cast(raw_data, CHIDatFlit(p))
+  wire upstream_data: CHIDatFlit(p)
+  if p.poison_width > 0
+  | upstream_data.poison <== data.poison
+  | #void
+  if p.data_check_width > 0
+  | upstream_data.data_check <== data.data_check
+  | #void
+  upstream_data.data <== data.data
+  upstream_data.byte_enable <== data.byte_enable
+  if p.dat_rsvdc_width > 0
+  | upstream_data.rsvdc <== data.rsvdc
+  | #void
+  upstream_data.replicate <== data.replicate
+  upstream_data.num_dat <== data.num_dat
+  upstream_data.cah <== data.cah
+  upstream_data.trace_tag <== data.trace_tag
+  upstream_data.tag_update <== data.tag_update
+  upstream_data.tag <== data.tag
+  upstream_data.tag_op <== data.tag_op
+  upstream_data.cache_line_id <== data.cache_line_id
+  upstream_data.data_id <== data.data_id
+  upstream_data.ccid <== data.ccid
+  upstream_data.dbid_or_mecid <== data.dbid_or_mecid
+  upstream_data.c_busy <== data.c_busy
+  upstream_data.data_pull <== data.data_pull
+  upstream_data.data_source_or_fwd_state <== data.data_source_or_fwd_state
+  upstream_data.resp <== data.resp
+  upstream_data.resp_err <== data.resp_err
+  upstream_data.opcode <== data.opcode
+  upstream_data.home_nid_or_pbha_or_mismatched_mecid <== bits(home_node_id, p.node_id_width)
+  upstream_data.txn_id <== requester_return_txn_id
+  upstream_data.src_id <== bits(home_node_id, p.node_id_width)
+  upstream_data.tgt_id <== requester_data_target
+  upstream_data.qos <== requester_qos
+  upstream_data
 
 fun opcodes_use_only(opcodes, allowed):
   for all (opcode in opcodes):
@@ -465,11 +645,248 @@ fun subordinate_transaction_monitor(rx_req_valid,
   )
   entries <== next_entries
 
+// Verifies the one-for-one ID and payload translation performed by an initial
+// HN-I between already-buffered ready-valid flows on its RN and SN sides.
+fun home_transaction_monitor(upstream_request_event,
+                             raw_upstream_request,
+                             downstream_request_event,
+                             raw_downstream_request,
+                             downstream_response_event,
+                             raw_downstream_response,
+                             upstream_response_event,
+                             raw_upstream_response,
+                             upstream_write_data_event,
+                             raw_upstream_write_data,
+                             downstream_write_data_event,
+                             raw_downstream_write_data,
+                             downstream_read_data_event,
+                             raw_downstream_read_data,
+                             upstream_read_data_event,
+                             raw_upstream_read_data,
+                             p :: CHIFlitParams,
+                             home_node_id :: Nat,
+                             subordinate_node_id :: Nat,
+                             limit :: PosInt,
+                             label_prefix :: String):
+  def empty = empty_chi_home_transaction(p)
+  def initial = vec(for List (_index in 0..limit): empty)
+  reg entries(~init: initial)
+  def upstream_request = cast(raw_upstream_request, CHIReqFlit(p))
+  def downstream_request = cast(raw_downstream_request, CHIReqFlit(p))
+  def downstream_response = cast(raw_downstream_response, CHIRspFlit(p))
+  def upstream_response = cast(raw_upstream_response, CHIRspFlit(p))
+  def upstream_write_data = cast(raw_upstream_write_data, CHIDatFlit(p))
+  def downstream_write_data = cast(raw_downstream_write_data, CHIDatFlit(p))
+  def downstream_read_data = cast(raw_downstream_read_data, CHIDatFlit(p))
+  def upstream_read_data = cast(raw_upstream_read_data, CHIDatFlit(p))
+  def slot_width = index_width(limit)
+  def request_slot = downstream_request.txn_id[0..slot_width]
+  def response_slot = downstream_response.txn_id[0..slot_width]
+  def write_data_slot = upstream_write_data.txn_id[0..slot_width]
+  def read_data_slot = downstream_read_data.txn_id[0..slot_width]
+  def request_slot_valid = downstream_request.txn_id < bits(limit, 12)
+  def response_slot_valid = downstream_response.txn_id < bits(limit, 12)
+  def write_data_slot_valid = upstream_write_data.txn_id < bits(limit, 12)
+  def read_data_slot_valid = downstream_read_data.txn_id < bits(limit, 12)
+  def response_entry = entries[response_slot]
+  def write_data_entry = entries[write_data_slot]
+  def read_data_entry = entries[read_data_slot]
+  def duplicate_request = or_reduce(
+    for List (index in 0..limit):
+      (entries[index].phase =/= CHIInitialTransactionPhase.Free) & (
+        entries[index].requester_id === upstream_request.src_id
+      ) & (entries[index].requester_txn_id === upstream_request.txn_id)
+  )
+  def response_dbid = downstream_response.opcode === CHIRspOpcode.DBIDResp
+  def response_comp = downstream_response.opcode === CHIRspOpcode.Comp
+
+  assert(upstream_request_event === downstream_request_event,
+         label_prefix ++ "_request_transfer_paired")
+  when (upstream_request_event & downstream_request_event):
+    assert(request_slot_valid, label_prefix ++ "_request_slot_in_range")
+    assert(entries[request_slot].phase === CHIInitialTransactionPhase.Free,
+           label_prefix ++ "_request_slot_free")
+    assert(!duplicate_request, label_prefix ++ "_request_txn_id_unique")
+    chi_initial_request_fields(upstream_request.multi_req,
+                               upstream_request.size_or_num_req[0..3],
+                               upstream_request.order,
+                               upstream_request.pcrd_type,
+                               upstream_request.exp_comp_ack,
+                               upstream_request.tag_op,
+                               p,
+                               label_prefix ++ "_request")
+    when (chi_initial_write_request(upstream_request.opcode)):
+      assert(!upstream_request.snp_attr_or_do_dwt,
+             label_prefix ++ "_request_no_direct_write_transfer")
+    assert(downstream_request.opcode === upstream_request.opcode,
+           label_prefix ++ "_request_opcode_preserved")
+    assert(downstream_request.address === upstream_request.address,
+           label_prefix ++ "_request_address_preserved")
+    assert(downstream_request.size_or_num_req === upstream_request.size_or_num_req,
+           label_prefix ++ "_request_size_preserved")
+    assert(downstream_request.src_id === bits(home_node_id, p.node_id_width),
+           label_prefix ++ "_request_source_home")
+    assert(downstream_request.tgt_id === bits(subordinate_node_id, p.node_id_width),
+           label_prefix ++ "_request_target_subordinate")
+    assert(downstream_request.return_nid_or_stash_nid_or_data_target === bits(home_node_id, p.node_id_width),
+           label_prefix ++ "_request_return_home")
+    assert(downstream_request.return_txn_id_or_stash_lpid === zext(request_slot, 12),
+           label_prefix ++ "_request_return_slot")
+    assert(downstream_request.qos === upstream_request.qos,
+           label_prefix ++ "_request_qos_preserved")
+
+  assert(downstream_response_event === upstream_response_event,
+         label_prefix ++ "_response_transfer_paired")
+  when (downstream_response_event & upstream_response_event):
+    assert(response_slot_valid, label_prefix ++ "_response_slot_in_range")
+    assert(is_one_of(downstream_response.opcode,
+                     CHIRspOpcode.DBIDResp,
+                     CHIRspOpcode.Comp),
+           label_prefix ++ "_response_opcode")
+    assert(downstream_response.resp === bits(0, 3),
+           label_prefix ++ "_response_resp_zero")
+    assert(downstream_response.resp_err === bits(0, 2),
+           label_prefix ++ "_response_ok")
+    when response_dbid:
+      assert(response_entry.phase === CHIInitialTransactionPhase.WriteAwaitDBID,
+             label_prefix ++ "_dbid_has_write")
+    when response_comp:
+      assert(response_entry.phase === CHIInitialTransactionPhase.WriteAwaitComp,
+             label_prefix ++ "_comp_has_write_data")
+    assert(upstream_response.opcode === downstream_response.opcode,
+           label_prefix ++ "_response_opcode_preserved")
+    assert(upstream_response.txn_id === response_entry.requester_txn_id,
+           label_prefix ++ "_response_txn_restored")
+    assert(upstream_response.src_id === bits(home_node_id, p.node_id_width),
+           label_prefix ++ "_response_source_home")
+    assert(upstream_response.tgt_id === response_entry.requester_id,
+           label_prefix ++ "_response_target_requester")
+    assert(upstream_response.dbid_or_group_id === zext(response_slot, 12),
+           label_prefix ++ "_response_home_dbid")
+    assert(upstream_response.qos === response_entry.requester_qos,
+           label_prefix ++ "_response_qos_restored")
+
+  assert(upstream_write_data_event === downstream_write_data_event,
+         label_prefix ++ "_write_data_transfer_paired")
+  when (upstream_write_data_event & downstream_write_data_event):
+    assert(write_data_slot_valid, label_prefix ++ "_write_data_slot_in_range")
+    assert(write_data_entry.phase === CHIInitialTransactionPhase.WriteAwaitData,
+           label_prefix ++ "_write_data_has_dbid")
+    chi_initial_data_fields(upstream_write_data.data_id,
+                            upstream_write_data.num_dat,
+                            upstream_write_data.replicate,
+                            label_prefix ++ "_write_data")
+    assert(downstream_write_data.opcode === upstream_write_data.opcode,
+           label_prefix ++ "_write_data_opcode_preserved")
+    assert(downstream_write_data.data === upstream_write_data.data,
+           label_prefix ++ "_write_data_payload_preserved")
+    assert(downstream_write_data.byte_enable === upstream_write_data.byte_enable,
+           label_prefix ++ "_write_data_mask_preserved")
+    assert(downstream_write_data.txn_id === write_data_entry.subordinate_dbid,
+           label_prefix ++ "_write_data_dbid_translated")
+    assert(downstream_write_data.src_id === bits(home_node_id, p.node_id_width),
+           label_prefix ++ "_write_data_source_home")
+    assert(downstream_write_data.tgt_id === bits(subordinate_node_id, p.node_id_width),
+           label_prefix ++ "_write_data_target_subordinate")
+    assert(downstream_write_data.qos === write_data_entry.requester_qos,
+           label_prefix ++ "_write_data_qos_restored")
+
+  assert(downstream_read_data_event === upstream_read_data_event,
+         label_prefix ++ "_read_data_transfer_paired")
+  when (downstream_read_data_event & upstream_read_data_event):
+    assert(read_data_slot_valid, label_prefix ++ "_read_data_slot_in_range")
+    assert(read_data_entry.phase === CHIInitialTransactionPhase.ReadPending,
+           label_prefix ++ "_read_data_has_request")
+    assert(downstream_read_data.resp === bits(0, 3),
+           label_prefix ++ "_read_data_resp_zero")
+    assert(downstream_read_data.resp_err === bits(0, 2),
+           label_prefix ++ "_read_data_ok")
+    chi_initial_data_fields(downstream_read_data.data_id,
+                            downstream_read_data.num_dat,
+                            downstream_read_data.replicate,
+                            label_prefix ++ "_read_data")
+    assert(upstream_read_data.opcode === downstream_read_data.opcode,
+           label_prefix ++ "_read_data_opcode_preserved")
+    assert(upstream_read_data.data === downstream_read_data.data,
+           label_prefix ++ "_read_data_payload_preserved")
+    assert(upstream_read_data.byte_enable === downstream_read_data.byte_enable,
+           label_prefix ++ "_read_data_mask_preserved")
+    assert(upstream_read_data.txn_id === read_data_entry.requester_return_txn_id,
+           label_prefix ++ "_read_data_txn_restored")
+    assert(upstream_read_data.src_id === bits(home_node_id, p.node_id_width),
+           label_prefix ++ "_read_data_source_home")
+    assert(upstream_read_data.tgt_id === read_data_entry.requester_data_target,
+           label_prefix ++ "_read_data_target_requester")
+    assert(upstream_read_data.qos === read_data_entry.requester_qos,
+           label_prefix ++ "_read_data_qos_restored")
+
+  def request_pair = upstream_request_event & downstream_request_event & request_slot_valid
+  def response_pair = downstream_response_event & upstream_response_event & response_slot_valid
+  def write_data_pair = upstream_write_data_event & downstream_write_data_event & write_data_slot_valid
+  def read_data_pair = downstream_read_data_event & upstream_read_data_event & read_data_slot_valid
+  def next_entries = vec(
+    for List (index in 0..limit):
+      block:
+        def entry = entries[index]
+        def index_bits = bits(index, slot_width)
+        def allocate_here = request_pair & (request_slot === index_bits)
+        def dbid_here = response_pair & response_dbid & (response_slot === index_bits)
+        def write_data_here = write_data_pair & (write_data_slot === index_bits)
+        def write_comp_here = response_pair & response_comp & (response_slot === index_bits)
+        def read_data_here = read_data_pair & (read_data_slot === index_bits)
+        def allocated:
+          CHIHomeTransaction(p):
+            phase: mux(chi_initial_write_request(upstream_request.opcode),
+                       CHIInitialTransactionPhase.WriteAwaitDBID,
+                       CHIInitialTransactionPhase.ReadPending)
+            requester_id: upstream_request.src_id
+            requester_txn_id: upstream_request.txn_id
+            requester_return_txn_id: upstream_request.return_txn_id_or_stash_lpid
+            requester_data_target: upstream_request.return_nid_or_stash_nid_or_data_target
+            requester_qos: upstream_request.qos
+            subordinate_id: downstream_request.tgt_id
+            subordinate_dbid: bits(0, 12)
+        def after_dbid:
+          CHIHomeTransaction(p):
+            phase: CHIInitialTransactionPhase.WriteAwaitData
+            requester_id: entry.requester_id
+            requester_txn_id: entry.requester_txn_id
+            requester_return_txn_id: entry.requester_return_txn_id
+            requester_data_target: entry.requester_data_target
+            requester_qos: entry.requester_qos
+            subordinate_id: entry.subordinate_id
+            subordinate_dbid: downstream_response.dbid_or_group_id
+        def after_write_data:
+          CHIHomeTransaction(p):
+            phase: CHIInitialTransactionPhase.WriteAwaitComp
+            requester_id: entry.requester_id
+            requester_txn_id: entry.requester_txn_id
+            requester_return_txn_id: entry.requester_return_txn_id
+            requester_data_target: entry.requester_data_target
+            requester_qos: entry.requester_qos
+            subordinate_id: entry.subordinate_id
+            subordinate_dbid: entry.subordinate_dbid
+        def progressed = mux(dbid_here,
+                             after_dbid,
+                             mux(write_data_here,
+                                 after_write_data,
+                                 mux(write_comp_here ||| read_data_here,
+                                     empty,
+                                     entry)))
+        mux(allocate_here, allocated, progressed)
+  )
+  entries <== next_entries
+
 export:
   chi_initial_request_supported
   chi_initial_write_request
   chi_initial_single_flit_size
+  chi_hni_downstream_request
+  chi_hni_upstream_response
+  chi_hni_downstream_write_data
+  chi_hni_upstream_read_data
   chi_initial_requester_capabilities
   chi_initial_subordinate_capabilities
   requester_transaction_monitor
   subordinate_transaction_monitor
+  home_transaction_monitor

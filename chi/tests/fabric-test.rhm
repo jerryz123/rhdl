@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks CHI fabric ports, subordinate services, and System Address Map validation.
+// Checks CHI fabric ports, Home Nodes, services, and both System Address Maps.
 
 import:
   "../main.rhdl" as chi
@@ -26,7 +26,7 @@ def requester = chi.CHIICNPortParams(
 def memory = chi.CHIICNPortParams(
   "memory-port",
   9,
-  chi.CHINodeKind.SNF,
+  chi.CHINodeKind.SNI,
   ~emits: chi.CHIChannelCapabilities(
     ~req: [chi.CHIReqOpcode.ReadNoSnp, chi.CHIReqOpcode.WriteNoSnpFull]
   ),
@@ -43,9 +43,22 @@ def memory_service = chi.CHISubordinateServiceParams(
   [chi.AddressSet(0x80000000, 0x0fffffff)],
   [read_support, write_support]
 )
+def home = chi.CHIHomeParams(
+  "io-home",
+  5,
+  chi.CHINodeKind.HNI,
+  ~max_outstanding: 4
+)
+def home_service = chi.CHIHomeServiceParams(
+  home,
+  [chi.AddressSet(0x80000000, 0x0fffffff)],
+  [read_support, write_support]
+)
 def fabric = chi.CHIFabricParams(
   flit,
   [requester_port, memory_port],
+  [home],
+  [home_service],
   [memory_service]
 )
 
@@ -53,15 +66,21 @@ check:
   memory_service.supports(chi.CHIReqOpcode.ReadNoSnp, 16) ~is #true
   memory_service.supports(chi.CHIReqOpcode.WriteNoSnpFull, 2) ~is #false
   memory_service.supports(chi.CHIReqOpcode.WriteNoSnpPtl, 4) ~is #false
+  home_service.supports(chi.CHIReqOpcode.ReadNoSnp, 16) ~is #true
   fabric.flit === flit ~is #true
   fabric.ports ~is [requester_port, memory_port]
-  fabric.services ~is [memory_service]
-  fabric.sam.length() ~is 1
-  fabric.sam[0].address_set ~is chi.AddressSet(0x80000000, 0x0fffffff)
-  fabric.sam[0].target_node_id ~is 9
-  fabric.sam[0].supports(chi.CHIReqOpcode.ReadNoSnp, 64) ~is #true
+  fabric.homes ~is [home]
+  fabric.home_services ~is [home_service]
+  fabric.subordinate_services ~is [memory_service]
+  fabric.rn_sam.length() ~is 1
+  fabric.rn_sam[0].address_set ~is chi.AddressSet(0x80000000, 0x0fffffff)
+  fabric.rn_sam[0].target_node_id ~is 5
+  fabric.hn_sam.length() ~is 1
+  fabric.hn_sam[0].target_node_id ~is 9
+  fabric.hn_sam[0].supports(chi.CHIReqOpcode.ReadNoSnp, 64) ~is #true
 
   chi.CHIRequestSupport("ReadNoSnp", chi.TransferSizes(1, 8)) ~throws "CHIReqOpcode"
+  chi.CHIHomeParams("bad-home", 4, chi.CHINodeKind.RNI, ~max_outstanding: 1) ~throws "HN-F or HN-I"
   chi.CHISubordinateServiceParams(
     requester,
     [chi.AddressSet(0, 0xfff)],
@@ -74,6 +93,11 @@ check:
   ) ~throws "emitted by its ICN port"
   chi.CHISubordinateServiceParams(
     memory,
+    [chi.AddressSet(0, 0xfff)],
+    [read_support, read_support]
+  ) ~throws "duplicate opcodes"
+  chi.CHIHomeServiceParams(
+    home,
     [chi.AddressSet(0, 0xfff)],
     [read_support, read_support]
   ) ~throws "duplicate opcodes"
@@ -98,6 +122,15 @@ check:
        ),
        chi.CHIRNILinkParams(flit)
      )],
+    [home],
+    [home_service],
+    [memory_service]
+  ) ~throws "NodeIDs must be unique"
+  chi.CHIFabricParams(
+    flit,
+    [requester_port, memory_port],
+    [chi.CHIHomeParams("duplicate-home", 3, chi.CHINodeKind.HNI, ~max_outstanding: 1)],
+    [home_service],
     [memory_service]
   ) ~throws "NodeIDs must be unique"
   chi.CHIFabricParams(
@@ -115,18 +148,31 @@ check:
        chi.CHIRNILinkParams(flit)
      ),
      memory_port],
+    [home],
+    [home_service],
     [memory_service]
   ) ~throws "fit the physical NodeID width"
   chi.CHIFabricParams(
     flit,
     [requester_port,
-     chi.CHIFabricPortParams(memory, chi.CHISNLinkParams(chi.CHIFlitParams(~data_width: 256)))],
+     chi.CHIFabricPortParams(memory,
+                             chi.CHISNLinkParams(chi.CHIFlitParams(~data_width: 256)))],
+    [home],
+    [home_service],
     [memory_service]
   ) ~throws "physical flit parameters"
-  chi.CHIFabricParams(flit, [requester_port], [memory_service]) ~throws "must be a fabric port"
+  chi.CHIFabricParams(
+    flit,
+    [requester_port],
+    [home],
+    [home_service],
+    [memory_service]
+  ) ~throws "must be a fabric port"
   chi.CHIFabricParams(
     flit,
     [requester_port, memory_port],
+    [home],
+    [home_service],
     [chi.CHISubordinateServiceParams(
        memory,
        [chi.AddressSet(1 bits.(<<) 44, 0xfff)],
@@ -136,6 +182,8 @@ check:
   chi.CHIFabricParams(
     flit,
     [requester_port, memory_port],
+    [home],
+    [home_service],
     [memory_service,
      chi.CHISubordinateServiceParams(
        memory,

@@ -2,7 +2,7 @@
 
 # AMBA CHI domain library
 
-`chi/` is the planned standalone AMBA CHI domain library. Like
+`chi/` is the standalone AMBA CHI domain library. Like
 [`tilelink/`](../tilelink/), it belongs beside RHDL rather than under
 `rhdl/std`: CHI parameters, flits, node roles, transaction rules, monitors,
 and components are protocol-specific. Only reusable transport mechanisms
@@ -14,9 +14,10 @@ wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
 protocol classifiers, node capabilities, credited node-role links, link-local
-monitors, bounded initial non-coherent transaction checking, validated
-fabric/SAM metadata, and an initial non-coherent backing RAM. Fabric RTL and
-coherent endpoints remain planned below.
+monitors, bounded initial non-coherent transaction checking, separate
+requester-side and home-side SAM metadata, an initial HN-I bridge, and a
+non-coherent backing RAM. Crossbar RTL and coherent endpoints remain planned
+below.
 
 ## Architectural boundary
 
@@ -93,6 +94,11 @@ It provides three physical shapes matching the channel sets in B13.6:
 | `CHIRNILink` | RN-I | REQ, RSP, DAT | RSP, DAT |
 | `CHISNLink` | SN-F, SN-I | RSP, DAT | REQ, DAT |
 
+HN-F and HN-I are fabric identities rather than new physical endpoint shapes.
+An HN-I terminates an RN-I-shaped link on its requester side and originates an
+SN-I-shaped link on its subordinate side; its two sides therefore use the
+existing role-specific link definitions.
+
 Each protocol channel is a generic `Credited(flit, credit_limit)` interface.
 The link parameter classes (`CHIRNLinkParams`, `CHIRNILinkParams`, and
 `CHISNLinkParams`) carry the common `CHIFlitParams` and a natural-number Link
@@ -130,15 +136,21 @@ associates those operation sizes and one or more `AddressSet` regions with an
 SN-F or SN-I ICN port. This allows one subordinate to expose different service
 profiles in disjoint address regions without changing its physical link.
 
-`CHIFabricPortParams` pairs each ICN endpoint with the link parameter class
-required by its node kind. `CHIFabricParams` accepts a common `CHIFlitParams`,
-nonempty port and subordinate-service lists, and derives a flat `sam` list of
-`CHISAMEntry` values. Construction rejects duplicate or width-overflowing
-NodeIDs, mismatched physical flit parameters, absent service targets,
-out-of-range addresses, overlapping SAM entries, duplicate service opcodes,
-and transfer sizes that cannot be represented by CHI's Size field. These are
-host-side topology parameters; they do not yet generate routing or arbitration
-RTL.
+`CHIHomeParams` gives HN-F and HN-I identities a NodeID and bounded transaction
+capacity. `CHIHomeServiceParams` describes the operations and address regions
+that an RN routes to a Home Node. `CHIFabricPortParams` pairs each RN or SN ICN
+endpoint with the link parameter class required by its node kind.
+
+`CHIFabricParams` accepts a common `CHIFlitParams`, physical ports, Home Nodes,
+home services, and subordinate services. It derives two deliberately separate
+maps: `rn_sam` routes requester addresses to `CHIHomeSAMEntry` targets, while
+`hn_sam` routes Home Node traffic to `CHISubordinateSAMEntry` targets. A flat
+RN-to-SN map would bypass the Home Node and is not a valid model of CHI
+topology. Construction rejects duplicate or width-overflowing NodeIDs,
+mismatched physical flit parameters, absent service targets, out-of-range
+addresses, overlap within either map, duplicate service opcodes, and transfer
+sizes that cannot be represented by CHI's Size field. These are host-side
+topology parameters; they do not yet generate routing or arbitration RTL.
 
 ## Link-local monitoring
 
@@ -210,13 +222,23 @@ Subordinate Node. It is not a Home Node and does not implement coherence. A
 Home Node performs any required ordering and coherence work before issuing a
 non-snoopable transaction to this RAM.
 
+[`home.rhdl`](home.rhdl) implements the first bounded `CHIHNI`. It terminates
+one RN-I link, originates one SN-I link, allocates a Home-owned transaction
+slot, and translates both transaction-ID namespaces. Reads restore the RN's
+ReturnTxnID and data target. Writes expose the Home slot as the RN-facing DBID,
+retain the subordinate's DBID internally, translate write data to that DBID,
+and restore the original RN TxnID on completion. Both physical links and every
+paired internal translation are monitored. This is a point-to-point
+non-coherent bridge, not yet an interconnect or coherent Home Node.
+
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
 operations. SN-F is the normal-memory backing role; SN-I additionally covers
 peripherals and explicitly non-coherent memory. `CHIRam` therefore
-advertise an SN-F endpoint while initially supporting only the small common
-Subordinate subset analogous to `TLRam`. This does not make the RAM coherent:
-the upstream HN-F owns coherence and sends the SN-F only non-snoopable traffic.
+defaults to an SN-F endpoint while permitting `~kind: CHINodeKind.SNI` for the
+same small common Subordinate subset analogous to `TLRam`. Selecting SN-F does
+not make the RAM coherent: an upstream HN-F owns coherence and sends the SN-F
+only non-snoopable traffic.
 
 | Operation | Initial transaction flow |
 |---|---|
@@ -327,10 +349,11 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
-| [`flow.rhdl`](flow.rhdl) | SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
+| [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
-| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F `CHIRam` backing-memory endpoint |
-| [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, subordinate services, and validated SAM metadata; routing, arbitration, credit termination, and generated topologies remain planned |
+| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory endpoint |
+| [`home.rhdl`](home.rhdl) | Implemented bounded point-to-point HN-I for the initial single-flit non-coherent transaction profile |
+| [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
 ## Implementation order
@@ -346,11 +369,13 @@ turns an externally credited flit channel into a buffered internal flow.
 5. **Initial non-coherent subset complete:** Add bounded TxnID/DBID,
    response, and single-flit data-completeness transaction monitors. General
    ordering, retry and Protocol Credits, and other transaction families remain.
-6. **Parameters complete:** Define `CHIFabricParams` and validate the System
-   Address Map. Next, generate a small credit-terminating crossbar.
-7. **Initial backing RAM complete:** Implement `CHIRam` over `SyncRam1RW` for
-   single-flit reads and writes. Next, connect it through an RN-I-facing
-   non-coherent subsystem and then add multibeat traffic.
+6. **Parameters complete:** Define `CHIFabricParams`, Home Node identities, and
+   separate requester-to-home and home-to-subordinate System Address Maps.
+   Next, generate a small crossbar over the ICN-side ready-valid adapters.
+7. **Initial non-coherent path complete:** Implement `CHIRam` over
+   `SyncRam1RW` and a bounded point-to-point `CHIHNI` for single-flit reads and
+   writes. Next, connect multiple ports through the generated crossbar and then
+   add multibeat traffic.
 8. Add RN-F/HN-F coherence and snoop tracking, followed by optional CHI
    features as independently verified vertical slices.
 
@@ -360,7 +385,7 @@ test of the supported transaction flows.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram' bash tests/backend/run-circt.sh`
+`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home' bash tests/backend/run-circt.sh`
 for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
 
 ## Specification references

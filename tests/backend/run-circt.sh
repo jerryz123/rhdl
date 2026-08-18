@@ -94,7 +94,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
-  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram
+  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home
   tilelink-protocol tilelink-ram
   ricket-core ricket-dcache
 )
@@ -567,6 +567,7 @@ direct_fixture_specs=(
   'chi-transaction|chi_transaction_tb'
   'chi-transaction-sn|chi_transaction_sn_tb'
   'chi-ram|chi_ram_tb'
+  'chi-home|chi_home_tb'
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'

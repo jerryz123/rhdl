@@ -1,0 +1,78 @@
+#lang rhdl
+// Elaborates a bounded initial-profile HN-I between one RN-I and one SN-I port.
+
+import:
+  lib("chi/main.rhdl") open
+
+def home_flit = CHIFlitParams()
+def requester_link = CHIRNILinkParams(home_flit)
+def subordinate_link = CHISNLinkParams(home_flit)
+def requester_endpoint = CHIICNPortParams(
+  "home-requester",
+  3,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~max_outstanding: 2
+)
+def subordinate_endpoint = CHIICNPortParams(
+  "home-subordinate",
+  9,
+  CHINodeKind.SNI,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 2
+)
+def home = CHIHomeParams(
+  "test-hni",
+  5,
+  CHINodeKind.HNI,
+  ~max_outstanding: 2
+)
+def requester_port = CHIFabricPortParams(requester_endpoint, requester_link)
+def subordinate_port = CHIFabricPortParams(subordinate_endpoint,
+                                           subordinate_link)
+def subordinate_service = CHISubordinateServiceParams(
+  subordinate_endpoint,
+  [AddressSet(0x80000000, 0x0fffffff)],
+  [CHIRequestSupport(CHIReqOpcode.ReadNoSnp,
+                     TransferSizes(1, home_flit.data_bytes)),
+   CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull,
+                     TransferSizes(1, home_flit.data_bytes)),
+   CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl,
+                     TransferSizes(1, home_flit.data_bytes))]
+)
+def home_params = CHIHNIParams(home,
+                               requester_port,
+                               subordinate_port,
+                               subordinate_service)
+def home_design = elaborate(CHIHNI(home_params))
+
+export:
+  home_flit
+  requester_link
+  subordinate_link
+  requester_endpoint
+  subordinate_endpoint
+  home
+  requester_port
+  subordinate_port
+  subordinate_service
+  home_params
+  home_design
