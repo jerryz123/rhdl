@@ -1,0 +1,92 @@
+#lang rhombus
+// Checks topology-independent merging of router plans into one uniform family.
+
+import:
+  "../../model/main.rhm" open
+  "../../plan/main.rhm" open
+  "../../examples/router-family.rhm" as fixture
+
+def family = fixture.router_family_plan
+def source_a = family.member(fixture.source_a)
+def source_b = family.member(fixture.source_b)
+def hub = family.member(fixture.hub)
+def destination = family.member(fixture.destination)
+def a_hub_vc = VCId(fixture.link_a_hub.id, 0)
+def b_hub_vc = VCId(fixture.link_b_hub.id, 0)
+def hub_destination_vc = VCId(fixture.link_hub_destination.id, 0)
+
+check:
+  family.network_plan === fixture.network_plan ~is #true
+  family.members.map(fun (member): member.router_plan.node.describe()) ~is [
+    "n0", "n1", "n2", "n3"
+  ]
+  family.members.map(fun (member): member.site_key) ~is [0, 1, 2, 3]
+  family.injection_count ~is 1
+  family.ingress_count ~is 2
+  family.egress_count ~is 1
+  family.ejection_count ~is 1
+  family.input_count ~is 3
+  family.target_count ~is 2
+  family.describe() ~is (
+    "router family: members=4, injection=1, ingress=2, egress=1, ejection=1, rows=7"
+  )
+
+check:
+  source_a.origin_slots ~is [0]
+  source_a.target_slots ~is [0]
+  source_b.origin_slots ~is [0]
+  source_b.target_slots ~is [0]
+  hub.origin_slots ~is [0, 1, 2]
+  hub.target_slots ~is [0, 1]
+  destination.origin_slots ~is [1]
+  destination.target_slots ~is [1]
+  family.site_key(fixture.hub) ~is 2
+  family.origin_slot(fixture.hub, HeldVC(a_hub_vc)) ~is 1
+  family.origin_slot(fixture.hub, HeldVC(b_hub_vc)) ~is 2
+  family.target_slot(fixture.hub, hub_destination_vc) ~is 0
+
+check:
+  family.rows.map(
+    fun (row): [row.site_key, row.route_key, row.origin_key, row.target_mask]
+  ) ~is [
+    [0, 0, 0, 1],
+    [1, 1, 0, 1],
+    [2, 0, 1, 1],
+    [2, 1, 2, 1],
+    [2, 2, 0, 2],
+    [3, 0, 1, 2],
+    [3, 1, 1, 2]
+  ]
+
+check:
+  family.injection_ports.map(
+    fun (port): [port.terminal.router.value, port.site_key, port.input_index]
+  ) ~is [[0, 0, 0], [1, 1, 0], [2, 2, 0]]
+  family.ejection_ports.map(
+    fun (port): [port.terminal.router.value, port.site_key, port.target_index]
+  ) ~is [[2, 2, 1], [3, 3, 1]]
+  family.vc_connections.map(
+    fun (connection):
+      [connection.source_site_key,
+       connection.source_target_index,
+       connection.destination_site_key,
+       connection.destination_input_index]
+  ) ~is [[0, 0, 2, 1], [1, 0, 2, 2], [2, 0, 3, 1]]
+  family.link_connections.map(
+    fun (connection):
+      [connection.source_site_key,
+       connection.source_target_indices,
+       connection.destination_site_key,
+       connection.destination_input_indices]
+  ) ~is [[0, [0], 2, [1]], [1, [0], 2, [2]], [2, [0], 3, [1]]]
+
+check:
+  RouterFamilyPlan("not a network plan") ~throws "NetworkPlan"
+  family.member("n0") ~throws "NodeId"
+  family.member(NodeId(99)) ~throws "unknown router-family node"
+  family.origin_slot(fixture.source_a, HeldVC(a_hub_vc)) ~throws (
+    "origin does not belong"
+  )
+  family.target_slot(fixture.destination, hub_destination_vc) ~throws (
+    "target does not belong"
+  )

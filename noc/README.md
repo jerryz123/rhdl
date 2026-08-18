@@ -645,3 +645,19 @@ row selects one exact local terminal in the same mask used for outgoing VCs;
 there is no singular ejection sideband. A linkless one-router topology can
 therefore elaborate directly as a generalized crossbar with arbitrary ingress
 and ejection counts, while its VC dependency graph remains empty.
+
+`RouterFamilyPlan(NetworkPlan(...))` is the topology-independent projection
+used when several physical sites should stamp one shared router module. It
+assigns a dense `site_key` in the network plan's deterministic node order and
+computes maxima separately for injection terminals, incoming VCs, outgoing
+VCs, and ejection terminals. Those four categories keep stable regions in the
+uniform input and target arrays, so a router with fewer ports merely leaves
+some family slots unused instead of changing another category's meaning.
+
+Every family route row includes the site key and remaps its local origin and
+target mask into the uniform shape. External terminal ports, per-VC
+connections, and physical-link connection groups are projected through the
+same mapping. The family is derived from one `NetworkPlan`, so all selected
+rows still come from the same globally validated routing relation. No mesh
+coordinate, dimension, direction, or other topology-specific concept is part
+of this API.

@@ -1,20 +1,32 @@
 #lang rhdl
-// Lowers one validated router plan into a local combinational route lookup.
+// Lowers validated router and router-family plans into combinational route lookups.
 
 import:
   lib("rhdl/std/decode.rhdl") open
   "../plan/router-plan.rhm" open
+  "../plan/router-family-plan.rhm" open
 
 export:
   RouteLookupKey
+  SiteRouteLookupKey
   RouteDecision
   RouteDecoder
+  RouterFamilyRouteDecoder
   route_decoder_lookup
+  router_family_route_decoder_lookup
   compile_route_decoder
+  compile_router_family_route_decoder
   RouteComputer
 
 // Names the semantic selector fields consumed by the generic typed decoder.
 bundle RouteLookupKey(route_width, origin_width):
+  route_key: Bits(route_width)
+  origin_key: Bits(origin_width)
+
+// Adds a spatial site selector to the same route and origin lookup. The site
+// key is intended to be tied to a constant at each stamped router instance.
+bundle SiteRouteLookupKey(site_width, route_width, origin_width):
+  site_key: Bits(site_width)
   route_key: Bits(route_width)
   origin_key: Bits(origin_width)
 
@@ -32,12 +44,37 @@ class RouteDecoder(router_plan,
   internal _RouteDecoder
   constructor ~none
 
+class RouterFamilyRouteDecoder(router_family_plan,
+                               site_width,
+                               route_width,
+                               origin_width,
+                               mask_width,
+                               decoder):
+  opaque
+  internal _RouterFamilyRouteDecoder
+  constructor ~none
+
 fun route_decoder_lookup(route_decoder :: RouteDecoder,
                          route_key :: Bits(route_decoder.route_width),
                          origin_key :: Bits(route_decoder.origin_width))
   :: RouteDecision(route_decoder.mask_width):
   route_decoder.decoder(
     RouteLookupKey(route_decoder.route_width, route_decoder.origin_width):
+      route_key: route_key
+      origin_key: origin_key
+  )
+
+fun router_family_route_decoder_lookup(
+      route_decoder :: RouterFamilyRouteDecoder,
+      site_key :: Bits(route_decoder.site_width),
+      route_key :: Bits(route_decoder.route_width),
+      origin_key :: Bits(route_decoder.origin_width))
+  :: RouteDecision(route_decoder.mask_width):
+  route_decoder.decoder(
+    SiteRouteLookupKey(route_decoder.site_width,
+                       route_decoder.route_width,
+                       route_decoder.origin_width):
+      site_key: site_key
       route_key: route_key
       origin_key: origin_key
   )
@@ -77,6 +114,44 @@ fun compile_route_decoder(router_plan :: RouterPlan) :: RouteDecoder:
                 origin_width,
                 mask_width,
                 decoder)
+
+// Compiles all per-site rows into one typed table whose first key is a static
+// integration selector, not a runtime routing mode.
+fun compile_router_family_route_decoder(
+      router_family_plan :: RouterFamilyPlan) :: RouterFamilyRouteDecoder:
+  unless router_family_plan.rows.length() > 0
+  | error(~who: #'compile_router_family_route_decoder,
+          "route decoding requires at least one router-family route row")
+  def site_width = index_width(router_family_plan.members.length())
+  def route_width = index_width(
+    router_family_plan.network_plan.validated_routing.route_classes.length()
+  )
+  def origin_width = index_width(router_family_plan.input_count)
+  def mask_width = if router_family_plan.target_count > 0 | router_family_plan.target_count | 1
+  def cases = router_family_plan.rows.map(
+    fun (entry):
+      DecodeCase(
+        (pattern(SiteRouteLookupKey(site_width, route_width, origin_width)):
+           site_key: bits(entry.site_key, site_width)
+           route_key: bits(entry.route_key, route_width)
+           origin_key: bits(entry.origin_key, origin_width)),
+        (pattern(RouteDecision(mask_width)):
+           target_mask: bits(entry.target_mask, mask_width)
+           valid: Bool(#true))
+      )
+  )
+  def decoder = DecodeGen(
+    cases,
+    ~default: (pattern(RouteDecision(mask_width)):
+                 target_mask: bits(0, mask_width)
+                 valid: Bool(#false))
+  )
+  _RouterFamilyRouteDecoder(router_family_plan,
+                            site_width,
+                            route_width,
+                            origin_width,
+                            mask_width,
+                            decoder)
 
 circuit RouteComputer(route_decoder :: RouteDecoder):
   input route_key: Bits(route_decoder.route_width)

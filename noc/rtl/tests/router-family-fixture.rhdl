@@ -1,0 +1,34 @@
+#lang rhdl
+// Elaborates two asymmetric sites by stamping one shared router-family module.
+
+import:
+  "../../examples/router-family.rhm" as fixture
+  "../main.rhdl" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+def family_plan = fixture.router_family_plan
+def config = compile_simple_router_family(family_plan)
+def Beat = RoutedBeat(Bits(8), config.route_decoder.route_width)
+
+sync_circuit RouterFamilyFixture():
+  interface source_ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  interface source_egress[config.target_count](Decoupled(Beat), ~role: producer)
+  interface hub_ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  interface hub_egress[config.target_count](Decoupled(Beat), ~role: producer)
+
+  def SharedRouterModule = SimpleRouterFamily(Bits(8), config)
+  inst source(SharedRouterModule)
+  inst hub(SharedRouterModule)
+  source.site_key <== bits(family_plan.site_key(fixture.source_a), config.route_decoder.site_width)
+  hub.site_key <== bits(family_plan.site_key(fixture.hub), config.route_decoder.site_width)
+  source.ingress <=> source_ingress
+  source_egress <=> source.egress
+  hub.ingress <=> hub_ingress
+  hub_egress <=> hub.egress
+
+def design = elaborate(RouterFamilyFixture())
+
+export:
+  family_plan
+  config
+  design

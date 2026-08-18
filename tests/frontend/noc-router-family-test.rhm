@@ -1,0 +1,74 @@
+#lang rhombus
+// Checks family decode compilation and shared-module router stamping.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../noc/model/main.rhm" open
+  "../../noc/plan/main.rhm" open
+  "../../noc/rtl/main.rhdl" open
+  "../../noc/examples/router-family.rhm" as model_fixture
+  "../../noc/rtl/tests/router-family-fixture.rhdl" as rtl_fixture
+
+def family = model_fixture.router_family_plan
+def decoder = rtl_fixture.config.route_decoder
+def top = rtl_fixture.design.modules.find(
+  fun (module_def): module_def.name == "RouterFamilyFixture"
+)
+def router = rtl_fixture.design.modules.find(
+  fun (module_def): module_def.name == "SimpleRouterFamily"
+)
+def router_instances = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance" && (
+    operation.attribute("module") === router
+  )
+)
+
+fun pattern_field(cube, field_name):
+  def field = cube.value.fields.find(
+    fun (candidate): candidate[0] == field_name
+  )
+  field[1].packed_value()
+
+check:
+  decoder.router_family_plan === family ~is #true
+  decoder.site_width ~is 2
+  decoder.route_width ~is 2
+  decoder.origin_width ~is 2
+  decoder.mask_width ~is 2
+  decoder.decoder.table.cases.length() ~is 7
+  decoder.decoder.table.cases.map(
+    fun (case):
+      [pattern_field(case.input, "site_key"),
+       pattern_field(case.input, "route_key"),
+       pattern_field(case.input, "origin_key"),
+       pattern_field(case.output, "target_mask")]
+  ) ~is [
+    [0, 0, 0, 1],
+    [1, 1, 0, 1],
+    [2, 0, 1, 1],
+    [2, 1, 2, 1],
+    [2, 2, 0, 2],
+    [3, 0, 1, 2],
+    [3, 1, 1, 2]
+  ]
+
+check:
+  rtl_fixture.config.router_family_plan === family ~is #true
+  rtl_fixture.config.input_count ~is 3
+  rtl_fixture.config.target_count ~is 2
+  top != #false ~is #true
+  router != #false ~is #true
+  router_instances.length() ~is 2
+  router_instances.map(fun (instance): instance.attribute("name")) ~is [
+    "source", "hub"
+  ]
+  (for all (instance in router_instances):
+     instance.attribute("module") === router) ~is #true
+  rtl_fixture.design.modules.filter(
+    ~keep: fun (module_def): module_def.name.starts_with("SimpleRouterFamily")
+  ).length() ~is 1
+  verify_design(rtl_fixture.design) ~is #void
+
+check:
+  compile_router_family_route_decoder("not a family") ~throws "RouterFamilyPlan"
+  compile_simple_router_family("not a family") ~throws "RouterFamilyPlan"

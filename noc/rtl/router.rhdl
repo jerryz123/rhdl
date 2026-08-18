@@ -8,12 +8,16 @@ import:
   lib("rhdl/std/flow/crossbar.rhdl") open
   "route-computer.rhdl" open
   "../plan/router-plan.rhm" open
+  "../plan/router-family-plan.rhm" open
 
 export:
   RoutedBeat
   SimpleRouterConfig
+  SimpleRouterFamilyConfig
   compile_simple_router
+  compile_simple_router_family
   SimpleRouter
+  SimpleRouterFamily
 
 // One beat is one complete packet in this first router implementation. The
 // route key is transport metadata; the payload remains entirely opaque.
@@ -27,6 +31,16 @@ bundle RoutedBeat(T, route_width):
 class SimpleRouterConfig(router_plan, route_decoder, input_count, target_count):
   opaque
   internal _SimpleRouterConfig
+  constructor ~none
+
+// Gives every member of one network the same physical shape and one shared
+// route decoder. Each instance ties its site key to an integration constant.
+class SimpleRouterFamilyConfig(router_family_plan,
+                               route_decoder,
+                               input_count,
+                               target_count):
+  opaque
+  internal _SimpleRouterFamilyConfig
   constructor ~none
 
 // Validates the supported proof regime and freezes the router's hardware shape.
@@ -43,6 +57,21 @@ fun compile_simple_router(router_plan :: RouterPlan) :: SimpleRouterConfig:
           "router plan must have an outgoing VC or an ejection target")
   _SimpleRouterConfig(router_plan, route_decoder, input_count, target_count)
 
+fun compile_simple_router_family(
+      router_family_plan :: RouterFamilyPlan) :: SimpleRouterFamilyConfig:
+  if router_family_plan.network_plan.validated_routing.assumptions.eventual_escape_grant
+  | error(~who: #'compile_simple_router_family,
+          "simple router currently requires whole-graph acyclic routing")
+  | #void
+  def route_decoder = compile_router_family_route_decoder(router_family_plan)
+  unless router_family_plan.target_count > 0
+  | error(~who: #'compile_simple_router_family,
+          "router family must have an outgoing VC or an ejection target")
+  _SimpleRouterFamilyConfig(router_family_plan,
+                            route_decoder,
+                            router_family_plan.input_count,
+                            router_family_plan.target_count)
+
 // Checks the route metadata contract on each external ingress offer. The
 // physical ingress index supplies the origin key that is intentionally absent
 // from the transported beat.
@@ -57,6 +86,22 @@ fun monitor_router_ingress(inputs :: Array,
     )
     assert(!input.valid ||| decision.valid,
            String.append("simple_router_ingress_valid_route_",
+                         to_string(input_index)))
+
+fun monitor_router_family_ingress(
+      inputs :: Array,
+      site_key,
+      route_decoder :: RouterFamilyRouteDecoder):
+  for (input_index in 0..inputs.length()):
+    def input :: Endpoint = inputs[input_index]
+    def decision = router_family_route_decoder_lookup(
+      route_decoder,
+      site_key,
+      input.bits.route_key,
+      bits(input_index, route_decoder.origin_width)
+    )
+    assert(!input.valid ||| decision.valid,
+           String.append("simple_router_family_ingress_valid_route_",
                          to_string(input_index)))
 
 // Each local origin owns one standard depth-one queue. A transfer releases that
@@ -79,6 +124,45 @@ sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
       def input_buffer :: Endpoint = input_buffers[input_index]
       route_decoder_lookup(
         config.route_decoder,
+        input_buffer.bits.route_key,
+        bits(input_index, config.route_decoder.origin_width)
+      )
+  )
+
+  def requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      def row = vec(
+        for List (target_index in 0..config.target_count):
+          def candidate = route_decisions[input_index].target_mask[target_index].into(Bool)
+          input_buffer.valid & route_decisions[input_index].valid & candidate
+      )
+      row
+  )
+
+  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  allocator.requests <== requests
+  (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
+
+// Implements one member of a router family. The site key changes only which
+// prevalidated row is selected; it never changes the routing proof or policy.
+sync_circuit SimpleRouterFamily(T, config :: SimpleRouterFamilyConfig):
+  def Beat = RoutedBeat(T, config.route_decoder.route_width)
+  input site_key: Bits(config.route_decoder.site_width)
+  interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  interface egress[config.target_count](Decoupled(Beat), ~role: producer)
+  monitor_router_family_ingress(ingress, site_key, config.route_decoder)
+
+  def input_buffers = ingress |> parallel_handles(
+    for Array (_ in 0..config.input_count): Beat |> queue(1)
+  )
+
+  def route_decisions = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      router_family_route_decoder_lookup(
+        config.route_decoder,
+        site_key,
         input_buffer.bits.route_key,
         bits(input_index, config.route_decoder.origin_width)
       )

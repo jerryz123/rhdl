@@ -23,6 +23,13 @@ by Espresso or CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 
+For shared physical implementations, `RouterFamilyRouteDecoder` adds a
+`site_key` field ahead of the same route and origin lookup. Its rows come only
+from `RouterFamilyPlan`; the site key is intended to be tied to a static value
+at each occurrence and is not a runtime routing mode. One typed `DecodeGen`
+therefore represents all site-specialized tables without reimplementing decode
+lowering or graph reasoning in RTL.
+
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
 proof regime, compiles the route decoder, and freezes the hardware port and
@@ -39,6 +46,15 @@ against the physical input's origin key before buffering. Outgoing VCs are the
 first targets and every local ejection terminal follows. The router contains
 no singular ejection convention, so a linkless plan with several terminals is
 an ordinary many-input, many-output crossbar instance.
+
+`compile_simple_router_family` and `SimpleRouterFamily` provide the uniform
+counterpart. All occurrences have the family maxima for their ingress and
+egress arrays and differ only in the constant `site_key` connection. Defining
+the generated module once and passing that module value to several `inst`
+forms produces one shared module definition with multiple occurrences. The
+pure family plan supplies the remapped connection indices; this RTL package
+still does not instantiate the network or assume that its routers share a
+parent module.
 
 Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
