@@ -517,13 +517,13 @@ instance-member expressions. Consequently `.bits`, `[0].bits`, array
 destructuring, and handle `.right` remain available under `use_static` without
 corrective `:: Endpoint` annotations.
 
-Fan-in helpers take an ordinary host `Array`. `rr_arbiter()` infers the input
-count from a connected array. A disconnected topology states its protocol once
-and its cardinality in the configured arbiter:
+Fan-in helpers take an ordinary host `Array`. `arbiter()` and `rr_arbiter()`
+infer the input count from a connected array. A disconnected topology states
+its protocol once and its cardinality in the configured arbiter:
 
 ```rhombus
 def selected = Array(first_request, second_request)
-               |> rr_arbiter()
+               |> arbiter()
                |> pipe(1)
 
 def selector = Request()
@@ -531,8 +531,8 @@ def selector = Request()
                |> pipe(1)
 ```
 
-Use an explicit `RRArbiter` instance when its `chosen` output is needed.
-Inputs must be a nonempty array of mutually compatible `Decoupled` or
+Use an explicit `Arbiter` or `RRArbiter` instance when its `chosen` output is
+needed. Inputs must be a nonempty array of mutually compatible `Decoupled` or
 `Irrevocable` endpoints.
 
 `atomic_fork` returns an indexable array of `Decoupled` endpoints and permits a
@@ -577,6 +577,14 @@ backpressure is intentional:
 ```rhombus
 source |> to_valid()
   |> eject_flow(~valid: sink_valid, ~bits: sink_bits)
+```
+
+`to_decoupled()` performs the checked inverse for a nonbackpressured `Valid(T)`
+source. It adds a readiness path and asserts that every valid event is accepted
+in the same cycle, making the otherwise unsafe boundary explicit:
+
+```rhombus
+valid_source |> to_decoupled() |> arbiter_input
 ```
 
 The flow facade retains `inject_flow(protocol, ...)` and `eject_flow(...)` as

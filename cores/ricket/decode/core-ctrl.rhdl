@@ -1,5 +1,5 @@
 #lang rhdl
-// Composes Ricket's RV32I and RV64I control relations into one hardware decoder.
+// Composes Ricket's base and Zmmul control relations into one hardware decoder.
 
 import:
   "../../alu.rhdl" open
@@ -8,11 +8,13 @@ import:
   "operand-ctrl.rhdl" open
   "branch-ctrl.rhdl" open
   "mem-ctrl.rhdl" open
+  "multiply-ctrl.rhdl" open
   "writeback-ctrl.rhdl" open
   "trap-ctrl.rhdl" open
   "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/isa/zmmul.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   lib("rhdl/std/decode.rhdl") open
 
@@ -21,13 +23,14 @@ bundle RicketControl():
   operand: OperandControl()
   branch: BranchControl()
   memory: MemoryControl()
+  multiply: RicketMultiplyControl()
   writeback: WritebackControl()
   trap: TrapControl()
 
 // Ordinary host code adds independently authored control columns to one row
 // per instruction. The selected ISA still elaborates to one decode table.
 fun compose_control_cases(instructions, alu_cases, operand_cases, branch_cases,
-                          memory_cases, writeback_cases, trap_cases):
+                          memory_cases, multiply_cases, writeback_cases, trap_cases):
   for List (instruction in instructions):
     block:
       def input = instruction_pattern(instruction)
@@ -38,6 +41,7 @@ fun compose_control_cases(instructions, alu_cases, operand_cases, branch_cases,
           operand: component_output(operand_cases, input)
           branch: component_output(branch_cases, input)
           memory: component_output(memory_cases, input)
+          multiply: component_output(multiply_cases, input)
           writeback: component_output(writeback_cases, input)
           trap: component_output(trap_cases, input)
       )
@@ -48,6 +52,7 @@ def RV32IControlCases = compose_control_cases(
   RV32IOperandCases,
   RV32IBranchCases,
   RV32IMemoryCases,
+  RV32RicketMultiplyCases,
   RV32IWritebackCases,
   RV32ITrapCases
 )
@@ -57,18 +62,43 @@ def RV64IControlCases = compose_control_cases(
   RV64IOperandCases,
   RV64IBranchCases,
   RV64IMemoryCases,
+  RV64RicketMultiplyCases,
   RV64IWritebackCases,
   RV64ITrapCases
 )
+def RV32RicketInstructions = rv32.RV32IInstructions ++ RV32ZmmulInstructions
+def RV64RicketInstructions = RV64IInstructions ++ RV64ZmmulInstructions
+def RV32RicketControlCases = compose_control_cases(
+  RV32RicketInstructions,
+  RV32RicketAluCases,
+  RV32RicketOperandCases,
+  RV32RicketBranchCases,
+  RV32RicketMemoryCases,
+  RV32RicketMultiplyCases,
+  RV32RicketWritebackCases,
+  RV32RicketTrapCases
+)
+def RV64RicketControlCases = compose_control_cases(
+  RV64RicketInstructions,
+  RV64RicketAluCases,
+  RV64RicketOperandCases,
+  RV64RicketBranchCases,
+  RV64RicketMemoryCases,
+  RV64RicketMultiplyCases,
+  RV64RicketWritebackCases,
+  RV64RicketTrapCases
+)
 def RV32IControlDecode = ValidDecodeGen(RV32IControlCases)
 def RV64IControlDecode = ValidDecodeGen(RV64IControlCases)
+def RV32RicketControlDecode = ValidDecodeGen(RV32RicketControlCases)
+def RV64RicketControlDecode = ValidDecodeGen(RV64RicketControlCases)
 
 circuit RicketInstructionDecoder(xlen :: XLen):
   input instruction: Bits(32)
   output valid: Bool
   output control: RicketControl()
 
-  def decoded :: DecodeResult(RicketControl()) = if xlen == XLen.X32 | RV32IControlDecode(instruction) | RV64IControlDecode(instruction)
+  def decoded :: DecodeResult(RicketControl()) = if xlen == XLen.X32 | RV32RicketControlDecode(instruction) | RV64RicketControlDecode(instruction)
   valid <== decoded.valid
   control <== decoded.value
 
@@ -79,4 +109,10 @@ export:
   RV64IControlCases
   RV32IControlDecode
   RV64IControlDecode
+  RV32RicketInstructions
+  RV64RicketInstructions
+  RV32RicketControlCases
+  RV64RicketControlCases
+  RV32RicketControlDecode
+  RV64RicketControlDecode
   RicketInstructionDecoder

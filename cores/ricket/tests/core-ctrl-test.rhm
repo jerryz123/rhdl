@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks composed RV32I and RV64I component-control relations and hardware decoders.
+// Checks base and Zmmul component-control relations and integrated hardware decoders.
 
 import:
   "../../../rhdl/core/main.rhm" open
@@ -8,6 +8,7 @@ import:
   "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/isa/zmmul.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   "../../alu.rhdl" as alu
   "../../branch-resolver.rhdl" as branches
@@ -26,6 +27,8 @@ def rv32_design = embedded.run_elaboration(fun (): controls.RicketInstructionDec
 def rv32_module = rv32_design.modules[0]
 fun control_for(cases, name):
   def instruction = RV64I.find(name)
+  control_for_instruction(cases, instruction)
+fun control_for_instruction(cases, instruction):
   cases.find(
     fun (candidate):
       candidate.input.value_bits == instruction.encoding.value && candidate.input.care_bits == instruction.encoding.care
@@ -79,6 +82,22 @@ def rv32_complete_relations = [
   trap_controls.RV32ITrapCases,
   controls.RV32IControlCases
 ]
+def ricket_domain = controls.RV64RicketInstructions.map(instruction_pattern)
+fun has_ricket_domain(cases):
+  cases.length() == ricket_domain.length() && (
+    for all (expected in ricket_domain):
+      cases.filter(
+        ~keep: fun (candidate): exact_pattern_equal(candidate.input, expected)
+      ).length() == 1
+  )
+def rv32_ricket_domain = controls.RV32RicketInstructions.map(instruction_pattern)
+fun has_rv32_ricket_domain(cases):
+  cases.length() == rv32_ricket_domain.length() && (
+    for all (expected in rv32_ricket_domain):
+      cases.filter(
+        ~keep: fun (candidate): exact_pattern_equal(candidate.input, expected)
+      ).length() == 1
+  )
 
 fun record_field(record, name):
   record.fields.find(fun (field): field[0] == name)[1]
@@ -119,6 +138,9 @@ def bgeu_branch = branch_value(#true, #false, #false, #false, #true, #false)
 def load_writeback = writeback_controls.WritebackControl():
   enable: bool.Bool(#true)
   source: writeback_controls.WritebackSelect.Memory
+def multiply_writeback = writeback_controls.WritebackControl():
+  enable: bool.Bool(#true)
+  source: writeback_controls.WritebackSelect.Multiply
 def trap = trap_controls.TrapControl():
   trap: bool.Bool(#true)
 def address_add = alu.AluControl():
@@ -181,6 +203,8 @@ check:
      has_canonical_domain(relation)) ~is #true
   (for all (relation in rv32_complete_relations):
      has_rv32_domain(relation)) ~is #true
+  has_ricket_domain(controls.RV64RicketControlCases) ~is #true
+  has_rv32_ricket_domain(controls.RV32RicketControlCases) ~is #true
   has_canonical_domain(
     operand_controls.RV64IOperandCases.drop(1)
   ) ~is #false
@@ -214,6 +238,7 @@ check:
   control_for(branch_controls.RV64IBranchCases, "BLTU").matches(bltu_branch) ~is #true
   control_for(branch_controls.RV64IBranchCases, "BGEU").matches(bgeu_branch) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "LD").matches(load_writeback) ~is #true
+  control_for_instruction(writeback_controls.RV64RicketWritebackCases, MUL).matches(multiply_writeback) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_a) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_b) ~is #true
   // Address generation requires addition; instructions with no ALU consumer
@@ -234,6 +259,12 @@ check:
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
   controls.RV32IControlDecode.table.packed_cases.length() ~is 40
+  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 57
+  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 44
+  record_field(
+    control_for_instruction(controls.RV64RicketControlCases, MUL).care,
+    "multiply"
+  ).packed_value() != 0 ~is #true
   alu_controls.RV32IAluCases.length() ~is 19
   module_def.outputs.map(fun (port): port.name) ~is [
     "valid", "control"
@@ -244,7 +275,7 @@ check:
              controls.RicketControl()) ~is #true
   module_def.find_output("control").type.fields.map(
     fun (field): field.name
-  ) ~is ["alu", "operand", "branch", "memory", "writeback", "trap"]
+  ) ~is ["alu", "operand", "branch", "memory", "multiply", "writeback", "trap"]
   verify_design(design) ~is #void
   type_equal(rv32_module.find_output("control").type,
              controls.RicketControl()) ~is #true

@@ -1,0 +1,61 @@
+#lang rhdl
+// Adapts the reusable iterative multiplier to Ricket's deferred-writeback protocol.
+
+import:
+  "../multiplier.rhdl" open
+  "decode/multiply-ctrl.rhdl" open
+  "../../riscv/isa/xlen.rhm" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+bundle RicketMultiplyIssue(xlen :: XLen):
+  left: Bits(xlen_width(xlen))
+  right: Bits(xlen_width(xlen))
+  control: RicketMultiplyControl()
+  rd: Bits(5)
+
+bundle RicketMultiplyCompletion(xlen :: XLen):
+  rd: Bits(5)
+  value: Bits(xlen_width(xlen))
+
+sync_circuit RicketMultiplier(xlen :: XLen):
+  def width = xlen_width(xlen)
+  def product_width = width * 2
+
+  interface issue(Valid(RicketMultiplyIssue(xlen)), ~role: consumer)
+  interface completion(Irrevocable(RicketMultiplyCompletion(xlen)), ~role: producer)
+  output available: Bool
+
+  inst multiplier(IterativeMultiplier(width))
+  reg destination(Bits(5))
+  reg high_result(Bool)
+  reg word_result(Bool)
+
+  available <== multiplier.request.ready
+  multiplier.request.valid <== issue.valid
+  multiplier.request.bits <== MultiplierRequest(width):
+    left: issue.bits.left
+    right: issue.bits.right
+    mode: issue.bits.control.mode
+
+  assert(!issue.valid ||| available, "ricket_multiplier_issue_available")
+  def issue_fire = issue.valid
+  when issue_fire:
+    destination <== issue.bits.rd
+    high_result <== issue.bits.control.high_result
+    word_result <== issue.bits.control.word_result
+
+  def product = multiplier.response.bits
+  def full_result = mux(high_result, product[width..product_width], product[0..width])
+  def word_result_value = as_bits(sext(cast(product[0..32], SInt(32)), 64))
+  def selected_result = if xlen == XLen.X64 | mux(word_result, word_result_value, full_result) | full_result
+
+  completion.valid <== multiplier.response.valid
+  completion.bits <== RicketMultiplyCompletion(xlen):
+    rd: destination
+    value: selected_result
+  multiplier.response.ready <== completion.ready
+
+export:
+  RicketMultiplyIssue
+  RicketMultiplyCompletion
+  RicketMultiplier

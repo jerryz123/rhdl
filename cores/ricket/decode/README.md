@@ -13,7 +13,7 @@ authored control columns.
 | [`operand-ctrl.rhdl`](operand-ctrl.rhdl) | Register use, operand routing, and immediate format |
 | [`branch-ctrl.rhdl`](branch-ctrl.rhdl) | Orthogonal branch-resolver controls and JALR target selection |
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
-| [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Standalone Zmmul signedness and high/word result selection; not yet composed into the core decoder |
+| [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Zmmul signedness and high/word result selection |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`trap-ctrl.rhdl`](trap-ctrl.rhdl) | Synchronous trap indication |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
@@ -44,12 +44,12 @@ Component tables use `decode_groups` directly. Its `group inputs:` form accepts
 the named host instruction-family lists, avoiding component-specific wrappers
 whose only job would be to construct and distribute one output pattern.
 
-`multiply-ctrl.rhdl` deliberately remains outside `RicketControl` while the
-iterative multiplier is not connected to the pipeline. It decodes the four
-RV32 Zmmul instructions and RV64 `MULW` into a nested reusable
-`MultiplierMode` plus orthogonal high-result and word-result controls.
+`multiply-ctrl.rhdl` decodes the four RV32 Zmmul instructions and RV64 `MULW`
+into a nested reusable `MultiplierMode` plus orthogonal high-result and
+word-result controls. `core-ctrl.rhdl` composes that column with the base ISA
+columns into the same selected decode table.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one
-hardware decode operation. The focused decoder test checks all 40 RV32I and 52
-RV64I rows against their canonical instruction-pattern domains.
+hardware decode operation. The focused decoder test checks all 44 RV32I+Zmmul
+and 57 RV64I+Zmmul rows against their canonical instruction-pattern domains.

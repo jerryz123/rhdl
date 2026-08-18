@@ -1,0 +1,30 @@
+#lang rhdl
+// Converts nonbackpressured Valid events into checked Decoupled offers.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/ready-valid-support.rhdl") open
+
+// Valid cannot retain an event under backpressure. The assertion makes that
+// limitation explicit while permitting composition with ready-valid stages.
+fun to_decoupled()
+  :: ((source :: Any) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source) :~ InterfaceTransformResult(source, Endpoint):
+    def input_protocol = valid_flow_protocol_type(source)
+    def input_link = interface_link(input_protocol, "to_decoupled_input")
+    def input_endpoint = input_link.right
+    def output_link = interface_link(
+      Decoupled(valid_flow_payload_type(source)),
+      "to_decoupled_output"
+    )
+    def output_endpoint = output_link.left
+    output_endpoint.field("valid") <== input_endpoint.field("valid")
+    output_endpoint.field("bits") <== input_endpoint.field("bits")
+    assert(!input_endpoint.field("valid") ||| output_endpoint.field("ready"))
+    finish_interface_transform(
+      source,
+      interface_transform(input_link, output_link)
+    )
+
+export:
+  to_decoupled

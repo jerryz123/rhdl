@@ -3,7 +3,7 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with Zmmul. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -16,7 +16,7 @@ caches live here. Reusable execution components remain directly under
 ricket.rhdl                         composition only
   |--> core.rhdl                    IF/ID/EX/MEM/WB logic
   |     |--> bundles + decode + register-file
-  |     |--> ../{alu,branch-resolver,load-store}.rhdl
+  |     |--> ../{alu,branch-resolver,load-store,multiplier}.rhdl
   |     |--> icache/protocol.rhdl
   |     |--> dcache/protocol.rhdl
   |     `--> ../../rhdl/std/scoreboard.rhdl
@@ -51,7 +51,8 @@ Fetch keeps accepted PCs in a two-entry flushable metadata queue. The pipelined
 L1I can therefore accept and return one hit per cycle. Redirects synchronously
 flush the PC queue, lookup result, and buffered responses; a wrong-path refill
 may finish internally but cannot return an instruction to Fetch.
-Decode holds a token behind loads in ID/EX and EX/MEM until they reach WB.
+Decode holds a token behind deferred loads or multiplies in ID/EX and EX/MEM
+until they reach WB.
 Execute owns forwarding, branch
 resolution, target and access alignment checks, and architectural fault
 generation. An atomic flow fork admits each Execute token simultaneously into
@@ -59,15 +60,21 @@ branch resolution, its optional data-cache request, and the feed-forward
 pipeline continuation. The cache leg alone contributes backpressure, and a
 legal request transfers at the same edge that places its instruction in
 EX/MEM. The L1D registers its SRAM lookup result so a hit arrives with the
-instruction in WB. WB is the ordered commit point: a load whose
-result has not returned sets its destination in the standard `Scoreboard` and
-releases the pipeline before its tagged result returns. Decode stalls on
+instruction in WB. WB is the ordered commit point: a load whose result has not
+returned or a multiply that starts there sets its destination in the standard
+`Scoreboard` and releases the pipeline before its result returns.
+Multiplication is reserved in Execute but issued only when the instruction
+reaches WB, so redirects and older faults never need to kill multiplier state.
+Decode stalls on
 scoreboard RAW and WAW
 hazards, while independent younger instructions may complete first. A returning
-load clears its destination and writes through one element of the register
+load or multiply clears its destination and writes through one element of the register
 file's `Valid(RegisterFileWrite(xlen))` write array. Valid-flow filtering,
 mapping, and fanout connect both update streams to the scoreboard without
-making its continuously observable busy bitmap into a transaction stream. The
+making its continuously observable busy bitmap into a transaction stream. A
+fixed-priority completion arbiter gives loads priority because they cannot be
+backpressured; the multiplier's irrevocable response remains stable until the
+following cycle. The
 other array element independently accepts the ordinary MEM/WB result through
 the same valid-only payload contract, so a load completion never backpressures
 either feed-forward stage. A WB-aligned hit sets and clears the entry without
@@ -81,7 +88,7 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32I or RV64I catalog at host
+The integrated structured decoder selects the RV32I+Zmmul or RV64I+Zmmul catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines

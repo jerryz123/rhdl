@@ -97,7 +97,7 @@ integration_fixtures=(
   credited-flow credited-monitor credited-monitor-overgrant
   chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home
   tilelink-protocol tilelink-ram
-  ricket-core ricket-dcache
+  ricket-core ricket-multiply ricket-dcache
 )
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -597,6 +597,7 @@ direct_fixture_specs=(
   'scoreboard|scoreboard_tb'
   'ricket-register-file|ricket_register_file_tb'
   'ricket-core|ricket_core_tb'
+  'ricket-multiply|ricket_multiply_tb'
   'ricket-core-rv32|'
   'ricket-icache|ricket_icache_tb'
   'ricket-dcache|ricket_dcache_tb'
