@@ -27,13 +27,16 @@ bundle WormholeBeat(T, route_width):
 class WormholeRouterConfig(router_plan,
                            route_decoder,
                            input_count,
-                           target_count):
+                           target_count,
+                           input_buffer_depth):
   opaque
   internal _WormholeRouterConfig
   constructor ~none
 
 // The first implementation supports only the whole-graph acyclic proof regime.
-fun compile_wormhole_router(router_plan :: RouterPlan) :: WormholeRouterConfig:
+fun compile_wormhole_router(
+      router_plan :: RouterPlan,
+      ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: WormholeRouterConfig:
   if router_plan.validated_routing.assumptions.eventual_escape_grant
   | error(~who: #'compile_wormhole_router,
           "wormhole router currently requires whole-graph acyclic routing")
@@ -44,7 +47,11 @@ fun compile_wormhole_router(router_plan :: RouterPlan) :: WormholeRouterConfig:
   unless target_count > 0
   | error(~who: #'compile_wormhole_router,
           "router plan must have an outgoing VC or an ejection target")
-  _WormholeRouterConfig(router_plan, route_decoder, input_count, target_count)
+  _WormholeRouterConfig(router_plan,
+                        route_decoder,
+                        input_count,
+                        target_count,
+                        input_buffer_depth)
 
 // A head acquires one validated target. Body and tail fragments retain that
 // target until the tail transfer releases it. Physical-link arbitration is a
@@ -54,7 +61,7 @@ sync_circuit WormholeRouter(T, config :: WormholeRouterConfig):
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
 
-  def input_buffers = ingress |> parallel_handles(for Array (_ in 0..config.input_count): Beat |> queue(1))
+  def input_buffers = ingress |> parallel_handles(for Array (_ in 0..config.input_count): Beat |> queue(config.input_buffer_depth))
   def inactive = as_vec(bits(0, config.input_count), Bool)
   def unreserved = as_vec(bits(0, config.target_count), Bool)
   def empty_reservations = vec(for List (_ in 0..config.input_count): unreserved)

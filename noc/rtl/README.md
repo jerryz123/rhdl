@@ -33,12 +33,14 @@ lowering or graph reasoning in RTL.
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
 proof regime, compiles the route decoder, and freezes the hardware port and
-target shape. One beat is one complete packet. Each local origin has one
-standard depth-one `Queue`; bypass (`flow`) and same-cycle replacement (`pipe`)
-remain disabled so the prior registered timing is preserved. Route decisions
-form the NoC-specific request matrix. A parallel flow handle connects the
-ingress array through those queues, and the endpoint-first `grant_crossbar`
-helper connects their outputs directly to egress. The standard-library
+target shape. `compile_simple_router` also accepts a uniform positive
+`input_buffer_depth`, defaulting to one. One beat is one complete packet. Each
+local origin has one standard `Queue` of that depth; bypass (`flow`) and
+same-cycle replacement (`pipe`) remain disabled so the registered timing is
+preserved. Route decisions form the NoC-specific request matrix. A parallel
+flow handle connects the ingress array through those queues, and the
+endpoint-first `grant_crossbar` helper connects their outputs directly to
+egress. The standard-library
 `GreedyMatcher` remains an explicit sideband controller: it observes requests
 and supplies grants but does not pretend to consume or forward payload flow.
 A NoC-specific ingress monitor checks every externally offered route key
@@ -48,13 +50,14 @@ no singular ejection convention, so a linkless plan with several terminals is
 an ordinary many-input, many-output crossbar instance.
 
 `compile_simple_router_family` and `SimpleRouterFamily` provide the uniform
-counterpart. All occurrences have the family maxima for their ingress and
-egress arrays and differ only in the constant `site_key` connection. Defining
-the generated module once and passing that module value to several `inst`
-forms produces one shared module definition with multiple occurrences. The
-pure family plan supplies the remapped connection indices; this RTL package
-still does not instantiate the network or assume that its routers share a
-parent module.
+counterpart. It accepts the same uniform `input_buffer_depth`; every occurrence
+in one family necessarily shares that physical queue implementation. All
+occurrences have the family maxima for their ingress and egress arrays and
+differ only in the constant `site_key` connection. Defining the generated
+module once and passing that module value to several `inst` forms produces one
+shared module definition with multiple occurrences. The pure family plan
+supplies the remapped connection indices; this RTL package still does not
+instantiate the network or assume that its routers share a parent module.
 
 Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
@@ -66,6 +69,8 @@ transport. A head fragment is the only fragment whose route key is decoded.
 After the head transfers, the selected output VC or local ejection target is
 owned by that input until its tail transfers. Body and tail fragments therefore
 cannot be rerouted or interleaved with a different packet on the reserved VC.
+`compile_wormhole_router` accepts the same uniform positive
+`input_buffer_depth`, also defaulting to one.
 
 `wormhole-link.rhdl` keeps logical VC routing distinct from physical-link
 sharing. `WormholeLinkMux` fairly selects at most one logical VC beat per cycle

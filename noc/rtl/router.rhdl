@@ -28,7 +28,11 @@ bundle RoutedBeat(T, route_width):
 // Fixes all widths and local port meanings before circuit elaboration. The
 // current fixed-priority allocator satisfies whole-graph acyclicity but does
 // not yet promise the fairness required by an escape-routing certificate.
-class SimpleRouterConfig(router_plan, route_decoder, input_count, target_count):
+class SimpleRouterConfig(router_plan,
+                         route_decoder,
+                         input_count,
+                         target_count,
+                         input_buffer_depth):
   opaque
   internal _SimpleRouterConfig
   constructor ~none
@@ -38,13 +42,16 @@ class SimpleRouterConfig(router_plan, route_decoder, input_count, target_count):
 class SimpleRouterFamilyConfig(router_family_plan,
                                route_decoder,
                                input_count,
-                               target_count):
+                               target_count,
+                               input_buffer_depth):
   opaque
   internal _SimpleRouterFamilyConfig
   constructor ~none
 
 // Validates the supported proof regime and freezes the router's hardware shape.
-fun compile_simple_router(router_plan :: RouterPlan) :: SimpleRouterConfig:
+fun compile_simple_router(
+      router_plan :: RouterPlan,
+      ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: SimpleRouterConfig:
   if router_plan.validated_routing.assumptions.eventual_escape_grant
   | error(~who: #'compile_simple_router,
           "simple router currently requires whole-graph acyclic routing")
@@ -55,10 +62,15 @@ fun compile_simple_router(router_plan :: RouterPlan) :: SimpleRouterConfig:
   unless target_count > 0
   | error(~who: #'compile_simple_router,
           "router plan must have an outgoing VC or an ejection target")
-  _SimpleRouterConfig(router_plan, route_decoder, input_count, target_count)
+  _SimpleRouterConfig(router_plan,
+                      route_decoder,
+                      input_count,
+                      target_count,
+                      input_buffer_depth)
 
 fun compile_simple_router_family(
-      router_family_plan :: RouterFamilyPlan) :: SimpleRouterFamilyConfig:
+      router_family_plan :: RouterFamilyPlan,
+      ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: SimpleRouterFamilyConfig:
   if router_family_plan.network_plan.validated_routing.assumptions.eventual_escape_grant
   | error(~who: #'compile_simple_router_family,
           "simple router currently requires whole-graph acyclic routing")
@@ -70,7 +82,8 @@ fun compile_simple_router_family(
   _SimpleRouterFamilyConfig(router_family_plan,
                             route_decoder,
                             router_family_plan.input_count,
-                            router_family_plan.target_count)
+                            router_family_plan.target_count,
+                            input_buffer_depth)
 
 // Checks the route metadata contract on each external ingress offer. The
 // physical ingress index supplies the origin key that is intentionally absent
@@ -104,7 +117,7 @@ fun monitor_router_family_ingress(
            String.append("simple_router_family_ingress_valid_route_",
                          to_string(input_index)))
 
-// Each local origin owns one standard depth-one queue. A transfer releases that
+// Each local origin owns one standard queue of the configured depth. A transfer releases that
 // origin and acquires exactly the selected outgoing VC at the neighboring
 // router, matching the validated one-beat resource model.
 sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
@@ -113,10 +126,10 @@ sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
   monitor_router_ingress(ingress, config.route_decoder)
 
-  // Compose the ingress array with one ordinary depth-one queue per VC.
+  // Compose the ingress array with one ordinary queue per local origin.
   // Leaving pipe and flow disabled preserves the original registered timing.
   def input_buffers = ingress |> parallel_handles(
-    for Array (_ in 0..config.input_count): Beat |> queue(1)
+    for Array (_ in 0..config.input_count): Beat |> queue(config.input_buffer_depth)
   )
 
   def route_decisions = vec(
@@ -154,7 +167,7 @@ sync_circuit SimpleRouterFamily(T, config :: SimpleRouterFamilyConfig):
   monitor_router_family_ingress(ingress, site_key, config.route_decoder)
 
   def input_buffers = ingress |> parallel_handles(
-    for Array (_ in 0..config.input_count): Beat |> queue(1)
+    for Array (_ in 0..config.input_count): Beat |> queue(config.input_buffer_depth)
   )
 
   def route_decisions = vec(
