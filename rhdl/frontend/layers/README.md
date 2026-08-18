@@ -747,6 +747,14 @@ views over forward-readable, exactly-one-driver wires. An `InterfaceHandle`
 owns a left endpoint shape and a right endpoint shape. Endpoint shapes are an
 `Endpoint` or recursively matching `Array`s of endpoints.
 
+`interface_transform(input_links, output_links)` adopts already-wired local
+links as one generic transform. Its input can be one link or an array-shaped
+product of links, and its output can independently be one link or an array.
+The transform exposes input links' left sides and output links' right sides,
+supporting 1-to-1 protocol conversion as well as N-to-M topology without
+adding a protocol concept to core IR. Protocol libraries implement the wiring
+between the internal link ends before constructing the transform.
+
 A binding annotated as `Handle` exposes `.left` and `.right` as endpoint
 shapes: either one `Endpoint` or a recursively matching endpoint `Array`.
 Static information preserves field access on scalar sides and indexing on
@@ -773,12 +781,26 @@ concrete endpoint shapes performs the hardware wiring effect and returns
 termination and returns a sink.
 
 Configured standard flow stages use the interface topology static-information
-key to select a dependent result. A known endpoint or endpoint array exposes
-the connected stage's exact result shape, a handle remains a handle, and a
-generic expression receives a conservative topology annotation that permits
-endpoint fields, array indexing, and handle-side access until elaboration
-chooses the concrete shape. This is frontend information only; it creates no
-flow-specific runtime graph or core IR type.
+key through `InterfaceTransformResult` to select a dependent result. A known
+endpoint or endpoint array exposes the connected transform's exact result
+shape, a handle remains a handle, and a generic expression receives a
+conservative topology annotation that permits endpoint fields, array indexing,
+and handle-side access until elaboration chooses the concrete shape. This is
+frontend information only; it creates no protocol-specific runtime graph or
+core IR type.
+
+`inject_interface(protocol, ...)` creates an endpoint from ordinary hardware,
+and `eject_interface(...)` terminates an endpoint back into ordinary hardware.
+Every declared member is supplied by name; `interface_fields(...)` groups the
+bindings of a nested interface member. These boundaries derive direction only
+from the interface roles and provider declaration. They do not inspect names
+such as `valid`, `ready`, `bits`, or `credit`.
+
+The interface layer therefore owns composition, topology, and generic circuit
+boundaries. `Valid`, `Decoupled`, `Irrevocable`, and `Credited` are optional
+standard-library protocols above it. User libraries can declare unrelated
+bidirectional protocols and configured transforms without importing those
+standard protocols.
 
 Ready-valid protocols and reusable flow circuits are documented in
 [`../../std/README.md`](../../std/README.md). Canonical feature programs live

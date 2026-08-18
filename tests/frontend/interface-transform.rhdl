@@ -1,0 +1,106 @@
+#lang rhdl/base
+// Proves custom bidirectional protocols can define typed transforms without flow libraries.
+
+import:
+  lib("rhdl/frontend/layers/interface.rhm") open
+
+use_static
+
+interface CommandChannel():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    command: Bits(8)
+
+  consumer -> producer:
+    accepted: Bits(1)
+
+interface RenamedChannel():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    payload: Bits(8)
+
+  consumer -> producer:
+    ready: Bits(1)
+
+interface EventChannel():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    payload: Bits(8)
+
+fun rename_channel()
+  :: ((source :: Any) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source) :~ InterfaceTransformResult(source, Endpoint):
+    def input_link :: Handle = interface_link(CommandChannel(), "rename_input")
+    def output_link :: Handle = interface_link(RenamedChannel(), "rename_output")
+    input_link.right.accepted <== output_link.left.ready
+    output_link.left.payload <== input_link.right.command
+    finish_interface_transform(
+      source,
+      interface_transform(input_link, output_link)
+    )
+
+fun duplicate_event(outputs :: PosInt)
+  :: ((source :: Any) -> InterfaceTransformResult(source, InterfaceArrayFields)):
+  fun (source) :~ InterfaceTransformResult(source, InterfaceArrayFields):
+    def input_link :: Handle = interface_link(EventChannel(), "event_input")
+    def output_links = for Array (index in 0..outputs):
+      interface_link(EventChannel(), "event_output_" ++ to_string(index))
+    for (index in 0..output_links.length()):
+      def output_link :: Handle = output_links[index]
+      output_link.left.payload <== input_link.right.payload
+    finish_interface_transform(
+      source,
+      interface_transform(input_link, output_links)
+    )
+
+circuit CustomInterfaceTransforms():
+  interface commands(CommandChannel(), ~role: consumer)
+  interface renamed(RenamedChannel(), ~role: producer)
+  interface event(EventChannel(), ~role: consumer)
+  interface copies[2](EventChannel(), ~role: producer)
+
+  def renamed_command = commands |> rename_channel()
+  def renamed_payload = renamed_command.payload
+  renamed <=> renamed_command
+
+  def duplicated = event |> duplicate_event(2)
+  def first_copy = duplicated[0].payload
+  copies <=> duplicated
+
+  #void
+
+circuit CustomInterfaceBoundary():
+  input command: Bits(8)
+  input ready: Bits(1)
+  output accepted: Bits(1)
+  output payload: Bits(8)
+
+  inject_interface(
+    CommandChannel(),
+    ~command: command,
+    ~accepted: accepted
+  ) |> rename_channel()
+    |> eject_interface(~payload: payload, ~ready: ready)
+
+def design = elaborate(CustomInterfaceTransforms())
+def boundary_design = elaborate(CustomInterfaceBoundary())
+
+export:
+  CommandChannel
+  RenamedChannel
+  EventChannel
+  rename_channel
+  duplicate_event
+  CustomInterfaceTransforms
+  CustomInterfaceBoundary
+  design
+  boundary_design

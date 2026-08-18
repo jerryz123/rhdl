@@ -492,13 +492,14 @@ Use an explicit `Decoupled(T)` or `Irrevocable(T)` seed when the disconnected
 path must retain that exact contract. Later stages infer the protocol and
 payload from the preceding endpoint or handle; they never repeat it.
 
-`StageResult` is the single dependent static-information rule behind these
-operations. A statically known endpoint produces the operation's connected
-shape, an endpoint array produces the cardinality-changing connected shape,
-and a type seed or existing handle produces a handle. A conservative topology
-annotation covers generic instance-member expressions. Consequently `.bits`,
-`[0].bits`, array destructuring, and handle `.right` remain available under
-`use_static` without corrective `:: Endpoint` annotations.
+`InterfaceTransformResult` is the generic interface layer's single dependent
+static-information rule behind these operations. A statically known endpoint
+produces the operation's connected shape, an endpoint array produces the
+cardinality-changing connected shape, and a type seed or existing handle
+produces a handle. A conservative topology annotation covers generic
+instance-member expressions. Consequently `.bits`, `[0].bits`, array
+destructuring, and handle `.right` remain available under `use_static` without
+corrective `:: Endpoint` annotations.
 
 Fan-in helpers take an ordinary host `Array`. `rr_arbiter()` infers the input
 count from a connected array. A disconnected topology states its protocol once
@@ -562,11 +563,11 @@ source |> to_valid()
   |> eject_flow(~valid: sink_valid, ~bits: sink_bits)
 ```
 
-`inject_flow(protocol, ...)` starts a chain from ordinary circuit-side hardware,
-and `eject_flow(...)` terminates one back into ordinary hardware. Each named
-binding corresponds to a declared protocol member. A `Decoupled(T)` boundary
-therefore names `~valid`, `~bits`, and `~ready`, while a `Valid(T)` boundary
-names only `~valid` and `~bits`:
+The flow facade retains `inject_flow(protocol, ...)` and `eject_flow(...)` as
+convenience aliases for the interface layer's generic `inject_interface` and
+`eject_interface` boundaries. Each named binding corresponds to a declared
+protocol member. A `Decoupled(T)` boundary therefore names `~valid`, `~bits`,
+and `~ready`, while a `Valid(T)` boundary names only `~valid` and `~bits`:
 
 ```rhombus
 inject_flow(

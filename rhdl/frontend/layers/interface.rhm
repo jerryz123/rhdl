@@ -12,7 +12,7 @@ import:
   "../support/instance-members.rhm".register_member_resolver
 
 export:
-  InterfaceFlow
+  InterfaceDirection
   InterfaceCompatibility
   InterfaceIdentity
   InterfaceMember
@@ -23,6 +23,7 @@ export:
   InterfaceSink
   interface_type_supports
   interface_link
+  interface_transform
   observe
   parallel_handles
   connect_endpoint_shapes
@@ -36,14 +37,22 @@ export:
   InterfaceArrayFields
   InterfaceTopologyFields
   InterfaceTopologyResult
+  InterfaceTransformResult
   interface_topology_key
+  connected_interface_source
+  finish_interface_transform
+  interface_fields
+  inject_interface
+  eject_interface
 
-class InterfaceFlow(from_role :: String, to_role :: String, type :: RecordType):
+class InterfaceDirection(from_role :: String, to_role :: String, type :: RecordType):
   constructor (from_role :: String, to_role :: String, type :: RecordType):
     unless from_role != to_role
-    | error(~who: #'InterfaceFlow, "interface flow requires two distinct role names")
+    | error(~who: #'InterfaceDirection,
+            "interface direction requires two distinct role names")
     unless record_type(type) && type_well_formed(type)
-    | error(~who: #'InterfaceFlow, "interface flow type must be a well-formed RecordType")
+    | error(~who: #'InterfaceDirection,
+            "interface direction type must be a well-formed RecordType")
     super(from_role, to_role, type)
 
 class InterfaceMember(name, type, from_role, to_role)
@@ -101,7 +110,7 @@ class InterfaceType(name,
       cond
       | declaration is_a InterfaceMember:
           members := members ++ [declaration]
-      | declaration is_a InterfaceFlow:
+      | declaration is_a InterfaceDirection:
           members := members ++ declaration.type.fields.map(
             fun (field):
               InterfaceMember(field.name,
@@ -161,16 +170,16 @@ class InterfaceType(name,
           specialization_arguments,
           connection_compatibility)
 
-  property flows: interface_flows(this)
+  property directions: interface_directions(this)
   property supported_types:
     supported_contracts.map(fun (contract): contract.type)
 
-  method flow_for_field(field_name):
+  method direction_for_field(field_name):
     def member = members.find(fun (candidate): candidate.name == field_name)
     if member
-    | flows.find(
-        fun (flow):
-          flow.from_role == member.from_role && flow.to_role == member.to_role
+    | directions.find(
+        fun (direction):
+          direction.from_role == member.from_role && direction.to_role == member.to_role
       )
     | #false
 
@@ -184,35 +193,35 @@ fun nested_role_to_parent(member, nested_type, nested_role):
   | member.from_role
   | member.to_role
 
-fun nested_flow_for_parent_direction(member, parent_from, parent_to):
+fun nested_direction_for_parent(member, parent_from, parent_to):
   def nested_type = member.type
-  nested_type.flows.find(
-    fun (flow):
-      (nested_role_to_parent(member, nested_type, flow.from_role) == parent_from) && (nested_role_to_parent(member, nested_type, flow.to_role) == parent_to)
+  nested_type.directions.find(
+    fun (direction):
+      (nested_role_to_parent(member, nested_type, direction.from_role) == parent_from) && (nested_role_to_parent(member, nested_type, direction.to_role) == parent_to)
   )
 
-fun interface_flow(type, from_role, to_role):
+fun interface_direction(type, from_role, to_role):
   def mutable fields = []
   for (member in type.members):
     if member.type is_a DataType
     | when member.from_role == from_role && member.to_role == to_role
       | fields := fields ++ [RecordField(member.name, member.type)]
     | block:
-        def nested_flow = nested_flow_for_parent_direction(member,
+        def nested_direction = nested_direction_for_parent(member,
                                                            from_role,
                                                            to_role)
-        when nested_flow
-        | fields := fields ++ [RecordField(member.name, nested_flow.type)]
+        when nested_direction
+        | fields := fields ++ [RecordField(member.name, nested_direction.type)]
   if fields.length() == 0
   | #false
-  | InterfaceFlow(from_role, to_role, RecordType(fields))
+  | InterfaceDirection(from_role, to_role, RecordType(fields))
 
-fun interface_flows(type):
-  def forward = interface_flow(type, type.roles[0], type.roles[1])
-  def backward = interface_flow(type, type.roles[1], type.roles[0])
-  [forward, backward].filter(~keep: fun (flow): flow)
+fun interface_directions(type):
+  def forward = interface_direction(type, type.roles[0], type.roles[1])
+  def backward = interface_direction(type, type.roles[1], type.roles[0])
+  [forward, backward].filter(~keep: fun (direction): direction)
 
-class InterfaceBinding(flow, port_name, entity)
+class InterfaceBinding(direction, port_name, entity)
 
 class InterfaceEndpoint(type,
                         role,
@@ -240,7 +249,7 @@ class InterfaceEndpoint(type,
     | block:
         def binding = bindings.find(
           fun (candidate):
-            candidate.flow.from_role == member.from_role && candidate.flow.to_role == member.to_role
+            candidate.direction.from_role == member.from_role && candidate.direction.to_role == member.to_role
         )
         kernel.project(binding.entity, field_name)
 
@@ -466,9 +475,9 @@ fun interface_type_supports(type, expected_type):
     ) != #false
   )
 
-fun flow_port_name(endpoint_name, flow, role):
-  def direction = if flow.from_role == role | "out" | "in"
-  endpoint_name ++ "_" ++ direction
+fun direction_port_name(endpoint_name, interface_direction, role):
+  def suffix = if interface_direction.from_role == role | "out" | "in"
+  endpoint_name ++ "_" ++ suffix
 
 fun nested_endpoint(endpoint, member):
   def nested_type = member.type
@@ -481,19 +490,19 @@ fun nested_endpoint(endpoint, member):
     | nested_type.roles[0]
     | nested_type.roles[1]
   def nested_bindings:
-    nested_type.flows.map(
-      fun (nested_flow):
+    nested_type.directions.map(
+      fun (nested_direction):
         def parent_from = nested_role_to_parent(member,
                                                 nested_type,
-                                                nested_flow.from_role)
+                                                nested_direction.from_role)
         def parent_to = nested_role_to_parent(member,
                                               nested_type,
-                                              nested_flow.to_role)
+                                              nested_direction.to_role)
         def parent_binding = endpoint.bindings.find(
           fun (binding):
-            binding.flow.from_role == parent_from && binding.flow.to_role == parent_to
+            binding.direction.from_role == parent_from && binding.direction.to_role == parent_to
         )
-        InterfaceBinding(nested_flow,
+        InterfaceBinding(nested_direction,
                          parent_binding.port_name ++ "__" ++ member.name,
                          kernel.project(parent_binding.entity, member.name))
     )
@@ -516,14 +525,14 @@ fun interface_name_taken(module_def, name):
 
 fun declare_interface_unchecked(module_def, name, type, role):
   def bindings:
-    type.flows.map(
-      fun (flow):
-        def port_name = flow_port_name(name, flow, role)
+    type.directions.map(
+      fun (direction):
+        def port_name = direction_port_name(name, direction, role)
         def entity:
-          if flow.from_role == role
-          | kernel.output(port_name, flow.type)
-          | kernel.input(port_name, flow.type)
-        InterfaceBinding(flow, port_name, entity)
+          if direction.from_role == role
+          | kernel.output(port_name, direction.type)
+          | kernel.input(port_name, direction.type)
+        InterfaceBinding(direction, port_name, entity)
     )
   def group = InterfaceGroup(module_def, name, type, role, bindings)
   interface_groups := interface_groups ++ [group]
@@ -561,25 +570,25 @@ fun declare_interface_array(name, count :: PosInt, type, role):
   Array(& declarations.map(fun (declaration): declaration[1]))
 
 // Creates a local, declaration-order-independent pair of complementary
-// endpoint views. The left view accepts the first-role flow and the right view
+// endpoint views. The left view accepts the first-role direction and the right view
 // exposes it, with reverse-direction members mirrored.
 fun interface_link(type, name = "interface_link"):
   validate_interface_declaration(type, type.roles[0])
   def mutable left_bindings = []
   def mutable right_bindings = []
-  for (flow in type.flows):
-    def flow_name = kernel.fresh_name(name ++ "_flow")
-    def place = kernel.wire(flow_name, flow.type)
+  for (direction in type.directions):
+    def direction_name = kernel.fresh_name(name ++ "_flow")
+    def place = kernel.wire(direction_name, direction.type)
     def value = kernel.read(place)
     def left_entity:
-      if flow.from_role == type.roles[0] | place | value
+      if direction.from_role == type.roles[0] | place | value
     def right_entity:
-      if flow.from_role == type.roles[0] | value | place
+      if direction.from_role == type.roles[0] | value | place
     left_bindings := left_bindings ++ [
-      InterfaceBinding(flow, flow_name, left_entity)
+      InterfaceBinding(direction, direction_name, left_entity)
     ]
     right_bindings := right_bindings ++ [
-      InterfaceBinding(flow, flow_name, right_entity)
+      InterfaceBinding(direction, direction_name, right_entity)
     ]
   InterfaceHandle(
     InterfaceEndpoint(type,
@@ -599,10 +608,10 @@ fun endpoint_for_group(instance, group):
     group.bindings.map(
       fun (binding):
         def entity:
-          if binding.flow.from_role == group.role
+          if binding.direction.from_role == group.role
           | instance.output(binding.port_name)
           | instance.input(binding.port_name)
-        InterfaceBinding(binding.flow, binding.port_name, entity)
+        InterfaceBinding(binding.direction, binding.port_name, entity)
     )
   InterfaceEndpoint(group.type,
                     group.role,
@@ -651,6 +660,47 @@ fun interface_endpoint_supports_type(value, expected_type):
 statinfo.key interface_topology_key:
   ~and: fun (_left, right): right
   ~or: fun (_left, right): right
+
+// Selects precise static information for a configured interface transform
+// after Rhombus supplies the transform's eventual source through `|>`.
+meta.bridge interface_transform_result_static_infos:
+  fun (data, dependencies :: annot_meta.Dependencies):
+    let '($position, $connected_infos)' = data
+    def source_infos = dependencies.arguments[position.unwrap()]
+    def topology = statinfo_meta.find(
+      statinfo_meta.unpack(source_infos),
+      'interface_topology_key'
+    )
+    cond
+    | topology && topology.unwrap() in [#'endpoint, #'endpoint_array]:
+        statinfo_meta.pack(connected_infos)
+    | topology && topology.unwrap() == #'handle:
+        annot_meta.parse_to_packed_statinfo('Handle')
+    | ~else:
+        annot_meta.parse_to_packed_statinfo('InterfaceTopologyResult')
+
+// A configured transform returns its connected far-end shape for endpoint
+// sources and a complete handle for detached type seeds or earlier handles.
+annot.macro 'InterfaceTransformResult($source, $(connected :: annot_meta.Parsed))':
+  ~context context
+  def position = context.argument_names[
+    syntax_meta.flip_introduce(source)
+  ]
+  unless position is_a Nat
+  | error(~who: #'InterfaceTransformResult,
+          "source must name a positional argument of the annotated function")
+  def (_connected_predicate, connected_infos) = annot_meta.unpack_predicate(
+    connected
+  )
+  def dependent_infos = statinfo_meta.pack_dependent_result(
+    'interface_transform_result_static_infos',
+    '($position, $connected_infos)',
+    {}
+  )
+  annot_meta.pack_predicate(
+    'fun (_value): #true',
+    '(($(statinfo_meta.dependent_result_key), $dependent_infos))'
+  )
 
 // Applying a linear topology object preserves whether another handle remains
 // open. Concrete endpoint sources expose the object's far endpoint shape;
@@ -848,7 +898,7 @@ fun interface_member_connection_pairs(left, right, members):
   pairs
 
 // Endpoint provenance identifies which connected component plays the provider
-// role. Operand order and the presence of any particular flow are irrelevant.
+// role. Operand order and the presence of any particular member are irrelevant.
 fun interface_connection_direction(left, right):
   unless left.type.roles == right.type.roles
   | error(~who: #'connect_interfaces,
@@ -875,7 +925,7 @@ fun exact_interface_connection_pairs(left :: InterfaceEndpoint,
     for List (left_binding in left.bindings):
       def right_binding = right.bindings.find(
         fun (candidate):
-          candidate.flow.from_role == left_binding.flow.from_role && candidate.flow.to_role == left_binding.flow.to_role
+          candidate.direction.from_role == left_binding.direction.from_role && candidate.direction.to_role == left_binding.direction.to_role
       )
       [left_binding.entity, right_binding.entity]
   for (pair in pairs):
@@ -1009,6 +1059,214 @@ fun connect_interfaces(left, right):
 // structural product; additional host product syntax can lower to Arrays.
 fun connect_endpoint_shapes(left, right):
   connect_interfaces(left, right)
+
+// Reports whether a transform source is a concrete endpoint shape that can
+// be connected immediately. Interface types and other host seeds remain
+// detached handles until a concrete source is supplied.
+fun connected_interface_source(source):
+  cond
+  | source is_a InterfaceEndpoint: #true
+  | source is_a Array && source.length() > 0:
+      def mutable all_endpoints = #true
+      for (element in source):
+        unless element is_a InterfaceEndpoint
+        | all_endpoints := #false
+      all_endpoints
+  | ~else: #false
+
+// Applies a completed transform to concrete topology while preserving a
+// detached handle for interface-type seeds.
+fun finish_interface_transform(source_or_type, handle :: Handle):
+  if connected_interface_source(source_or_type) || source_or_type is_a InterfaceHandle
+  | handle(source_or_type)
+  | handle
+
+fun validate_interface_transform_links(links, who):
+  cond
+  | links is_a InterfaceHandle:
+      when links.consumed
+      | error(~who: who, "an interface handle can be consumed only once")
+  | links is_a Array && links.length() > 0:
+      for (link in links): validate_interface_transform_links(link, who)
+  | ~else:
+      error(~who: who,
+            "interface transform ends must be handles or nonempty handle arrays")
+
+fun interface_transform_end(links, use_left):
+  cond
+  | links is_a InterfaceHandle:
+      links.consumed := #true
+      if use_left | links.left | links.right
+  | ~else:
+      Array(& (for List (link in links): interface_transform_end(link, use_left)))
+
+// Adopts already-wired local links as one N-to-M transform. Input links expose
+// their left sides; output links expose their right sides. Array shapes retain
+// their cardinality for later `|>` composition.
+fun interface_transform(input_links, output_links) :: Handle:
+  validate_interface_transform_links(input_links, #'interface_transform)
+  validate_interface_transform_links(output_links, #'interface_transform)
+  def left = interface_transform_end(input_links, #true)
+  validate_interface_transform_links(output_links, #'interface_transform)
+  def right = interface_transform_end(output_links, #false)
+  InterfaceHandle(left, right)
+
+// Records one flattened interface leaf and whether the protocol provider owns
+// its direction. Nested interfaces retain structural declaration order.
+class InterfaceBoundaryLeaf(path, from_provider)
+
+fun interface_boundary_leaves(type,
+                              provider_role,
+                              first_root_role,
+                              second_root_role,
+                              path = []):
+  def mutable leaves = []
+  for (member in type.members):
+    def from_root_role:
+      if member.from_role == type.roles[0]
+      | first_root_role
+      | second_root_role
+    def to_root_role:
+      if member.to_role == type.roles[0]
+      | first_root_role
+      | second_root_role
+    def member_path = path ++ [member.name]
+    if member.type is_a InterfaceType
+    | leaves := leaves ++ interface_boundary_leaves(
+        member.type,
+        provider_role,
+        from_root_role,
+        to_root_role,
+        member_path
+      )
+    | leaves := leaves ++ [
+        InterfaceBoundaryLeaf(member_path, from_root_role == provider_role)
+      ]
+  leaves
+
+fun interface_boundary_field(endpoint, path):
+  def mutable field = endpoint
+  for (name in path):
+    field := field.field(name)
+  field
+
+fun validate_interface_boundary_bindings(type, bindings, who):
+  unless type is_a InterfaceType
+  | error(~who: who, "interface boundary requires an InterfaceType")
+  unless bindings is_a Map
+  | error(~who: who, "nested interface members require named binding maps")
+  unless bindings.length() == type.members.length()
+  | error(~who: who,
+          "interface boundary requires exactly one named binding for every interface member")
+  for (member in type.members):
+    def key = Keyword.from_string(member.name)
+    unless bindings.has_key(key)
+    | error(~who: who,
+            "interface boundary is missing the ~" ++ member.name ++ " binding")
+    if member.type is_a InterfaceType
+    | validate_interface_boundary_bindings(member.type, bindings[key], who)
+    | #void
+
+fun interface_boundary_binding(bindings, path):
+  def mutable binding = bindings
+  for (name in path):
+    binding := binding[Keyword.from_string(name)]
+  binding
+
+fun validated_interface_boundary_leaves(type, bindings, who):
+  validate_interface_boundary_bindings(type, bindings, who)
+  interface_boundary_leaves(
+    type,
+    type.provider_role,
+    type.roles[0],
+    type.roles[1]
+  )
+
+// Captures a nested interface member's named leaves without exposing the host
+// map representation at a boundary call site.
+fun interface_fields(~& bindings):
+  bindings
+
+// The local circuit side owns provider-origin destinations and receives the
+// reverse path. The complementary endpoint is returned for composition.
+fun inject_interface(type, ~& bindings) :: Endpoint:
+  def leaves = validated_interface_boundary_leaves(
+    type,
+    bindings,
+    #'inject_interface
+  )
+  def link :: Handle = interface_link(type, "inject_flow")
+  def circuit_endpoint:
+    if type.provider_role == type.roles[0] | link.left | link.right
+  def interface_endpoint :: Endpoint:
+    if type.provider_role == type.roles[0] | link.right | link.left
+  for (leaf in leaves):
+    def entity = interface_boundary_field(circuit_endpoint, leaf.path)
+    def binding = interface_boundary_binding(bindings, leaf.path)
+    if leaf.from_provider
+    | kernel.connect(entity, binding)
+    | kernel.connect(binding, entity)
+  link.consumed := #true
+  interface_endpoint
+
+fun interface_provider_end(handle :: Handle):
+  cond
+  | handle.right is_a InterfaceEndpoint && handle.right.represented_role == handle.right.type.provider_role:
+      [handle.right, handle.left]
+  | handle.left is_a InterfaceEndpoint && handle.left.represented_role == handle.left.type.provider_role:
+      [handle.left, handle.right]
+  | ~else:
+      error(~who: #'eject_interface,
+            "interface ejection requires a handle with one provider-facing endpoint")
+
+// A terminal consumes a concrete endpoint immediately or retains the input
+// end of a detached handle as an InterfaceSink for later composition.
+fun finish_ejected_interface(source, bindings):
+  def detached_link:
+    if source is_a InterfaceType
+    | interface_link(source, "eject_flow")
+    | #false
+  def handle:
+    if source is_a InterfaceHandle | source | detached_link
+  if handle
+  | unless !handle.consumed
+    | error(~who: #'eject_interface,
+            "an interface handle can be consumed only once")
+  | #void
+  def handle_ends:
+    if handle | interface_provider_end(handle) | #false
+  def interface_endpoint:
+    cond
+    | source is_a InterfaceEndpoint: source
+    | handle: handle_ends[0]
+    | ~else:
+        error(~who: #'eject_interface,
+              "interface ejection requires an InterfaceType, endpoint, or handle")
+  unless interface_endpoint.represented_role == interface_endpoint.type.provider_role
+  | error(~who: #'eject_interface,
+          "interface ejection requires an endpoint representing the provider role")
+  def leaves = validated_interface_boundary_leaves(
+    interface_endpoint.type,
+    bindings,
+    #'eject_interface
+  )
+  for (leaf in leaves):
+    def entity = interface_boundary_field(interface_endpoint, leaf.path)
+    def binding = interface_boundary_binding(bindings, leaf.path)
+    if leaf.from_provider
+    | kernel.connect(binding, entity)
+    | kernel.connect(entity, binding)
+  if handle
+  | block:
+      handle.consumed := #true
+      InterfaceSink(handle_ends[1])
+  | #void
+
+// Configures a unary terminal so it naturally occupies the rightmost position
+// of an ordinary Rhombus pipeline.
+fun eject_interface(~& bindings):
+  fun (eject_interface_source):
+    finish_ejected_interface(eject_interface_source, bindings)
 
 // Combines independent handles or already-terminated sinks. A homogeneous
 // handle collection retains both array-shaped ends; a homogeneous sink

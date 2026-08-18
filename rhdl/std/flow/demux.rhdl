@@ -4,7 +4,7 @@
 import:
   rhombus/meta open
   lib("rhdl/std/ready-valid.rhdl") open
-  lib("rhdl/std/flow/stage.rhdl") open
+  lib("rhdl/std/flow/ready-valid-support.rhdl") open
 
 // Select is interpreted as part of the current Decoupled offer and may change
 // while stalled. Encodings outside 0 through n - 1 select no output and block
@@ -62,12 +62,7 @@ fun finish_demux_flow_handle(input_link :: Handle,
       selected & output_endpoint.field("ready")
   ))
   input_endpoint.field("ready") <== selected_ready
-  input_link.consumed := #true
-  for (output_link in output_links): output_link.consumed := #true
-  def output_endpoints = Array.make(count)
-  for (index in 0..count):
-    output_endpoints[index] := output_links[index].right
-  InterfaceHandle(input_link.left, output_endpoints)
+  interface_transform(input_link, output_links)
 
 // A payload type defaults to Decoupled, while an explicit ready-valid
 // InterfaceType retains that exact contract. Configuration produces a unary
@@ -77,7 +72,7 @@ expr.macro
               $(payload :: Identifier) => $selector ...)':
     'demux_flow($count, $payload): $selector ...'
 | 'demux_flow($count, $(payload :: Identifier)): $selector':
-    'fun (demux_flow_source) :~ StageResult(demux_flow_source, InterfaceArrayFields):
+    'fun (demux_flow_source) :~ InterfaceTransformResult(demux_flow_source, InterfaceArrayFields):
        def demux_flow_count = $count
        unless demux_flow_count is_a PosInt
        | error(~who: #'demux_flow,
@@ -102,7 +97,7 @@ expr.macro
          demux_flow_output_links,
          demux_flow_selector
        )
-       finish_flow_stage(demux_flow_source, demux_flow_handle)'
+       finish_interface_transform(demux_flow_source, demux_flow_handle)'
 
 export:
   Demux
