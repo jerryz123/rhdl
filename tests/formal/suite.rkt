@@ -3,6 +3,7 @@
 
 (require "aggregate-test.rhm"
          "api-test.rhm"
+         "decode-test.rhm"
          "engine-test.rkt"
          "hierarchy-test.rhm"
          "snapshot-test.rhm")

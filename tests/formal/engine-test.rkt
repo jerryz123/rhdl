@@ -239,6 +239,25 @@
          [(= selector 2) two-choice]
          [else default])))
 
+(define decode-cases
+  (list (list #b000 #b011 #b001 #b111)
+        (list #b001 #b011 #b010 #b111)))
+(define (decode-attributes cases [default-value #b111] [default-care #b111])
+  (hash "cases" cases
+        "default_value" default-value
+        "default_care" default-care))
+(define decode-snapshot
+  (operation-design "rtl.decode" (list (flat-type 3)) (flat-type 3)
+                    (decode-attributes decode-cases)))
+(for ([selector (in-range 8)])
+  (check-equal?
+   (hash-ref (interpret_snapshot decode-snapshot (hash "x0" selector)) "y")
+   (case (bitwise-and selector #b011)
+     [(0) #b001]
+     [(1) #b010]
+     [else #b111])
+   (format "decode selector ~a" selector)))
+
 (define record-type
   (hash "kind" "record" "text" "record<a: bits<2>, b: bits<3>>" "width" 5
         "fields" (list (hash "name" "a" "type" (flat-type 2))
@@ -280,6 +299,25 @@
     (check-equal? (hash-ref (interpret_snapshot vector-element (hash "x0" packed)) "y")
                   (truncate (arithmetic-shift packed (* -2 index)) 2))))
 
+(define aggregate-decode
+  (operation-design
+   "rtl.decode"
+   (list record-type)
+   vector-type
+   (decode-attributes
+    (list (list #b00000 #b11000 #b000110 #b111111)
+          (list #b01000 #b11000 #b111000 #b111111))
+    #b111111
+    #b111111)))
+(for ([packed (in-range 32)])
+  (check-equal?
+   (hash-ref (interpret_snapshot aggregate-decode (hash "x0" packed)) "y")
+   (case (bitwise-and packed #b11000)
+     [(0) #b000110]
+     [(8) #b111000]
+     [else #b111111])
+   (format "aggregate decode input ~a" packed)))
+
 (define wire-type (flat-type 3))
 (define wire-design
   (single-module-snapshot
@@ -320,7 +358,30 @@
 (check-equal? (engine_result_status unknown-result) "unknown")
 (check-true (regexp-match? #rx"unknown" (engine_result_message unknown-result)))
 
-(for ([opcode (in-list '("rtl.dont_care" "rtl.decode" "rtl.onehot_mux"
+(define reordered-decode
+  (operation-design "rtl.decode" (list (flat-type 3)) (flat-type 3)
+                    (decode-attributes (reverse decode-cases))))
+(define defective-decode
+  (operation-design
+   "rtl.decode"
+   (list (flat-type 3))
+   (flat-type 3)
+   (decode-attributes
+    (list (list #b000 #b011 #b011 #b111)
+          (second decode-cases)))))
+(check-equal? (engine_result_status
+               (check_equivalent_snapshots decode-snapshot reordered-decode))
+              "equivalent")
+(define decode-counterexample
+  (check_equivalent_snapshots decode-snapshot defective-decode))
+(check-equal? (engine_result_status decode-counterexample) "counterexample")
+(define decode-replay-inputs
+  (for/hash ([entry (in-list (engine_result_inputs decode-counterexample))])
+    (values (hash-ref entry "port") (hash-ref entry "value"))))
+(check-not-equal? (hash-ref (interpret_snapshot decode-snapshot decode-replay-inputs) "y")
+                  (hash-ref (interpret_snapshot defective-decode decode-replay-inputs) "y"))
+
+(for ([opcode (in-list '("rtl.dont_care" "rtl.onehot_mux"
                           "rtl.register" "rtl.memory" "rtl.memory_write"
                           "verif.assert" "sim.dpi_call" "unknown.operation"))])
   (define rejected
@@ -338,6 +399,45 @@
    #:solve (lambda (_mismatch) (set! solver-called? #t) 'forced-unknown)))
 (check-equal? (engine_result_status unsupported-query-result) "unsupported")
 (check-false solver-called?)
+
+(define partial-case-decode
+  (operation-design
+   "rtl.decode" (list (flat-type 1)) (flat-type 1)
+   (decode-attributes (list (list 0 1 0 0)) 0 1)))
+(define partial-default-decode
+  (operation-design
+   "rtl.decode" (list (flat-type 1)) (flat-type 1)
+   (decode-attributes (list (list 0 1 0 1)) 0 0)))
+(for ([snapshot (in-list (list partial-case-decode partial-default-decode))])
+  (define rejected (preflight_snapshot snapshot))
+  (check-equal? (engine_result_status rejected) "unsupported")
+  (check-equal? (hash-ref (engine_result_diagnostic rejected) "opcode") "rtl.decode")
+  (check-true (regexp-match? #rx"every output bit is cared"
+                             (engine_result_message rejected))))
+(define decode-solver-called? #f)
+(define unsupported-decode-query-result
+  (check_equivalent_snapshots
+   partial-case-decode partial-case-decode
+   #:solve (lambda (_mismatch) (set! decode-solver-called? #t) 'forced-unknown)))
+(check-equal? (engine_result_status unsupported-decode-query-result) "unsupported")
+(check-false decode-solver-called?)
+
+(for ([attributes+message
+       (in-list
+        (list
+         (cons (decode-attributes "not-a-list") #rx"cases must be a list")
+         (cons (decode-attributes (list (list 0 1 0))) #rx"case 0 is malformed")
+         (cons (decode-attributes (list (list 2 1 0 1))) #rx"input is malformed")
+         (cons (decode-attributes (list (list 0 1 2 1))) #rx"output is malformed")
+         (cons (decode-attributes (list (list 0 0 0 1) (list 0 1 1 1)) 0 1)
+               #rx"cases 0 and 1 overlap")
+         (cons (decode-attributes '() 2 1) #rx"default is malformed")))])
+  (check-exn
+   (cdr attributes+message)
+   (lambda ()
+     (preflight_snapshot
+      (operation-design "rtl.decode" (list (flat-type 1)) (flat-type 1)
+                        (car attributes+message))))))
 
 (check-exn #rx"missing required field"
            (lambda ()

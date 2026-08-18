@@ -4,8 +4,10 @@
 
 ## Status
 
-Proposed. No Rosette-backed RHDL implementation or public formal API exists
-yet.
+Implemented through milestone 1b. The optional public equivalence API,
+immutable snapshot boundary, Rosette engine, replayable counterexamples, and
+fully cared deterministic decode semantics have focused and differential
+coverage.
 
 This plan resolves the semantic and package boundaries before implementation.
 The first deliverable is deliberately a deterministic combinational
@@ -206,7 +208,7 @@ values of its driven input places, evaluates the referenced child definition,
 and returns child outputs in declared port order. Instance names and operation
 IDs are identities for diagnostics and memoization, not semantics.
 
-Milestone 1b may add `rtl.decode` only for deterministic relations whose every
+Milestone 1b adds `rtl.decode` only for deterministic relations whose every
 output bit is cared in every row and in the default. Input cubes may remain
 partially cared because they describe deterministic matching. Any free output
 bit keeps the operation unsupported until relational nondeterminism is
@@ -759,10 +761,22 @@ Milestone 1a is complete only when all of the following are true:
   reproduce both formal targets without a linked package workaround.
 - [x] Ordinary RHDL elaboration and host tests do not load or require Rosette.
 
-After this checklist is satisfied, milestone 1b may add deterministic fully
-cared `rtl.decode` with its own exhaustive cube-matching, precedence-
-independence, default, aggregate packing, and malformed-snapshot tests. It must
-not add uncared output semantics or assumptions implicitly.
+### Milestone 1b acceptance checklist
+
+- [x] Fully cared `rtl.decode` cases and defaults execute with exact packed
+  bitvector semantics.
+- [x] Partially cared input cubes match exhaustively and remain independent of
+  case order because verified and preflight snapshots reject overlaps.
+- [x] Flat and aggregate selectors and results preserve canonical packing.
+- [x] Malformed rows, values, masks, defaults, and overlaps fail as snapshot
+  contract errors.
+- [x] Any uncared output bit returns `unsupported` before solver invocation.
+- [x] A structurally different exact-key mux proves equivalent to a partial-
+  cube decode, while a defective row produces a replayable counterexample.
+- [x] CIRCT and Verilator exhaustively agree with the Rosette semantics for the
+  reduced-width decode fixture.
+
+Milestone 1b does not add uncared output semantics or assumptions implicitly.
 
 ### Stage 2: assumptions and property queries
 

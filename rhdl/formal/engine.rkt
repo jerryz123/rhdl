@@ -38,6 +38,7 @@
        "rtl.ult"
        "rtl.slt"
        "rtl.mux_lookup"
+       "rtl.decode"
        "rtl.cast"
        "rtl.concat"
        "rtl.extract"
@@ -160,6 +161,51 @@
      (unless (and (>= (length operands) 3)
                   (= (length keys) (- (length operands) 2)))
        (error 'rhdl-formal "mux snapshot has inconsistent keys and operands"))]
+    ["rtl.decode"
+     (arity 1 1 0)
+     (define cases (required attributes "cases" "decode attributes"))
+     (define default-value
+       (required attributes "default_value" "decode attributes"))
+     (define default-care
+       (required attributes "default_care" "decode attributes"))
+     (unless (list? cases)
+       (error 'rhdl-formal "decode cases must be a list"))
+     (define input-width
+       (value-width (module-value module (first operands))))
+     (define output-width
+       (value-width (module-value module (first results))))
+     (define (pattern-valid? value care width)
+       (define limit (arithmetic-shift 1 width))
+       (and (exact-nonnegative-integer? value)
+            (exact-nonnegative-integer? care)
+            (< value limit)
+            (< care limit)
+            (= value (bitwise-and value care))))
+     (for ([row (in-list cases)] [index (in-naturals)])
+       (unless (and (list? row) (= (length row) 4))
+         (error 'rhdl-formal "decode case ~a is malformed" index))
+       (unless (pattern-valid? (first row) (second row) input-width)
+         (error 'rhdl-formal "decode case ~a input is malformed" index))
+       (unless (pattern-valid? (third row) (fourth row) output-width)
+         (error 'rhdl-formal "decode case ~a output is malformed" index)))
+     (unless (pattern-valid? default-value default-care output-width)
+       (error 'rhdl-formal "decode default is malformed"))
+     (define (patterns-overlap? left right)
+       (zero?
+        (bitwise-and (bitwise-xor (first left) (first right))
+                     (bitwise-and (second left) (second right)))))
+     (for* ([left-index (in-range (length cases))]
+            [right-index (in-range (add1 left-index) (length cases))])
+       (when (patterns-overlap? (list-ref cases left-index)
+                                (list-ref cases right-index))
+         (error 'rhdl-formal "decode cases ~a and ~a overlap"
+                left-index right-index)))
+     (define full-output-care (sub1 (arithmetic-shift 1 output-width)))
+     (unless (and (= default-care full-output-care)
+                  (for/and ([row (in-list cases)])
+                    (= (fourth row) full-output-care)))
+       (unsupported module operation
+                    "formal milestone 1 supports rtl.decode only when every output bit is cared"))]
     [(or "rtl.concat")
      (arity #f 1 0)
      (unless (>= (length operands) 2)
@@ -387,6 +433,20 @@
        (for/fold ([selected default])
                  ([key (in-list keys)] [choice (in-list choices)])
          (if (bveq selector (bv key selector-width)) choice selected))]
+      ["rtl.decode"
+       (define selector (first operands))
+       (define selector-id (first (required operation "operands" "decode")))
+       (define selector-width (value-width (module-value module selector-id)))
+       (define default (bv (operation-attribute operation "default_value") result-width))
+       (for/fold ([selected default])
+                 ([row (in-list (operation-attribute operation "cases"))])
+         (define input-value (first row))
+         (define input-care (second row))
+         (define output-value (third row))
+         (if (bveq (bvand selector (bv input-care selector-width))
+                   (bv input-value selector-width))
+             (bv output-value result-width)
+             selected))]
       ["rtl.cast" (first operands)]
       ["rtl.concat" (pack-concat operands)]
       ["rtl.extract"

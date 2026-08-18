@@ -46,12 +46,13 @@ available:
 make formal-differential-test
 ```
 
-That target proves structurally different shift, aggregate, and hierarchical
-implementations equivalent, obtains live counterexamples for defects in each
-category, and passes those exact packed inputs and outputs to a shared
-CIRCT-generated Verilator DUT. The testbench also exhaustively checks all 128
-reduced-width unequal-shift inputs, 80 aggregate layouts and projections, and
-256 hierarchical arithmetic inputs against independent SystemVerilog oracles.
+That target proves structurally different shift, aggregate, hierarchical, and
+fully cared decode implementations equivalent, obtains live counterexamples
+for defects in each category, and passes those exact packed inputs and outputs
+to a shared CIRCT-generated Verilator DUT. The testbench also exhaustively
+checks all 128 reduced-width unequal-shift inputs, 80 aggregate layouts and
+projections, 256 hierarchical arithmetic inputs, and eight decode selectors
+against independent SystemVerilog oracles.
 Set `CIRCT_OPT=/path/to/circt-opt` when the pinned tool is not installed under
 the current checkout's `.tools/` directory.
 
@@ -83,16 +84,15 @@ operation contract is explicit:
 | Modular arithmetic | `rtl.add`, `rtl.mul`, `rtl.sub` |
 | Shifts | `rtl.shl`, `rtl.shru`, `rtl.shrs`, including unequal operand widths and overshifts |
 | Comparisons | `rtl.eq`, `rtl.ult`, `rtl.slt` |
-| Selection | total `rtl.mux_lookup` |
+| Selection | total `rtl.mux_lookup`; non-overlapping `rtl.decode` with every output bit cared in every case and the default |
 | Packing and widths | `rtl.cast`, `rtl.concat`, `rtl.extract`, `rtl.zext`, `rtl.sext`, `rtl.trunc` |
 | Aggregates | `rtl.record_create`, `rtl.record_get`, `rtl.vector_create`, `rtl.vector_get` |
 
-The engine returns `unsupported` for `rtl.dont_care`, `rtl.decode`,
-`rtl.onehot_mux`, registers, every memory form, assertions, DPI operations,
-and unknown operations. It performs this preflight before allocating symbolic
-inputs or invoking a solver, and it does not invent values or assumptions for
-unspecified behavior. Deterministic fully cared `rtl.decode` remains the
-optional milestone-1b extension described in the plan.
+The engine returns `unsupported` for `rtl.dont_care`, any `rtl.decode` with an
+uncared output bit, `rtl.onehot_mux`, registers, every memory form, assertions,
+DPI operations, and unknown operations. It performs this preflight before
+allocating symbolic inputs or invoking a solver, and it does not invent values
+or assumptions for unspecified behavior.
 
 Counterexample input values and differing output values are nonnegative packed
 integers. Inputs omitted from a partial solver model are completed with zero,

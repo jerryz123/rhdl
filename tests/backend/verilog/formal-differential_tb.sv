@@ -9,6 +9,7 @@ module formal_differential_tb;
   logic [1:0] element2;
   logic [3:0] pair_left;
   logic [3:0] pair_right;
+  logic [2:0] decode_selector;
   logic [2:0] shift_left;
   logic [2:0] shift_right;
   logic [2:0] shift_defect;
@@ -20,6 +21,9 @@ module formal_differential_tb;
   logic [3:0] pair_sum;
   logic [3:0] pair_difference;
   logic [3:0] pair_defect;
+  logic [2:0] decode_reference;
+  logic [2:0] decode_candidate;
+  logic [2:0] decode_defect;
 
   integer model_shift_value = 1;
   integer model_shift_amount = 1;
@@ -33,10 +37,14 @@ module formal_differential_tb;
   integer model_pair_right = 2;
   integer model_pair_reference = 15;
   integer model_pair_defect = 1;
+  integer model_decode_selector = 0;
+  integer model_decode_reference = 1;
+  integer model_decode_defect = 3;
   integer expected_shift_left;
   integer expected_shift_right;
   integer expected_pair_sum;
   integer expected_pair_difference;
+  integer expected_decode;
 
   FormalDifferentialDut dut (
     .shift_value(shift_value),
@@ -48,6 +56,7 @@ module formal_differential_tb;
     .element2(element2),
     .pair_left(pair_left),
     .pair_right(pair_right),
+    .decode_selector(decode_selector),
     .shift_left(shift_left),
     .shift_right(shift_right),
     .shift_defect(shift_defect),
@@ -58,7 +67,10 @@ module formal_differential_tb;
     .record_defect(record_defect),
     .pair_sum(pair_sum),
     .pair_difference(pair_difference),
-    .pair_defect(pair_defect)
+    .pair_defect(pair_defect),
+    .decode_reference(decode_reference),
+    .decode_candidate(decode_candidate),
+    .decode_defect(decode_defect)
   );
 
   initial begin
@@ -74,6 +86,9 @@ module formal_differential_tb;
     void'($value$plusargs("PAIR_RIGHT=%d", model_pair_right));
     void'($value$plusargs("PAIR_REFERENCE=%d", model_pair_reference));
     void'($value$plusargs("PAIR_DEFECT=%d", model_pair_defect));
+    void'($value$plusargs("DECODE_SELECTOR=%d", model_decode_selector));
+    void'($value$plusargs("DECODE_REFERENCE=%d", model_decode_reference));
+    void'($value$plusargs("DECODE_DEFECT=%d", model_decode_defect));
 
     high = 0;
     low = 0;
@@ -82,6 +97,7 @@ module formal_differential_tb;
     element2 = 0;
     pair_left = 0;
     pair_right = 0;
+    decode_selector = 0;
     for (integer value = 0; value < 8; value = value + 1) begin
       for (integer amount = 0; amount < 16; amount = amount + 1) begin
         shift_value = value[2:0];
@@ -94,6 +110,20 @@ module formal_differential_tb;
         assert (shift_right == expected_shift_right[2:0])
           else $fatal(1, "unequal-width right shift mismatch");
       end
+    end
+
+    for (integer selector = 0; selector < 8; selector = selector + 1) begin
+      decode_selector = selector[2:0];
+      case (selector & 3)
+        0: expected_decode = 1;
+        1: expected_decode = 2;
+        default: expected_decode = 7;
+      endcase
+      #1;
+      assert (decode_reference == expected_decode[2:0])
+        else $fatal(1, "decode reference mismatch");
+      assert (decode_candidate == expected_decode[2:0])
+        else $fatal(1, "decode candidate mismatch");
     end
 
     shift_value = 0;
@@ -174,6 +204,15 @@ module formal_differential_tb;
       else $fatal(1, "Rosette hierarchy defect replay mismatch");
     assert (pair_difference != pair_defect)
       else $fatal(1, "Rosette hierarchy counterexample did not reproduce");
+
+    decode_selector = model_decode_selector[2:0];
+    #1;
+    assert (decode_reference == model_decode_reference[2:0])
+      else $fatal(1, "Rosette decode reference replay mismatch");
+    assert (decode_defect == model_decode_defect[2:0])
+      else $fatal(1, "Rosette decode defect replay mismatch");
+    assert (decode_reference != decode_defect)
+      else $fatal(1, "Rosette decode counterexample did not reproduce");
 
     $display("formal differential simulation passed");
     $finish;

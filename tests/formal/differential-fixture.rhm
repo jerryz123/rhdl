@@ -14,7 +14,40 @@ export:
   hierarchy_reference
   hierarchy_candidate
   hierarchy_defect
+  decode_reference
+  decode_candidate
+  decode_defect
   differential_design
+
+fun decoded_value(builder, module_def, selector, implementation):
+  def one = builder.constant(module_def, Bits(3), 0b001)
+  def two = builder.constant(module_def, Bits(3), 0b010)
+  def default_value = builder.constant(module_def, Bits(3), 0b111)
+  if implementation == "reference"
+  | builder.mux_lookup(module_def,
+                       selector,
+                       default_value,
+                       [[0b000, one], [0b100, one],
+                        [0b001, two], [0b101, two]])
+  | builder.decode(module_def,
+                   selector,
+                   Bits(3),
+                   Bits(3),
+                   [[0b000, 0b011,
+                     if implementation == "defect" | 0b011 | 0b001,
+                     0b111],
+                    [0b001, 0b011, 0b010, 0b111]],
+                   0b111,
+                   0b111)
+
+fun build_decode_module(name, implementation):
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module(name)
+  def selector = builder.input(module_def, "selector", Bits(3))
+  def result = builder.output(module_def, "result", Bits(3))
+  builder.drive(result, decoded_value(builder, module_def, selector, implementation))
+  builder.finish(module_def)
 
 fun shifted_by_constants(builder, module_def, value, amount):
   def zero = builder.constant(module_def, Bits(3), 0)
@@ -162,6 +195,7 @@ fun build_differential_design():
   def element2 = builder.input(top, "element2", Bits(2))
   def pair_left = builder.input(top, "pair_left", Bits(4))
   def pair_right = builder.input(top, "pair_right", Bits(4))
+  def decode_selector = builder.input(top, "decode_selector", Bits(3))
 
   def shift_left = builder.output(top, "shift_left", Bits(3))
   def shift_right = builder.output(top, "shift_right", Bits(3))
@@ -174,6 +208,9 @@ fun build_differential_design():
   def pair_sum = builder.output(top, "pair_sum", Bits(4))
   def pair_difference = builder.output(top, "pair_difference", Bits(4))
   def pair_defect = builder.output(top, "pair_defect", Bits(4))
+  def decode_reference_result = builder.output(top, "decode_reference", Bits(3))
+  def decode_candidate_result = builder.output(top, "decode_candidate", Bits(3))
+  def decode_defect_result = builder.output(top, "decode_defect", Bits(3))
 
   def shifted = shifted_by_constants(builder, top, shift_value, shift_amount)
   builder.drive(shift_left, shifted[0])
@@ -199,6 +236,12 @@ fun build_differential_design():
   builder.drive(pair_sum, correct_pair.output("sum"))
   builder.drive(pair_difference, correct_pair.output("difference"))
   builder.drive(pair_defect, defective_pair.output("difference"))
+  builder.drive(decode_reference_result,
+                decoded_value(builder, top, decode_selector, "reference"))
+  builder.drive(decode_candidate_result,
+                decoded_value(builder, top, decode_selector, "candidate"))
+  builder.drive(decode_defect_result,
+                decoded_value(builder, top, decode_selector, "defect"))
   builder.finish(top)
   design
 
@@ -211,4 +254,7 @@ def aggregate_defect = build_aggregate_module("FormalAggregateDefect", "defect")
 def hierarchy_reference = build_hierarchy_module("FormalHierarchyReference", "reference")
 def hierarchy_candidate = build_hierarchy_module("FormalHierarchyCandidate", "candidate")
 def hierarchy_defect = build_hierarchy_module("FormalHierarchyDefect", "defect")
+def decode_reference = build_decode_module("FormalDecodeReference", "reference")
+def decode_candidate = build_decode_module("FormalDecodeCandidate", "candidate")
+def decode_defect = build_decode_module("FormalDecodeDefect", "defect")
 def differential_design = build_differential_design()
