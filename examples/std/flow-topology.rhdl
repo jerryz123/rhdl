@@ -370,6 +370,10 @@ module GateFlowExample(
 endmodule
 }>>|
 def endpoint_first_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic valid; logic [7:0] bits; logic index; } RoundRobinChoice;
+`endif // _TYPESCOPE_rhdl_types
 module EndpointFirstTopology(
   input                                                  clock,
                                                          reset,
@@ -416,33 +420,39 @@ module RRArbiter(
   output                                                 chosen
 );
 
-  reg  next_priority;
-  wire _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
-  wire _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
-  wire _GEN_1 = ingress_0_in.valid & ~ingress_1_in.valid;
-  wire _GEN_2 = next_priority ? _GEN_0 : ~next_priority & _GEN_0;
-  wire _GEN_3 = next_priority ? ~_GEN_1 : ~next_priority & _GEN;
+  reg                        next_priority;
+  wire                       _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
+  wire                       _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
+  wire RoundRobinChoice      _GEN_1 =
+    '{valid: _GEN_0,
+      bits:
+        (_GEN
+           ? ingress_1_in.bits
+           : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits),
+      index: _GEN};
+  wire                       _GEN_2 = ingress_0_in.valid & ~ingress_1_in.valid;
+  wire RoundRobinChoice      _GEN_3 =
+    '{valid: _GEN_0,
+      bits:
+        (_GEN_2
+           ? ingress_0_in.bits
+           : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits),
+      index: (~_GEN_2)};
+  wire RoundRobinChoice[1:0] _GEN_4 = {{_GEN_3}, {_GEN_1}};
+  wire RoundRobinChoice      _GEN_5 = _GEN_4[next_priority];
   always @(posedge clock) begin
     if (reset)
       next_priority <= 1'h0;
     else
-      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
+      next_priority <=
+        _GEN_5.valid & egress_in.ready
+          ? ~_GEN_5.index & _GEN_5.index - 1'h1
+          : next_priority;
   end // always @(posedge)
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_2 & ~_GEN_3)};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_2 & _GEN_3)};
-  assign egress_out =
-    '{valid: _GEN_2,
-      bits:
-        (next_priority
-           ? (_GEN_1
-                ? ingress_0_in.bits
-                : ingress_1_in.valid ? ingress_1_in.bits : ingress_1_in.bits)
-           : ~next_priority
-               ? (_GEN
-                    ? ingress_1_in.bits
-                    : ingress_0_in.valid ? ingress_0_in.bits : ingress_0_in.bits)
-               : ingress_0_in.bits)};
-  assign chosen = _GEN_3;
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_5.valid & ~_GEN_5.index)};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_5.valid & _GEN_5.index)};
+  assign egress_out = '{valid: _GEN_5.valid, bits: _GEN_5.bits};
+  assign chosen = _GEN_5.index;
 endmodule
 
 module Pipe(
