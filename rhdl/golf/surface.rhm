@@ -1,0 +1,114 @@
+#lang rhombus/and_meta
+// Defines compact Golf aliases and circuit forms by expanding to standard RHDL syntax.
+
+import:
+  rhombus/meta open
+  "../frontend/standard.rhm" open
+  "../frontend/support/generator-parameters.rhm".GeneratorParameter
+
+export:
+  B
+  c
+  top
+
+fun B(width):
+  Bits(width)
+
+annot.macro 'B($width)':
+  'Bits($width)'
+
+meta:
+  fun parse_compact_header(groups, location, expression_body):
+    unless groups.length() != 0
+    | syntax_meta.error(
+        if expression_body
+        | "expression-bodied c requires compact inputs and exactly one output"
+        | "expected compact ports in the form inputs: Type -> output: Type",
+        location
+      )
+    def mutable input_names = []
+    for (group in groups.take(groups.length() - 1)):
+      match group
+      | '$(input_name :: Identifier)':
+          input_names := input_names ++ [input_name]
+      | ~else:
+          syntax_meta.error(
+            if expression_body
+            | "expression-bodied c requires compact inputs and exactly one output"
+            | "expected compact ports in the form inputs: Type -> output: Type",
+            group
+          )
+    def final_group = groups[groups.length() - 1]
+    match final_group
+    | '$(last_input_name :: Identifier) -> $(output_name :: Identifier): $(port_type :: Group)':
+        values(input_names ++ [last_input_name],
+               port_type,
+               output_name,
+               port_type)
+    | '$(last_input_name :: Identifier): $(header_body :: Group)':
+        def header_terms = header_body.unwrap_group()
+        def mutable arrow_index = #false
+        for (term in header_terms, index in 0..header_terms.length()):
+          if term matches '->'
+          | block:
+              if arrow_index != #false
+              | syntax_meta.error("compact circuit header requires exactly one ->", term)
+              | arrow_index := index
+          | #void
+        unless arrow_index != #false && arrow_index > 0 && header_terms.length() == arrow_index + 3
+        | syntax_meta.error(
+            if expression_body
+            | "expression-bodied c requires compact inputs and exactly one output"
+            | "expected compact ports in the form inputs: Type -> output: Type",
+            header_body
+          )
+        def input_type = Syntax.make_group(header_terms.take(arrow_index))
+        def output_name_term = header_terms[arrow_index + 1]
+        def output_block = header_terms[arrow_index + 2]
+        match output_name_term
+        | '$(output_name :: Identifier)':
+            match output_block
+            | ': $(output_type :: Group)':
+                values(input_names ++ [last_input_name],
+                       input_type,
+                       output_name,
+                       output_type)
+            | ~else:
+                syntax_meta.error("compact circuit output requires an explicit type", output_block)
+        | ~else:
+            syntax_meta.error("compact circuit requires exactly one named output", output_name_term)
+    | ~else:
+        syntax_meta.error(
+          if expression_body
+          | "expression-bodied c requires compact inputs and exactly one output"
+          | "expected compact ports in the form inputs: Type -> output: Type",
+          final_group
+        )
+
+defn.macro
+| 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...]:
+     $body; ...':
+    def (input_names, input_type, output_name, output_type) = parse_compact_header([header_group, ...], name, #false)
+    let [input_name, ...] = input_names
+    'circuit $name($argument, ...):
+       input $input_name: $input_type
+       ...
+       output $output_name: $output_type
+       $body
+       ...'
+| 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...] = $result ...':
+    def (input_names, input_type, output_name, output_type) = parse_compact_header([header_group, ...], name, #true)
+    let [input_name, ...] = input_names
+    'circuit $name($argument, ...):
+       input $input_name: $input_type
+       ...
+       output $output_name: $output_type
+       $output_name <== ($result ...)'
+
+defn.macro
+| 'top $body ...':
+    def body_terms = [body, ...]
+    unless body_terms.length() != 0
+    | syntax_meta.error("top requires one circuit expression", 'top')
+    def name = Syntax.make_id("design", body_terms[0])
+    'def $name = elaborate($body ...)'

@@ -36,9 +36,11 @@ make examples-rhdl          # built-in language examples only
 make examples-std           # standard-library examples only
 make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only
+make examples-golf          # compact Golf examples only
 make examples-rfpl          # logical and physical RFPL examples only
 make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
+make golf-test              # compact Golf syntax, diagnostics, and profile equivalence
 make riscv-test             # pure RISC-V model and instruction catalogs
 make ridx-test              # finite structural index-space model
 make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses

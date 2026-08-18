@@ -15,6 +15,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
+| [`golf/`](golf/) | Compact `#lang rhdl/golf` syntax over the standard RHDL profile |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`tilelink/`](tilelink/) | Examples owned by the TileLink domain library |
 
@@ -62,6 +63,21 @@ The aggregate equivalence examples make the same boundary executable:
 
 The [frontend guide](../rhdl/frontend/README.md) explains the profiles, and
 the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
+
+## Golf examples
+
+[`golf/adder.rhdl`](golf/adder.rhdl) expresses the same parameterized 8-bit
+adder with the first Golf slice: `B(width)` shortens `Bits(width)`, `c` factors
+one shared port type out of the arrow header, an expression body drives the
+single output, and `top` defines the ordinary elaborated `design`. Its public
+IR and CIRCT MLIR are checked against
+[`lop/adder-standard.rhdl`](lop/adder-standard.rhdl).
+
+Run the Golf example and its colocated Verilog check with:
+
+```sh
+make examples-golf
+```
 
 ## Structural floorplanning
 
@@ -203,7 +219,7 @@ make examples
 ```
 
 The directory-specific targets `examples-rhdl`, `examples-std`, `examples-lop`,
-`examples-rfpl`, and `examples-tilelink` run one ownership group. CI selects
+`examples-golf`, `examples-rfpl`, and `examples-tilelink` run one ownership group. CI selects
 only groups affected by the changed implementation layer: core and frontend
 changes reach every group, standard-library changes reach the RHDL, standard,
 and TileLink groups that import `rhdl/std`, and domain changes remain local to
