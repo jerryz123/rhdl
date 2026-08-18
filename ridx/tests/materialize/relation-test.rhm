@@ -1,0 +1,145 @@
+#lang rhombus
+// Checks symbolic relation algebra, canonical snapshots, and opaque query discipline.
+
+import:
+  "../../model/main.rhm" open
+  "../../materialize/main.rhm" open
+
+fun pair_coordinates(snapshot):
+  snapshot.pairs.map(
+    fun (pair): [pair.source.coordinates, pair.target.coordinates]
+  )
+
+def line = IndexSpace([Axis("x", 4)], ~name: "line")
+def identity = identity_relation(line)
+def forward = shift_relation(line, "x", 1, ~boundary: "drop")
+def backward = shift_relation(line, "x", -1, ~boundary: "drop")
+def wrapped = shift_relation(line, "x", 1, ~boundary: "wrap")
+
+check:
+  identity is_a IdentityRelation ~is #true
+  forward is_a ShiftRelation ~is #true
+  forward.axis_name ~is "x"
+  forward.boundary ~is "drop"
+  materialize_relation(identity).length() ~is 4
+  pair_coordinates(materialize_relation(forward)) ~is [
+    [[0], [1]], [[1], [2]], [[2], [3]]
+  ]
+  pair_coordinates(materialize_relation(backward)) ~is [
+    [[1], [0]], [[2], [1]], [[3], [2]]
+  ]
+  pair_coordinates(materialize_relation(wrapped)) ~is [
+    [[0], [1]], [[1], [2]], [[2], [3]], [[3], [0]]
+  ]
+  materialize_relation(universal_relation(line, line)).length() ~is 16
+
+def source_grid = IndexSpace(
+  [Axis("x", 2), Axis("y", 3)],
+  ~name: "source_grid"
+)
+def target_grid = IndexSpace(
+  [Axis("row", 3), Axis("column", 2)],
+  ~name: "target_grid"
+)
+def permutation = permute_axes(
+  source_grid,
+  target_grid,
+  ["y", "x"]
+)
+
+check:
+  permutation is_a PermutationRelation ~is #true
+  pair_coordinates(materialize_relation(permutation)) ~is [
+    [[0, 0], [0, 0]], [[0, 1], [1, 0]], [[0, 2], [2, 0]],
+    [[1, 0], [0, 1]], [[1, 1], [1, 1]], [[1, 2], [2, 1]]
+  ]
+  permute_axes(source_grid, target_grid, ["x", "x"]) ~throws "repeats source axis x"
+  permute_axes(source_grid, target_grid, ["x"]) ~throws "requires equal ranks"
+  permute_axes(source_grid, target_grid, ["x", "y"]) ~throws "does not match source axis"
+
+def interior = IndexView(
+  line,
+  [line.point([1]), line.point([2])],
+  ~name: "interior"
+)
+def restricted_domain = restrict_domain(wrapped, interior)
+def restricted_range = restrict_range(wrapped, interior)
+
+check:
+  pair_coordinates(materialize_relation(restricted_domain)) ~is [
+    [[1], [2]], [[2], [3]]
+  ]
+  pair_coordinates(materialize_relation(restricted_range)) ~is [
+    [[0], [1]], [[1], [2]]
+  ]
+  pair_coordinates(materialize_relation(converse(forward))) ~is [
+    [[1], [0]], [[2], [1]], [[3], [2]]
+  ]
+
+def both_directions = relation_union(forward, backward)
+def both_directions_reversed = relation_union(backward, forward)
+def common = relation_intersection(wrapped, forward)
+def two_steps = compose_relations(forward, forward)
+
+check:
+  both_directions.describe() ~is both_directions_reversed.describe()
+  pair_coordinates(materialize_relation(both_directions)) ~is [
+    [[0], [1]], [[1], [0]], [[1], [2]],
+    [[2], [1]], [[2], [3]], [[3], [2]]
+  ]
+  pair_coordinates(materialize_relation(common)) ~is [
+    [[0], [1]], [[1], [2]], [[2], [3]]
+  ]
+  pair_coordinates(materialize_relation(two_steps)) ~is [
+    [[0], [2]], [[1], [3]]
+  ]
+
+def foreign_line = IndexSpace([Axis("x", 4)], ~name: "foreign_line")
+def foreign_view = IndexView(
+  foreign_line,
+  [foreign_line.point([0])],
+  ~name: "foreign_view"
+)
+
+check:
+  relation_union(identity_relation(line),
+                 identity_relation(foreign_line)) ~throws "requires equal domains"
+  compose_relations(identity_relation(line),
+                    identity_relation(foreign_line)) ~throws "requires equal domains"
+  restrict_domain(identity, foreign_view) ~throws "is not a subdomain"
+  shift_relation(line, "x", 1, ~boundary: "reflect") ~throws "boundary must be"
+  shift_relation(line, "missing", 1) ~throws "has no axis missing"
+
+def mutable opaque_calls = 0
+def parity = opaque_relation(
+  line,
+  line,
+  "same-parity",
+  fun (source, target):
+    opaque_calls := opaque_calls + 1
+    def difference = source.coordinate("x") - target.coordinate("x")
+    difference == 0 || difference == 2 || difference == -2
+)
+def shared = relation_union(parity, parity)
+
+check:
+  parity is_a OpaquePredicateRelation ~is #true
+  opaque_calls ~is 0
+
+def parity_snapshot = materialize_relation(shared)
+
+check:
+  opaque_calls ~is 16
+  parity_snapshot.length() ~is 8
+  parity_snapshot.contains(line.point([0]), line.point([2])) ~is #true
+  parity_snapshot.contains(line.point([0]), line.point([1])) ~is #false
+
+def non_boolean = opaque_relation(
+  line,
+  line,
+  "bad",
+  fun (_source, _target): "yes"
+)
+
+check:
+  materialize_relation(non_boolean) ~throws "predicate must return a host Boolean"
