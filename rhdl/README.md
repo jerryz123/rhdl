@@ -142,7 +142,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 
 | Layer | Provides | Direct RHDL dependencies |
 |---|---|---|
-| `cast.rhm` | Functional equal-width representation casts and inferred canonical packing to `Bits` | core IR, kernel, field support |
+| `cast.rhm` | Equal-width representation casts plus inferred packing to `Bits` and splitting into uniform vectors | core IR, kernel, field support |
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |

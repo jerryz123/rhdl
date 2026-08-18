@@ -111,7 +111,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/assertions.rhdl`](rhdl/assertions.rhdl) | Reset-suppressed assertions with branch-derived activation guards |
 | [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
 | [`rhdl/bundle.rhdl`](rhdl/bundle.rhdl) | Type-named fixed and elaboration-conditional bundles, recursive literal shadows, muxes, casts, and state |
-| [`rhdl/vector.rhdl`](rhdl/vector.rhdl) | Fixed vectors, selection, packing, aggregate drives, and state |
+| [`rhdl/vector.rhdl`](rhdl/vector.rhdl) | Fixed vectors, selection, `as_bits`/`as_vec` representation changes, aggregate drives, and state |
 | [`rhdl/vector-update.rhdl`](rhdl/vector-update.rhdl) | Functional replacement and dynamic vector-register writes |
 | [`rhdl/table.rhdl`](rhdl/table.rhdl) | Host-generated combinational vector table |
 | [`rhdl/vec-search.rhdl`](rhdl/vec-search.rhdl) | Registered traversal of a host-defined vector pattern |

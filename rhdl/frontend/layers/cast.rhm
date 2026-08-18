@@ -1,15 +1,17 @@
 #lang rhombus
-// Defines the composable generic typed casting layer over the elaboration kernel.
+// Defines generic explicit and shape-inferred representation casts over the kernel.
 
 import:
   "../../core/ir.rhm" open
   "../kernel.rhm".cast as kernel_cast
+  "../kernel.rhm".read as kernel_read
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_as_bits
 
 export:
   cast
   as_bits
+  as_vec
 
 fun cast(entity,
          target_type,
@@ -22,3 +24,25 @@ fun as_bits(entity,
             name = #false,
             location = Location()) :: HardwareFields:
   hardware_as_bits(entity, #'as_bits, "value", name, location)
+
+// Infers a vector length by dividing the source's canonical packed width by
+// one requested element. Element zero receives the least-significant chunk.
+fun as_vec(entity,
+           element_type,
+           name = #false,
+           location = Location()) :: HardwareFields:
+  def source = kernel_read(entity, location)
+  def source_width = packed_width(source.type)
+  unless data_type(source.type) && source_width != #false
+  | error(~who: #'as_vec, "value must have a packable DataType")
+  def element_width:
+    if element_type is_a DataType | packed_width(element_type) | #false
+  unless element_width != #false
+  | error(~who: #'as_vec, "element type must be a packable DataType")
+  unless source_width mod element_width == 0
+  | error(~who: #'as_vec,
+          "value width must be evenly divisible by the element width")
+  def target_type = VectorType(source_width div element_width, element_type)
+  if type_equal(source.type, target_type)
+  | source
+  | kernel_cast(source, target_type, name, location)

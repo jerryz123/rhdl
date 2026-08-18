@@ -11,7 +11,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 
 | Layer | Authoring feature |
 |---|---|
-| [`cast.rhm`](cast.rhm) | Functional equal-width representation casts and inferred packing to `Bits` |
+| [`cast.rhm`](cast.rhm) | Equal-width representation casts plus inferred packing to `Bits` and splitting into uniform vectors |
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
@@ -267,6 +267,10 @@ value and allows the backend to use selector-bit gating and a balanced OR tree.
   bit pattern while changing the hardware type.
 - `as_bits(value)` exposes any packable data value as
   `Bits(packed_width(value.type))`; an existing `Bits` value is unchanged.
+- `as_vec(value, ElementType)` splits any packable data representation into a
+  `Vec` whose inferred length exactly covers the source width. Element zero
+  receives the least-significant element-width chunk, and an existing vector
+  of the inferred type is unchanged.
 
 Indices and ranges are host values known during elaboration. Width changes are
 always explicit.

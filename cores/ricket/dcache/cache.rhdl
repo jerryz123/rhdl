@@ -32,8 +32,6 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   def set_width = alignment_bits(sets)
   def tag_width = width - offset_width - set_width
   def beat_width = index_width(beats)
-  def Line = Vec(beats, Bits(64))
-  def ByteLine = Vec(line_bytes, Bits(8))
 
   interface core(RicketDataAccess(xlen), ~role: responder)
   interface memory(SimpleMemory(width, 8), ~role: requester)
@@ -50,7 +48,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   // with the instruction's WB stage. Responses cannot be backpressured.
   inst responses(ValidPipe(RicketDataResp(xlen), 1))
 
-  reg valid_lines(~init: cast(bits(0, sets), Vec(sets, Bool)))
+  reg valid_lines(~init: as_vec(bits(0, sets), Bool))
   reg store_active(~init: Bool(#false))
   reg store_sent(~init: Bool(#false))
   reg store_address(~init: bits(0, width))
@@ -72,7 +70,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   def lookup_store = lookup.egress.valid & tags.port.response.valid & lookup_request.write
   def lookup_load = lookup.egress.valid & tags.port.response.valid & !lookup_request.write
   def lookup_miss = lookup_load & !line_hit
-  def cached_line = cast(lines.port.response.bits, Line)
+  def cached_line = as_vec(lines.port.response.bits, Bits(64))
   def cached_beat:
     if beats == 1
     | cached_line[0]
@@ -166,7 +164,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), line_bytes):
     address: mux(cache_write, cache_write_set, request_set_value)
     write: cache_write
-    data: cast(mux(install_refill, refill.completion.bits.line, store_line), ByteLine)
+    data: as_vec(mux(install_refill, refill.completion.bits.line, store_line), Bits(8))
     mask: mux(install_refill, !bits(0, line_bytes), store_line_mask)
 
   when install_refill:
