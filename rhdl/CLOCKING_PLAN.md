@@ -8,11 +8,12 @@ RHDL should add backend-independent temporal-domain semantics and expose them
 through a selectable clocking frontend layer.
 
 This is not only a frontend convenience. Clock-domain crossing (CDC) and
-reset-domain crossing (RDC) checks affect the meaning and validity of the
-public hardware IR, so the durable domain facts and their verification belong
-in `rhdl/core/`. Frontend syntax belongs in `rhdl/frontend/layers/`, reusable
-crossing circuits belong in `rhdl/std/`, and implementation attributes and
-constraints remain backend responsibilities.
+reset-domain crossing (RDC) checks must apply uniformly to every producer of
+public hardware IR. Intrinsic hardware facts and explicit crossing operations
+belong in `rhdl/core/`; derived provenance, environment resolution, and reports
+belong in `rhdl/analysis/clocking/`; frontend syntax belongs in
+`rhdl/frontend/layers/`; reusable crossing circuits belong in `rhdl/std/`; and
+implementation attributes and constraints remain backend responsibilities.
 
 CDC enforcement is the first target. Initial RDC support should inventory and
 report reset relationships without rejecting every interaction between
@@ -306,9 +307,12 @@ separate concerns.
 ## Package ownership and proposed files
 
 ```text
-rhdl/core/domains.rhm
-rhdl/core/domain-verify.rhm
 rhdl/core/dependencies.rhm
+
+rhdl/analysis/clocking.rhm
+rhdl/analysis/clocking/types.rhm
+rhdl/analysis/clocking/module.rhm
+rhdl/analysis/clocking/environment.rhm
 
 rhdl/frontend/layers/clocking.rhm
 rhdl/frontend/support/clocking.rhm
@@ -319,20 +323,28 @@ rhdl/std/cdc/handshake.rhdl       # later
 rhdl/std/cdc/event.rhdl           # later
 rhdl/std/cdc/async-fifo.rhdl      # later
 
-tests/core/domain-test.rhm
-tests/core/domain-verify-test.rhm
+tests/analysis/clocking-test.rhm
+tests/analysis/clocking-provenance-test.rhm
+tests/analysis/clocking-environment-test.rhm
 tests/frontend/clocking-fixture.rhdl
 tests/frontend/clocking-test.rhm
 tests/frontend/invalid/*clocking*.rhdl
 tests/backend/clocking-test.rhm
 ```
 
-`rhdl/core/domains.rhm` owns domain declarations, relationships, crossing
-contracts, report objects, and public predicates. `rhdl/core/domain-verify.rhm`
-owns provenance propagation, module summaries, instance substitution, and
-diagnostics. `rhdl/core/dependencies.rhm` owns the shared leaf-sensitive
-dependency semantics consumed by combinational-cycle and temporal analysis.
-`verify.rhm` invokes checks at the appropriate verification boundary.
+`rhdl/core/dependencies.rhm` owns the leaf-sensitive dependency semantics
+shared by intrinsic combinational-cycle verification and optional temporal
+analysis. Core continues to own `Clock` and `Reset` types, explicit operation
+operands, and any future crossing operation whose meaning must survive
+lowering. It does not export report or environment objects.
+
+`rhdl/analysis/clocking/types.rhm` owns clock-use summaries, provenance,
+relationships, environments, and report objects.
+`rhdl/analysis/clocking/module.rhm` owns clock-use certification, provenance
+propagation, reusable module summaries, instance substitution, and diagnostics.
+`rhdl/analysis/clocking/environment.rhm` owns closed-design resolution from an
+explicit top. `rhdl/analysis/clocking.rhm` is their public aggregate. Analysis
+depends on core; core never depends on analysis.
 
 `rhdl/frontend/layers/clocking.rhm` owns selectable public syntax for named
 domains, relationship declarations, top-level environment contracts, domain
@@ -398,17 +410,46 @@ Build the first Phase 1 analysis without changing what designs are accepted:
    multi-clock fan-in.
 5. Expose inspectable summary objects and deterministic text reports.
 
-This slice is implemented. It deliberately adds no domain declarations,
-clock-relationship policy, crossing evidence, frontend syntax, automatic
-verification call, rejection, IR mutation, or backend lowering. Existing
+This slice is implemented in `rhdl/analysis/clocking/`. It deliberately adds
+no domain declarations, clock-relationship policy, crossing evidence,
+frontend syntax, automatic verification call, rejection, IR mutation, or
+backend lowering. Existing
 `sync_circuit` certification remains the enforcement boundary; because those
 circuits already prove one ambient clock locally and propagate it to sync
 children, later closed-design analysis can treat each certified subtree as a
 known single-clock island rather than infer that invariant from dataflow.
 
+### Third slice: closed-design environment resolution
+
+Resolve the symbolic module report at one explicit system boundary without
+changing hardware or acceptance:
+
+1. Require `DesignElaboration`, making its completed top module authoritative.
+2. Give each top data-input aggregate subtree an optional unknown,
+   synchronous-to-clock, or asynchronous timing contract; uncovered leaves
+   remain unknown.
+3. Describe top-clock pairs as identical, derived, asynchronous, or exclusive;
+   an undeclared non-identical pair has an unknown relationship.
+4. Treat declared identical clocks as an equivalence class, but keep exact
+   identity separately visible in reports.
+5. Reclassify every hierarchical sink against the environment as exact-clock,
+   identical, derived, asynchronous, exclusive, unknown-relationship,
+   asynchronous-input, unknown-input, unknown-clock, or multi-clock fan-in.
+6. Reject malformed, overlapping, duplicate, and contradictory analysis
+   declarations while continuing to report all valid designs without CDC
+   enforcement.
+
+This slice is implemented as optional analysis over core IR. It adds no named frontend domains, clocking
+syntax, crossing evidence, verification hook, IR mutation, backend attributes,
+or timing exceptions. A certified `sync_circuit` subtree needs only its top
+boundary contract: its existing invariant already makes all local state and
+sync children share the ambient clock/reset, so contracts are not repeated at
+each child.
+
 ### Phase 1: Semantic inventory and analysis
 
-1. Add core domain, relationship, provenance-summary, and report objects.
+1. Add analysis-owned domain, relationship, provenance-summary, and report
+   objects over stable public core identities.
 2. Define identical, derived, asynchronous, exclusive, and unknown clock
    relationships without changing hardware lowering.
 3. Build leaf-sensitive, hierarchy-aware temporal dependency summaries.
@@ -416,7 +457,7 @@ known single-clock island rather than infer that invariant from dataflow.
    report objects.
 5. Require an explicit `DesignElaboration` top for closed-system environment
    analysis while retaining module-local verification.
-6. Add core tests for constants, aggregates, casts, registers, memories,
+6. Add analysis tests for constants, aggregates, casts, registers, memories,
    instances, reused module definitions, and multi-clock fan-in.
 
 Phase 1 reports crossings but does not yet approve a generated synchronizer.
@@ -494,9 +535,10 @@ The first enforceable release is complete when all of the following hold:
 
 ## Verification workflow
 
-- Add focused core tests before frontend syntax or backend lowering.
-- Mirror supported and invalid uses under `tests/core/`, `tests/frontend/`, and
-  `tests/backend/`.
+- Add focused analysis tests before frontend syntax or backend lowering.
+- Mirror intrinsic IR checks under `tests/core/`, optional analysis under
+  `tests/analysis/`, and supported authoring and lowering under
+  `tests/frontend/` and `tests/backend/`.
 - Test aggregate leaves and hierarchy explicitly; do not rely only on scalar,
   flat examples.
 - Test standard-library crossing circuits semantically and structurally.

@@ -29,8 +29,10 @@ fail_matches() {
   fi
 }
 
-fail_matches "core must not import frontend, backend, or formal modules" \
-  '^[[:space:]]+"[^"]*(frontend|backend|formal)/' rhdl/core
+fail_matches "core must not import analysis, frontend, backend, or formal modules" \
+  '^[[:space:]]+"[^"]*(analysis|frontend|backend|formal)/' rhdl/core
+fail_matches "analysis must depend only on core and other analysis modules" \
+  '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' rhdl/analysis
 fail_matches "host annotations must remain dependency-neutral" \
   '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' host
 fail_matches "frontend must not import backend or formal modules" \
@@ -42,23 +44,23 @@ fail_matches "backend must not import frontend or formal modules" \
 fail_matches "formal engine must not import frontend, backend, or standard-library modules" \
   '(frontend/|backend/|std/)' rhdl/formal
 fail_matches "standard library must not import RHDL implementation packages" \
-  '^[[:space:]]+.*(core/|backend/|frontend/|formal/)' rhdl/std
+  '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
 fail_matches "RHDL packages must not import the external TileLink domain library" \
   '^[[:space:]]+.*tilelink/' rhdl
 fail_matches "RHDL packages must not import the external CHI domain library" \
   '^[[:space:]]+.*chi/' rhdl
 fail_matches "simulation adapters must not import RHDL implementation packages" \
-  '^[[:space:]]+.*(core/|backend/|frontend/)' sim
-fail_matches "standard language assembly must not import core, backend, or formal modules" \
-  '^[[:space:]]+"[^"]*(core|backend|formal)/' rhdl/language.rhm
-fail_matches "base language assembly must not import core, backend, or formal modules" \
-  '^[[:space:]]+"[^"]*(core|backend|formal)/' rhdl/base/language.rhm
-fail_matches "Golf language assembly must not import core, backend, or formal modules" \
-  '^[[:space:]]+"[^"]*(core|backend|formal)/' rhdl/golf/language.rhm
-fail_matches "Golf syntax must not depend on core, backend, optional libraries, or domain packages" \
-  '^[[:space:]]+.*(core/|backend/|formal/|std/|tilelink/|chi/|noc/|rfpl/|riscv/|cores/|sim/)' rhdl/golf/surface.rhm
+  '^[[:space:]]+.*(core/|analysis/|backend/|frontend/)' sim
+fail_matches "standard language assembly must not import analysis, core, backend, or formal modules" \
+  '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/language.rhm
+fail_matches "base language assembly must not import analysis, core, backend, or formal modules" \
+  '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/base/language.rhm
+fail_matches "Golf language assembly must not import analysis, core, backend, or formal modules" \
+  '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/golf/language.rhm
+fail_matches "Golf syntax must not depend on analysis, core, backend, optional libraries, or domain packages" \
+  '^[[:space:]]+.*(analysis/|core/|backend/|formal/|std/|tilelink/|chi/|noc/|rfpl/|riscv/|cores/|sim/)' rhdl/golf/surface.rhm
 fail_matches "the standard frontend must aggregate only the foundation and frontend layers" \
-  '^[[:space:]]+"[^"]*(core/|kernel\.rhm|support/)' rhdl/frontend/standard.rhm
+  '^[[:space:]]+"[^"]*(analysis/|core/|kernel\.rhm|support/)' rhdl/frontend/standard.rhm
 fail_matches "the standard frontend must not implement feature behavior" \
   '^[[:space:]]*(def|fun|class|interface|operator|expr\.|defn\.|annot\.|dot\.|reducer\.)' rhdl/frontend/standard.rhm
 fail_matches "the Golf language assembly must not implement feature behavior" \
@@ -80,8 +82,10 @@ while IFS= read -r layer_file; do
   fi
 done < <(find rhdl/frontend/layers -maxdepth 1 -type f -name '*.rhm' | sort)
 
-fail_matches "core tests must not import backend modules" \
-  '^[[:space:]]+"[^"]*backend/' tests/core
+fail_matches "core tests must not import analysis or backend modules" \
+  '^[[:space:]]+"[^"]*(analysis|backend)/' tests/core
+fail_matches "analysis tests must not import frontend, backend, formal, or standard-library modules" \
+  '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' tests/analysis
 fail_matches "frontend tests must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' tests/frontend
 

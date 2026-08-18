@@ -1,8 +1,9 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test formal-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-std examples-noc examples-lop examples-golf examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-std examples-noc examples-lop examples-golf examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
+ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
 HOST_ANNOTATION_TESTS := $(sort $(wildcard host/tests/*-test.rhm))
 FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*-test.rhm))
 BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
@@ -44,8 +45,11 @@ host-annotation-test:
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(HOST_ANNOTATION_TESTS)
 
 frontend-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_TESTS) $(FRONTEND_TESTS)
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS)
 	bash tests/frontend/run-negative.sh
+
+analysis-test: check-boundaries
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(ANALYSIS_TESTS)
 
 backend-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(BACKEND_TESTS)

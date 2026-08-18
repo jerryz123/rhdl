@@ -7,6 +7,7 @@ Tests mirror the implementation boundaries:
 | Directory | Scope |
 |---|---|
 | [`core/`](core/) | Backend-independent types, IR construction, verification, and primitive semantics |
+| [`analysis/`](analysis/) | Optional backend-independent analyses over completed core IR |
 | [`frontend/`](frontend/) | Language profiles, layers, elaboration, examples, and invalid frontend uses |
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
 | [`formal/`](formal/) | Optional Rosette semantics, equivalence queries, counterexamples, and unsupported cases |
@@ -31,6 +32,7 @@ Run the minimum target that covers a change:
 
 ```sh
 make check-boundaries       # package, dependency, and file-type rules
+make analysis-test          # optional analyses over completed core IR
 make examples               # all canonical example modules
 make examples-rhdl          # built-in language examples only
 make examples-std           # standard-library examples only

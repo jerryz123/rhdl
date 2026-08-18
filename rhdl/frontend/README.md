@@ -35,9 +35,10 @@ The layers have separate responsibilities:
   layers for `#lang rhdl`.
 
 A concept belongs in core when it introduces hardware semantics that the IR,
-verifier, and backends must preserve. Notation, organization, reusable host
-descriptions, and policy over existing operations belong in a frontend layer
-or ordinary library.
+verifier, and backends must preserve. Optional derived facts and diagnostic
+reports belong in `rhdl/analysis/`. Notation, organization, reusable host
+descriptions, and authoring policy over existing operations belong in a
+frontend layer or ordinary library.
 
 ## Language profiles
 

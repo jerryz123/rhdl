@@ -64,6 +64,8 @@ check_no_jobs vlsi/src/rhdl-top.rhdl
 check_matrix_entry rhdl/core/ir.rhm host_matrix ci-host-foundation-test
 check_matrix_entry rhdl/core/ir.rhm circt_matrix ci-circt-language-test
 check_field rhdl/core/ir.rhm fesvr true
+check_matrix_entry rhdl/analysis/clocking.rhm host_matrix ci-host-foundation-test
+check_matrix_entry tests/analysis/clocking-test.rhm host_matrix ci-host-foundation-test
 check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-cores-test
 check_matrix_entry rhdl/std/flow.rhdl circt_matrix ci-circt-std-test
 check_matrix_entry host/annotations.rhm host_matrix ci-host-foundation-test

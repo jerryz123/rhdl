@@ -35,6 +35,9 @@ frontend/layers/* -------------+----> frontend/support/*
                                +----> frontend/kernel ----> core
 frontend/{foundation,layers,support} ---------------------> approved core APIs
 
+frontend/support/clocking ----> analysis/clocking --------> core
+backend and formal tools -----> optional analysis --------> core
+
 backend/circt ---------------------------------------------> core
 formal ----------------------------------------------------> core
 ```
@@ -51,8 +54,9 @@ internal module implementing its shared frontend forms is called the
 |---|---|---|
 | [`../host/`](../host/README.md) | Dependency-neutral host refinement annotations | Rhombus only |
 | [`core/`](core/README.md) | Types, IR, Builder, verification, and printing | Other core modules, `../host/`, and Rhombus libraries |
+| [`analysis/`](analysis/README.md) | Optional certification, provenance, and diagnostic passes over completed public IR | Core and other analysis modules |
 | [`frontend/kernel.rhm`](frontend/kernel.rhm) | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
-| [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, and static-information machinery; not a language profile | Kernel, approved core APIs, other support modules |
+| [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, static-information machinery, and policy certification; not a language profile | Kernel, approved core APIs, approved analyses, other support modules |
 | [`frontend/foundation.rhm`](frontend/foundation.rhm) | Circuits, ports, connections, elaboration, basic types, selection, and casts | Kernel, support, approved core type APIs |
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
@@ -68,21 +72,25 @@ internal module implementing its shared frontend forms is called the
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
 
-The import direction is one-way. Core never imports frontend or backend code;
-frontend code never imports a backend; and a backend never imports frontend
-syntax or elaboration. Layers do not import sibling layers. Shared machinery
-needed by multiple layers belongs in `frontend/support/`. Standard-library
-modules and simulation adapters use public RHDL forms rather than importing
-implementation modules. RFPL is a downstream annotation language: it inspects
-the public RHDL IR but does not construct hardware or import frontend/backend
-implementation modules. RHDL core, frontend, and backend modules never import
-RFPL.
+The import direction is one-way. Core never imports analysis, frontend, or
+backend code. Analysis imports core but not authoring or lowering packages.
+Frontend code never imports a backend; it may use an approved optional analysis
+for certification without making that analysis part of core IR. A backend
+never imports frontend syntax or elaboration. Layers do not import sibling
+layers. Shared machinery needed by multiple layers belongs in
+`frontend/support/`. Standard-library modules and simulation adapters use
+public RHDL forms rather than importing implementation modules. RFPL is a
+downstream annotation language: it inspects the public RHDL IR but does not
+construct hardware or import frontend/backend implementation modules. RHDL
+core, analysis, frontend, and backend modules never import RFPL.
 
 ## Design commitments
 
 - Keep one public hardware IR until a concrete feature requires another.
 - Keep frontend conveniences out of core when existing hardware semantics are
   sufficient.
+- Keep optional reports and policy analyses outside the core API when they can
+  derive their facts from completed IR.
 - Keep backends independent of frontend syntax and metadata.
 - Use CIRCT rather than an RHDL-owned SystemVerilog emitter.
 - Keep widths explicit and elaboration deterministic.

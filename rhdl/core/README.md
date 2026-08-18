@@ -289,10 +289,7 @@ The public object model includes:
 ```text
 Design        DesignElaboration  DpiImport   DpiResult   Module       Operation
 Value         Place              Port        Register    Memory       SyncMemory
-Instance      HardwareType       Location    Origin      Combinational
-SingleClock   MultiClock         ClockGroup  ClockUse
-StaticProvenance  ExternalProvenance  StateProvenance  ControlReference
-OutputLeafProvenance  TemporalSinkInput  TemporalSink  ModuleTemporalSummary
+Instance      HardwareType       Location    Origin
 ```
 
 An operation owns operands, results, places, attributes, a location, and an
@@ -336,44 +333,10 @@ boundaries. `Builder.instance` uses an exact name, while
 `Builder.suggested_instance` deterministically allocates a collision-free name.
 
 The core API is exported by [`main.rhm`](main.rhm). CIRCT is imported
-separately from [`../backend/circt.rhm`](../backend/circt.rhm).
-
-### Clock-use certification
-
-`summarize_module_clocking` inventories every clocked register, memory effect,
-assertion, and DPI effect in one completed module. It returns
-`Combinational`, `SingleClock`, or `MultiClock`; reset use is reported
-separately as `NoReset`, `AmbientReset`, or `LocalReset`. The operation-schema
-dispatcher is exhaustive for sequential and verification operations, so a new
-clocked operation cannot silently escape the inventory.
-
-Clock identity follows only transparent `rtl.wire` aliases. An equal-width
-`rtl.cast` to `Clock` is deliberately not proof that two event streams are the
-same. `verify_single_clock` checks a module's locally owned clocked effects
-against an expected clock without changing the IR or backend output. It does
-not infer value provenance or diagnose CDC paths through module inputs.
-
-### Temporal provenance reports
-
-`summarize_module_temporal` computes a report-only, leaf-sensitive temporal
-summary for a completed module and its instance hierarchy. Origins remain
-`StaticProvenance`, symbolic `ExternalProvenance`, or `StateProvenance` tied to
-the defining operation, concrete instance path, and clock/reset controls.
-Symbolic child inputs are substituted at every instance, so one module
-definition can be reused under different clocks without specialization or
-flattening.
-
-Every register, memory effect, synchronous memory, assertion, and DPI effect
-appears as a `TemporalSink`. Its sampled leaves are classified as static,
-same-clock, foreign-clock, unknown-input, unknown-clock, or multi-clock fan-in.
-`dump_temporal_report` renders the same inspectable objects deterministically.
-These classifications do not yet accept or reject crossings, and report
-construction does not mutate the IR or affect backend output.
-
-Combinational-cycle verification and temporal provenance share the exact
-leaf-dependency rules in `dependencies.rhm`. Records and vectors preserve
-independent leaf paths, while representation-reinterpreting operations such as
-`rtl.cast` conservatively depend on the whole source.
+separately from [`../backend/circt.rhm`](../backend/circt.rhm). Optional
+clock-use and temporal-provenance inspection is exported separately by
+[`../analysis/clocking.rhm`](../analysis/clocking.rhm); those report and
+environment objects are not part of the core API.
 
 ## Verification contract
 

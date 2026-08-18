@@ -1,0 +1,409 @@
+#lang rhombus
+// Resolves symbolic temporal summaries against validated top-level environment contracts.
+
+import:
+  "../../core/types.rhm" open
+  "../../core/ir.rhm" open
+  "../../core/dependencies.rhm" open
+  "types.rhm" open
+  "module.rhm".summarize_module_temporal
+
+export:
+  summarize_design_temporal
+  dump_design_temporal_report
+
+fun fail(message):
+  error(~who: #'summarize_design_temporal, message)
+
+fun contains_identity(items, item):
+  items.find(fun (candidate): candidate === item)
+
+fun same_instance_path(left, right):
+  def mutable same = left.length() == right.length()
+  when same
+  | for (left_step in left,
+         right_step in right):
+      unless left_step === right_step
+      | same := #false
+  same
+
+fun same_control_reference(left, right):
+  left is_a ControlReference && right is_a ControlReference && left.value === right.value && same_instance_path(left.instance_path, right.instance_path)
+
+fun path_prefix(prefix, path):
+  def mutable matches = prefix.length() <= path.length()
+  when matches
+  | for (step in prefix,
+         index in 0..prefix.length()):
+      unless step == path[index]
+      | matches := #false
+  matches
+
+fun type_at_path(type, path):
+  if path.length() == 0
+  | type
+  | block:
+      def step = path[0]
+      cond
+      | record_type(type) && step is_a String:
+          def field = type.fields.find(fun (candidate): candidate.name == step)
+          field && type_at_path(field.type, path.drop(1))
+      | vector_type(type) && step is_a Nat && step < type.length:
+          type_at_path(type.element_type, path.drop(1))
+      | ~else:
+          #false
+
+fun top_input_port(top, value):
+  top.inputs.find(fun (port): port.value === value)
+
+fun valid_top_clock(top, value):
+  top_input_port(top, value) && clock_type(value.type)
+
+fun valid_input_timing(timing):
+  timing is_a UnknownInputTiming || timing is_a SynchronousInputTiming || timing is_a AsynchronousInputTiming
+
+fun relationship_left(relationship):
+  cond
+  | relationship is_a IdenticalClockRelationship: relationship.left
+  | relationship is_a DerivedClockRelationship: relationship.source
+  | relationship is_a AsynchronousClockRelationship: relationship.left
+  | relationship is_a ExclusiveClockRelationship: relationship.left
+  | ~else: #false
+
+fun relationship_right(relationship):
+  cond
+  | relationship is_a IdenticalClockRelationship: relationship.right
+  | relationship is_a DerivedClockRelationship: relationship.destination
+  | relationship is_a AsynchronousClockRelationship: relationship.right
+  | relationship is_a ExclusiveClockRelationship: relationship.right
+  | ~else: #false
+
+fun relationship_kind(relationship):
+  cond
+  | relationship is_a IdenticalClockRelationship: "identical"
+  | relationship is_a DerivedClockRelationship: "derived"
+  | relationship is_a AsynchronousClockRelationship: "asynchronous"
+  | relationship is_a ExclusiveClockRelationship: "exclusive"
+  | ~else: #false
+
+fun direct_identical_neighbor(relationship, clock):
+  cond
+  | !(relationship is_a IdenticalClockRelationship): #false
+  | relationship.left === clock: relationship.right
+  | relationship.right === clock: relationship.left
+  | ~else: #false
+
+fun identical_clock_values(environment, left, right):
+  fun visit(current, visited):
+    cond
+    | current === right: #true
+    | contains_identity(visited, current): #false
+    | ~else:
+        def mutable found = #false
+        for (relationship in environment.clock_relationships):
+          unless found
+          | def neighbor = direct_identical_neighbor(relationship, current)
+            when neighbor
+            | found := visit(neighbor, visited ++ [current])
+        found
+  visit(left, [])
+
+fun same_clock_pair(environment,
+                    left_a,
+                    right_a,
+                    left_b,
+                    right_b):
+  (identical_clock_values(environment, left_a, left_b) && identical_clock_values(environment, right_a, right_b)) || (identical_clock_values(environment, left_a, right_b) && identical_clock_values(environment, right_a, left_b))
+
+fun validate_environment(elaboration, environment):
+  unless environment is_a TemporalEnvironment
+  | fail("environment must be a TemporalEnvironment")
+  def top = elaboration.top
+  for (contract in environment.input_contracts):
+    unless contract is_a TopInputContract
+    | fail("every environment input contract must be a TopInputContract")
+    def port = top_input_port(top, contract.input)
+    unless port
+    | fail("environment input contract must reference an input of top module " ++ top.name)
+    unless data_type(contract.input.type)
+    | fail("environment input contract must reference a data input")
+    unless type_at_path(contract.input.type, contract.path)
+    | fail("environment input contract has an invalid aggregate path for " ++ contract.input.ref())
+    unless valid_input_timing(contract.timing)
+    | fail("environment input contract has an unknown timing kind")
+    when contract.timing is_a SynchronousInputTiming
+    | unless valid_top_clock(top, contract.timing.clock)
+      | fail("synchronous input timing must reference a Clock input of the same top module")
+  for (left in environment.input_contracts,
+       left_index in 0..environment.input_contracts.length()):
+    for (right in environment.input_contracts.drop(left_index + 1)):
+      when left.input === right.input && (path_prefix(left.path, right.path) || path_prefix(right.path, left.path))
+      | fail("environment input contracts must not overlap")
+
+  for (relationship in environment.clock_relationships):
+    def left = relationship_left(relationship)
+    def right = relationship_right(relationship)
+    unless left && right
+    | fail("environment contains an unknown clock relationship")
+    unless valid_top_clock(top, left) && valid_top_clock(top, right)
+    | fail("clock relationships must reference Clock inputs of the same top module")
+    when left === right
+    | fail("a clock relationship must reference two distinct top clocks")
+    when relationship is_a DerivedClockRelationship && relationship.description == ""
+    | fail("a derived clock relationship requires a nonempty description")
+    when relationship is_a ExclusiveClockRelationship && relationship.description == ""
+    | fail("an exclusive clock relationship requires a nonempty description")
+
+  for (left in environment.clock_relationships,
+       left_index in 0..environment.clock_relationships.length()):
+    for (right in environment.clock_relationships.drop(left_index + 1)):
+      def left_kind = relationship_kind(left)
+      def right_kind = relationship_kind(right)
+      def both_nonidentical = !(left is_a IdenticalClockRelationship) && !(right is_a IdenticalClockRelationship)
+      def same_pair = both_nonidentical && same_clock_pair(environment,
+                                                           relationship_left(left),
+                                                           relationship_right(left),
+                                                           relationship_left(right),
+                                                           relationship_right(right))
+      cond
+      | left is_a IdenticalClockRelationship && right is_a IdenticalClockRelationship:
+          def direct_duplicate = (left.left === right.left && left.right === right.right) || (left.left === right.right && left.right === right.left)
+          when direct_duplicate
+          | fail("environment contains a duplicate clock relationship")
+      | same_pair:
+          if left_kind == right_kind
+          | fail("environment contains a duplicate clock relationship")
+          | fail("environment contains contradictory clock relationships")
+      | ~else: #void
+  for (relationship in environment.clock_relationships):
+    unless relationship is_a IdenticalClockRelationship
+    | when identical_clock_values(environment,
+                                  relationship_left(relationship),
+                                  relationship_right(relationship))
+      | fail("a non-identical relationship contradicts the identical clock equivalence")
+  #void
+
+fun contract_for(environment, input, path):
+  environment.input_contracts.find(
+    fun (contract): contract.input === input && path_prefix(contract.path, path)
+  )
+
+fun input_timing(environment, input, path):
+  def contract = contract_for(environment, input, path)
+  if contract | contract.timing | UnknownInputTiming()
+
+fun root_top_control(top, reference):
+  reference.instance_path.length() == 0 && valid_top_clock(top, reference.value)
+
+fun equivalent_control(environment, top, left, right):
+  same_control_reference(left, right) || (root_top_control(top, left) && root_top_control(top, right) && identical_clock_values(environment, left.value, right.value))
+
+fun add_source_clock(clocks, clock, environment, top):
+  if clocks.find(fun (candidate): equivalent_control(environment, top, candidate, clock))
+  | clocks
+  | clocks ++ [clock]
+
+fun relationship_for(environment, top, left, right):
+  if !(root_top_control(top, left) && root_top_control(top, right))
+  | #false
+  | environment.clock_relationships.find(
+      fun (relationship):
+        !(relationship is_a IdenticalClockRelationship) && same_clock_pair(environment,
+                                                                           relationship_left(relationship),
+                                                                           relationship_right(relationship),
+                                                                           left.value,
+                                                                           right.value)
+    )
+
+fun classify_clock_relationship(environment, top, source_clock, destination_clock):
+  def relationship = relationship_for(environment,
+                                      top,
+                                      source_clock,
+                                      destination_clock)
+  cond
+  | same_control_reference(source_clock, destination_clock):
+      SameClock(source_clock)
+  | equivalent_control(environment, top, source_clock, destination_clock):
+      IdenticalClock(source_clock, destination_clock)
+  | relationship is_a DerivedClockRelationship:
+      DerivedClock(source_clock, destination_clock, relationship)
+  | relationship is_a AsynchronousClockRelationship:
+      AsynchronousClock(source_clock, destination_clock, relationship)
+  | relationship is_a ExclusiveClockRelationship:
+      ExclusiveClock(source_clock, destination_clock, relationship)
+  | ~else:
+      UnknownClockRelationship(source_clock, destination_clock)
+
+fun classify_design_input(environment, top, destination_clock, origins):
+  def mutable source_clocks = []
+  def mutable unknown_inputs = []
+  def mutable asynchronous_inputs = []
+  def mutable unknown_states = []
+  for (origin in origins):
+    cond
+    | origin is_a StateProvenance:
+        if origin.clock is_a ControlReference
+        | source_clocks := add_source_clock(source_clocks,
+                                            origin.clock,
+                                            environment,
+                                            top)
+        | unknown_states := unknown_states ++ [origin]
+    | origin is_a ExternalProvenance:
+        def input = top.inputs[origin.input_index].value
+        def timing = input_timing(environment, input, origin.path)
+        cond
+        | timing is_a SynchronousInputTiming:
+            source_clocks := add_source_clock(source_clocks,
+                                              ControlReference([], timing.clock),
+                                              environment,
+                                              top)
+        | timing is_a AsynchronousInputTiming:
+            asynchronous_inputs := asynchronous_inputs ++ [origin]
+        | ~else:
+            unknown_inputs := unknown_inputs ++ [origin]
+    | ~else: #void
+  cond
+  | source_clocks.length() > 1: MultiClockFanIn(source_clocks)
+  | unknown_inputs.length() > 0: UnknownInput(unknown_inputs)
+  | asynchronous_inputs.length() > 0:
+      AsynchronousEnvironmentInput(asynchronous_inputs)
+  | unknown_states.length() > 0: UnknownClock(unknown_states)
+  | source_clocks.length() == 0: StaticInput()
+  | ~else:
+      def source_clock = source_clocks.find(
+        fun (clock): same_control_reference(clock, destination_clock)
+      ) || source_clocks[0]
+      classify_clock_relationship(environment,
+                                  top,
+                                  source_clock,
+                                  destination_clock)
+
+// Resolves only the explicit top boundary. The reusable module summary and its
+// origins remain unchanged; closed-design sinks receive new classifications.
+fun summarize_design_temporal(elaboration :: DesignElaboration,
+                              environment :: TemporalEnvironment = TemporalEnvironment()):
+  validate_environment(elaboration, environment)
+  def module_summary = summarize_module_temporal(elaboration.top)
+  def sinks:
+    for List (sink in module_summary.sinks):
+      def inputs:
+        for List (input in sink.inputs):
+          TemporalSinkInput(input.name,
+                            input.path,
+                            input.origins,
+                            classify_design_input(environment,
+                                                  elaboration.top,
+                                                  sink.clock,
+                                                  input.origins))
+      TemporalSink(sink.instance_path,
+                   sink.operation,
+                   sink.kind,
+                   sink.clock,
+                   inputs)
+  DesignTemporalSummary(elaboration,
+                        environment,
+                        module_summary.output_leaves,
+                        sinks)
+
+fun append_path(name, path):
+  def mutable result = name
+  for (step in path):
+    result := if step is_a String | result ++ "." ++ step | result ++ "[" ++ to_string(step) ++ "]"
+  result
+
+fun operation_name(operation):
+  operation.attribute("name", operation.opcode)
+
+fun hierarchical_name(instance_path, name):
+  def prefix = String.join(
+    instance_path.map(fun (operation): operation.attribute("name", "instance")),
+    "."
+  )
+  if prefix == "" | name | prefix ++ "." ++ name
+
+fun describe_control(reference):
+  hierarchical_name(reference.instance_path, reference.value.ref())
+
+fun describe_timing(timing):
+  cond
+  | timing is_a SynchronousInputTiming:
+      "synchronous " ++ timing.clock.ref()
+  | timing is_a AsynchronousInputTiming: "asynchronous"
+  | ~else: "unknown"
+
+fun describe_relationship(relationship):
+  def left = relationship_left(relationship).ref()
+  def right = relationship_right(relationship).ref()
+  cond
+  | relationship is_a IdenticalClockRelationship:
+      "identical " ++ left ++ " " ++ right
+  | relationship is_a DerivedClockRelationship:
+      "derived " ++ left ++ " " ++ right ++ " " ++ relationship.description
+  | relationship is_a AsynchronousClockRelationship:
+      "asynchronous " ++ left ++ " " ++ right
+  | relationship is_a ExclusiveClockRelationship:
+      "exclusive " ++ left ++ " " ++ right ++ " " ++ relationship.description
+
+fun describe_classification(classification):
+  cond
+  | classification is_a StaticInput: "static"
+  | classification is_a SameClock: "same_clock"
+  | classification is_a IdenticalClock: "identical_clock"
+  | classification is_a DerivedClock: "derived_clock"
+  | classification is_a AsynchronousClock: "asynchronous_clock"
+  | classification is_a ExclusiveClock: "exclusive_clock"
+  | classification is_a UnknownClockRelationship: "unknown_clock_relationship"
+  | classification is_a UnknownInput: "unknown_input"
+  | classification is_a AsynchronousEnvironmentInput: "asynchronous_input"
+  | classification is_a MultiClockFanIn: "multi_clock_fan_in"
+  | classification is_a UnknownClock: "unknown_clock"
+
+fun describe_origin(summary, origin):
+  cond
+  | origin is_a StaticProvenance: "static"
+  | origin is_a ExternalProvenance:
+      def input_name = summary.elaboration.top.inputs[origin.input_index].name
+      "input " ++ append_path(input_name, origin.path)
+  | origin is_a StateProvenance:
+      def name = hierarchical_name(origin.instance_path,
+                                   operation_name(origin.operation))
+      def clock = if origin.clock is_a ControlReference | "@" ++ describe_control(origin.clock) | "@unknown"
+      "state " ++ append_path(name, origin.path) ++ clock
+
+fun append_outputs(lines, summary):
+  def mutable result = lines
+  for (output in summary.output_leaves):
+    def port = summary.elaboration.top.outputs[output.output_index]
+    def origins = String.join(
+      output.origins.map(fun (origin): describe_origin(summary, origin)),
+      ", "
+    )
+    result := result ++ ["  output " ++ append_path(port.name, output.path) ++ " <- " ++ origins]
+  result
+
+fun append_sinks(lines, summary):
+  def mutable result = lines
+  for (sink in summary.sinks):
+    def sink_name = hierarchical_name(sink.instance_path,
+                                      operation_name(sink.operation))
+    result := result ++ ["  sink " ++ sink_name ++ " " ++ sink.kind ++ " clock " ++ describe_control(sink.clock)]
+    for (input in sink.inputs):
+      def origins = String.join(
+        input.origins.map(fun (origin): describe_origin(summary, origin)),
+        ", "
+      )
+      result := result ++ ["    " ++ append_path(input.name, input.path) ++ ": " ++ describe_classification(input.classification) ++ " <- " ++ origins]
+  result
+
+fun dump_design_temporal_report(summary :: DesignTemporalSummary):
+  def top = summary.elaboration.top
+  def mutable lines = ["temporal.design @" ++ top.name]
+  for (port in top.inputs):
+    when data_type(port.type)
+    | for (path in leaf_paths(port.type)):
+        lines := lines ++ ["  input " ++ append_path(port.name, path) ++ ": " ++ describe_timing(input_timing(summary.environment, port.value, path))]
+  for (relationship in summary.environment.clock_relationships):
+    lines := lines ++ ["  clock_relation " ++ describe_relationship(relationship)]
+  lines := append_outputs(lines, summary)
+  lines := append_sinks(lines, summary)
+  String.join(lines, "\n")

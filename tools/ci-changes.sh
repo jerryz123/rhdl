@@ -162,7 +162,7 @@ classify_path() {
     tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|tilelink/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
       host_hygiene=true
       ;;
-    rhdl/core/*|rhdl/frontend/*|rhdl/base/*|rhdl/language.rhm|rhdl/main.rkt)
+    rhdl/core/*|rhdl/analysis/*|rhdl/frontend/*|rhdl/base/*|rhdl/language.rhm|rhdl/main.rkt)
       mark_all
       ;;
     rhdl/std/*)
@@ -185,7 +185,7 @@ classify_path() {
       mark_all_circt
       fesvr=true
       ;;
-    host/*|tests/core/*|tests/frontend/*)
+    host/*|tests/core/*|tests/analysis/*|tests/frontend/*)
       host_foundation=true
       ;;
     tests/backend/*)
