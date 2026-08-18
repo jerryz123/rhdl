@@ -20,8 +20,9 @@ Dependency-neutral host refinements shared by the pure model and hardware
 packages live under [`host/`](host/README.md).
 
 Ridx is the dependency-neutral host library for finite structural index spaces,
-canonical views, point-indexed values, mappings, and symbolic relations. See
-the [Ridx guide](ridx/README.md) and [architecture plan](ridx/PLAN.md).
+canonical views, point-indexed values, mappings, symbolic relations, and
+identity-bearing incidence. See the [Ridx guide](ridx/README.md) and
+[architecture plan](ridx/PLAN.md).
 
 RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
@@ -157,7 +158,8 @@ The current vertical slice includes:
 
 - A pure Ridx host library with named finite product spaces, nominal points,
   canonical subset views, total point-indexed host values, validated mappings,
-  symbolic relation algebra, and canonical immutable materialization.
+  symbolic relation algebra, canonical immutable materialization, and
+  identity-bearing incidence that preserves parallel edges and self-loops.
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
   RHDL logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.

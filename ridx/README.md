@@ -4,9 +4,9 @@
 
 Ridx is a dependency-neutral Rhombus library for finite structural index
 spaces. It gives host-side models and generators stable named coordinates,
-canonical subset views, total point-indexed values, validated mappings, and
-symbolic finite relations without assigning those structures any hardware,
-topology, placement, or scheduling meaning.
+canonical subset views, total point-indexed values, validated mappings,
+symbolic finite relations, and identity-bearing incidence without assigning
+those structures any hardware, topology, placement, or scheduling meaning.
 
 RHDL is a future consumer of Ridx, not part of the Ridx model. Pure Ridx modules
 never import RHDL, CIRCT, NoC, RFPL, or backend packages. Consumer packages are
@@ -18,7 +18,7 @@ The architecture, staged roadmap, and accepted non-goals are recorded in
 
 ## Current API
 
-Milestones 1 and 2 provide:
+Milestones 1 through 3 provide:
 
 - `Axis(name, extent)` for named positive finite axes;
 - `IndexSpace(axes, ~name)` for nominal rectangular product spaces;
@@ -34,7 +34,11 @@ Milestones 1 and 2 provide:
 - inspectable symbolic identity, universal, shift, axis-permutation,
   restriction, converse, union, intersection, composition, and opaque-predicate
   relations; and
-- `materialize_relation` for immutable, canonically ordered pair snapshots.
+- `materialize_relation` for immutable, canonically ordered pair snapshots;
+  and
+- `Incidence(edges, sources, destinations, ~name)` for identity-bearing edges,
+  inverse source and destination fibers, and an inspectable set-valued relation
+  projection.
 
 Spaces are nominal: separately constructed spaces remain distinct even when
 their axes and extents match. Points compare semantically only when they belong
@@ -48,6 +52,12 @@ diagnostic. Constructing a symbolic relation does not enumerate it or invoke an
 opaque predicate. One materialization pass queries every required opaque
 source/target pair at most once, even when the same symbolic node is shared,
 and the resulting snapshot retains no callback.
+
+Incidence retains every nominal edge point even when multiple edges have the
+same endpoints or an edge is a self-loop. Per-edge metadata remains in ordinary
+`Indexed(edges, ...)` values. Materializing `incidence.as_relation()` orders
+pairs by the endpoint domains and deliberately collapses parallel endpoint
+pairs without modifying the incidence object or its metadata.
 
 Import the aggregate model from an ordinary Rhombus module:
 
@@ -86,9 +96,9 @@ def right_neighbor = shift_relation(
 `lib("ridx/materialize/main.rhm")` to convert `right_neighbor` into a canonical
 pair snapshot.
 
-Identity-bearing incidence, the NoC experiment, and the explicit RHDL
-elaboration adapter are later milestones. The current API deliberately does
-not infer connectivity meaning or create hardware.
+The NoC experiment and explicit RHDL elaboration adapter are later milestones.
+The current API deliberately does not infer connectivity meaning or create
+hardware.
 
 ## Focused validation
 
@@ -100,10 +110,12 @@ ridx_compiled_root="$(mktemp -d)"
 PLTCOMPILEDROOTS="$ridx_compiled_root" raco test \
   ridx/tests/model/milestone1-test.rhm \
   ridx/tests/model/mapping-test.rhm \
-  ridx/tests/materialize/relation-test.rhm
+  ridx/tests/materialize/relation-test.rhm \
+  ridx/tests/materialize/incidence-test.rhm
 ```
 
 The tests cover nominal space separation, deterministic enumeration, bounds and
 foreign-point diagnostics, canonical and empty views, total indexed values,
 mapping validation and inverse fibers, every symbolic constructor, canonical
-relation algebra, and exactly-once opaque predicate evaluation.
+relation algebra, exactly-once opaque predicate evaluation, parallel-edge and
+self-loop incidence, per-edge metadata, and set-valued adjacency projection.

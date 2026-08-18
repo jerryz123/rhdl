@@ -1,0 +1,64 @@
+#lang rhombus
+// Defines identity-bearing directed incidence and its set-valued relation projection.
+
+import:
+  "space.rhm" open
+  "view.rhm" open
+  "mapping.rhm" open
+  "relation.rhm" open
+
+export:
+  Incidence
+  IncidenceRelation
+
+fun require_incidence_name(name):
+  unless name == #false || (name is_a String && name.length() > 0)
+  | error(~who: #'Incidence,
+          "name must be #false or a nonempty String")
+  name
+
+fun require_edge_domain(subject, edges, mapping :: Mapping):
+  unless index_domain_equal(edges, mapping.source_domain)
+  | error(~who: #'Incidence,
+          String.append(subject, " mapping domain ",
+                        index_domain_describe(mapping.source_domain),
+                        " does not equal edge domain ", edges.describe()))
+
+class Incidence(edges :: IndexSpace,
+                sources :: Mapping,
+                destinations :: Mapping,
+                name):
+  constructor (edges :: IndexSpace,
+               sources :: Mapping,
+               destinations :: Mapping,
+               ~name: name = #false):
+    require_incidence_name(name)
+    require_edge_domain("source", edges, sources)
+    require_edge_domain("destination", edges, destinations)
+    super(edges, sources, destinations, name)
+
+  method source(edge :: IndexPoint): sources.get(edge)
+  method destination(edge :: IndexPoint): destinations.get(edge)
+
+  method edges_from(source_point :: IndexPoint, ~name: name = #false):
+    sources.inverse_view(source_point, ~name: name)
+
+  method edges_to(destination_point :: IndexPoint, ~name: name = #false):
+    destinations.inverse_view(destination_point, ~name: name)
+
+  method as_relation(): IncidenceRelation(this)
+
+  method describe():
+    if name
+    | name
+    | String.append("Incidence[", edges.describe(), ": ",
+                    index_domain_describe(sources.target_domain), " -> ",
+                    index_domain_describe(destinations.target_domain), "]")
+
+class IncidenceRelation(incidence :: Incidence):
+  implements Relation
+
+  override method source_domain(): incidence.sources.target_domain
+  override method target_domain(): incidence.destinations.target_domain
+  override method describe():
+    "incidence-relation(" ++ incidence.describe() ++ ")"
