@@ -51,6 +51,7 @@ construction rules.
 ridx/
   README.md
   model/
+    domain.rhm
     axis.rhm
     space.rhm
     view.rhm
@@ -87,6 +88,7 @@ into its own identities, metadata, validation artifacts, and plans.
 
 The public model provides:
 
+- `IndexDomain` as the common contract implemented by spaces and views;
 - `Axis(name, extent)` for named positive finite axes;
 - `IndexSpace(axes, ~name)` for nominal rectangular product spaces;
 - bounded `IndexPoint` values with named-coordinate lookup and canonical

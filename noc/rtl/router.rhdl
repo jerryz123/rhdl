@@ -21,29 +21,29 @@ export:
 
 // One beat is one complete packet in this first router implementation. The
 // route key is transport metadata; the payload remains entirely opaque.
-bundle RoutedBeat(T, route_width):
+bundle RoutedBeat(T :: DataType, route_width :: PosInt):
   route_key: Bits(route_width)
   payload: T
 
 // Fixes all widths and local port meanings before circuit elaboration. The
 // current fixed-priority allocator satisfies whole-graph acyclicity but does
 // not yet promise the fairness required by an escape-routing certificate.
-class SimpleRouterConfig(router_plan,
-                         route_decoder,
-                         input_count,
-                         target_count,
-                         input_buffer_depth):
+class SimpleRouterConfig(router_plan :: RouterPlan,
+                         route_decoder :: RouteDecoder,
+                         input_count :: PosInt,
+                         target_count :: PosInt,
+                         input_buffer_depth :: PosInt):
   opaque
   internal _SimpleRouterConfig
   constructor ~none
 
 // Gives every member of one network the same physical shape and one shared
 // route decoder. Each instance ties its site key to an integration constant.
-class SimpleRouterFamilyConfig(router_family_plan,
-                               route_decoder,
-                               input_count,
-                               target_count,
-                               input_buffer_depth):
+class SimpleRouterFamilyConfig(router_family_plan :: RouterFamilyPlan,
+                               route_decoder :: RouterFamilyRouteDecoder,
+                               input_count :: PosInt,
+                               target_count :: PosInt,
+                               input_buffer_depth :: PosInt):
   opaque
   internal _SimpleRouterFamilyConfig
   constructor ~none
@@ -103,7 +103,7 @@ fun monitor_router_ingress(inputs :: Array,
 
 fun monitor_router_family_ingress(
       inputs :: Array,
-      site_key,
+      site_key :: Hardware.bits,
       route_decoder :: RouterFamilyRouteDecoder):
   for (input_index in 0..inputs.length()):
     def input :: Endpoint = inputs[input_index]
@@ -120,7 +120,7 @@ fun monitor_router_family_ingress(
 // Each local origin owns one standard queue of the configured depth. A transfer releases that
 // origin and acquires exactly the selected outgoing VC at the neighboring
 // router, matching the validated one-beat resource model.
-sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
+sync_circuit SimpleRouter(T :: DataType, config :: SimpleRouterConfig):
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
@@ -159,7 +159,8 @@ sync_circuit SimpleRouter(T, config :: SimpleRouterConfig):
 
 // Implements one member of a router family. The site key changes only which
 // prevalidated row is selected; it never changes the routing proof or policy.
-sync_circuit SimpleRouterFamily(T, config :: SimpleRouterFamilyConfig):
+sync_circuit SimpleRouterFamily(T :: DataType,
+                                config :: SimpleRouterFamilyConfig):
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   input site_key: Bits(config.route_decoder.site_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)

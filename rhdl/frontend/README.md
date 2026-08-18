@@ -158,6 +158,11 @@ Generator declarations accept positional and keyword bindings with ordinary
 Rhombus annotations and default expressions. Ordinary and sync circuits share
 the same parameter forms and host-value validation.
 
+Annotate a generic hardware-type parameter as `T :: DataType`; annotate a
+hardware value separately with the most specific hardware annotation its
+operation accepts. This keeps elaboration-time type descriptors distinct from
+runtime circuit values.
+
 Parameters are not serialized, hashed, compared, or embedded into module
 names. Calling a generator creates a fresh definition, with deterministic
 suffixes such as `Adder`, `Adder_1`, and `Adder_2`. Active recursion is
