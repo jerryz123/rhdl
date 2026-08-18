@@ -25,12 +25,24 @@ fun pair_present(pairs, source, target):
     fun (pair): point_equal(pair.source, source) && point_equal(pair.target, target)
   ) != #false
 
+fun relation_pair_less(left :: RelationPair, right :: RelationPair):
+  def left_source = left.source.ordinal()
+  def right_source = right.source.ordinal()
+  if left_source == right_source
+  | left.target.ordinal() < right.target.ordinal()
+  | left_source < right_source
+
 fun canonical_pairs(source_domain, target_domain, supplied_pairs):
+  for (pair in supplied_pairs):
+    unless index_domain_contains(source_domain, pair.source) && index_domain_contains(target_domain, pair.target)
+    | error(~who: #'materialize_relation,
+            "relation pair endpoints do not belong to the declared domains")
+  def sorted = supplied_pairs.sort(relation_pair_less)
   def mutable ordered = []
-  for (source in index_domain_points(source_domain)):
-    for (target in index_domain_points(target_domain)):
-      when pair_present(supplied_pairs, source, target)
-      | ordered := ordered ++ [RelationPair(source, target)]
+  for (pair in sorted):
+    def previous = if ordered == [] | #false | ordered[ordered.length() - 1]
+    unless previous && relation_pair_equal(previous, pair)
+    | ordered := ordered ++ [pair]
   ordered
 
 class MaterializedRelation(source_domain,
@@ -58,12 +70,6 @@ fun snapshot(source_domain, target_domain, supplied_pairs):
     target_domain,
     canonical_pairs(source_domain, target_domain, supplied_pairs)
   )
-
-fun pairs_compose(first_pairs, second_pairs, source, middle, target):
-  pair_present(first_pairs, source, middle) && pair_present(second_pairs, middle, target)
-
-class MaterializationCacheEntry(node :: Relation,
-                                result :: MaterializedRelation)
 
 fun shifted_coordinate(coordinate, extent, delta, boundary):
   def mutable shifted = coordinate + delta
@@ -99,127 +105,19 @@ fun materialize_shift(relation :: ShiftRelation):
         ]
   snapshot(relation.space, relation.space, pairs)
 
-fun materialize_permutation(relation :: PermutationRelation):
-  def pairs:
-    for List (source in relation.source.points()):
-      RelationPair(
-        source,
-        relation.target.point(
-          relation.target_axis_sources.map(
-            fun (axis_name): source.coordinate(axis_name)
-          )
-        )
-      )
-  snapshot(relation.source, relation.target, pairs)
-
 fun materialize_relation(relation :: Relation):
-  def mutable cache = []
-
-  fun materialize_node(node :: Relation):
-    def found = cache.find(fun (entry): entry.node === node)
-    if found
-    | found.result
-    | block:
-        def result:
-          cond
-          | node is_a IdentityRelation:
-              def points = index_domain_points(node.domain)
-              snapshot(
-                node.domain,
-                node.domain,
-                points.map(fun (point): RelationPair(point, point))
-              )
-          | node is_a UniversalRelation:
-              def mutable pairs = []
-              for (source in index_domain_points(node.source)):
-                for (target in index_domain_points(node.target)):
-                  pairs := pairs ++ [RelationPair(source, target)]
-              snapshot(node.source, node.target, pairs)
-          | node is_a ShiftRelation:
-              materialize_shift(node)
-          | node is_a PermutationRelation:
-              materialize_permutation(node)
-          | node is_a DomainRestrictionRelation:
-              def child = materialize_node(node.relation)
-              snapshot(
-                node.view,
-                child.target_domain,
-                child.pairs.filter(
-                  ~keep: fun (pair): node.view.contains(pair.source)
-                )
-              )
-          | node is_a RangeRestrictionRelation:
-              def child = materialize_node(node.relation)
-              snapshot(
-                child.source_domain,
-                node.view,
-                child.pairs.filter(
-                  ~keep: fun (pair): node.view.contains(pair.target)
-                )
-              )
-          | node is_a ConverseRelation:
-              def child = materialize_node(node.relation)
-              snapshot(
-                child.target_domain,
-                child.source_domain,
-                child.pairs.map(
-                  fun (pair): RelationPair(pair.target, pair.source)
-                )
-              )
-          | node is_a UnionRelation:
-              def left = materialize_node(node.operands[0])
-              def right = materialize_node(node.operands[1])
-              snapshot(left.source_domain, left.target_domain,
-                       left.pairs ++ right.pairs)
-          | node is_a IntersectionRelation:
-              def left = materialize_node(node.operands[0])
-              def right = materialize_node(node.operands[1])
-              snapshot(
-                left.source_domain,
-                left.target_domain,
-                left.pairs.filter(
-                  ~keep: fun (pair): pair_present(right.pairs, pair.source, pair.target)
-                )
-              )
-          | node is_a CompositionRelation:
-              def first = materialize_node(node.first)
-              def second = materialize_node(node.second)
-              def mutable pairs = []
-              for (source in index_domain_points(first.source_domain)):
-                for (target in index_domain_points(second.target_domain)):
-                  def connects = index_domain_points(first.target_domain).find(
-                    fun (middle): pairs_compose(first.pairs, second.pairs, source, middle, target)
-                  ) != #false
-                  when connects
-                  | pairs := pairs ++ [RelationPair(source, target)]
-              snapshot(first.source_domain, second.target_domain, pairs)
-          | node is_a IncidenceRelation:
-              def incidence = node.incidence
-              def pairs:
-                for List (edge in incidence.edges.points()):
-                  RelationPair(
-                    incidence.source(edge),
-                    incidence.destination(edge)
-                  )
-              snapshot(node.source_domain(), node.target_domain(), pairs)
-          | node is_a OpaquePredicateRelation:
-              def mutable pairs = []
-              for (source in index_domain_points(node.source)):
-                for (target in index_domain_points(node.target)):
-                  def included = node.predicate(source, target)
-                  unless included is_a Boolean
-                  | error(~who: #'materialize_relation,
-                          String.append("opaque relation ", node.label,
-                                        " predicate must return a host Boolean for ",
-                                        source.describe(), " -> ",
-                                        target.describe()))
-                  when included
-                  | pairs := pairs ++ [RelationPair(source, target)]
-              snapshot(node.source, node.target, pairs)
-          | ~else:
-              error(~who: #'materialize_relation,
-                    "unknown symbolic relation node")
-        cache := cache ++ [MaterializationCacheEntry(node, result)]
-        result
-
-  materialize_node(relation)
+  cond
+  | relation is_a ShiftRelation:
+      materialize_shift(relation)
+  | relation is_a IncidenceRelation:
+      def incidence = relation.incidence
+      def pairs:
+        for List (edge in incidence.edges.points()):
+          RelationPair(
+            incidence.source(edge),
+            incidence.destination(edge)
+          )
+      snapshot(relation.source_domain(), relation.target_domain(), pairs)
+  | ~else:
+      error(~who: #'materialize_relation,
+            "unknown stabilized relation node")

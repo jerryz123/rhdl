@@ -1,0 +1,69 @@
+#lang rhdl
+// Defines the Ridx-driven grid used for exact comparison with explicit RHDL loops.
+
+import:
+  "../../model/main.rhm" open
+  "../../rhdl/main.rhdl" open
+
+circuit GridCell():
+  input seed: Bool
+  input dropped_neighbor: Bool
+  input wrapped_neighbor: Bool
+  output source: Bool
+
+  source <== seed
+
+circuit Grid():
+  def width = 2
+  def height = 3
+  def coordinates = IndexSpace(
+    [Axis("x", width), Axis("y", height)],
+    ~name: "rhdl-grid"
+  )
+  def GridCellModule = GridCell()
+  def cells = for InstanceArray (_point in coordinates.points()):
+    inst cell(GridCellModule)
+
+  for_each_index_point(
+    coordinates,
+    fun (point):
+      cells[point.ordinal()].seed <== Bool(point.coordinate("x") == 1)
+  )
+
+  def west_boundary = select_view(
+    coordinates,
+    fun (point): point.coordinate("x") == 0,
+    ~name: "west-boundary"
+  )
+  for_each_index_point(
+    west_boundary,
+    fun (point):
+      cells[point.ordinal()].dropped_neighbor <== Bool(#false)
+  )
+
+  for_each_relation_pair(
+    shift_relation(coordinates, "x", 1, ~boundary: "drop"),
+    fun (source, destination):
+      cells[destination.ordinal()].dropped_neighbor <== cells[source.ordinal()].source
+  )
+
+  def wrapped_sources = mapping_by(
+    coordinates,
+    coordinates,
+    fun (destination):
+      def y = destination.coordinate("y")
+      def source_y = if y == 0 | height - 1 | y - 1
+      coordinates.point([destination.coordinate("x"), source_y])
+  )
+  for_each_direct_mapping(
+    wrapped_sources,
+    fun (destination, source):
+      cells[destination.ordinal()].wrapped_neighbor <== cells[source.ordinal()].source
+  )
+
+def design = elaborate(Grid())
+
+export:
+  GridCell
+  Grid
+  design

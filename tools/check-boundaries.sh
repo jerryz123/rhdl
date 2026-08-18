@@ -35,6 +35,18 @@ fail_matches "analysis must depend only on core and other analysis modules" \
   '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' rhdl/analysis
 fail_matches "host annotations must remain dependency-neutral" \
   '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' host
+fail_matches "pure Ridx model must remain dependency-neutral" \
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' ridx/model
+fail_matches "pure Ridx materialization must remain dependency-neutral" \
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' ridx/materialize
+fail_matches "the Ridx RHDL adapter must not import implementation or backend packages" \
+  '^[[:space:]]+.*rhdl/(core|frontend|backend|formal)/' ridx/rhdl
+fail_matches "RHDL core must not import Ridx" \
+  '^[[:space:]]+.*ridx/' rhdl/core
+fail_matches "RHDL frontend must not import Ridx" \
+  '^[[:space:]]+.*ridx/' rhdl/frontend
+fail_matches "RHDL backend must not import Ridx" \
+  '^[[:space:]]+.*ridx/' rhdl/backend
 fail_matches "frontend must not import backend or formal modules" \
   '^[[:space:]]+"[^"]*(backend|formal)/' rhdl/frontend
 fail_matches "frontend must not import the optional standard library" \
@@ -114,6 +126,7 @@ fi
 unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './examples/*' ! -path './tests/frontend/*' ! -path './tests/formal/*' ! -path './tests/fesvr/*' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
+  ! -path './ridx/rhdl/*' ! -path './ridx/tests/rhdl/*' \
   ! -path './noc/rtl/*' \
   ! -path './tilelink/*' ! -path './chi/*' \
   ! -path './sim/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"

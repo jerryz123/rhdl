@@ -1,0 +1,38 @@
+#lang rhombus
+// Proves explicit-loop and Ridx-driven grids have identical public IR and CIRCT structure.
+
+import:
+  "../../../rhdl/core/main.rhm" open
+  "../../../rhdl/backend/circt.rhm" open
+  "explicit-grid.rhdl" as explicit_grid
+  "ridx-grid.rhdl" as ridx_grid
+
+def explicit_design = explicit_grid.design
+def ridx_design = ridx_grid.design
+def ridx_top = ridx_design.modules.find(
+  fun (module_def): module_def.name == "Grid"
+)
+def ridx_instances = ridx_top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.instance"
+)
+def instance_names = ["cell", "cell_1", "cell_2",
+                      "cell_3", "cell_4", "cell_5"]
+
+check:
+  verify_design(explicit_design) ~is #void
+  verify_design(ridx_design) ~is #void
+  dump_ir(ridx_design) ~is dump_ir(explicit_design)
+  emit_circt(ridx_design) ~is emit_circt(explicit_design)
+  ridx_instances.length() ~is 6
+  ridx_instances.map(
+    fun (operation): operation.attribute("name")
+  ) ~is instance_names
+  ridx_instances[3].places[1].driver === ridx_instances[0].results[0] ~is #true
+  ridx_instances[4].places[1].driver === ridx_instances[1].results[0] ~is #true
+  ridx_instances[5].places[1].driver === ridx_instances[2].results[0] ~is #true
+  ridx_instances[0].places[2].driver === ridx_instances[2].results[0] ~is #true
+  ridx_instances[1].places[2].driver === ridx_instances[0].results[0] ~is #true
+  ridx_instances[2].places[2].driver === ridx_instances[1].results[0] ~is #true
+  ridx_instances[3].places[2].driver === ridx_instances[5].results[0] ~is #true
+  ridx_instances[4].places[2].driver === ridx_instances[3].results[0] ~is #true
+  ridx_instances[5].places[2].driver === ridx_instances[4].results[0] ~is #true

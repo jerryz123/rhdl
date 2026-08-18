@@ -20,9 +20,8 @@ Dependency-neutral host refinements shared by the pure model and hardware
 packages live under [`host/`](host/README.md).
 
 Ridx is the dependency-neutral host library for finite structural index spaces,
-canonical views, point-indexed values, mappings, symbolic relations, and
-identity-bearing incidence. See the [Ridx guide](ridx/README.md) and
-[architecture plan](ridx/PLAN.md).
+canonical views, point-indexed values, mappings, symbolic axis shifts, and
+identity-bearing incidence. See the [Ridx guide and architecture](ridx/README.md).
 
 RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
@@ -132,7 +131,7 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Shared dependency-neutral host refinements | [`host/README.md`](host/README.md) |
-| Finite structural index spaces and roadmap | [`ridx/README.md`](ridx/README.md), [`ridx/PLAN.md`](ridx/PLAN.md) |
+| Finite structural index spaces and architecture | [`ridx/README.md`](ridx/README.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
 | RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
@@ -158,10 +157,12 @@ The current vertical slice includes:
 
 - A pure Ridx host library with named finite product spaces, nominal points,
   canonical subset views, total point-indexed host values, validated mappings,
-  symbolic relation algebra, canonical immutable materialization, and
+  symbolic axis shifts, canonical immutable materialization, and
   identity-bearing incidence that preserves parallel edges and self-loops. The
   NoC rectangular-mesh generator is its first consumer and lowers Ridx
-  enumeration into the existing NoC authoring model.
+  enumeration into the existing NoC authoring model. A second RHDL grid
+  consumer uses a public-only traversal adapter and produces hardware identical
+  to explicit host-loop construction without extending the frontend or IR.
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
   RHDL logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.
