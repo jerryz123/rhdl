@@ -8,6 +8,7 @@ import:
 
 export:
   B
+  sel
   c
   top
 
@@ -17,93 +18,149 @@ fun B(width):
 annot.macro 'B($width)':
   'Bits($width)'
 
+fun sel(selector, default_value, choice, ...):
+  def choices = [choice, ...]
+  def cases = for List (value in choices, index in 0..choices.length()): [index, value]
+  mux_lookup(selector, ~default: default_value, cases)
+
 meta:
   fun parse_compact_header(groups, location, expression_body):
-    unless groups.length() != 0
-    | syntax_meta.error(
-        if expression_body
-        | "expression-bodied c requires compact inputs and exactly one output"
-        | "expected compact ports in the form inputs: Type -> output: Type",
-        location
-      )
     def mutable input_names = []
-    for (group in groups.take(groups.length() - 1)):
+    def mutable input_types = []
+    def mutable output_names = []
+    def mutable output_types = []
+    def mutable pending_names = []
+    def mutable seen_names = []
+    def mutable seen_arrow = #false
+
+    fun close_typed_group(last_name, port_type, output_side):
+      def group_names = pending_names ++ [last_name]
+      pending_names := []
+      for (port_name in group_names):
+        if port_name.unwrap() in seen_names
+        | syntax_meta.error("compact circuit port name is repeated", port_name)
+        | seen_names := seen_names ++ [port_name.unwrap()]
+        if output_side
+        | block:
+            output_names := output_names ++ [port_name]
+            output_types := output_types ++ [port_type]
+        | block:
+            input_names := input_names ++ [port_name]
+            input_types := input_types ++ [port_type]
+
+    fun start_outputs(arrow_location):
+      if seen_arrow
+      | syntax_meta.error("compact circuit header requires exactly one ->", arrow_location)
+      | #void
+      unless pending_names.length() == 0
+      | syntax_meta.error("compact circuit port group requires an explicit type", pending_names[0])
+      seen_arrow := #true
+
+    fun parse_output_suffix(suffix_terms, arrow_location):
+      if suffix_terms.length() != 0
+      | block:
+          def suffix_group = Syntax.make_group(suffix_terms)
+          match suffix_group
+          | '$(output_name :: Identifier)':
+              pending_names := [output_name]
+          | '$(output_name :: Identifier): $(output_type :: Group)':
+              close_typed_group(output_name, output_type, #true)
+          | ~else:
+              syntax_meta.error("expected compact output names followed by an explicit type", suffix_group)
+      | #void
+
+    for (group in groups):
       match group
-      | '$(input_name :: Identifier)':
-          input_names := input_names ++ [input_name]
-      | ~else:
-          syntax_meta.error(
-            if expression_body
-            | "expression-bodied c requires compact inputs and exactly one output"
-            | "expected compact ports in the form inputs: Type -> output: Type",
-            group
-          )
-    def final_group = groups[groups.length() - 1]
-    match final_group
-    | '$(last_input_name :: Identifier) -> $(output_name :: Identifier): $(port_type :: Group)':
-        values(input_names ++ [last_input_name],
-               port_type,
-               output_name,
-               port_type)
-    | '$(last_input_name :: Identifier): $(header_body :: Group)':
-        def header_terms = header_body.unwrap_group()
-        def mutable arrow_index = #false
-        for (term in header_terms, index in 0..header_terms.length()):
-          if term matches '->'
+      | '$(port_name :: Identifier)':
+          pending_names := pending_names ++ [port_name]
+      | '$(last_input_name :: Identifier) -> $(output_name :: Identifier): $(port_type :: Group)':
+          close_typed_group(last_input_name, port_type, #false)
+          start_outputs(group)
+          close_typed_group(output_name, port_type, #true)
+      | '$(last_name :: Identifier): $(header_body :: Group)':
+          def header_terms = header_body.unwrap_group()
+          def mutable arrow_index = #false
+          for (term in header_terms, index in 0..header_terms.length()):
+            if term matches '->'
+            | block:
+                if arrow_index != #false
+                | syntax_meta.error("compact circuit header requires exactly one ->", term)
+                | arrow_index := index
+            | #void
+          if arrow_index == #false
+          | close_typed_group(last_name, header_body, seen_arrow)
           | block:
-              if arrow_index != #false
-              | syntax_meta.error("compact circuit header requires exactly one ->", term)
-              | arrow_index := index
-          | #void
-        unless arrow_index != #false && arrow_index > 0 && header_terms.length() == arrow_index + 3
-        | syntax_meta.error(
-            if expression_body
-            | "expression-bodied c requires compact inputs and exactly one output"
-            | "expected compact ports in the form inputs: Type -> output: Type",
-            header_body
-          )
-        def input_type = Syntax.make_group(header_terms.take(arrow_index))
-        def output_name_term = header_terms[arrow_index + 1]
-        def output_block = header_terms[arrow_index + 2]
-        match output_name_term
-        | '$(output_name :: Identifier)':
-            match output_block
-            | ': $(output_type :: Group)':
-                values(input_names ++ [last_input_name],
-                       input_type,
-                       output_name,
-                       output_type)
-            | ~else:
-                syntax_meta.error("compact circuit output requires an explicit type", output_block)
-        | ~else:
-            syntax_meta.error("compact circuit requires exactly one named output", output_name_term)
-    | ~else:
-        syntax_meta.error(
-          if expression_body
-          | "expression-bodied c requires compact inputs and exactly one output"
-          | "expected compact ports in the form inputs: Type -> output: Type",
-          final_group
-        )
+              unless arrow_index > 0
+              | syntax_meta.error("compact circuit port group requires an explicit type", header_body)
+              def input_type = Syntax.make_group(header_terms.take(arrow_index))
+              close_typed_group(last_name, input_type, #false)
+              start_outputs(header_terms[arrow_index])
+              parse_output_suffix(header_terms.drop(arrow_index + 1), header_terms[arrow_index])
+      | '->':
+          start_outputs(group)
+      | '-> $(output_name :: Identifier)':
+          start_outputs(group)
+          pending_names := [output_name]
+      | '-> $(output_name :: Identifier): $(output_type :: Group)':
+          start_outputs(group)
+          close_typed_group(output_name, output_type, #true)
+      | ~else:
+          syntax_meta.error("expected compact port names and types around ->", group)
+
+    unless seen_arrow
+    | syntax_meta.error("compact circuit header requires exactly one ->", location)
+    unless pending_names.length() == 0
+    | syntax_meta.error("compact circuit port group requires an explicit type", pending_names[0])
+    if expression_body && output_names.length() != 1
+    | syntax_meta.error("expression-bodied c requires compact inputs and exactly one output", location)
+    | #void
+    values(input_names, input_types, output_names, output_types)
 
 defn.macro
 | 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...]:
      $body; ...':
-    def (input_names, input_type, output_name, output_type) = parse_compact_header([header_group, ...], name, #false)
+    def (input_names, input_types, output_names, output_types) = parse_compact_header([header_group, ...], name, #false)
     let [input_name, ...] = input_names
+    let [input_type, ...] = input_types
+    let [output_name, ...] = output_names
+    let [output_type, ...] = output_types
     'circuit $name($argument, ...):
        input $input_name: $input_type
        ...
        output $output_name: $output_type
+       ...
        $body
        ...'
-| 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...] = $result ...':
-    def (input_names, input_type, output_name, output_type) = parse_compact_header([header_group, ...], name, #true)
+| 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...] = [$result, ...]':
+    def (input_names, input_types, output_names, output_types) = parse_compact_header([header_group, ...], name, #false)
+    def results = [result, ...]
+    unless output_names.length() > 1 && results.length() == output_names.length()
+    | syntax_meta.error("bracket-bodied c requires one expression per multiple output", name)
     let [input_name, ...] = input_names
+    let [input_type, ...] = input_types
+    let [output_name, ...] = output_names
+    let [output_type, ...] = output_types
+    let [result_expression, ...] = results
     'circuit $name($argument, ...):
        input $input_name: $input_type
        ...
        output $output_name: $output_type
-       $output_name <== ($result ...)'
+       ...
+       $output_name <== $result_expression
+       ...'
+| 'c $(name :: Identifier)($(argument :: GeneratorParameter), ...)[$(header_group :: Group), ...] = $result ...':
+    def (input_names, input_types, output_names, output_types) = parse_compact_header([header_group, ...], name, #true)
+    let [input_name, ...] = input_names
+    let [input_type, ...] = input_types
+    let [output_port_name, ...] = output_names
+    let [output_port_type, ...] = output_types
+    def result_name = output_names[0]
+    'circuit $name($argument, ...):
+       input $input_name: $input_type
+       ...
+       output $output_port_name: $output_port_type
+       ...
+       $result_name <== ($result ...)'
 
 defn.macro
 | 'top $body ...':

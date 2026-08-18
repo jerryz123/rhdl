@@ -5,10 +5,11 @@
 ## Status
 
 `#lang rhdl/golf` has its first vertical slice: the profile re-exports standard
-RHDL and implements `B(width)`, homogeneous `c A(w)[a,b->s:B(w)]` headers,
-typed single-output `c` headers with ordinary or expression bodies, and
-default `top`. The compact and canonical adders have focused public-IR and
-CIRCT equivalence coverage plus compact-grammar diagnostics.
+RHDL and implements `B(width)`, homogeneous and heterogeneous compact `c`
+headers, empty port sides, single- and multiple-output expression bodies,
+dense `sel`, and default `top`. The compact and canonical adders and ALUs have
+focused public-IR and CIRCT equivalence coverage plus compact-grammar
+diagnostics.
 
 The remaining surface in this plan is not yet implemented. Golf's purpose is
 source-level code golf: express hardware already supported by RHDL with fewer
@@ -123,8 +124,8 @@ one-off abbreviations.
    before individual punctuation is optimized.
 3. Port order and direction remain visible in the source.
 4. Boundary types remain explicit.
-5. A form with implicit output driving is allowed only when it names exactly
-   one output and therefore has one possible destination.
+5. Expression bodies drive outputs in their declared order and must provide
+   exactly one expression per output.
 6. Compact forms delegate type checking, ownership checking, and connection
    checking to their canonical forms.
 7. Golf-specific validation is limited to the compact grammar itself, such as
@@ -184,7 +185,7 @@ without inferring or omitting the circuit boundary type.
 c Add(width)[a, b: B(width) -> sum: B(width)]:
   sum <== a + b
 
-sc Accumulate(width)[enable: Bool; value: B(width) -> total: B(width)]:
+sc Accumulate(width)[enable: Bool, value: B(width) -> total: B(width)]:
   reg state(~init: b(0, width))
   when enable:
     state <== state + value
@@ -213,8 +214,8 @@ sync_circuit Accumulate(width):
 
 Header rules are:
 
-- `;` separates adjacent groups with different types.
-- A comma-separated name group shares one type.
+- A comma separates names and adjacent typed groups.
+- Bare names accumulate until a `name: Type` annotation closes their group.
 - Each name appears exactly once across the complete port header.
 - The declared order is the canonical port order.
 - Either side of `->` may be empty, but `->` is always present.
@@ -233,7 +234,7 @@ The compact header macro must expand through the public `circuit`,
 `sync_circuit`, `input`, and `output` forms rather than constructing kernel or
 core objects directly.
 
-### Single-output expression circuits
+### Expression-bodied circuits
 
 An ordinary `c` with exactly one output may use an expression body:
 
@@ -250,14 +251,27 @@ circuit Invert(width):
   result <== !value
 ```
 
-The expression is evaluated exactly once while elaborating the circuit. The
-form rejects zero or multiple outputs. `sc` does not initially support an
-expression body because a sequential circuit whose result is purely an
-expression gains little compression and could misleadingly imply state.
+Each expression is evaluated exactly once while elaborating the circuit. A
+single output accepts one ordinary expression. Multiple outputs accept a
+bracketed expression list and are driven positionally in declared order:
 
-Golf v1 does not positionally drive multiple outputs. Such a form would hide
-the output-to-expression association and would require a new product-value
-policy. Multiple-output circuits use an ordinary body with explicit drives.
+```rhombus
+c ALU(w)[a,b:B(w),op:B(3)->result:B(w),equal:Bool]=[sel(op,!a,a&b,a|||b,a^b,a+b,a-b),a===b]
+```
+
+The bracketed form requires at least two outputs and exactly one expression
+per output. Each generated drive delegates ordinary type and one-driver checks
+to canonical RHDL. `sc` does not initially support an expression body because
+a sequential circuit whose result is purely an expression gains little
+compression and could misleadingly imply state.
+
+### Dense selection
+
+`sel(selector, default, choice, ...)` expands to canonical `mux_lookup` cases
+whose keys are the choice indices `0`, `1`, and so on. It compresses dense
+integer lookup tables while keeping the selector, out-of-range default, and
+choice order visible. Sparse or typed-key lookups retain canonical
+`mux_lookup` syntax.
 
 ### Compact top elaboration
 
@@ -428,7 +442,7 @@ Golf macros own only grammar-level diagnostics:
 - malformed or missing `->` in a compact header;
 - missing type after a port group;
 - duplicate port names;
-- an expression body without exactly one output;
+- a bracketed expression count that does not match multiple outputs;
 - unsupported compact interface syntax; and
 - malformed `top` binding syntax.
 
@@ -573,6 +587,9 @@ profile.
 - This file owns the decision, syntax roadmap, milestones, and deferred work.
 - `README.md` owns the implemented Golf quick start, current syntax, semantic
   contract, and user-facing limitations.
+- `COVERAGE.md` owns the cross-reference from canonical core semantics,
+  frontend layers, and standard-library families to implemented, planned,
+  identity, candidate, or non-applicable Golf mappings.
 - `rhdl/README.md` owns the implemented package/profile graph and dependency
   contract.
 - `rhdl/frontend/README.md` owns how Golf relates to standard and base profiles
@@ -626,7 +643,8 @@ design binding.
 ### Milestone 3: compact circuit boundaries
 
 - Implement `c` and `sc` with grouped typed port headers.
-- Implement the single-output expression body for `c`.
+- Implement single- and multiple-output expression bodies for `c`.
+- Implement dense `sel` as a canonical `mux_lookup` abbreviation.
 - Preserve generator parameter grammar and ambient sync behavior.
 - Add header diagnostics and source-location tests.
 

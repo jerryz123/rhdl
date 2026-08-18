@@ -97,6 +97,11 @@ single output, and `top` defines the ordinary elaborated `design`. Its public
 IR and CIRCT MLIR are checked against
 [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl).
 
+[`golf/alu.rhdl`](golf/alu.rhdl) combines heterogeneous port groups, a dense
+`sel` lookup, and a positional multiple-output expression body. Its public IR
+and CIRCT MLIR are checked exactly against
+[`rhdl/alu.rhdl`](rhdl/alu.rhdl).
+
 Run the Golf example and its colocated Verilog check with:
 
 ```sh

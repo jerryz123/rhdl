@@ -62,6 +62,18 @@ c Pass()[value: Byte -> result: B(8)] = value
 It creates no wrapper type and retains the normal `Bits` operators, casts,
 selection behavior, and static information.
 
+### `sel(selector, default, choices...)`
+
+`sel` abbreviates a dense zero-based `mux_lookup`. Choice position supplies
+the canonical key while the out-of-range result stays explicit:
+
+```rhombus
+sel(op,!a,a&b,a|||b,a^b,a+b,a-b)
+```
+
+This expands to keys `0` through `4` with `!a` as the default. It introduces
+no new selection operation and retains ordinary `mux_lookup` type checking.
+
 ### Compact circuits
 
 `c` abbreviates a standard combinational `circuit`. When every port has one
@@ -78,13 +90,21 @@ c A(w)[a,b->s:B(w)]=a+b
 The final type applies to every input and the output. Width and type remain
 explicit; only their repeated spelling is removed.
 
-The first cut also retains a typed-arrow form for circuits whose output type
-differs from the input group:
+Typed groups are separated by commas. Each annotation closes the immediately
+preceding names that do not yet have a type:
 
 ```text
-c Name(parameters...)[input, ...: InputType -> output: OutputType]:
-  body...
+c Name(parameters...)[input,...:Type,input,...:Type->output,...:Type,output,...:Type]=[expressions...]
 ```
+
+```rhombus
+c ALU(w)[a,b:B(w),op:B(3)->result:B(w),equal:Bool]=[sel(op,!a,a&b,a|||b),a===b]
+```
+
+The arrow appears exactly once. Either side may be empty. A bracketed body
+positionally drives multiple outputs in their declared order and must contain
+exactly one expression per output. An ordinary body remains available when
+named drives communicate the structure better.
 
 The ordinary-body form preserves explicit drives:
 
@@ -104,8 +124,8 @@ The expression is parsed inside the generated circuit, so its input bindings
 have the same scope and static information as canonical port declarations.
 Generator parameters retain the complete standard `circuit` parameter grammar.
 
-Additional input type groups, multiple outputs, compact synchronous circuits,
-and compact interfaces are planned rather than implemented.
+Compact synchronous circuits and compact interfaces are planned rather than
+implemented.
 
 ### `top`
 
@@ -159,7 +179,9 @@ Golf compresses spelling, not hardware rules:
   abbreviate it.
 
 The full architecture, admission criteria, milestones, and deferred syntax are
-defined in [`PLAN.md`](PLAN.md).
+defined in [`PLAN.md`](PLAN.md). [`COVERAGE.md`](COVERAGE.md) classifies every
+core semantic group, frontend layer, and standard-library family by its Golf
+mapping policy.
 
 ## Validation
 
