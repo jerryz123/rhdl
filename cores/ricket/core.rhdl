@@ -62,17 +62,28 @@ sync_circuit RicketCore(xlen :: XLen):
   // registers SRAM results to align hits with WB; completion wins when both
   // updates target the same register in one cycle.
   def memory = ex_mem_pipe.egress
-  def Array(commit, scoreboard_set_path) = mem_wb_pipe.egress |> fork_valid(2)
-  def commit_is_load = commit.bits.memory_operation === MemoryOperation.Read
-  def scoreboard_set_valid = commit.valid & commit_is_load & (
-    commit.bits.write_enable
-  ) & or_reduce(commit.bits.rd)
-  def scoreboard_set_index = commit.bits.rd
-  (
-    scoreboard_set_path
-      |> filter_valid(operation => (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
-      |> map_valid(operation => operation.rd)
-  ) |> scoreboard.set
+  def Array(commit_write :: Endpoint, load_completion_write :: Endpoint) = registers.writes
+  def Array(scoreboard_commit, bypass_commit, register_commit) = mem_wb_pipe.egress |> fork_valid(3)
+  def scoreboard_set_event = scoreboard_commit
+    |> filter_valid(operation => (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
+    |> map_valid(operation => operation.rd)
+  scoreboard_set_event |> scoreboard.set
+
+  def writeback_bypass:
+    bypass_commit
+      |> filter_valid(operation => (operation.memory_operation =/= MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
+      |> map_valid(operation => RicketBypass(xlen)):
+        rd: operation.rd
+        value: operation.value
+  writeback_bypass |> writeback_bypass_link.left
+
+  def register_commit_write:
+    register_commit
+      |> filter_valid(operation => (operation.memory_operation =/= MemoryOperation.Read) & operation.write_enable)
+      |> map_valid(operation => RegisterFileWrite(xlen)):
+        address: operation.rd
+        data: operation.value
+  register_commit_write |> commit_write
 
   def valid_load_completions = data_access.response
     |> filter_valid(response => or_reduce(response.tag))
@@ -158,7 +169,7 @@ sync_circuit RicketCore(xlen :: XLen):
   registers.read_address_2 <== rs2
   fun ricket_register_busy(index):
     def stored = scoreboard_busy(register_count, scoreboard.busy, index)
-    def setting = scoreboard_set_valid & (scoreboard_set_index === index)
+    def setting = scoreboard_set_event.valid & (scoreboard_set_event.bits === index)
     def clearing = load_completion.valid & (load_completion.bits.tag === index)
     (stored ||| setting) & !clearing
   def rs1_busy = or_reduce(rs1) & ricket_register_busy(rs1)
@@ -338,28 +349,15 @@ sync_circuit RicketCore(xlen :: XLen):
     rd: memory.bits.rd
     value: memory.bits.result
 
-  // The two register-file write ports accept an ordinary committed WB result
-  // and a committed load completion independently. The L1D's registered hit
-  // response arrives here; a miss completion can arrive later.
-  def immediate_write_valid = commit.valid & commit.bits.write_enable & !commit_is_load
-
-  writeback_bypass_link.left.valid <== immediate_write_valid & or_reduce(commit.bits.rd)
-  writeback_bypass_link.left.bits <== RicketBypass(xlen):
-    rd: commit.bits.rd
-    value: commit.bits.value
-
-  def Array(commit_write :: Endpoint, load_completion_write :: Endpoint) = registers.writes
-  commit_write.valid <== immediate_write_valid
-  commit_write.bits <== RegisterFileWrite(xlen):
-    address: commit.bits.rd
-    data: commit.bits.value
-  (
+  // The second register-file write port accepts a committed load completion
+  // independently. The L1D's registered hit response arrives here; a miss
+  // completion can arrive later.
+  def load_completion_register_write:
     load_completion
-      |> map_valid(response):
-        RegisterFileWrite(xlen):
-          address: response.tag
-          data: response.data
-  ) |> load_completion_write
+      |> map_valid(response => RegisterFileWrite(xlen)):
+        address: response.tag
+        data: response.data
+  load_completion_register_write |> load_completion_write
 
 export:
   RicketCore
