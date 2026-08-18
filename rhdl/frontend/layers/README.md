@@ -777,10 +777,12 @@ without materializing a circuit instance.
 
 - `endpoint |> handle` connects the endpoint to the left end and returns the
   right end while preserving endpoint-shape static information.
+- `endpoint |> endpoint` connects the source to the terminal endpoint and
+  returns `#void`, allowing a complete topology to remain one pipeline.
 - `first_handle |> second_handle` connects their adjacent ends and returns a
   handle owning the two outside ends.
-- `handle <=> endpoint` closes the handle's right end and returns an
-  `InterfaceSink` owning its still-open left end.
+- `handle |> endpoint` performs the same partial termination and returns its
+  `InterfaceSink`, so a detached topology can be assembled from right to left.
 - `endpoint |> sink` completes the topology and returns `#void`; an earlier
   `handle |> sink` retains that handle's left end in a new sink.
 - `parallel_handles(Array(...))` creates one array-shaped handle or sink from
@@ -790,8 +792,8 @@ Handles and sinks are interface-generic: they contain no ready-valid policy,
 buffering, or new core IR. They are linear host objects because consuming one
 twice would attempt to drive an interface destination twice. `<=>` between
 concrete endpoint shapes performs the hardware wiring effect and returns
-`#void`; only the ordered `handle <=> endpoint` form performs partial
-termination and returns a sink.
+`#void`; piping a handle into an endpoint performs partial termination and
+returns a sink.
 
 Configured standard flow stages use the interface topology static-information
 key through `InterfaceTransformResult` to select a dependent result. A known

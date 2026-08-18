@@ -180,9 +180,10 @@ composition vocabulary:
 - `ZipRouteTopology` atomically joins heterogeneous inputs, buffers the joined
   payload, routes by a payload field, and maps both outputs in parallel.
 
-The operator boundary is deliberate: `|>` applies or composes handles and
-returns the still-open end, while `<=>` bulk-connects two concrete endpoint
-shapes. The ordered `handle <=> endpoint` form instead closes one branch and
+The operator boundary is deliberate: `|>` applies or composes handles,
+terminates scalar chains into endpoints, and returns any still-open end, while
+`<=>` bulk-connects endpoint arrays and expresses symmetric refinement
+merge/split wiring. Piping a handle into an endpoint closes one branch and
 returns a sink, allowing `parallel` to terminate heterogeneous branches inside
 one chain. Compact `payload => expression` binders keep maps, zips, and payload
 routing directly inside pipelines; their colon-bodied forms remain available

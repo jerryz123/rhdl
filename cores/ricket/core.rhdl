@@ -72,12 +72,12 @@ sync_circuit RicketCore(xlen :: XLen):
     scoreboard_set_path
       |> filter_valid(operation => (operation.memory_operation === MemoryOperation.Read) & operation.write_enable & or_reduce(operation.rd))
       |> map_valid(operation => operation.rd)
-  ) <=> scoreboard.set
+  ) |> scoreboard.set
 
   def valid_load_completions = data_access.response
     |> filter_valid(response => or_reduce(response.tag))
   def Array(load_completion, scoreboard_clear_path) = valid_load_completions |> fork_valid(2)
-  (scoreboard_clear_path |> map_valid(response => response.tag)) <=> scoreboard.clear
+  scoreboard_clear_path |> map_valid(response => response.tag) |> scoreboard.clear
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -208,7 +208,7 @@ sync_circuit RicketCore(xlen :: XLen):
       rd: rd
       rs1_value: registers.read_data_1
       rs2_value: registers.read_data_2
-  id_ex_pipe.ingress <=> decoded
+  decoded |> id_ex_pipe.ingress
 
   // Execute (EX) consumes the registered ID/EX token. Forwarding is live, so
   // the next Pipe owns the resulting EX/MEM stability under backpressure.
@@ -277,14 +277,13 @@ sync_circuit RicketCore(xlen :: XLen):
   def Array(branch_path, cache_path, pipeline_path) = id_ex |> atomic_fork(3)
 
   (
-    (
-      branch_path
-        |> map_flow(execute_token => BranchResolverRequest(width)):
-          left: forwarded_rs1
-          right: forwarded_rs2
-          control: execute_token.branch_control
-    ) |> to_valid()
-  ) <=> branch_resolver.request
+    branch_path
+      |> map_flow(execute_token => BranchResolverRequest(width)):
+        left: forwarded_rs1
+        right: forwarded_rs2
+        control: execute_token.branch_control
+  ) |> to_valid()
+    |> branch_resolver.request
 
   // A legal memory access starts its synchronous cache lookup at the same
   // edge that captures the instruction in EX/MEM.
@@ -302,19 +301,18 @@ sync_circuit RicketCore(xlen :: XLen):
           execute_token.rd,
           bits(0, 5)
         )
-  ) <=> data_access.request
+  ) |> data_access.request
 
   (
-    (
-      pipeline_path
-        |> filter_flow(execute_token => !execute_fault)
-        |> map_flow(execute_token => ExecuteMemory(xlen)):
-          memory_operation: execute_token.memory_operation
-          writeback_enable: execute_token.writeback_enable
-          rd: execute_token.rd
-          result: execute_result
-    ) |> to_valid()
-  ) <=> ex_mem_pipe.ingress
+    pipeline_path
+      |> filter_flow(execute_token => !execute_fault)
+      |> map_flow(execute_token => ExecuteMemory(xlen)):
+        memory_operation: execute_token.memory_operation
+        writeback_enable: execute_token.writeback_enable
+        rd: execute_token.rd
+        result: execute_result
+  ) |> to_valid()
+    |> ex_mem_pipe.ingress
 
   def execute_transfer = branch_resolver.result.valid
   execute_fault_event <== execute_transfer & execute_fault
@@ -322,7 +320,7 @@ sync_circuit RicketCore(xlen :: XLen):
     branch_resolver.result
       |> filter_valid(branch_result => !execute_fault & branch_result.taken)
       |> map_valid(branch_result => computed_redirect_target)
-  ) <=> redirect_link.left
+  ) |> redirect_link.left
 
   // Memory advances every non-faulting instruction into WB. Non-load results
   // can already bypass here, but no instruction commits at this boundary.
@@ -350,12 +348,18 @@ sync_circuit RicketCore(xlen :: XLen):
     rd: commit.bits.rd
     value: commit.bits.value
 
-  registers.write_enable_1 <== immediate_write_valid
-  registers.write_address_1 <== commit.bits.rd
-  registers.write_data_1 <== commit.bits.value
-  registers.write_enable_2 <== load_completion.valid
-  registers.write_address_2 <== load_completion.bits.tag
-  registers.write_data_2 <== load_completion.bits.data
+  def Array(commit_write :: Endpoint, load_completion_write :: Endpoint) = registers.writes
+  commit_write.valid <== immediate_write_valid
+  commit_write.bits <== RegisterFileWrite(xlen):
+    address: commit.bits.rd
+    data: commit.bits.value
+  (
+    load_completion
+      |> map_valid(response):
+        RegisterFileWrite(xlen):
+          address: response.tag
+          data: response.data
+  ) |> load_completion_write
 
 export:
   RicketCore

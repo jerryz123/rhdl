@@ -64,12 +64,14 @@ result has not returned sets its destination in the standard `Scoreboard` and
 releases the pipeline before its tagged result returns. Decode stalls on
 scoreboard RAW and WAW
 hazards, while independent younger instructions may complete first. A returning
-load clears its destination and writes through the register file's second write
-port. Valid-flow filtering, mapping, and fanout connect both update streams to
-the scoreboard without making its continuously observable busy bitmap into a
-transaction stream. The first write port independently accepts the ordinary
-MEM/WB result, so a load completion never backpressures either feed-forward
-stage. A WB-aligned hit sets and clears the entry without an extra busy cycle.
+load clears its destination and writes through one element of the register
+file's `Valid(RegisterFileWrite(xlen))` write array. Valid-flow filtering,
+mapping, and fanout connect both update streams to the scoreboard without
+making its continuously observable busy bitmap into a transaction stream. The
+other array element independently accepts the ordinary MEM/WB result through
+the same valid-only payload contract, so a load completion never backpressures
+either feed-forward stage. A WB-aligned hit sets and clears the entry without
+an extra busy cycle.
 Scoreboard WAW gating prevents both write ports from validly targeting the same
 register. Stores commit in WB; their earlier cache acceptance is safe because
 all Ricket faults have already been resolved before EX/MEM.

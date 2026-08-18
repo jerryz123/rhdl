@@ -3,18 +3,18 @@
 
 import:
   "../../riscv/isa/xlen.rhm" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+bundle RegisterFileWrite(xlen :: XLen):
+  address: Bits(5)
+  data: Bits(xlen_width(xlen))
 
 sync_circuit RicketRegisterFile(xlen :: XLen):
   def width = xlen_width(xlen)
 
   input read_address_1: Bits(5)
   input read_address_2: Bits(5)
-  input write_enable_1: Bool
-  input write_address_1: Bits(5)
-  input write_data_1: Bits(width)
-  input write_enable_2: Bool
-  input write_address_2: Bits(5)
-  input write_data_2: Bits(width)
+  interface writes[2](Valid(RegisterFileWrite(xlen)), ~role: consumer)
   output read_data_1: Bits(width)
   output read_data_2: Bits(width)
 
@@ -22,40 +22,42 @@ sync_circuit RicketRegisterFile(xlen :: XLen):
   def initial = vec(for List (_index in 0..32): zero)
   reg registers(~init: initial)
 
-  def writing_1 = write_enable_1 & or_reduce(write_address_1)
-  def writing_2 = write_enable_2 & or_reduce(write_address_2)
+  def Array(first_write, second_write) = writes
+  def writing_first = first_write.valid & or_reduce(first_write.bits.address)
+  def writing_second = second_write.valid & or_reduce(second_write.bits.address)
   // Scoreboard WAW gating keeps enabled architectural writes distinct. If that
   // invariant is violated, same-destination write behavior is undefined.
-  when writing_1:
-    registers[write_address_1] <== write_data_1
-  when writing_2:
-    registers[write_address_2] <== write_data_2
+  when writing_first:
+    registers[first_write.bits.address] <== first_write.bits.data
+  when writing_second:
+    registers[second_write.bits.address] <== second_write.bits.data
 
   // Forward each valid write to same-cycle reads; colliding writes are invalid.
   def read_1_zero = !or_reduce(read_address_1)
   def read_2_zero = !or_reduce(read_address_2)
-  def read_1_from_write_1 = writing_1 & (write_address_1 === read_address_1)
-  def read_1_from_write_2 = writing_2 & (write_address_2 === read_address_1)
-  def read_2_from_write_1 = writing_1 & (write_address_1 === read_address_2)
-  def read_2_from_write_2 = writing_2 & (write_address_2 === read_address_2)
+  def read_1_from_first_write = writing_first & (first_write.bits.address === read_address_1)
+  def read_1_from_second_write = writing_second & (second_write.bits.address === read_address_1)
+  def read_2_from_first_write = writing_first & (first_write.bits.address === read_address_2)
+  def read_2_from_second_write = writing_second & (second_write.bits.address === read_address_2)
   read_data_1 <== mux(
     read_1_zero,
     zero,
     mux(
-      read_1_from_write_2,
-      write_data_2,
-      mux(read_1_from_write_1, write_data_1, registers[read_address_1])
+      read_1_from_second_write,
+      second_write.bits.data,
+      mux(read_1_from_first_write, first_write.bits.data, registers[read_address_1])
     )
   )
   read_data_2 <== mux(
     read_2_zero,
     zero,
     mux(
-      read_2_from_write_2,
-      write_data_2,
-      mux(read_2_from_write_1, write_data_1, registers[read_address_2])
+      read_2_from_second_write,
+      second_write.bits.data,
+      mux(read_2_from_first_write, first_write.bits.data, registers[read_address_2])
     )
   )
 
 export:
+  RegisterFileWrite
   RicketRegisterFile

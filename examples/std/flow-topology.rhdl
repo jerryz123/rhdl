@@ -21,12 +21,12 @@ circuit MapFlowExample():
   input tag: Bits(4)
   interface egress(Decoupled(MappedByte()), ~role: producer)
 
-  def mapped:
+  (
     ingress |> map_flow(payload):
       MappedByte():
         data: payload
         tag: tag
-  egress <=> mapped
+  ) |> egress
 
 // Filtering consumes rejected offers, while gating leaves disabled offers
 // pending. Both conservatively expose Decoupled outputs after inspecting live
@@ -36,14 +36,14 @@ circuit FilterFlowExample():
   input keep: Bool
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  (ingress |> filter_flow(payload => keep & or_reduce(payload))) <=> egress
+  ingress |> filter_flow(payload => keep & or_reduce(payload)) |> egress
 
 circuit GateFlowExample():
   interface ingress(Irrevocable(Bits(8)), ~role: consumer)
   input enabled: Bool
   interface egress(Decoupled(Bits(8)), ~role: producer)
 
-  (ingress |> gate_flow(enabled)) <=> egress
+  ingress |> gate_flow(enabled) |> egress
 
 // With concrete endpoints on the left, each handle is applied immediately and
 // the final value is the only still-unconnected endpoint.
@@ -51,10 +51,7 @@ sync_circuit EndpointFirstTopology():
   interface ingress[2](Decoupled(Bits(8)), ~role: consumer)
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
-  def selected = ingress
-                 |> rr_arbiter()
-                 |> pipe(1)
-  egress <=> selected
+  ingress |> rr_arbiter() |> pipe(1) |> egress
 
 // With types on the left, the same operations construct one reusable handle:
 // independently tag two lanes, arbitrate and buffer, atomically fork the
@@ -81,9 +78,9 @@ sync_circuit FanInProjectTopology():
       |> pipe(1)
       |> atomic_fork(2)
       |> parallel(
-           data_path <=> data_egress,
+           data_path |> data_egress,
            (TaggedByte() |> map_flow(tagged => tagged.from_second))
-             <=> origin_egress
+             |> origin_egress
          )
   ingress |> path
 
@@ -105,9 +102,9 @@ sync_circuit ZipRouteTopology():
       |> demux_flow(2, routed => routed.destination)
       |> parallel(
            (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
-             <=> egress[0],
+             |> egress[0],
            (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
-             <=> egress[1]
+             |> egress[1]
          )
   Array(data_ingress, destination_ingress) |> path
 

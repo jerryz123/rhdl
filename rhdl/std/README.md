@@ -308,8 +308,8 @@ inst hazards(Scoreboard(32))
 def reserve_filter = filter_valid(operation => operation.reserve)
 def reserve_index = map_valid(operation => operation.destination)
 def completion_index = map_valid(completion => completion.tag)
-(reservations |> reserve_filter |> reserve_index) <=> hazards.set
-(completions |> completion_index) <=> hazards.clear
+reservations |> reserve_filter |> reserve_index |> hazards.set
+completions |> completion_index |> hazards.clear
 def permitted = requests |> gate_flow(!scoreboard_busy(32, hazards.busy, source))
 ```
 
@@ -477,13 +477,13 @@ Every lowercase flow-stage helper is configured first and receives its input onl
 through Rhombus `|>`. This makes every stage an ordinary unary host function:
 
 ```rhombus
-def buffered = ingress |> queue(4, ~pipe: #true) |> pipe(2)
-egress <=> buffered
+ingress |> queue(4, ~pipe: #true) |> pipe(2) |> egress
 ```
 
 With a concrete endpoint source, each operation connects immediately and
-returns its far endpoint shape. A disconnected topology begins with its
-payload or protocol type exactly once and returns an ordinary `InterfaceHandle`:
+returns its far endpoint shape; a final endpoint terminates the complete
+pipeline. A disconnected topology begins with its payload or protocol type
+exactly once and returns an ordinary `InterfaceHandle`:
 
 ```rhombus
 def path = Request()
@@ -676,9 +676,9 @@ def request_path:
   |> atomic_fork(2)
   |> parallel(
        (TaggedRequest() |> map_flow(tagged => tagged.request))
-         <=> memory_request,
+         |> memory_request,
        (TaggedRequest() |> map_flow(tagged => tagged.processor))
-         <=> owner_queue.ingress
+         |> owner_queue.ingress
      )
 
 Array(fesvr_request, processor_request) |> request_path
@@ -691,14 +691,14 @@ buffered
 |> demux_flow(2, tagged => tagged.processor)
 |> parallel(
      (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
-       <=> fesvr_response,
+       |> fesvr_response,
      (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
-       <=> processor_response
+       |> processor_response
    )
 ```
 
 The endpoint, handle, and sink shapes must match recursively. A
-`handle <=> endpoint` branch closes that handle's output immediately while
+`handle |> endpoint` branch closes that handle's output immediately while
 leaving its input available to the surrounding `parallel`. `zip_flow` is
 deliberately binary; homogeneous multi-input rendezvous remains the role of
 `Join(T, n)`.
