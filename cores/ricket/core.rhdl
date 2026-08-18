@@ -334,19 +334,24 @@ sync_circuit RicketCore(xlen :: XLen):
 
   // Memory advances every non-faulting instruction into WB. Non-load results
   // can already bypass here, but no instruction commits at this boundary.
-  def memory_writes_immediately = memory.bits.writeback_enable & !memory_is_load
+  def Array(memory_writeback_path, memory_bypass_path) = memory |> fork_valid(2)
 
-  mem_wb_pipe.ingress.valid <== memory.valid
-  mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
-    memory_operation: memory.bits.memory_operation
-    write_enable: memory.bits.writeback_enable
-    rd: memory.bits.rd
-    value: memory.bits.result
+  def memory_writeback:
+    memory_writeback_path
+      |> map_valid(operation => MemoryWriteback(xlen)):
+        memory_operation: operation.memory_operation
+        write_enable: operation.writeback_enable
+        rd: operation.rd
+        value: operation.result
+  memory_writeback |> mem_wb_pipe.ingress
 
-  memory_bypass_link.left.valid <== memory.valid & memory_writes_immediately & or_reduce(memory.bits.rd)
-  memory_bypass_link.left.bits <== RicketBypass(xlen):
-    rd: memory.bits.rd
-    value: memory.bits.result
+  def memory_bypass:
+    memory_bypass_path
+      |> filter_valid(operation => operation.writeback_enable & (operation.memory_operation =/= MemoryOperation.Read) & or_reduce(operation.rd))
+      |> map_valid(operation => RicketBypass(xlen)):
+        rd: operation.rd
+        value: operation.result
+  memory_bypass |> memory_bypass_link.left
 
   // The second register-file write port accepts a committed load completion
   // independently. The L1D's registered hit response arrives here; a miss
