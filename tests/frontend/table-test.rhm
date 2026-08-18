@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks host-generated table contents and exhaustive hardware vector lookup.
+// Checks host-generated table contents and direct hardware vector indexing.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -11,8 +11,8 @@ def table_cast = module_def.operations.find(
     operation.opcode == "rtl.cast" && vector_type(operation.results[0].type)
 )
 def table_constant = module_def.find_operation(table_cast.operands[0].defining_op_id)
-def lookup = module_def.operations.find(
-  fun (operation): operation.opcode == "rtl.mux_lookup"
+def dynamic_index = module_def.operations.find(
+  fun (operation): operation.opcode == "rtl.vector_index"
 )
 
 fun packed_bytes(items):
@@ -29,8 +29,6 @@ check:
   table_constant.opcode ~is "rtl.constant"
   type_equal(table_constant.results[0].type, Bits(2048)) ~is #true
   table_constant.attribute("value") ~is packed_bytes(for List (i in 0..256): i)
-  lookup.attribute("keys").length() ~is 256
-  lookup.attribute("keys")[0] ~is 0
-  lookup.attribute("keys")[255] ~is 255
-  type_equal(lookup.results[0].type, Bits(8)) ~is #true
+  dynamic_index.operands[1] === module_def.find_input("addr").value ~is #true
+  type_equal(dynamic_index.results[0].type, Bits(8)) ~is #true
   verify_design(fixture.design) ~is #void

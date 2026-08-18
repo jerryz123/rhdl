@@ -349,7 +349,7 @@ fixture_specs=(
   'vector|vector_tb|examples/rhdl/vector.rhdl|design|verilog_reference'
   'vector-carry||examples/rhdl/vector.rhdl|carry_design|carry_verilog_reference'
   'vector-update|vector_update_tb|examples/rhdl/vector-update.rhdl|design|verilog_reference'
-  'vector-register-update||examples/rhdl/vector-update.rhdl|register_design|register_verilog_reference'
+  'vector-register-update|vector_register_update_tb|examples/rhdl/vector-update.rhdl|register_design|register_verilog_reference'
   'vec-shift-register|vec_shift_register_tb|examples/rhdl/vec-shift-register.rhdl|design|verilog_reference'
   'vec-shift-register-param|vec_shift_register_param_tb|examples/rhdl/vec-shift-register-param.rhdl|design|verilog_reference'
   'predicate-filter|predicate_filter_tb|examples/rhdl/predicate-filter.rhdl|design|verilog_reference'

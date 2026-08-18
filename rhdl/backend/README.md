@@ -62,7 +62,9 @@ numeric suffixes. Anonymous structural records remain inline structs.
 | `rtl.zext` | zero constant plus `comb.concat` |
 | `rtl.sext` | sign-bit extraction plus `comb.concat` |
 | `rtl.record_create/get` | `hw.struct_create/extract` |
-| `rtl.vector_create/get` | `hw.array_create/get` |
+| `rtl.vector_create/get` | `hw.array_create/get` with a host-static index |
+| `rtl.vector_index/inject` | dynamic `hw.array_get/inject` |
+| `rtl.vector_write_set` | symmetric per-element decode and OR merge |
 | `rtl.memory` | `seq.hlmem` |
 | `rtl.memory_read_async` | latency-zero `seq.read` |
 | `rtl.memory_write` | latency-one `seq.write` |
@@ -81,6 +83,11 @@ One-hot mux choices are packed when necessary, AND-gated by their corresponding
 selector bits, reduced through a balanced OR tree, and cast back to their result
 type. The operation deliberately adds no validity detector: zero-hot and
 multi-hot selectors are outside its result contract.
+
+Vector write sets decode every enabled port against every destination element.
+The lowering OR-merges matching data through balanced trees and retains the old
+element when no port matches. It emits neither a priority chain nor collision
+detection; same-index enabled writes are outside the operation's contract.
 
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend

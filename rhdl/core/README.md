@@ -116,7 +116,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Conversion | cast |
 | Width-changing | concat, extract, zero extension, sign extension, truncation |
 | Records | record create and field extraction |
-| Vectors | vector create and host-static element extraction |
+| Vectors | vector create, host-static extraction, dynamic index and injection |
 | Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
 | Sequential | register with optional synchronous reset |
 | Verification | guarded, reset-suppressed clocked assertion |
@@ -143,6 +143,10 @@ record_create(fields matching R)            -> R: RecordType
 record_get(R, field_name)                   -> R.field_type(field_name)
 vector_create(elements matching V)          -> V: VectorType
 vector_get(V, host_index)                    -> V.element_type
+vector_index(V(n, T), Bits(index_width(n))) -> T
+vector_inject(V(n, T), Bits(index_width(n)), T) -> V
+vector_write_set(V(n, T), V(p, Bits(1)),
+                 V(p, Bits(index_width(n))), V(p, T)) -> V
 cast(A: packable, B: same packed width)     -> B
 onehot_mux(Bits(n), n values of T)          -> T: packable DataType
 concat(Bits(a), Bits(b), ...)               -> Bits(a + b + ...)
@@ -166,6 +170,17 @@ Mux keys are unique nonnegative host integers that fit the selector width and
 are normalized into increasing order. Every lookup has a default and at least
 one case. There is no `rtl.mux`: a binary Boolean mux is a frontend
 specialization of `rtl.mux_lookup`.
+
+`rtl.vector_index` and `rtl.vector_inject` use the minimum nonzero selector
+width capable of encoding every element. A selector encoding greater than or
+equal to the vector length is undefined: the operation result is unconstrained,
+and for injection that means the complete result vector is unconstrained.
+Static `rtl.vector_get` remains host-indexed and always in range.
+
+`rtl.vector_write_set` applies an unordered, nonempty collection of enabled
+dynamic writes. Enabled indices must be in range and pairwise distinct. If
+that precondition is violated, the result is undefined: no port has priority
+and backends need not add collision detection. A disabled port has no effect.
 
 `rtl.onehot_mux` is a separate partial selection primitive. Its selector width
 must equal its number of same-typed choices. Exactly one selector bit being set

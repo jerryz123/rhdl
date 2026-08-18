@@ -572,34 +572,45 @@ dynamically computed host value instead of a directly named bundle family.
 produces a reusable `VectorLiteral`; live elements produce a runtime vector
 value. Element zero occupies the least-significant packed slot.
 
-Static host indexing works for readable values and driveable places. A
-hardware `Bits(w)` index may read a `Vec(2^w, T)` with ordinary brackets because
-every selector value names an element; the result is a value, not a driveable
-place. Complete element-wise drives canonicalize to one vector construction and
-whole drive. Dynamic reads with possible out-of-range values and functional
-replacement remain explicit:
+Static host indexing works for readable values and driveable places. A hardware
+`Bits(index_width(n))` index may read a `Vec(n, T)` with ordinary brackets; an
+out-of-range encoding is undefined and makes the result unconstrained.
+Complete element-wise drives canonicalize to one vector construction and whole
+drive. Total dynamic read and functional replacement remain explicit:
 
 ```rhombus
 chosen <== values.lookup(selector, ~default: fallback)
 next_value <== current.updated(selector, replacement)
 ```
 
-Bracket selection and lookup project all elements and build a mux. `updated`
-reconstructs the vector with per-element muxes; an out-of-range selector leaves
-the original vector unchanged. There is no dynamically selected mutable place
-or dedicated dynamic vector-index operation in core.
+Bracket selection lowers to core `rtl.vector_index`. Lookup projects all
+elements and builds a mux with its explicit default. `updated` reconstructs the
+vector with per-element muxes, and an out-of-range selector leaves the original
+vector unchanged.
 
-A direct `Reg<Vec(2^w, T)>` is the one assignable exception:
+A direct `Reg<Vec(n, T)>` is the one dynamically assignable exception:
 
 ```rhombus
 state[selector] <== replacement
 ```
 
-This is frontend sugar for one whole next-state value built with `updated`; the
-unselected elements hold their current values. Existing one-driver and
-conditional-branch checks permit only one such update on each active control
-path. Multiple replacements must be composed explicitly with chained `updated`
-calls. Dynamically selected ordinary vector places remain read-only.
+Repeated assignments describe independent write ports without tuple syntax:
+
+```rhombus
+when write_enable_0:
+  state[address_0] <== data_0
+when write_enable_1:
+  state[address_1] <== data_1
+```
+
+All writes to one register lower together to core `rtl.vector_write_set` and
+one whole next-state driver. Writes in mutually exclusive branches share a
+port; writes in independent conditionals remain independent ports. Enabled
+indices must be in range and pairwise distinct. A collision has undefined
+behavior and no port priority, allowing symmetric decode and merge logic.
+Multiple total functional replacements may still be composed explicitly with
+chained `updated` calls. Dynamically selected ordinary vector places remain
+read-only.
 
 ## Wires
 

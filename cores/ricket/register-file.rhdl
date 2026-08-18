@@ -24,21 +24,14 @@ sync_circuit RicketRegisterFile(xlen :: XLen):
 
   def writing_1 = write_enable_1 & or_reduce(write_address_1)
   def writing_2 = write_enable_2 & or_reduce(write_address_2)
-  // Port 2 carries cache completions and has deterministic priority in stored
-  // state and write-first reads. Scoreboard WAW gating prevents a valid
-  // same-destination collision between the two architectural write paths.
-  def next_registers = vec(
-    for List (index in 0..32):
-      mux(
-        writing_2 & (write_address_2 === bits(index, 5)),
-        write_data_2,
-        mux(writing_1 & (write_address_1 === bits(index, 5)), write_data_1, registers[index])
-      )
-  )
-  when (writing_1 ||| writing_2):
-    registers.next <== next_registers
+  // Scoreboard WAW gating keeps enabled architectural writes distinct. If that
+  // invariant is violated, same-destination write behavior is undefined.
+  when writing_1:
+    registers[write_address_1] <== write_data_1
+  when writing_2:
+    registers[write_address_2] <== write_data_2
 
-  // Define write-first behavior for both ports with the same port-2 priority.
+  // Forward each valid write to same-cycle reads; colliding writes are invalid.
   def read_1_zero = !or_reduce(read_address_1)
   def read_2_zero = !or_reduce(read_address_2)
   def read_1_from_write_1 = writing_1 & (write_address_1 === read_address_1)

@@ -73,6 +73,10 @@ check:
   type_equal(extension, same_extension) ~is #true
   type_equal(extension, other_extension) ~is #false
   type_equal(extension, bits8) ~is #false
+  count_index_width(1) ~is 1
+  count_index_width(2) ~is 1
+  count_index_width(3) ~is 2
+  count_index_width(256) ~is 8
   type_well_formed(
     RecordType([RecordField("invalid", zero_width_extension)])
   ) ~is #false
@@ -92,6 +96,9 @@ check:
   schema_for("rtl.record_get").print_form ~is "record_get"
   schema_for("rtl.vector_create").type_rule ~is "vector_create"
   schema_for("rtl.vector_get").print_form ~is "vector_get"
+  schema_for("rtl.vector_index").type_rule ~is "vector_index"
+  schema_for("rtl.vector_inject").print_form ~is "vector_inject"
+  schema_for("rtl.vector_write_set").type_rule ~is "vector_write_set"
 
 def pair8 = RecordType([RecordField("left", Bits(8)),
                         RecordField("right", Bits(8))])
@@ -257,12 +264,37 @@ block:
   def vector_type = VectorType(2, element_type)
   def first = builder.input(module_def, "first", element_type)
   def second = builder.input(module_def, "second", element_type)
+  def index = builder.input(module_def, "index", Bits(1))
   def output = builder.output(module_def, "output", vector_type)
   def initial = builder.vector_create(module_def,
                                       vector_type,
                                       [first, second],
                                       "initial")
   def selected = builder.vector_get(module_def, initial, 1, "selected")
+  def dynamic = builder.vector_index(module_def, initial, index, "dynamic")
+  def injected = builder.vector_inject(module_def,
+                                       initial,
+                                       index,
+                                       first,
+                                       "injected")
+  def enables = builder.vector_create(module_def,
+                                      VectorType(2, Bits(1)),
+                                      [index, index],
+                                      "enables")
+  def indices = builder.vector_create(module_def,
+                                      VectorType(2, Bits(1)),
+                                      [index, index],
+                                      "indices")
+  def elements = builder.vector_create(module_def,
+                                       VectorType(2, element_type),
+                                       [first, second],
+                                       "elements")
+  def written = builder.vector_write_set(module_def,
+                                         initial,
+                                         enables,
+                                         indices,
+                                         elements,
+                                         "written")
   def packed = builder.cast(module_def, initial, Bits(8), "packed")
   def restored = builder.cast(module_def, packed, vector_type, "restored")
   builder.drive(builder.project_vector(output, 0), first)
@@ -270,12 +302,18 @@ block:
   builder.finish(module_def)
   check:
     type_equal(selected.type, element_type) ~is #true
+    type_equal(dynamic.type, element_type) ~is #true
+    type_equal(injected.type, vector_type) ~is #true
+    type_equal(written.type, vector_type) ~is #true
     type_equal(output.driver.type, vector_type) ~is #true
     type_equal(restored.type, vector_type) ~is #true
     module_def.operations.filter(
       ~keep: fun (operation): operation.opcode == "rtl.vector_create"
-    ).length() ~is 2
+    ).length() ~is 5
     dump_ir(design).contains("rtl.vector_get %initial[1]") ~is #true
+    dump_ir(design).contains("rtl.vector_index %initial[%index]") ~is #true
+    dump_ir(design).contains("rtl.vector_inject %initial[%index] = %first") ~is #true
+    dump_ir(design).contains("rtl.vector_write_set %initial enables %enables indices %indices elements %elements") ~is #true
     verify_design(design) ~is #void
 
 block:
@@ -284,7 +322,18 @@ block:
   def module_def = builder.module("BadVectors")
   def wide = builder.input(module_def, "wide", Bits(4))
   def narrow = builder.input(module_def, "narrow", Bits(2))
+  def exact_index = builder.input(module_def, "exact_index", Bits(1))
   def pair = VectorType(2, Bits(4))
+  def value = builder.vector_create(module_def, pair, [wide, wide])
+  def enables = builder.vector_create(module_def,
+                                      VectorType(2, Bits(1)),
+                                      [exact_index, exact_index])
+  def indices = builder.vector_create(module_def,
+                                      VectorType(2, Bits(1)),
+                                      [exact_index, exact_index])
+  def elements = builder.vector_create(module_def,
+                                       VectorType(2, Bits(4)),
+                                       [wide, wide])
   check:
     builder.vector_create(module_def, pair, [wide]) ~throws "exactly one value"
     builder.vector_create(module_def, pair, [wide, narrow]) ~throws "wrong hardware type"
@@ -292,3 +341,19 @@ block:
     builder.vector_get(module_def,
                        builder.vector_create(module_def, pair, [wide, wide]),
                        2) ~throws "0 <= index < vector length"
+    builder.vector_index(module_def, value, narrow) ~throws "wrong Bits width"
+    builder.vector_inject(module_def, value, exact_index, narrow) ~throws "wrong hardware type"
+    builder.vector_write_set(module_def,
+                             value,
+                             builder.vector_create(module_def,
+                                                   VectorType(1, Bits(1)),
+                                                   [exact_index]),
+                             indices,
+                             elements) ~throws "indices have the wrong vector type"
+    builder.vector_write_set(module_def,
+                             value,
+                             enables,
+                             indices,
+                             builder.vector_create(module_def,
+                                                   VectorType(2, Bits(2)),
+                                                   [narrow, narrow])) ~throws "elements have the wrong vector type"

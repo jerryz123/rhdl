@@ -64,6 +64,7 @@ export:
   vector_get
   vector_project
   vector_index
+  vector_inject
   vector_select
   vector_lookup
   vector_updated
@@ -138,7 +139,10 @@ fun hardware_entity(value):
   | ~else: value is_a HardwareEntity
 
 class CircuitIdentity(name)
-class ActiveCircuit(identity, name, mutable finalizers = [])
+class ActiveCircuit(identity,
+                    name,
+                    mutable finalizers = [],
+                    mutable vector_writes = [])
 
 fun new_circuit_identity(name :: String):
   CircuitIdentity(name)
@@ -163,18 +167,23 @@ Parameter.def current_conditional_form = "when"
 
 class ConditionalAssignment(place, value)
 class ConditionalMemoryWrite(resource, address, data, clock, enable, location)
+class ConditionalVectorWrite(register, index, data, enable, location)
 class ConditionalAssertion(condition, clock, reset, guard, label, location)
 
-// Collects assignments, memory writes, and assertions along one mutually
-// exclusive hardware branch for guarded resolution after elaboration.
+// Collects assignments and supported effects along one mutually exclusive
+// hardware branch for guarded resolution after elaboration.
 class ConditionalBranch(mutable assignments = [],
                         mutable memory_writes = [],
+                        mutable vector_writes = [],
                         mutable assertions = []):
   method assignment_for(place):
     assignments.find(fun (assignment): assignment.place === place)
 
   method memory_writes_for(resource):
     memory_writes.filter(~keep: fun (write): write.resource === resource)
+
+  method vector_writes_for(register):
+    vector_writes.filter(~keep: fun (write): write.register === register)
 
   method add(place, value, location):
     when this.assignment_for(place)
@@ -184,6 +193,9 @@ class ConditionalBranch(mutable assignments = [],
 
   method add_memory_write(write):
     memory_writes := memory_writes ++ [write]
+
+  method add_vector_write(write):
+    vector_writes := vector_writes ++ [write]
 
   method add_assertion(assertion):
     assertions := assertions ++ [assertion]
@@ -249,6 +261,7 @@ fun run_circuit_finalizers(location = Location()):
   def finalizers = active.finalizers
   active.finalizers := []
   for (finalizer in finalizers): finalizer()
+  flush_vector_register_writes(active, location)
   #void
 
 fun build_circuit(identity :: CircuitIdentity,
@@ -788,34 +801,57 @@ fun vector_lookup(entity,
                 location,
                 Origin("embedded vector lookup", name || ""))
 
-fun validate_exhaustive_vector_selector(vector_value,
-                                        selector_value,
-                                        location):
+fun validate_dynamic_vector_selector(vector_value,
+                                     selector_value,
+                                     location):
   unless vector_type(vector_value.type)
   | frontend_fail("hardware vector indexing requires a VectorType value", location)
   unless bits_type(selector_value.type)
   | frontend_fail("hardware vector index must have a Bits type", location)
-  unless vector_value.type.length == (1 bits.(<<) selector_value.type.width)
+  unless selector_value.type.width == count_index_width(vector_value.type.length)
   | frontend_fail(
-      "hardware vector indexing requires exactly one element per selector value; use .lookup(..., ~default: ...) for possible out-of-range values",
+      "hardware vector index must have Bits(index_width(vector length)) type",
       location
     )
 
-// Selects from a vector whose Bits selector exhaustively names every element.
-// Element zero supplies the structurally unreachable mux default so bracket
-// syntax does not invent behavior for an out-of-range selector.
+// Selects dynamically from a vector. A selector encoding outside the vector
+// length makes the result unconstrained.
 fun vector_select(entity,
                   selector,
                   name = #false,
                   location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
-  validate_exhaustive_vector_selector(vector_value, selector_value, location)
-  vector_lookup(vector_value,
-                selector_value,
-                vector_get(vector_value, 0, #false, location),
-                name,
-                location)
+  validate_dynamic_vector_selector(vector_value, selector_value, location)
+  require_context(location).builder.vector_index(
+    require_module(location),
+    vector_value,
+    selector_value,
+    name,
+    location,
+    Origin("embedded vector index", name || "")
+  )
+
+// Injects one dynamically selected element. An out-of-range selector makes the
+// complete result vector unconstrained.
+fun vector_inject(entity,
+                  selector,
+                  replacement,
+                  name = #false,
+                  location = Location()):
+  def vector_value = read(entity, location)
+  def selector_value = read(selector, location)
+  def replacement_value = read(replacement, location)
+  validate_dynamic_vector_selector(vector_value, selector_value, location)
+  require_context(location).builder.vector_inject(
+    require_module(location),
+    vector_value,
+    selector_value,
+    replacement_value,
+    name,
+    location,
+    Origin("embedded vector inject", name || "")
+  )
 
 // Constructs a new vector whose hardware-selected element is replaced. Each
 // element falls back to the original value, so an out-of-range selector leaves
@@ -871,13 +907,17 @@ class DynamicVectorRegisterPath(register,
     current
 
   override method assign_hardware(entity, location):
-    connect(register.next,
-            vector_updated(vector_value,
-                           selector_value,
-                           entity,
-                           #false,
-                           location),
-            location)
+    def replacement = read(entity, location)
+    unless type_equal(replacement.type, vector_value.type.element_type)
+    | frontend_fail("dynamic vector assignment requires the vector element type",
+                    location)
+    emit_vector_register_write(
+      ConditionalVectorWrite(register,
+                             selector_value,
+                             replacement,
+                             literal(Bits(1), 1, #false, location),
+                             location)
+    )
 
 // Preserves the read behavior of hardware vector indexing while retaining an
 // assignable path only for a direct Reg<Vec>. Other vector entities stay values.
@@ -887,7 +927,7 @@ fun vector_index(entity,
                  location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
-  validate_exhaustive_vector_selector(vector_value, selector_value, location)
+  validate_dynamic_vector_selector(vector_value, selector_value, location)
   if entity is_a Register
   | DynamicVectorRegisterPath(entity, vector_value, selector_value)
   | vector_select(vector_value, selector_value, name, location)
@@ -978,6 +1018,73 @@ fun emit_conditional_memory_write(write):
       write.location,
       Origin("embedded conditional memory write", write.resource.name)
     )
+
+// Carries a dynamic vector-register write outward through conditional scopes.
+// Top-level writes are collected until all ports for the register are known.
+fun emit_vector_register_write(write):
+  def branch = current_conditional_branch()
+  if branch is_a ConditionalBranch
+  | branch.add_vector_write(write)
+  | block:
+      def context = require_context(write.location)
+      unless context.active_circuits.length() > 0
+      | frontend_fail("vector register write requires an active circuit",
+                      write.location)
+      def active = context.active_circuits[context.active_circuits.length() - 1]
+      active.vector_writes := active.vector_writes ++ [write]
+  #void
+
+// Emits one unordered core write set per vector register, preserving the
+// frontend's ordinary one-driver rule for the register's whole next value.
+fun flush_vector_register_writes(active :: ActiveCircuit,
+                                 location = Location()):
+  def writes = active.vector_writes
+  active.vector_writes := []
+  def mutable registers = []
+  for (write in writes):
+    unless registers.find(fun (register): register === write.register)
+    | registers := registers ++ [write.register]
+  for (register in registers):
+    def register_writes = writes.filter(
+      ~keep: fun (write): write.register === register
+    )
+    def representative = register_writes[0]
+    def port_count = register_writes.length()
+    def enables = vector_create(
+      VectorType(port_count, Bits(1)),
+      register_writes.map(fun (write): write.enable),
+      #false,
+      representative.location
+    )
+    def indices = vector_create(
+      VectorType(port_count, representative.index.type),
+      register_writes.map(fun (write): write.index),
+      #false,
+      representative.location
+    )
+    def elements = vector_create(
+      VectorType(port_count, representative.data.type),
+      register_writes.map(fun (write): write.data),
+      #false,
+      representative.location
+    )
+    def next_value = require_context(representative.location).builder.vector_write_set(
+      require_module(representative.location),
+      register.current,
+      enables,
+      indices,
+      elements,
+      #false,
+      representative.location,
+      Origin("embedded vector register write set", register.next.name)
+    )
+    require_context(representative.location).builder.drive(
+      register.next,
+      next_value,
+      representative.location,
+      Origin("embedded vector register write set", register.next.name)
+    )
+  #void
 
 // Combines lexical activation as assertions cross nested conditional chains.
 // A missing guard means the assertion is active throughout its current scope.
@@ -1179,6 +1286,80 @@ fun resolve_conditional_branches(branch_results,
                                selected_address,
                                selected_data,
                                representative.clock,
+                               selected_enable,
+                               representative.location)
+      )
+
+  def mutable vector_registers = []
+  fun include_branch_vector_registers(branch_result):
+    when branch_result
+    | for (write in branch_result.vector_writes):
+        unless vector_registers.find(
+          fun (register): register === write.register
+        )
+        | vector_registers := vector_registers ++ [write.register]
+  for (branch_result in branch_results):
+    include_branch_vector_registers(branch_result)
+  include_branch_vector_registers(otherwise_result)
+
+  fun vector_write_at(branch_result, register, port_index):
+    if !branch_result
+    | #false
+    | block:
+        def writes = branch_result.vector_writes_for(register)
+        if port_index < writes.length() | writes[port_index] | #false
+
+  for (register in vector_registers):
+    def all_results = branch_results ++ (if otherwise_result | [otherwise_result] | [])
+    def mutable port_count = 0
+    for (branch_result in all_results):
+      def count = branch_result.vector_writes_for(register).length()
+      when count > port_count
+      | port_count := count
+    for (port_index in 0..port_count):
+      def mutable representative = #false
+      for (branch_result in all_results):
+        def candidate = vector_write_at(branch_result, register, port_index)
+        when candidate && !representative
+        | representative := candidate
+      def disabled = literal(Bits(1), 0, #false, location)
+      def fallback_write = vector_write_at(otherwise_result,
+                                           register,
+                                           port_index)
+      def fallback_index:
+        if fallback_write | fallback_write.index | representative.index
+      def fallback_data:
+        if fallback_write | fallback_write.data | representative.data
+      def fallback_enable:
+        if fallback_write | fallback_write.enable | disabled
+      def branch_writes:
+        for List (branch_result in branch_results):
+          vector_write_at(branch_result, register, port_index)
+      fun select_write_value(branch_values, fallback, origin):
+        if branch_values.find(
+             fun (value): value && !(value === fallback)
+           )
+        | select_values(branch_values, fallback, origin)
+        | fallback
+      def selected_index = select_write_value(
+        branch_writes.map(fun (write): if write | write.index | #false),
+        fallback_index,
+        Origin(origin_description ++ " vector write index", register.next.name)
+      )
+      def selected_data = select_write_value(
+        branch_writes.map(fun (write): if write | write.data | #false),
+        fallback_data,
+        Origin(origin_description ++ " vector write data", register.next.name)
+      )
+      def selected_enable = select_values(
+        branch_writes.map(fun (write): if write | write.enable | disabled),
+        fallback_enable,
+        Origin(origin_description ++ " vector write enable", register.next.name)
+      )
+      emit_vector_register_write(
+        ConditionalVectorWrite(register,
+                               selected_index,
+                               selected_data,
                                selected_enable,
                                representative.location)
       )

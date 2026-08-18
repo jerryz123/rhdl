@@ -112,7 +112,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
 | [`rhdl/bundle.rhdl`](rhdl/bundle.rhdl) | Type-named fixed and elaboration-conditional bundles, recursive literal shadows, muxes, casts, and state |
 | [`rhdl/vector.rhdl`](rhdl/vector.rhdl) | Fixed vectors, selection, packing, aggregate drives, and state |
-| [`rhdl/vector-update.rhdl`](rhdl/vector-update.rhdl) | Functional hardware-selected replacement |
+| [`rhdl/vector-update.rhdl`](rhdl/vector-update.rhdl) | Functional replacement and dynamic vector-register writes |
 | [`rhdl/table.rhdl`](rhdl/table.rhdl) | Host-generated combinational vector table |
 | [`rhdl/vec-search.rhdl`](rhdl/vec-search.rhdl) | Registered traversal of a host-defined vector pattern |
 | [`rhdl/vec-shift-register.rhdl`](rhdl/vec-shift-register.rhdl) | Priority aggregate load and shift updates |

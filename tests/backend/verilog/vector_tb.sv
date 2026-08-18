@@ -70,10 +70,10 @@ module vector_tb;
         assert (state_out == alternate)
             else $fatal(1, "vector register update failed");
 
-        selector = 2'd3;
+        selector = 2'd2;
         #1;
         assert (selected == assembled && chosen == c)
-            else $fatal(1, "vector lookup default failed");
+            else $fatal(1, "last dynamic vector element failed");
 
         $display("vector simulation passed");
         $finish;

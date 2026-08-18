@@ -25,6 +25,7 @@ import:
   "../../examples/rhdl/interface.rhdl" as interface_fixture
   "../../examples/rhdl/nested-interface.rhdl" as nested_interface_fixture
   "../../examples/rhdl/vector.rhdl" as vector_fixture
+  "../../examples/rhdl/vector-update.rhdl" as vector_update_fixture
   "../../examples/rhdl/table.rhdl" as table_fixture
   "../../examples/rhdl/vec-search.rhdl" as vec_search_fixture
   "../../examples/rhdl/wire.rhdl" as wire_fixture
@@ -39,6 +40,7 @@ def adder_circt = emit_circt(adder_fixture.design)
 def adder4_circt = emit_circt(adder4_fixture.design)
 def generated_adder_circt = emit_circt(generated_adder_fixture.design)
 def vector_circt = emit_circt(vector_fixture.design)
+def vector_update_circt = emit_circt(vector_update_fixture.register_design)
 def table_circt = emit_circt(table_fixture.design)
 def vec_search_circt = emit_circt(vec_search_fixture.design)
 def wire_circt = emit_circt(wire_fixture.design)
@@ -51,6 +53,47 @@ def decode_circt = emit_circt(decode_fixture.design)
 def decode_espresso = find_decode_espresso()
 def signed_circt = emit_circt(signed_fixture.design)
 def one_hot_circt = emit_circt(one_hot_fixture.design)
+
+// A direct two-port write set makes the collision-undefined symmetric merge
+// visible without relying on a larger frontend fixture's incidental logic.
+def write_set_design = Design()
+def write_set_builder = Builder(write_set_design)
+def write_set_module = write_set_builder.module("VectorWriteSet")
+def write_set_base = write_set_builder.input(
+  write_set_module,
+  "base",
+  VectorType(2, Bits(4))
+)
+def write_set_enables = write_set_builder.input(
+  write_set_module,
+  "enables",
+  VectorType(2, Bits(1))
+)
+def write_set_indices = write_set_builder.input(
+  write_set_module,
+  "indices",
+  VectorType(2, Bits(1))
+)
+def write_set_elements = write_set_builder.input(
+  write_set_module,
+  "elements",
+  VectorType(2, Bits(4))
+)
+def write_set_output = write_set_builder.output(
+  write_set_module,
+  "result",
+  VectorType(2, Bits(4))
+)
+def write_set_result = write_set_builder.vector_write_set(
+  write_set_module,
+  write_set_base,
+  write_set_enables,
+  write_set_indices,
+  write_set_elements
+)
+write_set_builder.drive(write_set_output, write_set_result)
+def finished_write_set_module = write_set_builder.finish(write_set_module)
+def write_set_circt = emit_circt(write_set_design)
 
 check:
   adder_circt.contains("hw.module @Adder(in %a : i8, in %b : i8, out sum : i8)") ~is #true
@@ -67,10 +110,20 @@ check:
   vector_circt.contains("!hw.array<3xi4>") ~is #true
   vector_circt.contains("hw.array_create") ~is #true
   vector_circt.contains("hw.array_get") ~is #true
+  vector_circt.contains("[%selector]") ~is #true
+  vector_update_circt.contains("hw.array_inject") ~is #false
+  vector_update_circt.contains("%__rhdl_vector_write_") ~is #true
+  vector_update_circt.contains("comb.icmp eq") ~is #true
+  vector_update_circt.contains("comb.and") ~is #true
+  write_set_circt.contains("hw.array_inject") ~is #false
+  write_set_circt.contains("%__rhdl_vector_write_") ~is #true
+  write_set_circt.contains("_gated_data_") ~is #true
+  write_set_circt.contains("_merged_data_") ~is #true
+  write_set_circt.contains(" = comb.or ") ~is #true
   vector_circt.contains("hw.bitcast") ~is #true
   table_circt.contains("hw.module @Tbl") ~is #true
   table_circt.contains("hw.bitcast") ~is #true
-  table_circt.contains("comb.mux") ~is #true
+  table_circt.contains("hw.array_get") ~is #true
   vec_search_circt.contains("hw.module @VecSearch") ~is #true
   vec_search_circt.contains("hw.bitcast") ~is #true
   vec_search_circt.contains("seq.firreg") ~is #true

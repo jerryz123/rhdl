@@ -326,6 +326,53 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "vector_get index is outside its vector type")
       unless type_equal(result.type, vector.type.element_type)
       | fail_operation(operation, "vector_get result has the wrong element type")
+  | "vector_index":
+      def vector = operation.operands[0]
+      def index = operation.operands[1]
+      def result = operation.results[0]
+      unless vector_type(vector.type)
+      | fail_operation(operation, "vector_index operand must have a VectorType")
+      def expected_width:
+        if vector_type(vector.type) | count_index_width(vector.type.length) | #false
+      unless bits_type(index.type) && index.type.width == expected_width
+      | fail_operation(operation, "vector_index selector has the wrong Bits width")
+      unless vector_type(vector.type) && type_equal(result.type, vector.type.element_type)
+      | fail_operation(operation, "vector_index result has the wrong element type")
+  | "vector_inject":
+      def vector = operation.operands[0]
+      def index = operation.operands[1]
+      def element = operation.operands[2]
+      def result = operation.results[0]
+      unless vector_type(vector.type)
+      | fail_operation(operation, "vector_inject operand must have a VectorType")
+      def expected_width:
+        if vector_type(vector.type) | count_index_width(vector.type.length) | #false
+      unless bits_type(index.type) && index.type.width == expected_width
+      | fail_operation(operation, "vector_inject selector has the wrong Bits width")
+      unless vector_type(vector.type) && type_equal(element.type, vector.type.element_type)
+      | fail_operation(operation, "vector_inject element has the wrong type")
+      unless type_equal(result.type, vector.type)
+      | fail_operation(operation, "vector_inject result has the wrong vector type")
+  | "vector_write_set":
+      def vector = operation.operands[0]
+      def enables = operation.operands[1]
+      def indices = operation.operands[2]
+      def elements = operation.operands[3]
+      def result = operation.results[0]
+      unless vector_type(vector.type)
+      | fail_operation(operation, "vector_write_set base must have a VectorType")
+      def port_count:
+        if vector_type(enables.type) | enables.type.length | 0
+      unless vector_type(enables.type) && port_count > 0 && type_equal(enables.type.element_type, Bits(1))
+      | fail_operation(operation, "vector_write_set enables must be a nonempty Vec of Bits(1)")
+      def expected_index_width:
+        if vector_type(vector.type) | count_index_width(vector.type.length) | #false
+      unless vector_type(indices.type) && indices.type.length == port_count && bits_type(indices.type.element_type) && indices.type.element_type.width == expected_index_width
+      | fail_operation(operation, "vector_write_set indices have the wrong vector type")
+      unless vector_type(elements.type) && elements.type.length == port_count && vector_type(vector.type) && type_equal(elements.type.element_type, vector.type.element_type)
+      | fail_operation(operation, "vector_write_set elements have the wrong vector type")
+      unless type_equal(result.type, vector.type)
+      | fail_operation(operation, "vector_write_set result has the wrong vector type")
   | "memory":
       def memory = operation.attribute("memory", #false)
       unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
@@ -724,6 +771,20 @@ fun verify_combinational_cycles(module_defs):
                     | operation.opcode == "rtl.vector_get":
                         add_operand(operation.operands[0],
                                     [operation.attribute("index")] ++ path)
+                    | operation.opcode == "rtl.vector_index":
+                        add_whole_operand(operation.operands[0])
+                        add_whole_operand(operation.operands[1])
+                    | operation.opcode == "rtl.vector_inject" && path.length() > 0:
+                        add_operand(operation.operands[0], path)
+                        add_whole_operand(operation.operands[1])
+                        add_operand(operation.operands[2], path.drop(1))
+                    | operation.opcode == "rtl.vector_write_set" && path.length() > 0:
+                        add_operand(operation.operands[0], path)
+                        add_whole_operand(operation.operands[1])
+                        add_whole_operand(operation.operands[2])
+                        for (port_index in 0..operation.operands[3].type.length):
+                          add_operand(operation.operands[3],
+                                      [port_index] ++ path.drop(1))
                     | operation.opcode == "rtl.mux_lookup":
                         add_whole_operand(operation.operands[0])
                         for (operand in operation.operands.drop(1)):

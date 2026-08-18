@@ -17,6 +17,9 @@ def vector_gets = module_def.operations.filter(
 def lookups = module_def.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.mux_lookup"
 )
+def dynamic_indices = module_def.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.vector_index"
+)
 def casts = module_def.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.cast"
 )
@@ -27,12 +30,12 @@ check:
   module_def.find_input("alternate").type.length ~is 3
   type_equal(module_def.find_input("alternate").type.element_type, Bits(4)) ~is #true
   vector_creates.length() ~is 2
-  vector_gets.length() ~is 6
-  vector_gets.map(fun (operation): operation.attribute("index")) ~is [0, 1, 2, 2, 1, 0]
-  lookups.length() ~is 2
+  vector_gets.length() ~is 3
+  vector_gets.map(fun (operation): operation.attribute("index")) ~is [2, 1, 0]
+  lookups.length() ~is 1
   type_equal(lookups[0].results[0].type, VectorType(3, Bits(4))) ~is #true
-  type_equal(lookups[1].results[0].type, Bits(4)) ~is #true
-  lookups[1].attribute("keys") ~is [0, 1, 2]
+  dynamic_indices.length() ~is 1
+  type_equal(dynamic_indices[0].results[0].type, Bits(4)) ~is #true
   casts.length() ~is 2
   casts[0].results[0].type.width ~is 12
   type_equal(casts[1].results[0].type, VectorType(3, Bits(4))) ~is #true
@@ -47,7 +50,7 @@ check:
   packed_width(carry_module.find_input("carries").type) ~is 5
   verify_design(fixture.carry_design) ~is #void
   embedded.run_elaboration(fun (): invalid.OutOfBoundsVector()) ~throws "0 <= index < vector length"
-  embedded.run_elaboration(fun (): invalid.NonExhaustiveVectorIndex()) ~throws "use .lookup(..., ~default: ...)"
+  embedded.run_elaboration(fun (): invalid.WideVectorIndex()) ~throws "Bits(index_width(vector length))"
   embedded.run_elaboration(fun (): invalid.NarrowVectorLookup()) ~throws "mux lookup key does not fit its selector type"
   embedded.run_elaboration(fun (): invalid.MixedVectorElements()) ~throws "wrong hardware type"
   embedded.run_elaboration(fun (): invalid.PartialVectorDrive()) ~throws "incomplete element-wise drivers"

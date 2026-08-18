@@ -118,15 +118,9 @@ fun emit_circt_record_aliases(aliases):
       ),
       "\n  }")
 
-// CIRCT array indices use the minimum nonzero integer width capable of naming
-// every element. This representation detail stays local to the backend.
+// CIRCT array indices use RHDL's minimum nonzero width for a collection count.
 fun circt_array_index_width(length):
-  fun loop(capacity, width):
-    if capacity >= length
-    | block:
-        if width == 0 | 1 | width
-    | loop(capacity * 2, width + 1)
-  loop(1, 0)
+  count_index_width(length)
 
 fun alias_operation(operation):
   (operation.opcode == "rtl.cast" && circt_type(operation.operands[0].type) == circt_type(operation.results[0].type)) || operation.opcode == "rtl.wire"
@@ -576,6 +570,190 @@ fun emit_vector_get(operation):
                 value_ref(vector), "[", index_ref, "] : ",
                 circt_type(vector.type), ", i", to_string(index_width))
 
+fun emit_vector_index(operation):
+  def vector = operation.operands[0]
+  def index = operation.operands[1]
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = hw.array_get ",
+                value_ref(vector), "[", value_ref(index), "] : ",
+                circt_type(vector.type), ", ", circt_type(index.type))
+
+fun emit_vector_inject(operation):
+  def vector = operation.operands[0]
+  def index = operation.operands[1]
+  def element = operation.operands[2]
+  def result = operation.results[0]
+  String.append("    ", value_ref(result), " = hw.array_inject ",
+                value_ref(vector), "[", value_ref(index), "], ",
+                value_ref(element), " : ", circt_type(vector.type), ", ",
+                circt_type(index.type))
+
+// Lowers an unordered vector write set as symmetric per-element decode and
+// merge logic. Colliding enabled ports OR their data, which is one legal
+// implementation of the operation's deliberately undefined collision case.
+fun emit_vector_write_set(operation):
+  def vector = operation.operands[0]
+  def enables = operation.operands[1]
+  def indices = operation.operands[2]
+  def elements = operation.operands[3]
+  def result = operation.results[0]
+  def port_count = enables.type.length
+  def element_width = packed_width(vector.type.element_type)
+  def port_index_width = circt_array_index_width(port_count)
+  def vector_index_width = circt_array_index_width(vector.type.length)
+  def prefix = "%__rhdl_vector_write_" ++ to_string(operation.id)
+  def mutable lines = []
+  def mutable enable_refs = []
+  def mutable index_refs = []
+  def mutable data_refs = []
+
+  for (port_index in 0..port_count):
+    def suffix = to_string(port_index)
+    def port_index_ref = prefix ++ "_port_index_" ++ suffix
+    def enable_ref = prefix ++ "_enable_" ++ suffix
+    def index_ref = prefix ++ "_index_" ++ suffix
+    def data_ref = prefix ++ "_data_" ++ suffix
+    lines := lines ++ [String.append(
+      "    ", port_index_ref, " = hw.constant ", suffix, " : i",
+      to_string(port_index_width)
+    ), String.append(
+      "    ", enable_ref, " = hw.array_get ", value_ref(enables), "[",
+      port_index_ref, "] : ", circt_type(enables.type), ", i",
+      to_string(port_index_width)
+    ), String.append(
+      "    ", index_ref, " = hw.array_get ", value_ref(indices), "[",
+      port_index_ref, "] : ", circt_type(indices.type), ", i",
+      to_string(port_index_width)
+    ), String.append(
+      "    ", data_ref, " = hw.array_get ", value_ref(elements), "[",
+      port_index_ref, "] : ", circt_type(elements.type), ", i",
+      to_string(port_index_width)
+    )]
+    enable_refs := enable_refs ++ [enable_ref]
+    index_refs := index_refs ++ [index_ref]
+    data_refs := data_refs ++ [data_ref]
+
+  fun reduce_or(refs, width, stem):
+    def mutable current = refs
+    def mutable level = 0
+    while current.length() > 1:
+      def mutable next = []
+      def mutable remaining = current
+      def mutable pair_index = 0
+      while remaining.length() > 1:
+        def combined_ref = String.append(stem, "_", to_string(level), "_",
+                                         to_string(pair_index))
+        lines := lines ++ [String.append(
+          "    ", combined_ref, " = comb.or ", remaining[0], ", ",
+          remaining[1], " : i", to_string(width)
+        )]
+        next := next ++ [combined_ref]
+        remaining := remaining.drop(2)
+        pair_index := pair_index + 1
+      when remaining.length() == 1
+      | next := next ++ [remaining[0]]
+      current := next
+      level := level + 1
+    current[0]
+
+  def mutable result_element_refs = []
+  for (element_index in 0..vector.type.length):
+    def suffix = to_string(element_index)
+    def destination_ref = prefix ++ "_destination_" ++ suffix
+    def old_ref = prefix ++ "_old_" ++ suffix
+    lines := lines ++ [String.append(
+      "    ", destination_ref, " = hw.constant ", suffix, " : i",
+      to_string(vector_index_width)
+    ), String.append(
+      "    ", old_ref, " = hw.array_get ", value_ref(vector), "[",
+      destination_ref, "] : ", circt_type(vector.type), ", i",
+      to_string(vector_index_width)
+    )]
+    def mutable hit_refs = []
+    def mutable gated_data_refs = []
+    for (port_index in 0..port_count):
+      def port_suffix = to_string(port_index)
+      def compare_ref = prefix ++ "_compare_" ++ suffix ++ "_" ++ port_suffix
+      def hit_ref = prefix ++ "_hit_" ++ suffix ++ "_" ++ port_suffix
+      def packed_data_ref:
+        if flat_data_type(vector.type.element_type)
+        | data_refs[port_index]
+        | prefix ++ "_packed_data_" ++ suffix ++ "_" ++ port_suffix
+      lines := lines ++ [String.append(
+        "    ", compare_ref, " = comb.icmp eq ", index_refs[port_index], ", ",
+        destination_ref, " : ", circt_type(indices.type.element_type)
+      ), String.append(
+        "    ", hit_ref, " = comb.and ", enable_refs[port_index], ", ",
+        compare_ref, " : i1"
+      )]
+      unless flat_data_type(vector.type.element_type)
+      | lines := lines ++ [String.append(
+          "    ", packed_data_ref, " = hw.bitcast ", data_refs[port_index],
+          " : (", circt_type(vector.type.element_type), ") -> i",
+          to_string(element_width)
+        )]
+      hit_refs := hit_refs ++ [hit_ref]
+      if port_count == 1
+      | gated_data_refs := gated_data_refs ++ [packed_data_ref]
+      | block:
+          def mask_ref:
+            if element_width == 1
+            | hit_ref
+            | prefix ++ "_mask_" ++ suffix ++ "_" ++ port_suffix
+          when element_width != 1
+          | lines := lines ++ [String.append(
+              "    ", mask_ref, " = comb.concat ",
+              String.join(for List (_index in 0..element_width): hit_ref, ", "),
+              " : ",
+              String.join(for List (_index in 0..element_width): "i1", ", ")
+            )]
+          def gated_data_ref = prefix ++ "_gated_data_" ++ suffix ++ "_" ++ port_suffix
+          lines := lines ++ [String.append(
+            "    ", gated_data_ref, " = comb.and ", packed_data_ref, ", ",
+            mask_ref, " : i", to_string(element_width)
+          )]
+          gated_data_refs := gated_data_refs ++ [gated_data_ref]
+    def any_hit_ref = reduce_or(hit_refs,
+                                1,
+                                prefix ++ "_any_hit_" ++ suffix)
+    def merged_data_ref = reduce_or(gated_data_refs,
+                                    element_width,
+                                    prefix ++ "_merged_data_" ++ suffix)
+    def packed_old_ref:
+      if flat_data_type(vector.type.element_type)
+      | old_ref
+      | prefix ++ "_packed_old_" ++ suffix
+    unless flat_data_type(vector.type.element_type)
+    | lines := lines ++ [String.append(
+        "    ", packed_old_ref, " = hw.bitcast ", old_ref, " : (",
+        circt_type(vector.type.element_type), ") -> i", to_string(element_width)
+      )]
+    def element_ref:
+      if flat_data_type(vector.type.element_type)
+      | prefix ++ "_result_element_" ++ suffix
+      | prefix ++ "_packed_result_element_" ++ suffix
+    lines := lines ++ [String.append(
+      "    ", element_ref, " = comb.mux ", any_hit_ref, ", ",
+      merged_data_ref, ", ", packed_old_ref, " : i", to_string(element_width)
+    )]
+    def result_element_ref:
+      if flat_data_type(vector.type.element_type)
+      | element_ref
+      | prefix ++ "_result_element_" ++ suffix
+    unless flat_data_type(vector.type.element_type)
+    | lines := lines ++ [String.append(
+        "    ", result_element_ref, " = hw.bitcast ", element_ref, " : (i",
+        to_string(element_width), ") -> ", circt_type(vector.type.element_type)
+      )]
+    result_element_refs := result_element_refs ++ [result_element_ref]
+
+  lines := lines ++ [String.append(
+    "    ", value_ref(result), " = hw.array_create ",
+    String.join(result_element_refs.reverse(), ", "), " : ",
+    circt_type(vector.type.element_type)
+  )]
+  String.join(lines, "\n")
+
 fun circt_memory_type(memory):
   String.append("!seq.hlmem<", to_string(memory.depth), "x",
                 circt_type(memory.element_type), ">")
@@ -898,6 +1076,12 @@ fun emit_operation(operation):
         emit_vector_create(operation)
     | "rtl.vector_get":
         emit_vector_get(operation)
+    | "rtl.vector_index":
+        emit_vector_index(operation)
+    | "rtl.vector_inject":
+        emit_vector_inject(operation)
+    | "rtl.vector_write_set":
+        emit_vector_write_set(operation)
     | "rtl.memory":
         emit_memory(operation)
     | "rtl.memory_read_async":

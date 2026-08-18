@@ -45,24 +45,6 @@ module ricket_register_file_tb;
     assert (read_data_1 == 64'd11 && read_data_2 == 64'd22)
       else $fatal(1, "simultaneous writes were not retained");
 
-    read_address_1 = 5'd9;
-    read_address_2 = 5'd9;
-    write_enable_1 = 1'b1;
-    write_address_1 = 5'd9;
-    write_data_1 = 64'd44;
-    write_enable_2 = 1'b1;
-    write_address_2 = 5'd9;
-    write_data_2 = 64'd55;
-    #1;
-    assert (read_data_1 == 64'd55 && read_data_2 == 64'd55)
-      else $fatal(1, "younger load port did not win a same-address write");
-    @(posedge clock);
-    #1;
-    write_enable_1 = 1'b0;
-    write_enable_2 = 1'b0;
-    assert (read_data_1 == 64'd55 && read_data_2 == 64'd55)
-      else $fatal(1, "same-address write priority was not retained");
-
     read_address_1 = 5'd0;
     read_address_2 = 5'd7;
     write_enable_1 = 1'b1;

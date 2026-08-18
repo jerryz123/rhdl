@@ -50,7 +50,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   // with the instruction's WB stage. Responses cannot be backpressured.
   inst responses(ValidPipe(RicketDataResp(xlen), 1))
 
-  reg valid_bits(~init: bits(0, sets))
+  reg valid_lines(~init: cast(bits(0, sets), Vec(sets, Bool)))
   reg store_active(~init: Bool(#false))
   reg store_sent(~init: Bool(#false))
   reg store_address(~init: bits(0, width))
@@ -68,8 +68,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
     if beats == 1
     | bits(0, beat_width)
     | lookup_request.address[3..offset_width]
-  def valid_vector = cast(valid_bits, Vec(sets, Bool))
-  def line_hit = valid_vector[lookup_set] & (tags.port.response.bits[0] === lookup_tag)
+  def line_hit = valid_lines[lookup_set] & (tags.port.response.bits[0] === lookup_tag)
   def lookup_store = lookup.egress.valid & tags.port.response.valid & lookup_request.write
   def lookup_load = lookup.egress.valid & tags.port.response.valid & !lookup_request.write
   def lookup_miss = lookup_load & !line_hit
@@ -171,7 +170,7 @@ sync_circuit RicketL1DCache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
     mask: mux(install_refill, !bits(0, line_bytes), store_line_mask)
 
   when install_refill:
-    valid_bits <== as_bits(valid_vector.updated(completion_set, Bool(#true)))
+    valid_lines[completion_set] <== Bool(#true)
 
   when lookup_store:
     store_address.next <== align_down(as_bits(lookup_request.address), 8)
