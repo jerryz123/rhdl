@@ -1,10 +1,11 @@
 #lang rhombus
-// Summarizes module clock use and certifies a module against one expected clock.
+// Summarizes clock use and hierarchy-aware temporal provenance for completed modules.
 
 import:
   "types.rhm" open
   "ir.rhm" open
   "ops.rhm" open
+  "dependencies.rhm" open
   "domains.rhm" open
 
 export:
@@ -12,6 +13,8 @@ export:
   summarize_module_clocking
   verify_single_clock
   same_clock_value
+  summarize_module_temporal
+  dump_temporal_report
 
 class ClockedOperationSpec(clock_operand :: Nat,
                            reset_operand = #false)
@@ -19,6 +22,9 @@ class UnclockedSequentialOperationSpec()
 class PendingResetUse(kind :: String,
                       reset,
                       mutable operations = [])
+class ValueProvenanceSummary(value :: Value,
+                             path :: List,
+                             origins :: List)
 
 def unclocked_sequential_operation = UnclockedSequentialOperationSpec()
 
@@ -170,3 +176,452 @@ fun verify_single_clock(module_def :: Module,
                         " instead of expected clock ",
                         canonical_expected_clock.ref()))
   summary
+
+fun same_instance_path(left, right):
+  def mutable same = left.length() == right.length()
+  when same
+  | for (left_step in left,
+         right_step in right):
+      unless left_step === right_step
+      | same := #false
+  same
+
+fun same_control_reference(left, right):
+  left is_a ControlReference && right is_a ControlReference && left.value === right.value && same_instance_path(left.instance_path, right.instance_path)
+
+fun same_optional_control_reference(left, right):
+  (!left && !right) || same_control_reference(left, right)
+
+fun same_origin(left, right):
+  cond
+  | left is_a StaticProvenance && right is_a StaticProvenance:
+      #true
+  | left is_a ExternalProvenance && right is_a ExternalProvenance:
+      left.input_index == right.input_index && left.path == right.path
+  | left is_a StateProvenance && right is_a StateProvenance:
+      left.operation === right.operation && left.path == right.path && same_instance_path(left.instance_path, right.instance_path) && same_optional_control_reference(left.clock, right.clock) && same_optional_control_reference(left.reset, right.reset)
+  | ~else:
+      #false
+
+fun normalize_origins(origins):
+  def non_static = origins.filter(
+    ~keep: fun (origin): !(origin is_a StaticProvenance)
+  )
+  cond
+  | non_static.length() > 0: non_static
+  | origins.length() > 0: [origins[0]]
+  | ~else: [StaticProvenance()]
+
+fun merge_origins(left, right):
+  def mutable result = left
+  for (origin in right):
+    unless result.find(fun (candidate): same_origin(candidate, origin))
+    | result := result ++ [origin]
+  normalize_origins(result)
+
+fun local_control_reference(value):
+  ControlReference([], canonical_wire_value(value))
+
+fun state_value_operation(operation):
+  operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset" || operation.opcode == "rtl.sync_memory" || operation.opcode == "sim.dpi_register"
+
+fun state_operation_reset(operation):
+  if operation.opcode == "rtl.register_reset"
+  | local_control_reference(operation.operands[1])
+  | #false
+
+fun source_clock_references(states):
+  def mutable result = []
+  for (state in states):
+    when state.clock is_a ControlReference
+    | unless result.find(
+        fun (candidate): same_control_reference(candidate, state.clock)
+      )
+      | result := result ++ [state.clock]
+  result
+
+fun classify_sink_input(destination_clock, origins):
+  def states = origins.filter(
+    ~keep: fun (origin): origin is_a StateProvenance
+  )
+  def externals = origins.filter(
+    ~keep: fun (origin): origin is_a ExternalProvenance
+  )
+  def source_clocks = source_clock_references(states)
+  cond
+  | source_clocks.length() > 1:
+      MultiClockFanIn(source_clocks)
+  | externals.length() > 0:
+      UnknownInput(externals)
+  | states.length() == 0:
+      StaticInput()
+  | states.find(fun (state): !(state.clock is_a ControlReference)):
+      UnknownClock(states)
+  | same_control_reference(source_clocks[0], destination_clock):
+      SameClock(source_clocks[0])
+  | ~else:
+      ForeignClock(source_clocks[0], destination_clock)
+
+fun append_path(name, path):
+  def mutable result = name
+  for (step in path):
+    result := if step is_a String | result ++ "." ++ step | result ++ "[" ++ to_string(step) ++ "]"
+  result
+
+fun instance_path_name(instance_path):
+  String.join(
+    instance_path.map(
+      fun (operation): operation.attribute("name", "instance")
+    ),
+    "."
+  )
+
+fun operation_name(operation):
+  operation.attribute("name", operation.opcode)
+
+fun hierarchical_name(instance_path, name):
+  def prefix = instance_path_name(instance_path)
+  if prefix == "" | name | prefix ++ "." ++ name
+
+fun describe_control(reference):
+  hierarchical_name(reference.instance_path, reference.value.ref())
+
+fun describe_classification(classification):
+  cond
+  | classification is_a StaticInput: "static"
+  | classification is_a SameClock: "same_clock"
+  | classification is_a ForeignClock: "foreign_clock"
+  | classification is_a UnknownInput: "unknown_input"
+  | classification is_a MultiClockFanIn: "multi_clock_fan_in"
+  | classification is_a UnknownClock: "unknown_clock"
+
+// Builds symbolic output provenance and a preorder inventory of every clocked
+// sink reachable through the module's instance hierarchy. The result is
+// report-only: classifications do not approve or reject any crossing yet.
+fun summarize_module_temporal(module_def :: Module):
+  unless module_def.finished
+  | error(~who: #'summarize_module_temporal,
+          "module must be finished before temporal provenance is summarized")
+  check_clock_operation_coverage()
+  def mutable module_summaries = []
+  def mutable active_modules = []
+
+  fun summarize_module(current_module):
+    def cached = module_summaries.find(
+      fun (summary): summary.module_def === current_module
+    )
+    if cached
+    | cached
+    | block:
+        when active_modules.find(fun (candidate): candidate === current_module)
+        | error(~who: #'summarize_module_temporal,
+                "recursive module instantiation involving " ++ current_module.name)
+        active_modules := active_modules ++ [current_module]
+        def mutable value_summaries = []
+        def mutable active_values = []
+
+        fun bind_child_control(reference, instance_operation):
+          if !(reference is_a ControlReference)
+          | #false
+          | if reference.instance_path.length() > 0
+            | ControlReference([instance_operation] ++ reference.instance_path,
+                               reference.value)
+            | block:
+                def child = instance_operation.attribute("module")
+                def control_value = canonical_wire_value(reference.value)
+                def input_index = identity_index(
+                  child.inputs.map(fun (port): port.value),
+                  control_value
+                )
+                if input_index is_a Nat
+                | block:
+                    def driver = place_leaf_driver(
+                      instance_operation.places[input_index],
+                      []
+                    )
+                    ControlReference([], canonical_wire_value(driver.value))
+                | ControlReference([instance_operation], control_value)
+
+        fun transform_child_origins(origins, instance_operation):
+          def mutable result = []
+          for (origin in origins):
+            def transformed:
+              cond
+              | origin is_a StaticProvenance:
+                  [origin]
+              | origin is_a ExternalProvenance:
+                  def input_place = instance_operation.places[origin.input_index]
+                  def driver = place_leaf_driver(input_place, origin.path)
+                  summarize_value(driver.value, driver.path)
+              | origin is_a StateProvenance:
+                  [StateProvenance([instance_operation] ++ origin.instance_path,
+                                   origin.operation,
+                                   origin.path,
+                                   bind_child_control(origin.clock,
+                                                      instance_operation),
+                                   bind_child_control(origin.reset,
+                                                      instance_operation))]
+            result := merge_origins(result, transformed)
+          normalize_origins(result)
+
+        fun summarize_memory_read(operation, path):
+          def memory = operation.attribute("memory")
+          def writes = current_module.operations.filter(
+            ~keep: fun (candidate): candidate.opcode == "rtl.memory_write" && candidate.attribute("memory", #false) === memory
+          )
+          def mutable origins = summarize_value(operation.operands[0], [])
+          if writes.length() == 0
+          | merge_origins(origins,
+                          [StateProvenance([], operation, path, #false)])
+          | block:
+              for (write in writes):
+                origins := merge_origins(
+                  origins,
+                  [StateProvenance([],
+                                   operation,
+                                   path,
+                                   local_control_reference(write.operands[2]))]
+                )
+              origins
+
+        fun summarize_value(value, path):
+          def cached_value = value_summaries.find(
+            fun (summary): summary.value === value && summary.path == path
+          )
+          if cached_value
+          | cached_value.origins
+          | block:
+              when active_values.find(
+                fun (summary): summary.value === value && summary.path == path
+              )
+              | error(~who: #'summarize_module_temporal,
+                      "combinational cycle reaches value " ++ describe_value_path(value, path))
+              active_values := active_values ++ [
+                ValueProvenanceSummary(value, path, [])
+              ]
+              def operation = current_module.find_operation(value.defining_op_id)
+              def input_index = identity_index(
+                current_module.inputs.map(fun (port): port.value),
+                value
+              )
+              def direct_dependencies = direct_value_dependencies(value, path)
+              def origins:
+                cond
+                | input_index is_a Nat:
+                    [ExternalProvenance(input_index, path)]
+                | operation && operation.opcode == "rtl.memory_read_async":
+                    summarize_memory_read(operation, path)
+                | direct_dependencies is_a List:
+                    if direct_dependencies.length() == 0
+                    | [StaticProvenance()]
+                    | block:
+                        def mutable result = []
+                        for (dependency in direct_dependencies):
+                          result := merge_origins(
+                            result,
+                            summarize_value(dependency.value, dependency.path)
+                          )
+                        result
+                | operation && operation.opcode == "rtl.instance":
+                    def child_summary = summarize_module(
+                      operation.attribute("module")
+                    )
+                    def output_index = identity_index(operation.results, value)
+                    def output_leaf = child_summary.output_leaves.find(
+                      fun (candidate): candidate.output_index == output_index && candidate.path == path
+                    )
+                    transform_child_origins(output_leaf.origins, operation)
+                | operation && state_value_operation(operation):
+                    def spec = clock_operation_spec(operation.opcode)
+                    [StateProvenance([],
+                                     operation,
+                                     path,
+                                     local_control_reference(
+                                       operation.operands[spec.clock_operand]
+                                     ),
+                                     state_operation_reset(operation))]
+                | ~else:
+                    error(~who: #'summarize_module_temporal,
+                          "provenance classification is missing for value-producing operation " ++ operation.opcode)
+              active_values := active_values.filter(
+                ~keep: fun (summary): !(summary.value === value && summary.path == path)
+              )
+              def summary = ValueProvenanceSummary(value, path, origins)
+              value_summaries := value_summaries ++ [summary]
+              origins
+
+        fun make_value_sink_inputs(name, value, destination_clock):
+          for List (path in leaf_paths(value.type)):
+            def origins = summarize_value(value, path)
+            TemporalSinkInput(name,
+                              path,
+                              origins,
+                              classify_sink_input(destination_clock, origins))
+
+        fun make_place_sink_inputs(name, place, destination_clock):
+          for List (path in leaf_paths(place.type)):
+            def driver = place_leaf_driver(place, path)
+            def origins = summarize_value(driver.value, driver.path)
+            TemporalSinkInput(name,
+                              path,
+                              origins,
+                              classify_sink_input(destination_clock, origins))
+
+        fun local_sink_inputs(operation, destination_clock):
+          match operation.opcode
+          | "rtl.register":
+              make_place_sink_inputs("next",
+                                     operation.places[0],
+                                     destination_clock)
+          | "rtl.register_reset":
+              def next_inputs = make_place_sink_inputs("next",
+                                                       operation.places[0],
+                                                       destination_clock)
+              def reset_inputs = make_value_sink_inputs("reset",
+                                                        operation.operands[1],
+                                                        destination_clock)
+              def reset_value_inputs = make_value_sink_inputs("reset_value",
+                                                              operation.operands[2],
+                                                              destination_clock)
+              next_inputs ++ reset_inputs ++ reset_value_inputs
+          | "rtl.memory_write":
+              def address_inputs = make_value_sink_inputs("address",
+                                                          operation.operands[0],
+                                                          destination_clock)
+              def data_inputs = make_value_sink_inputs("data",
+                                                       operation.operands[1],
+                                                       destination_clock)
+              def enable_inputs = make_value_sink_inputs("enable",
+                                                         operation.operands[3],
+                                                         destination_clock)
+              address_inputs ++ data_inputs ++ enable_inputs
+          | "rtl.sync_memory":
+              def mutable inputs = []
+              for (place in operation.places):
+                inputs := inputs ++ make_place_sink_inputs(place.name,
+                                                           place,
+                                                           destination_clock)
+              inputs
+          | "verif.assert":
+              def condition_inputs = make_value_sink_inputs("condition",
+                                                            operation.operands[0],
+                                                            destination_clock)
+              def reset_inputs = make_value_sink_inputs("reset",
+                                                        operation.operands[2],
+                                                        destination_clock)
+              def guard_inputs = make_value_sink_inputs("guard",
+                                                        operation.operands[3],
+                                                        destination_clock)
+              condition_inputs ++ reset_inputs ++ guard_inputs
+          | "sim.dpi_call" || "sim.dpi_register":
+              def mutable inputs = make_value_sink_inputs(
+                "enable",
+                operation.operands[1],
+                destination_clock
+              )
+              for (operand in operation.operands.drop(2),
+                   index in 0..operation.operands.drop(2).length()):
+                inputs := inputs ++ make_value_sink_inputs(
+                  "input" ++ to_string(index),
+                  operand,
+                  destination_clock
+                )
+              inputs
+          | ~else:
+              error(~who: #'summarize_module_temporal,
+                    "sink classification is missing for " ++ operation.opcode)
+
+        fun transform_child_sink(child_sink, instance_operation):
+          def destination_clock = bind_child_control(child_sink.clock,
+                                                     instance_operation)
+          def inputs:
+            for List (input in child_sink.inputs):
+              def origins = transform_child_origins(input.origins,
+                                                    instance_operation)
+              TemporalSinkInput(input.name,
+                                input.path,
+                                origins,
+                                classify_sink_input(destination_clock, origins))
+          TemporalSink([instance_operation] ++ child_sink.instance_path,
+                       child_sink.operation,
+                       child_sink.kind,
+                       destination_clock,
+                       inputs)
+
+        def mutable sinks = []
+        for (operation in current_module.operations):
+          def spec = clock_operation_spec(operation.opcode)
+          cond
+          | spec is_a ClockedOperationSpec:
+              def destination_clock = local_control_reference(
+                operation.operands[spec.clock_operand]
+              )
+              sinks := sinks ++ [
+                TemporalSink([],
+                             operation,
+                             operation.opcode,
+                             destination_clock,
+                             local_sink_inputs(operation, destination_clock))
+              ]
+          | operation.opcode == "rtl.instance":
+              def child_summary = summarize_module(
+                operation.attribute("module")
+              )
+              for (child_sink in child_summary.sinks):
+                sinks := sinks ++ [transform_child_sink(child_sink, operation)]
+          | ~else:
+              #void
+        def mutable output_leaves = []
+        for (port in current_module.outputs,
+             output_index in 0..current_module.outputs.length()):
+          for (path in leaf_paths(port.type)):
+            def driver = place_leaf_driver(port.place, path)
+            output_leaves := output_leaves ++ [
+              OutputLeafProvenance(output_index,
+                                   path,
+                                   summarize_value(driver.value,
+                                                   driver.path))
+            ]
+        def summary = ModuleTemporalSummary(current_module,
+                                            output_leaves,
+                                            sinks)
+        module_summaries := module_summaries ++ [summary]
+        active_modules := active_modules.filter(
+          ~keep: fun (candidate): !(candidate === current_module)
+        )
+        summary
+
+  summarize_module(module_def)
+
+fun describe_origin(summary, origin):
+  cond
+  | origin is_a StaticProvenance:
+      "static"
+  | origin is_a ExternalProvenance:
+      def input_name = summary.module_def.inputs[origin.input_index].name
+      "input " ++ append_path(input_name, origin.path)
+  | origin is_a StateProvenance:
+      def name = hierarchical_name(origin.instance_path, operation_name(origin.operation))
+      def clock = if origin.clock is_a ControlReference | "@" ++ describe_control(origin.clock) | "@unknown"
+      "state " ++ append_path(name, origin.path) ++ clock
+
+fun dump_temporal_report(summary :: ModuleTemporalSummary):
+  def mutable lines = ["temporal.module @" ++ summary.module_def.name]
+  for (output in summary.output_leaves):
+    def port = summary.module_def.outputs[output.output_index]
+    def origins = String.join(
+      output.origins.map(fun (origin): describe_origin(summary, origin)),
+      ", "
+    )
+    lines := lines ++ ["  output " ++ append_path(port.name, output.path) ++ " <- " ++ origins]
+  for (sink in summary.sinks):
+    def sink_name = hierarchical_name(sink.instance_path, operation_name(sink.operation))
+    lines := lines ++ ["  sink " ++ sink_name ++ " " ++ sink.kind ++ " clock " ++ describe_control(sink.clock)]
+    for (input in sink.inputs):
+      def origins = String.join(
+        input.origins.map(fun (origin): describe_origin(summary, origin)),
+        ", "
+      )
+      def classification = describe_classification(input.classification)
+      lines := lines ++ ["    " ++ append_path(input.name, input.path) ++ ": " ++ classification ++ " <- " ++ origins]
+  String.join(lines, "\n")

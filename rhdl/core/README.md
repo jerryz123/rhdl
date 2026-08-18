@@ -291,6 +291,8 @@ Design        DesignElaboration  DpiImport   DpiResult   Module       Operation
 Value         Place              Port        Register    Memory       SyncMemory
 Instance      HardwareType       Location    Origin      Combinational
 SingleClock   MultiClock         ClockGroup  ClockUse
+StaticProvenance  ExternalProvenance  StateProvenance  ControlReference
+OutputLeafProvenance  TemporalSinkInput  TemporalSink  ModuleTemporalSummary
 ```
 
 An operation owns operands, results, places, attributes, a location, and an
@@ -349,7 +351,29 @@ Clock identity follows only transparent `rtl.wire` aliases. An equal-width
 `rtl.cast` to `Clock` is deliberately not proof that two event streams are the
 same. `verify_single_clock` checks a module's locally owned clocked effects
 against an expected clock without changing the IR or backend output. It does
-not yet infer value provenance or diagnose CDC paths through module inputs.
+not infer value provenance or diagnose CDC paths through module inputs.
+
+### Temporal provenance reports
+
+`summarize_module_temporal` computes a report-only, leaf-sensitive temporal
+summary for a completed module and its instance hierarchy. Origins remain
+`StaticProvenance`, symbolic `ExternalProvenance`, or `StateProvenance` tied to
+the defining operation, concrete instance path, and clock/reset controls.
+Symbolic child inputs are substituted at every instance, so one module
+definition can be reused under different clocks without specialization or
+flattening.
+
+Every register, memory effect, synchronous memory, assertion, and DPI effect
+appears as a `TemporalSink`. Its sampled leaves are classified as static,
+same-clock, foreign-clock, unknown-input, unknown-clock, or multi-clock fan-in.
+`dump_temporal_report` renders the same inspectable objects deterministically.
+These classifications do not yet accept or reject crossings, and report
+construction does not mutate the IR or affect backend output.
+
+Combinational-cycle verification and temporal provenance share the exact
+leaf-dependency rules in `dependencies.rhm`. Records and vectors preserve
+independent leaf paths, while representation-reinterpreting operations such as
+`rtl.cast` conservatively depend on the whole source.
 
 ## Verification contract
 

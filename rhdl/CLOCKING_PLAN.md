@@ -308,6 +308,7 @@ separate concerns.
 ```text
 rhdl/core/domains.rhm
 rhdl/core/domain-verify.rhm
+rhdl/core/dependencies.rhm
 
 rhdl/frontend/layers/clocking.rhm
 rhdl/frontend/support/clocking.rhm
@@ -329,8 +330,9 @@ tests/backend/clocking-test.rhm
 `rhdl/core/domains.rhm` owns domain declarations, relationships, crossing
 contracts, report objects, and public predicates. `rhdl/core/domain-verify.rhm`
 owns provenance propagation, module summaries, instance substitution, and
-diagnostics. `verify.rhm` invokes the checks at the appropriate verification
-boundary.
+diagnostics. `rhdl/core/dependencies.rhm` owns the shared leaf-sensitive
+dependency semantics consumed by combinational-cycle and temporal analysis.
+`verify.rhm` invokes checks at the appropriate verification boundary.
 
 `rhdl/frontend/layers/clocking.rhm` owns selectable public syntax for named
 domains, relationship declarations, top-level environment contracts, domain
@@ -380,6 +382,29 @@ This slice adds no IR fields, named domains, CDC provenance, crossing
 primitives, backend attributes, or CIRCT changes. Its result is a dependable
 single-clock island boundary that later CDC analysis can summarize as one
 domain instead of rediscovering clocks operation by operation.
+
+### Second slice: report-only temporal provenance
+
+Build the first Phase 1 analysis without changing what designs are accepted:
+
+1. Extract the existing leaf-sensitive combinational dependency rules into
+   one core module shared by cycle verification and temporal analysis.
+2. Classify origins as static, symbolic module-input leaves, or state tied to
+   its clock/reset controls and concrete instance path.
+3. Substitute symbolic input and state origins through reused module
+   definitions without flattening hierarchy.
+4. Inventory every existing clocked sink and classify each sampled leaf as
+   static, same-clock, foreign-clock, unknown-input, unknown-clock, or
+   multi-clock fan-in.
+5. Expose inspectable summary objects and deterministic text reports.
+
+This slice is implemented. It deliberately adds no domain declarations,
+clock-relationship policy, crossing evidence, frontend syntax, automatic
+verification call, rejection, IR mutation, or backend lowering. Existing
+`sync_circuit` certification remains the enforcement boundary; because those
+circuits already prove one ambient clock locally and propagate it to sync
+children, later closed-design analysis can treat each certified subtree as a
+known single-clock island rather than infer that invariant from dataflow.
 
 ### Phase 1: Semantic inventory and analysis
 
