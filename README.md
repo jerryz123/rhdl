@@ -159,7 +159,9 @@ The current vertical slice includes:
 - A pure Ridx host library with named finite product spaces, nominal points,
   canonical subset views, total point-indexed host values, validated mappings,
   symbolic relation algebra, canonical immutable materialization, and
-  identity-bearing incidence that preserves parallel edges and self-loops.
+  identity-bearing incidence that preserves parallel edges and self-loops. The
+  NoC rectangular-mesh generator is its first consumer and lowers Ridx
+  enumeration into the existing NoC authoring model.
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
   RHDL logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.

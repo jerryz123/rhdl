@@ -33,7 +33,10 @@ The current implementation provides:
 - Resource-visible routing phases expressed as named VC-group transitions,
   without hidden mutable packet state.
 - Generic irreversible composition of independent adaptive and escape policies.
-- Separate standard definitions for line and rectangular-mesh topologies.
+- Separate standard definitions for line and rectangular-mesh topologies. The
+  mesh generator uses pure Ridx finite spaces and dropped shift relations for
+  enumeration, then lowers immediately into the existing NoC identities and
+  authoring model.
 - A standard all-pairs traffic definition that produces ordinary symbolic
   route-class specifications for any authored topology.
 - Standard XY and YX dimension-order policies defined as clients of the

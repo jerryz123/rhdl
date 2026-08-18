@@ -4,11 +4,13 @@
 
 ## Status
 
-Milestones 1 through 3 are implemented. Ridx now provides dependency-neutral
+Milestones 1 through 4 are implemented. Ridx now provides dependency-neutral
 Rhombus finite domains, total indexed values, validated mappings and inverse
 fibers, inspectable symbolic relations, immutable canonical materialization,
-and identity-bearing incidence with a set-valued relation projection. The two
-consumer experiments and the RHDL adapter remain planned.
+and identity-bearing incidence with a set-valued relation projection. The NoC
+rectangular-mesh generator is the first pure consumer: it lowers Ridx points
+and dropped shifts immediately into the existing NoC authoring model. The
+independent RHDL experiment and adapter remain planned.
 
 RHDL will be one consumer; Ridx is not an RHDL frontend layer, a hardware IR,
 or an automatic hardware scheduler.
@@ -353,7 +355,7 @@ following:
 - Preserve parallel edges, self-loops, and edge metadata associations.
 - Derive set-valued adjacency relations without changing incidence identity.
 
-### Milestone 4: NoC experiment
+### Milestone 4: NoC experiment — implemented
 
 - Re-express rectangular-mesh coordinate and neighbor construction with Ridx.
 - Lower into the existing authored `TopologySpec` and `RectangularMesh` view.

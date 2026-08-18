@@ -11,14 +11,15 @@ those structures any hardware, topology, placement, or scheduling meaning.
 RHDL is a future consumer of Ridx, not part of the Ridx model. Pure Ridx modules
 never import RHDL, CIRCT, NoC, RFPL, or backend packages. Consumer packages are
 responsible for translating Ridx objects into their own identities, validation
-artifacts, plans, or generated structure.
+artifacts, plans, or generated structure. The existing NoC rectangular-mesh
+generator is the first such consumer.
 
 The architecture, staged roadmap, and accepted non-goals are recorded in
 [`PLAN.md`](PLAN.md).
 
 ## Current API
 
-Milestones 1 through 3 provide:
+Milestones 1 through 4 provide:
 
 - `Axis(name, extent)` for named positive finite axes;
 - `IndexSpace(axes, ~name)` for nominal rectangular product spaces;
@@ -59,6 +60,13 @@ same endpoints or an edge is a self-loop. Per-edge metadata remains in ordinary
 pairs by the endpoint domains and deliberately collapses parallel endpoint
 pairs without modifying the incidence object or its metadata.
 
+The NoC rectangular-mesh helper uses a local two-axis `IndexSpace` for node
+enumeration and materialized dropped shifts for directional neighbors. It then
+immediately constructs the existing `MeshNodeBinding`, `MeshLinkBinding`, and
+`TopologySpec` values. No Ridx object escapes through the public NoC API, and
+NoC link naming, canonical sorting, validation, routing, and planning remain
+authoritative.
+
 Import the aggregate model from an ordinary Rhombus module:
 
 ```rhombus
@@ -96,9 +104,8 @@ def right_neighbor = shift_relation(
 `lib("ridx/materialize/main.rhm")` to convert `right_neighbor` into a canonical
 pair snapshot.
 
-The NoC experiment and explicit RHDL elaboration adapter are later milestones.
-The current API deliberately does not infer connectivity meaning or create
-hardware.
+The explicit RHDL elaboration adapter is the next experiment. The current API
+deliberately does not infer connectivity meaning or create hardware.
 
 ## Focused validation
 

@@ -3,6 +3,8 @@
 
 import:
   "../../authoring/main.rhm" open
+  "../../../ridx/model/main.rhm" open
+  "../../../ridx/materialize/main.rhm" open
 
 export:
   MeshCoordinate
@@ -163,41 +165,51 @@ fun require_mesh_vc_groups(vc_groups :: NonemptyList.of(VCGroup)):
     | error(~who: #'rectangular_mesh,
             "duplicate VC group " ++ group.name)
 
+fun mesh_coordinate_from_point(point :: IndexPoint):
+  MeshCoordinate(point.coordinate("x"), point.coordinate("y"))
+
+fun directional_mesh_links(space :: IndexSpace,
+                           direction :: MeshDirection):
+  materialize_relation(
+    shift_relation(
+      space,
+      direction.axis,
+      direction.step,
+      ~boundary: "drop"
+    )
+  ).pairs.map(
+    fun (pair):
+      def source = mesh_coordinate_from_point(pair.source)
+      def destination = mesh_coordinate_from_point(pair.target)
+      MeshLinkBinding(source,
+                      destination,
+                      direction,
+                      mesh_link_ref(source, direction))
+  )
+
 fun rectangular_mesh(width :: PosInt,
                      height :: PosInt,
                      vc_groups :: NonemptyList.of(VCGroup)):
   require_mesh_vc_groups(vc_groups)
 
-  def mutable node_bindings = []
-  for (x in 0..width):
-    for (y in 0..height):
-      def coordinate = MeshCoordinate(x, y)
-      node_bindings := node_bindings ++ [
-        MeshNodeBinding(coordinate, mesh_node_ref(x, y))
-      ]
+  def coordinate_space = IndexSpace(
+    [Axis("x", width), Axis("y", height)],
+    ~name: "rectangular-mesh"
+  )
+  def node_bindings = index_by(
+    coordinate_space,
+    fun (point):
+      def coordinate = mesh_coordinate_from_point(point)
+      MeshNodeBinding(coordinate,
+                      mesh_node_ref(coordinate.x, coordinate.y))
+  ).values()
 
   def mutable link_bindings = []
-  fun add_link(source, destination, direction):
-    link_bindings := link_bindings ++ [
-      MeshLinkBinding(source,
-                      destination,
-                      direction,
-                      mesh_link_ref(source, direction))
-    ]
-
-  for (x in 0..width):
-    for (y in 0..height):
-      def source = MeshCoordinate(x, y)
-      when x + 1 < width
-      | block:
-          def east = MeshCoordinate(x + 1, y)
-          add_link(source, east, mesh_east)
-          add_link(east, source, mesh_west)
-      when y + 1 < height
-      | block:
-          def north = MeshCoordinate(x, y + 1)
-          add_link(source, north, mesh_north)
-          add_link(north, source, mesh_south)
+  for (direction in [mesh_east, mesh_west, mesh_north, mesh_south]):
+    link_bindings := link_bindings ++ directional_mesh_links(
+      coordinate_space,
+      direction
+    )
 
   def links = link_bindings.map(
     fun (binding):
