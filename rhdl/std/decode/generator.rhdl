@@ -1,11 +1,9 @@
 #lang rhdl
-// Defines callable DecodeGen values with optional Espresso PLA minimization.
+// Defines callable DecodeGen values that preserve typed decode relations in core IR.
 
 import:
   lib("rhdl/std/decode/pattern.rhdl") open
   lib("rhdl/std/decode/table.rhdl") open
-  lib("rhdl/std/decode/espresso.rhdl") open
-  lib("rhdl/std/decode/pla.rhdl") open
 
 export:
   DecodeResult
@@ -17,28 +15,25 @@ bundle DecodeResult(T):
   value: T
 
 fun elaborate_decode(table :: DecodeTable,
-                     plan,
                      selector :: Hardware.of(table.input_type))
   :: Hardware.of(table.output_type):
-  if plan is_a DecodePla
-  | elaborate_decode_pla(table, plan, selector)
-  | hw_decode(selector,
-              table.input_type,
-              table.output_type,
-              table.packed_cases,
-              table.default.value_bits,
-              table.default.care_bits)
+  hw_decode(selector,
+            table.input_type,
+            table.output_type,
+            table.packed_cases,
+            table.default.value_bits,
+            table.default.care_bits)
 
-class DecodeGen(table, plan):
+class DecodeGen(table):
   implements Callable
-  constructor (cases, ~default, ~espresso: espresso = #'auto):
+  constructor (cases, ~default):
     def table = DecodeTable(cases, ~default)
-    super(table, make_decode_plan(table, ~espresso: espresso))
+    super(table)
 
   // Method annotations cannot depend on receiver fields, so the callable
   // surface states the packable category and delegates its exact relation.
   override method call(selector :: Hardware.packable) :: Hardware.packable:
-    elaborate_decode(table, plan, selector)
+    elaborate_decode(table, selector)
 
 // Turns a nonempty decode relation into a partial hardware function. Matched
 // cases assert valid; the unmatched value is unconstrained synthesis freedom.

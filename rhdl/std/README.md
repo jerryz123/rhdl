@@ -112,29 +112,24 @@ circuit ControlPath():
 ```
 
 `DecodeGen` is an ordinary callable host value and can be passed as a circuit
-parameter. Construction looks for the `espresso` executable. When available,
-it constructs a minimized plan, and calling the generator elaborates the
-resulting shared PLA as product-term ANDs and per-output ORs. Output bits are
-partitioned by their zero, one, or don't-care default; each nonempty partition
-is minimized separately, and identical input products are merged across
-partitions. `ValidDecodeGen` therefore keeps validity and payload in one
-semantic relation, but their different defaults normally place them in
-separate minimization runs.
+parameter. Construction validates and retains the typed relation; calling the
+generator always emits one typed `rtl.decode` operation. The standard library
+does not choose a physical implementation or invoke external tools. Raw
+`hw_decode` emits the same core operation directly.
 
-When Espresso is absent, `DecodeGen` emits the existing typed `rtl.decode`
-operation and lets CIRCT lower it without local minimization. An executable
-that is found but fails or returns malformed PLA is an elaboration error; only
-absence selects the fallback. `~espresso: #false` explicitly requests fallback
-for reproducible callers. `RHDL_ESPRESSO=off` provides the equivalent
-process-level override for build and golden-generation scripts, while any
-other nonempty value selects that executable. The default remains automatic
-discovery. Raw `hw_decode` is unchanged and always emits the core operation.
+The CIRCT backend requires the `espresso` executable whenever a design contains
+`rtl.decode`. It partitions output bits by their zero, one, or don't-care
+default, minimizes each nonempty partition, merges identical input products,
+and emits shared product-term ANDs and per-output ORs. There is no fallback or
+frontend optimizer configuration. `ValidDecodeGen` therefore keeps validity
+and payload in one semantic relation even though their different defaults
+normally place them in separate minimization runs.
 
 Input and output patterns may use different scalar, aggregate, or
-extension-defined hardware types. Espresso chooses a concrete value for every
-output don't-care; the fallback preserves that freedom for downstream
-synthesis. See [`../../examples/std/decode.rhdl`](../../examples/std/decode.rhdl) for an
-aggregate input/output example.
+extension-defined hardware types. The core operation preserves output
+don't-cares until backend lowering, where Espresso uses them while choosing a
+concrete cover. See [`../../examples/std/decode.rhdl`](../../examples/std/decode.rhdl)
+for an aggregate input/output example.
 
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
 sparse record output pattern to serve several input patterns. Its optional

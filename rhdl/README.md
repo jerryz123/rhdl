@@ -100,9 +100,7 @@ import one primitive without loading unrelated generators.
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes, exact-literal normalization, partial records, and recursive aggregate construction | None |
 | `std/decode/pattern-value.rhdl` | Partially specified hardware values from `Pattern` cubes | `std/decode/pattern.rhdl` |
 | `std/decode/table.rhdl` | Validated unordered typed decode relations, grouped sparse record cases, input lifting, and row-aligned output products | `std/decode/pattern.rhdl` |
-| `std/decode/espresso.rhdl` | Optional host-side Espresso discovery, PLA interchange, and minimized-cover plans | `std/decode/table.rhdl` |
-| `std/decode/pla.rhdl` | Shared product-term hardware elaboration for minimized decode covers | `std/decode/espresso.rhdl`, `std/decode/table.rhdl` |
-| `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings selecting minimized PLA or core-decode fallback | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/espresso.rhdl`, `std/decode/pla.rhdl` |
+| `std/decode/generator.rhdl` | Callable `DecodeGen` and valid-tagged partial mappings that elaborate relational `rtl.decode` operations | `std/decode/pattern.rhdl`, `std/decode/table.rhdl` |
 | `std/decode.rhdl` | Public decode facade | `std/decode/pattern.rhdl`, `std/decode/table.rhdl`, `std/decode/generator.rhdl` |
 | `std/ready-valid.rhdl` | `Valid`, `DecoupledCtrl`, `IrrevocableCtrl`, payload-bearing protocols, `fire`, and nominal endpoint/protocol introspection | None |
 | `std/credited.rhdl` | Protocol-neutral bounded credited payload transport, monitoring, and nominal protocol introspection | None |

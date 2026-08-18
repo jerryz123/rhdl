@@ -515,8 +515,7 @@ for integration_fixture in "${integration_fixtures[@]}"; do
 done
 
 for requested_fixture in ${FIXTURE:-} ${FIXTURES:-}; do
-  if [[ "$requested_fixture" != decode-espresso ]] \
-      && ! fixture_declared "$requested_fixture"; then
+  if ! fixture_declared "$requested_fixture"; then
     echo "requested CIRCT fixture is not declared: $requested_fixture" >&2
     exit 1
   fi
@@ -550,7 +549,7 @@ for spec in "${direct_fixture_specs[@]}"; do
 done
 
 if (( ${#materialize_args[@]} > 0 )); then
-  RHDL_ESPRESSO=off racket -y -S "$repo_dir" tests/backend/load-example.rkt \
+  racket -y -S "$repo_dir" tests/backend/load-example.rkt \
     materialize "$test_tmp_dir" "${materialize_args[@]}"
 fi
 
@@ -562,14 +561,6 @@ for spec in "${fixture_specs[@]}"; do
     golden_fixture "$fixture" "$example" "$design_export" "$reference_export"
   fi
 done
-
-if espresso_path="$(command -v espresso 2>/dev/null)"; then
-  if fixture_selected decode-espresso && [[ "$run_direct_fixtures" == true ]]; then
-    RHDL_ESPRESSO="$espresso_path" racket -y -S "$repo_dir" \
-      tests/backend/emit-decode-espresso.rhm > "$test_tmp_dir/decode-espresso.mlir"
-    verify_fixture decode-espresso decode_espresso_tb
-  fi
-fi
 
 for spec in "${direct_fixture_specs[@]}"; do
   IFS='|' read -r fixture top <<< "$spec"

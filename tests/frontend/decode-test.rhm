@@ -1,66 +1,26 @@
 #lang rhdl
-// Checks automatic minimized decodes, deterministic fallback, and table validation.
+// Checks relational DecodeGen elaboration and typed decode-table validation.
 
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/std/decode.rhdl" open
-  "../../rhdl/std/decode/espresso.rhdl" open
   "../../examples/std/decode.rhdl" as fixture
 
 def module_def = fixture.design.modules[0]
 def decode_operations = module_def.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.decode"
 )
-def espresso_path = find_decode_espresso()
+def decode_operation = decode_operations[0]
 
 check:
-  (if espresso_path
-   | fixture.control_decode.plan is_a DecodePla
-   | fixture.control_decode.plan is_a DecodeFallback) ~is #true
-  decode_operations.length() ~is (if espresso_path | 0 | 1)
-  (if espresso_path
-   | module_def.operations.find(
-       fun (operation): operation.opcode == "rtl.and"
-     ) != #false
-   | #true) ~is #true
-  (if espresso_path
-   | module_def.operations.find(
-       fun (operation): operation.opcode == "rtl.concat"
-     ) != #false
-   | #true) ~is #true
-  verify_design(fixture.design) ~is #void
-
-def fallback_decode = DecodeGen(
-  fixture.control_decode.table.cases,
-  ~default: fixture.control_decode.table.default,
-  ~espresso: #false
-)
-
-circuit FallbackInstructionDecoder():
-  input encoded: Bits(5)
-  output control: fixture.Control()
-
-  control <== fallback_decode(encoded.into(fixture.Instruction()))
-
-def fallback_design = elaborate(FallbackInstructionDecoder())
-def fallback_module = fallback_design.modules[0]
-def decode_operation = fallback_module.operations.find(
-  fun (operation): operation.opcode == "rtl.decode"
-)
-
-check:
-  fallback_decode.plan is_a DecodeFallback ~is #true
-  decode_operation != #false ~is #true
+  decode_operations.length() ~is 1
   type_equal(decode_operation.operands[0].type, fixture.Instruction()) ~is #true
   type_equal(decode_operation.results[0].type, fixture.Control()) ~is #true
   decode_operation.attribute("cases") ~is [[0b00000, 0b11110, 0b010, 0b111],
                                            [0b00010, 0b11110, 0b100, 0b110]]
   decode_operation.attribute("default_value") ~is 0
   decode_operation.attribute("default_care") ~is 0b110
-  fallback_module.operations.filter(
-    ~keep: fun (operation): operation.opcode == "rtl.decode"
-  ).length() ~is 1
-  verify_design(fallback_design) ~is #void
+  verify_design(fixture.design) ~is #void
 
 circuit WrongSelectorDecoder():
   input encoded: Bits(5)
@@ -74,32 +34,9 @@ check:
 def in_a = Pattern(~value: bits(0b1000, 4), ~care: bits(0b1000, 4))
 def in_b = Pattern(~value: bits(0b1010, 4), ~care: bits(0b1100, 4))
 def out = Pattern(~value: bits(0, 2), ~care: bits(3, 2))
-def inverted_table = DecodeTable(
-  [DecodeCase(pattern(Bits(2), bits(0, 2)),
-              pattern(Bits(1), bits(0, 1)))],
-  ~default: pattern(Bits(1), bits(1, 1))
-)
-def inverted_plan:
-  if espresso_path
-  | minimize_decode_table(inverted_table, espresso_path)
-  | #false
-
 check:
   DecodeTable([DecodeCase(in_a, out), DecodeCase(in_b, out)],
               ~default: out) ~throws "overlap"
   DecodeTable([DecodeCase(in_a, out)],
               ~default: Pattern(~value: bits(0, 3),
                                 ~care: bits(7, 3))) ~throws "default output type"
-  (if espresso_path | inverted_plan.invert_mask | 1) ~is 1
-  (if espresso_path | inverted_plan.terms.length() | 1) ~is 1
-  (if espresso_path | inverted_plan.terms[0].input_value | 0) ~is 0
-  (if espresso_path | inverted_plan.terms[0].input_care | 3) ~is 3
-  (if espresso_path | inverted_plan.terms[0].output_ones | 1) ~is 1
-
-check:
-  DecodeGen(fixture.control_decode.table.cases,
-            ~default: fixture.control_decode.table.default,
-            ~espresso: "/usr/bin/false") ~throws "Espresso failed"
-  DecodeGen(fixture.control_decode.table.cases,
-            ~default: fixture.control_decode.table.default,
-            ~espresso: "/usr/bin/true") ~throws "malformed PLA"
