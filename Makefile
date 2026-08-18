@@ -121,7 +121,7 @@ circt-full-test: check-example-verilog
 	bash tests/backend/run-circt.sh --full
 
 ci-circt-language-test:
-	bash tools/check-example-verilog.sh examples/rhdl examples/lop
+	bash tools/check-example-verilog.sh examples/rhdl examples/lop examples/golf
 	bash tests/backend/run-circt.sh --group language
 
 ci-circt-std-test:

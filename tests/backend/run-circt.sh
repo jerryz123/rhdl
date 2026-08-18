@@ -163,7 +163,7 @@ fixture_in_group() {
     IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
     if [[ "$fixture" == "$wanted" ]]; then
       case "$group:$example" in
-        language:examples/rhdl/*|language:examples/lop/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/tilelink/*|rfpl:examples/rfpl/*)
+        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/tilelink/*|rfpl:examples/rfpl/*)
           return 0
           ;;
         *)
