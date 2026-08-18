@@ -51,6 +51,13 @@ sync_circuit RicketCore(xlen :: XLen):
   inst multiplier(RicketMultiplier(xlen))
   inst scoreboard(Scoreboard(register_count))
 
+  // Name the pipeline boundaries once so later sections can be presented in
+  // stage order while still observing downstream occupancy and results.
+  def id_ex = id_ex_pipe.egress
+  def memory = ex_mem_pipe.egress
+  def commit = mem_wb_pipe.egress
+  def Array(commit_write :: Endpoint, deferred_completion_write :: Endpoint) = registers.writes
+
   fault <== faulted
 
   // Backward-traveling observations use local Valid interface links. Their
@@ -60,60 +67,10 @@ sync_circuit RicketCore(xlen :: XLen):
   def redirect_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
-
-  // WB is the ordered commit point. Deferred loads and multiplies mark their
-  // destinations busy there, and their later completions clear those entries.
-  // A fixed-priority arbiter lets loads win because they cannot be
-  // backpressured; the multiplier holds its irrevocable completion instead.
-  def memory = ex_mem_pipe.egress
-  def Array(commit_write :: Endpoint, deferred_completion_write :: Endpoint) = registers.writes
-  def commit = mem_wb_pipe.egress
-  def Array(scoreboard_commit, bypass_commit, register_commit, multiply_commit) = commit |> fork_valid(4)
-  def scoreboard_set_event = scoreboard_commit
-    |> filter_valid(operation => deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
-    |> map_valid(operation => operation.rd)
-  scoreboard_set_event |> scoreboard.set
-
-  def writeback_bypass:
-    bypass_commit
-      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
-      |> map_valid(operation => RicketBypass(xlen)):
-        rd: operation.rd
-        value: operation.value
-  writeback_bypass |> writeback_bypass_link.left
-
-  def register_commit_write:
-    register_commit
-      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable)
-      |> map_valid(operation => RegisterFileWrite(xlen)):
-        address: operation.rd
-        data: operation.value
-  register_commit_write |> commit_write
-
-  def multiply_issue = multiply_commit
-    |> filter_valid(operation => (operation.writeback_source === WritebackSelect.Multiply) & operation.write_enable & or_reduce(operation.rd))
-    |> map_valid(operation => operation.multiply_issue)
-  multiply_issue |> multiplier.issue
-
-  def load_completion = data_access.response
-    |> filter_valid(response => or_reduce(response.tag))
-  def load_completion_write = (
-    load_completion
-      |> map_valid(response => RegisterFileWrite(xlen)):
-        address: response.tag
-        data: response.data
-  ) |> to_decoupled()
-  def multiply_completion_write = multiplier.completion
-    |> map_flow(completion => RegisterFileWrite(xlen)):
-      address: completion.rd
-      data: completion.value
-  def Array(scoreboard_completion, register_completion) = Array(load_completion_write, multiply_completion_write)
-    |> arbiter()
-    |> to_valid()
-    |> fork_valid(2)
-  def scoreboard_clear_event = scoreboard_completion
-    |> map_valid(write => write.address)
-  scoreboard_clear_event |> scoreboard.clear
+  def scoreboard_set_link :: Handle = interface_link(Valid(Bits(5)))
+  def scoreboard_clear_link :: Handle = interface_link(Valid(Bits(5)))
+  scoreboard_set_link.right |> scoreboard.set
+  scoreboard_clear_link.right |> scoreboard.clear
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
@@ -164,7 +121,6 @@ sync_circuit RicketCore(xlen :: XLen):
   // Decode (ID) is ordinary combinational logic between IF/ID and ID/EX.
   // Filtering consumes squashed tokens; gating holds a token that depends on
   // deferred work which has not yet reached the WB commit point.
-  def id_ex = id_ex_pipe.egress
   def instruction = live_if_id.bits.instruction
   decoder.instruction <== instruction
   def control = decoder.control
@@ -193,8 +149,8 @@ sync_circuit RicketCore(xlen :: XLen):
   registers.read_address_2 <== rs2
   fun ricket_register_busy(index):
     def stored = scoreboard_busy(register_count, scoreboard.busy, index)
-    def setting = scoreboard_set_event.valid & (scoreboard_set_event.bits === index)
-    def clearing = scoreboard_clear_event.valid & (scoreboard_clear_event.bits === index)
+    def setting = scoreboard_set_link.right.valid & (scoreboard_set_link.right.bits === index)
+    def clearing = scoreboard_clear_link.right.valid & (scoreboard_clear_link.right.bits === index)
     (stored ||| setting) & !clearing
   def rs1_busy = or_reduce(rs1) & ricket_register_busy(rs1)
   def rs2_busy = or_reduce(rs2) & ricket_register_busy(rs2)
@@ -393,8 +349,59 @@ sync_circuit RicketCore(xlen :: XLen):
         value: operation.result
   memory_bypass |> memory_bypass_link.left
 
-  // The second register-file write port accepts one deferred completion. L1D
-  // hits cannot wait, so they take priority over a held multiplier result.
+  // Writeback (WB) is the ordered commit point. Deferred loads and multiplies
+  // mark their destinations busy here; immediate results update the register
+  // file and remain available to Execute through the bypass link.
+  def Array(scoreboard_commit, bypass_commit, register_commit, multiply_commit) = commit |> fork_valid(4)
+  def scoreboard_set_event = scoreboard_commit
+    |> filter_valid(operation => deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
+    |> map_valid(operation => operation.rd)
+  scoreboard_set_event |> scoreboard_set_link.left
+
+  def writeback_bypass:
+    bypass_commit
+      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
+      |> map_valid(operation => RicketBypass(xlen)):
+        rd: operation.rd
+        value: operation.value
+  writeback_bypass |> writeback_bypass_link.left
+
+  def register_commit_write:
+    register_commit
+      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable)
+      |> map_valid(operation => RegisterFileWrite(xlen)):
+        address: operation.rd
+        data: operation.value
+  register_commit_write |> commit_write
+
+  def multiply_issue = multiply_commit
+    |> filter_valid(operation => (operation.writeback_source === WritebackSelect.Multiply) & operation.write_enable & or_reduce(operation.rd))
+    |> map_valid(operation => operation.multiply_issue)
+  multiply_issue |> multiplier.issue
+
+  // Deferred loads and multiplies complete outside the ordered pipeline. A
+  // fixed-priority arbiter lets nonbackpressured L1D responses win while the
+  // multiplier holds its irrevocable result. Completion clears the scoreboard
+  // and uses the register file's second write port in the same cycle.
+  def load_completion = data_access.response
+    |> filter_valid(response => or_reduce(response.tag))
+  def load_completion_write = (
+    load_completion
+      |> map_valid(response => RegisterFileWrite(xlen)):
+        address: response.tag
+        data: response.data
+  ) |> to_decoupled()
+  def multiply_completion_write = multiplier.completion
+    |> map_flow(completion => RegisterFileWrite(xlen)):
+      address: completion.rd
+      data: completion.value
+  def Array(scoreboard_completion, register_completion) = Array(load_completion_write, multiply_completion_write)
+    |> arbiter()
+    |> to_valid()
+    |> fork_valid(2)
+  def scoreboard_clear_event = scoreboard_completion
+    |> map_valid(write => write.address)
+  scoreboard_clear_event |> scoreboard_clear_link.left
   register_completion |> deferred_completion_write
 
 export:
