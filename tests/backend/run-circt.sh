@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:chi-*|protocols:tilelink-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:scoreboard|cores:ricket-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:scoreboard|cores:ricket-*)
       return 0
       ;;
     *)
@@ -568,6 +568,7 @@ direct_fixture_specs=(
   'tilelink-protocol|tilelink_protocol_tb'
   'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'
+  'iterative-multiplier|iterative_multiplier_tb'
   'scoreboard|scoreboard_tb'
   'ricket-register-file|ricket_register_file_tb'
   'ricket-core|ricket_core_tb'

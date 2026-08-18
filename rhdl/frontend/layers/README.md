@@ -64,13 +64,15 @@ the typed `DecodeGen` standard-library wrapper, which constructs those images
 from `Pattern` values.
 
 The standard combinational surface includes modular `+`, `-`, `*`, shifts,
-and the hardware-only bitwise operators `&`, `|||`, and `^`. Prefix `!` is a
-width-preserving hardware inversion for both `Bool` and `Bits`; on host values
-it retains Rhombus negation. The three-character OR spelling avoids conflicting
-with Rhombus's use of bare `|` for block alternatives. Host bit manipulation
-remains available explicitly through `rhombus.bits`. `Bits` arithmetic is
-unsigned. Rhombus `&&` and `||` remain host short-circuit operators; hardware
-conjunction and disjunction use `&` and `|||`.
+and the hardware-only bitwise operators `&`, `|||`, and `^`. Prefix `-`
+performs fixed-width two's-complement arithmetic negation on `Bits` and `SInt`
+and ordinary numeric negation on host values. Prefix `!` is a width-preserving
+hardware inversion for both `Bool` and `Bits`; on host values it retains
+Rhombus negation. The three-character OR spelling avoids conflicting with
+Rhombus's use of bare `|` for block alternatives. Host bit manipulation remains
+available explicitly through `rhombus.bits`. `Bits` arithmetic is unsigned.
+Rhombus `&&` and `||` remain host short-circuit operators; hardware conjunction
+and disjunction use `&` and `|||`.
 `SInt` arithmetic uses a signed interpretation where the operation depends on
 it. Both remain fixed-width. Arithmetic and shift operators keep their ordinary
 Rhombus meaning on host values; the symbolic bitwise family requires hardware
@@ -286,10 +288,10 @@ state <== state + one
 
 The same rule follows statically selected aggregate paths. Reading
 `state.field` or `state[index]` selects current state, while using that path as
-the direct target of `<==` selects the corresponding next-state place. The
-explicit `state.next` spelling remains available for compatibility and
-low-level code. Hardware-selected dynamic indices are values rather than
-places; express those updates as a whole-register drive with `.updated`.
+the direct target of `<==` selects the corresponding next-state place.
+Author-level RTL should always use this direct form. Hardware-selected dynamic
+indices are values rather than places; express those updates as a
+whole-register drive with `.updated`.
 
 The type can be inferred from `~init` or `~next`. Supplying `~next` drives the
 register immediately; another drive is an error. `~init` is an active-high

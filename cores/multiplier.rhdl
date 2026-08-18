@@ -1,0 +1,73 @@
+#lang rhdl
+// Implements a width-generic iterative signed or unsigned integer multiplier.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+bundle MultiplierMode():
+  left_signed: Bool
+  right_signed: Bool
+
+bundle MultiplierRequest(width :: PosInt):
+  left: Bits(width)
+  right: Bits(width)
+  mode: MultiplierMode()
+
+// Accepts one request, consumes one multiplier bit per cycle, and returns the
+// full double-width product. The response remains stable under backpressure;
+// a replacement request can be accepted as the prior response is consumed.
+sync_circuit IterativeMultiplier(width :: PosInt):
+  def product_width = width * 2
+  def count_width = index_width(width)
+
+  interface request(Decoupled(MultiplierRequest(width)), ~role: consumer)
+  interface response(Irrevocable(Bits(product_width)), ~role: producer)
+
+  reg active(~init: Bool(#false))
+  reg count(~init: bits(0, count_width))
+  reg multiplicand(Bits(product_width))
+  reg multiplier(Bits(width))
+  reg accumulator(Bits(product_width))
+  reg negate_result(Bool)
+  reg response_valid(~init: Bool(#false))
+  reg response_bits(Bits(product_width))
+
+  request.ready <== !active & (!response_valid ||| response.ready)
+  response.valid <== response_valid
+  response.bits <== response_bits
+
+  def request_fire = fire(request)
+  def response_fire = fire(response)
+  def left_negative = request.bits.mode.left_signed & request.bits.left[width - 1].into(Bool)
+  def right_negative = request.bits.mode.right_signed & request.bits.right[width - 1].into(Bool)
+  def left_magnitude = mux(left_negative, -request.bits.left, request.bits.left)
+  def right_magnitude = mux(right_negative, -request.bits.right, request.bits.right)
+  def addend = mux(multiplier[0].into(Bool), multiplicand, bits(0, product_width))
+  def accumulated = accumulator + addend
+  def last_iteration = count === bits(width - 1, count_width)
+  def signed_product = mux(negate_result, -accumulated, accumulated)
+
+  when request_fire:
+    active <== Bool(#true)
+    count <== bits(0, count_width)
+    multiplicand <== zext(left_magnitude, product_width)
+    multiplier <== right_magnitude
+    accumulator <== bits(0, product_width)
+    negate_result <== left_negative ^ right_negative
+    response_valid <== Bool(#false)
+  elsewhen (active & last_iteration):
+    active <== Bool(#false)
+    response_valid <== Bool(#true)
+    response_bits <== signed_product
+  elsewhen active:
+    count <== count + bits(1, count_width)
+    multiplicand <== multiplicand << 1
+    multiplier <== multiplier >> 1
+    accumulator <== accumulated
+  elsewhen response_fire:
+    response_valid <== Bool(#false)
+
+export:
+  MultiplierMode
+  MultiplierRequest
+  IterativeMultiplier

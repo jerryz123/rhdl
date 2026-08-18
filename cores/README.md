@@ -18,20 +18,23 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`alu.rhdl`](alu.rhdl) | Width-parameterized 32- or 64-bit integer ALU |
 | [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
 | [`load-store.rhdl`](load-store.rhdl) | XLEN scalar-access width, alignment, load extraction, and store lane generation |
+| [`multiplier.rhdl`](multiplier.rhdl) | Width-generic iterative signed and unsigned multiplication |
 | [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
 | [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
+| [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
 | [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, state, and tests |
 
 The dependency direction is one way:
 
 ```text
-cores/ricket/ --> cores/{alu,branch-resolver,load-store}.rhdl
+cores/ricket/ --> cores/{alu,branch-resolver,load-store,multiplier}.rhdl
        |-------> riscv/isa + riscv/rhdl
        `-------> rhdl/std
 
 cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhdl + rhdl/std
 cores/branch-resolver.rhdl --> #lang rhdl only
+cores/multiplier.rhdl --> #lang rhdl + rhdl/std
 ```
 
 Neither reusable components nor named cores may import the optional CIRCT
@@ -39,6 +42,20 @@ backend, examples, or test implementations. Backend consumers elaborate their
 public designs from outside this package. Reusable components may consume the
 closed architectural `XLen` configuration but remain independent of RISC-V
 instruction catalogs, field models, decode adapters, and named cores.
+
+## Iterative multiplier
+
+[`multiplier.rhdl`](multiplier.rhdl) defines a one-request-at-a-time shift-add
+engine parameterized by operand width. Each request supplies two operands and
+a `MultiplierMode` that independently selects whether either operand is
+signed. The irrevocable response carries the complete double-width product and
+remains stable until accepted. Multiplication consumes one multiplier bit per
+cycle, and the unit can accept a replacement request in the cycle that a held
+response is consumed.
+
+The component does not select architectural high, low, or word results and
+does not import an instruction catalog. Those policies remain in a named
+core's decode and writeback logic.
 
 ## Integer ALU
 
@@ -91,4 +108,5 @@ env PLTCOLLECTS="$PWD": raco test cores/tests/*-test.rhm
 
 Run [`make ricket-host-test`](../Makefile) for all reusable components together
 with Ricket's decode and elaboration tests. `make ricket-test` additionally
-checks load/store lane behavior after CIRCT lowering with Verilator.
+checks load/store lane behavior and iterative multiplier transactions after
+CIRCT lowering with Verilator.

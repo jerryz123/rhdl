@@ -67,30 +67,24 @@ sync_circuit RicketLineRefill(Context,
     context: context
     line: line_with_response
   memory.response.ready <== active_state & (!last_response ||| completion.ready)
+  def memory_request_fire = fire(memory.request)
+  def memory_response_fire = fire(memory.response)
+  def memory_activity = memory_request_fire ||| memory_response_fire
+  def response_completes = memory_response_fire & last_response
+  def response_accumulates = memory_response_fire & !last_response
 
   when command_fire:
-    active_state.next <== Bool(#true)
-  elsewhen (active_state & fire(memory.response) & last_response):
-    active_state.next <== Bool(#false)
-
-  when command_fire:
-    line_address.next <== command.bits.line_address
-    context.next <== command.bits.context
-
-  when command_fire:
-    requested.next <== bits(0, count_width)
-  elsewhen (active_state & fire(memory.request)):
-    requested.next <== requested + bits(1, count_width)
-
-  when command_fire:
-    received.next <== bits(0, count_width)
-  elsewhen (active_state & fire(memory.response) & !last_response):
-    received.next <== received + bits(1, count_width)
-
-  when command_fire:
-    line.next <== as_vec(bits(0, line_bytes * 8), Bits(64))
-  elsewhen (active_state & fire(memory.response) & !last_response):
-    line.next <== line_with_response
+    active_state <== Bool(#true)
+    line_address <== command.bits.line_address
+    context <== command.bits.context
+    requested <== bits(0, count_width)
+    received <== bits(0, count_width)
+    line <== as_vec(bits(0, line_bytes * 8), Bits(64))
+  elsewhen memory_activity:
+    active_state <== mux(response_completes, Bool(#false), active_state)
+    requested <== mux(memory_request_fire, requested + bits(1, count_width), requested)
+    received <== mux(response_accumulates, received + bits(1, count_width), received)
+    line <== mux(response_accumulates, line_with_response, line)
 
 export:
   RicketLineRefillCommand

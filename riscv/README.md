@@ -98,9 +98,16 @@ Assembler pseudoinstructions are deliberately excluded because they alias and
 overlap architectural encodings. Specialized aliases such as `FENCE.TSO`,
 `PAUSE`, and `SEXT.W` therefore do not create catalog entries.
 
+[`isa/zmmul.rhm`](isa/zmmul.rhm) separately describes the multiply-only Zmmul
+extension. Its RV32 catalog contains `MUL`, `MULH`, `MULHSU`, and `MULHU`; its
+RV64 catalog adds `MULW`. Keeping the extension separate preserves the exact
+base-ISA catalogs and allows cores to adopt multiplication without claiming
+the divide and remainder operations from the full M extension.
+
 The catalogs were checked against the RISC-V International
 [RV32I specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html),
 [RV64I specification](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
 and canonical [`rv_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv_i)
 and [`rv64_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv64_i)
-opcode listings.
+opcode listings. Zmmul follows the ratified
+[multiply-only extension](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html#_zmmul_extension_version_1_0).

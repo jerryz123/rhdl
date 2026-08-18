@@ -152,22 +152,21 @@ sync_circuit RicketL1ICache(xlen :: XLen, sets :: Pow2Int, line_bytes :: Pow2Int
   when install:
     valid_lines[completion_set] <== Bool(#true)
 
-  when (core.flush):
-    refill_live <== Bool(#false)
-  elsewhen (lookup_miss):
-    refill_live <== Bool(#true)
-  elsewhen install:
-    refill_live <== Bool(#false)
-
   def next_outstanding = mux(
     request_fire,
     outstanding + bits(1, outstanding_width),
     outstanding - bits(1, outstanding_width)
   )
+  def refill_state_event = lookup_miss ||| install
+  def accounting_event = request_fire ^ response_fire
+  def cache_state_event = refill_state_event ||| accounting_event
+  def next_refill_live = mux(lookup_miss, Bool(#true), mux(install, Bool(#false), refill_live))
   when (core.flush):
+    refill_live <== Bool(#false)
     outstanding <== bits(0, outstanding_width)
-  elsewhen (request_fire ^ response_fire):
-    outstanding <== next_outstanding
+  elsewhen cache_state_event:
+    refill_live <== next_refill_live
+    outstanding <== mux(accounting_event, next_outstanding, outstanding)
 
 export:
   RicketL1ICache

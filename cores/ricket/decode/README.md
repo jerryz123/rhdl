@@ -13,6 +13,7 @@ authored control columns.
 | [`operand-ctrl.rhdl`](operand-ctrl.rhdl) | Register use, operand routing, and immediate format |
 | [`branch-ctrl.rhdl`](branch-ctrl.rhdl) | Orthogonal branch-resolver controls and JALR target selection |
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
+| [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Standalone Zmmul signedness and high/word result selection; not yet composed into the core decoder |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`trap-ctrl.rhdl`](trap-ctrl.rhdl) | Synchronous trap indication |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
@@ -42,6 +43,11 @@ synthesis don't-cares, including all result fields for unmatched instructions.
 Component tables use `decode_groups` directly. Its `group inputs:` form accepts
 the named host instruction-family lists, avoiding component-specific wrappers
 whose only job would be to construct and distribute one output pattern.
+
+`multiply-ctrl.rhdl` deliberately remains outside `RicketControl` while the
+iterative multiplier is not connected to the pipeline. It decodes the four
+RV32 Zmmul instructions and RV64 `MULW` into a nested reusable
+`MultiplierMode` plus orthogonal high-result and word-result controls.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one

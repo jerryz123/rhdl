@@ -40,33 +40,27 @@ fun build_switch(selector, cases :: NonemptyList, otherwise_body = #false):
 defn.sequence_macro 'when $condition: $body; ...
                      $tail
                      ...':
-  fun expand_chain(condition, body_thunk, remaining):
+  fun expand_chain(branches, remaining):
     match remaining
     | 'elsewhen $next_condition: $next_body; ...
        $rest
        ...':
-        def (nested, tail) = expand_chain(
-          next_condition,
-          'fun ():
-             $next_body
-             ...',
+        expand_chain(
+          branches ++ [
+            '[fun (): $next_condition,
+              fun ():
+                $next_body
+                ...]'
+          ],
           '$rest; ...'
-        )
-        values(
-          'conditional_chain(
-             [[fun (): $condition,
-               $body_thunk]],
-             fun (): $nested
-           )',
-          tail
         )
     | 'otherwise: $otherwise_body; ...
        $rest
        ...':
+        let [branch, ...] = branches
         values(
           'conditional_chain(
-             [[fun (): $condition,
-               $body_thunk]],
+             [$branch, ...],
              fun ():
                $otherwise_body
                ...
@@ -74,18 +68,22 @@ defn.sequence_macro 'when $condition: $body; ...
           '$rest; ...'
         )
     | ~else:
+        let [branch, ...] = branches
         values(
           'conditional_chain(
-             [[fun (): $condition,
-               $body_thunk]]
+             [$branch, ...]
            )',
           remaining
         )
-  expand_chain(condition,
-               'fun ():
-                  $body
-                  ...',
-               '$tail; ...')
+  expand_chain(
+    [
+      '[fun (): $condition,
+        fun ():
+          $body
+          ...]'
+    ],
+    '$tail; ...'
+  )
 
 expr.macro
 | 'when $condition: $body; ...':
