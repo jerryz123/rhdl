@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test formal-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt examples examples-rhdl examples-std examples-noc examples-lop examples-rfpl examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog frontend-test backend-test formal-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-std examples-noc examples-lop examples-rfpl examples-tilelink
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 HOST_ANNOTATION_TESTS := $(sort $(wildcard host/tests/*-test.rhm))
@@ -11,6 +11,7 @@ LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
 LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
+RIDX_TESTS := $(sort $(shell find ridx/tests -type f -name '*-test.rhm'))
 TILELINK_TESTS := $(sort $(wildcard tilelink/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
@@ -80,6 +81,9 @@ riscv-test:
 	bash riscv/check-boundaries.sh
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RISCV_TESTS)
 
+ridx-test:
+	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RIDX_TESTS)
+
 tilelink-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_TESTS)
 	bash tilelink/tests/run-negative.sh
@@ -109,6 +113,21 @@ verilator-test: check-example-verilog
 circt-full-test: check-example-verilog
 	bash tests/backend/run-circt.sh --full
 
+ci-circt-language-test:
+	bash tools/check-example-verilog.sh examples/rhdl examples/lop
+	bash tests/backend/run-circt.sh --group language
+
+ci-circt-std-test:
+	bash tools/check-example-verilog.sh examples/std
+	bash tests/backend/run-circt.sh --group std
+
+ci-circt-protocols-test:
+	bash tools/check-example-verilog.sh examples/noc examples/tilelink
+	bash tests/backend/run-circt.sh --group protocols
+
+ci-circt-cores-test:
+	bash tests/backend/run-circt.sh --group cores
+
 verilog-golden-test: check-example-verilog
 	bash tests/backend/run-circt.sh --golden-only
 
@@ -116,7 +135,19 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test tilelink-test chi-test ricket-host-test
+host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test tilelink-test chi-test ricket-host-test
+
+ci-host-foundation-test: host-annotation-test frontend-test lop-test
+
+ci-host-backend-test: backend-test
+
+ci-host-models-test: noc-test riscv-test ridx-test
+
+ci-host-protocols-test: rfpl-unit-test tilelink-test chi-test
+
+ci-host-cores-test: ricket-host-test
+
+ci-host-hygiene-test: check-boundaries check-example-verilog
 
 host-test: host-checks examples
 

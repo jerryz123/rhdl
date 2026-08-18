@@ -29,7 +29,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       host: "${{ steps.filter.outputs.host }}"
+      host_matrix: "${{ steps.filter.outputs.host_matrix }}"
       circt: "${{ steps.filter.outputs.circt }}"
+      circt_matrix: "${{ steps.filter.outputs.circt_matrix }}"
       fesvr: "${{ steps.filter.outputs.fesvr }}"
       examples: "${{ steps.filter.outputs.examples }}"
       example_matrix: "${{ steps.filter.outputs.example_matrix }}"
@@ -58,21 +60,26 @@ jobs:
           fi
 
   host:
-    name: Racket and model tests
+    name: Host (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.host == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.host_matrix) }}
     steps:
       - name: Check out RHDL
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Check out Espresso
+        if: matrix.espresso
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: chipsalliance/espresso
           ref: "${{ env.ESPRESSO_VERSION }}"
           path: .tools/espresso-source
       - name: Build and install Espresso
+        if: matrix.espresso
         run: |
           cmake -S .tools/espresso-source -B .tools/espresso-build -DCMAKE_BUILD_TYPE=Release -DBUILD_DOC=OFF
           cmake --build .tools/espresso-build --parallel
@@ -99,12 +106,12 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: "${{ runner.temp }}/rhdl-compiled"
-          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ matrix.target }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
       - name: Install Rhombus
         if: steps.racket-packages.outputs.cache-hit != 'true'
         run: raco pkg install --user --auto --batch --no-docs --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
-      - name: Run Racket and model tests
-        run: make host-checks
+      - name: Run affected host test group
+        run: make "${{ matrix.target }}"
 
   examples:
     name: Examples (${{ matrix.name }})
@@ -147,11 +154,14 @@ jobs:
         run: make "${{ matrix.target }}"
 
   circt:
-    name: CIRCT integration
+    name: CIRCT (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.circt == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.circt_matrix) }}
     steps:
       - name: Check out RHDL
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -188,7 +198,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: "${{ runner.temp }}/rhdl-compiled"
-          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ matrix.target }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
       - name: Install Rhombus and Verilator
         run: |
           if [[ "${{ steps.racket-packages.outputs.cache-hit }}" != "true" ]]; then
@@ -204,8 +214,8 @@ jobs:
           key: "${{ runner.os }}-${{ runner.arch }}-circt-${{ hashFiles('tools/install-circt.sh') }}"
       - name: Install CIRCT
         run: make setup-circt
-      - name: Verify CIRCT and generated RTL
-        run: make circt-test
+      - name: Verify affected CIRCT fixture group
+        run: make "${{ matrix.target }}"
 
   fesvr:
     name: FESVR integration
@@ -216,6 +226,31 @@ jobs:
     steps:
       - name: Check out RHDL
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: "${{ env.RACKET_VERSION }}"
+      - name: Configure Racket cache directories
+        run: |
+          echo "PLTUSERHOME=$RUNNER_TEMP/rhdl-racket-user" >> "$GITHUB_ENV"
+          echo "PLTCOMPILEDROOTS=$RUNNER_TEMP/rhdl-compiled" >> "$GITHUB_ENV"
+      - name: Cache Rhombus installation
+        id: racket-packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ runner.temp }}/rhdl-racket-user"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}"
+      - name: Cache compiled FESVR bytecode
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: "${{ runner.temp }}/rhdl-compiled"
+          key: "${{ runner.os }}-${{ runner.arch }}-racket-${{ env.RACKET_VERSION }}-rhombus-${{ env.RHOMBUS_CHECKSUM }}-${{ github.job }}-${{ hashFiles('**/*.rhm', '**/*.rhdl', '**/*.rkt') }}"
+      - name: Install Rhombus
+        if: steps.racket-packages.outputs.cache-hit != 'true'
+        run: raco pkg install --user --auto --batch --no-docs --checksum "${{ env.RHOMBUS_CHECKSUM }}" rhombus
       - name: Install native toolchain
         run: |
           sudo apt-get update
@@ -232,6 +267,13 @@ jobs:
           key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('tools/install-fesvr.sh', 'sim/fesvr/Makefile') }}"
       - name: Build pinned FESVR
         run: make -C sim/fesvr setup
+      - name: Cache CIRCT
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/firtool-*
+          key: "${{ runner.os }}-${{ runner.arch }}-circt-${{ hashFiles('tools/install-circt.sh') }}"
+      - name: Install CIRCT
+        run: make setup-circt
       - name: Test direct-memory transport
         run: make -C sim/fesvr test
       - name: Compile Verilator DPI adapter
@@ -239,3 +281,7 @@ jobs:
           verilator_root="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
           test -n "$verilator_root"
           make -C sim/fesvr dpi-compile-check VERILATOR_ROOT="$verilator_root"
+      - name: Elaborate the FESVR RTL adapter
+        run: make -C sim/fesvr rtl-elaboration-test
+      - name: Simulate the generated stub SoC
+        run: make -C sim/fesvr stub-soc-test

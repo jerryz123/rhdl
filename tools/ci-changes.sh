@@ -1,174 +1,266 @@
 #!/usr/bin/env bash
-# Classifies changed repository paths into the CI jobs that must run.
+# Classifies changed repository paths into dependency-aware CI job matrices.
 set -euo pipefail
 
-host=false
-circt=false
+host_foundation=false
+host_backend=false
+host_models=false
+host_protocols=false
+host_cores=false
+host_hygiene=false
+circt_language=false
+circt_std=false
+circt_protocols=false
+circt_cores=false
+circt_rfpl=false
 fesvr=false
 examples=false
 example_rhdl=false
 example_std=false
+example_noc=false
 example_lop=false
 example_rfpl=false
 example_tilelink=false
 
-mark_example_rhdl() {
-  examples=true
-  example_rhdl=true
+mark_all_host() {
+  host_foundation=true
+  host_backend=true
+  host_models=true
+  host_protocols=true
+  host_cores=true
+  host_hygiene=true
 }
 
-mark_example_std() {
-  examples=true
-  example_std=true
+mark_all_circt() {
+  circt_language=true
+  circt_std=true
+  circt_protocols=true
+  circt_cores=true
+  circt_rfpl=true
 }
 
-mark_example_lop() {
-  examples=true
-  example_lop=true
-}
-
-mark_example_rfpl() {
-  examples=true
-  example_rfpl=true
-}
-
-mark_example_tilelink() {
-  examples=true
-  example_tilelink=true
-}
+mark_example_rhdl() { examples=true; example_rhdl=true; }
+mark_example_std() { examples=true; example_std=true; }
+mark_example_noc() { examples=true; example_noc=true; }
+mark_example_lop() { examples=true; example_lop=true; }
+mark_example_rfpl() { examples=true; example_rfpl=true; }
+mark_example_tilelink() { examples=true; example_tilelink=true; }
 
 mark_all_examples() {
   mark_example_rhdl
   mark_example_std
+  mark_example_noc
   mark_example_lop
   mark_example_rfpl
   mark_example_tilelink
 }
 
 mark_all() {
-  host=true
-  circt=true
+  mark_all_host
+  mark_all_circt
   fesvr=true
   mark_all_examples
 }
 
-emit_jobs() {
-  local matrix=""
+append_matrix_entry() {
+  local variable="$1"
+  local entry="$2"
+  local current="${!variable}"
+  [[ -n "$current" ]] && current+=,
+  printf -v "$variable" '%s%s' "$current" "$entry"
+}
 
-  if [[ "$example_rhdl" == true ]]; then
-    matrix='{"name":"RHDL","target":"examples-rhdl"}'
+emit_jobs() {
+  local host=false
+  local circt=false
+  local host_matrix=""
+  local circt_matrix=""
+  local example_matrix=""
+
+  if [[ "$host_foundation" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"foundation","target":"ci-host-foundation-test","espresso":false}'
   fi
-  if [[ "$example_std" == true ]]; then
-    [[ -n "$matrix" ]] && matrix+=,
-    matrix+='{"name":"standard library","target":"examples-std"}'
+  if [[ "$host_backend" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"backend","target":"ci-host-backend-test","espresso":true}'
   fi
-  if [[ "$example_lop" == true ]]; then
-    [[ -n "$matrix" ]] && matrix+=,
-    matrix+='{"name":"language-oriented programming","target":"examples-lop"}'
+  if [[ "$host_models" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"models","target":"ci-host-models-test","espresso":false}'
   fi
-  if [[ "$example_rfpl" == true ]]; then
-    [[ -n "$matrix" ]] && matrix+=,
-    matrix+='{"name":"RFPL","target":"examples-rfpl"}'
+  if [[ "$host_protocols" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"protocols","target":"ci-host-protocols-test","espresso":false}'
   fi
-  if [[ "$example_tilelink" == true ]]; then
-    [[ -n "$matrix" ]] && matrix+=,
-    matrix+='{"name":"TileLink","target":"examples-tilelink"}'
+  if [[ "$host_cores" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"cores","target":"ci-host-cores-test","espresso":true}'
   fi
+  if [[ "$host_hygiene" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"hygiene","target":"ci-host-hygiene-test","espresso":false}'
+  fi
+
+  if [[ "$circt_language" == true ]]; then
+    circt=true
+    append_matrix_entry circt_matrix '{"name":"language","target":"ci-circt-language-test"}'
+  fi
+  if [[ "$circt_std" == true ]]; then
+    circt=true
+    append_matrix_entry circt_matrix '{"name":"standard library","target":"ci-circt-std-test"}'
+  fi
+  if [[ "$circt_protocols" == true ]]; then
+    circt=true
+    append_matrix_entry circt_matrix '{"name":"protocols","target":"ci-circt-protocols-test"}'
+  fi
+  if [[ "$circt_cores" == true ]]; then
+    circt=true
+    append_matrix_entry circt_matrix '{"name":"cores","target":"ci-circt-cores-test"}'
+  fi
+  if [[ "$circt_rfpl" == true ]]; then
+    circt=true
+    append_matrix_entry circt_matrix '{"name":"RFPL","target":"rfpl-circt-test"}'
+  fi
+
+  [[ "$example_rhdl" == true ]] && append_matrix_entry example_matrix '{"name":"RHDL","target":"examples-rhdl"}'
+  [[ "$example_std" == true ]] && append_matrix_entry example_matrix '{"name":"standard library","target":"examples-std"}'
+  [[ "$example_noc" == true ]] && append_matrix_entry example_matrix '{"name":"NoC","target":"examples-noc"}'
+  [[ "$example_lop" == true ]] && append_matrix_entry example_matrix '{"name":"language-oriented programming","target":"examples-lop"}'
+  [[ "$example_rfpl" == true ]] && append_matrix_entry example_matrix '{"name":"RFPL","target":"examples-rfpl"}'
+  [[ "$example_tilelink" == true ]] && append_matrix_entry example_matrix '{"name":"TileLink","target":"examples-tilelink"}'
 
   echo "host=$host"
+  echo "host_matrix={\"include\":[$host_matrix]}"
   echo "circt=$circt"
+  echo "circt_matrix={\"include\":[$circt_matrix]}"
   echo "fesvr=$fesvr"
   echo "examples=$examples"
-  echo "example_matrix={\"include\":[$matrix]}"
+  echo "example_matrix={\"include\":[$example_matrix]}"
 }
 
 classify_path() {
   local path="$1"
   case "$path" in
+    *.md|LICENSE|LICENSE.*|AGENTS.md|.gitignore|.gitattributes)
+      # Documentation and repository metadata cannot affect executable behavior.
+      ;;
+    tests/emacs/*|tools/emacs/*|vlsi/*)
+      # These optional integrations are intentionally outside automated CI.
+      ;;
     .github/workflows/ci.yml|tools/ci-changes.sh|tools/check-ci-changes.sh)
       mark_all
       ;;
     Makefile)
-      host=true
-      circt=true
-      mark_all_examples
+      mark_all
       ;;
     tools/check-example-verilog.sh)
+      host_hygiene=true
+      mark_all_circt
       mark_all_examples
+      ;;
+    tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|tilelink/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
+      host_hygiene=true
       ;;
     rhdl/core/*|rhdl/frontend/*|rhdl/base/*|rhdl/language.rhm|rhdl/main.rkt)
-      host=true
-      circt=true
-      mark_all_examples
+      mark_all
       ;;
     rhdl/std/*)
-      host=true
-      circt=true
-      # Some language examples use std protocols as illustrative payloads, and
-      # TileLink is implemented over std ready-valid and flow components.
+      host_foundation=true
+      host_backend=true
+      host_protocols=true
+      host_cores=true
+      circt_language=true
+      circt_std=true
+      circt_protocols=true
+      circt_cores=true
+      fesvr=true
       mark_example_rhdl
       mark_example_std
+      mark_example_noc
       mark_example_tilelink
       ;;
-    rhdl/backend/*|cores/*.rhm|cores/*.rhdl|cores/*.rkt|cores/*.sh|tests/backend/*.rhm|tests/backend/*.rkt)
-      host=true
-      circt=true
+    rhdl/backend/*)
+      host_backend=true
+      mark_all_circt
+      fesvr=true
+      ;;
+    host/*|tests/core/*|tests/frontend/*)
+      host_foundation=true
+      ;;
+    tests/backend/*)
+      host_backend=true
+      mark_all_circt
       ;;
     examples/rhdl/*)
-      host=true
-      circt=true
       mark_example_rhdl
+      circt_language=true
       ;;
     examples/std/*)
-      host=true
-      circt=true
       mark_example_std
+      circt_std=true
+      ;;
+    examples/noc/*)
+      mark_example_noc
+      circt_protocols=true
       ;;
     examples/lop/*)
-      host=true
-      circt=true
       mark_example_lop
+      circt_language=true
       ;;
     examples/rfpl/*)
-      host=true
-      circt=true
       mark_example_rfpl
+      circt_rfpl=true
       ;;
     examples/tilelink/*)
-      host=true
-      circt=true
       mark_example_tilelink
+      circt_protocols=true
       ;;
-    examples/*.rhm|examples/*.rhdl)
-      # Conservatively classify legacy top-level paths during the directory move.
-      host=true
-      circt=true
-      mark_all_examples
+    examples/*)
+      # Fail closed for new example groups until they receive an explicit shard.
+      mark_all
       ;;
-    rfpl/tests/*)
-      host=true
-      ;;
-    rfpl/*.rhm|rfpl/*.rhdl|rfpl/*.rkt|rfpl/*.sh)
-      host=true
-      circt=true
+    rfpl/*)
+      host_protocols=true
+      circt_rfpl=true
       mark_example_rfpl
       ;;
-    tilelink/tests/*)
-      host=true
+    noc/*)
+      host_models=true
+      circt_protocols=true
+      mark_example_noc
       ;;
-    tilelink/*.rhm|tilelink/*.rhdl|tilelink/*.rkt|tilelink/*.sh)
-      host=true
-      circt=true
+    riscv/*)
+      host_models=true
+      host_cores=true
+      circt_cores=true
+      ;;
+    ridx/*)
+      host_models=true
+      ;;
+    tilelink/*)
+      host_protocols=true
+      circt_protocols=true
       mark_example_tilelink
       ;;
-    tests/core/*.rhm|tests/frontend/*.rhm|tests/frontend/*.rhm.invalid|tests/frontend/*.sh|noc/*.rhm|noc/*.rhm.invalid|noc/*.rkt|noc/*.sh|riscv/*.rhm|riscv/*.rhm.invalid|riscv/*.rkt|riscv/*.sh|tools/check-boundaries.sh)
-      host=true
+    chi/*)
+      host_protocols=true
+      circt_protocols=true
       ;;
-    tests/backend/*.sh|tests/backend/*.sv|tests/backend/*.cpp|tools/install-circt.sh)
-      circt=true
+    cores/*)
+      host_cores=true
+      circt_cores=true
       ;;
-    sim/fesvr/Makefile|sim/fesvr/*.rhdl|sim/fesvr/*.cc|sim/fesvr/*.h|tests/fesvr/*.cc|tests/fesvr/*.S|tests/fesvr/*.ld|tools/install-fesvr.sh)
+    sim/fesvr/*|tests/fesvr/*|tools/emit-fesvr-stub-soc.rhm|tools/install-fesvr.sh)
       fesvr=true
+      ;;
+    tools/install-circt.sh)
+      mark_all_circt
+      fesvr=true
+      ;;
+    *)
+      # Unknown paths are executable until explicitly proven documentation-only.
+      mark_all
       ;;
   esac
 }
@@ -198,7 +290,7 @@ elif [[ $# == 2 ]]; then
     exit 0
   fi
   while IFS= read -r path; do
-    classify_path "$path"
+    [[ -n "$path" ]] && classify_path "$path"
   done <<< "$changed_paths"
 else
   echo "usage: $0 --all | --paths PATH... | BASE_REVISION HEAD_REVISION" >&2

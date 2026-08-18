@@ -46,13 +46,14 @@ rtl-elaboration-test:
 stub-soc-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	@test -x "$(CIRCT_OPT)" || \
 	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
-	cd $(REPO_DIR) && $(RACKET) -S $(REPO_DIR) \
+	cd $(REPO_DIR) && $(RACKET) -y -S $(REPO_DIR) \
 	  tools/emit-fesvr-stub-soc.rhm > $(SOC_MLIR)
 	$(CIRCT_OPT) --canonicalize --cse --prettify-verilog \
-	  --lower-seq-hlmem --lower-sim-to-sv \
+	  --lower-seq-hlmem --lower-sim-to-sv --lower-verif-to-sv \
 	  --lower-seq-to-sv='disable-mem-randomization=true disable-reg-randomization=true' \
 	  --lower-seq-firmem \
 	  --hw-memory-sim='disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined' \
+	  --sv-mask-non-synthesizable='mode=ifdef macro=SYNTHESIS' \
 	  --export-verilog $(SOC_MLIR) -o /dev/null > $(SOC_VERILOG)
 	$(VERILATOR) --binary --timing --vpi --build-jobs 0 \
 	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \

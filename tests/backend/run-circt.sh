@@ -2,7 +2,32 @@
 # Runs curated or comprehensive CIRCT lowering, Verilog golden, and simulation checks.
 set -euo pipefail
 
-mode="${1:-run}"
+mode=run
+fixture_group="${FIXTURE_GROUP:-}"
+while (( $# > 0 )); do
+  case "$1" in
+    --group)
+      if (( $# < 2 )); then
+        echo "--group requires a fixture group" >&2
+        exit 2
+      fi
+      fixture_group="$2"
+      shift 2
+      ;;
+    --verify-only|--simulate-only|--golden-only|--full|--update-goldens)
+      if [[ "$mode" != run ]]; then
+        echo "select at most one CIRCT test mode" >&2
+        exit 2
+      fi
+      mode="$1"
+      shift
+      ;;
+    *)
+      echo "usage: $0 [--group language|std|protocols|cores|rfpl] [--verify-only|--simulate-only|--golden-only|--full|--update-goldens]" >&2
+      exit 2
+      ;;
+  esac
+done
 fixture_scope=curated
 compare_goldens=true
 update_goldens=false
@@ -35,7 +60,7 @@ case "$mode" in
     run_direct_fixtures=false
     ;;
   *)
-    echo "usage: $0 [--verify-only|--simulate-only|--golden-only|--full|--update-goldens]" >&2
+    echo "unsupported CIRCT test mode: $mode" >&2
     exit 2
     ;;
 esac
@@ -44,6 +69,17 @@ if [[ -n "${FIXTURE:-}" && -n "${FIXTURES:-}" ]]; then
   echo "set either FIXTURE or FIXTURES, not both" >&2
   exit 2
 fi
+if [[ -n "$fixture_group" && ( -n "${FIXTURE:-}" || -n "${FIXTURES:-}" ) ]]; then
+  echo "set either a fixture group or explicit fixtures, not both" >&2
+  exit 2
+fi
+case "$fixture_group" in
+  ""|language|std|protocols|cores|rfpl) ;;
+  *)
+    echo "unknown CIRCT fixture group: $fixture_group" >&2
+    exit 2
+    ;;
+esac
 
 # This semantic spine crosses every lowering family whose external-tool behavior
 # is not already established by the backend's host-side text tests. FIXTURE
@@ -104,6 +140,10 @@ fixture_selected() {
     done
     return 1
   fi
+  if [[ -n "$fixture_group" ]]; then
+    fixture_in_group "$fixture" "$fixture_group"
+    return
+  fi
   if [[ "$fixture_scope" == all ]]; then
     return 0
   fi
@@ -112,6 +152,44 @@ fixture_selected() {
     [[ "$fixture" == "$integration_fixture" ]] && return 0
   done
   return 1
+}
+
+fixture_in_group() {
+  local wanted="$1"
+  local group="$2"
+  local spec fixture top example design_export reference_export
+
+  for spec in "${fixture_specs[@]}"; do
+    IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
+    if [[ "$fixture" == "$wanted" ]]; then
+      case "$group:$example" in
+        language:examples/rhdl/*|language:examples/lop/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/tilelink/*|rfpl:examples/rfpl/*)
+          return 0
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+    fi
+  done
+
+  case "$group:$wanted" in
+    language:nested-bundle|language:aggregate-memory|language:one-hot-aggregate|language:priority-encoder)
+      return 0
+      ;;
+    std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
+      return 0
+      ;;
+    protocols:chi-*|protocols:tilelink-*)
+      return 0
+      ;;
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:scoreboard|cores:ricket-*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 direct_fixture_selected() {
@@ -532,6 +610,21 @@ for direct_spec in "${direct_fixture_specs[@]}"; do
       exit 1
     fi
   done
+done
+
+fixture_groups=(language std protocols cores rfpl)
+for spec in "${fixture_specs[@]}" "${direct_fixture_specs[@]}"; do
+  IFS='|' read -r fixture _ <<< "$spec"
+  group_count=0
+  for group in "${fixture_groups[@]}"; do
+    if fixture_in_group "$fixture" "$group"; then
+      (( group_count += 1 ))
+    fi
+  done
+  if (( group_count != 1 )); then
+    echo "CIRCT fixture must belong to exactly one group: $fixture" >&2
+    exit 1
+  fi
 done
 
 materialize_args=()

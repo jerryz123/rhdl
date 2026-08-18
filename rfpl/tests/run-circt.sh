@@ -15,5 +15,4 @@ if [[ ! -x "$circt_opt" ]]; then
 fi
 
 cd "$repo_dir"
-CIRCT_OPT="$circt_opt" FIXTURE=rfpl-circuit-pair \
-  bash tests/backend/run-circt.sh --golden-only
+CIRCT_OPT="$circt_opt" bash tests/backend/run-circt.sh --group rfpl --golden-only

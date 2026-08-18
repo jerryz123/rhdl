@@ -34,11 +34,13 @@ make check-boundaries       # package, dependency, and file-type rules
 make examples               # all canonical example modules
 make examples-rhdl          # built-in language examples only
 make examples-std           # standard-library examples only
+make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only
 make examples-rfpl          # logical and physical RFPL examples only
 make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
+make ridx-test              # finite structural index-space model
 make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses
 make chi-test               # CHI boundaries, flits, links, and invalid connections
 make ricket-host-test       # Ricket core and reusable ALU host checks
@@ -53,7 +55,7 @@ make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary
 make riscv-test             # pure RISC-V model, decode, and package boundaries
 make host-checks            # host and model checks without the explicit example sweep
-make host-test              # unit tests, examples, NoC, RISC-V, and TileLink
+make host-test              # unit tests, examples, models, protocols, and cores
 make circt-test             # curated CIRCT, golden, and Verilator integration spine
 make circt-verify-test      # curated CIRCT lowering without simulation
 make verilator-test         # curated behavioral SystemVerilog simulations
@@ -63,8 +65,14 @@ make test                   # complete host and CIRCT suite
 ```
 
 The standalone FESVR transport has its own setup, native test, and DPI compile
-checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI runs those checks as an
-independent external-toolchain job.
+checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI also elaborates and
+simulates its generated stub SoC in an independent external-toolchain job.
+
+Pull-request CI classifies changed paths into parallel host, example, and CIRCT
+matrices. Unknown executable paths fail closed by selecting every job; only
+documentation and the explicitly non-CI Emacs and VLSI trees select no job. A
+manual workflow dispatch selects every matrix shard, including comprehensive
+CIRCT fixture groups instead of only the curated local integration spine.
 
 Use `FIXTURE=name` with `tests/backend/run-circt.sh` to select one external
 backend fixture, or space-separated `FIXTURES` to batch several. Update
