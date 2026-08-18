@@ -5,12 +5,23 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-if rg -n '^[[:space:]]+"[^\"]*rfpl/' rhdl --glob '*.rhm' --glob '*.rhdl'; then
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhm' --glob '*.rhdl'
+  else
+    find "$@" -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
+      -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+if search_sources '^[[:space:]]+"[^\"]*rfpl/' rhdl; then
   echo "RHDL must not import RFPL" >&2
   exit 1
 fi
 
-if rg -n 'rhdl/frontend/' rfpl/frontend --glob '*.rhm'; then
+if search_sources 'rhdl/frontend/' rfpl/frontend; then
   echo "RFPL annotation code must not import the RHDL frontend" >&2
   exit 1
 fi

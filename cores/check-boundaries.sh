@@ -5,9 +5,30 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(rg -n '^[[:space:]]+"[^"]*(rhdl/backend|tests/|examples/)' cores \
-  --glob '*.rhm' --glob '*.rhdl' \
-  --glob '!tests/**' --glob '!*/tests/**' || true)"
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhm' --glob '*.rhdl'
+  else
+    find "$@" -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
+      -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+search_production_sources() {
+  local pattern="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" cores --glob '*.rhm' --glob '*.rhdl' \
+      --glob '!tests/**' --glob '!*/tests/**'
+  else
+    find cores -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
+      ! -path '*/tests/*' -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+forbidden_imports="$(search_production_sources \
+  '^[[:space:]]+"[^"]*(rhdl/backend|tests/|examples/)' || true)"
 if [[ -n "$forbidden_imports" ]]; then
   echo "processor sources must not import backends, tests, or examples" >&2
   echo "$forbidden_imports" >&2
@@ -15,10 +36,10 @@ if [[ -n "$forbidden_imports" ]]; then
 fi
 
 component_domain_imports="$(
-  rg -n '^[[:space:]]+"[^"]*(riscv/|ricket/)' \
+  search_sources '^[[:space:]]+"[^"]*(riscv/|ricket/)' \
     cores/alu.rhdl cores/branch-resolver.rhdl cores/load-store.rhdl \
     cores/multiplier.rhdl \
-    | rg -v 'riscv/isa/xlen\.rhm' \
+    | grep -Ev 'riscv/isa/xlen\.rhm' \
     || true
 )"
 if [[ -n "$component_domain_imports" ]]; then
@@ -27,7 +48,7 @@ if [[ -n "$component_domain_imports" ]]; then
   exit 1
 fi
 
-component_control_imports="$(rg -n '^[[:space:]]+"(alu|operand|branch|mem|writeback|trap)-ctrl\.rhdl"' \
+component_control_imports="$(search_sources '^[[:space:]]+"(alu|operand|branch|mem|writeback|trap)-ctrl\.rhdl"' \
   cores/ricket/decode/alu-ctrl.rhdl \
   cores/ricket/decode/operand-ctrl.rhdl \
   cores/ricket/decode/branch-ctrl.rhdl \
@@ -41,7 +62,7 @@ if [[ -n "$component_control_imports" ]]; then
   exit 1
 fi
 
-pipeline_transport_imports="$(rg -n 'simple-memory' \
+pipeline_transport_imports="$(search_sources 'simple-memory' \
   cores/ricket/core.rhdl || true)"
 if [[ -n "$pipeline_transport_imports" ]]; then
   echo "Ricket pipeline must depend on its cache protocol, not SimpleMemory" >&2
@@ -49,9 +70,9 @@ if [[ -n "$pipeline_transport_imports" ]]; then
   exit 1
 fi
 
-cache_cross_imports="$(rg -n '^[[:space:]]+"[^" ]*(icache|dcache)/' \
+cache_cross_imports="$(search_sources '^[[:space:]]+"[^" ]*(icache|dcache)/' \
   cores/ricket/icache cores/ricket/dcache \
-  --glob '*.rhm' --glob '*.rhdl' || true)"
+  || true)"
 if [[ -n "$cache_cross_imports" ]]; then
   echo "Ricket instruction and data cache packages must not import each other" >&2
   echo "$cache_cross_imports" >&2
