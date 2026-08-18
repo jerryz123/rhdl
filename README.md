@@ -19,6 +19,10 @@ RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 Dependency-neutral host refinements shared by the pure model and hardware
 packages live under [`host/`](host/README.md).
 
+Ridx is the dependency-neutral host library for finite structural index spaces,
+canonical views, and point-indexed values. See the [Ridx guide](ridx/README.md)
+and [architecture plan](ridx/PLAN.md).
+
 RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
 exact rectangular dimensions and child-instance coordinates, and leaves the
@@ -124,6 +128,7 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Shared dependency-neutral host refinements | [`host/README.md`](host/README.md) |
+| Finite structural index spaces and roadmap | [`ridx/README.md`](ridx/README.md), [`ridx/PLAN.md`](ridx/PLAN.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
 | RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
@@ -146,6 +151,8 @@ Detailed documentation lives with the component that owns it:
 
 The current vertical slice includes:
 
+- A pure Ridx host library with named finite product spaces, nominal points,
+  canonical subset views, and total point-indexed host values.
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
   RHDL logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.

@@ -1,0 +1,99 @@
+#lang rhombus
+// Checks finite spaces, canonical views, nominal points, and total indexed host values.
+
+import:
+  "../../model/main.rhm" open
+
+def x = Axis("x", 2)
+def y = Axis("y", 3)
+def mesh = IndexSpace([x, y], ~name: "mesh")
+def mesh_points = mesh.points()
+def corner0 = mesh.point([0, 0])
+def corner1 = mesh.point([1, 2])
+
+check:
+  x.describe() ~is "x:2"
+  mesh.rank() ~is 2
+  mesh.cardinality ~is 6
+  mesh.axes.map(fun (axis): axis.name) ~is ["x", "y"]
+  mesh_points.map(fun (point): point.coordinates) ~is [
+    [0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]
+  ]
+  corner1.coordinate("x") ~is 1
+  corner1.coordinate("y") ~is 2
+  corner1.ordinal() ~is 5
+  corner1.describe() ~is "mesh{x=1,y=2}"
+  point_equal(corner0, mesh_points[0]) ~is #true
+  mesh.contains(corner1) ~is #true
+
+def same_shape = IndexSpace([Axis("x", 2), Axis("y", 3)], ~name: "same_shape")
+
+check:
+  mesh === same_shape ~is #false
+  mesh.contains(same_shape.point([0, 0])) ~is #false
+  point_equal(corner0, same_shape.point([0, 0])) ~is #false
+  mesh.ordinal(same_shape.point([0, 0])) ~throws "point does not belong to mesh"
+
+check:
+  IndexSpace([Axis("x", 2), Axis("x", 4)]) ~throws "duplicate axis name x"
+  mesh.point([0]) ~throws "mesh expects 2 coordinates, received 1"
+  mesh.point([2, 0]) ~throws "coordinate x=2 is outside x:2 in mesh"
+  mesh.axis("z") ~throws "mesh has no axis z"
+  Axis("", 2) ~throws "AsciiIdentifier"
+  Axis("x", 0) ~throws "PosInt"
+  IndexSpace([x], ~name: "") ~throws "name must be #false or a nonempty String"
+
+def corners = IndexView(
+  mesh,
+  [corner1, corner0, corner1],
+  ~name: "corners"
+)
+def right_column = select_view(
+  mesh,
+  fun (point): point.coordinate("x") == 1,
+  ~name: "right_column"
+)
+def empty = select_view(mesh, fun (_point): #false, ~name: "empty")
+
+check:
+  corners.points.map(fun (point): point.coordinates) ~is [[0, 0], [1, 2]]
+  corners.length() ~is 2
+  corners.contains(mesh.point([1, 2])) ~is #true
+  corners.contains(mesh.point([0, 1])) ~is #false
+  right_column.points.map(fun (point): point.coordinates) ~is [
+    [1, 0], [1, 1], [1, 2]
+  ]
+  empty.length() ~is 0
+  IndexView(mesh, [same_shape.point([0, 0])]) ~throws "does not belong to mesh"
+  select_view(mesh, fun (_point): "yes") ~throws "view predicate must return a host Boolean"
+  IndexView(mesh, [], ~name: "") ~throws "name must be #false or a nonempty String"
+
+def labels = index_by(
+  mesh,
+  fun (point):
+    point.coordinate("x") * 10 + point.coordinate("y")
+)
+def corner_labels = Indexed(
+  corners,
+  [IndexEntry(corner1, "last"), IndexEntry(corner0, "first")]
+)
+def empty_values = index_by(empty, fun (_point): "unreachable")
+
+check:
+  labels.length() ~is 6
+  labels.values() ~is [0, 1, 2, 10, 11, 12]
+  labels.get(mesh.point([1, 1])) ~is 11
+  corner_labels.values() ~is ["first", "last"]
+  corner_labels.get(mesh.point([1, 2])) ~is "last"
+  empty_values.length() ~is 0
+  empty_values.values() ~is []
+
+check:
+  Indexed(corners, [IndexEntry(corner0, "first")]) ~throws "missing indexed point mesh{x=1,y=2}"
+  Indexed(corners, [IndexEntry(corner0, "first"),
+                    IndexEntry(mesh.point([0, 0]), "again"),
+                    IndexEntry(corner1, "last")]) ~throws "duplicate indexed point mesh{x=0,y=0}"
+  Indexed(corners, [IndexEntry(corner0, "first"),
+                    IndexEntry(same_shape.point([1, 2]), "foreign")]) ~throws "does not belong to corners"
+  corner_labels.get(mesh.point([0, 1])) ~throws "does not belong to corners"
+  Indexed("not a domain", []) ~throws "index domain must be an IndexSpace or IndexView"

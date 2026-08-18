@@ -1,0 +1,67 @@
+#lang rhombus
+// Defines total canonically ordered host-value associations over Ridx domains.
+
+import:
+  "view.rhm" open
+
+export:
+  IndexEntry
+  Indexed
+  index_by
+
+class IndexEntry(point :: IndexPoint, value)
+
+fun entries_for_point(entries, point):
+  entries.filter(~keep: fun (entry): point_equal(entry.point, point))
+
+fun entry_for_point(entries, point):
+  entries.find(fun (entry): point_equal(entry.point, point))
+
+class Indexed(domain, entries :: List.of(IndexEntry)):
+  constructor (domain, supplied_entries :: List.of(IndexEntry)):
+    def expected_points = index_domain_points(domain)
+    for (entry in supplied_entries):
+      unless index_domain_contains(domain, entry.point)
+      | error(~who: #'Indexed,
+              String.append("point ", entry.point.describe(),
+                            " does not belong to ",
+                            index_domain_describe(domain)))
+      when entries_for_point(supplied_entries, entry.point).length() > 1
+      | error(~who: #'Indexed,
+              "duplicate indexed point " ++ entry.point.describe())
+    def mutable ordered_entries = []
+    for (point in expected_points):
+      def found = entry_for_point(supplied_entries, point)
+      unless found
+      | error(~who: #'Indexed,
+              "missing indexed point " ++ point.describe())
+      ordered_entries := ordered_entries ++ [found]
+    super(domain, ordered_entries)
+
+  method contains(point):
+    index_domain_contains(domain, point)
+
+  method get(point :: IndexPoint):
+    unless contains(point)
+    | error(~who: #'get,
+            String.append("point ", point.describe(),
+                          " does not belong to ",
+                          index_domain_describe(domain)))
+    entry_for_point(entries, point).value
+
+  method values():
+    entries.map(fun (entry): entry.value)
+
+  method length():
+    entries.length()
+
+  method describe():
+    String.append("Indexed[", index_domain_describe(domain), "]: ",
+                  to_string(entries.length()), " values")
+
+fun index_by(domain, producer :: Function.of_arity(1)):
+  Indexed(
+    domain,
+    for List (point in index_domain_points(domain)):
+      IndexEntry(point, producer(point))
+  )
