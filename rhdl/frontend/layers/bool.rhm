@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines Bool literals, reductions, priority encoders, comparisons, and binary selection.
+// Defines Bool literals, reductions, population counts, encoders, comparisons, and selection.
 
 import:
   "../../core/ir.rhm" open
@@ -18,6 +18,7 @@ export:
   bool_ne
   or_reduce
   and_reduce
+  popcount
   priority_encoder
   priority_encoder_oh
   is_one_of
@@ -164,6 +165,72 @@ fun and_reduce(entity, name = #false, location = Location()) :~ HardwareFields:
         name,
         location
       )
+
+class PopcountNode(value, capacity :: PosInt)
+
+fun widen_popcount_node(node :: PopcountNode,
+                        target_width :: PosInt,
+                        location):
+  if node.value.type.width == target_width
+  | node.value
+  | kernel.zext(node.value, target_width, #false, location)
+
+// Each node carries the number of source bits beneath it, allowing every
+// internal adder to use the minimum width that can represent its subtree sum.
+fun merge_popcount_nodes(left :: PopcountNode,
+                         right :: PopcountNode,
+                         name,
+                         location) :: PopcountNode:
+  def capacity = left.capacity + right.capacity
+  def result_width = count_index_width(capacity + 1)
+  PopcountNode(
+    kernel.hw_add(widen_popcount_node(left, result_width, location),
+                  widen_popcount_node(right, result_width, location),
+                  name,
+                  location),
+    capacity
+  )
+
+fun reduce_popcount_nodes(nodes :: List,
+                          name,
+                          location):
+  if nodes.length() == 1
+  | nodes[0].value
+  | block:
+      def mutable next_nodes = []
+      def mutable remaining = nodes
+      while remaining.length() >= 2:
+        next_nodes := [
+          merge_popcount_nodes(remaining[0],
+                               remaining[1],
+                               if nodes.length() == 2 | name | #false,
+                               location)
+        ] ++ next_nodes
+        remaining := remaining.drop(2)
+      when remaining.length() == 1
+      | next_nodes := [remaining[0]] ++ next_nodes
+      reduce_popcount_nodes(next_nodes.reverse(), name, location)
+
+// Counts asserted bits in the canonical packed representation. Pairwise
+// reduction gives logarithmic depth while capacity-aware widths avoid carrying
+// impossible high bits through smaller subtrees.
+fun popcount(entity,
+             name = #false,
+             location = Location()) :~ HardwareFields:
+  if entity is_a List && entity.length() == 0
+  | kernel.literal(Bits(1), 0, name, location)
+  | block:
+      def (packed, width) = packed_reduction_operand(entity, #'popcount, "popcount", location)
+      def nodes = for List (index in 0..width):
+        PopcountNode(
+          kernel.extract(packed,
+                         index,
+                         index,
+                         if width == 1 | name | #false,
+                         location),
+          1
+        )
+      reduce_popcount_nodes(nodes, name, location)
 
 // Statically shifts a packed value toward higher-numbered bits without
 // introducing a dynamic shifter into the core IR.

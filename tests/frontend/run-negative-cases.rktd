@@ -43,6 +43,7 @@
  ("bad-or-reduce-type.rhdl" "or_reduce operand must have a packable DataType")
  ("bad-or-reduce-list-type.rhdl" "or_reduce list elements must have packable DataTypes")
  ("bad-and-reduce-type.rhdl" "and_reduce operand must have a packable DataType")
+ ("bad-popcount-type.rhdl" "popcount operand must have a packable DataType")
  ("bad-priority-encoder-type.rhdl" "priority_encoder operand must have a packable DataType")
  ("bad-priority-encoder-oh-type.rhdl" "priority_encoder_oh operand must have a packable DataType")
  ("bad-invert-enum.rhdl" "bit_not operand must have a bitwise type")

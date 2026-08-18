@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions, equality, typed membership, enum validity, ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions and population count, equality, typed membership, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
@@ -152,6 +152,7 @@ active <== is_one_of(state, State.Refill, State.Respond)
 encoding_valid <== enum_valid(state)
 nonzero <== or_reduce(value)
 all_set <== and_reduce(value)
+set_count <== popcount(value)
 first_index <== priority_encoder(value)
 first_mask <== priority_encoder_oh(value)
 ```
@@ -174,6 +175,12 @@ identities: `or_reduce([])` is false and `and_reduce([])` is true. Nonempty
 operands lower respectively to inequality with zero and equality with an
 all-ones value, expressed through existing equality and inversion operations
 without adding core reduction operations or zero-width hardware types.
+`popcount(value)` counts asserted bits in the same canonical packed
+representation. For an `n`-bit representation it returns
+`Bits(index_width(n + 1))`; an empty host list returns one-bit zero. Population
+count lowers to a balanced tree of capacity-sized additions, keeping
+logarithmic depth without widening small subtrees beyond the values they can
+represent.
 `priority_encoder(value)` returns the index of the lowest asserted bit in the
 canonical packed representation, while `priority_encoder_oh(value)` returns a
 `Bits` mask containing only that bit. Both return zero for an all-zero operand;
