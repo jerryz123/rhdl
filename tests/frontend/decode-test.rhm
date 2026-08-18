@@ -34,7 +34,27 @@ check:
 def in_a = Pattern(~value: bits(0b1000, 4), ~care: bits(0b1000, 4))
 def in_b = Pattern(~value: bits(0b1010, 4), ~care: bits(0b1100, 4))
 def out = Pattern(~value: bits(0, 2), ~care: bits(3, 2))
+def crossing = Pattern(~value: bits(0b0010, 4), ~care: bits(0b0110, 4))
+def selected = Pattern(~value: bits(1, 2), ~care: bits(3, 2))
+def set_cases = decode_cases(in_a.union(crossing), selected)
+def set_decode = DecodeGen(set_cases, ~default: out)
+
+circuit PatternSetDecoder():
+  input encoded: Bits(4)
+  output result: Bits(2)
+
+  result <== set_decode(encoded)
+
+def set_design = elaborate(PatternSetDecoder())
+def set_operation = set_design.modules[0].operations.find(
+  fun (operation): operation.opcode == "rtl.decode"
+)
+
 check:
+  set_cases.length() ~is 3
+  set_decode.table.packed_cases.length() ~is 3
+  set_operation.attribute("cases").length() ~is 3
+  verify_design(set_design) ~is #void
   DecodeTable([DecodeCase(in_a, out), DecodeCase(in_b, out)],
               ~default: out) ~throws "overlap"
   DecodeTable([DecodeCase(in_a, out)],

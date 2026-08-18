@@ -151,7 +151,7 @@ instances, or logic to the generated RTL.
 | [`std/simple-memory-ram.rhdl`](std/simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`std/dont-care.rhdl`](std/dont-care.rhdl) | Typed synthesis freedom and Pattern-selected fixed bits |
 | [`std/decode.rhdl`](std/decode.rhdl) | Callable typed decode relation with named aggregate fields and semantic enum values |
-| [`std/decode-composition.rhdl`](std/decode-composition.rhdl) | Independent decode expansion across rows, output fields, and input fields |
+| [`std/decode-composition.rhdl`](std/decode-composition.rhdl) | PatternSet input algebra plus independent decode expansion across rows, output fields, and input fields |
 | [`std/ready-valid-compatibility.rhdl`](std/ready-valid-compatibility.rhdl) | Safe protocol weakening and refinement merge/split |
 | [`std/flow-control.rhdl`](std/flow-control.rhdl) | Pipe, queue, fixed-priority arbiter, and typed endpoint chaining |
 | [`std/valid-pipe.rhdl`](std/valid-pipe.rhdl) | Fixed-latency Valid-only pipelining without a readiness channel |

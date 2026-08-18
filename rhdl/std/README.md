@@ -70,6 +70,14 @@ The host-only relations support decode-table validation:
 - `pattern.subsumes(other)` reports whether every value matched by `other` is
   also matched by `pattern`.
 
+`PatternSet` is a typed, host-only union of pairwise-disjoint `Pattern` cubes.
+`pattern_set(...)` constructs a nonempty set, while `PatternSet(T, [])`
+constructs a typed empty set for set-algebra results. Union, intersection,
+subtraction, inverse, overlap, subsumption, and literal membership preserve the
+hardware type and produce deterministic disjoint covers. This layer does not
+minimize cubes; backend Espresso lowering remains responsible for minimizing
+the eventual decode relation.
+
 Pattern don't-cares describe static matching or optimization freedom. They are
 never runtime unknown or X values. `Pattern` remains neutral host data between
 input matching and partially specified decode outputs.
@@ -83,11 +91,11 @@ to choose different interpretations.
 
 ## Typed decode generation
 
-[`decode.rhdl`](decode.rhdl) is the public facade for `Pattern`, `DecodeCase`,
-`DecodeTable`, and `DecodeGen`. A table requires at least one case, one
-explicit default output pattern, exact common input types, and exact common
-output types. Input cubes may not overlap: the relation has no hidden row
-priority.
+[`decode.rhdl`](decode.rhdl) is the public facade for `Pattern`, `PatternSet`,
+`DecodeCase`, `DecodeTable`, and `DecodeGen`. A table requires at least one
+case, one explicit default output pattern, exact common input types, and exact
+common output types. Input cubes may not overlap: the relation has no hidden
+row priority.
 
 ```rhombus
 import:
@@ -132,14 +140,16 @@ concrete cover. See [`../../examples/std/decode.rhdl`](../../examples/std/decode
 for an aggregate input/output example.
 
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one
-sparse record output pattern to serve several input patterns. Its optional
-`~input` host function adapts domain descriptions into `Pattern` values without
-making the decode library depend on that domain. A bracketed row enumerates its
-inputs directly. A `group inputs:` row accepts any nonempty host `List`, so a
-domain library can name and compose instruction families without wrapping the
-result pattern in a one-off constructor. `ValidDecodeGen(cases)` treats the
-cases as a partial mapping and returns `DecodeResult(T)`, asserting `valid` for
-matches and leaving the unmatched value as synthesis freedom.
+sparse record output pattern to serve several inputs. Its optional `~input`
+host function adapts domain descriptions into `Pattern` or `PatternSet` values
+without making the decode library depend on that domain. A bracketed row
+enumerates inputs directly. A `group inputs:` row accepts one pattern set or a
+host `List` mixing literals, patterns, and pattern sets; every set expands into
+its disjoint cube terms. Empty inputs contribute no rows. `decode_cases`
+provides the same expansion without sparse-record syntax. `ValidDecodeGen`
+treats the resulting cases as a partial mapping and returns `DecodeResult(T)`,
+asserting `valid` for matches and leaving the unmatched value as synthesis
+freedom.
 
 Decode relations compose as ordinary case lists before constructing a
 `DecodeGen`. Row extension is list concatenation; the final `DecodeTable`
@@ -174,8 +184,8 @@ def combined_outputs = zip_decode_cases(
 ```
 
 [`../../examples/std/decode-composition.rhdl`](../../examples/std/decode-composition.rhdl)
-shows all three independent extensions in one executable example: concatenated
-rows, zipped output fields, and lifted input fields.
+shows reusable PatternSet input families alongside all three independent table
+extensions: concatenated rows, zipped output fields, and lifted input fields.
 
 ## Ready-valid protocols
 
