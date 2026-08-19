@@ -533,6 +533,10 @@ and environment-contract behavior is specified.
 8. Expose every missing crossing as a structured closed-design finding and
    aggregate strict failures after complete hierarchy analysis. Implemented as
    `CdcViolation`, with a broken/corrected multi-clock hierarchy example.
+9. Keep provenance analysis scalable in large flat modules. Implemented with
+   one operation and synchronizer-role index per reusable module plus keyed
+   value/path memoization, avoiding per-register operation scans and linear
+   cache searches.
 
 ### Phase 4: Reset foundations
 

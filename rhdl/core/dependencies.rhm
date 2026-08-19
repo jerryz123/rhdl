@@ -17,6 +17,7 @@ export:
   describe_value_path
   place_at_path
   place_leaf_driver
+  direct_operation_dependencies
   direct_value_dependencies
   verify_combinational_cycles
 
@@ -114,11 +115,9 @@ fun add_whole_operand(dependencies, operand):
       ValueLeaf(operand, operand_path)
   dependencies ++ added
 
-// Returns direct upstream Value leaves for a wire or combinational result.
-// A false result means the Value is a temporal or structural source. An empty
-// List is a static combinational source such as a constant or don't-care.
-fun direct_value_dependencies(value, path):
-  def operation = value.module_def.find_operation(value.defining_op_id)
+// Computes direct upstream leaves when the defining operation is already
+// available, allowing analyses to reuse their own operation indexes.
+fun direct_operation_dependencies(value, path, operation):
   cond
   | operation && operation.opcode == "rtl.wire":
       [place_leaf_driver(operation.places[0], path)]
@@ -169,6 +168,12 @@ fun direct_value_dependencies(value, path):
       dependencies
   | ~else:
       #false
+
+// Returns direct upstream Value leaves for a wire or combinational result.
+// A false result means the Value is a temporal or structural source. An empty
+// List is a static combinational source such as a constant or don't-care.
+fun direct_value_dependencies(value, path):
+  direct_operation_dependencies(value, path, value.module_def.find_operation(value.defining_op_id))
 
 fun is_drive_to(operation, place_id):
   operation.opcode == "rtl.drive" && operation.places.length() == 1 && operation.places[0].id == place_id

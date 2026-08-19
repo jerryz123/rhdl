@@ -25,6 +25,11 @@ class PendingResetUse(kind :: String,
 class ValueProvenanceSummary(value :: Value,
                              path :: List,
                              origins :: List)
+class IndexedSyncLevelStage(crossing :: Operation,
+                            stage_index :: Nat)
+class ModuleTemporalIndex(operations :: ReadableMap,
+                          sync_level_stages :: ReadableMap,
+                          sync_level_final_stages :: ReadableMap)
 
 def unclocked_sequential_operation = UnclockedSequentialOperationSpec()
 
@@ -265,15 +270,36 @@ fun state_operation_reset(operation):
   | local_control_reference(operation.operands[1])
   | #false
 
-fun sync_level_crossing_for_stage(operation, stage_index):
-  operation.module_def.operations.find(
-    fun (candidate): candidate.opcode == "cdc.sync_level" && candidate.operands.drop(2).length() > stage_index && candidate.operands.drop(2)[stage_index].defining_op_id == operation.id
-  )
+// Indexing defining operations and crossing roles once per reusable module
+// avoids rescanning every operation for every sink and provenance origin.
+fun index_module_temporal(module_def):
+  def operations = MutableMap()
+  def sync_level_stages = MutableMap()
+  def sync_level_final_stages = MutableMap()
+  for (operation in module_def.operations):
+    operations[operation.id] := operation
+    when operation.opcode == "cdc.sync_level"
+    | def crossing_stages = operation.operands.drop(2)
+      for (stage in crossing_stages,
+           stage_index in 0..crossing_stages.length()):
+        unless sync_level_stages.has_key(stage.defining_op_id)
+        | sync_level_stages[stage.defining_op_id] := IndexedSyncLevelStage(operation, stage_index)
+      when crossing_stages.length() > 0
+      | def final_stage = crossing_stages[crossing_stages.length() - 1]
+        unless sync_level_final_stages.has_key(final_stage.defining_op_id)
+        | sync_level_final_stages[final_stage.defining_op_id] := operation
+  ModuleTemporalIndex(operations,
+                      sync_level_stages,
+                      sync_level_final_stages)
 
-fun sync_level_crossing_for_final_stage(operation):
-  operation.module_def.operations.find(
-    fun (candidate): candidate.opcode == "cdc.sync_level" && candidate.operands[candidate.operands.length() - 1].defining_op_id == operation.id
-  )
+fun sync_level_crossing_for_stage(index, operation, stage_index):
+  def stage = index.sync_level_stages.get(operation.id, #false)
+  if stage && stage.stage_index == stage_index
+  | stage.crossing
+  | #false
+
+fun sync_level_crossing_for_final_stage(index, operation):
+  index.sync_level_final_stages.get(operation.id, #false)
 
 fun source_clock_references(states):
   def mutable result = []
@@ -371,8 +397,9 @@ fun summarize_module_temporal(module_def :: Module):
         | error(~who: #'summarize_module_temporal,
                 "recursive module instantiation involving " ++ current_module.name)
         active_modules := active_modules ++ [current_module]
-        def mutable value_summaries = []
-        def mutable active_values = []
+        def value_summaries = MutableMap()
+        def active_values = MutableMap()
+        def temporal_index = index_module_temporal(current_module)
 
         fun bind_child_control(reference, instance_operation):
           if !(reference is_a ControlReference)
@@ -449,26 +476,21 @@ fun summarize_module_temporal(module_def :: Module):
               origins
 
         fun summarize_value(value, path):
-          def cached_value = value_summaries.find(
-            fun (summary): summary.value === value && summary.path == path
-          )
+          def key = [value.id, path]
+          def cached_value = value_summaries.get(key, #false)
           if cached_value
           | cached_value.origins
           | block:
-              when active_values.find(
-                fun (summary): summary.value === value && summary.path == path
-              )
+              when active_values.has_key(key)
               | error(~who: #'summarize_module_temporal,
                       "combinational cycle reaches value " ++ describe_value_path(value, path))
-              active_values := active_values ++ [
-                ValueProvenanceSummary(value, path, [])
-              ]
-              def operation = current_module.find_operation(value.defining_op_id)
+              active_values[key] := #true
+              def operation = temporal_index.operations.get(value.defining_op_id, #false)
               def input_index = identity_index(
                 current_module.inputs.map(fun (port): port.value),
                 value
               )
-              def direct_dependencies = direct_value_dependencies(value, path)
+              def direct_dependencies = direct_operation_dependencies(value, path, operation)
               def origins:
                 cond
                 | input_index is_a Nat:
@@ -497,7 +519,8 @@ fun summarize_module_temporal(module_def :: Module):
                     transform_child_origins(output_leaf.origins, operation)
                 | operation && state_value_operation(operation):
                     def spec = clock_operation_spec(operation.opcode)
-                    def crossing = sync_level_crossing_for_final_stage(operation)
+                    def crossing = sync_level_crossing_for_final_stage(temporal_index,
+                                                                       operation)
                     if crossing
                     | [CrossedProvenance(
                          CrossingReference([], crossing),
@@ -515,11 +538,9 @@ fun summarize_module_temporal(module_def :: Module):
                 | ~else:
                     error(~who: #'summarize_module_temporal,
                           "provenance classification is missing for value-producing operation " ++ operation.opcode)
-              active_values := active_values.filter(
-                ~keep: fun (summary): !(summary.value === value && summary.path == path)
-              )
+              active_values.remove(key)
               def summary = ValueProvenanceSummary(value, path, origins)
-              value_summaries := value_summaries ++ [summary]
+              value_summaries[key] := summary
               origins
 
         fun make_value_sink_inputs(name,
@@ -550,7 +571,9 @@ fun summarize_module_temporal(module_def :: Module):
         fun local_sink_inputs(operation, destination_clock):
           match operation.opcode
           | "rtl.register":
-              def crossing = sync_level_crossing_for_stage(operation, 0)
+              def crossing = sync_level_crossing_for_stage(temporal_index,
+                                                           operation,
+                                                           0)
               make_place_sink_inputs("next",
                                      operation.places[0],
                                      destination_clock,
