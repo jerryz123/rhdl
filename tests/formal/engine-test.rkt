@@ -342,6 +342,10 @@
   (operation-design "rtl.add" (list (flat-type 4) (flat-type 4)) (flat-type 4)))
 (define sub-design
   (operation-design "rtl.sub" (list (flat-type 4) (flat-type 4)) (flat-type 4)))
+(define (input-assumption port value care)
+  (hash "kind" "input_pattern" "port" port "value" value "care" care))
+(define (onehot-assumption port)
+  (hash "kind" "onehot" "port" port))
 (check-equal? (engine_result_status
                (check_equivalent_snapshots add-design reversed-add-design))
               "equivalent")
@@ -357,6 +361,162 @@
                               #:solve (lambda (_mismatch) 'forced-unknown)))
 (check-equal? (engine_result_status unknown-result) "unknown")
 (check-true (regexp-match? #rx"unknown" (engine_result_message unknown-result)))
+
+(define zero-b-assumptions (list (input-assumption "x1" 0 #b1111)))
+(define low-zero-b-assumptions (list (input-assumption "x1" 0 #b0111)))
+(check-equal?
+ (engine_result_status
+  (check_equivalent_snapshots add-design sub-design zero-b-assumptions))
+ "equivalent")
+(check-equal?
+ (engine_result_status
+  (check_equivalent_snapshots add-design sub-design low-zero-b-assumptions))
+ "equivalent")
+(define assumed-counterexample
+  (check_equivalent_snapshots
+   add-design sub-design (list (input-assumption "x1" 1 #b1111))))
+(check-equal? (engine_result_status assumed-counterexample) "counterexample")
+(check-equal?
+ (hash-ref (findf (lambda (entry) (equal? (hash-ref entry "port") "x1"))
+                  (engine_result_inputs assumed-counterexample))
+           "value")
+ 1)
+(define vacuous-result
+  (check_equivalent_snapshots
+   add-design
+   sub-design
+   (list (input-assumption "x1" 0 #b1111)
+         (input-assumption "x1" 1 #b1111))))
+(check-equal? (engine_result_status vacuous-result) "vacuous")
+(check-true (regexp-match? #rx"unsatisfiable" (engine_result_message vacuous-result)))
+(check-equal? (hash-ref (engine_result_diagnostic vacuous-result) "module") "Operation")
+(define assumption-solver-calls 0)
+(define unknown-assumption-result
+  (check_equivalent_snapshots
+   add-design
+   sub-design
+   zero-b-assumptions
+   #:solve (lambda (_query)
+             (set! assumption-solver-calls (add1 assumption-solver-calls))
+             'forced-unknown)))
+(check-equal? (engine_result_status unknown-assumption-result) "unknown")
+(check-true (regexp-match? #rx"checking formal assumptions"
+                           (engine_result_message unknown-assumption-result)))
+(check-equal? assumption-solver-calls 1)
+
+(for ([assumptions+message
+       (in-list
+        (list
+         (cons "not-a-list" #rx"assumptions must be a list")
+         (cons (list "not-a-hash") #rx"assumption 0 is malformed")
+         (cons (list (hash "kind" "unknown")) #rx"unknown kind")
+         (cons (list (input-assumption "missing" 0 1)) #rx"unknown input")
+         (cons (list (input-assumption "x1" 16 15)) #rx"invalid packed pattern")
+         (cons (list (input-assumption "x1" 8 7)) #rx"invalid packed pattern")))])
+  (define malformed-solver-called? #f)
+  (check-exn
+   (cdr assumptions+message)
+   (lambda ()
+     (check_equivalent_snapshots
+      add-design sub-design (car assumptions+message)
+      #:solve (lambda (_query)
+                (set! malformed-solver-called? #t)
+                'forced-unknown))))
+  (check-false malformed-solver-called?))
+
+(define onehot-snapshot
+  (operation-design "rtl.onehot_mux"
+                    (list (flat-type 3) (flat-type 4) (flat-type 4) (flat-type 4))
+                    (flat-type 4)))
+(for* ([selector+index (in-list '((1 . 1) (2 . 2) (4 . 3)))]
+       [a (in-range 16)] [b (in-range 16)] [c (in-range 16)])
+  (define selector (car selector+index))
+  (define choices (list #f a b c))
+  (check-equal?
+   (hash-ref (interpret_snapshot onehot-snapshot
+                                 (hash "x0" selector "x1" a "x2" b "x3" c))
+             "y")
+   (list-ref choices (cdr selector+index))))
+(for ([selector (in-list '(0 3 5 6 7))])
+  (check-exn
+   #rx"not exactly one-hot"
+   (lambda ()
+     (interpret_snapshot onehot-snapshot
+                         (hash "x0" selector "x1" 1 "x2" 2 "x3" 3)))))
+
+(define (rewrite-onehot snapshot transform)
+  (hash-set
+   snapshot
+   "modules"
+   (for/list ([module (in-list (hash-ref snapshot "modules"))])
+     (hash-set
+      module
+      "operations"
+      (for/list ([operation (in-list (hash-ref module "operations"))])
+        (if (equal? (hash-ref operation "opcode") "rtl.onehot_mux")
+            (transform operation)
+            operation))))))
+(define swapped-onehot
+  (rewrite-onehot onehot-snapshot
+                  (lambda (operation)
+                    (hash-set operation "operands" '(10 12 11 13)))))
+(define onehot-query (list (onehot-assumption "x0")))
+(check-equal?
+ (engine_result_status
+  (check_equivalent_snapshots onehot-snapshot onehot-snapshot onehot-query))
+ "equivalent")
+(check-equal?
+ (engine_result_status
+  (check_equivalent_snapshots
+   onehot-snapshot onehot-snapshot (list (input-assumption "x0" 1 7))))
+ "equivalent")
+(define onehot-counterexample
+  (check_equivalent_snapshots onehot-snapshot swapped-onehot onehot-query))
+(check-equal? (engine_result_status onehot-counterexample) "counterexample")
+(define onehot-counterexample-selector
+  (hash-ref (findf (lambda (entry) (equal? (hash-ref entry "port") "x0"))
+                   (engine_result_inputs onehot-counterexample))
+            "value"))
+(check-not-false (member onehot-counterexample-selector '(1 2 4)))
+(for ([assumptions (in-list (list '()
+                                  (list (input-assumption "x0" 1 1))))])
+  (define rejected
+    (check_equivalent_snapshots onehot-snapshot onehot-snapshot assumptions))
+  (check-equal? (engine_result_status rejected) "unsupported")
+  (check-equal? (hash-ref (engine_result_diagnostic rejected) "opcode")
+                "rtl.onehot_mux")
+  (check-true (regexp-match? #rx"do not prove" (engine_result_message rejected))))
+(define vacuous-onehot
+  (check_equivalent_snapshots
+   onehot-snapshot onehot-snapshot
+   (list (onehot-assumption "x0") (input-assumption "x0" 0 7))))
+(check-equal? (engine_result_status vacuous-onehot) "vacuous")
+(define onehot-validity-solver-calls 0)
+(define unknown-onehot-validity
+  (check_equivalent_snapshots
+   onehot-snapshot onehot-snapshot
+   #:solve (lambda (_query)
+             (set! onehot-validity-solver-calls (add1 onehot-validity-solver-calls))
+             'forced-unknown)))
+(check-equal? (engine_result_status unknown-onehot-validity) "unknown")
+(check-true (regexp-match? #rx"one-hot validity"
+                           (engine_result_message unknown-onehot-validity)))
+(check-equal? onehot-validity-solver-calls 1)
+
+(check-exn
+ #rx"choice count"
+ (lambda ()
+   (preflight_snapshot
+    (rewrite-onehot onehot-snapshot
+                    (lambda (operation)
+                      (hash-set operation "operands" '(10 11 12)))))))
+(check-exn
+ #rx"choice width"
+ (lambda ()
+   (preflight_snapshot
+    (operation-design "rtl.onehot_mux"
+                      (list (flat-type 3) (flat-type 4) (flat-type 2) (flat-type 4))
+                      (flat-type 4)))))
 
 (define reordered-decode
   (operation-design "rtl.decode" (list (flat-type 3)) (flat-type 3)
@@ -381,7 +541,7 @@
 (check-not-equal? (hash-ref (interpret_snapshot decode-snapshot decode-replay-inputs) "y")
                   (hash-ref (interpret_snapshot defective-decode decode-replay-inputs) "y"))
 
-(for ([opcode (in-list '("rtl.dont_care" "rtl.onehot_mux"
+(for ([opcode (in-list '("rtl.dont_care"
                           "rtl.register" "rtl.memory" "rtl.memory_write"
                           "verif.assert" "sim.dpi_call" "unknown.operation"))])
   (define rejected

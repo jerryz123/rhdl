@@ -3,7 +3,9 @@
 
 (require "aggregate-test.rhm"
          "api-test.rhm"
+         "assumption-test.rhm"
          "decode-test.rhm"
          "engine-test.rkt"
          "hierarchy-test.rhm"
+         "onehot-assumption-test.rhm"
          "snapshot-test.rhm")

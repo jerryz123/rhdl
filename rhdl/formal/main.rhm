@@ -1,5 +1,5 @@
 #lang rhombus
-// Exposes typed combinational equivalence results over verified RHDL subjects.
+// Exposes typed combinational equivalence queries, assumptions, and results over verified RHDL subjects.
 
 import:
   "../core/main.rhm" open
@@ -11,6 +11,9 @@ export:
   FormalAssignment
   FormalDifference
   FormalDiagnostic
+  FormalInputAssumption
+  FormalOneHotAssumption
+  FormalQuery
   FormalResult
   check_equivalent
 
@@ -28,12 +31,20 @@ class FormalDiagnostic(module_path,
                        origin,
                        message :: String)
 
+class FormalInputAssumption(port :: String, value :: Nat, care = #false)
+
+class FormalOneHotAssumption(port :: String)
+
+class FormalQuery(assumptions :: List = [])
+
 class FormalResult(status :: String,
                    assignments = [],
                    differences = [],
-                   diagnostic = #false):
+                   diagnostic = #false,
+                   assumptions = []):
   method equivalent(): status == "equivalent"
   method counterexample(): status == "counterexample"
+  method vacuous(): status == "vacuous"
   method unsupported(): status == "unsupported"
   method unknown(): status == "unknown"
 
@@ -42,9 +53,46 @@ class FormalResult(status :: String,
     | "equivalent": "equivalent"
     | "counterexample":
         "counterexample with " ++ to_string(differences.length()) ++ " differing output(s)"
-    | "unsupported" || "unknown":
+    | "vacuous" || "unsupported" || "unknown":
         if diagnostic | status ++ ": " ++ diagnostic.message | status
     | ~else: status
+
+fun formal_query_snapshot(query, top):
+  unless query is_a FormalQuery
+  | error(~who: #'check_equivalent, "formal query must be a FormalQuery")
+  def snapshots:
+    for List (assumption in query.assumptions, index in 0..query.assumptions.length()):
+      unless assumption is_a FormalInputAssumption || assumption is_a FormalOneHotAssumption
+      | error(~who: #'check_equivalent,
+              String.append("formal assumption ", to_string(index),
+                            " must be a FormalInputAssumption or FormalOneHotAssumption"))
+      def port = top.inputs.find(fun (candidate): candidate.name == assumption.port)
+      unless port
+      | error(~who: #'check_equivalent,
+              String.append("formal assumption ", to_string(index),
+                            " references unknown input ", assumption.port))
+      if assumption is_a FormalInputAssumption
+      | block:
+          def width = packed_width(port.type)
+          unless assumption.care == #false || assumption.care is_a Nat
+          | error(~who: #'check_equivalent,
+                  String.append("formal assumption ", to_string(index),
+                                " has an invalid care mask"))
+          def care:
+            if assumption.care is_a Nat
+            | assumption.care
+            | (1 bits.(<<) width) - 1
+          def limit = 1 bits.(<<) width
+          unless assumption.value < limit && care < limit && (assumption.value bits.and care) == assumption.value
+          | error(~who: #'check_equivalent,
+                  String.append("formal assumption ", to_string(index),
+                                " has an invalid packed pattern"))
+          rkt.hash("kind", "input_pattern",
+                   "port", assumption.port,
+                   "value", assumption.value,
+                   "care", care)
+      | rkt.hash("kind", "onehot", "port", assumption.port)
+  PairList[& snapshots]
 
 fun interface_error(left_top, right_top):
   fun compare(kind, left_ports, right_ports):
@@ -90,7 +138,7 @@ fun convert_diagnostic(raw):
                      to_string(entry_value(raw, "message")))
   | #false
 
-fun convert_engine_result(raw, left_top):
+fun convert_engine_result(raw, left_top, query):
   def status = to_string(engine.engine_result_status(raw))
   def raw_assignments = PairList.to_list(engine.engine_result_inputs(raw))
   def raw_differences = PairList.to_list(engine.engine_result_differences(raw))
@@ -120,15 +168,21 @@ fun convert_engine_result(raw, left_top):
   FormalResult(status,
                assignments,
                differences,
-               convert_diagnostic(engine.engine_result_diagnostic(raw)))
+               convert_diagnostic(engine.engine_result_diagnostic(raw)),
+               query.assumptions)
 
-fun check_equivalent(left, right):
+fun check_equivalent(left, right, query = FormalQuery()):
   def left_top = formal_subject_top(left)
   def right_top = formal_subject_top(right)
+  def query_snapshot = formal_query_snapshot(query, left_top)
   def mismatch = interface_error(left_top, right_top)
   if mismatch
-  | FormalResult("unsupported", [], [], interface_diagnostic(left_top, mismatch))
+  | FormalResult("unsupported", [], [], interface_diagnostic(left_top, mismatch),
+                 query.assumptions)
   | convert_engine_result(
-      engine.check_equivalent_snapshots(formal_snapshot(left), formal_snapshot(right)),
-      left_top
+      engine.check_equivalent_snapshots(formal_snapshot(left),
+                                        formal_snapshot(right),
+                                        query_snapshot),
+      left_top,
+      query
     )

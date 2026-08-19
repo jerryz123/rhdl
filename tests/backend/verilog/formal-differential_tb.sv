@@ -10,6 +10,10 @@ module formal_differential_tb;
   logic [3:0] pair_left;
   logic [3:0] pair_right;
   logic [2:0] decode_selector;
+  logic [2:0] onehot_selector;
+  logic [3:0] onehot_a;
+  logic [3:0] onehot_b;
+  logic [3:0] onehot_c;
   logic [2:0] shift_left;
   logic [2:0] shift_right;
   logic [2:0] shift_defect;
@@ -24,6 +28,9 @@ module formal_differential_tb;
   logic [2:0] decode_reference;
   logic [2:0] decode_candidate;
   logic [2:0] decode_defect;
+  logic [3:0] onehot_reference;
+  logic [3:0] onehot_candidate;
+  logic [3:0] onehot_defect;
 
   integer model_shift_value = 1;
   integer model_shift_amount = 1;
@@ -40,11 +47,18 @@ module formal_differential_tb;
   integer model_decode_selector = 0;
   integer model_decode_reference = 1;
   integer model_decode_defect = 3;
+  integer model_onehot_selector = 1;
+  integer model_onehot_a = 1;
+  integer model_onehot_b = 2;
+  integer model_onehot_c = 3;
+  integer model_onehot_reference = 1;
+  integer model_onehot_defect = 2;
   integer expected_shift_left;
   integer expected_shift_right;
   integer expected_pair_sum;
   integer expected_pair_difference;
   integer expected_decode;
+  integer expected_onehot;
 
   FormalDifferentialDut dut (
     .shift_value(shift_value),
@@ -57,6 +71,10 @@ module formal_differential_tb;
     .pair_left(pair_left),
     .pair_right(pair_right),
     .decode_selector(decode_selector),
+    .onehot_selector(onehot_selector),
+    .onehot_a(onehot_a),
+    .onehot_b(onehot_b),
+    .onehot_c(onehot_c),
     .shift_left(shift_left),
     .shift_right(shift_right),
     .shift_defect(shift_defect),
@@ -70,7 +88,10 @@ module formal_differential_tb;
     .pair_defect(pair_defect),
     .decode_reference(decode_reference),
     .decode_candidate(decode_candidate),
-    .decode_defect(decode_defect)
+    .decode_defect(decode_defect),
+    .onehot_reference(onehot_reference),
+    .onehot_candidate(onehot_candidate),
+    .onehot_defect(onehot_defect)
   );
 
   initial begin
@@ -89,6 +110,12 @@ module formal_differential_tb;
     void'($value$plusargs("DECODE_SELECTOR=%d", model_decode_selector));
     void'($value$plusargs("DECODE_REFERENCE=%d", model_decode_reference));
     void'($value$plusargs("DECODE_DEFECT=%d", model_decode_defect));
+    void'($value$plusargs("ONEHOT_SELECTOR=%d", model_onehot_selector));
+    void'($value$plusargs("ONEHOT_A=%d", model_onehot_a));
+    void'($value$plusargs("ONEHOT_B=%d", model_onehot_b));
+    void'($value$plusargs("ONEHOT_C=%d", model_onehot_c));
+    void'($value$plusargs("ONEHOT_REFERENCE=%d", model_onehot_reference));
+    void'($value$plusargs("ONEHOT_DEFECT=%d", model_onehot_defect));
 
     high = 0;
     low = 0;
@@ -98,6 +125,10 @@ module formal_differential_tb;
     pair_left = 0;
     pair_right = 0;
     decode_selector = 0;
+    onehot_selector = 1;
+    onehot_a = 0;
+    onehot_b = 0;
+    onehot_c = 0;
     for (integer value = 0; value < 8; value = value + 1) begin
       for (integer amount = 0; amount < 16; amount = amount + 1) begin
         shift_value = value[2:0];
@@ -124,6 +155,29 @@ module formal_differential_tb;
         else $fatal(1, "decode reference mismatch");
       assert (decode_candidate == expected_decode[2:0])
         else $fatal(1, "decode candidate mismatch");
+    end
+
+    for (integer selector_index = 0; selector_index < 3; selector_index = selector_index + 1) begin
+      onehot_selector = 1 << selector_index;
+      for (integer first = 0; first < 16; first = first + 1) begin
+        for (integer second = 0; second < 16; second = second + 1) begin
+          for (integer third = 0; third < 16; third = third + 1) begin
+            onehot_a = first[3:0];
+            onehot_b = second[3:0];
+            onehot_c = third[3:0];
+            case (selector_index)
+              0: expected_onehot = first;
+              1: expected_onehot = second;
+              default: expected_onehot = third;
+            endcase
+            #1;
+            assert (onehot_reference == expected_onehot[3:0])
+              else $fatal(1, "one-hot reference mismatch");
+            assert (onehot_candidate == expected_onehot[3:0])
+              else $fatal(1, "one-hot candidate mismatch");
+          end
+        end
+      end
     end
 
     shift_value = 0;
@@ -213,6 +267,18 @@ module formal_differential_tb;
       else $fatal(1, "Rosette decode defect replay mismatch");
     assert (decode_reference != decode_defect)
       else $fatal(1, "Rosette decode counterexample did not reproduce");
+
+    onehot_selector = model_onehot_selector[2:0];
+    onehot_a = model_onehot_a[3:0];
+    onehot_b = model_onehot_b[3:0];
+    onehot_c = model_onehot_c[3:0];
+    #1;
+    assert (onehot_reference == model_onehot_reference[3:0])
+      else $fatal(1, "Rosette one-hot reference replay mismatch");
+    assert (onehot_defect == model_onehot_defect[3:0])
+      else $fatal(1, "Rosette one-hot defect replay mismatch");
+    assert (onehot_reference != onehot_defect)
+      else $fatal(1, "Rosette one-hot counterexample did not reproduce");
 
     $display("formal differential simulation passed");
     $finish;

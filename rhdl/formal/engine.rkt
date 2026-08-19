@@ -16,6 +16,7 @@
 
 (struct formal-engine-result (status message inputs differences diagnostic) #:transparent)
 (struct exn:fail:formal:unsupported exn:fail (diagnostic) #:transparent)
+(struct validity-obligation (condition module operation path) #:transparent)
 
 (define supported-opcodes
   (set "rtl.input_port"
@@ -39,6 +40,7 @@
        "rtl.slt"
        "rtl.mux_lookup"
        "rtl.decode"
+       "rtl.onehot_mux"
        "rtl.cast"
        "rtl.concat"
        "rtl.extract"
@@ -161,6 +163,19 @@
      (unless (and (>= (length operands) 3)
                   (= (length keys) (- (length operands) 2)))
        (error 'rhdl-formal "mux snapshot has inconsistent keys and operands"))]
+    ["rtl.onehot_mux"
+     (arity #f 1 0)
+     (unless (>= (length operands) 2)
+       (error 'rhdl-formal "one-hot mux snapshot requires a selector and choices"))
+     (define selector-width
+       (value-width (module-value module (first operands))))
+     (unless (= (sub1 (length operands)) selector-width)
+       (error 'rhdl-formal "one-hot mux snapshot choice count does not match selector width"))
+     (define result-width
+       (value-width (module-value module (first results))))
+     (for ([choice-id (in-list (rest operands))])
+       (unless (= (value-width (module-value module choice-id)) result-width)
+         (error 'rhdl-formal "one-hot mux snapshot choice width does not match result")))]
     ["rtl.decode"
      (arity 1 1 0)
      (define cases (required attributes "cases" "decode attributes"))
@@ -321,7 +336,12 @@
         (values (- total consumed 1) (- total consumed width))
         (loop (cdr fields) (+ consumed width)))))
 
-(define (interpret-module snapshot module-id input-values path)
+(define (exactly-one-bv value width)
+  (define zero (bv 0 width))
+  (&& (! (bveq value zero))
+      (bveq (bvand value (bvsub value (bv 1 width))) zero)))
+
+(define (interpret-module snapshot module-id input-values path [obligations #f])
   (define module (find-module snapshot module-id))
   (define value-snapshots (required module "values" "module"))
   (define place-snapshots (required module "places" "module"))
@@ -361,7 +381,7 @@
   (define (operand-values operation)
     (map eval-value (required operation "operands" "operation")))
 
-  (define (eval-instance operation result-id)
+  (define (ensure-instance operation)
     (define operation-id (required operation "id" "instance"))
     (unless (hash-has-key? instance-cache operation-id)
       (define child-id (operation-attribute operation "child_module"))
@@ -379,7 +399,8 @@
       (define instance-name (operation-attribute operation "name"))
       (define child-outputs
         (interpret-module snapshot child-id child-values
-                          (string-append path "." instance-name)))
+                          (string-append path "." instance-name)
+                          obligations))
       (define result-ids (required operation "results" "instance"))
       (define output-ports (required child "outputs" "child module"))
       (unless (= (length result-ids) (length output-ports))
@@ -390,7 +411,11 @@
        (for/hash ([id (in-list result-ids)]
                   [port (in-list output-ports)])
          (values id (hash-ref child-outputs (required port "name" "child output"))))))
-    (hash-ref (hash-ref instance-cache operation-id) result-id))
+    (hash-ref instance-cache operation-id))
+
+  (define (eval-instance operation result-id)
+    (define outputs (ensure-instance operation))
+    (hash-ref outputs result-id))
 
   (define (eval-operation operation result-id)
     (define opcode (required operation "opcode" "operation"))
@@ -447,6 +472,26 @@
                    (bv input-value selector-width))
              (bv output-value result-width)
              selected))]
+      ["rtl.onehot_mux"
+       (define selector (first operands))
+       (define choices (rest operands))
+       (define selector-id (first (required operation "operands" "one-hot mux")))
+       (define selector-width (value-width (module-value module selector-id)))
+       (define validity (exactly-one-bv selector selector-width))
+       (when obligations
+         (set-box! obligations
+                   (cons (validity-obligation validity module operation path)
+                         (unbox obligations))))
+       (when (concrete? selector)
+         (unless validity
+           (error 'rhdl-formal
+                  "concrete one-hot mux selector is not exactly one-hot")))
+       (for/fold ([selected (bv 0 result-width)])
+                 ([choice (in-list choices)] [index (in-naturals)])
+         (bvor selected
+               (if (bveq (extract index index selector) (bv 1 1))
+                   choice
+                   (bv 0 result-width))))]
       ["rtl.cast" (first operands)]
       ["rtl.concat" (pack-concat operands)]
       ["rtl.extract"
@@ -473,14 +518,22 @@
        (extract (+ low element-width -1) low (first operands))]
       [_ (error 'rhdl-formal "preflight missed unsupported opcode ~a" opcode)]))
 
+  (when obligations
+    (for ([operation (in-list operations)])
+      (match (required operation "opcode" "operation")
+        ["rtl.onehot_mux"
+         (eval-value (first (required operation "results" "one-hot mux")))]
+        ["rtl.instance" (ensure-instance operation)]
+        [_ (void)])))
+
   (for/hash ([port (in-list (required module "outputs" "module"))])
     (values (required port "name" "output port")
             (eval-value (required port "driver" "output port")))))
 
-(define (interpret-top-bv snapshot inputs)
+(define (interpret-top-bv snapshot inputs [obligations #f])
   (define top-id (required snapshot "top" "formal snapshot"))
   (define top (find-module snapshot top-id))
-  (interpret-module snapshot top-id inputs (required top "name" "top module")))
+  (interpret-module snapshot top-id inputs (required top "name" "top module") obligations))
 
 (define (interfaces snapshot)
   (define top (find-module snapshot (required snapshot "top" "formal snapshot")))
@@ -491,6 +544,33 @@
 (define (port-map ports)
   (for/hash ([port (in-list ports)])
     (values (required port "name" "port") port)))
+
+(define (validate-assumptions assumptions input-ports)
+  (unless (list? assumptions)
+    (error 'rhdl-formal "formal assumptions must be a list"))
+  (define inputs (port-map input-ports))
+  (for ([assumption (in-list assumptions)] [index (in-naturals)])
+    (unless (hash? assumption)
+      (error 'rhdl-formal "formal assumption ~a is malformed" index))
+    (define kind (required assumption "kind" "formal assumption"))
+    (unless (member kind '("input_pattern" "onehot"))
+      (error 'rhdl-formal "formal assumption ~a has an unknown kind" index))
+    (define name (required assumption "port" "formal input assumption"))
+    (unless (and (string? name) (hash-has-key? inputs name))
+      (error 'rhdl-formal "formal assumption ~a references unknown input ~a" index name))
+    (when (equal? kind "input_pattern")
+      (define value (required assumption "value" "formal input assumption"))
+      (define care (required assumption "care" "formal input assumption"))
+      (define width
+        (type-width (required (hash-ref inputs name) "type" "input port")))
+      (define limit (arithmetic-shift 1 width))
+      (unless (and (exact-nonnegative-integer? value)
+                   (exact-nonnegative-integer? care)
+                   (< value limit)
+                   (< care limit)
+                   (= value (bitwise-and value care)))
+        (error 'rhdl-formal "formal assumption ~a has an invalid packed pattern" index))))
+  #t)
 
 (define (check-interface left-snapshot right-snapshot)
   (define-values (left-top left-inputs left-outputs) (interfaces left-snapshot))
@@ -521,70 +601,124 @@
 (define (default-solve mismatch)
   (solve (assert mismatch)))
 
-(define (run-equivalence-query left-snapshot right-snapshot solve-query)
+(define (run-equivalence-query left-snapshot right-snapshot assumptions solve-query)
   (validate-snapshot left-snapshot)
   (validate-snapshot right-snapshot)
-  (define-values (_left-top left-inputs left-outputs _right-inputs _right-outputs)
+  (define-values (left-top left-inputs left-outputs _right-inputs _right-outputs)
     (check-interface left-snapshot right-snapshot))
+  (validate-assumptions assumptions left-inputs)
   (define symbolic-inputs
     (for/hash ([port (in-list left-inputs)])
       (define name (required port "name" "input port"))
       (define width (type-width (required port "type" "input port")))
       (values name (constant (gensym (string-append "rhdl_" name "_"))
                              (bitvector width)))))
-  (define left-values (interpret-top-bv left-snapshot symbolic-inputs))
-  (define right-values (interpret-top-bv right-snapshot symbolic-inputs))
+  (define obligations (box '()))
+  (define left-values (interpret-top-bv left-snapshot symbolic-inputs obligations))
+  (define right-values (interpret-top-bv right-snapshot symbolic-inputs obligations))
+  (define ordered-obligations (reverse (unbox obligations)))
   (define mismatches
     (for/list ([port (in-list left-outputs)])
       (define name (required port "name" "output port"))
       (! (bveq (hash-ref left-values name) (hash-ref right-values name)))))
   (define mismatch
     (for/fold ([result #f]) ([term (in-list mismatches)]) (|| result term)))
-  (define solution (solve-query mismatch))
-  (cond
-    [(unsat? solution)
-     (formal-engine-result "equivalent" #f '() '() #f)]
-    [(sat? solution)
-     (define assignments
-       (for/list ([port (in-list left-inputs)])
-         (define name (required port "name" "input port"))
-         (define type (required port "type" "input port"))
-         (hash "port" name
-               "type" type
-               "value" (model-natural (hash-ref symbolic-inputs name) solution))))
-     (define concrete-inputs
-       (for/hash ([entry (in-list assignments)])
-         (define name (required entry "port" "counterexample assignment"))
-         (define port
-           (findf (lambda (candidate)
-                    (equal? (required candidate "name" "input port") name))
-                  left-inputs))
-         (values name
-                 (bv (required entry "value" "counterexample assignment")
-                     (type-width (required port "type" "input port"))))))
-     (define concrete-left-values (interpret-top-bv left-snapshot concrete-inputs))
-     (define concrete-right-values (interpret-top-bv right-snapshot concrete-inputs))
-     (define differences
-       (for/list ([port (in-list left-outputs)]
-                  #:when
-                  (let* ([name (required port "name" "output port")]
-                         [left (bitvector->natural (hash-ref concrete-left-values name))]
-                         [right (bitvector->natural (hash-ref concrete-right-values name))])
-                    (not (= left right))))
-         (define name (required port "name" "output port"))
-         (hash "port" name
-               "type" (required port "type" "output port")
-               "left" (bitvector->natural (hash-ref concrete-left-values name))
-               "right" (bitvector->natural (hash-ref concrete-right-values name)))))
-     (formal-engine-result "counterexample" #f assignments differences #f)]
-    [else
-     (formal-engine-result "unknown"
-                           "Rosette solver returned an unknown result"
-                           '()
-                           '()
-                           (diagnostic #f #f "Rosette solver returned an unknown result"))]))
+  (define input-map (port-map left-inputs))
+  (define assumption
+    (for/fold ([result #t]) ([entry (in-list assumptions)])
+      (define name (required entry "port" "formal input assumption"))
+      (define width
+        (type-width (required (hash-ref input-map name) "type" "input port")))
+      (define input (hash-ref symbolic-inputs name))
+      (define term
+        (match (required entry "kind" "formal assumption")
+          ["input_pattern"
+           (define value (required entry "value" "formal input assumption"))
+           (define care (required entry "care" "formal input assumption"))
+           (bveq (bvand input (bv care width)) (bv value width))]
+          ["onehot" (exactly-one-bv input width)]))
+      (&& result term)))
+  (define (unknown-result message [obligation #f])
+    (formal-engine-result
+     "unknown" message '() '()
+     (if obligation
+         (diagnostic (validity-obligation-module obligation)
+                     (validity-obligation-operation obligation)
+                     message
+                     (validity-obligation-path obligation))
+         (diagnostic left-top #f message))))
+  (define (classify-mismatch solution)
+    (cond
+      [(unsat? solution)
+       (formal-engine-result "equivalent" #f '() '() #f)]
+      [(sat? solution)
+       (define assignments
+         (for/list ([port (in-list left-inputs)])
+           (define name (required port "name" "input port"))
+           (define type (required port "type" "input port"))
+           (hash "port" name
+                 "type" type
+                 "value" (model-natural (hash-ref symbolic-inputs name) solution))))
+       (define concrete-inputs
+         (for/hash ([entry (in-list assignments)])
+           (define name (required entry "port" "counterexample assignment"))
+           (define port (hash-ref input-map name))
+           (values name
+                   (bv (required entry "value" "counterexample assignment")
+                       (type-width (required port "type" "input port"))))))
+       (define concrete-left-values (interpret-top-bv left-snapshot concrete-inputs))
+       (define concrete-right-values (interpret-top-bv right-snapshot concrete-inputs))
+       (define differences
+         (for/list ([port (in-list left-outputs)]
+                    #:when
+                    (let* ([name (required port "name" "output port")]
+                           [left (bitvector->natural (hash-ref concrete-left-values name))]
+                           [right (bitvector->natural (hash-ref concrete-right-values name))])
+                      (not (= left right))))
+           (define name (required port "name" "output port"))
+           (hash "port" name
+                 "type" (required port "type" "output port")
+                 "left" (bitvector->natural (hash-ref concrete-left-values name))
+                 "right" (bitvector->natural (hash-ref concrete-right-values name)))))
+       (formal-engine-result "counterexample" #f assignments differences #f)]
+      [else (unknown-result "Rosette solver returned an unknown result")]))
+  (define (check-validity remaining)
+    (cond
+      [(null? remaining)
+       (classify-mismatch (solve-query (&& assumption mismatch)))]
+      [else
+       (define obligation (first remaining))
+       (define proof
+         (solve-query (&& assumption (! (validity-obligation-condition obligation)))))
+       (cond
+         [(unsat? proof) (check-validity (rest remaining))]
+         [(sat? proof)
+          (define message
+            "formal assumptions do not prove rtl.onehot_mux selector is exactly one-hot")
+          (formal-engine-result
+           "unsupported" message '() '()
+           (diagnostic (validity-obligation-module obligation)
+                       (validity-obligation-operation obligation)
+                       message
+                       (validity-obligation-path obligation)))]
+         [else
+          (unknown-result
+           "Rosette solver returned an unknown result while proving one-hot validity"
+           obligation)])]))
+  (if (null? assumptions)
+      (check-validity ordered-obligations)
+      (let ([feasibility (solve-query assumption)])
+        (cond
+          [(unsat? feasibility)
+           (define message "formal assumptions are unsatisfiable")
+           (formal-engine-result "vacuous" message '() '()
+                                 (diagnostic left-top #f message))]
+          [(sat? feasibility) (check-validity ordered-obligations)]
+          [else
+           (unknown-result
+            "Rosette solver returned an unknown result while checking formal assumptions")]))))
 
-(define (check_equivalent_snapshots left-snapshot right-snapshot
+(define (check_equivalent_snapshots left-snapshot right-snapshot [assumptions '()]
                                     #:solve [solve-query default-solve])
   (with-handlers ([exn:fail:formal:unsupported?
                    (lambda (exception)
@@ -598,11 +732,14 @@
     ;; exception wrapper so unsupported IR remains a typed formal result.
     (validate-snapshot left-snapshot)
     (validate-snapshot right-snapshot)
-    (check-interface left-snapshot right-snapshot)
+    (define-values (_left-top left-inputs _left-outputs
+                              _right-inputs _right-outputs)
+      (check-interface left-snapshot right-snapshot))
+    (validate-assumptions assumptions left-inputs)
     (define isolated
       (with-terms '()
         (with-vc vc-true
-          (run-equivalence-query left-snapshot right-snapshot solve-query))))
+          (run-equivalence-query left-snapshot right-snapshot assumptions solve-query))))
     (cond
       [(normal? isolated) (result-value isolated)]
       [else (raise (result-value isolated))])))

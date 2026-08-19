@@ -17,7 +17,35 @@ export:
   decode_reference
   decode_candidate
   decode_defect
+  onehot_reference
+  onehot_candidate
+  onehot_defect
   differential_design
+
+fun onehot_selected(builder, module_def, selector, choices, implementation):
+  if implementation == "reference"
+  | builder.mux_lookup(module_def,
+                       selector,
+                       choices[0],
+                       [[1, choices[0]], [2, choices[1]], [4, choices[2]]])
+  | builder.onehot_mux(module_def,
+                       selector,
+                       if implementation == "defect"
+                       | [choices[1], choices[0], choices[2]]
+                       | choices)
+
+fun build_onehot_module(name, implementation):
+  def design = Design()
+  def builder = Builder(design)
+  def module_def = builder.module(name)
+  def selector = builder.input(module_def, "selector", Bits(3))
+  def a = builder.input(module_def, "a", Bits(4))
+  def b = builder.input(module_def, "b", Bits(4))
+  def c = builder.input(module_def, "c", Bits(4))
+  def result = builder.output(module_def, "result", Bits(4))
+  builder.drive(result,
+                onehot_selected(builder, module_def, selector, [a, b, c], implementation))
+  builder.finish(module_def)
 
 fun decoded_value(builder, module_def, selector, implementation):
   def one = builder.constant(module_def, Bits(3), 0b001)
@@ -196,6 +224,10 @@ fun build_differential_design():
   def pair_left = builder.input(top, "pair_left", Bits(4))
   def pair_right = builder.input(top, "pair_right", Bits(4))
   def decode_selector = builder.input(top, "decode_selector", Bits(3))
+  def onehot_selector = builder.input(top, "onehot_selector", Bits(3))
+  def onehot_a = builder.input(top, "onehot_a", Bits(4))
+  def onehot_b = builder.input(top, "onehot_b", Bits(4))
+  def onehot_c = builder.input(top, "onehot_c", Bits(4))
 
   def shift_left = builder.output(top, "shift_left", Bits(3))
   def shift_right = builder.output(top, "shift_right", Bits(3))
@@ -211,6 +243,9 @@ fun build_differential_design():
   def decode_reference_result = builder.output(top, "decode_reference", Bits(3))
   def decode_candidate_result = builder.output(top, "decode_candidate", Bits(3))
   def decode_defect_result = builder.output(top, "decode_defect", Bits(3))
+  def onehot_reference_result = builder.output(top, "onehot_reference", Bits(4))
+  def onehot_candidate_result = builder.output(top, "onehot_candidate", Bits(4))
+  def onehot_defect_result = builder.output(top, "onehot_defect", Bits(4))
 
   def shifted = shifted_by_constants(builder, top, shift_value, shift_amount)
   builder.drive(shift_left, shifted[0])
@@ -242,6 +277,15 @@ fun build_differential_design():
                 decoded_value(builder, top, decode_selector, "candidate"))
   builder.drive(decode_defect_result,
                 decoded_value(builder, top, decode_selector, "defect"))
+  builder.drive(onehot_reference_result,
+                onehot_selected(builder, top, onehot_selector,
+                                [onehot_a, onehot_b, onehot_c], "reference"))
+  builder.drive(onehot_candidate_result,
+                onehot_selected(builder, top, onehot_selector,
+                                [onehot_a, onehot_b, onehot_c], "candidate"))
+  builder.drive(onehot_defect_result,
+                onehot_selected(builder, top, onehot_selector,
+                                [onehot_a, onehot_b, onehot_c], "defect"))
   builder.finish(top)
   design
 
@@ -257,4 +301,7 @@ def hierarchy_defect = build_hierarchy_module("FormalHierarchyDefect", "defect")
 def decode_reference = build_decode_module("FormalDecodeReference", "reference")
 def decode_candidate = build_decode_module("FormalDecodeCandidate", "candidate")
 def decode_defect = build_decode_module("FormalDecodeDefect", "defect")
+def onehot_reference = build_onehot_module("FormalOneHotReference", "reference")
+def onehot_candidate = build_onehot_module("FormalOneHotCandidate", "candidate")
+def onehot_defect = build_onehot_module("FormalOneHotDefect", "defect")
 def differential_design = build_differential_design()

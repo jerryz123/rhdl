@@ -46,27 +46,55 @@ available:
 make formal-differential-test
 ```
 
-That target proves structurally different shift, aggregate, hierarchical, and
-fully cared decode implementations equivalent, obtains live counterexamples
-for defects in each category, and passes those exact packed inputs and outputs
-to a shared CIRCT-generated Verilator DUT. The testbench also exhaustively
-checks all 128 reduced-width unequal-shift inputs, 80 aggregate layouts and
-projections, 256 hierarchical arithmetic inputs, and eight decode selectors
+That target proves structurally different shift, aggregate, hierarchical,
+fully cared decode, and assumption-constrained one-hot implementations
+equivalent, obtains live counterexamples for defects in each category, and
+passes those exact packed inputs and outputs to a shared CIRCT-generated
+Verilator DUT. The testbench also exhaustively checks all 128 reduced-width
+unequal-shift inputs, 80 aggregate layouts and projections, 256 hierarchical
+arithmetic inputs, eight decode selectors, and 12,288 valid one-hot selections
 against independent SystemVerilog oracles.
 Set `CIRCT_OPT=/path/to/circt-opt` when the pinned tool is not installed under
 the current checkout's `.tools/` directory.
 
-## Milestone 1 API
+## Formal API
 
 Import `rhdl/formal/main.rhm` explicitly and call `check_equivalent` with two
 verified `DesignElaboration` values or two completed core `Module` values.
 Both top interfaces must have exactly the same port names and mutually equal
 RHDL types.
 
-The result status is one of `equivalent`, `counterexample`, `unsupported`, or
-`unknown`. A counterexample contains every top input assignment and every
-differing output. An unsupported result identifies the first reachable
-operation outside the deterministic combinational contract.
+Stage 2 adds an optional third `FormalQuery` argument containing a conjunction
+of packed-pattern and one-hot assumptions:
+
+```rhombus
+def query:
+  FormalQuery([FormalInputAssumption("mode", 0b0000),
+               FormalInputAssumption("tag", 0b1000, 0b1100),
+               FormalOneHotAssumption("grant")])
+def result = check_equivalent(reference, candidate, query)
+```
+
+Omitting `care` requires exact equality. Supplying `care` constrains only cared
+bits and requires `value & care == value`; the example accepts any `tag` whose
+two high bits are `10`. Assumptions name top inputs and use their canonical
+packed widths, including aggregate inputs. No symbolic Rosette or live RHDL
+object crosses the query boundary.
+
+`FormalOneHotAssumption` constrains its named packed top input to have exactly
+one set bit. For every reachable `rtl.onehot_mux`, including operations below
+instances or fed by derived values, the engine separately proves that the
+query assumptions imply exactly-one validity. A missing or insufficient proof
+returns `unsupported` with the operation path; only a proved-valid selector is
+interpreted by direct choice gating and OR reduction. Contradictory assumptions
+still return `vacuous` before any operation-validity claim.
+
+The result status is one of `equivalent`, `counterexample`, `vacuous`,
+`unsupported`, or `unknown`. `vacuous` means the assumptions are mutually
+unsatisfiable, so the engine does not claim equivalence. A counterexample
+contains every top input assignment, every differing output, and retains the
+query assumptions that constrained it. An unsupported result identifies the
+first reachable operation outside the deterministic combinational contract.
 
 Equivalence is behavioral: two designs may have different module structure,
 operation order, names below the top interface, or printed IR and still prove
@@ -84,15 +112,16 @@ operation contract is explicit:
 | Modular arithmetic | `rtl.add`, `rtl.mul`, `rtl.sub` |
 | Shifts | `rtl.shl`, `rtl.shru`, `rtl.shrs`, including unequal operand widths and overshifts |
 | Comparisons | `rtl.eq`, `rtl.ult`, `rtl.slt` |
-| Selection | total `rtl.mux_lookup`; non-overlapping `rtl.decode` with every output bit cared in every case and the default |
+| Selection | total `rtl.mux_lookup`; non-overlapping `rtl.decode` with every output bit cared in every case and the default; `rtl.onehot_mux` when query assumptions prove its selector exactly one-hot |
 | Packing and widths | `rtl.cast`, `rtl.concat`, `rtl.extract`, `rtl.zext`, `rtl.sext`, `rtl.trunc` |
 | Aggregates | `rtl.record_create`, `rtl.record_get`, `rtl.vector_create`, `rtl.vector_get` |
 
 The engine returns `unsupported` for `rtl.dont_care`, any `rtl.decode` with an
-uncared output bit, `rtl.onehot_mux`, registers, every memory form, assertions,
-DPI operations, and unknown operations. It performs this preflight before
-allocating symbolic inputs or invoking a solver, and it does not invent values
-or assumptions for unspecified behavior.
+uncared output bit, registers, every memory form, assertions, DPI operations,
+unknown operations, and any `rtl.onehot_mux` whose exactly-one precondition is
+not implied by the query. Structural semantic exclusions fail during
+preflight; one-hot validity fails before the output-mismatch query. The engine
+does not invent values or assumptions for unspecified behavior.
 
 Counterexample input values and differing output values are nonnegative packed
 integers. Inputs omitted from a partial solver model are completed with zero,

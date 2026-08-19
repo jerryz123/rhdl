@@ -4,10 +4,12 @@
 
 ## Status
 
-Implemented through milestone 1b. The optional public equivalence API,
-immutable snapshot boundary, Rosette engine, replayable counterexamples, and
-fully cared deterministic decode semantics have focused and differential
-coverage.
+Implemented through Stage 2's first partial-operation contract. The optional
+public equivalence API, immutable snapshot boundary, Rosette engine, replayable
+counterexamples, fully cared deterministic decode semantics, packed input
+constraints, vacuity detection, and assumption-proved `rtl.onehot_mux` validity
+have focused and differential coverage. Other partial-operation contracts and
+property queries remain open.
 
 This plan resolves the semantic and package boundaries before implementation.
 The first deliverable is deliberately a deterministic combinational
@@ -101,7 +103,7 @@ the solver version before the formal target is made required.
 The first public entry point will have the conceptual shape:
 
 ```text
-check_equivalent(left, right) -> FormalResult
+check_equivalent(left, right, query = FormalQuery()) -> FormalResult
 ```
 
 `left` and `right` must each be either:
@@ -124,9 +126,9 @@ The first milestone compares the complete top-level interface:
 - every paired input receives the same symbolic value;
 - all paired outputs are compared simultaneously.
 
-Explicit port mappings, selected-output checks, and assumptions are deferred
-until the strict default has shipped. They must later be explicit arguments;
-the engine will never infer likely renames or validity constraints.
+Explicit port mappings and selected-output checks remain deferred. Assumptions
+are explicit packed patterns over named top inputs in a separate `FormalQuery`;
+the engine never infers likely renames or validity constraints.
 
 `FormalResult` will distinguish at least:
 
@@ -134,6 +136,7 @@ the engine will never infer likely renames or validity constraints.
 |---|---|
 | `equivalent` | The mismatch query is unsatisfiable under the supported semantics |
 | `counterexample` | A satisfying assignment makes at least one paired output differ |
+| `vacuous` | The explicit top-input assumptions are mutually unsatisfiable |
 | `unsupported` | The reachable design uses a type, operation, or semantic case outside the implemented contract |
 | `unknown` | The solver cannot decide the query within the configured limits |
 
@@ -220,7 +223,8 @@ Milestone 1 rejects:
 
 - `rtl.dont_care`;
 - `rtl.onehot_mux`, because its invalid-selector behavior is unspecified and
-  milestone 1 has no assumptions API;
+  milestone 1 has no assumptions API (Stage 2 supports it only after a separate
+  solver query proves exactly-one validity under explicit assumptions);
 - any `rtl.decode` with an uncared output bit;
 - registers and reset semantics;
 - asynchronous-read and synchronous memories;
@@ -235,13 +239,22 @@ produce an `unsupported` result with a focused diagnostic.
 
 ## Equivalence query
 
-For paired symbolic inputs `I`, left outputs `L(I)`, and right outputs `R(I)`,
-the engine asks Rosette to solve:
+For paired symbolic inputs `I`, explicit assumptions `A(I)`, left outputs
+`L(I)`, and right outputs `R(I)`, the engine first checks `A(I)` for
+satisfiability and then asks Rosette to solve:
 
 ```text
-exists I. any paired output L(I) != R(I)
+exists I. A(I) and any paired output L(I) != R(I)
 ```
 
+Before the mismatch query, every supported partial operation contributes a
+validity obligation `V(I)`. The engine solves `A(I) and not V(I)` separately.
+Only `UNSAT` discharges the operation precondition; `SAT` produces a
+source-aware `unsupported` result, and `UNKNOWN` remains `unknown`. Stage 2's
+first such obligation is exactly-one validity for every reachable
+`rtl.onehot_mux` selector.
+
+- Unsatisfiable `A(I)` produces `vacuous`, not `equivalent`.
 - `UNSAT` produces `equivalent`.
 - `SAT` produces `counterexample` and a concrete model for all top inputs and
   differing outputs.
@@ -267,9 +280,11 @@ supporting them. Candidate questions include:
 - how caller assumptions discharge partial-operation preconditions; and
 - whether implementation freedom is existential or universal in each query.
 
-Until these quantifier and sharing rules are settled, the engine must reject
-the affected operation instead of allocating independent or shared symbolic
-holes opportunistically.
+Until these quantifier and sharing rules are settled for a specific operation,
+the engine must reject it instead of allocating independent or shared symbolic
+holes opportunistically. Exactly-one validity is now settled for
+`rtl.onehot_mux`; its invalid domain remains uninterpreted and unreachable in a
+successful equivalence query.
 
 ## Validation strategy
 
@@ -663,11 +678,13 @@ The public wrapper owns exact RHDL type checking and converts the plain engine
 result into these conceptual objects:
 
 ```text
-FormalResult(status, assignments, differences, diagnostic)
+FormalResult(status, assignments, differences, diagnostic, assumptions)
 FormalAssignment(port, type, packed_value)
 FormalDifference(port, type, left_value, right_value)
 FormalDiagnostic(module_path, opcode, operation_id,
                  location, origin, message)
+FormalInputAssumption(port, value, care)
+FormalQuery(assumptions)
 ```
 
 Result invariants:
@@ -675,6 +692,8 @@ Result invariants:
 - `equivalent` has no assignments, differences, or diagnostic;
 - `counterexample` has every top input assignment and at least one output
   difference;
+- `vacuous` has a diagnostic identifying unsatisfiable assumptions and no
+  partial model;
 - `unsupported` has exactly one formal diagnostic and no partial model;
 - `unknown` has a diagnostic explaining the solver outcome and no claim about
   equivalence; and
@@ -780,12 +799,16 @@ Milestone 1b does not add uncared output semantics or assumptions implicitly.
 
 ### Stage 2: assumptions and property queries
 
-- Add explicit top-input assumptions as a separate query object.
-- Permit partial operations only when their preconditions are represented
-  soundly.
-- Add combinational assertion and reachability queries without changing
+- [x] Add explicit packed top-input assumptions as a separate query object.
+- [x] Detect unsatisfiable assumptions explicitly instead of reporting
+  vacuous equivalence.
+- [x] Preserve assumptions in public results and constrained counterexamples.
+- [x] Permit `rtl.onehot_mux` only when an explicit query proves the
+  exactly-one precondition for every reachable use.
+- [ ] Generalize validity obligations to other partial operations only after
+  their individual contracts and quantifiers are explicit.
+- [ ] Add combinational assertion and reachability queries without changing
   ordinary RHDL elaboration.
-- Preserve assumptions in counterexample reports.
 
 Exit criterion: one-hot selection can be checked under an explicit exactly-one
 assumption, and removing the assumption produces `unsupported` rather than a
