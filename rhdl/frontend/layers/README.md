@@ -27,8 +27,8 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`assertion.rhm`](assertion.rhm) | Reset-suppressed, branch-guarded clocked assertions |
 | [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
 | [`conditional.rhm`](conditional.rhm) | Hardware `when` priority chains, exact-key `switch`, and guarded effects |
-| [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, and child-member access |
-| [`sync.rhm`](sync.rhm) | Ambient clock and synchronous-reset policy |
+| [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, child-member access, and derived-reset instantiation |
+| [`sync.rhm`](sync.rhm) | Hidden ambient clock, synchronous-reset policy, and scoped reset derivation |
 | [`interface.rhm`](interface.rhm) | Roles, directional protocols, read-only observations, refinement, and bulk connection |
 | [`clocking.rhm`](clocking.rhm) | Root-owned temporal environment declarations and report-only closed-design analysis |
 
@@ -340,7 +340,8 @@ any `DataType`. Register keyword options follow ordinary Rhombus calling rules
 and may appear in any order; their existing legal combinations are unchanged.
 
 `sync_circuit` supplies real `clock: Clock` and `reset: Reset` inputs plus an
-ambient domain:
+ambient domain. Those ports are present in the core IR and emitted RTL, but
+`clock` and `reset` are not source bindings inside the body:
 
 ```rhombus
 sync_circuit Counter(width):
@@ -351,7 +352,32 @@ sync_circuit Counter(width):
 ```
 
 A resetless ambient register uses the clock only. An initializer is never
-invented merely because ambient reset exists.
+invented merely because ambient reset exists. Explicit `~clock` and `~reset`
+controls are rejected while a sync domain is active; use an ordinary `circuit`
+for an explicit clock boundary.
+
+`reset_when(condition)` creates a nested domain whose reset is the active
+ambient reset OR a readable one-bit data or `Reset` condition. Nested scopes
+compose by ORing each added condition:
+
+```rhombus
+reset_when(flush):
+  reg pending(~init: Bool(#false))
+  pending <== next_pending
+```
+
+A sync child that needs the derived reset but remains in use after the scoped
+expression uses the equivalent instance option:
+
+```rhombus
+inst responses(Queue(Response(), 2), ~reset_when: flush)
+```
+
+The child's clock remains ambient; `~reset_when` is not an explicit control
+override and is valid only for a `sync_circuit` child. When hardware or a
+simulation boundary must observe the active reset as data, `reset_active()`
+returns it as `Bits(1)` and respects the innermost reset scope. There is no
+corresponding clock-value escape hatch.
 
 ## Asynchronous-read memories
 
@@ -362,7 +388,7 @@ storage.write(write_address, write_data,
               ~enable: write_enable, ~clock: clock)
 ```
 
-Inside a `sync_circuit`, the clock may be omitted. Memory depth is a positive
+Inside a `sync_circuit`, the clock is omitted. Memory depth is a positive
 host integer; elements may be any `DataType`; addresses are exactly
 `Bits(index_width(depth))`. Reads are asynchronous physical ports. Writes are
 independent rising-edge synchronous ports and share one clock per memory.
@@ -432,8 +458,8 @@ the fixed port names cannot be renamed. Address fields are
 `Bits(index_width(depth))`, data fields use the element `DataType`, and
 `enable` and `write` are `Bits(1)`.
 
-Inside a `sync_circuit`, `sync_mem` uses the ambient clock. An ordinary
-`circuit` supplies `~clock: clock` in the declaration. `~clock` and
+Inside a `sync_circuit`, `sync_mem` uses the ambient clock and rejects
+`~clock`. An ordinary `circuit` supplies `~clock: clock` in the declaration. `~clock` and
 `~mask_granularity` may appear in either order. An enabled read samples
 its address on a rising edge and presents the corresponding data after that
 edge. Data while read enable is false is unspecified. The primitive has no
@@ -458,9 +484,9 @@ sync_circuit CheckedQueue():
 
 An assertion samples a readable one-bit `FlatDataType` on each rising clock
 edge. It is disabled while the active-high reset is asserted. `sync_circuit`
-supplies the ambient clock and reset. An ordinary circuit must supply both
-`~clock` and `~reset`; supplying only one is an error. Host Booleans are not
-hardware conditions.
+supplies the ambient clock and reset and rejects explicit controls. An ordinary
+circuit must supply both `~clock` and `~reset`; supplying only one is an error.
+Host Booleans are not hardware conditions.
 
 The optional second positional argument is an ASCII identifier label. The
 current form has no formatted message operands or temporal-property syntax.
@@ -490,9 +516,9 @@ flat hardware type. A single-result function uses one `dpi_reg` binding. A
 multi-result function uses parenthesized `dpi_reg` bindings in declaration
 order. The bindings are separate hardware values rather than a packed bundle.
 Each result is visible state: it holds while disabled, has unspecified initial
-value, and has no reset. A `sync_circuit` supplies the ambient clock, while
-ordinary circuits pass `~clock` explicitly. `dpi_reg` accepts `~clock` and
-`~enable` in either order. There is no unclocked DPI form,
+value, and has no reset. A `sync_circuit` supplies the ambient clock and
+rejects `~clock`, while ordinary circuits pass it explicitly. `dpi_reg` accepts
+`~clock` and `~enable` in either order. There is no unclocked DPI form,
 `inout`, or `ref` support.
 
 ## Hardware conditional assignment

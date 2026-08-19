@@ -1,23 +1,34 @@
 #lang rhombus/and_meta
-// Defines sync circuits with implicit clock and synchronous-reset ports.
+// Defines sync circuits with hidden ambient controls and scoped synchronous resets.
 
 import:
   rhombus/meta open
   "../kernel.rhm".new_circuit_identity as kernel_new_circuit_identity
+  "../support/clocking.rhm".ambient_reset_active
+  "../support/clocking.rhm".ambient_reset_when
   "../support/clocking.rhm".build_sync_circuit
   "../support/generator-parameters.rhm".GeneratorParameter
 
 export:
   sync_circuit
+  reset_active
+  reset_when
+
+fun reset_active():
+  ambient_reset_active()
+
+expr.macro 'reset_when($condition): $(body :: Block)':
+  let '$(parsed_body :: expr_meta.Parsed)' = 'block $body'
+  'ambient_reset_when($condition,
+                      fun ():
+                        $parsed_body)'
 
 defn.macro 'sync_circuit $(name :: Identifier)($(argument :: GeneratorParameter), ...): $body; ...':
   def circuit_name = name.to_source_string()
-  def clock = Syntax.make_id("clock", name)
-  def reset = Syntax.make_id("reset", name)
   '«
      def circuit_identity = kernel_new_circuit_identity($circuit_name)
      fun $name($argument, ...):
-       fun implementation($clock, $reset):
+       fun implementation():
          $body
          ...
        build_sync_circuit(circuit_identity,

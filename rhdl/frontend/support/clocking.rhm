@@ -5,12 +5,14 @@ import:
   "../../core/ir.rhm" open
   "../../core/types.rhm" open
   "../../analysis/clocking/module.rhm".verify_single_clock
-  "../../analysis/clocking/module.rhm".same_clock_value
   "../kernel.rhm" as kernel
   "../kernel.rhm".CircuitDefinition
 
 export:
   build_sync_circuit
+  ambient_reset_active
+  ambient_reset_when
+  reject_explicit_sync_control
   ambient_register
   ambient_reset_register
   ambient_memory_write
@@ -20,6 +22,7 @@ export:
   ambient_dpi_register
   ambient_dpi_register_results
   instantiate
+  instantiate_reset_when
 
 class SyncDomain(clock, reset)
 
@@ -36,11 +39,44 @@ Parameter.def current_sync_domain = #false
 fun sync_fail(message, location = Location()):
   error(~who: #'sync_circuit, location.describe() ++ ": " ++ message)
 
-fun require_sync_domain(location = Location()):
+fun active_sync_domain(location = Location()):
   def domain = current_sync_domain()
-  unless domain is_a SyncDomain
+  if domain is_a SyncDomain && domain.clock.module_def === kernel.active_module(location)
+  | domain
+  | #false
+
+fun require_sync_domain(location = Location()):
+  def domain = active_sync_domain(location)
+  unless domain
   | sync_fail("implicit clock/reset use requires an active sync_circuit", location)
   domain
+
+fun reject_explicit_sync_control(location = Location()):
+  when active_sync_domain(location)
+  | sync_fail(
+      "explicit clock/reset controls are not allowed inside sync_circuit; use the ambient domain or reset_when",
+      location
+    )
+
+fun ambient_reset_when(condition, body, location = Location()):
+  def domain = require_sync_domain(location)
+  def condition_value = kernel.read(condition, location)
+  unless (data_type(condition_value.type) || reset_type(condition_value.type)) && packed_width(condition_value.type) == 1
+  | sync_fail("reset_when condition must be readable one-bit data or Reset",
+              location)
+  def ambient_bits = kernel.cast(domain.reset, Bits(1), #false, location)
+  def condition_bits = kernel.cast(condition_value, Bits(1), #false, location)
+  def combined_bits = kernel.bit_or(ambient_bits,
+                                    condition_bits,
+                                    #false,
+                                    location)
+  def combined_reset = kernel.cast(combined_bits, Reset, #false, location)
+  parameterize { current_sync_domain: SyncDomain(domain.clock, combined_reset) }:
+    body()
+
+fun ambient_reset_active(location = Location()):
+  def domain = require_sync_domain(location)
+  kernel.cast(domain.reset, Bits(1), #false, location)
 
 fun build_sync_circuit(identity,
                        name,
@@ -55,7 +91,7 @@ fun build_sync_circuit(identity,
       def clock = kernel.input("clock", Clock, location)
       def reset = kernel.input("reset", Reset, location)
       parameterize { current_sync_domain: SyncDomain(clock, reset) }:
-        implementation(clock, reset)
+        implementation()
         kernel.run_circuit_finalizers(),
     location
   )
@@ -140,22 +176,16 @@ fun instantiate(name,
                 clock = #false,
                 reset = #false,
                 location = Location()):
+  when clock || reset
+  | reject_explicit_sync_control(location)
   if child is_a SyncCircuitDefinition
   | block:
-      def ambient_domain = current_sync_domain()
       def domain:
         if clock || reset
         | block:
             unless clock && reset
             | sync_fail("explicit sync child wiring requires both clock and reset",
                         location)
-            when ambient_domain is_a SyncDomain
-            | unless same_clock_value(kernel.read(clock, location),
-                                      kernel.read(ambient_domain.clock, location))
-              | sync_fail(
-                  "a sync_circuit child must use the parent's ambient clock; use an ordinary circuit for an explicit multi-clock boundary",
-                  location
-                )
             SyncDomain(clock, reset)
         | require_sync_domain(location)
       def instance = kernel.inst(name, child, location)
@@ -166,3 +196,15 @@ fun instantiate(name,
       when clock || reset
       | sync_fail("clock/reset overrides require a sync_circuit child", location)
       kernel.inst(name, child, location)
+
+fun instantiate_reset_when(name,
+                           child,
+                           condition,
+                           location = Location()):
+  unless child is_a SyncCircuitDefinition
+  | sync_fail("~reset_when requires a sync_circuit child", location)
+  ambient_reset_when(
+    condition,
+    fun (): instantiate(name, child, #false, #false, location),
+    location
+  )

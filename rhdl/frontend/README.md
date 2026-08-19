@@ -222,7 +222,12 @@ ports. An unused nested declaration emits no module.
 
 A nested `sync_circuit` follows the same domain rules as any other synchronous
 child. A sync parent propagates its ambient clock and reset only to marked sync
-children; ordinary children never inherit a domain by port name or type.
+children; ordinary children never inherit a domain by port name or type. The
+physical `clock` and `reset` ports are not source bindings in a `sync_circuit`
+body. Use `reset_when(condition)` for a nested reset scope or an instance's
+`~reset_when: condition` option to derive a child reset from the ambient one.
+Explicit `~clock` and `~reset` controls remain available only outside an active
+sync domain.
 
 See [`../../examples/rhdl/nested-circuit.rhdl`](../../examples/rhdl/nested-circuit.rhdl)
 and the integrated host-specialization example
