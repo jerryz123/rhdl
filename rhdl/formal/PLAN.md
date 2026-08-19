@@ -4,12 +4,13 @@
 
 ## Status
 
-Implemented through Stage 2's first partial-operation contract. The optional
-public equivalence API, immutable snapshot boundary, Rosette engine, replayable
-counterexamples, fully cared deterministic decode semantics, packed input
-constraints, vacuity detection, and assumption-proved `rtl.onehot_mux` validity
-have focused and differential coverage. Other partial-operation contracts and
-property queries remain open.
+Implemented through Stage 2's universal combinational output-property query.
+The optional public equivalence API, immutable snapshot boundary, Rosette
+engine, replayable counterexamples and reachability witnesses, fully cared
+deterministic decode semantics, packed constraints, vacuity detection, and
+assumption-proved `rtl.onehot_mux` validity have focused and differential
+coverage. Other partial-operation contracts and temporal properties remain
+open.
 
 This plan resolves the semantic and package boundaries before implementation.
 The first deliverable is deliberately a deterministic combinational
@@ -104,6 +105,8 @@ The first public entry point will have the conceptual shape:
 
 ```text
 check_equivalent(left, right, query = FormalQuery()) -> FormalResult
+check_reachable(subject, target, query = FormalQuery()) -> FormalReachabilityResult
+check_output_property(subject, target, query = FormalQuery()) -> FormalPropertyResult
 ```
 
 `left` and `right` must each be either:
@@ -146,6 +149,18 @@ operation, module, source location, and origin when available. Solver failures
 and implementation bugs must remain distinct from `unsupported`; broad
 exception-catching must not disguise engine defects as user-facing scope
 limits.
+
+`check_reachable` accepts one `FormalOutputPattern` naming a top output with a
+packed value and optional care mask. Its result distinguishes `reachable`,
+`unreachable`, `vacuous`, `unsupported`, and `unknown`. A reachable result
+contains every typed top-input assignment and the complete concrete target
+output value; the witness is replayed before it crosses the public boundary.
+
+`check_output_property` accepts the same `FormalOutputPattern`. Its result
+distinguishes `proved`, `counterexample`, `vacuous`, `unsupported`, and
+`unknown`. A counterexample contains every typed top-input assignment and the
+complete concrete violating output value, replayed before it crosses the public
+boundary.
 
 ## Milestone 1 semantics: deterministic combinational equivalence
 
@@ -264,6 +279,37 @@ first such obligation is exactly-one validity for every reachable
 Symbol names must be generated from a query-local namespace so repeated or
 parallel checks cannot alias accidentally. The Rosette verification condition
 and solver state must be isolated per query.
+
+## Reachability query
+
+For one subject output `O(I)` and packed target pattern `(P, C)`, reachability
+uses the same assumption feasibility and partial-operation validity checks as
+equivalence, then solves:
+
+```text
+exists I. A(I) and (O(I) & C) == P
+```
+
+`SAT` produces `reachable` with a concretely replayed witness. `UNSAT` produces
+`unreachable`. Unsatisfiable assumptions still produce `vacuous` before the
+target is classified, and failure to discharge a partial-operation obligation
+remains `unsupported`.
+
+## Universal output-property query
+
+For one subject output `O(I)` and packed target pattern `(P, C)`, the universal
+property query uses the same assumption feasibility and partial-operation
+validity checks, then searches for a violation:
+
+```text
+exists I. A(I) and (O(I) & C) != P
+```
+
+`UNSAT` produces `proved`. `SAT` produces `counterexample` with a concretely
+replayed violating output. Unsatisfiable assumptions produce `vacuous`, and
+validity or solver failures retain their `unsupported` or `unknown`
+classifications. This query is deliberately about combinational top outputs;
+it does not assign bounded or unbounded semantics to clocked `verif.assert`.
 
 ## Synthesis freedom and relational semantics
 
@@ -684,7 +730,13 @@ FormalDifference(port, type, left_value, right_value)
 FormalDiagnostic(module_path, opcode, operation_id,
                  location, origin, message)
 FormalInputAssumption(port, value, care)
+FormalOutputPattern(port, value, care)
+FormalOutputWitness(port, type, packed_value)
 FormalQuery(assumptions)
+FormalReachabilityResult(status, target, assignments, output,
+                         diagnostic, assumptions)
+FormalPropertyResult(status, target, assignments, output,
+                     diagnostic, assumptions)
 ```
 
 Result invariants:
@@ -698,6 +750,20 @@ Result invariants:
 - `unknown` has a diagnostic explaining the solver outcome and no claim about
   equivalence; and
 - packed values are nonnegative integers that fit their declared widths.
+
+Reachability adds these invariants:
+
+- `reachable` has every top input assignment and one complete output witness;
+- `unreachable` has no assignments, witness, or diagnostic; and
+- vacuous, unsupported, and unknown reachability results have no partial
+  witness.
+
+Output properties add these invariants:
+
+- `proved` has no assignments, witness, or diagnostic;
+- `counterexample` has every top input assignment and one complete violating
+  output witness; and
+- vacuous, unsupported, and unknown property results have no partial witness.
 
 Tasks:
 
@@ -807,11 +873,15 @@ Milestone 1b does not add uncared output semantics or assumptions implicitly.
   exactly-one precondition for every reachable use.
 - [ ] Generalize validity obligations to other partial operations only after
   their individual contracts and quantifiers are explicit.
-- [ ] Add combinational assertion and reachability queries without changing
-  ordinary RHDL elaboration.
+- [x] Add packed named-output reachability with concrete witnesses and no
+  change to ordinary RHDL elaboration.
+- [x] Add a universal combinational property query without reinterpreting the
+  clocked `verif.assert` operation.
 
 Exit criterion: one-hot selection can be checked under an explicit exactly-one
-assumption, and removing the assumption produces `unsupported` rather than a
+assumption, removing the assumption produces `unsupported`, and combinational
+output targets return replayable reachable or unreachable results while
+universal targets return proved or replayable violating results, without a
 different implicit semantics.
 
 ### Stage 3: single-clock bounded checking

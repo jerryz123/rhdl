@@ -1,20 +1,34 @@
 #lang rosette
-;; Interprets immutable verified RHDL snapshots with Rosette and checks combinational equivalence.
+;; Interprets immutable verified RHDL snapshots for combinational equivalence, reachability, and property queries.
 
 (require racket/list
          racket/match
          racket/set)
 
 (provide check_equivalent_snapshots
+         check_property_snapshot
+         check_reachable_snapshot
          interpret_snapshot
          preflight_snapshot
          engine_result_status
          engine_result_message
          engine_result_inputs
          engine_result_differences
-         engine_result_diagnostic)
+         engine_result_diagnostic
+         reachability_result_status
+         reachability_result_message
+         reachability_result_inputs
+         reachability_result_output
+         reachability_result_diagnostic
+         property_result_status
+         property_result_message
+         property_result_inputs
+         property_result_output
+         property_result_diagnostic)
 
 (struct formal-engine-result (status message inputs differences diagnostic) #:transparent)
+(struct formal-reachability-result (status message inputs output diagnostic) #:transparent)
+(struct formal-property-result (status message inputs output diagnostic) #:transparent)
 (struct exn:fail:formal:unsupported exn:fail (diagnostic) #:transparent)
 (struct validity-obligation (condition module operation path) #:transparent)
 
@@ -66,6 +80,36 @@
 
 (define (engine_result_diagnostic result)
   (formal-engine-result-diagnostic result))
+
+(define (reachability_result_status result)
+  (formal-reachability-result-status result))
+
+(define (reachability_result_message result)
+  (formal-reachability-result-message result))
+
+(define (reachability_result_inputs result)
+  (formal-reachability-result-inputs result))
+
+(define (reachability_result_output result)
+  (formal-reachability-result-output result))
+
+(define (reachability_result_diagnostic result)
+  (formal-reachability-result-diagnostic result))
+
+(define (property_result_status result)
+  (formal-property-result-status result))
+
+(define (property_result_message result)
+  (formal-property-result-message result))
+
+(define (property_result_inputs result)
+  (formal-property-result-inputs result))
+
+(define (property_result_output result)
+  (formal-property-result-output result))
+
+(define (property_result_diagnostic result)
+  (formal-property-result-diagnostic result))
 
 (define (required hash key [context "snapshot"])
   (hash-ref hash key
@@ -598,8 +642,119 @@
       (bitvector->natural evaluated)
       0))
 
-(define (default-solve mismatch)
-  (solve (assert mismatch)))
+(define (default-solve query)
+  (solve (assert query)))
+
+(define (make-symbolic-inputs input-ports)
+  (for/hash ([port (in-list input-ports)])
+    (define name (required port "name" "input port"))
+    (define width (type-width (required port "type" "input port")))
+    (values name (constant (gensym (string-append "rhdl_" name "_"))
+                           (bitvector width)))))
+
+(define (make-assumption-formula assumptions input-map symbolic-inputs)
+  (for/fold ([result #t]) ([entry (in-list assumptions)])
+    (define name (required entry "port" "formal input assumption"))
+    (define width
+      (type-width (required (hash-ref input-map name) "type" "input port")))
+    (define input (hash-ref symbolic-inputs name))
+    (define term
+      (match (required entry "kind" "formal assumption")
+        ["input_pattern"
+         (define value (required entry "value" "formal input assumption"))
+         (define care (required entry "care" "formal input assumption"))
+         (bveq (bvand input (bv care width)) (bv value width))]
+        ["onehot" (exactly-one-bv input width)]))
+    (&& result term)))
+
+(define (model-assignments input-ports symbolic-inputs solution)
+  (for/list ([port (in-list input-ports)])
+    (define name (required port "name" "input port"))
+    (hash "port" name
+          "type" (required port "type" "input port")
+          "value" (model-natural (hash-ref symbolic-inputs name) solution))))
+
+(define (assignments->inputs assignments input-map)
+  (for/hash ([entry (in-list assignments)])
+    (define name (required entry "port" "formal assignment"))
+    (define port (hash-ref input-map name))
+    (values name
+            (bv (required entry "value" "formal assignment")
+                (type-width (required port "type" "input port"))))))
+
+(define (make-equivalence-result status message inputs differences diagnostic)
+  (formal-engine-result status message inputs (or differences '()) diagnostic))
+
+(define (validate-output-pattern target output-ports)
+  (unless (hash? target)
+    (error 'rhdl-formal "formal output pattern is malformed"))
+  (define name (required target "port" "formal output pattern"))
+  (define outputs (port-map output-ports))
+  (unless (and (string? name) (hash-has-key? outputs name))
+    (error 'rhdl-formal "formal output pattern references unknown output ~a" name))
+  (define value (required target "value" "formal output pattern"))
+  (define care (required target "care" "formal output pattern"))
+  (define width
+    (type-width (required (hash-ref outputs name) "type" "output port")))
+  (define limit (arithmetic-shift 1 width))
+  (unless (and (exact-nonnegative-integer? value)
+               (exact-nonnegative-integer? care)
+               (< value limit)
+               (< care limit)
+               (= value (bitwise-and value care)))
+    (error 'rhdl-formal "formal output pattern has an invalid packed pattern"))
+  #t)
+
+(define (solve-under-contract top assumptions assumption obligations solve-query
+                              goal unsat-status sat-result make-result)
+  (define (unknown-result message [obligation #f])
+    (make-result
+     "unknown" message '() #f
+     (if obligation
+         (diagnostic (validity-obligation-module obligation)
+                     (validity-obligation-operation obligation)
+                     message
+                     (validity-obligation-path obligation))
+         (diagnostic top #f message))))
+  (define (solve-goal)
+    (define solution (solve-query (&& assumption goal)))
+    (cond
+      [(unsat? solution) (make-result unsat-status #f '() #f #f)]
+      [(sat? solution) (sat-result solution)]
+      [else (unknown-result "Rosette solver returned an unknown result")]))
+  (define (check-validity remaining)
+    (cond
+      [(null? remaining) (solve-goal)]
+      [else
+       (define obligation (first remaining))
+       (define proof
+         (solve-query (&& assumption (! (validity-obligation-condition obligation)))))
+       (cond
+         [(unsat? proof) (check-validity (rest remaining))]
+         [(sat? proof)
+          (define message
+            "formal assumptions do not prove rtl.onehot_mux selector is exactly one-hot")
+          (make-result
+           "unsupported" message '() #f
+           (diagnostic (validity-obligation-module obligation)
+                       (validity-obligation-operation obligation)
+                       message
+                       (validity-obligation-path obligation)))]
+         [else
+          (unknown-result
+           "Rosette solver returned an unknown result while proving one-hot validity"
+           obligation)])]))
+  (if (null? assumptions)
+      (check-validity obligations)
+      (let ([feasibility (solve-query assumption)])
+        (cond
+          [(unsat? feasibility)
+           (define message "formal assumptions are unsatisfiable")
+           (make-result "vacuous" message '() #f (diagnostic top #f message))]
+          [(sat? feasibility) (check-validity obligations)]
+          [else
+           (unknown-result
+            "Rosette solver returned an unknown result while checking formal assumptions")]))))
 
 (define (run-equivalence-query left-snapshot right-snapshot assumptions solve-query)
   (validate-snapshot left-snapshot)
@@ -607,12 +762,7 @@
   (define-values (left-top left-inputs left-outputs _right-inputs _right-outputs)
     (check-interface left-snapshot right-snapshot))
   (validate-assumptions assumptions left-inputs)
-  (define symbolic-inputs
-    (for/hash ([port (in-list left-inputs)])
-      (define name (required port "name" "input port"))
-      (define width (type-width (required port "type" "input port")))
-      (values name (constant (gensym (string-append "rhdl_" name "_"))
-                             (bitvector width)))))
+  (define symbolic-inputs (make-symbolic-inputs left-inputs))
   (define obligations (box '()))
   (define left-values (interpret-top-bv left-snapshot symbolic-inputs obligations))
   (define right-values (interpret-top-bv right-snapshot symbolic-inputs obligations))
@@ -624,99 +774,75 @@
   (define mismatch
     (for/fold ([result #f]) ([term (in-list mismatches)]) (|| result term)))
   (define input-map (port-map left-inputs))
-  (define assumption
-    (for/fold ([result #t]) ([entry (in-list assumptions)])
-      (define name (required entry "port" "formal input assumption"))
-      (define width
-        (type-width (required (hash-ref input-map name) "type" "input port")))
-      (define input (hash-ref symbolic-inputs name))
-      (define term
-        (match (required entry "kind" "formal assumption")
-          ["input_pattern"
-           (define value (required entry "value" "formal input assumption"))
-           (define care (required entry "care" "formal input assumption"))
-           (bveq (bvand input (bv care width)) (bv value width))]
-          ["onehot" (exactly-one-bv input width)]))
-      (&& result term)))
-  (define (unknown-result message [obligation #f])
-    (formal-engine-result
-     "unknown" message '() '()
-     (if obligation
-         (diagnostic (validity-obligation-module obligation)
-                     (validity-obligation-operation obligation)
-                     message
-                     (validity-obligation-path obligation))
-         (diagnostic left-top #f message))))
-  (define (classify-mismatch solution)
-    (cond
-      [(unsat? solution)
-       (formal-engine-result "equivalent" #f '() '() #f)]
-      [(sat? solution)
-       (define assignments
-         (for/list ([port (in-list left-inputs)])
-           (define name (required port "name" "input port"))
-           (define type (required port "type" "input port"))
-           (hash "port" name
-                 "type" type
-                 "value" (model-natural (hash-ref symbolic-inputs name) solution))))
-       (define concrete-inputs
-         (for/hash ([entry (in-list assignments)])
-           (define name (required entry "port" "counterexample assignment"))
-           (define port (hash-ref input-map name))
-           (values name
-                   (bv (required entry "value" "counterexample assignment")
-                       (type-width (required port "type" "input port"))))))
-       (define concrete-left-values (interpret-top-bv left-snapshot concrete-inputs))
-       (define concrete-right-values (interpret-top-bv right-snapshot concrete-inputs))
-       (define differences
-         (for/list ([port (in-list left-outputs)]
-                    #:when
-                    (let* ([name (required port "name" "output port")]
-                           [left (bitvector->natural (hash-ref concrete-left-values name))]
-                           [right (bitvector->natural (hash-ref concrete-right-values name))])
-                      (not (= left right))))
-           (define name (required port "name" "output port"))
-           (hash "port" name
-                 "type" (required port "type" "output port")
-                 "left" (bitvector->natural (hash-ref concrete-left-values name))
-                 "right" (bitvector->natural (hash-ref concrete-right-values name)))))
-       (formal-engine-result "counterexample" #f assignments differences #f)]
-      [else (unknown-result "Rosette solver returned an unknown result")]))
-  (define (check-validity remaining)
-    (cond
-      [(null? remaining)
-       (classify-mismatch (solve-query (&& assumption mismatch)))]
-      [else
-       (define obligation (first remaining))
-       (define proof
-         (solve-query (&& assumption (! (validity-obligation-condition obligation)))))
-       (cond
-         [(unsat? proof) (check-validity (rest remaining))]
-         [(sat? proof)
-          (define message
-            "formal assumptions do not prove rtl.onehot_mux selector is exactly one-hot")
-          (formal-engine-result
-           "unsupported" message '() '()
-           (diagnostic (validity-obligation-module obligation)
-                       (validity-obligation-operation obligation)
-                       message
-                       (validity-obligation-path obligation)))]
-         [else
-          (unknown-result
-           "Rosette solver returned an unknown result while proving one-hot validity"
-           obligation)])]))
-  (if (null? assumptions)
-      (check-validity ordered-obligations)
-      (let ([feasibility (solve-query assumption)])
-        (cond
-          [(unsat? feasibility)
-           (define message "formal assumptions are unsatisfiable")
-           (formal-engine-result "vacuous" message '() '()
-                                 (diagnostic left-top #f message))]
-          [(sat? feasibility) (check-validity ordered-obligations)]
-          [else
-           (unknown-result
-            "Rosette solver returned an unknown result while checking formal assumptions")]))))
+  (define assumption (make-assumption-formula assumptions input-map symbolic-inputs))
+  (define (counterexample-result solution)
+    (define assignments (model-assignments left-inputs symbolic-inputs solution))
+    (define concrete-inputs (assignments->inputs assignments input-map))
+    (define concrete-left-values (interpret-top-bv left-snapshot concrete-inputs))
+    (define concrete-right-values (interpret-top-bv right-snapshot concrete-inputs))
+    (define differences
+      (for/list ([port (in-list left-outputs)]
+                 #:when
+                 (let* ([name (required port "name" "output port")]
+                        [left (bitvector->natural (hash-ref concrete-left-values name))]
+                        [right (bitvector->natural (hash-ref concrete-right-values name))])
+                   (not (= left right))))
+        (define name (required port "name" "output port"))
+        (hash "port" name
+              "type" (required port "type" "output port")
+              "left" (bitvector->natural (hash-ref concrete-left-values name))
+              "right" (bitvector->natural (hash-ref concrete-right-values name)))))
+    (formal-engine-result "counterexample" #f assignments differences #f))
+  (solve-under-contract left-top assumptions assumption ordered-obligations solve-query
+                        mismatch "equivalent" counterexample-result make-equivalence-result))
+
+(define (run-output-query snapshot target assumptions solve-query mode)
+  (validate-snapshot snapshot)
+  (define-values (top inputs outputs) (interfaces snapshot))
+  (validate-assumptions assumptions inputs)
+  (validate-output-pattern target outputs)
+  (define symbolic-inputs (make-symbolic-inputs inputs))
+  (define obligations (box '()))
+  (define output-values (interpret-top-bv snapshot symbolic-inputs obligations))
+  (define ordered-obligations (reverse (unbox obligations)))
+  (define input-map (port-map inputs))
+  (define output-map (port-map outputs))
+  (define assumption (make-assumption-formula assumptions input-map symbolic-inputs))
+  (define name (required target "port" "formal output pattern"))
+  (define value (required target "value" "formal output pattern"))
+  (define care (required target "care" "formal output pattern"))
+  (define width
+    (type-width (required (hash-ref output-map name) "type" "output port")))
+  (define matches
+    (bveq (bvand (hash-ref output-values name) (bv care width)) (bv value width)))
+  (define property? (equal? mode 'property))
+  (define goal (if property? (! matches) matches))
+  (define sat-status (if property? "counterexample" "reachable"))
+  (define unsat-status (if property? "proved" "unreachable"))
+  (define make-result
+    (if property? formal-property-result formal-reachability-result))
+  (define (witness-result solution)
+    (define assignments (model-assignments inputs symbolic-inputs solution))
+    (define concrete-inputs (assignments->inputs assignments input-map))
+    (define concrete-outputs (interpret-top-bv snapshot concrete-inputs))
+    (define concrete-value (bitvector->natural (hash-ref concrete-outputs name)))
+    (define concrete-matches? (= (bitwise-and concrete-value care) value))
+    (unless (if property? (not concrete-matches?) concrete-matches?)
+      (error 'rhdl-formal "solver output witness failed concrete replay"))
+    (make-result
+     sat-status #f assignments
+     (hash "port" name
+           "type" (required (hash-ref output-map name) "type" "output port")
+           "value" concrete-value)
+     #f))
+  (solve-under-contract top assumptions assumption ordered-obligations solve-query
+                        goal unsat-status witness-result make-result))
+
+(define (run-reachability-query snapshot target assumptions solve-query)
+  (run-output-query snapshot target assumptions solve-query 'reachability))
+
+(define (run-property-query snapshot target assumptions solve-query)
+  (run-output-query snapshot target assumptions solve-query 'property))
 
 (define (check_equivalent_snapshots left-snapshot right-snapshot [assumptions '()]
                                     #:solve [solve-query default-solve])
@@ -740,6 +866,50 @@
       (with-terms '()
         (with-vc vc-true
           (run-equivalence-query left-snapshot right-snapshot assumptions solve-query))))
+    (cond
+      [(normal? isolated) (result-value isolated)]
+      [else (raise (result-value isolated))])))
+
+(define (check_reachable_snapshot snapshot target [assumptions '()]
+                                  #:solve [solve-query default-solve])
+  (with-handlers ([exn:fail:formal:unsupported?
+                   (lambda (exception)
+                     (formal-reachability-result
+                      "unsupported"
+                      (exn-message exception)
+                      '()
+                      #f
+                      (exn:fail:formal:unsupported-diagnostic exception)))])
+    (validate-snapshot snapshot)
+    (define-values (_top inputs outputs) (interfaces snapshot))
+    (validate-assumptions assumptions inputs)
+    (validate-output-pattern target outputs)
+    (define isolated
+      (with-terms '()
+        (with-vc vc-true
+          (run-reachability-query snapshot target assumptions solve-query))))
+    (cond
+      [(normal? isolated) (result-value isolated)]
+      [else (raise (result-value isolated))])))
+
+(define (check_property_snapshot snapshot target [assumptions '()]
+                                 #:solve [solve-query default-solve])
+  (with-handlers ([exn:fail:formal:unsupported?
+                   (lambda (exception)
+                     (formal-property-result
+                      "unsupported"
+                      (exn-message exception)
+                      '()
+                      #f
+                      (exn:fail:formal:unsupported-diagnostic exception)))])
+    (validate-snapshot snapshot)
+    (define-values (_top inputs outputs) (interfaces snapshot))
+    (validate-assumptions assumptions inputs)
+    (validate-output-pattern target outputs)
+    (define isolated
+      (with-terms '()
+        (with-vc vc-true
+          (run-property-query snapshot target assumptions solve-query))))
     (cond
       [(normal? isolated) (result-value isolated)]
       [else (raise (result-value isolated))])))

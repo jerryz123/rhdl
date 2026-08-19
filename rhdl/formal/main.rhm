@@ -1,5 +1,5 @@
 #lang rhombus
-// Exposes typed combinational equivalence queries, assumptions, and results over verified RHDL subjects.
+// Exposes typed combinational equivalence, reachability, and output-property queries over verified RHDL subjects.
 
 import:
   "../core/main.rhm" open
@@ -13,9 +13,15 @@ export:
   FormalDiagnostic
   FormalInputAssumption
   FormalOneHotAssumption
+  FormalOutputPattern
+  FormalOutputWitness
+  FormalPropertyResult
   FormalQuery
+  FormalReachabilityResult
   FormalResult
   check_equivalent
+  check_output_property
+  check_reachable
 
 class FormalAssignment(port :: String, type, packed_value :: Nat)
 
@@ -34,6 +40,10 @@ class FormalDiagnostic(module_path,
 class FormalInputAssumption(port :: String, value :: Nat, care = #false)
 
 class FormalOneHotAssumption(port :: String)
+
+class FormalOutputPattern(port :: String, value :: Nat, care = #false)
+
+class FormalOutputWitness(port :: String, type, packed_value :: Nat)
 
 class FormalQuery(assumptions :: List = [])
 
@@ -57,25 +67,73 @@ class FormalResult(status :: String,
         if diagnostic | status ++ ": " ++ diagnostic.message | status
     | ~else: status
 
-fun formal_query_snapshot(query, top):
+class FormalReachabilityResult(status :: String,
+                               target :: FormalOutputPattern,
+                               assignments = [],
+                               output = #false,
+                               diagnostic = #false,
+                               assumptions = []):
+  method reachable(): status == "reachable"
+  method unreachable(): status == "unreachable"
+  method vacuous(): status == "vacuous"
+  method unsupported(): status == "unsupported"
+  method unknown(): status == "unknown"
+
+  method describe():
+    match status
+    | "reachable":
+        if output
+        | String.append("reachable with ", output.port, " = ",
+                        to_string(output.packed_value))
+        | "reachable"
+    | "unreachable": "unreachable"
+    | "vacuous" || "unsupported" || "unknown":
+        if diagnostic | status ++ ": " ++ diagnostic.message | status
+    | ~else: status
+
+class FormalPropertyResult(status :: String,
+                           target :: FormalOutputPattern,
+                           assignments = [],
+                           output = #false,
+                           diagnostic = #false,
+                           assumptions = []):
+  method proved(): status == "proved"
+  method counterexample(): status == "counterexample"
+  method vacuous(): status == "vacuous"
+  method unsupported(): status == "unsupported"
+  method unknown(): status == "unknown"
+
+  method describe():
+    match status
+    | "proved": "proved"
+    | "counterexample":
+        if output
+        | String.append("counterexample with ", output.port, " = ",
+                        to_string(output.packed_value))
+        | "counterexample"
+    | "vacuous" || "unsupported" || "unknown":
+        if diagnostic | status ++ ": " ++ diagnostic.message | status
+    | ~else: status
+
+fun formal_query_snapshot(query, top, who):
   unless query is_a FormalQuery
-  | error(~who: #'check_equivalent, "formal query must be a FormalQuery")
+  | error(~who: who, "formal query must be a FormalQuery")
   def snapshots:
     for List (assumption in query.assumptions, index in 0..query.assumptions.length()):
       unless assumption is_a FormalInputAssumption || assumption is_a FormalOneHotAssumption
-      | error(~who: #'check_equivalent,
+      | error(~who: who,
               String.append("formal assumption ", to_string(index),
                             " must be a FormalInputAssumption or FormalOneHotAssumption"))
       def port = top.inputs.find(fun (candidate): candidate.name == assumption.port)
       unless port
-      | error(~who: #'check_equivalent,
+      | error(~who: who,
               String.append("formal assumption ", to_string(index),
                             " references unknown input ", assumption.port))
       if assumption is_a FormalInputAssumption
       | block:
           def width = packed_width(port.type)
           unless assumption.care == #false || assumption.care is_a Nat
-          | error(~who: #'check_equivalent,
+          | error(~who: who,
                   String.append("formal assumption ", to_string(index),
                                 " has an invalid care mask"))
           def care:
@@ -84,7 +142,7 @@ fun formal_query_snapshot(query, top):
             | (1 bits.(<<) width) - 1
           def limit = 1 bits.(<<) width
           unless assumption.value < limit && care < limit && (assumption.value bits.and care) == assumption.value
-          | error(~who: #'check_equivalent,
+          | error(~who: who,
                   String.append("formal assumption ", to_string(index),
                                 " has an invalid packed pattern"))
           rkt.hash("kind", "input_pattern",
@@ -93,6 +151,28 @@ fun formal_query_snapshot(query, top):
                    "care", care)
       | rkt.hash("kind", "onehot", "port", assumption.port)
   PairList[& snapshots]
+
+fun formal_output_pattern_snapshot(target, top, who):
+  unless target is_a FormalOutputPattern
+  | error(~who: who,
+          "formal output target must be a FormalOutputPattern")
+  def port = top.outputs.find(fun (candidate): candidate.name == target.port)
+  unless port
+  | error(~who: who,
+          "formal output target references unknown output " ++ target.port)
+  def width = packed_width(port.type)
+  unless target.care == #false || target.care is_a Nat
+  | error(~who: who,
+          "formal output target has an invalid care mask")
+  def care:
+    if target.care is_a Nat
+    | target.care
+    | (1 bits.(<<) width) - 1
+  def limit = 1 bits.(<<) width
+  unless target.value < limit && care < limit && (target.value bits.and care) == target.value
+  | error(~who: who,
+          "formal output target has an invalid packed pattern")
+  rkt.hash("port", target.port, "value", target.value, "care", care)
 
 fun interface_error(left_top, right_top):
   fun compare(kind, left_ports, right_ports):
@@ -174,7 +254,7 @@ fun convert_engine_result(raw, left_top, query):
 fun check_equivalent(left, right, query = FormalQuery()):
   def left_top = formal_subject_top(left)
   def right_top = formal_subject_top(right)
-  def query_snapshot = formal_query_snapshot(query, left_top)
+  def query_snapshot = formal_query_snapshot(query, left_top, #'check_equivalent)
   def mismatch = interface_error(left_top, right_top)
   if mismatch
   | FormalResult("unsupported", [], [], interface_diagnostic(left_top, mismatch),
@@ -186,3 +266,96 @@ fun check_equivalent(left, right, query = FormalQuery()):
       left_top,
       query
     )
+
+fun convert_reachability_result(raw, top, target, query):
+  def status = to_string(engine.reachability_result_status(raw))
+  def raw_assignments = PairList.to_list(engine.reachability_result_inputs(raw))
+  def assignments:
+    raw_assignments.map(
+      fun (entry):
+        def name = to_string(entry_value(entry, "port"))
+        def port = top.inputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_reachable,
+                "formal engine returned an unknown input port " ++ name)
+        FormalAssignment(name, port.type, entry_value(entry, "value"))
+    )
+  def raw_output = engine.reachability_result_output(raw)
+  def output:
+    if raw_output
+    | block:
+        def name = to_string(entry_value(raw_output, "port"))
+        def port = top.outputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_reachable,
+                "formal engine returned an unknown output port " ++ name)
+        FormalOutputWitness(name, port.type, entry_value(raw_output, "value"))
+    | #false
+  FormalReachabilityResult(
+    status,
+    target,
+    assignments,
+    output,
+    convert_diagnostic(engine.reachability_result_diagnostic(raw)),
+    query.assumptions
+  )
+
+fun check_reachable(subject, target, query = FormalQuery()):
+  def top = formal_subject_top(subject)
+  def target_snapshot = formal_output_pattern_snapshot(target, top, #'check_reachable)
+  def query_snapshot = formal_query_snapshot(query, top, #'check_reachable)
+  convert_reachability_result(
+    engine.check_reachable_snapshot(formal_snapshot(subject),
+                                    target_snapshot,
+                                    query_snapshot),
+    top,
+    target,
+    query
+  )
+
+fun convert_property_result(raw, top, target, query):
+  def status = to_string(engine.property_result_status(raw))
+  def raw_assignments = PairList.to_list(engine.property_result_inputs(raw))
+  def assignments:
+    raw_assignments.map(
+      fun (entry):
+        def name = to_string(entry_value(entry, "port"))
+        def port = top.inputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_output_property,
+                "formal engine returned an unknown input port " ++ name)
+        FormalAssignment(name, port.type, entry_value(entry, "value"))
+    )
+  def raw_output = engine.property_result_output(raw)
+  def output:
+    if raw_output
+    | block:
+        def name = to_string(entry_value(raw_output, "port"))
+        def port = top.outputs.find(fun (candidate): candidate.name == name)
+        unless port
+        | error(~who: #'check_output_property,
+                "formal engine returned an unknown output port " ++ name)
+        FormalOutputWitness(name, port.type, entry_value(raw_output, "value"))
+    | #false
+  FormalPropertyResult(
+    status,
+    target,
+    assignments,
+    output,
+    convert_diagnostic(engine.property_result_diagnostic(raw)),
+    query.assumptions
+  )
+
+fun check_output_property(subject, target, query = FormalQuery()):
+  def top = formal_subject_top(subject)
+  def target_snapshot:
+    formal_output_pattern_snapshot(target, top, #'check_output_property)
+  def query_snapshot = formal_query_snapshot(query, top, #'check_output_property)
+  convert_property_result(
+    engine.check_property_snapshot(formal_snapshot(subject),
+                                   target_snapshot,
+                                   query_snapshot),
+    top,
+    target,
+    query
+  )

@@ -4,8 +4,9 @@
 
 The formal engine is an optional consumer of verified public RHDL IR. It uses
 Rosette fixed-width bitvectors to prove deterministic combinational behavioral
-equivalence or produce a concrete counterexample. It does not participate in
-elaboration and is not imported by `#lang rhdl`.
+equivalence, produce concrete counterexamples, and find packed top-output
+reachability witnesses or prove universal packed top-output properties. It does
+not participate in elaboration and is not imported by `#lang rhdl`.
 
 The architectural plan and staged semantic scope are in [`PLAN.md`](PLAN.md).
 
@@ -48,9 +49,11 @@ make formal-differential-test
 
 That target proves structurally different shift, aggregate, hierarchical,
 fully cared decode, and assumption-constrained one-hot implementations
-equivalent, obtains live counterexamples for defects in each category, and
-passes those exact packed inputs and outputs to a shared CIRCT-generated
-Verilator DUT. The testbench also exhaustively checks all 128 reduced-width
+equivalent, obtains live counterexamples for defects in each category, finds a
+live assumption-constrained reachability witness, proves a constrained output
+property, obtains a live violating property counterexample, and passes those
+exact packed inputs and outputs to a shared CIRCT-generated Verilator DUT. The
+testbench also exhaustively checks all 128 reduced-width
 unequal-shift inputs, 80 aggregate layouts and projections, 256 hierarchical
 arithmetic inputs, eight decode selectors, and 12,288 valid one-hot selections
 against independent SystemVerilog oracles.
@@ -89,6 +92,42 @@ returns `unsupported` with the operation path; only a proved-valid selector is
 interpreted by direct choice gating and OR reduction. Contradictory assumptions
 still return `vacuous` before any operation-validity claim.
 
+`check_reachable` asks whether one named top output can match a canonical
+packed pattern:
+
+```rhombus
+def result:
+  check_reachable(candidate,
+                  FormalOutputPattern("response", 0b1000, 0b1100),
+                  query)
+```
+
+Omitting the target `care` mask requires the complete output value. With a
+mask, only cared bits participate; the example seeks any `response` whose two
+high bits are `10`. A `reachable` result contains every top input assignment
+and the complete concrete output value, replayed through the interpreter before
+it is returned. `unreachable` means no input satisfying the assumptions reaches
+the target. The other statuses retain the same `vacuous`, `unsupported`, and
+`unknown` meanings as equivalence queries.
+
+`check_output_property` asks whether one named top output always matches a
+canonical packed pattern under the query assumptions:
+
+```rhombus
+def result:
+  check_output_property(candidate,
+                        FormalOutputPattern("response", 0b1000, 0b1100),
+                        query)
+```
+
+A `proved` result means every input satisfying the assumptions makes the cared
+output bits match the target. A `counterexample` contains every top input
+assignment and the complete violating output value, replayed concretely before
+it is returned. The query uses the same masks, explicit assumptions, vacuity
+classification, partial-operation validity obligations, and `unsupported` or
+`unknown` outcomes as reachability. This is a universal combinational query;
+it does not reinterpret the clocked `verif.assert` operation.
+
 The result status is one of `equivalent`, `counterexample`, `vacuous`,
 `unsupported`, or `unknown`. `vacuous` means the assumptions are mutually
 unsatisfiable, so the engine does not claim equivalence. A counterexample
@@ -120,10 +159,11 @@ The engine returns `unsupported` for `rtl.dont_care`, any `rtl.decode` with an
 uncared output bit, registers, every memory form, assertions, DPI operations,
 unknown operations, and any `rtl.onehot_mux` whose exactly-one precondition is
 not implied by the query. Structural semantic exclusions fail during
-preflight; one-hot validity fails before the output-mismatch query. The engine
+preflight; one-hot validity fails before the requested output query. The engine
 does not invent values or assumptions for unspecified behavior.
 
 Counterexample input values and differing output values are nonnegative packed
 integers. Inputs omitted from a partial solver model are completed with zero,
 then both designs are interpreted concretely so every reported difference is
-replayable.
+replayable. Reachability witnesses use the same completion and concrete replay
+rule, as do violating output-property counterexamples.

@@ -8,4 +8,6 @@
          "engine-test.rkt"
          "hierarchy-test.rhm"
          "onehot-assumption-test.rhm"
+         "property-test.rhm"
+         "reachability-test.rhm"
          "snapshot-test.rhm")
