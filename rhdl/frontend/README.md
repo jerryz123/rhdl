@@ -12,7 +12,6 @@ features are documented in [`layers/README.md`](layers/README.md).
 ```text
 #lang rhdl ------> standard ------> foundation + curated layers
 #lang rhdl/base ------------------> foundation + selected layers
-#lang rhdl/golf -> standard + compact Golf syntax
                                              |
                                              v
                                     elaboration kernel
@@ -63,14 +62,6 @@ The base profile provides `circuit`, `elaborate`, ports, `<==`, `Bits`,
 `Clock`, `Reset`, hardware selection, `.into`, and guarded host `if`. It does
 not expose the public core Builder or raw kernel. The standard profile adds the
 curated layers without changing the resulting IR.
-
-`#lang rhdl/golf` re-exports the complete standard profile and adds compact
-syntax that expands back to standard RHDL forms. Its first vertical slice
-provides `B(width)`, compact single-output `c` declarations, expression bodies,
-and `top`; canonical syntax remains valid in the same module. Golf owns no
-hardware semantics, core operations, or backend lowering. Its roadmap and
-admission rules are in [`../golf/PLAN.md`](../golf/PLAN.md); current syntax and
-examples are in the [`Golf README`](../golf/README.md).
 
 Library code may use `hardware_value_type(value)` to recover the RHDL type of
 caller-elaborated readable or driveable hardware without importing core IR

@@ -85,8 +85,6 @@
  ("bad-signed-comparison.rhdl" "same signed arithmetic type and width")
  ("bad-signed-literal.rhdl" "fit the declared signed width")
  ("bad-signed-shift-amount.rhdl" "shift amount must be Bits")
- ("golf-malformed-header.rhdl" "expected compact ports in the form inputs: Type -> output: Type")
- ("golf-multiple-expression-outputs.rhdl" "expression-bodied c requires compact inputs and exactly one output")
  ("base-core-leak.rhdl" "Design: unbound identifier")
  ("base-kernel-leak.rhdl" "run_elaboration: unbound identifier")
  ("base-kernel-port-leak.rhdl" "input: misuse as an expression")

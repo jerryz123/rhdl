@@ -20,7 +20,6 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`chi/`](chi/) | AMBA CHI endpoints and finite components |
 | [`cores/`](cores/) | Reusable processor datapaths and complete named cores |
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
-| [`golf/`](golf/) | Compact `#lang rhdl/golf` syntax over the standard RHDL profile |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`formal/`](formal/) | Optional Rosette-backed behavioral proofs |
 
@@ -108,26 +107,6 @@ Run only these clocking examples with:
 
 ```sh
 make examples-clocking
-```
-
-## Golf examples
-
-[`golf/adder.rhdl`](golf/adder.rhdl) expresses the same parameterized 8-bit
-adder with the first Golf slice: `B(width)` shortens `Bits(width)`, `c` factors
-one shared port type out of the arrow header, an expression body drives the
-single output, and `top` defines the ordinary elaborated `design`. Its public
-IR and CIRCT MLIR are checked against
-[`lop/adder-standard.rhdl`](lop/adder-standard.rhdl).
-
-[`golf/alu.rhdl`](golf/alu.rhdl) combines heterogeneous port groups, a dense
-`sel` lookup, and a positional multiple-output expression body. Its public IR
-and CIRCT MLIR are checked exactly against
-[`rhdl/alu.rhdl`](rhdl/alu.rhdl).
-
-Run the Golf example and its colocated Verilog check with:
-
-```sh
-make examples-golf
 ```
 
 ## Structural floorplanning
@@ -295,7 +274,7 @@ make examples
 ```
 
 The directory-specific targets `examples-rhdl`, `examples-clocking`,
-`examples-std`, `examples-noc`, `examples-lop`, `examples-golf`,
+`examples-std`, `examples-noc`, `examples-lop`,
 `examples-rfpl`, `examples-ridx`, `examples-riscv`, `examples-chi`, and
 `examples-cores` run one ownership group. CI selects only groups affected by
 the changed implementation layer: core and frontend changes reach every group,

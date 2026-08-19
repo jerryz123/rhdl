@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-golf examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -10,8 +10,6 @@ BACKEND_TESTS := $(sort $(wildcard tests/backend/*-test.rhm))
 FORMAL_TESTS := tests/formal/suite.rkt
 LOP_FRONTEND_TESTS := $(sort $(wildcard tests/frontend/*equivalence-test.rhm))
 LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
-GOLF_FRONTEND_TESTS := tests/frontend/golf-test.rhm
-GOLF_BACKEND_TESTS := tests/backend/golf-equivalence-test.rhm
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 RIDX_TESTS := $(sort $(shell find ridx/tests -type f -name '*-test.rhm'))
@@ -25,7 +23,6 @@ CLOCKING_EXAMPLES := $(sort $(shell find examples/clocking -type f \( -name '*.r
 STD_EXAMPLES := $(sort $(shell find examples/std -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 NOC_EXAMPLES := $(sort $(shell find examples/noc -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 LOP_EXAMPLES := $(sort $(shell find examples/lop -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
-GOLF_EXAMPLES := $(sort $(shell find examples/golf -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 RFPL_LOGICAL_EXAMPLES := $(sort $(shell find examples/rfpl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 RIDX_EXAMPLES := $(sort $(shell find examples/ridx -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 RISCV_EXAMPLES := $(sort $(shell find examples/riscv -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -74,10 +71,6 @@ unit-test: frontend-test backend-test
 lop-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_FRONTEND_TESTS)
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_BACKEND_TESTS)
-
-golf-test: check-boundaries examples-golf
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(GOLF_FRONTEND_TESTS) $(GOLF_BACKEND_TESTS)
-	env PLTCOLLECTS=$(CURDIR): bash tests/frontend/run-golf-negative.sh
 
 rfpl-unit-test:
 	bash rfpl/check-boundaries.sh
@@ -132,7 +125,7 @@ circt-full-test: check-example-verilog
 	bash tests/backend/run-circt.sh --full
 
 ci-circt-language-test:
-	bash tools/check-example-verilog.sh examples/rhdl examples/lop examples/golf
+	bash tools/check-example-verilog.sh examples/rhdl examples/lop
 	bash tests/backend/run-circt.sh --group language
 
 ci-circt-std-test:
@@ -197,10 +190,6 @@ examples-noc:
 examples-lop:
 	bash tools/check-example-verilog.sh examples/lop
 	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_EXAMPLES)
-
-examples-golf:
-	bash tools/check-example-verilog.sh examples/golf
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(GOLF_EXAMPLES)
 
 examples-rfpl:
 	bash tools/check-example-verilog.sh examples/rfpl

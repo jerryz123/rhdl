@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforces RHDL source conventions, package imports, and standard, base, and Golf profile composition.
+# Enforces RHDL source conventions, package imports, and standard/base profile composition.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,16 +65,10 @@ fail_matches "standard language assembly must not import analysis, core, backend
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/language.rhm
 fail_matches "base language assembly must not import analysis, core, backend, or formal modules" \
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/base/language.rhm
-fail_matches "Golf language assembly must not import analysis, core, backend, or formal modules" \
-  '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/golf/language.rhm
-fail_matches "Golf syntax must not depend on analysis, core, backend, optional libraries, or domain packages" \
-  '^[[:space:]]+.*(analysis/|core/|backend/|formal/|std/|chi/|noc/|rfpl/|riscv/|cores/|sim/)' rhdl/golf/surface.rhm
 fail_matches "the standard frontend must aggregate only the foundation and frontend layers" \
   '^[[:space:]]+"[^"]*(analysis/|core/|kernel\.rhm|support/)' rhdl/frontend/standard.rhm
 fail_matches "the standard frontend must not implement feature behavior" \
   '^[[:space:]]*(def|fun|class|interface|operator|expr\.|defn\.|annot\.|dot\.|reducer\.)' rhdl/frontend/standard.rhm
-fail_matches "the Golf language assembly must not implement feature behavior" \
-  '^[[:space:]]*(def|fun|class|interface|operator|expr\.|defn\.|annot\.|dot\.|reducer\.)' rhdl/golf/language.rhm
 fail_matches "the frontend foundation must not depend on layers or the standard aggregator" \
   '^[[:space:]]+"[^"]*(layers/|standard\.rhm)' rhdl/frontend/foundation.rhm
 fail_matches "frontend support must not depend on profiles or language layers" \
@@ -112,9 +106,7 @@ unexpected_racket="$(find rhdl -type f -name '*.rkt' \
   ! -path 'rhdl/main.rkt' \
   ! -path 'rhdl/base/main.rkt' \
   ! -path 'rhdl/base/lang/reader.rkt' \
-  ! -path 'rhdl/formal/engine.rkt' \
-  ! -path 'rhdl/golf/main.rkt' \
-  ! -path 'rhdl/golf/lang/reader.rkt' -print)"
+  ! -path 'rhdl/formal/engine.rkt' -print)"
 if [[ -n "$unexpected_racket" ]]; then
   echo "only #lang reader shims and the Rosette formal engine may use the .rkt extension" >&2
   echo "$unexpected_racket" >&2

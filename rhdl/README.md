@@ -17,8 +17,6 @@ not a second IR.
 #lang rhdl/base ---------------> frontend/foundation
 user base-profile imports -----> selected frontend/layers/*
 
-#lang rhdl/golf ---------------> frontend/standard + golf/surface
-
 #lang rfpl --------------------> ../rfpl/frontend ------------------------> core IR
 
 std/* -------------------------> public #lang rhdl authoring surface
@@ -60,7 +58,6 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs and analyses |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
-| [`golf/`](golf/README.md) | Compact additive syntax over the complete standard RHDL profile | Standard frontend, generator-parameter support, and Golf-local syntax only |
 | [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
@@ -92,7 +89,6 @@ core, analysis, frontend, and backend modules never import RFPL.
 - Keep backends independent of frontend syntax and metadata.
 - Use CIRCT rather than an RHDL-owned SystemVerilog emitter.
 - Keep widths explicit and elaboration deterministic.
-- Require Golf shorthand to expand to existing standard RHDL forms without new hardware semantics.
 - Keep generator parameters in the host language and runtime data in hardware.
 - Specify and test implicit conversion, connection, priority, or reset behavior
   before adding it.

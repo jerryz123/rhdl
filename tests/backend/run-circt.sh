@@ -163,7 +163,7 @@ fixture_in_group() {
     IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
     if [[ "$fixture" == "$wanted" ]]; then
       case "$group:$example" in
-        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
+        language:examples/rhdl/*|language:examples/lop/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
           return 0
           ;;
         *)
@@ -432,8 +432,6 @@ verify_fixture() {
 
 fixture_specs=(
   'adder|adder_tb|examples/lop/adder-standard.rhdl|design|verilog_reference'
-  'golf-adder||examples/golf/adder.rhdl|design|verilog_reference'
-  'golf-alu||examples/golf/alu.rhdl|design|verilog_reference'
   'adder4|adder4_tb|examples/rhdl/adder4.rhdl|design|verilog_reference'
   'generated-adder|generated_adder_tb|examples/rhdl/generated-adder.rhdl|design|verilog_reference'
   'alu|alu_tb|examples/rhdl/alu.rhdl|design|verilog_reference'
