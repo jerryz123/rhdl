@@ -75,15 +75,21 @@ the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
 
 ## Clocking-analysis examples
 
-The examples under [`clocking/`](clocking/) use the optional clocking frontend
-layer or import `rhdl/analysis/clocking.rhm` directly. Its report objects and
-environment contracts are not part of core IR and do not change generated
-hardware.
+The examples under [`clocking/`](clocking/) use the clocking frontend layer or
+import `rhdl/analysis/clocking.rhm` directly. Environment and report objects
+remain outside core IR; explicit crossing evidence can now affect CDC
+verification and backend register attributes.
 
 - [`clocking/frontend-environment.rhdl`](clocking/frontend-environment.rhdl)
   uses `#lang rhdl/base` with the selectable clocking layer to declare local,
   asynchronous-clock, and asynchronous-pin input timing at the root circuit
   and obtain the resolved report as part of elaboration.
+- [`clocking/sync-level.rhdl`](clocking/sync-level.rhdl) uses strict
+  `elaborate_with_cdc`, instantiates the standard two-stage `SyncLevel`, checks
+  its retained crossing lineage, and shows generated synchronizer attributes.
+- [`clocking/reconvergence.rhdl`](clocking/reconvergence.rhdl) shows that two
+  individually legal `SyncLevel` results remain accepted while their later
+  convergence is retained as a structured diagnostic and report entry.
 - [`clocking/single-clock.rhm`](clocking/single-clock.rhm) applies one set of
   top-level synchronous input contracts to an existing `sync_circuit` shift
   register and shows that its certified subtree samples those inputs on the

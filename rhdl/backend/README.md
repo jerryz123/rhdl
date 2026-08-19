@@ -69,6 +69,7 @@ numeric suffixes. Anonymous structural records remain inline structs.
 | `rtl.memory_read_async` | latency-zero `seq.read` |
 | `rtl.memory_write` | latency-one `seq.write` |
 | `rtl.sync_memory` | `seq.firmem` with native read, write, or shared read-write ports |
+| `cdc.sync_level` | no operation; verified stage registers receive `sv.attributes` `async_reg = "TRUE"` |
 | `rtl.wire` | alias to the wire's driver |
 | `verif.assert` | guarded, reset-suppressed rising-edge `verif.clocked_assert` |
 | `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
@@ -92,6 +93,12 @@ detection; same-index enabled writes are outside the operation's contract.
 RHDL does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
 a composition. An unsupported verified type or operation produces a backend
 error rather than leaking CIRCT decisions into core schemas.
+
+`cdc.sync_level` is durable analysis evidence, not hardware. Core verification
+proves that it names a resetless, direct, one-bit register chain on one
+destination clock. CIRCT lowering omits the evidence operation and attaches
+the conventional `async_reg = "TRUE"` SystemVerilog attribute only to those
+verified stage registers.
 
 Synchronous-memory element types are packed to the integer width required by
 `seq.firmem` and bitcast back at port boundaries. A declared RHDL mask

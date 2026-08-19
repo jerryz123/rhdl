@@ -1,0 +1,93 @@
+#lang rhdl
+// Demonstrates a diagnostic when independently synchronized levels reconverge.
+
+import:
+  lib("rhdl/std/cdc.rhdl") open
+  lib("rhdl/analysis/clocking.rhm").CrossingReconvergence
+  lib("rhdl/analysis/clocking.rhm").dump_design_temporal_report
+
+sync_circuit ReconvergentLevels():
+  input(asynchronous_left, asynchronous_right): Bits(1)
+  output combined: Bits(1)
+
+  asynchronous_input(asynchronous_left)
+  asynchronous_input(asynchronous_right)
+  def SyncLevelModule = SyncLevel()
+  inst left_sync(SyncLevelModule)
+  inst right_sync(SyncLevelModule)
+  left_sync.level <== asynchronous_left
+  right_sync.level <== asynchronous_right
+
+  reg sampled(Bits(1))
+  sampled <== left_sync.synchronized ^ right_sync.synchronized
+  combined <== sampled
+
+def clocked = elaborate_with_cdc(ReconvergentLevels())
+def design = clocked.design
+def report = dump_design_temporal_report(clocked.summary)
+def finding = clocked.summary.reconvergences[0]
+
+check:
+  clocked.summary.reconvergences.length() ~is 1
+  finding is_a CrossingReconvergence ~is #true
+  finding.arrivals.length() ~is 2
+  report.contains("reconvergence sampled rtl.register") ~is #true
+  report.contains("left_sync.cdc.sync_level") ~is #true
+  report.contains("right_sync.cdc.sync_level") ~is #true
+
+print(report ++ "\n")
+
+def verilog_reference = @str|<<{
+module ReconvergentLevels(
+  input  clock,
+         reset,
+         asynchronous_left,
+         asynchronous_right,
+  output combined
+);
+
+  wire _right_sync_synchronized;
+  wire _left_sync_synchronized;
+  reg  sampled;
+  SyncLevel left_sync (
+    .clock        (clock),
+    .reset        (reset),
+    .level        (asynchronous_left),
+    .synchronized (_left_sync_synchronized)
+  );
+  SyncLevel right_sync (
+    .clock        (clock),
+    .reset        (reset),
+    .level        (asynchronous_right),
+    .synchronized (_right_sync_synchronized)
+  );
+  always @(posedge clock)
+    sampled <= _left_sync_synchronized ^ _right_sync_synchronized;
+  assign combined = sampled;
+endmodule
+
+module SyncLevel(
+  input  clock,
+         reset,
+         level,
+  output synchronized
+);
+
+  (* async_reg = "TRUE" *)
+  reg stage0;
+  (* async_reg = "TRUE" *)
+  reg stage1;
+  always @(posedge clock) begin
+    stage0 <= level;
+    stage1 <= stage0;
+  end // always @(posedge)
+  assign synchronized = stage1;
+endmodule
+}>>|
+
+export:
+  ReconvergentLevels
+  clocked
+  design
+  report
+  verilog_reference

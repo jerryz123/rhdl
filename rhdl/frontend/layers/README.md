@@ -30,13 +30,13 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, child-member access, and derived-reset instantiation |
 | [`sync.rhm`](sync.rhm) | Hidden ambient clock, synchronous-reset policy, and scoped reset derivation |
 | [`interface.rhm`](interface.rhm) | Roles, directional protocols, read-only observations, refinement, and bulk connection |
-| [`clocking.rhm`](clocking.rhm) | Root-owned temporal environment declarations and report-only closed-design analysis |
+| [`clocking.rhm`](clocking.rhm) | Root-owned temporal environments, durable sync-level crossing evidence, reports, and opt-in CDC enforcement |
 
-`#lang rhdl` aggregates the curated set. A `#lang rhdl/base` program can import
-only the layers it needs. The clocking layer is selectable but is not yet in
-the standard aggregate.
+`#lang rhdl` aggregates the curated set, including clocking now that its
+crossing evidence is durable core IR. A `#lang rhdl/base` program can still
+import only the layers it needs.
 
-## Report-only clocking environments
+## Clocking environments and CDC enforcement
 
 Import `clocking.rhm` explicitly and use `elaborate_with_clocking` when a
 completed design should be analyzed in a top-level temporal environment:
@@ -63,9 +63,25 @@ elaborating its explicit top circuit; child-owned and hardware-conditional
 declarations are rejected. The result retains the `DesignElaboration`, the
 validated `TemporalEnvironment`, and the resolved `DesignTemporalSummary`.
 
-This first frontend slice is deliberately report-only. It does not mutate IR,
-add CDC crossing evidence, reject reported crossings, or emit backend timing
-constraints.
+`elaborate_with_clocking` remains report-only. `elaborate_with_cdc` applies the
+first conservative policy: static, exact-clock, and declared-identical inputs
+are safe; other sampled data requires recognized crossing evidence. Reset
+inputs remain inventory-only pending RDC semantics.
+
+The retained summary also diagnoses distinct verified crossing identities
+that later reach one clocked sink through `summary.reconvergences`. These
+findings preserve source and hierarchy lineage but do not make otherwise legal
+crossings fail strict CDC verification.
+
+The low-level `sync_level_crossing(source, stages)` hook records a stable-level
+promise around an ordinary resetless register chain using the certified
+ambient `sync_circuit` clock. An explicit destination clock may be supplied as
+`sync_level_crossing(source, destination_clock, stages)` outside that ambient
+context. Core verification requires `Bits(1)`, at least two direct
+destination-clock stages, and no functional fanout from intermediate stages.
+Most authors should instantiate
+[`../../std/cdc/level.rhdl`](../../std/cdc/level.rhdl) rather than calling the
+evidence hook directly.
 
 ## Literals and combinational expressions
 

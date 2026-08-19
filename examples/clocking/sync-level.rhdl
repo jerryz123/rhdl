@@ -1,0 +1,73 @@
+#lang rhdl
+// Demonstrates strict CDC acceptance through the standard two-stage stable-level synchronizer.
+
+import:
+  lib("rhdl/std/cdc.rhdl") open
+  lib("rhdl/analysis/clocking.rhm").CrossedProvenance
+  lib("rhdl/analysis/clocking.rhm").dump_design_temporal_report
+
+sync_circuit SyncLevelTop():
+  input asynchronous_level: Bits(1)
+  output synchronized_level: Bits(1)
+
+  asynchronous_input(asynchronous_level)
+  inst synchronizer(SyncLevel())
+  synchronizer.level <== asynchronous_level
+  synchronized_level <== synchronizer.synchronized
+
+def clocked = elaborate_with_cdc(SyncLevelTop())
+def design = clocked.design
+def report = dump_design_temporal_report(clocked.summary)
+
+def synchronized_output = clocked.summary.output_leaves.find(
+  fun (output): clocked.top.outputs[output.output_index].name == "synchronized_level"
+)
+
+check:
+  synchronized_output.origins[0] is_a CrossedProvenance ~is #true
+  report.contains("asynchronous_input") ~is #true
+  report.contains("crossed synchronizer.cdc.sync_level") ~is #true
+
+print(report ++ "\n")
+
+def verilog_reference = @str|<<{
+module SyncLevelTop(
+  input  clock,
+         reset,
+         asynchronous_level,
+  output synchronized_level
+);
+
+  SyncLevel synchronizer (
+    .clock        (clock),
+    .reset        (reset),
+    .level        (asynchronous_level),
+    .synchronized (synchronized_level)
+  );
+endmodule
+
+module SyncLevel(
+  input  clock,
+         reset,
+         level,
+  output synchronized
+);
+
+  (* async_reg = "TRUE" *)
+  reg stage0;
+  (* async_reg = "TRUE" *)
+  reg stage1;
+  always @(posedge clock) begin
+    stage0 <= level;
+    stage1 <= stage0;
+  end // always @(posedge)
+  assign synchronized = stage1;
+endmodule
+}>>|
+
+export:
+  SyncLevelTop
+  clocked
+  design
+  report
+  verilog_reference

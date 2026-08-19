@@ -30,6 +30,22 @@ fun packed_patterns_overlap(left, right):
   def jointly_cared = left[1] bits.and right[1]
   (differing bits.and jointly_cared) == 0
 
+// Core recognizes only transparent wires when comparing physical clock
+// operands. Relationships between distinct clocks remain analysis policy.
+fun canonical_wire_value(value):
+  fun loop(current, visited):
+    if contains_identity(visited, current)
+    | current
+    | block:
+        def operation = current.module_def.find_operation(current.defining_op_id)
+        if operation && operation.opcode == "rtl.wire" && operation.places[0].driver
+        | loop(operation.places[0].driver, visited ++ [current])
+        | current
+  loop(value, [])
+
+fun same_wire_value(left, right):
+  canonical_wire_value(left) === canonical_wire_value(right)
+
 def assertion_label_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
 fun check_schema(operation):
@@ -580,6 +596,53 @@ fun check_operation_types(module_def, operation, schema):
         | fail_operation(operation, "register reset must be Reset")
         unless data_type(reset_value.type) && type_equal(current.type, reset_value.type)
         | fail_operation(operation, "register reset value has the wrong hardware type")
+  | "sync_level_crossing":
+      unless operation.operands.length() >= 4
+      | fail_operation(operation,
+                       "sync-level crossing requires a source, destination clock, and at least two stages")
+      def source = operation.operands[0]
+      def destination_clock = operation.operands[1]
+      def stages = operation.operands.drop(2)
+      unless bits_type(source.type) && source.type.width == 1
+      | fail_operation(operation, "sync-level crossing source must be Bits(1)")
+      unless clock_type(destination_clock.type)
+      | fail_operation(operation, "sync-level crossing destination must be Clock")
+      unless operation.attribute("promise", #false) == "stable_level"
+      | fail_operation(operation, "sync-level crossing must carry the stable-level promise")
+      def mutable prior = source
+      def mutable seen_stages = []
+      for (stage in stages,
+           index in 0..stages.length()):
+        when contains_identity(seen_stages, stage)
+        | fail_operation(operation, "sync-level crossing stages must be distinct")
+        seen_stages := seen_stages ++ [stage]
+        def stage_operation = module_def.find_operation(stage.defining_op_id)
+        unless stage_operation && stage_operation.opcode == "rtl.register" && stage_operation.results[0] === stage
+        | fail_operation(operation, "sync-level crossing stages must be resetless registers")
+        unless bits_type(stage.type) && stage.type.width == 1
+        | fail_operation(operation, "sync-level crossing stages must be Bits(1)")
+        unless same_wire_value(stage_operation.operands[0], destination_clock)
+        | fail_operation(operation, "sync-level crossing stages must use the destination clock")
+        unless stage_operation.places[0].driver === prior
+        | fail_operation(operation, "sync-level crossing stages must form a direct register chain")
+        when index + 1 < stages.length()
+        | def next_stage_operation = module_def.find_operation(
+            stages[index + 1].defining_op_id
+          )
+          fun unexpected_user(user_id):
+            def user = module_def.find_operation(user_id)
+            !(user === operation || (user && user.opcode == "rtl.drive" && user.places[0] === next_stage_operation.places[0]))
+          def functional_users = stage.users().filter(~keep: unexpected_user)
+          when functional_users.length() != 0
+          | fail_operation(operation,
+                           "sync-level crossing intermediate stages must not have functional fanout")
+        def crossing_uses:
+          module_def.operations.filter(
+            ~keep: fun (candidate): candidate.opcode == "cdc.sync_level" && candidate.operands.drop(2).find(fun (candidate_stage): candidate_stage === stage)
+          )
+        unless crossing_uses.length() == 1
+        | fail_operation(operation, "a register stage may belong to exactly one sync-level crossing")
+        prior := stage
   | "type_equal_drive":
       def value = operation.operands[0]
       def place = operation.places[0]

@@ -223,17 +223,20 @@ The stable-level promise is a semantic precondition. RHDL cannot infer that a
 abstraction may distinguish `Level` and `Event`, but V1 must not claim to catch
 that misuse from representation alone.
 
-### Unsafe escape hatch
+### No generic unsafe escape hatch
 
-Provide an intentionally conspicuous `unsafe_cross_domain` crossing with:
+Do not add `unsafe_cross_domain` or a generic CDC waiver operation. A reason
+string records intent but cannot establish electrical or protocol safety, and
+a generic domain relabel would weaken the guarantee that accepted crossings
+have inspectable implementations.
 
-- an explicit destination domain;
-- a mandatory nonempty reason;
-- source location and origin;
-- ordinary crossing lineage in reports;
-- no automatic implementation attributes or timing constraints.
-
-It is a recorded waiver, not a proof and not a silent cast.
+A crossing is accepted only when its source is compatible with the sink or it
+uses a recognized, structurally verified crossing contract. Legitimate cases
+that `SyncLevel` cannot express should add a narrowly specified crossing kind,
+such as an acknowledged event or bundled-data handshake, with its own
+implementation and verification rules. External or black-box implementations
+likewise need an explicit contract describing the guarantee they provide;
+unsupported crossings remain errors.
 
 ### Later crossings
 
@@ -504,19 +507,28 @@ and environment-contract behavior is specified.
    domain declarations. Environment validation and root ownership are covered;
    domain-scope cases await durable declarations.
 7. Add the layer to the curated standard profile only after its core semantics
-   and explicit base-profile composition are tested as equivalent.
+   and explicit base-profile composition are tested as equivalent. Implemented
+   with durable `cdc.sync_level` evidence and retained base-profile coverage.
 
-### Phase 3: `SyncLevel` and waivers
+### Phase 3: `SyncLevel` and reconvergence
 
-1. Implement the one-bit `SyncLevel` standard-library circuit.
+1. Implement the one-bit `SyncLevel` standard-library circuit. Implemented as
+   a resetless two-stage `sync_circuit`.
 2. Add durable crossing evidence tied to its inspectable register chain.
+   Implemented as the zero-result core `cdc.sync_level` operation.
 3. Verify stage count, destination clocks, fanout, input provenance, and output
-   lineage.
-4. Add `unsafe_cross_domain` with mandatory justification.
-5. Diagnose independently synchronized leaves that reconverge.
-6. Emit CIRCT/SystemVerilog synchronizer attributes from verified evidence.
-7. Add backend tests and at least one external CIRCT/Verilator integration
-   fixture.
+   lineage. Implemented for the first conservative closed-design CDC policy;
+   unknown external timing and multi-clock fan-in remain errors.
+4. Diagnose independently synchronized leaves that reconverge. Implemented as
+   structured, policy-neutral `CrossingReconvergence` findings on module and
+   closed-design summaries; one-identity fanout is not reported.
+5. Emit CIRCT/SystemVerilog synchronizer attributes from verified evidence.
+   Implemented for all verified `SyncLevel` stages.
+6. Add backend tests and at least one external CIRCT/Verilator integration
+   fixture. CIRCT verification and an example-owned Verilog golden are
+   implemented; a cycle-level Verilator test is still pending.
+7. Require each later crossing kind to define a narrow semantic contract and
+   independently verifiable implementation; do not add a generic waiver path.
 
 ### Phase 4: Reset foundations
 
@@ -553,8 +565,9 @@ The first enforceable release is complete when all of the following hold:
 - Multi-clock fan-in before a crossing is rejected.
 - A raw cast-produced clock or reset does not silently establish a safe
   relationship.
-- Every unsafe waiver appears in the final report with its reason and source
-  location.
+- A reason string or domain relabel cannot authorize a crossing; transfers
+  without a compatible relationship or recognized verified contract are
+  rejected.
 - Reset-domain differences are inventoried without rejecting valid/resetless
   payload structures solely because their reset identities differ.
 - Timing exceptions are emitted only for explicitly declared relationships
@@ -579,16 +592,22 @@ The first enforceable release is complete when all of the following hold:
 - Compare emitted constraints against the verified report so stale naming or
   unverified exceptions cannot pass silently.
 
-## Questions to resolve before implementation
+## Resolved decisions and remaining questions
 
-- Whether crossing evidence is best represented as a dedicated core operation,
-  a module contract, or a small combination of both.
+- Crossing evidence is a dedicated zero-result core operation referencing the
+  ordinary register chain; reusable implementation remains a standard-library
+  circuit.
+- There is no generic unsafe CDC waiver or domain-relabel operation; every
+  accepted incompatible-domain transfer requires a recognized verified
+  crossing contract.
+- Instantiating `SyncLevel` is the explicit stable-level promise.
+- `SyncLevel` stages are resetless until asynchronous reset behavior exists.
+
+Remaining questions are:
+
 - The exact public syntax for named domains, domain scopes, and environment
   input contracts.
 - The precise compatibility rules for derived and exclusive clocks.
-- Whether a stable-level promise is an explicit wrapper, a source-port
-  contract, or both.
-- The reset policy of `SyncLevel` itself before asynchronous reset exists.
 - The public compatibility policy for adding domain declarations and report
   objects to the inspectable IR.
 

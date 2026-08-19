@@ -27,11 +27,21 @@ under [`clocking/`](clocking/):
 follows transparent `rtl.wire` aliases only; a cast to `Clock` is not identity
 evidence.
 
-`summarize_module_temporal` computes a report-only, leaf-sensitive temporal
-summary for a completed module hierarchy. Origins remain static, symbolic
-module inputs, or state tied to a concrete instance path and clock/reset.
+`summarize_module_temporal` computes a leaf-sensitive temporal summary for a
+completed module hierarchy. Origins remain static, symbolic module inputs,
+state tied to a concrete instance path and clock/reset, or a crossed origin
+that retains its `cdc.sync_level` identity, source lineage, and destination
+clock.
 Symbolic child inputs are substituted at each instance, so one definition can
 be reused under different clocks without specialization or flattening.
+
+Both module and closed-design summaries expose structured
+`CrossingReconvergence` findings when two or more distinct crossing identities
+reach one clocked sink. Each finding retains the sink, input-leaf paths,
+crossing hierarchy paths, and original source lineage. Reconvergence is a
+diagnostic rather than a blanket CDC error because independently synchronized
+controls can legitimately meet; repeated fanout from one crossing identity is
+not reported.
 
 `summarize_design_temporal` starts from an explicit `DesignElaboration` top.
 A `TemporalEnvironment` binds top data-input aggregate subtrees to unknown,
@@ -41,10 +51,15 @@ distinct from declared equivalence. Malformed, overlapping, duplicate, and
 contradictory declarations are rejected.
 
 Both temporal analyzers expose inspectable objects and deterministic reports.
-Their current classifications are findings only: they do not approve a
-crossing, reject CDCs, mutate core IR, or affect backend lowering. Future
-crossing operations that change hardware meaning must remain explicit core IR;
-optional authoring notation belongs in a frontend layer. The selectable
-[`../frontend/layers/clocking.rhm`](../frontend/layers/clocking.rhm) layer now
-collects root-owned environment declarations and invokes this analysis without
-changing the design.
+`verify_design_cdc` adds an opt-in conservative policy over the closed-design
+summary: raw incompatible, unknown, or asynchronous sampling is rejected;
+verified `cdc.sync_level` evidence approves one declared timing source at its
+first destination stage; multi-clock fan-in and unknown external timing remain
+errors. Synchronous reset inputs are still reported but excluded from CDC
+enforcement until RDC semantics are defined. Strict verification returns the
+same reconvergence findings without rejecting otherwise verified crossings.
+
+The [`../frontend/layers/clocking.rhm`](../frontend/layers/clocking.rhm) layer
+collects root-owned environment declarations, exposes report-only
+`elaborate_with_clocking`, and exposes strict `elaborate_with_cdc`. The CIRCT
+backend derives `async_reg` attributes only from core-verified evidence.

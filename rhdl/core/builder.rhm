@@ -1817,6 +1817,44 @@ class Builder(design :: Design):
     module_def.add_operation(operation)
     Register(operation, current, next)
 
+  // Records a stable one-bit level crossing while leaving its implementation
+  // as ordinary, inspectable destination-clock registers.
+  method sync_level_crossing(module_def,
+                             source,
+                             destination_clock,
+                             stages,
+                             location = Location(),
+                             origin = Origin("stable level crossing")):
+    ensure_module_in_design(design, module_def, #'sync_level_crossing)
+    ensure_open(module_def, #'sync_level_crossing)
+    ensure_value_in(module_def, source, #'sync_level_crossing)
+    ensure_value_in(module_def, destination_clock, #'sync_level_crossing)
+    unless bits_type(source.type) && source.type.width == 1
+    | fail(#'sync_level_crossing, "source must be Bits(1)")
+    unless clock_type(destination_clock.type)
+    | fail(#'sync_level_crossing, "destination clock must be Clock")
+    unless stages is_a List && stages.length() >= 2
+    | fail(#'sync_level_crossing, "requires at least two register stages")
+    for (stage in stages):
+      unless stage is_a Register
+      | fail(#'sync_level_crossing, "stages must be registers")
+      ensure_value_in(module_def, stage.current, #'sync_level_crossing)
+    def operation_id = design.fresh_id()
+    def operands = [source, destination_clock] ++ stages.map(fun (stage): stage.current)
+    def operation = Operation(operation_id,
+                              "cdc.sync_level",
+                              module_def,
+                              operands,
+                              [],
+                              [],
+                              {"promise": "stable_level"},
+                              location,
+                              origin)
+    for (operand in operands):
+      operand.add_user(operation_id)
+    module_def.add_operation(operation)
+    operation
+
   method instance(module_def,
                   child :: Module,
                   name,

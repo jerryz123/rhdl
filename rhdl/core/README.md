@@ -99,10 +99,11 @@ nested vectors and record elements.
 
 ## Operation model
 
-Operations use namespaced `rtl.*`, `verif.*`, and `sim.*` opcodes plus a static schema
-registry instead of a closed node-class hierarchy. A schema defines arity,
-required attributes, type constraints, semantic category, verification, and
-printing. Backend lowering choices are not part of core schemas.
+Operations use namespaced `rtl.*`, `cdc.*`, `verif.*`, and `sim.*` opcodes plus
+a static schema registry instead of a closed node-class hierarchy. A schema
+defines arity, required attributes, type constraints, semantic category,
+verification, and printing. Backend lowering choices are not part of core
+schemas.
 
 | Group | Core operations |
 |---|---|
@@ -119,6 +120,7 @@ printing. Backend lowering choices are not part of core schemas.
 | Vectors | vector create, host-static extraction, dynamic index and injection |
 | Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
 | Sequential | register with optional synchronous reset |
+| Crossing evidence | stable one-bit level crossing tied to ordinary register stages |
 | Verification | guarded, reset-suppressed clocked assertion |
 | Simulation | clocked DPI procedure call and explicit DPI result registers |
 
@@ -335,8 +337,11 @@ boundaries. `Builder.instance` uses an exact name, while
 The core API is exported by [`main.rhm`](main.rhm). CIRCT is imported
 separately from [`../backend/circt.rhm`](../backend/circt.rhm). Optional
 clock-use and temporal-provenance inspection is exported separately by
-[`../analysis/clocking.rhm`](../analysis/clocking.rhm); those report and
-environment objects are not part of the core API.
+[`../analysis/clocking.rhm`](../analysis/clocking.rhm); those policy, report,
+and environment objects are not part of the core API. The zero-result
+`cdc.sync_level` operation is core because it is durable, backend-independent
+evidence tying a stable one-bit source and destination clock to ordinary
+register stages; compatibility decisions remain in analysis.
 
 ## Verification contract
 
@@ -353,15 +358,18 @@ The Builder and whole-design verifier enforce:
    whole and element-wise drive modes remain consistent.
 8. Mux selectors, keys, cases, and defaults are well typed and valid.
 9. Register clocks are `Clock`; reset operands are `Reset`.
-10. Reset presence and reset-value presence match, and reset value equals the
+10. A `cdc.sync_level` crossing has one `Bits(1)` source, at least two distinct
+    resetless destination-clock register stages, a direct chain, no
+    intermediate functional fanout, and exclusive ownership of its stages.
+11. Reset presence and reset-value presence match, and reset value equals the
     state type.
-11. DPI operations reference a same-design import and exact signature, with a
+12. DPI operations reference a same-design import and exact signature, with a
     clock and one-bit enable.
-12. Assertions have a one-bit condition and guard, a `Clock`, a `Reset`, and an
+13. Assertions have a one-bit condition and guard, a `Clock`, a `Reset`, and an
     optional identifier label.
-13. Instances reference completed same-design definitions and have unique
+14. Instances reference completed same-design definitions and have unique
     final names within their parent.
-14. Purely combinational cycles are rejected, including cycles that cross
+15. Purely combinational cycles are rejected, including cycles that cross
     instance boundaries. Dependency summaries preserve record-field and
     vector-element paths through structural operations and hierarchy, so an
     independent aggregate leaf does not create a false cycle. Operations that

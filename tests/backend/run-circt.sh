@@ -482,6 +482,8 @@ fixture_specs=(
   'enable-shift-register|enable_shift_register_tb|examples/rhdl/enable-shift-register.rhdl|design|verilog_reference'
   'reset-shift-register|reset_shift_register_tb|examples/rhdl/reset-shift-register.rhdl|design|verilog_reference'
   'clocking-environment||examples/clocking/frontend-environment.rhdl|design|verilog_reference'
+  'clocking-reconvergence||examples/clocking/reconvergence.rhdl|design|verilog_reference'
+  'clocking-sync-level||examples/clocking/sync-level.rhdl|design|verilog_reference'
   'hierarchy|hierarchy_tb|examples/rhdl/hierarchy.rhdl|design|verilog_reference'
   'rfpl-circuit-pair||examples/rfpl/circuit-pair.rhdl|design|verilog_reference'
   'nested-circuit|nested_circuit_tb|examples/rhdl/nested-circuit.rhdl|design|verilog_reference'

@@ -10,6 +10,7 @@ import:
 
 export:
   summarize_design_temporal
+  verify_design_cdc
   dump_design_temporal_report
 
 fun fail(message):
@@ -248,6 +249,13 @@ fun classify_design_input(environment, top, destination_clock, origins):
                                             environment,
                                             top)
         | unknown_states := unknown_states ++ [origin]
+    | origin is_a CrossedProvenance:
+        if origin.destination_clock is_a ControlReference
+        | source_clocks := add_source_clock(source_clocks,
+                                            origin.destination_clock,
+                                            environment,
+                                            top)
+        | unknown_states := unknown_states ++ [origin]
     | origin is_a ExternalProvenance:
         def input = top.inputs[origin.input_index].value
         def timing = input_timing(environment, input, origin.path)
@@ -264,6 +272,8 @@ fun classify_design_input(environment, top, destination_clock, origins):
     | ~else: #void
   cond
   | source_clocks.length() > 1: MultiClockFanIn(source_clocks)
+  | asynchronous_inputs.length() > 1 || (asynchronous_inputs.length() > 0 && source_clocks.length() > 0):
+      MixedTimingFanIn(source_clocks, asynchronous_inputs)
   | unknown_inputs.length() > 0: UnknownInput(unknown_inputs)
   | asynchronous_inputs.length() > 0:
       AsynchronousEnvironmentInput(asynchronous_inputs)
@@ -294,7 +304,8 @@ fun summarize_design_temporal(elaboration :: DesignElaboration,
                             classify_design_input(environment,
                                                   elaboration.top,
                                                   sink.clock,
-                                                  input.origins))
+                                                  input.origins),
+                            input.crossing)
       TemporalSink(sink.instance_path,
                    sink.operation,
                    sink.kind,
@@ -303,7 +314,50 @@ fun summarize_design_temporal(elaboration :: DesignElaboration,
   DesignTemporalSummary(elaboration,
                         environment,
                         module_summary.output_leaves,
-                        sinks)
+                        sinks,
+                        module_summary.reconvergences)
+
+fun safe_cdc_classification(classification):
+  classification is_a StaticInput || classification is_a SameClock || classification is_a IdenticalClock
+
+fun supported_sync_level_source(classification):
+  safe_cdc_classification(classification) || classification is_a DerivedClock || classification is_a AsynchronousClock || classification is_a ExclusiveClock || classification is_a UnknownClockRelationship || classification is_a AsynchronousEnvironmentInput
+
+fun cdc_sink_input_name(sink, input):
+  def sink_name = hierarchical_name(sink.instance_path,
+                                    operation_name(sink.operation))
+  append_path(sink_name ++ "." ++ input.name, input.path)
+
+// Enforces the first conservative CDC policy. Reset inputs remain inventory-
+// only until RDC semantics are explicit; all other unsafe sampling requires a
+// structurally verified sync-level crossing at the first destination stage.
+fun verify_design_cdc(elaboration :: DesignElaboration,
+                      environment :: TemporalEnvironment = TemporalEnvironment()):
+  def summary = summarize_design_temporal(elaboration, environment)
+  for (sink in summary.sinks):
+    for (input in sink.inputs):
+      unless input.name == "reset" || input.name == "reset_value"
+      | if input.crossing
+        | unless input.crossing is_a CrossingReference && input.crossing.operation.opcode == "cdc.sync_level"
+          | error(~who: #'verify_design_cdc,
+                  cdc_sink_input_name(sink, input) ++ " has unknown crossing evidence")
+          unless supported_sync_level_source(input.classification)
+          | error(~who: #'verify_design_cdc,
+                  String.append(sink.operation.location.describe(),
+                                ": sync-level crossing input ",
+                                cdc_sink_input_name(sink, input),
+                                " has ",
+                                describe_classification(input.classification),
+                                "; expected one declared timing source"))
+        | unless safe_cdc_classification(input.classification)
+          | error(~who: #'verify_design_cdc,
+                  String.append(sink.operation.location.describe(),
+                                ": CDC violation at ",
+                                cdc_sink_input_name(sink, input),
+                                ": ",
+                                describe_classification(input.classification),
+                                " requires explicit crossing evidence"))
+  summary
 
 fun append_path(name, path):
   def mutable result = name
@@ -356,6 +410,7 @@ fun describe_classification(classification):
   | classification is_a UnknownInput: "unknown_input"
   | classification is_a AsynchronousEnvironmentInput: "asynchronous_input"
   | classification is_a MultiClockFanIn: "multi_clock_fan_in"
+  | classification is_a MixedTimingFanIn: "mixed_timing_fan_in"
   | classification is_a UnknownClock: "unknown_clock"
 
 fun describe_origin(summary, origin):
@@ -369,6 +424,14 @@ fun describe_origin(summary, origin):
                                    operation_name(origin.operation))
       def clock = if origin.clock is_a ControlReference | "@" ++ describe_control(origin.clock) | "@unknown"
       "state " ++ append_path(name, origin.path) ++ clock
+  | origin is_a CrossedProvenance:
+      def crossing_name = hierarchical_name(origin.crossing.instance_path,
+                                            origin.crossing.operation.opcode)
+      def clock:
+        if origin.destination_clock is_a ControlReference
+        | "@" ++ describe_control(origin.destination_clock)
+        | "@unknown"
+      "crossed " ++ append_path(crossing_name, origin.path) ++ clock
 
 fun append_outputs(lines, summary):
   def mutable result = lines
@@ -395,6 +458,29 @@ fun append_sinks(lines, summary):
       result := result ++ ["    " ++ append_path(input.name, input.path) ++ ": " ++ describe_classification(input.classification) ++ " <- " ++ origins]
   result
 
+fun append_reconvergences(lines, summary):
+  def mutable result = lines
+  for (finding in summary.reconvergences):
+    def sink_name = hierarchical_name(finding.instance_path,
+                                      operation_name(finding.operation))
+    result := result ++ ["  reconvergence " ++ sink_name ++ " " ++ finding.kind]
+    for (arrival in finding.arrivals):
+      def crossing = arrival.provenance.crossing
+      def crossing_name = hierarchical_name(crossing.instance_path,
+                                            crossing.operation.opcode)
+      def sources = String.join(
+        arrival.provenance.source_origins.map(
+          fun (origin): describe_origin(summary, origin)
+        ),
+        ", "
+      )
+      result := result ++ [
+        String.append("    ",
+                      append_path(arrival.input_name, arrival.input_path),
+                      ": ", crossing_name, " <- ", sources)
+      ]
+  result
+
 fun dump_design_temporal_report(summary :: DesignTemporalSummary):
   def top = summary.elaboration.top
   def mutable lines = ["temporal.design @" ++ top.name]
@@ -406,4 +492,5 @@ fun dump_design_temporal_report(summary :: DesignTemporalSummary):
     lines := lines ++ ["  clock_relation " ++ describe_relationship(relationship)]
   lines := append_outputs(lines, summary)
   lines := append_sinks(lines, summary)
+  lines := append_reconvergences(lines, summary)
   String.join(lines, "\n")

@@ -108,6 +108,8 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
+| `std/cdc/level.rhdl` | Resetless two-stage stable one-bit `SyncLevel` synchronizer | None |
+| `std/cdc.rhdl` | Public CDC circuit facade | `std/cdc/level.rhdl` |
 | `std/bits.rhdl` | Host `Pow2Int` refinement and power-of-two testing plus alignment width, checking, and downward alignment for `Bits` | None |
 | `std/scoreboard.rhdl` | Positive-sized single-set, single-clear registered occupancy `Scoreboard` plus total indexed lookup | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/interconnect.rhdl` | Protocol-neutral host-side ID ranges, masked address sets, and transfer-size sets | `std/bits.rhdl` |
@@ -174,7 +176,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `conditional.rhm` | Flat hardware `when`/`elsewhen` priority chains where omitted register updates hold, plus exact-key `switch`, memory-write, and assertion effects | core IR, kernel, mux-lookup support |
 | `hierarchy.rhm` | Binding-derived instances, child-member access, and sync-child propagation | core IR, clocking support, instance-member support |
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support, generator-parameter support |
-| `clocking.rhm` | Root-owned top-input timing and top-clock relationship declarations with an immediate closed-design report | core IR, kernel, clocking analysis |
+| `clocking.rhm` | Root-owned timing and clock relationships, durable sync-level evidence, immediate reports, and opt-in CDC enforcement | core IR, kernel, clocking analysis, clocking support |
 
 The support modules implement shared mechanisms without becoming selectable
 language profiles:

@@ -12,6 +12,7 @@ export:
 class CirctRecordAlias(key, type, name)
 
 Parameter.def current_circt_record_aliases = []
+Parameter.def current_circt_sync_register_ids = []
 
 // Produces the canonical CIRCT representation used to identify equal packed
 // record shapes before any source-level bundle names are attached.
@@ -1045,10 +1046,16 @@ fun emit_register(operation):
                     value_ref(operation.operands[1]), ", ",
                     value_ref(operation.operands[2]))
     | ""
+  def attribute_text:
+    if current_circt_sync_register_ids().find(
+         fun (id): id == operation.id
+       )
+    | " {sv.attributes = [#sv.attribute<\"async_reg\" = \"\\\"TRUE\\\"\">]}"
+    | ""
   String.append("    ", clock_ref, " = seq.to_clock ", value_ref(clock), "\n",
                 "    ", value_ref(current), " = seq.firreg ",
                 value_ref(next.driver), " clock ", clock_ref,
-                reset_text, " : ", circt_type(current.type))
+                reset_text, attribute_text, " : ", circt_type(current.type))
 
 fun emit_instance(operation):
   def child = operation.attribute("module")
@@ -1078,6 +1085,8 @@ fun emit_operation(operation):
   | ""
   | match operation.opcode
     | "rtl.input_port" || "rtl.output_port" || "rtl.wire" || "rtl.drive":
+        ""
+    | "cdc.sync_level":
         ""
     | "rtl.constant":
         emit_constant(operation)
@@ -1170,8 +1179,15 @@ fun emit_module_circt(module_def):
       fun (port):
         "out " ++ port.name ++ " : " ++ circt_type(port.type)
     )
+  def mutable sync_register_ids = []
+  for (operation in module_def.operations):
+    when operation.opcode == "cdc.sync_level"
+    | sync_register_ids := sync_register_ids ++ operation.operands.drop(2).map(
+        fun (stage): stage.defining_op_id
+      )
   def operations:
-    module_def.operations.map(emit_operation).filter(~keep: fun (text): text != "")
+    parameterize { current_circt_sync_register_ids: sync_register_ids }:
+      module_def.operations.map(emit_operation).filter(~keep: fun (text): text != "")
   def output_values = module_def.outputs.map(fun (port): value_ref(port.place.driver))
   def output_types = module_def.outputs.map(fun (port): circt_type(port.type))
   def output:

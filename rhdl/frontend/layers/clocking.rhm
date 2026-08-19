@@ -1,15 +1,18 @@
 #lang rhombus/and_meta
-// Adds root-owned temporal environment declarations and report-only closed-design clocking analysis.
+// Adds temporal environment declarations, sync-level evidence, and optional CDC enforcement.
 
 import:
   rhombus/meta open
   "../../core/ir.rhm" open
   "../../analysis/clocking.rhm" open
   "../kernel.rhm" as kernel
+  "../support/clocking.rhm".ambient_clock
 
 export:
   ClockingElaboration
   elaborate_with_clocking
+  elaborate_with_cdc
+  sync_level_crossing
   synchronous_input
   asynchronous_input
   unknown_input_timing
@@ -113,6 +116,25 @@ fun exclusive_clocks(left, right, description):
                                        description)
   )
 
+// This low-level authoring hook is public so an ordinary standard-library
+// circuit can retain verifiable evidence without importing frontend internals.
+// Core verification, not this declaration, proves the register-chain shape.
+fun sync_level_crossing(source,
+                        destination_clock_or_stages,
+                        explicit_stages = #false):
+  kernel.reject_unsupported_conditional_effect(
+    "sync-level crossing evidence",
+    Location(),
+    "declare crossing evidence structurally after driving its register chain"
+  )
+  if explicit_stages
+  | kernel.sync_level_crossing(source,
+                               destination_clock_or_stages,
+                               explicit_stages)
+  | kernel.sync_level_crossing(source,
+                               ambient_clock(),
+                               destination_clock_or_stages)
+
 fun ensure_root_declarations(elaboration, pending_declarations):
   for (pending in pending_declarations):
     unless pending.module_def === elaboration.top
@@ -120,7 +142,7 @@ fun ensure_root_declarations(elaboration, pending_declarations):
         "clocking environment declarations must belong to the elaborated top circuit"
       )
 
-fun run_clocking_elaboration(program :: Function):
+fun run_clocking_elaboration(program :: Function, enforce_cdc = #false):
   def collector = ClockingCollector()
   def elaboration = parameterize { current_clocking_collector: collector }:
                       kernel.run_elaboration_with_top(program)
@@ -130,9 +152,14 @@ fun run_clocking_elaboration(program :: Function):
     collector.input_contracts.map(fun (pending): pending.contract),
     collector.clock_relationships.map(fun (pending): pending.relationship)
   )
-  ClockingElaboration(elaboration,
-                      environment,
-                      summarize_design_temporal(elaboration, environment))
+  def summary:
+    if enforce_cdc
+    | verify_design_cdc(elaboration, environment)
+    | summarize_design_temporal(elaboration, environment)
+  ClockingElaboration(elaboration, environment, summary)
 
 expr.macro 'elaborate_with_clocking($body)':
   'run_clocking_elaboration(fun (): $body)'
+
+expr.macro 'elaborate_with_cdc($body)':
+  'run_clocking_elaboration(fun (): $body, #true)'

@@ -7,6 +7,17 @@ public `#lang rhdl` language. It is not another language profile and adds no
 core IR, elaboration, or backend behavior. Its dependency contract is listed
 in [`../README.md`](../README.md).
 
+## Clock-domain crossings
+
+[`cdc.rhdl`](cdc.rhdl) exports the first standard crossing circuit,
+[`cdc/level.rhdl`](cdc/level.rhdl)'s `SyncLevel`. It is a resetless two-stage
+`sync_circuit` for a stable `Bits(1)` level. The sync-circuit contract wires and
+certifies one ambient destination clock throughout the implementation, while
+durable `cdc.sync_level` evidence lets core independently verify the direct
+register chain for every producer of IR. Using `SyncLevel` is the semantic
+promise that the source persists long enough to be observed; it is not an
+event or pulse synchronizer.
+
 ## Typed decode patterns
 
 [`decode/pattern.rhdl`](decode/pattern.rhdl) defines `Pattern`, an immutable
