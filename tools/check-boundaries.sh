@@ -55,6 +55,14 @@ fail_matches "backend must not import frontend or formal modules" \
   '^[[:space:]]+"[^"]*(frontend|formal)/' rhdl/backend
 fail_matches "formal engine must not import frontend, backend, or standard-library modules" \
   '(frontend/|backend/|std/)' rhdl/formal
+fail_matches "diagram tooling must not import backend, formal, or standard-library modules" \
+  '(backend/|formal/|std/)' rhdl/diagram
+fail_matches "core must not import optional diagram tooling" \
+  '^[[:space:]]+"[^"]*diagram/' rhdl/core
+fail_matches "frontend must not import optional diagram tooling" \
+  '^[[:space:]]+"[^"]*diagram/' rhdl/frontend
+fail_matches "backends must not import optional diagram tooling" \
+  '^[[:space:]]+"[^"]*diagram/' rhdl/backend
 fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
 fail_matches "RHDL packages must not import the external CHI domain library" \

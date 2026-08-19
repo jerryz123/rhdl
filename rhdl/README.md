@@ -37,6 +37,7 @@ backend and formal tools -----> optional analysis --------> core
 
 backend/circt ---------------------------------------------> core
 formal ----------------------------------------------------> core
+diagram -------------------------------> core + frontend/layers/interface
 ```
 
 `#lang rhdl` is the curated language. `#lang rhdl/base` is the composition
@@ -59,6 +60,7 @@ internal module implementing its shared frontend forms is called the
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public RHDL profile | Standard or foundation |
 | [`../rfpl/`](../rfpl/PLAN.md) | Physical views over existing modules: opaque hard macros and wiring-only composite floorplans with contained child coordinates | Public core IR only |
+| [`diagram/`](diagram/README.md) | Read-only logical block, hierarchy, compound-interface, and flow visualization with JSON and DOT output | Core IR and interface-owned nonsemantic metadata |
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`formal/`](formal/README.md) | Optional Rosette-backed behavioral equivalence, output reachability, and combinational output properties over verified public IR | Core only; Rosette through one Racket interoperability module |
@@ -78,6 +80,8 @@ public RHDL forms rather than importing implementation modules. RFPL is a
 downstream annotation language: it inspects the public RHDL IR but does not
 construct hardware or import frontend/backend implementation modules. RHDL
 core, analysis, frontend, and backend modules never import RFPL.
+The diagram package is similarly downstream and read-only; its dependency on
+interface metadata does not make visualization part of frontend elaboration.
 
 ## Design commitments
 

@@ -9,6 +9,8 @@ import:
   "../kernel.rhm".CircuitDefinition
 
 export:
+  SyncCircuitMetadata
+  module_sync_circuit_metadata
   build_sync_circuit
   ambient_clock
   ambient_reset_active
@@ -26,6 +28,17 @@ export:
   instantiate_reset_when
 
 class SyncDomain(clock, reset)
+
+// Marks the implicit control ports introduced by sync_circuit so inspection
+// tools can distinguish them from explicitly authored Clock and Reset ports.
+class SyncCircuitMetadata(clock_port, reset_port)
+
+def sync_circuit_metadata_namespace = "rhdl.sync-circuit"
+
+fun module_sync_circuit_metadata(module_def :: Module):
+  module_def.metadata_for(sync_circuit_metadata_namespace).find(
+    fun (candidate): candidate is_a SyncCircuitMetadata
+  )
 
 // This wrapper is frontend-only. Its core module still contains ordinary
 // clock/reset ports, register operands, instance inputs, and drives.
@@ -92,8 +105,14 @@ fun build_sync_circuit(identity,
     name,
     arguments,
     fun ():
-      def clock = kernel.input("clock", Clock, location)
-      def reset = kernel.input("reset", Reset, location)
+      def clock_port = "clock"
+      def reset_port = "reset"
+      kernel.active_module(location).add_metadata(
+        sync_circuit_metadata_namespace,
+        SyncCircuitMetadata(clock_port, reset_port)
+      )
+      def clock = kernel.input(clock_port, Clock, location)
+      def reset = kernel.input(reset_port, Reset, location)
       parameterize { current_sync_domain: SyncDomain(clock, reset) }:
         implementation()
         kernel.run_circuit_finalizers(),

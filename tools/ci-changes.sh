@@ -25,6 +25,7 @@ example_ridx=false
 example_riscv=false
 example_chi=false
 example_cores=false
+example_ricket=false
 
 mark_all_host() {
   host_foundation=true
@@ -53,6 +54,7 @@ mark_example_ridx() { examples=true; example_ridx=true; }
 mark_example_riscv() { examples=true; example_riscv=true; }
 mark_example_chi() { examples=true; example_chi=true; }
 mark_example_cores() { examples=true; example_cores=true; }
+mark_example_ricket() { examples=true; example_ricket=true; }
 
 mark_all_examples() {
   mark_example_rhdl
@@ -65,6 +67,7 @@ mark_all_examples() {
   mark_example_riscv
   mark_example_chi
   mark_example_cores
+  mark_example_ricket
 }
 
 mark_all() {
@@ -145,6 +148,7 @@ emit_jobs() {
   [[ "$example_riscv" == true ]] && append_matrix_entry example_matrix '{"name":"RISC-V","target":"examples-riscv"}'
   [[ "$example_chi" == true ]] && append_matrix_entry example_matrix '{"name":"CHI","target":"examples-chi"}'
   [[ "$example_cores" == true ]] && append_matrix_entry example_matrix '{"name":"processor cores","target":"examples-cores"}'
+  [[ "$example_ricket" == true ]] && append_matrix_entry example_matrix '{"name":"Ricket","target":"examples-ricket"}'
 
   echo "host=$host"
   echo "host_matrix={\"include\":[$host_matrix]}"
@@ -175,6 +179,12 @@ classify_path() {
       mark_all_circt
       mark_all_examples
       ;;
+    tools/write-ricket-core-diagram.rhm)
+      mark_example_ricket
+      ;;
+    tools/write-noc-router-diagram.rhm)
+      mark_example_noc
+      ;;
     tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
       host_hygiene=true
       ;;
@@ -199,6 +209,7 @@ classify_path() {
       mark_example_riscv
       mark_example_chi
       mark_example_cores
+      mark_example_ricket
       ;;
     rhdl/backend/*)
       host_backend=true
@@ -255,6 +266,9 @@ classify_path() {
       mark_example_cores
       circt_cores=true
       ;;
+    examples/ricket/*)
+      mark_example_ricket
+      ;;
     examples/*)
       # Fail closed for new example groups until they receive an explicit shard.
       mark_all
@@ -275,6 +289,7 @@ classify_path() {
       circt_cores=true
       mark_example_riscv
       mark_example_cores
+      mark_example_ricket
       ;;
     ridx/*)
       host_models=true
@@ -289,6 +304,7 @@ classify_path() {
       host_cores=true
       circt_cores=true
       mark_example_cores
+      mark_example_ricket
       ;;
     sim/fesvr/*|tests/fesvr/*|tools/emit-fesvr-stub-soc.rhm|tools/install-fesvr.sh)
       fesvr=true

@@ -431,6 +431,8 @@ under [`flow/`](flow/):
 | Valid-only generator | Behavior |
 |---|---|
 | `ValidPipe(T, stages)` | Fixed-latency registered valid/payload pipeline with no backpressure |
+| `ValidArbiter(T, n)` | Fixed-priority selection that drops simultaneous lower-priority events |
+| `OfferRegister(T)` | Rewritable one-slot state whose accepted Decoupled offer clears when no replacement arrives |
 
 | Transaction generator | Behavior |
 |---|---|
@@ -742,6 +744,13 @@ deliberately binary; homogeneous multi-input rendezvous remains the role of
 `valid_pipe(stages)` infers its eventual input payload, instantiates in the
 ambient `sync_circuit` domain, and delays every asserted cycle by exactly the
 configured number of stages. There is no readiness or pending-offer state.
+`valid_arbiter(n)` similarly infers its payload and, for a connected endpoint
+array, its input count. Because `Valid` has no backpressure, callers must accept
+that simultaneous unselected events are dropped.
+`OfferRegister(T)` accepts `Valid(T)` state updates and exposes the current
+state as a `Decoupled(T)` offer. An update replaces the offer even while it is
+stalled; otherwise a transfer clears the slot. This makes replacement explicit
+without claiming irrevocability.
 
 `queue(depth, ...)` and `pipe(stages)` similarly infer their eventual
 ready-valid input. `Pipe` and a non-flowing `Queue` produce an `Irrevocable`

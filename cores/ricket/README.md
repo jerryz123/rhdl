@@ -13,19 +13,17 @@ caches live here. Reusable execution components remain directly under
 ## Dependency boundary
 
 ```text
-ricket.rhdl                         composition only
-  |--> core.rhdl                    IF/ID/EX/MEM/WB logic
-  |     |--> bundles + decode + register-file
-  |     |--> csr.rhdl                 commit-owned CSR, privilege, and trap state
-  |     |--> ../{alu,branch-resolver,load-store,multiplier}.rhdl
-  |     |--> icache/protocol.rhdl
-  |     |--> dcache/protocol.rhdl
-  |     `--> ../../rhdl/std/scoreboard.rhdl
+core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
+  |--> bundles + decode + register-file + csr
+  |--> ../{alu,branch-resolver,load-store,multiplier}.rhdl
+  |--> icache/protocol.rhdl
+  |--> dcache/protocol.rhdl
+  `--> ../../rhdl/std/scoreboard.rhdl
+ricket.rhdl                         composition selects core-flow.rhdl
   |--> chi.rhdl                     RN-F parameters and flit construction
   |--> refill.rhdl                  blocking ReadShared/CompData/CompAck engine
   |--> icache/cache.rhdl            instruction access plus clean RN-F snoops
   `--> dcache/cache.rhdl            data access plus coherent write-through RN-F
-        `--> ../load-store.rhdl
 ```
 
 `RicketCore` speaks only Ricket's semantic instruction and data access
@@ -39,27 +37,48 @@ implementations. See [`icache/README.md`](icache/README.md) and
 [`dcache/README.md`](dcache/README.md) for their separate protocol and cache
 contracts.
 
+## Core variants
+
+[`core.rhdl`](core.rhdl) is a direct RTL description. It uses ordinary
+registers for fetch state, one explicit priority update chain, direct
+ready-valid equations, and a shared forwarding mux policy. It retains only the
+pipeline storage primitives and the real deferred-completion arbiter instead
+of mechanically recreating flow transformations with helper instances.
+
+[`core-flow.rhdl`](core-flow.rhdl) implements the same processor contract with
+the standard flow vocabulary. [`ricket.rhdl`](ricket.rhdl) selects this version
+for the integrated cache hierarchy. The standalone CIRCT fixtures run the same
+architectural scenario against both implementations. A host test checks their
+shared port contract and verifies that each keeps its intended explicit or
+flow-oriented structure.
+
 ## Pipeline
 
-[`core.rhdl`](core.rhdl) keeps Fetch, Decode, Execute,
-Memory, and Writeback as logical regions of one circuit. Individual stages are
-not module boundaries. `Pipe(_, 1)` instances make IF/ID and ID/EX elastic, so
-instructions wait before Execute until required operands and cache request
-capacity are available. `ValidPipe(_, 1)` instances make EX/MEM and MEM/WB
-feed-forward: once an instruction leaves Execute, no later stage can stall it.
+Both core variants keep Fetch, Decode, Execute, Memory, and Writeback as logical
+regions of one circuit. Individual stages are not module boundaries.
+`Pipe(_, 1)` instances make IF/ID and ID/EX elastic, so instructions wait before
+Execute until required operands and cache request capacity are available.
+`ValidPipe(_, 1)` instances make EX/MEM and MEM/WB feed-forward: once an
+instruction leaves Execute, no later stage can stall it.
 
 Fetch keeps accepted PCs in a two-entry flushable metadata queue. The pipelined
 L1I can therefore accept and return one hit per cycle. Redirects synchronously
 flush the PC queue, lookup result, and buffered responses; a wrong-path refill
 may finish internally but cannot return an instruction to Fetch.
+The explicit core exposes `started` and `fetch_pc` directly. Redirect, initial
+start, and completed request update `fetch_pc` in that priority order, while
+paired valid equations make the L1I request and PC correlation queue advance
+together. The flow core deliberately keeps the same explicit sequential state;
+its abstraction boundary is the combinational interface topology around it.
 Decode holds a token behind deferred loads or multiplies in ID/EX and EX/MEM
 until they reach WB.
 Execute owns forwarding, branch resolution, target and access alignment
-checks, and synchronous-exception classification. An atomic flow fork admits each Execute token simultaneously into
-branch resolution, its optional data-cache request, and the feed-forward
-pipeline continuation. The cache leg alone contributes backpressure, and a
-legal request transfers at the same edge that places its instruction in
-EX/MEM. The L1D registers its SRAM lookup result so a hit arrives with the
+checks, and synchronous-exception classification. In the explicit core, one
+readiness equation combines cache capacity and multiplier reservation; branch
+resolution and EX/MEM observe the resulting transfer together. The flow core
+uses an atomic fork for the same four-way admission policy. A legal request
+transfers at the same edge that places its instruction in EX/MEM. The L1D
+registers its SRAM lookup result so a hit arrives with the
 instruction in WB. WB is the ordered commit point: a load whose result has not
 returned or a multiply that starts there sets its destination in the standard
 `Scoreboard` and releases the pipeline before its result returns.
@@ -112,6 +131,24 @@ read values, direct storage, aliases, WARL masks, and write dispatch. Trap and
 return updates remain an explicit prioritized transition because they
 atomically affect privilege state and several CSRs instead of representing an
 ordinary addressed write.
+
+## Logical diagram
+
+[`examples/ricket/core-diagram.rhdl`](../../examples/ricket/core-diagram.rhdl)
+elaborates the flow-oriented RV64 `RicketCore` and extracts its module boundary,
+child blocks, registers, typed interface channels, and named flow
+transformations. Generate the focused JSON and Graphviz DOT files with:
+
+```sh
+mkdir -p /tmp/ricket-core-diagram
+env PLTCOMPILEDROOTS="$(mktemp -d)" \
+  racket -y -S "$PWD" tools/write-ricket-core-diagram.rhm \
+  /tmp/ricket-core-diagram
+```
+
+The JSON is intended for interactive renderers. The DOT file is a compact
+diagnostic view of the core module; child modules remain linked by name instead
+of being flattened into the same graph.
 
 ## Top-level core
 

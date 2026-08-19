@@ -135,6 +135,7 @@ Detailed documentation lives with the component that owns it:
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Clock/reset inventory and temporal provenance analysis | [`rhdl/analysis/README.md`](rhdl/analysis/README.md) |
+| Logical block, hierarchy, interface, and flow diagrams | [`rhdl/diagram/README.md`](rhdl/diagram/README.md) |
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
@@ -168,6 +169,8 @@ The current vertical slice includes:
   structural aggregates, primitive state and memories, clocked assertions, DPI
   simulation operations, single-driver verification, and combinational-cycle
   detection.
+- A read-only logical diagram view with hierarchical blocks, compound interface
+  channels, flow-aware stages, deterministic JSON, and compact Graphviz DOT.
 - Standard and compositional Rhombus profiles with host-only generation,
   frontend-defined types including explicit-width signed integers, typed
   literals and patterns, relational decode generation, combinational and

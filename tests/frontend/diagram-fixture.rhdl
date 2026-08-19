@@ -1,0 +1,79 @@
+#lang rhdl
+// Defines a representative mapped, filtered, pipelined, and forked flow diagram fixture.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+sync_circuit DiagramFlow():
+  interface source(Decoupled(Bits(8)), ~role: consumer)
+  interface sinks[2](Decoupled(Bits(8)), ~role: producer)
+
+  def Array(left, right) = source
+    |> map_flow(payload => payload + bits(1, 8))
+    |> filter_flow(payload => or_reduce(payload))
+    |> pipe(1)
+    |> atomic_fork(2)
+  left |> sinks[0]
+  right |> sinks[1]
+
+sync_circuit DiagramTransparentLink():
+  interface source(Valid(Bits(8)), ~role: consumer)
+  interface sink(Valid(Bits(8)), ~role: producer)
+
+  def bridge = interface_link(Valid(Bits(8)), "first_bridge")
+    |> interface_link(Valid(Bits(8)), "second_bridge")
+  source |> bridge |> sink
+
+sync_circuit DiagramStateLeaf():
+  input source: Bits(8)
+  output result: Bits(8)
+
+  reg state(Bits(8))
+  state <== source
+  result <== state
+
+sync_circuit DiagramStateWrapper():
+  input source: Bits(8)
+  output result: Bits(8)
+
+  inst state_leaf(DiagramStateLeaf())
+  state_leaf.source <== source
+  result <== state_leaf.result
+
+// Being clocked does not by itself make this implementation stateful.
+sync_circuit DiagramCombinational():
+  input source: Bits(8)
+  output result: Bits(8)
+
+  result <== source
+
+sync_circuit DiagramBehavior():
+  input source: Bits(8)
+  output stored: Bits(8)
+  output direct: Bits(8)
+
+  inst stateful(DiagramStateWrapper())
+  inst combinational(DiagramCombinational())
+  stateful.source <== source
+  combinational.source <== source
+  stored <== stateful.result
+  direct <== combinational.result
+
+// Explicit control ports on an ordinary circuit remain part of its diagram.
+circuit DiagramExplicitControl():
+  input clock: Clock
+  input reset: Reset
+  output observed: Bits(1)
+
+  observed <== bits(0, 1)
+
+def logical = elaborate_with_top(DiagramFlow())
+def transparent_link_logical = elaborate_with_top(DiagramTransparentLink())
+def behavior_logical = elaborate_with_top(DiagramBehavior())
+def explicit_control_logical = elaborate_with_top(DiagramExplicitControl())
+
+export:
+  logical
+  transparent_link_logical
+  behavior_logical
+  explicit_control_logical

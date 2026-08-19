@@ -1,0 +1,28 @@
+#lang rhdl
+// Defines a rewritable one-slot state holder with a Decoupled flow egress.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+
+// A Valid update installs or replaces the current offer, including while the
+// egress is stalled. Without an update, an accepted offer clears the slot.
+// Replacement under stall is why the egress contract is Decoupled.
+sync_circuit OfferRegister(T):
+
+  interface update(Valid(T), ~role: consumer)
+  interface egress(Decoupled(T), ~role: producer)
+
+  reg occupied(~init: Bool(#false))
+  reg payload(T)
+
+  egress.valid <== occupied
+  egress.bits <== payload
+
+  when (update.valid):
+    occupied <== Bool(#true)
+    payload <== update.bits
+  elsewhen (fire(egress)):
+    occupied <== Bool(#false)
+
+export:
+  OfferRegister

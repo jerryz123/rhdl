@@ -615,6 +615,7 @@ direct_fixture_specs=(
   'ricket-csr|ricket_csr_tb'
   'ricket-core|ricket_core_tb'
   'ricket-multiply|ricket_multiply_tb'
+  'ricket-core-flow|ricket_core_tb'
   'ricket-core-rv32|'
   'ricket-icache|ricket_icache_tb'
   'ricket-dcache|ricket_dcache_tb'

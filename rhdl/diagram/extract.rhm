@@ -1,0 +1,666 @@
+#lang rhombus
+// Extracts hierarchical logical blocks and compound interface channels from verified RHDL.
+
+import:
+  "../core/main.rhm" open
+  "../frontend/layers/interface.rhm" open
+  "../frontend/support/clocking.rhm".module_sync_circuit_metadata
+  "model.rhm" open
+
+export:
+  diagram
+  diagram_module
+
+class DiagramTerminal(block_id,
+                      port_id,
+                      direction,
+                      protocol,
+                      backpressured,
+                      compound,
+                      entities)
+
+fun endpoint_elements(shape):
+  cond
+  | shape is_a InterfaceEndpoint: [shape]
+  | shape is_a Array: for List (element in shape): element
+  | ~else: error(~who: #'diagram, "diagram endpoint shape is invalid")
+
+fun endpoint_direction(endpoint :: InterfaceEndpoint):
+  if endpoint.represented_role == endpoint.type.provider_role
+  | "output"
+  | "input"
+
+fun endpoint_protocol(endpoint :: InterfaceEndpoint):
+  def payload = endpoint.type.members.find(
+    fun (member): member.name == "bits" && data_type(member.type)
+  )
+  if payload
+  | endpoint.type.name ++ "<" ++ type_text(payload.type) ++ ">"
+  | endpoint.type.name
+
+fun endpoint_backpressured(endpoint :: InterfaceEndpoint):
+  for any (member in endpoint.type.members):
+    member.from_role != endpoint.type.provider_role
+
+fun endpoint_entities(endpoint :: InterfaceEndpoint):
+  endpoint.bindings.map(fun (binding): binding.entity)
+
+fun diagram_projection(entity, field_name):
+  cond
+  | entity is_a Place:
+      entity.projected_place(field_name) || entity
+  | entity is_a Value:
+      def operation = entity.module_def.operations.find(
+        fun (candidate):
+          candidate.opcode == "rtl.record_get" && (
+            candidate.operands[0] === entity
+          ) && candidate.attribute("field") == field_name
+      )
+      if operation | operation.results[0] | entity
+  | ~else: entity
+
+fun diagram_nested_endpoint(endpoint :: InterfaceEndpoint, member):
+  def nested_type = member.type
+  def nested_role:
+    if endpoint.role == member.from_role
+    | nested_type.roles[0]
+    | nested_type.roles[1]
+  def represented_role:
+    if endpoint.represented_role == member.from_role
+    | nested_type.roles[0]
+    | nested_type.roles[1]
+  def bindings:
+    nested_type.directions.map(
+      fun (direction):
+        def parent_from:
+          if direction.from_role == nested_type.roles[0]
+          | member.from_role
+          | member.to_role
+        def parent_to:
+          if direction.to_role == nested_type.roles[0]
+          | member.from_role
+          | member.to_role
+        def parent_binding = endpoint.bindings.find(
+          fun (binding):
+            binding.direction.from_role == parent_from && (
+              binding.direction.to_role == parent_to
+            )
+        )
+        InterfaceBinding(direction,
+                         parent_binding.port_name ++ "__" ++ member.name,
+                         diagram_projection(parent_binding.entity, member.name))
+    )
+  InterfaceEndpoint(nested_type,
+                    nested_role,
+                    represented_role,
+                    bindings,
+                    "diagram-nested")
+
+fun endpoint_ports(block_id, base_name, shape):
+  def elements = endpoint_elements(shape)
+  def mutable ports = []
+  def mutable terminals = []
+  for (endpoint in elements, index in 0..elements.length()):
+    def suffix:
+      if elements.length() == 1 | "" | "[" ++ to_string(index) ++ "]"
+    def port_id = base_name ++ suffix
+    def nested_members = endpoint.type.members.filter(
+      ~keep: fun (member): member.type is_a InterfaceType
+    )
+    if nested_members.length() > 0
+    | for (member in nested_members):
+        def built = endpoint_ports(block_id,
+                                   port_id ++ "." ++ member.name,
+                                   diagram_nested_endpoint(endpoint, member))
+        ports := ports ++ built[0]
+        terminals := terminals ++ built[1]
+      for (member in endpoint.type.members):
+        unless member.type is_a InterfaceType
+        | def direction:
+            if endpoint.represented_role == member.from_role
+            | "output"
+            | "input"
+          def binding = endpoint.bindings.find(
+            fun (candidate):
+              candidate.direction.from_role == member.from_role && (
+                candidate.direction.to_role == member.to_role
+              )
+          )
+          def member_port_id = port_id ++ "." ++ member.name
+          def protocol = type_text(member.type)
+          def entity = diagram_projection(binding.entity, member.name)
+          ports := ports ++ [
+            DiagramPort(member_port_id,
+                        member_port_id,
+                        direction,
+                        protocol)
+          ]
+          terminals := terminals ++ [
+            DiagramTerminal(block_id,
+                            member_port_id,
+                            direction,
+                            protocol,
+                            #false,
+                            #false,
+                            [entity])
+          ]
+    | block:
+        def direction = endpoint_direction(endpoint)
+        def protocol = endpoint_protocol(endpoint)
+        def backpressured = endpoint_backpressured(endpoint)
+        ports := ports ++ [
+          DiagramPort(port_id, port_id, direction, protocol, backpressured, #true)
+        ]
+        terminals := terminals ++ [
+          DiagramTerminal(block_id,
+                          port_id,
+                          direction,
+                          protocol,
+                          backpressured,
+                          #true,
+                          endpoint_entities(endpoint))
+        ]
+  [ports, terminals]
+
+fun port_index(ports, name):
+  def mutable result = #false
+  for (port in ports, index in 0..ports.length()):
+    when port.name == name
+    | result := index
+  result
+
+fun instance_endpoint(operation, group :: InterfaceGroup):
+  def child = operation.attribute("module")
+  def bindings:
+    group.bindings.map(
+      fun (binding):
+        def entity:
+          if binding.direction.from_role == group.role
+          | block:
+              def index = port_index(child.outputs, binding.port_name)
+              unless index != #false
+              | error(~who: #'diagram, "interface output is missing from instance")
+              operation.results[index]
+          | block:
+              def index = port_index(child.inputs, binding.port_name)
+              unless index != #false
+              | error(~who: #'diagram, "interface input is missing from instance")
+              operation.places[index]
+        InterfaceBinding(binding.direction, binding.port_name, entity)
+    )
+  InterfaceEndpoint(group.type,
+                    group.role,
+                    group.role,
+                    bindings,
+                    "diagram-instance")
+
+fun group_in_arrays(group, arrays):
+  for any (array_group in arrays):
+    array_group.groups.find(fun (element): element === group)
+
+fun grouped_port_names(groups):
+  def mutable names = []
+  for (group in groups):
+    for (binding in group.bindings):
+      unless binding.port_name in names
+      | names := names ++ [binding.port_name]
+  names
+
+fun implicit_sync_port(metadata, port_name):
+  metadata && (
+    port_name == metadata.clock_port || port_name == metadata.reset_port
+  )
+
+fun terminal_produces(terminal :: DiagramTerminal, value :: Value):
+  terminal.entities.find(
+    fun (entity): entity is_a Value && entity === value
+  )
+
+fun append_unique_terminals(left, right):
+  def mutable result = left
+  for (terminal in right):
+    unless result.find(
+      fun (candidate): candidate.block_id == terminal.block_id && candidate.port_id == terminal.port_id
+    )
+    | result := result ++ [terminal]
+  result
+
+// Walks backward through unrepresented combinational logic, but stops as soon
+// as it reaches a block output so abstraction boundaries never gain shortcuts.
+fun value_source_terminals(value :: Value, outputs, seen = []):
+  def matching = outputs.filter(
+    ~keep: fun (terminal): terminal_produces(terminal, value)
+  )
+  if matching.length() > 0
+  | matching
+  | if value.id in seen
+    | []
+    | block:
+        def operation = value.module_def.find_operation(value.defining_op_id)
+        if !operation
+        | []
+        | if operation.opcode == "rtl.wire"
+          | block:
+              def driver = operation.places[0].driver
+              if driver
+              | value_source_terminals(driver, outputs, seen ++ [value.id])
+              | []
+          | if operation.opcode == "rtl.input_port" || operation.opcode == "rtl.instance" || operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset" || operation.opcode == "rtl.sync_memory"
+            | []
+            | block:
+                def mutable sources = []
+                for (operand in operation.operands):
+                  sources := append_unique_terminals(
+                    sources,
+                    value_source_terminals(operand,
+                                           outputs,
+                                           seen ++ [value.id])
+                  )
+                sources
+
+fun destination_sources(destination :: DiagramTerminal, outputs):
+  def mutable sources = []
+  for (entity in destination.entities):
+    when entity is_a Place && entity.driver
+    | sources := append_unique_terminals(
+        sources,
+        value_source_terminals(entity.driver, outputs)
+      )
+  sources
+
+fun entity_originates_from(entity, candidate, seen = []):
+  if entity === candidate
+  | #true
+  | cond
+    | entity is_a Place && entity.parent is_a Place:
+        entity_originates_from(entity.parent, candidate, seen)
+    | entity is_a Value && !(entity.id in seen):
+        def operation = entity.module_def.find_operation(entity.defining_op_id)
+        operation && operation.opcode in ["rtl.record_get", "rtl.vector_get"] && (
+          entity_originates_from(operation.operands[0],
+                                 candidate,
+                                 seen ++ [entity.id])
+        )
+    | ~else: #false
+
+fun terminal_contains_endpoint(terminal :: DiagramTerminal,
+                               endpoint :: InterfaceEndpoint):
+  def entities = endpoint_entities(endpoint)
+  for all (entity in entities):
+    terminal.entities.find(
+      fun (candidate): entity_originates_from(entity, candidate)
+    ) != #false
+
+fun same_endpoint(left :: InterfaceEndpoint, right :: InterfaceEndpoint):
+  left === right
+
+fun endpoint_seen(endpoint :: InterfaceEndpoint, seen):
+  seen.find(fun (candidate): same_endpoint(candidate, endpoint)) != #false
+
+// Follows whole-interface connections across local interface_link bridges.
+// Links remain transparent wiring, but their protocol identity survives until
+// the walk reaches a rendered input terminal.
+fun transparent_interface_destinations(endpoint :: InterfaceEndpoint,
+                                       inputs,
+                                       connections,
+                                       links,
+                                       seen = []):
+  def matching = inputs.filter(
+    ~keep: fun (terminal): terminal.compound && terminal_contains_endpoint(terminal, endpoint)
+  )
+  if matching.length() > 0
+  | matching
+  | if endpoint_seen(endpoint, seen)
+    | []
+    | block:
+        def link = links.find(
+          fun (candidate): same_endpoint(candidate.left, endpoint)
+        )
+        if !link
+        | []
+        | block:
+            def mutable destinations = []
+            for (connection in connections):
+              when same_endpoint(connection.source, link.right)
+              | destinations := append_unique_terminals(
+                  destinations,
+                  transparent_interface_destinations(
+                    connection.destination,
+                    inputs,
+                    connections,
+                    links,
+                    seen ++ [endpoint]
+                  )
+                )
+            destinations
+
+fun reachable_modules(top :: Module):
+  def mutable modules = []
+  fun visit(module_def):
+    unless modules.find(fun (candidate): candidate === module_def)
+    | modules := modules ++ [module_def]
+      for (operation in module_def.operations):
+        when operation.opcode == "rtl.instance"
+        | visit(operation.attribute("module"))
+  visit(top)
+  modules
+
+// A block is sequential when its implementation contains a sequential IR
+// operation directly or reaches one through an ordinary child instance.
+fun module_has_synchronous_state(module_def :: Module, seen = []):
+  if module_def.id in seen
+  | #false
+  | for any (operation in module_def.operations):
+      def schema = schema_for(operation.opcode)
+      (schema && schema.kind == "sequential") || (
+        operation.opcode == "rtl.instance" && module_has_synchronous_state(
+          operation.attribute("module"),
+          seen ++ [module_def.id]
+        )
+      )
+
+fun module_behavior(module_def :: Module):
+  if module_has_synchronous_state(module_def)
+  | "sequential"
+  | "combinational"
+
+// Inline transforms whose configured function is ordinary combinational
+// hardware expose one abstract sideband port without expanding its wiring.
+fun transform_has_combo_input(kind):
+  kind in ["map", "map-valid", "filter", "filter-valid", "gate", "demux"]
+
+fun diagram_module(module_def :: Module):
+  def sync_metadata = module_sync_circuit_metadata(module_def)
+  def groups = module_interface_groups(module_def)
+  def array_groups = module_interface_array_groups(module_def)
+  def transforms = module_interface_transforms(module_def)
+  def connections = module_interface_connections(module_def)
+  def links = module_interface_links(module_def)
+  def grouped_names = grouped_port_names(groups)
+  def mutable blocks = []
+  def mutable terminals = []
+
+  for (group in groups):
+    unless group_in_arrays(group, array_groups)
+    | def block_id = "boundary:" ++ group.name
+      def built = endpoint_ports(block_id,
+                                 "interface",
+                                 interface_boundary_endpoint(group))
+      blocks := blocks ++ [
+        DiagramBlock(block_id,
+                     group.name,
+                     "boundary",
+                     built[0],
+                     {},
+                     #false,
+                     "boundary")
+      ]
+      terminals := terminals ++ built[1]
+
+  for (array_group in array_groups):
+    def block_id = "boundary:" ++ array_group.name
+    def mutable ports = []
+    def mutable block_terminals = []
+    for (group in array_group.groups, index in 0..array_group.groups.length()):
+      def built = endpoint_ports(block_id,
+                                 "interface[" ++ to_string(index) ++ "]",
+                                 interface_boundary_endpoint(group))
+      ports := ports ++ built[0]
+      block_terminals := block_terminals ++ built[1]
+    blocks := blocks ++ [
+      DiagramBlock(block_id,
+                   array_group.name,
+                   "boundary-array",
+                   ports,
+                   {},
+                   #false,
+                   "boundary")
+    ]
+    terminals := terminals ++ block_terminals
+
+  for (port in module_def.inputs):
+    unless port.name in grouped_names || implicit_sync_port(sync_metadata, port.name)
+    | def block_id = "input:" ++ port.name
+      def port_id = "value"
+      def protocol = type_text(port.type)
+      blocks := blocks ++ [
+        DiagramBlock(block_id,
+                     port.name,
+                     "input",
+                     [DiagramPort(port_id, port_id, "output", protocol)],
+                     {},
+                     #false,
+                     "boundary")
+      ]
+      terminals := terminals ++ [
+        DiagramTerminal(block_id,
+                        port_id,
+                        "output",
+                        protocol,
+                        #false,
+                        #false,
+                        [port.value])
+      ]
+
+  for (port in module_def.outputs):
+    unless port.name in grouped_names
+    | def block_id = "output:" ++ port.name
+      def port_id = "value"
+      def protocol = type_text(port.type)
+      blocks := blocks ++ [
+        DiagramBlock(block_id,
+                     port.name,
+                     "output",
+                     [DiagramPort(port_id, port_id, "input", protocol)],
+                     {},
+                     #false,
+                     "boundary")
+      ]
+      terminals := terminals ++ [
+        DiagramTerminal(block_id,
+                        port_id,
+                        "input",
+                        protocol,
+                        #false,
+                        #false,
+                        [port.place])
+      ]
+
+  def mutable implementation_ids = []
+  for (transform in transforms):
+    when transform.implementation
+    | implementation_ids := implementation_ids ++ [transform.implementation.operation.id]
+
+  for (transform in transforms, index in 0..transforms.length()):
+    def block_id = "transform:" ++ to_string(index)
+    def input_built = endpoint_ports(block_id, "in", transform.input)
+    def output_built = endpoint_ports(block_id, "out", transform.output)
+    def combo_ports:
+      if transform_has_combo_input(transform.kind)
+      | [DiagramPort("combo", "combo", "input", "data")]
+      | []
+    def child_module:
+      if transform.implementation
+      | transform.implementation.module_def.name
+      | #false
+    def behavior:
+      if transform.implementation
+      | module_behavior(transform.implementation.module_def)
+      | "combinational"
+    blocks := blocks ++ [
+      DiagramBlock(block_id,
+                   transform.kind,
+                   "flow",
+                   input_built[0] ++ output_built[0] ++ combo_ports,
+                   transform.properties,
+                   child_module,
+                   behavior)
+    ]
+    terminals := terminals ++ input_built[1] ++ output_built[1]
+
+  for (operation in module_def.operations):
+    when operation.opcode == "rtl.instance" && !(operation.id in implementation_ids)
+    | def child = operation.attribute("module")
+      def name = operation.attribute("name")
+      def block_id = "instance:" ++ name
+      def child_groups = module_interface_groups(child)
+      def child_arrays = module_interface_array_groups(child)
+      def child_grouped_names = grouped_port_names(child_groups)
+      def child_sync_metadata = module_sync_circuit_metadata(child)
+      def mutable ports = []
+      def mutable instance_terminals = []
+      for (group in child_groups):
+        unless group_in_arrays(group, child_arrays)
+        | def built = endpoint_ports(block_id,
+                                     group.name,
+                                     instance_endpoint(operation, group))
+          ports := ports ++ built[0]
+          instance_terminals := instance_terminals ++ built[1]
+      for (array_group in child_arrays):
+        for (group in array_group.groups, index in 0..array_group.groups.length()):
+          def built = endpoint_ports(block_id,
+                                     array_group.name ++ "[" ++ to_string(index) ++ "]",
+                                     instance_endpoint(operation, group))
+          ports := ports ++ built[0]
+          instance_terminals := instance_terminals ++ built[1]
+      for (port in child.inputs, index in 0..child.inputs.length()):
+        unless port.name in child_grouped_names || implicit_sync_port(child_sync_metadata, port.name)
+        | def protocol = type_text(port.type)
+          ports := ports ++ [DiagramPort(port.name, port.name, "input", protocol)]
+          instance_terminals := instance_terminals ++ [
+            DiagramTerminal(block_id,
+                            port.name,
+                            "input",
+                            protocol,
+                            #false,
+                            #false,
+                            [operation.places[index]])
+          ]
+      for (port in child.outputs, index in 0..child.outputs.length()):
+        unless port.name in child_grouped_names
+        | def protocol = type_text(port.type)
+          ports := ports ++ [DiagramPort(port.name, port.name, "output", protocol)]
+          instance_terminals := instance_terminals ++ [
+            DiagramTerminal(block_id,
+                            port.name,
+                            "output",
+                            protocol,
+                            #false,
+                            #false,
+                            [operation.results[index]])
+          ]
+      blocks := blocks ++ [
+        DiagramBlock(block_id,
+                     name,
+                     "instance",
+                     ports,
+                     {},
+                     child.name,
+                     module_behavior(child))
+      ]
+      terminals := terminals ++ instance_terminals
+
+  for (operation in module_def.operations):
+    when operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+    | def name = operation.attribute("name")
+      def block_id = "register:" ++ name
+      def protocol = type_text(operation.results[0].type)
+      blocks := blocks ++ [
+        DiagramBlock(
+          block_id,
+          name,
+          "register",
+          [DiagramPort("next", "next", "input", protocol),
+           DiagramPort("current", "current", "output", protocol)],
+          {},
+          #false,
+          "sequential"
+        )
+      ]
+      terminals := terminals ++ [
+        DiagramTerminal(block_id,
+                        "next",
+                        "input",
+                        protocol,
+                        #false,
+                        #false,
+                        [operation.places[0]]),
+        DiagramTerminal(block_id,
+                        "current",
+                        "output",
+                        protocol,
+                        #false,
+                        #false,
+                        [operation.results[0]])
+      ]
+
+  def outputs = terminals.filter(
+    ~keep: fun (terminal): terminal.direction == "output"
+  )
+  def inputs = terminals.filter(
+    ~keep: fun (terminal): terminal.direction == "input"
+  )
+  def mutable channels = []
+
+  for (connection in connections):
+    def source = outputs.find(
+      fun (terminal): terminal.compound && terminal_contains_endpoint(terminal, connection.source)
+    )
+    when source
+    | def destinations = transparent_interface_destinations(
+        connection.destination,
+        inputs,
+        connections,
+        links
+      )
+      for (destination in destinations):
+        when source.block_id != destination.block_id
+        | def duplicate = channels.find(
+            fun (channel):
+              channel.source_block == source.block_id && (
+                channel.source_port == source.port_id
+              ) && channel.destination_block == destination.block_id && (
+                channel.destination_port == destination.port_id
+              ) && channel.kind == "interface"
+          )
+          unless duplicate
+          | def channel_id = "channel:" ++ to_string(channels.length())
+            channels := channels ++ [
+              DiagramChannel(channel_id,
+                             source.block_id,
+                             source.port_id,
+                             destination.block_id,
+                             destination.port_id,
+                             endpoint_protocol(connection.source),
+                             endpoint_backpressured(connection.source) || destination.backpressured,
+                             "interface",
+                             connection.source.type.name)
+            ]
+
+  for (destination in inputs):
+    for (source in destination_sources(destination, outputs)):
+      def already_connected = channels.find(
+        fun (channel):
+          channel.source_block == source.block_id && channel.destination_block == destination.block_id
+      )
+      when source.block_id != destination.block_id && !already_connected
+      | def channel_id = "channel:" ++ to_string(channels.length())
+        channels := channels ++ [
+          DiagramChannel(channel_id,
+                         source.block_id,
+                         source.port_id,
+                         destination.block_id,
+                         destination.port_id,
+                         destination.protocol,
+                         #false,
+                         "data",
+                         "data")
+        ]
+  DiagramModule(module_def.id, module_def.name, blocks, channels)
+
+fun diagram(logical :: DesignElaboration):
+  verify_design(logical.design)
+  DiagramDesign(
+    logical,
+    reachable_modules(logical.top).map(diagram_module)
+  )

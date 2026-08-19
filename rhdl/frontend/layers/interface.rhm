@@ -18,9 +18,22 @@ export:
   InterfaceMember
   InterfaceSupport
   InterfaceType
+  InterfaceBinding
   InterfaceEndpoint
   InterfaceHandle
   InterfaceSink
+  InterfaceGroup
+  InterfaceArrayGroup
+  InterfaceTransformGroup
+  InterfaceConnectionGroup
+  InterfaceLinkGroup
+  module_interface_groups
+  module_interface_array_groups
+  module_interface_transforms
+  module_interface_connections
+  module_interface_links
+  interface_boundary_endpoint
+  describe_interface_transform
   interface_type_supports
   interface_link
   interface_transform
@@ -336,9 +349,35 @@ class InterfaceSink(left, mutable consumed = #false):
 
 class InterfaceGroup(module_def, name, type, role, bindings)
 class InterfaceArrayGroup(module_def, name, groups)
+class InterfaceTransformGroup(module_def,
+                              kind,
+                              input,
+                              output,
+                              properties,
+                              implementation)
+class InterfaceConnectionGroup(module_def, source, destination)
+class InterfaceLinkGroup(module_def, name, left, right)
 
-def mutable interface_groups = []
-def mutable interface_array_groups = []
+def interface_group_namespace = "rhdl.interface.group"
+def interface_array_group_namespace = "rhdl.interface.array-group"
+def interface_transform_group_namespace = "rhdl.interface.transform"
+def interface_connection_group_namespace = "rhdl.interface.connection"
+def interface_link_group_namespace = "rhdl.interface.link"
+
+fun module_interface_groups(module_def :: Module):
+  module_def.metadata_for(interface_group_namespace)
+
+fun module_interface_array_groups(module_def :: Module):
+  module_def.metadata_for(interface_array_group_namespace)
+
+fun module_interface_transforms(module_def :: Module):
+  module_def.metadata_for(interface_transform_group_namespace)
+
+fun module_interface_connections(module_def :: Module):
+  module_def.metadata_for(interface_connection_group_namespace)
+
+fun module_interface_links(module_def :: Module):
+  module_def.metadata_for(interface_link_group_namespace)
 
 fun interface_member_type_equal(left, right):
   if left is_a InterfaceType || right is_a InterfaceType
@@ -526,11 +565,18 @@ fun validate_interface_declaration(type :: InterfaceType, role :: String):
   | error(~who: #'interface, "unknown interface role " ++ to_string(role))
 
 fun interface_name_taken(module_def, name):
-  interface_groups.find(
-    fun (group): group.module_def === module_def && group.name == name
-  ) || interface_array_groups.find(
-    fun (group): group.module_def === module_def && group.name == name
+  module_interface_groups(module_def).find(
+    fun (group): group.name == name
+  ) || module_interface_array_groups(module_def).find(
+    fun (group): group.name == name
   )
+
+fun interface_boundary_endpoint(group :: InterfaceGroup):
+  InterfaceEndpoint(group.type,
+                    group.role,
+                    group.type.complementary_role(group.role),
+                    group.bindings,
+                    "boundary")
 
 fun declare_interface_unchecked(module_def, name, type, role):
   def bindings:
@@ -544,13 +590,8 @@ fun declare_interface_unchecked(module_def, name, type, role):
         InterfaceBinding(direction, port_name, entity)
     )
   def group = InterfaceGroup(module_def, name, type, role, bindings)
-  interface_groups := interface_groups ++ [group]
-  [group,
-   InterfaceEndpoint(type,
-                     role,
-                     type.complementary_role(role),
-                     bindings,
-                     "boundary")]
+  module_def.add_metadata(interface_group_namespace, group)
+  [group, interface_boundary_endpoint(group)]
 
 fun declare_interface(name, type, role):
   validate_interface_declaration(type, role)
@@ -571,11 +612,12 @@ fun declare_interface_array(name, count :: PosInt, type, role):
   def declarations:
     for List (element_name in element_names):
       declare_interface_unchecked(module_def, element_name, type, role)
-  interface_array_groups := interface_array_groups ++ [
+  module_def.add_metadata(
+    interface_array_group_namespace,
     InterfaceArrayGroup(module_def,
                         name,
                         declarations.map(fun (declaration): declaration[0]))
-  ]
+  )
   Array(& declarations.map(fun (declaration): declaration[1]))
 
 // Creates a local, declaration-order-independent pair of complementary
@@ -583,6 +625,7 @@ fun declare_interface_array(name, count :: PosInt, type, role):
 // exposes it, with reverse-direction members mirrored.
 fun interface_link(type, name = "interface_link"):
   validate_interface_declaration(type, type.roles[0])
+  def module_def = kernel.active_module()
   def mutable left_bindings = []
   def mutable right_bindings = []
   for (direction in type.directions):
@@ -599,7 +642,7 @@ fun interface_link(type, name = "interface_link"):
     right_bindings := right_bindings ++ [
       InterfaceBinding(direction, direction_name, right_entity)
     ]
-  InterfaceHandle(
+  def handle = InterfaceHandle(
     InterfaceEndpoint(type,
                       type.roles[0],
                       type.roles[1],
@@ -611,6 +654,11 @@ fun interface_link(type, name = "interface_link"):
                       right_bindings,
                       "link-right")
   )
+  module_def.add_metadata(
+    interface_link_group_namespace,
+    InterfaceLinkGroup(module_def, name, handle.left, handle.right)
+  )
+  handle
 
 fun endpoint_for_group(instance, group):
   def bindings:
@@ -629,14 +677,14 @@ fun endpoint_for_group(instance, group):
                     "instance")
 
 fun endpoint_for_instance(instance, name):
-  def group = interface_groups.find(
-    fun (candidate): candidate.module_def === instance.module_def && candidate.name == name
+  def group = module_interface_groups(instance.module_def).find(
+    fun (candidate): candidate.name == name
   )
   if group | endpoint_for_group(instance, group) | #false
 
 fun endpoint_array_for_instance(instance, name):
-  def group = interface_array_groups.find(
-    fun (candidate): candidate.module_def === instance.module_def && candidate.name == name
+  def group = module_interface_array_groups(instance.module_def).find(
+    fun (candidate): candidate.name == name
   )
   if group
   | Array(& group.groups.map(fun (element_group): endpoint_for_group(instance, element_group)))
@@ -1093,12 +1141,27 @@ fun endpoint_shape_connection_pairs(left, right):
       error(~who: #'connect_interfaces,
             "bulk interface connection requires matching endpoint shapes")
 
+fun record_interface_connection(left, right):
+  cond
+  | left is_a InterfaceEndpoint && right is_a InterfaceEndpoint:
+      let [source, destination] = interface_connection_direction(left, right)
+      def module_def = kernel.active_module()
+      module_def.add_metadata(
+        interface_connection_group_namespace,
+        InterfaceConnectionGroup(module_def, source, destination)
+      )
+  | left is_a Array && right is_a Array:
+      for (index in 0..left.length()):
+        record_interface_connection(left[index], right[index])
+  | ~else: #void
+
 fun connect_interfaces(left, right):
   def pairs = endpoint_shape_connection_pairs(left, right)
   for (pair in pairs):
     if pair[0] is_a Place
     | kernel.connect(pair[0], pair[1])
     | kernel.connect(pair[1], pair[0])
+  record_interface_connection(left, right)
   #void
 
 // Recursively connects interface endpoint shapes. Arrays are the initial
@@ -1156,6 +1219,27 @@ fun interface_transform(input_links, output_links) :: Handle:
   validate_interface_transform_links(output_links, #'interface_transform)
   def right = interface_transform_end(output_links, #false)
   InterfaceHandle(left, right)
+
+// Gives an interface transform a persistent authoring-level identity for
+// inspection tools while leaving its ordinary flattened hardware unchanged.
+fun describe_interface_transform(handle :: Handle,
+                                 kind :: String,
+                                 properties = {},
+                                 implementation = #false) :: Handle:
+  def module_def = kernel.active_module()
+  when implementation && (!(implementation is_a Instance) || !(implementation.operation.module_def === module_def))
+  | error(~who: #'describe_interface_transform,
+          "interface transform implementation must be a local instance")
+  module_def.add_metadata(
+    interface_transform_group_namespace,
+    InterfaceTransformGroup(module_def,
+                            kind,
+                            handle.left,
+                            handle.right,
+                            properties,
+                            implementation)
+  )
+  handle
 
 // Records one flattened interface leaf and whether the protocol provider owns
 // its direction. Nested interfaces retain structural declaration order.
@@ -1387,6 +1471,7 @@ fun connect_interface_fields(left,
         if pair[0] is_a Place
         | kernel.connect(pair[0], pair[1])
         | kernel.connect(pair[1], pair[0])
+      record_interface_connection(left, right)
       #void
 
 fun make_refined_interface(identity,

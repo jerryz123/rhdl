@@ -22,6 +22,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`formal/`](formal/) | Optional Rosette-backed behavioral proofs |
+| [`ricket/`](ricket/) | Ricket core integration and inspection examples |
 
 ## One IR, layered languages
 
@@ -209,6 +210,8 @@ instances, or logic to the generated RTL.
 | [`chi/home.rhdl`](chi/home.rhdl) | Bounded HN-I between one requester and one subordinate port |
 | [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
 | [`cores/ricket.rhdl`](cores/ricket.rhdl) | Complete RV64 Ricket core with private instruction and data caches |
+| [`noc/wormhole-router-diagram.rhdl`](noc/wormhole-router-diagram.rhdl) | Flow-aware diagram of a packet-retaining phased-XY router with five inputs and five targets |
+| [`ricket/core-diagram.rhdl`](ricket/core-diagram.rhdl) | Flow-aware logical diagram extraction for the flow-oriented Ricket core |
 
 ## Formal example
 

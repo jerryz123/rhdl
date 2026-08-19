@@ -62,6 +62,22 @@ if [[ -n "$component_control_imports" ]]; then
   exit 1
 fi
 
+pipeline_transport_imports="$(search_sources 'simple-memory' \
+  cores/ricket/core.rhdl cores/ricket/core-flow.rhdl || true)"
+if [[ -n "$pipeline_transport_imports" ]]; then
+  echo "Ricket pipeline must depend on its cache protocol, not SimpleMemory" >&2
+  echo "$pipeline_transport_imports" >&2
+  exit 1
+fi
+
+explicit_flow_syntax="$(search_sources '\|>|(map|filter|gate|zip)_flow\(|(map|filter|fork)_valid\(|atomic_fork\(|valid_arbiter\(|to_valid\(|OfferRegister\(|ValidArbiter\(|AtomicFork\(' \
+  cores/ricket/core.rhdl || true)"
+if [[ -n "$explicit_flow_syntax" ]]; then
+  echo "the explicit Ricket core must use direct state and interface wiring" >&2
+  echo "$explicit_flow_syntax" >&2
+  exit 1
+fi
+
 cache_cross_imports="$(search_sources '^[[:space:]]+"[^" ]*(icache|dcache)/' \
   cores/ricket/icache cores/ricket/dcache \
   || true)"

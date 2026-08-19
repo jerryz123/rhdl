@@ -5,6 +5,26 @@ import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/ready-valid-support.rhdl") open
 
+// Lower indices have priority. Since Valid has no backpressure, simultaneous
+// lower-priority events are intentionally dropped instead of held for retry.
+circuit ValidArbiter(T, n :: PosInt):
+
+  interface ingress[n](Valid(T), ~role: consumer)
+  interface egress(Valid(T), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def mutable selected_bits = ingress[0].bits
+  for (offset in 0..n):
+    def index = n - offset - 1
+    selected_bits := mux(ingress[index].valid,
+                         ingress[index].bits,
+                         selected_bits)
+
+  egress.valid <== or_reduce(requests)
+  egress.bits <== selected_bits
+  chosen <== priority_encoder(requests)
+
 // Lower indices have higher priority. The output uses Decoupled because a new
 // higher-priority arrival may change the selected payload while stalled.
 circuit Arbiter(T :: DataType, n :: PosInt):
@@ -76,7 +96,50 @@ fun arbiter(n = #false)
       InterfaceHandle(arbiter_stage.ingress, arbiter_stage.egress)
     )
 
+// A connected Valid endpoint array supplies its own input count. A
+// disconnected topology starts from a payload type and states the count once.
+fun valid_arbiter(n = #false)
+  :: ((source :: Any) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source) :~ InterfaceTransformResult(source, Endpoint):
+    def inputs:
+      if source is_a Handle | source.right | source
+    def typed = !(inputs is_a Array)
+    def input_count:
+      if typed
+      | block:
+          unless n is_a PosInt
+          | error(~who: #'valid_arbiter,
+                  "typed Valid arbitration requires a positive input count")
+          n
+      | block:
+          unless inputs.length() > 0
+          | error(~who: #'valid_arbiter,
+                  "Valid arbitration requires at least one input endpoint")
+          if n
+          | unless n == inputs.length()
+            | error(~who: #'valid_arbiter,
+                    "configured input count does not match the endpoint array")
+          | #void
+          inputs.length()
+    def T:
+      if typed
+      | valid_flow_payload_type(source)
+      | valid_flow_payload_type(inputs[0])
+    inst valid_arbiter_stage(ValidArbiter(T, input_count))
+    finish_interface_transform(
+      source,
+      describe_interface_transform(
+        InterfaceHandle(valid_arbiter_stage.ingress,
+                        valid_arbiter_stage.egress),
+        "valid-arbiter",
+        {"inputs": input_count},
+        valid_arbiter_stage
+      )
+    )
+
 export:
+  ValidArbiter
+  valid_arbiter
   Arbiter
   arbiter
   CtrlArbiter

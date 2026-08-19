@@ -22,6 +22,7 @@ export:
   Port
   Register
   Instance
+  ModuleMetadata
   Module
   Design
   DesignElaboration
@@ -178,6 +179,10 @@ class Instance(operation, module_def, input_bindings, output_bindings):
             "instance has no output named " ++ name)
     binding.value
 
+// Attaches extension-owned, nonsemantic inspection data to a finished design
+// without turning the described abstraction into a hardware operation.
+class ModuleMetadata(namespace :: String, payload)
+
 class Module(design,
              id,
              name,
@@ -187,6 +192,7 @@ class Module(design,
              mutable values = [],
              mutable places = [],
              mutable memories = [],
+             mutable metadata = [],
              mutable finished = #false):
   private field collections_finished = operations.length() != 0 || inputs.length() != 0 || outputs.length() != 0 || values.length() != 0 || places.length() != 0 || memories.length() != 0
   private field indexes_complete = operations.length() == 0 && inputs.length() == 0 && outputs.length() == 0 && values.length() == 0 && places.length() == 0 && memories.length() == 0
@@ -263,6 +269,19 @@ class Module(design,
     | memories_by_id[memory.id] := memory
     memory_set.add(memory)
     hardware_names.add(memory.name)
+
+  method add_metadata(namespace :: String, payload):
+    when finished
+    | error(~who: #'add_metadata,
+            "cannot attach metadata to finished module " ++ name)
+    def entry = ModuleMetadata(namespace, payload)
+    metadata := metadata ++ [entry]
+    entry
+
+  method metadata_for(namespace :: String):
+    metadata.filter(
+      ~keep: fun (entry): entry.namespace == namespace
+    ).map(fun (entry): entry.payload)
 
   method add_input(port):
     inputs := if collections_finished | inputs ++ [port] | [port] ++ inputs

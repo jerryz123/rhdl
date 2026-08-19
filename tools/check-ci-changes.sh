@@ -79,12 +79,17 @@ check_matrix_entry chi/link.rhdl host_matrix ci-host-protocols-test
 check_matrix_entry chi/link.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry cores/ricket/core.rhdl host_matrix ci-host-cores-test
 check_matrix_entry cores/ricket/core.rhdl circt_matrix ci-circt-cores-test
+check_matrix_entry cores/ricket/core.rhdl example_matrix examples-ricket
+check_matrix_entry cores/ricket/core-flow.rhdl host_matrix ci-host-cores-test
+check_matrix_entry cores/ricket/core-flow.rhdl circt_matrix ci-circt-cores-test
+check_matrix_entry cores/ricket/core-flow.rhdl example_matrix examples-ricket
 check_matrix_entry examples/rhdl/alu.rhdl example_matrix examples-rhdl
 check_matrix_entry examples/rhdl/alu.rhdl circt_matrix ci-circt-language-test
 check_matrix_entry examples/clocking/single-clock.rhm example_matrix examples-clocking
 check_matrix_entry examples/std/flow-control.rhdl example_matrix examples-std
 check_matrix_entry examples/noc/noc-router.rhdl example_matrix examples-noc
 check_matrix_entry examples/noc/noc-router.rhdl circt_matrix ci-circt-protocols-test
+check_matrix_entry examples/noc/wormhole-router-diagram.rhdl example_matrix examples-noc
 check_matrix_entry examples/lop/adder-core.rhm example_matrix examples-lop
 check_matrix_entry examples/rfpl/circuit-pair.rhdl example_matrix examples-rfpl
 check_matrix_entry examples/rfpl/circuit-pair.rhdl circt_matrix rfpl-circt-test
@@ -96,6 +101,9 @@ check_matrix_entry examples/chi/ram.rhdl example_matrix examples-chi
 check_matrix_entry examples/chi/ram.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry examples/cores/ricket.rhdl example_matrix examples-cores
 check_matrix_entry examples/cores/ricket.rhdl circt_matrix ci-circt-cores-test
+check_matrix_entry examples/ricket/core-diagram.rhdl example_matrix examples-ricket
+check_matrix_entry tools/write-ricket-core-diagram.rhm example_matrix examples-ricket
+check_matrix_entry tools/write-noc-router-diagram.rhm example_matrix examples-noc
 check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sim/fesvr/direct_mem_htif.cc fesvr true
 check_field tests/fesvr/fesvr-rtl-test.rhm fesvr true

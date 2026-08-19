@@ -130,3 +130,14 @@ availability.
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar
 mechanisms come from `rhdl/std`.
+
+[`examples/noc/wormhole-router-diagram.rhdl`](../../examples/noc/wormhole-router-diagram.rhdl)
+projects the checked-in phased-XY routing relation onto a corner router and
+extracts a logical flow diagram. Generate its JSON and Graphviz DOT files with:
+
+```sh
+mkdir -p /tmp/noc-router-diagram
+env PLTCOMPILEDROOTS="$(mktemp -d)" \
+  racket -y -S "$PWD" tools/write-noc-router-diagram.rhm \
+  /tmp/noc-router-diagram
+```
