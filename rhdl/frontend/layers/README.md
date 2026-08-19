@@ -66,7 +66,9 @@ validated `TemporalEnvironment`, and the resolved `DesignTemporalSummary`.
 `elaborate_with_clocking` remains report-only. `elaborate_with_cdc` applies the
 first conservative policy: static, exact-clock, and declared-identical inputs
 are safe; other sampled data requires recognized crossing evidence. Reset
-inputs remain inventory-only pending RDC semantics.
+inputs remain inventory-only pending RDC semantics. Both forms expose the
+complete structured list through `summary.cdc_violations`; the strict form
+raises one aggregate error after the full hierarchy has been classified.
 
 The retained summary also diagnoses distinct verified crossing identities
 that later reach one clocked sink through `summary.reconvergences`. These

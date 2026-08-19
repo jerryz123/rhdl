@@ -1,0 +1,244 @@
+#lang rhdl
+// Shows complete hierarchical CDC findings and the same design repaired with SyncLevel.
+
+import:
+  lib("rhdl/std/cdc.rhdl") open
+  lib("rhdl/analysis/clocking.rhm").CdcViolation
+  lib("rhdl/analysis/clocking.rhm").dump_design_temporal_report
+  lib("rhdl/analysis/clocking.rhm").verify_design_cdc
+
+circuit SampleBit():
+  input clock: Clock
+  input data: Bits(1)
+  output sampled: Bits(1)
+
+  reg state(Bits(1), ~clock: clock)
+  state <== data
+  sampled <== state
+
+circuit MissingCrossingSystem():
+  input(ingress_clock, core_clock, egress_clock): Clock
+  input command: Bits(1)
+  input interrupt: Bits(1)
+  output(worker_sampled, response_sampled, interrupt_sampled): Bits(1)
+
+  def SampleBitModule = SampleBit()
+  inst worker(SampleBitModule)
+  worker.clock <== core_clock
+  worker.data <== command
+  inst response(SampleBitModule)
+  response.clock <== egress_clock
+  response.data <== worker.sampled
+  inst interrupt_sink(SampleBitModule)
+  interrupt_sink.clock <== core_clock
+  interrupt_sink.data <== interrupt
+
+  worker_sampled <== worker.sampled
+  response_sampled <== response.sampled
+  interrupt_sampled <== interrupt_sink.sampled
+
+  synchronous_input(command, ingress_clock)
+  asynchronous_input(interrupt)
+  asynchronous_clocks(ingress_clock, core_clock)
+  asynchronous_clocks(core_clock, egress_clock)
+
+circuit CorrectedCrossingSystem():
+  input(ingress_clock, core_clock, egress_clock): Clock
+  input(core_reset, egress_reset): Reset
+  input command: Bits(1)
+  input interrupt: Bits(1)
+  output(worker_sampled, response_sampled, interrupt_sampled): Bits(1)
+
+  def SampleBitModule = SampleBit()
+  def SyncLevelModule = SyncLevel()
+  inst command_sync(SyncLevelModule, ~clock: core_clock, ~reset: core_reset)
+  command_sync.level <== command
+  inst worker(SampleBitModule)
+  worker.clock <== core_clock
+  worker.data <== command_sync.synchronized
+
+  inst response_sync(SyncLevelModule,
+                     ~clock: egress_clock,
+                     ~reset: egress_reset)
+  response_sync.level <== worker.sampled
+  inst response(SampleBitModule)
+  response.clock <== egress_clock
+  response.data <== response_sync.synchronized
+
+  inst interrupt_sync(SyncLevelModule,
+                      ~clock: core_clock,
+                      ~reset: core_reset)
+  interrupt_sync.level <== interrupt
+  inst interrupt_sink(SampleBitModule)
+  interrupt_sink.clock <== core_clock
+  interrupt_sink.data <== interrupt_sync.synchronized
+
+  worker_sampled <== worker.sampled
+  response_sampled <== response.sampled
+  interrupt_sampled <== interrupt_sink.sampled
+
+  synchronous_input(command, ingress_clock)
+  asynchronous_input(interrupt)
+  asynchronous_clocks(ingress_clock, core_clock)
+  asynchronous_clocks(core_clock, egress_clock)
+
+def broken = elaborate_with_clocking(MissingCrossingSystem())
+def broken_design = broken.design
+def broken_report = dump_design_temporal_report(broken.summary)
+def clocked = elaborate_with_cdc(CorrectedCrossingSystem())
+def design = clocked.design
+def report = dump_design_temporal_report(clocked.summary)
+
+check:
+  broken.summary.cdc_violations.length() ~is 3
+  broken.summary.cdc_violations[0] is_a CdcViolation ~is #true
+  broken_report.contains("worker.state.next: asynchronous_clock") ~is #true
+  broken_report.contains("response.state.next: asynchronous_clock") ~is #true
+  broken_report.contains("interrupt_sink.state.next: asynchronous_input") ~is #true
+  verify_design_cdc(broken.elaboration, broken.environment) ~throws "3 CDC violations"
+  clocked.summary.cdc_violations.length() ~is 0
+  report.contains("cdc_violations") ~is #false
+
+print(broken_report ++ "\n\n" ++ report ++ "\n")
+
+def broken_verilog_reference = @str|<<{
+module MissingCrossingSystem(
+  input  ingress_clock,
+         core_clock,
+         egress_clock,
+         command,
+         interrupt,
+  output worker_sampled,
+         response_sampled,
+         interrupt_sampled
+);
+
+  wire _worker_sampled;
+  SampleBit worker (
+    .clock   (core_clock),
+    .data    (command),
+    .sampled (_worker_sampled)
+  );
+  SampleBit response (
+    .clock   (egress_clock),
+    .data    (_worker_sampled),
+    .sampled (response_sampled)
+  );
+  SampleBit interrupt_sink (
+    .clock   (core_clock),
+    .data    (interrupt),
+    .sampled (interrupt_sampled)
+  );
+  assign worker_sampled = _worker_sampled;
+endmodule
+
+module SampleBit(
+  input  clock,
+         data,
+  output sampled
+);
+
+  reg state;
+  always @(posedge clock)
+    state <= data;
+  assign sampled = state;
+endmodule
+}>>|
+
+def verilog_reference = @str|<<{
+module CorrectedCrossingSystem(
+  input  ingress_clock,
+         core_clock,
+         egress_clock,
+         core_reset,
+         egress_reset,
+         command,
+         interrupt,
+  output worker_sampled,
+         response_sampled,
+         interrupt_sampled
+);
+
+  wire _interrupt_sync_synchronized;
+  wire _response_sync_synchronized;
+  wire _worker_sampled;
+  wire _command_sync_synchronized;
+  SyncLevel command_sync (
+    .clock        (core_clock),
+    .reset        (core_reset),
+    .level        (command),
+    .synchronized (_command_sync_synchronized)
+  );
+  SampleBit worker (
+    .clock   (core_clock),
+    .data    (_command_sync_synchronized),
+    .sampled (_worker_sampled)
+  );
+  SyncLevel response_sync (
+    .clock        (egress_clock),
+    .reset        (egress_reset),
+    .level        (_worker_sampled),
+    .synchronized (_response_sync_synchronized)
+  );
+  SampleBit response (
+    .clock   (egress_clock),
+    .data    (_response_sync_synchronized),
+    .sampled (response_sampled)
+  );
+  SyncLevel interrupt_sync (
+    .clock        (core_clock),
+    .reset        (core_reset),
+    .level        (interrupt),
+    .synchronized (_interrupt_sync_synchronized)
+  );
+  SampleBit interrupt_sink (
+    .clock   (core_clock),
+    .data    (_interrupt_sync_synchronized),
+    .sampled (interrupt_sampled)
+  );
+  assign worker_sampled = _worker_sampled;
+endmodule
+
+module SampleBit(
+  input  clock,
+         data,
+  output sampled
+);
+
+  reg state;
+  always @(posedge clock)
+    state <= data;
+  assign sampled = state;
+endmodule
+
+module SyncLevel(
+  input  clock,
+         reset,
+         level,
+  output synchronized
+);
+
+  (* async_reg = "TRUE" *)
+  reg stage0;
+  (* async_reg = "TRUE" *)
+  reg stage1;
+  always @(posedge clock) begin
+    stage0 <= level;
+    stage1 <= stage0;
+  end // always @(posedge)
+  assign synchronized = stage1;
+endmodule
+}>>|
+
+export:
+  SampleBit
+  MissingCrossingSystem
+  CorrectedCrossingSystem
+  broken
+  broken_design
+  broken_report
+  clocked
+  design
+  report
+  broken_verilog_reference
+  verilog_reference

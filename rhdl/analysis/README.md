@@ -51,13 +51,16 @@ distinct from declared equivalence. Malformed, overlapping, duplicate, and
 contradictory declarations are rejected.
 
 Both temporal analyzers expose inspectable objects and deterministic reports.
-`verify_design_cdc` adds an opt-in conservative policy over the closed-design
-summary: raw incompatible, unknown, or asynchronous sampling is rejected;
-verified `cdc.sync_level` evidence approves one declared timing source at its
-first destination stage; multi-clock fan-in and unknown external timing remain
-errors. Synchronous reset inputs are still reported but excluded from CDC
-enforcement until RDC semantics are defined. Strict verification returns the
-same reconvergence findings without rejecting otherwise verified crossings.
+Every closed-design summary contains structured `CdcViolation` findings for
+all unsafe sink leaves, including their hierarchy paths, classifications,
+origins, and reasons. `verify_design_cdc` applies the same conservative policy
+and rejects once with the complete deterministic list: raw incompatible,
+unknown, or asynchronous sampling is unsafe; verified `cdc.sync_level`
+evidence approves one declared timing source at its first destination stage;
+multi-clock fan-in and unknown external timing remain errors. Synchronous reset
+inputs are still reported but excluded from CDC enforcement until RDC
+semantics are defined. Strict verification returns the same reconvergence
+findings without rejecting otherwise verified crossings.
 
 The [`../frontend/layers/clocking.rhm`](../frontend/layers/clocking.rhm) layer
 collects root-owned environment declarations, exposes report-only

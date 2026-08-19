@@ -525,10 +525,14 @@ and environment-contract behavior is specified.
 5. Emit CIRCT/SystemVerilog synchronizer attributes from verified evidence.
    Implemented for all verified `SyncLevel` stages.
 6. Add backend tests and at least one external CIRCT/Verilator integration
-   fixture. CIRCT verification and an example-owned Verilog golden are
-   implemented; a cycle-level Verilator test is still pending.
+   fixture. Implemented with CIRCT verification, an example-owned Verilog
+   golden, and a cycle-level Verilator test for two-edge latency, stable-level
+   propagation, and resetless-stage behavior.
 7. Require each later crossing kind to define a narrow semantic contract and
    independently verifiable implementation; do not add a generic waiver path.
+8. Expose every missing crossing as a structured closed-design finding and
+   aggregate strict failures after complete hierarchy analysis. Implemented as
+   `CdcViolation`, with a broken/corrected multi-clock hierarchy example.
 
 ### Phase 4: Reset foundations
 
@@ -562,6 +566,8 @@ The first enforceable release is complete when all of the following hold:
   `SyncLevel` is accepted.
 - A multi-bit bus cannot be passed through `SyncLevel` as one value.
 - Independent per-bit synchronizers that reconverge are diagnosed.
+- Every missing crossing in a closed hierarchy is returned in one structured,
+  deterministic list before strict verification fails.
 - Multi-clock fan-in before a crossing is rejected.
 - A raw cast-produced clock or reset does not silently establish a safe
   relationship.

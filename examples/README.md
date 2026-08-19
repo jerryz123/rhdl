@@ -89,6 +89,9 @@ verification and backend register attributes.
 - [`clocking/reconvergence.rhdl`](clocking/reconvergence.rhdl) shows that two
   individually legal `SyncLevel` results remain accepted while their later
   convergence is retained as a structured diagnostic and report entry.
+- [`clocking/missing-crossings.rhdl`](clocking/missing-crossings.rhdl) reports
+  every missing crossing across a reused child hierarchy, then elaborates a
+  corrected version whose transfers use standard `SyncLevel` instances.
 - [`clocking/single-clock.rhm`](clocking/single-clock.rhm) applies one set of
   top-level synchronous input contracts to an existing `sync_circuit` shift
   register and shows that its certified subtree samples those inputs on the

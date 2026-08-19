@@ -40,7 +40,14 @@ block:
     [],
     [AsynchronousClockRelationship(source_clock, destination_clock)]
   )
+  def summary = summarize_design_temporal(elaboration, environment)
   check:
+    summary.cdc_violations.length() ~is 1
+    summary.cdc_violations[0] is_a CdcViolation ~is #true
+    summary.cdc_violations[0].operation === destination.operation ~is #true
+    summary.cdc_violations[0].classification is_a AsynchronousClock ~is #true
+    dump_design_temporal_report(summary).contains("destination.next: asynchronous_clock") ~is #true
+    verify_design_cdc(elaboration, environment) ~throws "1 CDC violation"
     verify_design_cdc(elaboration, environment) ~throws "requires explicit crossing evidence"
 
 block:
@@ -71,6 +78,7 @@ block:
     fun (sink): sink.operation === stage0.operation
   )
   check:
+    summary.cdc_violations.length() ~is 0
     first_stage.inputs[0].classification is_a AsynchronousEnvironmentInput ~is #true
     first_stage.inputs[0].crossing.operation === evidence ~is #true
     summary.output_leaves[0].origins[0] is_a CrossedProvenance ~is #true
@@ -174,6 +182,46 @@ block:
     finding.arrivals[1].provenance.crossing.operation === right_evidence ~is #true
     finding.arrivals[0].provenance.source_origins[0] is_a ExternalProvenance ~is #true
     dump_design_temporal_report(summary).contains("reconvergence sampled rtl.register") ~is #true
+
+block:
+  def design = Design()
+  def builder = Builder(design)
+  def child = builder.module("HierarchicalSink")
+  def child_clock = builder.input(child, "clock", Clock)
+  def child_data = builder.input(child, "data", Bits(1))
+  def child_state = builder.register(child, "state", Bits(1), child_clock)
+  builder.drive(child_state.next, child_data)
+  builder.finish(child)
+
+  def top = builder.module("MultipleMissingCrossings")
+  def source_clock = builder.input(top, "source_clock", Clock)
+  def worker_clock = builder.input(top, "worker_clock", Clock)
+  def response_clock = builder.input(top, "response_clock", Clock)
+  def data = builder.input(top, "data", Bits(1))
+  def worker = builder.instance(top, child, "worker")
+  builder.drive(worker.input("clock"), worker_clock)
+  builder.drive(worker.input("data"), data)
+  def response = builder.instance(top, child, "response")
+  builder.drive(response.input("clock"), response_clock)
+  builder.drive(response.input("data"), data)
+  builder.finish(top)
+  verify_design(design)
+
+  def elaboration = DesignElaboration(design, top)
+  def environment = TemporalEnvironment(
+    [TopInputContract(data, [], SynchronousInputTiming(source_clock))],
+    [AsynchronousClockRelationship(source_clock, worker_clock),
+     AsynchronousClockRelationship(source_clock, response_clock)]
+  )
+  def summary = summarize_design_temporal(elaboration, environment)
+  def report = dump_design_temporal_report(summary)
+  check:
+    summary.cdc_violations.length() ~is 2
+    summary.cdc_violations[0].instance_path[0] === worker.operation ~is #true
+    summary.cdc_violations[1].instance_path[0] === response.operation ~is #true
+    report.contains("worker.state.next: asynchronous_clock") ~is #true
+    report.contains("response.state.next: asynchronous_clock") ~is #true
+    verify_design_cdc(elaboration, environment) ~throws "2 CDC violations"
 
 block:
   def design = Design()

@@ -315,7 +315,8 @@ fun summarize_design_temporal(elaboration :: DesignElaboration,
                         environment,
                         module_summary.output_leaves,
                         sinks,
-                        module_summary.reconvergences)
+                        module_summary.reconvergences,
+                        summarize_cdc_violations(sinks))
 
 fun safe_cdc_classification(classification):
   classification is_a StaticInput || classification is_a SameClock || classification is_a IdenticalClock
@@ -323,10 +324,50 @@ fun safe_cdc_classification(classification):
 fun supported_sync_level_source(classification):
   safe_cdc_classification(classification) || classification is_a DerivedClock || classification is_a AsynchronousClock || classification is_a ExclusiveClock || classification is_a UnknownClockRelationship || classification is_a AsynchronousEnvironmentInput
 
-fun cdc_sink_input_name(sink, input):
-  def sink_name = hierarchical_name(sink.instance_path,
-                                    operation_name(sink.operation))
-  append_path(sink_name ++ "." ++ input.name, input.path)
+fun cdc_violation_reason(input):
+  cond
+  | input.name == "reset" || input.name == "reset_value": #false
+  | input.crossing:
+      cond
+      | !(input.crossing is_a CrossingReference) || input.crossing.operation.opcode != "cdc.sync_level":
+          "has unknown crossing evidence"
+      | !supported_sync_level_source(input.classification):
+          "expected one declared timing source"
+      | ~else: #false
+  | !safe_cdc_classification(input.classification):
+      "requires explicit crossing evidence"
+  | ~else: #false
+
+fun summarize_cdc_violations(sinks):
+  def mutable violations = []
+  for (sink in sinks):
+    for (input in sink.inputs):
+      def reason = cdc_violation_reason(input)
+      when reason
+      | violations := violations ++ [
+          CdcViolation(sink.instance_path,
+                       sink.operation,
+                       sink.kind,
+                       input.name,
+                       input.path,
+                       input.classification,
+                       input.origins,
+                       reason)
+        ]
+  violations
+
+fun cdc_violation_name(violation):
+  def sink_name = hierarchical_name(violation.instance_path,
+                                    operation_name(violation.operation))
+  append_path(sink_name ++ "." ++ violation.input_name,
+              violation.input_path)
+
+fun cdc_violation_message(violation):
+  String.append(cdc_violation_name(violation),
+                ": ",
+                describe_classification(violation.classification),
+                "; ",
+                violation.reason)
 
 // Enforces the first conservative CDC policy. Reset inputs remain inventory-
 // only until RDC semantics are explicit; all other unsafe sampling requires a
@@ -334,29 +375,15 @@ fun cdc_sink_input_name(sink, input):
 fun verify_design_cdc(elaboration :: DesignElaboration,
                       environment :: TemporalEnvironment = TemporalEnvironment()):
   def summary = summarize_design_temporal(elaboration, environment)
-  for (sink in summary.sinks):
-    for (input in sink.inputs):
-      unless input.name == "reset" || input.name == "reset_value"
-      | if input.crossing
-        | unless input.crossing is_a CrossingReference && input.crossing.operation.opcode == "cdc.sync_level"
-          | error(~who: #'verify_design_cdc,
-                  cdc_sink_input_name(sink, input) ++ " has unknown crossing evidence")
-          unless supported_sync_level_source(input.classification)
-          | error(~who: #'verify_design_cdc,
-                  String.append(sink.operation.location.describe(),
-                                ": sync-level crossing input ",
-                                cdc_sink_input_name(sink, input),
-                                " has ",
-                                describe_classification(input.classification),
-                                "; expected one declared timing source"))
-        | unless safe_cdc_classification(input.classification)
-          | error(~who: #'verify_design_cdc,
-                  String.append(sink.operation.location.describe(),
-                                ": CDC violation at ",
-                                cdc_sink_input_name(sink, input),
-                                ": ",
-                                describe_classification(input.classification),
-                                " requires explicit crossing evidence"))
+  when summary.cdc_violations.length() > 0
+  | def count = summary.cdc_violations.length()
+    def lines = summary.cdc_violations.map(
+      fun (violation): "  " ++ cdc_violation_message(violation)
+    )
+    error(~who: #'verify_design_cdc,
+          String.append(to_string(count),
+                        if count == 1 | " CDC violation:\n" | " CDC violations:\n",
+                        String.join(lines, "\n")))
   summary
 
 fun append_path(name, path):
@@ -481,6 +508,27 @@ fun append_reconvergences(lines, summary):
       ]
   result
 
+fun append_cdc_violations(lines, summary):
+  def mutable result = lines
+  when summary.cdc_violations.length() > 0
+  | result := result ++ ["  cdc_violations"]
+    for (violation in summary.cdc_violations):
+      def origins = String.join(
+        violation.origins.map(
+          fun (origin): describe_origin(summary, origin)
+        ),
+        ", "
+      )
+      result := result ++ [
+        String.append("    ",
+                      cdc_violation_name(violation),
+                      ": ",
+                      describe_classification(violation.classification),
+                      " <- ",
+                      origins)
+      ]
+  result
+
 fun dump_design_temporal_report(summary :: DesignTemporalSummary):
   def top = summary.elaboration.top
   def mutable lines = ["temporal.design @" ++ top.name]
@@ -492,5 +540,6 @@ fun dump_design_temporal_report(summary :: DesignTemporalSummary):
     lines := lines ++ ["  clock_relation " ++ describe_relationship(relationship)]
   lines := append_outputs(lines, summary)
   lines := append_sinks(lines, summary)
+  lines := append_cdc_violations(lines, summary)
   lines := append_reconvergences(lines, summary)
   String.join(lines, "\n")
