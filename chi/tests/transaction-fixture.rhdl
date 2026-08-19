@@ -1,5 +1,5 @@
 #lang rhdl
-// Provides explicitly monitored RN-I and SN-F initial transaction fixtures.
+// Provides monitored initial RN-I, RN-F, and SN-F transaction fixtures.
 
 import:
   lib("chi/main.rhdl") open
@@ -55,6 +55,28 @@ def transaction_sn_link = CHISNLinkParams(
   ~rx_dat_credits: 1
 )
 
+def transaction_rnf_node = CHINodeParams(
+  "transaction-coherent-requester",
+  5,
+  CHINodeKind.RNF,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadShared],
+    ~rsp: [CHIRspOpcode.CompAck,
+           CHIRspOpcode.SnpResp,
+           CHIRspOpcode.SnpRespFwded],
+    ~dat: [CHIDatOpcode.SnpRespData,
+           CHIDatOpcode.SnpRespDataPtl,
+           CHIDatOpcode.SnpRespDataFwded,
+           CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~snp: chi_rnf_snoop_opcodes,
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 2
+)
+def transaction_rnf_link = CHIRNLinkParams(transaction_flit)
+
 sync_circuit MonitoredInitialCHIRNI():
   input tx_link_active_request: Bool
   input rx_link_active_ack: Bool
@@ -99,8 +121,36 @@ sync_circuit MonitoredInitialCHISN():
   port.rx_dat.credit <== rx_dat_credit
   monitor_chi_sn(transaction_sn_link, transaction_sn_node, port)
 
+sync_circuit MonitoredInitialCHIRNF():
+  input tx_link_active_request: Bool
+  input rx_link_active_ack: Bool
+  input tx_req_valid: Bool
+  input tx_req_bits: CHIReqFlit(transaction_flit)
+  input tx_rsp_valid: Bool
+  input tx_rsp_bits: CHIRspFlit(transaction_flit)
+  input tx_dat_valid: Bool
+  input tx_dat_bits: CHIDatFlit(transaction_flit)
+  input rx_rsp_credit: Bool
+  input rx_dat_credit: Bool
+  input rx_snp_credit: Bool
+  interface port(CHIRNLink(transaction_rnf_link, transaction_rnf_node), ~role: node)
+
+  port.tx_link_active_request <== tx_link_active_request
+  port.rx_link_active_ack <== rx_link_active_ack
+  port.tx_req.valid <== tx_req_valid
+  port.tx_req.bits <== tx_req_bits
+  port.tx_rsp.valid <== tx_rsp_valid
+  port.tx_rsp.bits <== tx_rsp_bits
+  port.tx_dat.valid <== tx_dat_valid
+  port.tx_dat.bits <== tx_dat_bits
+  port.rx_rsp.credit <== rx_rsp_credit
+  port.rx_dat.credit <== rx_dat_credit
+  port.rx_snp.credit <== rx_snp_credit
+  monitor_chi_rn(transaction_rnf_link, transaction_rnf_node, port)
+
 def transaction_rni_design = elaborate(MonitoredInitialCHIRNI())
 def transaction_sn_design = elaborate(MonitoredInitialCHISN())
+def transaction_rnf_design = elaborate(MonitoredInitialCHIRNF())
 
 export:
   transaction_flit
@@ -108,7 +158,11 @@ export:
   transaction_rni_link
   transaction_sn_node
   transaction_sn_link
+  transaction_rnf_node
+  transaction_rnf_link
   MonitoredInitialCHIRNI
   MonitoredInitialCHISN
+  MonitoredInitialCHIRNF
   transaction_rni_design
   transaction_sn_design
+  transaction_rnf_design

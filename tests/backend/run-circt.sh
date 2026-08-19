@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home
+  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home
   ricket-core ricket-multiply ricket-dcache
 )
 
@@ -613,6 +613,7 @@ direct_fixture_specs=(
   'chi-monitor|chi_monitor_tb'
   'chi-transaction|chi_transaction_tb'
   'chi-transaction-sn|chi_transaction_sn_tb'
+  'chi-coherent|chi_coherent_tb'
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'
   'ricket-register-file|ricket_register_file_tb'
@@ -732,6 +733,10 @@ run_expected_assertion_failure chi-transaction \
   chi_transaction_early_data_tb \
   tests/backend/verilog/chi-transaction-early-data_tb.sv \
   chi_transaction_write_data_has_dbid
+run_expected_assertion_failure chi-coherent \
+  chi_coherent_early_comp_ack_tb \
+  tests/backend/verilog/chi-coherent-early-comp-ack_tb.sv \
+  chi_coherent_comp_ack_has_read_data
 run_expected_assertion_failure chi-ram chi_ram_invalid_tb \
   tests/backend/verilog/chi-ram-invalid_tb.sv \
   chi_ram_request_address_supported

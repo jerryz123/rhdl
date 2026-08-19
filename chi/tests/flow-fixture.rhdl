@@ -1,9 +1,10 @@
 #lang rhdl
-// Elaborates an SN credited-to-ready-valid flow adapter for structural tests.
+// Elaborates requester and subordinate credited-flow adapters for structural tests.
 
 import:
   lib("chi/params.rhdl") open
   lib("chi/flits.rhdl") open
+  lib("chi/coherence.rhdl") open
   lib("chi/link.rhdl") open
   lib("chi/flow.rhdl") open
 
@@ -32,6 +33,32 @@ def flow_node = CHINodeParams(
   ~max_outstanding: 2
 )
 def flow_design = elaborate(CHISNFlowAdapter(flow_link, flow_node))
+
+def rn_link = CHIRNLinkParams(flow_flit)
+def rn_node = CHINodeParams(
+  "flow-rnf",
+  5,
+  CHINodeKind.RNF,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadShared],
+    ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~snp: chi_rnf_snoop_opcodes,
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 2
+)
+def rn_icn = CHIICNPortParams(
+  "flow-rnf-icn",
+  rn_node.node_id,
+  CHINodeKind.RNF,
+  ~emits: rn_node.supports,
+  ~supports: rn_node.emits,
+  ~max_outstanding: 2
+)
+def rn_design = elaborate(CHIRNFlowAdapter(rn_link, rn_node))
+def rn_icn_design = elaborate(CHIRNICNFlowAdapter(rn_link, rn_icn))
 
 def rni_link = CHIRNILinkParams(flow_flit)
 def rni_icn = CHIICNPortParams(
@@ -76,6 +103,11 @@ export:
   flow_link
   flow_node
   flow_design
+  rn_link
+  rn_node
+  rn_icn
+  rn_design
+  rn_icn_design
   rni_link
   rni_icn
   rni_icn_design

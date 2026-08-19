@@ -9,6 +9,7 @@ import:
   lib("chi/link.rhdl") open
   lib("chi/fabric.rhdl").CHIHomeParams
   lib("chi/transaction.rhdl") open
+  lib("chi/coherent-transaction.rhdl") open
 
 fun chi_opcode_supported(opcode, capabilities):
   is_one_of(opcode, capabilities)
@@ -233,7 +234,9 @@ fun node_received_capabilities(endpoint):
 // Applies the RN-F/RN-D checks to one explicitly selected endpoint.
 fun monitor_chi_rn(link :: CHIRNLinkParams,
                    endpoint,
-                   port :: Endpoint.of(CHIRNLink(link, endpoint))):
+                   port :: Endpoint.of(CHIRNLink(link, endpoint)),
+                   ~label_prefix: label_prefix :: String = "chi",
+                   ~transaction_checks: transaction_checks :: Boolean = #true):
   def observed :: Observation = observe(port)
   def emitted = node_emitted_capabilities(endpoint)
   def received = node_received_capabilities(endpoint)
@@ -251,12 +254,12 @@ fun monitor_chi_rn(link :: CHIRNLinkParams,
                          observed.tx_link_active_ack,
                          rn_tx_previous_request,
                          rn_tx_previous_ack,
-                         "chi_tx_link")
+                         label_prefix ++ "_tx_link")
   monitor_chi_activation(observed.rx_link_active_request,
                          observed.rx_link_active_ack,
                          rn_rx_previous_request,
                          rn_rx_previous_ack,
-                         "chi_rx_link")
+                         label_prefix ++ "_rx_link")
   monitor_chi_req(observed.tx_req.valid, observed.tx_req.bits.opcode,
                   observed.tx_req.bits.txn_id, observed.tx_req.bits.src_id,
                   observed.tx_req.bits.size_or_num_req, observed.tx_req.bits.multi_req,
@@ -264,40 +267,58 @@ fun monitor_chi_rn(link :: CHIRNLinkParams,
                   rn_tx_req_credit_balance,
                   observed.tx_link_active_request, observed.tx_link_active_ack,
                   rn_tx_previous_request, link.tx_req_credits, emitted.req, link.flit,
-                  endpoint.node_id, "_source_id", "chi_tx_req")
+                  endpoint.node_id, "_source_id", label_prefix ++ "_tx_req")
   monitor_chi_rsp(observed.tx_rsp.valid, observed.tx_rsp.bits.opcode,
                   observed.tx_rsp.bits.txn_id, observed.tx_rsp.bits.src_id,
                   observed.tx_rsp.credit,
                   rn_tx_rsp_credit_balance,
                   observed.tx_link_active_request, observed.tx_link_active_ack,
                   rn_tx_previous_request, link.tx_rsp_credits, emitted.rsp, link.flit,
-                  endpoint.node_id, "_source_id", "chi_tx_rsp")
+                  endpoint.node_id, "_source_id", label_prefix ++ "_tx_rsp")
   monitor_chi_dat(observed.tx_dat.valid, observed.tx_dat.bits.opcode,
                   observed.tx_dat.bits.txn_id, observed.tx_dat.bits.src_id,
                   observed.tx_dat.bits.data_id, observed.tx_dat.credit,
                   rn_tx_dat_credit_balance,
                   observed.tx_link_active_request, observed.tx_link_active_ack,
                   rn_tx_previous_request, link.tx_dat_credits, emitted.dat, link.flit,
-                  endpoint.node_id, "_source_id", "chi_tx_dat")
+                  endpoint.node_id, "_source_id", label_prefix ++ "_tx_dat")
   monitor_chi_rsp(observed.rx_rsp.valid, observed.rx_rsp.bits.opcode,
                   observed.rx_rsp.bits.txn_id, observed.rx_rsp.bits.tgt_id,
                   observed.rx_rsp.credit,
                   rn_rx_rsp_credit_balance,
                   observed.rx_link_active_request, observed.rx_link_active_ack,
                   rn_rx_previous_request, link.rx_rsp_credits, received.rsp, link.flit,
-                  endpoint.node_id, "_target_id", "chi_rx_rsp")
+                  endpoint.node_id, "_target_id", label_prefix ++ "_rx_rsp")
   monitor_chi_dat(observed.rx_dat.valid, observed.rx_dat.bits.opcode,
                   observed.rx_dat.bits.txn_id, observed.rx_dat.bits.tgt_id,
                   observed.rx_dat.bits.data_id, observed.rx_dat.credit,
                   rn_rx_dat_credit_balance,
                   observed.rx_link_active_request, observed.rx_link_active_ack,
                   rn_rx_previous_request, link.rx_dat_credits, received.dat, link.flit,
-                  endpoint.node_id, "_target_id", "chi_rx_dat")
+                  endpoint.node_id, "_target_id", label_prefix ++ "_rx_dat")
   monitor_chi_snp(observed.rx_snp.valid, observed.rx_snp.bits.opcode,
                   observed.rx_snp.bits.txn_id, observed.rx_snp.credit,
                   rn_rx_snp_credit_balance,
                   observed.rx_link_active_request, observed.rx_link_active_ack,
-                  rn_rx_previous_request, link.rx_snp_credits, received.snp, "chi_rx_snp")
+                  rn_rx_previous_request, link.rx_snp_credits, received.snp,
+                  label_prefix ++ "_rx_snp")
+  if transaction_checks && endpoint.kind == CHINodeKind.RNF && (
+    chi_initial_coherent_requester_capabilities(emitted, received)
+  )
+  | coherent_requester_transaction_monitor(observed.tx_req.valid,
+                                           observed.tx_req.bits,
+                                           observed.tx_rsp.valid,
+                                           observed.tx_rsp.bits,
+                                           observed.tx_dat.valid,
+                                           observed.tx_dat.bits,
+                                           observed.rx_dat.valid,
+                                           observed.rx_dat.bits,
+                                           observed.rx_snp.valid,
+                                           observed.rx_snp.bits,
+                                           link.flit,
+                                           endpoint.max_outstanding,
+                                           label_prefix ++ "_coherent")
+  | #void
   rn_tx_previous_request <== observed.tx_link_active_request
   rn_tx_previous_ack <== observed.tx_link_active_ack
   rn_rx_previous_request <== observed.rx_link_active_request

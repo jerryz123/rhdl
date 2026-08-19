@@ -12,11 +12,12 @@ Architecture Specification. This identifies the source used for the implemented
 wire definitions; it is not a configurable parameter in the API.
 
 The package currently implements the physical parameter and flit foundation,
-protocol classifiers, node capabilities, credited node-role links, link-local
-monitors, bounded initial non-coherent transaction checking, separate
+protocol and coherence classifiers, node capabilities, credited node-role
+links, link-local monitors, bounded initial non-coherent and RN-F transaction
+checking, separate
 requester-side and home-side SAM metadata, an initial HN-I bridge, and a
-non-coherent backing RAM. Crossbar RTL and coherent endpoints remain planned
-below.
+non-coherent backing RAM. Crossbar RTL, coherent cache controllers, and HN-F
+remain planned below.
 
 ## Architectural boundary
 
@@ -82,6 +83,13 @@ of the encodings declared by its CHI hardware enum; the link monitor further
 checks each endpoint's advertised opcode capabilities. These helpers are
 hardware expressions intended for endpoint construction and monitoring.
 
+[`coherence.rhdl`](coherence.rhdl) adds the protocol-neutral state vocabulary
+needed by coherent endpoints: cache-line states, response-state decoding,
+PassDirty extraction, and snoop, stash, forward, and snoop-response families.
+It also owns the complete ordinary SNP opcode set that every RN-F endpoint is
+required to accept. These are classifiers and static capability rules; they do
+not implement a cache-state machine.
+
 ## Node-role links
 
 [`link.rhdl`](link.rhdl) models CHI interfaces from the node's point of view.
@@ -114,7 +122,8 @@ all protocol channels in that direction, as specified in B14.5.
 and accepted through `CHIChannelCapabilities`. Construction rejects
 capabilities on channels that
 the selected node role does not possess; RN-D snoop capabilities are limited
-to `SnpDVMOp`. A connection is legal only when:
+to `SnpDVMOp`, while RN-F endpoints must accept every ordinary snoop opcode. A
+connection is legal only when:
 
 - both endpoints select the same node kind and NodeID, and the NodeID fits the
   physical width;
@@ -125,6 +134,14 @@ to `SnpDVMOp`. A connection is legal only when:
 The RN-F/RN-D and SN-F/SN-I pairs intentionally share physical interface
 types. Their exact kind remains endpoint metadata so later monitors can apply
 the distinct protocol rules without duplicating identical wiring.
+
+[`flow.rhdl`](flow.rhdl) provides node-side and ICN-side adapters for all three
+physical link shapes. `CHIRNFlowAdapter` and `CHIRNICNFlowAdapter` convert RN-F
+REQ/RSP/DAT transmit channels and RSP/DAT/SNP receive channels between credited
+transport and internal ready-valid flows. RSP and DAT are exposed as separate
+requester-response and snoop-response paths at the semantic endpoint; choosing
+which protocol transaction owns a shared physical channel is endpoint logic,
+not a transport-adapter policy.
 
 ## Fabric and System Address Map parameters
 
@@ -174,9 +191,33 @@ On a valid flit, the monitor checks:
 - that an ordinary REQ has a legal Size encoding with reserved Size bits zero;
 - that an ordinary DAT has a `DataID` legal for the configured data width.
 
-Opcode-dependent rules outside the initial non-coherent subset, multibeat
-data accounting, retry, and general ordering remain later stateful-monitor
-milestones.
+For an RN-F advertising the initial coherent capability profile, the same
+monitor also enables the bounded coherent requester checker described below.
+Opcode-dependent rules outside the implemented transaction profiles,
+multibeat data accounting, retry, and general ordering remain later
+stateful-monitor milestones.
+
+## Initial RN-F transaction monitoring
+
+[`coherent-transaction.rhdl`](coherent-transaction.rhdl) implements the first
+bounded coherent requester profile. It accepts `ReadShared` requests that fit
+in one DAT flit, requires a matching `CompData`, records the returned HomeNID
+and DBID, and then requires the matching `CompAck`. Live requester TxnIDs are
+unique and bounded by the endpoint's `max_outstanding` resource.
+
+The same checker tracks every ordinary incoming SNP transaction by Home Node
+and TxnID. A non-forward snoop completes on a matching `SnpResp` or snoop DAT
+response. A forward snoop remains live until both the response to the Home Node
+and the forwarded `CompData` to the designated requester have appeared. It
+checks bounded allocation, duplicate snoop IDs, response association, and the
+single-flit DataID/NumDat/Replicate contract.
+
+This substrate deliberately does not decide a cache response, store tags or
+data, change line state, arbitrate shared RSP/DAT producers, or implement
+coherent writes, evictions, retries, separated read responses, or multibeat
+data. Those policies belong in the future RN-F cache endpoint. HN-F directory,
+snoop generation, and completion aggregation are likewise outside this first
+step.
 
 ## Initial non-coherent transaction monitoring
 
@@ -345,10 +386,12 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
 | [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
 | [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, Size checking, and DAT packetization |
+| [`coherence.rhdl`](coherence.rhdl) | Implemented cache/response states, coherent opcode families, and mandatory RN-F snoop capability set |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
-| [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
+| [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded initial RN-F `ReadShared`/`CompData`/`CompAck` and snoop-response lifetime checks |
+| [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-F/RN-D/RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory endpoint |
 | [`home.rhdl`](home.rhdl) | Implemented bounded point-to-point HN-I for the initial single-flit non-coherent transaction profile |
@@ -375,8 +418,12 @@ turns an externally credited flit channel into a buffered internal flow.
    `SyncRam1RW` and a bounded point-to-point `CHIHNI` for single-flit reads and
    writes. Next, connect multiple ports through the generated crossbar and then
    add multibeat traffic.
-8. Add RN-F/HN-F coherence and snoop tracking, followed by optional CHI
-   features as independently verified vertical slices.
+8. **Initial RN-F substrate complete:** Add RN-F node/ICN flow adapters,
+   mandatory snoop capability validation, cache/response classifiers, and
+   bounded `ReadShared` plus snoop-response lifetime monitoring. Next, build an
+   RN-F cache endpoint on this substrate, then add HN-F directory and snoop
+   aggregation behavior. Optional CHI features follow as independently
+   verified vertical slices.
 
 Each milestone requires host elaboration tests, invalid-parameter and invalid
 connection tests, generated CIRCT verification, and a cycle-level Verilator
