@@ -193,17 +193,19 @@ On a valid flit, the monitor checks:
 
 For an RN-F advertising the initial coherent capability profile, the same
 monitor also enables the bounded coherent requester checker described below.
-Opcode-dependent rules outside the implemented transaction profiles,
-multibeat data accounting, retry, and general ordering remain later
-stateful-monitor milestones.
+Opcode-dependent rules outside the implemented transaction profiles, retry,
+and general ordering remain later stateful-monitor milestones.
 
 ## Initial RN-F transaction monitoring
 
 [`coherent-transaction.rhdl`](coherent-transaction.rhdl) implements the first
-bounded coherent requester profile. It accepts `ReadShared` requests that fit
-in one DAT flit, requires a matching `CompData`, records the returned HomeNID
-and DBID, and then requires the matching `CompAck`. Live requester TxnIDs are
-unique and bounded by the endpoint's `max_outstanding` resource.
+bounded coherent requester profile. It accepts legal-size `ReadShared`
+requests, derives their complete DataID set from Size, address, and DAT width,
+and rejects unexpected and duplicate packets. It accepts a matching `CompAck`
+after the first data packet, as CHI permits, but keeps the transaction live
+until both the acknowledgement and the complete DataID set have arrived. Live
+requester TxnIDs are unique and bounded by the endpoint's `max_outstanding`
+resource.
 
 The same checker tracks every ordinary incoming SNP transaction by Home Node
 and TxnID. A non-forward snoop completes on a matching `SnpResp` or snoop DAT
@@ -215,7 +217,7 @@ single-flit DataID/NumDat/Replicate contract.
 This substrate deliberately does not decide a cache response, store tags or
 data, change line state, arbitrate shared RSP/DAT producers, or implement
 coherent writes, evictions, retries, separated read responses, or multibeat
-data. Those policies belong in the future RN-F cache endpoint. HN-F directory,
+snoop data. Those policies belong in the future RN-F cache endpoint. HN-F directory,
 snoop generation, and completion aggregation are likewise outside this first
 step.
 

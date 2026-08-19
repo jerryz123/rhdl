@@ -116,8 +116,6 @@ import one primitive without loading unrelated generators.
 | `std/credited.rhdl` | Protocol-neutral bounded credited payload transport, monitoring, and nominal protocol introspection | None |
 | `std/flit.rhdl` | Protocol-neutral variable, framed-fixed, and implicit fixed flit payload shapes | None |
 | `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
-| `std/simple-memory.rhdl` | Ordered multi-outstanding aligned byte-addressed and byte-masked `SimpleMemory` protocol | `std/bits.rhdl`, `std/ready-valid.rhdl` |
-| `std/simple-memory/ram.rhdl` | Pipelined finite masked synchronous-RAM implementation of `SimpleMemory` | `std/simple-memory.rhdl`, `std/ready-valid.rhdl`, `std/flow/queue.rhdl`, `std/flow/pipe.rhdl` |
 | `std/sync-ram.rhdl` | Fixed-latency lane-masked shared 1RW RAM | `std/read-write.rhdl` |
 | `std/flow/ready-valid-support.rhdl` | Ready-valid protocol normalization, payload inference, and contract-preserving payload replacement for flow stages | `std/ready-valid.rhdl` |
 | `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and configured unary stages | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |

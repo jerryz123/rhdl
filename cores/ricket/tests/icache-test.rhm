@@ -10,7 +10,6 @@ import:
 def instruction_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(XLen.X64, 8, 32))
 def instruction_cache = instruction_design.modules.find(fun (module_def): module_def.name == "RicketL1ICache")
 def refill = instruction_design.modules.find(fun (module_def): module_def.name == "RicketLineRefill")
-def one_beat_design = embedded.run_elaboration(fun (): l1i.RicketL1ICache(XLen.X64, 8, 8))
 fun register_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
@@ -24,6 +23,7 @@ check:
   data_width(instruction_cache.find_input("core_in").type.field("flush").type) ~is 1
   instruction_cache.find_input("core_in").type.field("request").type.field("bits").type.field("address").type.width ~is 64
   instruction_cache.find_output("core_out").type.field("response").type.field("bits").type.field("instruction").type.width ~is 32
+  instruction_cache.find_output("chi_out").type.field("tx_req").type.field("bits").type.field("address").type.width ~is 44
   register_names(instruction_cache).contains("valid_lines") ~is #true
   register_names(instruction_cache).contains("lookup_valid") ~is #false
   register_names(instruction_cache).contains("lookup_address") ~is #false
@@ -42,13 +42,17 @@ check:
   ).length() ~is 1
   instance_names(instruction_cache).filter(
     ~keep: fun (name): name.starts_with("Arbiter")
-  ).length() ~is 1
+  ).length() ~is 2
   instance_names(instruction_cache).contains("RicketLineRefill") ~is #true
   register_names(refill) ~is [
-    "active_state", "line_address", "context", "requested", "received", "line"
+    "active_state", "request_sent", "received_packets", "acknowledgement_sent",
+    "line_address", "context", "line", "home_id", "dbid", "response_state",
+    "pass_dirty"
   ]
   verify_design(instruction_design) ~is #void
-  verify_design(one_beat_design) ~is #void
+  embedded.run_elaboration(
+    fun (): l1i.RicketL1ICache(XLen.X64, 8, 8)
+  ) ~throws "cache line size"
   embedded.run_elaboration(
     fun (): l1i.RicketL1ICache(XLen.X64, 3, 32)
   ) ~throws "Pow2Int"

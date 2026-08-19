@@ -4,11 +4,13 @@
 import:
   "../../../rhdl/core/main.rhm" open
   "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../chi.rhdl" as chi
   "../refill.rhdl" as refill
 
-def design = embedded.run_elaboration(fun (): refill.RicketLineRefill(Bits(5), 32, 32))
+def design = embedded.run_elaboration(
+  fun (): refill.RicketLineRefill(Bits(5), 32, 32, chi.default_ricket_chi_params, 2)
+)
 def engine = design.modules.find(fun (module_def): module_def.name == "RicketLineRefill")
-def one_beat_design = embedded.run_elaboration(fun (): refill.RicketLineRefill(Bits(5), 32, 8))
 fun register_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
@@ -20,15 +22,20 @@ check:
   engine.find_output("completion_out").type.field("bits").type.field("context").type.width ~is 5
   engine.find_output("completion_out").type.field("bits").type.field("line").type.length ~is 4
   engine.find_output("completion_out").type.field("bits").type.field("line").type.element_type.width ~is 64
-  engine.find_output("memory_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  engine.find_output("requests_out").type.field("bits").type.field("opcode").type.width ~is 7
+  engine.find_input("response_data_in").type.field("bits").type.field("data").type.width ~is 128
   register_names(engine) ~is [
-    "active_state", "line_address", "context", "requested", "received", "line"
+    "active_state", "request_sent", "received_packets", "acknowledgement_sent",
+    "line_address", "context", "line", "home_id", "dbid", "response_state",
+    "pass_dirty"
   ]
   verify_design(design) ~is #void
-  verify_design(one_beat_design) ~is #void
   embedded.run_elaboration(
-    fun (): refill.RicketLineRefill(Bits(5), 32, 4)
-  ) ~throws "line byte count"
+    fun (): refill.RicketLineRefill(Bits(5), 32, 8, chi.default_ricket_chi_params, 2)
+  ) ~throws "cache line size"
   embedded.run_elaboration(
-    fun (): refill.RicketLineRefill(Bits(5), 2, 8)
+    fun (): refill.RicketLineRefill(Bits(5), 2, 32, chi.default_ricket_chi_params, 2)
   ) ~throws "address width"
+  embedded.run_elaboration(
+    fun (): refill.RicketLineRefill(Bits(5), 32, 32, chi.default_ricket_chi_params, 1)
+  ) ~throws "NodeID"

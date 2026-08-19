@@ -180,9 +180,6 @@ instances, or logic to the generated RTL.
 |---|---|
 | [`std/standard-counter.rhdl`](std/standard-counter.rhdl) | Reusable bounded counter with wrap indication |
 | [`std/sync-ram.rhdl`](std/sync-ram.rhdl) | One generic lane-masked `Valid` request flow over a fixed-latency shared 1RW RAM |
-| [`std/simple-memory.rhdl`](std/simple-memory.rhdl) | Parameterized byte-masked `SimpleMemory` protocol plus generic alignment operations |
-| [`std/simple-memory-flow.rhdl`](std/simple-memory-flow.rhdl) | `SimpleMemory` request and response channels composed with standard flow control |
-| [`std/simple-memory-ram.rhdl`](std/simple-memory-ram.rhdl) | Finite byte-masked synchronous RAM serving a `SimpleMemory` interface |
 | [`std/dont-care.rhdl`](std/dont-care.rhdl) | Typed synthesis freedom and Pattern-selected fixed bits |
 | [`std/decode.rhdl`](std/decode.rhdl) | Callable typed decode relation with named aggregate fields and semantic enum values |
 | [`std/decode-composition.rhdl`](std/decode-composition.rhdl) | PatternSet input algebra plus independent decode expansion across rows, output fields, and input fields |

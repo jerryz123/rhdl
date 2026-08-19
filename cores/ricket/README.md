@@ -21,17 +21,17 @@ ricket.rhdl                         composition only
   |     |--> icache/protocol.rhdl
   |     |--> dcache/protocol.rhdl
   |     `--> ../../rhdl/std/scoreboard.rhdl
-  |--> refill.rhdl                  ordered cache-line transaction engine
-  |--> icache/cache.rhdl            instruction access -> refill -> SimpleMemory(8 B)
-  `--> dcache/cache.rhdl            data access -> refill -> SimpleMemory(8 B)
+  |--> chi.rhdl                     RN-F parameters and flit construction
+  |--> refill.rhdl                  blocking ReadShared/CompData/CompAck engine
+  |--> icache/cache.rhdl            instruction access plus clean RN-F snoops
+  `--> dcache/cache.rhdl            data access plus coherent write-through RN-F
         `--> ../load-store.rhdl
 ```
 
-`RicketCore` does not import `SimpleMemory`: it speaks Ricket's semantic
-instruction and data access protocols. Cache modules own line lookup, refill,
-beat alignment, byte masks, and load/store lane generation. The wrapper is the
-only place that composes the core and caches into the external Harvard
-memory boundary.
+`RicketCore` speaks only Ricket's semantic instruction and data access
+protocols. Cache modules own line lookup, refill, CHI transactions, snoop
+serialization, byte masks, and load/store lane generation. The wrapper
+composes the core and caches into two native RN-F links.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
@@ -116,13 +116,14 @@ ordinary addressed write.
 ## Top-level core
 
 [`ricket.rhdl`](ricket.rhdl) defines
-`Ricket(xlen, ~cache_sets: 64, ~line_bytes: 32)`. `xlen` is an `XLen` enum
-value. Architectural addresses, cache tags, and external memory address ports
-all use `xlen_width(xlen)`; Ricket has no implicit narrower-address truncation
-boundary. The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start
-consumer, separate eight-byte `SimpleMemory` instruction and data requester
-ports, and a `fault` output for a rejected misaligned external start address.
-Architectural instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
+`Ricket(xlen, ~cache_sets: 64, ~line_bytes: 32, ~chi: ...)`. `xlen` is an
+`XLen` enum value. Architectural addresses and cache tags use
+`xlen_width(xlen)` internally. The RN-F boundary uses the explicit CHI request
+address width and asserts that a wider accepted address fits before narrowing.
+The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer,
+separate instruction and data `CHIRNLink` node ports, and a sticky `fault`
+output for a rejected misaligned external start address. Architectural
+instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
 one-request-per-cycle throughput. In both caches, a one-stage lookup flow
 carries request context beside the SRAM access; a miss is filtered and mapped
 into the shared refill engine, which returns that context with the completed
@@ -131,9 +132,10 @@ them before its response queue. L1D load hits have the same throughput and pass 
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
 completion tag. Stores complete through the registered response path and drain
 through an ordered one-entry write buffer. The two
-external ports intentionally remain separate; SoC arbitration and integration
-are outside the core. The backing-memory data width stays fixed at 64 bits in
-both specializations, while its address width follows `xlen`.
+external ports intentionally remain separate RN-F Request Nodes. Home Node,
+fabric, and SoC integration remain outside the core. Ricket uses CHI's minimum
+128-bit DAT width; each 32-byte cache-line refill therefore completes from two
+ordinary, unelided DAT packets before the cache returns `CompAck`.
 
 ## Verification
 

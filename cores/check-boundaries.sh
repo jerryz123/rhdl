@@ -62,14 +62,6 @@ if [[ -n "$component_control_imports" ]]; then
   exit 1
 fi
 
-pipeline_transport_imports="$(search_sources 'simple-memory' \
-  cores/ricket/core.rhdl || true)"
-if [[ -n "$pipeline_transport_imports" ]]; then
-  echo "Ricket pipeline must depend on its cache protocol, not SimpleMemory" >&2
-  echo "$pipeline_transport_imports" >&2
-  exit 1
-fi
-
 cache_cross_imports="$(search_sources '^[[:space:]]+"[^" ]*(icache|dcache)/' \
   cores/ricket/icache cores/ricket/dcache \
   || true)"

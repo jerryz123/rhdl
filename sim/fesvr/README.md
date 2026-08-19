@@ -85,8 +85,8 @@ TestDriver.sv
     └── CHIRam (SN-I, NodeID 9)
 ```
 
-The links are connected directly. There is no `SimpleMemory` protocol,
-compatibility adapter, shared-memory owner queue, processor port, or crossbar.
+The links are connected directly, without a compatibility adapter, shared-memory
+owner queue, processor port, or crossbar.
 The RAM covers `0x80000000` through `0x80001fff`, which includes both the ELF
 entry point and the test program's HTIF mailbox.
 
@@ -108,4 +108,4 @@ The second target additionally requires CIRCT, Verilator, and an RV32-capable
 installations.
 
 A later processor integration should add a native CHI Request Node and a CHI
-fabric. It should not restore the removed `SimpleMemory` simulation hierarchy.
+fabric.

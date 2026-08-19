@@ -1,0 +1,207 @@
+#lang rhdl
+// Defines Ricket's native RN-F endpoint parameters and conservative CHI flit constructors.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("chi/main.rhdl") open
+
+class RicketCHIParams(flit :: CHIFlitParams,
+                      home_node_id :: Nat,
+                      instruction_node_id :: Nat,
+                      data_node_id :: Nat):
+  property instruction_link: CHIRNLinkParams(flit)
+  property data_link: CHIRNLinkParams(flit)
+  property instruction_node:
+    CHINodeParams(
+      "ricket-l1i",
+      instruction_node_id,
+      CHINodeKind.RNF,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadShared],
+        ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~snp: chi_rnf_snoop_opcodes,
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 2
+    )
+  property data_node:
+    CHINodeParams(
+      "ricket-l1d",
+      data_node_id,
+      CHINodeKind.RNF,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadShared, CHIReqOpcode.WriteUniquePtl],
+        ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp],
+        ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+        ~snp: chi_rnf_snoop_opcodes,
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 2
+    )
+
+def default_ricket_chi_params = RicketCHIParams(
+  CHIFlitParams(),
+  1,
+  2,
+  3
+)
+
+fun checked_ricket_chi_params(params :: RicketCHIParams):
+  def p = params.flit
+  unless bits.length(params.home_node_id) <= p.node_id_width
+  | error(~who: #'RicketCHIParams,
+          "Home NodeID must fit in the CHI NodeID width")
+  unless bits.length(params.instruction_node_id) <= p.node_id_width
+  | error(~who: #'RicketCHIParams,
+          "instruction NodeID must fit in the CHI NodeID width")
+  unless bits.length(params.data_node_id) <= p.node_id_width
+  | error(~who: #'RicketCHIParams,
+          "data NodeID must fit in the CHI NodeID width")
+  unless params.home_node_id != params.instruction_node_id && (
+    params.home_node_id != params.data_node_id
+  ) && params.instruction_node_id != params.data_node_id
+  | error(~who: #'RicketCHIParams,
+          "Home, instruction, and data NodeIDs must be distinct")
+  params
+
+fun ricket_chi_address(address :: Hardware.bits,
+                       p :: CHIFlitParams) :~ Bits(p.request_address_width):
+  def width = hardware_value_type(address).bit_width()
+  cond
+  | width < p.request_address_width: zext(address, p.request_address_width)
+  | width == p.request_address_width: address
+  | ~else: address[0..p.request_address_width]
+
+fun ricket_chi_address_fits(address :: Hardware.bits,
+                            p :: CHIFlitParams) :~ Bool:
+  def width = hardware_value_type(address).bit_width()
+  if width <= p.request_address_width
+  | Bool(#true)
+  | !or_reduce(address[p.request_address_width..width])
+
+fun ricket_chi_request(p :: CHIFlitParams,
+                       node_id :: Nat,
+                       home_node_id :: Nat,
+                       raw_address,
+                       size,
+                       opcode :: CHIReqOpcode,
+                       txn_id :: Bits(12),
+                       expect_comp_ack :: Bool):
+  wire request: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | request.rsvdc <== bits(0, p.req_rsvdc_width)
+  | #void
+  if p.sec_sid_width > 0
+  | request.sec_sid1 <== bits(0, p.sec_sid_width)
+  | #void
+  if p.request_security_width > 0
+  | request.mecid_or_stream_id <== bits(0, p.request_security_width)
+  | #void
+  if p.pbha_width > 0
+  | request.pbha <== bits(0, p.pbha_width)
+  | #void
+  if p.mpam_width > 0
+  | request.mpam <== bits(0, p.mpam_width)
+  | #void
+  request.trace_tag <== Bool(#false)
+  request.tag_op <== bits(0, 2)
+  request.exp_comp_ack <== expect_comp_ack
+  request.excl_snoop_me_cah <== Bool(#false)
+  request.group_id_or_lpid <== bits(0, 8)
+  request.snp_attr_or_do_dwt <== Bool(#true)
+  request.mem_attr <== bits(0, 4)
+  request.pcrd_type <== bits(0, 4)
+  request.order <== bits(0, 2)
+  request.allow_retry <== Bool(#false)
+  request.likely_shared <== Bool(#false)
+  request.pas <== bits(0, 3)
+  request.address <== ricket_chi_address(raw_address, p)
+  request.size_or_num_req <== zext(size, 6)
+  request.multi_req <== Bool(#false)
+  request.opcode <== opcode
+  request.return_txn_id_or_stash_lpid <== txn_id
+  request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
+  request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
+  request.txn_id <== txn_id
+  request.src_id <== bits(node_id, p.node_id_width)
+  request.tgt_id <== bits(home_node_id, p.node_id_width)
+  request.qos <== bits(0, 4)
+  request
+
+fun ricket_chi_response(p :: CHIFlitParams,
+                        node_id :: Nat,
+                        target_id,
+                        txn_id,
+                        opcode :: CHIRspOpcode):
+  CHIRspFlit(p):
+    cache_line_id: bits(0, 6)
+    trace_tag: Bool(#false)
+    tag_op: bits(0, 2)
+    pcrd_type: bits(0, 4)
+    dbid_or_group_id: bits(0, 12)
+    c_busy: bits(0, 3)
+    fwd_state_or_data_pull: bits(0, 3)
+    resp: bits(0, 3)
+    resp_err: bits(0, 2)
+    opcode: opcode
+    txn_id: txn_id
+    src_id: bits(node_id, p.node_id_width)
+    tgt_id: target_id
+    qos: bits(0, 4)
+
+fun ricket_chi_write_data(p :: CHIFlitParams,
+                          node_id :: Nat,
+                          home_node_id,
+                          dbid,
+                          data,
+                          byte_enable):
+  wire flit: CHIDatFlit(p)
+  if p.poison_width > 0
+  | flit.poison <== bits(0, p.poison_width)
+  | #void
+  if p.data_check_width > 0
+  | flit.data_check <== bits(0, p.data_check_width)
+  | #void
+  flit.data <== data
+  flit.byte_enable <== byte_enable
+  if p.dat_rsvdc_width > 0
+  | flit.rsvdc <== bits(0, p.dat_rsvdc_width)
+  | #void
+  flit.replicate <== Bool(#false)
+  flit.num_dat <== bits(0, 2)
+  flit.cah <== Bool(#false)
+  flit.trace_tag <== Bool(#false)
+  flit.tag_update <== bits(0, p.tag_update_width)
+  flit.tag <== bits(0, p.tag_width)
+  flit.tag_op <== bits(0, 2)
+  flit.cache_line_id <== bits(0, 6)
+  flit.data_id <== bits(0, 2)
+  flit.ccid <== bits(0, 2)
+  flit.dbid_or_mecid <== zext(dbid, 16)
+  flit.c_busy <== bits(0, 3)
+  flit.data_pull <== Bool(#false)
+  flit.data_source_or_fwd_state <== bits(0, 8)
+  flit.resp <== bits(0, 3)
+  flit.resp_err <== bits(0, 2)
+  flit.opcode <== CHIDatOpcode.NonCopyBackWriteData
+  flit.home_nid_or_pbha_or_mismatched_mecid <== home_node_id
+  flit.txn_id <== dbid
+  flit.src_id <== bits(node_id, p.node_id_width)
+  flit.tgt_id <== home_node_id
+  flit.qos <== bits(0, 4)
+  flit
+
+export:
+  RicketCHIParams
+  default_ricket_chi_params
+  checked_ricket_chi_params
+  ricket_chi_address
+  ricket_chi_address_fits
+  ricket_chi_request
+  ricket_chi_response
+  ricket_chi_write_data

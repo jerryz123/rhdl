@@ -3,32 +3,35 @@
 
 import:
   "core.rhdl" open
+  "chi.rhdl" open
   "icache/cache.rhdl" open
   "dcache/cache.rhdl" open
   "../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl").Pow2Int
   lib("rhdl/std/ready-valid.rhdl") open
-  lib("rhdl/std/simple-memory.rhdl") open
+  lib("chi/main.rhdl") open
 
 sync_circuit Ricket(xlen :: XLen,
                     ~cache_sets: cache_sets :: Pow2Int = 64,
-                    ~line_bytes: line_bytes :: Pow2Int = 32):
+                    ~line_bytes: line_bytes :: Pow2Int = 32,
+                    ~chi: params :: RicketCHIParams = default_ricket_chi_params):
   def width = xlen_width(xlen)
+  def checked = checked_ricket_chi_params(params)
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
-  interface imem(SimpleMemory(width, 8), ~role: requester)
-  interface dmem(SimpleMemory(width, 8), ~role: requester)
+  interface imem(CHIRNLink(checked.instruction_link, checked.instruction_node), ~role: node)
+  interface dmem(CHIRNLink(checked.data_link, checked.data_node), ~role: node)
   output fault: Bool
 
   inst core(RicketCore(xlen))
-  inst l1i(RicketL1ICache(xlen, cache_sets, line_bytes))
-  inst l1d(RicketL1DCache(xlen, cache_sets, line_bytes))
+  inst l1i(RicketL1ICache(xlen, cache_sets, line_bytes, ~chi: checked))
+  inst l1d(RicketL1DCache(xlen, cache_sets, line_bytes, ~chi: checked))
 
   start |> core.start
   core.instruction_access |> l1i.core
   core.data_access |> l1d.core
-  l1i.memory |> imem
-  l1d.memory |> dmem
+  forward_chi_rn_node_port(imem, l1i.chi)
+  forward_chi_rn_node_port(dmem, l1d.chi)
   fault <== core.fault
 
 export:

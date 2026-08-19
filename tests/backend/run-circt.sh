@@ -88,7 +88,7 @@ integration_fixtures=(
   alu enum-state shifts signed-integers generated-adder
   formal-differential
   vector-update vec-shift-register-param
-  async-read-memory sync-memory-masked simple-memory-ram sync-ram
+  async-read-memory sync-memory-masked sync-ram
   clocked-dpi assertions hierarchy bundle interface-array
   queue-options rr-arbiter round-robin-matcher ctrl-queue-options
   dont-care decode noc-route-computer noc-router noc-network noc-wormhole noc-router-family noc-escape-router
@@ -454,11 +454,6 @@ fixture_specs=(
   'sync-memory|sync_memory_tb|examples/rhdl/sync-memory.rhdl|design|verilog_reference'
   'sync-memory-1rw|sync_memory_1rw_tb|examples/rhdl/sync-memory-1rw.rhdl|design|verilog_reference'
   'sync-memory-masked|sync_memory_masked_tb|examples/rhdl/sync-memory-masked.rhdl|design|verilog_reference'
-  'simple-memory||examples/std/simple-memory.rhdl|design|verilog_reference'
-  'simple-memory-alignment||examples/std/simple-memory.rhdl|alignment_design|alignment_verilog_reference'
-  'simple-memory-activity||examples/std/simple-memory.rhdl|activity_design|activity_verilog_reference'
-  'simple-memory-flow||examples/std/simple-memory-flow.rhdl|design|verilog_reference'
-  'simple-memory-ram|simple_memory_ram_tb|examples/std/simple-memory-ram.rhdl|design|verilog_reference'
   'multi-write-memory|multi_write_memory_tb|examples/rhdl/multi-write-memory.rhdl|design|verilog_reference'
   'clocked-dpi|clocked_dpi_tb|examples/rhdl/clocked-dpi.rhdl|design|verilog_reference'
   'clocked-dpi-always||examples/rhdl/clocked-dpi.rhdl|always_design|always_verilog_reference'

@@ -1,4 +1,4 @@
-// Simulates legal initial-profile RN-F coherent read and snoop transactions.
+// Simulates legal multibeat RN-F coherent reads and snoop transactions.
 module chi_coherent_tb;
   typedef struct packed { logic credit; } credit_t;
   typedef struct packed { logic valid; CHIReqFlit bits; } req_forward_t;
@@ -92,13 +92,14 @@ module chi_coherent_tb;
     rx_dat_credit = 1'b1;
     tick();
     port_in.tx_req.credit = 1'b0;
+    tick();
     rx_dat_credit = 1'b0;
     tx_req_valid = 1'b1;
     tx_req_bits.opcode = 7'h01;
     tx_req_bits.src_id = 7'h05;
     tx_req_bits.tgt_id = 7'h09;
     tx_req_bits.txn_id = 12'h101;
-    tx_req_bits.size_or_num_req = 6'h04;
+    tx_req_bits.size_or_num_req = 6'h05;
     tx_req_bits.exp_comp_ack = 1'b1;
     tick();
     clear_flits();
@@ -110,6 +111,7 @@ module chi_coherent_tb;
     port_in.rx_dat.bits.txn_id = 12'h101;
     port_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid = 7'h09;
     port_in.rx_dat.bits.dbid_or_mecid = 16'h0055;
+    port_in.rx_dat.bits.data_id = 2'h1;
     tick();
     clear_flits();
 
@@ -121,6 +123,17 @@ module chi_coherent_tb;
     tx_rsp_bits.src_id = 7'h05;
     tx_rsp_bits.tgt_id = 7'h09;
     tx_rsp_bits.txn_id = 12'h055;
+    tick();
+    clear_flits();
+
+    port_in.rx_dat.valid = 1'b1;
+    port_in.rx_dat.bits.opcode = 4'h4;
+    port_in.rx_dat.bits.src_id = 7'h09;
+    port_in.rx_dat.bits.tgt_id = 7'h05;
+    port_in.rx_dat.bits.txn_id = 12'h101;
+    port_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid = 7'h09;
+    port_in.rx_dat.bits.dbid_or_mecid = 16'h0055;
+    port_in.rx_dat.bits.data_id = 2'h0;
     tick();
     clear_flits();
 

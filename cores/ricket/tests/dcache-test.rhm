@@ -17,7 +17,6 @@ def data_request_member = data_access_type.members.find(
 def refill = design.modules.find(fun (module_def): module_def.name == "RicketLineRefill")
 def rv32_design = embedded.run_elaboration(fun (): l1d.RicketL1DCache(XLen.X32, 8, 32))
 def rv32_cache = rv32_design.modules.find(fun (module_def): module_def.name == "RicketL1DCache")
-def one_beat_design = embedded.run_elaboration(fun (): l1d.RicketL1DCache(XLen.X64, 8, 8))
 fun register_names(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
@@ -33,11 +32,11 @@ check:
   cache.find_input("core_in").type.field("request").type.field("bits").type.field("address").type.width ~is 64
   cache.find_input("core_in").type.field("request").type.field("bits").type.field("tag").type.width ~is 5
   cache.find_output("core_out").type.field("response").type.field("bits").type.field("tag").type.width ~is 5
-  cache.find_output("memory_out").type.field("request").type.field("bits").type.field("mask").type.width ~is 8
+  cache.find_output("chi_out").type.field("tx_dat").type.field("bits").type.field("byte_enable").type.width ~is 16
   rv32_cache.find_input("core_in").type.field("request").type.field("bits").type.field("data").type.width ~is 32
   rv32_cache.find_input("core_in").type.field("request").type.field("bits").type.field("address").type.width ~is 32
   rv32_cache.find_output("core_out").type.field("response").type.field("bits").type.field("data").type.width ~is 32
-  rv32_cache.find_output("memory_out").type.field("request").type.field("bits").type.field("data").type.width ~is 64
+  rv32_cache.find_output("chi_out").type.field("tx_req").type.field("bits").type.field("address").type.width ~is 44
   register_names(cache).contains("valid_lines") ~is #true
   register_names(cache).contains("lookup_valid") ~is #false
   register_names(cache).contains("lookup_request") ~is #false
@@ -45,7 +44,9 @@ check:
   register_names(cache).contains("refill_received") ~is #false
   register_names(cache).contains("refill_line") ~is #false
   register_names(cache).contains("store_active") ~is #true
-  register_names(cache).contains("store_sent") ~is #true
+  register_names(cache).contains("store_request_sent") ~is #true
+  register_names(cache).contains("store_dbid_received") ~is #true
+  register_names(cache).contains("store_data_sent") ~is #true
   register_names(cache).contains("outstanding") ~is #false
   register_names(cache).contains("state") ~is #false
   instance_names(cache).filter(
@@ -53,11 +54,15 @@ check:
   ).length() ~is 1
   instance_names(cache).contains("RicketLineRefill") ~is #true
   register_names(refill) ~is [
-    "active_state", "line_address", "context", "requested", "received", "line"
+    "active_state", "request_sent", "received_packets", "acknowledgement_sent",
+    "line_address", "context", "line", "home_id", "dbid", "response_state",
+    "pass_dirty"
   ]
   verify_design(design) ~is #void
   verify_design(rv32_design) ~is #void
-  verify_design(one_beat_design) ~is #void
+  embedded.run_elaboration(
+    fun (): l1d.RicketL1DCache(XLen.X64, 8, 8)
+  ) ~throws "cache line size"
   embedded.run_elaboration(
     fun (): l1d.RicketL1DCache(XLen.X64, 8, 24)
   ) ~throws "Pow2Int"
