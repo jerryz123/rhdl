@@ -25,16 +25,23 @@ class InputLeaf(input_index, path)
 class ValueLeaf(value, path)
 class ValueDependencySummary(value, path, input_leaves)
 class OutputLeafDependency(path, input_leaves)
-class ModuleDependencySummary(module_def, output_leaf_dependencies)
+class ModuleDependencySummary(module_def, output_leaf_dependencies):
+  private field output_leaf_maps:
+    for List (output_dependencies in output_leaf_dependencies):
+      block:
+        def leaves_by_path = MutableMap{}
+        for (dependency in output_dependencies):
+          leaves_by_path[dependency.path] := dependency
+        leaves_by_path
+
+  method find_output_leaf(output_index, path):
+    output_leaf_maps[output_index].get(path, #false)
 
 fun fail(message):
   error(~who: #'verify, message)
 
 fun fail_operation(operation, message):
   fail(operation.location.describe() ++ ": " ++ message)
-
-fun contains_identity(items, item):
-  items.find(fun (candidate): candidate === item)
 
 fun identity_index(items, item):
   def mutable result = #false
@@ -52,40 +59,34 @@ fun equal_index(items, item):
     | result := index
   result
 
-fun same_input_leaf(left, right):
-  left.input_index == right.input_index && left.path == right.path
-
 fun merge_input_leaves(left, right):
-  def mutable result = left
+  def result = MutableList[& left]
+  def seen = MutableSet{}
+  for (leaf in left):
+    seen.add([leaf.input_index, leaf.path])
   for (leaf in right):
-    unless result.find(fun (candidate): same_input_leaf(candidate, leaf))
-    | result := result ++ [leaf]
-  result
+    def key = [leaf.input_index, leaf.path]
+    unless key in seen
+    | seen.add(key)
+      result.add(leaf)
+  result.snapshot()
 
 fun leaf_paths(type):
   cond
   | record_type(type):
-      def mutable result = []
+      def result = MutableList[]
       for (field in type.fields):
         for (path in leaf_paths(field.type)):
-          result := result ++ [[field.name] ++ path]
-      result
+          result.add([field.name] ++ path)
+      result.snapshot()
   | vector_type(type):
-      def mutable result = []
+      def result = MutableList[]
       for (index in 0..type.length):
         for (path in leaf_paths(type.element_type)):
-          result := result ++ [[index] ++ path]
-      result
+          result.add([index] ++ path)
+      result.snapshot()
   | ~else:
       [[]]
-
-fun projection_index(summaries, value, path):
-  def mutable result = #false
-  for (summary in summaries,
-       index in 0..summaries.length()):
-    when result == #false && summary.value === value && summary.path == path
-    | result := index
-  result
 
 fun describe_value_path(value, path):
   def mutable result = value.name
@@ -175,39 +176,44 @@ fun direct_operation_dependencies(value, path, operation):
 fun direct_value_dependencies(value, path):
   direct_operation_dependencies(value, path, value.module_def.find_operation(value.defining_op_id))
 
-fun is_drive_to(operation, place_id):
-  operation.opcode == "rtl.drive" && operation.places.length() == 1 && operation.places[0].id == place_id
-
 // Summarizes output-to-input combinational dependencies and rejects cycles.
 // Temporal analysis consumes the same direct leaf dependency rules above.
 fun verify_combinational_cycles(module_defs):
-  def mutable module_summaries = []
-  def mutable active_modules = []
+  def module_summaries = MutableMap.by(===){}
+  def active_modules = MutableSet.by(===){}
 
   fun summarize_module(module_def):
-    def cached = module_summaries.find(
-      fun (summary): summary.module_def === module_def
-    )
+    def cached = module_summaries.get(module_def, #false)
     if cached
     | cached
     | block:
-        when contains_identity(active_modules, module_def)
+        when module_def in active_modules
         | fail("recursive module instantiation involving " ++ module_def.name)
-        active_modules := active_modules ++ [module_def]
-        def mutable value_summaries = []
-        def mutable active_values = []
+        active_modules.add(module_def)
+        def value_summaries = MutableMap.by(===){}
+        def active_values = MutableList[]
+        def active_value_indices = MutableMap.by(===){}
+
+        fun path_map(table, value, create = #false):
+          def existing = table.get(value, #false)
+          if existing || !create
+          | existing
+          | block:
+              def paths = MutableMap{}
+              table[value] := paths
+              paths
 
         fun summarize_value(value, path, via_operation = #false):
-          def cached_value = value_summaries.find(
-            fun (summary): summary.value === value && summary.path == path
-          )
+          def summaries_for_value = path_map(value_summaries, value)
+          def cached_value = summaries_for_value && summaries_for_value.get(path, #false)
           if cached_value
           | cached_value.input_leaves
           | block:
-              def active_index = projection_index(active_values, value, path)
+              def active_paths = path_map(active_value_indices, value)
+              def active_index = active_paths && active_paths.get(path, #false)
               when active_index is_a Nat
               | def repeated = ValueDependencySummary(value, path, [])
-                def cycle = active_values.drop(active_index) ++ [repeated]
+                def cycle = active_values.snapshot().drop(active_index) ++ [repeated]
                 def cycle_path = String.join(
                   cycle.map(
                     fun (candidate):
@@ -226,15 +232,15 @@ fun verify_combinational_cycles(module_defs):
                 if via_operation
                 | fail_operation(via_operation, message)
                 | fail(message)
-              active_values := active_values ++ [
-                ValueDependencySummary(value, path, [])
-              ]
+              def active_summary = ValueDependencySummary(value, path, [])
+              path_map(active_value_indices, value, #true)[path] := active_values.length()
+              active_values.add(active_summary)
               def operation = module_def.find_operation(value.defining_op_id)
               def input_index = identity_index(
                 module_def.inputs.map(fun (port): port.value),
                 value
               )
-              def direct_dependencies = direct_value_dependencies(value, path)
+              def direct_dependencies = direct_operation_dependencies(value, path, operation)
               def input_leaves:
                 cond
                 | input_index is_a Nat:
@@ -254,14 +260,10 @@ fun verify_combinational_cycles(module_defs):
                     def child_summary = summarize_module(child)
                     def output_index = identity_index(operation.results, value)
                     def mutable dependencies = []
-                    def output_leaf = child_summary.output_leaf_dependencies[
-                      output_index
-                    ].find(fun (candidate): candidate.path == path)
+                    def output_leaf = child_summary.find_output_leaf(output_index, path)
                     for (input_leaf in output_leaf.input_leaves):
                       def input_place = operation.places[input_leaf.input_index]
-                      def drive_operation = module_def.operations.find(
-                        fun (candidate): is_drive_to(candidate, input_place.id)
-                      )
+                      def drive_operation = module_def.find_drive_to(input_place.id)
                       def driver = place_leaf_driver(input_place, input_leaf.path)
                       dependencies := merge_input_leaves(
                         dependencies,
@@ -272,11 +274,10 @@ fun verify_combinational_cycles(module_defs):
                     dependencies
                 | ~else:
                     []
-              active_values := active_values.filter(
-                ~keep: fun (candidate): !(candidate.value === value && candidate.path == path)
-              )
+              active_values.delete(active_values.length() - 1)
+              path_map(active_value_indices, value).remove(path)
               def summary = ValueDependencySummary(value, path, input_leaves)
-              value_summaries := value_summaries ++ [summary]
+              path_map(value_summaries, value, #true)[path] := summary
               input_leaves
 
         // Visit every leaf of dead values too: an unobservable combinational
@@ -293,10 +294,8 @@ fun verify_combinational_cycles(module_defs):
                                                    driver.path))
         def summary = ModuleDependencySummary(module_def,
                                               output_leaf_dependencies)
-        module_summaries := module_summaries ++ [summary]
-        active_modules := active_modules.filter(
-          ~keep: fun (candidate): !(candidate === module_def)
-        )
+        module_summaries[module_def] := summary
+        active_modules.remove(module_def)
         summary
 
   for (module_def in module_defs):

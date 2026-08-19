@@ -46,7 +46,7 @@ fun ensure_hardware_name(name :: AsciiIdentifier, who):
   | fail(who, "hardware names beginning with __rhdl_ are reserved")
 
 fun ensure_module_in_design(design :: Design, module_def :: Module, who):
-  def owned = module_def.design === design && design.modules.find(fun (candidate): candidate === module_def)
+  def owned = module_def.design === design && design.owns_module(module_def)
   unless owned
   | fail(who, "module belongs to a different design")
 
@@ -55,17 +55,17 @@ fun ensure_open(module_def :: Module, who):
   | fail(who, "module " ++ module_def.name ++ " is already finished")
 
 fun ensure_value_in(module_def :: Module, value :: Value, who):
-  def owned = value.module_def === module_def && module_def.values.find(fun (candidate): candidate === value)
+  def owned = value.module_def === module_def && module_def.owns_value(value)
   unless owned
   | fail(who, "hardware value belongs to a different module")
 
 fun ensure_memory_in(module_def :: Module, memory :: Memory, who):
-  def owned = memory.module_def === module_def && module_def.memories.find(fun (candidate): candidate === memory)
+  def owned = memory.module_def === module_def && module_def.owns_memory(memory)
   unless owned
   | fail(who, "memory belongs to a different module")
 
 fun ensure_dpi_import_in(design :: Design, dpi_import :: DpiImport, who):
-  def owned = dpi_import.design === design && design.dpi_imports.find(fun (candidate): candidate === dpi_import)
+  def owned = dpi_import.design === design && design.owns_dpi_import(dpi_import)
   unless owned
   | fail(who, "DPI import belongs to a different design")
 
@@ -100,7 +100,7 @@ fun root_place(place):
 
 fun ensure_place_in(module_def :: Module, place :: Place, who):
   def root = root_place(place)
-  def owned = root && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
+  def owned = root && place.module_def === module_def && module_def.owns_place(root)
   unless owned
   | fail(who, "hardware place belongs to a different module")
 
@@ -126,25 +126,15 @@ fun aggregate_place_complete(place):
       | #false
 
 fun ensure_unique_hardware_name(module_def, name, who):
-  def value_named = module_def.values.find(fun (value): value.name == name)
-  def place_named = module_def.places.find(fun (place): place.name == name)
-  def memory_named = module_def.memories.find(fun (memory): memory.name == name)
-  def sync_memory_named = module_def.operations.find(
-    fun (operation): operation.opcode == "rtl.sync_memory" && operation.attribute("name", #false) == name
-  )
-  when value_named || place_named || memory_named || sync_memory_named
+  when module_def.hardware_name_used(name)
   | fail(who, "duplicate hardware name " ++ name)
 
 fun ensure_unique_instance_name(module_def, name, who):
-  when module_def.operations.find(
-    fun (operation): operation.opcode == "rtl.instance" && operation.attribute("name", #false) == name
-  )
+  when module_def.find_instance(name)
   | fail(who, "duplicate instance name " ++ name)
 
 fun instance_name_used(module_def, name):
-  module_def.operations.find(
-    fun (operation): operation.opcode == "rtl.instance" && operation.attribute("name", #false) == name
-  )
+  module_def.find_instance(name)
 
 fun build_value_operation(design,
                           module_def,
@@ -614,7 +604,7 @@ class Builder(design :: Design):
 
   method module(name):
     ensure_hardware_name(name, #'module)
-    when design.modules.find(fun (candidate): candidate.name == name)
+    when design.find_module_named(name)
     | fail(#'module, "duplicate module name " ++ name)
     def module_def = Module(design, design.fresh_id(), name)
     design.add_module(module_def)
@@ -1865,7 +1855,7 @@ class Builder(design :: Design):
     ensure_hardware_name(name, #'instance)
     unless child.finished
     | fail(#'instance, "instance target must be a finished module definition")
-    def child_owned = child.design === design && design.modules.find(fun (candidate): candidate === child)
+    def child_owned = child.design === design && design.owns_module(child)
     unless child_owned
     | fail(#'instance, "instance target belongs to a different design")
     ensure_unique_instance_name(module_def, name, #'instance)
@@ -1927,7 +1917,7 @@ class Builder(design :: Design):
                origin = Origin("drive")):
     def module_def = design.find_module(place.module_id)
     def root = root_place(place)
-    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.owns_place(root)
     unless target_owned
     | fail(#'drive, "drive target belongs to a different design")
     ensure_open(module_def, #'drive)
@@ -1958,7 +1948,7 @@ class Builder(design :: Design):
   method read(place :: Place):
     def module_def = design.find_module(place.module_id)
     def root = root_place(place)
-    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.places.find(fun (candidate): candidate === root)
+    def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.owns_place(root)
     unless target_owned
     | fail(#'read, "read target belongs to a different design")
     def owner = module_def.find_operation(root.owner_op_id)
@@ -2009,5 +1999,6 @@ class Builder(design :: Design):
             place,
             ~preserve_projections: owner && owner.opcode == "rtl.wire"
           )
+    module_def.finish_collections()
     module_def.finished := #true
     module_def

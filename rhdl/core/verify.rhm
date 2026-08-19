@@ -391,7 +391,7 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "vector_write_set result has the wrong vector type")
   | "memory":
       def memory = operation.attribute("memory", #false)
-      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      unless memory is_a Memory && memory.module_def === module_def && module_def.owns_memory(memory)
       | fail_operation(operation, "memory allocation references an invalid memory")
       unless memory.defining_op_id == operation.id
       | fail_operation(operation, "memory has the wrong defining operation")
@@ -405,7 +405,7 @@ fun check_operation_types(module_def, operation, schema):
       def memory = operation.attribute("memory", #false)
       def address = operation.operands[0]
       def result = operation.results[0]
-      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      unless memory is_a Memory && memory.module_def === module_def && module_def.owns_memory(memory)
       | fail_operation(operation, "memory read references an invalid memory")
       def valid_depth = memory is_a Memory
       def expected_width = if valid_depth | memory_address_width(memory.depth) | #false
@@ -419,7 +419,7 @@ fun check_operation_types(module_def, operation, schema):
       def data = operation.operands[1]
       def clock = operation.operands[2]
       def enable = operation.operands[3]
-      unless memory is_a Memory && memory.module_def === module_def && contains_identity(module_def.memories, memory)
+      unless memory is_a Memory && memory.module_def === module_def && module_def.owns_memory(memory)
       | fail_operation(operation, "memory write references an invalid memory")
       def valid_depth = memory is_a Memory
       def expected_width = if valid_depth | memory_address_width(memory.depth) | #false
@@ -431,10 +431,7 @@ fun check_operation_types(module_def, operation, schema):
       | fail_operation(operation, "memory write clock must be Clock")
       unless flat_data_type(enable.type) && data_width(enable.type) == 1
       | fail_operation(operation, "memory write enable must be a one-bit FlatDataType")
-      def writes = module_def.operations.filter(
-        ~keep: fun (candidate): candidate.opcode == "rtl.memory_write" && candidate.attribute("memory", #false) === memory
-      )
-      unless (for all (candidate in writes): candidate.operands[2] === clock)
+      unless module_def.memory_write_clock_consistent(memory)
       | fail_operation(operation, "memory write ports must use the same clock")
   | "sync_memory":
       def depth = operation.attribute("depth", #false)
@@ -554,7 +551,7 @@ fun check_operation_types(module_def, operation, schema):
                        "assert label must be an ASCII identifier")
   | "dpi_call" || "dpi_register":
       def dpi_import = operation.attribute("dpi_import", #false)
-      unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && contains_identity(module_def.design.dpi_imports, dpi_import)
+      unless dpi_import is_a DpiImport && dpi_import.design === module_def.design && module_def.design.owns_dpi_import(dpi_import)
       | fail_operation(operation, "DPI operation references an invalid import")
       unless operation.operands.length() >= 3
       | fail_operation(operation, "DPI operation requires a clock, enable, and input operands")
@@ -610,12 +607,12 @@ fun check_operation_types(module_def, operation, schema):
       unless operation.attribute("promise", #false) == "stable_level"
       | fail_operation(operation, "sync-level crossing must carry the stable-level promise")
       def mutable prior = source
-      def mutable seen_stages = []
+      def seen_stages = MutableSet.by(===){}
       for (stage in stages,
            index in 0..stages.length()):
-        when contains_identity(seen_stages, stage)
+        when stage in seen_stages
         | fail_operation(operation, "sync-level crossing stages must be distinct")
-        seen_stages := seen_stages ++ [stage]
+        seen_stages.add(stage)
         def stage_operation = module_def.find_operation(stage.defining_op_id)
         unless stage_operation && stage_operation.opcode == "rtl.register" && stage_operation.results[0] === stage
         | fail_operation(operation, "sync-level crossing stages must be resetless registers")
@@ -636,11 +633,7 @@ fun check_operation_types(module_def, operation, schema):
           when functional_users.length() != 0
           | fail_operation(operation,
                            "sync-level crossing intermediate stages must not have functional fanout")
-        def crossing_uses:
-          module_def.operations.filter(
-            ~keep: fun (candidate): candidate.opcode == "cdc.sync_level" && candidate.operands.drop(2).find(fun (candidate_stage): candidate_stage === stage)
-          )
-        unless crossing_uses.length() == 1
+        unless module_def.sync_crossing_use_count(stage) == 1
         | fail_operation(operation, "a register stage may belong to exactly one sync-level crossing")
         prior := stage
   | "type_equal_drive":
@@ -654,7 +647,7 @@ fun check_operation_types(module_def, operation, schema):
       def child = operation.attribute("module", #false)
       unless child is_a Module && child.finished
       | fail_operation(operation, "instance target is not a finished module")
-      def child_owned = child.design === module_def.design && contains_identity(module_def.design.modules, child)
+      def child_owned = child.design === module_def.design && module_def.design.owns_module(child)
       unless child_owned
       | fail_operation(operation, "instance target belongs to a different design")
       unless operation.places.length() == child.inputs.length()
@@ -672,21 +665,36 @@ fun check_operation_types(module_def, operation, schema):
   | ~else:
       #void
 
-fun is_drive_to(operation, place_id):
-  operation.opcode == "rtl.drive" && operation.places.length() == 1 && operation.places[0].id == place_id
+fun increment_count(counts, key):
+  counts[key] := counts.get(key, 0) + 1
 
 fun verify_module_structure(module_def):
-  def module_owned = module_def is_a Module && module_def.design is_a Design && contains_identity(module_def.design.modules, module_def)
+  def module_owned = module_def is_a Module && module_def.design is_a Design && module_def.design.owns_module(module_def)
   unless module_owned
   | fail("module belongs to a different design")
   unless module_def.finished
   | fail("module " ++ module_def.name ++ " has not been finished")
+  def instance_name_counts = MutableMap{}
+  def sync_memory_name_counts = MutableMap{}
+  def drive_counts = MutableMap{}
+  def memory_name_counts = MutableMap{}
+  for (operation in module_def.operations):
+    when operation is_a Operation
+    | when operation.opcode == "rtl.instance"
+      | increment_count(instance_name_counts, operation.attribute("name", #false))
+      when operation.opcode == "rtl.sync_memory"
+      | increment_count(sync_memory_name_counts, operation.attribute("name", #false))
+      when operation.opcode == "rtl.drive" && operation.places.length() == 1
+      | increment_count(drive_counts, operation.places[0].id)
+  for (memory in module_def.memories):
+    when memory is_a Memory
+    | increment_count(memory_name_counts, memory.name)
   for (port in module_def.inputs):
-    def input_valid = type_well_formed(port.type) && port.value && !port.place && port.value.module_def === module_def && contains_identity(module_def.values, port.value)
+    def input_valid = type_well_formed(port.type) && port.value && !port.place && port.value.module_def === module_def && module_def.owns_value(port.value)
     unless input_valid
     | fail("input " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (port in module_def.outputs):
-    def output_valid = type_well_formed(port.type) && port.place && !port.value && port.place.module_def === module_def && contains_identity(module_def.places, port.place)
+    def output_valid = type_well_formed(port.type) && port.place && !port.value && port.place.module_def === module_def && module_def.owns_place(port.place)
     unless output_valid
     | fail("output " ++ module_def.name ++ "." ++ port.name ++ " is malformed")
   for (operation in module_def.operations):
@@ -694,33 +702,27 @@ fun verify_module_structure(module_def):
     | fail("operation belongs to a different module")
     def schema = check_schema(operation)
     when operation.opcode == "rtl.instance"
-    | def same_names = module_def.operations.filter(
-        ~keep: fun (candidate): candidate.opcode == "rtl.instance" && candidate.attribute("name", #false) == operation.attribute("name", #false)
-      )
-      unless same_names.length() == 1
+    | unless instance_name_counts.get(operation.attribute("name", #false), 0) == 1
       | fail_operation(operation,
                        "instance name " ++ operation.attribute("name") ++ " is not unique")
     when operation.opcode == "rtl.sync_memory"
-    | def same_names = module_def.operations.filter(
-        ~keep: fun (candidate): candidate.opcode == "rtl.sync_memory" && candidate.attribute("name", #false) == operation.attribute("name", #false)
-      )
-      unless same_names.length() == 1
+    | unless sync_memory_name_counts.get(operation.attribute("name", #false), 0) == 1
       | fail_operation(operation,
                        "synchronous memory name " ++ operation.attribute("name") ++ " is not unique")
     for (operand in operation.operands):
-      def operand_owned = operand is_a Value && operand.module_def === module_def && contains_identity(module_def.values, operand)
+      def operand_owned = operand is_a Value && operand.module_def === module_def && module_def.owns_value(operand)
       unless operand_owned
       | fail_operation(operation, "operand belongs to a different module")
-      unless operand.users().find(fun (user_id): user_id == operation.id)
+      unless operand.has_user(operation.id)
       | fail_operation(operation, "operand is missing its use-def link")
     for (result in operation.results):
-      def result_owned = result is_a Value && result.module_def === module_def && contains_identity(module_def.values, result)
+      def result_owned = result is_a Value && result.module_def === module_def && module_def.owns_value(result)
       unless result_owned
       | fail_operation(operation, "result belongs to a different module")
       unless result.defining_op_id == operation.id
       | fail_operation(operation, "result has the wrong defining operation")
     for (place in operation.places):
-      def place_owned = place is_a Place && place.module_def === module_def && contains_identity(module_def.places, place)
+      def place_owned = place is_a Place && place.module_def === module_def && module_def.owns_place(place)
       unless place_owned
       | fail_operation(operation, "place belongs to a different module")
     check_operation_types(module_def, operation, schema)
@@ -734,13 +736,12 @@ fun verify_module_structure(module_def):
     | fail("place " ++ place.name ++ " does not have a well-formed HardwareType")
     unless place.driver
     | fail("place " ++ place.name ++ " is undriven")
-    def driver_owned = place.driver.module_def === module_def && contains_identity(module_def.values, place.driver)
+    def driver_owned = place.driver.module_def === module_def && module_def.owns_value(place.driver)
     unless driver_owned
     | fail("place " ++ place.name ++ " is driven from a different module")
     unless type_equal(place.type, place.driver.type)
     | fail("place " ++ place.name ++ " and its driver have different types")
-    def drive_count:
-      module_def.operations.filter(~keep: fun (operation): is_drive_to(operation, place.id)).length()
+    def drive_count = drive_counts.get(place.id, 0)
     unless drive_count == 1
     | fail("place " ++ place.name ++ " must have exactly one drive operation")
   for (memory in module_def.memories):
@@ -749,9 +750,7 @@ fun verify_module_structure(module_def):
     def defining_operation = module_def.find_operation(memory.defining_op_id)
     unless defining_operation && defining_operation.opcode == "rtl.memory" && defining_operation.attribute("memory", #false) === memory
     | fail("memory " ++ memory.name ++ " has an invalid defining operation")
-    def same_names:
-      module_def.memories.filter(~keep: fun (candidate): candidate.name == memory.name)
-    unless same_names.length() == 1
+    unless memory_name_counts.get(memory.name, 0) == 1
     | fail("memory name " ++ memory.name ++ " is not unique")
   for (value in module_def.values):
     unless value.module_def === module_def
@@ -768,20 +767,31 @@ fun verify_module_structure(module_def):
   #void
 
 fun verify_module(module_def):
-  def mutable reachable_modules = []
+  def reachable_modules = MutableList[]
+  def visited_modules = MutableSet.by(===){}
   fun visit(candidate):
-    unless contains_identity(reachable_modules, candidate)
+    unless candidate in visited_modules
     | verify_module_structure(candidate)
-      reachable_modules := reachable_modules ++ [candidate]
+      visited_modules.add(candidate)
+      reachable_modules.add(candidate)
       for (operation in candidate.operations):
         when operation.opcode == "rtl.instance"
         | visit(operation.attribute("module"))
   visit(module_def)
-  verify_combinational_cycles(reachable_modules)
+  verify_combinational_cycles(reachable_modules.snapshot())
 
 fun verify_design(design):
   unless design is_a Design
   | fail("expected an IR.Design")
+  design.finish_collections()
+  def dpi_name_counts = MutableMap{}
+  def module_name_counts = MutableMap{}
+  for (dpi_import in design.dpi_imports):
+    when dpi_import is_a DpiImport
+    | increment_count(dpi_name_counts, dpi_import.name)
+  for (module_def in design.modules):
+    when module_def is_a Module
+    | increment_count(module_name_counts, module_def.name)
   for (dpi_import in design.dpi_imports):
     unless dpi_import is_a DpiImport && dpi_import.design === design
     | fail("DPI import belongs to a different design")
@@ -791,38 +801,46 @@ fun verify_design(design):
     | fail("DPI import " ++ import_label ++ " has a malformed signature")
     unless dpi_import.results is_a List
     | fail("DPI import " ++ import_label ++ " has malformed results")
+    def input_names_seen = MutableSet{}
     for (input_name in dpi_import.input_names, input_type in dpi_import.input_types):
       unless input_name is_a String && flat_data_type(input_type) && type_well_formed(input_type)
       | fail("DPI import " ++ import_label ++ " has a malformed input")
-      when dpi_import.input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
+      when input_name in input_names_seen
       | fail("DPI import " ++ import_label ++ " has duplicate input names")
+      input_names_seen.add(input_name)
+    def result_names_seen = MutableSet{}
     for (result in dpi_import.results):
       unless result is_a DpiResult && result.name is_a String && flat_data_type(result.type) && type_well_formed(result.type) && (result.direction == "out" || result.direction == "return")
       | fail("DPI import " ++ import_label ++ " has a malformed result")
-      when dpi_import.results.filter(~keep: fun (candidate): candidate.name == result.name).length() != 1
+      when result.name in result_names_seen
       | fail("DPI import " ++ import_label ++ " has duplicate result names")
+      result_names_seen.add(result.name)
       when dpi_import.input_names.find(fun (candidate): candidate == result.name)
       | fail("DPI import " ++ import_label ++ " reuses an input name as a result")
     when dpi_import.results.length() != 0
     | def returns = dpi_import.results.filter(~keep: fun (result): result.direction == "return")
       unless returns.length() == 1 && dpi_import.results[dpi_import.results.length() - 1].direction == "return"
       | fail("DPI import " ++ import_label ++ " must have exactly one final return result")
-    def same_names = design.dpi_imports.filter(~keep: fun (other): other.name == dpi_import.name)
-    unless same_names.length() == 1
+    unless dpi_name_counts.get(dpi_import.name, 0) == 1
     | fail("duplicate DPI import name " ++ import_label)
   for (module_def in design.modules):
     unless module_def is_a Module && module_def.design === design
     | fail("module belongs to a different design")
-    def same_names = design.modules.filter(~keep: fun (other): other.name == module_def.name)
-    unless same_names.length() == 1
+    unless module_name_counts.get(module_def.name, 0) == 1
     | fail("duplicate module name " ++ module_def.name)
     verify_module_structure(module_def)
-  def mutable entities = design.dpi_imports
-  for (module_def in design.modules):
-    entities := entities ++ [module_def] ++ module_def.operations ++ module_def.values ++ module_def.places ++ module_def.memories
-  for (entity in entities):
-    def same_ids = entities.filter(~keep: fun (other): other.id == entity.id)
-    unless same_ids.length() == 1
+  def entity_ids = MutableSet{}
+  fun verify_unique_id(entity):
+    when entity.id in entity_ids
     | fail("duplicate IR id " ++ to_string(entity.id))
+    entity_ids.add(entity.id)
+  for (dpi_import in design.dpi_imports):
+    verify_unique_id(dpi_import)
+  for (module_def in design.modules):
+    verify_unique_id(module_def)
+    for (operation in module_def.operations): verify_unique_id(operation)
+    for (value in module_def.values): verify_unique_id(value)
+    for (place in module_def.places): verify_unique_id(place)
+    for (memory in module_def.memories): verify_unique_id(memory)
   verify_combinational_cycles(design.modules)
   #void
