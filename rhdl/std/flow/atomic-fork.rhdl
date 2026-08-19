@@ -4,6 +4,7 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/ready-valid-support.rhdl") open
+  lib("rhdl/std/flow/reduction.rhdl").and_exclusion_reduce
 
 // Every output transfers in the same cycle or none do. Unlike Broadcast, the
 // fork has no storage and does not retain independently pending recipients.
@@ -13,22 +14,12 @@ circuit AtomicFork(T :: DataType, n :: PosInt):
   interface ingress(Decoupled(T), ~role: consumer)
   interface egress[n](Decoupled(T), ~role: producer)
 
-  ingress.ready <== and_reduce(vec(
+  def ready_reduction = and_exclusion_reduce(vec(
     for List (index in 0..n): egress[index].ready
   ))
+  ingress.ready <== ready_reduction.all
   for (index in 0..n):
-    def peer_indices = (
-      for List (peer in 0..index): peer
-    ) ++ (
-      for List (peer in (index + 1)..n): peer
-    )
-    def peers_ready:
-      if peer_indices.length() == 0
-      | Bool(#true)
-      | and_reduce(vec(
-          for List (peer in peer_indices): egress[peer].ready
-        ))
-    egress[index].valid <== ingress.valid & peers_ready
+    egress[index].valid <== ingress.valid & ready_reduction.except[index]
     egress[index].bits <== ingress.bits
 
 // The control-only specialization atomically duplicates indistinguishable
@@ -38,22 +29,12 @@ circuit CtrlAtomicFork(n :: PosInt):
   interface ingress(DecoupledCtrl(), ~role: consumer)
   interface egress[n](DecoupledCtrl(), ~role: producer)
 
-  ingress.ready <== and_reduce(vec(
+  def ready_reduction = and_exclusion_reduce(vec(
     for List (index in 0..n): egress[index].ready
   ))
+  ingress.ready <== ready_reduction.all
   for (index in 0..n):
-    def peer_indices = (
-      for List (peer in 0..index): peer
-    ) ++ (
-      for List (peer in (index + 1)..n): peer
-    )
-    def peers_ready:
-      if peer_indices.length() == 0
-      | Bool(#true)
-      | and_reduce(vec(
-          for List (peer in peer_indices): egress[peer].ready
-        ))
-    egress[index].valid <== ingress.valid & peers_ready
+    egress[index].valid <== ingress.valid & ready_reduction.except[index]
 
 // Instantiates an atomic fork and returns its indexable output endpoint array.
 fun atomic_fork(n :: PosInt)

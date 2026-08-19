@@ -1,4 +1,4 @@
-// Exercises one-to-one grants, independent output rotation, and stalled priorities.
+// Exercises output-greedy one-to-one grants, input rotation, and stalled priorities.
 module round_robin_matcher_tb;
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -6,7 +6,7 @@ module round_robin_matcher_tb;
   logic [1:0] accepts;
   logic [2:0][1:0] grants;
 
-  RoundRobinMatcher dut (.*);
+  OutputGreedyRoundRobinMatcher dut (.*);
   always #5 clock = ~clock;
   task automatic tick; @(posedge clock); #1; endtask
 
@@ -46,6 +46,16 @@ module round_robin_matcher_tb;
     check_grants(2'b01, 2'b10, 2'b00);
     tick();
     check_grants(2'b01, 2'b00, 2'b10);
+
+    // Input rotation does not override fixed output ordering. A sole input
+    // requesting both outputs remains assigned to output zero.
+    requests = '0;
+    requests[0] = 2'b11;
+    accepts = 2'b11;
+    #1;
+    check_grants(2'b01, 2'b00, 2'b00);
+    tick();
+    check_grants(2'b01, 2'b00, 2'b00);
 
     // Every possible request image preserves the matching contract at the
     // current priorities, irrespective of which requests are absent.

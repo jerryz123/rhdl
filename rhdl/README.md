@@ -124,15 +124,17 @@ import one primitive without loading unrelated generators.
 | `std/flow/completion-queue.rhdl` | Reserved response buffering between ready-valid requests and nonstallable issues/completions | `std/ready-valid.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/credit.rhdl` | Credited sender and receiver adapters, bounded accounting, and configured unary stages | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/arbiter.rhdl` | Fixed-priority `Arbiter`/`CtrlArbiter` | `std/ready-valid.rhdl` |
-| `std/flow/rr-arbiter.rhdl` | Round-robin `RRArbiter`/`CtrlRRArbiter` plus configured Array-to-endpoint arbitration | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/matcher.rhdl` |
+| `std/flow/circular-priority.rhdl` | Combinational circular-priority optional-one-hot selection with a shared valid, grant, and index result | None |
+| `std/flow/rr-arbiter.rhdl` | Direct-state round-robin `RRArbiter`/`CtrlRRArbiter` plus configured Array-to-endpoint arbitration | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/circular-priority.rhdl` |
 | `std/flow/demux.rhdl` | Selected one-to-many `Demux`/`CtrlDemux` plus configured payload-selected routing | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
-| `std/flow/matcher.rhdl` | Fixed-priority and transfer-rotating one-to-one request-matrix matchers | None |
+| `std/flow/matcher.rhdl` | Fixed-priority and explicitly output-greedy transfer-rotating one-to-one request-matrix matchers | `std/flow/circular-priority.rhdl` |
 | `std/flow/grant.rhdl` | Optional-one-hot ready-valid grant routing and merging primitives | `std/ready-valid.rhdl` |
 | `std/flow/crossbar.rhdl` | Configured grant-controlled one-to-one ready-valid crossbar stage | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/grant.rhdl` |
-| `std/flow/join.rhdl` | Atomic homogeneous `Join`/`CtrlJoin` | `std/ready-valid.rhdl` |
+| `std/flow/join.rhdl` | Atomic homogeneous `Join`/`CtrlJoin` | `std/ready-valid.rhdl`, `std/flow/reduction.rhdl` |
 | `std/flow/zip.rhdl` | Configured inline binary heterogeneous atomic `zip_flow` stage | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
-| `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` plus configured fanout stages | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
+| `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` plus configured fanout stages | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/reduction.rhdl` |
+| `std/flow/reduction.rhdl` | Shared balanced full and all-except-one Boolean reduction helper | None |
 | `std/flow/map.rhdl` | Configured protocol-preserving inline payload substitution | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/map-valid.rhdl` | Configured inline payload substitution for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/fork-valid.rhdl` | Configured inline one-to-many fanout for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |

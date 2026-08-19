@@ -2,6 +2,7 @@
 // Exhaustively checks router-local route ABIs and their RHDL decode operations.
 
 import:
+  rhombus.bits.(<<) as <<
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/layers/bool.rhm" as bool
   "../../rhdl/frontend/layers/comb.rhm" as comb
@@ -22,13 +23,17 @@ fun decision_result(cube):
    pattern_field(cube, "valid") != 0]
 
 fun decoded_result(route_decoder, encoded_key):
-  def origin_mask = (1 bits.(<<) route_decoder.origin_width) - 1
+  def origin_mask = (1 << route_decoder.origin_width) - 1
   def selector = RouteLookupKey(
     route_decoder.route_width,
     route_decoder.origin_width
   ):
     route_key: comb.bits(
-      encoded_key bits.(>>) route_decoder.origin_width,
+      bits.field(
+        encoded_key,
+        route_decoder.origin_width,
+        route_decoder.origin_width + route_decoder.route_width
+      ),
       route_decoder.route_width
     )
     origin_key: comb.bits(
@@ -44,8 +49,12 @@ fun decoded_result(route_decoder, encoded_key):
   | decision_result(table.default)
 
 fun expected_result(route_decoder, encoded_key):
-  def origin_mask = (1 bits.(<<) route_decoder.origin_width) - 1
-  def route_key = encoded_key bits.(>>) route_decoder.origin_width
+  def origin_mask = (1 << route_decoder.origin_width) - 1
+  def route_key = bits.field(
+    encoded_key,
+    route_decoder.origin_width,
+    route_decoder.origin_width + route_decoder.route_width
+  )
   def origin_key = encoded_key bits.and origin_mask
   def entry = route_decoder.router_plan.rows.find(
     fun (candidate):
@@ -56,7 +65,7 @@ fun expected_result(route_decoder, encoded_key):
   | [0, 0, #false]
 
 fun key_space_size(route_decoder):
-  1 bits.(<<) (route_decoder.route_width + route_decoder.origin_width)
+  1 << (route_decoder.route_width + route_decoder.origin_width)
 
 fun decoded_results(route_decoder):
   for List (key in 0..key_space_size(route_decoder)):
@@ -73,11 +82,11 @@ fun materialized_mask(route_decoder, entry):
              entry.route_row.origin
            )):
     mask := mask bits.or (
-      1 bits.(<<) route_decoder.router_plan.target_bit(vc)
+      1 << route_decoder.router_plan.target_bit(vc)
     )
   when entry.route_row.ejection_terminal
   | mask := mask bits.or (
-      1 bits.(<<) route_decoder.router_plan.target_bit(
+      1 << route_decoder.router_plan.target_bit(
         entry.route_row.ejection_terminal
       )
     )

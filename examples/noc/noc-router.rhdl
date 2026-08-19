@@ -68,6 +68,8 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [1:0] target_mask; logic [1:0] fallback_mask; logic valid; }
     RouteDecision;
+  typedef struct packed {logic valid; logic [1:0] grant; logic index; }
+    CircularPriorityChoice;
   typedef struct packed {logic target_mask; logic fallback_mask; logic valid; }
     RouteDecision_1;
 `endif // _TYPESCOPE_rhdl_types
@@ -283,7 +285,7 @@ module RouterAllocator(
   wire [1:0] _GEN_0 =
     {{requests[1'h1][1'h1] & ~fallback_requests[1'h1][1'h1] & target_available[1'h1]},
      {requests[1'h1][1'h0] & ~fallback_requests[1'h1][1'h0] & target_available[1'h0]}};
-  RoundRobinMatcher matcher (
+  OutputGreedyRoundRobinMatcher matcher (
     .clock    (clock),
     .reset    (reset),
     .requests
@@ -294,7 +296,7 @@ module RouterAllocator(
   );
 endmodule
 
-module RoundRobinMatcher(
+module OutputGreedyRoundRobinMatcher(
   input             clock,
                     reset,
   input  [1:0][1:0] requests,
@@ -302,41 +304,33 @@ module RoundRobinMatcher(
   output [1:0][1:0] grants
 );
 
-  reg  [1:0]      next_priorities;
-  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
-  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
-  wire [1:0][1:0] _GEN_1 =
-    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
-  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
-  wire            _GEN_3 = _GEN_2[next_priorities[1'h0]];
-  wire [1:0]      _GEN_4 = {{requests[1'h1][1'h0]}, {_GEN}};
-  wire            _GEN_5 = _GEN_4[next_priorities[1'h0]];
-  wire            _GEN_6 = requests[1'h0][1'h1] & ~_GEN_3;
-  wire            _GEN_7 = requests[1'h1][1'h1] & ~_GEN_5 & ~_GEN_6;
-  wire            _GEN_8 = requests[1'h1][1'h1] & ~_GEN_5;
-  wire            _GEN_9 = requests[1'h0][1'h1] & ~_GEN_3 & ~_GEN_8;
-  wire [1:0][1:0] _GEN_10 = {{{{_GEN_8}, {_GEN_9}}}, {{{_GEN_7}, {_GEN_6}}}};
-  wire [1:0]      _GEN_11 = {{_GEN_9}, {_GEN_6}};
-  wire [1:0]      _GEN_12 = {{_GEN_8}, {_GEN_7}};
-  wire [1:0]      _GEN_13 = _GEN_1[next_priorities[1'h0]];
-  wire            _GEN_14 = _GEN_13[1] & ~(_GEN_13[0]);
-  wire            _GEN_15 =
-    (|_GEN_13) & accepts[1'h0] ? ~_GEN_14 & _GEN_14 - 1'h1 : next_priorities[1'h0];
-  wire [1:0]      _GEN_16 = _GEN_10[next_priorities[1'h1]];
-  wire            _GEN_17 = _GEN_16[1] & ~(_GEN_16[0]);
-  wire            _GEN_18 =
-    (|_GEN_16) & accepts[1'h1] ? ~_GEN_17 & _GEN_17 - 1'h1 : next_priorities[1'h1];
+  reg  [1:0] next_priorities;
+  wire [1:0] _GEN =
+    {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
+  wire [1:0] _GEN_0 = {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0]}};
+  wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
+  wire       _GEN_2 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
+  wire       _GEN_3 = requests[1'h0][1'h1] & ~_GEN_1[1'h0];
+  wire       _GEN_4 = requests[1'h1][1'h1] & ~_GEN_1[1'h1];
+  wire [1:0] _GEN_5 = {{_GEN_4}, {_GEN_3 & ~next_priorities[1'h1]}};
+  wire [1:0] _GEN_6 = {{_GEN_4}, {_GEN_3}};
+  wire [1:0] _GEN_7 =
+    (|_GEN_5) ? _GEN_5 & {~(_GEN_5[0]), 1'h1} : _GEN_6 & {~(_GEN_6[0]), 1'h1};
+  wire       _GEN_8 = /*cast(bit)*/{1{_GEN_7[1'h1]}};
+  wire       _GEN_9 =
+    (|_GEN_0) & accepts[1'h0] ? ~_GEN_2 & _GEN_2 - 1'h1 : next_priorities[1'h0];
+  wire       _GEN_10 =
+    (|_GEN_6) & accepts[1'h1] ? ~_GEN_8 & _GEN_8 - 1'h1 : next_priorities[1'h1];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{1'h0, 1'h0};
     else begin
-      next_priorities[1'h1] <= _GEN_18;
-      next_priorities[1'h0] <= _GEN_15;
+      next_priorities[1'h1] <= _GEN_10;
+      next_priorities[1'h0] <= _GEN_9;
     end
   end // always @(posedge)
   assign grants =
-    {{{{_GEN_12[next_priorities[1'h1]]}, {_GEN_5}}},
-     {{{_GEN_11[next_priorities[1'h1]]}, {_GEN_3}}}};
+    {{{{_GEN_7[1'h1]}, {_GEN_1[1'h1]}}}, {{{_GEN_7[1'h0]}, {_GEN_1[1'h0]}}}};
 endmodule
 
 module GrantCrossbar(
@@ -628,7 +622,7 @@ module RouterAllocator_1(
   wire [0:0] _GEN_1 =
     {1{requests[1'h1][1'h0] & ~fallback_requests[1'h1][1'h0] & target_available[1'h0]}};
   wire       _GEN_2 = /*cast(bit)*/_GEN_1;
-  RoundRobinMatcher_1 matcher (
+  OutputGreedyRoundRobinMatcher_1 matcher (
     .clock    (clock),
     .reset    (reset),
     .requests
@@ -639,7 +633,7 @@ module RouterAllocator_1(
   );
 endmodule
 
-module RoundRobinMatcher_1(
+module OutputGreedyRoundRobinMatcher_1(
   input             clock,
                     reset,
   input  [1:0][0:0] requests,
@@ -647,25 +641,22 @@ module RoundRobinMatcher_1(
   output [1:0][0:0] grants
 );
 
-  reg  [0:0]      next_priorities;
-  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
-  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
-  wire [1:0][1:0] _GEN_1 =
-    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
-  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
-  wire [1:0]      _GEN_3 = {{requests[1'h1][1'h0]}, {_GEN}};
-  wire [1:0]      _GEN_4 = _GEN_1[next_priorities[1'h0]];
-  wire            _GEN_5 = _GEN_4[1] & ~(_GEN_4[0]);
-  wire            _GEN_6 =
-    (|_GEN_4) & accepts[1'h0] ? ~_GEN_5 & _GEN_5 - 1'h1 : next_priorities[1'h0];
+  reg  [0:0] next_priorities;
+  wire [1:0] _GEN =
+    {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
+  wire [1:0] _GEN_0 = {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0]}};
+  wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
+  wire [0:0] _GEN_2 = {1{_GEN_1[1'h1]}};
+  wire       _GEN_3 = /*cast(bit)*/_GEN_2;
+  wire       _GEN_4 =
+    (|_GEN_0) & accepts[1'h0] ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{1'h0};
     else
-      next_priorities[1'h0] <= _GEN_6;
+      next_priorities[1'h0] <= _GEN_4;
   end // always @(posedge)
-  assign grants =
-    {{{1{_GEN_3[next_priorities[1'h0]]}}}, {{1{_GEN_2[next_priorities[1'h0]]}}}};
+  assign grants = {{_GEN_2}, {{1{_GEN_1[1'h0]}}}};
 endmodule
 
 module GrantCrossbar_1(

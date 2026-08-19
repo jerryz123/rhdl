@@ -1,0 +1,58 @@
+#lang rhdl
+// Selects one request from a hardware-supplied circular starting priority.
+
+import:
+  rhombus.bits.(?) as ?
+
+bundle CircularPriorityChoice(n :: PosInt, index_width :: PosInt):
+  valid: Bool
+  grant: Vec(n, Bool)
+  index: Bits(index_width)
+
+fun onehot_index(grant :: Hardware.packable,
+                 n :: PosInt,
+                 width :: PosInt) :~ Hardware.packable:
+  def result_bits = for List (result_bit in 0..width):
+    def mutable contributors = []
+    for (index in 0..n):
+      def contributes = index ? result_bit
+      if contributes
+      | contributors := contributors ++ [grant[index]]
+      | #void
+    or_reduce(contributors)
+  as_bits(vec(result_bits))
+
+// The start index must be in range. Selection first considers requests at or
+// above start, then wraps to the ordinary lower-index-first priority result.
+// Both paths are built once; this avoids constructing one complete arbiter for
+// every possible start value.
+fun circular_priority_onehot(requests :: Hardware.packable,
+                             start :: Hardware.bits) :~ Hardware.packable:
+  def request_type = hardware_value_type(requests)
+  unless request_type is_a VectorType && bool_type(request_type.element_type)
+  | error(~who: #'circular_priority_onehot,
+          "requests must be a nonempty Vec of Bool")
+  def n = request_type.length
+  def width = index_width(n)
+  unless hardware_value_type(start).bit_width() == width
+  | error(~who: #'circular_priority_onehot,
+          "start width must equal the request index width")
+  def eligible = vec(
+    for List (index in 0..n):
+      requests[index] & (start <= bits(index, width))
+  )
+  def eligible_grant = cast(priority_encoder_oh(eligible), Vec(n, Bool))
+  def wrapped_grant = cast(priority_encoder_oh(requests), Vec(n, Bool))
+  def use_eligible = or_reduce(eligible)
+  def grant = vec(
+    for List (index in 0..n):
+      mux(use_eligible, eligible_grant[index], wrapped_grant[index])
+  )
+  CircularPriorityChoice(n, width):
+    valid: or_reduce(requests)
+    grant: grant
+    index: onehot_index(grant, n, width)
+
+export:
+  CircularPriorityChoice
+  circular_priority_onehot

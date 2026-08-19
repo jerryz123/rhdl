@@ -34,14 +34,15 @@ therefore represents all site-specialized tables without reimplementing decode
 lowering or graph reasoning in RTL.
 
 `allocator.rhdl` defines the NoC-specific `RouterAllocator` around the generic
-standard-library `RoundRobinMatcher`. Every output rotates its input priority
-only after an actual transfer. For escape-certified rows, an adaptive target
-is eligible only when its separate `target_available` sideband says that the
-VC can be acquired immediately; otherwise the input continuously requests its
-fallback targets. The sideband describes resource availability independently
-of ready/valid selection. A physical VC link therefore supplies the reverse
-per-VC readiness from `WormholeLinkDemux`, not the selected mux ingress's
-ready signal. This separation avoids a valid-to-ready arbitration loop.
+standard-library `OutputGreedyRoundRobinMatcher`. Every output rotates its
+input priority only after an actual transfer. For escape-certified rows, an
+adaptive target is eligible only when its separate `target_available` sideband
+says that the VC can be acquired immediately; otherwise the input continuously
+requests its fallback targets. The sideband describes resource availability
+independently of ready/valid selection. A physical VC link therefore supplies
+the reverse per-VC readiness from `WormholeLinkDemux`, not the selected mux
+ingress's ready signal. This separation avoids a valid-to-ready arbitration
+loop.
 
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported

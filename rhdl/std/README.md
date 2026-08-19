@@ -472,7 +472,7 @@ under [`flow/`](flow/):
 | Allocation generator | Behavior |
 |---|---|
 | `GreedyMatcher(inputs, outputs)` | Fixed-priority maximal matching over an input-major request matrix |
-| `RoundRobinMatcher(inputs, outputs)` | Per-output round-robin matching that advances accepted grants |
+| `OutputGreedyRoundRobinMatcher(inputs, outputs)` | Fixed-output-order maximal matching with per-output rotating input priority |
 
 | Payload generator | Control-only generator | Behavior |
 |---|---|---|
@@ -654,15 +654,25 @@ input takes its lowest still-unclaimed requested output. The result is maximal
 but not fair; readiness and the application-specific meaning of rows and
 columns remain outside the matcher.
 
-`RoundRobinMatcher(inputs, outputs)` exposes the same input-major request and
-grant matrices plus one `accepts` bit per output. Each output selects the first
-still-unmatched requester beginning at its independent rotating priority. A
-priority advances past the selected input only when that output's grant is
-accepted, so stalls do not consume turns. Output index order resolves
-cross-output input conflicts; the result is one-to-one and maximal, while the
-meaning of requests and acceptance remains application-owned. `RRArbiter` and
-`CtrlRRArbiter` are the one-output payload-bearing and control-only clients of
-this matcher.
+`OutputGreedyRoundRobinMatcher(inputs, outputs)` exposes the same input-major
+request and grant matrices plus one `accepts` bit per output. Outputs are
+considered in fixed index order, while each output selects the first input still
+unmatched by earlier outputs beginning at its independent rotating priority. A
+priority advances only when that output's grant is accepted. The result is
+one-to-one and maximal, not maximum-cardinality, and rotating input priority does
+not make the fixed inter-output ordering fair.
+
+`circular_priority_onehot(requests, start)` is the stateless selection primitive
+under the matcher and round-robin arbiters. It returns one shared `valid`,
+optional-one-hot `grant`, and binary `index` result. It builds one masked
+priority selection and one wraparound selection instead of replicating a full
+arbiter for every possible start. `RRArbiter` and `CtrlRRArbiter` own their
+priority registers directly and advance them only after successful transfers.
+
+`and_exclusion_reduce(values)` uses a shared balanced reduction tree to return
+the full conjunction plus each conjunction with one corresponding input
+omitted. `Join`, `CtrlJoin`, `AtomicFork`, and `CtrlAtomicFork` use it instead of
+independently rebuilding full and peer reductions for every lane.
 
 `GrantDemux(T, outputs)` routes one input according to an optional-one-hot grant
 row, while `GrantMerge(T, inputs)` selects one input according to an

@@ -121,6 +121,11 @@ def fan_in_project_design = elaborate(FanInProjectTopology())
 def zip_route_design = elaborate(ZipRouteTopology())
 
 def rr_arbiter_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic valid; logic [2:0] grant; logic [1:0] index; }
+    CircularPriorityChoice;
+`endif // _TYPESCOPE_rhdl_types
 module RRArbiter(
   input                                                  clock,
                                                          reset,
@@ -135,76 +140,43 @@ module RRArbiter(
   output [1:0]                                           chosen
 );
 
-  wire [2:0][0:0] _matcher_grants;
-  wire [2:0]      _GEN =
-    {{_matcher_grants[2'h2][1'h0]},
-     {_matcher_grants[2'h1][1'h0]},
-     {_matcher_grants[2'h0][1'h0]}};
-  RoundRobinMatcher matcher (
-    .clock    (clock),
-    .reset    (reset),
-    .requests
-      ({{{1{ingress_2_in.valid}}}, {{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
-    .accepts  ({1{egress_in.ready}}),
-    .grants   (_matcher_grants)
-  );
-  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[2'h0][1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[2'h1][1'h0])};
-  assign ingress_2_out = '{ready: (egress_in.ready & _matcher_grants[2'h2][1'h0])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (_matcher_grants[2'h2][1'h0]
-           ? ingress_2_in.bits
-           : _matcher_grants[2'h1][1'h0]
-               ? ingress_1_in.bits
-               : _matcher_grants[2'h0][1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[2:1] & ~(_GEN[1:0] | {_GEN[0], 1'h0});
-endmodule
-
-module RoundRobinMatcher(
-  input             clock,
-                    reset,
-  input  [2:0][0:0] requests,
-  input  [0:0]      accepts,
-  output [2:0][0:0] grants
-);
-
-  reg  [0:0][1:0] next_priorities;
+  reg  [1:0] next_priority;
+  wire       _GEN = next_priority != 2'h3;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_0:
-      assert property (@(posedge clock) disable iff (reset)
-                         next_priorities[1'h0] != 2'h3);
+    rr_priority_in_range: assert property (@(posedge clock) disable iff (reset) _GEN);
   `endif // not def SYNTHESIS
-  wire            _GEN = requests[2'h1][1'h0] & ~requests[2'h0][1'h0];
-  wire            _GEN_0 = requests[2'h2][1'h0] & ~(requests[2'h0][1'h0] | _GEN);
-  wire            _GEN_1 = requests[2'h2][1'h0] & ~requests[2'h1][1'h0];
-  wire            _GEN_2 = requests[2'h0][1'h0] & ~(requests[2'h1][1'h0] | _GEN_1);
-  wire            _GEN_3 = requests[2'h0][1'h0] & ~requests[2'h2][1'h0];
-  wire            _GEN_4 = requests[2'h1][1'h0] & ~(requests[2'h2][1'h0] | _GEN_3);
-  wire [2:0][2:0] _GEN_5 =
-    {{{{requests[2'h2][1'h0]}, {_GEN_4}, {_GEN_3}}},
-     {{{_GEN_1}, {requests[2'h1][1'h0]}, {_GEN_2}}},
-     {{{_GEN_0}, {_GEN}, {requests[2'h0][1'h0]}}}};
-  wire [2:0]      _GEN_6 = {{_GEN_3}, {_GEN_2}, {requests[2'h0][1'h0]}};
-  wire [2:0]      _GEN_7 = {{_GEN_4}, {requests[2'h1][1'h0]}, {_GEN}};
-  wire [2:0]      _GEN_8 = {{requests[2'h2][1'h0]}, {_GEN_1}, {_GEN_0}};
-  wire [2:0]      _GEN_9 = _GEN_5[next_priorities[1'h0]];
-  wire [1:0]      _GEN_10 = _GEN_9[2:1] & ~(_GEN_9[1:0] | {_GEN_9[0], 1'h0});
-  wire [1:0]      _GEN_11 =
-    (|_GEN_9) & accepts[1'h0]
-      ? (_GEN_10 == 2'h2 ? 2'h0 : _GEN_10 + 2'h1)
-      : next_priorities[1'h0];
+  wire [2:0] _GEN_0 =
+    {{ingress_2_in.valid & _GEN},
+     {ingress_1_in.valid & ~(next_priority[1])},
+     {ingress_0_in.valid & next_priority == 2'h0}};
+  wire [2:0] _GEN_1 = {{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [2:0] _GEN_2 =
+    (|_GEN_0)
+      ? _GEN_0 & {~(_GEN_0[1:0] | {_GEN_0[0], 1'h0}), 1'h1}
+      : _GEN_1 & {~(_GEN_1[1:0] | {_GEN_1[0], 1'h0}), 1'h1};
+  wire       _GEN_3 = |_GEN_1;
+  wire [1:0] _GEN_4 = _GEN_2[2'h1 +: 2];
   always @(posedge clock) begin
     if (reset)
-      next_priorities <= '{2'h0};
+      next_priority <= 2'h0;
     else
-      next_priorities[1'h0] <= _GEN_11;
+      next_priority <=
+        _GEN_3 & egress_in.ready
+          ? (_GEN_4 == 2'h2 ? 2'h0 : _GEN_4 + 2'h1)
+          : next_priority;
   end // always @(posedge)
-  assign grants =
-    {{{1{_GEN_8[next_priorities[1'h0]]}}},
-     {{1{_GEN_7[next_priorities[1'h0]]}}},
-     {{1{_GEN_6[next_priorities[1'h0]]}}}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_2[2'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_2[2'h1])};
+  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_2[2'h2])};
+  assign egress_out =
+    '{valid: _GEN_3,
+      bits:
+        (_GEN_2[2'h2]
+           ? ingress_2_in.bits
+           : _GEN_2[2'h1]
+               ? ingress_1_in.bits
+               : _GEN_2[2'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN_4;
 endmodule
 }>>|
 
@@ -236,6 +208,10 @@ endmodule
 }>>|
 
 def join_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic all; logic [2:0] except; } AndExclusionReduction;
+`endif // _TYPESCOPE_rhdl_types
 module Join(
   input  struct packed {logic valid; logic [7:0] bits; }      ingress_0_in,
                                                               ingress_1_in,
@@ -247,14 +223,14 @@ module Join(
   output struct packed {logic valid; logic [2:0][7:0] bits; } egress_out
 );
 
-  assign ingress_0_out =
-    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_1_in.valid}})))};
+  wire _GEN = ingress_1_in.valid & ingress_2_in.valid;
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN)};
   assign ingress_1_out =
-    '{ready: (egress_in.ready & (&({{ingress_2_in.valid}, {ingress_0_in.valid}})))};
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_2_in.valid)};
   assign ingress_2_out =
-    '{ready: (egress_in.ready & (&({{ingress_1_in.valid}, {ingress_0_in.valid}})))};
+    '{ready: (egress_in.ready & ingress_0_in.valid & ingress_1_in.valid)};
   assign egress_out =
-    '{valid: (&({{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}})),
+    '{valid: (ingress_0_in.valid & _GEN),
       bits: ({{ingress_2_in.bits}, {ingress_1_in.bits}, {ingress_0_in.bits}})};
 endmodule
 }>>|
@@ -303,6 +279,10 @@ endmodule
 }>>|
 
 def atomic_fork_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic all; logic [2:0] except; } AndExclusionReduction;
+`endif // _TYPESCOPE_rhdl_types
 module AtomicFork(
   input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
   input  struct packed {logic ready; }                   egress_0_in,
@@ -314,16 +294,14 @@ module AtomicFork(
                                                          egress_2_out
 );
 
-  assign ingress_out =
-    '{ready: (&({{egress_2_in.ready}, {egress_1_in.ready}, {egress_0_in.ready}}))};
-  assign egress_0_out =
-    '{valid: (ingress_in.valid & (&({{egress_2_in.ready}, {egress_1_in.ready}}))),
-      bits: ingress_in.bits};
+  wire _GEN = egress_1_in.ready & egress_2_in.ready;
+  assign ingress_out = '{ready: (egress_0_in.ready & _GEN)};
+  assign egress_0_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
   assign egress_1_out =
-    '{valid: (ingress_in.valid & (&({{egress_2_in.ready}, {egress_0_in.ready}}))),
+    '{valid: (ingress_in.valid & egress_0_in.ready & egress_2_in.ready),
       bits: ingress_in.bits};
   assign egress_2_out =
-    '{valid: (ingress_in.valid & (&({{egress_1_in.ready}, {egress_0_in.ready}}))),
+    '{valid: (ingress_in.valid & egress_0_in.ready & egress_1_in.ready),
       bits: ingress_in.bits};
 endmodule
 }>>|
@@ -375,6 +353,11 @@ module GateFlowExample(
 endmodule
 }>>|
 def endpoint_first_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic valid; logic [1:0] grant; logic index; }
+    CircularPriorityChoice;
+`endif // _TYPESCOPE_rhdl_types
 module EndpointFirstTopology(
   input                                                  clock,
                                                          reset,
@@ -421,53 +404,27 @@ module RRArbiter(
   output                                                 chosen
 );
 
-  wire [1:0][0:0] _matcher_grants;
-  wire [1:0]      _GEN = {{_matcher_grants[1'h1][1'h0]}, {_matcher_grants[1'h0][1'h0]}};
-  RoundRobinMatcher matcher (
-    .clock    (clock),
-    .reset    (reset),
-    .requests ({{{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
-    .accepts  ({1{egress_in.ready}}),
-    .grants   (_matcher_grants)
-  );
-  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[1'h0][1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[1'h1][1'h0])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (_matcher_grants[1'h1][1'h0]
-           ? ingress_1_in.bits
-           : _matcher_grants[1'h0][1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
-endmodule
-
-module RoundRobinMatcher(
-  input             clock,
-                    reset,
-  input  [1:0][0:0] requests,
-  input  [0:0]      accepts,
-  output [1:0][0:0] grants
-);
-
-  reg  [0:0]      next_priorities;
-  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
-  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
-  wire [1:0][1:0] _GEN_1 =
-    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
-  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
-  wire [1:0]      _GEN_3 = {{requests[1'h1][1'h0]}, {_GEN}};
-  wire [1:0]      _GEN_4 = _GEN_1[next_priorities[1'h0]];
-  wire            _GEN_5 = _GEN_4[1] & ~(_GEN_4[0]);
-  wire            _GEN_6 =
-    (|_GEN_4) & accepts[1'h0] ? ~_GEN_5 & _GEN_5 - 1'h1 : next_priorities[1'h0];
+  reg        next_priority;
+  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid & ~next_priority}};
+  wire [1:0] _GEN_0 = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
+  wire       _GEN_2 = |_GEN_0;
+  wire       _GEN_3 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
   always @(posedge clock) begin
     if (reset)
-      next_priorities <= '{1'h0};
+      next_priority <= 1'h0;
     else
-      next_priorities[1'h0] <= _GEN_6;
+      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
   end // always @(posedge)
-  assign grants =
-    {{{1{_GEN_3[next_priorities[1'h0]]}}}, {{1{_GEN_2[next_priorities[1'h0]]}}}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1'h1])};
+  assign egress_out =
+    '{valid: _GEN_2,
+      bits:
+        (_GEN_1[1'h1]
+           ? ingress_1_in.bits
+           : _GEN_1[1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN_3;
 endmodule
 
 module Pipe(
@@ -501,6 +458,9 @@ def fan_in_project_verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhdl_types
 `define _TYPESCOPE_rhdl_types
   typedef struct packed {logic [7:0] data; logic from_second; } TaggedByte;
+  typedef struct packed {logic valid; logic [1:0] grant; logic index; }
+    CircularPriorityChoice;
+  typedef struct packed {logic all; logic [1:0] except; } AndExclusionReduction;
 `endif // _TYPESCOPE_rhdl_types
 module FanInProjectTopology(
   input                                                  clock,
@@ -611,53 +571,27 @@ module RRArbiter(
   output                                                chosen
 );
 
-  wire [1:0][0:0] _matcher_grants;
-  wire [1:0]      _GEN = {{_matcher_grants[1'h1][1'h0]}, {_matcher_grants[1'h0][1'h0]}};
-  RoundRobinMatcher matcher (
-    .clock    (clock),
-    .reset    (reset),
-    .requests ({{{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
-    .accepts  ({1{egress_in.ready}}),
-    .grants   (_matcher_grants)
-  );
-  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[1'h0][1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[1'h1][1'h0])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (_matcher_grants[1'h1][1'h0]
-           ? ingress_1_in.bits
-           : _matcher_grants[1'h0][1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
-endmodule
-
-module RoundRobinMatcher(
-  input             clock,
-                    reset,
-  input  [1:0][0:0] requests,
-  input  [0:0]      accepts,
-  output [1:0][0:0] grants
-);
-
-  reg  [0:0]      next_priorities;
-  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
-  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
-  wire [1:0][1:0] _GEN_1 =
-    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
-  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
-  wire [1:0]      _GEN_3 = {{requests[1'h1][1'h0]}, {_GEN}};
-  wire [1:0]      _GEN_4 = _GEN_1[next_priorities[1'h0]];
-  wire            _GEN_5 = _GEN_4[1] & ~(_GEN_4[0]);
-  wire            _GEN_6 =
-    (|_GEN_4) & accepts[1'h0] ? ~_GEN_5 & _GEN_5 - 1'h1 : next_priorities[1'h0];
+  reg        next_priority;
+  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid & ~next_priority}};
+  wire [1:0] _GEN_0 = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
+  wire       _GEN_2 = |_GEN_0;
+  wire       _GEN_3 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
   always @(posedge clock) begin
     if (reset)
-      next_priorities <= '{1'h0};
+      next_priority <= 1'h0;
     else
-      next_priorities[1'h0] <= _GEN_6;
+      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
   end // always @(posedge)
-  assign grants =
-    {{{1{_GEN_3[next_priorities[1'h0]]}}}, {{1{_GEN_2[next_priorities[1'h0]]}}}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1'h1])};
+  assign egress_out =
+    '{valid: _GEN_2,
+      bits:
+        (_GEN_1[1'h1]
+           ? ingress_1_in.bits
+           : _GEN_1[1'h0] ? ingress_0_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN_3;
 endmodule
 
 module Pipe_1(
@@ -696,11 +630,11 @@ module AtomicFork(
                                                         egress_1_out
 );
 
-  wire _GEN = /*cast(bit)*/{1{egress_1_in.ready}};
-  wire _GEN_0 = /*cast(bit)*/{1{egress_0_in.ready}};
-  assign ingress_out = '{ready: (&({{egress_1_in.ready}, {egress_0_in.ready}}))};
-  assign egress_0_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
-  assign egress_1_out = '{valid: (ingress_in.valid & _GEN_0), bits: ingress_in.bits};
+  assign ingress_out = '{ready: (egress_0_in.ready & egress_1_in.ready)};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & egress_1_in.ready), bits: ingress_in.bits};
+  assign egress_1_out =
+    '{valid: (ingress_in.valid & egress_0_in.ready), bits: ingress_in.bits};
 endmodule
 }>>|
 def zip_route_verilog_reference = @str|<<{

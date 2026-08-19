@@ -136,6 +136,8 @@ def verilog_reference = @str|<<{
   typedef struct packed {logic route_key; logic origin_key; } RouteLookupKey;
   typedef struct packed {logic target_mask; logic fallback_mask; logic valid; }
     RouteDecision;
+  typedef struct packed {logic valid; logic [0:0] grant; logic index; }
+    CircularPriorityChoice;
   typedef
     struct packed {logic [1:0] target_mask; logic [1:0] fallback_mask; logic valid; }
     RouteDecision_1;
@@ -299,7 +301,7 @@ module RouterAllocator(
   wire [0:0] _GEN =
     {1{requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
   wire       _GEN_0 = /*cast(bit)*/_GEN;
-  RoundRobinMatcher matcher (
+  OutputGreedyRoundRobinMatcher matcher (
     .clock    (clock),
     .reset    (reset),
     .requests ({1{_GEN_0 ? _GEN : fallback_requests[1'h0]}}),
@@ -308,7 +310,7 @@ module RouterAllocator(
   );
 endmodule
 
-module RoundRobinMatcher(
+module OutputGreedyRoundRobinMatcher(
   input             clock,
                     reset,
   input  [0:0][0:0] requests,
@@ -318,11 +320,11 @@ module RoundRobinMatcher(
 
   reg  [0:0] next_priorities;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_0:
+    output_greedy_round_robin_matcher_priority_in_range_0:
       assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
   `endif // not def SYNTHESIS
-  wire [0:0] _GEN = {1{requests[1'h0][1'h0]}};
-  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  wire       _GEN = /*cast(bit)*/{1{requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/{1{requests[1'h0][1'h0]}};
   wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
@@ -330,7 +332,7 @@ module RoundRobinMatcher(
     else
       next_priorities[1'h0] <= _GEN_1;
   end // always @(posedge)
-  assign grants = {1{_GEN}};
+  assign grants = {1{{1{(~_GEN | ~next_priorities[1'h0]) & requests[1'h0][1'h0]}}}};
 endmodule
 
 module GrantCrossbar(
@@ -523,7 +525,7 @@ module RouterAllocator_1(
   wire [1:0] _GEN =
     {{requests[1'h0][1'h1] & ~fallback_requests[1'h0][1'h1] & target_available[1'h1]},
      {requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
-  RoundRobinMatcher_1 matcher (
+  OutputGreedyRoundRobinMatcher_1 matcher (
     .clock    (clock),
     .reset    (reset),
     .requests ({1{(|_GEN) ? _GEN : fallback_requests[1'h0]}}),
@@ -532,7 +534,7 @@ module RouterAllocator_1(
   );
 endmodule
 
-module RoundRobinMatcher_1(
+module OutputGreedyRoundRobinMatcher_1(
   input             clock,
                     reset,
   input  [0:0][1:0] requests,
@@ -542,27 +544,30 @@ module RoundRobinMatcher_1(
 
   reg  [1:0] next_priorities;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_0:
+    output_greedy_round_robin_matcher_priority_in_range_0:
       assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
   `endif // not def SYNTHESIS
+  wire       _GEN = /*cast(bit)*/{1{requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
+  wire       _GEN_0 = (~_GEN | ~next_priorities[1'h0]) & requests[1'h0][1'h0];
+  wire       _GEN_1 = /*cast(bit)*/{1{requests[1'h0][1'h0]}};
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_1:
+    output_greedy_round_robin_matcher_priority_in_range_1:
       assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h1]);
   `endif // not def SYNTHESIS
-  wire       _GEN = requests[1'h0][1'h1] & ~requests[1'h0][1'h0];
-  wire       _GEN_0 = /*cast(bit)*/{1{requests[1'h0][1'h0]}};
-  wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
-  wire       _GEN_2 = /*cast(bit)*/{1{_GEN}};
-  wire       _GEN_3 = ~(_GEN_2 & accepts[1'h1]) & next_priorities[1'h1];
+  wire       _GEN_2 = requests[1'h0][1'h1] & ~_GEN_0;
+  wire       _GEN_3 = /*cast(bit)*/{1{_GEN_2 & ~next_priorities[1'h1]}};
+  wire       _GEN_4 = /*cast(bit)*/{1{_GEN_2}};
+  wire       _GEN_5 = ~(_GEN_1 & accepts[1'h0]) & next_priorities[1'h0];
+  wire       _GEN_6 = ~(_GEN_4 & accepts[1'h1]) & next_priorities[1'h1];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{1'h0, 1'h0};
     else begin
-      next_priorities[1'h1] <= _GEN_3;
-      next_priorities[1'h0] <= _GEN_1;
+      next_priorities[1'h1] <= _GEN_6;
+      next_priorities[1'h0] <= _GEN_5;
     end
   end // always @(posedge)
-  assign grants = {1{{{_GEN}, {requests[1'h0][1'h0]}}}};
+  assign grants = {1{{{(~_GEN_3 | ~next_priorities[1'h1]) & _GEN_2}, {_GEN_0}}}};
 endmodule
 
 module GrantCrossbar_1(
@@ -767,7 +772,7 @@ module RouterAllocator_2(
   wire [0:0] _GEN =
     {1{requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
   wire       _GEN_0 = /*cast(bit)*/_GEN;
-  RoundRobinMatcher_2 matcher (
+  OutputGreedyRoundRobinMatcher_2 matcher (
     .clock    (clock),
     .reset    (reset),
     .requests ({1{_GEN_0 ? _GEN : fallback_requests[1'h0]}}),
@@ -776,7 +781,7 @@ module RouterAllocator_2(
   );
 endmodule
 
-module RoundRobinMatcher_2(
+module OutputGreedyRoundRobinMatcher_2(
   input             clock,
                     reset,
   input  [0:0][0:0] requests,
@@ -786,11 +791,11 @@ module RoundRobinMatcher_2(
 
   reg  [0:0] next_priorities;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_0:
+    output_greedy_round_robin_matcher_priority_in_range_0:
       assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
   `endif // not def SYNTHESIS
-  wire [0:0] _GEN = {1{requests[1'h0][1'h0]}};
-  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  wire       _GEN = /*cast(bit)*/{1{requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/{1{requests[1'h0][1'h0]}};
   wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
@@ -798,7 +803,7 @@ module RoundRobinMatcher_2(
     else
       next_priorities[1'h0] <= _GEN_1;
   end // always @(posedge)
-  assign grants = {1{_GEN}};
+  assign grants = {1{{1{(~_GEN | ~next_priorities[1'h0]) & requests[1'h0][1'h0]}}}};
 endmodule
 
 module GrantCrossbar_2(

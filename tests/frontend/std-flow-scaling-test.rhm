@@ -1,0 +1,61 @@
+#lang rhombus
+// Guards standard flow selection and peer-reduction structures against quadratic growth.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/std/flow.rhdl" as flow
+
+def sizes = [2, 4, 8, 16]
+
+fun elaborate_modules(generator):
+  for List (size in sizes):
+    generator(size).modules[0]
+
+def matcher_modules = elaborate_modules(
+  fun (size): embedded.run_elaboration(
+    fun (): flow.OutputGreedyRoundRobinMatcher(size, 1)
+  )
+)
+def rr_arbiter_modules = elaborate_modules(
+  fun (size): embedded.run_elaboration(
+    fun (): flow.RRArbiter(Bits(8), size)
+  )
+)
+def join_modules = elaborate_modules(
+  fun (size): embedded.run_elaboration(
+    fun (): flow.Join(Bits(8), size)
+  )
+)
+def fork_modules = elaborate_modules(
+  fun (size): embedded.run_elaboration(
+    fun (): flow.AtomicFork(Bits(8), size)
+  )
+)
+
+fun operation_costs(modules):
+  modules.map(fun (module_def): module_def.operations.length())
+
+fun grows_below(costs, factor :: PosInt):
+  def mutable bounded = #true
+  for (index in 1..costs.length()):
+    bounded := bounded && costs[index] < costs[index - 1] * factor
+  bounded
+
+def avoids_candidate_vector_index = for all (
+  module_def in matcher_modules ++ rr_arbiter_modules
+):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.vector_index"
+  ).length() == 0
+
+check:
+  // Doubling lanes must stay below quadratic four-times growth. This rejects
+  // rebuilding one complete circular arbiter or peer reduction per lane.
+  grows_below(operation_costs(matcher_modules), 3) ~is #true
+  grows_below(operation_costs(rr_arbiter_modules), 3) ~is #true
+  grows_below(operation_costs(join_modules), 3) ~is #true
+  grows_below(operation_costs(fork_modules), 3) ~is #true
+
+  // The circular selector must not return to candidate-vector indexing.
+  avoids_candidate_vector_index ~is #true

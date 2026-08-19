@@ -88,6 +88,8 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [2:0] target_mask; logic [2:0] fallback_mask; logic valid; }
     RouteDecision;
+  typedef struct packed {logic valid; logic [2:0] grant; logic [1:0] index; }
+    CircularPriorityChoice;
 `endif // _TYPESCOPE_rhdl_types
 module OneRouterCrossbarFixture(
   input                                                 clock,
@@ -569,7 +571,7 @@ module RouterAllocator(
     {{requests[2'h2][2'h2] & ~fallback_requests[2'h2][2'h2] & target_available[2'h2]},
      {requests[2'h2][2'h1] & ~fallback_requests[2'h2][2'h1] & target_available[2'h1]},
      {requests[2'h2][2'h0] & ~fallback_requests[2'h2][2'h0] & target_available[2'h0]}};
-  RoundRobinMatcher matcher (
+  OutputGreedyRoundRobinMatcher matcher (
     .clock    (clock),
     .reset    (reset),
     .requests
@@ -581,7 +583,7 @@ module RouterAllocator(
   );
 endmodule
 
-module RoundRobinMatcher(
+module OutputGreedyRoundRobinMatcher(
   input             clock,
                     reset,
   input  [2:0][2:0] requests,
@@ -590,106 +592,83 @@ module RoundRobinMatcher(
 );
 
   reg  [2:0][1:0] next_priorities;
+  wire            _GEN = next_priorities[2'h0] != 2'h3;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_0:
-      assert property (@(posedge clock) disable iff (reset)
-                         next_priorities[2'h0] != 2'h3);
+    output_greedy_round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset) _GEN);
   `endif // not def SYNTHESIS
-  wire            _GEN = requests[2'h1][2'h0] & ~requests[2'h0][2'h0];
-  wire            _GEN_0 = requests[2'h2][2'h0] & ~(requests[2'h0][2'h0] | _GEN);
-  wire            _GEN_1 = requests[2'h2][2'h0] & ~requests[2'h1][2'h0];
-  wire            _GEN_2 = requests[2'h0][2'h0] & ~(requests[2'h1][2'h0] | _GEN_1);
-  wire            _GEN_3 = requests[2'h0][2'h0] & ~requests[2'h2][2'h0];
-  wire            _GEN_4 = requests[2'h1][2'h0] & ~(requests[2'h2][2'h0] | _GEN_3);
-  wire [2:0][2:0] _GEN_5 =
-    {{{{requests[2'h2][2'h0]}, {_GEN_4}, {_GEN_3}}},
-     {{{_GEN_1}, {requests[2'h1][2'h0]}, {_GEN_2}}},
-     {{{_GEN_0}, {_GEN}, {requests[2'h0][2'h0]}}}};
-  wire [2:0]      _GEN_6 = {{_GEN_3}, {_GEN_2}, {requests[2'h0][2'h0]}};
-  wire            _GEN_7 = _GEN_6[next_priorities[2'h0]];
-  wire [2:0]      _GEN_8 = {{_GEN_4}, {requests[2'h1][2'h0]}, {_GEN}};
-  wire            _GEN_9 = _GEN_8[next_priorities[2'h0]];
-  wire [2:0]      _GEN_10 = {{requests[2'h2][2'h0]}, {_GEN_1}, {_GEN_0}};
-  wire            _GEN_11 = _GEN_10[next_priorities[2'h0]];
+  wire [2:0]      _GEN_0 =
+    {{requests[2'h2][2'h0] & _GEN},
+     {requests[2'h1][2'h0] & ~(next_priorities[2'h0][1])},
+     {requests[2'h0][2'h0] & next_priorities[2'h0] == 2'h0}};
+  wire [2:0]      _GEN_1 =
+    {{requests[2'h2][2'h0]}, {requests[2'h1][2'h0]}, {requests[2'h0][2'h0]}};
+  wire [2:0]      _GEN_2 =
+    (|_GEN_0)
+      ? _GEN_0 & {~(_GEN_0[1:0] | {_GEN_0[0], 1'h0}), 1'h1}
+      : _GEN_1 & {~(_GEN_1[1:0] | {_GEN_1[0], 1'h0}), 1'h1};
+  wire [1:0]      _GEN_3 = _GEN_2[2'h1 +: 2];
+  wire            _GEN_4 = next_priorities[2'h1] != 2'h3;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_1:
-      assert property (@(posedge clock) disable iff (reset)
-                         next_priorities[2'h1] != 2'h3);
+    output_greedy_round_robin_matcher_priority_in_range_1:
+      assert property (@(posedge clock) disable iff (reset) _GEN_4);
   `endif // not def SYNTHESIS
-  wire            _GEN_12 = requests[2'h0][2'h1] & ~_GEN_7;
-  wire            _GEN_13 = requests[2'h1][2'h1] & ~_GEN_9 & ~_GEN_12;
-  wire            _GEN_14 = requests[2'h2][2'h1] & ~_GEN_11 & ~(_GEN_12 | _GEN_13);
-  wire            _GEN_15 = requests[2'h1][2'h1] & ~_GEN_9;
-  wire            _GEN_16 = requests[2'h2][2'h1] & ~_GEN_11 & ~_GEN_15;
-  wire            _GEN_17 = requests[2'h0][2'h1] & ~_GEN_7 & ~(_GEN_15 | _GEN_16);
-  wire            _GEN_18 = requests[2'h2][2'h1] & ~_GEN_11;
-  wire            _GEN_19 = requests[2'h0][2'h1] & ~_GEN_7 & ~_GEN_18;
-  wire            _GEN_20 = requests[2'h1][2'h1] & ~_GEN_9 & ~(_GEN_18 | _GEN_19);
-  wire [2:0][2:0] _GEN_21 =
-    {{{{_GEN_18}, {_GEN_20}, {_GEN_19}}},
-     {{{_GEN_16}, {_GEN_15}, {_GEN_17}}},
-     {{{_GEN_14}, {_GEN_13}, {_GEN_12}}}};
-  wire [2:0]      _GEN_22 = {{_GEN_19}, {_GEN_17}, {_GEN_12}};
-  wire            _GEN_23 = _GEN_22[next_priorities[2'h1]];
-  wire            _GEN_24 = _GEN_7 | _GEN_23;
-  wire [2:0]      _GEN_25 = {{_GEN_20}, {_GEN_15}, {_GEN_13}};
-  wire            _GEN_26 = _GEN_25[next_priorities[2'h1]];
-  wire            _GEN_27 = _GEN_9 | _GEN_26;
-  wire [2:0]      _GEN_28 = {{_GEN_18}, {_GEN_16}, {_GEN_14}};
-  wire            _GEN_29 = _GEN_28[next_priorities[2'h1]];
-  wire            _GEN_30 = _GEN_11 | _GEN_29;
+  wire            _GEN_5 = requests[2'h0][2'h1] & ~_GEN_2[2'h0];
+  wire            _GEN_6 = requests[2'h1][2'h1] & ~_GEN_2[2'h1];
+  wire            _GEN_7 = requests[2'h2][2'h1] & ~_GEN_2[2'h2];
+  wire [2:0]      _GEN_8 =
+    {{_GEN_7 & _GEN_4},
+     {_GEN_6 & ~(next_priorities[2'h1][1])},
+     {_GEN_5 & next_priorities[2'h1] == 2'h0}};
+  wire [2:0]      _GEN_9 = {{_GEN_7}, {_GEN_6}, {_GEN_5}};
+  wire [2:0]      _GEN_10 =
+    (|_GEN_8)
+      ? _GEN_8 & {~(_GEN_8[1:0] | {_GEN_8[0], 1'h0}), 1'h1}
+      : _GEN_9 & {~(_GEN_9[1:0] | {_GEN_9[0], 1'h0}), 1'h1};
+  wire [1:0]      _GEN_11 = _GEN_10[2'h1 +: 2];
+  wire            _GEN_12 = next_priorities[2'h2] != 2'h3;
   `ifndef SYNTHESIS
-    round_robin_matcher_priority_in_range_2:
-      assert property (@(posedge clock) disable iff (reset)
-                         next_priorities[2'h2] != 2'h3);
+    output_greedy_round_robin_matcher_priority_in_range_2:
+      assert property (@(posedge clock) disable iff (reset) _GEN_12);
   `endif // not def SYNTHESIS
-  wire            _GEN_31 = requests[2'h0][2'h2] & ~_GEN_24;
-  wire            _GEN_32 = requests[2'h1][2'h2] & ~_GEN_27 & ~_GEN_31;
-  wire            _GEN_33 = requests[2'h2][2'h2] & ~_GEN_30 & ~(_GEN_31 | _GEN_32);
-  wire            _GEN_34 = requests[2'h1][2'h2] & ~_GEN_27;
-  wire            _GEN_35 = requests[2'h2][2'h2] & ~_GEN_30 & ~_GEN_34;
-  wire            _GEN_36 = requests[2'h0][2'h2] & ~_GEN_24 & ~(_GEN_34 | _GEN_35);
-  wire            _GEN_37 = requests[2'h2][2'h2] & ~_GEN_30;
-  wire            _GEN_38 = requests[2'h0][2'h2] & ~_GEN_24 & ~_GEN_37;
-  wire            _GEN_39 = requests[2'h1][2'h2] & ~_GEN_27 & ~(_GEN_37 | _GEN_38);
-  wire [2:0][2:0] _GEN_40 =
-    {{{{_GEN_37}, {_GEN_39}, {_GEN_38}}},
-     {{{_GEN_35}, {_GEN_34}, {_GEN_36}}},
-     {{{_GEN_33}, {_GEN_32}, {_GEN_31}}}};
-  wire [2:0]      _GEN_41 = {{_GEN_38}, {_GEN_36}, {_GEN_31}};
-  wire [2:0]      _GEN_42 = {{_GEN_39}, {_GEN_34}, {_GEN_32}};
-  wire [2:0]      _GEN_43 = {{_GEN_37}, {_GEN_35}, {_GEN_33}};
-  wire [2:0]      _GEN_44 = _GEN_5[next_priorities[2'h0]];
-  wire [1:0]      _GEN_45 = _GEN_44[2:1] & ~(_GEN_44[1:0] | {_GEN_44[0], 1'h0});
-  wire [1:0]      _GEN_46 =
-    (|_GEN_44) & accepts[2'h0]
-      ? (_GEN_45 == 2'h2 ? 2'h0 : _GEN_45 + 2'h1)
+  wire            _GEN_13 = requests[2'h0][2'h2] & ~(_GEN_2[2'h0] | _GEN_10[2'h0]);
+  wire            _GEN_14 = requests[2'h1][2'h2] & ~(_GEN_2[2'h1] | _GEN_10[2'h1]);
+  wire            _GEN_15 = requests[2'h2][2'h2] & ~(_GEN_2[2'h2] | _GEN_10[2'h2]);
+  wire [2:0]      _GEN_16 =
+    {{_GEN_15 & _GEN_12},
+     {_GEN_14 & ~(next_priorities[2'h2][1])},
+     {_GEN_13 & next_priorities[2'h2] == 2'h0}};
+  wire [2:0]      _GEN_17 = {{_GEN_15}, {_GEN_14}, {_GEN_13}};
+  wire [2:0]      _GEN_18 =
+    (|_GEN_16)
+      ? _GEN_16 & {~(_GEN_16[1:0] | {_GEN_16[0], 1'h0}), 1'h1}
+      : _GEN_17 & {~(_GEN_17[1:0] | {_GEN_17[0], 1'h0}), 1'h1};
+  wire [1:0]      _GEN_19 = _GEN_18[2'h1 +: 2];
+  wire [1:0]      _GEN_20 =
+    (|_GEN_1) & accepts[2'h0]
+      ? (_GEN_3 == 2'h2 ? 2'h0 : _GEN_3 + 2'h1)
       : next_priorities[2'h0];
-  wire [2:0]      _GEN_47 = _GEN_21[next_priorities[2'h1]];
-  wire [1:0]      _GEN_48 = _GEN_47[2:1] & ~(_GEN_47[1:0] | {_GEN_47[0], 1'h0});
-  wire [1:0]      _GEN_49 =
-    (|_GEN_47) & accepts[2'h1]
-      ? (_GEN_48 == 2'h2 ? 2'h0 : _GEN_48 + 2'h1)
+  wire [1:0]      _GEN_21 =
+    (|_GEN_9) & accepts[2'h1]
+      ? (_GEN_11 == 2'h2 ? 2'h0 : _GEN_11 + 2'h1)
       : next_priorities[2'h1];
-  wire [2:0]      _GEN_50 = _GEN_40[next_priorities[2'h2]];
-  wire [1:0]      _GEN_51 = _GEN_50[2:1] & ~(_GEN_50[1:0] | {_GEN_50[0], 1'h0});
-  wire [1:0]      _GEN_52 =
-    (|_GEN_50) & accepts[2'h2]
-      ? (_GEN_51 == 2'h2 ? 2'h0 : _GEN_51 + 2'h1)
+  wire [1:0]      _GEN_22 =
+    (|_GEN_17) & accepts[2'h2]
+      ? (_GEN_19 == 2'h2 ? 2'h0 : _GEN_19 + 2'h1)
       : next_priorities[2'h2];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{2'h0, 2'h0, 2'h0};
     else begin
-      next_priorities[2'h2] <= _GEN_52;
-      next_priorities[2'h1] <= _GEN_49;
-      next_priorities[2'h0] <= _GEN_46;
+      next_priorities[2'h2] <= _GEN_22;
+      next_priorities[2'h1] <= _GEN_21;
+      next_priorities[2'h0] <= _GEN_20;
     end
   end // always @(posedge)
   assign grants =
-    {{{{_GEN_43[next_priorities[2'h2]]}, {_GEN_29}, {_GEN_11}}},
-     {{{_GEN_42[next_priorities[2'h2]]}, {_GEN_26}, {_GEN_9}}},
-     {{{_GEN_41[next_priorities[2'h2]]}, {_GEN_23}, {_GEN_7}}}};
+    {{{{_GEN_18[2'h2]}, {_GEN_10[2'h2]}, {_GEN_2[2'h2]}}},
+     {{{_GEN_18[2'h1]}, {_GEN_10[2'h1]}, {_GEN_2[2'h1]}}},
+     {{{_GEN_18[2'h0]}, {_GEN_10[2'h0]}, {_GEN_2[2'h0]}}}};
 endmodule
 
 module GrantCrossbar(

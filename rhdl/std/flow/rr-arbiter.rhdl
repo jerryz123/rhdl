@@ -4,61 +4,65 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/ready-valid-support.rhdl") open
-  lib("rhdl/std/flow/matcher.rhdl") open
+  lib("rhdl/std/flow/circular-priority.rhdl") open
 
-// A one-output RoundRobinMatcher owns transfer-based rotation. Selection may
-// change while stalled, so the output deliberately remains Decoupled rather
-// than claiming an irrevocable offer.
+// The arbiter owns transfer-based rotation around one combinational circular
+// selector. Selection may change while stalled, so the output deliberately
+// remains Decoupled rather than claiming an irrevocable offer.
 sync_circuit RRArbiter(T :: DataType, n :: PosInt):
 
   interface ingress[n](Decoupled(T), ~role: consumer)
   interface egress(Decoupled(T), ~role: producer)
   output chosen: Bits(index_width(n))
 
-  def requests = vec(
-    for List (index in 0..n): vec(ingress[index].valid)
-  )
-  inst matcher(RoundRobinMatcher(n, 1))
-  matcher.requests <== requests
-  matcher.accepts <== vec(egress.ready)
-  def grants = vec(
-    for List (index in 0..n): matcher.grants[index][0]
-  )
-  def selected_valid = or_reduce(grants)
+  def width = index_width(n)
+  reg next_priority(~init: bits(0, width))
+  assert(next_priority <= bits(n - 1, width), "rr_priority_in_range")
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def choice = circular_priority_onehot(requests, next_priority)
   def mutable selected_bits = ingress[0].bits
   for (index in 0..n):
-    selected_bits := mux(grants[index], ingress[index].bits, selected_bits)
+    selected_bits := mux(choice.grant[index], ingress[index].bits, selected_bits)
 
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & grants[index]
+    ingress[index].ready <== egress.ready & choice.grant[index]
 
-  egress.valid <== selected_valid
+  egress.valid <== choice.valid
   egress.bits <== selected_bits
-  chosen <== priority_encoder(grants)
+  chosen <== choice.index
 
-// The payloadless specialization uses the same generic matching policy.
+  when (choice.valid & egress.ready):
+    next_priority <== mux(
+      choice.index === bits(n - 1, width),
+      bits(0, width),
+      choice.index + bits(1, width)
+    )
+
+// The payloadless specialization owns the same direct rotating state.
 sync_circuit CtrlRRArbiter(n :: PosInt):
 
   interface ingress[n](DecoupledCtrl(), ~role: consumer)
   interface egress(DecoupledCtrl(), ~role: producer)
   output chosen: Bits(index_width(n))
 
-  def requests = vec(
-    for List (index in 0..n): vec(ingress[index].valid)
-  )
-  inst matcher(RoundRobinMatcher(n, 1))
-  matcher.requests <== requests
-  matcher.accepts <== vec(egress.ready)
-  def grants = vec(
-    for List (index in 0..n): matcher.grants[index][0]
-  )
-  def selected_valid = or_reduce(grants)
+  def width = index_width(n)
+  reg next_priority(~init: bits(0, width))
+  assert(next_priority <= bits(n - 1, width), "ctrl_rr_priority_in_range")
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def choice = circular_priority_onehot(requests, next_priority)
 
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & grants[index]
+    ingress[index].ready <== egress.ready & choice.grant[index]
 
-  egress.valid <== selected_valid
-  chosen <== priority_encoder(grants)
+  egress.valid <== choice.valid
+  chosen <== choice.index
+
+  when (choice.valid & egress.ready):
+    next_priority <== mux(
+      choice.index === bits(n - 1, width),
+      bits(0, width),
+      choice.index + bits(1, width)
+    )
 
 // A connected endpoint array supplies its own input count. A disconnected
 // topology starts from a payload type and states the count once in rr_arbiter.
