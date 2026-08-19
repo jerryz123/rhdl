@@ -1,0 +1,345 @@
+#lang rhdl
+// Implements Ricket's commit-owned CSR, privilege, and synchronous-trap state.
+
+import:
+  "decode/system-ctrl.rhdl" open
+  "../../riscv/isa/csr.rhm" open
+  "../../riscv/isa/trap.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rhdl/csr.rhdl" open
+  "../../riscv/rhdl/trap.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+hardware_enum PrivilegeMode(~width: 2):
+  User = 0
+  Supervisor = 1
+  Machine = 3
+
+bundle RicketCsrCommit(xlen :: XLen):
+  pc: Bits(xlen_width(xlen))
+  instruction: Bits(32)
+  rd: Bits(5)
+  csr_operation: CsrOperation
+  csr_address: Bits(12)
+  csr_source: Bits(xlen_width(xlen))
+  system_operation: SystemOperation
+  exception_valid: Bool
+  exception_cause: Bits(xlen_width(xlen))
+  exception_value: Bits(xlen_width(xlen))
+
+bundle RicketCsrState(xlen :: XLen):
+  mstatus: Bits(xlen_width(xlen))
+  medeleg: Bits(xlen_width(xlen))
+  mideleg: Bits(xlen_width(xlen))
+  mie: Bits(xlen_width(xlen))
+  mtvec: Bits(xlen_width(xlen))
+  mcounteren: Bits(xlen_width(xlen))
+  mscratch: Bits(xlen_width(xlen))
+  mepc: Bits(xlen_width(xlen))
+  mcause: Bits(xlen_width(xlen))
+  mtval: Bits(xlen_width(xlen))
+  stvec: Bits(xlen_width(xlen))
+  scounteren: Bits(xlen_width(xlen))
+  sscratch: Bits(xlen_width(xlen))
+  sepc: Bits(xlen_width(xlen))
+  scause: Bits(xlen_width(xlen))
+  stval: Bits(xlen_width(xlen))
+
+bundle RicketTrapDecision(xlen :: XLen):
+  valid: Bool
+  cause: Bits(xlen_width(xlen))
+  value: Bits(xlen_width(xlen))
+  to_supervisor: Bool
+
+fun csr_system_operation(control :: SystemControl()) :~ Bool:
+  (control.csr =/= CsrOperation.None) ||| (
+    control.action =/= SystemOperation.None
+  )
+
+def RicketDelegatableExceptions = [
+  ExceptionCause.InstructionAddressMisaligned,
+  ExceptionCause.IllegalInstruction,
+  ExceptionCause.Breakpoint,
+  ExceptionCause.LoadAddressMisaligned,
+  ExceptionCause.StoreAddressMisaligned,
+  ExceptionCause.EnvironmentCallFromUser,
+  ExceptionCause.InstructionPageFault,
+  ExceptionCause.LoadPageFault,
+  ExceptionCause.StorePageFault
+]
+
+fun resolve_ricket_trap(xlen :: XLen,
+                        commit_valid :: Bool,
+                        operation :: RicketCsrCommit(xlen),
+                        privilege :: PrivilegeMode,
+                        csr_access_legal :: Bool,
+                        medeleg :: Bits(xlen_width(xlen))) :~ RicketTrapDecision(xlen):
+  def width = xlen_width(xlen)
+  def zero = bits(0, width)
+  def csr_commit = commit_valid & (operation.csr_operation =/= CsrOperation.None)
+  def illegal_csr = csr_commit & !csr_access_legal
+  def illegal_return = commit_valid & (
+    ((operation.system_operation === SystemOperation.Mret) & (privilege =/= PrivilegeMode.Machine)) ||| (
+      (operation.system_operation === SystemOperation.Sret) & (privilege === PrivilegeMode.User)
+    )
+  )
+  def explicit_exception = commit_valid & operation.exception_valid
+  def ecall = commit_valid & (operation.system_operation === SystemOperation.Ecall)
+  def ebreak = commit_valid & (operation.system_operation === SystemOperation.Ebreak)
+  def trap_event = explicit_exception ||| illegal_csr ||| illegal_return ||| ecall ||| ebreak
+  def ecall_cause = mux_lookup(
+    privilege,
+    ~default: exception_cause_bits(ExceptionCause.EnvironmentCallFromMachine, width),
+    [
+      [PrivilegeMode.User, exception_cause_bits(ExceptionCause.EnvironmentCallFromUser, width)],
+      [PrivilegeMode.Supervisor, exception_cause_bits(ExceptionCause.EnvironmentCallFromSupervisor, width)],
+      [PrivilegeMode.Machine, exception_cause_bits(ExceptionCause.EnvironmentCallFromMachine, width)]
+    ]
+  )
+  def generated_cause = mux(
+    ecall,
+    ecall_cause,
+    mux(
+      ebreak,
+      exception_cause_bits(ExceptionCause.Breakpoint, width),
+      exception_cause_bits(ExceptionCause.IllegalInstruction, width)
+    )
+  )
+  def cause = mux(explicit_exception, operation.exception_cause, generated_cause)
+  def instruction = if width == 32 | operation.instruction | zext(operation.instruction, width)
+  def value = mux(
+    explicit_exception,
+    operation.exception_value,
+    mux(illegal_csr ||| illegal_return, instruction, zero)
+  )
+  def delegated = mux_lookup(
+    cause,
+    ~default: Bool(#false),
+    RicketDelegatableExceptions.map(
+      fun (candidate):
+        def code = exception_code(candidate)
+        [code, medeleg[code].into(Bool)]
+    )
+  )
+  RicketTrapDecision(xlen):
+    valid: trap_event
+    cause: cause
+    value: value
+    to_supervisor: trap_event & (privilege =/= PrivilegeMode.Machine) & delegated
+
+sync_circuit RicketCsrFile(xlen :: XLen):
+  def width = xlen_width(xlen)
+  def zero = bits(0, width)
+  def mstatus_mask = bits(0xe19bb, width)
+  def sstatus_mask = bits(0xc0133, width)
+  def medeleg_mask = bits(exception_mask(RicketDelegatableExceptions), width)
+  def mideleg_mask = bits(0x222, width)
+  def interrupt_enable_mask = bits(0xaaa, width)
+  def counter_enable_mask = bits(0x7, width)
+  def tvec_mask = !bits(0x3, width)
+  def epc_mask = !bits(0x3, width)
+  def mpp_mask = bits(0x1800, width)
+  def misa_value = if xlen == XLen.X32 | bits(0x40140100, width) | bits(0x8000000000140100, width)
+
+  interface commit(Valid(RicketCsrCommit(xlen)), ~role: consumer)
+  interface redirect(Valid(Bits(width)), ~role: producer)
+  output writeback_valid: Bool
+  output writeback_value: Bits(width)
+  output privilege: PrivilegeMode
+  output satp: Bits(width)
+
+  reg privilege_state(PrivilegeMode, ~init: PrivilegeMode.Machine)
+  reg state(RicketCsrState(xlen), ~init: literal(RicketCsrState(xlen), 0))
+
+  fun flag_value(original, mask, enabled):
+    mux(enabled, original ||| mask, original & !mask)
+
+  def sstatus_value = state.mstatus & sstatus_mask
+  def csr = commit.bits.csr_address
+  def bank = csr_bank(csr, ~default: zero):
+    csr CsrId.Sstatus:
+      read: sstatus_value
+      write value:
+        state.mstatus <== masked_merge(state.mstatus, value, sstatus_mask)
+    csr CsrId.Sie:
+      read: state.mie & state.mideleg
+      write value:
+        state.mie <== masked_merge(state.mie, value, state.mideleg)
+    csr CsrId.Stvec:
+      read: state.stvec
+      write value:
+        state.stvec <== value & tvec_mask
+    csr CsrId.Scounteren:
+      read: state.scounteren
+      write value:
+        state.scounteren <== value & counter_enable_mask
+    read CsrId.Senvcfg: zero
+    storage CsrId.Sscratch: state.sscratch
+    csr CsrId.Sepc:
+      read: state.sepc
+      write value:
+        state.sepc <== value & epc_mask
+    storage CsrId.Scause: state.scause
+    storage CsrId.Stval: state.stval
+    read CsrId.Sip: zero
+    read CsrId.Satp: zero
+    csr CsrId.Mstatus:
+      read: state.mstatus
+      write value:
+        state.mstatus <== masked_merge(state.mstatus, value, mstatus_mask)
+    read CsrId.Misa: misa_value
+    csr CsrId.Medeleg:
+      read: state.medeleg
+      write value:
+        state.medeleg <== value & medeleg_mask
+    csr CsrId.Mideleg:
+      read: state.mideleg
+      write value:
+        state.mideleg <== value & mideleg_mask
+    csr CsrId.Mie:
+      read: state.mie
+      write value:
+        state.mie <== value & interrupt_enable_mask
+    csr CsrId.Mtvec:
+      read: state.mtvec
+      write value:
+        state.mtvec <== value & tvec_mask
+    csr CsrId.Mcounteren:
+      read: state.mcounteren
+      write value:
+        state.mcounteren <== value & counter_enable_mask
+    read CsrId.Menvcfg: zero
+    storage CsrId.Mscratch: state.mscratch
+    csr CsrId.Mepc:
+      read: state.mepc
+      write value:
+        state.mepc <== value & epc_mask
+    storage CsrId.Mcause: state.mcause
+    storage CsrId.Mtval: state.mtval
+    read CsrId.Mip: zero
+    read CsrId.Mvendorid: zero
+    read CsrId.Marchid: zero
+    read CsrId.Mimpid: zero
+    read CsrId.Mhartid: zero
+  def csr_recognized = bank.recognized
+  def csr_read_value = bank.read_value
+  def csr_write_requested = (commit.bits.csr_operation === CsrOperation.Write) ||| (
+    is_one_of(commit.bits.csr_operation, CsrOperation.Set, CsrOperation.Clear) & or_reduce(commit.bits.csr_source)
+  )
+  def csr_read_only = csr[10..12] === bits(3, 2)
+  def required_privilege = csr[8..10]
+  def privilege_bits = cast(privilege_state, Bits(2))
+  def csr_access_legal = csr_recognized & !(
+    privilege_bits < required_privilege
+  ) & !(csr_write_requested & csr_read_only)
+  def csr_commit = commit.valid & (commit.bits.csr_operation =/= CsrOperation.None)
+  def trap = resolve_ricket_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
+
+  def csr_replacement = mux_lookup(
+    commit.bits.csr_operation,
+    ~default: csr_read_value,
+    [
+      [CsrOperation.Write, commit.bits.csr_source],
+      [CsrOperation.Set, csr_read_value ||| commit.bits.csr_source],
+      [CsrOperation.Clear, csr_read_value & !commit.bits.csr_source]
+    ]
+  )
+  def csr_write = csr_commit & csr_access_legal & csr_write_requested
+  def mret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Mret)
+  def sret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Sret)
+  def mret_privilege = mux_lookup(
+    state.mstatus[11..13],
+    ~default: PrivilegeMode.User,
+    [
+      [1, PrivilegeMode.Supervisor],
+      [3, PrivilegeMode.Machine]
+    ]
+  )
+  def sret_privilege = mux(state.mstatus[8].into(Bool), PrivilegeMode.Supervisor, PrivilegeMode.User)
+  def supervisor_trap_status = flag_value(
+    flag_value(
+      flag_value(state.mstatus, bits(0x20, width), state.mstatus[1].into(Bool)),
+      bits(0x2, width),
+      Bool(#false)
+    ),
+    bits(0x100, width),
+    privilege_state === PrivilegeMode.Supervisor
+  )
+  def machine_trap_status = masked_merge(
+    flag_value(
+      flag_value(state.mstatus, bits(0x80, width), state.mstatus[3].into(Bool)),
+      bits(0x8, width),
+      Bool(#false)
+    ),
+    zext(privilege_bits, width) << 11,
+    mpp_mask
+  )
+  def trap_mstatus = mux(trap.to_supervisor, supervisor_trap_status, machine_trap_status)
+  def mret_status = flag_value(
+    flag_value(
+      masked_merge(state.mstatus, zero, mpp_mask),
+      bits(0x8, width),
+      state.mstatus[7].into(Bool)
+    ),
+    bits(0x80, width),
+    Bool(#true)
+  )
+  def normalized_mret_status = mux(
+    mret_privilege === PrivilegeMode.Machine,
+    mret_status,
+    mret_status & !bits(0x20000, width)
+  )
+  def sret_status = flag_value(
+    flag_value(
+      flag_value(state.mstatus, bits(0x2, width), state.mstatus[5].into(Bool)),
+      bits(0x20, width),
+      Bool(#true)
+    ),
+    bits(0x100, width),
+    Bool(#false)
+  ) & !bits(0x20000, width)
+
+  writeback_valid <== csr_commit & csr_access_legal & or_reduce(commit.bits.rd)
+  writeback_value <== csr_read_value
+  privilege <== privilege_state
+  satp <== zero
+  redirect.valid <== trap.valid ||| mret ||| sret
+  redirect.bits <== mux(
+    trap.valid,
+    mux(trap.to_supervisor, state.stvec, state.mtvec),
+    mux(mret, state.mepc, state.sepc)
+  )
+
+  when (trap.valid):
+    privilege_state <== mux(trap.to_supervisor, PrivilegeMode.Supervisor, PrivilegeMode.Machine)
+  elsewhen mret:
+    privilege_state <== mret_privilege
+  elsewhen sret:
+    privilege_state <== sret_privilege
+
+  when (trap.valid & trap.to_supervisor):
+    state.mstatus <== trap_mstatus
+    state.sepc <== commit.bits.pc & epc_mask
+    state.scause <== trap.cause
+    state.stval <== trap.value
+  elsewhen (trap.valid):
+    state.mstatus <== trap_mstatus
+    state.mepc <== commit.bits.pc & epc_mask
+    state.mcause <== trap.cause
+    state.mtval <== trap.value
+  elsewhen mret:
+    state.mstatus <== normalized_mret_status
+  elsewhen sret:
+    state.mstatus <== sret_status
+  elsewhen csr_write:
+    bank.write(csr_replacement)
+
+export:
+  PrivilegeMode
+  RicketCsrCommit
+  RicketCsrState
+  RicketTrapDecision
+  RicketCsrFile
+  csr_system_operation
+  resolve_ricket_trap

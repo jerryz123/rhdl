@@ -19,3 +19,16 @@ conversion while retaining their exact architectural care masks.
 concatenations, and signed or unsigned extension. Architectural bit placement
 therefore remains defined once in `riscv/model`; concrete cores only select
 which described layout their datapath consumes.
+
+[`csr.rhdl`](csr.rhdl) converts a pure `CsrId` enum member to the corresponding
+typed `Bits(12)` instruction field. Its `csr_bank` form defines each
+implemented CSR once and derives recognition, read selection, and one exact-key
+write dispatch. `storage` entries provide direct state, `read` entries provide
+constants or write-ignored views, and `csr` entries provide custom read and
+write behavior for aliases and WARL masks. The architectural identifier and
+numeric address remain owned by `riscv/isa`; hardware receives a value only at
+this adapter boundary.
+
+[`trap.rhdl`](trap.rhdl) converts an architectural `ExceptionCause` into a
+width-specialized hardware value. Core-specific trap selection stays in the
+processor while the cause-number namespace remains shared.

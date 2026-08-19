@@ -11,11 +11,14 @@ import:
   "decode/mem-ctrl.rhdl" open
   "decode/writeback-ctrl.rhdl" open
   "bundles.rhdl" open
+  "csr.rhdl" open
   "multiply.rhdl" open
   "register-file.rhdl" open
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm" open
+  "../../riscv/isa/trap.rhm" open
+  "../../riscv/rhdl/trap.rhdl" open
   "../../riscv/model/formats.rhm" as riscv_fields
   "../../riscv/rhdl/instruction-fields.rhdl" open
   lib("rhdl/std/bits.rhdl") open
@@ -32,6 +35,8 @@ sync_circuit RicketCore(xlen :: XLen):
   output fault: Bool
 
   def zero = bits(0, width)
+  fun instruction_value(instruction :: Bits(32)):
+    if width == 32 | instruction | zext(instruction, width)
   fun deferred_writeback(source):
     (source === WritebackSelect.Memory) ||| (source === WritebackSelect.Multiply)
   reg faulted(~init: Bool(#false))
@@ -50,6 +55,7 @@ sync_circuit RicketCore(xlen :: XLen):
   inst branch_resolver(BranchResolver(width))
   inst multiplier(RicketMultiplier(xlen))
   inst scoreboard(Scoreboard(register_count))
+  inst csrs(RicketCsrFile(xlen))
 
   // Name the pipeline boundaries once so later sections can be presented in
   // stage order while still observing downstream occupancy and results.
@@ -63,26 +69,40 @@ sync_circuit RicketCore(xlen :: XLen):
   // Backward-traveling observations use local Valid interface links. Their
   // producers remain in their pipeline stages below, despite earlier stages
   // consuming their values. The payloadless fault event remains a Bool wire.
-  wire execute_fault_event: Bool
+  wire execute_exception_event: Bool
   def redirect_link :: Handle = interface_link(Valid(Bits(width)))
+  def execute_redirect_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RicketBypass(xlen)))
   def scoreboard_set_link :: Handle = interface_link(Valid(Bits(5)))
   def scoreboard_clear_link :: Handle = interface_link(Valid(Bits(5)))
   scoreboard_set_link.right |> scoreboard.set
   scoreboard_clear_link.right |> scoreboard.clear
+  redirect_link.left.valid <== csrs.redirect.valid ||| execute_redirect_link.right.valid
+  redirect_link.left.bits <== mux(
+    csrs.redirect.valid,
+    csrs.redirect.bits,
+    execute_redirect_link.right.bits
+  )
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
   // its Pipe. Redirects and faults flush both pending PCs and the L1I's
   // lookup/response path, so no generation tag crosses this interface.
-  def squash = faulted ||| execute_fault_event ||| redirect_link.right.valid
+  def exception_in_flight = (memory.valid & memory.bits.exception_valid) ||| (
+    commit.valid & commit.bits.exception_valid
+  )
+  def squash = faulted ||| execute_exception_event ||| exception_in_flight ||| (
+    redirect_link.right.valid
+  )
   def accepted_start = start
-    |> gate_flow(!started & !(faulted ||| execute_fault_event))
+    |> gate_flow(!started & !(faulted ||| execute_exception_event))
     |> to_valid()
   def start_fault = accepted_start.valid & !is_aligned(accepted_start.bits, 4)
-  def fetch_flush = start_fault ||| execute_fault_event ||| redirect_link.right.valid
+  def fetch_flush = start_fault ||| execute_exception_event ||| redirect_link.right.valid
   inst fetch_pcs(Queue(Bits(width), 2, ~pipe: #true), ~reset_when: fetch_flush)
-  def fetch_valid = started & !(faulted ||| execute_fault_event) & !redirect_link.right.valid
+  def fetch_valid = started & !(
+    faulted ||| execute_exception_event ||| exception_in_flight
+  ) & !redirect_link.right.valid
   instruction_access.flush <== fetch_flush
   instruction_access.request.valid <== fetch_valid & fetch_pcs.ingress.ready
   instruction_access.request.bits.address <== fetch_pc
@@ -112,7 +132,7 @@ sync_circuit RicketCore(xlen :: XLen):
   elsewhen fetch_request_fire:
     fetch_pc <== fetch_pc + bits(4, width)
 
-  when (start_fault ||| execute_fault_event):
+  when start_fault:
     faulted <== Bool(#true)
 
   // Decode (ID) is ordinary combinational logic between IF/ID and ID/EX.
@@ -172,8 +192,23 @@ sync_circuit RicketCore(xlen :: XLen):
     control.operand.uses_rs2 & rs2_busy
   )
   def scoreboard_waw_hazard = control.writeback.enable & rd_busy
-  def register_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| scoreboard_waw_hazard
-  def hazard_free_if_id = live_if_id |> gate_flow(!register_hazard)
+  def system_in_id_ex = id_ex.valid & csr_system_operation(id_ex.bits.system)
+  def system_in_memory = memory.valid & csr_system_operation(memory.bits.system)
+  def system_in_commit = commit.valid & csr_system_operation(commit.bits.system)
+  def system_in_flight = system_in_id_ex ||| system_in_memory ||| system_in_commit
+  def commit_is_deferred = commit.valid & deferred_writeback(
+    commit.bits.writeback_source
+  ) & commit.bits.write_enable
+  def deferred_state_pending = id_ex_is_deferred ||| memory_is_deferred ||| (
+    commit_is_deferred
+  ) ||| or_reduce(scoreboard.busy) ||| scoreboard_set_link.right.valid
+  def system_waits_for_deferred = csr_system_operation(control.system) & deferred_state_pending
+  def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
+    scoreboard_waw_hazard
+  ) ||| system_in_flight ||| system_waits_for_deferred ||| exception_in_flight ||| (
+    execute_exception_event
+  )
+  def hazard_free_if_id = live_if_id |> gate_flow(!pipeline_hazard)
   def decoded = hazard_free_if_id |> map_flow(fetch_token):
     DecodeExecute(xlen):
       pc: fetch_token.pc
@@ -189,7 +224,7 @@ sync_circuit RicketCore(xlen :: XLen):
       multiply_control: control.multiply
       writeback_enable: control.writeback.enable
       writeback_source: control.writeback.source
-      trap: control.trap.trap
+      system: control.system
       illegal: !decoder.valid
       immediate: decoded_immediate
       rs1: rs1
@@ -247,11 +282,28 @@ sync_circuit RicketCore(xlen :: XLen):
   def redirect_aligned = is_aligned(computed_redirect_target, 4)
   def memory_aligned = memory_access_aligned(alu.result, id_ex.bits.memory_width)
   def execute_is_memory = id_ex.bits.memory_operation =/= MemoryOperation.None
-  def execute_nonredirect_fault = id_ex.bits.illegal ||| id_ex.bits.trap ||| (
-    execute_is_memory & !memory_aligned
-  )
+  def execute_nonredirect_fault = id_ex.bits.illegal ||| (execute_is_memory & !memory_aligned)
   def redirect_fault = redirect_requested & !redirect_aligned
   def execute_fault = execute_nonredirect_fault ||| redirect_fault
+  def execute_exception_cause = mux(
+    id_ex.bits.illegal,
+    exception_cause_bits(ExceptionCause.IllegalInstruction, width),
+    mux(redirect_fault,
+        exception_cause_bits(ExceptionCause.InstructionAddressMisaligned, width),
+        mux(id_ex.bits.memory_operation === MemoryOperation.Write,
+            exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
+            exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width)))
+  )
+  def execute_exception_value = mux(
+    id_ex.bits.illegal,
+    instruction_value(id_ex.bits.instruction),
+    mux(redirect_fault, computed_redirect_target, alu.result)
+  )
+  def csr_source = mux(
+    id_ex.bits.system.immediate,
+    zext(id_ex.bits.instruction[15..20], width),
+    forwarded_rs1
+  )
   def pc_plus_four = id_ex.bits.pc + bits(4, width)
   def execute_result = mux(
     id_ex.bits.writeback_source === WritebackSelect.PcPlus4,
@@ -306,41 +358,58 @@ sync_circuit RicketCore(xlen :: XLen):
 
   (
     pipeline_path
-      |> filter_flow(execute_token => !execute_fault)
       |> map_flow(execute_token => ExecuteMemory(xlen)):
+        pc: execute_token.pc
+        instruction: execute_token.instruction
         writeback_source: execute_token.writeback_source
-        writeback_enable: execute_token.writeback_enable
+        writeback_enable: execute_token.writeback_enable & !execute_fault
         rd: execute_token.rd
         result: execute_result
         multiply_issue: execute_multiply_issue
+        system: execute_token.system
+        csr_address: execute_token.instruction[20..32]
+        csr_source: csr_source
+        exception_valid: execute_fault
+        exception_cause: execute_exception_cause
+        exception_value: execute_exception_value
   ) |> to_valid()
     |> ex_mem_pipe.ingress
 
   def execute_transfer = branch_resolver.result.valid
-  execute_fault_event <== execute_transfer & execute_fault
+  execute_exception_event <== execute_transfer & execute_fault
   (
     branch_resolver.result
       |> filter_valid(branch_result => !execute_fault & branch_result.taken)
       |> map_valid(branch_result => computed_redirect_target)
-  ) |> redirect_link.left
+  ) |> execute_redirect_link.left
 
-  // Memory advances every non-faulting instruction into WB. Immediate results
-  // can already bypass here, but no instruction commits at this boundary.
+  // Memory advances every instruction into WB; exception payloads have their
+  // ordinary side effects disabled. No instruction commits at this boundary.
   def Array(memory_writeback_path, memory_bypass_path) = memory |> fork_valid(2)
 
   def memory_writeback:
     memory_writeback_path
       |> map_valid(operation => MemoryWriteback(xlen)):
+        pc: operation.pc
+        instruction: operation.instruction
         writeback_source: operation.writeback_source
         write_enable: operation.writeback_enable
         rd: operation.rd
         value: operation.result
         multiply_issue: operation.multiply_issue
+        system: operation.system
+        csr_address: operation.csr_address
+        csr_source: operation.csr_source
+        exception_valid: operation.exception_valid
+        exception_cause: operation.exception_cause
+        exception_value: operation.exception_value
   memory_writeback |> mem_wb_pipe.ingress
 
   def memory_bypass:
     memory_bypass_path
-      |> filter_valid(operation => operation.writeback_enable & !deferred_writeback(operation.writeback_source) & or_reduce(operation.rd))
+      |> filter_valid(operation => operation.writeback_enable & !deferred_writeback(
+        operation.writeback_source
+      ) & (operation.writeback_source =/= WritebackSelect.Csr) & or_reduce(operation.rd))
       |> map_valid(operation => RicketBypass(xlen)):
         rd: operation.rd
         value: operation.result
@@ -349,7 +418,22 @@ sync_circuit RicketCore(xlen :: XLen):
   // Writeback (WB) is the ordered commit point. Deferred loads and multiplies
   // mark their destinations busy here; immediate results update the register
   // file and remain available to Execute through the bypass link.
-  def Array(scoreboard_commit, bypass_commit, register_commit, multiply_commit) = commit |> fork_valid(4)
+  def Array(scoreboard_commit, bypass_commit, register_commit,
+            multiply_commit, csr_commit) = commit |> fork_valid(5)
+  (
+    csr_commit
+      |> map_valid(operation => RicketCsrCommit(xlen)):
+        pc: operation.pc
+        instruction: operation.instruction
+        rd: operation.rd
+        csr_operation: operation.system.csr
+        csr_address: operation.csr_address
+        csr_source: operation.csr_source
+        system_operation: operation.system.action
+        exception_valid: operation.exception_valid
+        exception_cause: operation.exception_cause
+        exception_value: operation.exception_value
+  ) |> csrs.commit
   def scoreboard_set_event = scoreboard_commit
     |> filter_valid(operation => deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
     |> map_valid(operation => operation.rd)
@@ -357,7 +441,9 @@ sync_circuit RicketCore(xlen :: XLen):
 
   def writeback_bypass:
     bypass_commit
-      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable & or_reduce(operation.rd))
+      |> filter_valid(operation => !deferred_writeback(
+        operation.writeback_source
+      ) & (operation.writeback_source =/= WritebackSelect.Csr) & operation.write_enable & or_reduce(operation.rd))
       |> map_valid(operation => RicketBypass(xlen)):
         rd: operation.rd
         value: operation.value
@@ -365,10 +451,18 @@ sync_circuit RicketCore(xlen :: XLen):
 
   def register_commit_write:
     register_commit
-      |> filter_valid(operation => !deferred_writeback(operation.writeback_source) & operation.write_enable)
+      |> filter_valid(operation => !deferred_writeback(
+        operation.writeback_source
+      ) & operation.write_enable & (
+        (operation.writeback_source =/= WritebackSelect.Csr) ||| csrs.writeback_valid
+      ))
       |> map_valid(operation => RegisterFileWrite(xlen)):
         address: operation.rd
-        data: operation.value
+        data: mux(
+          operation.writeback_source === WritebackSelect.Csr,
+          csrs.writeback_value,
+          operation.value
+        )
   register_commit_write |> commit_write
 
   def multiply_issue = multiply_commit

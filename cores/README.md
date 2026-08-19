@@ -23,7 +23,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
 | [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
-| [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, state, and tests |
+| [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, CSR/privilege state, caches, and tests |
 
 The dependency direction is one way:
 
@@ -108,5 +108,5 @@ env PLTCOLLECTS="$PWD": raco test cores/tests/*-test.rhm
 
 Run [`make ricket-host-test`](../Makefile) for all reusable components together
 with Ricket's decode and elaboration tests. `make ricket-test` additionally
-checks load/store lane behavior and iterative multiplier transactions after
-CIRCT lowering with Verilator.
+checks load/store lane behavior, iterative multiplier transactions, and CSR
+privilege/trap transitions after CIRCT lowering with Verilator.

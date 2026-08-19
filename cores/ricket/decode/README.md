@@ -15,7 +15,7 @@ authored control columns.
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
 | [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Zmmul signedness and high/word result selection |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
-| [`trap-ctrl.rhdl`](trap-ctrl.rhdl) | Synchronous trap indication |
+| [`system-ctrl.rhdl`](system-ctrl.rhdl) | Zicsr operations, ECALL/EBREAK, and MRET/SRET |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
 | [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the XLEN-selected integrated decoder circuit |
 
@@ -46,10 +46,11 @@ whose only job would be to construct and distribute one output pattern.
 
 `multiply-ctrl.rhdl` decodes the four RV32 Zmmul instructions and RV64 `MULW`
 into a nested reusable `MultiplierMode` plus orthogonal high-result and
-word-result controls. `core-ctrl.rhdl` composes that column with the base ISA
-columns into the same selected decode table.
+word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and the
+initial privileged returns. `core-ctrl.rhdl` composes both columns with the
+base ISA columns into the same selected decode table.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one
-hardware decode operation. The focused decoder test checks all 44 RV32I+Zmmul
-and 57 RV64I+Zmmul rows against their canonical instruction-pattern domains.
+hardware decode operation. The focused decoder test checks all 52 RV32 and 65
+RV64 Ricket rows against their canonical instruction-pattern domains.

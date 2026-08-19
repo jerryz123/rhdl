@@ -181,10 +181,11 @@ The current vertical slice includes:
 - Backend-independent clock/reset inventory and hierarchy-aware temporal
   provenance reports that distinguish same-clock, foreign-clock, external,
   static, and multi-clock fan-in sources.
-- Ricket, a standalone five-stage RV32I/RV64I integer core with direct component-oriented
-  structured decode, separate instruction and data memory ports, forwarding,
-  load-use stalls, redirect flushing, and fault-stop behavior. Its typed,
-  shared integer ALU remains independently reusable.
+- Ricket, a standalone five-stage RV32I/RV64I integer core with direct
+  component-oriented structured decode, Zmmul, Zicsr, initial M/S/U synchronous
+  trap handling, separate instruction and data memory ports, forwarding,
+  scoreboarded deferred completion, and redirect flushing. Its typed, shared
+  integer ALU remains independently reusable.
 
 ## Deferred work
 

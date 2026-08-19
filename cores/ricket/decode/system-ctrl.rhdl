@@ -1,0 +1,85 @@
+#lang rhdl
+// Defines Ricket's CSR, synchronous trap, and privileged-return controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/zmmul.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum CsrOperation:
+  None
+  Write
+  Set
+  Clear
+
+hardware_enum SystemOperation:
+  None
+  Ecall
+  Ebreak
+  Mret
+  Sret
+
+bundle SystemControl():
+  csr: CsrOperation
+  immediate: Bool
+  action: SystemOperation
+
+def no_system = partial_pattern(SystemControl()):
+  csr: CsrOperation.None
+  action: SystemOperation.None
+
+fun csr_control(operation :: CsrOperation, immediate :: Boolean):
+  pattern(SystemControl()):
+    csr: operation
+    immediate: Bool(immediate)
+    action: SystemOperation.None
+
+fun system_control(operation :: SystemOperation):
+  partial_pattern(SystemControl()):
+    csr: CsrOperation.None
+    action: operation
+
+def ZicsrSystemCases = combine_case_groups([
+  instruction_cases([CSRRW], csr_control(CsrOperation.Write, #false)),
+  instruction_cases([CSRRS], csr_control(CsrOperation.Set, #false)),
+  instruction_cases([CSRRC], csr_control(CsrOperation.Clear, #false)),
+  instruction_cases([CSRRWI], csr_control(CsrOperation.Write, #true)),
+  instruction_cases([CSRRSI], csr_control(CsrOperation.Set, #true)),
+  instruction_cases([CSRRCI], csr_control(CsrOperation.Clear, #true))
+])
+
+def PrivilegedSystemCases = combine_case_groups([
+  instruction_cases([MRET], system_control(SystemOperation.Mret)),
+  instruction_cases([SRET], system_control(SystemOperation.Sret))
+])
+
+fun base_system_cases(instructions):
+  combine_case_groups([
+    instruction_cases([ECALL], system_control(SystemOperation.Ecall)),
+    instruction_cases([EBREAK], system_control(SystemOperation.Ebreak)),
+    instruction_cases(excluding_instructions(instructions, [ECALL, EBREAK]), no_system)
+  ])
+
+def RV32ISystemCases = base_system_cases(rv32.RV32IInstructions)
+def RV64ISystemCases = base_system_cases(RV64IInstructions)
+def RV32RicketSystemCases = RV32ISystemCases ++ instruction_cases(
+  RV32ZmmulInstructions,
+  no_system
+) ++ ZicsrSystemCases ++ PrivilegedSystemCases
+def RV64RicketSystemCases = RV64ISystemCases ++ instruction_cases(
+  RV64ZmmulInstructions,
+  no_system
+) ++ ZicsrSystemCases ++ PrivilegedSystemCases
+
+export:
+  CsrOperation
+  SystemOperation
+  SystemControl
+  RV32ISystemCases
+  RV64ISystemCases
+  RV32RicketSystemCases
+  RV64RicketSystemCases

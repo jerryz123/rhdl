@@ -48,14 +48,14 @@ if [[ -n "$component_domain_imports" ]]; then
   exit 1
 fi
 
-component_control_imports="$(search_sources '^[[:space:]]+"(alu|operand|branch|mem|writeback|trap)-ctrl\.rhdl"' \
+component_control_imports="$(search_sources '^[[:space:]]+"(alu|operand|branch|mem|writeback|system)-ctrl\.rhdl"' \
   cores/ricket/decode/alu-ctrl.rhdl \
   cores/ricket/decode/operand-ctrl.rhdl \
   cores/ricket/decode/branch-ctrl.rhdl \
   cores/ricket/decode/mem-ctrl.rhdl \
   cores/ricket/decode/multiply-ctrl.rhdl \
   cores/ricket/decode/writeback-ctrl.rhdl \
-  cores/ricket/decode/trap-ctrl.rhdl || true)"
+  cores/ricket/decode/system-ctrl.rhdl || true)"
 if [[ -n "$component_control_imports" ]]; then
   echo "Ricket component control decoders must not import sibling control decoders" >&2
   echo "$component_control_imports" >&2

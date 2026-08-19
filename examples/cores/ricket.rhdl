@@ -29,17 +29,19 @@ def verilog_reference = @str|<<{
   typedef struct packed {logic left_signed; logic right_signed; } MultiplierMode;
   typedef struct packed {MultiplierMode mode; logic high_result; logic word_result; }
     RicketMultiplyControl;
+  typedef struct packed {logic [1:0] csr; logic immediate; logic [2:0] action; }
+    SystemControl;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [1:0] memory_operation; logic [1:0] memory_width; logic memory_unsigned; RicketMultiplyControl multiply_control; logic writeback_enable; logic [1:0] writeback_source; logic trap; logic illegal; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [63:0] rs1_value; logic [63:0] rs2_value; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [1:0] memory_operation; logic [1:0] memory_width; logic memory_unsigned; RicketMultiplyControl multiply_control; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; logic illegal; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [63:0] rs1_value; logic [63:0] rs2_value; }
     DecodeExecute;
   typedef
     struct packed {logic [63:0] left; logic [63:0] right; RicketMultiplyControl control; logic [4:0] rd; }
     RicketMultiplyIssue;
   typedef
-    struct packed {logic [1:0] writeback_source; logic writeback_enable; logic [4:0] rd; logic [63:0] result; RicketMultiplyIssue multiply_issue; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic writeback_enable; logic [4:0] rd; logic [63:0] result; RicketMultiplyIssue multiply_issue; SystemControl system; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
     ExecuteMemory;
   typedef
-    struct packed {logic [1:0] writeback_source; logic write_enable; logic [4:0] rd; logic [63:0] value; RicketMultiplyIssue multiply_issue; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic write_enable; logic [4:0] rd; logic [63:0] value; RicketMultiplyIssue multiply_issue; SystemControl system; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
     MemoryWriteback;
   typedef
     struct packed {logic uses_rs1; logic uses_rs2; logic [1:0] left; logic right; logic [2:0] immediate; }
@@ -48,10 +50,9 @@ def verilog_reference = @str|<<{
     BranchControl;
   typedef struct packed {logic [1:0] access; logic [1:0] width; logic unsigned_0; }
     MemoryControl;
-  typedef struct packed {logic enable; logic [1:0] source; } WritebackControl;
-  typedef struct packed {logic trap; } TrapControl;
+  typedef struct packed {logic enable; logic [2:0] source; } WritebackControl;
   typedef
-    struct packed {AluControl alu; OperandControl operand; BranchControl branch; MemoryControl memory; RicketMultiplyControl multiply; WritebackControl writeback; TrapControl trap; }
+    struct packed {AluControl alu; OperandControl operand; BranchControl branch; MemoryControl memory; RicketMultiplyControl multiply; WritebackControl writeback; SystemControl system; }
     RicketControl;
   typedef struct packed {logic taken; } BranchResult;
   typedef struct packed {logic [4:0] rd; logic [63:0] value; } RicketMultiplyCompletion;
@@ -59,10 +60,19 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [63:0] left; logic [63:0] right; BranchResolverControl control; }
     BranchResolverRequest;
+  typedef
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [4:0] rd; logic [1:0] csr_operation; logic [11:0] csr_address; logic [63:0] csr_source; logic [2:0] system_operation; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
+    RicketCsrCommit;
   typedef struct packed {logic [4:0] address; logic [63:0] data; } RegisterFileWrite;
   typedef struct packed {logic valid; RicketControl value; } DecodeResult;
   typedef struct packed {logic [63:0] left; logic [63:0] right; MultiplierMode mode; }
     MultiplierRequest;
+  typedef
+    struct packed {logic [63:0] mstatus; logic [63:0] medeleg; logic [63:0] mideleg; logic [63:0] mie; logic [63:0] mtvec; logic [63:0] mcounteren; logic [63:0] mscratch; logic [63:0] mepc; logic [63:0] mcause; logic [63:0] mtval; logic [63:0] stvec; logic [63:0] scounteren; logic [63:0] sscratch; logic [63:0] sepc; logic [63:0] scause; logic [63:0] stval; }
+    RicketCsrState;
+  typedef
+    struct packed {logic valid; logic [63:0] cause; logic [63:0] value; logic to_supervisor; }
+    RicketTrapDecision;
   typedef struct packed {logic all; logic [3:0] except; } AndExclusionReduction;
   typedef
     struct packed {logic [63:0] line_address; logic [63:0] context_0; logic [3:0][63:0] line; }
@@ -179,6 +189,9 @@ module RicketCore(
   wire struct packed {logic valid; FetchDecode bits; } _pipe_stage_egress_out;
   wire struct packed {logic ready; } _fetch_pcs_ingress_out;
   wire struct packed {logic valid; logic [63:0] bits; } _fetch_pcs_egress_out;
+  wire struct packed {logic valid; logic [63:0] bits; } _csrs_redirect_out;
+  wire                               _csrs_writeback_valid;
+  wire [63:0]                        _csrs_writeback_value;
   wire [31:0]                        _scoreboard_busy;
   wire struct packed {logic valid; RicketMultiplyCompletion bits; }
     _multiplier_completion_out;
@@ -197,22 +210,26 @@ module RicketCore(
   reg                                faulted;
   reg                                started;
   reg  [63:0]                        fetch_pc;
-  wire                               _GEN_20 = faulted | _GEN_12 | _GEN_11;
-  wire                               _GEN_21 = faulted | _GEN_12;
-  wire                               _GEN_22 = ~started & ~_GEN_21;
-  wire                               _GEN_23 = start_in.valid & _GEN_22;
-  wire                               _GEN_24 = _GEN_23 & (|(start_in.bits[1:0]));
-  wire                               _GEN_25 = _GEN_24 | _GEN_12 | _GEN_11;
-  wire                               _GEN_26 = started & ~_GEN_21 & ~_GEN_11;
-  wire                               _GEN_27 = _GEN_26 & _fetch_pcs_ingress_out.ready;
-  wire FetchDecode                   _GEN_28 =
+  wire                               _GEN_20 = _csrs_redirect_out.valid | _GEN_11;
+  wire                               _GEN_21 =
+    _ex_mem_pipe_egress_out.valid & _ex_mem_pipe_egress_out.bits.exception_valid
+    | _mem_wb_pipe_egress_out.valid & _mem_wb_pipe_egress_out.bits.exception_valid;
+  wire                               _GEN_22 = faulted | _GEN_12 | _GEN_21 | _GEN_20;
+  wire                               _GEN_23 = ~started & ~(faulted | _GEN_12);
+  wire                               _GEN_24 = start_in.valid & _GEN_23;
+  wire                               _GEN_25 = _GEN_24 & (|(start_in.bits[1:0]));
+  wire                               _GEN_26 = _GEN_25 | _GEN_12 | _GEN_20;
+  wire                               _GEN_27 =
+    started & ~(faulted | _GEN_12 | _GEN_21) & ~_GEN_20;
+  wire                               _GEN_28 = _GEN_27 & _fetch_pcs_ingress_out.ready;
+  wire FetchDecode                   _GEN_29 =
     '{pc: _fetch_pcs_egress_out.bits,
       instruction: instruction_access_in.response.bits.instruction};
-  assign _GEN_18 = _GEN_20 | _pipe_stage_ingress_out.ready;
-  wire                               _GEN_29 = _pipe_stage_egress_out.valid & ~_GEN_20;
-  wire [51:0]                        _GEN_30 =
+  assign _GEN_18 = _GEN_22 | _pipe_stage_ingress_out.ready;
+  wire                               _GEN_30 = _pipe_stage_egress_out.valid & ~_GEN_22;
+  wire [51:0]                        _GEN_31 =
     {52{_pipe_stage_egress_out.bits.instruction[31]}};
-  wire [7:0][63:0]                   _GEN_31 =
+  wire [7:0][63:0]                   _GEN_32 =
     {{64'h0},
      {64'h0},
      {{{44{_pipe_stage_egress_out.bits.instruction[31]}},
@@ -223,36 +240,43 @@ module RicketCore(
      {{{32{_pipe_stage_egress_out.bits.instruction[31]}},
        _pipe_stage_egress_out.bits.instruction[31:12],
        12'h0}},
-     {{_GEN_30,
+     {{_GEN_31,
        _pipe_stage_egress_out.bits.instruction[7],
        _pipe_stage_egress_out.bits.instruction[30:25],
        _pipe_stage_egress_out.bits.instruction[11:8],
        1'h0}},
-     {{_GEN_30,
+     {{_GEN_31,
        _pipe_stage_egress_out.bits.instruction[31:25],
        _pipe_stage_egress_out.bits.instruction[11:7]}},
-     {{_GEN_30, _pipe_stage_egress_out.bits.instruction[31:20]}},
+     {{_GEN_31, _pipe_stage_egress_out.bits.instruction[31:20]}},
      {64'h0}};
-  wire [31:0]                        _GEN_32 = _scoreboard_busy;
-  wire                               _GEN_33 =
-    &_id_ex_pipe_egress_out.bits.writeback_source;
+  wire [31:0]                        _GEN_33 = _scoreboard_busy;
   wire                               _GEN_34 =
-    &_ex_mem_pipe_egress_out.bits.writeback_source;
+    _id_ex_pipe_egress_out.bits.writeback_source == 3'h3;
   wire                               _GEN_35 =
-    _ex_mem_pipe_egress_out.bits.writeback_source == 2'h1 | _GEN_34;
-  wire                               _GEN_36 = |_id_ex_pipe_egress_out.bits.rd;
-  wire                               _GEN_37 = |_ex_mem_pipe_egress_out.bits.rd;
-  wire                               _GEN_38 =
-    _GEN_29
-    & (_id_ex_pipe_egress_out.valid
-       & (_id_ex_pipe_egress_out.bits.writeback_source == 2'h1 | _GEN_33) & _GEN_36
+    _id_ex_pipe_egress_out.valid
+    & (_id_ex_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_34);
+  wire                               _GEN_36 =
+    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h3;
+  wire                               _GEN_37 =
+    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_36;
+  wire                               _GEN_38 = _ex_mem_pipe_egress_out.valid & _GEN_37;
+  wire                               _GEN_39 = |_id_ex_pipe_egress_out.bits.rd;
+  wire                               _GEN_40 = |_ex_mem_pipe_egress_out.bits.rd;
+  wire                               _GEN_41 =
+    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h3;
+  wire                               _GEN_42 =
+    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_41;
+  wire                               _GEN_43 =
+    _GEN_30
+    & (_GEN_35 & _GEN_39
        & (_decoder_control.operand.uses_rs1
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[19:15]
           | _decoder_control.operand.uses_rs2
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[24:20]
           | _decoder_control.writeback.enable
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[11:7])
-       | _ex_mem_pipe_egress_out.valid & _GEN_35 & _GEN_37
+       | _GEN_38 & _GEN_40
        & (_decoder_control.operand.uses_rs1
           & _ex_mem_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[19:15]
           | _decoder_control.operand.uses_rs2
@@ -261,21 +285,32 @@ module RicketCore(
           & _ex_mem_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[11:7]))
     | _decoder_control.operand.uses_rs1
     & (|(_pipe_stage_egress_out.bits.instruction[19:15]))
-    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[19:15]] | _GEN_7
+    & (_GEN_33[_pipe_stage_egress_out.bits.instruction[19:15]] | _GEN_7
        & _GEN_6 == _pipe_stage_egress_out.bits.instruction[19:15])
     & ~(_GEN_2 & _GEN_1 == _pipe_stage_egress_out.bits.instruction[19:15])
     | _decoder_control.operand.uses_rs2
     & (|(_pipe_stage_egress_out.bits.instruction[24:20]))
-    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[24:20]] | _GEN_7
+    & (_GEN_33[_pipe_stage_egress_out.bits.instruction[24:20]] | _GEN_7
        & _GEN_6 == _pipe_stage_egress_out.bits.instruction[24:20])
     & ~(_GEN_2 & _GEN_1 == _pipe_stage_egress_out.bits.instruction[24:20])
     | _decoder_control.writeback.enable
     & (|(_pipe_stage_egress_out.bits.instruction[11:7]))
-    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[11:7]] | _GEN_7
+    & (_GEN_33[_pipe_stage_egress_out.bits.instruction[11:7]] | _GEN_7
        & _GEN_6 == _pipe_stage_egress_out.bits.instruction[11:7])
-    & ~(_GEN_2 & _GEN_1 == _pipe_stage_egress_out.bits.instruction[11:7]);
-  assign _GEN_17 = _GEN_16 & ~_GEN_38;
-  wire DecodeExecute                 _GEN_39 =
+    & ~(_GEN_2 & _GEN_1 == _pipe_stage_egress_out.bits.instruction[11:7])
+    | _id_ex_pipe_egress_out.valid
+    & ((|_id_ex_pipe_egress_out.bits.system.csr)
+       | (|_id_ex_pipe_egress_out.bits.system.action)) | _ex_mem_pipe_egress_out.valid
+    & ((|_ex_mem_pipe_egress_out.bits.system.csr)
+       | (|_ex_mem_pipe_egress_out.bits.system.action)) | _mem_wb_pipe_egress_out.valid
+    & ((|_mem_wb_pipe_egress_out.bits.system.csr)
+       | (|_mem_wb_pipe_egress_out.bits.system.action))
+    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action))
+    & (_GEN_35 | _GEN_38 | _mem_wb_pipe_egress_out.valid & _GEN_42
+       & _mem_wb_pipe_egress_out.bits.write_enable | (|_scoreboard_busy) | _GEN_7)
+    | _GEN_21 | _GEN_12;
+  assign _GEN_17 = _GEN_16 & ~_GEN_43;
+  wire DecodeExecute                 _GEN_44 =
     '{pc: _pipe_stage_egress_out.bits.pc,
       instruction: _pipe_stage_egress_out.bits.instruction,
       alu_control: _decoder_control.alu,
@@ -289,170 +324,213 @@ module RicketCore(
       multiply_control: _decoder_control.multiply,
       writeback_enable: _decoder_control.writeback.enable,
       writeback_source: _decoder_control.writeback.source,
-      trap: _decoder_control.trap.trap,
+      system: _decoder_control.system,
       illegal: (~_decoder_valid),
-      immediate: _GEN_31[_decoder_control.operand.immediate],
+      immediate: _GEN_32[_decoder_control.operand.immediate],
       rs1: (_pipe_stage_egress_out.bits.instruction[19:15]),
       rs2: (_pipe_stage_egress_out.bits.instruction[24:20]),
       rd: (_pipe_stage_egress_out.bits.instruction[11:7]),
       rs1_value: _registers_read_data_1,
       rs2_value: _registers_read_data_2};
   assign _GEN_16 = _id_ex_pipe_ingress_out.ready;
-  wire [63:0]                        _GEN_40 =
+  wire [63:0]                        _GEN_45 =
     _GEN_10 & _GEN_9 == _id_ex_pipe_egress_out.bits.rs1
       ? _GEN_8
       : _GEN_5 & _GEN_4 == _id_ex_pipe_egress_out.bits.rs1
           ? _GEN_3
           : _id_ex_pipe_egress_out.bits.rs1_value;
-  wire [63:0]                        _GEN_41 =
+  wire [63:0]                        _GEN_46 =
     _GEN_10 & _GEN_9 == _id_ex_pipe_egress_out.bits.rs2
       ? _GEN_8
       : _GEN_5 & _GEN_4 == _id_ex_pipe_egress_out.bits.rs2
           ? _GEN_3
           : _id_ex_pipe_egress_out.bits.rs2_value;
-  wire [63:0]                        _GEN_42 =
-    _GEN_40 + _id_ex_pipe_egress_out.bits.immediate;
+  wire [63:0]                        _GEN_47 =
+    _GEN_45 + _id_ex_pipe_egress_out.bits.immediate;
   assign _GEN_15 =
     _id_ex_pipe_egress_out.bits.target_from_rs1
-      ? {_GEN_42[63:1], 1'h0}
+      ? {_GEN_47[63:1], 1'h0}
       : _id_ex_pipe_egress_out.bits.pc + _id_ex_pipe_egress_out.bits.immediate;
-  wire                               _GEN_43 =
+  wire                               _GEN_48 =
     |_id_ex_pipe_egress_out.bits.memory_operation;
-  wire                               _GEN_44 =
-    _id_ex_pipe_egress_out.bits.illegal | _id_ex_pipe_egress_out.bits.trap | _GEN_43
+  wire                               _GEN_49 =
+    _id_ex_pipe_egress_out.bits.illegal | _GEN_48
     & ~(_id_ex_pipe_egress_out.bits.memory_width == 2'h0
         | (_id_ex_pipe_egress_out.bits.memory_width == 2'h1
              ? ~(_alu_result[0])
              : _id_ex_pipe_egress_out.bits.memory_width == 2'h2
                  ? _alu_result[1:0] == 2'h0
                  : _alu_result[2:0] == 3'h0));
-  wire                               _GEN_45 =
-    _GEN_44 | _branch_resolver_result_out.bits.taken & (|(_GEN_15[1:0]));
-  wire                               _GEN_46 =
-    &_mem_wb_pipe_egress_out.bits.writeback_source;
-  wire                               _GEN_47 = |_mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_48 =
-    _mem_wb_pipe_egress_out.valid & _GEN_46 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_47;
-  wire RicketMultiplyIssue           _GEN_49 =
-    '{left: _GEN_40,
-      right: _GEN_41,
+  wire                               _GEN_50 =
+    _branch_resolver_result_out.bits.taken & (|(_GEN_15[1:0]));
+  wire                               _GEN_51 = _GEN_49 | _GEN_50;
+  wire                               _GEN_52 = |_mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_53 =
+    _mem_wb_pipe_egress_out.valid & _GEN_41 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_52;
+  wire RicketMultiplyIssue           _GEN_54 =
+    '{left: _GEN_45,
+      right: _GEN_46,
       control: _id_ex_pipe_egress_out.bits.multiply_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire BranchResolverRequest         _GEN_50 =
-    '{left: _GEN_40,
-      right: _GEN_41,
+  wire BranchResolverRequest         _GEN_55 =
+    '{left: _GEN_45,
+      right: _GEN_46,
       control: _fork_stage_egress_0_out.bits.branch_control};
-  wire                               _GEN_51 = _GEN_43 & ~_GEN_44;
-  wire RicketDataReq                 _GEN_52 =
+  wire                               _GEN_56 = _GEN_48 & ~_GEN_49;
+  wire RicketDataReq                 _GEN_57 =
     '{address: _alu_result,
       write: (_fork_stage_egress_1_out.bits.memory_operation == 2'h2),
       width: _fork_stage_egress_1_out.bits.memory_width,
       unsigned_0: _fork_stage_egress_1_out.bits.memory_unsigned,
-      data: _GEN_41,
+      data: _GEN_46,
       tag:
         (_fork_stage_egress_1_out.bits.memory_operation == 2'h1
            ? _fork_stage_egress_1_out.bits.rd
            : 5'h0)};
   assign _GEN_14 = _GEN_13.ready;
   assign _GEN_13 = data_access_in.request;
-  wire ExecuteMemory                 _GEN_53 =
-    '{writeback_source: _fork_stage_egress_3_out.bits.writeback_source,
-      writeback_enable: _fork_stage_egress_3_out.bits.writeback_enable,
+  wire ExecuteMemory                 _GEN_58 =
+    '{pc: _fork_stage_egress_3_out.bits.pc,
+      instruction: _fork_stage_egress_3_out.bits.instruction,
+      writeback_source: _fork_stage_egress_3_out.bits.writeback_source,
+      writeback_enable: (_fork_stage_egress_3_out.bits.writeback_enable & ~_GEN_51),
       rd: _fork_stage_egress_3_out.bits.rd,
       result:
-        (_id_ex_pipe_egress_out.bits.writeback_source == 2'h2
+        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2
            ? _id_ex_pipe_egress_out.bits.pc + 64'h4
            : _alu_result),
-      multiply_issue: _GEN_49};
-  assign _GEN_12 = _branch_resolver_result_out.valid & _GEN_45;
+      multiply_issue: _GEN_54,
+      system: _fork_stage_egress_3_out.bits.system,
+      csr_address: (_fork_stage_egress_3_out.bits.instruction[31:20]),
+      csr_source:
+        (_id_ex_pipe_egress_out.bits.system.immediate
+           ? {59'h0, _id_ex_pipe_egress_out.bits.instruction[19:15]}
+           : _GEN_45),
+      exception_valid: _GEN_51,
+      exception_cause:
+        (_id_ex_pipe_egress_out.bits.illegal
+           ? 64'h2
+           : _GEN_50
+               ? 64'h0
+               : {62'h1, _id_ex_pipe_egress_out.bits.memory_operation == 2'h2, 1'h0}),
+      exception_value:
+        (_id_ex_pipe_egress_out.bits.illegal
+           ? {32'h0, _id_ex_pipe_egress_out.bits.instruction}
+           : _GEN_50 ? _GEN_15 : _alu_result)};
+  assign _GEN_12 = _branch_resolver_result_out.valid & _GEN_51;
   assign _GEN_11 =
-    _branch_resolver_result_out.valid & ~_GEN_45 & _branch_resolver_result_out.bits.taken;
-  wire MemoryWriteback               _GEN_54 =
-    '{writeback_source: _ex_mem_pipe_egress_out.bits.writeback_source,
+    _branch_resolver_result_out.valid & ~_GEN_51 & _branch_resolver_result_out.bits.taken;
+  wire MemoryWriteback               _GEN_59 =
+    '{pc: _ex_mem_pipe_egress_out.bits.pc,
+      instruction: _ex_mem_pipe_egress_out.bits.instruction,
+      writeback_source: _ex_mem_pipe_egress_out.bits.writeback_source,
       write_enable: _ex_mem_pipe_egress_out.bits.writeback_enable,
       rd: _ex_mem_pipe_egress_out.bits.rd,
       value: _ex_mem_pipe_egress_out.bits.result,
-      multiply_issue: _ex_mem_pipe_egress_out.bits.multiply_issue};
+      multiply_issue: _ex_mem_pipe_egress_out.bits.multiply_issue,
+      system: _ex_mem_pipe_egress_out.bits.system,
+      csr_address: _ex_mem_pipe_egress_out.bits.csr_address,
+      csr_source: _ex_mem_pipe_egress_out.bits.csr_source,
+      exception_valid: _ex_mem_pipe_egress_out.bits.exception_valid,
+      exception_cause: _ex_mem_pipe_egress_out.bits.exception_cause,
+      exception_value: _ex_mem_pipe_egress_out.bits.exception_value};
   assign _GEN_10 =
     _ex_mem_pipe_egress_out.valid & _ex_mem_pipe_egress_out.bits.writeback_enable
-    & ~_GEN_35 & _GEN_37;
+    & ~_GEN_37 & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h4 & _GEN_40;
   assign _GEN_9 = _ex_mem_pipe_egress_out.bits.rd;
   assign _GEN_8 = _ex_mem_pipe_egress_out.bits.result;
-  wire                               _GEN_55 =
-    _mem_wb_pipe_egress_out.bits.writeback_source == 2'h1 | _GEN_46;
+  wire RicketCsrCommit               _GEN_60 =
+    '{pc: _mem_wb_pipe_egress_out.bits.pc,
+      instruction: _mem_wb_pipe_egress_out.bits.instruction,
+      rd: _mem_wb_pipe_egress_out.bits.rd,
+      csr_operation: _mem_wb_pipe_egress_out.bits.system.csr,
+      csr_address: _mem_wb_pipe_egress_out.bits.csr_address,
+      csr_source: _mem_wb_pipe_egress_out.bits.csr_source,
+      system_operation: _mem_wb_pipe_egress_out.bits.system.action,
+      exception_valid: _mem_wb_pipe_egress_out.bits.exception_valid,
+      exception_cause: _mem_wb_pipe_egress_out.bits.exception_cause,
+      exception_value: _mem_wb_pipe_egress_out.bits.exception_value};
   assign _GEN_7 =
-    _mem_wb_pipe_egress_out.valid & _GEN_55 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_47;
+    _mem_wb_pipe_egress_out.valid & _GEN_42 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_52;
   assign _GEN_6 = _mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_61 =
+    _mem_wb_pipe_egress_out.bits.writeback_source != 3'h4;
   assign _GEN_5 =
-    _mem_wb_pipe_egress_out.valid & ~_GEN_55 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_47;
+    _mem_wb_pipe_egress_out.valid & ~_GEN_42 & _GEN_61
+    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_52;
   assign _GEN_4 = _mem_wb_pipe_egress_out.bits.rd;
   assign _GEN_3 = _mem_wb_pipe_egress_out.bits.value;
-  wire RegisterFileWrite             _GEN_56 =
-    '{address: _mem_wb_pipe_egress_out.bits.rd, data: _GEN_3};
-  wire                               _GEN_57 =
+  wire RegisterFileWrite             _GEN_62 =
+    '{address: _mem_wb_pipe_egress_out.bits.rd,
+      data:
+        (_mem_wb_pipe_egress_out.bits.writeback_source == 3'h4
+           ? _csrs_writeback_value
+           : _GEN_3)};
+  wire                               _GEN_63 =
     data_access_in.response.valid & (|data_access_in.response.bits.tag);
-  wire RegisterFileWrite             _GEN_58 =
+  wire RegisterFileWrite             _GEN_64 =
     '{address: data_access_in.response.bits.tag, data: data_access_in.response.bits.data};
   `ifndef SYNTHESIS
     assert property (@(posedge clock) disable iff (reset)
-                       ~_GEN_57 | _arbiter_stage_ingress_0_out.ready);
+                       ~_GEN_63 | _arbiter_stage_ingress_0_out.ready);
   `endif // not def SYNTHESIS
-  wire RegisterFileWrite             _GEN_59 =
+  wire RegisterFileWrite             _GEN_65 =
     '{address: _multiplier_completion_out.bits.rd,
       data: _multiplier_completion_out.bits.value};
   assign _GEN_2 = _arbiter_stage_egress_out.valid;
   assign _GEN_1 = _arbiter_stage_egress_out.bits.address;
-  wire RicketInstructionReq          _GEN_60 = '{address: fetch_pc};
-  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_61 =
-    '{valid: _GEN_27, bits: _GEN_60};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_62 =
-    '{valid: (_GEN_26 & instruction_access_in.request.ready), bits: fetch_pc};
+  wire RicketInstructionReq          _GEN_66 = '{address: fetch_pc};
+  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_67 =
+    '{valid: _GEN_28, bits: _GEN_66};
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_68 =
+    '{valid: (_GEN_27 & instruction_access_in.request.ready), bits: fetch_pc};
   assign _GEN_0 = '{ready: (_GEN_18 & _fetch_pcs_egress_out.valid)};
-  wire struct packed {logic ready; } _GEN_63 =
+  wire struct packed {logic ready; } _GEN_69 =
     '{ready: (_GEN_18 & instruction_access_in.response.valid)};
-  wire struct packed {logic valid; FetchDecode bits; } _GEN_64 =
+  wire struct packed {logic valid; FetchDecode bits; } _GEN_70 =
     '{valid:
-        (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_20),
-      bits: _GEN_28};
-  wire struct packed {logic ready; } _GEN_65 = '{ready: (_GEN_20 | _GEN_17)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_66 =
-    '{valid: (_GEN_29 & ~_GEN_38), bits: _GEN_39};
-  wire struct packed {logic ready; } _GEN_67 =
+        (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_22),
+      bits: _GEN_29};
+  wire struct packed {logic ready; } _GEN_71 = '{ready: (_GEN_22 | _GEN_17)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_72 =
+    '{valid: (_GEN_30 & ~_GEN_43), bits: _GEN_44};
+  wire struct packed {logic ready; } _GEN_73 =
     '{ready:
-        (~(_GEN_33 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_36)
+        (~(_GEN_34 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_39)
          | _multiplier_available
-         & ~(_ex_mem_pipe_egress_out.valid & _GEN_34
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_37) & ~_GEN_48)};
-  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_68 =
-    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_50};
-  wire struct packed {logic ready; } _GEN_69 = '{ready: (~_GEN_51 | _GEN_14)};
-  assign _GEN = '{valid: (_fork_stage_egress_1_out.valid & _GEN_51), bits: _GEN_52};
-  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_70 =
-    '{valid: (_fork_stage_egress_3_out.valid & ~_GEN_45), bits: _GEN_53};
-  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_71 =
-    '{valid: _ex_mem_pipe_egress_out.valid, bits: _GEN_54};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_72 =
+         & ~(_ex_mem_pipe_egress_out.valid & _GEN_36
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_40) & ~_GEN_53)};
+  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_74 =
+    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_55};
+  wire struct packed {logic ready; } _GEN_75 = '{ready: (~_GEN_56 | _GEN_14)};
+  assign _GEN = '{valid: (_fork_stage_egress_1_out.valid & _GEN_56), bits: _GEN_57};
+  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_76 =
+    '{valid: _fork_stage_egress_3_out.valid, bits: _GEN_58};
+  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_77 =
+    '{valid: _ex_mem_pipe_egress_out.valid, bits: _GEN_59};
+  wire struct packed {logic valid; RicketCsrCommit bits; } _GEN_78 =
+    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_60};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_79 =
     '{valid: _GEN_7, bits: _mem_wb_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_73 =
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_80 =
     '{valid:
-        (_mem_wb_pipe_egress_out.valid & ~_GEN_55
-         & _mem_wb_pipe_egress_out.bits.write_enable),
-      bits: _GEN_56};
-  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_74 =
-    '{valid: _GEN_48, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_75 =
-    '{valid: _GEN_57, bits: _GEN_58};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_76 =
-    '{valid: _multiplier_completion_out.valid, bits: _GEN_59};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_77 =
+        (_mem_wb_pipe_egress_out.valid & ~_GEN_42
+         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_61 | _csrs_writeback_valid)),
+      bits: _GEN_62};
+  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_81 =
+    '{valid: _GEN_53, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_82 =
+    '{valid: _GEN_63, bits: _GEN_64};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_83 =
+    '{valid: _multiplier_completion_out.valid, bits: _GEN_65};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_84 =
     '{valid: _GEN_2, bits: _GEN_1};
   Pipe id_ex_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_66),
+    .ingress_in  (_GEN_72),
     .egress_in   (_fork_stage_ingress_out),
     .ingress_out (_id_ex_pipe_ingress_out),
     .egress_out  (_id_ex_pipe_egress_out)
@@ -460,13 +538,13 @@ module RicketCore(
   ValidPipe ex_mem_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_70),
+    .ingress_in (_GEN_76),
     .egress_out (_ex_mem_pipe_egress_out)
   );
   ValidPipe_1 mem_wb_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_71),
+    .ingress_in (_GEN_77),
     .egress_out (_mem_wb_pipe_egress_out)
   );
   RicketInstructionDecoder decoder (
@@ -479,7 +557,7 @@ module RicketCore(
     .reset          (reset),
     .read_address_1 (_pipe_stage_egress_out.bits.instruction[19:15]),
     .read_address_2 (_pipe_stage_egress_out.bits.instruction[24:20]),
-    .writes_0_in    (_GEN_73),
+    .writes_0_in    (_GEN_80),
     .writes_1_in    (_arbiter_stage_egress_out),
     .read_data_1    (_registers_read_data_1),
     .read_data_2    (_registers_read_data_2)
@@ -488,22 +566,22 @@ module RicketCore(
     .left
       (_id_ex_pipe_egress_out.bits.operand_left == 2'h1
          ? _id_ex_pipe_egress_out.bits.pc
-         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_40),
+         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_45),
     .right
       (_id_ex_pipe_egress_out.bits.operand_right
          ? _id_ex_pipe_egress_out.bits.immediate
-         : _GEN_41),
+         : _GEN_46),
     .control (_id_ex_pipe_egress_out.bits.alu_control),
     .result  (_alu_result)
   );
   BranchResolver branch_resolver (
-    .request_in (_GEN_68),
+    .request_in (_GEN_74),
     .result_out (_branch_resolver_result_out)
   );
   RicketMultiplier multiplier (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_74),
+    .issue_in       (_GEN_81),
     .completion_in  (_arbiter_stage_ingress_1_out),
     .completion_out (_multiplier_completion_out),
     .available      (_multiplier_available)
@@ -511,15 +589,25 @@ module RicketCore(
   Scoreboard scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_72),
-    .clear_in (_GEN_77),
+    .set_in   (_GEN_79),
+    .clear_in (_GEN_84),
     .busy     (_scoreboard_busy)
+  );
+  RicketCsrFile csrs (
+    .clock           (clock),
+    .reset           (reset),
+    .commit_in       (_GEN_78),
+    .redirect_out    (_csrs_redirect_out),
+    .writeback_valid (_csrs_writeback_valid),
+    .writeback_value (_csrs_writeback_value),
+    .privilege       (/* unused */),
+    .satp            (/* unused */)
   );
   Queue fetch_pcs (
     .clock       (clock),
-    .reset       (reset | _GEN_25),
-    .ingress_in  (_GEN_62),
-    .egress_in   (_GEN_63),
+    .reset       (reset | _GEN_26),
+    .ingress_in  (_GEN_68),
+    .egress_in   (_GEN_69),
     .ingress_out (_fetch_pcs_ingress_out),
     .egress_out  (_fetch_pcs_egress_out),
     .count       (/* unused */)
@@ -527,16 +615,16 @@ module RicketCore(
   Pipe_1 pipe_stage (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_64),
-    .egress_in   (_GEN_65),
+    .ingress_in  (_GEN_70),
+    .egress_in   (_GEN_71),
     .ingress_out (_pipe_stage_ingress_out),
     .egress_out  (_pipe_stage_egress_out)
   );
   AtomicFork fork_stage (
     .ingress_in   (_id_ex_pipe_egress_out),
     .egress_0_in  (_GEN_19),
-    .egress_1_in  (_GEN_69),
-    .egress_2_in  (_GEN_67),
+    .egress_1_in  (_GEN_75),
+    .egress_2_in  (_GEN_73),
     .egress_3_in  (_GEN_19),
     .ingress_out  (_fork_stage_ingress_out),
     .egress_0_out (_fork_stage_egress_0_out),
@@ -545,8 +633,8 @@ module RicketCore(
     .egress_3_out (_fork_stage_egress_3_out)
   );
   Arbiter arbiter_stage (
-    .ingress_0_in  (_GEN_75),
-    .ingress_1_in  (_GEN_76),
+    .ingress_0_in  (_GEN_82),
+    .ingress_1_in  (_GEN_83),
     .egress_in     (_GEN_19),
     .ingress_0_out (_arbiter_stage_ingress_0_out),
     .ingress_1_out (_arbiter_stage_ingress_1_out),
@@ -560,20 +648,20 @@ module RicketCore(
       fetch_pc <= 64'h0;
     end
     else begin
-      faulted <= _GEN_24 | _GEN_12 | faulted;
-      started <= _GEN_23 | started;
+      faulted <= _GEN_25 | faulted;
+      started <= _GEN_24 | started;
       fetch_pc <=
-        _GEN_11
-          ? _GEN_15
-          : _GEN_23
+        _GEN_20
+          ? (_csrs_redirect_out.valid ? _csrs_redirect_out.bits : _GEN_15)
+          : _GEN_24
               ? start_in.bits
-              : _GEN_27 & instruction_access_in.request.ready
+              : _GEN_28 & instruction_access_in.request.ready
                   ? fetch_pc + 64'h4
                   : fetch_pc;
     end
   end // always @(posedge)
-  assign start_out = '{ready: _GEN_22};
-  assign instruction_access_out = '{flush: _GEN_25, request: _GEN_61, response: _GEN_0};
+  assign start_out = '{ready: _GEN_23};
+  assign instruction_access_out = '{flush: _GEN_26, request: _GEN_67, response: _GEN_0};
   assign data_access_out = '{request: _GEN};
   assign fault = faulted;
 endmodule
@@ -653,117 +741,333 @@ module RicketInstructionDecoder(
   output RicketControl control
 );
 
-  wire              _GEN =
-    ~(instruction[2]) & instruction[4] & instruction[13] & ~(instruction[14]);
-  wire              _GEN_0 = ~(instruction[2]) & instruction[5] & instruction[25];
-  wire              _GEN_1 =
-    ~(instruction[2]) & instruction[4] & instruction[12] & ~(instruction[13]);
-  wire              _GEN_2 = instruction[2] & ~(instruction[3]) & ~(instruction[5]);
-  wire              _GEN_3 =
-    ~(instruction[2]) & instruction[4] & instruction[5] & ~(instruction[6]);
-  wire              _GEN_4 = instruction[2] & ~(instruction[3]) & ~(instruction[4]);
-  wire              _GEN_5 = ~(instruction[2]) & ~(instruction[4]) & ~(instruction[5]);
-  wire              _GEN_6 = ~(instruction[4]) & instruction[5] & ~(instruction[6]);
-  wire              _GEN_7 = instruction[2] & instruction[4] & instruction[5];
-  wire              _GEN_8 = ~(instruction[2]) & ~(instruction[4]) & instruction[6];
-  wire              _GEN_9 = instruction[3] & instruction[6];
-  wire              _GEN_10 = ~(instruction[2]) & ~(instruction[5]);
-  wire              _GEN_11 =
-    instruction[0] & instruction[1] & ~(instruction[2]) & ~(instruction[3])
-    & instruction[5] & ~(instruction[7]) & ~(instruction[8]) & ~(instruction[9])
-    & ~(instruction[10]) & ~(instruction[11]) & ~(instruction[12]) & ~(instruction[13])
-    & ~(instruction[14]) & ~(instruction[15]) & ~(instruction[16]) & ~(instruction[17])
-    & ~(instruction[18]) & ~(instruction[19]) & ~(instruction[21]) & ~(instruction[22])
-    & ~(instruction[23]) & ~(instruction[24]) & ~(instruction[25]) & ~(instruction[26])
-    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & ~(instruction[2])
-    & instruction[4] & ~(instruction[6]) & instruction[12] & ~(instruction[13])
-    & instruction[14] & ~(instruction[25]) & ~(instruction[26]) & ~(instruction[27])
-    & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[31]) | instruction[0]
-    & instruction[1] & ~(instruction[2]) & instruction[4] & ~(instruction[6])
-    & instruction[12] & ~(instruction[13]) & ~(instruction[25]) & ~(instruction[26])
-    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & ~(instruction[2])
-    & instruction[4] & ~(instruction[6]) & ~(instruction[12]) & ~(instruction[13])
-    & ~(instruction[14]) & ~(instruction[25]) & ~(instruction[26]) & ~(instruction[27])
-    & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[31]) | instruction[0]
-    & instruction[1] & ~(instruction[2]) & instruction[4] & ~(instruction[6])
-    & ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14]) & ~(instruction[26])
-    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & ~(instruction[3])
-    & instruction[4] & ~(instruction[5]) & ~(instruction[6]) & instruction[14]
-    & ~(instruction[26]) & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & ~(instruction[3])
-    & instruction[4] & ~(instruction[6]) & ~(instruction[25]) & ~(instruction[26])
-    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & ~(instruction[2])
-    & ~(instruction[3]) & ~(instruction[6]) & ~(instruction[14]) & ~(instruction[26])
-    & ~(instruction[27]) & ~(instruction[28]) & ~(instruction[29]) & ~(instruction[30])
-    & ~(instruction[31]) | instruction[0] & instruction[1] & instruction[2]
-    & instruction[3] & ~(instruction[4]) & ~(instruction[5]) & ~(instruction[6])
-    & ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14]) | instruction[0]
-    & instruction[1] & ~(instruction[3]) & ~(instruction[4]) & instruction[5]
-    & instruction[6] & ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14])
-    | instruction[0] & instruction[1] & instruction[2] & instruction[3]
-    & ~(instruction[4]) & instruction[5] & instruction[6] | instruction[0]
-    & instruction[1] & ~(instruction[2]) & ~(instruction[3]) & ~(instruction[4])
-    & instruction[5] & instruction[6] & instruction[14] | instruction[0] & instruction[1]
-    & ~(instruction[2]) & instruction[4] & ~(instruction[5]) & ~(instruction[6])
-    & ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14]) | instruction[0]
-    & instruction[1] & ~(instruction[2]) & ~(instruction[3]) & ~(instruction[4])
-    & instruction[5] & instruction[6] & ~(instruction[13]) | instruction[0]
-    & instruction[1] & ~(instruction[2]) & ~(instruction[3]) & ~(instruction[4])
-    & ~(instruction[5]) & ~(instruction[6]) & ~(instruction[13]) | instruction[0]
-    & instruction[1] & ~(instruction[3]) & instruction[4] & ~(instruction[5])
-    & ~(instruction[6]) & instruction[13] | instruction[0] & instruction[1]
-    & ~(instruction[2]) & ~(instruction[3]) & ~(instruction[5]) & ~(instruction[6])
-    & ~(instruction[12]) | instruction[0] & instruction[1] & ~(instruction[2])
-    & ~(instruction[3]) & ~(instruction[4]) & ~(instruction[6]) & ~(instruction[14])
-    | instruction[0] & instruction[1] & instruction[2] & ~(instruction[3])
-    & instruction[4] & ~(instruction[6]);
-  wire DecodeResult _GEN_12 =
-    /*cast(bit)*/{_GEN_11,
-                  ~(instruction[2]) & instruction[12] & instruction[13] & instruction[14],
-                  ~(instruction[2]) & instruction[4] & ~(instruction[12])
-                    & instruction[13] & instruction[14],
-                  ~(instruction[2]) & instruction[4] & ~(instruction[12])
-                    & ~(instruction[13]) & instruction[14],
-                  _GEN,
-                  _GEN_1,
-                  ~(instruction[12]) & ~(instruction[13]) & ~(instruction[14]) | _GEN_2
-                    | _GEN_5 | _GEN_6 | _GEN_7,
-                  ~(instruction[2]) & instruction[4] & instruction[5] & instruction[30],
-                  ~(instruction[13]) & instruction[30] | ~(instruction[12]),
-                  instruction[14],
-                  instruction[3],
-                  _GEN_3 | _GEN_4 | _GEN_6 | _GEN_8 | _GEN_10,
-                  _GEN_3 | _GEN_6 | _GEN_8,
-                  _GEN_7,
-                  _GEN_2,
-                  _GEN_2 | _GEN_6 | _GEN_7 | _GEN_10,
-                  _GEN_2 | _GEN_7 | _GEN_9,
-                  _GEN_6 | _GEN_8,
-                  _GEN_4 | _GEN_8 | _GEN_9 | _GEN_10,
-                  _GEN_4 | _GEN_8 | _GEN_9,
-                  _GEN_4 | _GEN_9,
-                  ~(instruction[14]),
-                  ~(instruction[13]),
-                  instruction[12],
-                  _GEN_4,
-                  _GEN_6,
-                  _GEN_5,
-                  instruction[13:12],
-                  instruction[14],
-                  ~(instruction[12]) | _GEN_1,
-                  _GEN_1,
-                  _GEN | _GEN_1,
-                  instruction[3],
-                  _GEN_2 | _GEN_3 | _GEN_4 | _GEN_7 | _GEN_9 | _GEN_10,
-                  _GEN_0 | _GEN_4 | _GEN_9,
-                  _GEN_0 | _GEN_5,
-                  instruction[4] & instruction[6]};
-  assign valid = _GEN_12.valid;
-  assign control = _GEN_12.value;
+  logic [43:0]       __rhdl_decode_240_result;
+  always_comb begin
+    automatic logic [1:0] _GEN;
+    automatic logic [4:0] _GEN_0;
+    automatic logic [6:0] _GEN_1;
+    automatic logic [9:0] _GEN_2;
+    automatic logic [2:0] _GEN_3;
+    automatic logic [3:0] _GEN_4;
+    automatic logic [5:0] _GEN_5;
+    _GEN = {2{1'bx}};
+    _GEN_0 = {5{1'bx}};
+    _GEN_1 = {7{1'bx}};
+    _GEN_2 = {10{1'bx}};
+    _GEN_3 = {3{1'bx}};
+    _GEN_4 = {4{1'bx}};
+    _GEN_5 = {6{1'bx}};
+    casez (instruction)
+      32'bzzzzzzzzzzzzzzzzzzzzzzzzz0110111:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h58, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzzzzzzzzzz0010111:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h38, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzzzzzzzzzz1101111:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h0, _GEN_3, 5'h17, _GEN_3, 3'h0, _GEN_1, 6'h28, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz1100111:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h2, _GEN_3, 5'h7, _GEN_3, 3'h4, _GEN_1, 6'h28, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h3,
+           _GEN_3,
+           6'h1D,
+           1'bx,
+           4'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h0};
+      32'bzzzzzzzzzzzzzzzzz001zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h3,
+           _GEN_3,
+           6'h1D,
+           1'bx,
+           4'h8,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h0};
+      32'bzzzzzzzzzzzzzzzzz100zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h390, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz101zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h398, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz110zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h380, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz111zzzzz1100011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h388, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'h8, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz001zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hA, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz010zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hC, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz100zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'h9, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz101zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hB, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz110zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hD, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz011zzzzz0000011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hE, _GEN_4, 6'h24, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz0100011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'h8, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz001zzzzz0100011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'h9, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz010zzzzz0100011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'hA, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz011zzzzz0100011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'hB, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz0010011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz010zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h44, 1'bx, 1'h1, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz011zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h44, 1'bx, 1'h0, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz100zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h48, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz110zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h50, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz111zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h60, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b000000zzzzzzzzzzz001zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h42, _GEN, 11'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b000000zzzzzzzzzzz101zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 12'h512, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b010000zzzzzzzzzzz101zzzzz0010011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 12'hD12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz0011011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 10'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz001zzzzz0011011:
+        __rhdl_decode_240_result =
+          {7'h42, _GEN, 11'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz101zzzzz0011011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 12'h712, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0100000zzzzzzzzzz101zzzzz0011011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 12'hF12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz000zzzzz0110011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0100000zzzzzzzzzz000zzzzz0110011:
+        __rhdl_decode_240_result =
+          {8'h83, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz001zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h42, _GEN, 7'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz010zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h44,
+           1'bx,
+           1'h1,
+           _GEN,
+           5'h18,
+           _GEN_3,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           6'h20,
+           1'bx,
+           3'h0};
+      32'b0000000zzzzzzzzzz011zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h44,
+           1'bx,
+           1'h0,
+           _GEN,
+           5'h18,
+           _GEN_3,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           6'h20,
+           1'bx,
+           3'h0};
+      32'b0000000zzzzzzzzzz100zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h48, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz101zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 8'h58, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0100000zzzzzzzzzz101zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 8'hD8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz110zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h50, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz111zzzzz0110011:
+        __rhdl_decode_240_result =
+          {7'h60, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz000zzzzz0111011:
+        __rhdl_decode_240_result =
+          {8'h82, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0100000zzzzzzzzzz000zzzzz0111011:
+        __rhdl_decode_240_result =
+          {8'h83, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz001zzzzz0111011:
+        __rhdl_decode_240_result =
+          {7'h42, _GEN, 7'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0000000zzzzzzzzzz101zzzzz0111011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 8'h78, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'b0100000zzzzzzzzzz101zzzzz0111011:
+        __rhdl_decode_240_result =
+          {7'h42, 1'bx, 8'hF8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz000zzzzz0001111:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h0};
+      32'b00000000000000000000000001110011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h1};
+      32'b00000000000100000000000001110011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h2};
+      32'b0000001zzzzzzzzzz000zzzzz0110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h2C, 1'bx, 3'h0};
+      32'b0000001zzzzzzzzzz001zzzzz0110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h3AC, 1'bx, 3'h0};
+      32'b0000001zzzzzzzzzz010zzzzz0110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h2AC, 1'bx, 3'h0};
+      32'b0000001zzzzzzzzzz011zzzzz0110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'hAC, 1'bx, 3'h0};
+      32'b0000001zzzzzzzzzz000zzzzz0111011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h6C, 1'bx, 3'h0};
+      32'bzzzzzzzzzzzzzzzzz001zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h310};
+      32'bzzzzzzzzzzzzzzzzz010zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h320};
+      32'bzzzzzzzzzzzzzzzzz011zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h330};
+      32'bzzzzzzzzzzzzzzzzz101zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h318};
+      32'bzzzzzzzzzzzzzzzzz110zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h328};
+      32'bzzzzzzzzzzzzzzzzz111zzzzz1110011:
+        __rhdl_decode_240_result =
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h338};
+      32'b00110000001000000000000001110011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h3};
+      32'b00010000001000000000000001110011:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           3'h4};
+      default:
+        __rhdl_decode_240_result = {1'h0, {43{1'bx}}};
+    endcase
+  end // always_comb
+  wire  DecodeResult _GEN_6 = /*cast(bit)*/__rhdl_decode_240_result;
+  assign valid = _GEN_6.valid;
+  assign control = _GEN_6.value;
 endmodule
 
 module RicketRegisterFile(
@@ -1247,6 +1551,367 @@ module Scoreboard(
           : state;
   end // always @(posedge)
   assign busy = state;
+endmodule
+
+module RicketCsrFile(
+  input                                                      clock,
+                                                             reset,
+  input  struct packed {logic valid; RicketCsrCommit bits; } commit_in,
+  output struct packed {logic valid; logic [63:0] bits; }    redirect_out,
+  output                                                     writeback_valid,
+  output [63:0]                                              writeback_value,
+  output [1:0]                                               privilege,
+  output [63:0]                                              satp
+);
+
+  reg  [1:0]          privilege_state;
+  RicketCsrState      state;
+  wire                _GEN = commit_in.bits.csr_address == 12'h100;
+  wire                _GEN_0 = commit_in.bits.csr_address == 12'h104;
+  wire                _GEN_1 = commit_in.bits.csr_address == 12'h105;
+  wire                _GEN_2 = commit_in.bits.csr_address == 12'h106;
+  wire                _GEN_3 = commit_in.bits.csr_address == 12'h10A;
+  wire                _GEN_4 = commit_in.bits.csr_address == 12'h140;
+  wire                _GEN_5 = commit_in.bits.csr_address == 12'h141;
+  wire                _GEN_6 = commit_in.bits.csr_address == 12'h142;
+  wire                _GEN_7 = commit_in.bits.csr_address == 12'h143;
+  wire                _GEN_8 = commit_in.bits.csr_address == 12'h144;
+  wire                _GEN_9 = commit_in.bits.csr_address == 12'h180;
+  wire                _GEN_10 = commit_in.bits.csr_address == 12'h300;
+  wire                _GEN_11 = commit_in.bits.csr_address == 12'h301;
+  wire                _GEN_12 = commit_in.bits.csr_address == 12'h302;
+  wire                _GEN_13 = commit_in.bits.csr_address == 12'h303;
+  wire                _GEN_14 = commit_in.bits.csr_address == 12'h304;
+  wire                _GEN_15 = commit_in.bits.csr_address == 12'h305;
+  wire                _GEN_16 = commit_in.bits.csr_address == 12'h306;
+  wire                _GEN_17 = commit_in.bits.csr_address == 12'h30A;
+  wire                _GEN_18 = commit_in.bits.csr_address == 12'h340;
+  wire                _GEN_19 = commit_in.bits.csr_address == 12'h341;
+  wire                _GEN_20 = commit_in.bits.csr_address == 12'h342;
+  wire                _GEN_21 = commit_in.bits.csr_address == 12'h343;
+  wire [63:0]         _GEN_22 =
+    _GEN
+      ? {44'h0, state.mstatus[19:0] & 20'hC0133}
+      : _GEN_0
+          ? state.mie & state.mideleg
+          : _GEN_1
+              ? state.stvec
+              : _GEN_2
+                  ? state.scounteren
+                  : _GEN_3
+                      ? 64'h0
+                      : _GEN_4
+                          ? state.sscratch
+                          : _GEN_5
+                              ? state.sepc
+                              : _GEN_6
+                                  ? state.scause
+                                  : _GEN_7
+                                      ? state.stval
+                                      : _GEN_8 | _GEN_9
+                                          ? 64'h0
+                                          : _GEN_10
+                                              ? state.mstatus
+                                              : _GEN_11
+                                                  ? 64'h8000000000140100
+                                                  : _GEN_12
+                                                      ? state.medeleg
+                                                      : _GEN_13
+                                                          ? state.mideleg
+                                                          : _GEN_14
+                                                              ? state.mie
+                                                              : _GEN_15
+                                                                  ? state.mtvec
+                                                                  : _GEN_16
+                                                                      ? state.mcounteren
+                                                                      : _GEN_17
+                                                                          ? 64'h0
+                                                                          : _GEN_18
+                                                                              ? state.mscratch
+                                                                              : _GEN_19
+                                                                                  ? state.mepc
+                                                                                  : _GEN_20
+                                                                                      ? state.mcause
+                                                                                      : _GEN_21
+                                                                                          ? state.mtval
+                                                                                          : 64'h0;
+  wire                _GEN_23 = commit_in.bits.csr_operation == 2'h1;
+  wire                _GEN_24 = commit_in.bits.csr_operation == 2'h2;
+  wire                _GEN_25 =
+    _GEN_23 | (_GEN_24 | (&commit_in.bits.csr_operation)) & (|commit_in.bits.csr_source);
+  wire                _GEN_26 =
+    (_GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8
+     | _GEN_9 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16
+     | _GEN_17 | _GEN_18 | _GEN_19 | _GEN_20 | _GEN_21
+     | commit_in.bits.csr_address == 12'h344 | commit_in.bits.csr_address == 12'hF11
+     | commit_in.bits.csr_address == 12'hF12 | commit_in.bits.csr_address == 12'hF13
+     | commit_in.bits.csr_address == 12'hF14)
+    & privilege_state >= commit_in.bits.csr_address[9:8]
+    & ~(_GEN_25 & (&(commit_in.bits.csr_address[11:10])));
+  wire                _GEN_27 = |commit_in.bits.csr_operation;
+  wire                _GEN_28 = commit_in.valid & _GEN_27;
+  wire                _GEN_29 = commit_in.valid & _GEN_27 & ~_GEN_26;
+  wire                _GEN_30 = commit_in.bits.system_operation == 3'h3;
+  wire                _GEN_31 = privilege_state != 2'h3;
+  wire                _GEN_32 = commit_in.bits.system_operation == 3'h4;
+  wire                _GEN_33 = privilege_state == 2'h0;
+  wire                _GEN_34 = commit_in.valid & (_GEN_30 & _GEN_31 | _GEN_32 & _GEN_33);
+  wire                _GEN_35 = commit_in.valid & commit_in.bits.exception_valid;
+  wire                _GEN_36 = commit_in.valid & commit_in.bits.system_operation == 3'h1;
+  wire                _GEN_37 = commit_in.valid & commit_in.bits.system_operation == 3'h2;
+  wire                _GEN_38 = _GEN_35 | _GEN_29 | _GEN_34 | _GEN_36 | _GEN_37;
+  wire [63:0]         _GEN_39 =
+    _GEN_35
+      ? commit_in.bits.exception_cause
+      : _GEN_36
+          ? (_GEN_33 ? 64'h8 : {62'h2, privilege_state != 2'h1, 1'h1})
+          : {63'h1, _GEN_37};
+  wire [63:0]         _GEN_40 =
+    _GEN_35
+      ? commit_in.bits.exception_value
+      : _GEN_29 | _GEN_34 ? {32'h0, commit_in.bits.instruction} : 64'h0;
+  wire                _GEN_41 =
+    _GEN_38 & _GEN_31
+    & (_GEN_39 == 64'h0
+         ? state.medeleg[0]
+         : _GEN_39 == 64'h2
+             ? state.medeleg[2]
+             : _GEN_39 == 64'h3
+                 ? state.medeleg[3]
+                 : _GEN_39 == 64'h4
+                     ? state.medeleg[4]
+                     : _GEN_39 == 64'h6
+                         ? state.medeleg[6]
+                         : _GEN_39 == 64'h8
+                             ? state.medeleg[8]
+                             : _GEN_39 == 64'hC
+                                 ? state.medeleg[12]
+                                 : _GEN_39 == 64'hD
+                                     ? state.medeleg[13]
+                                     : _GEN_39 == 64'hF & state.medeleg[15]);
+  wire [63:0]         _GEN_42 =
+    _GEN_23
+      ? commit_in.bits.csr_source
+      : _GEN_24
+          ? _GEN_22 | commit_in.bits.csr_source
+          : ({64{commit_in.bits.csr_operation != 2'h3}} | ~commit_in.bits.csr_source)
+            & _GEN_22;
+  wire                _GEN_43 = _GEN_28 & _GEN_26 & _GEN_25;
+  wire                _GEN_44 = commit_in.valid & ~_GEN_38 & _GEN_30;
+  wire                _GEN_45 = commit_in.valid & ~_GEN_38 & _GEN_32;
+  wire [1:0]          _GEN_46 =
+    state.mstatus[12:11] == 2'h1 ? 2'h1 : {2{&(state.mstatus[12:11])}};
+  wire [63:0]         _GEN_47 =
+    state.mstatus[1] ? state.mstatus | 64'h20 : state.mstatus & 64'hFFFFFFFFFFFFFFDF;
+  wire [63:0]         _GEN_48 =
+    privilege_state == 2'h1
+      ? _GEN_47 & 64'hFFFFFFFFFFFFFFFD | 64'h100
+      : _GEN_47 & 64'hFFFFFFFFFFFFFEFD;
+  wire [63:0]         _GEN_49 = {commit_in.bits.pc[63:2], 2'h0};
+  wire [63:0]         _GEN_50 = {_GEN_42[63:2], 2'h0};
+  wire [63:0]         _GEN_51 = {61'h0, _GEN_42[2:0]};
+  wire                _GEN_52 = _GEN_38 | _GEN_44 | _GEN_45 | ~_GEN_43;
+  wire                _GEN_53 = _GEN_44 | _GEN_45 | ~_GEN_43;
+  wire                _GEN_54 = _GEN_41 | _GEN_38 | _GEN_44 | _GEN_45 | ~_GEN_43;
+  wire RicketCsrState _GEN_55 =
+    '{mstatus:
+        (_GEN_41
+           ? _GEN_48
+           : _GEN_38
+               ? (_GEN_41
+                    ? _GEN_48
+                    : (state.mstatus[3]
+                         ? state.mstatus | 64'h80
+                         : state.mstatus & 64'hFFFFFFFFFFFFFF7F) & 64'hFFFFFFFFFFFFE7F7
+                      | {51'h0, privilege_state, 11'h0})
+               : _GEN_44
+                   ? ({64{&_GEN_46}} | 64'hFFFFFFFFFFFDFFFF)
+                     & ((state.mstatus[7]
+                           ? state.mstatus & 64'hFFFFFFFFFFFFE7FF | 64'h8
+                           : state.mstatus & 64'hFFFFFFFFFFFFE7F7) | 64'h80)
+                   : _GEN_45
+                       ? ((state.mstatus[5]
+                             ? state.mstatus | 64'h2
+                             : state.mstatus & 64'hFFFFFFFFFFFFFFFD) | 64'h20)
+                         & 64'hFFFFFFFFFFFDFEFF
+                       : _GEN_43
+                           ? (_GEN
+                                ? {state.mstatus[63:2] & 62'h3FFFFFFFFFFCFFB3, 2'h0}
+                                  | {44'h0, _GEN_42[19:0] & 20'hC0133}
+                                : _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6
+                                  | _GEN_7 | commit_in.bits.csr_address != 12'h300
+                                    ? state.mstatus
+                                    : {state.mstatus[63:2] & 62'h3FFFFFFFFFFC7991, 2'h0}
+                                      | {44'h0, _GEN_42[19:0] & 20'hE19BB})
+                           : state.mstatus),
+      medeleg:
+        (_GEN_54
+           ? state.medeleg
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+             | commit_in.bits.csr_address != 12'h302
+               ? state.medeleg
+               : {48'h0, _GEN_42[15:0] & 16'hB15D}),
+      mideleg:
+        (_GEN_54
+           ? state.mideleg
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+             | _GEN_12 | commit_in.bits.csr_address != 12'h303
+               ? state.mideleg
+               : {54'h0, _GEN_42[9:1] & 9'h111, 1'h0}),
+      mie:
+        (_GEN_54
+           ? state.mie
+           : _GEN
+               ? state.mie
+               : _GEN_0
+                   ? state.mie & ~state.mideleg | _GEN_42 & state.mideleg
+                   : _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+                     | _GEN_12 | _GEN_13 | commit_in.bits.csr_address != 12'h304
+                       ? state.mie
+                       : {52'h0, _GEN_42[11:1] & 11'h555, 1'h0}),
+      mtvec:
+        (_GEN_54
+           ? state.mtvec
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+             | _GEN_12 | _GEN_13 | _GEN_14 | commit_in.bits.csr_address != 12'h305
+               ? state.mtvec
+               : _GEN_50),
+      mcounteren:
+        (_GEN_54
+           ? state.mcounteren
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+             | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15
+             | commit_in.bits.csr_address != 12'h306
+               ? state.mcounteren
+               : _GEN_51),
+      mscratch:
+        (_GEN_54
+           ? state.mscratch
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_10
+             | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16
+             | commit_in.bits.csr_address != 12'h340
+               ? state.mscratch
+               : _GEN_42),
+      mepc:
+        (_GEN_41
+           ? state.mepc
+           : _GEN_38
+               ? _GEN_49
+               : _GEN_53
+                   ? state.mepc
+                   : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7
+                     | _GEN_10 | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_18
+                     | commit_in.bits.csr_address != 12'h341
+                       ? state.mepc
+                       : _GEN_50),
+      mcause:
+        (_GEN_41
+           ? state.mcause
+           : _GEN_38
+               ? _GEN_39
+               : _GEN_53
+                   ? state.mcause
+                   : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7
+                     | _GEN_10 | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_18
+                     | _GEN_19 | commit_in.bits.csr_address != 12'h342
+                       ? state.mcause
+                       : _GEN_42),
+      mtval:
+        (_GEN_41
+           ? state.mtval
+           : _GEN_38
+               ? _GEN_40
+               : _GEN_53
+                   ? state.mtval
+                   : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7
+                     | _GEN_10 | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_18
+                     | _GEN_19 | _GEN_20 | commit_in.bits.csr_address != 12'h343
+                       ? state.mtval
+                       : _GEN_42),
+      stvec:
+        (_GEN_54
+           ? state.stvec
+           : _GEN | _GEN_0 | commit_in.bits.csr_address != 12'h105
+               ? state.stvec
+               : _GEN_50),
+      scounteren:
+        (_GEN_54
+           ? state.scounteren
+           : _GEN | _GEN_0 | _GEN_1 | commit_in.bits.csr_address != 12'h106
+               ? state.scounteren
+               : _GEN_51),
+      sscratch:
+        (_GEN_54
+           ? state.sscratch
+           : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | commit_in.bits.csr_address != 12'h140
+               ? state.sscratch
+               : _GEN_42),
+      sepc:
+        (_GEN_41
+           ? _GEN_49
+           : _GEN_52
+               ? state.sepc
+               : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4
+                 | commit_in.bits.csr_address != 12'h141
+                   ? state.sepc
+                   : _GEN_50),
+      scause:
+        (_GEN_41
+           ? _GEN_39
+           : _GEN_52
+               ? state.scause
+               : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5
+                 | commit_in.bits.csr_address != 12'h142
+                   ? state.scause
+                   : _GEN_42),
+      stval:
+        (_GEN_41
+           ? _GEN_40
+           : _GEN_52
+               ? state.stval
+               : _GEN | _GEN_0 | _GEN_1 | _GEN_2 | _GEN_4 | _GEN_5 | _GEN_6
+                 | commit_in.bits.csr_address != 12'h143
+                   ? state.stval
+                   : _GEN_42)};
+  always @(posedge clock) begin
+    if (reset) begin
+      privilege_state <= 2'h3;
+      state <=
+        '{mstatus: 64'h0,
+          medeleg: 64'h0,
+          mideleg: 64'h0,
+          mie: 64'h0,
+          mtvec: 64'h0,
+          mcounteren: 64'h0,
+          mscratch: 64'h0,
+          mepc: 64'h0,
+          mcause: 64'h0,
+          mtval: 64'h0,
+          stvec: 64'h0,
+          scounteren: 64'h0,
+          sscratch: 64'h0,
+          sepc: 64'h0,
+          scause: 64'h0,
+          stval: 64'h0};
+    end
+    else begin
+      privilege_state <=
+        _GEN_38
+          ? {~_GEN_41, 1'h1}
+          : _GEN_44 ? _GEN_46 : _GEN_45 ? {1'h0, state.mstatus[8]} : privilege_state;
+      state <= _GEN_55;
+    end
+  end // always @(posedge)
+  assign redirect_out =
+    '{valid: (_GEN_38 | _GEN_44 | _GEN_45),
+      bits:
+        (_GEN_38
+           ? (_GEN_41 ? state.stvec : state.mtvec)
+           : _GEN_44 ? state.mepc : state.sepc)};
+  assign writeback_valid = _GEN_28 & _GEN_26 & (|commit_in.bits.rd);
+  assign writeback_value = _GEN_22;
+  assign privilege = privilege_state;
+  assign satp = 64'h0;
 endmodule
 
 module Queue(

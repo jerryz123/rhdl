@@ -343,6 +343,11 @@ the identity for `align_down` and always true for `is_aligned`.
 `alignment_bits(alignment)` exposes the exact host-side base-two width for
 protocols and generators that need to size or remove those low bits.
 
+The same module provides `masked_merge(original, replacement, mask)`, which
+selects replacement bits where the mask is set and retains original bits
+elsewhere. All three operands must be compatible `Bits` values; the result
+retains the original width.
+
 ## Scoreboard
 
 [`scoreboard.rhdl`](scoreboard.rhdl) provides a reusable occupancy bitmap with

@@ -1,0 +1,31 @@
+#lang rhombus
+// Checks Ricket's width-specialized CSR state, ports, and structural validity.
+
+import:
+  "../../../rhdl/core/main.rhm" open
+  "../../../rhdl/frontend/kernel.rhm" as embedded
+  "../../../riscv/isa/xlen.rhm" open
+  "../csr.rhdl" as csr
+
+fun state_names(module_def):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+  ).map(fun (operation): operation.attribute("name"))
+
+def rv64_design = embedded.run_elaboration(fun (): csr.RicketCsrFile(XLen.X64))
+def rv64 = rv64_design.modules[0]
+def rv32_design = embedded.run_elaboration(fun (): csr.RicketCsrFile(XLen.X32))
+def rv32 = rv32_design.modules[0]
+
+check:
+  rv64.inputs.map(fun (port): port.name) ~is ["clock", "reset", "commit_in"]
+  rv64.outputs.map(fun (port): port.name) ~is [
+    "redirect_out", "writeback_valid", "writeback_value", "privilege", "satp"
+  ]
+  rv64.find_input("commit_in").type.field("bits").type.field("pc").type.width ~is 64
+  rv32.find_input("commit_in").type.field("bits").type.field("pc").type.width ~is 32
+  rv64.find_output("writeback_value").type.width ~is 64
+  rv32.find_output("satp").type.width ~is 32
+  state_names(rv64) ~is ["privilege_state", "state"]
+  verify_design(rv64_design) ~is #void
+  verify_design(rv32_design) ~is #void

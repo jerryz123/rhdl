@@ -6,6 +6,8 @@ import:
   "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/zmmul.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
   lib("rhdl/std/decode.rhdl") open
 
 hardware_enum WritebackSelect:
@@ -13,6 +15,7 @@ hardware_enum WritebackSelect:
   Memory
   PcPlus4
   Multiply
+  Csr
 
 bundle WritebackControl():
   enable: Bool
@@ -30,6 +33,9 @@ def link_writeback = pattern(WritebackControl()):
 def multiply_writeback = pattern(WritebackControl()):
   enable: Bool(#true)
   source: WritebackSelect.Multiply
+def csr_writeback = pattern(WritebackControl()):
+  enable: Bool(#true)
+  source: WritebackSelect.Csr
 def no_writeback = partial_pattern(WritebackControl()):
   enable: Bool(#false)
 
@@ -56,8 +62,18 @@ def RV64IWritebackCases = writeback_cases(
   [LUI, AUIPC] ++ shared_immediate_alu ++ [SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW] ++ shared_register_alu ++ [ADDW, SUBW, SLLW, SRLW, SRAW],
   shared_loads ++ [LWU, LD]
 )
-def RV32RicketWritebackCases = RV32IWritebackCases ++ instruction_cases(RV32ZmmulInstructions, multiply_writeback)
-def RV64RicketWritebackCases = RV64IWritebackCases ++ instruction_cases(RV64ZmmulInstructions, multiply_writeback)
+def RicketSystemWritebackCases = instruction_cases(
+  ZicsrInstructions,
+  csr_writeback
+) ++ instruction_cases(PrivilegedInstructions, no_writeback)
+def RV32RicketWritebackCases = RV32IWritebackCases ++ instruction_cases(
+  RV32ZmmulInstructions,
+  multiply_writeback
+) ++ RicketSystemWritebackCases
+def RV64RicketWritebackCases = RV64IWritebackCases ++ instruction_cases(
+  RV64ZmmulInstructions,
+  multiply_writeback
+) ++ RicketSystemWritebackCases
 def RV32IWritebackDecode = ValidDecodeGen(RV32IWritebackCases)
 def RV64IWritebackDecode = ValidDecodeGen(RV64IWritebackCases)
 

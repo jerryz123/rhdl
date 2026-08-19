@@ -3,7 +3,7 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with Zmmul. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with Zmmul, Zicsr, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -16,6 +16,7 @@ caches live here. Reusable execution components remain directly under
 ricket.rhdl                         composition only
   |--> core.rhdl                    IF/ID/EX/MEM/WB logic
   |     |--> bundles + decode + register-file
+  |     |--> csr.rhdl                 commit-owned CSR, privilege, and trap state
   |     |--> ../{alu,branch-resolver,load-store,multiplier}.rhdl
   |     |--> icache/protocol.rhdl
   |     |--> dcache/protocol.rhdl
@@ -53,9 +54,8 @@ flush the PC queue, lookup result, and buffered responses; a wrong-path refill
 may finish internally but cannot return an instruction to Fetch.
 Decode holds a token behind deferred loads or multiplies in ID/EX and EX/MEM
 until they reach WB.
-Execute owns forwarding, branch
-resolution, target and access alignment checks, and architectural fault
-generation. An atomic flow fork admits each Execute token simultaneously into
+Execute owns forwarding, branch resolution, target and access alignment
+checks, and synchronous-exception classification. An atomic flow fork admits each Execute token simultaneously into
 branch resolution, its optional data-cache request, and the feed-forward
 pipeline continuation. The cache leg alone contributes backpressure, and a
 legal request transfers at the same edge that places its instruction in
@@ -80,19 +80,38 @@ the same valid-only payload contract, so a load completion never backpressures
 either feed-forward stage. A WB-aligned hit sets and clears the entry without
 an extra busy cycle.
 Scoreboard WAW gating prevents both write ports from validly targeting the same
-register. Stores commit in WB; their earlier cache acceptance is safe because
-all Ricket faults have already been resolved before EX/MEM.
+register. Stores commit in WB; their address and alignment checks still occur
+before cache acceptance.
 
 This is in-order commit with out-of-order register completion, not out-of-order
 instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32I+Zmmul or RV64I+Zmmul catalog at host
+The integrated structured decoder selects the RV32I+Zmmul+Zicsr or RV64I+Zmmul+Zicsr catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
 whether decoded values have architectural meaning.
+
+[`csr.rhdl`](csr.rhdl) owns the named machine and supervisor CSRs, current
+privilege mode, synchronous trap entry, and `MRET`/`SRET`. CSR instructions
+atomically return the old value and update state at WB. System instructions
+serialize in Decode and wait for older deferred loads or multiplies before
+entering the pipeline, so younger instructions cannot create side effects
+before the system operation commits. Execute-detected exceptions immediately
+squash younger work but carry the faulting instruction to WB, where the CSR
+file records EPC, cause, and trap value and selects the direct `mtvec` or
+`stvec` target. The first cut has no interrupts, PMP, counters, vectored trap
+mode, or virtual memory; `satp` is a recognized WARL-zero CSR and translation
+therefore remains Bare.
+
+Ricket stores implemented CSR data in one aggregate state register. The
+RISC-V/RHDL `csr_bank` declaration is the single source for recognized IDs,
+read values, direct storage, aliases, WARL masks, and write dispatch. Trap and
+return updates remain an explicit prioritized transition because they
+atomically affect privilege state and several CSRs instead of representing an
+ordinary addressed write.
 
 ## Top-level core
 
@@ -102,7 +121,8 @@ value. Architectural addresses, cache tags, and external memory address ports
 all use `xlen_width(xlen)`; Ricket has no implicit narrower-address truncation
 boundary. The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start
 consumer, separate eight-byte `SimpleMemory` instruction and data requester
-ports, and a sticky `fault` output. L1I hits have one-cycle latency and
+ports, and a `fault` output for a rejected misaligned external start address.
+Architectural instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
 one-request-per-cycle throughput. In both caches, a one-stage lookup flow
 carries request context beside the SRAM access; a miss is filtered and mapped
 into the shared refill engine, which returns that context with the completed

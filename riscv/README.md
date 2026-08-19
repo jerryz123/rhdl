@@ -104,6 +104,20 @@ RV64 catalog adds `MULW`. Keeping the extension separate preserves the exact
 base-ISA catalogs and allows cores to adopt multiplication without claiming
 the divide and remainder operations from the full M extension.
 
+[`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
+read/modify/write encodings independently of any core's CSR implementation.
+[`isa/csr.rhm`](isa/csr.rhm) owns the closed `CsrId` host enum and its canonical
+12-bit architectural address mapping. Hardware must cross through
+[`rhdl/csr.rhdl`](rhdl/csr.rhdl) when it needs a typed instruction-field value,
+so sparse architectural identifiers do not become a core-specific hardware
+enum or a collection of numeric literals.
+[`isa/trap.rhm`](isa/trap.rhm) similarly owns synchronous `ExceptionCause`
+members, cause codes, and masks assembled from cause sets.
+[`isa/privileged.rhm`](isa/privileged.rhm) currently contributes the exact
+`MRET` and `SRET` encodings used by Ricket's first privileged control slice.
+Keeping these catalogs separate lets a core select the mechanisms it actually
+implements without adding them to the RV32I or RV64I base catalogs.
+
 The catalogs were checked against the RISC-V International
 [RV32I specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html),
 [RV64I specification](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
