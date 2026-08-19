@@ -48,7 +48,7 @@ numeric suffixes. Anonymous structural records remain inline structs.
 |---|---|
 | `rtl.constant` | `hw.constant` |
 | `rtl.dont_care` | `sv.constantX` as a synthesis-freedom carrier |
-| `rtl.decode` | required Espresso minimization followed by shared `comb.and/or` product logic |
+| `rtl.decode` | `sv.alwayscomb` containing a sparse `sv.case casez` relation |
 | `rtl.not` | `comb.xor` with an all-ones constant |
 | `rtl.and/or/xor` | `comb.and/or/xor` |
 | `rtl.add/sub/mul` | `comb.add/sub/mul` |
@@ -108,17 +108,15 @@ the declared physical topology, including native 1RW mode, enables, and
 packed-lane masks, before producing its simulation SystemVerilog module. The
 older asynchronous-read `Memory` resource continues to use `seq.hlmem`.
 
-`rtl.decode` stays relational until backend lowering. The CIRCT backend requires
-an `espresso` executable on `PATH`; absence or a failed or malformed run is a
-hard emission error. The backend partitions output columns by their default
-value, invokes Espresso, merges shared input products, emits balanced AND/OR
-logic, and restores the declared aggregate result type. There is no
-comparison-and-mux fallback and no frontend optimizer switch.
+`rtl.decode` stays relational until backend lowering. The CIRCT backend emits
+one sparse `sv.case casez`: input-care masks become `z` wildcard positions, and
+partially specified outputs retain `sv.constantX` bits. The verified relation's
+non-overlap makes source row order irrelevant. CIRCT owns SystemVerilog
+emission, and downstream RTL synthesis chooses and optimizes the gate-level
+implementation without an RHDL-side minimizer or subprocess.
 
-Decode output don't-cares remain semantic synthesis freedom through core IR and
-become part of Espresso's minimization problem. The chosen cover then assigns a
-concrete implementation. Standalone `rtl.dont_care` values continue to use
-`sv.constantX` as their CIRCT/SV synthesis-freedom carrier.
+Standalone `rtl.dont_care` values and uncared decode output bits use the same
+`sv.constantX` CIRCT/SV synthesis-freedom carrier.
 
 This carrier does not give RHDL four-state value semantics: the public
 operations only grant synthesis freedom, and frontend operations continue to

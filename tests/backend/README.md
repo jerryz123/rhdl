@@ -2,8 +2,8 @@
 
 # Backend tests
 
-Backend unit tests exercise RHDL-to-CIRCT lowering and invoke Espresso for
-decode relations. [`run-circt.sh`](run-circt.sh) owns the external pipeline:
+Backend unit tests exercise RHDL-to-CIRCT lowering, including native sparse
+CaseZ decode relations. [`run-circt.sh`](run-circt.sh) owns the external pipeline:
 
 ```text
 example design

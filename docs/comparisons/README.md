@@ -205,7 +205,7 @@ abstraction is a sequence of three ordinary, separately meaningful layers:
    output product before one callable `DecodeGen` is elaborated.
 
 The individual mechanisms are established ideas. Typed literals, masked bit
-patterns, truth tables, output don't-cares, and Espresso minimization all exist
+patterns, truth tables, output don't-cares, and wildcard case lowering all exist
 elsewhere. Exact aggregate constants in particular are routine in several
 comparison systems; RHDL's literal-level distinction is the open protocol that
 lets built-in and extension-defined semantic types feed the same recursive
@@ -220,11 +220,11 @@ validity and every output field.
 | Chisel | The closest peer. [`BitPat`, `TruthTable`, and `DecodeTable`](https://www.chisel-lang.org/docs/explanations/decoder) also support partial inputs and outputs, typed result fields, multi-output Espresso, and QMC fallback. RHDL adds recursive semantic aggregate patterns, exact input/output type identity, explicit relation lifting/zipping, and uniform overlap rejection; Chisel's `BitSet` algebra and column-oriented `DecodeField` model are stronger in other directions. |
 | SpinalHDL | [`MaskedLiteral`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html) and [`DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html) provide flat masked selectors and Boolean minimization. RHDL's recursively typed aggregate relation and structured partial outputs are more general. |
 | Amaranth | [`Value.matches` and `Switch`/`Case`](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-flow) give concise flat masked matching and ordered choice. They do not form a standard typed partial-output relation or multi-output decoder generator. |
-| SystemVerilog | `casez`, `case inside`, packed aggregates, and `unique`/`priority` cover a broader range of local decisions. They remain control-flow syntax rather than one reusable relation value with composition and backend minimization. |
+| SystemVerilog | `casez`, `case inside`, packed aggregates, and `unique`/`priority` cover a broader range of local decisions. They remain control-flow syntax rather than one reusable relation value with composition and backend preservation. |
 | Bluespec | Nested typed patterns, wildcard bit literals, bindings, and guards make one match expression more general than `DecodeGen`. RHDL is narrower but makes the complete finite relation first-class, unordered, and directly optimizable. |
 | Clash | Haskell patterns and [`bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html) support algebraic matching and bit capture. Clash has no standard equivalent to RHDL's typed partial-output table algebra. |
 | DSLX/XLS | DSLX [`match`](https://google.github.io/xls/dslx_reference/#match) supports nested patterns, bindings, alternatives, and ranges, while XLS performs general multi-level optimization. RHDL's matching language is less general but its decoder-specific input and output care is more explicit. |
-| Hardcaml and PyMTL3 | Both have typed aggregate constants and can generate comparisons and muxes through host code, but neither standard authoring model provides a recursively masked aggregate relation with partial outputs and multi-output minimization. |
+| Hardcaml and PyMTL3 | Both have typed aggregate constants and can generate comparisons and muxes through host code, but neither standard authoring model provides a recursively masked aggregate relation with partial-output synthesis freedom. |
 | HazardFlow, Calyx, and Filament | Their central abstractions concern transfer hazards, scheduled actions, and timeline types. Equivalent decoder hardware can be constructed, but these languages expose no comparable standard decode-relation abstraction. |
 
 This specialization is a real source-language advantage, not greater Boolean
@@ -233,41 +233,29 @@ wildcarded fields, attach arbitrary guards, compute row results from captures,
 express ranges as primitives, or represent ordered priority between overlapping
 rows. Bluespec, Clash, DSLX, and SystemVerilog are more expressive for those
 general matching tasks. RHDL's restriction is what makes global validation and
-minimization straightforward.
+sparse backend preservation straightforward.
 
 The hardware-quality claim is similarly bounded. `DecodeGen` preserves output
-don't-cares in one relational core operation. The CIRCT backend uses those
-don't-cares, minimizes same-default output groups together, merges identical
-products across groups, and emits balanced product AND and output OR trees.
-Validity and payload remain one semantic table, but their different defaults
-normally put them in separate minimization runs. The current
-[RV64I ALU relation](../../cores/ricket/decode/alu-ctrl.rhdl) demonstrates a
-more compact shared two-level cover than a direct unminimized mux-chain
-lowering: in the snapshot audit, its 28-row relation became 20 shared PLA
-products, while the 52-row complete relation became 31. Those are structural
-counts, not gate-count, area, or timing measurements. They do not establish
-universal PPA superiority: Chisel uses the same class of multi-output Espresso
-optimization, Espresso is a target-independent two-level heuristic, and a
-strong downstream optimizer may choose a better multi-level or LUT-specific
-implementation.
+don't-cares in one relational core operation. The CIRCT backend emits one
+sparse `casez`, carries uncared output positions as X, and leaves product
+sharing, multi-level factoring, and target mapping to downstream synthesis.
+Validity and payload remain one semantic table and one synthesis problem. This
+does not establish universal PPA superiority: final quality depends on the
+downstream optimizer and target library, while RHDL deliberately avoids
+committing the relation to an early target-independent cover.
 
-The current seams are important. `Pattern` denotes only one cube rather than a
-set algebra. `zip_decode_cases` requires exactly identical input partitions
+The current seams are important. `PatternSet` provides host-side set algebra,
+but `zip_decode_cases` still requires exactly identical input partitions
 instead of refining compatible cubes. The low-level `Pattern(~value, ~care)`
 constructor also requires the care mask to have the value's semantic type even
-though care is representation-level information. The mandatory backend
-Espresso pass makes the emitted structure deterministic for a fixed Espresso
-version, but the returned cover is checked for syntax and dimensions rather
-than semantic equivalence to the original relation. The pass also commits
-output don't-cares before target-aware synthesis, whereas the core
-[`rtl.decode`](../../rhdl/core/README.md#operation-model) contract can
-preserve that freedom longer.
+though care is representation-level information. Emitted gate structure and
+quality are intentionally synthesis-tool dependent instead of deterministic at
+the RHDL backend boundary.
 
-The principled next steps are therefore a first-class pattern-set algebra and
-partition-refining relation products. Keeping the semantic relation intact
-until the mandatory backend Espresso pass preserves RHDL's strongest part: one
-concise typed specification without pretending that a two-level cover is
-always the best target-specific hardware.
+The principled next step is partition-refining relation products. Keeping the
+semantic relation and output freedom intact through CIRCT already preserves
+RHDL's strongest part: one concise typed specification without pretending that
+an early two-level cover is always the best target-specific hardware.
 
 ## Comparison map
 

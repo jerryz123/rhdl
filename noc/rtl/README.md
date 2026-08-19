@@ -22,7 +22,7 @@ The receiver-explicit
 at its boundary. Compilation returns an opaque `RouteDecoder` that stores only
 the plan, derived decode widths, and compiled `DecodeGen`; route mappings and
 rows remain owned by `RouterPlan`. `DecodeGen` alone owns any flattening needed
-by Espresso or CIRCT;
+by CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 

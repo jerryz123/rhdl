@@ -86,8 +86,8 @@ The host-only relations support decode-table validation:
 constructs a typed empty set for set-algebra results. Union, intersection,
 subtraction, inverse, overlap, subsumption, and literal membership preserve the
 hardware type and produce deterministic disjoint covers. This layer does not
-minimize cubes; backend Espresso lowering remains responsible for minimizing
-the eventual decode relation.
+minimize cubes. The backend preserves the sparse relation for downstream RTL
+synthesis instead of choosing a Boolean cover itself.
 
 Pattern don't-cares describe static matching or optimization freedom. They are
 never runtime unknown or X values. `Pattern` remains neutral host data between
@@ -136,18 +136,17 @@ generator always emits one typed `rtl.decode` operation. The standard library
 does not choose a physical implementation or invoke external tools. Raw
 `hw_decode` emits the same core operation directly.
 
-The CIRCT backend requires the `espresso` executable whenever a design contains
-`rtl.decode`. It partitions output bits by their zero, one, or don't-care
-default, minimizes each nonempty partition, merges identical input products,
-and emits shared product-term ANDs and per-output ORs. There is no fallback or
-frontend optimizer configuration. `ValidDecodeGen` therefore keeps validity
-and payload in one semantic relation even though their different defaults
-normally place them in separate minimization runs.
+The CIRCT backend lowers `rtl.decode` to a sparse `sv.case casez`. Input-care
+masks become wildcard positions, while uncared output bits remain explicit X
+synthesis freedom. CIRCT emits the SystemVerilog and downstream RTL synthesis
+chooses the physical logic implementation; RHDL invokes no logic-minimizer
+subprocess. `ValidDecodeGen` therefore keeps validity and payload in one
+semantic relation while preserving their independently specified output bits.
 
 Input and output patterns may use different scalar, aggregate, or
 extension-defined hardware types. The core operation preserves output
-don't-cares until backend lowering, where Espresso uses them while choosing a
-concrete cover. See [`../../examples/std/decode.rhdl`](../../examples/std/decode.rhdl)
+don't-cares through backend lowering and SystemVerilog emission. See
+[`../../examples/std/decode.rhdl`](../../examples/std/decode.rhdl)
 for an aggregate input/output example.
 
 `decode_groups(T)` constructs ordinary `DecodeCase` values while allowing one

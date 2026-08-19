@@ -47,7 +47,7 @@ make chi-test               # CHI boundaries, flits, links, and invalid connecti
 make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
 make frontend-test          # core and frontend tests, including invalid uses
-make backend-test           # textual CIRCT lowering; decode tests require Espresso
+make backend-test           # textual CIRCT lowering, including sparse decode relations
 make formal-test            # Rosette equivalence, reachability, property, and witness checks
 make formal-differential-test # replay Rosette models through CIRCT and Verilator
 make rfpl-test              # structural RFPL semantics and invalid uses

@@ -4,7 +4,6 @@
 import:
   rhombus.bits.(<<) as <<
   "../core/main.rhm" open
-  "decode/espresso.rhm" open
 
 export:
   emit_circt
@@ -149,6 +148,18 @@ fun value_ref(value):
 fun decode_bit_set(value, index):
   (value bits.and (1 << index)) != 0
 
+// Renders a packed input cube as the native bit pattern accepted by CIRCT's
+// sv.case operation. CaseZ treats z positions as relation-level don't-cares.
+fun decode_case_pattern(value, care, width):
+  String.join(
+    for List (index in (width - 1) >=..= 0):
+      if !decode_bit_set(care, index)
+      | "z"
+      | block:
+          if decode_bit_set(value, index) | "1" | "0",
+    ""
+  )
+
 fun emit_constant(operation):
   def result = operation.results[0]
   String.append("    ", value_ref(result), " = hw.constant ",
@@ -160,41 +171,12 @@ fun emit_dont_care(operation):
   String.append("    ", value_ref(result), " = sv.constantX : ",
                 circt_type(result.type))
 
-// Produces a balanced binary reduction while keeping all backend-only SSA
-// naming out of the semantic decode relation.
-fun emit_decode_reduction(nodes, opcode, prefix):
-  def mutable lines = []
-  def mutable current = nodes
-  def mutable level = 0
-  while current.length() > 1:
-    def mutable next = []
-    def mutable remaining = current
-    def mutable pair_index = 0
-    while remaining.length() > 1:
-      def combined_ref = String.append(prefix, "_", to_string(level), "_",
-                                       to_string(pair_index))
-      lines := lines ++ [String.append("    ", combined_ref, " = ", opcode, " ",
-                                       remaining[0], ", ", remaining[1], " : i1")]
-      next := next ++ [combined_ref]
-      remaining := remaining.drop(2)
-      pair_index := pair_index + 1
-    when remaining.length() == 1
-    | next := next ++ [remaining[0]]
-    current := next
-    level := level + 1
-  [lines, current[0]]
-
 fun emit_decode(operation):
   def selector = operation.operands[0]
   def result = operation.results[0]
   def cases = operation.attribute("cases")
   def input_width = packed_width(selector.type)
   def output_width = packed_width(result.type)
-  def pla = minimize_decode_relation(input_width,
-                                     output_width,
-                                     cases,
-                                     operation.attribute("default_value"),
-                                     operation.attribute("default_care"))
   def operation_prefix = "%__rhdl_decode_" ++ to_string(operation.id)
   def selector_ref:
     if flat_data_type(selector.type)
@@ -206,111 +188,89 @@ fun emit_decode(operation):
     | [String.append("    ", selector_ref, " = hw.bitcast ", value_ref(selector),
                      " : (", circt_type(selector.type), ") -> i",
                      to_string(input_width))]
-  def zero_ref = operation_prefix ++ "_zero"
-  def one_ref = operation_prefix ++ "_one"
-  lines := lines ++ [String.append("    ", zero_ref, " = hw.constant 0 : i1"),
-                     String.append("    ", one_ref, " = hw.constant 1 : i1")]
-  def positive_refs = for List (index in 0..input_width):
-    def used = pla.terms.find(
-      fun (term):
-        decode_bit_set(term.input_care, index) && decode_bit_set(term.input_value, index)
-    )
-    if used
-    | block:
-        def bit_ref = operation_prefix ++ "_input_" ++ to_string(index)
-        lines := lines ++ [String.append("    ", bit_ref, " = comb.extract ",
-                                         selector_ref, " from ", to_string(index),
-                                         " : (i", to_string(input_width), ") -> i1")]
-        bit_ref
-    | #false
-  def negative_refs = for List (index in 0..input_width):
-    def used = pla.terms.find(
-      fun (term):
-        decode_bit_set(term.input_care, index) && !decode_bit_set(term.input_value, index)
-    )
-    if used
-    | block:
-        def bit_ref:
-          if positive_refs[index]
-          | positive_refs[index]
-          | block:
-              def extracted_ref = operation_prefix ++ "_input_" ++ to_string(index)
-              lines := lines ++ [String.append("    ", extracted_ref,
-                                               " = comb.extract ", selector_ref,
-                                               " from ", to_string(index), " : (i",
-                                               to_string(input_width), ") -> i1")]
-              extracted_ref
-        def negative_ref = operation_prefix ++ "_not_input_" ++ to_string(index)
-        lines := lines ++ [String.append("    ", negative_ref, " = comb.xor ",
-                                         bit_ref, ", ", one_ref, " : i1")]
-        negative_ref
-    | #false
-  def products = for List (term in pla.terms, term_index in 0..pla.terms.length()):
-    def possible_literals = for List (index in 0..input_width):
-      if !decode_bit_set(term.input_care, index)
-      | #false
-      | if decode_bit_set(term.input_value, index)
-        | positive_refs[index]
-        | negative_refs[index]
-    def literals = possible_literals.filter(~keep: fun (literal): literal != #false)
-    if literals.length() == 0
-    | one_ref
-    | if literals.length() == 1
-      | literals[0]
-      | block:
-          def reduction = emit_decode_reduction(
-            literals,
-            "comb.and",
-            operation_prefix ++ "_product_" ++ to_string(term_index)
-          )
-          lines := lines ++ reduction[0]
-          reduction[1]
-  def output_bits = for List (index in 0..output_width):
-    def possible_products = for List (term in pla.terms, product in products):
-      if decode_bit_set(term.output_ones, index) | product | #false
-    def selected_products = possible_products.filter(~keep: fun (product): product != #false)
+  def mutable zero_bit_ref = #false
+  def mutable one_bit_ref = #false
+  def mutable x_bit_ref = #false
+
+  fun output_bit_ref(kind):
+    match kind
+    | "zero":
+        unless zero_bit_ref
+        | zero_bit_ref := operation_prefix ++ "_bit_zero"
+          lines := lines ++ [String.append("    ", zero_bit_ref,
+                                           " = hw.constant 0 : i1")]
+        zero_bit_ref
+    | "one":
+        unless one_bit_ref
+        | one_bit_ref := operation_prefix ++ "_bit_one"
+          lines := lines ++ [String.append("    ", one_bit_ref,
+                                           " = hw.constant 1 : i1")]
+        one_bit_ref
+    | "x":
+        unless x_bit_ref
+        | x_bit_ref := operation_prefix ++ "_bit_x"
+          lines := lines ++ [String.append("    ", x_bit_ref,
+                                           " = sv.constantX : i1")]
+        x_bit_ref
+
+  // Materializes a partial output cube without choosing values for uncared
+  // bits. Mixed patterns use concat so ExportVerilog exposes each X directly.
+  fun emit_output_pattern(value, care, suffix):
+    def pattern_ref = operation_prefix ++ "_" ++ suffix
+    def full_care = (1 bits.(<<) output_width) - 1
     cond
-    | selected_products.length() == 0: zero_ref
-    | selected_products.length() == 1: selected_products[0]
+    | care == full_care:
+        lines := lines ++ [String.append("    ", pattern_ref, " = hw.constant ",
+                                         to_string(value), " : i",
+                                         to_string(output_width))]
+    | care == 0:
+        lines := lines ++ [String.append("    ", pattern_ref,
+                                         " = sv.constantX : i",
+                                         to_string(output_width))]
     | ~else:
-        def reduction = emit_decode_reduction(
-          selected_products,
-          "comb.or",
-          operation_prefix ++ "_output_" ++ to_string(index)
-        )
-        lines := lines ++ reduction[0]
-        reduction[1]
+        def bit_refs = for List (index in (output_width - 1) >=..= 0):
+          if !decode_bit_set(care, index)
+          | output_bit_ref("x")
+          | block:
+              if decode_bit_set(value, index)
+              | output_bit_ref("one")
+              | output_bit_ref("zero")
+        lines := lines ++ [String.append("    ", pattern_ref, " = comb.concat ",
+                                         String.join(bit_refs, ", "), " : ",
+                                         String.join(bit_refs.map(fun (_): "i1"), ", "))]
+    pattern_ref
+
+  def case_outputs = for List (case in cases, index in 0..cases.length()):
+    emit_output_pattern(case[2], case[3], "case_" ++ to_string(index))
+  def default_output = emit_output_pattern(operation.attribute("default_value"),
+                                           operation.attribute("default_care"),
+                                           "default")
+  def result_variable = operation_prefix ++ "_result"
+  lines := lines ++ [String.append("    ", result_variable,
+                                   " = sv.logic : !hw.inout<i",
+                                   to_string(output_width), ">"),
+                     "    sv.alwayscomb {",
+                     String.append("      sv.case casez ", selector_ref, " : i",
+                                   to_string(input_width))]
+  for (case in cases, case_output in case_outputs):
+    lines := lines ++ [String.append("      case b",
+                                     decode_case_pattern(case[0], case[1], input_width),
+                                     ": {"),
+                       String.append("        sv.bpassign ", result_variable, ", ",
+                                     case_output, " : i", to_string(output_width)),
+                       "      }"]
+  lines := lines ++ ["      default: {",
+                     String.append("        sv.bpassign ", result_variable, ", ",
+                                   default_output, " : i", to_string(output_width)),
+                     "      }",
+                     "    }"]
   def packed_result_ref:
     if flat_data_type(result.type)
     | value_ref(result)
     | operation_prefix ++ "_packed_result"
-  def selected_ref:
-    if output_width == 1
-    | output_bits[0]
-    | block:
-        def concat_ref:
-          if pla.invert_mask == 0
-          | packed_result_ref
-          | operation_prefix ++ "_selected"
-        lines := lines ++ [String.append("    ", concat_ref, " = comb.concat ",
-                                         String.join(output_bits.reverse(), ", "),
-                                         " : ", String.join(
-                                           for List (_index in 0..output_width): "i1",
-                                           ", "
-                                         ))]
-        concat_ref
-  if pla.invert_mask != 0
-  | block:
-      def invert_ref = operation_prefix ++ "_invert"
-      lines := lines ++ [String.append("    ", invert_ref, " = hw.constant ",
-                                       to_string(pla.invert_mask), " : i",
-                                       to_string(output_width)),
-                         String.append("    ", packed_result_ref, " = comb.xor ",
-                                       selected_ref, ", ", invert_ref, " : i",
-                                       to_string(output_width))]
-  | when output_width == 1
-    | lines := lines ++ [String.append("    ", packed_result_ref, " = comb.or ",
-                                       selected_ref, ", ", zero_ref, " : i1")]
+  lines := lines ++ [String.append("    ", packed_result_ref, " = sv.read_inout ",
+                                   result_variable, " : !hw.inout<i",
+                                   to_string(output_width), ">")]
   unless flat_data_type(result.type)
   | lines := lines ++ [String.append("    ", value_ref(result), " = hw.bitcast ",
                                      packed_result_ref, " : (i", to_string(output_width),

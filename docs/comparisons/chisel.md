@@ -120,8 +120,8 @@ don't-cares. `DecodePattern`, `DecodeField`, `DecodeTable`, and `DecodeBundle`
 also support an instruction-like host description whose independently defined
 fields become a decode result. Chisel's public minimizers handle a multi-input,
 multi-output truth table, using Espresso when available or QMC as an
-alternative. That is the same essential Boolean-optimization opportunity as
-RHDL's PLA path, so minimization is not unique to RHDL.
+alternative. RHDL preserves the same essential Boolean-optimization opportunity
+as sparse CaseZ logic for target-aware downstream synthesis.
 
 The authoring difference is where the relation lives. Chisel associates a
 structured host pattern and output fields with a packed `BitPat` table; its
@@ -132,20 +132,17 @@ checking, and explicit input/output relation composition direct, without
 requiring a separate packed encoding. Both decoder APIs treat their tables as
 relations rather than priority-ordered cases; RHDL additionally rejects every
 pair of distinct overlapping input cubes. Conversely, RHDL currently has only
-single cubes and exact-cube zipping; it does not offer the general set algebra
-of Chisel `BitSet`, nor does it automatically refine nonidentical input
-partitions while composing relations.
+exact-cube zipping despite its host-side `PatternSet` algebra; it does not
+automatically refine nonidentical input partitions while composing relations.
 
 Multi-output minimization can share product terms across output fields and
-exploit unconstrained outputs. RHDL minimizes each same-default output
-partition separately, then merges identical input products across partitions;
-Chisel's minimizer works from its own whole truth-table representation. Either
-can produce a more compact starting circuit than separately authored
-comparison-and-mux chains. It is not a portable PPA guarantee: Espresso is
-heuristic and target-independent, Chisel can choose a different minimizer, and
-downstream synthesis may equal or improve either source structure. RHDL's
-advantage is therefore more precise source meaning and explicit opportunities
-for sharing, not an inherent hardware-quality ceiling above Chisel.
+exploit unconstrained outputs. Chisel performs an explicit host-side
+minimization, while RHDL emits one sparse CaseZ relation whose X-valued output
+positions remain available to downstream RTL synthesis. Neither approach is a
+portable PPA guarantee: optimization quality depends on the selected minimizer,
+target, and synthesis flow. RHDL's advantage is therefore more precise source
+meaning and preserved optimization freedom, not an inherent hardware-quality
+ceiling above Chisel.
 
 ## State, assignment, and priority
 

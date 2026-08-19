@@ -91,27 +91,27 @@ emit_jobs() {
 
   if [[ "$host_foundation" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"foundation","target":"ci-host-foundation-test","espresso":false}'
+    append_matrix_entry host_matrix '{"name":"foundation","target":"ci-host-foundation-test"}'
   fi
   if [[ "$host_backend" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"backend","target":"ci-host-backend-test","espresso":true}'
+    append_matrix_entry host_matrix '{"name":"backend","target":"ci-host-backend-test"}'
   fi
   if [[ "$host_models" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"models","target":"ci-host-models-test","espresso":false}'
+    append_matrix_entry host_matrix '{"name":"models","target":"ci-host-models-test"}'
   fi
   if [[ "$host_protocols" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"protocols","target":"ci-host-protocols-test","espresso":false}'
+    append_matrix_entry host_matrix '{"name":"protocols","target":"ci-host-protocols-test"}'
   fi
   if [[ "$host_cores" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"cores","target":"ci-host-cores-test","espresso":true}'
+    append_matrix_entry host_matrix '{"name":"cores","target":"ci-host-cores-test"}'
   fi
   if [[ "$host_hygiene" == true ]]; then
     host=true
-    append_matrix_entry host_matrix '{"name":"hygiene","target":"ci-host-hygiene-test","espresso":false}'
+    append_matrix_entry host_matrix '{"name":"hygiene","target":"ci-host-hygiene-test"}'
   fi
 
   if [[ "$circt_language" == true ]]; then

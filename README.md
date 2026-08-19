@@ -69,8 +69,6 @@ The authoritative package graph and dependency contract are in
 
 - Racket 9.2 or a compatible current release
 - Rhombus 1.1
-- The [Espresso logic minimizer](https://github.com/chipsalliance/espresso) for
-  CIRCT emission of any design containing `rtl.decode`
 - CIRCT and Verilator only for external backend integration tests
 - Rosette only for optional equivalence, reachability, and output-property tests
 
