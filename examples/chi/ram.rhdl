@@ -50,9 +50,6 @@ def ram_verilog_reference = @str|<<{
   typedef
     struct packed {logic [2:0] phase; logic [11:0] txn_id; logic [6:0] requester_id; logic [11:0] return_txn_id; logic [6:0] return_node_id; logic [11:0] dbid; }
     CHISubordinateTransaction;
-  typedef struct packed {logic valid; CHIRamMemoryOperation bits; logic index; }
-    RoundRobinChoice;
-  typedef struct packed {logic valid; CHIRspFlit bits; logic index; } RoundRobinChoice_1;
 `endif // _TYPESCOPE_rhdl_types
 module CHIRam(
   input                                                                                                                                                                                                                                                                       clock,
@@ -1995,31 +1992,50 @@ module RRArbiter(
   output                                                           chosen
 );
 
-  reg                        next_priority;
-  wire                       _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
-  wire                       _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
-  wire RoundRobinChoice      _GEN_1 =
-    '{valid: _GEN_0, bits: (_GEN ? ingress_1_in.bits : ingress_0_in.bits), index: _GEN};
-  wire                       _GEN_2 = ingress_0_in.valid & ~ingress_1_in.valid;
-  wire RoundRobinChoice      _GEN_3 =
-    '{valid: _GEN_0,
-      bits: (_GEN_2 ? ingress_0_in.bits : ingress_1_in.bits),
-      index: (~_GEN_2)};
-  wire RoundRobinChoice[1:0] _GEN_4 = {{_GEN_3}, {_GEN_1}};
-  wire RoundRobinChoice      _GEN_5 = _GEN_4[next_priority];
+  wire [1:0][0:0] _matcher_grants;
+  wire [1:0]      _GEN = {{_matcher_grants[1'h1][1'h0]}, {_matcher_grants[1'h0][1'h0]}};
+  RoundRobinMatcher matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests ({{{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
+    .accepts  ({1{egress_in.ready}}),
+    .grants   (_matcher_grants)
+  );
+  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[1'h0][1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[1'h1][1'h0])};
+  assign egress_out =
+    '{valid: (|_GEN),
+      bits: (_matcher_grants[1'h1][1'h0] ? ingress_1_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN[1] & ~(_GEN[0]);
+endmodule
+
+module RoundRobinMatcher(
+  input             clock,
+                    reset,
+  input  [1:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [1:0][0:0] grants
+);
+
+  reg  [0:0]      next_priorities;
+  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
+  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
+  wire [1:0][1:0] _GEN_1 =
+    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
+  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
+  wire [1:0]      _GEN_3 = {{requests[1'h1][1'h0]}, {_GEN}};
+  wire [1:0]      _GEN_4 = _GEN_1[next_priorities[1'h0]];
+  wire            _GEN_5 = _GEN_4[1] & ~(_GEN_4[0]);
+  wire            _GEN_6 =
+    (|_GEN_4) & accepts[1'h0] ? ~_GEN_5 & _GEN_5 - 1'h1 : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
-      next_priority <= 1'h0;
+      next_priorities <= '{1'h0};
     else
-      next_priority <=
-        _GEN_5.valid & egress_in.ready
-          ? ~_GEN_5.index & _GEN_5.index - 1'h1
-          : next_priority;
+      next_priorities[1'h0] <= _GEN_6;
   end // always @(posedge)
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_5.valid & ~_GEN_5.index)};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_5.valid & _GEN_5.index)};
-  assign egress_out = '{valid: _GEN_5.valid, bits: _GEN_5.bits};
-  assign chosen = _GEN_5.index;
+  assign grants =
+    {{{1{_GEN_3[next_priorities[1'h0]]}}}, {{1{_GEN_2[next_priorities[1'h0]]}}}};
 endmodule
 
 module CompletionQueue(
@@ -2374,31 +2390,50 @@ module RRArbiter_1(
   output                                                chosen
 );
 
-  reg                          next_priority;
-  wire                         _GEN = ingress_1_in.valid & ~ingress_0_in.valid;
-  wire                         _GEN_0 = ingress_0_in.valid | ingress_1_in.valid;
-  wire RoundRobinChoice_1      _GEN_1 =
-    '{valid: _GEN_0, bits: (_GEN ? ingress_1_in.bits : ingress_0_in.bits), index: _GEN};
-  wire                         _GEN_2 = ingress_0_in.valid & ~ingress_1_in.valid;
-  wire RoundRobinChoice_1      _GEN_3 =
-    '{valid: _GEN_0,
-      bits: (_GEN_2 ? ingress_0_in.bits : ingress_1_in.bits),
-      index: (~_GEN_2)};
-  wire RoundRobinChoice_1[1:0] _GEN_4 = {{_GEN_3}, {_GEN_1}};
-  wire RoundRobinChoice_1      _GEN_5 = _GEN_4[next_priority];
+  wire [1:0][0:0] _matcher_grants;
+  wire [1:0]      _GEN = {{_matcher_grants[1'h1][1'h0]}, {_matcher_grants[1'h0][1'h0]}};
+  RoundRobinMatcher_1 matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests ({{{1{ingress_1_in.valid}}}, {{1{ingress_0_in.valid}}}}),
+    .accepts  ({1{egress_in.ready}}),
+    .grants   (_matcher_grants)
+  );
+  assign ingress_0_out = '{ready: (egress_in.ready & _matcher_grants[1'h0][1'h0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _matcher_grants[1'h1][1'h0])};
+  assign egress_out =
+    '{valid: (|_GEN),
+      bits: (_matcher_grants[1'h1][1'h0] ? ingress_1_in.bits : ingress_0_in.bits)};
+  assign chosen = _GEN[1] & ~(_GEN[0]);
+endmodule
+
+module RoundRobinMatcher_1(
+  input             clock,
+                    reset,
+  input  [1:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [1:0][0:0] grants
+);
+
+  reg  [0:0]      next_priorities;
+  wire            _GEN = requests[1'h1][1'h0] & ~requests[1'h0][1'h0];
+  wire            _GEN_0 = requests[1'h0][1'h0] & ~requests[1'h1][1'h0];
+  wire [1:0][1:0] _GEN_1 =
+    {{{{requests[1'h1][1'h0]}, {_GEN_0}}}, {{{_GEN}, {requests[1'h0][1'h0]}}}};
+  wire [1:0]      _GEN_2 = {{_GEN_0}, {requests[1'h0][1'h0]}};
+  wire [1:0]      _GEN_3 = {{requests[1'h1][1'h0]}, {_GEN}};
+  wire [1:0]      _GEN_4 = _GEN_1[next_priorities[1'h0]];
+  wire            _GEN_5 = _GEN_4[1] & ~(_GEN_4[0]);
+  wire            _GEN_6 =
+    (|_GEN_4) & accepts[1'h0] ? ~_GEN_5 & _GEN_5 - 1'h1 : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
-      next_priority <= 1'h0;
+      next_priorities <= '{1'h0};
     else
-      next_priority <=
-        _GEN_5.valid & egress_in.ready
-          ? ~_GEN_5.index & _GEN_5.index - 1'h1
-          : next_priority;
+      next_priorities[1'h0] <= _GEN_6;
   end // always @(posedge)
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_5.valid & ~_GEN_5.index)};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_5.valid & _GEN_5.index)};
-  assign egress_out = '{valid: _GEN_5.valid, bits: _GEN_5.bits};
-  assign chosen = _GEN_5.index;
+  assign grants =
+    {{{1{_GEN_3[next_priorities[1'h0]]}}}, {{1{_GEN_2[next_priorities[1'h0]]}}}};
 endmodule
 
 module CHISNTransactionSlots(

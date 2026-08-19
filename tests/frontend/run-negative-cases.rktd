@@ -73,7 +73,7 @@
  ("bad-interface-parameter.rhdl" "circuit parameters must be host values, not hardware values")
  ("bad-recursion.rhdl" "recursive elaboration of circuit Recursive")
  ("bad-nested-circuit-capture.rhdl" "hardware value belongs to a different module")
- ("bad-nested-circuit-sync-inherit.rhdl" "hardware value belongs to a different module")
+ ("bad-nested-circuit-sync-inherit.rhdl" "implicit clock/reset use requires an active sync_circuit")
  ("bad-top-call.rhdl" "circuit generators may only be called during elaborate")
  ("bad-width.rhdl" "add operands must have exactly the same arithmetic type and width")
  ("bad-expanding-arithmetic-type.rhdl" "expanding arithmetic operands must be Bits")
