@@ -94,7 +94,7 @@ integration_fixtures=(
   dont-care decode noc-route-computer noc-router noc-network noc-wormhole noc-router-family noc-escape-router
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
-  credited-flow credited-monitor credited-monitor-overgrant
+  credited-flow credited-monitor credited-monitor-overgrant flit-formats
   chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home
   ricket-core ricket-multiply ricket-dcache
 )
@@ -547,6 +547,7 @@ fixture_specs=(
   'credited-flow|credited_flow_tb|examples/std/credited-transport.rhdl|design|verilog_reference'
   'credited-flow-chained||examples/std/credited-transport.rhdl|chained_design|chained_verilog_reference'
   'credited-monitor||examples/std/credited-transport.rhdl|monitor_design|monitor_verilog_reference'
+  'flit-formats|flit_formats_tb|examples/std/flit-formats.rhdl|design|verilog_reference'
   'scoreboard|scoreboard_tb|examples/std/scoreboard.rhdl|design|verilog_reference'
   'full-adder||examples/rhdl/full-adder.rhdl|design|verilog_reference'
   'adder-core||examples/lop/adder-core.rhm|design|verilog_reference'

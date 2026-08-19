@@ -194,6 +194,7 @@ instances, or logic to the generated RTL.
 | [`std/valid-flow.rhdl`](std/valid-flow.rhdl) | Valid-only map, filter, fanout, and conversion from accepted flow |
 | [`std/completion-queue.rhdl`](std/completion-queue.rhdl) | Response-capacity reservation before nonstallable issue |
 | [`std/credited-transport.rhdl`](std/credited-transport.rhdl) | Monitored sender/buffer composition with explicit credit return |
+| [`std/flit-formats.rhdl`](std/flit-formats.rhdl) | Transfer-counted framing for fixed-length ready-valid packets |
 | [`std/scoreboard.rhdl`](std/scoreboard.rhdl) | Set/clear occupancy tracking with range and state assertions |
 
 ## Domain-library examples

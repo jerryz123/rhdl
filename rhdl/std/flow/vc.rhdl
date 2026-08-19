@@ -1,0 +1,48 @@
+#lang rhdl
+// Multiplexes independently backpressured virtual channels over one flow.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/demux.rhdl") open
+  lib("rhdl/std/flow/gate.rhdl") open
+  lib("rhdl/std/flow/map.rhdl") open
+  lib("rhdl/std/flow/rr-arbiter.rhdl") open
+
+export:
+  VcBeat
+  VcMux
+  VcDemux
+
+// A physical transfer identifies the virtual channel carrying its payload.
+bundle VcBeat(T :: DataType, vc_count :: PosInt):
+  vc: Bits(index_width(vc_count))
+  payload: T
+
+// Fairly selects one ready virtual channel without letting a blocked channel
+// prevent another channel from using the shared physical flow.
+sync_circuit VcMux(T :: DataType, vc_count :: PosInt):
+  interface ingress[vc_count](Decoupled(T), ~role: consumer)
+  input vc_ready: Vec(vc_count, Bool)
+  interface egress(Decoupled(VcBeat(T, vc_count)), ~role: producer)
+
+  fun tag_vc(vc_index):
+    map_flow(payload):
+      VcBeat(T, vc_count):
+        vc: bits(vc_index, index_width(vc_count))
+        payload: payload
+  def tagged = for Array (vc_index in 0..vc_count): ingress[vc_index] |> gate_flow(vc_ready[vc_index]) |> tag_vc(vc_index)
+  (tagged |> rr_arbiter()) <=> egress
+
+// Delivers each physical transfer to its named virtual channel and exposes
+// every channel's readiness so an upstream mux can avoid blocked channels.
+sync_circuit VcDemux(T :: DataType, vc_count :: PosInt):
+  interface ingress(Decoupled(VcBeat(T, vc_count)), ~role: consumer)
+  interface egress[vc_count](Decoupled(T), ~role: producer)
+  output vc_ready: Vec(vc_count, Bool)
+
+  def vc_valid = ingress.bits.vc <= bits(vc_count - 1, index_width(vc_count))
+  assert(!ingress.valid ||| vc_valid, "vc_flow_index_in_range")
+  vc_ready <== vec(for List (vc_index in 0..vc_count): egress[vc_index].ready)
+  def demuxed = ingress |> demux_flow(vc_count, beat => beat.vc)
+  def payloads = for Array (vc_index in 0..vc_count): demuxed[vc_index] |> map_flow(beat => beat.payload)
+  payloads <=> egress

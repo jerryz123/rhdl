@@ -1,0 +1,73 @@
+#lang rhdl
+// Demonstrates transfer-counted framing for fixed-length ready-valid flits.
+
+import:
+  lib("rhdl/std/flow.rhdl") open
+
+sync_circuit FixedFlitFramer():
+  interface ingress(Decoupled(FixedFlit(Bits(8))), ~role: consumer)
+  interface egress(Decoupled(FramedFixedFlit(Bits(8))), ~role: producer)
+
+  ingress |> frame_fixed_flits(3) |> egress
+
+def design = elaborate(FixedFlitFramer())
+
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhdl_types
+`define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [7:0] payload; } FixedFlit;
+  typedef struct packed {logic first; logic last; logic [7:0] payload; } FramedFixedFlit;
+`endif // _TYPESCOPE_rhdl_types
+module FixedFlitFramer(
+  input                                                      clock,
+                                                             reset,
+  input  struct packed {logic valid; FixedFlit bits; }       ingress_in,
+  input  struct packed {logic ready; }                       egress_in,
+  output struct packed {logic ready; }                       ingress_out,
+  output struct packed {logic valid; FramedFixedFlit bits; } egress_out
+);
+
+  wire [1:0]           _phase_counter_value;
+  wire FramedFixedFlit _GEN =
+    '{first: (_phase_counter_value == 2'h0),
+      last: (_phase_counter_value == 2'h2),
+      payload: ingress_in.bits.payload};
+  Counter phase_counter (
+    .clock  (clock),
+    .reset  (reset),
+    .enable (ingress_in.valid & egress_in.ready),
+    .value  (_phase_counter_value),
+    .wrap   (/* unused */)
+  );
+  assign ingress_out = egress_in;
+  assign egress_out = '{valid: ingress_in.valid, bits: _GEN};
+endmodule
+
+module Counter(
+  input        clock,
+               reset,
+               enable,
+  output [1:0] value,
+  output       wrap
+);
+
+  reg  [1:0] state;
+  wire       _GEN = state == 2'h2;
+  `ifndef SYNTHESIS
+    counter_state_in_range:
+      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
+  `endif // not def SYNTHESIS
+  always @(posedge clock) begin
+    if (reset)
+      state <= 2'h0;
+    else
+      state <= enable ? (_GEN ? 2'h0 : state + 2'h1) : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & _GEN;
+endmodule
+}>>|
+
+export:
+  design
+  verilog_reference

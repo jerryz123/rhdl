@@ -40,9 +40,8 @@ adaptive target is eligible only when its separate `target_available` sideband
 says that the VC can be acquired immediately; otherwise the input continuously
 requests its fallback targets. The sideband describes resource availability
 independently of ready/valid selection. A physical VC link therefore supplies
-the reverse per-VC readiness from `WormholeLinkDemux`, not the selected mux
-ingress's ready signal. This separation avoids a valid-to-ready arbitration
-loop.
+per-VC readiness from the standard `VcDemux`, not the selected mux ingress's
+ready signal. This separation avoids a valid-to-ready arbitration loop.
 
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
@@ -77,19 +76,21 @@ Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
 ordinary field projection and indexing instead of explicit packed extraction.
 
-`wormhole-router.rhdl` defines the sibling `WormholeBeat`,
-`WormholeRouterConfig`, `compile_wormhole_router`, and `WormholeRouter`
-transport. A head fragment is the only fragment whose route key is decoded.
+`wormhole-router.rhdl` defines the sibling `WormholeRouterConfig`,
+`compile_wormhole_router`, and `WormholeRouter` transport over the standard
+`VariableFlit(RoutedBeat(T, route_width))` composition. `VariableFlit` owns
+packet boundaries while `RoutedBeat` owns the NoC route key and opaque
+application payload. A head fragment is the only fragment whose route key is decoded.
 After the head transfers, the selected output VC or local ejection target is
 owned by that input until its tail transfers. Body and tail fragments therefore
 cannot be rerouted or interleaved with a different packet on the reserved VC.
 `compile_wormhole_router` accepts the same uniform positive
 `input_buffer_depth`, also defaulting to one.
 
-`wormhole-link.rhdl` keeps logical VC routing distinct from physical-link
-sharing. `WormholeLinkMux` fairly selects at most one logical VC beat per cycle
-and adds its link-local VC index; `WormholeLinkDemux` validates that index and
-delivers the beat to the corresponding downstream VC. The demultiplexer also
+The standard `VcMux` and `VcDemux` keep logical VC routing distinct from
+physical-link sharing. `VcMux` fairly selects at most one logical VC payload
+per cycle and adds its link-local VC index; `VcDemux` validates that index and
+delivers the payload to the corresponding downstream VC. The demultiplexer also
 returns a readiness bit for every VC, allowing the multiplexer to select a
 ready VC instead of letting one blocked VC stall the entire link. Link
 arbitration is per beat and retains no physical-link resource across cycles, so

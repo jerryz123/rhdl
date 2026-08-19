@@ -2,12 +2,12 @@
 module noc_wormhole_tb;
     logic clock;
     logic reset;
-    struct packed {logic valid; WormholeBeat bits;} injection_0_in;
-    struct packed {logic valid; WormholeBeat bits;} injection_1_in;
+    struct packed {logic valid; VariableFlit bits;} injection_0_in;
+    struct packed {logic valid; VariableFlit bits;} injection_1_in;
     struct packed {logic ready;} ejection_in;
     struct packed {logic ready;} injection_0_out;
     struct packed {logic ready;} injection_1_out;
-    struct packed {logic valid; WormholeBeat bits;} ejection_out;
+    struct packed {logic valid; VariableFlit bits;} ejection_out;
 
     WormholeNetworkFixture dut (.*);
     always #5 clock = ~clock;
@@ -20,10 +20,10 @@ module noc_wormhole_tb;
     );
         @(negedge clock);
         injection_0_in = '{valid: 1'b1,
-                           bits: '{route_key: head ? 1'b0 : 1'b1,
-                                   head: head,
+                           bits: '{head: head,
                                    tail: tail,
-                                   payload: payload}};
+                                   payload: '{route_key: head ? 1'b0 : 1'b1,
+                                              payload: payload}}};
         do @(posedge clock); while (!injection_0_out.ready);
         #1 injection_0_in.valid = 0;
     endtask
@@ -35,10 +35,10 @@ module noc_wormhole_tb;
     );
         @(negedge clock);
         injection_1_in = '{valid: 1'b1,
-                           bits: '{route_key: head ? 1'b1 : 1'b0,
-                                   head: head,
+                           bits: '{head: head,
                                    tail: tail,
-                                   payload: payload}};
+                                   payload: '{route_key: head ? 1'b1 : 1'b0,
+                                              payload: payload}}};
         do @(posedge clock); while (!injection_1_out.ready);
         #1 injection_1_in.valid = 0;
     endtask
@@ -81,7 +81,7 @@ module noc_wormhole_tb;
                     ejection_in.ready = ($urandom_range(0, 2) != 0);
                     @(posedge clock);
                     if (ejection_out.valid && ejection_in.ready) begin
-                        payload = ejection_out.bits.payload;
+                        payload = ejection_out.bits.payload.payload;
                         assert ((payload >= 8'hA0 && payload <= 8'hA2) ||
                                 (payload >= 8'hB0 && payload <= 8'hB1))
                             else $fatal(1, "unknown wormhole payload %h", payload);

@@ -266,6 +266,34 @@ ready-valid domain between hop boundaries rather than acquiring duplicate
 credited variants. `CreditCounter` is the shared bounded accounting circuit
 used by the adapters.
 
+## Flit formats
+
+[`flit.rhdl`](flit.rhdl) separates packet representation from transport. A
+`VariableFlit(T)` carries explicit `head`, `tail`, and `payload` fields.
+`FramedFixedFlit(T)` carries structurally distinct `first`, `last`, and
+`payload` fields whose markers must agree with one fixed packet length.
+`FixedFlit(T)` carries only `payload`; its packet
+boundaries are implicit in the successful-transfer sequence. The packet
+length is therefore an elaboration-time argument to conversions and monitors,
+not a payload field or a count of clock cycles.
+
+[`flow/flit.rhdl`](flow/flit.rhdl) supplies the safe ready-valid conversion
+graph:
+
+- `frame_fixed_flits(n)` adds canonical markers to `FixedFlit` traffic.
+- `strip_fixed_framing(n)` checks canonical markers before removing them.
+- `require_fixed_framing(n)` checks variable traffic before strengthening its
+  fixed-length contract.
+- `forget_fixed_framing()` weakens framed-fixed traffic to variable traffic
+  without state or buffering.
+
+Every stateful conversion advances phase only when both `valid` and `ready`
+are asserted. Stalls therefore preserve phase and framing. The conversions
+preserve `Decoupled` versus `Irrevocable` protocol strength and neither add a
+queue nor alter transfer count. Variable-to-fixed conversion is deliberately
+not an unchecked cast: arbitrary packet lengths require either the explicit
+checking operation or a future buffering/repacketization policy.
+
 ## Generic interconnect parameters
 
 [`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral sets used to
@@ -479,6 +507,8 @@ under [`flow/`](flow/):
 | `Queue(T, depth)` | `CtrlQueue(depth)` | Configurable FIFO with occupancy count |
 | `Arbiter(T, n)` | `CtrlArbiter(n)` | Fixed-priority, index-zero-first arbitration |
 | `RRArbiter(T, n)` | `CtrlRRArbiter(n)` | Fair round-robin arbitration |
+| `VcMux(T, n)` | -- | Fairly tags and multiplexes `n` independently backpressured virtual channels |
+| `VcDemux(T, n)` | -- | Validates and distributes tagged traffic while exposing per-channel readiness |
 | `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
 | `GrantDemux(T, outputs)` | -- | Optional-one-hot grant routing to ready-valid outputs |
 | `GrantMerge(T, inputs)` | -- | Optional-one-hot grant selection from ready-valid inputs |
@@ -545,6 +575,15 @@ def selector = Request()
 Use an explicit `Arbiter` or `RRArbiter` instance when its `chosen` output is
 needed. Inputs must be a nonempty array of mutually compatible `Decoupled` or
 `Irrevocable` endpoints.
+
+`VcMux(T, n)` and `VcDemux(T, n)` let `n` independently backpressured logical
+flows share one physical ready-valid flow. The mux fairly selects only lanes
+whose corresponding `vc_ready` bit is asserted and emits `VcBeat(T, n)` with
+the selected lane index. The demux validates that index, delivers the payload
+to exactly one output, and exposes every output's readiness for the upstream
+mux. Neither component allocates per-VC buffering or gives the lanes routing,
+reservation, credit, or deadlock semantics; domain libraries and callers own
+those policies.
 
 `atomic_fork` returns an indexable array of `Decoupled` endpoints and permits a
 transfer only when every output can accept it. This is useful when one logical

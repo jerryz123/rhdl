@@ -5,7 +5,9 @@ import:
   "../../model/main.rhm" open
   "../../plan/main.rhm" open
   "../main.rhdl" open
+  lib("rhdl/std/flit.rhdl").VariableFlit
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/vc.rhdl") open
 
 def n0 = NodeId(0)
 def n1 = NodeId(1)
@@ -61,14 +63,14 @@ sync_circuit WormholeSourceSubsystem(
       config :: WormholeRouterConfig,
       injection_indices :: List.of(Nat),
       target_indices :: List.of(Nat)):
-  def Beat = WormholeBeat(Bits(8), config.route_decoder.route_width)
-  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  def Beat = VariableFlit(RoutedBeat(Bits(8), config.route_decoder.route_width))
+  def LinkBeat = VcBeat(Beat, 2)
   interface injection[2](Decoupled(Beat), ~role: consumer)
   input vc_ready: Vec(2, Bool)
   interface physical(Decoupled(LinkBeat), ~role: producer)
 
   inst router(WormholeRouter(Bits(8), config))
-  inst mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
+  inst mux(VcMux(Beat, 2))
   for (index in 0..2):
     injection[index] |> router.ingress[injection_indices[index]]
     router.egress[target_indices[index]] |> mux.ingress[index]
@@ -80,15 +82,16 @@ sync_circuit WormholeTransitSubsystem(
       config :: WormholeRouterConfig,
       input_indices :: List.of(Nat),
       target_indices :: List.of(Nat)):
-  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  def Beat = VariableFlit(RoutedBeat(Bits(8), config.route_decoder.route_width))
+  def LinkBeat = VcBeat(Beat, 2)
   interface incoming(Decoupled(LinkBeat), ~role: consumer)
   output incoming_vc_ready: Vec(2, Bool)
   input outgoing_vc_ready: Vec(2, Bool)
   interface outgoing(Decoupled(LinkBeat), ~role: producer)
 
-  inst demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
+  inst demux(VcDemux(Beat, 2))
   inst router(WormholeRouter(Bits(8), config))
-  inst mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
+  inst mux(VcMux(Beat, 2))
   incoming |> demux.ingress
   incoming_vc_ready <== demux.vc_ready
   for (index in 0..2):
@@ -102,13 +105,13 @@ sync_circuit WormholeDestinationSubsystem(
       config :: WormholeRouterConfig,
       input_indices :: List.of(Nat),
       ejection_index :: Nat):
-  def Beat = WormholeBeat(Bits(8), config.route_decoder.route_width)
-  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  def Beat = VariableFlit(RoutedBeat(Bits(8), config.route_decoder.route_width))
+  def LinkBeat = VcBeat(Beat, 2)
   interface physical(Decoupled(LinkBeat), ~role: consumer)
   output vc_ready: Vec(2, Bool)
   interface ejection(Decoupled(Beat), ~role: producer)
 
-  inst demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
+  inst demux(VcDemux(Beat, 2))
   inst router(WormholeRouter(Bits(8), config))
   physical |> demux.ingress
   vc_ready <== demux.vc_ready
@@ -118,7 +121,7 @@ sync_circuit WormholeDestinationSubsystem(
   router.target_available <== vec([ejection.ready])
 
 sync_circuit WormholeNetworkFixture():
-  def Beat = WormholeBeat(Bits(8), source_config.route_decoder.route_width)
+  def Beat = VariableFlit(RoutedBeat(Bits(8), source_config.route_decoder.route_width))
   interface injection[2](Decoupled(Beat), ~role: consumer)
   interface ejection(Decoupled(Beat), ~role: producer)
 

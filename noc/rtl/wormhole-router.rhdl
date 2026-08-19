@@ -2,26 +2,19 @@
 // Implements packet-retaining wormhole routing from a validated router plan.
 
 import:
+  lib("rhdl/std/flit.rhdl").VariableFlit
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/queue.rhdl") open
   lib("rhdl/std/flow/crossbar.rhdl") open
   "allocator.rhdl" open
+  "router.rhdl".RoutedBeat
   "route-computer.rhdl" open
   "../plan/router-plan.rhm" open
 
 export:
-  WormholeBeat
   WormholeRouterConfig
   compile_wormhole_router
   WormholeRouter
-
-// Head and tail delimit one packet. The route key is meaningful on the head;
-// every other fragment follows the output VC retained by the router.
-bundle WormholeBeat(T :: DataType, route_width :: PosInt):
-  route_key: Bits(route_width)
-  head: Bool
-  tail: Bool
-  payload: T
 
 // Freezes the validated route decoder and local port shape before elaboration.
 class WormholeRouterConfig(router_plan :: RouterPlan,
@@ -53,7 +46,7 @@ fun compile_wormhole_router(
 // separate concern and can backpressure these logical per-VC egress streams.
 sync_circuit WormholeRouter(T :: DataType,
                             config :: WormholeRouterConfig):
-  def Beat = WormholeBeat(T, config.route_decoder.route_width)
+  def Beat = VariableFlit(RoutedBeat(T, config.route_decoder.route_width))
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
   input target_available: Vec(config.target_count, Bool)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
@@ -68,7 +61,7 @@ sync_circuit WormholeRouter(T :: DataType,
   def route_decisions = vec(
     for List (input_index in 0..config.input_count):
       def input_buffer :: Endpoint = input_buffers[input_index]
-      route_decoder_lookup(config.route_decoder, input_buffer.bits.route_key, bits(input_index, config.route_decoder.origin_width))
+      route_decoder_lookup(config.route_decoder, input_buffer.bits.payload.route_key, bits(input_index, config.route_decoder.origin_width))
   )
 
   def target_busy = vec(
