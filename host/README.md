@@ -3,8 +3,8 @@
 # Host refinements
 
 `host/annotations.rhm` defines reusable Rhombus annotations that carry no RHDL,
-NoC, RISC-V, TileLink, CHI, or RFPL dependency. Domain packages may depend on
-this module without reversing their dependency direction.
+NoC, RISC-V, CHI, or RFPL dependency. Domain packages may depend on this module
+without reversing their dependency direction.
 
 - `NonemptyString` accepts host strings with at least one character.
 - `AsciiIdentifier` accepts nonempty ASCII identifiers beginning with a letter

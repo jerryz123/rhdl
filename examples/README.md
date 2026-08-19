@@ -23,7 +23,6 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`golf/`](golf/) | Compact `#lang rhdl/golf` syntax over the standard RHDL profile |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`formal/`](formal/) | Optional Rosette-backed behavioral proofs |
-| [`tilelink/`](tilelink/) | Examples owned by the TileLink domain library |
 
 ## One IR, layered languages
 
@@ -230,7 +229,6 @@ instances, or logic to the generated RTL.
 | [`chi/home.rhdl`](chi/home.rhdl) | Bounded HN-I between one requester and one subordinate port |
 | [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
 | [`cores/ricket.rhdl`](cores/ricket.rhdl) | Complete RV64 Ricket core with private instruction and data caches |
-| [`tilelink/tilelink.rhdl`](tilelink/tilelink.rhdl) | Parameterized uncached and cached TileLink interface adapters |
 
 ## Formal example
 
@@ -295,12 +293,11 @@ make examples
 
 The directory-specific targets `examples-rhdl`, `examples-clocking`,
 `examples-std`, `examples-noc`, `examples-lop`, `examples-golf`,
-`examples-rfpl`, `examples-ridx`, `examples-riscv`, `examples-chi`,
-`examples-cores`, and `examples-tilelink` run one ownership group. CI selects
-only groups affected by the changed implementation layer: core and frontend
-changes reach every group, standard-library changes reach the RHDL, standard,
-and TileLink groups that import `rhdl/std`, and domain changes remain local to
-their group.
+`examples-rfpl`, `examples-ridx`, `examples-riscv`, `examples-chi`, and
+`examples-cores` run one ownership group. CI selects only groups affected by
+the changed implementation layer: core and frontend changes reach every group,
+standard-library changes reach every group that imports `rhdl/std`, and domain
+changes remain local to their group.
 
 ## Generated Verilog
 

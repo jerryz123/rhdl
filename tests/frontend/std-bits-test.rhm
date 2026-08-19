@@ -18,6 +18,13 @@ def extracts = module_def.operations.filter(
 def bitwise_ands = module_def.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.and" && operation.results[0].type.type_equal(Bits(8))
 )
+def transfer_design = embedded.run_elaboration(
+  fun (): fixture.TransferByteMaskFixture()
+)
+def transfer_module = transfer_design.modules[0]
+def registered_transfer_design = embedded.run_elaboration(
+  fun (): fixture.RegisteredTransferByteMaskFixture()
+)
 
 check:
   bits_std.power_of_two(-2) ~is #false
@@ -52,6 +59,14 @@ check:
     ~keep: fun (operation): operation.opcode == "rtl.constant" && operation.attribute("value", #false) == 0 && operation.results[0].type.type_equal(Bits(8))
   ).length() >= 1 ~is #true
   verify_design(design) ~is #void
+  transfer_module.outputs.map(fun (port): port.type) ~is [
+    Bits(1), Bits(4), Bits(16)
+  ]
+  transfer_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.shl"
+  ).length() ~is 3
+  verify_design(transfer_design) ~is #void
+  verify_design(registered_transfer_design) ~is #void
   bits_std.alignment_bits(0) ~throws "Pow2Int"
   bits_std.alignment_bits(3) ~throws "Pow2Int"
   embedded.run_elaboration(
@@ -63,3 +78,9 @@ check:
   embedded.run_elaboration(
     fun (): fixture.NonBitsAlignmentFixture()
   ) ~throws "Hardware.bits"
+  embedded.run_elaboration(
+    fun (): fixture.NonPowerTransferBeatFixture()
+  ) ~throws "Pow2Int"
+  embedded.run_elaboration(
+    fun (): fixture.TransferBeatTooWideFixture()
+  ) ~throws "alignment must fit the Bits width"

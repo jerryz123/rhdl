@@ -1,9 +1,11 @@
 #lang rhdl
-// Adapts the direct-memory FESVR DPI tick to typed RHDL simulation protocols.
+// Implements the direct-memory FESVR DPI tick as a native CHI RN-I endpoint.
 
 import:
-  lib("rhdl/std/simple-memory.rhdl") open
+  lib("rhdl/std/bits.rhdl").transfer_byte_mask
   lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/flow/credit.rhdl") open
+  lib("chi/main.rhdl") open
 
 dpi_import function rhdl_htif_tick(
   reset: Bool,
@@ -54,36 +56,254 @@ sync_circuit DirectMemoryHTIF():
   start_entry <== htif_start_entry
   exit <== htif_exit
 
-// The initial FESVR transport is deliberately fixed to its C++ contract:
-// RV32 addresses and one 32-bit little-endian word per transaction. FESVR
-// performs read-modify-write when loading a partial word, so every transport
-// write enables all four bytes on SimpleMemory.
-sync_circuit FesvrHost():
-  interface memory(SimpleMemory(32, 4), ~role: requester)
+def design = elaborate(DirectMemoryHTIF())
+
+hardware_enum FesvrCHIState:
+  Idle
+  ReadPending
+  WriteAwaitDBID
+  WriteData
+  WriteAwaitComp
+
+fun checked_fesvr_chi_host(link :: CHIRNILinkParams,
+                           node :: CHINodeParams,
+                           home_node_id :: Nat):
+  unless node.kind == CHINodeKind.RNI
+  | error(~who: #'FesvrHost, "node must be an RN-I")
+  unless node.max_outstanding == 1
+  | error(~who: #'FesvrHost, "node must allow exactly one outstanding transaction")
+  unless home_node_id < (1 bits.(<<) link.flit.node_id_width)
+  | error(~who: #'FesvrHost, "Home NodeID must fit the physical NodeID width")
+  link
+
+fun fesvr_chi_request(address :: Bits(32),
+                      write :: Bool,
+                      p :: CHIFlitParams,
+                      node_id :: Nat,
+                      home_node_id :: Nat):
+  wire request: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | request.rsvdc <== bits(0, p.req_rsvdc_width)
+  | #void
+  if p.sec_sid_width > 0
+  | request.sec_sid1 <== bits(0, p.sec_sid_width)
+  | #void
+  if p.request_security_width > 0
+  | request.mecid_or_stream_id <== bits(0, p.request_security_width)
+  | #void
+  if p.pbha_width > 0
+  | request.pbha <== bits(0, p.pbha_width)
+  | #void
+  if p.mpam_width > 0
+  | request.mpam <== bits(0, p.mpam_width)
+  | #void
+  request.trace_tag <== Bool(#false)
+  request.tag_op <== bits(0, 2)
+  request.exp_comp_ack <== Bool(#false)
+  request.excl_snoop_me_cah <== Bool(#false)
+  request.group_id_or_lpid <== bits(0, 8)
+  request.snp_attr_or_do_dwt <== Bool(#false)
+  request.mem_attr <== bits(0, 4)
+  request.pcrd_type <== bits(0, 4)
+  request.order <== bits(0, 2)
+  request.allow_retry <== Bool(#false)
+  request.likely_shared <== Bool(#false)
+  request.pas <== bits(0, 3)
+  request.address <== zext(address, p.request_address_width)
+  request.size_or_num_req <== bits(2, 6)
+  request.multi_req <== Bool(#false)
+  request.opcode <== mux(write,
+                         CHIReqOpcode.WriteNoSnpFull,
+                         CHIReqOpcode.ReadNoSnp)
+  request.return_txn_id_or_stash_lpid <== bits(0, 12)
+  request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
+  request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
+  request.txn_id <== bits(0, 12)
+  request.src_id <== bits(node_id, p.node_id_width)
+  request.tgt_id <== bits(home_node_id, p.node_id_width)
+  request.qos <== bits(0, 4)
+  request
+
+fun fesvr_chi_write_data(address :: Bits(32),
+                         data :: Bits(32),
+                         dbid :: Bits(12),
+                         p :: CHIFlitParams,
+                         node_id :: Nat,
+                         home_node_id :: Nat):
+  def word_lanes = p.data_bytes / 4
+  def lane_width = index_width(word_lanes)
+  def lane = address[2..(2 + lane_width)]
+  def placed_data = mux_lookup(
+    lane,
+    ~default: bits(0, p.data_width),
+    for List (index in 0..word_lanes):
+      [index, zext(data, p.data_width) << (index * 32)]
+  )
+  def byte_enable = transfer_byte_mask(address, bits(2, 3), p.data_bytes)
+  wire write_data: CHIDatFlit(p)
+  if p.poison_width > 0
+  | write_data.poison <== bits(0, p.poison_width)
+  | #void
+  if p.data_check_width > 0
+  | write_data.data_check <== bits(0, p.data_check_width)
+  | #void
+  write_data.data <== placed_data
+  write_data.byte_enable <== byte_enable
+  if p.dat_rsvdc_width > 0
+  | write_data.rsvdc <== bits(0, p.dat_rsvdc_width)
+  | #void
+  write_data.replicate <== Bool(#false)
+  write_data.num_dat <== bits(0, 2)
+  write_data.cah <== Bool(#false)
+  write_data.trace_tag <== Bool(#false)
+  write_data.tag_update <== bits(0, p.tag_update_width)
+  write_data.tag <== bits(0, p.tag_width)
+  write_data.tag_op <== bits(0, 2)
+  write_data.cache_line_id <== bits(0, 6)
+  write_data.data_id <== bits(0, 2)
+  write_data.ccid <== bits(0, 2)
+  write_data.dbid_or_mecid <== bits(0, 16)
+  write_data.c_busy <== bits(0, 3)
+  write_data.data_pull <== Bool(#false)
+  write_data.data_source_or_fwd_state <== bits(0, 8)
+  write_data.resp <== bits(0, 3)
+  write_data.resp_err <== bits(0, 2)
+  write_data.opcode <== CHIDatOpcode.NonCopyBackWriteData
+  write_data.home_nid_or_pbha_or_mismatched_mecid <== bits(home_node_id,
+                                                           p.node_id_width)
+  write_data.txn_id <== dbid
+  write_data.src_id <== bits(node_id, p.node_id_width)
+  write_data.tgt_id <== bits(home_node_id, p.node_id_width)
+  write_data.qos <== bits(0, 4)
+  write_data
+
+// The host is deliberately fixed to FESVR's RV32, one-outstanding contract.
+// Its hardware boundary is native RN-I; the private ready-valid signals only
+// handshake the flat DPI call with this endpoint's CHI transaction engine.
+sync_circuit FesvrHost(link :: CHIRNILinkParams,
+                       node :: CHINodeParams,
+                       home_node_id :: Nat):
+  def checked_link = checked_fesvr_chi_host(link, node, home_node_id)
+  def p = checked_link.flit
+  def word_lanes = p.data_bytes / 4
+  def lane_width = index_width(word_lanes)
+
+  interface memory(CHIRNILink(checked_link, node), ~role: node)
   interface start(Irrevocable(Bits(32)), ~role: producer)
   output exit: Bits(32)
 
   inst raw(DirectMemoryHTIF())
+  inst request_sender(CreditSender(CHIReqFlit(p), checked_link.tx_req_credits))
+  inst write_data_sender(CreditSender(CHIDatFlit(p), checked_link.tx_dat_credits))
+  inst response_receiver(CreditBuffer(CHIRspFlit(p), checked_link.rx_rsp_credits))
+  inst read_data_receiver(CreditBuffer(CHIDatFlit(p), checked_link.rx_dat_credits))
 
-  raw.request_ready <== memory.request.ready
-  raw.response_valid <== memory.response.valid
-  raw.response_data <== memory.response.bits.data
+  reg state(~init: FesvrCHIState.Idle)
+  reg request_address(~init: bits(0, 32))
+  reg request_data(~init: bits(0, 32))
+  reg write_dbid(~init: bits(0, 12))
+  reg transmit_request(~init: Bool(#false))
+  reg receive_ack(~init: Bool(#false))
+
+  when (!transmit_request):
+    transmit_request <== Bool(#true)
+  when (!receive_ack & memory.rx_link_active_request):
+    receive_ack <== Bool(#true)
+
+  memory.tx_link_active_request <== transmit_request
+  memory.rx_link_active_ack <== receive_ack
+
+  memory.tx_req.valid <== request_sender.link.valid
+  memory.tx_req.bits <== request_sender.link.bits
+  request_sender.link.credit <== memory.tx_req.credit
+  memory.tx_dat.valid <== write_data_sender.link.valid
+  memory.tx_dat.bits <== write_data_sender.link.bits
+  write_data_sender.link.credit <== memory.tx_dat.credit
+  memory.tx_rsp.valid <== Bool(#false)
+  memory.tx_rsp.bits <== literal(CHIRspFlit(p), 0)
+
+  response_receiver.link.valid <== memory.rx_rsp.valid
+  response_receiver.link.bits <== memory.rx_rsp.bits
+  memory.rx_rsp.credit <== response_receiver.link.credit
+  read_data_receiver.link.valid <== memory.rx_dat.valid
+  read_data_receiver.link.bits <== memory.rx_dat.bits
+  memory.rx_dat.credit <== read_data_receiver.link.credit
+  def receive_running = receive_ack & memory.rx_link_active_request
+  response_receiver.grant_enable <== receive_running
+  read_data_receiver.grant_enable <== receive_running
+
+  def idle = state === FesvrCHIState.Idle
+  request_sender.ingress.valid <== raw.request_valid & idle
+  request_sender.ingress.bits <== fesvr_chi_request(raw.request_address,
+                                                    raw.request_write,
+                                                    p,
+                                                    node.node_id,
+                                                    home_node_id)
+  raw.request_ready <== idle & request_sender.ingress.ready
+  def request_fire = fire(request_sender.ingress)
+
+  def response = response_receiver.egress.bits
+  def accepting_dbid = (state === FesvrCHIState.WriteAwaitDBID) & (
+    response.opcode === CHIRspOpcode.DBIDResp
+  )
+  def accepting_completion = (state === FesvrCHIState.WriteAwaitComp) & (
+    response.opcode === CHIRspOpcode.Comp
+  ) & raw.response_ready
+  response_receiver.egress.ready <== accepting_dbid ||| accepting_completion
+  def dbid_fire = (fire(response_receiver.egress)) & accepting_dbid
+
+  write_data_sender.ingress.valid <== state === FesvrCHIState.WriteData
+  write_data_sender.ingress.bits <== fesvr_chi_write_data(request_address,
+                                                          request_data,
+                                                          write_dbid,
+                                                          p,
+                                                          node.node_id,
+                                                          home_node_id)
+  def write_data_fire = fire(write_data_sender.ingress)
+
+  def read_data = read_data_receiver.egress.bits
+  def read_pending = state === FesvrCHIState.ReadPending
+  def read_words = cast(read_data.data, Vec(word_lanes, Bits(32)))
+  def read_lane = request_address[2..(2 + lane_width)]
+  def read_response_valid = read_pending & read_data_receiver.egress.valid
+  def write_response_valid = (state === FesvrCHIState.WriteAwaitComp) & (
+    response_receiver.egress.valid
+  ) & (response.opcode === CHIRspOpcode.Comp)
+  raw.response_valid <== read_response_valid ||| write_response_valid
+  raw.response_data <== mux(read_response_valid,
+                            read_words[read_lane],
+                            bits(0, 32))
+  read_data_receiver.egress.ready <== read_pending & raw.response_ready
+  def response_fire = raw.response_valid & raw.response_ready
+
+  when request_fire:
+    request_address <== raw.request_address
+    request_data <== raw.request_data
+    state <== mux(raw.request_write,
+                  FesvrCHIState.WriteAwaitDBID,
+                  FesvrCHIState.ReadPending)
+  elsewhen dbid_fire:
+    write_dbid <== response.dbid_or_group_id
+    state <== FesvrCHIState.WriteData
+  elsewhen write_data_fire:
+    state <== FesvrCHIState.WriteAwaitComp
+  elsewhen response_fire:
+    state <== FesvrCHIState.Idle
+
+  when (response_receiver.egress.valid):
+    assert(accepting_dbid ||| write_response_valid,
+           "fesvr_chi_response_expected")
+  when (read_data_receiver.egress.valid):
+    assert(read_pending, "fesvr_chi_read_data_expected")
+
   raw.start_ready <== start.ready
-
-  memory.request.valid <== raw.request_valid
-  memory.request.bits.address <== raw.request_address
-  memory.request.bits.write <== raw.request_write
-  memory.request.bits.data <== raw.request_data
-  memory.request.bits.mask <== bits(0xf, 4)
-  memory.response.ready <== raw.response_ready
-
   start.valid <== raw.start_valid
   start.bits <== raw.start_entry
   exit <== raw.exit
-
-def design = elaborate(FesvrHost())
+  monitor_chi_rni(checked_link, node, memory, ~label_prefix: "fesvr_chi")
 
 export:
   DirectMemoryHTIF
+  FesvrCHIState
   FesvrHost
   design

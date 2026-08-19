@@ -1,37 +1,45 @@
-<!-- Documents the FESVR transport, typed RTL adapter, and minimal simulation harness. -->
+<!-- Documents the FESVR transport and native CHI-backed simulation host. -->
 
-# Direct-memory FESVR simulation support
+# Native CHI FESVR simulation support
 
-`DirectMemoryHtif` derives from FESVR's `htif_t` and converts its abstract
-memory chunks into one-outstanding, aligned 32-bit ready/valid transactions.
-It deliberately implements only an RV32 little-endian target. FESVR splits
-larger accesses and performs read-modify-write for partial words.
+`DirectMemoryHtif` derives from FESVR's `htif_t` and presents its abstract
+memory chunks to RHDL as one-outstanding, aligned 32-bit transactions. It is
+deliberately limited to an RV32 little-endian target. FESVR splits larger
+accesses and performs read-modify-write for partial words.
 
-The transport also turns `htif_t::reset()` into a startup transaction carrying
-the ELF entry point. The processor must remain idle until that transaction is
-accepted. Once running, FESVR polls `tohost` through the same memory interface
-and reports completion as `(exit_code << 1) | 1`.
-
-Install the pinned optional dependency, then build and test the transport:
+Install the pinned optional dependency, then build and test the C++ transport:
 
 ```sh
 make -C sim/fesvr setup
 make -C sim/fesvr test
 ```
 
-`direct_mem_htif_dpi.cc` provides the intended DPI-C entry point.
-`direct-memory-htif.rhdl` keeps that flat ABI in `DirectMemoryHTIF` and exposes
-the normal RHDL-facing `FesvrHost` adapter:
+`direct_mem_htif_dpi.cc` provides the DPI-C entry point.
+`direct-memory-htif.rhdl` preserves that flat ABI in `DirectMemoryHTIF`, while
+`FesvrHost` is a native CHI RN-I endpoint:
 
 ```text
 FesvrHost
-  memory: SimpleMemory(32, 4) requester
+  memory: CHIRNILink node
   start:  Irrevocable(Bits(32)) producer
   exit:   Bits(32)
 ```
 
-The full-byte request mask matches the C++ transport: FESVR itself performs
-read-modify-write for sub-word ELF chunks. The underlying DPI declaration is:
+The private ready-valid signals between `DirectMemoryHTIF` and `FesvrHost`
+belong only to the DPI procedure call. They are not a hardware memory protocol
+and are not exposed outside the endpoint. `FesvrHost` directly implements CHI
+link activation, credit handling, and these one-outstanding transaction flows:
+
+| FESVR operation | Native CHI sequence |
+|---|---|
+| 32-bit read | `ReadNoSnp`, then `CompData` |
+| 32-bit write | `WriteNoSnpFull`, `DBIDResp`, `NonCopyBackWriteData`, then `Comp` |
+
+The default 128-bit CHI data flit carries the 32-bit word in the lane selected
+by the low address bits. Writes generate the corresponding four-byte enable;
+reads select the same lane from `CompData`.
+
+The underlying DPI declaration remains:
 
 ```rhombus
 dpi_import function rhdl_htif_tick(
@@ -52,10 +60,9 @@ dpi_import function rhdl_htif_tick(
 )
 ```
 
-The flat wrapper binds those ordered results directly with one parenthesized
-`dpi_reg` declaration. The exact C signature is declared in
-`direct_mem_htif_dpi.h`. Check the adapter against the installed Verilator
-headers with:
+The flat wrapper binds those ordered results with one parenthesized `dpi_reg`
+declaration. The exact C signature is declared in `direct_mem_htif_dpi.h`.
+Check it against the installed Verilator headers with:
 
 ```sh
 make -C sim/fesvr dpi-compile-check \
@@ -66,65 +73,39 @@ The transport is simulation support rather than synthesizable RHDL. It does
 not introduce a dependency from the RHDL core, frontend, or CIRCT backend to
 FESVR.
 
-## Simple simulation SoC
+## Host-only CHI composition
 
-`shared-memory.rhdl` fairly arbitrates FESVR and processor requests directly
-into one `SimpleMemoryRam`. It exposes complete `SimpleMemory` endpoints for
-both requesters; the request and response directions remain independent
-generic interface-handle chains internally. It stores one owner token per
-accepted request, couples it with the corresponding ordered response, and
-payload-demultiplexes that response back to its requester.
-
-`simple-soc-top.rhdl` owns the reusable simulation-only composition. Its
-processor is a host generator parameter with two required interfaces:
-`SimpleMemory(32, 4)` requester `memory` and
-`Irrevocable(Bits(32))` consumer `start`.
+`chi-top.rhdl` provides the first processor-free integration slice:
 
 ```text
 TestDriver.sv
-└── SimpleSoCTop
-    ├── processor
-    ├── FesvrSharedMemory
-    │   └── SimpleMemoryRam
-    └── FesvrHost
-        └── DirectMemoryHTIF
+└── FesvrTop
+    ├── FesvrHost (RN-I, NodeID 3)
+    ├── CHIHNI (HN-I, NodeID 5)
+    └── CHIRam (SN-I, NodeID 9)
 ```
 
-`TestDriver.sv` is the only handwritten SystemVerilog layer. It supplies
-clock and reset, monitors the FESVR exit word, and enforces a timeout. The
-generated `SimpleSoCTop` owns all typed hardware composition and the DPI call.
+The links are connected directly. There is no `SimpleMemory` protocol,
+compatibility adapter, shared-memory owner queue, processor port, or crossbar.
+The RAM covers `0x80000000` through `0x80001fff`, which includes both the ELF
+entry point and the test program's HTIF mailbox.
 
-The runnable smoke configuration is also under `sim/fesvr/`:
+Without a processor, the test ELF preinitializes `tohost` with the passing
+value. FESVR completes ELF loading, hands off the entry point, then reads that
+mailbox through CHI and reports its normal passing exit word. The driver checks
+both the `0x80000000` handoff and exit value, while the CHI endpoint, Home, RAM,
+and transaction monitors check the load writes and mailbox read.
 
-```text
-FesvrHost ---------\
-                    FesvrSharedMemory
-FesvrStubCore -----/
-       ^
-       +------------ start entry
-```
-
-`stub-soc.rhdl` supplies `FesvrStubCore` to `SimpleSoCTop`. The stub executes no
-instructions. After accepting the ELF entry point, it writes `1` to `tohost`.
-The integration test under `tests/fesvr/` proves that FESVR loads the ELF
-through generated RTL, start delivery completes, processor and host traffic
-share the same RAM, and FESVR observes the passing exit. Test-owned files are
-limited to assertions, the transport unit test, and target programs.
-
-Install FESVR and CIRCT, then run the focused RTL checks:
+Run the focused RTL checks with:
 
 ```sh
 make -C sim/fesvr rtl-elaboration-test
-make -C sim/fesvr stub-soc-test
+make -C sim/fesvr chi-host-test
 ```
 
-The second target additionally requires Verilator and an RV32-capable
+The second target additionally requires CIRCT, Verilator, and an RV32-capable
 `riscv64-unknown-elf-gcc`. `FESVR_PREFIX` and `CIRCT_OPT` may point at existing
 installations.
 
-The standalone Ricket processor implementation lives in
-[`cores/ricket/ricket.rhdl`](../../cores/ricket/ricket.rhdl), not under this simulator
-package. It deliberately exposes separate instruction and data memory ports,
-so it does not yet satisfy `SimpleSoCTop`'s single combined processor-memory
-contract. A later SoC-level adapter or arbiter can reconcile those boundaries
-while retaining the FESVR host, shared memory, SV driver, and DPI support here.
+A later processor integration should add a native CHI Request Node and a CHI
+fabric. It should not restore the removed `SimpleMemory` simulation hierarchy.

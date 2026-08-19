@@ -84,29 +84,13 @@ fun checked_chi_ram_params(params :: CHIRamParams):
   unless params.base_address mod params.size_bytes == 0
   | error(~who: #'CHIRam,
           "base address must be aligned to the RAM size")
-  unless bits.length(params.base_address + params.size_bytes - 1) <= p.request_address_width
+  unless bits.length((params.base_address + params.size_bytes) - 1) <= p.request_address_width
   | error(~who: #'CHIRam,
           "memory region must fit in the request address width")
   unless bits.length(params.node_id) <= p.node_id_width
   | error(~who: #'CHIRam,
           "NodeID must fit in the physical NodeID width")
   params
-
-fun chi_ram_expected_mask(address, size, p :: CHIFlitParams):
-  def typed_address = cast(address, Bits(p.request_address_width))
-  def typed_size = cast(size, Bits(3))
-  def max_size = alignment_bits(p.data_bytes)
-  def masks = for List (encoded_size in 0..(max_size + 1)):
-    [encoded_size,
-     bits((1 bits.(<<) (1 bits.(<<) encoded_size)) - 1,
-          p.data_bytes)]
-  def base_mask = mux_lookup(typed_size,
-                             ~default: bits(0, p.data_bytes),
-                             masks)
-  def lane_width = alignment_bits(p.data_bytes)
-  def lane_offset:
-    if lane_width == 0 | bits(0, 1) | typed_address[0..lane_width]
-  base_mask << lane_offset
 
 fun monitor_chi_ram_request(valid, raw_request, params :: CHIRamParams):
   def p = params.flit
@@ -141,10 +125,10 @@ fun monitor_chi_ram_write_data(valid,
                                p :: CHIFlitParams):
   def data = cast(raw_data, CHIDatFlit(p))
   def request = cast(raw_request, CHIReqFlit(p))
-  def expected_mask = chi_ram_expected_mask(
+  def expected_mask = transfer_byte_mask(
     request.address,
     request.size_or_num_req[0..3],
-    p
+    p.data_bytes
   )
   def partial = request.opcode === CHIReqOpcode.WriteNoSnpPtl
   def mask_supported = mux(
@@ -213,10 +197,10 @@ fun chi_ram_read_completion(p :: CHIFlitParams,
   | response.data_check <== bits(0, p.data_check_width)
   | #void
   response.data <== data
-  response.byte_enable <== chi_ram_expected_mask(
+  response.byte_enable <== transfer_byte_mask(
     request.address,
     request.size_or_num_req[0..3],
-    p
+    p.data_bytes
   )
   if p.dat_rsvdc_width > 0
   | response.rsvdc <== bits(0, p.dat_rsvdc_width)

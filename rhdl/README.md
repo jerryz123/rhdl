@@ -22,7 +22,6 @@ user base-profile imports -----> selected frontend/layers/*
 #lang rfpl --------------------> ../rfpl/frontend ------------------------> core IR
 
 std/* -------------------------> public #lang rhdl authoring surface
-tilelink/* --------------------> public #lang rhdl and generic std/* libraries
 chi/* -------------------------> public #lang rhdl and generic std/* libraries
 sim/* -------------------------> public #lang rhdl authoring surface
 riscv/rhdl --------------------> public #lang rhdl authoring surface
@@ -66,7 +65,6 @@ internal module implementing its shared frontend forms is called the
 | [`std/`](std/README.md) | Optional host utilities, protocols, and circuit generators written in ordinary RHDL | Public `#lang rhdl` authoring surface only |
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`formal/`](formal/README.md) | Optional Rosette-backed behavioral equivalence over verified public IR | Core only; Rosette through one Racket interoperability module |
-| [`../tilelink/`](../tilelink/README.md) | TileLink parameters, payloads, endpoint monitors, and an uncached RAM manager | Public `#lang rhdl` and protocol-neutral `std/` libraries |
 | [`../chi/`](../chi/README.md) | AMBA CHI parameters, exact flits, credited node-role links, monitors, fabric metadata, and initial non-coherent endpoints | Public `#lang rhdl`; protocol-neutral `std/` libraries |
 | [`../sim/`](../sim/fesvr/README.md) | Optional simulation adapters and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
@@ -199,7 +197,7 @@ language profiles:
   lookup selector behavior, and one-hot selector types without importing one
   another.
 
-Domain libraries and adapters such as `tilelink/` and `riscv/rhdl` consume the
+Domain libraries and adapters such as `chi/` and `riscv/rhdl` consume the
 public language and standard libraries. They do not become frontend layers and
 cannot import RHDL implementation packages.
 

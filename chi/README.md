@@ -2,11 +2,10 @@
 
 # AMBA CHI domain library
 
-`chi/` is the standalone AMBA CHI domain library. Like
-[`tilelink/`](../tilelink/), it belongs beside RHDL rather than under
-`rhdl/std`: CHI parameters, flits, node roles, transaction rules, monitors,
-and components are protocol-specific. Only reusable transport mechanisms
-belong in the generic standard library.
+`chi/` is the standalone AMBA CHI domain library. It belongs beside RHDL
+rather than under `rhdl/std`: CHI parameters, flits, node roles, transaction
+rules, monitors, and components are protocol-specific. Only reusable transport
+mechanisms belong in the generic standard library.
 
 The initial implementation targets revision IHI 0050H of the AMBA CHI
 Architecture Specification. This identifies the source used for the implemented
@@ -236,9 +235,9 @@ non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
 operations. SN-F is the normal-memory backing role; SN-I additionally covers
 peripherals and explicitly non-coherent memory. `CHIRam` therefore
 defaults to an SN-F endpoint while permitting `~kind: CHINodeKind.SNI` for the
-same small common Subordinate subset analogous to `TLRam`. Selecting SN-F does
-not make the RAM coherent: an upstream HN-F owns coherence and sends the SN-F
-only non-snoopable traffic.
+same small common Subordinate subset. Selecting SN-F does not make the RAM
+coherent: an upstream HN-F owns coherence and sends the SN-F only
+non-snoopable traffic.
 
 | Operation | Initial transaction flow |
 |---|---|
@@ -249,7 +248,7 @@ only non-snoopable traffic.
 The initial write path deliberately uses separate `DBIDResp` and `Comp`
 responses. CHI permits a combined `CompDBIDResp` before the write data is
 sent, but completing only after the RAM update gives `CHIRam` the same
-observable storage discipline as `TLRam`.
+observable storage discipline for reads that follow a completed write.
 
 The initial implementation has these explicit limits:
 

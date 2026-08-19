@@ -1,4 +1,4 @@
-// Defines the inert RV32 payload used to exercise FESVR ELF loading and startup.
+// Defines an inert RV32 payload whose preloaded mailbox completes the host-only smoke.
 .section .text
 .globl _start
 _start:
@@ -8,7 +8,7 @@ _start:
 .balign 8
 .globl tohost
 tohost:
-  .dword 0
+  .dword 1
 .globl fromhost
 fromhost:
   .dword 0

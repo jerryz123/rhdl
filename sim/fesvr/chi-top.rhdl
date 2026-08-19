@@ -1,0 +1,91 @@
+#lang rhdl
+// Composes the native RN-I FESVR host with one HN-I and one SN-I backing RAM.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").fire
+  lib("chi/main.rhdl") open
+  "direct-memory-htif.rhdl".FesvrHost
+
+def fesvr_flit = CHIFlitParams()
+def fesvr_requester_link = CHIRNILinkParams(fesvr_flit)
+def fesvr_subordinate_link = CHISNLinkParams(fesvr_flit)
+def fesvr_node = CHINodeParams(
+  "fesvr",
+  3,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 1
+)
+def fesvr_home_port = CHIICNPortParams(
+  "fesvr-home-port",
+  fesvr_node.node_id,
+  CHINodeKind.RNI,
+  ~emits: fesvr_node.supports,
+  ~supports: fesvr_node.emits,
+  ~max_outstanding: 1
+)
+def fesvr_ram_params = CHIRamParams(
+  "fesvr-ram",
+  9,
+  fesvr_subordinate_link,
+  0x2000,
+  ~base_address: 0x80000000,
+  ~kind: CHINodeKind.SNI,
+  ~max_outstanding: 2
+)
+def fesvr_home = CHIHomeParams("fesvr-home",
+                               5,
+                               CHINodeKind.HNI,
+                               ~max_outstanding: 2)
+def fesvr_home_params = CHIHNIParams(
+  fesvr_home,
+  CHIFabricPortParams(fesvr_home_port, fesvr_requester_link),
+  fesvr_ram_params.fabric_port,
+  fesvr_ram_params.service
+)
+
+sync_circuit FesvrTop():
+  output loaded: Bool
+  output entry: Bits(32)
+  output exit: Bits(32)
+
+  inst host(FesvrHost(fesvr_requester_link,
+                      fesvr_node,
+                      fesvr_home.node_id))
+  inst home(CHIHNI(fesvr_home_params))
+  inst ram(CHIRam(fesvr_ram_params))
+
+  host.memory <=> home.requester
+  home.subordinate <=> ram.port
+
+  reg load_complete(~init: Bool(#false))
+  reg loaded_entry(~init: bits(0, 32))
+  host.start.ready <== Bool(#true)
+  when (fire(host.start)):
+    load_complete <== Bool(#true)
+    loaded_entry <== host.start.bits
+
+  loaded <== load_complete
+  entry <== loaded_entry
+  exit <== host.exit
+
+def design = elaborate(FesvrTop())
+
+export:
+  fesvr_flit
+  fesvr_requester_link
+  fesvr_subordinate_link
+  fesvr_node
+  fesvr_home_port
+  fesvr_ram_params
+  fesvr_home
+  fesvr_home_params
+  FesvrTop
+  design

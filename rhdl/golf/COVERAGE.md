@@ -139,7 +139,7 @@ Golf does not map:
 
 - backend lowering, CIRCT, Verilog generation, or simulation harnesses;
 - formal engines or proof APIs;
-- RFPL or domain packages such as NoC, RISC-V, TileLink, CHI, or processor
+- RFPL or domain packages such as NoC, RISC-V, CHI, or processor
   cores;
 - core Builder or raw IR construction;
 - implicit widths, unsized hardware literals, implicit conversions, inferred

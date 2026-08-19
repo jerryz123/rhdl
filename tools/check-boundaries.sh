@@ -34,11 +34,11 @@ fail_matches "core must not import analysis, frontend, backend, or formal module
 fail_matches "analysis must depend only on core and other analysis modules" \
   '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' rhdl/analysis
 fail_matches "host annotations must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' host
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' host
 fail_matches "pure Ridx model must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' ridx/model
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' ridx/model
 fail_matches "pure Ridx materialization must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|tilelink/|chi/|rfpl/|cores/|sim/)' ridx/materialize
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' ridx/materialize
 fail_matches "the Ridx RHDL adapter must not import implementation or backend packages" \
   '^[[:space:]]+.*rhdl/(core|frontend|backend|formal)/' ridx/rhdl
 fail_matches "RHDL core must not import Ridx" \
@@ -57,8 +57,6 @@ fail_matches "formal engine must not import frontend, backend, or standard-libra
   '(frontend/|backend/|std/)' rhdl/formal
 fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
-fail_matches "RHDL packages must not import the external TileLink domain library" \
-  '^[[:space:]]+.*tilelink/' rhdl
 fail_matches "RHDL packages must not import the external CHI domain library" \
   '^[[:space:]]+.*chi/' rhdl
 fail_matches "simulation adapters must not import RHDL implementation packages" \
@@ -70,7 +68,7 @@ fail_matches "base language assembly must not import analysis, core, backend, or
 fail_matches "Golf language assembly must not import analysis, core, backend, or formal modules" \
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/golf/language.rhm
 fail_matches "Golf syntax must not depend on analysis, core, backend, optional libraries, or domain packages" \
-  '^[[:space:]]+.*(analysis/|core/|backend/|formal/|std/|tilelink/|chi/|noc/|rfpl/|riscv/|cores/|sim/)' rhdl/golf/surface.rhm
+  '^[[:space:]]+.*(analysis/|core/|backend/|formal/|std/|chi/|noc/|rfpl/|riscv/|cores/|sim/)' rhdl/golf/surface.rhm
 fail_matches "the standard frontend must aggregate only the foundation and frontend layers" \
   '^[[:space:]]+"[^"]*(analysis/|core/|kernel\.rhm|support/)' rhdl/frontend/standard.rhm
 fail_matches "the standard frontend must not implement feature behavior" \
@@ -128,7 +126,7 @@ unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
   ! -path './ridx/rhdl/*' ! -path './ridx/tests/rhdl/*' \
   ! -path './noc/rtl/*' \
-  ! -path './tilelink/*' ! -path './chi/*' \
+  ! -path './chi/*' \
   ! -path './sim/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
   echo ".rhdl files may appear only in std, domain libraries, public adapters, examples, concrete cores, simulation adapters, physical-design fixtures, and frontend or FESVR fixtures" >&2

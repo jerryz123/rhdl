@@ -1,4 +1,4 @@
-# Builds the FESVR transport and generated SimpleSoCTop simulation independently.
+# Builds the FESVR transport and its native CHI-backed RTL simulation.
 REPO_DIR := $(abspath ../..)
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
 FESVR_PREFIX ?= $(REPO_DIR)/.tools/fesvr-$(FESVR_REVISION)
@@ -18,12 +18,12 @@ TRANSPORT_OBJECT := $(BUILD_DIR)/direct_mem_htif.o
 TRANSPORT_LIBRARY := $(BUILD_DIR)/libdirect_mem_htif.a
 TEST_ELF := $(BUILD_DIR)/direct_mem_htif_pass.elf
 TEST_BINARY := $(BUILD_DIR)/direct_mem_htif_test
-SOC_MLIR := $(BUILD_DIR)/simple_soc_top.mlir
-SOC_VERILOG := $(BUILD_DIR)/SimpleSoCTop.sv
-SOC_OBJECT_DIR := $(BUILD_DIR)/simple_soc_obj
+SOC_MLIR := $(BUILD_DIR)/fesvr_chi_top.mlir
+SOC_VERILOG := $(BUILD_DIR)/FesvrTop.sv
+SOC_OBJECT_DIR := $(BUILD_DIR)/fesvr_chi_obj
 SOC_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 
-.PHONY: all setup test dpi-compile-check rtl-elaboration-test stub-soc-test
+.PHONY: all setup test dpi-compile-check rtl-elaboration-test chi-host-test
 
 all: $(TRANSPORT_LIBRARY)
 
@@ -40,14 +40,16 @@ dpi-compile-check: $(FESVR_LIBRARY) | $(BUILD_DIR)
 	  -c direct_mem_htif_dpi.cc -o $(BUILD_DIR)/direct_mem_htif_dpi.o
 
 rtl-elaboration-test:
-	cd $(REPO_DIR) && env PLTCOLLECTS=$(REPO_DIR): \
-	  $(RACO) test tests/fesvr/fesvr-rtl-test.rhm
+	compiled_root="$$(mktemp -d /tmp/rhdl-fesvr-rtl.XXXXXX)"; \
+	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
+	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test tests/fesvr/fesvr-rtl-test.rhm
 
-stub-soc-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
+chi-host-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	@test -x "$(CIRCT_OPT)" || \
 	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
-	cd $(REPO_DIR) && $(RACKET) -y -S $(REPO_DIR) \
-	  tools/emit-fesvr-stub-soc.rhm > $(SOC_MLIR)
+	compiled_root="$$(mktemp -d /tmp/rhdl-fesvr-chi.XXXXXX)"; \
+	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
+	  $(RACKET) -y -S $(REPO_DIR) tools/emit-fesvr-chi-top.rhm > $(SOC_MLIR)
 	$(CIRCT_OPT) --canonicalize --cse --prettify-verilog \
 	  --lower-seq-hlmem --lower-sim-to-sv --lower-verif-to-sv \
 	  --lower-seq-to-sv='disable-mem-randomization=true disable-reg-randomization=true' \
@@ -55,7 +57,9 @@ stub-soc-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	  --hw-memory-sim='disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined' \
 	  --sv-mask-non-synthesizable='mode=ifdef macro=SYNTHESIS' \
 	  --export-verilog $(SOC_MLIR) -o /dev/null > $(SOC_VERILOG)
-	$(VERILATOR) --binary --timing --vpi --build-jobs 0 \
+	# Bidirectional aggregate CHI ports form false UNOPTFLAT paths between \
+	# independent credited directions; assertions still check the link behavior.
+	$(VERILATOR) --binary --timing --vpi --assert --Wno-UNOPTFLAT --build-jobs 0 \
 	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \
 	  $(SOC_VERILOG) $(CURDIR)/TestDriver.sv \
 	  $(CURDIR)/direct_mem_htif.cc $(CURDIR)/direct_mem_htif_dpi.cc \

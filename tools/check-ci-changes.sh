@@ -96,7 +96,6 @@ check_matrix_entry examples/chi/ram.rhdl example_matrix examples-chi
 check_matrix_entry examples/chi/ram.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry examples/cores/ricket.rhdl example_matrix examples-cores
 check_matrix_entry examples/cores/ricket.rhdl circt_matrix ci-circt-cores-test
-check_matrix_entry examples/tilelink/tilelink.rhdl example_matrix examples-tilelink
 check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sim/fesvr/direct_mem_htif.cc fesvr true
 check_field tests/fesvr/fesvr-rtl-test.rhm fesvr true

@@ -96,7 +96,6 @@ integration_fixtures=(
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant
   chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home
-  tilelink-protocol tilelink-ram
   ricket-core ricket-multiply ricket-dcache
 )
 
@@ -164,7 +163,7 @@ fixture_in_group() {
     IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
     if [[ "$fixture" == "$wanted" ]]; then
       case "$group:$example" in
-        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|protocols:examples/tilelink/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
+        language:examples/rhdl/*|language:examples/lop/*|language:examples/golf/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
           return 0
           ;;
         *)
@@ -181,7 +180,7 @@ fixture_in_group() {
     std:round-robin-matcher|std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
       return 0
       ;;
-    protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*|protocols:tilelink-*)
+    protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
     cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:scoreboard|cores:ricket-*)
@@ -584,8 +583,6 @@ fixture_specs=(
   'enum-validity||examples/rhdl/bit-utilities.rhdl|enum_validity_design|enum_validity_verilog_reference'
   'sync-ram|sync_ram_tb|examples/std/sync-ram.rhdl|design|verilog_reference'
   'table|table_tb|examples/rhdl/table.rhdl|design|verilog_reference'
-  'tilelink-uncached||examples/tilelink/tilelink.rhdl|uncached_design|uncached_verilog_reference'
-  'tilelink-cached||examples/tilelink/tilelink.rhdl|cached_design|cached_verilog_reference'
   'valid-pipe|valid_pipe_tb|examples/std/valid-pipe.rhdl|design|verilog_reference'
   'vec-search|vec_search_tb|examples/rhdl/vec-search.rhdl|design|verilog_reference'
   'ridx-grid||examples/ridx/grid.rhdl|design|verilog_reference'
@@ -615,8 +612,6 @@ direct_fixture_specs=(
   'chi-monitor|chi_monitor_tb'
   'chi-transaction|chi_transaction_tb'
   'chi-transaction-sn|chi_transaction_sn_tb'
-  'tilelink-protocol|tilelink_protocol_tb'
-  'tilelink-ram|tilelink_ram_tb'
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'
   'ricket-register-file|ricket_register_file_tb'
@@ -738,5 +733,3 @@ run_expected_assertion_failure chi-transaction \
 run_expected_assertion_failure chi-ram chi_ram_invalid_tb \
   tests/backend/verilog/chi-ram-invalid_tb.sv \
   chi_ram_request_address_supported
-run_expected_assertion_failure tilelink-ram tilelink_ram_invalid_tb \
-  tests/backend/verilog/tilelink-ram-invalid_tb.sv tilelink_a_mask_supported

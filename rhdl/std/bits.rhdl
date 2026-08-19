@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines the Pow2Int host refinement and aligned hardware bit-vector operations.
+// Defines power-of-two, alignment, and byte-mask utilities for hardware transfers.
 
 import:
   rhombus/meta open
@@ -26,7 +26,7 @@ fun alignment_bits(alignment :: Pow2Int):
 fun checked_alignment_width(value :: Hardware.bits,
                             alignment :: Pow2Int,
                             who):
-  def width = value.type.bit_width()
+  def width = hardware_value_type(value).bit_width()
   def low_width = unchecked_alignment_bits(alignment)
   unless low_width <= width
   | error(~who: who, "alignment must fit the Bits width")
@@ -53,6 +53,29 @@ fun align_down(value :: Hardware.bits,
   | value
   | value & bits((1 bits.(<<) width) - alignment, width)
 
+// Produces one enable bit per byte of a power-of-two beat. Size is the
+// log2(bytes) transfer encoding used by byte-addressed bus protocols.
+// Transfers wider than the beat produce the all-zero mask.
+fun transfer_byte_mask(address :: Hardware.bits,
+                       size :: Hardware.bits,
+                       beat_bytes :: Pow2Int) :~ Bits(beat_bytes):
+  def (_width, lane_width) = checked_alignment_width(
+    address,
+    beat_bytes,
+    #'transfer_byte_mask
+  )
+  def max_size = alignment_bits(beat_bytes)
+  def base_mask = mux_lookup(
+    size,
+    ~default: bits(0, beat_bytes),
+    for List (encoded_size in 0..(max_size + 1)):
+      [encoded_size,
+       bits((1 bits.(<<) (1 bits.(<<) encoded_size)) - 1, beat_bytes)]
+  )
+  def lane_offset:
+    if lane_width == 0 | bits(0, 1) | address[0..lane_width]
+  base_mask << lane_offset
+
 export:
   Pow2Int
   power_of_two
@@ -60,3 +83,4 @@ export:
   alignment_bits
   is_aligned
   align_down
+  transfer_byte_mask

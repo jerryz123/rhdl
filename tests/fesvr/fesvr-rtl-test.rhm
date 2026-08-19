@@ -1,26 +1,19 @@
 #lang rhombus
-// Checks the typed FESVR adapter, shared memory, and reusable simulation SoC.
+// Checks the native RN-I FESVR host and its direct HN-I-to-SN-I composition.
 
 import:
   "../../rhdl/core/main.rhm" open
-  "../../rhdl/frontend/kernel.rhm" as embedded
   "../../sim/fesvr/direct-memory-htif.rhdl" as host
-  "../../sim/fesvr/shared-memory.rhdl" as memory
-  "../../sim/fesvr/stub-soc.rhdl" as soc
+  "../../sim/fesvr/chi-top.rhdl" as soc
 
-def host_design = host.design
-def host_top = host_design.modules[0]
-def memory_design = embedded.run_elaboration(
-  fun (): memory.FesvrSharedMemory(32,
-                                   4,
-                                   0x2000,
-                                   ~base_address: 0x80000000)
-)
-def memory_top = memory_design.modules[0]
 def soc_design = soc.design
-def soc_top = soc_design.modules.find(
-  fun (module_def): module_def.name == "SimpleSoCTop"
+def host_top = soc_design.modules.find(
+  fun (module_def): module_def.name == "FesvrHost"
 )
+def soc_top = soc_design.modules.find(
+  fun (module_def): module_def.name == "FesvrTop"
+)
+def module_names = soc_design.modules.map(fun (module_def): module_def.name)
 
 check:
   host_top.name ~is "FesvrHost"
@@ -30,18 +23,11 @@ check:
   host_top.outputs.map(fun (port): port.name) ~is [
     "memory_out", "start_out", "exit"
   ]
-  host_design.dpi_imports.map(fun (dpi): dpi.name) ~is ["rhdl_htif_tick"]
-
-  memory_top.inputs.map(fun (port): port.name) ~is [
-    "clock", "reset", "fesvr_in", "processor_in"
-  ]
-  memory_top.outputs.map(fun (port): port.name) ~is [
-    "fesvr_out", "processor_out"
-  ]
-  soc_top.name ~is "SimpleSoCTop"
+  soc_design.dpi_imports.map(fun (dpi): dpi.name) ~is ["rhdl_htif_tick"]
+  module_names.contains("CHIHNI") ~is #true
+  module_names.contains("CHIRam") ~is #true
+  soc_top.name ~is "FesvrTop"
   soc_top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
-  soc_top.outputs.map(fun (port): port.name) ~is ["exit"]
+  soc_top.outputs.map(fun (port): port.name) ~is ["loaded", "entry", "exit"]
 
-  verify_design(host_design) ~is #void
-  verify_design(memory_design) ~is #void
   verify_design(soc_design) ~is #void

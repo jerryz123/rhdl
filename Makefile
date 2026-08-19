@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test tilelink-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-golf examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-tilelink
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test backend-test formal-test formal-differential-test unit-test lop-test golf-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-golf examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -15,7 +15,6 @@ GOLF_BACKEND_TESTS := tests/backend/golf-equivalence-test.rhm
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 RIDX_TESTS := $(sort $(shell find ridx/tests -type f -name '*-test.rhm'))
-TILELINK_TESTS := $(sort $(wildcard tilelink/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
@@ -33,14 +32,12 @@ RISCV_EXAMPLES := $(sort $(shell find examples/riscv -type f \( -name '*.rhm' -o
 CHI_EXAMPLES := $(sort $(shell find examples/chi -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 CORE_EXAMPLES := $(sort $(shell find examples/cores -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 FORMAL_EXAMPLES := $(sort $(shell find examples/formal -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
-TILELINK_EXAMPLES := $(sort $(shell find examples/tilelink -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f \( -name '*.rhm' -o -name '*.rhdl' \) -print) $(RFPL_EXAMPLES))
 
 check-boundaries:
 	bash tools/check-boundaries.sh
 	bash rfpl/check-boundaries.sh
 	bash riscv/check-boundaries.sh
-	bash tilelink/check-boundaries.sh
 	bash chi/check-boundaries.sh
 	bash cores/check-boundaries.sh
 
@@ -109,10 +106,6 @@ ridx-test:
 ridx-circt-test:
 	bash ridx/tests/rhdl/run-grid-equivalence.sh
 
-tilelink-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_TESTS)
-	bash tilelink/tests/run-negative.sh
-
 chi-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CHI_TESTS)
 	bash chi/tests/run-negative.sh
@@ -147,7 +140,7 @@ ci-circt-std-test:
 	bash tests/backend/run-circt.sh --group std
 
 ci-circt-protocols-test:
-	bash tools/check-example-verilog.sh examples/noc examples/chi examples/ridx examples/tilelink
+	bash tools/check-example-verilog.sh examples/noc examples/chi examples/ridx
 	bash tests/backend/run-circt.sh --group protocols
 
 ci-circt-cores-test:
@@ -161,7 +154,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test tilelink-test chi-test ricket-host-test
+host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test chi-test ricket-host-test
 
 ci-host-foundation-test: host-annotation-test frontend-test lop-test
 
@@ -169,7 +162,7 @@ ci-host-backend-test: backend-test
 
 ci-host-models-test: noc-test riscv-test ridx-test
 
-ci-host-protocols-test: rfpl-unit-test tilelink-test chi-test
+ci-host-protocols-test: rfpl-unit-test chi-test
 
 ci-host-cores-test: ricket-host-test
 
@@ -231,7 +224,3 @@ examples-cores:
 
 examples-formal: check-boundaries
 	@formal_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$formal_compiled_root"' EXIT; if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''examples-formal "Rosette solver probe failed"))'; then echo 'examples-formal requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; exit 1; fi; env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_EXAMPLES)
-
-examples-tilelink:
-	bash tools/check-example-verilog.sh examples/tilelink
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(TILELINK_EXAMPLES)

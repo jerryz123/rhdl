@@ -15,7 +15,7 @@ Tests mirror the implementation boundaries:
 | [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
 Domain-library tests live with their owning packages, including
-[`../tilelink/tests/`](../tilelink/tests/) and [`../chi/tests/`](../chi/tests/).
+[`../chi/tests/`](../chi/tests/).
 
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
 Intentional language failures live under `frontend/invalid/` and are exercised
@@ -41,12 +41,10 @@ make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only
 make examples-golf          # compact Golf examples only
 make examples-rfpl          # logical and physical RFPL examples only
-make examples-tilelink      # TileLink domain examples only
 make lop-test               # equivalence across authoring layers
 make golf-test              # compact Golf syntax, diagnostics, and profile equivalence
 make riscv-test             # pure RISC-V model and instruction catalogs
 make ridx-test              # finite structural index-space model
-make tilelink-test          # TileLink boundaries, monitored links, RAM, and invalid uses
 make chi-test               # CHI boundaries, flits, links, and invalid connections
 make ricket-host-test       # Ricket core and reusable ALU host checks
 make ricket-test            # host checks plus external ALU simulation
@@ -72,7 +70,8 @@ make test                   # complete host and CIRCT suite
 
 The standalone FESVR transport has its own setup, native test, and DPI compile
 checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI also elaborates and
-simulates its generated stub SoC in an independent external-toolchain job.
+simulates its generated native CHI host, HN-I, and backing RAM in an independent
+external-toolchain job.
 
 Pull-request CI classifies changed paths into parallel host, example, and CIRCT
 matrices. Unknown executable paths fail closed by selecting every job; only
