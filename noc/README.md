@@ -640,9 +640,12 @@ followed by every local ejection terminal. Multiple terminals therefore remain
 independently addressable even when they share one router.
 
 Each `RouterPlanRow` points back to its validated `RouteTableRow` and records
-the global route key, local origin key, and unified target mask. An ejection
-row selects one exact local terminal in the same mask used for outgoing VCs;
-there is no singular ejection sideband. A linkless one-router topology can
+the global route key, local origin key, unified target mask, and certified
+fallback subset. Under whole-graph acyclicity every legal target is fallback.
+Under escape validation the subset contains certified escape VCs and exact
+local ejection targets; it is projected from the same materialized row rather
+than re-evaluating routing policy. An ejection row selects one exact local
+terminal in both masks; there is no singular ejection sideband. A linkless one-router topology can
 therefore elaborate directly as a generalized crossbar with arbitrary ingress
 and ejection counts, while its VC dependency graph remains empty.
 
@@ -654,8 +657,8 @@ VCs, and ejection terminals. Those four categories keep stable regions in the
 uniform input and target arrays, so a router with fewer ports merely leaves
 some family slots unused instead of changing another category's meaning.
 
-Every family route row includes the site key and remaps its local origin and
-target mask into the uniform shape. External terminal ports, per-VC
+Every family route row includes the site key and remaps its local origin,
+target mask, and fallback mask into the uniform shape. External terminal ports, per-VC
 connections, and physical-link connection groups are projected through the
 same mapping. The family is derived from one `NetworkPlan`, so all selected
 rows still come from the same globally validated routing relation. No mesh

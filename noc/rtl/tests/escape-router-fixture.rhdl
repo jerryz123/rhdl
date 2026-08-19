@@ -1,0 +1,53 @@
+#lang rhdl
+// Elaborates an escape-certified router with adaptive and fallback outputs.
+
+import:
+  "../../model/main.rhm" open
+  "../../analysis/main.rhm" open
+  "../../plan/main.rhm" open
+  "../main.rhdl" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def adaptive_loop = PhysicalLink(LinkId(0), n0, n0, 1)
+def escape_link = PhysicalLink(LinkId(1), n0, n1, 1)
+def topology = Topology([n0, n1], [adaptive_loop, escape_link])
+def route = RouteClass(RouteClassId(0), n0, n1)
+
+fun on_link(vc, link): link_id_equal(vc.link_id, link.id)
+
+fun allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      on_link(candidate, adaptive_loop) || on_link(candidate, escape_link)
+  | origin is_a HeldVC && on_link(origin.vc, adaptive_loop):
+      on_link(candidate, adaptive_loop) || on_link(candidate, escape_link)
+  | ~else: #false
+
+def routing = compile_routing(
+  RoutingProblem(topology, [route], RoutingRelation(allows)),
+  ~escape: EscapeValidationRequest(topology, [VCId(escape_link.id, 0)])
+)
+unless routing is_a ValidatedRouting
+| error(~who: #'EscapeRouterFixture,
+        "adaptive self-loop must pass escape validation")
+def plan = RouterPlan(routing, n0)
+def config = compile_simple_router(plan)
+
+sync_circuit EscapeRouterFixture():
+  def Beat = RoutedBeat(Bits(8), config.route_decoder.route_width)
+  interface ingress[2](Decoupled(Beat), ~role: consumer)
+  interface egress[2](Decoupled(Beat), ~role: producer)
+
+  inst router(SimpleRouter(Bits(8), config))
+  router.ingress <=> ingress
+  egress <=> router.egress
+  router.target_available <== vec(for List (index in 0..config.target_count): egress[index].ready)
+
+def design = elaborate(EscapeRouterFixture())
+
+export:
+  plan
+  config
+  design

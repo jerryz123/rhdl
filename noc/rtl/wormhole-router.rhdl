@@ -4,8 +4,8 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/queue.rhdl") open
-  lib("rhdl/std/flow/matcher.rhdl") open
   lib("rhdl/std/flow/crossbar.rhdl") open
+  "allocator.rhdl" open
   "route-computer.rhdl" open
   "../plan/router-plan.rhm" open
 
@@ -33,14 +33,9 @@ class WormholeRouterConfig(router_plan :: RouterPlan,
   internal _WormholeRouterConfig
   constructor ~none
 
-// The first implementation supports only the whole-graph acyclic proof regime.
 fun compile_wormhole_router(
       router_plan :: RouterPlan,
       ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: WormholeRouterConfig:
-  if router_plan.validated_routing.assumptions.eventual_escape_grant
-  | error(~who: #'compile_wormhole_router,
-          "wormhole router currently requires whole-graph acyclic routing")
-  | #void
   def route_decoder = compile_route_decoder(router_plan)
   def input_count = router_plan.origins.length()
   def target_count = router_plan.targets.length()
@@ -60,6 +55,7 @@ sync_circuit WormholeRouter(T :: DataType,
                             config :: WormholeRouterConfig):
   def Beat = WormholeBeat(T, config.route_decoder.route_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  input target_available: Vec(config.target_count, Bool)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
 
   def input_buffers = ingress |> parallel_handles(for Array (_ in 0..config.input_count): Beat |> queue(config.input_buffer_depth))
@@ -91,9 +87,22 @@ sync_circuit WormholeRouter(T :: DataType,
       )
   )
 
-  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  def fallback_requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      vec(
+        for List (target_index in 0..config.target_count):
+          def fallback = route_decisions[input_index].fallback_mask[target_index].into(Bool)
+          def new_fallback = input_buffer.valid & input_buffer.bits.head & route_decisions[input_index].valid & fallback & !target_busy[target_index]
+          mux(packet_active[input_index], reservations[input_index][target_index], new_fallback)
+      )
+  )
+  inst allocator(RouterAllocator(config.input_count, config.target_count))
   allocator.requests <== requests
+  allocator.fallback_requests <== fallback_requests
+  allocator.target_available <== target_available
   (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
+  allocator.accepts <== vec(for List (target_index in 0..config.target_count): egress[target_index].valid & egress[target_index].ready)
 
   def next_active = vec(
     for List (input_index in 0..config.input_count):

@@ -43,16 +43,19 @@ circuit RouteComputerFixture():
   input source_route_key: Bits(source_decoder.route_width)
   input source_origin_key: Bits(source_decoder.origin_width)
   output source_target_mask: Bits(source_decoder.mask_width)
+  output source_fallback_mask: Bits(source_decoder.mask_width)
   output source_valid: Bool
 
   input middle_route_key: Bits(middle_decoder.route_width)
   input middle_origin_key: Bits(middle_decoder.origin_width)
   output middle_target_mask: Bits(middle_decoder.mask_width)
+  output middle_fallback_mask: Bits(middle_decoder.mask_width)
   output middle_valid: Bool
 
   input destination_route_key: Bits(destination_decoder.route_width)
   input destination_origin_key: Bits(destination_decoder.origin_width)
   output destination_target_mask: Bits(destination_decoder.mask_width)
+  output destination_fallback_mask: Bits(destination_decoder.mask_width)
   output destination_valid: Bool
 
   inst source(RouteComputer(source_decoder))
@@ -62,16 +65,19 @@ circuit RouteComputerFixture():
   source.route_key <== source_route_key
   source.origin_key <== source_origin_key
   source_target_mask <== source.target_mask
+  source_fallback_mask <== source.fallback_mask
   source_valid <== source.valid
 
   middle.route_key <== middle_route_key
   middle.origin_key <== middle_origin_key
   middle_target_mask <== middle.target_mask
+  middle_fallback_mask <== middle.fallback_mask
   middle_valid <== middle.valid
 
   destination.route_key <== destination_route_key
   destination.origin_key <== destination_origin_key
   destination_target_mask <== destination.target_mask
+  destination_fallback_mask <== destination.fallback_mask
   destination_valid <== destination.valid
 
 def design = elaborate(RouteComputerFixture())
@@ -81,8 +87,11 @@ def verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhdl_types
 `define _TYPESCOPE_rhdl_types
   typedef struct packed {logic route_key; logic origin_key; } RouteLookupKey;
-  typedef struct packed {logic [1:0] target_mask; logic valid; } RouteDecision;
-  typedef struct packed {logic target_mask; logic valid; } RouteDecision_1;
+  typedef
+    struct packed {logic [1:0] target_mask; logic [1:0] fallback_mask; logic valid; }
+    RouteDecision;
+  typedef struct packed {logic target_mask; logic fallback_mask; logic valid; }
+    RouteDecision_1;
 `endif // _TYPESCOPE_rhdl_types
 module RouteComputerFixture(
   input        source_route_key,
@@ -92,30 +101,36 @@ module RouteComputerFixture(
                destination_route_key,
                destination_origin_key,
   output [1:0] source_target_mask,
+               source_fallback_mask,
   output       source_valid,
   output [1:0] middle_target_mask,
+               middle_fallback_mask,
   output       middle_valid,
                destination_target_mask,
+               destination_fallback_mask,
                destination_valid
 );
 
   RouteComputer source (
-    .route_key   (source_route_key),
-    .origin_key  (source_origin_key),
-    .target_mask (source_target_mask),
-    .valid       (source_valid)
+    .route_key     (source_route_key),
+    .origin_key    (source_origin_key),
+    .target_mask   (source_target_mask),
+    .fallback_mask (source_fallback_mask),
+    .valid         (source_valid)
   );
   RouteComputer_1 middle (
-    .route_key   (middle_route_key),
-    .origin_key  (middle_origin_key),
-    .target_mask (middle_target_mask),
-    .valid       (middle_valid)
+    .route_key     (middle_route_key),
+    .origin_key    (middle_origin_key),
+    .target_mask   (middle_target_mask),
+    .fallback_mask (middle_fallback_mask),
+    .valid         (middle_valid)
   );
   RouteComputer_2 destination (
-    .route_key   (destination_route_key),
-    .origin_key  (destination_origin_key),
-    .target_mask (destination_target_mask),
-    .valid       (destination_valid)
+    .route_key     (destination_route_key),
+    .origin_key    (destination_origin_key),
+    .target_mask   (destination_target_mask),
+    .fallback_mask (destination_fallback_mask),
+    .valid         (destination_valid)
   );
 endmodule
 
@@ -123,13 +138,15 @@ module RouteComputer(
   input        route_key,
                origin_key,
   output [1:0] target_mask,
+               fallback_mask,
   output       valid
 );
 
   wire RouteLookupKey _GEN = '{route_key: route_key, origin_key: origin_key};
   wire [1:0]          _GEN_0 = /*cast(bit[1:0])*/_GEN;
-  wire RouteDecision  _GEN_1 = /*cast(bit)*/{3{~(_GEN_0[0]) & ~(_GEN_0[1])}};
+  wire RouteDecision  _GEN_1 = /*cast(bit)*/{5{~(_GEN_0[0]) & ~(_GEN_0[1])}};
   assign target_mask = _GEN_1.target_mask;
+  assign fallback_mask = _GEN_1.fallback_mask;
   assign valid = _GEN_1.valid;
 endmodule
 
@@ -137,6 +154,7 @@ module RouteComputer_1(
   input        route_key,
                origin_key,
   output [1:0] target_mask,
+               fallback_mask,
   output       valid
 );
 
@@ -144,8 +162,10 @@ module RouteComputer_1(
   wire [1:0]          _GEN_0 = /*cast(bit[1:0])*/_GEN;
   wire                _GEN_1 = _GEN_0[0] & ~(_GEN_0[1]);
   wire                _GEN_2 = ~(_GEN_0[0]) & ~(_GEN_0[1]);
-  wire RouteDecision  _GEN_3 = /*cast(bit)*/{_GEN_1, _GEN_2, _GEN_1 | _GEN_2};
+  wire RouteDecision  _GEN_3 =
+    /*cast(bit)*/{_GEN_1, _GEN_2, _GEN_1, _GEN_2, _GEN_1 | _GEN_2};
   assign target_mask = _GEN_3.target_mask;
+  assign fallback_mask = _GEN_3.fallback_mask;
   assign valid = _GEN_3.valid;
 endmodule
 
@@ -153,13 +173,15 @@ module RouteComputer_2(
   input  route_key,
          origin_key,
   output target_mask,
+         fallback_mask,
          valid
 );
 
   wire RouteLookupKey  _GEN = '{route_key: route_key, origin_key: origin_key};
   wire [1:0]           _GEN_0 = /*cast(bit[1:0])*/_GEN;
-  wire RouteDecision_1 _GEN_1 = /*cast(bit)*/{2{~(_GEN_0[1])}};
+  wire RouteDecision_1 _GEN_1 = /*cast(bit)*/{3{~(_GEN_0[1])}};
   assign target_mask = _GEN_1.target_mask;
+  assign fallback_mask = _GEN_1.fallback_mask;
   assign valid = _GEN_1.valid;
 endmodule
 }>>|

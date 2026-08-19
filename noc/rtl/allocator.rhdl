@@ -1,0 +1,35 @@
+#lang rhdl
+// Selects fair router grants while honoring escape-certified fallback targets.
+
+import:
+  lib("rhdl/std/flow/matcher.rhdl") open
+
+export:
+  RouterAllocator
+
+// Acyclic plans mark every legal request as a fallback. Escape-certified
+// plans mark only escape VCs and ejection targets. An adaptive request is
+// eligible only when its target can accept immediately; otherwise the input
+// continuously requests its fallback set. Actual output transfers advance the
+// generic matcher's priorities, so backpressure never consumes fairness.
+sync_circuit RouterAllocator(input_count :: PosInt,
+                             target_count :: PosInt):
+  input requests: Vec(input_count, Vec(target_count, Bool))
+  input fallback_requests: Vec(input_count, Vec(target_count, Bool))
+  input target_available: Vec(target_count, Bool)
+  input accepts: Vec(target_count, Bool)
+  output grants: Vec(input_count, Vec(target_count, Bool))
+
+  def eligible_requests = vec(
+    for List (input_index in 0..input_count):
+      def adaptive_ready = vec(
+        for List (target_index in 0..target_count):
+          requests[input_index][target_index] & !fallback_requests[input_index][target_index] & target_available[target_index]
+      )
+      mux(or_reduce(adaptive_ready), adaptive_ready, fallback_requests[input_index])
+  )
+
+  inst matcher(RoundRobinMatcher(input_count, target_count))
+  matcher.requests <== eligible_requests
+  matcher.accepts <== accepts
+  grants <== matcher.grants

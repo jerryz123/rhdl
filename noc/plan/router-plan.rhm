@@ -78,7 +78,11 @@ fun require_target_bit(targets, target):
   | error(~who: #'RouterPlan, "target does not belong to this router plan")
   found
 
-class RouterPlanRow(route_row, route_key, origin_key, target_mask):
+class RouterPlanRow(route_row,
+                    route_key,
+                    origin_key,
+                    target_mask,
+                    fallback_mask):
   opaque
   internal _RouterPlanRow
   constructor ~none
@@ -86,19 +90,39 @@ class RouterPlanRow(route_row, route_key, origin_key, target_mask):
   method describe():
     String.append(route_row.describe(), "; route-key=", to_string(route_key),
                   "; origin-key=", to_string(origin_key),
-                  "; target-mask=", to_string(target_mask))
+                  "; target-mask=", to_string(target_mask),
+                  "; fallback-mask=", to_string(fallback_mask))
 
-fun make_plan_row(route_classes, origins, targets, route_row):
+fun fallback_vc(validated_routing, vc):
+  if validated_routing.certificate is_a EscapeCertificate
+  | validated_routing.certificate.request.contains(vc)
+  | #true
+
+fun make_plan_row(validated_routing,
+                  route_classes,
+                  origins,
+                  targets,
+                  route_row):
   def route_key = require_route_key(route_classes, route_row.route_class)
   def origin_key = require_origin_key(origins, route_row.origin)
   def mutable target_mask = 0
+  def mutable fallback_mask = 0
   for (vc in route_row.allowed_vcs):
     def bit = require_target_bit(targets, vc)
     target_mask := target_mask bits.or (1 bits.(<<) bit)
+    when fallback_vc(validated_routing, vc)
+    | fallback_mask := fallback_mask bits.or (1 bits.(<<) bit)
   when route_row.ejection_terminal
   | def bit = require_target_bit(targets, route_row.ejection_terminal)
     target_mask := target_mask bits.or (1 bits.(<<) bit)
-  _RouterPlanRow(route_row, route_key, origin_key, target_mask)
+    // Ejection releases the held network resource and is always a safe
+    // fallback even though terminals are not vertices in the escape graph.
+    fallback_mask := fallback_mask bits.or (1 bits.(<<) bit)
+  _RouterPlanRow(route_row,
+                 route_key,
+                 origin_key,
+                 target_mask,
+                 fallback_mask)
 
 class RouterPlan(validated_routing,
                  node,
@@ -126,7 +150,11 @@ class RouterPlan(validated_routing,
     def targets = output_vcs ++ ejection_terminals
     def rows = validated_routing.route_table.rows_at(node).map(
       fun (route_row):
-        make_plan_row(route_classes, origins, targets, route_row)
+        make_plan_row(validated_routing,
+                      route_classes,
+                      origins,
+                      targets,
+                      route_row)
     )
     super(validated_routing,
           node,

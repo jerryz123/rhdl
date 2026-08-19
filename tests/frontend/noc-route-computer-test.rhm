@@ -18,6 +18,7 @@ fun pattern_field(cube, field_name):
 
 fun decision_result(cube):
   [pattern_field(cube, "target_mask"),
+   pattern_field(cube, "fallback_mask"),
    pattern_field(cube, "valid") != 0]
 
 fun decoded_result(route_decoder, encoded_key):
@@ -51,8 +52,8 @@ fun expected_result(route_decoder, encoded_key):
       candidate.route_key == route_key && candidate.origin_key == origin_key
   )
   if entry
-  | [entry.target_mask, #true]
-  | [0, #false]
+  | [entry.target_mask, entry.fallback_mask, #true]
+  | [0, 0, #false]
 
 fun key_space_size(route_decoder):
   1 bits.(<<) (route_decoder.route_width + route_decoder.origin_width)
@@ -117,13 +118,14 @@ check:
   fixture.source_plan.rows.map(fun (entry): entry.route_key) ~is [0]
   fixture.source_plan.rows.map(fun (entry): entry.origin_key) ~is [0]
   fixture.source_plan.rows.map(fun (entry): entry.target_mask) ~is [0b11]
+  fixture.source_plan.rows.map(fun (entry): entry.fallback_mask) ~is [0b11]
   masks_match_materialized(source_decoder) ~is #true
   decoded_results(source_decoder) ~is expected_results(source_decoder)
   decoded_results(source_decoder) ~is [
-    [0b11, #true],
-    [0, #false],
-    [0, #false],
-    [0, #false]
+    [0b11, 0b11, #true],
+    [0, 0, #false],
+    [0, 0, #false],
+    [0, 0, #false]
   ]
 
 check:
@@ -139,13 +141,14 @@ check:
   fixture.middle_plan.rows.map(fun (entry): entry.route_key) ~is [0, 0]
   fixture.middle_plan.rows.map(fun (entry): entry.origin_key) ~is [0, 1]
   fixture.middle_plan.rows.map(fun (entry): entry.target_mask) ~is [0b01, 0b10]
+  fixture.middle_plan.rows.map(fun (entry): entry.fallback_mask) ~is [0b01, 0b10]
   masks_match_materialized(middle_decoder) ~is #true
   decoded_results(middle_decoder) ~is expected_results(middle_decoder)
   decoded_results(middle_decoder) ~is [
-    [0b01, #true],
-    [0b10, #true],
-    [0, #false],
-    [0, #false]
+    [0b01, 0b01, #true],
+    [0b10, 0b10, #true],
+    [0, 0, #false],
+    [0, 0, #false]
   ]
 
 check:
@@ -156,13 +159,14 @@ check:
   fixture.destination_plan.rows.map(fun (entry): entry.route_key) ~is [0, 0]
   fixture.destination_plan.rows.map(fun (entry): entry.origin_key) ~is [0, 1]
   fixture.destination_plan.rows.map(fun (entry): entry.target_mask) ~is [1, 1]
+  fixture.destination_plan.rows.map(fun (entry): entry.fallback_mask) ~is [1, 1]
   masks_match_materialized(destination_decoder) ~is #true
   decoded_results(destination_decoder) ~is expected_results(destination_decoder)
   decoded_results(destination_decoder) ~is [
-    [1, #true],
-    [1, #true],
-    [0, #false],
-    [0, #false]
+    [1, 1, #true],
+    [1, 1, #true],
+    [0, 0, #false],
+    [0, 0, #false]
   ]
 
 check:
@@ -170,6 +174,7 @@ check:
   type_equal(top.find_input("source_route_key").type, Bits(1)) ~is #true
   type_equal(top.find_input("middle_origin_key").type, Bits(1)) ~is #true
   type_equal(top.find_output("source_target_mask").type, Bits(2)) ~is #true
+  type_equal(top.find_output("source_fallback_mask").type, Bits(2)) ~is #true
   type_equal(top.find_output("middle_target_mask").type, Bits(2)) ~is #true
   type_equal(top.find_output("destination_target_mask").type, Bits(1)) ~is #true
   bool.bool_type(top.find_output("source_valid").type) ~is #true
@@ -186,7 +191,7 @@ check:
       module_def.operations.filter(
         ~keep: fun (operation): operation.opcode == "rtl.record_get"
       ).length()
-  ) ~is [2, 2, 2]
+  ) ~is [3, 3, 3]
   verify_design(fixture.design) ~is #void
 
 def isolated_node = NodeId(0)
@@ -210,3 +215,4 @@ check:
   fixture.source_plan.route_key("not a route") ~throws "RouteClass"
   local_decoder.mask_width ~is 1
   local_decoder.router_plan.rows.map(fun (entry): entry.target_mask) ~is [1]
+  local_decoder.router_plan.rows.map(fun (entry): entry.fallback_mask) ~is [1]

@@ -67,6 +67,7 @@ sync_circuit SourceSubsystem(config :: SimpleRouterConfig,
   inst router(SimpleRouter(Bits(8), config))
   injection |> router.ingress[injection_index]
   router.egress[outgoing_index] |> outgoing
+  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
 
 sync_circuit TransitSubsystem(config :: SimpleRouterConfig,
                               incoming_index :: Nat,
@@ -81,6 +82,7 @@ sync_circuit TransitSubsystem(config :: SimpleRouterConfig,
   incoming |> router.ingress[incoming_index]
   router.egress[outgoing_index] |> outgoing
   router.egress[ejection_index] |> ejection
+  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
 
 sync_circuit DestinationSubsystem(config :: SimpleRouterConfig,
                                   incoming_index :: Nat,
@@ -92,6 +94,7 @@ sync_circuit DestinationSubsystem(config :: SimpleRouterConfig,
   inst router(SimpleRouter(Bits(8), config))
   incoming |> router.ingress[incoming_index]
   router.egress[ejection_index] |> ejection
+  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
 
 // The system, not noc/rtl, owns placement in the hierarchy and physical-link
 // connections between independently elaborated router-containing subsystems.
@@ -131,8 +134,11 @@ def verilog_reference = @str|<<{
 `define _TYPESCOPE_rhdl_types
   typedef struct packed {logic route_key; logic [7:0] payload; } RoutedBeat;
   typedef struct packed {logic route_key; logic origin_key; } RouteLookupKey;
-  typedef struct packed {logic target_mask; logic valid; } RouteDecision;
-  typedef struct packed {logic [1:0] target_mask; logic valid; } RouteDecision_1;
+  typedef struct packed {logic target_mask; logic fallback_mask; logic valid; }
+    RouteDecision;
+  typedef
+    struct packed {logic [1:0] target_mask; logic [1:0] fallback_mask; logic valid; }
+    RouteDecision_1;
 `endif // _TYPESCOPE_rhdl_types
 module HierarchicalNoCFixture(
   input                                                 clock,
@@ -187,12 +193,13 @@ module SourceSubsystem(
 );
 
   SimpleRouter router (
-    .clock         (clock),
-    .reset         (reset),
-    .ingress_0_in  (injection_in),
-    .egress_0_in   (outgoing_in),
-    .ingress_0_out (injection_out),
-    .egress_0_out  (outgoing_out)
+    .clock            (clock),
+    .reset            (reset),
+    .ingress_0_in     (injection_in),
+    .target_available ({1{outgoing_in.ready}}),
+    .egress_0_in      (outgoing_in),
+    .ingress_0_out    (injection_out),
+    .egress_0_out     (outgoing_out)
   );
 endmodule
 
@@ -200,18 +207,20 @@ module SimpleRouter(
   input                                                 clock,
                                                         reset,
   input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+  input  [0:0]                                          target_available,
   input  struct packed {logic ready; }                  egress_0_in,
   output struct packed {logic ready; }                  ingress_0_out,
   output struct packed {logic valid; RoutedBeat bits; } egress_0_out
 );
 
   wire struct packed {logic ready; } _crossbar_stage_ingress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_0_out;
   wire [0:0][0:0]                    _allocator_grants;
   wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
   wire RouteLookupKey                _GEN =
     '{route_key: ingress_0_in.bits.route_key, origin_key: (1'h0)};
   wire [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
-  wire RouteDecision                 _GEN_1 = /*cast(bit)*/{2{~(_GEN_0[0])}};
+  wire RouteDecision                 _GEN_1 = /*cast(bit)*/{3{~(_GEN_0[0])}};
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
@@ -220,7 +229,7 @@ module SimpleRouter(
   wire RouteLookupKey                _GEN_2 =
     '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (1'h0)};
   wire [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
-  wire RouteDecision                 _GEN_4 = /*cast(bit)*/{2{~(_GEN_3[0])}};
+  wire RouteDecision                 _GEN_4 = /*cast(bit)*/{3{~(_GEN_3[0])}};
   Queue queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -230,18 +239,25 @@ module SimpleRouter(
     .egress_out  (_queue_stage_egress_out),
     .count       (/* unused */)
   );
-  GreedyMatcher allocator (
+  RouterAllocator allocator (
+    .clock             (clock),
+    .reset             (reset),
     .requests
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.target_mask}}}}),
-    .grants   (_allocator_grants)
+    .fallback_requests
+      ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask}}}}),
+    .target_available  (target_available),
+    .accepts           ({1{_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+    .grants            (_allocator_grants)
   );
   GrantCrossbar crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
     .grants        (_allocator_grants),
     .egress_0_in   (egress_0_in),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
-    .egress_0_out  (egress_0_out)
+    .egress_0_out  (_crossbar_stage_egress_0_out)
   );
+  assign egress_0_out = _crossbar_stage_egress_0_out;
 endmodule
 
 module Queue(
@@ -270,12 +286,51 @@ module Queue(
   assign count = occupied;
 endmodule
 
-module GreedyMatcher(
+module RouterAllocator(
+  input             clock,
+                    reset,
   input  [0:0][0:0] requests,
+                    fallback_requests,
+  input  [0:0]      target_available,
+                    accepts,
   output [0:0][0:0] grants
 );
 
-  assign grants = {1{{1{requests[1'h0][1'h0]}}}};
+  wire [0:0] _GEN =
+    {1{requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  RoundRobinMatcher matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests ({1{_GEN_0 ? _GEN : fallback_requests[1'h0]}}),
+    .accepts  (accepts),
+    .grants   (grants)
+  );
+endmodule
+
+module RoundRobinMatcher(
+  input             clock,
+                    reset,
+  input  [0:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [0:0][0:0] grants
+);
+
+  reg  [0:0] next_priorities;
+  `ifndef SYNTHESIS
+    round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
+  `endif // not def SYNTHESIS
+  wire [0:0] _GEN = {1{requests[1'h0][1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      next_priorities <= '{1'h0};
+    else
+      next_priorities[1'h0] <= _GEN_1;
+  end // always @(posedge)
+  assign grants = {1{_GEN}};
 endmodule
 
 module GrantCrossbar(
@@ -344,14 +399,15 @@ module TransitSubsystem(
 );
 
   SimpleRouter_1 router (
-    .clock         (clock),
-    .reset         (reset),
-    .ingress_0_in  (incoming_in),
-    .egress_0_in   (outgoing_in),
-    .egress_1_in   (ejection_in),
-    .ingress_0_out (incoming_out),
-    .egress_0_out  (outgoing_out),
-    .egress_1_out  (ejection_out)
+    .clock            (clock),
+    .reset            (reset),
+    .ingress_0_in     (incoming_in),
+    .target_available ({{ejection_in.ready}, {outgoing_in.ready}}),
+    .egress_0_in      (outgoing_in),
+    .egress_1_in      (ejection_in),
+    .ingress_0_out    (incoming_out),
+    .egress_0_out     (outgoing_out),
+    .egress_1_out     (ejection_out)
   );
 endmodule
 
@@ -359,6 +415,7 @@ module SimpleRouter_1(
   input                                                 clock,
                                                         reset,
   input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+  input  [1:0]                                          target_available,
   input  struct packed {logic ready; }                  egress_0_in,
                                                         egress_1_in,
   output struct packed {logic ready; }                  ingress_0_out,
@@ -367,6 +424,8 @@ module SimpleRouter_1(
 );
 
   wire struct packed {logic ready; } _crossbar_stage_ingress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_1_out;
   wire [0:0][1:0]                    _allocator_grants;
   wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
   wire RouteLookupKey                _GEN =
@@ -375,7 +434,7 @@ module SimpleRouter_1(
   wire                               _GEN_1 = ~(_GEN_0[0]) & ~(_GEN_0[1]);
   wire                               _GEN_2 = ~(_GEN_0[0]) & _GEN_0[1];
   wire RouteDecision_1               _GEN_3 =
-    /*cast(bit)*/{_GEN_1, _GEN_2, _GEN_1 | _GEN_2};
+    /*cast(bit)*/{_GEN_1, _GEN_2, _GEN_1, _GEN_2, _GEN_1 | _GEN_2};
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
@@ -387,7 +446,7 @@ module SimpleRouter_1(
   wire                               _GEN_6 = ~(_GEN_5[0]) & ~(_GEN_5[1]);
   wire                               _GEN_7 = ~(_GEN_5[0]) & _GEN_5[1];
   wire RouteDecision_1               _GEN_8 =
-    /*cast(bit)*/{_GEN_6, _GEN_7, _GEN_6 | _GEN_7};
+    /*cast(bit)*/{_GEN_6, _GEN_7, _GEN_6, _GEN_7, _GEN_6 | _GEN_7};
   Queue_1 queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -397,11 +456,20 @@ module SimpleRouter_1(
     .egress_out  (_queue_stage_egress_out),
     .count       (/* unused */)
   );
-  GreedyMatcher_1 allocator (
+  RouterAllocator_1 allocator (
+    .clock             (clock),
+    .reset             (reset),
     .requests
       ({1{{{_queue_stage_egress_out.valid & _GEN_8.valid & _GEN_8.target_mask[1]},
            {_queue_stage_egress_out.valid & _GEN_8.valid & _GEN_8.target_mask[0]}}}}),
-    .grants   (_allocator_grants)
+    .fallback_requests
+      ({1{{{_queue_stage_egress_out.valid & _GEN_8.valid & _GEN_8.fallback_mask[1]},
+           {_queue_stage_egress_out.valid & _GEN_8.valid & _GEN_8.fallback_mask[0]}}}}),
+    .target_available  (target_available),
+    .accepts
+      ({{_crossbar_stage_egress_1_out.valid & egress_1_in.ready},
+        {_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+    .grants            (_allocator_grants)
   );
   GrantCrossbar_1 crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
@@ -409,9 +477,11 @@ module SimpleRouter_1(
     .egress_0_in   (egress_0_in),
     .egress_1_in   (egress_1_in),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
-    .egress_0_out  (egress_0_out),
-    .egress_1_out  (egress_1_out)
+    .egress_0_out  (_crossbar_stage_egress_0_out),
+    .egress_1_out  (_crossbar_stage_egress_1_out)
   );
+  assign egress_0_out = _crossbar_stage_egress_0_out;
+  assign egress_1_out = _crossbar_stage_egress_1_out;
 endmodule
 
 module Queue_1(
@@ -440,13 +510,59 @@ module Queue_1(
   assign count = occupied;
 endmodule
 
-module GreedyMatcher_1(
+module RouterAllocator_1(
+  input             clock,
+                    reset,
   input  [0:0][1:0] requests,
+                    fallback_requests,
+  input  [1:0]      target_available,
+                    accepts,
   output [0:0][1:0] grants
 );
 
-  assign grants =
-    {1{{{requests[1'h0][1'h1] & ~requests[1'h0][1'h0]}, {requests[1'h0][1'h0]}}}};
+  wire [1:0] _GEN =
+    {{requests[1'h0][1'h1] & ~fallback_requests[1'h0][1'h1] & target_available[1'h1]},
+     {requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
+  RoundRobinMatcher_1 matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests ({1{(|_GEN) ? _GEN : fallback_requests[1'h0]}}),
+    .accepts  (accepts),
+    .grants   (grants)
+  );
+endmodule
+
+module RoundRobinMatcher_1(
+  input             clock,
+                    reset,
+  input  [0:0][1:0] requests,
+  input  [1:0]      accepts,
+  output [0:0][1:0] grants
+);
+
+  reg  [1:0] next_priorities;
+  `ifndef SYNTHESIS
+    round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
+  `endif // not def SYNTHESIS
+  `ifndef SYNTHESIS
+    round_robin_matcher_priority_in_range_1:
+      assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h1]);
+  `endif // not def SYNTHESIS
+  wire       _GEN = requests[1'h0][1'h1] & ~requests[1'h0][1'h0];
+  wire       _GEN_0 = /*cast(bit)*/{1{requests[1'h0][1'h0]}};
+  wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
+  wire       _GEN_2 = /*cast(bit)*/{1{_GEN}};
+  wire       _GEN_3 = ~(_GEN_2 & accepts[1'h1]) & next_priorities[1'h1];
+  always @(posedge clock) begin
+    if (reset)
+      next_priorities <= '{1'h0, 1'h0};
+    else begin
+      next_priorities[1'h1] <= _GEN_3;
+      next_priorities[1'h0] <= _GEN_1;
+    end
+  end // always @(posedge)
+  assign grants = {1{{{_GEN}, {requests[1'h0][1'h0]}}}};
 endmodule
 
 module GrantCrossbar_1(
@@ -545,12 +661,13 @@ module DestinationSubsystem(
 );
 
   SimpleRouter_2 router (
-    .clock         (clock),
-    .reset         (reset),
-    .ingress_0_in  (incoming_in),
-    .egress_0_in   (ejection_in),
-    .ingress_0_out (incoming_out),
-    .egress_0_out  (ejection_out)
+    .clock            (clock),
+    .reset            (reset),
+    .ingress_0_in     (incoming_in),
+    .target_available ({1{ejection_in.ready}}),
+    .egress_0_in      (ejection_in),
+    .ingress_0_out    (incoming_out),
+    .egress_0_out     (ejection_out)
   );
 endmodule
 
@@ -558,18 +675,20 @@ module SimpleRouter_2(
   input                                                 clock,
                                                         reset,
   input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
+  input  [0:0]                                          target_available,
   input  struct packed {logic ready; }                  egress_0_in,
   output struct packed {logic ready; }                  ingress_0_out,
   output struct packed {logic valid; RoutedBeat bits; } egress_0_out
 );
 
   wire struct packed {logic ready; } _crossbar_stage_ingress_0_out;
+  wire struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_0_out;
   wire [0:0][0:0]                    _allocator_grants;
   wire struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
   wire RouteLookupKey                _GEN =
     '{route_key: ingress_0_in.bits.route_key, origin_key: (1'h0)};
   wire [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
-  wire RouteDecision                 _GEN_1 = /*cast(bit)*/{2{~(_GEN_0[0]) & _GEN_0[1]}};
+  wire RouteDecision                 _GEN_1 = /*cast(bit)*/{3{~(_GEN_0[0]) & _GEN_0[1]}};
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
@@ -578,7 +697,7 @@ module SimpleRouter_2(
   wire RouteLookupKey                _GEN_2 =
     '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (1'h0)};
   wire [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
-  wire RouteDecision                 _GEN_4 = /*cast(bit)*/{2{~(_GEN_3[0]) & _GEN_3[1]}};
+  wire RouteDecision                 _GEN_4 = /*cast(bit)*/{3{~(_GEN_3[0]) & _GEN_3[1]}};
   Queue_2 queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -588,18 +707,25 @@ module SimpleRouter_2(
     .egress_out  (_queue_stage_egress_out),
     .count       (/* unused */)
   );
-  GreedyMatcher_2 allocator (
+  RouterAllocator_2 allocator (
+    .clock             (clock),
+    .reset             (reset),
     .requests
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.target_mask}}}}),
-    .grants   (_allocator_grants)
+    .fallback_requests
+      ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask}}}}),
+    .target_available  (target_available),
+    .accepts           ({1{_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+    .grants            (_allocator_grants)
   );
   GrantCrossbar_2 crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
     .grants        (_allocator_grants),
     .egress_0_in   (egress_0_in),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
-    .egress_0_out  (egress_0_out)
+    .egress_0_out  (_crossbar_stage_egress_0_out)
   );
+  assign egress_0_out = _crossbar_stage_egress_0_out;
 endmodule
 
 module Queue_2(
@@ -628,12 +754,51 @@ module Queue_2(
   assign count = occupied;
 endmodule
 
-module GreedyMatcher_2(
+module RouterAllocator_2(
+  input             clock,
+                    reset,
   input  [0:0][0:0] requests,
+                    fallback_requests,
+  input  [0:0]      target_available,
+                    accepts,
   output [0:0][0:0] grants
 );
 
-  assign grants = {1{{1{requests[1'h0][1'h0]}}}};
+  wire [0:0] _GEN =
+    {1{requests[1'h0][1'h0] & ~fallback_requests[1'h0][1'h0] & target_available[1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  RoundRobinMatcher_2 matcher (
+    .clock    (clock),
+    .reset    (reset),
+    .requests ({1{_GEN_0 ? _GEN : fallback_requests[1'h0]}}),
+    .accepts  (accepts),
+    .grants   (grants)
+  );
+endmodule
+
+module RoundRobinMatcher_2(
+  input             clock,
+                    reset,
+  input  [0:0][0:0] requests,
+  input  [0:0]      accepts,
+  output [0:0][0:0] grants
+);
+
+  reg  [0:0] next_priorities;
+  `ifndef SYNTHESIS
+    round_robin_matcher_priority_in_range_0:
+      assert property (@(posedge clock) disable iff (reset) ~next_priorities[1'h0]);
+  `endif // not def SYNTHESIS
+  wire [0:0] _GEN = {1{requests[1'h0][1'h0]}};
+  wire       _GEN_0 = /*cast(bit)*/_GEN;
+  wire       _GEN_1 = ~(_GEN_0 & accepts[1'h0]) & next_priorities[1'h0];
+  always @(posedge clock) begin
+    if (reset)
+      next_priorities <= '{1'h0};
+    else
+      next_priorities[1'h0] <= _GEN_1;
+  end // always @(posedge)
+  assign grants = {1{_GEN}};
 endmodule
 
 module GrantCrossbar_2(

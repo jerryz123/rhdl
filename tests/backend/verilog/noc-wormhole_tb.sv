@@ -1,148 +1,130 @@
-// Exercises retained VC ownership, packet backpressure, and physical-link sharing.
+// Verifies multi-router wormhole delivery, packet retention, sharing, and backpressure.
 module noc_wormhole_tb;
     logic clock;
     logic reset;
-    struct packed {logic valid; WormholeBeat bits;} ingress_0_in;
-    struct packed {logic valid; WormholeBeat bits;} ingress_1_in;
-    struct packed {logic ready;} egress_0_in;
-    struct packed {logic ready;} egress_1_in;
-    struct packed {logic ready;} ingress_0_out;
-    struct packed {logic ready;} ingress_1_out;
-    struct packed {logic valid; WormholeBeat bits;} egress_0_out;
-    struct packed {logic valid; WormholeBeat bits;} egress_1_out;
-    logic first_head_seen;
+    struct packed {logic valid; WormholeBeat bits;} injection_0_in;
+    struct packed {logic valid; WormholeBeat bits;} injection_1_in;
+    struct packed {logic ready;} ejection_in;
+    struct packed {logic ready;} injection_0_out;
+    struct packed {logic ready;} injection_1_out;
+    struct packed {logic valid; WormholeBeat bits;} ejection_out;
 
-    WormholeRouterFixture dut (
-        .clock(clock),
-        .reset(reset),
-        .ingress_0_in(ingress_0_in),
-        .ingress_1_in(ingress_1_in),
-        .egress_0_in(egress_0_in),
-        .egress_1_in(egress_1_in),
-        .ingress_0_out(ingress_0_out),
-        .ingress_1_out(ingress_1_out),
-        .egress_0_out(egress_0_out),
-        .egress_1_out(egress_1_out)
-    );
-
+    WormholeNetworkFixture dut (.*);
     always #5 clock = ~clock;
+    task automatic tick; @(posedge clock); #1; endtask
 
-    task automatic tick;
-        @(posedge clock);
-        #1;
-    endtask
-
-    task automatic send_input_0(
-        input logic route_key,
+    task automatic send_0(
         input logic head,
         input logic tail,
         input logic [7:0] payload
     );
         @(negedge clock);
-        ingress_0_in = '{valid: 1'b1,
-                         bits: '{route_key: route_key,
-                                 head: head,
-                                 tail: tail,
-                                 payload: payload}};
-        do @(posedge clock); while (!ingress_0_out.ready);
-        #1;
-        ingress_0_in.valid = 0;
+        injection_0_in = '{valid: 1'b1,
+                           bits: '{route_key: head ? 1'b0 : 1'b1,
+                                   head: head,
+                                   tail: tail,
+                                   payload: payload}};
+        do @(posedge clock); while (!injection_0_out.ready);
+        #1 injection_0_in.valid = 0;
     endtask
 
-    task automatic send_input_1(input logic [7:0] payload);
+    task automatic send_1(
+        input logic head,
+        input logic tail,
+        input logic [7:0] payload
+    );
         @(negedge clock);
-        ingress_1_in = '{valid: 1'b1,
-                         bits: '{route_key: 1'b0,
-                                 head: 1'b1,
-                                 tail: 1'b1,
-                                 payload: payload}};
-        do @(posedge clock); while (!ingress_1_out.ready);
-        #1;
-        ingress_1_in.valid = 0;
+        injection_1_in = '{valid: 1'b1,
+                           bits: '{route_key: head ? 1'b1 : 1'b0,
+                                   head: head,
+                                   tail: tail,
+                                   payload: payload}};
+        do @(posedge clock); while (!injection_1_out.ready);
+        #1 injection_1_in.valid = 0;
     endtask
 
     initial begin
-        int output_0_count;
-        int output_1_count;
+        int received;
         int cycles;
+        int active_packet;
+        int active_index;
+        logic [4:0] seen;
+        logic [7:0] payload;
 
         clock = 0;
         reset = 1;
-        ingress_0_in = '0;
-        ingress_1_in = '0;
-        egress_0_in = '{ready: 1'b1};
-        egress_1_in = '{ready: 1'b1};
-        first_head_seen = 0;
-        output_0_count = 0;
-        output_1_count = 0;
+        injection_0_in = '0;
+        injection_1_in = '0;
+        ejection_in = '0;
+        received = 0;
         cycles = 0;
+        active_packet = -1;
+        active_index = 0;
+        seen = '0;
         tick();
         tick();
         reset = 0;
 
         fork
             begin
-                send_input_0(1'b0, 1'b1, 1'b0, 8'hA0);
-                send_input_0(1'b1, 1'b0, 1'b0, 8'hA1);
-                send_input_0(1'b1, 1'b0, 1'b1, 8'hA2);
+                send_0(1'b1, 1'b0, 8'hA0);
+                send_0(1'b0, 1'b0, 8'hA1);
+                send_0(1'b0, 1'b1, 8'hA2);
             end
             begin
-                send_input_1(8'hB0);
-                send_input_1(8'hC0);
+                send_1(1'b1, 1'b0, 8'hB0);
+                send_1(1'b0, 1'b1, 8'hB1);
             end
             begin
-                wait (first_head_seen);
-                @(negedge clock);
-                egress_0_in.ready = 0;
-                repeat (4) @(negedge clock);
-                egress_0_in.ready = 1;
-            end
-            begin
-                while ((output_0_count < 3 || output_1_count < 2) && cycles < 100) begin
+                while (received < 5 && cycles < 400) begin
+                    @(negedge clock);
+                    ejection_in.ready = ($urandom_range(0, 2) != 0);
                     @(posedge clock);
-                    assert (!(egress_0_out.valid && egress_0_in.ready &&
-                              egress_1_out.valid && egress_1_in.ready))
-                        else $fatal(1, "two VCs transferred on one physical-link cycle");
-                    if (egress_0_out.valid && egress_0_in.ready) begin
-                        case (output_0_count)
-                            0: begin
-                                assert (egress_0_out.bits.head && !egress_0_out.bits.tail &&
-                                        egress_0_out.bits.payload == 8'hA0)
-                                    else $fatal(1, "first packet head was misrouted");
-                                first_head_seen = 1;
-                            end
-                            1: assert (!egress_0_out.bits.head && !egress_0_out.bits.tail &&
-                                       egress_0_out.bits.route_key == 1'b1 &&
-                                       egress_0_out.bits.payload == 8'hA1)
-                                   else $fatal(1, "body did not retain its head route");
-                            2: assert (!egress_0_out.bits.head && egress_0_out.bits.tail &&
-                                       egress_0_out.bits.payload == 8'hA2)
-                                   else $fatal(1, "tail did not retain its head route");
-                            default: $fatal(1, "unexpected VC0 transfer");
-                        endcase
-                        output_0_count++;
-                    end
-                    if (egress_1_out.valid && egress_1_in.ready) begin
-                        assert (egress_1_out.bits.head && egress_1_out.bits.tail)
-                            else $fatal(1, "single-beat packet markers changed");
-                        if (output_1_count == 0)
-                            assert (egress_1_out.bits.payload == 8'hB0)
-                                else $fatal(1, "first competing packet was reordered");
-                        else if (output_1_count == 1)
-                            assert (egress_1_out.bits.payload == 8'hC0 && output_0_count == 1)
-                                else $fatal(1, "ready VC did not bypass a blocked VC");
-                        else
-                            $fatal(1, "unexpected VC1 transfer");
-                        output_1_count++;
+                    if (ejection_out.valid && ejection_in.ready) begin
+                        payload = ejection_out.bits.payload;
+                        assert ((payload >= 8'hA0 && payload <= 8'hA2) ||
+                                (payload >= 8'hB0 && payload <= 8'hB1))
+                            else $fatal(1, "unknown wormhole payload %h", payload);
+                        if (ejection_out.bits.head) begin
+                            assert (active_packet == -1)
+                                else $fatal(1, "packet heads interleaved at ejection");
+                            active_packet = payload[4] ? 1 : 0;
+                            active_index = 0;
+                        end else begin
+                            assert (active_packet != -1)
+                                else $fatal(1, "body arrived without an active packet");
+                        end
+                        assert ((active_packet == 0 && payload == 8'hA0 + active_index[7:0]) ||
+                                (active_packet == 1 && payload == 8'hB0 + active_index[7:0]))
+                            else $fatal(1, "packet beat reordered or interleaved: %h", payload);
+                        if (active_packet == 0) begin
+                            assert (!seen[active_index])
+                                else $fatal(1, "A packet beat duplicated");
+                            seen[active_index] = 1;
+                        end else begin
+                            assert (!seen[3 + active_index])
+                                else $fatal(1, "B packet beat duplicated");
+                            seen[3 + active_index] = 1;
+                        end
+                        active_index++;
+                        if (ejection_out.bits.tail) begin
+                            assert ((active_packet == 0 && active_index == 3) ||
+                                    (active_packet == 1 && active_index == 2))
+                                else $fatal(1, "packet tail arrived at wrong length");
+                            active_packet = -1;
+                        end
+                        received++;
                     end
                     cycles++;
                 end
             end
         join
 
-        assert (output_0_count == 3 && output_1_count == 2)
-            else $fatal(1, "wormhole packet conservation failed");
-        $display("NoC wormhole router simulation passed");
+        assert (received == 5 && seen == 5'b11111 && active_packet == -1)
+            else $fatal(1, "wormhole network conservation failed");
+        assert (cycles < 400)
+            else $fatal(1, "wormhole network made no forward progress");
+        $display("NoC wormhole network simulation passed");
         $finish;
     end
 endmodule

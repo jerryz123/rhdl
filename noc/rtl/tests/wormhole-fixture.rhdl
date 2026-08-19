@@ -1,5 +1,5 @@
 #lang rhdl
-// Elaborates retained packet routing and two VCs sharing one physical link.
+// Assembles a multi-router wormhole network across user-owned hierarchy.
 
 import:
   "../../model/main.rhm" open
@@ -13,40 +13,143 @@ def n2 = NodeId(2)
 def first = PhysicalLink(LinkId(0), n0, n1, 2)
 def second = PhysicalLink(LinkId(1), n1, n2, 2)
 def topology = Topology([n0, n1, n2], [first, second])
-def route = RouteClass(RouteClassId(0), n0, n2)
+def source_0 = InjectionTerminal(InjectionId(0), n0)
+def source_1 = InjectionTerminal(InjectionId(1), n0)
+def destination = EjectionTerminal(EjectionId(0), n2)
+def route_0 = RouteClass(RouteClassId(0), source_0, destination)
+def route_1 = RouteClass(RouteClassId(1), source_1, destination)
 
 fun on_link(vc, link): link_id_equal(vc.link_id, link.id)
 
 fun allows(_route_class, origin, candidate):
   cond
   | origin is_a Injection: on_link(candidate, first)
-  | origin is_a HeldVC: on_link(origin.vc, first) && on_link(candidate, second)
+  | origin is_a HeldVC:
+      on_link(origin.vc, first) && on_link(candidate, second)
   | ~else: #false
 
-def routing = compile_routing(RoutingProblem(topology, [route], RoutingRelation(allows)))
+def routing = compile_routing(
+  RoutingProblem(
+    topology,
+    [route_0, route_1],
+    RoutingRelation(allows)
+  )
+)
 unless routing is_a ValidatedRouting
-| error(~who: #'WormholeRouterFixture,
-        "wormhole fixture requires validated routing")
-def config = compile_wormhole_router(RouterPlan(routing, n1), ~input_buffer_depth: 2)
-def link_connection = NetworkPlan(routing).link_connection(second.id)
+| error(~who: #'WormholeNetworkFixture,
+        "wormhole network requires validated routing")
+def network_plan = NetworkPlan(routing)
+def source_config = compile_wormhole_router(
+  network_plan.router_plan(n0),
+  ~input_buffer_depth: 2
+)
+def transit_config = compile_wormhole_router(
+  network_plan.router_plan(n1),
+  ~input_buffer_depth: 2
+)
+def destination_config = compile_wormhole_router(
+  network_plan.router_plan(n2),
+  ~input_buffer_depth: 2
+)
+def first_connection = network_plan.link_connection(first.id)
+def second_connection = network_plan.link_connection(second.id)
+def injection_0 = network_plan.injection_port(source_0.id)
+def injection_1 = network_plan.injection_port(source_1.id)
+def ejection_port = network_plan.ejection_port(destination.id)
 
-sync_circuit WormholeRouterFixture():
+sync_circuit WormholeSourceSubsystem(
+      config :: WormholeRouterConfig,
+      injection_indices :: List.of(Nat),
+      target_indices :: List.of(Nat)):
   def Beat = WormholeBeat(Bits(8), config.route_decoder.route_width)
-  interface ingress[2](Decoupled(Beat), ~role: consumer)
-  interface egress[2](Decoupled(Beat), ~role: producer)
+  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  interface injection[2](Decoupled(Beat), ~role: consumer)
+  input vc_ready: Vec(2, Bool)
+  interface physical(Decoupled(LinkBeat), ~role: producer)
 
   inst router(WormholeRouter(Bits(8), config))
-  inst link_mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
-  inst link_demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
-  router.ingress <=> ingress
-  for (vc_index in 0..second.vc_count):
-    link_mux.ingress[vc_index] <=> router.egress[link_connection.source_target_indices[vc_index]]
-  link_mux.vc_ready <== link_demux.vc_ready
-  link_demux.ingress <=> link_mux.egress
-  egress <=> link_demux.egress
+  inst mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
+  for (index in 0..2):
+    injection[index] |> router.ingress[injection_indices[index]]
+    router.egress[target_indices[index]] |> mux.ingress[index]
+  router.target_available <== vc_ready
+  mux.vc_ready <== vc_ready
+  mux.egress |> physical
 
-def design = elaborate(WormholeRouterFixture())
+sync_circuit WormholeTransitSubsystem(
+      config :: WormholeRouterConfig,
+      input_indices :: List.of(Nat),
+      target_indices :: List.of(Nat)):
+  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  interface incoming(Decoupled(LinkBeat), ~role: consumer)
+  output incoming_vc_ready: Vec(2, Bool)
+  input outgoing_vc_ready: Vec(2, Bool)
+  interface outgoing(Decoupled(LinkBeat), ~role: producer)
+
+  inst demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
+  inst router(WormholeRouter(Bits(8), config))
+  inst mux(WormholeLinkMux(Bits(8), config.route_decoder.route_width, 2))
+  incoming |> demux.ingress
+  incoming_vc_ready <== demux.vc_ready
+  for (index in 0..2):
+    demux.egress[index] |> router.ingress[input_indices[index]]
+    router.egress[target_indices[index]] |> mux.ingress[index]
+  router.target_available <== outgoing_vc_ready
+  mux.vc_ready <== outgoing_vc_ready
+  mux.egress |> outgoing
+
+sync_circuit WormholeDestinationSubsystem(
+      config :: WormholeRouterConfig,
+      input_indices :: List.of(Nat),
+      ejection_index :: Nat):
+  def Beat = WormholeBeat(Bits(8), config.route_decoder.route_width)
+  def LinkBeat = WormholeLinkBeat(Bits(8), config.route_decoder.route_width, 2)
+  interface physical(Decoupled(LinkBeat), ~role: consumer)
+  output vc_ready: Vec(2, Bool)
+  interface ejection(Decoupled(Beat), ~role: producer)
+
+  inst demux(WormholeLinkDemux(Bits(8), config.route_decoder.route_width, 2))
+  inst router(WormholeRouter(Bits(8), config))
+  physical |> demux.ingress
+  vc_ready <== demux.vc_ready
+  for (index in 0..2):
+    demux.egress[index] |> router.ingress[input_indices[index]]
+  router.egress[ejection_index] |> ejection
+  router.target_available <== vec([ejection.ready])
+
+sync_circuit WormholeNetworkFixture():
+  def Beat = WormholeBeat(Bits(8), source_config.route_decoder.route_width)
+  interface injection[2](Decoupled(Beat), ~role: consumer)
+  interface ejection(Decoupled(Beat), ~role: producer)
+
+  inst source(WormholeSourceSubsystem(
+    source_config,
+    [injection_0.input_index, injection_1.input_index],
+    first_connection.source_target_indices
+  ))
+  inst transit(WormholeTransitSubsystem(
+    transit_config,
+    first_connection.destination_input_indices,
+    second_connection.source_target_indices
+  ))
+  inst destination(WormholeDestinationSubsystem(
+    destination_config,
+    second_connection.destination_input_indices,
+    ejection_port.target_index
+  ))
+
+  injection <=> source.injection
+  source.physical <=> transit.incoming
+  source.vc_ready <== transit.incoming_vc_ready
+  transit.outgoing <=> destination.physical
+  transit.outgoing_vc_ready <== destination.vc_ready
+  destination.ejection <=> ejection
+
+def design = elaborate(WormholeNetworkFixture())
 
 export:
-  config
+  source_config
+  transit_config
+  destination_config
+  network_plan
   design

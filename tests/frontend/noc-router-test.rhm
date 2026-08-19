@@ -4,11 +4,10 @@
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
-  "../../rhdl/std/flow/matcher.rhdl" as matcher
   "../../noc/rtl/main.rhdl" open
   "../../noc/model/main.rhm" open
+  "../../noc/analysis/main.rhm" open
   "../../noc/plan/main.rhm" open
-  "../../noc/examples/irregular-adaptive-escape.rhm" as escape_fixture
   "../../examples/noc/noc-router.rhdl" as fixture
 
 def middle = fixture.middle_config
@@ -23,8 +22,44 @@ def router_modules = fixture.design.modules.filter(
   )
 )
 def allocator_design = embedded.run_elaboration(
-  fun (): matcher.GreedyMatcher(2, 2)
+  fun (): RouterAllocator(2, 2)
 )
+def escape_n0 = NodeId(10)
+def escape_n1 = NodeId(11)
+def adaptive_loop = PhysicalLink(LinkId(10), escape_n0, escape_n0, 1)
+def escape_link = PhysicalLink(LinkId(11), escape_n0, escape_n1, 1)
+def escape_topology = Topology(
+  [escape_n0, escape_n1],
+  [adaptive_loop, escape_link]
+)
+def escape_route = RouteClass(RouteClassId(10), escape_n0, escape_n1)
+fun escape_allows(_route_class, origin, candidate):
+  cond
+  | origin is_a Injection:
+      link_id_equal(candidate.link_id, adaptive_loop.id) || link_id_equal(candidate.link_id, escape_link.id)
+  | origin is_a HeldVC && link_id_equal(origin.vc.link_id, adaptive_loop.id):
+      link_id_equal(candidate.link_id, adaptive_loop.id) || link_id_equal(candidate.link_id, escape_link.id)
+  | ~else: #false
+def escape_routing = compile_routing(
+  RoutingProblem(
+    escape_topology,
+    [escape_route],
+    RoutingRelation(escape_allows)
+  ),
+  ~escape: EscapeValidationRequest(
+    escape_topology,
+    [VCId(escape_link.id, 0)]
+  )
+)
+unless escape_routing is_a ValidatedRouting
+| error(~who: #'noc_router_test,
+        "small adaptive routing must pass escape validation")
+def escape_plan = RouterPlan(
+  escape_routing,
+  escape_n0
+)
+def escape_config = compile_simple_router(escape_plan)
+def escape_wormhole_config = compile_wormhole_router(escape_plan)
 
 fun assertion_labels(module_def):
   module_def.operations.filter(
@@ -49,24 +84,26 @@ check:
 check:
   compile_simple_router("not a plan") ~throws "RouterPlan"
   compile_simple_router(fixture.middle_plan, ~input_buffer_depth: 0) ~throws "PosInt"
-  compile_simple_router(
-    RouterPlan(
-      escape_fixture.irregular_validated,
-      escape_fixture.irregular_topology.node_id(escape_fixture.irregular_a)
-    )
-  ) ~throws "requires whole-graph acyclic routing"
+  escape_config.router_plan === escape_plan ~is #true
+  escape_wormhole_config.router_plan === escape_plan ~is #true
+  escape_plan.rows.find(
+    fun (row): row.target_mask != row.fallback_mask
+  ) != #false ~is #true
+  (for all (row in escape_plan.rows):
+     row.fallback_mask != 0 && (
+       (row.fallback_mask bits.and row.target_mask) == row.fallback_mask
+     )) ~is #true
 
 check:
   top != #false ~is #true
   top.inputs.map(fun (port): port.name) ~is [
-    "clock", "reset", "allocator_requests",
+    "clock", "reset",
     "middle_ingress_0_in", "middle_ingress_1_in",
     "middle_egress_0_in", "middle_egress_1_in",
     "destination_ingress_0_in", "destination_ingress_1_in",
     "destination_egress_0_in"
   ]
   top.outputs.map(fun (port): port.name) ~is [
-    "allocator_grants",
     "middle_ingress_0_out", "middle_ingress_1_out",
     "middle_egress_0_out", "middle_egress_1_out",
     "destination_ingress_0_out", "destination_ingress_1_out",

@@ -2,9 +2,6 @@
 module noc_router_tb;
     logic clock;
     logic reset;
-    logic [1:0][1:0] allocator_requests;
-    logic [1:0][1:0] allocator_grants;
-
     struct packed {logic valid; RoutedBeat bits;} middle_ingress_0_in;
     struct packed {logic valid; RoutedBeat bits;} middle_ingress_1_in;
     struct packed {logic ready;} middle_egress_0_in;
@@ -24,8 +21,6 @@ module noc_router_tb;
     SimpleRouterFixture dut (
         .clock(clock),
         .reset(reset),
-        .allocator_requests(allocator_requests),
-        .allocator_grants(allocator_grants),
         .middle_ingress_0_in(middle_ingress_0_in),
         .middle_ingress_1_in(middle_ingress_1_in),
         .middle_egress_0_in(middle_egress_0_in),
@@ -56,12 +51,9 @@ module noc_router_tb;
         int cycles;
         logic [7:0] seen;
         logic [7:0] payload;
-        logic [1:0] expected0;
-        logic [1:0] expected1;
 
         clock = 0;
         reset = 1;
-        allocator_requests = '0;
         middle_ingress_0_in = '0;
         middle_ingress_1_in = '0;
         middle_egress_0_in = '0;
@@ -73,33 +65,6 @@ module noc_router_tb;
         tick();
         reset = 0;
         #1;
-
-        // Exhaust every two-input, two-target request matrix.
-        for (int request_image = 0; request_image < 16; request_image++) begin
-            allocator_requests = request_image[3:0];
-            #1;
-            if (allocator_requests[0][0])
-                expected0 = 2'b01;
-            else if (allocator_requests[0][1])
-                expected0 = 2'b10;
-            else
-                expected0 = 2'b00;
-            if (allocator_requests[1][0] && !expected0[0])
-                expected1 = 2'b01;
-            else if (allocator_requests[1][1] && !expected0[1])
-                expected1 = 2'b10;
-            else
-                expected1 = 2'b00;
-            assert (allocator_grants[0] == expected0 &&
-                    allocator_grants[1] == expected1)
-                else $fatal(1, "allocator mismatch for request image %h",
-                            request_image[3:0]);
-            assert ((allocator_grants[0] & ~allocator_requests[0]) == 0 &&
-                    (allocator_grants[1] & ~allocator_requests[1]) == 0)
-                else $fatal(1, "allocator granted an unrequested target");
-            assert ((allocator_grants[0] & allocator_grants[1]) == 0)
-                else $fatal(1, "allocator granted one target twice");
-        end
 
         assert (middle_ingress_0_out.ready && middle_ingress_1_out.ready)
             else $fatal(1, "middle router did not reset empty");

@@ -4,8 +4,8 @@
 import:
   lib("rhdl/std/ready-valid.rhdl") open
   lib("rhdl/std/flow/queue.rhdl") open
-  lib("rhdl/std/flow/matcher.rhdl") open
   lib("rhdl/std/flow/crossbar.rhdl") open
+  "allocator.rhdl" open
   "route-computer.rhdl" open
   "../plan/router-plan.rhm" open
   "../plan/router-family-plan.rhm" open
@@ -25,9 +25,7 @@ bundle RoutedBeat(T :: DataType, route_width :: PosInt):
   route_key: Bits(route_width)
   payload: T
 
-// Fixes all widths and local port meanings before circuit elaboration. The
-// current fixed-priority allocator satisfies whole-graph acyclicity but does
-// not yet promise the fairness required by an escape-routing certificate.
+// Fixes all widths and local port meanings before circuit elaboration.
 class SimpleRouterConfig(router_plan :: RouterPlan,
                          route_decoder :: RouteDecoder,
                          input_count :: PosInt,
@@ -48,14 +46,10 @@ class SimpleRouterFamilyConfig(router_family_plan :: RouterFamilyPlan,
   internal _SimpleRouterFamilyConfig
   constructor ~none
 
-// Validates the supported proof regime and freezes the router's hardware shape.
+// Freezes the router's validated hardware shape.
 fun compile_simple_router(
       router_plan :: RouterPlan,
       ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: SimpleRouterConfig:
-  if router_plan.validated_routing.assumptions.eventual_escape_grant
-  | error(~who: #'compile_simple_router,
-          "simple router currently requires whole-graph acyclic routing")
-  | #void
   def route_decoder = compile_route_decoder(router_plan)
   def input_count = router_plan.origins.length()
   def target_count = router_plan.targets.length()
@@ -71,10 +65,6 @@ fun compile_simple_router(
 fun compile_simple_router_family(
       router_family_plan :: RouterFamilyPlan,
       ~input_buffer_depth: input_buffer_depth :: PosInt = 1) :: SimpleRouterFamilyConfig:
-  if router_family_plan.network_plan.validated_routing.assumptions.eventual_escape_grant
-  | error(~who: #'compile_simple_router_family,
-          "simple router currently requires whole-graph acyclic routing")
-  | #void
   def route_decoder = compile_router_family_route_decoder(router_family_plan)
   unless router_family_plan.target_count > 0
   | error(~who: #'compile_simple_router_family,
@@ -123,6 +113,7 @@ fun monitor_router_family_ingress(
 sync_circuit SimpleRouter(T :: DataType, config :: SimpleRouterConfig):
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  input target_available: Vec(config.target_count, Bool)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
   monitor_router_ingress(ingress, config.route_decoder)
 
@@ -153,9 +144,21 @@ sync_circuit SimpleRouter(T :: DataType, config :: SimpleRouterConfig):
       row
   )
 
-  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  def fallback_requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      vec(
+        for List (target_index in 0..config.target_count):
+          def fallback = route_decisions[input_index].fallback_mask[target_index].into(Bool)
+          input_buffer.valid & route_decisions[input_index].valid & fallback
+      )
+  )
+  inst allocator(RouterAllocator(config.input_count, config.target_count))
   allocator.requests <== requests
+  allocator.fallback_requests <== fallback_requests
+  allocator.target_available <== target_available
   (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
+  allocator.accepts <== vec(for List (target_index in 0..config.target_count): egress[target_index].valid & egress[target_index].ready)
 
 // Implements one member of a router family. The site key changes only which
 // prevalidated row is selected; it never changes the routing proof or policy.
@@ -164,6 +167,7 @@ sync_circuit SimpleRouterFamily(T :: DataType,
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   input site_key: Bits(config.route_decoder.site_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
+  input target_available: Vec(config.target_count, Bool)
   interface egress[config.target_count](Decoupled(Beat), ~role: producer)
   monitor_router_family_ingress(ingress, site_key, config.route_decoder)
 
@@ -193,6 +197,18 @@ sync_circuit SimpleRouterFamily(T :: DataType,
       row
   )
 
-  inst allocator(GreedyMatcher(config.input_count, config.target_count))
+  def fallback_requests = vec(
+    for List (input_index in 0..config.input_count):
+      def input_buffer :: Endpoint = input_buffers[input_index]
+      vec(
+        for List (target_index in 0..config.target_count):
+          def fallback = route_decisions[input_index].fallback_mask[target_index].into(Bool)
+          input_buffer.valid & route_decisions[input_index].valid & fallback
+      )
+  )
+  inst allocator(RouterAllocator(config.input_count, config.target_count))
   allocator.requests <== requests
+  allocator.fallback_requests <== fallback_requests
+  allocator.target_available <== target_available
   (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
+  allocator.accepts <== vec(for List (target_index in 0..config.target_count): egress[target_index].valid & egress[target_index].ready)

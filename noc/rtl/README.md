@@ -14,7 +14,10 @@ an unchecked relation or rerun topology, reachability, dependency, or deadlock
 analysis. Route keys retain their global stable encoding, while origin keys
 and outgoing-VC masks are local to one router. The decode relation uses a typed
 `RouteLookupKey` input and a typed `RouteDecision` output with a unified
-`target_mask` plus a Boolean `valid` field. The receiver-explicit
+`target_mask`, its certified `fallback_mask` subset, and a Boolean `valid`
+field. Whole-graph-acyclic plans mark every legal target as fallback.
+Escape-certified plans mark only escape VCs and exact local ejection targets.
+The receiver-explicit
 `route_decoder_lookup` function preserves those decoder-dependent exact types
 at its boundary. Compilation returns an opaque `RouteDecoder` that stores only
 the plan, derived decode widths, and compiled `DecodeGen`; route mappings and
@@ -30,6 +33,16 @@ at each occurrence and is not a runtime routing mode. One typed `DecodeGen`
 therefore represents all site-specialized tables without reimplementing decode
 lowering or graph reasoning in RTL.
 
+`allocator.rhdl` defines the NoC-specific `RouterAllocator` around the generic
+standard-library `RoundRobinMatcher`. Every output rotates its input priority
+only after an actual transfer. For escape-certified rows, an adaptive target
+is eligible only when its separate `target_available` sideband says that the
+VC can be acquired immediately; otherwise the input continuously requests its
+fallback targets. The sideband describes resource availability independently
+of ready/valid selection. A physical VC link therefore supplies the reverse
+per-VC readiness from `WormholeLinkDemux`, not the selected mux ingress's
+ready signal. This separation avoids a valid-to-ready arbitration loop.
+
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
 proof regime, compiles the route decoder, and freezes the hardware port and
@@ -40,9 +53,9 @@ same-cycle replacement (`pipe`) remain disabled so the registered timing is
 preserved. Route decisions form the NoC-specific request matrix. A parallel
 flow handle connects the ingress array through those queues, and the
 endpoint-first `grant_crossbar` helper connects their outputs directly to
-egress. The standard-library
-`GreedyMatcher` remains an explicit sideband controller: it observes requests
-and supplies grants but does not pretend to consume or forward payload flow.
+egress. The allocator remains an explicit sideband controller: it observes
+requests, fallback classification, availability, and completed transfers but
+does not pretend to consume or forward payload flow.
 A NoC-specific ingress monitor checks every externally offered route key
 against the physical input's origin key before buffering. Outgoing VCs are the
 first targets and every local ejection terminal follows. The router contains
@@ -90,10 +103,14 @@ reassemble it after ejection without changing topology, routing, or VC
 analysis. CHI link credits and internal physical-link credits remain separate
 protocol layers.
 
-The initial router accepts only whole-graph-acyclic validation. Escape
-certificates require persistent escape requests and eventual grants; the
-fixed-priority allocator does not yet claim that fairness contract, so router
-configuration compilation rejects escape-certified plans.
+Both router implementations accept whole-graph-acyclic and escape-certified
+plans. The escape contract is realized by persistent fallback requests and
+transfer-based round-robin rotation. Adaptive outputs are considered only
+when their independent availability sideband permits an immediate acquisition;
+ejection is always a fallback because it releases the held network resource.
+This implements the certificate's allocator obligation, not a broader claim
+of protocol progress, livelock freedom, or fairness through unmodeled shared
+resources.
 
 There is intentionally no whole-network circuit or router-instantiating
 network helper in this package. Real routers live in independently owned tile,
@@ -103,7 +120,10 @@ compiles only its selected local router configuration, and exposes the VC or
 physical-link ports appropriate to its own boundary. A user-owned parent
 connects those boundaries from the corresponding `NetworkPlan` assignments;
 `noc/rtl` neither owns the system hierarchy nor inserts a wrapper around the
-complete transport.
+complete transport. The hierarchical wormhole fixture follows this pattern:
+source, transit, and destination subsystems own their routers and physical-link
+mux/demux logic, while their parent connects link payloads and reverse per-VC
+availability.
 
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar
