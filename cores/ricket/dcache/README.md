@@ -15,6 +15,10 @@ load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
 `XLen.X64`; its core-facing addresses use the selected XLEN while its native
 RN-F port uses the configured CHI address width. Its 128-bit DAT width is CHI's
 minimum, so a 32-byte cache line is assembled from two physical DAT packets.
+The responder also exposes a combinational `drained` observation. It is true
+only when no request is accepted that cycle and no lookup, refill, or coherent
+write-through transaction remains active, giving architectural fences a
+precise quiescence boundary without creating a separate fence transaction.
 
 `cache.rhdl` implements a direct-mapped, read-allocating,
 write-through/write-no-allocate cache. A one-stage `Pipe` carries lookup

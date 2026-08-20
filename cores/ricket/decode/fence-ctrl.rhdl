@@ -1,0 +1,58 @@
+#lang rhdl
+// Defines Ricket's explicit memory- and instruction-fence controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/zmmul.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum FenceOperation:
+  None
+  Memory
+  Instruction
+
+bundle FenceControl():
+  action: FenceOperation
+
+  method is_fence_operation(control) :: Bool:
+    control.action =/= FenceOperation.None
+
+  method is_instruction_fence(control) :: Bool:
+    control.action === FenceOperation.Instruction
+
+def no_fence = pattern(FenceControl()):
+  action: FenceOperation.None
+def memory_fence = pattern(FenceControl()):
+  action: FenceOperation.Memory
+def instruction_fence = pattern(FenceControl()):
+  action: FenceOperation.Instruction
+
+fun base_fence_cases(instructions):
+  instruction_cases([FENCE], memory_fence) ++ instruction_cases(
+    excluding_instructions(instructions, [FENCE]),
+    no_fence
+  )
+
+def RV32IFenceCases = base_fence_cases(rv32.RV32IInstructions)
+def RV64IFenceCases = base_fence_cases(RV64IInstructions)
+def RV32RicketFenceCases = RV32IFenceCases ++ instruction_cases(
+  RV32ZmmulInstructions ++ ZicsrInstructions ++ PrivilegedInstructions,
+  no_fence
+) ++ instruction_cases(ZifenceiInstructions, instruction_fence)
+def RV64RicketFenceCases = RV64IFenceCases ++ instruction_cases(
+  RV64ZmmulInstructions ++ ZicsrInstructions ++ PrivilegedInstructions,
+  no_fence
+) ++ instruction_cases(ZifenceiInstructions, instruction_fence)
+
+export:
+  FenceOperation
+  FenceControl
+  RV32IFenceCases
+  RV64IFenceCases
+  RV32RicketFenceCases
+  RV64RicketFenceCases

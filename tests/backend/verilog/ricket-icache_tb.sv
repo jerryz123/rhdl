@@ -5,7 +5,7 @@ module ricket_icache_tb;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [31:0] instruction; } instruction_bits_t;
   typedef struct packed { logic valid; instruction_bits_t bits; } instruction_resp_t;
-  typedef struct packed { logic flush; core_req_t request; ready_t response; } core_in_t;
+  typedef struct packed { logic flush; logic invalidate_all; core_req_t request; ready_t response; } core_in_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } core_out_t;
 
   typedef struct packed { logic credit; } credit_t;
@@ -290,6 +290,7 @@ module ricket_icache_tb;
   endtask
 
   localparam logic [63:0] ADDRESS = 64'h00000001_00000000;
+  localparam logic [63:0] SECOND_ADDRESS = 64'h00000001_00000040;
   localparam logic [255:0] LINE = {
     64'h88888888_77777777,
     64'h66666666_55555555,
@@ -323,6 +324,45 @@ module ricket_icache_tb;
     send_core_request(ADDRESS);
     accept_read_request(ADDRESS);
     return_line(ADDRESS, LINE);
+    accept_comp_ack();
+    expect_instruction(32'h11111111);
+
+    // A speculative flush preserves residency, while architectural
+    // invalidation forces the next request back through CHI.
+    core_in.flush = 1'b1;
+    tick();
+    core_in.flush = 1'b0;
+    send_core_request(ADDRESS + 64'd4);
+    expect_instruction(32'h22222222);
+    core_in.invalidate_all = 1'b1;
+    tick();
+    core_in.invalidate_all = 1'b0;
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(ADDRESS);
+    accept_read_request(ADDRESS);
+    return_line(ADDRESS, LINE);
+    accept_comp_ack();
+    expect_instruction(32'h11111111);
+
+    // An invalidated in-flight refill may drain, but cannot respond or install.
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(SECOND_ADDRESS);
+    accept_read_request(SECOND_ADDRESS);
+    core_in.invalidate_all = 1'b1;
+    tick();
+    core_in.invalidate_all = 1'b0;
+    return_line(SECOND_ADDRESS, LINE);
+    accept_comp_ack();
+    repeat (2) tick();
+    assert (!core_out.response.valid)
+      else $fatal(1, "invalidated refill returned an instruction");
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(SECOND_ADDRESS);
+    accept_read_request(SECOND_ADDRESS);
+    return_line(SECOND_ADDRESS, LINE);
     accept_comp_ack();
     expect_instruction(32'h11111111);
 

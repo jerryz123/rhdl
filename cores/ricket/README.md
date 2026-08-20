@@ -3,7 +3,7 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with Zmmul, Zicsr, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with Zmmul, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -107,7 +107,7 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32I+Zmmul+Zicsr or RV64I+Zmmul+Zicsr catalog at host
+The integrated structured decoder selects the RV32I+Zmmul+Zicsr+Zifencei or RV64I+Zmmul+Zicsr+Zifencei catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
@@ -124,6 +124,18 @@ file records EPC, cause, and trap value and selects the direct `mtvec` or
 `stvec` target. The first cut has no interrupts, PMP, counters, vectored trap
 mode, or virtual memory; `satp` is a recognized WARL-zero CSR and translation
 therefore remains Bare.
+
+Base `FENCE` and `FENCE.I` share the same serialization boundary. Decode waits
+for older deferred register completions and for the L1D to report that its
+lookup, refill, and coherent write-through transaction are drained, then
+prevents younger instructions from entering Execute until the fence reaches
+WB. `FENCE.I`
+additionally invalidates every L1I line at WB and redirects Fetch to the
+fence's own `pc + 4`. The architectural invalidate is distinct from a
+speculative fetch flush: an ordinary redirect discards wrong-path work without
+destroying useful cache residency. An L1I refill already in flight is allowed
+to drain after invalidation, but cannot install its line or return an
+instruction.
 
 Ricket stores implemented CSR data in one aggregate state register. The
 RISC-V/RHDL `csr_bank` declaration is the single source for recognized IDs,
@@ -168,7 +180,7 @@ line. L1I maps hits and live refill completions into response flows and merges
 them before its response queue. L1D load hits have the same throughput and pass through a mandatory
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
 completion tag. Stores complete through the registered response path and drain
-through an ordered one-entry write buffer. The two
+through an ordered one-entry coherent write-through transaction. The two
 external ports intentionally remain separate RN-F Request Nodes. Home Node,
 fabric, and SoC integration remain outside the core. Ricket uses CHI's minimum
 128-bit DAT width; each 32-byte cache-line refill therefore completes from two

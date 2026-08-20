@@ -106,6 +106,9 @@ the divide and remainder operations from the full M extension.
 
 [`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
 read/modify/write encodings independently of any core's CSR implementation.
+[`isa/zifencei.rhm`](isa/zifencei.rhm) describes the XLEN-independent
+`FENCE.I` encoding as the separate ratified Zifencei extension; microarchitectural
+cache invalidation and pipeline serialization remain core policy.
 [`isa/csr.rhm`](isa/csr.rhm) owns the closed `CsrId` host enum and its canonical
 12-bit architectural address mapping. Hardware must cross through
 [`rhdl/csr.rhdl`](rhdl/csr.rhdl) when it needs a typed instruction-field value,

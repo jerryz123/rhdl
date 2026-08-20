@@ -1,4 +1,4 @@
-// Verifies RicketCore out-of-order load completion with ordered commit and scoreboard hazards.
+// Verifies RicketCore ordered commit, scoreboard hazards, and FENCE.I refetch control.
 module ricket_core_tb;
   typedef struct packed { logic valid; logic [63:0] bits; } start_in_t;
   typedef struct packed { logic ready; } ready_t;
@@ -7,7 +7,12 @@ module ricket_core_tb;
   typedef struct packed { logic [31:0] instruction; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
-  typedef struct packed { logic flush; instruction_req_t request; ready_t response; } instruction_out_t;
+  typedef struct packed {
+    logic flush;
+    logic invalidate_all;
+    instruction_req_t request;
+    ready_t response;
+  } instruction_out_t;
   typedef struct packed {
     logic [63:0] address;
     logic write;
@@ -19,7 +24,7 @@ module ricket_core_tb;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
-  typedef struct packed { ready_t request; data_resp_t response; } data_in_t;
+  typedef struct packed { ready_t request; data_resp_t response; logic drained; } data_in_t;
   typedef struct packed { data_req_t request; } data_out_t;
 
   logic clock = 1'b0;
@@ -44,6 +49,8 @@ module ricket_core_tb;
   logic [1:0] stores_seen;
   logic saw_fetch_flush;
   logic saw_redirect;
+  logic saw_fence_i_invalidate;
+  logic saw_fence_i_refetch;
 
   RicketCore dut (.*);
   always #5 clock = ~clock;
@@ -57,8 +64,9 @@ module ricket_core_tb;
       64'h00000001_00000010: instruction_at = 32'h02031863; // bne x6, x0, +48
       64'h00000001_00000040: instruction_at = 32'h006503b3; // add x7, x10, x6
       64'h00000001_00000044: instruction_at = 32'h00900413; // addi x8, x0, 9
-      64'h00000001_00000048: instruction_at = 32'h00703423; // sd x7, 8(x0)
-      64'h00000001_0000004c: instruction_at = 32'h00803823; // sd x8, 16(x0)
+      64'h00000001_00000048: instruction_at = 32'h0000100f; // fence.i
+      64'h00000001_0000004c: instruction_at = 32'h00703423; // sd x7, 8(x0)
+      64'h00000001_00000050: instruction_at = 32'h00803823; // sd x8, 16(x0)
       default: instruction_at = 32'h00000013;
     endcase
   endfunction
@@ -71,6 +79,7 @@ module ricket_core_tb;
     data_access_in.response.valid = data_response_valid;
     data_access_in.response.bits.data = data_response_bits;
     data_access_in.response.bits.tag = data_response_tag;
+    data_access_in.drained = 1'b1;
   end
 
   always_ff @(posedge clock) begin
@@ -88,10 +97,14 @@ module ricket_core_tb;
       stores_seen <= '0;
       saw_fetch_flush <= 1'b0;
       saw_redirect <= 1'b0;
+      saw_fence_i_invalidate <= 1'b0;
+      saw_fence_i_refetch <= 1'b0;
     end else begin
       if (instruction_access_out.flush) begin
         instruction_response_valid <= 1'b0;
         saw_fetch_flush <= 1'b1;
+        if (instruction_access_out.invalidate_all)
+          saw_fence_i_invalidate <= 1'b1;
       end else begin
         if (instruction_response_valid && instruction_access_out.response.ready)
           instruction_response_valid <= 1'b0;
@@ -105,6 +118,9 @@ module ricket_core_tb;
               else $fatal(1, "branch redirect did not pass only the deferred load");
             saw_redirect <= 1'b1;
           end
+          if (instruction_access_out.request.bits.address == 64'h00000001_0000004c &&
+              saw_fence_i_invalidate)
+            saw_fence_i_refetch <= 1'b1;
         end
       end
 
@@ -167,6 +183,8 @@ module ricket_core_tb;
                     data_access_out.request.bits.data == 64'd9 &&
                     data_access_out.request.bits.tag == 5'd0)
               else $fatal(1, "WAW ordering was not preserved");
+            assert (saw_fence_i_invalidate && saw_fence_i_refetch)
+              else $fatal(1, "FENCE.I did not invalidate and refetch from pc + 4");
             $display("Ricket out-of-order load completion passed");
             $finish;
           end

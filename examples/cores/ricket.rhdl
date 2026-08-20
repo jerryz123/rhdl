@@ -39,17 +39,18 @@ def verilog_reference = @str|<<{
     RicketMultiplyControl;
   typedef struct packed {logic [1:0] csr; logic immediate; logic [2:0] action; }
     SystemControl;
+  typedef struct packed {logic [1:0] action; } FenceControl;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [1:0] memory_operation; logic [1:0] memory_width; logic memory_unsigned; RicketMultiplyControl multiply_control; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; logic illegal; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [63:0] rs1_value; logic [63:0] rs2_value; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [1:0] memory_operation; logic [1:0] memory_width; logic memory_unsigned; RicketMultiplyControl multiply_control; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; FenceControl fence; logic illegal; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [63:0] rs1_value; logic [63:0] rs2_value; }
     DecodeExecute;
   typedef
     struct packed {logic [63:0] left; logic [63:0] right; RicketMultiplyControl control; logic [4:0] rd; }
     RicketMultiplyIssue;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic writeback_enable; logic [4:0] rd; logic [63:0] result; RicketMultiplyIssue multiply_issue; SystemControl system; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic writeback_enable; logic [4:0] rd; logic [63:0] result; RicketMultiplyIssue multiply_issue; SystemControl system; FenceControl fence; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
     ExecuteMemory;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic write_enable; logic [4:0] rd; logic [63:0] value; RicketMultiplyIssue multiply_issue; SystemControl system; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [2:0] writeback_source; logic write_enable; logic [4:0] rd; logic [63:0] value; RicketMultiplyIssue multiply_issue; SystemControl system; FenceControl fence; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
     MemoryWriteback;
   typedef
     struct packed {logic uses_rs1; logic uses_rs2; logic [1:0] left; logic right; logic [2:0] immediate; }
@@ -60,7 +61,7 @@ def verilog_reference = @str|<<{
     MemoryControl;
   typedef struct packed {logic enable; logic [2:0] source; } WritebackControl;
   typedef
-    struct packed {AluControl alu; OperandControl operand; BranchControl branch; MemoryControl memory; RicketMultiplyControl multiply; WritebackControl writeback; SystemControl system; }
+    struct packed {AluControl alu; OperandControl operand; BranchControl branch; MemoryControl memory; RicketMultiplyControl multiply; WritebackControl writeback; SystemControl system; FenceControl fence; }
     RicketControl;
   typedef struct packed {logic taken; } BranchResult;
   typedef struct packed {logic [4:0] rd; logic [63:0] value; } RicketMultiplyCompletion;
@@ -121,13 +122,13 @@ module Ricket(
 );
 
   wire
-    struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; }
+    struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
     _l1d_core_out;
   wire
     struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }
     _l1i_core_out;
   wire
-    struct packed {logic flush; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }
+    struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }
     _core_instruction_access_out;
   wire struct packed {struct packed {logic valid; RicketDataReq bits; } request; }
     _core_data_access_out;
@@ -161,15 +162,15 @@ module Ricket(
 endmodule
 
 module RicketCore(
-  input                                                                                                                                          clock,
-                                                                                                                                                 reset,
-  input  struct packed {logic valid; logic [63:0] bits; }                                                                                        start_in,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }             instruction_access_in,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; }                    data_access_in,
-  output struct packed {logic ready; }                                                                                                           start_out,
-  output struct packed {logic flush; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; } instruction_access_out,
-  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                             data_access_out,
-  output                                                                                                                                         fault
+  input                                                                                                                                                                clock,
+                                                                                                                                                                       reset,
+  input  struct packed {logic valid; logic [63:0] bits; }                                                                                                              start_in,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                   instruction_access_in,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                           data_access_in,
+  output struct packed {logic ready; }                                                                                                                                 start_out,
+  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; } instruction_access_out,
+  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                   data_access_out,
+  output                                                                                                                                                               fault
 );
 
   wire [4:0]                         _GEN;
@@ -222,26 +223,29 @@ module RicketCore(
   reg                                faulted;
   reg                                started;
   reg  [63:0]                        fetch_pc;
-  wire                               _GEN_18 = _csrs_redirect_out.valid | _GEN_9;
+  wire                               _GEN_18 =
+    _mem_wb_pipe_egress_out.valid & _mem_wb_pipe_egress_out.bits.fence.action == 2'h2;
   wire                               _GEN_19 =
+    _csrs_redirect_out.valid | _GEN_18 | _GEN_9;
+  wire                               _GEN_20 =
     _ex_mem_pipe_egress_out.valid & _ex_mem_pipe_egress_out.bits.exception_valid
     | _mem_wb_pipe_egress_out.valid & _mem_wb_pipe_egress_out.bits.exception_valid;
-  wire                               _GEN_20 = faulted | _GEN_10 | _GEN_19 | _GEN_18;
-  wire                               _GEN_21 = ~started & ~(faulted | _GEN_10);
-  wire                               _GEN_22 = start_in.valid & _GEN_21;
-  wire                               _GEN_23 = _GEN_22 & (|(start_in.bits[1:0]));
-  wire                               _GEN_24 = _GEN_23 | _GEN_10 | _GEN_18;
-  wire                               _GEN_25 =
-    started & ~(faulted | _GEN_10 | _GEN_19) & ~_GEN_18;
-  wire                               _GEN_26 = _GEN_25 & _fetch_pcs_ingress_out.ready;
-  wire FetchDecode                   _GEN_27 =
+  wire                               _GEN_21 = faulted | _GEN_10 | _GEN_20 | _GEN_19;
+  wire                               _GEN_22 = ~started & ~(faulted | _GEN_10);
+  wire                               _GEN_23 = start_in.valid & _GEN_22;
+  wire                               _GEN_24 = _GEN_23 & (|(start_in.bits[1:0]));
+  wire                               _GEN_25 = _GEN_24 | _GEN_10 | _GEN_19;
+  wire                               _GEN_26 =
+    started & ~(faulted | _GEN_10 | _GEN_20) & ~_GEN_19;
+  wire                               _GEN_27 = _GEN_26 & _fetch_pcs_ingress_out.ready;
+  wire FetchDecode                   _GEN_28 =
     '{pc: _fetch_pcs_egress_out.bits,
       instruction: instruction_access_in.response.bits.instruction};
-  assign _GEN_16 = _GEN_20 | _pipe_stage_ingress_out.ready;
-  wire                               _GEN_28 = _pipe_stage_egress_out.valid & ~_GEN_20;
-  wire [51:0]                        _GEN_29 =
+  assign _GEN_16 = _GEN_21 | _pipe_stage_ingress_out.ready;
+  wire                               _GEN_29 = _pipe_stage_egress_out.valid & ~_GEN_21;
+  wire [51:0]                        _GEN_30 =
     {52{_pipe_stage_egress_out.bits.instruction[31]}};
-  wire [7:0][63:0]                   _GEN_30 =
+  wire [7:0][63:0]                   _GEN_31 =
     {{64'h0},
      {64'h0},
      {{{44{_pipe_stage_egress_out.bits.instruction[31]}},
@@ -252,43 +256,44 @@ module RicketCore(
      {{{32{_pipe_stage_egress_out.bits.instruction[31]}},
        _pipe_stage_egress_out.bits.instruction[31:12],
        12'h0}},
-     {{_GEN_29,
+     {{_GEN_30,
        _pipe_stage_egress_out.bits.instruction[7],
        _pipe_stage_egress_out.bits.instruction[30:25],
        _pipe_stage_egress_out.bits.instruction[11:8],
        1'h0}},
-     {{_GEN_29,
+     {{_GEN_30,
        _pipe_stage_egress_out.bits.instruction[31:25],
        _pipe_stage_egress_out.bits.instruction[11:7]}},
-     {{_GEN_29, _pipe_stage_egress_out.bits.instruction[31:20]}},
+     {{_GEN_30, _pipe_stage_egress_out.bits.instruction[31:20]}},
      {64'h0}};
-  wire [31:0]                        _GEN_31 = _scoreboard_busy;
-  wire                               _GEN_32 =
-    _id_ex_pipe_egress_out.bits.writeback_source == 3'h3;
+  wire [31:0]                        _GEN_32 = _scoreboard_busy;
   wire                               _GEN_33 =
-    _id_ex_pipe_egress_out.valid
-    & (_id_ex_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_32);
+    _id_ex_pipe_egress_out.bits.writeback_source == 3'h3;
   wire                               _GEN_34 =
-    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h3;
+    _id_ex_pipe_egress_out.valid
+    & (_id_ex_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_33);
   wire                               _GEN_35 =
-    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_34;
-  wire                               _GEN_36 = _ex_mem_pipe_egress_out.valid & _GEN_35;
-  wire                               _GEN_37 = |_id_ex_pipe_egress_out.bits.rd;
-  wire                               _GEN_38 = |_ex_mem_pipe_egress_out.bits.rd;
-  wire                               _GEN_39 =
-    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h3;
+    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h3;
+  wire                               _GEN_36 =
+    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_35;
+  wire                               _GEN_37 = _ex_mem_pipe_egress_out.valid & _GEN_36;
+  wire                               _GEN_38 = |_id_ex_pipe_egress_out.bits.rd;
+  wire                               _GEN_39 = |_ex_mem_pipe_egress_out.bits.rd;
   wire                               _GEN_40 =
-    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_39;
+    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h3;
   wire                               _GEN_41 =
-    _GEN_28
-    & (_GEN_33 & _GEN_37
+    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_40;
+  wire                               _GEN_42 = |_decoder_control.fence.action;
+  wire                               _GEN_43 =
+    _GEN_29
+    & (_GEN_34 & _GEN_38
        & (_decoder_control.operand.uses_rs1
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[19:15]
           | _decoder_control.operand.uses_rs2
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[24:20]
           | _decoder_control.writeback.enable
           & _id_ex_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[11:7])
-       | _GEN_36 & _GEN_38
+       | _GEN_37 & _GEN_39
        & (_decoder_control.operand.uses_rs1
           & _ex_mem_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[19:15]
           | _decoder_control.operand.uses_rs2
@@ -297,32 +302,35 @@ module RicketCore(
           & _ex_mem_pipe_egress_out.bits.rd == _pipe_stage_egress_out.bits.instruction[11:7]))
     | _decoder_control.operand.uses_rs1
     & (|(_pipe_stage_egress_out.bits.instruction[19:15]))
-    & (_GEN_31[_pipe_stage_egress_out.bits.instruction[19:15]] | _GEN_5
+    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[19:15]] | _GEN_5
        & _GEN_4 == _pipe_stage_egress_out.bits.instruction[19:15])
     & ~(_GEN_0 & _GEN == _pipe_stage_egress_out.bits.instruction[19:15])
     | _decoder_control.operand.uses_rs2
     & (|(_pipe_stage_egress_out.bits.instruction[24:20]))
-    & (_GEN_31[_pipe_stage_egress_out.bits.instruction[24:20]] | _GEN_5
+    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[24:20]] | _GEN_5
        & _GEN_4 == _pipe_stage_egress_out.bits.instruction[24:20])
     & ~(_GEN_0 & _GEN == _pipe_stage_egress_out.bits.instruction[24:20])
     | _decoder_control.writeback.enable
     & (|(_pipe_stage_egress_out.bits.instruction[11:7]))
-    & (_GEN_31[_pipe_stage_egress_out.bits.instruction[11:7]] | _GEN_5
+    & (_GEN_32[_pipe_stage_egress_out.bits.instruction[11:7]] | _GEN_5
        & _GEN_4 == _pipe_stage_egress_out.bits.instruction[11:7])
     & ~(_GEN_0 & _GEN == _pipe_stage_egress_out.bits.instruction[11:7])
     | _id_ex_pipe_egress_out.valid
     & ((|_id_ex_pipe_egress_out.bits.system.csr)
-       | (|_id_ex_pipe_egress_out.bits.system.action)) | _ex_mem_pipe_egress_out.valid
+       | (|_id_ex_pipe_egress_out.bits.system.action)
+       | (|_id_ex_pipe_egress_out.bits.fence.action)) | _ex_mem_pipe_egress_out.valid
     & ((|_ex_mem_pipe_egress_out.bits.system.csr)
-       | (|_ex_mem_pipe_egress_out.bits.system.action)) | _mem_wb_pipe_egress_out.valid
+       | (|_ex_mem_pipe_egress_out.bits.system.action)
+       | (|_ex_mem_pipe_egress_out.bits.fence.action)) | _mem_wb_pipe_egress_out.valid
     & ((|_mem_wb_pipe_egress_out.bits.system.csr)
-       | (|_mem_wb_pipe_egress_out.bits.system.action))
-    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action))
-    & (_GEN_33 | _GEN_36 | _mem_wb_pipe_egress_out.valid & _GEN_40
+       | (|_mem_wb_pipe_egress_out.bits.system.action)
+       | (|_mem_wb_pipe_egress_out.bits.fence.action))
+    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action) | _GEN_42)
+    & (_GEN_34 | _GEN_37 | _mem_wb_pipe_egress_out.valid & _GEN_41
        & _mem_wb_pipe_egress_out.bits.write_enable | (|_scoreboard_busy) | _GEN_5)
-    | _GEN_19 | _GEN_10;
-  assign _GEN_15 = _GEN_14 & ~_GEN_41;
-  wire DecodeExecute                 _GEN_42 =
+    | _GEN_42 & ~data_access_in.drained | _GEN_20 | _GEN_10;
+  assign _GEN_15 = _GEN_14 & ~_GEN_43;
+  wire DecodeExecute                 _GEN_44 =
     '{pc: _pipe_stage_egress_out.bits.pc,
       instruction: _pipe_stage_egress_out.bits.instruction,
       alu_control: _decoder_control.alu,
@@ -337,103 +345,105 @@ module RicketCore(
       writeback_enable: _decoder_control.writeback.enable,
       writeback_source: _decoder_control.writeback.source,
       system: _decoder_control.system,
+      fence: _decoder_control.fence,
       illegal: (~_decoder_valid),
-      immediate: _GEN_30[_decoder_control.operand.immediate],
+      immediate: _GEN_31[_decoder_control.operand.immediate],
       rs1: (_pipe_stage_egress_out.bits.instruction[19:15]),
       rs2: (_pipe_stage_egress_out.bits.instruction[24:20]),
       rd: (_pipe_stage_egress_out.bits.instruction[11:7]),
       rs1_value: _registers_read_data_1,
       rs2_value: _registers_read_data_2};
   assign _GEN_14 = _id_ex_pipe_ingress_out.ready;
-  wire [63:0]                        _GEN_43 =
+  wire [63:0]                        _GEN_45 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs1
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs1
           ? _GEN_1
           : _id_ex_pipe_egress_out.bits.rs1_value;
-  wire [63:0]                        _GEN_44 =
+  wire [63:0]                        _GEN_46 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs2
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs2
           ? _GEN_1
           : _id_ex_pipe_egress_out.bits.rs2_value;
-  wire [63:0]                        _GEN_45 =
-    _GEN_43 + _id_ex_pipe_egress_out.bits.immediate;
+  wire [63:0]                        _GEN_47 =
+    _GEN_45 + _id_ex_pipe_egress_out.bits.immediate;
   assign _GEN_13 =
     _id_ex_pipe_egress_out.bits.target_from_rs1
-      ? {_GEN_45[63:1], 1'h0}
+      ? {_GEN_47[63:1], 1'h0}
       : _id_ex_pipe_egress_out.bits.pc + _id_ex_pipe_egress_out.bits.immediate;
-  wire                               _GEN_46 =
+  wire                               _GEN_48 =
     |_id_ex_pipe_egress_out.bits.memory_operation;
-  wire                               _GEN_47 =
-    _id_ex_pipe_egress_out.bits.illegal | _GEN_46
+  wire                               _GEN_49 =
+    _id_ex_pipe_egress_out.bits.illegal | _GEN_48
     & ~(_id_ex_pipe_egress_out.bits.memory_width == 2'h0
         | (_id_ex_pipe_egress_out.bits.memory_width == 2'h1
              ? ~(_alu_result[0])
              : _id_ex_pipe_egress_out.bits.memory_width == 2'h2
                  ? _alu_result[1:0] == 2'h0
                  : _alu_result[2:0] == 3'h0));
-  wire                               _GEN_48 =
+  wire                               _GEN_50 =
     _branch_resolver_result_out.bits.taken & (|(_GEN_13[1:0]));
-  wire                               _GEN_49 = _GEN_47 | _GEN_48;
-  wire                               _GEN_50 = |_mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_51 =
-    _mem_wb_pipe_egress_out.valid & _GEN_39 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_50;
-  wire RicketMultiplyIssue           _GEN_52 =
-    '{left: _GEN_43,
-      right: _GEN_44,
+  wire                               _GEN_51 = _GEN_49 | _GEN_50;
+  wire                               _GEN_52 = |_mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_53 =
+    _mem_wb_pipe_egress_out.valid & _GEN_40 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_52;
+  wire RicketMultiplyIssue           _GEN_54 =
+    '{left: _GEN_45,
+      right: _GEN_46,
       control: _id_ex_pipe_egress_out.bits.multiply_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire BranchResolverRequest         _GEN_53 =
-    '{left: _GEN_43,
-      right: _GEN_44,
+  wire BranchResolverRequest         _GEN_55 =
+    '{left: _GEN_45,
+      right: _GEN_46,
       control: _fork_stage_egress_0_out.bits.branch_control};
-  wire                               _GEN_54 = _GEN_46 & ~_GEN_47;
-  wire RicketDataReq                 _GEN_55 =
+  wire                               _GEN_56 = _GEN_48 & ~_GEN_49;
+  wire RicketDataReq                 _GEN_57 =
     '{address: _alu_result,
       write: (_fork_stage_egress_1_out.bits.memory_operation == 2'h2),
       width: _fork_stage_egress_1_out.bits.memory_width,
       unsigned_0: _fork_stage_egress_1_out.bits.memory_unsigned,
-      data: _GEN_44,
+      data: _GEN_46,
       tag:
         (_fork_stage_egress_1_out.bits.memory_operation == 2'h1
            ? _fork_stage_egress_1_out.bits.rd
            : 5'h0)};
   assign _GEN_12 = _GEN_11.ready;
   assign _GEN_11 = data_access_in.request;
-  wire ExecuteMemory                 _GEN_56 =
+  wire ExecuteMemory                 _GEN_58 =
     '{pc: _fork_stage_egress_3_out.bits.pc,
       instruction: _fork_stage_egress_3_out.bits.instruction,
       writeback_source: _fork_stage_egress_3_out.bits.writeback_source,
-      writeback_enable: (_fork_stage_egress_3_out.bits.writeback_enable & ~_GEN_49),
+      writeback_enable: (_fork_stage_egress_3_out.bits.writeback_enable & ~_GEN_51),
       rd: _fork_stage_egress_3_out.bits.rd,
       result:
         (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2
            ? _id_ex_pipe_egress_out.bits.pc + 64'h4
            : _alu_result),
-      multiply_issue: _GEN_52,
+      multiply_issue: _GEN_54,
       system: _fork_stage_egress_3_out.bits.system,
+      fence: _fork_stage_egress_3_out.bits.fence,
       csr_address: (_fork_stage_egress_3_out.bits.instruction[31:20]),
       csr_source:
         (_id_ex_pipe_egress_out.bits.system.immediate
            ? {59'h0, _id_ex_pipe_egress_out.bits.instruction[19:15]}
-           : _GEN_43),
-      exception_valid: _GEN_49,
+           : _GEN_45),
+      exception_valid: _GEN_51,
       exception_cause:
         (_id_ex_pipe_egress_out.bits.illegal
            ? 64'h2
-           : _GEN_48
+           : _GEN_50
                ? 64'h0
                : {62'h1, _id_ex_pipe_egress_out.bits.memory_operation == 2'h2, 1'h0}),
       exception_value:
         (_id_ex_pipe_egress_out.bits.illegal
            ? {32'h0, _id_ex_pipe_egress_out.bits.instruction}
-           : _GEN_48 ? _GEN_13 : _alu_result)};
-  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_49;
+           : _GEN_50 ? _GEN_13 : _alu_result)};
+  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_51;
   assign _GEN_9 =
-    _branch_resolver_result_out.valid & ~_GEN_49 & _branch_resolver_result_out.bits.taken;
-  wire MemoryWriteback               _GEN_57 =
+    _branch_resolver_result_out.valid & ~_GEN_51 & _branch_resolver_result_out.bits.taken;
+  wire MemoryWriteback               _GEN_59 =
     '{pc: _ex_mem_pipe_egress_out.bits.pc,
       instruction: _ex_mem_pipe_egress_out.bits.instruction,
       writeback_source: _ex_mem_pipe_egress_out.bits.writeback_source,
@@ -442,6 +452,7 @@ module RicketCore(
       value: _ex_mem_pipe_egress_out.bits.result,
       multiply_issue: _ex_mem_pipe_egress_out.bits.multiply_issue,
       system: _ex_mem_pipe_egress_out.bits.system,
+      fence: _ex_mem_pipe_egress_out.bits.fence,
       csr_address: _ex_mem_pipe_egress_out.bits.csr_address,
       csr_source: _ex_mem_pipe_egress_out.bits.csr_source,
       exception_valid: _ex_mem_pipe_egress_out.bits.exception_valid,
@@ -449,10 +460,10 @@ module RicketCore(
       exception_value: _ex_mem_pipe_egress_out.bits.exception_value};
   assign _GEN_8 =
     _ex_mem_pipe_egress_out.valid & _ex_mem_pipe_egress_out.bits.writeback_enable
-    & ~_GEN_35 & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h4 & _GEN_38;
+    & ~_GEN_36 & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h4 & _GEN_39;
   assign _GEN_7 = _ex_mem_pipe_egress_out.bits.rd;
   assign _GEN_6 = _ex_mem_pipe_egress_out.bits.result;
-  wire RicketCsrCommit               _GEN_58 =
+  wire RicketCsrCommit               _GEN_60 =
     '{pc: _mem_wb_pipe_egress_out.bits.pc,
       instruction: _mem_wb_pipe_egress_out.bits.instruction,
       rd: _mem_wb_pipe_egress_out.bits.rd,
@@ -464,87 +475,87 @@ module RicketCore(
       exception_cause: _mem_wb_pipe_egress_out.bits.exception_cause,
       exception_value: _mem_wb_pipe_egress_out.bits.exception_value};
   assign _GEN_5 =
-    _mem_wb_pipe_egress_out.valid & _GEN_40 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_50;
+    _mem_wb_pipe_egress_out.valid & _GEN_41 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_52;
   assign _GEN_4 = _mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_59 =
+  wire                               _GEN_61 =
     _mem_wb_pipe_egress_out.bits.writeback_source != 3'h4;
   assign _GEN_3 =
-    _mem_wb_pipe_egress_out.valid & ~_GEN_40 & _GEN_59
-    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_50;
+    _mem_wb_pipe_egress_out.valid & ~_GEN_41 & _GEN_61
+    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_52;
   assign _GEN_2 = _mem_wb_pipe_egress_out.bits.rd;
   assign _GEN_1 = _mem_wb_pipe_egress_out.bits.value;
-  wire RegisterFileWrite             _GEN_60 =
+  wire RegisterFileWrite             _GEN_62 =
     '{address: _mem_wb_pipe_egress_out.bits.rd,
       data:
         (_mem_wb_pipe_egress_out.bits.writeback_source == 3'h4
            ? _csrs_writeback_value
            : _GEN_1)};
-  wire                               _GEN_61 =
+  wire                               _GEN_63 =
     data_access_in.response.valid & (|data_access_in.response.bits.tag);
-  wire RegisterFileWrite             _GEN_62 =
+  wire RegisterFileWrite             _GEN_64 =
     '{address: data_access_in.response.bits.tag, data: data_access_in.response.bits.data};
   `ifndef SYNTHESIS
     assert property (@(posedge clock) disable iff (reset)
-                       ~_GEN_61 | _arbiter_stage_ingress_0_out.ready);
+                       ~_GEN_63 | _arbiter_stage_ingress_0_out.ready);
   `endif // not def SYNTHESIS
-  wire RegisterFileWrite             _GEN_63 =
+  wire RegisterFileWrite             _GEN_65 =
     '{address: _multiplier_completion_out.bits.rd,
       data: _multiplier_completion_out.bits.value};
   assign _GEN_0 = _arbiter_stage_egress_out.valid;
   assign _GEN = _arbiter_stage_egress_out.bits.address;
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_64 =
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_66 =
     '{valid: _GEN_0, bits: _GEN};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_65 =
-    '{valid: _multiplier_completion_out.valid, bits: _GEN_63};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_66 =
-    '{valid: _GEN_61, bits: _GEN_62};
-  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_67 =
-    '{valid: _GEN_51, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_67 =
+    '{valid: _multiplier_completion_out.valid, bits: _GEN_65};
   wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_68 =
+    '{valid: _GEN_63, bits: _GEN_64};
+  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_69 =
+    '{valid: _GEN_53, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_70 =
     '{valid:
-        (_mem_wb_pipe_egress_out.valid & ~_GEN_40
-         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_59 | _csrs_writeback_valid)),
-      bits: _GEN_60};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_69 =
+        (_mem_wb_pipe_egress_out.valid & ~_GEN_41
+         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_61 | _csrs_writeback_valid)),
+      bits: _GEN_62};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_71 =
     '{valid: _GEN_5, bits: _mem_wb_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; RicketCsrCommit bits; } _GEN_70 =
-    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_58};
-  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_71 =
-    '{valid: _ex_mem_pipe_egress_out.valid, bits: _GEN_57};
-  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_72 =
-    '{valid: _fork_stage_egress_3_out.valid, bits: _GEN_56};
-  wire struct packed {logic valid; RicketDataReq bits; } _GEN_73 =
-    '{valid: (_fork_stage_egress_1_out.valid & _GEN_54), bits: _GEN_55};
-  wire struct packed {logic ready; } _GEN_74 = '{ready: (~_GEN_54 | _GEN_12)};
-  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_75 =
-    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_53};
-  wire struct packed {logic ready; } _GEN_76 =
+  wire struct packed {logic valid; RicketCsrCommit bits; } _GEN_72 =
+    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_60};
+  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_73 =
+    '{valid: _ex_mem_pipe_egress_out.valid, bits: _GEN_59};
+  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_74 =
+    '{valid: _fork_stage_egress_3_out.valid, bits: _GEN_58};
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN_75 =
+    '{valid: (_fork_stage_egress_1_out.valid & _GEN_56), bits: _GEN_57};
+  wire struct packed {logic ready; } _GEN_76 = '{ready: (~_GEN_56 | _GEN_12)};
+  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_77 =
+    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_55};
+  wire struct packed {logic ready; } _GEN_78 =
     '{ready:
-        (~(_GEN_32 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_37)
+        (~(_GEN_33 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_38)
          | _multiplier_available
-         & ~(_ex_mem_pipe_egress_out.valid & _GEN_34
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_38) & ~_GEN_51)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_77 =
-    '{valid: (_GEN_28 & ~_GEN_41), bits: _GEN_42};
-  wire struct packed {logic ready; } _GEN_78 = '{ready: (_GEN_20 | _GEN_15)};
-  wire struct packed {logic valid; FetchDecode bits; } _GEN_79 =
+         & ~(_ex_mem_pipe_egress_out.valid & _GEN_35
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_39) & ~_GEN_53)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_79 =
+    '{valid: (_GEN_29 & ~_GEN_43), bits: _GEN_44};
+  wire struct packed {logic ready; } _GEN_80 = '{ready: (_GEN_21 | _GEN_15)};
+  wire struct packed {logic valid; FetchDecode bits; } _GEN_81 =
     '{valid:
-        (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_20),
-      bits: _GEN_27};
-  wire struct packed {logic ready; } _GEN_80 =
+        (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_21),
+      bits: _GEN_28};
+  wire struct packed {logic ready; } _GEN_82 =
     '{ready: (_GEN_16 & instruction_access_in.response.valid)};
-  wire struct packed {logic ready; } _GEN_81 =
+  wire struct packed {logic ready; } _GEN_83 =
     '{ready: (_GEN_16 & _fetch_pcs_egress_out.valid)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_82 =
-    '{valid: (_GEN_25 & instruction_access_in.request.ready), bits: fetch_pc};
-  wire RicketInstructionReq          _GEN_83 = '{address: fetch_pc};
-  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_84 =
-    '{valid: _GEN_26, bits: _GEN_83};
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_84 =
+    '{valid: (_GEN_26 & instruction_access_in.request.ready), bits: fetch_pc};
+  wire RicketInstructionReq          _GEN_85 = '{address: fetch_pc};
+  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_86 =
+    '{valid: _GEN_27, bits: _GEN_85};
   Pipe id_ex_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_77),
+    .ingress_in  (_GEN_79),
     .egress_in   (_fork_stage_ingress_out),
     .ingress_out (_id_ex_pipe_ingress_out),
     .egress_out  (_id_ex_pipe_egress_out)
@@ -552,13 +563,13 @@ module RicketCore(
   ValidPipe ex_mem_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_72),
+    .ingress_in (_GEN_74),
     .egress_out (_ex_mem_pipe_egress_out)
   );
   ValidPipe_1 mem_wb_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_71),
+    .ingress_in (_GEN_73),
     .egress_out (_mem_wb_pipe_egress_out)
   );
   RicketInstructionDecoder decoder (
@@ -571,7 +582,7 @@ module RicketCore(
     .reset          (reset),
     .read_address_1 (_pipe_stage_egress_out.bits.instruction[19:15]),
     .read_address_2 (_pipe_stage_egress_out.bits.instruction[24:20]),
-    .writes_0_in    (_GEN_68),
+    .writes_0_in    (_GEN_70),
     .writes_1_in    (_arbiter_stage_egress_out),
     .read_data_1    (_registers_read_data_1),
     .read_data_2    (_registers_read_data_2)
@@ -580,22 +591,22 @@ module RicketCore(
     .left
       (_id_ex_pipe_egress_out.bits.operand_left == 2'h1
          ? _id_ex_pipe_egress_out.bits.pc
-         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_43),
+         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_45),
     .right
       (_id_ex_pipe_egress_out.bits.operand_right
          ? _id_ex_pipe_egress_out.bits.immediate
-         : _GEN_44),
+         : _GEN_46),
     .control (_id_ex_pipe_egress_out.bits.alu_control),
     .result  (_alu_result)
   );
   BranchResolver branch_resolver (
-    .request_in (_GEN_75),
+    .request_in (_GEN_77),
     .result_out (_branch_resolver_result_out)
   );
   RicketMultiplier multiplier (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_67),
+    .issue_in       (_GEN_69),
     .completion_in  (_arbiter_stage_ingress_1_out),
     .completion_out (_multiplier_completion_out),
     .available      (_multiplier_available)
@@ -603,14 +614,14 @@ module RicketCore(
   Scoreboard scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_69),
-    .clear_in (_GEN_64),
+    .set_in   (_GEN_71),
+    .clear_in (_GEN_66),
     .busy     (_scoreboard_busy)
   );
   RicketCsrFile csrs (
     .clock           (clock),
     .reset           (reset),
-    .commit_in       (_GEN_70),
+    .commit_in       (_GEN_72),
     .redirect_out    (_csrs_redirect_out),
     .writeback_valid (_csrs_writeback_valid),
     .writeback_value (_csrs_writeback_value),
@@ -619,9 +630,9 @@ module RicketCore(
   );
   Queue fetch_pcs (
     .clock       (clock),
-    .reset       (reset | _GEN_24),
-    .ingress_in  (_GEN_82),
-    .egress_in   (_GEN_80),
+    .reset       (reset | _GEN_25),
+    .ingress_in  (_GEN_84),
+    .egress_in   (_GEN_82),
     .ingress_out (_fetch_pcs_ingress_out),
     .egress_out  (_fetch_pcs_egress_out),
     .count       (/* unused */)
@@ -629,16 +640,16 @@ module RicketCore(
   Pipe_1 pipe_stage (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_79),
-    .egress_in   (_GEN_78),
+    .ingress_in  (_GEN_81),
+    .egress_in   (_GEN_80),
     .ingress_out (_pipe_stage_ingress_out),
     .egress_out  (_pipe_stage_egress_out)
   );
   AtomicFork fork_stage (
     .ingress_in   (_id_ex_pipe_egress_out),
     .egress_0_in  (_GEN_17),
-    .egress_1_in  (_GEN_74),
-    .egress_2_in  (_GEN_76),
+    .egress_1_in  (_GEN_76),
+    .egress_2_in  (_GEN_78),
     .egress_3_in  (_GEN_17),
     .ingress_out  (_fork_stage_ingress_out),
     .egress_0_out (_fork_stage_egress_0_out),
@@ -647,8 +658,8 @@ module RicketCore(
     .egress_3_out (_fork_stage_egress_3_out)
   );
   Arbiter arbiter_stage (
-    .ingress_0_in  (_GEN_66),
-    .ingress_1_in  (_GEN_65),
+    .ingress_0_in  (_GEN_68),
+    .ingress_1_in  (_GEN_67),
     .egress_in     (_GEN_17),
     .ingress_0_out (_arbiter_stage_ingress_0_out),
     .ingress_1_out (_arbiter_stage_ingress_1_out),
@@ -662,21 +673,24 @@ module RicketCore(
       fetch_pc <= 64'h0;
     end
     else begin
-      faulted <= _GEN_23 | faulted;
-      started <= _GEN_22 | started;
+      faulted <= _GEN_24 | faulted;
+      started <= _GEN_23 | started;
       fetch_pc <=
-        _GEN_18
-          ? (_csrs_redirect_out.valid ? _csrs_redirect_out.bits : _GEN_13)
-          : _GEN_22
+        _GEN_19
+          ? (_csrs_redirect_out.valid
+               ? _csrs_redirect_out.bits
+               : _GEN_18 ? _mem_wb_pipe_egress_out.bits.pc + 64'h4 : _GEN_13)
+          : _GEN_23
               ? start_in.bits
-              : _GEN_26 & instruction_access_in.request.ready
+              : _GEN_27 & instruction_access_in.request.ready
                   ? fetch_pc + 64'h4
                   : fetch_pc;
     end
   end // always @(posedge)
-  assign start_out = '{ready: _GEN_21};
-  assign instruction_access_out = '{flush: _GEN_24, request: _GEN_84, response: _GEN_81};
-  assign data_access_out = '{request: _GEN_73};
+  assign start_out = '{ready: _GEN_22};
+  assign instruction_access_out =
+    '{flush: _GEN_25, invalidate_all: _GEN_18, request: _GEN_86, response: _GEN_83};
+  assign data_access_out = '{request: _GEN_75};
   assign fault = faulted;
 endmodule
 
@@ -755,7 +769,7 @@ module RicketInstructionDecoder(
   output RicketControl control
 );
 
-  logic [43:0]       __rhdl_decode_240_result;
+  logic [45:0]       __rhdl_decode_240_result;
   always_comb begin
     automatic logic [1:0] _GEN;
     automatic logic [4:0] _GEN_0;
@@ -774,16 +788,16 @@ module RicketInstructionDecoder(
     casez (instruction)
       32'bzzzzzzzzzzzzzzzzzzzzzzzzz0110111:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h58, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h58, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzzzzzzzzzz0010111:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h38, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h38, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzzzzzzzzzz1101111:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h0, _GEN_3, 5'h17, _GEN_3, 3'h0, _GEN_1, 6'h28, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h0, _GEN_3, 5'h17, _GEN_3, 3'h0, _GEN_1, 6'h28, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz1100111:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h2, _GEN_3, 5'h7, _GEN_3, 3'h4, _GEN_1, 6'h28, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h2, _GEN_3, 5'h7, _GEN_3, 3'h4, _GEN_1, 6'h28, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz1100011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -798,7 +812,7 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h0};
+           5'h0};
       32'bzzzzzzzzzzzzzzzzz001zzzzz1100011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -813,100 +827,100 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h0};
+           5'h0};
       32'bzzzzzzzzzzzzzzzzz100zzzzz1100011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h390, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h390, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz101zzzzz1100011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h398, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h398, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz110zzzzz1100011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h380, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h380, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz111zzzzz1100011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h388, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 2'h3, _GEN_3, 11'h388, _GEN_1, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'h8, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'h8, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz001zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'hA, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hA, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz010zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'hC, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hC, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz100zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'h9, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'h9, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz101zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'hB, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hB, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz110zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'hD, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hD, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz011zzzzz0000011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 5'hE, _GEN_4, 6'h24, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 5'hE, _GEN_4, 6'h24, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz0100011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h194, _GEN_0, 4'h8, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'h8, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz001zzzzz0100011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h194, _GEN_0, 4'h9, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'h9, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz010zzzzz0100011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h194, _GEN_0, 4'hA, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'hA, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz011zzzzz0100011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h194, _GEN_0, 4'hB, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h194, _GEN_0, 4'hB, _GEN_0, 1'h0, _GEN_3, 2'h0, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz0010011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz010zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h44, 1'bx, 1'h1, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h44, 1'bx, 1'h1, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz011zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h44, 1'bx, 1'h0, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h44, 1'bx, 1'h0, _GEN, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz100zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h48, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h48, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz110zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h50, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h50, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz111zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h60, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h60, _GEN_4, 9'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b000000zzzzzzzzzzz001zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h42, _GEN, 11'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, _GEN, 11'h112, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b000000zzzzzzzzzzz101zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 12'h512, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 12'h512, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b010000zzzzzzzzzzz101zzzzz0010011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 12'hD12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 12'hD12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz0011011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 10'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 10'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz001zzzzz0011011:
         __rhdl_decode_240_result =
-          {7'h42, _GEN, 11'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, _GEN, 11'h312, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz101zzzzz0011011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 12'h712, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 12'h712, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0100000zzzzzzzzzz101zzzzz0011011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 12'hF12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 12'hF12, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz000zzzzz0110011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0100000zzzzzzzzzz000zzzzz0110011:
         __rhdl_decode_240_result =
-          {8'h83, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h83, _GEN, 6'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz001zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h42, _GEN, 7'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, _GEN, 7'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz010zzzzz0110011:
         __rhdl_decode_240_result =
           {7'h44,
@@ -921,7 +935,7 @@ module RicketInstructionDecoder(
            _GEN_1,
            6'h20,
            1'bx,
-           3'h0};
+           5'h0};
       32'b0000000zzzzzzzzzz011zzzzz0110011:
         __rhdl_decode_240_result =
           {7'h44,
@@ -936,37 +950,37 @@ module RicketInstructionDecoder(
            _GEN_1,
            6'h20,
            1'bx,
-           3'h0};
+           5'h0};
       32'b0000000zzzzzzzzzz100zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h48, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h48, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz101zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 8'h58, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 8'h58, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0100000zzzzzzzzzz101zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 8'hD8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 8'hD8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz110zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h50, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h50, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz111zzzzz0110011:
         __rhdl_decode_240_result =
-          {7'h60, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h60, _GEN_4, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz000zzzzz0111011:
         __rhdl_decode_240_result =
-          {8'h82, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h82, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0100000zzzzzzzzzz000zzzzz0111011:
         __rhdl_decode_240_result =
-          {8'h83, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {8'h83, _GEN, 6'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz001zzzzz0111011:
         __rhdl_decode_240_result =
-          {7'h42, _GEN, 7'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, _GEN, 7'h38, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0000000zzzzzzzzzz101zzzzz0111011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 8'h78, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 8'h78, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'b0100000zzzzzzzzzz101zzzzz0111011:
         __rhdl_decode_240_result =
-          {7'h42, 1'bx, 8'hF8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 3'h0};
+          {7'h42, 1'bx, 8'hF8, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_1, 6'h20, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz000zzzzz0001111:
         __rhdl_decode_240_result =
           {1'h1,
@@ -981,7 +995,7 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h0};
+           5'h1};
       32'b00000000000000000000000001110011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -996,7 +1010,7 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h1};
+           5'h4};
       32'b00000000000100000000000001110011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -1011,40 +1025,55 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h2};
+           5'h8};
       32'b0000001zzzzzzzzzz000zzzzz0110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h2C, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h2C, 1'bx, 5'h0};
       32'b0000001zzzzzzzzzz001zzzzz0110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h3AC, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h3AC, 1'bx, 5'h0};
       32'b0000001zzzzzzzzzz010zzzzz0110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h2AC, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'h2AC, 1'bx, 5'h0};
       32'b0000001zzzzzzzzzz011zzzzz0110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'hAC, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_3, 10'hAC, 1'bx, 5'h0};
       32'b0000001zzzzzzzzzz000zzzzz0111011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h6C, 1'bx, 3'h0};
+          {1'h1, _GEN_2, 5'h18, _GEN_3, 1'h0, _GEN_0, 2'h0, _GEN_0, 8'h6C, 1'bx, 5'h0};
       32'bzzzzzzzzzzzzzzzzz001zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h310};
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hC40};
       32'bzzzzzzzzzzzzzzzzz010zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h320};
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hC80};
       32'bzzzzzzzzzzzzzzzzz011zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h330};
+          {1'h1, _GEN_2, 2'h2, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hCC0};
       32'bzzzzzzzzzzzzzzzzz101zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h318};
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hC60};
       32'bzzzzzzzzzzzzzzzzz110zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h328};
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hCA0};
       32'bzzzzzzzzzzzzzzzzz111zzzzz1110011:
         __rhdl_decode_240_result =
-          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 10'h338};
+          {1'h1, _GEN_2, 2'h0, _GEN_5, 1'h0, _GEN_0, 2'h0, _GEN_1, 12'hCE0};
+      32'bzzzzzzzzzzzzzzzzz001zzzzz0001111:
+        __rhdl_decode_240_result =
+          {1'h1,
+           _GEN_2,
+           2'h0,
+           _GEN_5,
+           1'h0,
+           _GEN_0,
+           2'h0,
+           _GEN_1,
+           1'h0,
+           _GEN_3,
+           2'h0,
+           1'bx,
+           5'h2};
       32'b00110000001000000000000001110011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -1059,7 +1088,7 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h3};
+           5'hC};
       32'b00010000001000000000000001110011:
         __rhdl_decode_240_result =
           {1'h1,
@@ -1074,9 +1103,9 @@ module RicketInstructionDecoder(
            _GEN_3,
            2'h0,
            1'bx,
-           3'h4};
+           5'h10};
       default:
-        __rhdl_decode_240_result = {1'h0, {43{1'bx}}};
+        __rhdl_decode_240_result = {1'h0, {45{1'bx}}};
     endcase
   end // always_comb
   wire  DecodeResult _GEN_6 = /*cast(bit)*/__rhdl_decode_240_result;
@@ -2086,7 +2115,7 @@ endmodule
 module RicketL1ICache(
   input                                                                                                                                                                                                                                                                                                                                                                     clock,
                                                                                                                                                                                                                                                                                                                                                                             reset,
-  input  struct packed {logic flush; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                                                                                                                                                                                                                            core_in,
+  input  struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                                                                                                                                                                                                      core_in,
   input  struct packed {struct packed {logic credit; } tx_req; struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIRspFlit bits; } rx_rsp; struct packed {logic valid; CHIDatFlit bits; } rx_dat; struct packed {logic valid; CHISnpFlit bits; } rx_snp; } chi_in,
   output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                                                                                                                                                                                                                        core_out,
   output struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIReqFlit bits; } tx_req; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_rsp; struct packed {logic credit; } rx_dat; struct packed {logic credit; } rx_snp; } chi_out
@@ -2229,23 +2258,24 @@ module RicketL1ICache(
       1'h0,
       1'h0,
       1'h0};
+  wire                                 _GEN_7 = core_in.flush | core_in.invalidate_all;
   reg  [63:0]                          valid_lines;
   reg                                  refill_live;
+  reg                                  refill_installable;
   reg  [1:0]                           outstanding;
-  wire                                 _GEN_7 =
-    _responses_egress_out.valid & ~core_in.flush;
+  wire                                 _GEN_8 = _responses_egress_out.valid & ~_GEN_7;
   reg                                  transmit_request;
   reg                                  receive_ack;
-  wire                                 _GEN_8 =
+  wire                                 _GEN_9 =
     receive_ack & chi_in.rx_link_active_request;
-  wire                                 _GEN_9 = |_snoop_receiver_egress_out.bits.opcode;
-  wire                                 _GEN_10 =
-    _snoop_receiver_egress_out.valid & _GEN_9;
+  wire                                 _GEN_10 = |_snoop_receiver_egress_out.bits.opcode;
   wire                                 _GEN_11 =
-    _refill_command_out.ready & ~_lookup_egress_out.valid;
+    _snoop_receiver_egress_out.valid & _GEN_10;
   wire                                 _GEN_12 =
-    ~_GEN_9 | _GEN_11 & _protocol_responses_ingress_1_out.ready;
-  wire CHIRspFlit                      _GEN_13 =
+    _refill_command_out.ready & ~_lookup_egress_out.valid;
+  wire                                 _GEN_13 =
+    ~_GEN_10 | _GEN_12 & _protocol_responses_ingress_1_out.ready;
+  wire CHIRspFlit                      _GEN_14 =
     '{cache_line_id: (6'h0),
       trace_tag: (1'h0),
       tag_op: (2'h0),
@@ -2318,7 +2348,7 @@ module RicketL1ICache(
                          ~(~receive_ack & rn_rx_previous_ack)
                          | ~chi_in.rx_link_active_request);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_14 =
+  wire                                 _GEN_15 =
     _request_transmitter_link_out.bits.opcode == 7'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit:
@@ -2337,7 +2367,7 @@ module RicketL1ICache(
       assert property (@(posedge clock) disable iff (reset)
                          rn_tx_req_credit_balance != 2'h3);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_15 =
+  wire                                 _GEN_16 =
     chi_in.tx_link_active_ack & (transmit_request | rn_tx_previous_request);
   `ifndef SYNTHESIS
     chi_tx_req_flit_active:
@@ -2348,43 +2378,43 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_tx_req_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~chi_in.tx_req.credit | _GEN_15);
+                         ~chi_in.tx_req.credit | _GEN_16);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_16 =
+  wire                                 _GEN_17 =
     ~transmit_request & ~chi_in.tx_link_active_ack & ~reset;
-  wire                                 _GEN_17 = ~_GEN_16;
+  wire                                 _GEN_18 = ~_GEN_17;
   `ifndef SYNTHESIS
     chi_tx_req_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_17)
+      assert property (@(posedge clock) disable iff (_GEN_18)
                          rn_tx_req_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_18 =
-    ~transmit_request & chi_in.tx_link_active_ack;
   wire                                 _GEN_19 =
-    _request_transmitter_link_out.valid & _GEN_14 & ~reset;
-  wire                                 _GEN_20 = ~_GEN_19;
+    ~transmit_request & chi_in.tx_link_active_ack;
+  wire                                 _GEN_20 =
+    _request_transmitter_link_out.valid & _GEN_15 & ~reset;
+  wire                                 _GEN_21 = ~_GEN_20;
   `ifndef SYNTHESIS
     chi_tx_req_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_20) _GEN_18);
-  `endif // not def SYNTHESIS
-  wire                                 _GEN_21 =
-    ~(_request_transmitter_link_out.valid & ~_GEN_14 & ~reset);
-  `ifndef SYNTHESIS
-    chi_tx_req_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_21)
-                         _request_transmitter_link_out.bits.src_id == 7'h2);
+      assert property (@(posedge clock) disable iff (_GEN_21) _GEN_19);
   `endif // not def SYNTHESIS
   wire                                 _GEN_22 =
-    _request_transmitter_link_out.bits.opcode == 7'h1;
+    ~(_request_transmitter_link_out.valid & ~_GEN_15 & ~reset);
+  `ifndef SYNTHESIS
+    chi_tx_req_source_id:
+      assert property (@(posedge clock) disable iff (_GEN_22)
+                         _request_transmitter_link_out.bits.src_id == 7'h2);
+  `endif // not def SYNTHESIS
   wire                                 _GEN_23 =
-    _request_transmitter_link_out.bits.size_or_num_req[2:0] != 3'h7;
+    _request_transmitter_link_out.bits.opcode == 7'h1;
   wire                                 _GEN_24 =
+    _request_transmitter_link_out.bits.size_or_num_req[2:0] != 3'h7;
+  wire                                 _GEN_25 =
     _request_transmitter_link_out.valid & ~reset;
-  wire                                 _GEN_25 = ~_GEN_24;
+  wire                                 _GEN_26 = ~_GEN_25;
   `ifndef SYNTHESIS
     chi_tx_req_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_25)
-                         _GEN_14 | _GEN_22
+      assert property (@(posedge clock) disable iff (_GEN_26)
+                         _GEN_15 | _GEN_23
                          | _request_transmitter_link_out.bits.opcode == 7'h2
                          | _request_transmitter_link_out.bits.opcode == 7'h3
                          | _request_transmitter_link_out.bits.opcode == 7'h4
@@ -2466,32 +2496,32 @@ module RicketL1ICache(
                          | _request_transmitter_link_out.bits.opcode == 7'h72
                          | _request_transmitter_link_out.bits.opcode == 7'h79);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_26 = ~_GEN_24;
+  wire                                 _GEN_27 = ~_GEN_25;
   `ifndef SYNTHESIS
     chi_tx_req_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_26) _GEN_14 | _GEN_22);
+      assert property (@(posedge clock) disable iff (_GEN_27) _GEN_15 | _GEN_23);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_27 = ~_GEN_19;
+  wire                                 _GEN_28 = ~_GEN_20;
   `ifndef SYNTHESIS
     chi_tx_req_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_27)
+      assert property (@(posedge clock) disable iff (_GEN_28)
                          _request_transmitter_link_out.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_28 =
-    ~_GEN_14 & ~_request_transmitter_link_out.bits.multi_req
+  wire                                 _GEN_29 =
+    ~_GEN_15 & ~_request_transmitter_link_out.bits.multi_req
     & _request_transmitter_link_out.valid & ~reset;
-  wire                                 _GEN_29 = ~_GEN_28;
+  wire                                 _GEN_30 = ~_GEN_29;
   `ifndef SYNTHESIS
     chi_tx_req_size_reserved_zero:
-      assert property (@(posedge clock) disable iff (_GEN_29)
+      assert property (@(posedge clock) disable iff (_GEN_30)
                          _request_transmitter_link_out.bits.size_or_num_req[5:3] == 3'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_30 = ~_GEN_28;
+  wire                                 _GEN_31 = ~_GEN_29;
   `ifndef SYNTHESIS
     chi_tx_req_size_valid:
-      assert property (@(posedge clock) disable iff (_GEN_30) _GEN_23);
+      assert property (@(posedge clock) disable iff (_GEN_31) _GEN_24);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_31 =
+  wire                                 _GEN_32 =
     _requester_response_transmitter_link_out.bits.opcode == 5'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit_0:
@@ -2520,48 +2550,48 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_tx_rsp_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~chi_in.tx_rsp.credit | _GEN_15);
+                         ~chi_in.tx_rsp.credit | _GEN_16);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_32 = ~_GEN_16;
+  wire                                 _GEN_33 = ~_GEN_17;
   `ifndef SYNTHESIS
     chi_tx_rsp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_32)
+      assert property (@(posedge clock) disable iff (_GEN_33)
                          rn_tx_rsp_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_33 =
-    _requester_response_transmitter_link_out.valid & _GEN_31 & ~reset;
-  wire                                 _GEN_34 = ~_GEN_33;
+  wire                                 _GEN_34 =
+    _requester_response_transmitter_link_out.valid & _GEN_32 & ~reset;
+  wire                                 _GEN_35 = ~_GEN_34;
   `ifndef SYNTHESIS
     chi_tx_rsp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_34) _GEN_18);
-  `endif // not def SYNTHESIS
-  wire                                 _GEN_35 =
-    ~(_requester_response_transmitter_link_out.valid & ~_GEN_31 & ~reset);
-  `ifndef SYNTHESIS
-    chi_tx_rsp_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_35)
-                         _requester_response_transmitter_link_out.bits.src_id == 7'h2);
+      assert property (@(posedge clock) disable iff (_GEN_35) _GEN_19);
   `endif // not def SYNTHESIS
   wire                                 _GEN_36 =
-    _requester_response_transmitter_link_out.bits.opcode == 5'h1;
+    ~(_requester_response_transmitter_link_out.valid & ~_GEN_32 & ~reset);
+  `ifndef SYNTHESIS
+    chi_tx_rsp_source_id:
+      assert property (@(posedge clock) disable iff (_GEN_36)
+                         _requester_response_transmitter_link_out.bits.src_id == 7'h2);
+  `endif // not def SYNTHESIS
   wire                                 _GEN_37 =
-    _requester_response_transmitter_link_out.bits.opcode == 5'h2;
+    _requester_response_transmitter_link_out.bits.opcode == 5'h1;
   wire                                 _GEN_38 =
-    _requester_response_transmitter_link_out.bits.opcode == 5'h9;
+    _requester_response_transmitter_link_out.bits.opcode == 5'h2;
   wire                                 _GEN_39 =
+    _requester_response_transmitter_link_out.bits.opcode == 5'h9;
+  wire                                 _GEN_40 =
     _requester_response_transmitter_link_out.valid & ~reset;
-  wire                                 _GEN_40 = ~_GEN_39;
+  wire                                 _GEN_41 = ~_GEN_40;
   `ifndef SYNTHESIS
     chi_tx_rsp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_40)
-                         _GEN_31 | _GEN_36 | _GEN_37
+      assert property (@(posedge clock) disable iff (_GEN_41)
+                         _GEN_32 | _GEN_37 | _GEN_38
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h3
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h4
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h5
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h6
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h7
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h8
-                         | _GEN_38
+                         | _GEN_39
                          | _requester_response_transmitter_link_out.bits.opcode == 5'hA
                          | _requester_response_transmitter_link_out.bits.opcode == 5'hB
                          | _requester_response_transmitter_link_out.bits.opcode == 5'hC
@@ -2571,19 +2601,19 @@ module RicketL1ICache(
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h11
                          | _requester_response_transmitter_link_out.bits.opcode == 5'h14);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_41 = ~_GEN_39;
+  wire                                 _GEN_42 = ~_GEN_40;
   `ifndef SYNTHESIS
     chi_tx_rsp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_41)
-                         _GEN_31 | _GEN_37 | _GEN_36);
+      assert property (@(posedge clock) disable iff (_GEN_42)
+                         _GEN_32 | _GEN_38 | _GEN_37);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_42 = ~_GEN_33;
+  wire                                 _GEN_43 = ~_GEN_34;
   `ifndef SYNTHESIS
     chi_tx_rsp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_42)
+      assert property (@(posedge clock) disable iff (_GEN_43)
                          _requester_response_transmitter_link_out.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_43 =
+  wire                                 _GEN_44 =
     _request_data_transmitter_link_out.bits.opcode == 4'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit_1:
@@ -2611,62 +2641,62 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_tx_dat_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~chi_in.tx_dat.credit | _GEN_15);
+                         ~chi_in.tx_dat.credit | _GEN_16);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_44 = ~_GEN_16;
+  wire                                 _GEN_45 = ~_GEN_17;
   `ifndef SYNTHESIS
     chi_tx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_44)
+      assert property (@(posedge clock) disable iff (_GEN_45)
                          rn_tx_dat_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_45 =
-    _request_data_transmitter_link_out.valid & _GEN_43 & ~reset;
-  wire                                 _GEN_46 = ~_GEN_45;
+  wire                                 _GEN_46 =
+    _request_data_transmitter_link_out.valid & _GEN_44 & ~reset;
+  wire                                 _GEN_47 = ~_GEN_46;
   `ifndef SYNTHESIS
     chi_tx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_46) _GEN_18);
-  `endif // not def SYNTHESIS
-  wire                                 _GEN_47 =
-    ~(_request_data_transmitter_link_out.valid & ~_GEN_43 & ~reset);
-  `ifndef SYNTHESIS
-    chi_tx_dat_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_47)
-                         _request_data_transmitter_link_out.bits.src_id == 7'h2);
+      assert property (@(posedge clock) disable iff (_GEN_47) _GEN_19);
   `endif // not def SYNTHESIS
   wire                                 _GEN_48 =
-    _request_data_transmitter_link_out.bits.opcode == 4'h1;
+    ~(_request_data_transmitter_link_out.valid & ~_GEN_44 & ~reset);
+  `ifndef SYNTHESIS
+    chi_tx_dat_source_id:
+      assert property (@(posedge clock) disable iff (_GEN_48)
+                         _request_data_transmitter_link_out.bits.src_id == 7'h2);
+  `endif // not def SYNTHESIS
   wire                                 _GEN_49 =
-    _request_data_transmitter_link_out.bits.opcode == 4'h4;
+    _request_data_transmitter_link_out.bits.opcode == 4'h1;
   wire                                 _GEN_50 =
-    _request_data_transmitter_link_out.bits.opcode == 4'h5;
+    _request_data_transmitter_link_out.bits.opcode == 4'h4;
   wire                                 _GEN_51 =
-    _request_data_transmitter_link_out.bits.opcode == 4'h6;
+    _request_data_transmitter_link_out.bits.opcode == 4'h5;
   wire                                 _GEN_52 =
+    _request_data_transmitter_link_out.bits.opcode == 4'h6;
+  wire                                 _GEN_53 =
     _request_data_transmitter_link_out.valid & ~reset;
-  wire                                 _GEN_53 = ~_GEN_52;
+  wire                                 _GEN_54 = ~_GEN_53;
   `ifndef SYNTHESIS
     chi_tx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_53)
-                         _GEN_43 | _GEN_48
+      assert property (@(posedge clock) disable iff (_GEN_54)
+                         _GEN_44 | _GEN_49
                          | _request_data_transmitter_link_out.bits.opcode == 4'h2
                          | _request_data_transmitter_link_out.bits.opcode == 4'h3
-                         | _GEN_49 | _GEN_50 | _GEN_51
+                         | _GEN_50 | _GEN_51 | _GEN_52
                          | _request_data_transmitter_link_out.bits.opcode == 4'h7
                          | _request_data_transmitter_link_out.bits.opcode == 4'hB
                          | _request_data_transmitter_link_out.bits.opcode == 4'hC);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_54 = ~_GEN_52;
+  wire                                 _GEN_55 = ~_GEN_53;
   `ifndef SYNTHESIS
     chi_tx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_54) _GEN_43);
+      assert property (@(posedge clock) disable iff (_GEN_55) _GEN_44);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_55 = ~_GEN_45;
+  wire                                 _GEN_56 = ~_GEN_46;
   `ifndef SYNTHESIS
     chi_tx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_55)
+      assert property (@(posedge clock) disable iff (_GEN_56)
                          _request_data_transmitter_link_out.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_56 = chi_in.rx_rsp.bits.opcode == 5'h0;
+  wire                                 _GEN_57 = chi_in.rx_rsp.bits.opcode == 5'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit_2:
       assert property (@(posedge clock) disable iff (reset)
@@ -2683,7 +2713,7 @@ module RicketL1ICache(
       assert property (@(posedge clock) disable iff (reset)
                          rn_rx_rsp_credit_balance != 2'h3);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_57 =
+  wire                                 _GEN_58 =
     receive_ack & (chi_in.rx_link_active_request | rn_rx_previous_request);
   `ifndef SYNTHESIS
     chi_rx_rsp_flit_active:
@@ -2693,37 +2723,37 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_rx_rsp_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~_response_receiver_link_out.credit | _GEN_57);
+                         ~_response_receiver_link_out.credit | _GEN_58);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_58 =
+  wire                                 _GEN_59 =
     ~chi_in.rx_link_active_request & ~receive_ack & ~reset;
-  wire                                 _GEN_59 = ~_GEN_58;
+  wire                                 _GEN_60 = ~_GEN_59;
   `ifndef SYNTHESIS
     chi_rx_rsp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_59)
+      assert property (@(posedge clock) disable iff (_GEN_60)
                          rn_rx_rsp_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_60 =
+  wire                                 _GEN_61 =
     ~chi_in.rx_link_active_request & receive_ack;
-  wire                                 _GEN_61 = chi_in.rx_rsp.valid & _GEN_56 & ~reset;
-  wire                                 _GEN_62 = ~_GEN_61;
+  wire                                 _GEN_62 = chi_in.rx_rsp.valid & _GEN_57 & ~reset;
+  wire                                 _GEN_63 = ~_GEN_62;
   `ifndef SYNTHESIS
     chi_rx_rsp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_62) _GEN_60);
+      assert property (@(posedge clock) disable iff (_GEN_63) _GEN_61);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_63 =
-    ~(chi_in.rx_rsp.valid & ~_GEN_56 & ~reset);
+  wire                                 _GEN_64 =
+    ~(chi_in.rx_rsp.valid & ~_GEN_57 & ~reset);
   `ifndef SYNTHESIS
     chi_rx_rsp_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_63)
+      assert property (@(posedge clock) disable iff (_GEN_64)
                          chi_in.rx_rsp.bits.tgt_id == 7'h2);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_64 = chi_in.rx_rsp.valid & ~reset;
-  wire                                 _GEN_65 = ~_GEN_64;
+  wire                                 _GEN_65 = chi_in.rx_rsp.valid & ~reset;
+  wire                                 _GEN_66 = ~_GEN_65;
   `ifndef SYNTHESIS
     chi_rx_rsp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_65)
-                         _GEN_56 | chi_in.rx_rsp.bits.opcode == 5'h1
+      assert property (@(posedge clock) disable iff (_GEN_66)
+                         _GEN_57 | chi_in.rx_rsp.bits.opcode == 5'h1
                          | chi_in.rx_rsp.bits.opcode == 5'h2
                          | chi_in.rx_rsp.bits.opcode == 5'h3
                          | chi_in.rx_rsp.bits.opcode == 5'h4
@@ -2741,18 +2771,18 @@ module RicketL1ICache(
                          | chi_in.rx_rsp.bits.opcode == 5'h11
                          | chi_in.rx_rsp.bits.opcode == 5'h14);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_66 = ~_GEN_64;
+  wire                                 _GEN_67 = ~_GEN_65;
   `ifndef SYNTHESIS
     chi_rx_rsp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_66) _GEN_56);
+      assert property (@(posedge clock) disable iff (_GEN_67) _GEN_57);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_67 = ~_GEN_61;
+  wire                                 _GEN_68 = ~_GEN_62;
   `ifndef SYNTHESIS
     chi_rx_rsp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_67)
+      assert property (@(posedge clock) disable iff (_GEN_68)
                          chi_in.rx_rsp.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_68 = chi_in.rx_dat.bits.opcode == 4'h0;
+  wire                                 _GEN_69 = chi_in.rx_dat.bits.opcode == 4'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit_3:
       assert property (@(posedge clock) disable iff (reset)
@@ -2777,54 +2807,54 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_rx_dat_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~_response_data_receiver_link_out.credit | _GEN_57);
+                         ~_response_data_receiver_link_out.credit | _GEN_58);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_69 = ~_GEN_58;
+  wire                                 _GEN_70 = ~_GEN_59;
   `ifndef SYNTHESIS
     chi_rx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_69)
+      assert property (@(posedge clock) disable iff (_GEN_70)
                          rn_rx_dat_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_70 = chi_in.rx_dat.valid & _GEN_68 & ~reset;
-  wire                                 _GEN_71 = ~_GEN_70;
+  wire                                 _GEN_71 = chi_in.rx_dat.valid & _GEN_69 & ~reset;
+  wire                                 _GEN_72 = ~_GEN_71;
   `ifndef SYNTHESIS
     chi_rx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_71) _GEN_60);
+      assert property (@(posedge clock) disable iff (_GEN_72) _GEN_61);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_72 =
-    ~(chi_in.rx_dat.valid & ~_GEN_68 & ~reset);
+  wire                                 _GEN_73 =
+    ~(chi_in.rx_dat.valid & ~_GEN_69 & ~reset);
   `ifndef SYNTHESIS
     chi_rx_dat_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_72)
+      assert property (@(posedge clock) disable iff (_GEN_73)
                          chi_in.rx_dat.bits.tgt_id == 7'h2);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_73 = chi_in.rx_dat.bits.opcode == 4'h4;
-  wire                                 _GEN_74 = chi_in.rx_dat.valid & ~reset;
-  wire                                 _GEN_75 = ~_GEN_74;
+  wire                                 _GEN_74 = chi_in.rx_dat.bits.opcode == 4'h4;
+  wire                                 _GEN_75 = chi_in.rx_dat.valid & ~reset;
+  wire                                 _GEN_76 = ~_GEN_75;
   `ifndef SYNTHESIS
     chi_rx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_75)
-                         _GEN_68 | chi_in.rx_dat.bits.opcode == 4'h1
+      assert property (@(posedge clock) disable iff (_GEN_76)
+                         _GEN_69 | chi_in.rx_dat.bits.opcode == 4'h1
                          | chi_in.rx_dat.bits.opcode == 4'h2
-                         | chi_in.rx_dat.bits.opcode == 4'h3 | _GEN_73
+                         | chi_in.rx_dat.bits.opcode == 4'h3 | _GEN_74
                          | chi_in.rx_dat.bits.opcode == 4'h5
                          | chi_in.rx_dat.bits.opcode == 4'h6
                          | chi_in.rx_dat.bits.opcode == 4'h7
                          | chi_in.rx_dat.bits.opcode == 4'hB
                          | chi_in.rx_dat.bits.opcode == 4'hC);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_76 = ~_GEN_74;
+  wire                                 _GEN_77 = ~_GEN_75;
   `ifndef SYNTHESIS
     chi_rx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_76) _GEN_68 | _GEN_73);
+      assert property (@(posedge clock) disable iff (_GEN_77) _GEN_69 | _GEN_74);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_77 = ~_GEN_70;
+  wire                                 _GEN_78 = ~_GEN_71;
   `ifndef SYNTHESIS
     chi_rx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_77)
+      assert property (@(posedge clock) disable iff (_GEN_78)
                          chi_in.rx_dat.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_78 = chi_in.rx_snp.bits.opcode == 5'h0;
+  wire                                 _GEN_79 = chi_in.rx_snp.bits.opcode == 5'h0;
   `ifndef SYNTHESIS
     credited_transfer_has_credit_4:
       assert property (@(posedge clock) disable iff (reset)
@@ -2849,195 +2879,195 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     chi_rx_snp_credit_active:
       assert property (@(posedge clock) disable iff (reset)
-                         ~_snoop_receiver_link_out.credit | _GEN_57);
+                         ~_snoop_receiver_link_out.credit | _GEN_58);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_79 = ~_GEN_58;
+  wire                                 _GEN_80 = ~_GEN_59;
   `ifndef SYNTHESIS
     chi_rx_snp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_79)
+      assert property (@(posedge clock) disable iff (_GEN_80)
                          rn_rx_snp_credit_balance == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_80 = chi_in.rx_snp.valid & _GEN_78 & ~reset;
-  wire                                 _GEN_81 = ~_GEN_80;
+  wire                                 _GEN_81 = chi_in.rx_snp.valid & _GEN_79 & ~reset;
+  wire                                 _GEN_82 = ~_GEN_81;
   `ifndef SYNTHESIS
     chi_rx_snp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_81) _GEN_60);
+      assert property (@(posedge clock) disable iff (_GEN_82) _GEN_61);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_82 = chi_in.rx_snp.bits.opcode == 5'h11;
-  wire                                 _GEN_83 = chi_in.rx_snp.bits.opcode == 5'h12;
-  wire                                 _GEN_84 = chi_in.rx_snp.bits.opcode == 5'h13;
-  wire                                 _GEN_85 = chi_in.rx_snp.bits.opcode == 5'h14;
-  wire                                 _GEN_86 = chi_in.rx_snp.bits.opcode == 5'h16;
-  wire                                 _GEN_87 = chi_in.rx_snp.bits.opcode == 5'h17;
-  wire                                 _GEN_88 =
-    _GEN_78 | chi_in.rx_snp.bits.opcode == 5'h1 | chi_in.rx_snp.bits.opcode == 5'h2
+  wire                                 _GEN_83 = chi_in.rx_snp.bits.opcode == 5'h11;
+  wire                                 _GEN_84 = chi_in.rx_snp.bits.opcode == 5'h12;
+  wire                                 _GEN_85 = chi_in.rx_snp.bits.opcode == 5'h13;
+  wire                                 _GEN_86 = chi_in.rx_snp.bits.opcode == 5'h14;
+  wire                                 _GEN_87 = chi_in.rx_snp.bits.opcode == 5'h16;
+  wire                                 _GEN_88 = chi_in.rx_snp.bits.opcode == 5'h17;
+  wire                                 _GEN_89 =
+    _GEN_79 | chi_in.rx_snp.bits.opcode == 5'h1 | chi_in.rx_snp.bits.opcode == 5'h2
     | chi_in.rx_snp.bits.opcode == 5'h3 | chi_in.rx_snp.bits.opcode == 5'h4
     | chi_in.rx_snp.bits.opcode == 5'h5 | chi_in.rx_snp.bits.opcode == 5'h6
     | chi_in.rx_snp.bits.opcode == 5'h7 | chi_in.rx_snp.bits.opcode == 5'h8
     | chi_in.rx_snp.bits.opcode == 5'h9 | chi_in.rx_snp.bits.opcode == 5'hA
     | chi_in.rx_snp.bits.opcode == 5'hB | chi_in.rx_snp.bits.opcode == 5'hC
-    | chi_in.rx_snp.bits.opcode == 5'hD | chi_in.rx_snp.bits.opcode == 5'h10 | _GEN_82
-    | _GEN_83 | _GEN_84 | _GEN_85 | chi_in.rx_snp.bits.opcode == 5'h15 | _GEN_86
-    | _GEN_87;
-  wire                                 _GEN_89 = chi_in.rx_snp.valid & ~reset;
-  wire                                 _GEN_90 = ~_GEN_89;
+    | chi_in.rx_snp.bits.opcode == 5'hD | chi_in.rx_snp.bits.opcode == 5'h10 | _GEN_83
+    | _GEN_84 | _GEN_85 | _GEN_86 | chi_in.rx_snp.bits.opcode == 5'h15 | _GEN_87
+    | _GEN_88;
+  wire                                 _GEN_90 = chi_in.rx_snp.valid & ~reset;
+  wire                                 _GEN_91 = ~_GEN_90;
   `ifndef SYNTHESIS
     chi_rx_snp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_90) _GEN_88);
+      assert property (@(posedge clock) disable iff (_GEN_91) _GEN_89);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_91 = ~_GEN_89;
+  wire                                 _GEN_92 = ~_GEN_90;
   `ifndef SYNTHESIS
     chi_rx_snp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_91) _GEN_88);
+      assert property (@(posedge clock) disable iff (_GEN_92) _GEN_89);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_92 = ~_GEN_80;
+  wire                                 _GEN_93 = ~_GEN_81;
   `ifndef SYNTHESIS
     chi_rx_snp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_92)
+      assert property (@(posedge clock) disable iff (_GEN_93)
                          chi_in.rx_snp.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
   CHICoherentReadTransaction[1:0]      reads;
   CHISnoopTransaction[1:0]             snoops;
-  wire                                 _GEN_93 =
-    _request_transmitter_link_out.valid & (|_request_transmitter_link_out.bits.opcode);
   wire                                 _GEN_94 =
-    _requester_response_transmitter_link_out.valid & _GEN_37;
-  wire                                 _GEN_95 = chi_in.rx_dat.valid & _GEN_73;
-  wire [3:0]                           _GEN_96 = 4'h1 << chi_in.rx_dat.bits.data_id;
-  wire                                 _GEN_97 =
-    chi_in.rx_snp.valid & (|chi_in.rx_snp.bits.opcode);
+    _request_transmitter_link_out.valid & (|_request_transmitter_link_out.bits.opcode);
+  wire                                 _GEN_95 =
+    _requester_response_transmitter_link_out.valid & _GEN_38;
+  wire                                 _GEN_96 = chi_in.rx_dat.valid & _GEN_74;
+  wire [3:0]                           _GEN_97 = 4'h1 << chi_in.rx_dat.bits.data_id;
   wire                                 _GEN_98 =
-    _requester_response_transmitter_link_out.valid & (_GEN_36 | _GEN_38);
+    chi_in.rx_snp.valid & (|chi_in.rx_snp.bits.opcode);
   wire                                 _GEN_99 =
-    _request_data_transmitter_link_out.valid & (_GEN_48 | _GEN_50 | _GEN_51);
+    _requester_response_transmitter_link_out.valid & (_GEN_37 | _GEN_39);
   wire                                 _GEN_100 =
-    _request_data_transmitter_link_out.valid & _GEN_49;
-  wire [1:0]                           _GEN_101 =
+    _request_data_transmitter_link_out.valid & (_GEN_49 | _GEN_51 | _GEN_52);
+  wire                                 _GEN_101 =
+    _request_data_transmitter_link_out.valid & _GEN_50;
+  wire [1:0]                           _GEN_102 =
     {{reads[1'h1].phase == 2'h0}, {reads[1'h0].phase == 2'h0}};
-  wire                                 _GEN_102 = |_GEN_101;
-  wire                                 _GEN_103 = _GEN_101[1] & ~(_GEN_101[0]);
-  wire                                 _GEN_104 = |reads[1'h0].phase;
-  wire                                 _GEN_105 = |reads[1'h1].phase;
-  wire                                 _GEN_106 =
-    |{_GEN_104 & reads[1'h0].txn_id == _request_transmitter_link_out.bits.txn_id,
-      _GEN_105 & reads[1'h1].txn_id == _request_transmitter_link_out.bits.txn_id};
-  wire                                 _GEN_107 = reads[1'h0].phase == 2'h1;
-  wire                                 _GEN_108 =
+  wire                                 _GEN_103 = |_GEN_102;
+  wire                                 _GEN_104 = _GEN_102[1] & ~(_GEN_102[0]);
+  wire                                 _GEN_105 = |reads[1'h0].phase;
+  wire                                 _GEN_106 = |reads[1'h1].phase;
+  wire                                 _GEN_107 =
+    |{_GEN_105 & reads[1'h0].txn_id == _request_transmitter_link_out.bits.txn_id,
+      _GEN_106 & reads[1'h1].txn_id == _request_transmitter_link_out.bits.txn_id};
+  wire                                 _GEN_108 = reads[1'h0].phase == 2'h1;
+  wire                                 _GEN_109 =
     reads[1'h0].txn_id == chi_in.rx_dat.bits.txn_id;
-  wire                                 _GEN_109 = reads[1'h1].phase == 2'h1;
-  wire                                 _GEN_110 =
+  wire                                 _GEN_110 = reads[1'h1].phase == 2'h1;
+  wire                                 _GEN_111 =
     reads[1'h1].txn_id == chi_in.rx_dat.bits.txn_id;
-  wire                                 _GEN_111 = reads[1'h0].received_data_ids == 4'h0;
-  wire                                 _GEN_112 = reads[1'h1].received_data_ids == 4'h0;
-  wire                                 _GEN_113 = |reads[1'h0].received_data_ids;
-  wire                                 _GEN_114 =
-    reads[1'h0].comp_ack_txn_id == _requester_response_transmitter_link_out.bits.txn_id;
+  wire                                 _GEN_112 = reads[1'h0].received_data_ids == 4'h0;
+  wire                                 _GEN_113 = reads[1'h1].received_data_ids == 4'h0;
+  wire                                 _GEN_114 = |reads[1'h0].received_data_ids;
   wire                                 _GEN_115 =
+    reads[1'h0].comp_ack_txn_id == _requester_response_transmitter_link_out.bits.txn_id;
+  wire                                 _GEN_116 =
     reads[1'h0].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
-  wire                                 _GEN_116 = |reads[1'h1].received_data_ids;
-  wire                                 _GEN_117 =
-    reads[1'h1].comp_ack_txn_id == _requester_response_transmitter_link_out.bits.txn_id;
+  wire                                 _GEN_117 = |reads[1'h1].received_data_ids;
   wire                                 _GEN_118 =
+    reads[1'h1].comp_ack_txn_id == _requester_response_transmitter_link_out.bits.txn_id;
+  wire                                 _GEN_119 =
     reads[1'h1].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
-  wire                                 _GEN_119 = _GEN_93 & ~reset;
-  wire                                 _GEN_120 = ~_GEN_119;
+  wire                                 _GEN_120 = _GEN_94 & ~reset;
+  wire                                 _GEN_121 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_request_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_120) _GEN_22);
+      assert property (@(posedge clock) disable iff (_GEN_121) _GEN_23);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_121 = ~_GEN_119;
+  wire                                 _GEN_122 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_single_request:
-      assert property (@(posedge clock) disable iff (_GEN_121)
+      assert property (@(posedge clock) disable iff (_GEN_122)
                          ~_request_transmitter_link_out.bits.multi_req);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_122 = ~_GEN_119;
+  wire                                 _GEN_123 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_size_valid:
-      assert property (@(posedge clock) disable iff (_GEN_122) _GEN_23);
+      assert property (@(posedge clock) disable iff (_GEN_123) _GEN_24);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_123 = ~_GEN_119;
+  wire                                 _GEN_124 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_expects_comp_ack:
-      assert property (@(posedge clock) disable iff (_GEN_123)
+      assert property (@(posedge clock) disable iff (_GEN_124)
                          _request_transmitter_link_out.bits.exp_comp_ack);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_124 = ~_GEN_119;
+  wire                                 _GEN_125 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_txn_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_124) ~_GEN_106);
+      assert property (@(posedge clock) disable iff (_GEN_125) ~_GEN_107);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_125 = ~_GEN_119;
+  wire                                 _GEN_126 = ~_GEN_120;
   `ifndef SYNTHESIS
     chi_coherent_read_within_outstanding_limit:
-      assert property (@(posedge clock) disable iff (_GEN_125) _GEN_102);
+      assert property (@(posedge clock) disable iff (_GEN_126) _GEN_103);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_126 = _GEN_95 & ~reset;
-  wire                                 _GEN_127 = ~_GEN_126;
+  wire                                 _GEN_127 = _GEN_96 & ~reset;
+  wire                                 _GEN_128 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_127)
-                         |{_GEN_107 & _GEN_108, _GEN_109 & _GEN_110});
+      assert property (@(posedge clock) disable iff (_GEN_128)
+                         |{_GEN_108 & _GEN_109, _GEN_110 & _GEN_111});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_128 = ~_GEN_126;
+  wire                                 _GEN_129 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_id_expected:
-      assert property (@(posedge clock) disable iff (_GEN_128)
-                         |{_GEN_107 & _GEN_108
-                             & (|(reads[1'h0].expected_data_ids & _GEN_96)),
-                           _GEN_109 & _GEN_110
-                             & (|(reads[1'h1].expected_data_ids & _GEN_96))});
+      assert property (@(posedge clock) disable iff (_GEN_129)
+                         |{_GEN_108 & _GEN_109
+                             & (|(reads[1'h0].expected_data_ids & _GEN_97)),
+                           _GEN_110 & _GEN_111
+                             & (|(reads[1'h1].expected_data_ids & _GEN_97))});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_129 = ~_GEN_126;
+  wire                                 _GEN_130 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_129)
-                         {_GEN_107 & _GEN_108
-                            & (|(reads[1'h0].received_data_ids & _GEN_96)),
-                          _GEN_109 & _GEN_110
-                            & (|(reads[1'h1].received_data_ids & _GEN_96))} == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_130)
+                         {_GEN_108 & _GEN_109
+                            & (|(reads[1'h0].received_data_ids & _GEN_97)),
+                          _GEN_110 & _GEN_111
+                            & (|(reads[1'h1].received_data_ids & _GEN_97))} == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_130 = ~_GEN_126;
+  wire                                 _GEN_131 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_metadata_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_130)
-                         |{_GEN_107 & _GEN_108
-                             & (_GEN_111
+      assert property (@(posedge clock) disable iff (_GEN_131)
+                         |{_GEN_108 & _GEN_109
+                             & (_GEN_112
                                 | reads[1'h0].home_id == chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid
                                 & reads[1'h0].comp_ack_txn_id == chi_in.rx_dat.bits.dbid_or_mecid[11:0]),
-                           _GEN_109 & _GEN_110
-                             & (_GEN_112
+                           _GEN_110 & _GEN_111
+                             & (_GEN_113
                                 | reads[1'h1].home_id == chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid
                                 & reads[1'h1].comp_ack_txn_id == chi_in.rx_dat.bits.dbid_or_mecid[11:0])});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_131 = ~_GEN_126;
+  wire                                 _GEN_132 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_ok:
-      assert property (@(posedge clock) disable iff (_GEN_131)
+      assert property (@(posedge clock) disable iff (_GEN_132)
                          chi_in.rx_dat.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_132 = ~_GEN_126;
+  wire                                 _GEN_133 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_num_dat_zero:
-      assert property (@(posedge clock) disable iff (_GEN_132)
+      assert property (@(posedge clock) disable iff (_GEN_133)
                          chi_in.rx_dat.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_133 = ~_GEN_126;
+  wire                                 _GEN_134 = ~_GEN_127;
   `ifndef SYNTHESIS
     chi_coherent_read_data_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_133)
+      assert property (@(posedge clock) disable iff (_GEN_134)
                          ~chi_in.rx_dat.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_134 = ~(_GEN_94 & ~reset);
+  wire                                 _GEN_135 = ~(_GEN_95 & ~reset);
   `ifndef SYNTHESIS
     chi_coherent_comp_ack_has_read_data:
-      assert property (@(posedge clock) disable iff (_GEN_134)
-                         |{_GEN_104 & _GEN_113 & _GEN_114 & _GEN_115,
-                           _GEN_105 & _GEN_116 & _GEN_117 & _GEN_118});
+      assert property (@(posedge clock) disable iff (_GEN_135)
+                         |{_GEN_105 & _GEN_114 & _GEN_115 & _GEN_116,
+                           _GEN_106 & _GEN_117 & _GEN_118 & _GEN_119});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_135 =
-    _GEN_93 & _GEN_22 & ~_GEN_106 & _GEN_102;
-  wire CHICoherentReadTransaction      _GEN_136 =
+  wire                                 _GEN_136 =
+    _GEN_94 & _GEN_23 & ~_GEN_107 & _GEN_103;
+  wire CHICoherentReadTransaction      _GEN_137 =
     '{phase: (2'h1),
       txn_id: _request_transmitter_link_out.bits.txn_id,
       home_id: _request_transmitter_link_out.bits.tgt_id,
@@ -3050,295 +3080,298 @@ module RicketL1ICache(
                : 4'h1 << _request_transmitter_link_out.bits.address[5:4]),
       received_data_ids: (4'h0),
       comp_ack_seen: (1'h0)};
-  wire                                 _GEN_137 = _GEN_95 & _GEN_107 & _GEN_108;
-  wire                                 _GEN_138 =
-    _GEN_94 & _GEN_104 & _GEN_113 & _GEN_114 & _GEN_115;
-  wire [3:0]                           _GEN_139 =
-    _GEN_137 ? reads[1'h0].received_data_ids | _GEN_96 : reads[1'h0].received_data_ids;
-  wire                                 _GEN_140 = reads[1'h0].comp_ack_seen | _GEN_138;
-  wire                                 _GEN_141 =
-    _GEN_139 == reads[1'h0].expected_data_ids;
-  wire                                 _GEN_142 = _GEN_137 & _GEN_111;
-  wire CHICoherentReadTransaction      _GEN_143 =
-    '{phase: (_GEN_141 ? 2'h2 : 2'h1),
+  wire                                 _GEN_138 = _GEN_96 & _GEN_108 & _GEN_109;
+  wire                                 _GEN_139 =
+    _GEN_95 & _GEN_105 & _GEN_114 & _GEN_115 & _GEN_116;
+  wire [3:0]                           _GEN_140 =
+    _GEN_138 ? reads[1'h0].received_data_ids | _GEN_97 : reads[1'h0].received_data_ids;
+  wire                                 _GEN_141 = reads[1'h0].comp_ack_seen | _GEN_139;
+  wire                                 _GEN_142 =
+    _GEN_140 == reads[1'h0].expected_data_ids;
+  wire                                 _GEN_143 = _GEN_138 & _GEN_112;
+  wire CHICoherentReadTransaction      _GEN_144 =
+    '{phase: (_GEN_142 ? 2'h2 : 2'h1),
       txn_id: reads[1'h0].txn_id,
       home_id:
-        (_GEN_142
+        (_GEN_143
            ? chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid
            : reads[1'h0].home_id),
       comp_ack_txn_id:
-        (_GEN_142 ? chi_in.rx_dat.bits.dbid_or_mecid[11:0] : reads[1'h0].comp_ack_txn_id),
+        (_GEN_143 ? chi_in.rx_dat.bits.dbid_or_mecid[11:0] : reads[1'h0].comp_ack_txn_id),
       expected_data_ids: reads[1'h0].expected_data_ids,
-      received_data_ids: _GEN_139,
-      comp_ack_seen: _GEN_140};
-  wire CHICoherentReadTransaction      _GEN_144 =
-    _GEN_135 & ~_GEN_103
-      ? _GEN_136
-      : _GEN_137 | _GEN_138 ? (_GEN_141 & _GEN_140 ? _GEN_4 : _GEN_143) : reads[1'h0];
-  wire                                 _GEN_145 = _GEN_95 & _GEN_109 & _GEN_110;
-  wire                                 _GEN_146 =
-    _GEN_94 & _GEN_105 & _GEN_116 & _GEN_117 & _GEN_118;
-  wire [3:0]                           _GEN_147 =
-    _GEN_145 ? reads[1'h1].received_data_ids | _GEN_96 : reads[1'h1].received_data_ids;
-  wire                                 _GEN_148 = reads[1'h1].comp_ack_seen | _GEN_146;
-  wire                                 _GEN_149 =
-    _GEN_147 == reads[1'h1].expected_data_ids;
-  wire                                 _GEN_150 = _GEN_145 & _GEN_112;
-  wire CHICoherentReadTransaction      _GEN_151 =
-    '{phase: (_GEN_149 ? 2'h2 : 2'h1),
+      received_data_ids: _GEN_140,
+      comp_ack_seen: _GEN_141};
+  wire CHICoherentReadTransaction      _GEN_145 =
+    _GEN_136 & ~_GEN_104
+      ? _GEN_137
+      : _GEN_138 | _GEN_139 ? (_GEN_142 & _GEN_141 ? _GEN_4 : _GEN_144) : reads[1'h0];
+  wire                                 _GEN_146 = _GEN_96 & _GEN_110 & _GEN_111;
+  wire                                 _GEN_147 =
+    _GEN_95 & _GEN_106 & _GEN_117 & _GEN_118 & _GEN_119;
+  wire [3:0]                           _GEN_148 =
+    _GEN_146 ? reads[1'h1].received_data_ids | _GEN_97 : reads[1'h1].received_data_ids;
+  wire                                 _GEN_149 = reads[1'h1].comp_ack_seen | _GEN_147;
+  wire                                 _GEN_150 =
+    _GEN_148 == reads[1'h1].expected_data_ids;
+  wire                                 _GEN_151 = _GEN_146 & _GEN_113;
+  wire CHICoherentReadTransaction      _GEN_152 =
+    '{phase: (_GEN_150 ? 2'h2 : 2'h1),
       txn_id: reads[1'h1].txn_id,
       home_id:
-        (_GEN_150
+        (_GEN_151
            ? chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid
            : reads[1'h1].home_id),
       comp_ack_txn_id:
-        (_GEN_150 ? chi_in.rx_dat.bits.dbid_or_mecid[11:0] : reads[1'h1].comp_ack_txn_id),
+        (_GEN_151 ? chi_in.rx_dat.bits.dbid_or_mecid[11:0] : reads[1'h1].comp_ack_txn_id),
       expected_data_ids: reads[1'h1].expected_data_ids,
-      received_data_ids: _GEN_147,
-      comp_ack_seen: _GEN_148};
-  wire CHICoherentReadTransaction      _GEN_152 =
-    _GEN_135 & _GEN_103
-      ? _GEN_136
-      : _GEN_145 | _GEN_146 ? (_GEN_149 & _GEN_148 ? _GEN_4 : _GEN_151) : reads[1'h1];
-  wire [1:0]                           _GEN_153 =
+      received_data_ids: _GEN_148,
+      comp_ack_seen: _GEN_149};
+  wire CHICoherentReadTransaction      _GEN_153 =
+    _GEN_136 & _GEN_104
+      ? _GEN_137
+      : _GEN_146 | _GEN_147 ? (_GEN_150 & _GEN_149 ? _GEN_4 : _GEN_152) : reads[1'h1];
+  wire [1:0]                           _GEN_154 =
     {{~snoops[1'h1].live}, {~snoops[1'h0].live}};
-  wire                                 _GEN_154 = |_GEN_153;
-  wire                                 _GEN_155 = _GEN_153[1] & ~(_GEN_153[0]);
-  wire                                 _GEN_156 =
+  wire                                 _GEN_155 = |_GEN_154;
+  wire                                 _GEN_156 = _GEN_154[1] & ~(_GEN_154[0]);
+  wire                                 _GEN_157 =
     |{snoops[1'h0].live & snoops[1'h0].txn_id == chi_in.rx_snp.bits.txn_id
         & snoops[1'h0].home_id == chi_in.rx_snp.bits.src_id,
       snoops[1'h1].live & snoops[1'h1].txn_id == chi_in.rx_snp.bits.txn_id
         & snoops[1'h1].home_id == chi_in.rx_snp.bits.src_id};
-  wire                                 _GEN_157 =
-    snoops[1'h0].txn_id == _requester_response_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_158 =
-    snoops[1'h0].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
+    snoops[1'h0].txn_id == _requester_response_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_159 =
-    snoops[1'h1].txn_id == _requester_response_transmitter_link_out.bits.txn_id;
+    snoops[1'h0].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
   wire                                 _GEN_160 =
-    snoops[1'h1].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
+    snoops[1'h1].txn_id == _requester_response_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_161 =
-    snoops[1'h0].txn_id == _request_data_transmitter_link_out.bits.txn_id;
+    snoops[1'h1].home_id == _requester_response_transmitter_link_out.bits.tgt_id;
   wire                                 _GEN_162 =
-    snoops[1'h0].home_id == _request_data_transmitter_link_out.bits.tgt_id;
+    snoops[1'h0].txn_id == _request_data_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_163 =
-    snoops[1'h1].txn_id == _request_data_transmitter_link_out.bits.txn_id;
+    snoops[1'h0].home_id == _request_data_transmitter_link_out.bits.tgt_id;
   wire                                 _GEN_164 =
-    snoops[1'h1].home_id == _request_data_transmitter_link_out.bits.tgt_id;
+    snoops[1'h1].txn_id == _request_data_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_165 =
-    snoops[1'h0].forward_txn_id == _request_data_transmitter_link_out.bits.txn_id;
+    snoops[1'h1].home_id == _request_data_transmitter_link_out.bits.tgt_id;
   wire                                 _GEN_166 =
-    snoops[1'h0].forward_id == _request_data_transmitter_link_out.bits.tgt_id;
+    snoops[1'h0].forward_txn_id == _request_data_transmitter_link_out.bits.txn_id;
   wire                                 _GEN_167 =
-    snoops[1'h1].forward_txn_id == _request_data_transmitter_link_out.bits.txn_id;
+    snoops[1'h0].forward_id == _request_data_transmitter_link_out.bits.tgt_id;
   wire                                 _GEN_168 =
+    snoops[1'h1].forward_txn_id == _request_data_transmitter_link_out.bits.txn_id;
+  wire                                 _GEN_169 =
     snoops[1'h1].forward_id == _request_data_transmitter_link_out.bits.tgt_id;
-  wire                                 _GEN_169 = _GEN_97 & ~reset;
-  wire                                 _GEN_170 = ~_GEN_169;
+  wire                                 _GEN_170 = _GEN_98 & ~reset;
+  wire                                 _GEN_171 = ~_GEN_170;
   `ifndef SYNTHESIS
     chi_coherent_snoop_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_170) ~_GEN_156);
+      assert property (@(posedge clock) disable iff (_GEN_171) ~_GEN_157);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_171 = ~_GEN_169;
+  wire                                 _GEN_172 = ~_GEN_170;
   `ifndef SYNTHESIS
     chi_coherent_snoop_within_outstanding_limit:
-      assert property (@(posedge clock) disable iff (_GEN_171) _GEN_154);
+      assert property (@(posedge clock) disable iff (_GEN_172) _GEN_155);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_172 = ~(_GEN_98 & ~reset);
+  wire                                 _GEN_173 = ~(_GEN_99 & ~reset);
   `ifndef SYNTHESIS
     chi_coherent_snoop_rsp_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_172)
-                         |{snoops[1'h0].live & _GEN_157 & _GEN_158,
-                           snoops[1'h1].live & _GEN_159 & _GEN_160});
+      assert property (@(posedge clock) disable iff (_GEN_173)
+                         |{snoops[1'h0].live & _GEN_158 & _GEN_159,
+                           snoops[1'h1].live & _GEN_160 & _GEN_161});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_173 =
-    _request_data_transmitter_link_out.bits.data_id == 2'h0;
   wire                                 _GEN_174 =
+    _request_data_transmitter_link_out.bits.data_id == 2'h0;
+  wire                                 _GEN_175 =
     _request_data_transmitter_link_out.bits.num_dat == 2'h0;
-  wire                                 _GEN_175 = _GEN_99 & ~reset;
-  wire                                 _GEN_176 = ~_GEN_175;
+  wire                                 _GEN_176 = _GEN_100 & ~reset;
+  wire                                 _GEN_177 = ~_GEN_176;
   `ifndef SYNTHESIS
     chi_coherent_snoop_data_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_176)
-                         |{snoops[1'h0].live & _GEN_161 & _GEN_162,
-                           snoops[1'h1].live & _GEN_163 & _GEN_164});
+      assert property (@(posedge clock) disable iff (_GEN_177)
+                         |{snoops[1'h0].live & _GEN_162 & _GEN_163,
+                           snoops[1'h1].live & _GEN_164 & _GEN_165});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_177 = ~_GEN_175;
+  wire                                 _GEN_178 = ~_GEN_176;
   `ifndef SYNTHESIS
     chi_coherent_snoop_data_data_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_177) _GEN_173);
-  `endif // not def SYNTHESIS
-  wire                                 _GEN_178 = ~_GEN_175;
-  `ifndef SYNTHESIS
-    chi_coherent_snoop_data_num_dat_zero:
       assert property (@(posedge clock) disable iff (_GEN_178) _GEN_174);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_179 = ~_GEN_175;
+  wire                                 _GEN_179 = ~_GEN_176;
+  `ifndef SYNTHESIS
+    chi_coherent_snoop_data_num_dat_zero:
+      assert property (@(posedge clock) disable iff (_GEN_179) _GEN_175);
+  `endif // not def SYNTHESIS
+  wire                                 _GEN_180 = ~_GEN_176;
   `ifndef SYNTHESIS
     chi_coherent_snoop_data_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_179)
+      assert property (@(posedge clock) disable iff (_GEN_180)
                          ~_request_data_transmitter_link_out.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_180 = _GEN_100 & ~reset;
-  wire                                 _GEN_181 = ~_GEN_180;
+  wire                                 _GEN_181 = _GEN_101 & ~reset;
+  wire                                 _GEN_182 = ~_GEN_181;
   `ifndef SYNTHESIS
     chi_coherent_forward_data_has_snoop:
-      assert property (@(posedge clock) disable iff (_GEN_181)
-                         |{snoops[1'h0].live & snoops[1'h0].forward & _GEN_165 & _GEN_166,
-                           snoops[1'h1].live & snoops[1'h1].forward & _GEN_167
-                             & _GEN_168});
+      assert property (@(posedge clock) disable iff (_GEN_182)
+                         |{snoops[1'h0].live & snoops[1'h0].forward & _GEN_166 & _GEN_167,
+                           snoops[1'h1].live & snoops[1'h1].forward & _GEN_168
+                             & _GEN_169});
   `endif // not def SYNTHESIS
-  wire                                 _GEN_182 = ~_GEN_180;
+  wire                                 _GEN_183 = ~_GEN_181;
   `ifndef SYNTHESIS
     chi_coherent_forward_data_data_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_182) _GEN_173);
-  `endif // not def SYNTHESIS
-  wire                                 _GEN_183 = ~_GEN_180;
-  `ifndef SYNTHESIS
-    chi_coherent_forward_data_num_dat_zero:
       assert property (@(posedge clock) disable iff (_GEN_183) _GEN_174);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_184 = ~_GEN_180;
+  wire                                 _GEN_184 = ~_GEN_181;
+  `ifndef SYNTHESIS
+    chi_coherent_forward_data_num_dat_zero:
+      assert property (@(posedge clock) disable iff (_GEN_184) _GEN_175);
+  `endif // not def SYNTHESIS
+  wire                                 _GEN_185 = ~_GEN_181;
   `ifndef SYNTHESIS
     chi_coherent_forward_data_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_184)
+      assert property (@(posedge clock) disable iff (_GEN_185)
                          ~_request_data_transmitter_link_out.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_185 = _GEN_97 & ~_GEN_156 & _GEN_154;
-  wire CHISnoopTransaction             _GEN_186 =
+  wire                                 _GEN_186 = _GEN_98 & ~_GEN_157 & _GEN_155;
+  wire CHISnoopTransaction             _GEN_187 =
     '{live: (1'h1),
-      forward: (_GEN_82 | _GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87),
+      forward: (_GEN_83 | _GEN_84 | _GEN_85 | _GEN_86 | _GEN_87 | _GEN_88),
       txn_id: chi_in.rx_snp.bits.txn_id,
       home_id: chi_in.rx_snp.bits.src_id,
       forward_txn_id: chi_in.rx_snp.bits.fwd_txn_id_or_stash_lpid_or_vmid_ext,
       forward_id: chi_in.rx_snp.bits.fwd_nid_or_pbha,
       response_seen: (1'h0),
       forward_data_seen: (1'h0)};
-  wire                                 _GEN_187 = _GEN_98 & _GEN_157 & _GEN_158;
-  wire                                 _GEN_188 = _GEN_99 & _GEN_161 & _GEN_162;
-  wire                                 _GEN_189 = _GEN_187 & _GEN_38 | _GEN_188 & _GEN_51;
-  wire                                 _GEN_190 = snoops[1'h0].response_seen | _GEN_189;
-  wire                                 _GEN_191 =
-    snoops[1'h0].forward_data_seen | _GEN_100 & snoops[1'h0].forward & _GEN_165
-    & _GEN_166;
-  wire CHISnoopTransaction             _GEN_192 =
+  wire                                 _GEN_188 = _GEN_99 & _GEN_158 & _GEN_159;
+  wire                                 _GEN_189 = _GEN_100 & _GEN_162 & _GEN_163;
+  wire                                 _GEN_190 = _GEN_188 & _GEN_39 | _GEN_189 & _GEN_52;
+  wire                                 _GEN_191 = snoops[1'h0].response_seen | _GEN_190;
+  wire                                 _GEN_192 =
+    snoops[1'h0].forward_data_seen | _GEN_101 & snoops[1'h0].forward & _GEN_166
+    & _GEN_167;
+  wire CHISnoopTransaction             _GEN_193 =
     '{live:
         (snoops[1'h0].live
-         & ~((_GEN_187 | _GEN_188) & ~_GEN_189 | snoops[1'h0].forward & _GEN_190
-             & _GEN_191)),
+         & ~((_GEN_188 | _GEN_189) & ~_GEN_190 | snoops[1'h0].forward & _GEN_191
+             & _GEN_192)),
       forward: snoops[1'h0].forward,
       txn_id: snoops[1'h0].txn_id,
       home_id: snoops[1'h0].home_id,
       forward_txn_id: snoops[1'h0].forward_txn_id,
       forward_id: snoops[1'h0].forward_id,
-      response_seen: _GEN_190,
-      forward_data_seen: _GEN_191};
-  wire CHISnoopTransaction             _GEN_193 =
-    _GEN_185 & ~_GEN_155 ? _GEN_186 : _GEN_192;
-  wire                                 _GEN_194 = _GEN_98 & _GEN_159 & _GEN_160;
-  wire                                 _GEN_195 = _GEN_99 & _GEN_163 & _GEN_164;
-  wire                                 _GEN_196 = _GEN_194 & _GEN_38 | _GEN_195 & _GEN_51;
-  wire                                 _GEN_197 = snoops[1'h1].response_seen | _GEN_196;
-  wire                                 _GEN_198 =
-    snoops[1'h1].forward_data_seen | _GEN_100 & snoops[1'h1].forward & _GEN_167
-    & _GEN_168;
-  wire CHISnoopTransaction             _GEN_199 =
+      response_seen: _GEN_191,
+      forward_data_seen: _GEN_192};
+  wire CHISnoopTransaction             _GEN_194 =
+    _GEN_186 & ~_GEN_156 ? _GEN_187 : _GEN_193;
+  wire                                 _GEN_195 = _GEN_99 & _GEN_160 & _GEN_161;
+  wire                                 _GEN_196 = _GEN_100 & _GEN_164 & _GEN_165;
+  wire                                 _GEN_197 = _GEN_195 & _GEN_39 | _GEN_196 & _GEN_52;
+  wire                                 _GEN_198 = snoops[1'h1].response_seen | _GEN_197;
+  wire                                 _GEN_199 =
+    snoops[1'h1].forward_data_seen | _GEN_101 & snoops[1'h1].forward & _GEN_168
+    & _GEN_169;
+  wire CHISnoopTransaction             _GEN_200 =
     '{live:
         (snoops[1'h1].live
-         & ~((_GEN_194 | _GEN_195) & ~_GEN_196 | snoops[1'h1].forward & _GEN_197
-             & _GEN_198)),
+         & ~((_GEN_195 | _GEN_196) & ~_GEN_197 | snoops[1'h1].forward & _GEN_198
+             & _GEN_199)),
       forward: snoops[1'h1].forward,
       txn_id: snoops[1'h1].txn_id,
       home_id: snoops[1'h1].home_id,
       forward_txn_id: snoops[1'h1].forward_txn_id,
       forward_id: snoops[1'h1].forward_id,
-      response_seen: _GEN_197,
-      forward_data_seen: _GEN_198};
-  wire CHISnoopTransaction             _GEN_200 =
-    _GEN_185 & _GEN_155 ? _GEN_186 : _GEN_199;
-  wire                                 _GEN_201 = _GEN_7 & core_in.response.ready;
-  wire                                 _GEN_202 =
+      response_seen: _GEN_198,
+      forward_data_seen: _GEN_199};
+  wire CHISnoopTransaction             _GEN_201 =
+    _GEN_186 & _GEN_156 ? _GEN_187 : _GEN_200;
+  wire                                 _GEN_202 = _GEN_8 & core_in.response.ready;
+  wire                                 _GEN_203 =
     valid_lines[_lookup_egress_out.bits[10:5]]
     & _tags_port_out.response.bits[1'h0] == _lookup_egress_out.bits[63:11];
-  wire                                 _GEN_203 =
-    _lookup_egress_out.valid & _tags_port_out.response.valid & ~_GEN_202;
-  wire [63:0]                          _GEN_204 =
-    _lines_port_out.response.bits[_lookup_egress_out.bits[4:3]];
+  wire                                 _GEN_204 =
+    _lookup_egress_out.valid & _tags_port_out.response.valid & ~_GEN_203;
   wire [63:0]                          _GEN_205 =
+    _lines_port_out.response.bits[_lookup_egress_out.bits[4:3]];
+  wire [63:0]                          _GEN_206 =
     _refill_completion_out.bits.line[_refill_completion_out.bits.context_0[4:3]];
   `ifndef SYNTHESIS
     l1i_outstanding_in_range:
       assert property (@(posedge clock) disable iff (reset) outstanding != 2'h3);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_206 = ~(_GEN_201 & ~reset);
+  wire                                 _GEN_207 = ~(_GEN_202 & ~reset);
   `ifndef SYNTHESIS
     l1i_response_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_206) |outstanding);
+      assert property (@(posedge clock) disable iff (_GEN_207) |outstanding);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_207 =
-    ~core_in.flush & ~_GEN_10 & _refill_command_out.ready & ~_GEN_203
-    & (~(outstanding[1]) | _GEN_201);
-  wire                                 _GEN_208 = _lookup_ingress_out.ready & _GEN_207;
-  wire                                 _GEN_209 = core_in.request.valid & _GEN_208;
-  wire                                 _GEN_210 =
-    _tags_port_out.response.valid & ~core_in.flush;
-  wire                                 _GEN_211 = _lookup_egress_out.valid & _GEN_210;
-  assign _GEN_2 = |({{_GEN_202 & _GEN_0}, {~_GEN_202 & _GEN_1}});
-  wire RicketLineRefillCommand         _GEN_212 =
+  wire                                 _GEN_208 =
+    ~_GEN_7 & ~_GEN_11 & _refill_command_out.ready & ~_GEN_204
+    & (~(outstanding[1]) | _GEN_202);
+  wire                                 _GEN_209 = _lookup_ingress_out.ready & _GEN_208;
+  wire                                 _GEN_210 = core_in.request.valid & _GEN_209;
+  wire                                 _GEN_211 = _tags_port_out.response.valid & ~_GEN_7;
+  wire                                 _GEN_212 = _lookup_egress_out.valid & _GEN_211;
+  wire                                 _GEN_213 = _GEN_212 & ~_GEN_203;
+  assign _GEN_2 = |({{_GEN_203 & _GEN_0}, {~_GEN_203 & _GEN_1}});
+  wire RicketLineRefillCommand         _GEN_214 =
     '{line_address: {_lookup_egress_out.bits[63:5], 5'h0},
       context_0: _lookup_egress_out.bits};
   assign _GEN_1 = _refill_command_out.ready;
   `ifndef SYNTHESIS
     l1i_refill_command_accepted:
       assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_203 | core_in.flush | _refill_command_out.ready);
+                         ~_GEN_204 | _GEN_7 | _refill_command_out.ready);
   `endif // not def SYNTHESIS
-  wire RicketInstructionResp           _GEN_213 =
-    '{instruction: (_lookup_egress_out.bits[2] ? _GEN_204[63:32] : _GEN_204[31:0])};
-  assign _GEN_0 = _response_arbiter_ingress_0_out.ready;
-  wire                                 _GEN_214 = ~refill_live | _GEN;
   wire RicketInstructionResp           _GEN_215 =
+    '{instruction: (_lookup_egress_out.bits[2] ? _GEN_205[63:32] : _GEN_205[31:0])};
+  assign _GEN_0 = _response_arbiter_ingress_0_out.ready;
+  wire                                 _GEN_216 = ~refill_live | _GEN;
+  wire RicketInstructionResp           _GEN_217 =
     '{instruction:
-        (_refill_completion_out.bits.context_0[2] ? _GEN_205[63:32] : _GEN_205[31:0])};
+        (_refill_completion_out.bits.context_0[2] ? _GEN_206[63:32] : _GEN_206[31:0])};
   assign _GEN = _response_arbiter_ingress_1_out.ready;
-  wire                                 _GEN_216 =
+  wire                                 _GEN_218 =
     ~(_response_arbiter_egress_out.valid & ~reset);
   `ifndef SYNTHESIS
     l1i_response_slot_reserved:
-      assert property (@(posedge clock) disable iff (_GEN_216)
+      assert property (@(posedge clock) disable iff (_GEN_218)
                          _responses_ingress_out.ready);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_217 = _refill_completion_out.valid & _GEN_214;
-  wire                                 _GEN_218 = _GEN_217 & ~reset;
-  wire                                 _GEN_219 = ~_GEN_218;
+  wire                                 _GEN_219 = _GEN_213 & _refill_command_out.ready;
+  wire                                 _GEN_220 = _refill_completion_out.valid & _GEN_216;
+  wire                                 _GEN_221 =
+    _GEN_220 & refill_installable & ~core_in.invalidate_all;
+  wire                                 _GEN_222 = _GEN_220 & ~reset;
+  wire                                 _GEN_223 = ~_GEN_222;
   `ifndef SYNTHESIS
     l1i_refill_state_valid:
-      assert property (@(posedge clock) disable iff (_GEN_219)
+      assert property (@(posedge clock) disable iff (_GEN_223)
                          |_refill_completion_out.bits.state);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_220 = ~_GEN_218;
+  wire                                 _GEN_224 = ~_GEN_222;
   `ifndef SYNTHESIS
     l1i_refill_not_dirty:
-      assert property (@(posedge clock) disable iff (_GEN_220)
+      assert property (@(posedge clock) disable iff (_GEN_224)
                          ~_refill_completion_out.bits.pass_dirty);
   `endif // not def SYNTHESIS
-  wire                                 _GEN_221 = _GEN_209 | _GEN_217;
-  wire [5:0]                           _GEN_222 =
-    _GEN_217
+  wire                                 _GEN_225 = _GEN_210 | _GEN_221;
+  wire [5:0]                           _GEN_226 =
+    _GEN_221
       ? _refill_completion_out.bits.context_0[10:5]
       : core_in.request.bits.address[10:5];
-  wire ReadWriteRequest                _GEN_223 =
-    '{address: _GEN_222,
-      write: _GEN_217,
+  wire ReadWriteRequest                _GEN_227 =
+    '{address: _GEN_226,
+      write: _GEN_221,
       data: ({1{_refill_completion_out.bits.context_0[63:11]}}),
       mask: (1'h1)};
-  wire ReadWriteRequest_1              _GEN_224 =
-    '{address: _GEN_222,
-      write: _GEN_217,
+  wire ReadWriteRequest_1              _GEN_228 =
+    '{address: _GEN_226,
+      write: _GEN_221,
       data: _refill_completion_out.bits.line,
       mask: (4'hF)};
-  wire [63:0]                          _GEN_225 =
-    _GEN_217
+  wire [63:0]                          _GEN_229 =
+    _GEN_221
       ? {{(&(_refill_completion_out.bits.context_0[10:5])) | valid_lines[6'h3F]},
          {_refill_completion_out.bits.context_0[10:5] == 6'h3E | valid_lines[6'h3E]},
          {_refill_completion_out.bits.context_0[10:5] == 6'h3D | valid_lines[6'h3D]},
@@ -3404,53 +3437,53 @@ module RicketL1ICache(
          {_refill_completion_out.bits.context_0[10:5] == 6'h1 | valid_lines[6'h1]},
          {_refill_completion_out.bits.context_0[10:5] == 6'h0 | valid_lines[6'h0]}}
       : valid_lines;
-  wire                                 _GEN_226 = _GEN_209 ^ _GEN_201;
-  wire                                 _GEN_227 = _GEN_203 | _GEN_217 | _GEN_226;
-  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_228 =
-    '{valid: (_refill_completion_out.valid & refill_live), bits: _GEN_215};
-  wire struct packed {logic ready; }   _GEN_229 = '{ready: _GEN_214};
-  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_230 =
-    '{valid: (_GEN_211 & _GEN_202), bits: _GEN_213};
-  wire struct packed {logic valid; RicketLineRefillCommand bits; } _GEN_231 =
-    '{valid: (_GEN_211 & ~_GEN_202), bits: _GEN_212};
-  wire struct packed {logic ready; }   _GEN_232 = '{ready: (~_GEN_210 | _GEN_2)};
-  wire struct packed {logic ready; }   _GEN_233 = '{ready: _GEN_12};
-  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_234 =
+  wire                                 _GEN_230 = _GEN_210 ^ _GEN_202;
+  wire                                 _GEN_231 = _GEN_219 | _GEN_220 | _GEN_230;
+  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_232 =
+    '{valid: (_refill_completion_out.valid & refill_live), bits: _GEN_217};
+  wire struct packed {logic ready; }   _GEN_233 = '{ready: _GEN_216};
+  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_234 =
+    '{valid: (_GEN_212 & _GEN_203), bits: _GEN_215};
+  wire struct packed {logic valid; RicketLineRefillCommand bits; } _GEN_235 =
+    '{valid: _GEN_213, bits: _GEN_214};
+  wire struct packed {logic ready; }   _GEN_236 = '{ready: (~_GEN_211 | _GEN_2)};
+  wire struct packed {logic ready; }   _GEN_237 = '{ready: _GEN_13};
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_238 =
     '{valid: (1'h0), bits: _GEN_5};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_235 =
-    '{valid: (_GEN_10 & _GEN_11), bits: _GEN_13};
-  wire struct packed {logic ready; }   _GEN_236 =
-    '{ready: (core_in.response.ready & ~core_in.flush)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_237 =
-    '{valid: (core_in.request.valid & _GEN_207), bits: core_in.request.bits.address};
-  wire struct packed {logic valid; ReadWriteRequest_1 bits; } _GEN_238 =
-    '{valid: _GEN_221, bits: _GEN_224};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_239 =
+    '{valid: (_GEN_11 & _GEN_12), bits: _GEN_14};
+  wire struct packed {logic ready; }   _GEN_240 =
+    '{ready: (core_in.response.ready & ~_GEN_7)};
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_241 =
+    '{valid: (core_in.request.valid & _GEN_208), bits: core_in.request.bits.address};
+  wire struct packed {logic valid; ReadWriteRequest_1 bits; } _GEN_242 =
+    '{valid: _GEN_225, bits: _GEN_228};
   wire struct packed {struct packed {logic valid; ReadWriteRequest_1 bits; } request; }
-    _GEN_239 = '{request: _GEN_238};
-  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_240 =
-    '{valid: _GEN_221, bits: _GEN_223};
+    _GEN_243 = '{request: _GEN_242};
+  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_244 =
+    '{valid: _GEN_225, bits: _GEN_227};
   wire struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }
-    _GEN_241 = '{request: _GEN_240};
-  wire struct packed {logic ready; }   _GEN_242 = '{ready: _GEN_208};
-  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_243 =
-    '{valid: _GEN_7, bits: _responses_egress_out.bits};
+    _GEN_245 = '{request: _GEN_244};
+  wire struct packed {logic ready; }   _GEN_246 = '{ready: _GEN_209};
+  wire struct packed {logic valid; RicketInstructionResp bits; } _GEN_247 =
+    '{valid: _GEN_8, bits: _responses_egress_out.bits};
   SyncRam1RW tags (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_241),
+    .port_in  (_GEN_245),
     .port_out (_tags_port_out)
   );
   SyncRam1RW_1 lines (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_239),
+    .port_in  (_GEN_243),
     .port_out (_lines_port_out)
   );
   RicketLineRefill refill (
     .clock                (clock),
     .reset                (reset),
-    .command_in           (_GEN_231),
-    .completion_in        (_GEN_229),
+    .command_in           (_GEN_235),
+    .completion_in        (_GEN_233),
     .requests_in          (_request_transmitter_ingress_out),
     .acknowledgements_in  (_protocol_responses_ingress_0_out),
     .response_data_in     (_response_data_receiver_egress_out),
@@ -3463,14 +3496,14 @@ module RicketL1ICache(
   Pipe_2 lookup (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_237),
-    .egress_in   (_GEN_232),
+    .ingress_in  (_GEN_241),
+    .egress_in   (_GEN_236),
     .ingress_out (_lookup_ingress_out),
     .egress_out  (_lookup_egress_out)
   );
   Arbiter_1 response_arbiter (
-    .ingress_0_in  (_GEN_230),
-    .ingress_1_in  (_GEN_228),
+    .ingress_0_in  (_GEN_234),
+    .ingress_1_in  (_GEN_232),
     .egress_in     (_responses_ingress_out),
     .ingress_0_out (_response_arbiter_ingress_0_out),
     .ingress_1_out (_response_arbiter_ingress_1_out),
@@ -3479,16 +3512,16 @@ module RicketL1ICache(
   );
   Queue_1 responses (
     .clock       (clock),
-    .reset       (reset | core_in.flush),
+    .reset       (reset | _GEN_7),
     .ingress_in  (_response_arbiter_egress_out),
-    .egress_in   (_GEN_236),
+    .egress_in   (_GEN_240),
     .ingress_out (_responses_ingress_out),
     .egress_out  (_responses_egress_out),
     .count       (/* unused */)
   );
   Arbiter_2 protocol_responses (
     .ingress_0_in  (_refill_acknowledgements_out),
-    .ingress_1_in  (_GEN_235),
+    .ingress_1_in  (_GEN_239),
     .egress_in     (_requester_response_transmitter_ingress_out),
     .ingress_0_out (_protocol_responses_ingress_0_out),
     .ingress_1_out (_protocol_responses_ingress_1_out),
@@ -3516,7 +3549,7 @@ module RicketL1ICache(
   CreditSender_2 request_data_transmitter (
     .clock        (clock),
     .reset        (reset),
-    .ingress_in   (_GEN_234),
+    .ingress_in   (_GEN_238),
     .link_in      (chi_in.tx_dat),
     .ingress_out  (/* unused */),
     .link_out     (_request_data_transmitter_link_out),
@@ -3525,7 +3558,7 @@ module RicketL1ICache(
   CreditBuffer response_receiver (
     .clock        (clock),
     .reset        (reset),
-    .grant_enable (_GEN_8),
+    .grant_enable (_GEN_9),
     .link_in      (chi_in.rx_rsp),
     .egress_in    (_GEN_3),
     .link_out     (_response_receiver_link_out),
@@ -3536,7 +3569,7 @@ module RicketL1ICache(
   CreditBuffer_1 response_data_receiver (
     .clock        (clock),
     .reset        (reset),
-    .grant_enable (_GEN_8),
+    .grant_enable (_GEN_9),
     .link_in      (chi_in.rx_dat),
     .egress_in    (_refill_response_data_out),
     .link_out     (_response_data_receiver_link_out),
@@ -3547,9 +3580,9 @@ module RicketL1ICache(
   CreditBuffer_2 snoop_receiver (
     .clock        (clock),
     .reset        (reset),
-    .grant_enable (_GEN_8),
+    .grant_enable (_GEN_9),
     .link_in      (chi_in.rx_snp),
-    .egress_in    (_GEN_233),
+    .egress_in    (_GEN_237),
     .link_out     (_snoop_receiver_link_out),
     .egress_out   (_snoop_receiver_egress_out),
     .count        (/* unused */),
@@ -3559,6 +3592,7 @@ module RicketL1ICache(
     if (reset) begin
       valid_lines <= _GEN_6;
       refill_live <= 1'h0;
+      refill_installable <= 1'h0;
       outstanding <= 2'h0;
       transmit_request <= 1'h0;
       receive_ack <= 1'h0;
@@ -3607,14 +3641,18 @@ module RicketL1ICache(
     end
     else begin
       valid_lines <=
-        _snoop_receiver_egress_out.valid & _GEN_12 & _GEN_9 ? _GEN_6 : _GEN_225;
+        core_in.invalidate_all | _snoop_receiver_egress_out.valid & _GEN_13 & _GEN_10
+          ? _GEN_6
+          : _GEN_229;
       refill_live <=
-        ~core_in.flush & (_GEN_227 ? _GEN_203 | ~_GEN_217 & refill_live : refill_live);
+        ~_GEN_7 & (_GEN_231 ? _GEN_219 | ~_GEN_220 & refill_live : refill_live);
+      refill_installable <=
+        ~core_in.invalidate_all & (_GEN_219 | ~_GEN_220 & refill_installable);
       outstanding <=
-        core_in.flush
+        _GEN_7
           ? 2'h0
-          : _GEN_227 & _GEN_226
-              ? (_GEN_209 ? outstanding + 2'h1 : outstanding - 2'h1)
+          : _GEN_231 & _GEN_230
+              ? (_GEN_210 ? outstanding + 2'h1 : outstanding - 2'h1)
               : outstanding;
       transmit_request <=
         ~transmit_request & ~chi_in.tx_link_active_ack | transmit_request;
@@ -3664,13 +3702,13 @@ module RicketL1ICache(
                ? rn_rx_snp_credit_balance + 2'h1
                : rn_rx_snp_credit_balance - 2'h1)
           : rn_rx_snp_credit_balance;
-      reads[1'h1] <= _GEN_152;
-      reads[1'h0] <= _GEN_144;
-      snoops[1'h1] <= _GEN_200;
-      snoops[1'h0] <= _GEN_193;
+      reads[1'h1] <= _GEN_153;
+      reads[1'h0] <= _GEN_145;
+      snoops[1'h1] <= _GEN_201;
+      snoops[1'h0] <= _GEN_194;
     end
   end // always @(posedge)
-  assign core_out = '{request: _GEN_242, response: _GEN_243};
+  assign core_out = '{request: _GEN_246, response: _GEN_247};
   assign chi_out =
     '{tx_link_active_request: transmit_request,
       rx_link_active_ack: receive_ack,
@@ -4729,7 +4767,7 @@ module RicketL1DCache(
                                                                                                                                                                                                                                                                                                                                                                             reset,
   input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                                                                                                                                                                                                        core_in,
   input  struct packed {struct packed {logic credit; } tx_req; struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIRspFlit bits; } rx_rsp; struct packed {logic valid; CHIDatFlit bits; } rx_dat; struct packed {logic valid; CHISnpFlit bits; } rx_snp; } chi_in,
-  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; }                                                                                                                                                                                                                                               core_out,
+  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                                                                                                                                                                                                                                core_out,
   output struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIReqFlit bits; } tx_req; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_rsp; struct packed {logic credit; } rx_dat; struct packed {logic credit; } rx_snp; } chi_out
 );
 
@@ -5543,81 +5581,81 @@ module RicketL1DCache(
   wire                                _GEN_89 =
     _GEN & ~store_active & ~_GEN_85 & ~_GEN_77 & ~_GEN_75;
   wire                                _GEN_90 = _lookup_ingress_out.ready & _GEN_89;
-  wire                                _GEN_91 = store_active & ~store_request_sent;
-  wire                                _GEN_92 =
-    _GEN_91 & _protocol_requests_ingress_1_out.ready;
+  wire                                _GEN_91 = core_in.request.valid & _GEN_90;
+  wire                                _GEN_92 = store_active & ~store_request_sent;
   wire                                _GEN_93 =
-    |_response_receiver_egress_out.bits.opcode;
+    _GEN_92 & _protocol_requests_ingress_1_out.ready;
   wire                                _GEN_94 =
-    _response_receiver_egress_out.bits.opcode == 5'h6;
+    |_response_receiver_egress_out.bits.opcode;
   wire                                _GEN_95 =
-    _response_receiver_egress_out.bits.opcode == 5'h4;
+    _response_receiver_egress_out.bits.opcode == 5'h6;
   wire                                _GEN_96 =
+    _response_receiver_egress_out.bits.opcode == 5'h4;
+  wire                                _GEN_97 =
     store_active
-    & (_GEN_94 & store_request_sent & ~store_dbid_received | _GEN_95 & store_data_sent);
-  wire                                _GEN_97 = ~_GEN_93 | _GEN_96;
-  wire                                _GEN_98 =
-    _response_receiver_egress_out.valid & _GEN_97 & _GEN_93;
-  wire                                _GEN_99 = _GEN_98 & _GEN_94;
-  wire                                _GEN_100 = _GEN_98 & _GEN_95;
-  wire                                _GEN_101 =
-    _response_receiver_egress_out.valid & _GEN_93 & ~reset;
-  wire                                _GEN_102 = ~_GEN_101;
+    & (_GEN_95 & store_request_sent & ~store_dbid_received | _GEN_96 & store_data_sent);
+  wire                                _GEN_98 = ~_GEN_94 | _GEN_97;
+  wire                                _GEN_99 =
+    _response_receiver_egress_out.valid & _GEN_98 & _GEN_94;
+  wire                                _GEN_100 = _GEN_99 & _GEN_95;
+  wire                                _GEN_101 = _GEN_99 & _GEN_96;
+  wire                                _GEN_102 =
+    _response_receiver_egress_out.valid & _GEN_94 & ~reset;
+  wire                                _GEN_103 = ~_GEN_102;
   `ifndef SYNTHESIS
     l1d_chi_response_expected:
-      assert property (@(posedge clock) disable iff (_GEN_102) _GEN_96);
+      assert property (@(posedge clock) disable iff (_GEN_103) _GEN_97);
   `endif // not def SYNTHESIS
-  wire                                _GEN_103 = ~_GEN_101;
+  wire                                _GEN_104 = ~_GEN_102;
   `ifndef SYNTHESIS
     l1d_chi_response_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_103)
+      assert property (@(posedge clock) disable iff (_GEN_104)
                          _response_receiver_egress_out.bits.txn_id == 12'h1);
   `endif // not def SYNTHESIS
-  wire                                _GEN_104 = ~_GEN_101;
+  wire                                _GEN_105 = ~_GEN_102;
   `ifndef SYNTHESIS
     l1d_chi_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_104)
+      assert property (@(posedge clock) disable iff (_GEN_105)
                          _response_receiver_egress_out.bits.src_id == 7'h1);
   `endif // not def SYNTHESIS
-  wire                                _GEN_105 = ~_GEN_101;
+  wire                                _GEN_106 = ~_GEN_102;
   `ifndef SYNTHESIS
     l1d_chi_response_ok:
-      assert property (@(posedge clock) disable iff (_GEN_105)
+      assert property (@(posedge clock) disable iff (_GEN_106)
                          _response_receiver_egress_out.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                                _GEN_106 =
-    store_active & store_dbid_received & ~store_data_sent;
   wire                                _GEN_107 =
-    _GEN_106 & _request_data_transmitter_ingress_out.ready;
-  wire                                _GEN_108 = _GEN_76 & _GEN_74;
-  wire RicketDataResp                 _GEN_109 =
-    '{data: (_GEN_108 | _refill_completion_out.valid ? _load_gen_value : 64'h0),
+    store_active & store_dbid_received & ~store_data_sent;
+  wire                                _GEN_108 =
+    _GEN_107 & _request_data_transmitter_ingress_out.ready;
+  wire                                _GEN_109 = _GEN_76 & _GEN_74;
+  wire RicketDataResp                 _GEN_110 =
+    '{data: (_GEN_109 | _refill_completion_out.valid ? _load_gen_value : 64'h0),
       tag:
         (_refill_completion_out.valid
            ? _refill_completion_out.bits.context_0.tag
            : _lookup_egress_out.bits.tag)};
-  wire                                _GEN_110 =
-    core_in.request.valid & _GEN_90 | _refill_completion_out.valid;
-  wire [5:0]                          _GEN_111 =
+  wire                                _GEN_111 = _GEN_91 | _refill_completion_out.valid;
+  wire [5:0]                          _GEN_112 =
     _refill_completion_out.valid
       ? _refill_completion_out.bits.context_0.address[10:5]
       : core_in.request.bits.address[10:5];
-  wire ReadWriteRequest               _GEN_112 =
-    '{address: _GEN_111,
+  wire ReadWriteRequest               _GEN_113 =
+    '{address: _GEN_112,
       write: _refill_completion_out.valid,
       data:
         ({1{_refill_completion_out.valid
               ? _refill_completion_out.bits.context_0.address[63:11]
               : _lookup_egress_out.bits.address[63:11]}}),
       mask: (1'h1)};
-  wire [31:0][7:0]                    _GEN_113 =
+  wire [31:0][7:0]                    _GEN_114 =
     /*cast(bit[31:0][7:0])*/_refill_completion_out.bits.line;
-  wire ReadWriteRequest_2             _GEN_114 =
-    '{address: _GEN_111,
+  wire ReadWriteRequest_2             _GEN_115 =
+    '{address: _GEN_112,
       write: _refill_completion_out.valid,
-      data: _GEN_113,
+      data: _GEN_114,
       mask: (32'hFFFFFFFF)};
-  wire [63:0]                         _GEN_115 =
+  wire [63:0]                         _GEN_116 =
     _refill_completion_out.valid
       ? {{(&(_refill_completion_out.bits.context_0.address[10:5])) | valid_lines[6'h3F]},
          {_refill_completion_out.bits.context_0.address[10:5] == 6'h3E
@@ -5747,7 +5785,7 @@ module RicketL1DCache(
          {_refill_completion_out.bits.context_0.address[10:5] == 6'h0
             | valid_lines[6'h0]}}
       : valid_lines;
-  wire [63:0]                         _GEN_116 =
+  wire [63:0]                         _GEN_117 =
     _GEN_75
       ? {{_lookup_egress_out.bits.address[10:5] != 6'h3F & valid_lines[6'h3F]},
          {_lookup_egress_out.bits.address[10:5] != 6'h3E & valid_lines[6'h3E]},
@@ -5813,15 +5851,15 @@ module RicketL1DCache(
          {_lookup_egress_out.bits.address[10:5] != 6'h2 & valid_lines[6'h2]},
          {_lookup_egress_out.bits.address[10:5] != 6'h1 & valid_lines[6'h1]},
          {(|(_lookup_egress_out.bits.address[10:5])) & valid_lines[6'h0]}}
-      : _GEN_115;
-  wire                                _GEN_117 = ~(_GEN_75 & ~reset);
+      : _GEN_116;
+  wire                                _GEN_118 = ~(_GEN_75 & ~reset);
   `ifndef SYNTHESIS
     l1d_store_address_fits_chi:
-      assert property (@(posedge clock) disable iff (_GEN_117)
+      assert property (@(posedge clock) disable iff (_GEN_118)
                          _lookup_egress_out.bits.address[63:44] == 20'h0);
   `endif // not def SYNTHESIS
-  wire                                _GEN_118 = _GEN_75 | _GEN_92 | ~_GEN_99;
-  wire CHIDatFlit                     _GEN_119 =
+  wire                                _GEN_119 = _GEN_75 | _GEN_93 | ~_GEN_100;
+  wire CHIDatFlit                     _GEN_120 =
     '{data: ({64'h0, store_data} << {121'h0, store_address[3], 6'h0}),
       byte_enable: ({8'h0, store_mask} << {12'h0, store_address[3], 3'h0}),
       replicate: (1'h0),
@@ -5846,7 +5884,7 @@ module RicketL1DCache(
       src_id: (7'h3),
       tgt_id: store_home_id,
       qos: (4'h0)};
-  wire CHIReqFlit                     _GEN_120 =
+  wire CHIReqFlit                     _GEN_121 =
     '{trace_tag: (1'h0),
       tag_op: (2'h0),
       exp_comp_ack: (1'h0),
@@ -5870,40 +5908,40 @@ module RicketL1DCache(
       src_id: (7'h3),
       tgt_id: (7'h1),
       qos: (4'h0)};
-  wire struct packed {logic valid; RicketLineRefillCommand_1 bits; } _GEN_121 =
+  wire struct packed {logic valid; RicketLineRefillCommand_1 bits; } _GEN_122 =
     '{valid: (_lookup_egress_out.valid & _GEN_77), bits: _GEN_80};
-  wire struct packed {logic ready; }  _GEN_122 = '{ready: _GEN_79};
-  wire struct packed {logic ready; }  _GEN_123 = '{ready: _GEN_87};
-  wire struct packed {logic ready; }  _GEN_124 = '{ready: _GEN_97};
-  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_125 =
-    '{valid: _GEN_106, bits: _GEN_119};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_126 =
+  wire struct packed {logic ready; }  _GEN_123 = '{ready: _GEN_79};
+  wire struct packed {logic ready; }  _GEN_124 = '{ready: _GEN_87};
+  wire struct packed {logic ready; }  _GEN_125 = '{ready: _GEN_98};
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_126 =
+    '{valid: _GEN_107, bits: _GEN_120};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_127 =
     '{valid: (_GEN_85 & _GEN_86), bits: _GEN_88};
-  wire struct packed {logic valid; CHIReqFlit bits; } _GEN_127 =
-    '{valid: _GEN_91, bits: _GEN_120};
-  wire struct packed {logic valid; RicketDataResp bits; } _GEN_128 =
-    '{valid: (_GEN_108 | _GEN_75 | _refill_completion_out.valid), bits: _GEN_109};
-  wire struct packed {logic valid; RicketDataReq bits; } _GEN_129 =
+  wire struct packed {logic valid; CHIReqFlit bits; } _GEN_128 =
+    '{valid: _GEN_92, bits: _GEN_121};
+  wire struct packed {logic valid; RicketDataResp bits; } _GEN_129 =
+    '{valid: (_GEN_109 | _GEN_75 | _refill_completion_out.valid), bits: _GEN_110};
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN_130 =
     '{valid: (core_in.request.valid & _GEN_89), bits: core_in.request.bits};
-  wire struct packed {logic valid; ReadWriteRequest_2 bits; } _GEN_130 =
-    '{valid: _GEN_110, bits: _GEN_114};
+  wire struct packed {logic valid; ReadWriteRequest_2 bits; } _GEN_131 =
+    '{valid: _GEN_111, bits: _GEN_115};
   wire struct packed {struct packed {logic valid; ReadWriteRequest_2 bits; } request; }
-    _GEN_131 = '{request: _GEN_130};
-  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_132 =
-    '{valid: _GEN_110, bits: _GEN_112};
+    _GEN_132 = '{request: _GEN_131};
+  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_133 =
+    '{valid: _GEN_111, bits: _GEN_113};
   wire struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }
-    _GEN_133 = '{request: _GEN_132};
-  wire struct packed {logic ready; }  _GEN_134 = '{ready: _GEN_90};
-  SyncRam1RW tags (
+    _GEN_134 = '{request: _GEN_133};
+  wire struct packed {logic ready; }  _GEN_135 = '{ready: _GEN_90};
+  SyncRam1RW_2 tags (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_133),
+    .port_in  (_GEN_134),
     .port_out (_tags_port_out)
   );
   SyncRam1RW_2 lines (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_131),
+    .port_in  (_GEN_132),
     .port_out (_lines_port_out)
   );
   LoadGen load_gen (
@@ -5935,7 +5973,7 @@ module RicketL1DCache(
   RicketLineRefill_1 refill (
     .clock                (clock),
     .reset                (reset),
-    .command_in           (_GEN_121),
+    .command_in           (_GEN_122),
     .completion_in        (_GEN_0),
     .requests_in          (_protocol_requests_ingress_0_out),
     .acknowledgements_in  (_protocol_responses_ingress_0_out),
@@ -5949,20 +5987,20 @@ module RicketL1DCache(
   Pipe_3 lookup (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_129),
-    .egress_in   (_GEN_122),
+    .ingress_in  (_GEN_130),
+    .egress_in   (_GEN_123),
     .ingress_out (_lookup_ingress_out),
     .egress_out  (_lookup_egress_out)
   );
   ValidPipe_2 responses (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_128),
+    .ingress_in (_GEN_129),
     .egress_out (_responses_egress_out)
   );
   Arbiter_3 protocol_requests (
     .ingress_0_in  (_refill_requests_out),
-    .ingress_1_in  (_GEN_127),
+    .ingress_1_in  (_GEN_128),
     .egress_in     (_request_transmitter_ingress_out),
     .ingress_0_out (_protocol_requests_ingress_0_out),
     .ingress_1_out (_protocol_requests_ingress_1_out),
@@ -5971,7 +6009,7 @@ module RicketL1DCache(
   );
   Arbiter_2 protocol_responses (
     .ingress_0_in  (_refill_acknowledgements_out),
-    .ingress_1_in  (_GEN_126),
+    .ingress_1_in  (_GEN_127),
     .egress_in     (_requester_response_transmitter_ingress_out),
     .ingress_0_out (_protocol_responses_ingress_0_out),
     .ingress_1_out (_protocol_responses_ingress_1_out),
@@ -5999,7 +6037,7 @@ module RicketL1DCache(
   CreditSender_2 request_data_transmitter (
     .clock        (clock),
     .reset        (reset),
-    .ingress_in   (_GEN_125),
+    .ingress_in   (_GEN_126),
     .link_in      (chi_in.tx_dat),
     .ingress_out  (_request_data_transmitter_ingress_out),
     .link_out     (_request_data_transmitter_link_out),
@@ -6010,7 +6048,7 @@ module RicketL1DCache(
     .reset        (reset),
     .grant_enable (_GEN_2),
     .link_in      (chi_in.rx_rsp),
-    .egress_in    (_GEN_124),
+    .egress_in    (_GEN_125),
     .link_out     (_response_receiver_link_out),
     .egress_out   (_response_receiver_egress_out),
     .count        (/* unused */),
@@ -6032,7 +6070,7 @@ module RicketL1DCache(
     .reset        (reset),
     .grant_enable (_GEN_2),
     .link_in      (chi_in.rx_snp),
-    .egress_in    (_GEN_123),
+    .egress_in    (_GEN_124),
     .link_out     (_snoop_receiver_link_out),
     .egress_out   (_snoop_receiver_egress_out),
     .count        (/* unused */),
@@ -6066,26 +6104,27 @@ module RicketL1DCache(
     end
     else begin
       valid_lines <=
-        _snoop_receiver_egress_out.valid & _GEN_87 & _GEN_84 ? _GEN_1 : _GEN_116;
-      store_active <= _GEN_75 | (_GEN_92 | _GEN_99 | _GEN_107 | ~_GEN_100) & store_active;
+        _snoop_receiver_egress_out.valid & _GEN_87 & _GEN_84 ? _GEN_1 : _GEN_117;
+      store_active <=
+        _GEN_75 | (_GEN_93 | _GEN_100 | _GEN_108 | ~_GEN_101) & store_active;
       store_request_sent <=
-        ~_GEN_75 & (_GEN_92 | (_GEN_99 | _GEN_107 | ~_GEN_100) & store_request_sent);
+        ~_GEN_75 & (_GEN_93 | (_GEN_100 | _GEN_108 | ~_GEN_101) & store_request_sent);
       store_dbid_received <=
         ~_GEN_75
-        & (_GEN_92
+        & (_GEN_93
              ? store_dbid_received
-             : _GEN_99 | (_GEN_107 | ~_GEN_100) & store_dbid_received);
+             : _GEN_100 | (_GEN_108 | ~_GEN_101) & store_dbid_received);
       store_data_sent <=
         ~_GEN_75
-        & (_GEN_92 | _GEN_99 ? store_data_sent : _GEN_107 | ~_GEN_100 & store_data_sent);
+        & (_GEN_93 | _GEN_100 ? store_data_sent : _GEN_108 | ~_GEN_101 & store_data_sent);
       store_address <= _GEN_75 ? _lookup_egress_out.bits.address : store_address;
       store_width <= _GEN_75 ? _lookup_egress_out.bits.width : store_width;
       store_data <= _GEN_75 ? _store_gen_data : store_data;
       store_mask <= _GEN_75 ? _store_gen_mask : store_mask;
       store_home_id <=
-        _GEN_118 ? store_home_id : _response_receiver_egress_out.bits.src_id;
+        _GEN_119 ? store_home_id : _response_receiver_egress_out.bits.src_id;
       store_dbid <=
-        _GEN_118 ? store_dbid : _response_receiver_egress_out.bits.dbid_or_group_id;
+        _GEN_119 ? store_dbid : _response_receiver_egress_out.bits.dbid_or_group_id;
       transmit_request <=
         ~transmit_request & ~chi_in.tx_link_active_ack | transmit_request;
       receive_ack <=
@@ -6136,7 +6175,10 @@ module RicketL1DCache(
           : rn_rx_snp_credit_balance;
     end
   end // always @(posedge)
-  assign core_out = '{request: _GEN_134, response: _responses_egress_out};
+  assign core_out =
+    '{request: _GEN_135,
+      response: _responses_egress_out,
+      drained: (~_GEN_91 & ~_lookup_egress_out.valid & _GEN & ~store_active)};
   assign chi_out =
     '{tx_link_active_request: transmit_request,
       rx_link_active_ack: receive_ack,

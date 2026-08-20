@@ -49,16 +49,18 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   inst refill(RicketLineRefill(Bits(width), width, line_bytes, checked, node.node_id))
   inst lookup(Pipe(Bits(width), 1))
   inst response_arbiter(Arbiter(RicketInstructionResp(), 2))
-  inst responses(Queue(RicketInstructionResp(), 2, ~pipe: #true, ~flow: #true), ~reset_when: core.flush)
+  def cache_flush = core.flush ||| core.invalidate_all
+  inst responses(Queue(RicketInstructionResp(), 2, ~pipe: #true, ~flow: #true), ~reset_when: cache_flush)
   inst protocol_responses(Arbiter(CHIRspFlit(p), 2))
 
   reg valid_lines(~init: as_vec(bits(0, sets), Bool))
   reg refill_live(~init: Bool(#false))
+  reg refill_installable(~init: Bool(#false))
   reg outstanding(~init: bits(0, outstanding_width))
 
-  core.response.valid <== responses.egress.valid & !core.flush
+  core.response.valid <== responses.egress.valid & !cache_flush
   core.response.bits <== responses.egress.bits
-  responses.egress.ready <== core.response.ready & !core.flush
+  responses.egress.ready <== core.response.ready & !cache_flush
   def flows = chi_rn_flow_adapter(chi, link, Bool(#true), Bool(#true))
   def outgoing_requests :: Endpoint.of(Decoupled(CHIReqFlit(p))) = flows.requests
   def outgoing_responses :: Endpoint.of(Decoupled(CHIRspFlit(p))) = flows.requester_responses
@@ -131,7 +133,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   // Lookup and SRAM response tokens advance together. A hit can admit the
   // next request, while a miss transfers its address into the refill engine
   // and blocks new requests until that transaction completes.
-  def lookup_accepts_input = !core.flush & !snoop_pending & refill.command.ready & !lookup_miss & response_capacity
+  def lookup_accepts_input = !cache_flush & !snoop_pending & refill.command.ready & !lookup_miss & response_capacity
   core.request.ready <== lookup.ingress.ready & lookup_accepts_input
   lookup.ingress.valid <== core.request.valid & lookup_accepts_input
   lookup.ingress.bits <== core.request.bits.address
@@ -139,7 +141,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
 
   def Array(miss_path, hit_path) = (
     lookup.egress
-      |> filter_flow(address => tags.port.response.valid & !core.flush)
+      |> filter_flow(address => tags.port.response.valid & !cache_flush)
       |> demux_flow(2, address => as_bits(line_hit))
   )
   def refill_commands = (
@@ -149,7 +151,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
         context: address
   )
   refill_commands |> refill.command
-  assert(!lookup_miss ||| core.flush ||| refill.command.ready,
+  assert(!lookup_miss ||| cache_flush ||| refill.command.ready,
          "l1i_refill_command_accepted")
 
   def hit_responses = (
@@ -171,8 +173,10 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   when (response_arbiter.egress.valid):
     assert(response_arbiter.egress.ready, "l1i_response_slot_reserved")
 
-  def install = fire(refill.completion)
-  when install:
+  def refill_start = fire(refill.command)
+  def refill_complete = fire(refill.completion)
+  def install = refill_complete & refill_installable & !core.invalidate_all
+  when refill_complete:
     assert(refill.completion.bits.state =/= CHIResponseState.Invalid,
            "l1i_refill_state_valid")
     assert(!refill.completion.bits.pass_dirty,
@@ -191,7 +195,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
     data: refill.completion.bits.line
     mask: !bits(0, beats)
 
-  when snoop_fire:
+  when (core.invalidate_all ||| snoop_fire):
     valid_lines <== as_vec(bits(0, sets), Bool)
   elsewhen install:
     valid_lines <== valid_lines.updated(completion_set, Bool(#true))
@@ -201,16 +205,23 @@ sync_circuit RicketL1ICache(xlen :: XLen,
     outstanding + bits(1, outstanding_width),
     outstanding - bits(1, outstanding_width)
   )
-  def refill_state_event = lookup_miss ||| install
+  def refill_state_event = refill_start ||| refill_complete
   def accounting_event = request_fire ^ response_fire
   def cache_state_event = refill_state_event ||| accounting_event
-  def next_refill_live = mux(lookup_miss, Bool(#true), mux(install, Bool(#false), refill_live))
-  when (core.flush):
+  def next_refill_live = mux(refill_start, Bool(#true), mux(refill_complete, Bool(#false), refill_live))
+  when cache_flush:
     refill_live <== Bool(#false)
     outstanding <== bits(0, outstanding_width)
   elsewhen cache_state_event:
     refill_live <== next_refill_live
     outstanding <== mux(accounting_event, next_outstanding, outstanding)
+
+  when (core.invalidate_all):
+    refill_installable <== Bool(#false)
+  elsewhen refill_start:
+    refill_installable <== Bool(#true)
+  elsewhen refill_complete:
+    refill_installable <== Bool(#false)
 
 export:
   RicketL1ICache

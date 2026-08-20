@@ -13,7 +13,7 @@ module ricket_dcache_tb;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } core_resp_bits_t;
   typedef struct packed { logic valid; core_resp_bits_t bits; } core_resp_t;
   typedef struct packed { core_req_t request; } core_in_t;
-  typedef struct packed { ready_t request; core_resp_t response; } core_out_t;
+  typedef struct packed { ready_t request; core_resp_t response; logic drained; } core_out_t;
 
   typedef struct packed { logic credit; } credit_t;
   typedef struct packed { logic valid; CHIReqFlit bits; } req_forward_t;
@@ -378,8 +378,12 @@ module ricket_dcache_tb;
     activate_link();
     grant_req_credit();
     grant_rsp_credit();
+    assert (core_out.drained)
+      else $fatal(1, "data cache was not drained after reset");
 
     send_core_request(ADDRESS, 1'b0, 64'd0, 5'd3);
+    assert (!core_out.drained)
+      else $fatal(1, "data cache reported drained during a refill");
     accept_request(READ_SHARED, ADDRESS, 12'd0, 6'd5);
     return_line(ADDRESS, LINE);
     accept_comp_ack();
@@ -392,10 +396,15 @@ module ricket_dcache_tb;
     grant_dat_credit();
     send_core_request(ADDRESS, 1'b1, STORE_DATA, 5'd0);
     expect_core_response(64'd0, 5'd0);
+    assert (!core_out.drained)
+      else $fatal(1, "data cache reported drained before store completion");
     accept_request(WRITE_UNIQUE_PTL, ADDRESS, 12'd1, 6'd3);
     send_dbid();
     accept_write_data(STORE_DATA);
     send_completion();
+    tick();
+    assert (core_out.drained)
+      else $fatal(1, "data cache did not drain after store completion");
 
     grant_req_credit();
     grant_rsp_credit();

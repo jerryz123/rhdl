@@ -9,6 +9,8 @@ import:
   "decode/operand-ctrl.rhdl" open
   "decode/branch-ctrl.rhdl" open
   "decode/mem-ctrl.rhdl" open
+  "decode/fence-ctrl.rhdl" open
+  "decode/system-ctrl.rhdl" open
   "decode/writeback-ctrl.rhdl" open
   "bundles.rhdl" open
   "csr.rhdl" open
@@ -39,6 +41,8 @@ sync_circuit RicketCore(xlen :: XLen):
     if width == 32 | instruction | zext(instruction, width)
   fun deferred_writeback(source):
     (source === WritebackSelect.Memory) ||| (source === WritebackSelect.Multiply)
+  fun serializing_operation(system :: SystemControl(), fence :: FenceControl()) :~ Bool:
+    system.is_system_operation() ||| fence.is_fence_operation()
   reg faulted(~init: Bool(#false))
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
@@ -78,11 +82,13 @@ sync_circuit RicketCore(xlen :: XLen):
   def scoreboard_clear_link :: Handle = interface_link(Valid(Bits(5)))
   scoreboard_set_link.right |> scoreboard.set
   scoreboard_clear_link.right |> scoreboard.clear
-  redirect_link.left.valid <== csrs.redirect.valid ||| execute_redirect_link.right.valid
+  def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
+  def fence_i_resume_pc = commit.bits.pc + bits(4, width)
+  redirect_link.left.valid <== csrs.redirect.valid ||| fence_i_commit ||| execute_redirect_link.right.valid
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
     csrs.redirect.bits,
-    execute_redirect_link.right.bits
+    mux(fence_i_commit, fence_i_resume_pc, execute_redirect_link.right.bits)
   )
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
@@ -104,6 +110,7 @@ sync_circuit RicketCore(xlen :: XLen):
     faulted ||| execute_exception_event ||| exception_in_flight
   ) & !redirect_link.right.valid
   instruction_access.flush <== fetch_flush
+  instruction_access.invalidate_all <== fence_i_commit
   instruction_access.request.valid <== fetch_valid & fetch_pcs.ingress.ready
   instruction_access.request.bits.address <== fetch_pc
   fetch_pcs.ingress.valid <== fetch_valid & instruction_access.request.ready
@@ -192,20 +199,21 @@ sync_circuit RicketCore(xlen :: XLen):
     control.operand.uses_rs2 & rs2_busy
   )
   def scoreboard_waw_hazard = control.writeback.enable & rd_busy
-  def system_in_id_ex = id_ex.valid & id_ex.bits.system.is_system_operation()
-  def system_in_memory = memory.valid & memory.bits.system.is_system_operation()
-  def system_in_commit = commit.valid & commit.bits.system.is_system_operation()
-  def system_in_flight = system_in_id_ex ||| system_in_memory ||| system_in_commit
+  def serializing_in_id_ex = id_ex.valid & serializing_operation(id_ex.bits.system, id_ex.bits.fence)
+  def serializing_in_memory = memory.valid & serializing_operation(memory.bits.system, memory.bits.fence)
+  def serializing_in_commit = commit.valid & serializing_operation(commit.bits.system, commit.bits.fence)
+  def serializing_in_flight = serializing_in_id_ex ||| serializing_in_memory ||| serializing_in_commit
   def commit_is_deferred = commit.valid & deferred_writeback(
     commit.bits.writeback_source
   ) & commit.bits.write_enable
   def deferred_state_pending = id_ex_is_deferred ||| memory_is_deferred ||| (
     commit_is_deferred
   ) ||| or_reduce(scoreboard.busy) ||| scoreboard_set_link.right.valid
-  def system_waits_for_deferred = control.system.is_system_operation() & deferred_state_pending
+  def serializing_waits_for_deferred = serializing_operation(control.system, control.fence) & deferred_state_pending
+  def fence_waits_for_data = control.fence.is_fence_operation() & !data_access.drained
   def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
     scoreboard_waw_hazard
-  ) ||| system_in_flight ||| system_waits_for_deferred ||| exception_in_flight ||| (
+  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| exception_in_flight ||| (
     execute_exception_event
   )
   def hazard_free_if_id = live_if_id |> gate_flow(!pipeline_hazard)
@@ -225,6 +233,7 @@ sync_circuit RicketCore(xlen :: XLen):
       writeback_enable: control.writeback.enable
       writeback_source: control.writeback.source
       system: control.system
+      fence: control.fence
       illegal: !decoder.valid
       immediate: decoded_immediate
       rs1: rs1
@@ -367,6 +376,7 @@ sync_circuit RicketCore(xlen :: XLen):
         result: execute_result
         multiply_issue: execute_multiply_issue
         system: execute_token.system
+        fence: execute_token.fence
         csr_address: execute_token.instruction[20..32]
         csr_source: csr_source
         exception_valid: execute_fault
@@ -398,6 +408,7 @@ sync_circuit RicketCore(xlen :: XLen):
         value: operation.result
         multiply_issue: operation.multiply_issue
         system: operation.system
+        fence: operation.fence
         csr_address: operation.csr_address
         csr_source: operation.csr_source
         exception_valid: operation.exception_valid

@@ -4,7 +4,8 @@
 
 `protocol.rhdl` defines `RicketInstructionAccess`, an ordered `Irrevocable`
 request/response interface carrying XLEN-wide byte addresses, returning 32-bit
-instructions, and accepting an explicit speculative flush from Fetch. The
+instructions, and accepting distinct speculative-flush and architectural
+invalidate-all controls from Fetch. The
 pipeline checks architectural alignment; the cache translates a miss into one
 line-sized RN-F `ReadShared` transaction.
 
@@ -18,11 +19,15 @@ The engine owns the address context, REQ transaction, returned `CompData`, and
 live-refill responses merge before a two-entry queue that preserves results
 under fetch backpressure. A flush clears buffered hits and kills the active
 lookup. A wrong-path refill still drains and installs its line but its completion
-is filtered from the core response flow. Reset clears the lookup pipeline and
-valid bits.
+is filtered from the core response flow. An architectural invalidation also
+clears all valid bits. If it intersects an active refill, that transaction
+drains but cannot install or return its pre-invalidation line. Reset clears the
+lookup pipeline and valid bits.
 
 The cache stores only clean lines. An incoming ordinary snoop waits for any
 lookup or refill to finish, conservatively invalidates the cache, and returns
 `SnpResp` with Invalid state. It does not return or forward data. The first cut
-still has no associativity, prefetching, or `FENCE.I`; self-modifying code
-requires the surrounding system to issue the appropriate snoop.
+still has no associativity, prefetching, or selective core-initiated
+invalidation. Ricket implements `FENCE.I` by waiting for L1D quiescence and
+then issuing the local invalidate-all operation; coherent agents may
+independently invalidate the cache through snoops.

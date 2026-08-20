@@ -10,6 +10,7 @@ import:
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/zmmul.rhm" open
   "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
   "../../../riscv/rhdl/instruction-pattern.rhdl" open
   "../../alu.rhdl" as alu
@@ -21,6 +22,7 @@ import:
   "../decode/mem-ctrl.rhdl" as memory_controls
   "../decode/writeback-ctrl.rhdl" as writeback_controls
   "../decode/system-ctrl.rhdl" as system_controls
+  "../decode/fence-ctrl.rhdl" as fence_controls
   "../decode/core-ctrl.rhdl" as controls
 
 def design = embedded.run_elaboration(fun (): controls.RicketInstructionDecoder(XLen.X64))
@@ -73,6 +75,7 @@ def complete_relations = [
   memory_controls.RV64IMemoryCases,
   writeback_controls.RV64IWritebackCases,
   system_controls.RV64ISystemCases,
+  fence_controls.RV64IFenceCases,
   controls.RV64IControlCases
 ]
 def rv32_complete_relations = [
@@ -82,6 +85,7 @@ def rv32_complete_relations = [
   memory_controls.RV32IMemoryCases,
   writeback_controls.RV32IWritebackCases,
   system_controls.RV32ISystemCases,
+  fence_controls.RV32IFenceCases,
   controls.RV32IControlCases
 ]
 def ricket_domain = controls.RV64RicketInstructions.map(instruction_pattern)
@@ -155,6 +159,10 @@ def csrrsi_system = system_controls.SystemControl():
   csr: system_controls.CsrOperation.Set
   immediate: bool.Bool(#true)
   action: system_controls.SystemOperation.None
+def memory_fence = fence_controls.FenceControl():
+  action: fence_controls.FenceOperation.Memory
+def instruction_fence = fence_controls.FenceControl():
+  action: fence_controls.FenceOperation.Instruction
 def address_add = alu.AluControl():
   result_select: alu.AluResultSelect.Arithmetic
   subtract: bool.Bool(#false)
@@ -262,6 +270,8 @@ check:
   control_for(system_controls.RV64ISystemCases, "FENCE").matches(ecall_system) ~is #false
   control_for_instruction(system_controls.RV64RicketSystemCases, CSRRW).matches(csrrw_system) ~is #true
   control_for_instruction(system_controls.RV64RicketSystemCases, CSRRSI).matches(csrrsi_system) ~is #true
+  control_for(fence_controls.RV64IFenceCases, "FENCE").matches(memory_fence) ~is #true
+  control_for_instruction(fence_controls.RV64RicketFenceCases, FENCE_I).matches(instruction_fence) ~is #true
   // Host-side column composition preserves nested freedom and emits one table.
   record_field(
     control_for(controls.RV64IControlCases, "BEQ").care,
@@ -273,8 +283,8 @@ check:
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
   controls.RV32IControlDecode.table.packed_cases.length() ~is 40
-  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 65
-  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 52
+  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 66
+  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 53
   record_field(
     control_for_instruction(controls.RV64RicketControlCases, MUL).care,
     "multiply"
@@ -289,7 +299,7 @@ check:
              controls.RicketControl()) ~is #true
   module_def.find_output("control").type.fields.map(
     fun (field): field.name
-  ) ~is ["alu", "operand", "branch", "memory", "multiply", "writeback", "system"]
+  ) ~is ["alu", "operand", "branch", "memory", "multiply", "writeback", "system", "fence"]
   verify_design(design) ~is #void
   type_equal(rv32_module.find_output("control").type,
              controls.RicketControl()) ~is #true
