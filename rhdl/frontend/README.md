@@ -74,8 +74,9 @@ and CIRCT representations.
 
 ## Circuits and elaboration
 
-A circuit declaration defines a Rhombus generator. Calling it during
-`elaborate` creates a fresh module definition:
+A circuit declaration defines a parameterized module family. Calling it during
+`elaborate` creates the selected specialization once and reuses that definition
+for later calls with the same stable parameters:
 
 ```rhombus
 circuit Passthrough(T):
@@ -133,7 +134,7 @@ if                           elaboration-time choice
 when                         hardware conditional assignment
 switch                       hardware exact-key conditional assignment
 for over a host collection   repeated generated structure
-generator call               fresh module definition
+generator call               cached module specialization
 ```
 
 Host control retains ordinary Rhombus truthiness. A hardware value is a host
@@ -147,12 +148,23 @@ exact keys. Host values are rejected by both forms.
 
 ## Host parameters and helpers
 
-Circuit parameters may be opaque host values such as numbers, strings,
-symbols, collections, configuration objects, hardware-type descriptors,
-functions, and closures. Circuit-bound `Value`, `Place`, `Register`,
-`Instance`, and frontend hardware views are rejected as direct parameters.
-The check is deliberately shallow; ordinary ownership verification catches
-incompatible handles hidden in host containers or closures.
+Circuit parameters are stable immutable host values. RHDL directly accepts
+integers, Booleans, strings, symbols, recursively stable immutable lists, and
+hardware-type descriptors. A user-defined immutable configuration implements
+`CircuitParam`. Its default specialization equality is ordinary Rhombus `==`:
+transparent immutable classes compare structurally, while opaque compiled
+artifacts remain nominal:
+
+```rhombus
+class EngineConfig(lanes :: PosInt, width :: PosInt):
+  implements CircuitParam
+```
+
+Override `same_circuit_param` only when a type needs semantic equality that
+differs from `==`. An overridden comparison must be symmetric, deterministic,
+and independent of mutable elaboration state. Mutable collections, ordinary
+functions and closures, elaborated modules, circuit-bound hardware, and other
+opaque values that do not implement `CircuitParam` are rejected.
 
 Generator declarations accept positional and keyword bindings with ordinary
 Rhombus annotations and default expressions. Ordinary and sync circuits share
@@ -163,10 +175,19 @@ hardware value separately with the most specific hardware annotation its
 operation accepts. This keeps elaboration-time type descriptors distinct from
 runtime circuit values.
 
-Parameters are not serialized, hashed, compared, or embedded into module
-names. Calling a generator creates a fresh definition, with deterministic
-suffixes such as `Adder`, `Adder_1`, and `Adder_2`. Active recursion is
-rejected by generator identity.
+The elaboration-local specialization cache compares the circuit declaration
+identity and its normalized positional and keyword argument values. Equivalent
+calls share one definition; distinct parameter values receive deterministic
+suffixes such as `Adder` and `Adder_1`. Parameters are not embedded into module
+names, and the cache is not persisted across compiler runs. Active recursion
+is rejected by generator identity.
+
+Circuit bodies and parameter defaults must depend only on their parameters,
+stable immutable captures, and local elaboration state. Local mutation used to
+collect generated structure is valid; observing or modifying external mutable
+state is not, because a cache hit does not execute the body again. A physical
+or implementation variant that needs a distinct definition should carry an
+explicit stable parameter naming that variant.
 
 Ordinary host functions may accept hardware objects while elaborating,
 inspect type descriptors, construct hardware, and return hardware to the
@@ -192,7 +213,7 @@ and [`../../examples/rhdl/layered-adder.rhdl`](../../examples/rhdl/layered-adder
 
 ## Nested circuits and hierarchy
 
-A circuit body may declare a private child generator that captures host
+A circuit body may declare a private child generator that captures stable host
 values, including parameters of the enclosing generator:
 
 ```rhombus

@@ -93,7 +93,7 @@ interface metadata does not make visualization part of frontend elaboration.
 - Keep backends independent of frontend syntax and metadata.
 - Use CIRCT rather than an RHDL-owned SystemVerilog emitter.
 - Keep widths explicit and elaboration deterministic.
-- Keep generator parameters in the host language and runtime data in hardware.
+- Keep generator parameters stable and immutable in the host language and runtime data in hardware.
 - Specify and test implicit conversion, connection, priority, or reset behavior
   before adding it.
 

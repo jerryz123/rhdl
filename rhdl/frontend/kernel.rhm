@@ -7,6 +7,7 @@ import:
   "../core/verify.rhm" open
 
 export:
+  CircuitParam
   HardwareEntity
   DeferredHardwareValue
   StaticHardwareValue
@@ -80,6 +81,12 @@ export:
   hardware_entity
   frontend_fail
 
+// Marks immutable host values for circuit specialization reuse. Ordinary
+// equality is the default; implementations may supply semantic equality.
+interface CircuitParam:
+  method same_circuit_param(other) :: Boolean:
+    this == other
+
 // Lets frontend-only wrappers carry authoring metadata while still selecting
 // an ordinary core module for instances and top-level elaboration.
 interface CircuitDefinition:
@@ -145,6 +152,7 @@ class ActiveCircuit(identity,
                     name,
                     mutable finalizers = [],
                     mutable vector_writes = [])
+class CircuitSpecialization(identity, arguments, module_def)
 
 fun new_circuit_identity(name :: String):
   CircuitIdentity(name)
@@ -153,6 +161,7 @@ class FrontendContext(design,
                       builder,
                       mutable active = #true,
                       mutable active_circuits = [],
+                      mutable circuit_specializations = [],
                       mutable allocated_symbols = []):
   method allocate_symbol(circuit_name):
     def base = circuit_name
@@ -267,30 +276,72 @@ fun run_circuit_finalizers(location = Location()):
   flush_vector_register_writes(active, location)
   #void
 
+fun circuit_param_value(value):
+  cond
+  | value is_a Boolean: #true
+  | value is_a Int: #true
+  | value is_a String: #true
+  | value is_a Symbol: #true
+  | value is_a List:
+      for all (element in value): circuit_param_value(element)
+  | hardware_type(value): #true
+  | ~else: value is_a CircuitParam
+
+fun circuit_params_same(left, right):
+  cond
+  | left is_a Boolean && right is_a Boolean: left == right
+  | left is_a Int && right is_a Int: left == right
+  | left is_a String && right is_a String: left == right
+  | left is_a Symbol && right is_a Symbol: left == right
+  | left is_a List && right is_a List:
+      circuit_param_lists_same(left, right)
+  | hardware_type(left) && hardware_type(right): type_equal(left, right)
+  | left is_a CircuitParam && right is_a CircuitParam:
+      left.same_circuit_param(right) && right.same_circuit_param(left)
+  | ~else: #false
+
+fun circuit_param_lists_same(left :: List, right :: List):
+  left.length() == right.length() && (
+    for all (left_value in left, right_value in right):
+      circuit_params_same(left_value, right_value)
+  )
+
 fun build_circuit(identity :: CircuitIdentity,
                   name :: String,
                   arguments :: List,
                   implementation :: Function.of_arity(0),
                   location = Location()):
   def context = require_context(location)
-  for (argument in arguments):
+  for (argument in arguments, index in 0..arguments.length()):
     when hardware_entity(argument) && !(argument is_a StaticHardwareValue)
-    | frontend_fail("circuit parameters must be host values, not hardware values", location)
-  when context.active_circuits.find(fun (active): active.identity === identity)
-  | frontend_fail("recursive elaboration of circuit " ++ name, location)
-  def active_circuit = ActiveCircuit(identity, name)
-  context.active_circuits := context.active_circuits ++ [active_circuit]
-  def module_def = context.builder.module(context.allocate_symbol(name))
-  parameterize { current_module: module_def }:
-    implementation()
-    // Direct kernel clients get a fallback flush. Frontend circuit wrappers
-    // flush earlier while their ambient layer parameters are still active.
-    run_circuit_finalizers(location)
-  context.builder.finish(module_def)
-  context.active_circuits := context.active_circuits.filter(
-    ~keep: fun (active): !(active.identity === identity)
+    | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a CircuitParam, not hardware", location)
+    unless circuit_param_value(argument)
+    | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a stable immutable CircuitParam value", location)
+  def cached = context.circuit_specializations.find(
+    fun (specialization):
+      specialization.identity === identity && circuit_param_lists_same(specialization.arguments, arguments)
   )
-  module_def
+  if cached
+  | cached.module_def
+  | block:
+      when context.active_circuits.find(fun (active): active.identity === identity)
+      | frontend_fail("recursive elaboration of circuit " ++ name, location)
+      def active_circuit = ActiveCircuit(identity, name)
+      context.active_circuits := context.active_circuits ++ [active_circuit]
+      def module_def = context.builder.module(context.allocate_symbol(name))
+      parameterize { current_module: module_def }:
+        implementation()
+        // Direct kernel clients get a fallback flush. Frontend circuit wrappers
+        // flush earlier while their ambient layer parameters are still active.
+        run_circuit_finalizers(location)
+      context.builder.finish(module_def)
+      context.active_circuits := context.active_circuits.filter(
+        ~keep: fun (active): !(active.identity === identity)
+      )
+      context.circuit_specializations := context.circuit_specializations ++ [
+        CircuitSpecialization(identity, arguments, module_def)
+      ]
+      module_def
 
 fun input(name, type, location = Location()):
   def context = require_context(location)

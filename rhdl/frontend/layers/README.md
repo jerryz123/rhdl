@@ -592,14 +592,16 @@ last-connect semantics. Primitive register reset remains expressed through
 
 ## Hierarchy
 
-Every circuit call creates a fresh definition. Bind a definition once to reuse
-it across instances:
+Equivalent circuit calls reuse one elaboration-local module specialization, so
+instances can call a generator directly:
 
 ```rhombus
-def AdderModule = Adder(8)
-inst u0(AdderModule)
-inst u1(AdderModule)
+inst u0(Adder(8))
+inst u1(Adder(8))
 ```
+
+Different stable parameters create distinct definitions. Binding the result
+once remains valid but is not required for reuse.
 
 An `inst` binding supplies a suggested name; collisions receive deterministic
 suffixes. `InstanceArray` is a host collection reducer that retains checked

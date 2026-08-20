@@ -1,43 +1,43 @@
 #lang rhdl
-// Composes host-specialized predicate filters through a reusable Valid interface.
+// Elaborates stable host predicate policies inline through a Valid interface.
 
 import:
+  rhombus/meta open
   lib("rhdl/std/ready-valid.rhdl") open
 
-circuit PredicateFilter(T :: DataType,
-                        predicate :: Function.of_arity(1)):
+class SingleDigitPolicy(T :: DataType):
+  implements CircuitParam
+
+  override method same_circuit_param(other):
+    other is_a SingleDigitPolicy && T.type_equal(other.T) && other.T.type_equal(T)
+
+  method apply(value :: Hardware.of(T)) :: Bool:
+    value <= bits(9, T.width)
+
+class LowBitSetPolicy(T :: DataType):
+  implements CircuitParam
+
+  override method same_circuit_param(other):
+    other is_a LowBitSetPolicy && T.type_equal(other.T) && other.T.type_equal(T)
+
+  method apply(value :: Hardware.of(T)) :: Bool:
+    value[0].into(Bool)
+
+annot.macro 'PredicatePolicy':
+  'SingleDigitPolicy || LowBitSetPolicy'
+
+circuit SingleEvenFilter(T :: DataType,
+                         first :: PredicatePolicy,
+                         second :: PredicatePolicy):
   interface ingress(Valid(T), ~role: consumer)
   interface egress(Valid(T), ~role: producer)
 
-  egress.valid <== ingress.valid & predicate(ingress.bits)
+  egress.valid <== ingress.valid & first.apply(ingress.bits) & second.apply(ingress.bits)
   egress.bits <== ingress.bits
 
-fun SingleFilter(T :: DataType):
-  fun is_single_digit(x :: Hardware.of(T)) :: Bool:
-    x <= bits(9, T.width)
-
-  PredicateFilter(T, is_single_digit)
-
-fun EvenFilter(T :: DataType):
-  // This preserves the source example's predicate: it accepts values whose
-  // low bit is set, despite the factory's original EvenFilter name.
-  fun has_low_bit_set(x :: Hardware.of(T)) :: Bool:
-    x[0].into(Bool)
-
-  PredicateFilter(T, has_low_bit_set)
-
-circuit SingleEvenFilter(T :: DataType):
-  interface ingress(Valid(T), ~role: consumer)
-  interface egress(Valid(T), ~role: producer)
-
-  inst single(SingleFilter(T))
-  inst even(EvenFilter(T))
-
-  ingress |> single.ingress
-  single.egress |> even.ingress
-  even.egress |> egress
-
-def design = elaborate(SingleEvenFilter(Bits(8)))
+def design = elaborate(
+  SingleEvenFilter(Bits(8), SingleDigitPolicy(Bits(8)), LowBitSetPolicy(Bits(8)))
+)
 
 def verilog_reference = @str|<<{
 module SingleEvenFilter(
@@ -45,40 +45,15 @@ module SingleEvenFilter(
   output struct packed {logic valid; logic [7:0] bits; } egress_out
 );
 
-  wire struct packed {logic valid; logic [7:0] bits; } _single_egress_out;
-  PredicateFilter single (
-    .ingress_in (ingress_in),
-    .egress_out (_single_egress_out)
-  );
-  PredicateFilter_1 even (
-    .ingress_in (_single_egress_out),
-    .egress_out (egress_out)
-  );
-endmodule
-
-module PredicateFilter(
-  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
-  output struct packed {logic valid; logic [7:0] bits; } egress_out
-);
-
   assign egress_out =
-    '{valid: (ingress_in.valid & ingress_in.bits < 8'hA), bits: ingress_in.bits};
-endmodule
-
-module PredicateFilter_1(
-  input  struct packed {logic valid; logic [7:0] bits; } ingress_in,
-  output struct packed {logic valid; logic [7:0] bits; } egress_out
-);
-
-  assign egress_out =
-    '{valid: (ingress_in.valid & ingress_in.bits[0]), bits: ingress_in.bits};
+    '{valid: (ingress_in.valid & ingress_in.bits < 8'hA & ingress_in.bits[0]),
+      bits: ingress_in.bits};
 endmodule
 }>>|
 
 export:
-  PredicateFilter
-  SingleFilter
-  EvenFilter
+  SingleDigitPolicy
+  LowBitSetPolicy
   SingleEvenFilter
   design
   verilog_reference

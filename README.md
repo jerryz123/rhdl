@@ -193,7 +193,6 @@ The current vertical slice includes:
 ## Deferred work
 
 - General last-connect and unordered multiple-driver semantics
-- Automatic module-specialization deduplication
 - A dedicated `UInt` distinct from raw `Bits`, implicit widths, and general
   width inference
 - Memory initialization, masks on asynchronous-read memories, general

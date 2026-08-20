@@ -143,8 +143,8 @@ instances, or logic to the generated RTL.
 | [`rhdl/hierarchy.rhdl`](rhdl/hierarchy.rhdl) | Reused module definitions and child-port access |
 | [`rhdl/nested-circuit.rhdl`](rhdl/nested-circuit.rhdl) | Lexically private child generators with explicit hardware boundaries |
 | [`rhdl/layered-adder.rhdl`](rhdl/layered-adder.rhdl) | Ordinary imported library plus generated structure |
-| [`rhdl/fresh-generators.rhdl`](rhdl/fresh-generators.rhdl) | Fresh definitions without automatic deduplication |
-| [`rhdl/host-parameters.rhdl`](rhdl/host-parameters.rhdl) | Opaque host parameters and type-producing closures |
+| [`rhdl/fresh-generators.rhdl`](rhdl/fresh-generators.rhdl) | Automatic reuse of equivalent module specializations |
+| [`rhdl/host-parameters.rhdl`](rhdl/host-parameters.rhdl) | Stable `CircuitParam` configuration and hardware-type parameters |
 | [`rhdl/generator-parameters.rhdl`](rhdl/generator-parameters.rhdl) | Positional, keyword, typed, defaulted, and synchronous generator parameters |
 | [`rhdl/register-forms.rhdl`](rhdl/register-forms.rhdl) | Inferred register types, immediate next values, reset values, and direct drives |
 | [`rhdl/tiny-simd.rhdl`](rhdl/tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |
@@ -164,7 +164,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/vec-search.rhdl`](rhdl/vec-search.rhdl) | Registered traversal of a host-defined vector pattern |
 | [`rhdl/vec-shift-register.rhdl`](rhdl/vec-shift-register.rhdl) | Priority aggregate load and shift updates |
 | [`rhdl/vec-shift-register-param.rhdl`](rhdl/vec-shift-register-param.rhdl) | Host-parameterized vector pipeline |
-| [`rhdl/predicate-filter.rhdl`](rhdl/predicate-filter.rhdl) | Host predicate closures specialized through a `Valid` interface |
+| [`rhdl/predicate-filter.rhdl`](rhdl/predicate-filter.rhdl) | Stable predicate policies elaborated inline through a `Valid` interface |
 | [`rhdl/wire.rhdl`](rhdl/wire.rhdl) | Forward-readable aggregate wire driven later by element |
 | [`rhdl/interface.rhdl`](rhdl/interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
 | [`rhdl/interface-specialization.rhdl`](rhdl/interface-specialization.rhdl) | Directional parameter compatibility, nested rules, operand reversal, and explicit width adaptation |

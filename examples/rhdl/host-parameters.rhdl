@@ -1,48 +1,38 @@
 #lang rhdl
-// Demonstrates opaque host configuration, hardware types, and type-producing closures as circuit parameters.
+// Demonstrates stable CircuitParam configuration and hardware-type circuit parameters.
 
-class HostConfig(use_factory, labels)
+class HostConfig(use_configured_width :: Boolean,
+                 width :: PosInt,
+                 labels :: List):
+  implements CircuitParam
 
-fun type_factory(width):
-  fun (): Bits(width)
-
-fun select_type(fallback_type, make_type, config):
+fun select_type(fallback_type :: DataType, config :: HostConfig):
   unless config.labels.length() == 2
   | error(~who: #'HostParameterized, "expected input and output labels")
-  if (config.use_factory)
-  | make_type()
+  if config.use_configured_width
+  | Bits(config.width)
   | fallback_type
 
-circuit HostParameterized(fallback_type, make_type, config):
-  def T = select_type(fallback_type, make_type, config)
+circuit HostParameterized(fallback_type :: DataType, config :: HostConfig):
+  def T = select_type(fallback_type, config)
   input x: T
   output y: T
   y <== x
 
-circuit HostWrapper(child):
-  input x: Bits(8)
-  output y: Bits(8)
-  inst u(child)
+circuit HostWrapper(config :: HostConfig):
+  def T = select_type(Bits(16), config)
+  input x: T
+  output y: T
+  inst u(HostParameterized(Bits(16), config))
   u.x <== x
   y <== u.y
 
 fun top():
-  def child = HostParameterized(Bits(16),
-                                type_factory(8),
-                                HostConfig(#true, ["input", "output"]))
-  HostWrapper(child)
+  HostWrapper(HostConfig(#true, 8, ["input", "output"]))
 
 def design = elaborate(top())
 
 def verilog_reference = @str|<<{
-module HostParameterized(
-  input  [7:0] x,
-  output [7:0] y
-);
-
-  assign y = x;
-endmodule
-
 module HostWrapper(
   input  [7:0] x,
   output [7:0] y
@@ -53,11 +43,18 @@ module HostWrapper(
     .y (y)
   );
 endmodule
+
+module HostParameterized(
+  input  [7:0] x,
+  output [7:0] y
+);
+
+  assign y = x;
+endmodule
 }>>|
 
 export:
   HostConfig
-  type_factory
   HostParameterized
   HostWrapper
   design
