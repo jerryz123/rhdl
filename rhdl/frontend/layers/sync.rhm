@@ -11,6 +11,7 @@ import:
   "../support/fields.rhm".CircuitMemberFields
   "../support/fields.rhm".ValueSurfaceFields
   "../support/generator-parameters.rhm".GeneratorParameter
+  "../support/generator-parameters.rhm".substitute_generator_parameters
 
 export:
   sync_circuit
@@ -34,6 +35,8 @@ defn.macro 'sync_circuit $(name :: Identifier)($(argument :: GeneratorParameter)
   for (item in [body, ...]):
     match item
     | 'def $(local_name :: Identifier) $tail ...':
+        body_local_names := body_local_names ++ [local_name.to_source_string()]
+    | 'fun $(local_name :: Identifier) $tail ...':
         body_local_names := body_local_names ++ [local_name.to_source_string()]
     | ~else: #void
   fun static_type_available(port_type):
@@ -107,17 +110,8 @@ defn.macro 'sync_circuit $(name :: Identifier)($(argument :: GeneratorParameter)
     | 'Array.later_of(ValueSurfaceFields($type))':
         def substituted_type = substitute_parameters(type)
         'Array.later_of(ValueSurfaceFields($substituted_type))'
-    | '$(identifier :: Identifier)':
-        def mutable substituted = form
-        for (binding in [parameter_binding, ...]):
-          when identifier.to_source_string() == binding.to_source_string()
-          | substituted := '$('$')$binding'
-        substituted
-    | '$constructor($item, ...)':
-        let [substituted_item, ...]:
-          for List (part in [item, ...]): substitute_parameters(part)
-        '$constructor($substituted_item, ...)'
-    | ~else: form
+    | ~else:
+        substitute_generator_parameters(form, [parameter_binding, ...])
   let [substituted_member_entry, ...]:
     for List (entry in member_entries):
       match entry

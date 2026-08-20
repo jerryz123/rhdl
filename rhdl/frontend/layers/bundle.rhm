@@ -8,6 +8,7 @@ import:
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/generator-parameters.rhm".GeneratorParameter
+  "../support/generator-parameters.rhm".substitute_generator_parameters
   "../support/hardware-methods.rhm".HardwareMethods
   "../support/hardware-literal.rhm" open
 
@@ -101,9 +102,7 @@ annot.macro 'BundleFields($expected_type,
   def (predicate, base_infos) = annot_meta.unpack_predicate(base)
   let [field_infos, ...]:
     for List (annotation in [field_annotation, ...]):
-      let '$(parsed_annotation :: annot_meta.Parsed)' = annotation
-      def (_field_predicate, infos) = annot_meta.unpack_predicate(parsed_annotation)
-      statinfo_meta.pack(infos)
+      annot_meta.parse_to_packed_statinfo(annotation)
   def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), bundle_value_dot),
       (bundle_field_static_info_key, (($field_name, $field_infos), ...)))',
@@ -119,9 +118,7 @@ annot.macro 'BundleStaticFields($(field_name :: Identifier): $field_annotation, 
   def (predicate, base_infos) = annot_meta.unpack_predicate(base)
   let [field_infos, ...]:
     for List (annotation in [field_annotation, ...]):
-      let '$(parsed_annotation :: annot_meta.Parsed)' = annotation
-      def (_field_predicate, infos) = annot_meta.unpack_predicate(parsed_annotation)
-      statinfo_meta.pack(infos)
+      annot_meta.parse_to_packed_statinfo(annotation)
   def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), bundle_value_dot),
       (bundle_field_static_info_key, (($field_name, $field_infos), ...)))',
@@ -147,26 +144,14 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
   def mutable method_entries = []
   def mutable method_definitions = []
   fun substitute_bundle_parameters(field_type):
-    match field_type
-    | '$(type_name :: Identifier)':
-        def mutable substituted = field_type
-        for (item in [parameter, ...]):
-          def binding = item.binding
-          when type_name.to_source_string() == binding.to_source_string()
-          | substituted := '$('$')$binding'
-        substituted
-    | '$constructor($type_argument, ...)':
-        def substituted_constructor = substitute_bundle_parameters(constructor)
-        let [substituted_argument, ...]:
-          for List (item in [type_argument, ...]):
-            substitute_bundle_parameters(item)
-        '$substituted_constructor($substituted_argument, ...)'
-    | ~else: field_type
+    substitute_generator_parameters(field_type, [parameter.binding, ...])
   fun retain_static_field(field_name, field_type):
-    static_fields := static_fields ++ ['$field_name: $field_type']
+    static_fields := static_fields ++ [
+      '$field_name: HardwareFields.from_type($field_type)'
+    ]
     def substituted_type = substitute_bundle_parameters(field_type)
     descriptor_static_fields := descriptor_static_fields ++ [
-      '$field_name: $substituted_type'
+      '$field_name: HardwareFields.from_type($substituted_type)'
     ]
   for (item in [clause, ...]):
     match item
@@ -316,7 +301,7 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
               )'
        | '$name': '$type_constructor'
        annot.macro '$name($('$')$parameter_binding, ...)':
-         'HardwareFields.from_type($name($('$')$parameter_binding, ...))'
+         'HardwareFields.of($type_constructor($('$')$parameter_binding, ...))'
      »'
 
 expr.macro 'record($type):

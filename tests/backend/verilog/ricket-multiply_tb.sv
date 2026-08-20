@@ -7,7 +7,12 @@ module ricket_multiply_tb;
   typedef struct packed { logic [31:0] instruction; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
-  typedef struct packed { logic flush; instruction_req_t request; ready_t response; } instruction_out_t;
+  typedef struct packed {
+    logic flush;
+    logic invalidate_all;
+    instruction_req_t request;
+    ready_t response;
+  } instruction_out_t;
   typedef struct packed {
     logic [63:0] address;
     logic write;
@@ -19,7 +24,7 @@ module ricket_multiply_tb;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
-  typedef struct packed { ready_t request; data_resp_t response; } data_in_t;
+  typedef struct packed { ready_t request; data_resp_t response; logic drained; } data_in_t;
   typedef struct packed { data_req_t request; } data_out_t;
 
   logic clock = 1'b0;
@@ -67,6 +72,7 @@ module ricket_multiply_tb;
     instruction_access_in.response.bits.instruction = instruction_response_bits;
     data_access_in.request.ready = 1'b1;
     data_access_in.response = '0;
+    data_access_in.drained = 1'b1;
   end
 
   always_ff @(posedge clock) begin
