@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements an initial single-flit non-coherent CHI SN-F/SN-I backing RAM.
+// Implements a single-flit non-coherent CHI SN-F/SN-I backing RAM.
 
 import:
   lib("host/annotations.rhm") open
@@ -12,8 +12,7 @@ import:
   lib("chi/protocol.rhdl") open
   lib("chi/transaction.rhdl") open
   lib("chi/link.rhdl") open
-  lib("chi/monitor.rhdl").monitor_chi_sn
-  lib("chi/flow.rhdl").chi_sn_flow_adapter
+  lib("chi/decoupled.rhdl").CHISNDecoupled
   lib("chi/fabric.rhdl") open
   lib("chi/subordinate-slots.rhdl") open
 
@@ -30,12 +29,11 @@ bundle CHIRamMemoryCompletion(p :: CHIFlitParams, slot_width :: PosInt):
 
 class CHIRamParams(name :: NonemptyString,
                    node_id :: Nat,
-                   link :: CHISNLinkParams,
+                   flit :: CHIFlitParams,
                    size_bytes :: Pow2Int,
                    ~base_address: base_address :: Nat = 0,
                    ~kind: kind :: CHINodeKind = CHINodeKind.SNF,
                    ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024) = 2):
-  property flit: link.flit
   property transfers: TransferSizes(1, flit.data_bytes)
   property node:
     CHINodeParams(
@@ -63,7 +61,6 @@ class CHIRamParams(name :: NonemptyString,
       ~supports: node.emits,
       ~max_outstanding: max_outstanding
     )
-  property fabric_port: CHIFabricPortParams(icn_port, link)
   property service:
     CHISubordinateServiceParams(
       icn_port,
@@ -263,8 +260,6 @@ circuit CHIRamCompletionRouter(p :: CHIFlitParams,
 sync_circuit CHIRam(params :: CHIRamParams):
   def checked = checked_chi_ram_params(params)
   def p = checked.flit
-  def node = checked.node
-  def link = checked.link
   def limit = checked.max_outstanding
   def slot_width = index_width(limit)
   def depth = checked.size_bytes / p.data_bytes
@@ -274,13 +269,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
   def MemoryOperation = CHIRamMemoryOperation(p, slot_width)
   def MemoryCompletion = CHIRamMemoryCompletion(p, slot_width)
 
-  interface port(CHISNLink(link, node), ~role: node)
-  def link_adapter = chi_sn_flow_adapter(port,
-                                         link,
-                                         Bool(#true),
-                                         Bool(#true))
-  def requests :: Endpoint.of(Irrevocable(CHIReqFlit(p))) = link_adapter.requests
-  def request_data :: Endpoint.of(Irrevocable(CHIDatFlit(p))) = link_adapter.request_data
+  interface port(CHISNDecoupled(p), ~role: node)
   inst dbid_responses(Queue(CHIRspFlit(p), limit, ~pipe: #true))
   inst read_operations(Queue(MemoryOperation, limit, ~pipe: #true))
   inst write_operations(Queue(MemoryOperation, limit, ~pipe: #true))
@@ -295,7 +284,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
   inst response_arbiter(RRArbiter(CHIRspFlit(p), 2))
   inst transaction_slots(CHISNTransactionSlots(p, limit))
 
-  def supported_requests = requests |> filter_flow(request):
+  def supported_requests = port.requests |> filter_flow(request):
     chi_initial_request_supported(request.opcode)
   transaction_slots.allocation <=> (
     supported_requests |> map_flow(request):
@@ -325,7 +314,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
                             allocated.slot)
   )
 
-  request_data <=> transaction_slots.write_data
+  port.request_data <=> transaction_slots.write_data
   write_operations.ingress <=> (
     transaction_slots.matched_write |> map_flow(matched):
       CHIRamMemoryOperation(p, slot_width):
@@ -369,12 +358,11 @@ sync_circuit CHIRam(params :: CHIRamParams):
       response.dbid_or_group_id[0..slot_width]
   )
   completion_router.write_response <=> response_arbiter.ingress[1]
-  response_arbiter.egress <=> link_adapter.responses
-  completion_router.read_response <=> link_adapter.response_data
+  response_arbiter.egress <=> port.responses
+  completion_router.read_response <=> port.response_data
   completion_router.completed <=> transaction_slots.completed
 
-  monitor_chi_sn(link, node, port)
-  monitor_chi_ram_request(port.rx_req.valid, port.rx_req.bits, checked)
+  monitor_chi_ram_request(port.requests.valid, port.requests.bits, checked)
   monitor_chi_ram_write_data(transaction_slots.matched_write.valid,
                              transaction_slots.matched_write.bits.data,
                              transaction_slots.matched_write.bits.request,

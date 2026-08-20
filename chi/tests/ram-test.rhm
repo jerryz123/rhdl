@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks CHIRam parameters, composition, service assertions, and invalid regions.
+// Checks decoupled CHI RAM parameters, composition, and invalid regions.
 
 import:
   rhombus.bits.(<<) as <<
@@ -11,7 +11,7 @@ import:
 def params = fixture.ram_params
 def sni_params = chi.CHIRamParams("test-chi-sni-ram",
                                   10,
-                                  fixture.ram_link,
+                                  fixture.ram_flit,
                                   64,
                                   ~kind: chi.CHINodeKind.SNI)
 def non_power_of_two_design = embedded.run_elaboration(
@@ -19,7 +19,7 @@ def non_power_of_two_design = embedded.run_elaboration(
     chi.CHIRam(
       chi.CHIRamParams("three-slot-chi-ram",
                        9,
-                       fixture.ram_link,
+                       fixture.ram_flit,
                        64,
                        ~base_address: 0x80000000,
                        ~max_outstanding: 3)
@@ -77,7 +77,6 @@ check:
   params.node.max_outstanding ~is 2
   params.node.supports.req ~is [chi.CHIReqOpcode.ReadNoSnp, chi.CHIReqOpcode.WriteNoSnpFull, chi.CHIReqOpcode.WriteNoSnpPtl]
   params.icn_port.emits.req ~is params.node.supports.req
-  params.fabric_port.endpoint ~is params.icn_port
   params.service.address_sets ~is [chi.AddressSet(0x80000000, 63)]
   params.service.supports(chi.CHIReqOpcode.ReadNoSnp, 16) ~is #true
   params.service.supports(chi.CHIReqOpcode.ReadNoSnp, 32) ~is #false
@@ -91,7 +90,6 @@ check:
   assertion_labels.contains("chi_ram_request_address_supported") ~is #true
   assertion_labels.contains("chi_ram_write_data_has_transaction") ~is #false
   assertion_labels.contains("chi_ram_write_data_mask_supported") ~is #true
-  assertion_labels.contains("chi_transaction_request_opcode_supported") ~is #true
   register_names.contains("occupied") ~is #false
   register_names.contains("awaiting_write_data") ~is #false
   register_names.contains("write_requests") ~is #false
@@ -113,16 +111,16 @@ check:
   verify_design(fixture.ram_design) ~is #void
   verify_design(non_power_of_two_design) ~is #void
 
-  chi.CHIRamParams("", 9, fixture.ram_link, 64) ~throws "NonemptyString"
+  chi.CHIRamParams("", 9, fixture.ram_flit, 64) ~throws "NonemptyString"
   embedded.run_elaboration(
-    fun (): chi.CHIRam(chi.CHIRamParams("one-beat", 9, fixture.ram_link, 16))
+    fun (): chi.CHIRam(chi.CHIRamParams("one-beat", 9, fixture.ram_flit, 16))
   ) ~throws "at least two physical data beats"
   embedded.run_elaboration(
-    fun (): chi.CHIRam(chi.CHIRamParams("misaligned", 9, fixture.ram_link, 64, ~base_address: 32))
+    fun (): chi.CHIRam(chi.CHIRamParams("misaligned", 9, fixture.ram_flit, 64, ~base_address: 32))
   ) ~throws "base address must be aligned"
   embedded.run_elaboration(
-    fun (): chi.CHIRam(chi.CHIRamParams("outside", 9, fixture.ram_link, 64, ~base_address: (1 << 44)))
+    fun (): chi.CHIRam(chi.CHIRamParams("outside", 9, fixture.ram_flit, 64, ~base_address: (1 << 44)))
   ) ~throws "memory region must fit"
   embedded.run_elaboration(
-    fun (): chi.CHIRam(chi.CHIRamParams("wide-node", 128, fixture.ram_link, 64))
+    fun (): chi.CHIRam(chi.CHIRamParams("wide-node", 128, fixture.ram_flit, 64))
   ) ~throws "NodeID must fit"

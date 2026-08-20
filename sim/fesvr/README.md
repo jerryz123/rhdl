@@ -1,6 +1,6 @@
-<!-- Documents the FESVR transport and native CHI-backed simulation host. -->
+<!-- Documents the FESVR transport and decoupled CHI-backed simulation requester. -->
 
-# Native CHI FESVR simulation support
+# Decoupled CHI FESVR simulation support
 
 `DirectMemoryHtif` derives from FESVR's `htif_t` and presents its abstract
 memory chunks to RHDL as one-outstanding, aligned 32-bit transactions. It is
@@ -16,19 +16,21 @@ make -C sim/fesvr test
 
 `direct_mem_htif_dpi.cc` provides the DPI-C entry point.
 `direct-memory-htif.rhdl` preserves that flat ABI in `DirectMemoryHTIF`, while
-`FesvrHost` is a native CHI RN-I endpoint:
+`FesvrRequester` is its ready-valid CHI requester transaction engine:
 
 ```text
-FesvrHost
-  memory: CHIRNILink node
-  start:  Irrevocable(Bits(32)) producer
-  exit:   Bits(32)
+FesvrRequester
+  port:  CHIRNDecoupled node
+  start: Irrevocable(Bits(32)) producer
+  exit:  Bits(32)
 ```
 
-The private ready-valid signals between `DirectMemoryHTIF` and `FesvrHost`
+The private ready-valid signals between `DirectMemoryHTIF` and
+`FesvrRequester`
 belong only to the DPI procedure call. They are not a hardware memory protocol
-and are not exposed outside the endpoint. `FesvrHost` directly implements CHI
-link activation, credit handling, and these one-outstanding transaction flows:
+and are not exposed outside the requester. The requester owns these
+one-outstanding CHI transaction flows but no physical link activation or credit
+state:
 
 | FESVR operation | Native CHI sequence |
 |---|---|
@@ -80,21 +82,24 @@ FESVR.
 ```text
 TestDriver.sv
 └── FesvrTop
-    ├── FesvrHost (RN-I, NodeID 3)
+    ├── FesvrRequester (RN-I behavior, NodeID 3)
     ├── CHIHNI (HN-I, NodeID 5)
-    └── CHIRam (SN-I, NodeID 9)
+    └── CHIRam (SN-I behavior, NodeID 9)
 ```
 
-The links are connected directly, without a compatibility adapter, shared-memory
-owner queue, processor port, or crossbar.
+The three transaction engines connect directly over ready-valid flows. A later
+NoC can transport each flow without creating redundant internal CHI links or
+credit loops; physical CHI adapters belong only at boundaries that actually
+expose CHI credited links. There is no `SimpleMemory` protocol, compatibility
+adapter, shared-memory owner queue, processor port, or crossbar.
 The RAM covers `0x80000000` through `0x80001fff`, which includes both the ELF
 entry point and the test program's HTIF mailbox.
 
 Without a processor, the test ELF preinitializes `tohost` with the passing
 value. FESVR completes ELF loading, hands off the entry point, then reads that
 mailbox through CHI and reports its normal passing exit word. The driver checks
-both the `0x80000000` handoff and exit value, while the CHI endpoint, Home, RAM,
-and transaction monitors check the load writes and mailbox read.
+both the `0x80000000` handoff and exit value, while the requester, Home, RAM,
+and transaction checks cover the load writes and mailbox read.
 
 Run the focused RTL checks with:
 

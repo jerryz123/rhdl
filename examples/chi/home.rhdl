@@ -1,12 +1,10 @@
 #lang rhdl
-// Demonstrates a bounded initial-profile HN-I between one RN-I and one SN-I port.
+// Demonstrates the ready-valid initial-profile HN-I transaction bridge.
 
 import:
   lib("chi/main.rhdl") open
 
 def home_flit = CHIFlitParams()
-def requester_link = CHIRNILinkParams(home_flit)
-def subordinate_link = CHISNLinkParams(home_flit)
 def requester_endpoint = CHIICNPortParams(
   "home-requester",
   3,
@@ -45,9 +43,6 @@ def home = CHIHomeParams(
   CHINodeKind.HNI,
   ~max_outstanding: 2
 )
-def requester_port = CHIFabricPortParams(requester_endpoint, requester_link)
-def subordinate_port = CHIFabricPortParams(subordinate_endpoint,
-                                           subordinate_link)
 def subordinate_service = CHISubordinateServiceParams(
   subordinate_endpoint,
   [AddressSet(0x80000000, 0x0fffffff)],
@@ -59,8 +54,9 @@ def subordinate_service = CHISubordinateServiceParams(
                      TransferSizes(1, home_flit.data_bytes))]
 )
 def home_params = CHIHNIParams(home,
-                               requester_port,
-                               subordinate_port,
+                               home_flit,
+                               requester_endpoint,
+                               subordinate_endpoint,
                                subordinate_service)
 def home_design = elaborate(CHIHNI(home_params))
 
@@ -81,12 +77,10 @@ def home_verilog_reference = @str|<<{
     CHIHomeTransaction;
 `endif // _TYPESCOPE_rhdl_types
 module CHIHNI(
-  input                                                                                                                                                                                                                                                                                                                              clock,
-                                                                                                                                                                                                                                                                                                                                     reset,
-  input  struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIReqFlit bits; } tx_req; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_rsp; struct packed {logic credit; } rx_dat; } requester_in,
-  input  struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_req; struct packed {logic credit; } rx_dat; }                                                        subordinate_in,
-  output struct packed {struct packed {logic credit; } tx_req; struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIRspFlit bits; } rx_rsp; struct packed {logic valid; CHIDatFlit bits; } rx_dat; }                 requester_out,
-  output struct packed {struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIReqFlit bits; } rx_req; struct packed {logic valid; CHIDatFlit bits; } rx_dat; }                                                        subordinate_out
+  input                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         clock,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                reset,
+  input  struct packed {struct packed {struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIRspFlit bits; } requester_responses; struct packed {logic valid; CHIDatFlit bits; } request_data; struct packed {logic ready; } responses; struct packed {logic ready; } response_data; } requester; struct packed {struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic ready; } requests; struct packed {logic ready; } request_data; } subordinate; } port_in,
+  output struct packed {struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; } requester; struct packed {struct packed {logic ready; } responses; struct packed {logic ready; } response_data; struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIDatFlit bits; } request_data; } subordinate; }                  port_out
 );
 
   wire CHIDatFlit                    _GEN;
@@ -103,21 +97,6 @@ module CHIHNI(
   wire [1:0]                         _write_await_dbid_busy;
   wire [1:0]                         _read_pending_busy;
   wire [1:0]                         _occupancy_busy;
-  wire
-    struct packed {struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIReqFlit bits; } rx_req; struct packed {logic valid; CHIDatFlit bits; } rx_dat; }
-    _subordinate_adapter_port_out;
-  wire struct packed {logic ready; } _subordinate_adapter_requests_out;
-  wire struct packed {logic ready; } _subordinate_adapter_request_data_out;
-  wire struct packed {logic valid; CHIRspFlit bits; } _subordinate_adapter_responses_out;
-  wire struct packed {logic valid; CHIDatFlit bits; }
-    _subordinate_adapter_response_data_out;
-  wire
-    struct packed {struct packed {logic credit; } tx_req; struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIRspFlit bits; } rx_rsp; struct packed {logic valid; CHIDatFlit bits; } rx_dat; }
-    _requester_adapter_port_out;
-  wire struct packed {logic valid; CHIReqFlit bits; } _requester_adapter_requests_out;
-  wire struct packed {logic valid; CHIDatFlit bits; } _requester_adapter_request_data_out;
-  wire struct packed {logic ready; } _requester_adapter_responses_out;
-  wire struct packed {logic ready; } _requester_adapter_response_data_out;
   wire struct packed {logic ready; } _GEN_8 = '{ready: 1'h1};
   wire CHIHomeTransaction            _GEN_9 =
     '{phase: 3'h0,
@@ -155,22 +134,22 @@ module CHIHNI(
   wire [1:0]                         _GEN_16 = {{~_GEN_11[1'h1]}, {~_GEN_11[_GEN_10]}};
   wire                               _GEN_17 = |_GEN_16;
   assign _GEN_7 = _GEN_16[1] & ~(_GEN_16[0]);
-  assign _GEN_6 = _requester_adapter_requests_out.bits;
+  assign _GEN_6 = port_in.requester.requests.bits;
   wire                               _GEN_18 = |_GEN_6.opcode;
   wire                               _GEN_19 = _GEN_6.opcode == 7'h4;
   wire                               _GEN_20 = _GEN_6.opcode == 7'h1D;
   wire                               _GEN_21 = _GEN_6.opcode == 7'h1C;
   wire                               _GEN_22 = _GEN_19 | _GEN_20 | _GEN_21;
   wire                               _GEN_23 =
-    ~_GEN_18 | ~_GEN_22 | _GEN_17 & _subordinate_adapter_requests_out.ready;
+    ~_GEN_18 | ~_GEN_22 | _GEN_17 & port_in.subordinate.requests.ready;
   wire                               _GEN_24 =
-    _requester_adapter_requests_out.valid & _GEN_18 & _GEN_22 & _GEN_17;
+    port_in.requester.requests.valid & _GEN_18 & _GEN_22 & _GEN_17;
   wire [11:0]                        _GEN_25 = {11'h0, _GEN_7};
-  assign _GEN_5 = _GEN_24 & _subordinate_adapter_requests_out.ready;
+  assign _GEN_5 = _GEN_24 & port_in.subordinate.requests.ready;
   wire                               _GEN_26 = _GEN_20 | _GEN_21;
   wire                               _GEN_27 = _GEN_6.size_or_num_req[2:0] < 3'h5;
   wire                               _GEN_28 =
-    _requester_adapter_requests_out.valid & _GEN_18 & ~reset;
+    port_in.requester.requests.valid & _GEN_18 & ~reset;
   wire                               _GEN_29 = ~_GEN_28;
   `ifndef SYNTHESIS
     chi_hni_request_opcode_supported:
@@ -189,1176 +168,125 @@ module CHIHNI(
                              {_GEN_20 & _GEN_27},
                              {_GEN_19 & _GEN_27}})) & _GEN_6.address[43:28] == 16'h8);
   `endif // not def SYNTHESIS
-  wire                               _GEN_32 =
-    |_subordinate_adapter_responses_out.bits.opcode;
+  wire                               _GEN_32 = |port_in.subordinate.responses.bits.opcode;
   wire                               _GEN_33 =
-    _subordinate_adapter_responses_out.bits.opcode == 5'h6;
+    port_in.subordinate.responses.bits.opcode == 5'h6;
   wire                               _GEN_34 =
-    _subordinate_adapter_responses_out.bits.opcode == 5'h4;
-  assign _GEN_4 = _subordinate_adapter_responses_out.bits.txn_id[0];
+    port_in.subordinate.responses.bits.opcode == 5'h4;
+  assign _GEN_4 = port_in.subordinate.responses.bits.txn_id[0];
   wire                               _GEN_35 =
-    _subordinate_adapter_responses_out.bits.txn_id < 12'h2;
+    port_in.subordinate.responses.bits.txn_id < 12'h2;
   wire                               _GEN_36 =
     _GEN_35 & (_GEN_33 & _GEN_13[_GEN_4] | _GEN_34 & _GEN_15[_GEN_4]);
   wire                               _GEN_37 =
-    _subordinate_adapter_responses_out.valid & _GEN_32 & _GEN_36;
+    port_in.subordinate.responses.valid & _GEN_32 & _GEN_36;
   wire CHIRspFlit                    _GEN_38 =
-    '{cache_line_id: _subordinate_adapter_responses_out.bits.cache_line_id,
-      trace_tag: _subordinate_adapter_responses_out.bits.trace_tag,
-      tag_op: _subordinate_adapter_responses_out.bits.tag_op,
+    '{cache_line_id: port_in.subordinate.responses.bits.cache_line_id,
+      trace_tag: port_in.subordinate.responses.bits.trace_tag,
+      tag_op: port_in.subordinate.responses.bits.tag_op,
       pcrd_type: (4'h0),
       dbid_or_group_id: {11'h0, _GEN_4},
-      c_busy: _subordinate_adapter_responses_out.bits.c_busy,
-      fwd_state_or_data_pull:
-        _subordinate_adapter_responses_out.bits.fwd_state_or_data_pull,
-      resp: _subordinate_adapter_responses_out.bits.resp,
-      resp_err: _subordinate_adapter_responses_out.bits.resp_err,
-      opcode: _subordinate_adapter_responses_out.bits.opcode,
+      c_busy: port_in.subordinate.responses.bits.c_busy,
+      fwd_state_or_data_pull: port_in.subordinate.responses.bits.fwd_state_or_data_pull,
+      resp: port_in.subordinate.responses.bits.resp,
+      resp_err: port_in.subordinate.responses.bits.resp_err,
+      opcode: port_in.subordinate.responses.bits.opcode,
       txn_id: requests[_GEN_4].txn_id,
       src_id: (7'h5),
       tgt_id: requests[_GEN_4].src_id,
       qos: requests[_GEN_4].qos};
   wire                               _GEN_39 =
-    ~_GEN_32 | ~_GEN_36 | _requester_adapter_responses_out.ready;
+    ~_GEN_32 | ~_GEN_36 | port_in.requester.responses.ready;
   wire                               _GEN_40 =
-    _GEN_37 & _requester_adapter_responses_out.ready;
+    _GEN_37 & port_in.requester.responses.ready;
   assign _GEN_3 = _GEN_40 & _GEN_33;
   wire                               _GEN_41 = _GEN_40 & _GEN_34;
   wire                               _GEN_42 =
-    ~(_subordinate_adapter_responses_out.valid & _GEN_32 & ~reset);
+    ~(port_in.subordinate.responses.valid & _GEN_32 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_response_has_transaction:
       assert property (@(posedge clock) disable iff (_GEN_42) _GEN_36);
   `endif // not def SYNTHESIS
-  assign _GEN_2 = _subordinate_adapter_responses_out.bits.dbid_or_group_id;
+  assign _GEN_2 = port_in.subordinate.responses.bits.dbid_or_group_id;
   wire                               _GEN_43 =
-    |_requester_adapter_request_data_out.bits.opcode;
+    |port_in.requester.request_data.bits.opcode;
   wire                               _GEN_44 =
-    _requester_adapter_request_data_out.bits.txn_id < 12'h2;
+    port_in.requester.request_data.bits.txn_id < 12'h2;
   wire                               _GEN_45 =
-    _GEN_44 & _GEN_14[_requester_adapter_request_data_out.bits.txn_id[0]]
-    & _requester_adapter_request_data_out.bits.src_id == requests[_requester_adapter_request_data_out.bits.txn_id[0]].src_id;
+    _GEN_44 & _GEN_14[port_in.requester.request_data.bits.txn_id[0]]
+    & port_in.requester.request_data.bits.src_id == requests[port_in.requester.request_data.bits.txn_id[0]].src_id;
   wire                               _GEN_46 =
-    ~_GEN_43 | ~_GEN_45 | _subordinate_adapter_request_data_out.ready;
+    ~_GEN_43 | ~_GEN_45 | port_in.subordinate.request_data.ready;
   wire                               _GEN_47 =
-    _requester_adapter_request_data_out.valid & _GEN_43 & _GEN_45;
+    port_in.requester.request_data.valid & _GEN_43 & _GEN_45;
   wire                               _GEN_48 =
-    ~(_requester_adapter_request_data_out.valid & _GEN_43 & ~reset);
+    ~(port_in.requester.request_data.valid & _GEN_43 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_write_data_has_dbid:
       assert property (@(posedge clock) disable iff (_GEN_48) _GEN_45);
   `endif // not def SYNTHESIS
   wire                               _GEN_49 =
-    |_subordinate_adapter_response_data_out.bits.opcode;
+    |port_in.subordinate.response_data.bits.opcode;
   wire                               _GEN_50 =
-    _subordinate_adapter_response_data_out.bits.txn_id < 12'h2;
+    port_in.subordinate.response_data.bits.txn_id < 12'h2;
   wire                               _GEN_51 =
-    _GEN_50 & _GEN_12[_subordinate_adapter_response_data_out.bits.txn_id[0]];
+    _GEN_50 & _GEN_12[port_in.subordinate.response_data.bits.txn_id[0]];
   wire                               _GEN_52 =
-    _subordinate_adapter_response_data_out.valid & _GEN_49 & _GEN_51 & ~_GEN_41;
+    port_in.subordinate.response_data.valid & _GEN_49 & _GEN_51 & ~_GEN_41;
   wire                               _GEN_53 =
-    ~_GEN_49 | ~_GEN_51 | ~_GEN_41 & _requester_adapter_response_data_out.ready;
+    ~_GEN_49 | ~_GEN_51 | ~_GEN_41 & port_in.requester.response_data.ready;
   wire                               _GEN_54 =
-    _GEN_52 & _requester_adapter_response_data_out.ready;
+    _GEN_52 & port_in.requester.response_data.ready;
   wire                               _GEN_55 =
-    ~(_subordinate_adapter_response_data_out.valid & _GEN_49 & ~reset);
+    ~(port_in.subordinate.response_data.valid & _GEN_49 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_read_data_has_transaction:
       assert property (@(posedge clock) disable iff (_GEN_55) _GEN_51);
   `endif // not def SYNTHESIS
-  reg                                rni_tx_previous_request;
-  reg                                rni_tx_previous_ack;
-  reg                                rni_rx_previous_request;
-  reg                                rni_rx_previous_ack;
-  reg  [1:0]                         rni_tx_req_credit_balance;
-  reg  [1:0]                         rni_tx_rsp_credit_balance;
-  reg  [1:0]                         rni_tx_dat_credit_balance;
-  reg  [1:0]                         rni_rx_rsp_credit_balance;
-  reg  [1:0]                         rni_rx_dat_credit_balance;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_link_request_after_ack_low:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(requester_in.tx_link_active_request & ~rni_tx_previous_request)
-                         | ~rni_tx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_link_ack_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(_requester_adapter_port_out.tx_link_active_ack
-                           & ~rni_tx_previous_ack) | requester_in.tx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_link_request_drop_after_ack:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~requester_in.tx_link_active_request & rni_tx_previous_request)
-                         | rni_tx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_link_ack_drop_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~_requester_adapter_port_out.tx_link_active_ack
-                           & rni_tx_previous_ack) | ~requester_in.tx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_link_request_after_ack_low:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(_requester_adapter_port_out.rx_link_active_request
-                           & ~rni_rx_previous_request) | ~rni_rx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_link_ack_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(requester_in.rx_link_active_ack & ~rni_rx_previous_ack)
-                         | _requester_adapter_port_out.rx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_link_request_drop_after_ack:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~_requester_adapter_port_out.rx_link_active_request
-                           & rni_rx_previous_request) | rni_rx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_link_ack_drop_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~requester_in.rx_link_active_ack & rni_rx_previous_ack)
-                         | ~_requester_adapter_port_out.rx_link_active_request);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_56 = requester_in.tx_req.bits.opcode == 7'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_req.valid | (|rni_tx_req_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_req.credit
-                         | requester_in.tx_req.valid | rni_tx_req_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset)
-                         rni_tx_req_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
+  wire                               _GEN_56 =
+    port_in.requester.requests.valid & _GEN_23 & _GEN_22;
   wire                               _GEN_57 =
-    _requester_adapter_port_out.tx_link_active_ack
-    & (requester_in.tx_link_active_request | rni_tx_previous_request);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_req.valid
-                         | _requester_adapter_port_out.tx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_req.credit | _GEN_57);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_58 =
-    ~requester_in.tx_link_active_request & ~_requester_adapter_port_out.tx_link_active_ack
-    & ~reset;
-  wire                               _GEN_59 = ~_GEN_58;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_59)
-                         rni_tx_req_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
+    _GEN_24 & port_in.subordinate.requests.ready & _GEN_22;
+  wire                               _GEN_58 = _GEN_33 | _GEN_34;
+  wire                               _GEN_59 =
+    port_in.subordinate.responses.valid & _GEN_39 & _GEN_58;
   wire                               _GEN_60 =
-    ~requester_in.tx_link_active_request & _requester_adapter_port_out.tx_link_active_ack;
+    _GEN_37 & port_in.requester.responses.ready & _GEN_58;
   wire                               _GEN_61 =
-    requester_in.tx_req.valid & _GEN_56 & ~reset;
-  wire                               _GEN_62 = ~_GEN_61;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_62) _GEN_60);
-  `endif // not def SYNTHESIS
+    port_in.requester.request_data.bits.opcode == 4'h3;
+  wire                               _GEN_62 =
+    port_in.requester.request_data.valid & _GEN_46 & _GEN_61;
   wire                               _GEN_63 =
-    ~(requester_in.tx_req.valid & ~_GEN_56 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_63)
-                         requester_in.tx_req.bits.src_id == 7'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_64 = requester_in.tx_req.bits.opcode == 7'h4;
-  wire                               _GEN_65 = requester_in.tx_req.bits.opcode == 7'h1C;
-  wire                               _GEN_66 = requester_in.tx_req.bits.opcode == 7'h1D;
-  wire                               _GEN_67 = requester_in.tx_req.valid & ~reset;
-  wire                               _GEN_68 = ~_GEN_67;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_68)
-                         _GEN_56 | requester_in.tx_req.bits.opcode == 7'h1
-                         | requester_in.tx_req.bits.opcode == 7'h2
-                         | requester_in.tx_req.bits.opcode == 7'h3 | _GEN_64
-                         | requester_in.tx_req.bits.opcode == 7'h5
-                         | requester_in.tx_req.bits.opcode == 7'h7
-                         | requester_in.tx_req.bits.opcode == 7'h8
-                         | requester_in.tx_req.bits.opcode == 7'h9
-                         | requester_in.tx_req.bits.opcode == 7'hA
-                         | requester_in.tx_req.bits.opcode == 7'hB
-                         | requester_in.tx_req.bits.opcode == 7'hC
-                         | requester_in.tx_req.bits.opcode == 7'hD
-                         | requester_in.tx_req.bits.opcode == 7'hE
-                         | requester_in.tx_req.bits.opcode == 7'h11
-                         | requester_in.tx_req.bits.opcode == 7'h13
-                         | requester_in.tx_req.bits.opcode == 7'h14
-                         | requester_in.tx_req.bits.opcode == 7'h15
-                         | requester_in.tx_req.bits.opcode == 7'h17
-                         | requester_in.tx_req.bits.opcode == 7'h18
-                         | requester_in.tx_req.bits.opcode == 7'h19
-                         | requester_in.tx_req.bits.opcode == 7'h1A
-                         | requester_in.tx_req.bits.opcode == 7'h1B | _GEN_65 | _GEN_66
-                         | requester_in.tx_req.bits.opcode == 7'h20
-                         | requester_in.tx_req.bits.opcode == 7'h21
-                         | requester_in.tx_req.bits.opcode == 7'h22
-                         | requester_in.tx_req.bits.opcode == 7'h23
-                         | requester_in.tx_req.bits.opcode == 7'h24
-                         | requester_in.tx_req.bits.opcode == 7'h25
-                         | requester_in.tx_req.bits.opcode == 7'h26
-                         | requester_in.tx_req.bits.opcode == 7'h27
-                         | requester_in.tx_req.bits.opcode == 7'h28
-                         | requester_in.tx_req.bits.opcode == 7'h29
-                         | requester_in.tx_req.bits.opcode == 7'h2A
-                         | requester_in.tx_req.bits.opcode == 7'h2B
-                         | requester_in.tx_req.bits.opcode == 7'h2C
-                         | requester_in.tx_req.bits.opcode == 7'h2D
-                         | requester_in.tx_req.bits.opcode == 7'h2E
-                         | requester_in.tx_req.bits.opcode == 7'h2F
-                         | requester_in.tx_req.bits.opcode == 7'h30
-                         | requester_in.tx_req.bits.opcode == 7'h31
-                         | requester_in.tx_req.bits.opcode == 7'h32
-                         | requester_in.tx_req.bits.opcode == 7'h33
-                         | requester_in.tx_req.bits.opcode == 7'h34
-                         | requester_in.tx_req.bits.opcode == 7'h35
-                         | requester_in.tx_req.bits.opcode == 7'h36
-                         | requester_in.tx_req.bits.opcode == 7'h37
-                         | requester_in.tx_req.bits.opcode == 7'h38
-                         | requester_in.tx_req.bits.opcode == 7'h39
-                         | requester_in.tx_req.bits.opcode == 7'h3A
-                         | requester_in.tx_req.bits.opcode == 7'h41
-                         | requester_in.tx_req.bits.opcode == 7'h42
-                         | requester_in.tx_req.bits.opcode == 7'h43
-                         | requester_in.tx_req.bits.opcode == 7'h44
-                         | requester_in.tx_req.bits.opcode == 7'h47
-                         | requester_in.tx_req.bits.opcode == 7'h48
-                         | requester_in.tx_req.bits.opcode == 7'h4C
-                         | requester_in.tx_req.bits.opcode == 7'h4D
-                         | requester_in.tx_req.bits.opcode == 7'h4E
-                         | requester_in.tx_req.bits.opcode == 7'h50
-                         | requester_in.tx_req.bits.opcode == 7'h51
-                         | requester_in.tx_req.bits.opcode == 7'h52
-                         | requester_in.tx_req.bits.opcode == 7'h54
-                         | requester_in.tx_req.bits.opcode == 7'h56
-                         | requester_in.tx_req.bits.opcode == 7'h57
-                         | requester_in.tx_req.bits.opcode == 7'h58
-                         | requester_in.tx_req.bits.opcode == 7'h59
-                         | requester_in.tx_req.bits.opcode == 7'h5A
-                         | requester_in.tx_req.bits.opcode == 7'h5B
-                         | requester_in.tx_req.bits.opcode == 7'h5C
-                         | requester_in.tx_req.bits.opcode == 7'h5E
-                         | requester_in.tx_req.bits.opcode == 7'h60
-                         | requester_in.tx_req.bits.opcode == 7'h61
-                         | requester_in.tx_req.bits.opcode == 7'h62
-                         | requester_in.tx_req.bits.opcode == 7'h64
-                         | requester_in.tx_req.bits.opcode == 7'h66
-                         | requester_in.tx_req.bits.opcode == 7'h70
-                         | requester_in.tx_req.bits.opcode == 7'h71
-                         | requester_in.tx_req.bits.opcode == 7'h72
-                         | requester_in.tx_req.bits.opcode == 7'h79);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_69 = ~_GEN_67;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_69)
-                         _GEN_56 | _GEN_64 | _GEN_66 | _GEN_65);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_70 = ~_GEN_61;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_70)
-                         requester_in.tx_req.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_71 =
-    ~_GEN_56 & ~requester_in.tx_req.bits.multi_req & requester_in.tx_req.valid & ~reset;
-  wire                               _GEN_72 = ~_GEN_71;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_size_reserved_zero:
-      assert property (@(posedge clock) disable iff (_GEN_72)
-                         requester_in.tx_req.bits.size_or_num_req[5:3] == 3'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_73 = ~_GEN_71;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_req_size_valid:
-      assert property (@(posedge clock) disable iff (_GEN_73)
-                         requester_in.tx_req.bits.size_or_num_req[2:0] != 3'h7);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_74 = requester_in.tx_rsp.bits.opcode == 5'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_0:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_rsp.valid | (|rni_tx_rsp_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_0:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_rsp.credit
-                         | requester_in.tx_rsp.valid | rni_tx_rsp_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_0:
-      assert property (@(posedge clock) disable iff (reset)
-                         rni_tx_rsp_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_rsp.valid
-                         | _requester_adapter_port_out.tx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_rsp.credit | _GEN_57);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_75 = ~_GEN_58;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_75)
-                         rni_tx_rsp_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_76 =
-    requester_in.tx_rsp.valid & _GEN_74 & ~reset;
-  wire                               _GEN_77 = ~_GEN_76;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_77) _GEN_60);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_78 =
-    ~(requester_in.tx_rsp.valid & ~_GEN_74 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_78)
-                         requester_in.tx_rsp.bits.src_id == 7'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_79 = requester_in.tx_rsp.valid & ~reset;
-  wire                               _GEN_80 = ~_GEN_79;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_80)
-                         _GEN_74 | requester_in.tx_rsp.bits.opcode == 5'h1
-                         | requester_in.tx_rsp.bits.opcode == 5'h2
-                         | requester_in.tx_rsp.bits.opcode == 5'h3
-                         | requester_in.tx_rsp.bits.opcode == 5'h4
-                         | requester_in.tx_rsp.bits.opcode == 5'h5
-                         | requester_in.tx_rsp.bits.opcode == 5'h6
-                         | requester_in.tx_rsp.bits.opcode == 5'h7
-                         | requester_in.tx_rsp.bits.opcode == 5'h8
-                         | requester_in.tx_rsp.bits.opcode == 5'h9
-                         | requester_in.tx_rsp.bits.opcode == 5'hA
-                         | requester_in.tx_rsp.bits.opcode == 5'hB
-                         | requester_in.tx_rsp.bits.opcode == 5'hC
-                         | requester_in.tx_rsp.bits.opcode == 5'hD
-                         | requester_in.tx_rsp.bits.opcode == 5'hE
-                         | requester_in.tx_rsp.bits.opcode == 5'h10
-                         | requester_in.tx_rsp.bits.opcode == 5'h11
-                         | requester_in.tx_rsp.bits.opcode == 5'h14);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_81 = ~_GEN_79;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_81) _GEN_74);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_82 = ~_GEN_76;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_rsp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_82)
-                         requester_in.tx_rsp.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_83 = requester_in.tx_dat.bits.opcode == 4'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_1:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_dat.valid | (|rni_tx_dat_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_1:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_dat.credit
-                         | requester_in.tx_dat.valid | rni_tx_dat_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_1:
-      assert property (@(posedge clock) disable iff (reset)
-                         rni_tx_dat_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.tx_dat.valid
-                         | _requester_adapter_port_out.tx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.tx_dat.credit | _GEN_57);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_84 = ~_GEN_58;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_84)
-                         rni_tx_dat_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_85 =
-    requester_in.tx_dat.valid & _GEN_83 & ~reset;
-  wire                               _GEN_86 = ~_GEN_85;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_86) _GEN_60);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_87 =
-    ~(requester_in.tx_dat.valid & ~_GEN_83 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_87)
-                         requester_in.tx_dat.bits.src_id == 7'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_88 = requester_in.tx_dat.bits.opcode == 4'h3;
-  wire                               _GEN_89 = requester_in.tx_dat.valid & ~reset;
-  wire                               _GEN_90 = ~_GEN_89;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_90)
-                         _GEN_83 | requester_in.tx_dat.bits.opcode == 4'h1
-                         | requester_in.tx_dat.bits.opcode == 4'h2 | _GEN_88
-                         | requester_in.tx_dat.bits.opcode == 4'h4
-                         | requester_in.tx_dat.bits.opcode == 4'h5
-                         | requester_in.tx_dat.bits.opcode == 4'h6
-                         | requester_in.tx_dat.bits.opcode == 4'h7
-                         | requester_in.tx_dat.bits.opcode == 4'hB
-                         | requester_in.tx_dat.bits.opcode == 4'hC);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_91 = ~_GEN_89;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_91) _GEN_83 | _GEN_88);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_92 = ~_GEN_85;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_tx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_92)
-                         requester_in.tx_dat.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_93 =
-    _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_2:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.rx_rsp.valid
-                         | (|rni_rx_rsp_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_2:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.rx_rsp.credit
-                         | _requester_adapter_port_out.rx_rsp.valid
-                         | rni_rx_rsp_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_2:
-      assert property (@(posedge clock) disable iff (reset)
-                         rni_rx_rsp_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_94 =
-    requester_in.rx_link_active_ack
-    & (_requester_adapter_port_out.rx_link_active_request | rni_rx_previous_request);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.rx_rsp.valid
-                         | requester_in.rx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.rx_rsp.credit | _GEN_94);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_95 =
-    ~_requester_adapter_port_out.rx_link_active_request & ~requester_in.rx_link_active_ack
-    & ~reset;
-  wire                               _GEN_96 = ~_GEN_95;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_96)
-                         rni_rx_rsp_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_97 =
-    ~_requester_adapter_port_out.rx_link_active_request & requester_in.rx_link_active_ack;
-  wire                               _GEN_98 =
-    _requester_adapter_port_out.rx_rsp.valid & _GEN_93 & ~reset;
-  wire                               _GEN_99 = ~_GEN_98;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_99) _GEN_97);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_100 =
-    ~(_requester_adapter_port_out.rx_rsp.valid & ~_GEN_93 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_100)
-                         _requester_adapter_port_out.rx_rsp.bits.tgt_id == 7'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_101 =
-    _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h4;
-  wire                               _GEN_102 =
-    _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h6;
-  wire                               _GEN_103 =
-    _requester_adapter_port_out.rx_rsp.valid & ~reset;
-  wire                               _GEN_104 = ~_GEN_103;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_104)
-                         _GEN_93 | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h1
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h2
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h3
-                         | _GEN_101
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h5
-                         | _GEN_102
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h7
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h8
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h9
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'hA
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'hB
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'hC
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'hD
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'hE
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h10
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h11
-                         | _requester_adapter_port_out.rx_rsp.bits.opcode == 5'h14);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_105 = ~_GEN_103;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_105)
-                         _GEN_93 | _GEN_102 | _GEN_101);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_106 = ~_GEN_98;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_rsp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_106)
-                         _requester_adapter_port_out.rx_rsp.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_107 =
-    _requester_adapter_port_out.rx_dat.bits.opcode == 4'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_3:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.rx_dat.valid
-                         | (|rni_rx_dat_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_3:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.rx_dat.credit
-                         | _requester_adapter_port_out.rx_dat.valid
-                         | rni_rx_dat_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_3:
-      assert property (@(posedge clock) disable iff (reset)
-                         rni_rx_dat_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_requester_adapter_port_out.rx_dat.valid
-                         | requester_in.rx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~requester_in.rx_dat.credit | _GEN_94);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_108 = ~_GEN_95;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_108)
-                         rni_rx_dat_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_109 =
-    _requester_adapter_port_out.rx_dat.valid & _GEN_107 & ~reset;
-  wire                               _GEN_110 = ~_GEN_109;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_110) _GEN_97);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_111 =
-    ~(_requester_adapter_port_out.rx_dat.valid & ~_GEN_107 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_111)
-                         _requester_adapter_port_out.rx_dat.bits.tgt_id == 7'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_112 =
-    _requester_adapter_port_out.rx_dat.bits.opcode == 4'h4;
-  wire                               _GEN_113 =
-    _requester_adapter_port_out.rx_dat.valid & ~reset;
-  wire                               _GEN_114 = ~_GEN_113;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_114)
-                         _GEN_107 | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h1
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h2
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h3
-                         | _GEN_112
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h5
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h6
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'h7
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'hB
-                         | _requester_adapter_port_out.rx_dat.bits.opcode == 4'hC);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_115 = ~_GEN_113;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_115) _GEN_107 | _GEN_112);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_116 = ~_GEN_109;
-  `ifndef SYNTHESIS
-    chi_hni_upstream_rx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_116)
-                         _requester_adapter_port_out.rx_dat.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  reg                                sn_tx_previous_request;
-  reg                                sn_tx_previous_ack;
-  reg                                sn_rx_previous_request;
-  reg                                sn_rx_previous_ack;
-  reg  [1:0]                         sn_tx_rsp_credit_balance;
-  reg  [1:0]                         sn_tx_dat_credit_balance;
-  reg  [1:0]                         sn_rx_req_credit_balance;
-  reg  [1:0]                         sn_rx_dat_credit_balance;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_link_request_after_ack_low:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(subordinate_in.tx_link_active_request
-                           & ~sn_tx_previous_request) | ~sn_tx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_link_ack_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(_subordinate_adapter_port_out.tx_link_active_ack
-                           & ~sn_tx_previous_ack)
-                         | subordinate_in.tx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_link_request_drop_after_ack:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~subordinate_in.tx_link_active_request
-                           & sn_tx_previous_request) | sn_tx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_link_ack_drop_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~_subordinate_adapter_port_out.tx_link_active_ack
-                           & sn_tx_previous_ack)
-                         | ~subordinate_in.tx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_link_request_after_ack_low:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(_subordinate_adapter_port_out.rx_link_active_request
-                           & ~sn_rx_previous_request) | ~sn_rx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_link_ack_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(subordinate_in.rx_link_active_ack & ~sn_rx_previous_ack)
-                         | _subordinate_adapter_port_out.rx_link_active_request);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_link_request_drop_after_ack:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~_subordinate_adapter_port_out.rx_link_active_request
-                           & sn_rx_previous_request) | sn_rx_previous_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_link_ack_drop_after_request:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~(~subordinate_in.rx_link_active_ack & sn_rx_previous_ack)
-                         | ~_subordinate_adapter_port_out.rx_link_active_request);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_117 = subordinate_in.tx_rsp.bits.opcode == 5'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_4:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.tx_rsp.valid | (|sn_tx_rsp_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_4:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.tx_rsp.credit
-                         | subordinate_in.tx_rsp.valid
-                         | sn_tx_rsp_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_4:
-      assert property (@(posedge clock) disable iff (reset)
-                         sn_tx_rsp_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_118 =
-    _subordinate_adapter_port_out.tx_link_active_ack
-    & (subordinate_in.tx_link_active_request | sn_tx_previous_request);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.tx_rsp.valid
-                         | _subordinate_adapter_port_out.tx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.tx_rsp.credit | _GEN_118);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_119 =
-    ~subordinate_in.tx_link_active_request
-    & ~_subordinate_adapter_port_out.tx_link_active_ack & ~reset;
-  wire                               _GEN_120 = ~_GEN_119;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_120)
-                         sn_tx_rsp_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_121 =
-    ~subordinate_in.tx_link_active_request
-    & _subordinate_adapter_port_out.tx_link_active_ack;
-  wire                               _GEN_122 =
-    subordinate_in.tx_rsp.valid & _GEN_117 & ~reset;
-  wire                               _GEN_123 = ~_GEN_122;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_123) _GEN_121);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_124 =
-    ~(subordinate_in.tx_rsp.valid & ~_GEN_117 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_124)
-                         subordinate_in.tx_rsp.bits.src_id == 7'h9);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_125 = subordinate_in.tx_rsp.bits.opcode == 5'h4;
-  wire                               _GEN_126 = subordinate_in.tx_rsp.bits.opcode == 5'h6;
-  wire                               _GEN_127 = subordinate_in.tx_rsp.valid & ~reset;
-  wire                               _GEN_128 = ~_GEN_127;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_128)
-                         _GEN_117 | subordinate_in.tx_rsp.bits.opcode == 5'h1
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h2
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h3 | _GEN_125
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h5 | _GEN_126
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h7
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h8
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h9
-                         | subordinate_in.tx_rsp.bits.opcode == 5'hA
-                         | subordinate_in.tx_rsp.bits.opcode == 5'hB
-                         | subordinate_in.tx_rsp.bits.opcode == 5'hC
-                         | subordinate_in.tx_rsp.bits.opcode == 5'hD
-                         | subordinate_in.tx_rsp.bits.opcode == 5'hE
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h10
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h11
-                         | subordinate_in.tx_rsp.bits.opcode == 5'h14);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_129 = ~_GEN_127;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_129)
-                         _GEN_117 | _GEN_126 | _GEN_125);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_130 = ~_GEN_122;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_rsp_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_130)
-                         subordinate_in.tx_rsp.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_131 = subordinate_in.tx_dat.bits.opcode == 4'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_5:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.tx_dat.valid | (|sn_tx_dat_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_5:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.tx_dat.credit
-                         | subordinate_in.tx_dat.valid
-                         | sn_tx_dat_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_5:
-      assert property (@(posedge clock) disable iff (reset)
-                         sn_tx_dat_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.tx_dat.valid
-                         | _subordinate_adapter_port_out.tx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.tx_dat.credit | _GEN_118);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_132 = ~_GEN_119;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_132)
-                         sn_tx_dat_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_133 =
-    subordinate_in.tx_dat.valid & _GEN_131 & ~reset;
-  wire                               _GEN_134 = ~_GEN_133;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_134) _GEN_121);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_135 =
-    ~(subordinate_in.tx_dat.valid & ~_GEN_131 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_source_id:
-      assert property (@(posedge clock) disable iff (_GEN_135)
-                         subordinate_in.tx_dat.bits.src_id == 7'h9);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_136 = subordinate_in.tx_dat.bits.opcode == 4'h4;
-  wire                               _GEN_137 = subordinate_in.tx_dat.valid & ~reset;
-  wire                               _GEN_138 = ~_GEN_137;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_138)
-                         _GEN_131 | subordinate_in.tx_dat.bits.opcode == 4'h1
-                         | subordinate_in.tx_dat.bits.opcode == 4'h2
-                         | subordinate_in.tx_dat.bits.opcode == 4'h3 | _GEN_136
-                         | subordinate_in.tx_dat.bits.opcode == 4'h5
-                         | subordinate_in.tx_dat.bits.opcode == 4'h6
-                         | subordinate_in.tx_dat.bits.opcode == 4'h7
-                         | subordinate_in.tx_dat.bits.opcode == 4'hB
-                         | subordinate_in.tx_dat.bits.opcode == 4'hC);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_139 = ~_GEN_137;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_139) _GEN_131 | _GEN_136);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_140 = ~_GEN_133;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_tx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_140)
-                         subordinate_in.tx_dat.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_141 =
-    _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_6:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.rx_req.valid
-                         | (|sn_rx_req_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_6:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.rx_req.credit
-                         | _subordinate_adapter_port_out.rx_req.valid
-                         | sn_rx_req_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_6:
-      assert property (@(posedge clock) disable iff (reset)
-                         sn_rx_req_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_142 =
-    subordinate_in.rx_link_active_ack
-    & (_subordinate_adapter_port_out.rx_link_active_request | sn_rx_previous_request);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.rx_req.valid
-                         | subordinate_in.rx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.rx_req.credit | _GEN_142);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_143 =
-    ~_subordinate_adapter_port_out.rx_link_active_request
-    & ~subordinate_in.rx_link_active_ack & ~reset;
-  wire                               _GEN_144 = ~_GEN_143;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_144)
-                         sn_rx_req_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_145 =
-    ~_subordinate_adapter_port_out.rx_link_active_request
-    & subordinate_in.rx_link_active_ack;
-  wire                               _GEN_146 =
-    _subordinate_adapter_port_out.rx_req.valid & _GEN_141 & ~reset;
-  wire                               _GEN_147 = ~_GEN_146;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_147) _GEN_145);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_148 =
-    ~(_subordinate_adapter_port_out.rx_req.valid & ~_GEN_141 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_148)
-                         _subordinate_adapter_port_out.rx_req.bits.tgt_id == 7'h9);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_149 =
-    _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h4;
-  wire                               _GEN_150 =
-    _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h1C;
-  wire                               _GEN_151 =
-    _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h1D;
-  wire                               _GEN_152 =
-    _subordinate_adapter_port_out.rx_req.valid & ~reset;
-  wire                               _GEN_153 = ~_GEN_152;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_153)
-                         _GEN_141
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h1
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h3
-                         | _GEN_149
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h5
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h7
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h8
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h9
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'hA
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'hB
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'hC
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'hD
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'hE
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h11
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h13
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h14
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h15
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h17
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h18
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h19
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h1A
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h1B
-                         | _GEN_150 | _GEN_151
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h20
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h21
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h22
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h23
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h24
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h25
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h26
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h27
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h28
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h29
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2A
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2B
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2C
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2D
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2E
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h2F
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h30
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h31
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h32
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h33
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h34
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h35
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h36
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h37
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h38
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h39
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h3A
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h41
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h42
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h43
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h44
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h47
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h48
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h4C
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h4D
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h4E
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h50
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h51
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h52
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h54
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h56
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h57
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h58
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h59
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h5A
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h5B
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h5C
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h5E
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h60
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h61
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h62
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h64
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h66
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h70
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h71
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h72
-                         | _subordinate_adapter_port_out.rx_req.bits.opcode == 7'h79);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_154 = ~_GEN_152;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_154)
-                         _GEN_141 | _GEN_149 | _GEN_151 | _GEN_150);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_155 = ~_GEN_146;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_155)
-                         _subordinate_adapter_port_out.rx_req.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_156 =
-    ~_GEN_141 & ~_subordinate_adapter_port_out.rx_req.bits.multi_req
-    & _subordinate_adapter_port_out.rx_req.valid & ~reset;
-  wire                               _GEN_157 = ~_GEN_156;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_size_reserved_zero:
-      assert property (@(posedge clock) disable iff (_GEN_157)
-                         _subordinate_adapter_port_out.rx_req.bits.size_or_num_req[5:3] == 3'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_158 = ~_GEN_156;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_req_size_valid:
-      assert property (@(posedge clock) disable iff (_GEN_158)
-                         _subordinate_adapter_port_out.rx_req.bits.size_or_num_req[2:0] != 3'h7);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_159 =
-    _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h0;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit_7:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.rx_dat.valid
-                         | (|sn_rx_dat_credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit_7:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.rx_dat.credit
-                         | _subordinate_adapter_port_out.rx_dat.valid
-                         | sn_rx_dat_credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range_7:
-      assert property (@(posedge clock) disable iff (reset)
-                         sn_rx_dat_credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_flit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_subordinate_adapter_port_out.rx_dat.valid
-                         | subordinate_in.rx_link_active_ack);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_credit_active:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~subordinate_in.rx_dat.credit | _GEN_142);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_160 = ~_GEN_143;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_credits_returned:
-      assert property (@(posedge clock) disable iff (_GEN_160)
-                         sn_rx_dat_credit_balance == 2'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_161 =
-    _subordinate_adapter_port_out.rx_dat.valid & _GEN_159 & ~reset;
-  wire                               _GEN_162 = ~_GEN_161;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_lcrd_during_deactivate:
-      assert property (@(posedge clock) disable iff (_GEN_162) _GEN_145);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_163 =
-    ~(_subordinate_adapter_port_out.rx_dat.valid & ~_GEN_159 & ~reset);
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_target_id:
-      assert property (@(posedge clock) disable iff (_GEN_163)
-                         _subordinate_adapter_port_out.rx_dat.bits.tgt_id == 7'h9);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_164 =
-    _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h3;
-  wire                               _GEN_165 =
-    _subordinate_adapter_port_out.rx_dat.valid & ~reset;
-  wire                               _GEN_166 = ~_GEN_165;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_opcode_valid:
-      assert property (@(posedge clock) disable iff (_GEN_166)
-                         _GEN_159
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h1
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h2
-                         | _GEN_164
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h4
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h5
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h6
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'h7
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'hB
-                         | _subordinate_adapter_port_out.rx_dat.bits.opcode == 4'hC);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_167 = ~_GEN_165;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_167) _GEN_159 | _GEN_164);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_168 = ~_GEN_161;
-  `ifndef SYNTHESIS
-    chi_hni_downstream_rx_dat_lcrd_txn_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_168)
-                         _subordinate_adapter_port_out.rx_dat.bits.txn_id == 12'h0);
-  `endif // not def SYNTHESIS
-  wire                               _GEN_169 =
-    _requester_adapter_requests_out.valid & _GEN_23 & _GEN_22;
-  wire                               _GEN_170 =
-    _GEN_24 & _subordinate_adapter_requests_out.ready & _GEN_22;
-  wire                               _GEN_171 = _GEN_33 | _GEN_34;
-  wire                               _GEN_172 =
-    _subordinate_adapter_responses_out.valid & _GEN_39 & _GEN_171;
-  wire                               _GEN_173 =
-    _GEN_37 & _requester_adapter_responses_out.ready & _GEN_171;
-  wire                               _GEN_174 =
-    _requester_adapter_request_data_out.bits.opcode == 4'h3;
-  wire                               _GEN_175 =
-    _requester_adapter_request_data_out.valid & _GEN_46 & _GEN_174;
-  wire                               _GEN_176 =
-    _GEN_47 & _subordinate_adapter_request_data_out.ready & _GEN_174;
-  wire                               _GEN_177 =
-    _subordinate_adapter_response_data_out.bits.opcode == 4'h4;
-  wire                               _GEN_178 =
-    _subordinate_adapter_response_data_out.valid & _GEN_53 & _GEN_177;
-  wire                               _GEN_179 =
-    _GEN_52 & _requester_adapter_response_data_out.ready & _GEN_177;
+    _GEN_47 & port_in.subordinate.request_data.ready & _GEN_61;
+  wire                               _GEN_64 =
+    port_in.subordinate.response_data.bits.opcode == 4'h4;
+  wire                               _GEN_65 =
+    port_in.subordinate.response_data.valid & _GEN_53 & _GEN_64;
+  wire                               _GEN_66 =
+    _GEN_52 & port_in.requester.response_data.ready & _GEN_64;
   CHIHomeTransaction[1:0]            entries;
-  wire                               _GEN_180 = _GEN_25 < 12'h2;
+  wire                               _GEN_67 = _GEN_25 < 12'h2;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_transfer_paired:
-      assert property (@(posedge clock) disable iff (reset) _GEN_169 == _GEN_170);
+      assert property (@(posedge clock) disable iff (reset) _GEN_56 == _GEN_57);
   `endif // not def SYNTHESIS
-  wire                               _GEN_181 = _GEN_169 & _GEN_170;
-  wire                               _GEN_182 = _GEN_181 & ~reset;
-  wire                               _GEN_183 = ~_GEN_182;
+  wire                               _GEN_68 = _GEN_56 & _GEN_57;
+  wire                               _GEN_69 = _GEN_68 & ~reset;
+  wire                               _GEN_70 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_slot_in_range:
-      assert property (@(posedge clock) disable iff (_GEN_183) _GEN_180);
+      assert property (@(posedge clock) disable iff (_GEN_70) _GEN_67);
   `endif // not def SYNTHESIS
-  wire                               _GEN_184 = ~_GEN_182;
+  wire                               _GEN_71 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_slot_free:
-      assert property (@(posedge clock) disable iff (_GEN_184)
+      assert property (@(posedge clock) disable iff (_GEN_71)
                          entries[_GEN_7].phase == 3'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_185 = ~_GEN_182;
+  wire                               _GEN_72 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_txn_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_185)
+      assert property (@(posedge clock) disable iff (_GEN_72)
                          {(|entries[_GEN_10].phase)
                             & entries[_GEN_10].requester_id == _GEN_6.src_id
                             & entries[_GEN_10].requester_txn_id == _GEN_6.txn_id,
@@ -1366,286 +294,285 @@ module CHIHNI(
                             & entries[1'h1].requester_id == _GEN_6.src_id
                             & entries[1'h1].requester_txn_id == _GEN_6.txn_id} == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_186 = ~_GEN_182;
+  wire                               _GEN_73 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_single_request:
-      assert property (@(posedge clock) disable iff (_GEN_186) ~_GEN_6.multi_req);
+      assert property (@(posedge clock) disable iff (_GEN_73) ~_GEN_6.multi_req);
   `endif // not def SYNTHESIS
-  wire                               _GEN_187 = ~_GEN_182;
+  wire                               _GEN_74 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_single_flit_size:
-      assert property (@(posedge clock) disable iff (_GEN_187) _GEN_27);
+      assert property (@(posedge clock) disable iff (_GEN_74) _GEN_27);
   `endif // not def SYNTHESIS
-  wire                               _GEN_188 = ~_GEN_182;
+  wire                               _GEN_75 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_order_none:
-      assert property (@(posedge clock) disable iff (_GEN_188) _GEN_6.order == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_75) _GEN_6.order == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_189 = ~_GEN_182;
+  wire                               _GEN_76 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_pcrd_type_zero:
-      assert property (@(posedge clock) disable iff (_GEN_189) _GEN_6.pcrd_type == 4'h0);
+      assert property (@(posedge clock) disable iff (_GEN_76) _GEN_6.pcrd_type == 4'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_190 = ~_GEN_182;
+  wire                               _GEN_77 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_no_comp_ack:
-      assert property (@(posedge clock) disable iff (_GEN_190) ~_GEN_6.exp_comp_ack);
+      assert property (@(posedge clock) disable iff (_GEN_77) ~_GEN_6.exp_comp_ack);
   `endif // not def SYNTHESIS
-  wire                               _GEN_191 = ~_GEN_182;
+  wire                               _GEN_78 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_tag_op_invalid:
-      assert property (@(posedge clock) disable iff (_GEN_191) _GEN_6.tag_op == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_78) _GEN_6.tag_op == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_192 = ~(_GEN_26 & _GEN_181 & ~reset);
+  wire                               _GEN_79 = ~(_GEN_26 & _GEN_68 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_transaction_request_no_direct_write_transfer:
-      assert property (@(posedge clock) disable iff (_GEN_192)
-                         ~_GEN_6.snp_attr_or_do_dwt);
+      assert property (@(posedge clock) disable iff (_GEN_79) ~_GEN_6.snp_attr_or_do_dwt);
   `endif // not def SYNTHESIS
-  wire                               _GEN_193 = ~_GEN_182;
+  wire                               _GEN_80 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_opcode_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_193)
+      assert property (@(posedge clock) disable iff (_GEN_80)
                          _GEN_6.opcode == _GEN_6.opcode);
   `endif // not def SYNTHESIS
-  wire                               _GEN_194 = ~_GEN_182;
+  wire                               _GEN_81 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_address_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_194)
+      assert property (@(posedge clock) disable iff (_GEN_81)
                          _GEN_6.address == _GEN_6.address);
   `endif // not def SYNTHESIS
-  wire                               _GEN_195 = ~_GEN_182;
+  wire                               _GEN_82 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_size_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_195)
+      assert property (@(posedge clock) disable iff (_GEN_82)
                          _GEN_6.size_or_num_req == _GEN_6.size_or_num_req);
   `endif // not def SYNTHESIS
-  wire                               _GEN_196 = ~_GEN_182;
+  wire                               _GEN_83 = ~_GEN_69;
   `ifndef SYNTHESIS
     chi_hni_transaction_request_qos_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_196) _GEN_6.qos == _GEN_6.qos);
+      assert property (@(posedge clock) disable iff (_GEN_83) _GEN_6.qos == _GEN_6.qos);
   `endif // not def SYNTHESIS
   `ifndef SYNTHESIS
     chi_hni_transaction_response_transfer_paired:
-      assert property (@(posedge clock) disable iff (reset) _GEN_172 == _GEN_173);
+      assert property (@(posedge clock) disable iff (reset) _GEN_59 == _GEN_60);
   `endif // not def SYNTHESIS
-  wire                               _GEN_197 = _GEN_172 & _GEN_173;
-  wire CHIHomeTransaction            _GEN_198 = entries[_GEN_4];
-  wire                               _GEN_199 = _GEN_197 & ~reset;
-  wire                               _GEN_200 = ~_GEN_199;
+  wire                               _GEN_84 = _GEN_59 & _GEN_60;
+  wire CHIHomeTransaction            _GEN_85 = entries[_GEN_4];
+  wire                               _GEN_86 = _GEN_84 & ~reset;
+  wire                               _GEN_87 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_slot_in_range:
-      assert property (@(posedge clock) disable iff (_GEN_200) _GEN_35);
+      assert property (@(posedge clock) disable iff (_GEN_87) _GEN_35);
   `endif // not def SYNTHESIS
-  wire                               _GEN_201 = ~_GEN_199;
+  wire                               _GEN_88 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_opcode:
-      assert property (@(posedge clock) disable iff (_GEN_201) _GEN_171);
+      assert property (@(posedge clock) disable iff (_GEN_88) _GEN_58);
   `endif // not def SYNTHESIS
-  wire                               _GEN_202 = ~_GEN_199;
+  wire                               _GEN_89 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_resp_zero:
-      assert property (@(posedge clock) disable iff (_GEN_202)
-                         _subordinate_adapter_responses_out.bits.resp == 3'h0);
+      assert property (@(posedge clock) disable iff (_GEN_89)
+                         port_in.subordinate.responses.bits.resp == 3'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_203 = ~_GEN_199;
+  wire                               _GEN_90 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_ok:
-      assert property (@(posedge clock) disable iff (_GEN_203)
-                         _subordinate_adapter_responses_out.bits.resp_err == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_90)
+                         port_in.subordinate.responses.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_204 = ~(_GEN_33 & _GEN_197 & ~reset);
+  wire                               _GEN_91 = ~(_GEN_33 & _GEN_84 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_transaction_dbid_has_write:
-      assert property (@(posedge clock) disable iff (_GEN_204) _GEN_198.phase == 3'h2);
+      assert property (@(posedge clock) disable iff (_GEN_91) _GEN_85.phase == 3'h2);
   `endif // not def SYNTHESIS
-  wire                               _GEN_205 = ~(_GEN_34 & _GEN_197 & ~reset);
+  wire                               _GEN_92 = ~(_GEN_34 & _GEN_84 & ~reset);
   `ifndef SYNTHESIS
     chi_hni_transaction_comp_has_write_data:
-      assert property (@(posedge clock) disable iff (_GEN_205) _GEN_198.phase == 3'h4);
+      assert property (@(posedge clock) disable iff (_GEN_92) _GEN_85.phase == 3'h4);
   `endif // not def SYNTHESIS
-  wire                               _GEN_206 = ~_GEN_199;
+  wire                               _GEN_93 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_opcode_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_206)
-                         _subordinate_adapter_responses_out.bits.opcode == _subordinate_adapter_responses_out.bits.opcode);
+      assert property (@(posedge clock) disable iff (_GEN_93)
+                         port_in.subordinate.responses.bits.opcode == port_in.subordinate.responses.bits.opcode);
   `endif // not def SYNTHESIS
-  wire                               _GEN_207 = ~_GEN_199;
+  wire                               _GEN_94 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_txn_restored:
-      assert property (@(posedge clock) disable iff (_GEN_207)
-                         requests[_GEN_4].txn_id == _GEN_198.requester_txn_id);
+      assert property (@(posedge clock) disable iff (_GEN_94)
+                         requests[_GEN_4].txn_id == _GEN_85.requester_txn_id);
   `endif // not def SYNTHESIS
-  wire                               _GEN_208 = ~_GEN_199;
+  wire                               _GEN_95 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_target_requester:
-      assert property (@(posedge clock) disable iff (_GEN_208)
-                         requests[_GEN_4].src_id == _GEN_198.requester_id);
+      assert property (@(posedge clock) disable iff (_GEN_95)
+                         requests[_GEN_4].src_id == _GEN_85.requester_id);
   `endif // not def SYNTHESIS
-  wire                               _GEN_209 = ~_GEN_199;
+  wire                               _GEN_96 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_home_dbid:
-      assert property (@(posedge clock) disable iff (_GEN_209) _GEN_4 == _GEN_4);
+      assert property (@(posedge clock) disable iff (_GEN_96) _GEN_4 == _GEN_4);
   `endif // not def SYNTHESIS
-  wire                               _GEN_210 = ~_GEN_199;
+  wire                               _GEN_97 = ~_GEN_86;
   `ifndef SYNTHESIS
     chi_hni_transaction_response_qos_restored:
-      assert property (@(posedge clock) disable iff (_GEN_210)
-                         requests[_GEN_4].qos == _GEN_198.requester_qos);
+      assert property (@(posedge clock) disable iff (_GEN_97)
+                         requests[_GEN_4].qos == _GEN_85.requester_qos);
   `endif // not def SYNTHESIS
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_transfer_paired:
-      assert property (@(posedge clock) disable iff (reset) _GEN_175 == _GEN_176);
+      assert property (@(posedge clock) disable iff (reset) _GEN_62 == _GEN_63);
   `endif // not def SYNTHESIS
-  wire CHIHomeTransaction            _GEN_211 =
-    entries[_requester_adapter_request_data_out.bits.txn_id[0]];
-  wire                               _GEN_212 = _GEN_175 & _GEN_176 & ~reset;
-  wire                               _GEN_213 = ~_GEN_212;
+  wire CHIHomeTransaction            _GEN_98 =
+    entries[port_in.requester.request_data.bits.txn_id[0]];
+  wire                               _GEN_99 = _GEN_62 & _GEN_63 & ~reset;
+  wire                               _GEN_100 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_slot_in_range:
-      assert property (@(posedge clock) disable iff (_GEN_213) _GEN_44);
+      assert property (@(posedge clock) disable iff (_GEN_100) _GEN_44);
   `endif // not def SYNTHESIS
-  wire                               _GEN_214 = ~_GEN_212;
+  wire                               _GEN_101 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_has_dbid:
-      assert property (@(posedge clock) disable iff (_GEN_214) _GEN_211.phase == 3'h3);
+      assert property (@(posedge clock) disable iff (_GEN_101) _GEN_98.phase == 3'h3);
   `endif // not def SYNTHESIS
-  wire                               _GEN_215 = ~_GEN_212;
+  wire                               _GEN_102 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_data_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_215)
-                         _requester_adapter_request_data_out.bits.data_id == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_102)
+                         port_in.requester.request_data.bits.data_id == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_216 = ~_GEN_212;
+  wire                               _GEN_103 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_num_dat_zero:
-      assert property (@(posedge clock) disable iff (_GEN_216)
-                         _requester_adapter_request_data_out.bits.num_dat == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_103)
+                         port_in.requester.request_data.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_217 = ~_GEN_212;
+  wire                               _GEN_104 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_217)
-                         ~_requester_adapter_request_data_out.bits.replicate);
+      assert property (@(posedge clock) disable iff (_GEN_104)
+                         ~port_in.requester.request_data.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                               _GEN_218 = ~_GEN_212;
+  wire                               _GEN_105 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_opcode_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_218)
-                         _requester_adapter_request_data_out.bits.opcode == _requester_adapter_request_data_out.bits.opcode);
+      assert property (@(posedge clock) disable iff (_GEN_105)
+                         port_in.requester.request_data.bits.opcode == port_in.requester.request_data.bits.opcode);
   `endif // not def SYNTHESIS
-  wire                               _GEN_219 = ~_GEN_212;
+  wire                               _GEN_106 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_payload_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_219)
-                         _requester_adapter_request_data_out.bits.data == _requester_adapter_request_data_out.bits.data);
+      assert property (@(posedge clock) disable iff (_GEN_106)
+                         port_in.requester.request_data.bits.data == port_in.requester.request_data.bits.data);
   `endif // not def SYNTHESIS
-  wire                               _GEN_220 = ~_GEN_212;
+  wire                               _GEN_107 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_mask_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_220)
-                         _requester_adapter_request_data_out.bits.byte_enable == _requester_adapter_request_data_out.bits.byte_enable);
+      assert property (@(posedge clock) disable iff (_GEN_107)
+                         port_in.requester.request_data.bits.byte_enable == port_in.requester.request_data.bits.byte_enable);
   `endif // not def SYNTHESIS
-  wire                               _GEN_221 = ~_GEN_212;
+  wire                               _GEN_108 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_dbid_translated:
-      assert property (@(posedge clock) disable iff (_GEN_221)
-                         subordinate_dbids[_requester_adapter_request_data_out.bits.txn_id[0]] == _GEN_211.subordinate_dbid);
+      assert property (@(posedge clock) disable iff (_GEN_108)
+                         subordinate_dbids[port_in.requester.request_data.bits.txn_id[0]] == _GEN_98.subordinate_dbid);
   `endif // not def SYNTHESIS
-  wire                               _GEN_222 = ~_GEN_212;
+  wire                               _GEN_109 = ~_GEN_99;
   `ifndef SYNTHESIS
     chi_hni_transaction_write_data_qos_restored:
-      assert property (@(posedge clock) disable iff (_GEN_222)
-                         requests[_requester_adapter_request_data_out.bits.txn_id[0]].qos == _GEN_211.requester_qos);
+      assert property (@(posedge clock) disable iff (_GEN_109)
+                         requests[port_in.requester.request_data.bits.txn_id[0]].qos == _GEN_98.requester_qos);
   `endif // not def SYNTHESIS
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_transfer_paired:
-      assert property (@(posedge clock) disable iff (reset) _GEN_178 == _GEN_179);
+      assert property (@(posedge clock) disable iff (reset) _GEN_65 == _GEN_66);
   `endif // not def SYNTHESIS
-  wire CHIHomeTransaction            _GEN_223 =
-    entries[_subordinate_adapter_response_data_out.bits.txn_id[0]];
-  wire                               _GEN_224 = _GEN_178 & _GEN_179 & ~reset;
-  wire                               _GEN_225 = ~_GEN_224;
+  wire CHIHomeTransaction            _GEN_110 =
+    entries[port_in.subordinate.response_data.bits.txn_id[0]];
+  wire                               _GEN_111 = _GEN_65 & _GEN_66 & ~reset;
+  wire                               _GEN_112 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_slot_in_range:
-      assert property (@(posedge clock) disable iff (_GEN_225) _GEN_50);
+      assert property (@(posedge clock) disable iff (_GEN_112) _GEN_50);
   `endif // not def SYNTHESIS
-  wire                               _GEN_226 = ~_GEN_224;
+  wire                               _GEN_113 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_226) _GEN_223.phase == 3'h1);
+      assert property (@(posedge clock) disable iff (_GEN_113) _GEN_110.phase == 3'h1);
   `endif // not def SYNTHESIS
-  wire                               _GEN_227 = ~_GEN_224;
+  wire                               _GEN_114 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_resp_zero:
-      assert property (@(posedge clock) disable iff (_GEN_227)
-                         _subordinate_adapter_response_data_out.bits.resp == 3'h0);
+      assert property (@(posedge clock) disable iff (_GEN_114)
+                         port_in.subordinate.response_data.bits.resp == 3'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_228 = ~_GEN_224;
+  wire                               _GEN_115 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_ok:
-      assert property (@(posedge clock) disable iff (_GEN_228)
-                         _subordinate_adapter_response_data_out.bits.resp_err == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_115)
+                         port_in.subordinate.response_data.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_229 = ~_GEN_224;
+  wire                               _GEN_116 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_data_id_zero:
-      assert property (@(posedge clock) disable iff (_GEN_229)
-                         _subordinate_adapter_response_data_out.bits.data_id == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_116)
+                         port_in.subordinate.response_data.bits.data_id == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_230 = ~_GEN_224;
+  wire                               _GEN_117 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_num_dat_zero:
-      assert property (@(posedge clock) disable iff (_GEN_230)
-                         _subordinate_adapter_response_data_out.bits.num_dat == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_117)
+                         port_in.subordinate.response_data.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
-  wire                               _GEN_231 = ~_GEN_224;
+  wire                               _GEN_118 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_231)
-                         ~_subordinate_adapter_response_data_out.bits.replicate);
+      assert property (@(posedge clock) disable iff (_GEN_118)
+                         ~port_in.subordinate.response_data.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                               _GEN_232 = ~_GEN_224;
+  wire                               _GEN_119 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_opcode_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_232)
-                         _subordinate_adapter_response_data_out.bits.opcode == _subordinate_adapter_response_data_out.bits.opcode);
+      assert property (@(posedge clock) disable iff (_GEN_119)
+                         port_in.subordinate.response_data.bits.opcode == port_in.subordinate.response_data.bits.opcode);
   `endif // not def SYNTHESIS
-  wire                               _GEN_233 = ~_GEN_224;
+  wire                               _GEN_120 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_payload_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_233)
-                         _subordinate_adapter_response_data_out.bits.data == _subordinate_adapter_response_data_out.bits.data);
+      assert property (@(posedge clock) disable iff (_GEN_120)
+                         port_in.subordinate.response_data.bits.data == port_in.subordinate.response_data.bits.data);
   `endif // not def SYNTHESIS
-  wire                               _GEN_234 = ~_GEN_224;
+  wire                               _GEN_121 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_mask_preserved:
-      assert property (@(posedge clock) disable iff (_GEN_234)
-                         _subordinate_adapter_response_data_out.bits.byte_enable == _subordinate_adapter_response_data_out.bits.byte_enable);
+      assert property (@(posedge clock) disable iff (_GEN_121)
+                         port_in.subordinate.response_data.bits.byte_enable == port_in.subordinate.response_data.bits.byte_enable);
   `endif // not def SYNTHESIS
-  wire                               _GEN_235 = ~_GEN_224;
+  wire                               _GEN_122 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_txn_restored:
-      assert property (@(posedge clock) disable iff (_GEN_235)
-                         requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].return_txn_id_or_stash_lpid == _GEN_223.requester_return_txn_id);
+      assert property (@(posedge clock) disable iff (_GEN_122)
+                         requests[port_in.subordinate.response_data.bits.txn_id[0]].return_txn_id_or_stash_lpid == _GEN_110.requester_return_txn_id);
   `endif // not def SYNTHESIS
-  wire                               _GEN_236 = ~_GEN_224;
+  wire                               _GEN_123 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_target_requester:
-      assert property (@(posedge clock) disable iff (_GEN_236)
-                         requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].return_nid_or_stash_nid_or_data_target == _GEN_223.requester_data_target);
+      assert property (@(posedge clock) disable iff (_GEN_123)
+                         requests[port_in.subordinate.response_data.bits.txn_id[0]].return_nid_or_stash_nid_or_data_target == _GEN_110.requester_data_target);
   `endif // not def SYNTHESIS
-  wire                               _GEN_237 = ~_GEN_224;
+  wire                               _GEN_124 = ~_GEN_111;
   `ifndef SYNTHESIS
     chi_hni_transaction_read_data_qos_restored:
-      assert property (@(posedge clock) disable iff (_GEN_237)
-                         requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].qos == _GEN_223.requester_qos);
+      assert property (@(posedge clock) disable iff (_GEN_124)
+                         requests[port_in.subordinate.response_data.bits.txn_id[0]].qos == _GEN_110.requester_qos);
   `endif // not def SYNTHESIS
-  wire                               _GEN_238 = _GEN_169 & _GEN_170 & _GEN_180;
-  wire                               _GEN_239 = _GEN_172 & _GEN_173 & _GEN_35;
-  wire                               _GEN_240 = _GEN_175 & _GEN_176 & _GEN_44;
-  wire                               _GEN_241 = _GEN_178 & _GEN_179 & _GEN_50;
-  wire CHIHomeTransaction            _GEN_242 =
+  wire                               _GEN_125 = _GEN_56 & _GEN_57 & _GEN_67;
+  wire                               _GEN_126 = _GEN_59 & _GEN_60 & _GEN_35;
+  wire                               _GEN_127 = _GEN_62 & _GEN_63 & _GEN_44;
+  wire                               _GEN_128 = _GEN_65 & _GEN_66 & _GEN_50;
+  wire CHIHomeTransaction            _GEN_129 =
     '{phase: (_GEN_26 ? 3'h2 : 3'h1),
       requester_id: _GEN_6.src_id,
       requester_txn_id: _GEN_6.txn_id,
@@ -1654,7 +581,7 @@ module CHIHNI(
       requester_qos: _GEN_6.qos,
       subordinate_id: (7'h9),
       subordinate_dbid: (12'h0)};
-  wire CHIHomeTransaction            _GEN_243 =
+  wire CHIHomeTransaction            _GEN_130 =
     '{phase: (3'h3),
       requester_id: entries[_GEN_10].requester_id,
       requester_txn_id: entries[_GEN_10].requester_txn_id,
@@ -1663,7 +590,7 @@ module CHIHNI(
       requester_qos: entries[_GEN_10].requester_qos,
       subordinate_id: entries[_GEN_10].subordinate_id,
       subordinate_dbid: _GEN_2};
-  wire CHIHomeTransaction            _GEN_244 =
+  wire CHIHomeTransaction            _GEN_131 =
     '{phase: (3'h4),
       requester_id: entries[_GEN_10].requester_id,
       requester_txn_id: entries[_GEN_10].requester_txn_id,
@@ -1672,18 +599,18 @@ module CHIHNI(
       requester_qos: entries[_GEN_10].requester_qos,
       subordinate_id: entries[_GEN_10].subordinate_id,
       subordinate_dbid: entries[_GEN_10].subordinate_dbid};
-  wire CHIHomeTransaction            _GEN_245 =
-    _GEN_238 & ~_GEN_7
-      ? _GEN_242
-      : _GEN_239 & _GEN_33 & ~_GEN_4
-          ? _GEN_243
-          : _GEN_240 & ~(_requester_adapter_request_data_out.bits.txn_id[0])
-              ? _GEN_244
-              : _GEN_239 & _GEN_34 & ~_GEN_4 | _GEN_241
-                & ~(_subordinate_adapter_response_data_out.bits.txn_id[0])
+  wire CHIHomeTransaction            _GEN_132 =
+    _GEN_125 & ~_GEN_7
+      ? _GEN_129
+      : _GEN_126 & _GEN_33 & ~_GEN_4
+          ? _GEN_130
+          : _GEN_127 & ~(port_in.requester.request_data.bits.txn_id[0])
+              ? _GEN_131
+              : _GEN_126 & _GEN_34 & ~_GEN_4 | _GEN_128
+                & ~(port_in.subordinate.response_data.bits.txn_id[0])
                   ? _GEN_9
                   : entries[_GEN_10];
-  wire CHIHomeTransaction            _GEN_246 =
+  wire CHIHomeTransaction            _GEN_133 =
     '{phase: (3'h3),
       requester_id: entries[1'h1].requester_id,
       requester_txn_id: entries[1'h1].requester_txn_id,
@@ -1692,7 +619,7 @@ module CHIHNI(
       requester_qos: entries[1'h1].requester_qos,
       subordinate_id: entries[1'h1].subordinate_id,
       subordinate_dbid: _GEN_2};
-  wire CHIHomeTransaction            _GEN_247 =
+  wire CHIHomeTransaction            _GEN_134 =
     '{phase: (3'h4),
       requester_id: entries[1'h1].requester_id,
       requester_txn_id: entries[1'h1].requester_txn_id,
@@ -1701,46 +628,61 @@ module CHIHNI(
       requester_qos: entries[1'h1].requester_qos,
       subordinate_id: entries[1'h1].subordinate_id,
       subordinate_dbid: entries[1'h1].subordinate_dbid};
-  wire CHIHomeTransaction            _GEN_248 =
-    _GEN_238 & _GEN_7
-      ? _GEN_242
-      : _GEN_239 & _GEN_33 & _GEN_4
-          ? _GEN_246
-          : _GEN_240 & _requester_adapter_request_data_out.bits.txn_id[0]
-              ? _GEN_247
-              : _GEN_239 & _GEN_34 & _GEN_4 | _GEN_241
-                & _subordinate_adapter_response_data_out.bits.txn_id[0]
+  wire CHIHomeTransaction            _GEN_135 =
+    _GEN_125 & _GEN_7
+      ? _GEN_129
+      : _GEN_126 & _GEN_33 & _GEN_4
+          ? _GEN_133
+          : _GEN_127 & port_in.requester.request_data.bits.txn_id[0]
+              ? _GEN_134
+              : _GEN_126 & _GEN_34 & _GEN_4 | _GEN_128
+                & port_in.subordinate.response_data.bits.txn_id[0]
                   ? _GEN_9
                   : entries[1'h1];
-  wire struct packed {logic ready; } _GEN_249 = '{ready: _GEN_23};
-  wire struct packed {logic ready; } _GEN_250 = '{ready: _GEN_46};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_251 =
+  wire struct packed {logic ready; } _GEN_136 = '{ready: _GEN_23};
+  wire struct packed {logic ready; } _GEN_137 = '{ready: _GEN_46};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_138 =
     '{valid: _GEN_37, bits: _GEN_38};
-  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_252 =
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_139 =
     '{valid: _GEN_52, bits: _GEN};
-  wire struct packed {logic valid; CHIReqFlit bits; } _GEN_253 =
+  wire
+    struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; }
+    _GEN_140 =
+    '{requests: _GEN_136,
+      requester_responses: _GEN_8,
+      request_data: _GEN_137,
+      responses: _GEN_138,
+      response_data: _GEN_139};
+  wire struct packed {logic ready; } _GEN_141 = '{ready: _GEN_39};
+  wire struct packed {logic ready; } _GEN_142 = '{ready: _GEN_53};
+  wire struct packed {logic valid; CHIReqFlit bits; } _GEN_143 =
     '{valid: _GEN_24, bits: _GEN_1};
-  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_254 =
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_144 =
     '{valid: _GEN_47, bits: _GEN_0};
-  wire struct packed {logic ready; } _GEN_255 = '{ready: _GEN_39};
-  wire struct packed {logic ready; } _GEN_256 = '{ready: _GEN_53};
-  wire struct packed {logic valid; logic bits; } _GEN_257 =
+  wire
+    struct packed {struct packed {logic ready; } responses; struct packed {logic ready; } response_data; struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIDatFlit bits; } request_data; }
+    _GEN_145 =
+    '{responses: _GEN_141,
+      response_data: _GEN_142,
+      requests: _GEN_143,
+      request_data: _GEN_144};
+  wire struct packed {logic valid; logic bits; } _GEN_146 =
     '{valid: _GEN_5, bits: _GEN_7};
-  wire struct packed {logic valid; logic bits; } _GEN_258 =
+  wire struct packed {logic valid; logic bits; } _GEN_147 =
     '{valid: (_GEN_41 | _GEN_54),
-      bits: (_GEN_41 ? _GEN_4 : _subordinate_adapter_response_data_out.bits.txn_id[0])};
-  wire struct packed {logic valid; logic bits; } _GEN_259 =
+      bits: (_GEN_41 ? _GEN_4 : port_in.subordinate.response_data.bits.txn_id[0])};
+  wire struct packed {logic valid; logic bits; } _GEN_148 =
     '{valid: (_GEN_5 & ~_GEN_26), bits: _GEN_7};
-  wire struct packed {logic valid; logic bits; } _GEN_260 =
-    '{valid: _GEN_54, bits: (_subordinate_adapter_response_data_out.bits.txn_id[0])};
-  wire struct packed {logic valid; logic bits; } _GEN_261 =
+  wire struct packed {logic valid; logic bits; } _GEN_149 =
+    '{valid: _GEN_54, bits: (port_in.subordinate.response_data.bits.txn_id[0])};
+  wire struct packed {logic valid; logic bits; } _GEN_150 =
     '{valid: (_GEN_5 & _GEN_26), bits: _GEN_7};
-  wire struct packed {logic valid; logic bits; } _GEN_262 =
+  wire struct packed {logic valid; logic bits; } _GEN_151 =
     '{valid: _GEN_3, bits: _GEN_4};
-  wire struct packed {logic valid; logic bits; } _GEN_263 =
-    '{valid: (_GEN_47 & _subordinate_adapter_request_data_out.ready),
-      bits: (_requester_adapter_request_data_out.bits.txn_id[0])};
-  wire struct packed {logic valid; logic bits; } _GEN_264 =
+  wire struct packed {logic valid; logic bits; } _GEN_152 =
+    '{valid: (_GEN_47 & port_in.subordinate.request_data.ready),
+      bits: (port_in.requester.request_data.bits.txn_id[0])};
+  wire struct packed {logic valid; logic bits; } _GEN_153 =
     '{valid: _GEN_41, bits: _GEN_4};
   assign _GEN_1 =
     '{trace_tag: _GEN_6.trace_tag,
@@ -1767,157 +709,96 @@ module CHIHNI(
       tgt_id: (7'h9),
       qos: _GEN_6.qos};
   assign _GEN_0 =
-    '{data: _requester_adapter_request_data_out.bits.data,
-      byte_enable: _requester_adapter_request_data_out.bits.byte_enable,
-      replicate: _requester_adapter_request_data_out.bits.replicate,
-      num_dat: _requester_adapter_request_data_out.bits.num_dat,
-      cah: _requester_adapter_request_data_out.bits.cah,
-      trace_tag: _requester_adapter_request_data_out.bits.trace_tag,
-      tag_update: _requester_adapter_request_data_out.bits.tag_update,
-      tag: _requester_adapter_request_data_out.bits.tag,
-      tag_op: _requester_adapter_request_data_out.bits.tag_op,
-      cache_line_id: _requester_adapter_request_data_out.bits.cache_line_id,
-      data_id: _requester_adapter_request_data_out.bits.data_id,
-      ccid: _requester_adapter_request_data_out.bits.ccid,
-      dbid_or_mecid: _requester_adapter_request_data_out.bits.dbid_or_mecid,
-      c_busy: _requester_adapter_request_data_out.bits.c_busy,
-      data_pull: _requester_adapter_request_data_out.bits.data_pull,
+    '{data: port_in.requester.request_data.bits.data,
+      byte_enable: port_in.requester.request_data.bits.byte_enable,
+      replicate: port_in.requester.request_data.bits.replicate,
+      num_dat: port_in.requester.request_data.bits.num_dat,
+      cah: port_in.requester.request_data.bits.cah,
+      trace_tag: port_in.requester.request_data.bits.trace_tag,
+      tag_update: port_in.requester.request_data.bits.tag_update,
+      tag: port_in.requester.request_data.bits.tag,
+      tag_op: port_in.requester.request_data.bits.tag_op,
+      cache_line_id: port_in.requester.request_data.bits.cache_line_id,
+      data_id: port_in.requester.request_data.bits.data_id,
+      ccid: port_in.requester.request_data.bits.ccid,
+      dbid_or_mecid: port_in.requester.request_data.bits.dbid_or_mecid,
+      c_busy: port_in.requester.request_data.bits.c_busy,
+      data_pull: port_in.requester.request_data.bits.data_pull,
       data_source_or_fwd_state:
-        _requester_adapter_request_data_out.bits.data_source_or_fwd_state,
-      resp: _requester_adapter_request_data_out.bits.resp,
-      resp_err: _requester_adapter_request_data_out.bits.resp_err,
-      opcode: _requester_adapter_request_data_out.bits.opcode,
+        port_in.requester.request_data.bits.data_source_or_fwd_state,
+      resp: port_in.requester.request_data.bits.resp,
+      resp_err: port_in.requester.request_data.bits.resp_err,
+      opcode: port_in.requester.request_data.bits.opcode,
       home_nid_or_pbha_or_mismatched_mecid: (7'h5),
-      txn_id: subordinate_dbids[_requester_adapter_request_data_out.bits.txn_id[0]],
+      txn_id: subordinate_dbids[port_in.requester.request_data.bits.txn_id[0]],
       src_id: (7'h5),
       tgt_id: (7'h9),
-      qos: requests[_requester_adapter_request_data_out.bits.txn_id[0]].qos};
+      qos: requests[port_in.requester.request_data.bits.txn_id[0]].qos};
   assign _GEN =
-    '{data: _subordinate_adapter_response_data_out.bits.data,
-      byte_enable: _subordinate_adapter_response_data_out.bits.byte_enable,
-      replicate: _subordinate_adapter_response_data_out.bits.replicate,
-      num_dat: _subordinate_adapter_response_data_out.bits.num_dat,
-      cah: _subordinate_adapter_response_data_out.bits.cah,
-      trace_tag: _subordinate_adapter_response_data_out.bits.trace_tag,
-      tag_update: _subordinate_adapter_response_data_out.bits.tag_update,
-      tag: _subordinate_adapter_response_data_out.bits.tag,
-      tag_op: _subordinate_adapter_response_data_out.bits.tag_op,
-      cache_line_id: _subordinate_adapter_response_data_out.bits.cache_line_id,
-      data_id: _subordinate_adapter_response_data_out.bits.data_id,
-      ccid: _subordinate_adapter_response_data_out.bits.ccid,
-      dbid_or_mecid: _subordinate_adapter_response_data_out.bits.dbid_or_mecid,
-      c_busy: _subordinate_adapter_response_data_out.bits.c_busy,
-      data_pull: _subordinate_adapter_response_data_out.bits.data_pull,
+    '{data: port_in.subordinate.response_data.bits.data,
+      byte_enable: port_in.subordinate.response_data.bits.byte_enable,
+      replicate: port_in.subordinate.response_data.bits.replicate,
+      num_dat: port_in.subordinate.response_data.bits.num_dat,
+      cah: port_in.subordinate.response_data.bits.cah,
+      trace_tag: port_in.subordinate.response_data.bits.trace_tag,
+      tag_update: port_in.subordinate.response_data.bits.tag_update,
+      tag: port_in.subordinate.response_data.bits.tag,
+      tag_op: port_in.subordinate.response_data.bits.tag_op,
+      cache_line_id: port_in.subordinate.response_data.bits.cache_line_id,
+      data_id: port_in.subordinate.response_data.bits.data_id,
+      ccid: port_in.subordinate.response_data.bits.ccid,
+      dbid_or_mecid: port_in.subordinate.response_data.bits.dbid_or_mecid,
+      c_busy: port_in.subordinate.response_data.bits.c_busy,
+      data_pull: port_in.subordinate.response_data.bits.data_pull,
       data_source_or_fwd_state:
-        _subordinate_adapter_response_data_out.bits.data_source_or_fwd_state,
-      resp: _subordinate_adapter_response_data_out.bits.resp,
-      resp_err: _subordinate_adapter_response_data_out.bits.resp_err,
-      opcode: _subordinate_adapter_response_data_out.bits.opcode,
+        port_in.subordinate.response_data.bits.data_source_or_fwd_state,
+      resp: port_in.subordinate.response_data.bits.resp,
+      resp_err: port_in.subordinate.response_data.bits.resp_err,
+      opcode: port_in.subordinate.response_data.bits.opcode,
       home_nid_or_pbha_or_mismatched_mecid: (7'h5),
       txn_id:
-        requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].return_txn_id_or_stash_lpid,
+        requests[port_in.subordinate.response_data.bits.txn_id[0]].return_txn_id_or_stash_lpid,
       src_id: (7'h5),
       tgt_id:
-        requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].return_nid_or_stash_nid_or_data_target,
-      qos: requests[_subordinate_adapter_response_data_out.bits.txn_id[0]].qos};
-  CHIRNIICNFlowAdapter requester_adapter (
-    .clock                   (clock),
-    .reset                   (reset),
-    .transmit_enable         (1'h1),
-    .receive_enable          (1'h1),
-    .port_in                 (requester_in),
-    .requests_in             (_GEN_249),
-    .requester_responses_in  (_GEN_8),
-    .request_data_in         (_GEN_250),
-    .responses_in            (_GEN_251),
-    .response_data_in        (_GEN_252),
-    .port_out                (_requester_adapter_port_out),
-    .requests_out            (_requester_adapter_requests_out),
-    .requester_responses_out (/* unused */),
-    .request_data_out        (_requester_adapter_request_data_out),
-    .responses_out           (_requester_adapter_responses_out),
-    .response_data_out       (_requester_adapter_response_data_out),
-    .transmit_running        (/* unused */),
-    .transmit_deactivating   (/* unused */),
-    .transmit_credit_empty   (/* unused */),
-    .receive_running         (/* unused */),
-    .receive_deactivating    (/* unused */)
-  );
-  CHISNICNFlowAdapter subordinate_adapter (
-    .clock                 (clock),
-    .reset                 (reset),
-    .transmit_enable       (1'h1),
-    .receive_enable        (1'h1),
-    .port_in               (subordinate_in),
-    .requests_in           (_GEN_253),
-    .request_data_in       (_GEN_254),
-    .responses_in          (_GEN_255),
-    .response_data_in      (_GEN_256),
-    .port_out              (_subordinate_adapter_port_out),
-    .requests_out          (_subordinate_adapter_requests_out),
-    .request_data_out      (_subordinate_adapter_request_data_out),
-    .responses_out         (_subordinate_adapter_responses_out),
-    .response_data_out     (_subordinate_adapter_response_data_out),
-    .transmit_running      (/* unused */),
-    .transmit_deactivating (/* unused */),
-    .transmit_credit_empty (/* unused */),
-    .receive_running       (/* unused */),
-    .receive_deactivating  (/* unused */)
-  );
+        requests[port_in.subordinate.response_data.bits.txn_id[0]].return_nid_or_stash_nid_or_data_target,
+      qos: requests[port_in.subordinate.response_data.bits.txn_id[0]].qos};
   Scoreboard occupancy (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_257),
-    .clear_in (_GEN_258),
+    .set_in   (_GEN_146),
+    .clear_in (_GEN_147),
     .busy     (_occupancy_busy)
   );
   Scoreboard_1 read_pending (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_259),
-    .clear_in (_GEN_260),
+    .set_in   (_GEN_148),
+    .clear_in (_GEN_149),
     .busy     (_read_pending_busy)
   );
   Scoreboard_2 write_await_dbid (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_261),
-    .clear_in (_GEN_262),
+    .set_in   (_GEN_150),
+    .clear_in (_GEN_151),
     .busy     (_write_await_dbid_busy)
   );
   Scoreboard_3 write_await_data (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_262),
-    .clear_in (_GEN_263),
+    .set_in   (_GEN_151),
+    .clear_in (_GEN_152),
     .busy     (_write_await_data_busy)
   );
   Scoreboard_4 write_await_comp (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_263),
-    .clear_in (_GEN_264),
+    .set_in   (_GEN_152),
+    .clear_in (_GEN_153),
     .busy     (_write_await_comp_busy)
   );
   always @(posedge clock) begin
-    if (reset) begin
-      rni_tx_previous_request <= _GEN_10;
-      rni_tx_previous_ack <= _GEN_10;
-      rni_rx_previous_request <= _GEN_10;
-      rni_rx_previous_ack <= _GEN_10;
-      rni_tx_req_credit_balance <= 2'h0;
-      rni_tx_rsp_credit_balance <= 2'h0;
-      rni_tx_dat_credit_balance <= 2'h0;
-      rni_rx_rsp_credit_balance <= 2'h0;
-      rni_rx_dat_credit_balance <= 2'h0;
-      sn_tx_previous_request <= _GEN_10;
-      sn_tx_previous_ack <= _GEN_10;
-      sn_rx_previous_request <= _GEN_10;
-      sn_rx_previous_ack <= _GEN_10;
-      sn_tx_rsp_credit_balance <= 2'h0;
-      sn_tx_dat_credit_balance <= 2'h0;
-      sn_rx_req_credit_balance <= 2'h0;
-      sn_rx_dat_credit_balance <= 2'h0;
+    if (reset)
       entries <=
         '{'{phase: 3'h0,
             requester_id: 7'h0,
@@ -1935,1520 +816,12 @@ module CHIHNI(
             requester_qos: 4'h0,
             subordinate_id: 7'h0,
             subordinate_dbid: 12'h0}};
-    end
     else begin
-      rni_tx_previous_request <= requester_in.tx_link_active_request;
-      rni_tx_previous_ack <= _requester_adapter_port_out.tx_link_active_ack;
-      rni_rx_previous_request <= _requester_adapter_port_out.rx_link_active_request;
-      rni_rx_previous_ack <= requester_in.rx_link_active_ack;
-      rni_tx_req_credit_balance <=
-        _requester_adapter_port_out.tx_req.credit ^ requester_in.tx_req.valid
-          ? (_requester_adapter_port_out.tx_req.credit
-               ? rni_tx_req_credit_balance + 2'h1
-               : rni_tx_req_credit_balance - 2'h1)
-          : rni_tx_req_credit_balance;
-      rni_tx_rsp_credit_balance <=
-        _requester_adapter_port_out.tx_rsp.credit ^ requester_in.tx_rsp.valid
-          ? (_requester_adapter_port_out.tx_rsp.credit
-               ? rni_tx_rsp_credit_balance + 2'h1
-               : rni_tx_rsp_credit_balance - 2'h1)
-          : rni_tx_rsp_credit_balance;
-      rni_tx_dat_credit_balance <=
-        _requester_adapter_port_out.tx_dat.credit ^ requester_in.tx_dat.valid
-          ? (_requester_adapter_port_out.tx_dat.credit
-               ? rni_tx_dat_credit_balance + 2'h1
-               : rni_tx_dat_credit_balance - 2'h1)
-          : rni_tx_dat_credit_balance;
-      rni_rx_rsp_credit_balance <=
-        requester_in.rx_rsp.credit ^ _requester_adapter_port_out.rx_rsp.valid
-          ? (requester_in.rx_rsp.credit
-               ? rni_rx_rsp_credit_balance + 2'h1
-               : rni_rx_rsp_credit_balance - 2'h1)
-          : rni_rx_rsp_credit_balance;
-      rni_rx_dat_credit_balance <=
-        requester_in.rx_dat.credit ^ _requester_adapter_port_out.rx_dat.valid
-          ? (requester_in.rx_dat.credit
-               ? rni_rx_dat_credit_balance + 2'h1
-               : rni_rx_dat_credit_balance - 2'h1)
-          : rni_rx_dat_credit_balance;
-      sn_tx_previous_request <= subordinate_in.tx_link_active_request;
-      sn_tx_previous_ack <= _subordinate_adapter_port_out.tx_link_active_ack;
-      sn_rx_previous_request <= _subordinate_adapter_port_out.rx_link_active_request;
-      sn_rx_previous_ack <= subordinate_in.rx_link_active_ack;
-      sn_tx_rsp_credit_balance <=
-        _subordinate_adapter_port_out.tx_rsp.credit ^ subordinate_in.tx_rsp.valid
-          ? (_subordinate_adapter_port_out.tx_rsp.credit
-               ? sn_tx_rsp_credit_balance + 2'h1
-               : sn_tx_rsp_credit_balance - 2'h1)
-          : sn_tx_rsp_credit_balance;
-      sn_tx_dat_credit_balance <=
-        _subordinate_adapter_port_out.tx_dat.credit ^ subordinate_in.tx_dat.valid
-          ? (_subordinate_adapter_port_out.tx_dat.credit
-               ? sn_tx_dat_credit_balance + 2'h1
-               : sn_tx_dat_credit_balance - 2'h1)
-          : sn_tx_dat_credit_balance;
-      sn_rx_req_credit_balance <=
-        subordinate_in.rx_req.credit ^ _subordinate_adapter_port_out.rx_req.valid
-          ? (subordinate_in.rx_req.credit
-               ? sn_rx_req_credit_balance + 2'h1
-               : sn_rx_req_credit_balance - 2'h1)
-          : sn_rx_req_credit_balance;
-      sn_rx_dat_credit_balance <=
-        subordinate_in.rx_dat.credit ^ _subordinate_adapter_port_out.rx_dat.valid
-          ? (subordinate_in.rx_dat.credit
-               ? sn_rx_dat_credit_balance + 2'h1
-               : sn_rx_dat_credit_balance - 2'h1)
-          : sn_rx_dat_credit_balance;
-      entries[1'h1] <= _GEN_248;
-      entries[1'h0] <= _GEN_245;
+      entries[1'h1] <= _GEN_135;
+      entries[1'h0] <= _GEN_132;
     end
   end // always @(posedge)
-  assign requester_out = _requester_adapter_port_out;
-  assign subordinate_out = _subordinate_adapter_port_out;
-endmodule
-
-module CHIRNIICNFlowAdapter(
-  input                                                                                                                                                                                                                                                                                                                              clock,
-                                                                                                                                                                                                                                                                                                                                     reset,
-                                                                                                                                                                                                                                                                                                                                     transmit_enable,
-                                                                                                                                                                                                                                                                                                                                     receive_enable,
-  input  struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIReqFlit bits; } tx_req; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_rsp; struct packed {logic credit; } rx_dat; } port_in,
-  input  struct packed {logic ready; }                                                                                                                                                                                                                                                                                               requests_in,
-                                                                                                                                                                                                                                                                                                                                     requester_responses_in,
-                                                                                                                                                                                                                                                                                                                                     request_data_in,
-  input  struct packed {logic valid; CHIRspFlit bits; }                                                                                                                                                                                                                                                                              responses_in,
-  input  struct packed {logic valid; CHIDatFlit bits; }                                                                                                                                                                                                                                                                              response_data_in,
-  output struct packed {struct packed {logic credit; } tx_req; struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIRspFlit bits; } rx_rsp; struct packed {logic valid; CHIDatFlit bits; } rx_dat; }                 port_out,
-  output struct packed {logic valid; CHIReqFlit bits; }                                                                                                                                                                                                                                                                              requests_out,
-  output struct packed {logic valid; CHIRspFlit bits; }                                                                                                                                                                                                                                                                              requester_responses_out,
-  output struct packed {logic valid; CHIDatFlit bits; }                                                                                                                                                                                                                                                                              request_data_out,
-  output struct packed {logic ready; }                                                                                                                                                                                                                                                                                               responses_out,
-                                                                                                                                                                                                                                                                                                                                     response_data_out,
-  output                                                                                                                                                                                                                                                                                                                             transmit_running,
-                                                                                                                                                                                                                                                                                                                                     transmit_deactivating,
-                                                                                                                                                                                                                                                                                                                                     transmit_credit_empty,
-                                                                                                                                                                                                                                                                                                                                     receive_running,
-                                                                                                                                                                                                                                                                                                                                     receive_deactivating
-);
-
-  wire struct packed {logic valid; CHIDatFlit bits; } _response_data_transmitter_link_out;
-  wire [1:0]                          _response_data_transmitter_credit_count;
-  wire struct packed {logic valid; CHIRspFlit bits; } _response_transmitter_link_out;
-  wire [1:0]                          _response_transmitter_credit_count;
-  wire struct packed {logic credit; } _request_data_receiver_link_out;
-  wire [1:0]                          _request_data_receiver_reserved;
-  wire struct packed {logic credit; } _request_response_receiver_link_out;
-  wire [1:0]                          _request_response_receiver_reserved;
-  wire struct packed {logic credit; } _request_receiver_link_out;
-  wire [1:0]                          _request_receiver_reserved;
-  reg                                 transmit_request;
-  reg                                 receive_ack;
-  wire                                _GEN =
-    receive_ack & port_in.tx_link_active_request & receive_enable;
-  CreditBuffer request_receiver (
-    .clock        (clock),
-    .reset        (reset),
-    .grant_enable (_GEN),
-    .link_in      (port_in.tx_req),
-    .egress_in    (requests_in),
-    .link_out     (_request_receiver_link_out),
-    .egress_out   (requests_out),
-    .count        (/* unused */),
-    .reserved     (_request_receiver_reserved)
-  );
-  CreditBuffer_1 request_response_receiver (
-    .clock        (clock),
-    .reset        (reset),
-    .grant_enable (_GEN),
-    .link_in      (port_in.tx_rsp),
-    .egress_in    (requester_responses_in),
-    .link_out     (_request_response_receiver_link_out),
-    .egress_out   (requester_responses_out),
-    .count        (/* unused */),
-    .reserved     (_request_response_receiver_reserved)
-  );
-  CreditBuffer_2 request_data_receiver (
-    .clock        (clock),
-    .reset        (reset),
-    .grant_enable (_GEN),
-    .link_in      (port_in.tx_dat),
-    .egress_in    (request_data_in),
-    .link_out     (_request_data_receiver_link_out),
-    .egress_out   (request_data_out),
-    .count        (/* unused */),
-    .reserved     (_request_data_receiver_reserved)
-  );
-  CreditSender response_transmitter (
-    .clock        (clock),
-    .reset        (reset),
-    .ingress_in   (responses_in),
-    .link_in      (port_in.rx_rsp),
-    .ingress_out  (responses_out),
-    .link_out     (_response_transmitter_link_out),
-    .credit_count (_response_transmitter_credit_count)
-  );
-  CreditSender_1 response_data_transmitter (
-    .clock        (clock),
-    .reset        (reset),
-    .ingress_in   (response_data_in),
-    .link_in      (port_in.rx_dat),
-    .ingress_out  (response_data_out),
-    .link_out     (_response_data_transmitter_link_out),
-    .credit_count (_response_data_transmitter_credit_count)
-  );
-  always @(posedge clock) begin
-    if (reset) begin
-      transmit_request <= 1'h0;
-      receive_ack <= 1'h0;
-    end
-    else begin
-      transmit_request <=
-        ~transmit_request & ~port_in.rx_link_active_ack & transmit_enable
-        | ~(transmit_request & port_in.rx_link_active_ack & ~transmit_enable)
-        & transmit_request;
-      receive_ack <=
-        ~receive_ack & port_in.tx_link_active_request & receive_enable
-        | ~(receive_ack & ~port_in.tx_link_active_request
-            & _request_receiver_reserved == 2'h0
-            & _request_response_receiver_reserved == 2'h0
-            & _request_data_receiver_reserved == 2'h0) & receive_ack;
-    end
-  end // always @(posedge)
-  assign port_out =
-    '{tx_req: _request_receiver_link_out,
-      tx_rsp: _request_response_receiver_link_out,
-      tx_dat: _request_data_receiver_link_out,
-      tx_link_active_ack: receive_ack,
-      rx_link_active_request: transmit_request,
-      rx_rsp: _response_transmitter_link_out,
-      rx_dat: _response_data_transmitter_link_out};
-  assign transmit_running = transmit_request & port_in.rx_link_active_ack;
-  assign transmit_deactivating = ~transmit_request & port_in.rx_link_active_ack;
-  assign transmit_credit_empty =
-    _response_transmitter_credit_count == 2'h0
-    & _response_data_transmitter_credit_count == 2'h0;
-  assign receive_running = port_in.tx_link_active_request & receive_ack;
-  assign receive_deactivating = ~port_in.tx_link_active_request & receive_ack;
-endmodule
-
-module CreditBuffer(
-  input                                                 clock,
-                                                        reset,
-                                                        grant_enable,
-  input  struct packed {logic valid; CHIReqFlit bits; } link_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic credit; }                 link_out,
-  output struct packed {logic valid; CHIReqFlit bits; } egress_out,
-  output [1:0]                                          count,
-                                                        reserved
-);
-
-  wire [1:0]                         _reservations_count;
-  wire                               _reservations_full;
-  wire struct packed {logic ready; } _storage_ingress_out;
-  wire struct packed {logic valid; CHIReqFlit bits; } _storage_egress_out;
-  wire [1:0]                         _storage_count;
-  wire                               _GEN = _storage_egress_out.valid & egress_in.ready;
-  wire                               _GEN_0 = grant_enable & (~_reservations_full | _GEN);
-  `ifndef SYNTHESIS
-    credit_buffer_reserved_slot_available:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | _storage_ingress_out.ready);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_buffer_occupancy_reserved:
-      assert property (@(posedge clock) disable iff (reset)
-                         _reservations_count >= _storage_count);
-  `endif // not def SYNTHESIS
-  reg  [1:0]                         credit_balance;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | (|credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_0 | link_in.valid | credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset) credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  Queue storage (
-    .clock       (clock),
-    .reset       (reset),
-    .ingress_in  (link_in),
-    .egress_in   (egress_in),
-    .ingress_out (_storage_ingress_out),
-    .egress_out  (_storage_egress_out),
-    .count       (_storage_count)
-  );
-  CreditCounter reservations (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (_GEN_0),
-    .decrement (_GEN),
-    .count     (_reservations_count),
-    .empty     (/* unused */),
-    .full      (_reservations_full)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      credit_balance <= 2'h0;
-    else
-      credit_balance <=
-        _GEN_0 ^ link_in.valid
-          ? (_GEN_0 ? credit_balance + 2'h1 : credit_balance - 2'h1)
-          : credit_balance;
-  end // always @(posedge)
-  assign link_out = '{credit: _GEN_0};
-  assign egress_out = _storage_egress_out;
-  assign count = _storage_count;
-  assign reserved = _reservations_count;
-endmodule
-
-module Queue(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIReqFlit bits; } ingress_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIReqFlit bits; } egress_out,
-  output [1:0]                                          count
-);
-
-  wire CHIReqFlit _GEN;
-  wire            _GEN_0;
-  wire            _write_pointer_value;
-  wire            _read_pointer_value;
-  wire            _GEN_1 = 1'h0;
-  CHIReqFlit      storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
-    end
-    else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
-    end
-  end // always_ff @(posedge)
-  reg  [1:0]      occupancy;
-  wire            _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire            _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
-  end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
-endmodule
-
-module Counter(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
-);
-
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
-endmodule
-
-module CreditCounter(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditBuffer_1(
-  input                                                 clock,
-                                                        reset,
-                                                        grant_enable,
-  input  struct packed {logic valid; CHIRspFlit bits; } link_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic credit; }                 link_out,
-  output struct packed {logic valid; CHIRspFlit bits; } egress_out,
-  output [1:0]                                          count,
-                                                        reserved
-);
-
-  wire [1:0]                         _reservations_count;
-  wire                               _reservations_full;
-  wire struct packed {logic ready; } _storage_ingress_out;
-  wire struct packed {logic valid; CHIRspFlit bits; } _storage_egress_out;
-  wire [1:0]                         _storage_count;
-  wire                               _GEN = _storage_egress_out.valid & egress_in.ready;
-  wire                               _GEN_0 = grant_enable & (~_reservations_full | _GEN);
-  `ifndef SYNTHESIS
-    credit_buffer_reserved_slot_available:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | _storage_ingress_out.ready);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_buffer_occupancy_reserved:
-      assert property (@(posedge clock) disable iff (reset)
-                         _reservations_count >= _storage_count);
-  `endif // not def SYNTHESIS
-  reg  [1:0]                         credit_balance;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | (|credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_0 | link_in.valid | credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset) credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  Queue_1 storage (
-    .clock       (clock),
-    .reset       (reset),
-    .ingress_in  (link_in),
-    .egress_in   (egress_in),
-    .ingress_out (_storage_ingress_out),
-    .egress_out  (_storage_egress_out),
-    .count       (_storage_count)
-  );
-  CreditCounter_1 reservations (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (_GEN_0),
-    .decrement (_GEN),
-    .count     (_reservations_count),
-    .empty     (/* unused */),
-    .full      (_reservations_full)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      credit_balance <= 2'h0;
-    else
-      credit_balance <=
-        _GEN_0 ^ link_in.valid
-          ? (_GEN_0 ? credit_balance + 2'h1 : credit_balance - 2'h1)
-          : credit_balance;
-  end // always @(posedge)
-  assign link_out = '{credit: _GEN_0};
-  assign egress_out = _storage_egress_out;
-  assign count = _storage_count;
-  assign reserved = _reservations_count;
-endmodule
-
-module Queue_1(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIRspFlit bits; } ingress_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIRspFlit bits; } egress_out,
-  output [1:0]                                          count
-);
-
-  wire CHIRspFlit _GEN;
-  wire            _GEN_0;
-  wire            _write_pointer_value;
-  wire            _read_pointer_value;
-  wire            _GEN_1 = 1'h0;
-  CHIRspFlit      storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
-    end
-    else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
-    end
-  end // always_ff @(posedge)
-  reg  [1:0]      occupancy;
-  wire            _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire            _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter_1 read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter_1 write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
-  end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
-endmodule
-
-module Counter_1(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
-);
-
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
-endmodule
-
-module CreditCounter_1(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditBuffer_2(
-  input                                                 clock,
-                                                        reset,
-                                                        grant_enable,
-  input  struct packed {logic valid; CHIDatFlit bits; } link_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic credit; }                 link_out,
-  output struct packed {logic valid; CHIDatFlit bits; } egress_out,
-  output [1:0]                                          count,
-                                                        reserved
-);
-
-  wire [1:0]                         _reservations_count;
-  wire                               _reservations_full;
-  wire struct packed {logic ready; } _storage_ingress_out;
-  wire struct packed {logic valid; CHIDatFlit bits; } _storage_egress_out;
-  wire [1:0]                         _storage_count;
-  wire                               _GEN = _storage_egress_out.valid & egress_in.ready;
-  wire                               _GEN_0 = grant_enable & (~_reservations_full | _GEN);
-  `ifndef SYNTHESIS
-    credit_buffer_reserved_slot_available:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | _storage_ingress_out.ready);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_buffer_occupancy_reserved:
-      assert property (@(posedge clock) disable iff (reset)
-                         _reservations_count >= _storage_count);
-  `endif // not def SYNTHESIS
-  reg  [1:0]                         credit_balance;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | (|credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_0 | link_in.valid | credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset) credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  Queue_2 storage (
-    .clock       (clock),
-    .reset       (reset),
-    .ingress_in  (link_in),
-    .egress_in   (egress_in),
-    .ingress_out (_storage_ingress_out),
-    .egress_out  (_storage_egress_out),
-    .count       (_storage_count)
-  );
-  CreditCounter_2 reservations (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (_GEN_0),
-    .decrement (_GEN),
-    .count     (_reservations_count),
-    .empty     (/* unused */),
-    .full      (_reservations_full)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      credit_balance <= 2'h0;
-    else
-      credit_balance <=
-        _GEN_0 ^ link_in.valid
-          ? (_GEN_0 ? credit_balance + 2'h1 : credit_balance - 2'h1)
-          : credit_balance;
-  end // always @(posedge)
-  assign link_out = '{credit: _GEN_0};
-  assign egress_out = _storage_egress_out;
-  assign count = _storage_count;
-  assign reserved = _reservations_count;
-endmodule
-
-module Queue_2(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIDatFlit bits; } ingress_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIDatFlit bits; } egress_out,
-  output [1:0]                                          count
-);
-
-  wire CHIDatFlit _GEN;
-  wire            _GEN_0;
-  wire            _write_pointer_value;
-  wire            _read_pointer_value;
-  wire            _GEN_1 = 1'h0;
-  CHIDatFlit      storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
-    end
-    else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
-    end
-  end // always_ff @(posedge)
-  reg  [1:0]      occupancy;
-  wire            _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire            _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter_2 read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter_2 write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
-  end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
-endmodule
-
-module Counter_2(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
-);
-
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
-endmodule
-
-module CreditCounter_2(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditSender(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIRspFlit bits; } ingress_in,
-  input  struct packed {logic credit; }                 link_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIRspFlit bits; } link_out,
-  output [1:0]                                          credit_count
-);
-
-  wire _balance_empty;
-  wire _GEN = ingress_in.valid & ~_balance_empty;
-  CreditCounter_3 balance (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (link_in.credit),
-    .decrement (_GEN),
-    .count     (credit_count),
-    .empty     (_balance_empty),
-    .full      (/* unused */)
-  );
-  assign ingress_out = '{ready: (~_balance_empty)};
-  assign link_out = '{valid: _GEN, bits: ingress_in.bits};
-endmodule
-
-module CreditCounter_3(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditSender_1(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIDatFlit bits; } ingress_in,
-  input  struct packed {logic credit; }                 link_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIDatFlit bits; } link_out,
-  output [1:0]                                          credit_count
-);
-
-  wire _balance_empty;
-  wire _GEN = ingress_in.valid & ~_balance_empty;
-  CreditCounter_4 balance (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (link_in.credit),
-    .decrement (_GEN),
-    .count     (credit_count),
-    .empty     (_balance_empty),
-    .full      (/* unused */)
-  );
-  assign ingress_out = '{ready: (~_balance_empty)};
-  assign link_out = '{valid: _GEN, bits: ingress_in.bits};
-endmodule
-
-module CreditCounter_4(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CHISNICNFlowAdapter(
-  input                                                                                                                                                                                                                                                                       clock,
-                                                                                                                                                                                                                                                                              reset,
-                                                                                                                                                                                                                                                                              transmit_enable,
-                                                                                                                                                                                                                                                                              receive_enable,
-  input  struct packed {logic tx_link_active_request; logic rx_link_active_ack; struct packed {logic valid; CHIRspFlit bits; } tx_rsp; struct packed {logic valid; CHIDatFlit bits; } tx_dat; struct packed {logic credit; } rx_req; struct packed {logic credit; } rx_dat; } port_in,
-  input  struct packed {logic valid; CHIReqFlit bits; }                                                                                                                                                                                                                       requests_in,
-  input  struct packed {logic valid; CHIDatFlit bits; }                                                                                                                                                                                                                       request_data_in,
-  input  struct packed {logic ready; }                                                                                                                                                                                                                                        responses_in,
-                                                                                                                                                                                                                                                                              response_data_in,
-  output struct packed {struct packed {logic credit; } tx_rsp; struct packed {logic credit; } tx_dat; logic tx_link_active_ack; logic rx_link_active_request; struct packed {logic valid; CHIReqFlit bits; } rx_req; struct packed {logic valid; CHIDatFlit bits; } rx_dat; } port_out,
-  output struct packed {logic ready; }                                                                                                                                                                                                                                        requests_out,
-                                                                                                                                                                                                                                                                              request_data_out,
-  output struct packed {logic valid; CHIRspFlit bits; }                                                                                                                                                                                                                       responses_out,
-  output struct packed {logic valid; CHIDatFlit bits; }                                                                                                                                                                                                                       response_data_out,
-  output                                                                                                                                                                                                                                                                      transmit_running,
-                                                                                                                                                                                                                                                                              transmit_deactivating,
-                                                                                                                                                                                                                                                                              transmit_credit_empty,
-                                                                                                                                                                                                                                                                              receive_running,
-                                                                                                                                                                                                                                                                              receive_deactivating
-);
-
-  wire struct packed {logic credit; } _response_data_receiver_link_out;
-  wire [1:0]                          _response_data_receiver_reserved;
-  wire struct packed {logic credit; } _response_receiver_link_out;
-  wire [1:0]                          _response_receiver_reserved;
-  wire struct packed {logic valid; CHIDatFlit bits; } _request_data_transmitter_link_out;
-  wire [1:0]                          _request_data_transmitter_credit_count;
-  wire struct packed {logic valid; CHIReqFlit bits; } _request_transmitter_link_out;
-  wire [1:0]                          _request_transmitter_credit_count;
-  reg                                 transmit_request;
-  reg                                 receive_ack;
-  wire                                _GEN =
-    receive_ack & port_in.tx_link_active_request & receive_enable;
-  CreditSender_2 request_transmitter (
-    .clock        (clock),
-    .reset        (reset),
-    .ingress_in   (requests_in),
-    .link_in      (port_in.rx_req),
-    .ingress_out  (requests_out),
-    .link_out     (_request_transmitter_link_out),
-    .credit_count (_request_transmitter_credit_count)
-  );
-  CreditSender_3 request_data_transmitter (
-    .clock        (clock),
-    .reset        (reset),
-    .ingress_in   (request_data_in),
-    .link_in      (port_in.rx_dat),
-    .ingress_out  (request_data_out),
-    .link_out     (_request_data_transmitter_link_out),
-    .credit_count (_request_data_transmitter_credit_count)
-  );
-  CreditBuffer_3 response_receiver (
-    .clock        (clock),
-    .reset        (reset),
-    .grant_enable (_GEN),
-    .link_in      (port_in.tx_rsp),
-    .egress_in    (responses_in),
-    .link_out     (_response_receiver_link_out),
-    .egress_out   (responses_out),
-    .count        (/* unused */),
-    .reserved     (_response_receiver_reserved)
-  );
-  CreditBuffer_4 response_data_receiver (
-    .clock        (clock),
-    .reset        (reset),
-    .grant_enable (_GEN),
-    .link_in      (port_in.tx_dat),
-    .egress_in    (response_data_in),
-    .link_out     (_response_data_receiver_link_out),
-    .egress_out   (response_data_out),
-    .count        (/* unused */),
-    .reserved     (_response_data_receiver_reserved)
-  );
-  always @(posedge clock) begin
-    if (reset) begin
-      transmit_request <= 1'h0;
-      receive_ack <= 1'h0;
-    end
-    else begin
-      transmit_request <=
-        ~transmit_request & ~port_in.rx_link_active_ack & transmit_enable
-        | ~(transmit_request & port_in.rx_link_active_ack & ~transmit_enable)
-        & transmit_request;
-      receive_ack <=
-        ~receive_ack & port_in.tx_link_active_request & receive_enable
-        | ~(receive_ack & ~port_in.tx_link_active_request
-            & _response_receiver_reserved == 2'h0
-            & _response_data_receiver_reserved == 2'h0) & receive_ack;
-    end
-  end // always @(posedge)
-  assign port_out =
-    '{tx_rsp: _response_receiver_link_out,
-      tx_dat: _response_data_receiver_link_out,
-      tx_link_active_ack: receive_ack,
-      rx_link_active_request: transmit_request,
-      rx_req: _request_transmitter_link_out,
-      rx_dat: _request_data_transmitter_link_out};
-  assign transmit_running = transmit_request & port_in.rx_link_active_ack;
-  assign transmit_deactivating = ~transmit_request & port_in.rx_link_active_ack;
-  assign transmit_credit_empty =
-    _request_transmitter_credit_count == 2'h0
-    & _request_data_transmitter_credit_count == 2'h0;
-  assign receive_running = port_in.tx_link_active_request & receive_ack;
-  assign receive_deactivating = ~port_in.tx_link_active_request & receive_ack;
-endmodule
-
-module CreditSender_2(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIReqFlit bits; } ingress_in,
-  input  struct packed {logic credit; }                 link_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIReqFlit bits; } link_out,
-  output [1:0]                                          credit_count
-);
-
-  wire _balance_empty;
-  wire _GEN = ingress_in.valid & ~_balance_empty;
-  CreditCounter_5 balance (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (link_in.credit),
-    .decrement (_GEN),
-    .count     (credit_count),
-    .empty     (_balance_empty),
-    .full      (/* unused */)
-  );
-  assign ingress_out = '{ready: (~_balance_empty)};
-  assign link_out = '{valid: _GEN, bits: ingress_in.bits};
-endmodule
-
-module CreditCounter_5(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditSender_3(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIDatFlit bits; } ingress_in,
-  input  struct packed {logic credit; }                 link_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIDatFlit bits; } link_out,
-  output [1:0]                                          credit_count
-);
-
-  wire _balance_empty;
-  wire _GEN = ingress_in.valid & ~_balance_empty;
-  CreditCounter_6 balance (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (link_in.credit),
-    .decrement (_GEN),
-    .count     (credit_count),
-    .empty     (_balance_empty),
-    .full      (/* unused */)
-  );
-  assign ingress_out = '{ready: (~_balance_empty)};
-  assign link_out = '{valid: _GEN, bits: ingress_in.bits};
-endmodule
-
-module CreditCounter_6(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditBuffer_3(
-  input                                                 clock,
-                                                        reset,
-                                                        grant_enable,
-  input  struct packed {logic valid; CHIRspFlit bits; } link_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic credit; }                 link_out,
-  output struct packed {logic valid; CHIRspFlit bits; } egress_out,
-  output [1:0]                                          count,
-                                                        reserved
-);
-
-  wire [1:0]                         _reservations_count;
-  wire                               _reservations_full;
-  wire struct packed {logic ready; } _storage_ingress_out;
-  wire struct packed {logic valid; CHIRspFlit bits; } _storage_egress_out;
-  wire [1:0]                         _storage_count;
-  wire                               _GEN = _storage_egress_out.valid & egress_in.ready;
-  wire                               _GEN_0 = grant_enable & (~_reservations_full | _GEN);
-  `ifndef SYNTHESIS
-    credit_buffer_reserved_slot_available:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | _storage_ingress_out.ready);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_buffer_occupancy_reserved:
-      assert property (@(posedge clock) disable iff (reset)
-                         _reservations_count >= _storage_count);
-  `endif // not def SYNTHESIS
-  reg  [1:0]                         credit_balance;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | (|credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_0 | link_in.valid | credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset) credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  Queue_3 storage (
-    .clock       (clock),
-    .reset       (reset),
-    .ingress_in  (link_in),
-    .egress_in   (egress_in),
-    .ingress_out (_storage_ingress_out),
-    .egress_out  (_storage_egress_out),
-    .count       (_storage_count)
-  );
-  CreditCounter_7 reservations (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (_GEN_0),
-    .decrement (_GEN),
-    .count     (_reservations_count),
-    .empty     (/* unused */),
-    .full      (_reservations_full)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      credit_balance <= 2'h0;
-    else
-      credit_balance <=
-        _GEN_0 ^ link_in.valid
-          ? (_GEN_0 ? credit_balance + 2'h1 : credit_balance - 2'h1)
-          : credit_balance;
-  end // always @(posedge)
-  assign link_out = '{credit: _GEN_0};
-  assign egress_out = _storage_egress_out;
-  assign count = _storage_count;
-  assign reserved = _reservations_count;
-endmodule
-
-module Queue_3(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIRspFlit bits; } ingress_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIRspFlit bits; } egress_out,
-  output [1:0]                                          count
-);
-
-  wire CHIRspFlit _GEN;
-  wire            _GEN_0;
-  wire            _write_pointer_value;
-  wire            _read_pointer_value;
-  wire            _GEN_1 = 1'h0;
-  CHIRspFlit      storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
-    end
-    else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
-    end
-  end // always_ff @(posedge)
-  reg  [1:0]      occupancy;
-  wire            _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire            _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter_3 read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter_3 write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
-  end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
-endmodule
-
-module Counter_3(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
-);
-
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
-endmodule
-
-module CreditCounter_7(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
-endmodule
-
-module CreditBuffer_4(
-  input                                                 clock,
-                                                        reset,
-                                                        grant_enable,
-  input  struct packed {logic valid; CHIDatFlit bits; } link_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic credit; }                 link_out,
-  output struct packed {logic valid; CHIDatFlit bits; } egress_out,
-  output [1:0]                                          count,
-                                                        reserved
-);
-
-  wire [1:0]                         _reservations_count;
-  wire                               _reservations_full;
-  wire struct packed {logic ready; } _storage_ingress_out;
-  wire struct packed {logic valid; CHIDatFlit bits; } _storage_egress_out;
-  wire [1:0]                         _storage_count;
-  wire                               _GEN = _storage_egress_out.valid & egress_in.ready;
-  wire                               _GEN_0 = grant_enable & (~_reservations_full | _GEN);
-  `ifndef SYNTHESIS
-    credit_buffer_reserved_slot_available:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | _storage_ingress_out.ready);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_buffer_occupancy_reserved:
-      assert property (@(posedge clock) disable iff (reset)
-                         _reservations_count >= _storage_count);
-  `endif // not def SYNTHESIS
-  reg  [1:0]                         credit_balance;
-  `ifndef SYNTHESIS
-    credited_transfer_has_credit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~link_in.valid | (|credit_balance));
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_grant_within_limit:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~_GEN_0 | link_in.valid | credit_balance != 2'h2);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credited_balance_in_range:
-      assert property (@(posedge clock) disable iff (reset) credit_balance != 2'h3);
-  `endif // not def SYNTHESIS
-  Queue_4 storage (
-    .clock       (clock),
-    .reset       (reset),
-    .ingress_in  (link_in),
-    .egress_in   (egress_in),
-    .ingress_out (_storage_ingress_out),
-    .egress_out  (_storage_egress_out),
-    .count       (_storage_count)
-  );
-  CreditCounter_8 reservations (
-    .clock     (clock),
-    .reset     (reset),
-    .increment (_GEN_0),
-    .decrement (_GEN),
-    .count     (_reservations_count),
-    .empty     (/* unused */),
-    .full      (_reservations_full)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      credit_balance <= 2'h0;
-    else
-      credit_balance <=
-        _GEN_0 ^ link_in.valid
-          ? (_GEN_0 ? credit_balance + 2'h1 : credit_balance - 2'h1)
-          : credit_balance;
-  end // always @(posedge)
-  assign link_out = '{credit: _GEN_0};
-  assign egress_out = _storage_egress_out;
-  assign count = _storage_count;
-  assign reserved = _reservations_count;
-endmodule
-
-module Queue_4(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; CHIDatFlit bits; } ingress_in,
-  input  struct packed {logic ready; }                  egress_in,
-  output struct packed {logic ready; }                  ingress_out,
-  output struct packed {logic valid; CHIDatFlit bits; } egress_out,
-  output [1:0]                                          count
-);
-
-  wire CHIDatFlit _GEN;
-  wire            _GEN_0;
-  wire            _write_pointer_value;
-  wire            _read_pointer_value;
-  wire            _GEN_1 = 1'h0;
-  CHIDatFlit      storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
-    end
-    else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
-    end
-  end // always_ff @(posedge)
-  reg  [1:0]      occupancy;
-  wire            _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire            _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire            _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter_4 read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter_4 write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
-  end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
-endmodule
-
-module Counter_4(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
-);
-
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
-endmodule
-
-module CreditCounter_8(
-  input        clock,
-               reset,
-               increment,
-               decrement,
-  output [1:0] count,
-  output       empty,
-               full
-);
-
-  reg  [1:0] state;
-  wire       _GEN = state == 2'h0;
-  wire       _GEN_0 = state == 2'h2;
-  `ifndef SYNTHESIS
-    credit_counter_underflow:
-      assert property (@(posedge clock) disable iff (reset) ~decrement | ~_GEN);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_overflow:
-      assert property (@(posedge clock) disable iff (reset)
-                         ~increment | decrement | ~_GEN_0);
-  `endif // not def SYNTHESIS
-  `ifndef SYNTHESIS
-    credit_counter_in_range:
-      assert property (@(posedge clock) disable iff (reset) state != 2'h3);
-  `endif // not def SYNTHESIS
-  always @(posedge clock) begin
-    if (reset)
-      state <= 2'h0;
-    else
-      state <= increment ^ decrement ? (increment ? state + 2'h1 : state - 2'h1) : state;
-  end // always @(posedge)
-  assign count = state;
-  assign empty = _GEN;
-  assign full = _GEN_0;
+  assign port_out = '{requester: _GEN_140, subordinate: _GEN_145};
 endmodule
 
 module Scoreboard(
@@ -3639,13 +1012,9 @@ endmodule
 
 export:
   home_flit
-  requester_link
-  subordinate_link
   requester_endpoint
   subordinate_endpoint
   home
-  requester_port
-  subordinate_port
   subordinate_service
   home_params
   home_design

@@ -207,7 +207,7 @@ instances, or logic to the generated RTL.
 | [`riscv/instruction-pattern.rhdl`](riscv/instruction-pattern.rhdl) | RV32I and RV64I descriptors materialized as typed patterns |
 | [`riscv/instruction-fields.rhdl`](riscv/instruction-fields.rhdl) | Descriptor-generated instruction fields and sign-extended immediates |
 | [`chi/ram.rhdl`](chi/ram.rhdl) | Finite initial-profile non-coherent CHI backing RAM |
-| [`chi/home.rhdl`](chi/home.rhdl) | Bounded HN-I between one requester and one subordinate port |
+| [`chi/home.rhdl`](chi/home.rhdl) | Decoupled HN-I transaction translation between requester and subordinate flows |
 | [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
 | [`cores/ricket.rhdl`](cores/ricket.rhdl) | Complete RV64 Ricket core with private instruction and data caches |
 | [`noc/wormhole-router-diagram.rhdl`](noc/wormhole-router-diagram.rhdl) | Flow-aware diagram of a packet-retaining phased-XY router with five inputs and five targets |

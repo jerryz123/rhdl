@@ -1,4 +1,4 @@
-# Builds the FESVR transport and its native CHI-backed RTL simulation.
+# Builds the FESVR transport and its decoupled CHI-backed RTL simulation.
 REPO_DIR := $(abspath ../..)
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
 FESVR_PREFIX ?= $(REPO_DIR)/.tools/fesvr-$(FESVR_REVISION)
@@ -57,8 +57,8 @@ chi-host-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	  --hw-memory-sim='disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined' \
 	  --sv-mask-non-synthesizable='mode=ifdef macro=SYNTHESIS' \
 	  --export-verilog $(SOC_MLIR) -o /dev/null > $(SOC_VERILOG)
-	# Bidirectional aggregate CHI ports form false UNOPTFLAT paths between \
-	# independent credited directions; assertions still check the link behavior.
+	# Bidirectional decoupled contracts lower as packed aggregates, so Verilator \
+	# reports false whole-aggregate feedback across independent flow fields.
 	$(VERILATOR) --binary --timing --vpi --assert --Wno-UNOPTFLAT --build-jobs 0 \
 	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \
 	  $(SOC_VERILOG) $(CURDIR)/TestDriver.sv \

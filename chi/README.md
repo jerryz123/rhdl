@@ -260,18 +260,24 @@ transaction state.
 ## Non-coherent-first scope
 
 [`ram.rhdl`](ram.rhdl) implements `CHIRam`, a finite backing-memory
-Subordinate Node. It is not a Home Node and does not implement coherence. A
-Home Node performs any required ordering and coherence work before issuing a
-non-snoopable transaction to this RAM.
+Subordinate transaction engine. Its `CHISNDecoupled` REQ/RSP/DAT boundary is
+ready-valid, so it does not own physical CHI link activation or credit state. It is not a Home
+Node and does not implement coherence. A Home Node performs any required
+ordering and coherence work before issuing a non-snoopable transaction to it.
 
-[`home.rhdl`](home.rhdl) implements the first bounded `CHIHNI`. It terminates
-one RN-I link, originates one SN-I link, allocates a Home-owned transaction
-slot, and translates both transaction-ID namespaces. Reads restore the RN's
+[`home.rhdl`](home.rhdl) implements the first bounded HN-I as
+`CHIHNI`. It operates through a `CHIHNDecoupled` interface containing
+ready-valid requester- and
+subordinate-side REQ/RSP/DAT flows, allocates a Home-owned transaction slot,
+and translates both transaction-ID namespaces. Reads restore the RN's
 ReturnTxnID and data target. Writes expose the Home slot as the RN-facing DBID,
 retain the subordinate's DBID internally, translate write data to that DBID,
-and restore the original RN TxnID on completion. Both physical links and every
-paired internal translation are monitored. This is a point-to-point
-non-coherent bridge, not yet an interconnect or coherent Home Node.
+and restore the original RN TxnID on completion. Paired transaction translation
+is monitored inside the module. Physical CHI link adapters, activation, and
+credit state belong to the integrating system, so a NoC can connect channel
+transports directly without creating internal CHI links or credit loops. This
+is still a non-coherent Home Node, not yet a generated interconnect or coherent
+Home Node.
 
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
@@ -390,13 +396,14 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, Size checking, and DAT packetization |
 | [`coherence.rhdl`](coherence.rhdl) | Implemented cache/response states, coherent opcode families, and mandatory RN-F snoop capability set |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
+| [`decoupled.rhdl`](decoupled.rhdl) | Reusable ready-valid `CHIRNDecoupled`, `CHISNDecoupled`, and nested `CHIHNDecoupled` contracts |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded initial RN-F `ReadShared`/`CompData`/`CompAck` and snoop-response lifetime checks |
 | [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-F/RN-D/RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
-| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory endpoint |
-| [`home.rhdl`](home.rhdl) | Implemented bounded point-to-point HN-I for the initial single-flit non-coherent transaction profile |
+| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
+| [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
@@ -417,9 +424,10 @@ turns an externally credited flit channel into a buffered internal flow.
    separate requester-to-home and home-to-subordinate System Address Maps.
    Next, generate a small crossbar over the ICN-side ready-valid adapters.
 7. **Initial non-coherent path complete:** Implement `CHIRam` over
-   `SyncRam1RW` and a bounded point-to-point `CHIHNI` for single-flit reads and
-   writes. Next, connect multiple ports through the generated crossbar and then
-   add multibeat traffic.
+   `SyncRam1RW` and a bounded `CHIHNI` for single-flit reads and
+   writes. Transaction engines expose ready-valid flows; a system adds credited
+   link adapters only where its physical boundaries require them. Next, connect
+   multiple ports through the generated crossbar and then add multibeat traffic.
 8. **Initial RN-F substrate complete:** Add RN-F node/ICN flow adapters,
    mandatory snoop capability validation, cache/response classifiers, and
    bounded `ReadShared` plus snoop-response lifetime monitoring. Next, build an
