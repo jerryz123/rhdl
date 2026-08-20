@@ -7,6 +7,8 @@ import:
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
+  "../support/generator-parameters.rhm".GeneratorParameter
+  "../support/hardware-methods.rhm".HardwareMethods
   "../support/hardware-literal.rhm" open
 
 export:
@@ -43,7 +45,7 @@ class RecordLiteral(type :: RecordType, fields :: List):
       def field_literal = fields.find(
         fun (field): field[0] == declared.name
       )[1]
-      def shifted = packed << packed_width(declared.type)
+      def shifted = packed << declared.type.packed_width()
       packed := shifted + field_literal.packed_value()
     packed
 
@@ -65,29 +67,127 @@ fun build_bundle_type(name, field_groups):
           "bundle specialization must contain at least one field")
   RecordType(fields, name)
 
-defn.macro 'bundle $(name :: Identifier)($parameter, ...): $clause; ...':
+// Carries the declared type of every bundle field so projection preserves the
+// field type's custom authoring surface, including enum-owned methods.
+statinfo.key bundle_field_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+dot.macro 'bundle_value_dot $left $dot $right':
+  def packed_fields = statinfo_meta.find(
+    statinfo_meta.gather(left),
+    'bundle_field_static_info_key'
+  )
+  if packed_fields
+  | block:
+      let '($field_entry, ...)' = packed_fields
+      def mutable expansion = #false
+      for (entry in [field_entry, ...]):
+        match entry
+        | '($(field_name :: Identifier), $(packed_infos :: Term))':
+            when right.to_source_string() == field_name.to_source_string()
+            | expansion := statinfo_meta.replace(
+                'kernel.project($left, $(right.to_source_string()))',
+                statinfo_meta.unpack(packed_infos)
+              )
+        | ~else:
+            syntax_meta.error("invalid bundle field static information", entry)
+      expansion
+  | #false
+
+annot.macro 'BundleFields($expected_type,
+                          $(field_name :: Identifier): $field_annotation, ...)':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields.of($expected_type)'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  let [field_infos, ...]:
+    for List (annotation in [field_annotation, ...]):
+      let '$(parsed_annotation :: annot_meta.Parsed)' = annotation
+      def (_field_predicate, infos) = annot_meta.unpack_predicate(parsed_annotation)
+      statinfo_meta.pack(infos)
+  def result_infos = statinfo_meta.and(
+    '(($(statinfo_meta.dot_provider_key), bundle_value_dot),
+      (bundle_field_static_info_key, (($field_name, $field_infos), ...)))',
+    base_infos
+  )
+  annot_meta.pack_predicate(predicate, result_infos)
+
+// Carries the statically recoverable member surface of a parameterized bundle
+// on the type expression itself, without requiring its runtime specialization
+// arguments to be in annotation scope.
+annot.macro 'BundleStaticFields($(field_name :: Identifier): $field_annotation, ...)':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  let [field_infos, ...]:
+    for List (annotation in [field_annotation, ...]):
+      let '$(parsed_annotation :: annot_meta.Parsed)' = annotation
+      def (_field_predicate, infos) = annot_meta.unpack_predicate(parsed_annotation)
+      statinfo_meta.pack(infos)
+  def result_infos = statinfo_meta.and(
+    '(($(statinfo_meta.dot_provider_key), bundle_value_dot),
+      (bundle_field_static_info_key, (($field_name, $field_infos), ...)))',
+    base_infos
+  )
+  annot_meta.pack_predicate(predicate, result_infos)
+
+annot.macro 'BundleTypeDescriptor':
+  annot_meta.pack_predicate('fun (value): value is_a RecordType')
+
+defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...): $clause; ...':
   def type_constructor = Syntax.make_id(
     name.to_source_string() ++ "_bundle_type",
     name
   )
   def bundle_name = name.to_source_string()
+  def parameter_count = [parameter, ...].length()
   def mutable field_groups = []
+  def mutable field_names = []
+  def mutable static_fields = []
+  def mutable descriptor_static_fields = []
+  def mutable method_names = []
+  def mutable method_entries = []
+  def mutable method_definitions = []
+  fun substitute_bundle_parameters(field_type):
+    match field_type
+    | '$(type_name :: Identifier)':
+        def mutable substituted = field_type
+        for (item in [parameter, ...]):
+          def binding = item.binding
+          when type_name.to_source_string() == binding.to_source_string()
+          | substituted := '$('$')$binding'
+        substituted
+    | '$constructor($type_argument, ...)':
+        def substituted_constructor = substitute_bundle_parameters(constructor)
+        let [substituted_argument, ...]:
+          for List (item in [type_argument, ...]):
+            substitute_bundle_parameters(item)
+        '$substituted_constructor($substituted_argument, ...)'
+    | ~else: field_type
+  fun retain_static_field(field_name, field_type):
+    static_fields := static_fields ++ ['$field_name: $field_type']
+    def substituted_type = substitute_bundle_parameters(field_type)
+    descriptor_static_fields := descriptor_static_fields ++ [
+      '$field_name: $substituted_type'
+    ]
   for (item in [clause, ...]):
     match item
     | '$(field_name :: Identifier): $field_type':
         def field_string = field_name.to_source_string()
+        field_names := field_names ++ [field_string]
         field_groups := field_groups ++ [
           '[RecordField($field_string, $field_type)]'
         ]
+        retain_static_field(field_name, field_type)
     | 'if $condition ...: $conditional_clause; ...':
         def mutable conditional_fields = []
         for (conditional_item in [conditional_clause, ...]):
           match conditional_item
           | '$(field_name :: Identifier): $field_type':
               def field_string = field_name.to_source_string()
+              field_names := field_names ++ [field_string]
               conditional_fields := conditional_fields ++ [
                 'RecordField($field_string, $field_type)'
               ]
+              retain_static_field(field_name, field_type)
           | ~else:
               syntax_meta.error(
                 "expected a bundle field in conditional field group",
@@ -105,34 +205,123 @@ defn.macro 'bundle $(name :: Identifier)($parameter, ...): $clause; ...':
              fun (): [$conditional_field, ...]
            )'
         ]
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
+         $method_body; ...':
+        when method_names.find(fun (declared): declared == method_name.to_source_string())
+        | syntax_meta.error("bundle method names must be unique", method_name)
+        method_names := method_names ++ [method_name.to_source_string()]
+        def method_function = Syntax.make_id(
+          bundle_name ++ "_" ++ method_name.to_source_string(),
+          method_name
+        )
+        method_entries := method_entries ++ [
+          '($method_name, $method_function, ($argument, ...),
+            (typed ($result_constructor($result_argument, ...))))'
+        ]
+        method_definitions := method_definitions ++ [
+          'fun $method_function($receiver :: $name(), $argument, ...) :: $result_constructor($result_argument, ...):
+             $method_body
+             ...'
+        ]
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_type :: Identifier):
+         $method_body; ...':
+        when method_names.find(fun (declared): declared == method_name.to_source_string())
+        | syntax_meta.error("bundle method names must be unique", method_name)
+        method_names := method_names ++ [method_name.to_source_string()]
+        def method_function = Syntax.make_id(
+          bundle_name ++ "_" ++ method_name.to_source_string(),
+          method_name
+        )
+        method_entries := method_entries ++ [
+          '($method_name, $method_function, ($argument, ...), (typed ($result_type)))'
+        ]
+        method_definitions := method_definitions ++ [
+          'fun $method_function($receiver :: $name(), $argument, ...) :: $result_type:
+             $method_body
+             ...'
+        ]
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...):
+         $method_body; ...':
+        when method_names.find(fun (declared): declared == method_name.to_source_string())
+        | syntax_meta.error("bundle method names must be unique", method_name)
+        method_names := method_names ++ [method_name.to_source_string()]
+        def method_function = Syntax.make_id(
+          bundle_name ++ "_" ++ method_name.to_source_string(),
+          method_name
+        )
+        method_entries := method_entries ++ [
+          '($method_name, $method_function, ($argument, ...), untyped)'
+        ]
+        method_definitions := method_definitions ++ [
+          'fun $method_function($receiver :: $name(), $argument, ...) :~ HardwareFields:
+             $method_body
+             ...'
+        ]
     | ~else:
         syntax_meta.error(
-          "expected a bundle field or conditional field group",
+          "expected a bundle field, conditional field group, or method declaration",
           item
         )
   when field_groups.length() == 0
   | syntax_meta.error("bundle requires at least one field clause", name)
+  when parameter_count > 0 && method_entries.length() > 0
+  | syntax_meta.error("bundle methods currently require a zero-parameter bundle", name)
+  for (method_name in method_names):
+    when field_names.find(fun (field_name): field_name == method_name)
+    | syntax_meta.error("bundle fields and methods must have distinct names", name)
   let [field_group, ...] = field_groups
-  '«
-     fun $type_constructor($parameter, ...):
-       build_bundle_type($bundle_name, [$field_group, ...])
-     expr.macro
-     | '$name($('$')type_argument, $'...'):
-          $('$')field; $('...')':
-         'record($type_constructor($('$')type_argument, $'...')):
-            $('$')field
-            $('...')'
-     | '$name($('$')type_argument, $'...')':
-         '$type_constructor($('$')type_argument, $'...')'
-     | '$name':
-         '$type_constructor'
-     annot.macro '$name($('$')type_argument, $'...')':
-       'HardwareFields.of($type_constructor($('$')type_argument, $'...'))'
-   »'
+  let [static_field, ...] = static_fields
+  let [descriptor_static_field, ...] = descriptor_static_fields
+  let [method_entry, ...] = method_entries
+  let [method_definition, ...] = method_definitions
+  let [parameter_binding, ...] = [parameter.binding, ...]
+  if parameter_count == 0
+  | block:
+      def type_descriptor = Syntax.make_id(bundle_name ++ "_bundle_descriptor", name)
+      '«
+         fun $type_constructor($parameter, ...):
+           build_bundle_type($bundle_name, [$field_group, ...])
+         def $type_descriptor :: HardwareFields.describes(
+           BundleTypeDescriptor,
+           BundleFields($type_constructor(), $static_field, ...) && HardwareMethods($method_entry, ...)
+         ) = $type_constructor()
+         expr.macro
+         | '$name(): $('$')field; $('...')':
+             'record($type_descriptor):
+                $('$')field
+                $('...')'
+         | '$name()': '$type_descriptor'
+         | '$name': '$type_constructor'
+         annot.macro '$name()':
+           'BundleFields($type_constructor(), $static_field, ...) && HardwareMethods($method_entry, ...)'
+         $method_definition
+         ...
+       »'
+  | '«
+       fun $type_constructor($parameter, ...):
+         build_bundle_type($bundle_name, [$field_group, ...])
+       expr.macro
+       | '$name($('$')$parameter_binding, ...):
+            $('$')field; $('...')':
+           'record($name($('$')$parameter_binding, ...)):
+              $('$')field
+              $('...')'
+       | '$name($('$')$parameter_binding, ...)':
+           '(block:
+              def $parameter_binding = $('$')$parameter_binding
+              ...
+              $type_constructor($parameter_binding, ...)) :: HardwareFields.describes(
+                BundleTypeDescriptor,
+                BundleStaticFields($descriptor_static_field, ...)
+              )'
+       | '$name': '$type_constructor'
+       annot.macro '$name($('$')$parameter_binding, ...)':
+         'HardwareFields.from_type($name($('$')$parameter_binding, ...))'
+     »'
 
 expr.macro 'record($type):
               $field_name: $field_value
               ...':
   let [field_string, ...] = [field_name.to_source_string(), ...]
   'build_record($type,
-                [[$field_string, $field_value], ...]) :: HardwareFields'
+                [[$field_string, $field_value], ...]) :: HardwareFields.from_type($type)'

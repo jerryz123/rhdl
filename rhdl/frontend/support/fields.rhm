@@ -10,11 +10,62 @@ import:
 
 export:
   HardwareFields
+  HardwareIntoFunction
+  ValueSurfaceFields
+  CircuitPortFields
+  CircuitMemberFields
+  hardware_port_static_info_key
+  value_surface_static_info_key
   hardware_value_type
   hardware_as_bits
   hardware_index
   hardware_into
   hardware_lookup
+
+// Associates a circuit definition with the exact static surface of each
+// declared data port. Hierarchy transfers this map to the resulting instance.
+statinfo.key hardware_port_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+// Carries the runtime-value surface advertised by any type descriptor. Data
+// types and interface types share this key so circuit declarations can retain
+// member precision without importing individual frontend layers.
+statinfo.key value_surface_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+annot.macro 'ValueSurfaceFields($(type :: expr_meta.Parsed))':
+  def value_infos = statinfo_meta.find(
+    statinfo_meta.gather(type),
+    'value_surface_static_info_key'
+  )
+  if value_infos
+  | annot_meta.pack_predicate('fun (_value): #true', statinfo_meta.unpack(value_infos))
+  | 'HardwareFields.from_type($type)'
+
+annot.macro 'CircuitPortFields($(port_name :: Identifier): $(port_type :: expr_meta.Parsed), ...)':
+  let [port_infos, ...]:
+    for List (type in [port_type, ...]):
+      let '$(port_annotation :: annot_meta.Parsed)' = 'ValueSurfaceFields($type)'
+      def (_port_predicate, infos) = annot_meta.unpack_predicate(port_annotation)
+      statinfo_meta.pack(infos)
+  annot_meta.pack_predicate(
+    'fun (_value): #true',
+    '((hardware_port_static_info_key, (($port_name, $port_infos), ...)))'
+  )
+
+// Records already-selected member annotations, including scalar and array
+// interface endpoints, on a circuit generator result.
+annot.macro 'CircuitMemberFields($(member_name :: Identifier): $(member_annotation :: annot_meta.Parsed), ...)':
+  let [member_infos, ...]:
+    for List (annotation in [member_annotation, ...]):
+      def (_member_predicate, infos) = annot_meta.unpack_predicate(annotation)
+      statinfo_meta.pack(infos)
+  annot_meta.pack_predicate(
+    'fun (_value): #true',
+    '((hardware_port_static_info_key, (($member_name, $member_infos), ...)))'
+  )
 
 fun hardware_fields(value):
   kernel.hardware_entity(value)
@@ -64,6 +115,33 @@ annot.macro 'HardwareFields':
 // Extends the broad HardwareFields annotation with an exact-type form. The
 // foundation renames this root to the public Hardware annotation namespace.
 namespace HardwareFields:
+  // Carries an exact value surface on a hardware type descriptor so frontend
+  // declarations can recover it without evaluating the descriptor at expansion time.
+  export annot.macro 'describes($(descriptor :: annot_meta.Parsed),
+                                $(value :: annot_meta.Parsed))':
+    def (descriptor_predicate, descriptor_infos) = annot_meta.unpack_predicate(descriptor)
+    def (_value_predicate, value_infos) = annot_meta.unpack_predicate(value)
+    def result_infos = statinfo_meta.and(
+      descriptor_infos,
+      '((hardware_value_static_info_key, $(statinfo_meta.pack(value_infos))),
+        (value_surface_static_info_key, $(statinfo_meta.pack(value_infos))))'
+    )
+    annot_meta.pack_predicate(descriptor_predicate, result_infos)
+
+  // Recovers the value surface advertised by a parsed hardware type expression,
+  // conservatively retaining generic field and index behavior when none is known.
+  export annot.macro 'from_type($(type :: expr_meta.Parsed))':
+    def value_infos = statinfo_meta.find(
+      statinfo_meta.gather(type),
+      'hardware_value_static_info_key'
+    )
+    if value_infos
+    | annot_meta.pack_predicate(
+        'fun (value): hardware_has_type(value, $type)',
+        statinfo_meta.unpack(value_infos)
+      )
+    | 'HardwareFields'
+
   export annot.macro 'of($expected_type)':
     annot_meta.pack_predicate(
       'fun (value): hardware_has_type(value, $expected_type)',
@@ -114,6 +192,33 @@ fun hardware_index(value, index) :: HardwareFields:
 fun hardware_into(value, target_type) :~ HardwareFields:
   kernel.cast(value, target_type)
 
+// Selects the result surface from the target type supplied to an `.into`
+// function, so representation casts preserve enum and bundle methods.
+meta.bridge hardware_into_result_static_infos:
+  fun (_data, dependencies :: annot_meta.Dependencies):
+    def target_infos = dependencies.arguments[0]
+    def surface_infos = statinfo_meta.find(
+      statinfo_meta.unpack(target_infos),
+      'value_surface_static_info_key'
+    )
+    if surface_infos
+    | surface_infos
+    | annot_meta.parse_to_packed_statinfo('HardwareFields')
+
+annot.macro 'HardwareIntoFunction':
+  def dependent_result = statinfo_meta.pack_dependent_result(
+    'hardware_into_result_static_infos',
+    '(unused)',
+    {}
+  )
+  def call_result = statinfo_meta.pack(
+    '(($(statinfo_meta.dependent_result_key), $dependent_result))'
+  )
+  annot_meta.pack_predicate(
+    'fun (_value): #true',
+    '(($(statinfo_meta.call_result_key), $call_result))'
+  )
+
 // Produces the canonical packed Bits image of frontend data while preserving
 // an existing Bits value without introducing a redundant cast operation.
 fun hardware_as_bits(value,
@@ -122,7 +227,7 @@ fun hardware_as_bits(value,
                      name = #false,
                      location = Location()) :~ HardwareFields:
   def source = kernel.read(value, location)
-  def width = packed_width(source.type)
+  def width = source.type.packed_width()
   unless data_type(source.type) && width != #false
   | error(~who: who, role ++ " must have a packable DataType")
   if bits_type(source.type)
@@ -159,7 +264,7 @@ dot.macro 'hardware_field_dot $left $dot $right':
   | 'literal_width': #false
   | 'current': #false
   | 'next': 'hardware_next($left) :: HardwareFields'
-  | 'into': 'fun (target_type) :~ HardwareFields: hardware_into($left, target_type)'
+  | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
   | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
   | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'
   | ~else:

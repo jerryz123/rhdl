@@ -93,7 +93,7 @@ halfword, word, or doubleword from an eight-byte returned beat and extends it to
 32 or 64 bits. `StoreGen` shifts an XLEN scalar source into its addressed byte
 lane and generates the corresponding eight-bit write mask.
 
-`memory_access_aligned` checks the same size contract independently. The
+`MemoryWidth.is_aligned(address)` checks the same size contract independently. The
 generators deliberately know nothing about instruction encodings, memory
 protocols, request ordering, or pipeline stalls, so a core can reuse them with
 a cache, scratchpad, or another bus. The core remains responsible for aligning

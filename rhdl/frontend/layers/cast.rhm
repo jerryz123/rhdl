@@ -1,7 +1,8 @@
-#lang rhombus
+#lang rhombus/and_meta
 // Defines generic explicit and shape-inferred representation casts over the kernel.
 
 import:
+  rhombus/meta open
   "../../core/ir.rhm" open
   "../kernel.rhm".cast as kernel_cast
   "../kernel.rhm".read as kernel_read
@@ -13,11 +14,19 @@ export:
   as_bits
   as_vec
 
-fun cast(entity,
-         target_type,
-         name = #false,
-         location = Location()) :: HardwareFields:
+fun build_cast(entity,
+               target_type,
+               name = #false,
+               location = Location()) :: HardwareFields:
   kernel_cast(entity, target_type, name, location)
+
+expr.macro
+| 'cast($entity, $(target_type :: expr_meta.Parsed))':
+    'build_cast($entity, $target_type) :: HardwareFields.from_type($target_type)'
+| 'cast($entity, $(target_type :: expr_meta.Parsed), $name)':
+    'build_cast($entity, $target_type, $name) :: HardwareFields.from_type($target_type)'
+| 'cast($entity, $(target_type :: expr_meta.Parsed), $name, $location)':
+    'build_cast($entity, $target_type, $name, $location) :: HardwareFields.from_type($target_type)'
 
 // Infers canonical Bits width from any packable frontend data value.
 fun as_bits(entity,
@@ -32,11 +41,11 @@ fun as_vec(entity,
            name = #false,
            location = Location()) :: HardwareFields:
   def source = kernel_read(entity, location)
-  def source_width = packed_width(source.type)
+  def source_width = source.type.packed_width()
   unless data_type(source.type) && source_width != #false
   | error(~who: #'as_vec, "value must have a packable DataType")
   def element_width:
-    if element_type is_a DataType | packed_width(element_type) | #false
+    if element_type is_a DataType | element_type.packed_width() | #false
   unless element_width != #false
   | error(~who: #'as_vec, "element type must be a packable DataType")
   unless source_width mod element_width == 0

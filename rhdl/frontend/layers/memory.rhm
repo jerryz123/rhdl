@@ -26,6 +26,24 @@ annot.macro 'MemoryFields':
     '(($(statinfo_meta.dot_provider_key), memory_field_dot), ($(statinfo_meta.index_get_key), memory_index))'
   )
 
+statinfo.key memory_element_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+namespace MemoryFields:
+  export annot.macro 'of($(element_type :: expr_meta.Parsed))':
+    let '$(base :: annot_meta.Parsed)' = 'MemoryFields'
+    let '$(element :: annot_meta.Parsed)' = 'HardwareFields.from_type($element_type)'
+    def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+    def (_element_predicate, element_infos) = annot_meta.unpack_predicate(element)
+    def result_infos = statinfo_meta.and(
+      base_infos,
+      '(($(statinfo_meta.index_result_key),
+         $(statinfo_meta.pack_index_result(element_infos, []))),
+        (memory_element_static_info_key, $(statinfo_meta.pack(element_infos))))'
+    )
+    annot_meta.pack_predicate(predicate, result_infos)
+
 fun memory_index(memory, address) :~ HardwareFields:
   kernel.memory_read_async(memory, address)
 
@@ -43,6 +61,10 @@ fun frontend_memory_write(memory,
   | ambient_memory_write(memory, address, data, resolved_enable)
 
 dot.macro 'memory_field_dot $left $dot $right':
+  def packed_element = statinfo_meta.find(
+    statinfo_meta.gather(left),
+    'memory_element_static_info_key'
+  )
   match right
   | 'id': #false
   | 'name': #false
@@ -53,7 +75,18 @@ dot.macro 'memory_field_dot $left $dot $right':
   | 'design': #false
   | 'defining_op_id': #false
   | 'ref': #false
-  | 'read': 'fun (address) :~ HardwareFields: memory_index($left, address)'
+  | 'read':
+      def read_function = 'fun (address) :~ HardwareFields: memory_index($left, address)'
+      if packed_element
+      | block:
+          def call_result = statinfo_meta.pack_call_result(
+            [[-1, statinfo_meta.unpack(packed_element)]]
+          )
+          statinfo_meta.wrap(
+            read_function,
+            '(($(statinfo_meta.call_result_key), $call_result))'
+          )
+      | read_function
   | 'write':
       'fun (address, data,
             ~enable: enable = #false,
@@ -61,6 +94,6 @@ dot.macro 'memory_field_dot $left $dot $right':
          frontend_memory_write($left, address, data, enable, clock)'
   | ~else: #false
 
-defn.macro 'mem $(name :: Identifier)($depth, $element_type)':
+defn.macro 'mem $(name :: Identifier)($depth, $(element_type :: expr_meta.Parsed))':
   def memory_name = name.to_source_string()
-  'def $name :: MemoryFields = kernel.memory($memory_name, $depth, $element_type)'
+  'def $name :: MemoryFields.of($element_type) = kernel.memory($memory_name, $depth, $element_type)'

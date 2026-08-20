@@ -24,7 +24,6 @@ export:
   arithmetic_type
   signed_arithmetic_type
   data_width
-  packed_width
   packable_type
   cast_compatible
   type_well_formed
@@ -38,11 +37,11 @@ export:
   selector_width
   count_index_width
   bits_text
-  type_text
 
 interface HardwareType:
   method describe()
   method type_equal(other)
+  method packed_width()
 
 interface DataType:
   extends HardwareType
@@ -79,15 +78,20 @@ class Bits(width :: PosInt):
   override method with_bit_width(new_width):
     Bits(new_width)
 
+  override method packed_width():
+    width
+
 class _ClockType():
   implements HardwareType
   override method describe(): "clock"
   override method type_equal(other): clock_type(other)
+  override method packed_width(): 1
 
 class _ResetType():
   implements HardwareType
   override method describe(): "reset"
   override method type_equal(other): reset_type(other)
+  override method packed_width(): 1
 
 def Clock = _ClockType()
 def Reset = _ResetType()
@@ -122,6 +126,16 @@ class RecordType(fields :: NonemptyList.of(RecordField), preferred_name = #false
                right_field in other.fields):
         left_field.name == right_field.name && left_field.type.type_equal(right_field.type) && right_field.type.type_equal(left_field.type)
 
+  override method packed_width():
+    def mutable width = 0
+    def mutable packable = #true
+    for (field in fields):
+      def field_width = field.type.packed_width()
+      if field_width == #false
+      | packable := #false
+      | width := width + field_width
+    if packable | width | #false
+
 // Models a fixed-length packed hardware vector. Logical element zero occupies
 // the least-significant element-width bits of the canonical representation.
 class VectorType(length :: PosInt, element_type :: DataType):
@@ -132,6 +146,10 @@ class VectorType(length :: PosInt, element_type :: DataType):
 
   override method type_equal(other):
     vector_type(other) && length == other.length && element_type.type_equal(other.element_type) && other.element_type.type_equal(element_type)
+
+  override method packed_width():
+    def element_width = element_type.packed_width()
+    if element_width == #false | #false | length * element_width
 
 fun hardware_type(type):
   type is_a HardwareType
@@ -158,37 +176,12 @@ fun data_width(type):
       if width is_a PosInt | width | #false
   | #false
 
-// Computes the canonical packed representation width used only by explicit
-// casts. Record fields put the first field in the most-significant bits;
-// vectors put logical element zero in the least-significant bits.
-fun packed_width(type):
-  cond
-  | flat_data_type(type):
-      def width = data_width(type)
-      if width is_a PosInt | width | #false
-  | record_type(type):
-      def mutable width = 0
-      def mutable packable = #true
-      for (field in type.fields):
-        def field_width = packed_width(field.type)
-        if field_width == #false
-        | packable := #false
-        | width := width + field_width
-      if packable | width | #false
-  | vector_type(type):
-      def element_width = packed_width(type.element_type)
-      if element_width == #false | #false | type.length * element_width
-  | clock_type(type) || reset_type(type):
-      1
-  | ~else:
-      #false
-
 fun packable_type(type):
-  packed_width(type) != #false
+  hardware_type(type) && type.packed_width() != #false
 
 fun cast_compatible(source_type, target_type):
-  def source_width = packed_width(source_type)
-  def target_width = packed_width(target_type)
+  def source_width = if hardware_type(source_type) | source_type.packed_width() | #false
+  def target_width = if hardware_type(target_type) | target_type.packed_width() | #false
   source_width != #false && target_width != #false && source_width == target_width
 
 fun bits_type(type):
@@ -239,6 +232,3 @@ fun type_equal(left, right):
 
 fun bits_text(type):
   "bits<" ++ to_string(type.width) ++ ">"
-
-fun type_text(type):
-  type.describe()

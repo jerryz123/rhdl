@@ -51,6 +51,7 @@
  ("bad-enum-mux-integer-key.rhdl" "enum mux lookup keys must be members of the selector's enum type")
  ("bad-enum-mux-foreign-key.rhdl" "enum mux lookup keys must be members of the selector's enum type")
  ("bad-enum-mux-duplicate-key.rhdl" "mux lookup keys must be unique")
+ ("bad-bundle-method-collision.rhdl" "bundle fields and methods must have distinct names")
  ("bad-sync-parent.rhdl" "implicit clock/reset use requires an active sync_circuit")
  ("bad-sync-partial-override.rhdl" "explicit sync child wiring requires both clock and reset")
  ("bad-sync-foreign-clock.rhdl" "explicit clock/reset controls are not allowed inside sync_circuit")

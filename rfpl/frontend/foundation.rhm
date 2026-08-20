@@ -10,6 +10,7 @@ export:
   Length
   RectOutline
   Coordinate
+  PhysicalView
   HardMacro
   CompositeFloorplan
   FloorplanPlacement
@@ -35,12 +36,23 @@ class RectOutline(width :: Length, height :: Length):
 
 class Coordinate(x :: Length, y :: Length)
 
-class HardMacro(module_def, outline, location = Location())
+interface PhysicalView:
+  method validate()
+
+class HardMacro(module_def, outline, location = Location()):
+  implements PhysicalView
+
+  override method validate():
+    validate_physical_view(this)
 
 class CompositeFloorplan(module_def,
                          outline,
                          placements,
-                         location = Location())
+                         location = Location()):
+  implements PhysicalView
+
+  override method validate():
+    validate_physical_view(this)
 
 class FloorplanPlacement(parent_module,
                          child,
@@ -62,7 +74,7 @@ fun um(magnitude :: Nat):
   Length(magnitude * 1000000)
 
 fun physical_view(value):
-  value is_a HardMacro || value is_a CompositeFloorplan
+  value is_a PhysicalView
 
 fun require_module(module_def :: Module, location = Location()):
   unless module_def.finished
@@ -159,7 +171,7 @@ fun build_composite_floorplan(module_def,
     verify_containment(view, placement)
   view
 
-fun validate_view(view):
+fun validate_physical_view(view :: PhysicalView):
   unless physical_view(view)
   | rfpl_fail("expected a hard-macro or composite-floorplan view")
   require_module(view.module_def, view.location)
@@ -197,7 +209,7 @@ fun annotate(logical :: DesignElaboration, top, location = Location()):
   unless physical_view(top)
   | rfpl_fail("annotate requires a hard-macro or composite-floorplan top view",
               location)
-  validate_view(top)
+  top.validate()
   unless top.module_def === logical.top
   | rfpl_fail(
       String.append("physical top ", top.module_def.name,
@@ -207,7 +219,7 @@ fun annotate(logical :: DesignElaboration, top, location = Location()):
   def mutable views = []
   def mutable placements = []
   fun visit(view):
-    validate_view(view)
+    view.validate()
     unless view.module_def.design === logical.design
     | rfpl_fail(
         String.append("physical view for ", view.module_def.name,

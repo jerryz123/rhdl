@@ -246,7 +246,7 @@ exactly `Bits(index_width(depth))`.
 
 A memory may optionally declare a positive host-known mask granularity that
 evenly divides the packed element width. Each write port then gains a required
-mask field of type `Bits(packed_width(element_type) / mask_granularity)`; the
+mask field of type `Bits(element_type.packed_width() / mask_granularity)`; the
 shared port names it `write_mask`. Mask bit zero controls the least-significant
 packed granule. A one writes that granule and a zero preserves its stored bits.
 The layout belongs to the memory and will be shared by every future

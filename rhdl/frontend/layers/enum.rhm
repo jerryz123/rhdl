@@ -8,6 +8,7 @@ import:
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/finite-enum.rhm".FiniteEnumType
+  "../support/hardware-methods.rhm".HardwareMethods
   "../support/mux-lookup.rhm" as mux_support
 
 export:
@@ -34,6 +35,9 @@ class EnumType(name, identity, members, width):
   override method bit_width():
     width
 
+  override method packed_width():
+    width
+
   override method enum_encodings():
     members.map(fun (member): member.encoding)
 
@@ -57,6 +61,9 @@ class OneHotEnumType(name, identity, members, width):
     enum_type(other) && identity === other.identity
 
   override method bit_width():
+    width
+
+  override method packed_width():
     width
 
   override method enum_encodings():
@@ -186,65 +193,178 @@ annot.macro 'EnumMembers':
 dot.macro 'enum_member_dot $left $dot $right':
   'enum_value($left, $(right.to_source_string())) :: HardwareFields'
 
+meta:
+  // Builds all enum encodings through one declaration path so methods have
+  // identical behavior on automatic, explicit, fixed-width, and one-hot forms.
+  fun expand_hardware_enum(name, options, clauses):
+    def enum_name = name.to_source_string()
+    def mutable requested_width = #false
+    def mutable one_hot = #false
+    for (option in options):
+      match option
+      | '~width: $width':
+          when requested_width
+          | syntax_meta.error("duplicate ~width option", option)
+          requested_width := width
+      | '~encoding: one_hot':
+          when one_hot
+          | syntax_meta.error("duplicate ~encoding option", option)
+          one_hot := #true
+      | ~else:
+          syntax_meta.error("expected ~width or ~encoding: one_hot", option)
+
+    def mutable members = []
+    def mutable encodings = []
+    def mutable explicit = #false
+    def mutable automatic = #false
+    def mutable method_names = []
+    def mutable method_entries = []
+    def mutable method_definitions = []
+    for (clause in clauses):
+      match clause
+      | '$(member :: Identifier)':
+          when explicit
+          | syntax_meta.error("cannot mix automatic and explicit enum members", clause)
+          automatic := #true
+          members := members ++ [member]
+      | '$(member :: Identifier) = $encoding':
+          when automatic
+          | syntax_meta.error("cannot mix automatic and explicit enum members", clause)
+          explicit := #true
+          members := members ++ [member]
+          encodings := encodings ++ [encoding]
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
+           $method_body; ...':
+          when method_names.find(fun (declared): declared == method_name.to_source_string())
+          | syntax_meta.error("enum method names must be unique", method_name)
+          method_names := method_names ++ [method_name.to_source_string()]
+          def method_function = Syntax.make_id(
+            enum_name ++ "_" ++ method_name.to_source_string(),
+            method_name
+          )
+          method_entries := method_entries ++ [
+            '($method_name, $method_function, ($argument, ...),
+              (typed ($result_constructor($result_argument, ...))))'
+          ]
+          method_definitions := method_definitions ++ [
+            'fun $method_function($receiver :: $name, $argument, ...) :: $result_constructor($result_argument, ...):
+               $method_body
+               ...'
+          ]
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_type :: Identifier):
+           $method_body; ...':
+          when method_names.find(fun (declared): declared == method_name.to_source_string())
+          | syntax_meta.error("enum method names must be unique", method_name)
+          method_names := method_names ++ [method_name.to_source_string()]
+          def method_function = Syntax.make_id(
+            enum_name ++ "_" ++ method_name.to_source_string(),
+            method_name
+          )
+          method_entries := method_entries ++ [
+            '($method_name, $method_function, ($argument, ...), (typed ($result_type)))'
+          ]
+          method_definitions := method_definitions ++ [
+            'fun $method_function($receiver :: $name, $argument, ...) :: $result_type:
+               $method_body
+               ...'
+          ]
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...):
+           $method_body; ...':
+          when method_names.find(fun (declared): declared == method_name.to_source_string())
+          | syntax_meta.error("enum method names must be unique", method_name)
+          method_names := method_names ++ [method_name.to_source_string()]
+          def method_function = Syntax.make_id(
+            enum_name ++ "_" ++ method_name.to_source_string(),
+            method_name
+          )
+          method_entries := method_entries ++ [
+            '($method_name, $method_function, ($argument, ...), untyped)'
+          ]
+          method_definitions := method_definitions ++ [
+            'fun $method_function($receiver :: $name, $argument, ...) :~ HardwareFields:
+               $method_body
+               ...'
+          ]
+      | ~else:
+          syntax_meta.error("expected an enum member or method declaration", clause)
+
+    when members.length() == 0
+    | syntax_meta.error("hardware enum requires at least one member", name)
+    when one_hot && explicit
+    | syntax_meta.error("one-hot enums use declaration-order encodings", name)
+    when one_hot && requested_width
+    | syntax_meta.error("one-hot enum width is determined by its members", name)
+
+    let [member_name, ...] = members.map(fun (member): member.to_source_string())
+    let [encoding, ...] = encodings
+    let [method_entry, ...] = method_entries
+    let [method_definition, ...] = method_definitions
+    def member_dot = Syntax.make_id(enum_name ++ "_member_dot", name)
+    def member_annotation = Syntax.make_id(enum_name ++ "_members", name)
+    def method_annotation = Syntax.make_id(enum_name ++ "_value_methods", name)
+    def constructor:
+      cond
+      | one_hot:
+          'make_one_hot_enum($enum_name, [$member_name, ...])'
+      | explicit && requested_width:
+          'make_explicit_enum($enum_name,
+                              [[$member_name, $encoding], ...],
+                              $requested_width)'
+      | explicit:
+          'make_explicit_enum($enum_name,
+                              [[$member_name, $encoding], ...])'
+      | requested_width:
+          'make_automatic_enum($enum_name,
+                               [$member_name, ...],
+                               $requested_width)'
+      | ~else:
+          'make_automatic_enum($enum_name, [$member_name, ...])'
+    if method_entries.length() > 0
+    | '«
+         annot.macro '$method_annotation':
+           'HardwareMethods($method_entry, ...)'
+         annot.macro '$name':
+           'HardwareFields.of($name) && $method_annotation'
+         dot.macro '$member_dot $('$')left $('$')dot $('$')right':
+           if [$member_name, ...].contains(right.to_source_string())
+           | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
+           | if ["name", "identity", "members", "width", "bit_width",
+                 "packed_width", "enum_encodings", "member", "describe"].contains(
+                  right.to_source_string()
+                )
+             | #false
+             | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
+         annot.macro '$member_annotation':
+           annot_meta.pack_predicate(
+             'enum_type',
+             '(($(statinfo_meta.dot_provider_key), $member_dot))'
+           )
+         def $name :: HardwareFields.describes($member_annotation, $name) = $constructor
+         $method_definition
+         ...
+       »'
+    | '«
+         annot.macro '$name':
+           'HardwareFields.of($name)'
+         dot.macro '$member_dot $('$')left $('$')dot $('$')right':
+           if [$member_name, ...].contains(right.to_source_string())
+           | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
+           | if ["name", "identity", "members", "width", "bit_width",
+                 "packed_width", "enum_encodings", "member", "describe"].contains(
+                  right.to_source_string()
+                )
+             | #false
+             | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
+         annot.macro '$member_annotation':
+           annot_meta.pack_predicate(
+             'enum_type',
+             '(($(statinfo_meta.dot_provider_key), $member_dot))'
+           )
+         def $name :: HardwareFields.describes($member_annotation, $name) = $constructor
+       »'
+
 defn.macro
-| 'hardware_enum $(name :: Identifier)(~encoding: one_hot):
-     $(member :: Identifier)
-     ...':
-    def enum_name = name.to_source_string()
-    let [member_name, ...] = [member.to_source_string(), ...]
-    '«
-       def $name :: EnumMembers = make_one_hot_enum($enum_name,
-                                                    [$member_name, ...])
-       annot.macro '$name':
-         'HardwareFields.of($name)'
-     »'
-| 'hardware_enum $(name :: Identifier):
-     $(member :: Identifier)
-     ...':
-    def enum_name = name.to_source_string()
-    let [member_name, ...] = [member.to_source_string(), ...]
-    '«
-       def $name :: EnumMembers = make_automatic_enum($enum_name,
-                                                      [$member_name, ...])
-       annot.macro '$name':
-         'HardwareFields.of($name)'
-     »'
-| 'hardware_enum $(name :: Identifier)(~width: $width):
-     $(member :: Identifier)
-     ...':
-    def enum_name = name.to_source_string()
-    let [member_name, ...] = [member.to_source_string(), ...]
-    '«
-       def $name :: EnumMembers = make_automatic_enum($enum_name,
-                                                      [$member_name, ...],
-                                                      $width)
-       annot.macro '$name':
-         'HardwareFields.of($name)'
-     »'
-| 'hardware_enum $(name :: Identifier):
-     $(member :: Identifier) = $encoding
-     ...':
-    def enum_name = name.to_source_string()
-    let [member_name, ...] = [member.to_source_string(), ...]
-    '«
-       def $name :: EnumMembers = make_explicit_enum(
-                                    $enum_name,
-                                    [[$member_name, $encoding], ...]
-                                  )
-       annot.macro '$name':
-         'HardwareFields.of($name)'
-     »'
-| 'hardware_enum $(name :: Identifier)(~width: $width):
-     $(member :: Identifier) = $encoding
-     ...':
-    def enum_name = name.to_source_string()
-    let [member_name, ...] = [member.to_source_string(), ...]
-    '«
-       def $name :: EnumMembers = make_explicit_enum(
-                                    $enum_name,
-                                    [[$member_name, $encoding], ...],
-                                    $width
-                                  )
-       annot.macro '$name':
-         'HardwareFields.of($name)'
-     »'
+| 'hardware_enum $(name :: Identifier): $clause; ...':
+    expand_hardware_enum(name, [], [clause, ...])
+| 'hardware_enum $(name :: Identifier)($option, ...): $clause; ...':
+    expand_hardware_enum(name, [option, ...], [clause, ...])

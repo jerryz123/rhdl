@@ -1,0 +1,108 @@
+#lang rhdl
+// Exercises enum-owned hardware methods across precise frontend value producers.
+
+hardware_enum CacheState:
+  Invalid
+  SharedClean
+  SharedDirty
+  UniqueClean
+  method is_shared(state):
+    is_one_of(state, CacheState.SharedClean, CacheState.SharedDirty)
+  method is_invalid(state):
+    is_one_of(state, CacheState.Invalid)
+
+hardware_enum SparseState:
+  Cold = 1
+  Warm = 5
+  method is_warm(state):
+    is_one_of(state, SparseState.Warm)
+  method matches(state, other):
+    is_one_of(state, other)
+
+hardware_enum WideState(~width: 4):
+  First
+  Second
+  method is_second(state):
+    is_one_of(state, WideState.Second)
+
+hardware_enum OneHotState(~encoding: one_hot):
+  Idle
+  Read
+  Write
+  method is_idle(state):
+    is_one_of(state, OneHotState.Idle)
+  method is_access(state):
+    is_one_of(state, OneHotState.Read, OneHotState.Write)
+
+bundle CacheEnvelope():
+  state: CacheState
+
+circuit EnumMethodEcho():
+  input state: CacheState
+  output echoed: CacheState
+  echoed <== state
+
+sync_circuit EnumMethodPropagation():
+  input select: Bool
+  input state: CacheState
+  input state_vector: Vec(2, CacheState)
+  input envelope: CacheEnvelope()
+  input memory_address: Bits(2)
+  output input_shared: Bool
+  output literal_shared: Bool
+  output wire_shared: Bool
+  output explicit_register_shared: Bool
+  output inferred_register_shared: Bool
+  output mux_shared: Bool
+  output second_method: Bool
+  output sparse_method: Bool
+  output sparse_argument_method: Bool
+  output explicit_width_method: Bool
+  output one_hot_method: Bool
+  output bundle_field_method: Bool
+  output vector_element_method: Bool
+  output memory_index_method: Bool
+  output memory_read_method: Bool
+  output instance_output_method: Bool
+  output packed: Bits(2)
+
+  wire state_wire: CacheState
+  reg explicit_state(CacheState)
+  reg inferred_state(~init: CacheState.Invalid)
+  mem state_memory(4, CacheState)
+  inst echo(EnumMethodEcho())
+  def selected = mux(select, state, CacheState.UniqueClean)
+
+  state_wire <== state
+  explicit_state <== state
+  inferred_state <== state
+  echo.state <== state
+  input_shared <== state.is_shared()
+  literal_shared <== CacheState.SharedClean.is_shared()
+  wire_shared <== state_wire.is_shared()
+  explicit_register_shared <== explicit_state.is_shared()
+  inferred_register_shared <== inferred_state.is_shared()
+  mux_shared <== selected.is_shared()
+  second_method <== state.is_invalid()
+  sparse_method <== SparseState.Warm.is_warm()
+  sparse_argument_method <== SparseState.Cold.matches(SparseState.Warm)
+  explicit_width_method <== WideState.Second.is_second()
+  one_hot_method <== OneHotState.Read.is_access()
+  bundle_field_method <== envelope.state.is_shared()
+  vector_element_method <== state_vector[0].is_shared()
+  memory_index_method <== state_memory[memory_address].is_shared()
+  memory_read_method <== state_memory.read(memory_address).is_shared()
+  instance_output_method <== echo.echoed.is_shared()
+  packed <== state.into(Bits(2))
+
+def design = elaborate(EnumMethodPropagation())
+
+export:
+  CacheState
+  SparseState
+  WideState
+  OneHotState
+  CacheEnvelope
+  EnumMethodEcho
+  EnumMethodPropagation
+  design

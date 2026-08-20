@@ -1,0 +1,127 @@
+#lang rhdl
+// Exercises bundle-owned hardware methods and their exact static propagation.
+
+hardware_enum CacheState:
+  Invalid
+  SharedClean
+  SharedDirty
+  UniqueClean
+  method is_shared(state) :: Bool:
+    is_one_of(state, CacheState.SharedClean, CacheState.SharedDirty)
+
+bundle CacheEnvelope():
+  state: CacheState
+  valid: Bool
+  method is_shared(envelope) :: Bool:
+    envelope.valid & envelope.state.is_shared()
+  method matches(envelope, other) :: Bool:
+    is_one_of(envelope.state, other)
+  method state_value(envelope) :: CacheState:
+    envelope.state
+  method identity(envelope) :: CacheEnvelope():
+    envelope
+
+bundle SizedCacheEnvelope(width :: PosInt):
+  state: CacheState
+  payload: Bits(width)
+
+bundle GenericCacheEnvelope(T :: DataType):
+  nested: T
+
+interface CacheEnvelopeStream(T :: DataType):
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    bits: T
+
+circuit CacheEnvelopeSource(T :: DataType):
+  input payload: T
+  interface egress(CacheEnvelopeStream(T), ~role: producer)
+  egress.bits <== payload
+
+def shared_envelope = CacheEnvelope():
+  state: CacheState.SharedClean
+  valid: Bool(#true)
+
+circuit BundleMethodEcho():
+  input envelope: CacheEnvelope()
+  output echoed: CacheEnvelope()
+  echoed <== envelope
+
+sync_circuit BundleMethodPropagation():
+  input select: Bool
+  input envelope: CacheEnvelope()
+  input envelopes: Vec(2, CacheEnvelope())
+  input memory_address: Bits(1)
+  output input_method: Bool
+  output literal_method: Bool
+  output wire_method: Bool
+  output register_method: Bool
+  output mux_method: Bool
+  output argument_method: Bool
+  output typed_enum_result_method: Bool
+  output typed_bundle_result_method: Bool
+  output vector_method: Bool
+  output memory_index_method: Bool
+  output memory_read_method: Bool
+  output instance_method: Bool
+  output packed: Bits(3)
+
+  wire envelope_wire: CacheEnvelope()
+  reg envelope_register(CacheEnvelope())
+  mem envelope_memory(2, CacheEnvelope())
+  inst echo(BundleMethodEcho())
+  def selected = mux(select, envelope, shared_envelope)
+
+  envelope_wire <== envelope
+  envelope_register <== envelope
+  echo.envelope <== envelope
+  input_method <== envelope.is_shared()
+  literal_method <== shared_envelope.is_shared()
+  wire_method <== envelope_wire.is_shared()
+  register_method <== envelope_register.is_shared()
+  mux_method <== selected.is_shared()
+  argument_method <== envelope.matches(CacheState.SharedClean)
+  typed_enum_result_method <== envelope.state_value().is_shared()
+  typed_bundle_result_method <== envelope.identity().is_shared()
+  vector_method <== envelopes[0].is_shared()
+  memory_index_method <== envelope_memory[memory_address].is_shared()
+  memory_read_method <== envelope_memory.read(memory_address).is_shared()
+  instance_method <== echo.echoed.is_shared()
+  packed <== envelope.into(Bits(3))
+
+def design = elaborate(BundleMethodPropagation())
+
+sync_circuit ParameterizedMethodPropagation():
+  input envelope: SizedCacheEnvelope(8)
+  input generic_envelope: GenericCacheEnvelope(CacheEnvelope())
+  output bundle_method: Bool
+  output generic_bundle_method: Bool
+  output instance_interface_method: Bool
+  output cast_method: Bool
+  output into_method: Bool
+
+  inst source(CacheEnvelopeSource(SizedCacheEnvelope(8)))
+  source.payload <== envelope
+  bundle_method <== envelope.state.is_shared()
+  generic_bundle_method <== generic_envelope.nested.is_shared()
+  instance_interface_method <== source.egress.bits.state.is_shared()
+  cast_method <== cast(envelope.into(Bits(10)), SizedCacheEnvelope(8)).state.is_shared()
+  into_method <== envelope.into(Bits(10)).into(SizedCacheEnvelope(8)).state.is_shared()
+
+def parameterized_design = elaborate(ParameterizedMethodPropagation())
+
+export:
+  CacheState
+  CacheEnvelope
+  SizedCacheEnvelope
+  GenericCacheEnvelope
+  CacheEnvelopeStream
+  CacheEnvelopeSource
+  BundleMethodEcho
+  BundleMethodPropagation
+  ParameterizedMethodPropagation
+  design
+  parameterized_design

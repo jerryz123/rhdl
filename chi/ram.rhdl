@@ -94,6 +94,7 @@ fun checked_chi_ram_params(params :: CHIRamParams):
 fun monitor_chi_ram_request(valid, raw_request, params :: CHIRamParams):
   def p = params.flit
   def request = cast(raw_request, CHIReqFlit(p))
+  def request_opcode = request.opcode
   def size = request.size_or_num_req[0..3]
   def max_size = alignment_bits(p.data_bytes)
   def alignment_cases = for List (encoded_size in 0..(max_size + 1)):
@@ -111,7 +112,7 @@ fun monitor_chi_ram_request(valid, raw_request, params :: CHIRamParams):
                            p.request_address_width)
   )
   when (valid & (request.opcode =/= CHIReqOpcode.ReqLCrdReturn)):
-    assert(chi_initial_request_supported(request.opcode),
+    assert(request_opcode.supports_initial_transaction(),
            "chi_ram_request_opcode_supported")
     assert(size <= bits(max_size, 3),
            "chi_ram_request_size_supported")
@@ -287,11 +288,13 @@ sync_circuit CHIRam(params :: CHIRamParams):
   inst transaction_slots(CHISNTransactionSlots(p, limit))
 
   def supported_requests = port.requests |> filter_flow(request):
-    chi_initial_request_supported(request.opcode)
+    def request_opcode = request.opcode
+    request_opcode.supports_initial_transaction()
   transaction_slots.allocation <=> (
     supported_requests |> map_flow(request):
+      def request_opcode = request.opcode
       CHISNTransactionAllocation(p):
-        write: chi_initial_write_request(request.opcode)
+        write: request_opcode.is_initial_write()
         request: request
   )
 

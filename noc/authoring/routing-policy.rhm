@@ -39,8 +39,6 @@ export:
   policy_intersection
   routing_phase
   custom_policy
-  routing_policy_evaluation
-  routing_policy_result
 
 interface RoutingOrigin:
   method describe()
@@ -99,6 +97,7 @@ class RoutingContext(route_class :: RouteClassSpec,
 
 interface RoutingPolicy:
   method allows(context)
+  method evaluate(context)
   method describe()
 
 class RoutingPolicyEvaluation(allowed :: Boolean,
@@ -107,11 +106,13 @@ class RoutingPolicyEvaluation(allowed :: Boolean,
 class AllowAllPolicy():
   implements RoutingPolicy
   override method allows(_context): #true
+  override method evaluate(context): checked_policy_evaluation(this, context)
   override method describe(): "allow-all"
 
 class DenyAllPolicy():
   implements RoutingPolicy
   override method allows(_context): #false
+  override method evaluate(context): checked_policy_evaluation(this, context)
   override method describe(): "deny-all"
 
 class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
@@ -124,6 +125,8 @@ class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
       fun (ref): route_class_ref_equal(ref, context.route_class.ref)
     ) != #false
 
+  override method evaluate(context): checked_policy_evaluation(this, context)
+
   override method describe():
     "route-class(" ++ String.join(
       refs.map(fun (ref): ref.describe()),
@@ -133,11 +136,13 @@ class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
 class InjectionPolicy():
   implements RoutingPolicy
   override method allows(context): context.origin is_a RoutingInjection
+  override method evaluate(context): checked_policy_evaluation(this, context)
   override method describe(): "origin(injection)"
 
 class ForwardingPolicy():
   implements RoutingPolicy
   override method allows(context): context.origin is_a RoutingForwarding
+  override method evaluate(context): checked_policy_evaluation(this, context)
   override method describe(): "origin(forwarding)"
 
 class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
@@ -149,6 +154,8 @@ class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
     refs.find(
       fun (ref): link_ref_equal(ref, context.candidate_link())
     ) != #false
+
+  override method evaluate(context): checked_policy_evaluation(this, context)
 
   override method describe():
     "candidate-link(" ++ String.join(
@@ -178,6 +185,8 @@ class CurrentVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
       fun (name): name == context.origin.vc.group
     ) != #false
 
+  override method evaluate(context): checked_policy_evaluation(this, context)
+
   override method describe():
     "current-vc-group(" ++ String.join(names, ", ") ++ ")"
 
@@ -194,6 +203,8 @@ class CandidateVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
   override method allows(context):
     names.find(fun (name): name == context.candidate_vc.group) != #false
 
+  override method evaluate(context): checked_policy_evaluation(this, context)
+
   override method describe():
     "candidate-vc-group(" ++ String.join(names, ", ") ++ ")"
 
@@ -208,9 +219,16 @@ class UnionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
   override method allows(context):
-    policies.find(
-      fun (policy): routing_policy_result(policy, context)
-    ) != #false
+    evaluate(context).allowed
+
+  override method evaluate(context):
+    def mutable matched = #false
+    for (policy in policies):
+      unless matched
+      | def child = policy.evaluate(context)
+        when child.allowed
+        | matched := child
+    if matched | matched | RoutingPolicyEvaluation(#false, [])
 
   override method describe():
     "union(" ++ String.join(
@@ -224,8 +242,19 @@ class IntersectionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
   override method allows(context):
-    for all (policy in policies):
-      routing_policy_result(policy, context)
+    evaluate(context).allowed
+
+  override method evaluate(context):
+    def mutable allowed = #true
+    def mutable rule_names = []
+    for (policy in policies):
+      when allowed
+      | def child = policy.evaluate(context)
+        if child.allowed
+        | rule_names := rule_names ++ child.rule_names
+        | allowed := #false
+          rule_names := []
+    RoutingPolicyEvaluation(allowed, rule_names)
 
   override method describe():
     "intersection(" ++ String.join(
@@ -237,7 +266,14 @@ class RoutingPhasePolicy(name :: NonemptyString, policy :: RoutingPolicy):
   implements RoutingPolicy
 
   override method allows(context):
-    routing_policy_result(policy, context)
+    evaluate(context).allowed
+
+  override method evaluate(context):
+    def child = policy.evaluate(context)
+    RoutingPolicyEvaluation(
+      child.allowed,
+      (if child.allowed | [name] ++ child.rule_names | [])
+    )
 
   override method describe():
     "phase(" ++ name ++ ": " ++ policy.describe() ++ ")"
@@ -247,51 +283,16 @@ class CustomPolicy(label :: NonemptyString,
   implements RoutingPolicy
 
   override method allows(context): predicate(context)
+  override method evaluate(context): checked_policy_evaluation(this, context)
   override method describe(): "custom(" ++ label ++ ")"
 
-fun atomic_policy_evaluation(policy :: RoutingPolicy,
-                             context :: RoutingContext):
+fun checked_policy_evaluation(policy :: RoutingPolicy,
+                              context :: RoutingContext):
   def result = policy.allows(context)
   unless result is_a Boolean
-  | error(~who: #'routing_policy_evaluation,
+  | error(~who: #'evaluate,
           "routing policy " ++ policy.describe() ++ " must return a Boolean")
   RoutingPolicyEvaluation(result, [])
-
-fun routing_policy_evaluation(policy :: RoutingPolicy,
-                              context :: RoutingContext):
-  cond
-  | policy is_a RoutingPhasePolicy:
-      def child = routing_policy_evaluation(policy.policy, context)
-      RoutingPolicyEvaluation(
-        child.allowed,
-        (if child.allowed | [policy.name] ++ child.rule_names | [])
-      )
-  | policy is_a UnionPolicy:
-      def mutable matched = #false
-      for (child_policy in policy.policies):
-        unless matched
-        | def child = routing_policy_evaluation(child_policy, context)
-          when child.allowed
-          | matched := child
-      if matched
-      | matched
-      | RoutingPolicyEvaluation(#false, [])
-  | policy is_a IntersectionPolicy:
-      def mutable allowed = #true
-      def mutable rule_names = []
-      for (child_policy in policy.policies):
-        when allowed
-        | def child = routing_policy_evaluation(child_policy, context)
-          if child.allowed
-          | rule_names := rule_names ++ child.rule_names
-          | allowed := #false
-            rule_names := []
-      RoutingPolicyEvaluation(allowed, rule_names)
-  | ~else:
-      atomic_policy_evaluation(policy, context)
-
-fun routing_policy_result(policy :: RoutingPolicy, context :: RoutingContext):
-  routing_policy_evaluation(policy, context).allowed
 
 def allow_all = AllowAllPolicy()
 def deny_all = DenyAllPolicy()

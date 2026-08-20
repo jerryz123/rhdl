@@ -305,7 +305,7 @@ power-of-two byte-size range. The set objects are immutable elaboration-time
 values and do not themselves create hardware. `IdRange.fits_unsigned_width(width)` and
 `AddressSet.fits_unsigned_width(width)` report whether every represented value
 fits a nonnegative unsigned host width. Both set types provide `overlaps` for
-host-time topology validation. `address_set_matches` turns one `AddressSet`
+host-time topology validation. `AddressSet.matches(address)` turns one set
 into a hardware predicate, while `address_sets_match` OR-reduces any list of
 sets and returns false for an empty list. `allocate_id_ranges` assigns exact contiguous
 global ranges to a nonempty list of local ranges and returns reversible

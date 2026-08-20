@@ -44,6 +44,7 @@ class _BoolType():
   override method describe(): "bool"
   override method type_equal(other): bool_type(other)
   override method bit_width(): 1
+  override method packed_width(): 1
   override method call(value :: Boolean) :~ HardwareFields:
     BoolLiteral(this, value)
 
@@ -98,7 +99,7 @@ fun bool_ne(left, right, name = #false, location = Location()):
 fun packed_reduction_list(entities, who, spelling :: String, location):
   def packed_elements = for List (entity in entities):
     def value = kernel.read(entity, location)
-    def width = packed_width(value.type)
+    def width = value.type.packed_width()
     unless data_type(value.type) && width != #false
     | error(~who: who,
             location.describe() ++ ": " ++ spelling ++ " list elements must have packable DataTypes")
@@ -118,7 +119,7 @@ fun packed_reduction_operand(entity, who, spelling :: String, location):
   | packed_reduction_list(entity, who, spelling, location)
   | block:
       def value = kernel.read(entity, location)
-      def width = packed_width(value.type)
+      def width = value.type.packed_width()
       unless data_type(value.type) && width != #false
       | error(~who: who,
               location.describe() ++ ": " ++ spelling ++ " operand must have a packable DataType")
@@ -279,7 +280,7 @@ fun priority_encoder_oh(entity,
   | error(~who: #'priority_encoder_oh,
           location.describe() ++ ": priority_encoder_oh operand must be one packable DataType")
   def value = kernel.read(entity, location)
-  def width = packed_width(value.type)
+  def width = value.type.packed_width()
   unless data_type(value.type) && width != #false
   | error(~who: #'priority_encoder_oh,
           location.describe() ++ ": priority_encoder_oh operand must have a packable DataType")
@@ -308,7 +309,7 @@ fun priority_encoder(entity,
   | error(~who: #'priority_encoder,
           location.describe() ++ ": priority_encoder operand must be one packable DataType")
   def value = kernel.read(entity, location)
-  def width = packed_width(value.type)
+  def width = value.type.packed_width()
   unless data_type(value.type) && width != #false
   | error(~who: #'priority_encoder,
           location.describe() ++ ": priority_encoder operand must have a packable DataType")
@@ -388,7 +389,7 @@ fun enum_valid(value, name = #false, location = Location()) :~ HardwareFields:
   unless type is_a finite_enum_support.FiniteEnumType
   | error(~who: #'enum_valid,
           location.describe() ++ ": enum_valid operand must have a hardware enum type")
-  def width = packed_width(type)
+  def width = type.packed_width()
   def packed = hardware_as_bits(value_read,
                                 #'enum_valid,
                                 "enum_valid operand",
@@ -514,11 +515,11 @@ operator (left >= right):
                       Location())
   | (left compare_to right) .>= 0
 
-fun mux(condition,
-        true_value,
-        false_value,
-        name = #false,
-        location = Location()):
+fun build_mux(condition,
+              true_value,
+              false_value,
+              name = #false,
+              location = Location()):
   def condition_value = kernel.read(condition, location)
   unless bool_type(condition_value.type)
   | error(~who: #'mux, location.describe() ++ ": mux condition must be Bool")
@@ -528,3 +529,31 @@ fun mux(condition,
                        name,
                        location,
                        Origin("embedded mux", name || ""))
+
+meta:
+  fun mux_result(result, true_value):
+    match true_value.group
+    | '$(type_name :: Identifier) $dot $(member :: Identifier)' when dot.to_source_string() == ".":
+        '$result :: HardwareFields.from_type($type_name)'
+    | ~else:
+        statinfo_meta.wrap(result, statinfo_meta.gather(true_value))
+
+expr.macro
+| 'mux($(condition :: expr_meta.Parsed),
+       $(true_value :: expr_meta.Parsed),
+       $(false_value :: expr_meta.Parsed))':
+    def result = 'build_mux($condition, $true_value, $false_value)'
+    mux_result(result, true_value)
+| 'mux($(condition :: expr_meta.Parsed),
+       $(true_value :: expr_meta.Parsed),
+       $(false_value :: expr_meta.Parsed),
+       $(name :: expr_meta.Parsed))':
+    def result = 'build_mux($condition, $true_value, $false_value, $name)'
+    mux_result(result, true_value)
+| 'mux($(condition :: expr_meta.Parsed),
+       $(true_value :: expr_meta.Parsed),
+       $(false_value :: expr_meta.Parsed),
+       $(name :: expr_meta.Parsed),
+       $(location :: expr_meta.Parsed))':
+    def result = 'build_mux($condition, $true_value, $false_value, $name, $location)'
+    mux_result(result, true_value)

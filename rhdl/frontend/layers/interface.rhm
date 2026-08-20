@@ -5,9 +5,12 @@ import:
   rhombus/meta open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
+  "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_index
   "../support/fields.rhm".hardware_into
+  "../support/fields.rhm".HardwareIntoFunction
   "../support/fields.rhm".hardware_lookup
+  "../support/fields.rhm".value_surface_static_info_key
   "../support/instance-members.rhm".InstanceMembers
   "../support/instance-members.rhm".register_member_resolver
 
@@ -37,7 +40,6 @@ export:
   interface_type_supports
   interface_link
   interface_transform
-  observe
   parallel_handles
   connect_endpoint_shapes
   interface
@@ -718,6 +720,28 @@ statinfo.key interface_topology_key:
   ~and: fun (_left, right): right
   ~or: fun (_left, right): right
 
+// Associates an interface type expression with the precise static surface of
+// an endpoint of that specialization.
+statinfo.key interface_endpoint_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+statinfo.key interface_member_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+statinfo.key interface_parent_static_info_key:
+  ~and: fun (_left, right): right
+  ~or: fun (_left, right): right
+
+annot.macro 'InterfaceTypeSurface($(endpoint :: annot_meta.Parsed))':
+  def (_endpoint_predicate, endpoint_infos) = annot_meta.unpack_predicate(endpoint)
+  annot_meta.pack_predicate(
+    'fun (value): value is_a InterfaceType',
+    '((interface_endpoint_static_info_key, $(statinfo_meta.pack(endpoint_infos))),
+      (value_surface_static_info_key, $(statinfo_meta.pack(endpoint_infos))))'
+  )
+
 // Selects precise static information for a configured interface transform
 // after Rhombus supplies the transform's eventual source through `|>`.
 meta.bridge interface_transform_result_static_infos:
@@ -814,9 +838,15 @@ namespace Endpoint:
     def call_result = statinfo_meta.pack(
       '(($(statinfo_meta.dependent_result_key), $dependent_result))'
     )
+    def endpoint_infos = statinfo_meta.find(
+      statinfo_meta.gather(expected_type),
+      'interface_endpoint_static_info_key'
+    )
     annot_meta.pack_predicate(
       'fun (value): interface_endpoint_has_type(value, $expected_type)',
-      '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint), ($(statinfo_meta.call_result_key), $call_result))'
+      if endpoint_infos
+      | statinfo_meta.unpack(endpoint_infos)
+      | '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint), ($(statinfo_meta.call_result_key), $call_result))'
     )
 
   export annot.macro 'supports($expected_type)':
@@ -833,6 +863,49 @@ namespace Endpoint:
       '(($(statinfo_meta.dot_provider_key), interface_field_dot), (interface_topology_key, endpoint), ($(statinfo_meta.call_result_key), $call_result))'
     )
 
+// Selects an endpoint surface for nested interface members and a hardware
+// value surface for ordinary data members.
+annot.macro 'InterfaceMemberFields($(type :: expr_meta.Parsed))':
+  def endpoint_infos = statinfo_meta.find(
+    statinfo_meta.gather(type),
+    'interface_endpoint_static_info_key'
+  )
+  if endpoint_infos
+  | annot_meta.pack_predicate('fun (_value): #true', statinfo_meta.unpack(endpoint_infos))
+  | 'HardwareFields.from_type($type)'
+
+// Describes the locally declared members of one interface specialization and
+// retains the inherited endpoint surface for refinement lookup.
+annot.macro 'EndpointSurface($parent,
+                             $(field_name :: Identifier): $(field_type :: expr_meta.Parsed), ...)':
+  let '$(base :: annot_meta.Parsed)' = 'Endpoint'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  let [field_infos, ...]:
+    for List (type in [field_type, ...]):
+      let '$(field_annotation :: annot_meta.Parsed)' = 'InterfaceMemberFields($type)'
+      def (_field_predicate, infos) = annot_meta.unpack_predicate(field_annotation)
+      statinfo_meta.pack(infos)
+  def parent_infos:
+    match parent
+    | '#false': #false
+    | ~else:
+        statinfo_meta.find(
+          statinfo_meta.gather(parent),
+          'interface_endpoint_static_info_key'
+        )
+  def local_infos = '((interface_member_static_info_key,
+                       (($field_name, $field_infos), ...)))'
+  def result_infos = statinfo_meta.and(base_infos, local_infos)
+  annot_meta.pack_predicate(
+    predicate,
+    if parent_infos
+    | statinfo_meta.and(
+        result_infos,
+        '((interface_parent_static_info_key, $parent_infos))'
+      )
+    | result_infos
+  )
+
 annot.macro 'InterfaceArrayFields':
   def endpoint_infos = statinfo_meta.unpack(
     annot_meta.parse_to_packed_statinfo('Endpoint')
@@ -842,6 +915,17 @@ annot.macro 'InterfaceArrayFields':
     '(($(statinfo_meta.index_get_key), interface_array_index), ($(statinfo_meta.index_result_key), $(statinfo_meta.pack_index_result(endpoint_infos, []))), (interface_topology_key, endpoint_array))'
   )
 
+namespace InterfaceArrayFields:
+  export annot.macro 'of($expected_type)':
+    let '$(endpoint :: annot_meta.Parsed)' = 'Endpoint.of($expected_type)'
+    def (_endpoint_predicate, endpoint_infos) = annot_meta.unpack_predicate(endpoint)
+    annot_meta.pack_predicate(
+      'fun (value): value is_a Array',
+      '(($(statinfo_meta.index_get_key), interface_array_index),
+        ($(statinfo_meta.index_result_key),
+         $(statinfo_meta.pack_index_result(endpoint_infos, []))),
+        (interface_topology_key, endpoint_array))'
+    )
 // A handle side can be either one endpoint or an endpoint array. The generic
 // annotation deliberately exposes both access paths while precise connected
 // stage results continue to use Endpoint or InterfaceArrayFields.
@@ -951,18 +1035,59 @@ fun observe(endpoint :: InterfaceEndpoint) :~ Observation:
 fun interface_array_index(value, index :: Nat) :~ Endpoint:
   value[index]
 
+meta:
+  fun interface_member_static_expansion(left, right, infos):
+    def packed_members = statinfo_meta.find(
+      infos,
+      'interface_member_static_info_key'
+    )
+    def mutable expansion = #false
+    when packed_members
+    | let '($member_entry, ...)' = packed_members
+      for (entry in [member_entry, ...]):
+        match entry
+        | '($(member_name :: Identifier), $(packed_infos :: Term))':
+            when right.to_source_string() == member_name.to_source_string()
+            | expansion := statinfo_meta.replace(
+                'interface_member($left, $(right.to_source_string()))',
+                statinfo_meta.unpack(packed_infos)
+              )
+        | ~else:
+            syntax_meta.error("invalid interface member static information", entry)
+    def packed_parent = statinfo_meta.find(
+      infos,
+      'interface_parent_static_info_key'
+    )
+    if expansion
+    | expansion
+    | if packed_parent
+      | interface_member_static_expansion(
+          left,
+          right,
+          statinfo_meta.unpack(packed_parent)
+        )
+      | #false
+
 dot.macro 'interface_field_dot $left $dot $right':
-  match right
-  | 'field': #false
-  | 'type': #false
-  | 'role': #false
-  | 'represented_role': #false
-  | 'bindings': #false
-  | 'view': #false
-  | 'into': 'fun (target_type) :~ InstanceMembers: hardware_into($left, target_type)'
-  | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
-  | ~else:
-      'interface_member($left, $(right.to_source_string())) :: InstanceMembers'
+  def precise = interface_member_static_expansion(
+    left,
+    right,
+    statinfo_meta.gather(left)
+  )
+  if precise
+  | precise
+  | match right
+    | 'field': #false
+    | 'type': #false
+    | 'role': #false
+    | 'represented_role': #false
+    | 'bindings': #false
+    | 'view': #false
+    | 'observe': 'fun () :~ Observation: observe($left)'
+    | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
+    | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
+    | ~else:
+        'interface_member($left, $(right.to_source_string())) :: InstanceMembers'
 
 fun validate_interface_entity_pair(left_entity, right_entity):
   unless ((left_entity is_a Place && right_entity is_a Value) || (left_entity is_a Value && right_entity is_a Place))
@@ -1489,6 +1614,67 @@ fun make_refined_interface(identity,
                 ~identity: identity,
                 ~specialization_arguments: specialization_arguments)
 
+meta:
+  fun interface_parameter_binding(parameter):
+    match parameter
+    | '$(binding :: Identifier) $_ ...': binding
+    | '~$_: $(binding :: Identifier) $_ ...': binding
+    | ~else:
+        syntax_meta.error("expected an interface generator parameter", parameter)
+
+  fun substitute_interface_parameters(form, parameters):
+    match form
+    | '$(identifier :: Identifier)':
+        def mutable substituted = form
+        for (parameter in parameters):
+          def binding = interface_parameter_binding(parameter)
+          when identifier.to_source_string() == binding.to_source_string()
+          | substituted := '$('$')$binding'
+        substituted
+    | '$constructor($argument, ...)':
+        def substituted_constructor = substitute_interface_parameters(
+          constructor,
+          parameters
+        )
+        let [substituted_argument, ...]:
+          for List (item in [argument, ...]):
+            substitute_interface_parameters(item, parameters)
+        '$substituted_constructor($substituted_argument, ...)'
+    | ~else: form
+
+  fun build_interface_definition(name,
+                                 parameters,
+                                 constructor,
+                                 parent,
+                                 members):
+    def implementation = Syntax.make_id(
+      name.to_source_string() ++ "_interface_type",
+      name
+    )
+    let [parameter, ...] = parameters
+    let [binding, ...] = parameters.map(interface_parameter_binding)
+    let [member, ...] = members
+    def substituted_parent = substitute_interface_parameters(parent, parameters)
+    let [substituted_member, ...]:
+      for List (entry in members):
+        match entry
+        | '$(field :: Identifier): $type':
+            def substituted_type = substitute_interface_parameters(type, parameters)
+            '$field: $substituted_type'
+        | ~else:
+            syntax_meta.error("invalid interface member surface", entry)
+    '«
+       def interface_identity = InterfaceIdentity()
+       fun $implementation($parameter, ...):
+         $constructor
+       expr.macro
+       | '$name($('$')$binding, ...)':
+           '$implementation($('$')$binding, ...) :: InterfaceTypeSurface(
+              EndpointSurface($substituted_parent, $substituted_member, ...)
+            )'
+       | '$name': '$implementation'
+     »'
+
 defn.macro
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        supports $(support_role :: Identifier): $supported
@@ -1506,27 +1692,21 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(
-           interface_identity,
-           $interface_name,
-           $parent,
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           [InterfaceSupport($support_role_name, $supported)],
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(
+         interface_identity,
+         $interface_name,
+         $parent,
+         [InterfaceMember($first_field_name, $first_type, $first_from_name, $first_to_name), ...,
+          InterfaceMember($second_field_name, $second_type, $second_from_name, $second_to_name), ...],
+         [InterfaceSupport($support_role_name, $supported)],
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      parent,
+      ['$first_field: $first_type', ..., '$second_field: $second_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        supports $(support_role :: Identifier): $supported
        $(from_role :: Identifier) -> $(to_role :: Identifier):
@@ -1537,38 +1717,38 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(
-           interface_identity,
-           $interface_name,
-           $parent,
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           [InterfaceSupport($support_role_name, $supported)],
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(
+         interface_identity,
+         $interface_name,
+         $parent,
+         [InterfaceMember($field_name, $field_type, $from_role_name, $to_role_name), ...],
+         [InterfaceSupport($support_role_name, $supported)],
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      parent,
+      ['$field: $field_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        supports $(support_role :: Identifier): $supported':
     def interface_name = name.to_source_string()
     def support_role_name = support_role.to_source_string()
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(
-           interface_identity,
-           $interface_name,
-           $parent,
-           [],
-           [InterfaceSupport($support_role_name, $supported)],
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(
+         interface_identity,
+         $interface_name,
+         $parent,
+         [],
+         [InterfaceSupport($support_role_name, $supported)],
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      parent,
+      []
+    )
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        $(first_from :: Identifier) -> $(first_to :: Identifier):
          $first_field: $first_type
@@ -1583,26 +1763,20 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(
-           interface_identity,
-           $interface_name,
-           $parent,
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(
+         interface_identity,
+         $interface_name,
+         $parent,
+         [InterfaceMember($first_field_name, $first_type, $first_from_name, $first_to_name), ...,
+          InterfaceMember($second_field_name, $second_type, $second_from_name, $second_to_name), ...],
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      parent,
+      ['$first_field: $first_type', ..., '$second_field: $second_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed):
        $(from_role :: Identifier) -> $(to_role :: Identifier):
          $field: $field_type
@@ -1611,32 +1785,32 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(
-           interface_identity,
-           $interface_name,
-           $parent,
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(
+         interface_identity,
+         $interface_name,
+         $parent,
+         [InterfaceMember($field_name, $field_type, $from_role_name, $to_role_name), ...],
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      parent,
+      ['$field: $field_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...) refines $(parent :: expr_meta.Parsed)':
     def interface_name = name.to_source_string()
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         make_refined_interface(interface_identity,
-                                $interface_name,
-                                $parent,
-                                [],
-                                ~specialization_arguments: [$parameter, ...])
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'make_refined_interface(interface_identity,
+                              $interface_name,
+                              $parent,
+                              [],
+                              ~specialization_arguments: [$parameter, ...])',
+      parent,
+      []
+    )
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
      role $(second_role :: Identifier)
@@ -1660,32 +1834,26 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~connection_compatibility:
-             InterfaceCompatibility(
-               $compatibility_role_name,
-               fun ($provided_arguments, $required_arguments): $compatibility
-             )
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($first_field_name, $first_type, $first_from_name, $first_to_name), ...,
+          InterfaceMember($second_field_name, $second_type, $second_from_name, $second_to_name), ...],
+         ~provider_role: $provider_role_name,
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...],
+         ~connection_compatibility:
+           InterfaceCompatibility(
+             $compatibility_role_name,
+             fun ($provided_arguments, $required_arguments): $compatibility
+           )
+       )',
+      '#false',
+      ['$first_field: $first_type', ..., '$second_field: $second_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
      role $(second_role :: Identifier)
@@ -1703,27 +1871,25 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...],
-           ~connection_compatibility:
-             InterfaceCompatibility(
-               $compatibility_role_name,
-               fun ($provided_arguments, $required_arguments): $compatibility
-             )
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($field_name, $field_type, $from_role_name, $to_role_name), ...],
+         ~provider_role: $provider_role_name,
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...],
+         ~connection_compatibility:
+           InterfaceCompatibility(
+             $compatibility_role_name,
+             fun ($provided_arguments, $required_arguments): $compatibility
+           )
+       )',
+      '#false',
+      ['$field: $field_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
      role $(second_role :: Identifier)
@@ -1744,27 +1910,21 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($first_field_name, $first_type, $first_from_name, $first_to_name), ...,
+          InterfaceMember($second_field_name, $second_type, $second_from_name, $second_to_name), ...],
+         ~provider_role: $provider_role_name,
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      '#false',
+      ['$first_field: $first_type', ..., '$second_field: $second_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
      role $(second_role :: Identifier)
@@ -1779,22 +1939,20 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~provider_role: $provider_role_name,
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($field_name, $field_type, $from_role_name, $to_role_name), ...],
+         ~provider_role: $provider_role_name,
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      '#false',
+      ['$field: $field_type', ...]
+    )
 | 'interface $(name :: Identifier)($parameter, ...):
               role $(first_role :: Identifier)
               role $(second_role :: Identifier)
@@ -1813,34 +1971,28 @@ defn.macro
     def second_to_name = second_to.to_source_string()
     let [first_field_name, ...] = [first_field.to_source_string(), ...]
     let [second_field_name, ...] = [second_field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($first_field_name,
-                            $first_type,
-                            $first_from_name,
-                            $first_to_name),
-            ...,
-            InterfaceMember($second_field_name,
-                            $second_type,
-                            $second_from_name,
-                            $second_to_name),
-            ...],
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($first_field_name, $first_type, $first_from_name, $first_to_name), ...,
+          InterfaceMember($second_field_name, $second_type, $second_from_name, $second_to_name), ...],
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      '#false',
+      ['$first_field: $first_type', ..., '$second_field: $second_type', ...]
+    )
 | 'interface $(name :: Identifier)($type, ~role: $(role :: Identifier))':
     def endpoint_name = name.to_source_string()
     def role_name = role.to_source_string()
-    'def $name :: Endpoint = declare_interface($endpoint_name, $type, $role_name)'
+    'def $name :: Endpoint.of($type) = declare_interface($endpoint_name, $type, $role_name)'
 | 'interface $(name :: Identifier)[$count]($type, ~role: $(role :: Identifier))':
     def endpoint_name = name.to_source_string()
     def role_name = role.to_source_string()
-    'def $name :: InterfaceArrayFields = declare_interface_array($endpoint_name, $count, $type, $role_name)'
+    'def $name :: InterfaceArrayFields.of($type) = declare_interface_array($endpoint_name, $count, $type, $role_name)'
 | 'interface $(name :: Identifier)($parameter, ...):
      role $(first_role :: Identifier)
      role $(second_role :: Identifier)
@@ -1853,21 +2005,19 @@ defn.macro
     def from_role_name = from_role.to_source_string()
     def to_role_name = to_role.to_source_string()
     let [field_name, ...] = [field.to_source_string(), ...]
-    '«
-       def interface_identity = InterfaceIdentity()
-       fun $name($parameter, ...):
-         InterfaceType(
-           $interface_name,
-           [$first_role_name, $second_role_name],
-           [InterfaceMember($field_name,
-                            $field_type,
-                            $from_role_name,
-                            $to_role_name),
-            ...],
-           ~identity: interface_identity,
-           ~specialization_arguments: [$parameter, ...]
-         )
-     »'
+    build_interface_definition(
+      name,
+      [parameter, ...],
+      'InterfaceType(
+         $interface_name,
+         [$first_role_name, $second_role_name],
+         [InterfaceMember($field_name, $field_type, $from_role_name, $to_role_name), ...],
+         ~identity: interface_identity,
+         ~specialization_arguments: [$parameter, ...]
+       )',
+      '#false',
+      ['$field: $field_type', ...]
+    )
 
 expr.macro <=>:
   ~weaker_than: ~other

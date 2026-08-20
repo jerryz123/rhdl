@@ -15,11 +15,43 @@ export:
   VectorLiteral
   vec
 
-fun Vec(length, element_type):
+fun build_vector_type(length, element_type):
   VectorType(length, element_type)
 
+annot.macro 'VectorFields($expected_type, $(element_type :: expr_meta.Parsed))':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields.of($expected_type)'
+  let '$(element :: annot_meta.Parsed)' = 'HardwareFields.from_type($element_type)'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  def (_element_predicate, element_infos) = annot_meta.unpack_predicate(element)
+  def result_infos = statinfo_meta.and(
+    base_infos,
+    '(($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(element_infos, []))))'
+  )
+  annot_meta.pack_predicate(predicate, result_infos)
+
+annot.macro 'VectorTypeDescriptor':
+  annot_meta.pack_predicate('fun (value): value is_a VectorType')
+
+annot.macro 'VectorElementFields($(element :: expr_meta.Parsed))':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  def element_infos = statinfo_meta.gather(element)
+  def result_infos = statinfo_meta.and(
+    base_infos,
+    '(($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(element_infos, []))))'
+  )
+  annot_meta.pack_predicate(predicate, result_infos)
+
 annot.macro 'Vec($length, $element_type)':
-  'HardwareFields.of(Vec($length, $element_type))'
+  'HardwareFields.of(build_vector_type($length, $element_type))'
+
+expr.macro 'Vec($(length :: expr_meta.Parsed), $(element_type :: expr_meta.Parsed))':
+  'build_vector_type($length, $element_type) :: HardwareFields.describes(
+     VectorTypeDescriptor,
+     VectorFields(build_vector_type($length, $element_type), $element_type)
+   )'
 
 // Vector element zero occupies the least-significant element-width bits, so
 // recursive literal packing follows the same ordering as core VectorType casts.
@@ -37,7 +69,7 @@ class VectorLiteral(type :: VectorType, elements :: List):
   override method literal_type(): type
 
   override method packed_value():
-    def element_width = packed_width(type.element_type)
+    def element_width = type.element_type.packed_width()
     def mutable packed = 0
     for (element in elements, index in 0..elements.length()):
       packed := packed + (element.packed_value() << (index * element_width))
@@ -45,7 +77,7 @@ class VectorLiteral(type :: VectorType, elements :: List):
 
 // Accepts direct elements or one host List, infers the uniform element type,
 // and delegates construction to the typed elaboration kernel.
-fun vec(entity, ...) :~ HardwareFields:
+fun build_vec(entity, ...) :~ HardwareFields:
   def supplied = [entity, ...]
   def entities:
     if supplied.length() == 1 && supplied[0] is_a List
@@ -62,3 +94,11 @@ fun vec(entity, ...) :~ HardwareFields:
         VectorType(element_values.length(), element_values[0].type),
         element_values
       )
+
+// The first supplied element determines the vector's uniform static element
+// surface, matching the runtime uniform-type inference in build_vec.
+expr.macro
+| 'vec($(entity :: expr_meta.Parsed), $next, $rest, ...)':
+    'build_vec($entity, $next, $rest, ...) :: VectorElementFields($entity)'
+| 'vec($entity)':
+    'build_vec($entity) :: HardwareFields'

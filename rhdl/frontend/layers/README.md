@@ -102,7 +102,7 @@ for non-`Bits` data, an explicit equal-width cast. `Clock`, `Reset`, and other
 non-data types are not literal domains.
 
 `dont_care(T)` is the corresponding typed synthesis-freedom source for any
-packable `DataType`. It materializes a `Bits(packed_width(T))` core don't-care
+packable `DataType`. It materializes a `Bits(T.packed_width())` core don't-care
 and casts it to `T` when needed. It is not a literal, cannot be inspected as a
 host packed value, and gives RHDL no runtime X-propagation semantics. A backend
 may expose an X carrier to downstream tools, so use it only where every
@@ -252,6 +252,36 @@ capability. Automatic encodings use declaration order and the minimum positive
 width. Explicit encodings require a stable width, unique names and values, and
 all-or-none explicit values.
 
+An enum may own multiple hardware methods:
+
+```rhombus
+hardware_enum CacheState:
+  Invalid
+  SharedClean
+  SharedDirty
+  UniqueClean
+  method is_shared(state) :: Bool:
+    is_one_of(state, CacheState.SharedClean, CacheState.SharedDirty)
+  method is_invalid(state) :: Bool:
+    is_one_of(state, CacheState.Invalid)
+
+input state: CacheState
+output shared: Bool
+
+shared <== state.is_shared()
+```
+
+The first method parameter is the receiver and is omitted at the call site.
+Method bodies use ordinary RHDL operations and return hardware. An optional
+result type preserves the exact authoring surface for chained calls; an
+unannotated result remains generic `Hardware`. Methods are supported on
+automatic, explicit-width, explicit-value, and one-hot enums.
+The exact enum authoring surface follows members through typed ports and
+wires, explicit or inferred registers, `mux`, parameterized bundle fields,
+vector elements, asynchronous memory reads, interface members, child-instance
+ports, and explicit `cast` or `.into` representation changes. Generic hardware methods
+such as `.into` remain available on the same values.
+
 A declaration can instead make its encoding policy explicit and derive one
 selector bit per member:
 
@@ -326,7 +356,7 @@ value and allows the backend to use selector-bit gating and a balanced OR tree.
 - `.into(TargetType)` and `cast(value, TargetType)` preserve packed width and
   bit pattern while changing the hardware type.
 - `as_bits(value)` exposes any packable data value as
-  `Bits(packed_width(value.type))`; an existing `Bits` value is unchanged.
+  `Bits(value.type.packed_width())`; an existing `Bits` value is unchanged.
 - `as_vec(value, ElementType)` splits any packable data representation into a
   `Vec` whose inferred length exactly covers the source width. Element zero
   receives the least-significant element-width chunk, and an existing vector
@@ -630,6 +660,29 @@ result.left <== source.right
 result.right <== source.left
 ```
 
+A concrete zero-parameter bundle may also own multiple hardware methods:
+
+```rhombus
+bundle CacheEnvelope():
+  state: CacheState
+  valid: Bool
+  method is_shared(envelope) :: Bool:
+    envelope.valid & envelope.state.is_shared()
+  method state_value(envelope) :: CacheState:
+    envelope.state
+
+shared <== envelope.is_shared()
+state_shared <== envelope.state_value().is_shared()
+```
+
+The receiver is omitted at the call site, just as for enum methods. Exact
+bundle methods follow values through typed ports, literals, wires, explicit
+registers, `mux`, vectors, memories, and child-instance ports. A typed method
+result retains enum or bundle methods for further dot calls. Field and method
+names share one dot namespace and must be distinct. Parameterized bundles do
+not yet support method declarations because their specialization-dependent
+field surfaces are not available to method bodies.
+
 Calling the declared name with its parameters and no field block produces a
 `RecordType`; attaching a field block constructs a value of that type. Fields
 are named, order-independent, and must be supplied exactly once with matching
@@ -742,7 +795,7 @@ is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
 
 Interfaces describe connectivity and do not carry monitor factories or
-instrumentation policy. `observe(endpoint)` explicitly creates a read-only view
+instrumentation policy. `endpoint.observe()` explicitly creates a read-only view
 containing fields from both directions, so ordinary library functions can
 correlate a forward `valid` with a backward `ready`:
 
@@ -763,7 +816,7 @@ sync_circuit Producer():
   interface stream(Stream(Bits(8)), ~role: producer)
   stream.valid <== false
   stream.bits <== 0
-  monitor_stream(observe(stream))
+  monitor_stream(stream.observe())
 ```
 
 The observation capability prevents instrumentation from becoming another

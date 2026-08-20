@@ -9,7 +9,6 @@ export:
   VCDependencyEdge
   VCDependencyGraph
   build_dependency_graph
-  project_dependency_graph
 
 fun edge_matches(edge, source_vc, target_vc):
   vc_id_equal(edge.source_vc, source_vc) && vc_id_equal(edge.target_vc, target_vc)
@@ -87,6 +86,25 @@ class VCDependencyGraph(reachable, vertices, edges):
       ~keep: fun (edge): vc_id_equal(edge.target_vc, vc)
     )
 
+  method project(selected_vertices :: List.of(VCId)):
+    for (vc in selected_vertices):
+      unless contains_vertex(vc)
+      | error(~who: #'project,
+              "projection VC is not a dependency-graph vertex: " ++ vc.describe())
+      when selected_vertices.filter(
+        ~keep: fun (candidate): vc_id_equal(candidate, vc)
+      ).length() > 1
+      | error(~who: #'project,
+              "duplicate dependency-graph projection VC " ++ vc.describe())
+    def sorted_vertices = selected_vertices.sort(vc_id_less)
+    def projected_edges = edges.filter(
+      ~keep: fun (edge): contains_vc(sorted_vertices, edge.source_vc) && contains_vc(
+        sorted_vertices,
+        edge.target_vc
+      )
+    )
+    _VCDependencyGraph(reachable, sorted_vertices, projected_edges)
+
   method describe():
     String.join(edges.map(fun (edge): edge.describe()), "\n")
 
@@ -121,23 +139,3 @@ fun build_dependency_graph(reachable :: ReachableRouting):
     vertices.sort(vc_id_less),
     edges.sort(edge_less)
   )
-
-fun project_dependency_graph(graph :: VCDependencyGraph,
-                             vertices :: List.of(VCId)):
-  for (vc in vertices):
-    unless graph.contains_vertex(vc)
-    | error(~who: #'project_dependency_graph,
-            "projection VC is not a dependency-graph vertex: " ++ vc.describe())
-    when vertices.filter(
-      ~keep: fun (candidate): vc_id_equal(candidate, vc)
-    ).length() > 1
-    | error(~who: #'project_dependency_graph,
-            "duplicate dependency-graph projection VC " ++ vc.describe())
-  def sorted_vertices = vertices.sort(vc_id_less)
-  def projected_edges = graph.edges.filter(
-    ~keep: fun (edge): contains_vc(sorted_vertices, edge.source_vc) && contains_vc(
-      sorted_vertices,
-      edge.target_vc
-    )
-  )
-  _VCDependencyGraph(graph.reachable, sorted_vertices, projected_edges)

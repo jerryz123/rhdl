@@ -559,7 +559,7 @@ The resulting opaque `VCDependencyGraph` includes all reachable VC vertices in
 stable identity order. Duplicate edges are merged while retaining the original
 `MaterializedDecision` values and all contributing route classes. This
 provenance is the evidence that the acyclicity pass attaches to a cycle
-witness. `project_dependency_graph` can retain an explicit subset of those
+witness. `graph.project(selected_vertices)` can retain an explicit subset of those
 vertices and their induced edges without changing the originating reachable
 routing evidence; escape validation uses this operation after classifying VCs.
 

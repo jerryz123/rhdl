@@ -8,6 +8,7 @@ import:
   "../support/clocking.rhm".instantiate_reset_when as clocking_inst_reset_when
   "../support/instance-members.rhm".InstanceMembers
   "../support/instance-members.rhm".instance_member
+  "../support/fields.rhm".hardware_port_static_info_key
 
 export:
   inst
@@ -19,25 +20,65 @@ annot.macro 'InstancePorts':
     '(($(statinfo_meta.dot_provider_key), instance_port_dot))'
   )
 
+namespace InstancePorts:
+  export annot.macro 'from_child($(child :: expr_meta.Parsed))':
+    def port_infos = statinfo_meta.find(
+      statinfo_meta.gather(child),
+      'hardware_port_static_info_key'
+    )
+    annot_meta.pack_predicate(
+      'fun (value): value is_a Instance',
+      if port_infos
+      | '(($(statinfo_meta.dot_provider_key), instance_port_dot),
+          (hardware_port_static_info_key, $port_infos))'
+      | '(($(statinfo_meta.dot_provider_key), instance_port_dot))'
+    )
+
 dot.macro 'instance_port_dot $left $dot $right':
+  def packed_ports = statinfo_meta.find(
+    statinfo_meta.gather(left),
+    'hardware_port_static_info_key'
+  )
   match right
   | 'input': #false
   | 'output': #false
-  | ~else: 'instance_member($left, $(right.to_source_string())) :: InstanceMembers'
+  | ~else:
+      if packed_ports
+      | block:
+          let '($port_entry, ...)' = packed_ports
+          def mutable expansion = #false
+          for (entry in [port_entry, ...]):
+            match entry
+            | '($(port_name :: Identifier), $(port_infos :: Term))':
+                when right.to_source_string() == port_name.to_source_string()
+                | expansion := statinfo_meta.replace(
+                    'instance_member($left, $(right.to_source_string()))',
+                    statinfo_meta.unpack(port_infos)
+                  )
+            | ~else:
+                syntax_meta.error("invalid circuit port static information", entry)
+          expansion || 'instance_member($left, $(right.to_source_string())) :: InstanceMembers'
+      | 'instance_member($left, $(right.to_source_string())) :: InstanceMembers'
 
 defn.sequence_macro 'inst $(name :: Identifier)($argument, ...); $tail; ...':
   def instance_name = name.to_source_string()
+  def mutable child_expression = #false
   def instance:
     match '($argument, ...)'
-    | '($child)':
+    | '($(child :: expr_meta.Parsed))':
+        child_expression := child
         'clocking_inst($instance_name, $child)'
-    | '($child, ~reset_when: $condition)':
+    | '($(child :: expr_meta.Parsed), ~reset_when: $condition)':
+        child_expression := child
         'clocking_inst_reset_when($instance_name, $child, $condition)'
-    | '($child, ~clock: $clock, ~reset: $reset)':
+    | '($(child :: expr_meta.Parsed), ~clock: $clock, ~reset: $reset)':
+        child_expression := child
         'clocking_inst($instance_name, $child, $clock, $reset)'
-    | '($child, ~clock: $clock)':
+    | '($(child :: expr_meta.Parsed), ~clock: $clock)':
+        child_expression := child
         'clocking_inst($instance_name, $child, $clock)'
-    | '($child, ~reset: $reset)':
+    | '($(child :: expr_meta.Parsed), ~reset: $reset)':
+        child_expression := child
         'clocking_inst($instance_name, $child, #false, $reset)'
     | ~else:
         syntax_meta.error(
@@ -46,8 +87,8 @@ defn.sequence_macro 'inst $(name :: Identifier)($argument, ...); $tail; ...':
         )
   def expansion:
     if [tail, ...].length() == 0
-    | 'def $name :: InstancePorts = $instance; $name'
-    | 'def $name :: InstancePorts = $instance'
+    | 'def $name :: InstancePorts.from_child($child_expression) = $instance; $name'
+    | 'def $name :: InstancePorts.from_child($child_expression) = $instance'
   values(expansion, '$tail; ...')
 
 // In expression position, the same surface form returns the new instance so
@@ -55,16 +96,16 @@ defn.sequence_macro 'inst $(name :: Identifier)($argument, ...); $tail; ...':
 expr.macro 'inst $(name :: Identifier)($argument, ...)':
   def instance_name = name.to_source_string()
   match '($argument, ...)'
-  | '($child)':
-      'clocking_inst($instance_name, $child) :: InstancePorts'
-  | '($child, ~reset_when: $condition)':
-      'clocking_inst_reset_when($instance_name, $child, $condition) :: InstancePorts'
-  | '($child, ~clock: $clock, ~reset: $reset)':
-      'clocking_inst($instance_name, $child, $clock, $reset) :: InstancePorts'
-  | '($child, ~clock: $clock)':
-      'clocking_inst($instance_name, $child, $clock) :: InstancePorts'
-  | '($child, ~reset: $reset)':
-      'clocking_inst($instance_name, $child, #false, $reset) :: InstancePorts'
+  | '($(child :: expr_meta.Parsed))':
+      'clocking_inst($instance_name, $child) :: InstancePorts.from_child($child)'
+  | '($(child :: expr_meta.Parsed), ~reset_when: $condition)':
+      'clocking_inst_reset_when($instance_name, $child, $condition) :: InstancePorts.from_child($child)'
+  | '($(child :: expr_meta.Parsed), ~clock: $clock, ~reset: $reset)':
+      'clocking_inst($instance_name, $child, $clock, $reset) :: InstancePorts.from_child($child)'
+  | '($(child :: expr_meta.Parsed), ~clock: $clock)':
+      'clocking_inst($instance_name, $child, $clock) :: InstancePorts.from_child($child)'
+  | '($(child :: expr_meta.Parsed), ~reset: $reset)':
+      'clocking_inst($instance_name, $child, #false, $reset) :: InstancePorts.from_child($child)'
   | ~else:
       syntax_meta.error(
         "expected (child), (child, ~reset_when: condition), or (child, ~clock: clock, ~reset: reset)",

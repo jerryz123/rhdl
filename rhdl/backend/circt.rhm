@@ -31,7 +31,7 @@ fun circt_shape_type(type):
       "i1"
   | ~else:
       error(~who: #'emit_circt,
-            "CIRCT lowering does not support hardware type " ++ type_text(type))
+            "CIRCT lowering does not support hardware type " ++ type.describe())
 
 fun record_alias(type):
   current_circt_record_aliases().find(
@@ -60,7 +60,7 @@ fun circt_type(type):
       "i1"
   | ~else:
       error(~who: #'emit_circt,
-            "CIRCT lowering does not support hardware type " ++ type_text(type))
+            "CIRCT lowering does not support hardware type " ++ type.describe())
 
 fun circt_width(type):
   if flat_data_type(type) | data_width(type) | 1
@@ -175,8 +175,8 @@ fun emit_decode(operation):
   def selector = operation.operands[0]
   def result = operation.results[0]
   def cases = operation.attribute("cases")
-  def input_width = packed_width(selector.type)
-  def output_width = packed_width(result.type)
+  def input_width = selector.type.packed_width()
+  def output_width = result.type.packed_width()
   def operation_prefix = "%__rhdl_decode_" ++ to_string(operation.id)
   def selector_ref:
     if flat_data_type(selector.type)
@@ -431,7 +431,7 @@ fun emit_onehot_mux(operation):
   def selector = operation.operands[0]
   def choices = operation.operands.drop(1)
   def result = operation.results[0]
-  def width = packed_width(result.type)
+  def width = result.type.packed_width()
   def prefix = "%__rhdl_onehot_" ++ to_string(operation.id)
   def packed_result_ref:
     if flat_data_type(result.type)
@@ -619,7 +619,7 @@ fun emit_vector_write_set(operation):
   def elements = operation.operands[3]
   def result = operation.results[0]
   def port_count = enables.type.length
-  def element_width = packed_width(vector.type.element_type)
+  def element_width = vector.type.element_type.packed_width()
   def port_index_width = circt_array_index_width(port_count)
   def vector_index_width = circt_array_index_width(vector.type.length)
   def prefix = "%__rhdl_vector_write_" ++ to_string(operation.id)
@@ -816,7 +816,7 @@ fun emit_memory_write(operation):
                 " {latency = 1 : i64} : ", circt_memory_type(memory))
 
 fun sync_memory_type(operation):
-  def width = packed_width(operation.attribute("element_type"))
+  def width = operation.attribute("element_type").packed_width()
   unless width is_a PosInt
   | error(~who: #'emit_circt,
           "synchronous memory element type must have a packed width")
@@ -835,13 +835,13 @@ fun emit_sync_memory(operation):
   def memory_ref = "%" ++ operation.attribute("name")
   def memory_type = sync_memory_type(operation)
   def element_type = operation.attribute("element_type")
-  def packed_type = "i" ++ to_string(packed_width(element_type))
+  def packed_type = "i" ++ to_string(element_type.packed_width())
   def flat_element = flat_data_type(element_type)
   def mask_granularity = operation.attribute("mask_granularity", #false)
   def mask_width:
     if mask_granularity == #false
     | #false
-    | packed_width(element_type) / mask_granularity
+    | element_type.packed_width() / mask_granularity
   def mutable place_index = 0
   def mutable result_index = 0
   def mutable port_operations = []

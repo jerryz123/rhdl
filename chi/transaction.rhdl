@@ -65,17 +65,6 @@ fun empty_chi_home_transaction(p :: CHIFlitParams):
     subordinate_id: bits(0, p.node_id_width)
     subordinate_dbid: bits(0, 12)
 
-fun chi_initial_request_supported(opcode):
-  is_one_of(opcode,
-            CHIReqOpcode.ReadNoSnp,
-            CHIReqOpcode.WriteNoSnpFull,
-            CHIReqOpcode.WriteNoSnpPtl)
-
-fun chi_initial_write_request(opcode):
-  is_one_of(opcode,
-            CHIReqOpcode.WriteNoSnpFull,
-            CHIReqOpcode.WriteNoSnpPtl)
-
 fun chi_initial_single_flit_size(size, p :: CHIFlitParams):
   size <= bits(alignment_bits(p.data_bytes), 3)
 
@@ -313,6 +302,7 @@ fun requester_transaction_monitor(tx_req_valid,
   def rsp = cast(raw_rsp, CHIRspFlit(p))
   def tx_dat = cast(raw_tx_dat, CHIDatFlit(p))
   def rx_dat = cast(raw_rx_dat, CHIDatFlit(p))
+  def req_opcode = req.opcode
 
   def req_event = tx_req_valid & (req.opcode =/= CHIReqOpcode.ReqLCrdReturn)
   def rsp_event = rx_rsp_valid & (rsp.opcode =/= CHIRspOpcode.RespLCrdReturn)
@@ -358,7 +348,7 @@ fun requester_transaction_monitor(tx_req_valid,
   )
 
   when req_event:
-    assert(chi_initial_request_supported(req.opcode),
+    assert(req_opcode.supports_initial_transaction(),
            label_prefix ++ "_request_opcode_supported")
     chi_initial_request_fields(req.multi_req,
                                req.size_or_num_req[0..3],
@@ -409,7 +399,7 @@ fun requester_transaction_monitor(tx_req_valid,
                             rx_dat.replicate,
                             label_prefix ++ "_read_data")
 
-  def allocated_phase = mux(chi_initial_write_request(req.opcode),
+  def allocated_phase = mux(req_opcode.is_initial_write(),
                             CHIInitialTransactionPhase.WriteAwaitDBID,
                             CHIInitialTransactionPhase.ReadPending)
   def allocated:
@@ -418,7 +408,7 @@ fun requester_transaction_monitor(tx_req_valid,
       txn_id: req.txn_id
       completer_id: req.tgt_id
       dbid: bits(0, 12)
-  def allocate = req_event & chi_initial_request_supported(req.opcode) & (
+  def allocate = req_event & req_opcode.supports_initial_transaction() & (
     !duplicate_txn & allocation_available
   )
   def next_entries = vec(
@@ -483,6 +473,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
   def rsp = cast(raw_rsp, CHIRspFlit(p))
   def rx_dat = cast(raw_rx_dat, CHIDatFlit(p))
   def tx_dat = cast(raw_tx_dat, CHIDatFlit(p))
+  def req_opcode = req.opcode
 
   def req_event = rx_req_valid & (req.opcode =/= CHIReqOpcode.ReqLCrdReturn)
   def rsp_event = tx_rsp_valid & (rsp.opcode =/= CHIRspOpcode.RespLCrdReturn)
@@ -528,7 +519,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
   )
 
   when req_event:
-    assert(chi_initial_request_supported(req.opcode),
+    assert(req_opcode.supports_initial_transaction(),
            label_prefix ++ "_request_opcode_supported")
     chi_initial_request_fields(req.multi_req,
                                req.size_or_num_req[0..3],
@@ -538,7 +529,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
                                req.tag_op,
                                p,
                                label_prefix ++ "_request")
-    when (chi_initial_write_request(req.opcode)):
+    when (req_opcode.is_initial_write()):
       assert(!req.snp_attr_or_do_dwt, label_prefix ++ "_no_direct_write_transfer")
     assert(!duplicate_txn, label_prefix ++ "_txn_id_unique")
     assert(allocation_available, label_prefix ++ "_within_outstanding_limit")
@@ -581,7 +572,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
                             tx_dat.replicate,
                             label_prefix ++ "_read_data")
 
-  def allocated_phase = mux(chi_initial_write_request(req.opcode),
+  def allocated_phase = mux(req_opcode.is_initial_write(),
                             CHIInitialTransactionPhase.WriteAwaitDBID,
                             CHIInitialTransactionPhase.ReadPending)
   def allocated:
@@ -592,7 +583,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
       return_txn_id: req.return_txn_id_or_stash_lpid
       return_node_id: req.return_nid_or_stash_nid_or_data_target
       dbid: bits(0, 12)
-  def allocate = req_event & chi_initial_request_supported(req.opcode) & (
+  def allocate = req_event & req_opcode.supports_initial_transaction() & (
     !duplicate_txn & allocation_available
   )
   def next_entries = vec(
@@ -679,6 +670,7 @@ fun home_transaction_monitor(upstream_request_event,
   def downstream_write_data = cast(raw_downstream_write_data, CHIDatFlit(p))
   def downstream_read_data = cast(raw_downstream_read_data, CHIDatFlit(p))
   def upstream_read_data = cast(raw_upstream_read_data, CHIDatFlit(p))
+  def upstream_request_opcode = upstream_request.opcode
   def slot_width = index_width(limit)
   def request_slot = downstream_request.txn_id[0..slot_width]
   def response_slot = downstream_response.txn_id[0..slot_width]
@@ -715,7 +707,7 @@ fun home_transaction_monitor(upstream_request_event,
                                upstream_request.tag_op,
                                p,
                                label_prefix ++ "_request")
-    when (chi_initial_write_request(upstream_request.opcode)):
+    when (upstream_request_opcode.is_initial_write()):
       assert(!upstream_request.snp_attr_or_do_dwt,
              label_prefix ++ "_request_no_direct_write_transfer")
     assert(downstream_request.opcode === upstream_request.opcode,
@@ -836,7 +828,7 @@ fun home_transaction_monitor(upstream_request_event,
         def read_data_here = read_data_pair & (read_data_slot === index_bits)
         def allocated:
           CHIHomeTransaction(p):
-            phase: mux(chi_initial_write_request(upstream_request.opcode),
+            phase: mux(upstream_request_opcode.is_initial_write(),
                        CHIInitialTransactionPhase.WriteAwaitDBID,
                        CHIInitialTransactionPhase.ReadPending)
             requester_id: upstream_request.src_id
@@ -878,8 +870,6 @@ fun home_transaction_monitor(upstream_request_event,
   entries <== next_entries
 
 export:
-  chi_initial_request_supported
-  chi_initial_write_request
   chi_initial_single_flit_size
   chi_hni_downstream_request
   chi_hni_upstream_response

@@ -24,29 +24,29 @@ fun chi_subordinate_node_kind(kind):
 class CHIChannelCapabilities(~req: req :: List.of(CHIReqOpcode) = [],
                              ~rsp: rsp :: List.of(CHIRspOpcode) = [],
                              ~snp: snp :: List.of(CHISnpOpcode) = [],
-                             ~dat: dat :: List.of(CHIDatOpcode) = [])
+                             ~dat: dat :: List.of(CHIDatOpcode) = []):
+
+  method contains_all(emitted :: CHIChannelCapabilities):
+    for all (pair in [[req, emitted.req],
+                      [rsp, emitted.rsp],
+                      [snp, emitted.snp],
+                      [dat, emitted.dat]]):
+      opcode_lists_contain(pair[0], pair[1])
+
+  method uses_only(~req, ~rsp, ~snp, ~dat):
+    for all (condition in [(req || this.req.length() == 0),
+                           (rsp || this.rsp.length() == 0),
+                           (snp || this.snp.length() == 0),
+                           (dat || this.dat.length() == 0)]):
+      condition
+
+  method is_dvm_snoop_only():
+    for all (opcode in snp):
+      opcode.packed_value() == CHISnpOpcode.SnpDVMOp.packed_value()
 
 fun opcode_lists_contain(supported, emitted):
   for all (opcode in emitted):
     supported.contains(opcode)
-
-fun capabilities_contain(supported, emitted):
-  for all (pair in [[supported.req, emitted.req],
-                    [supported.rsp, emitted.rsp],
-                    [supported.snp, emitted.snp],
-                    [supported.dat, emitted.dat]]):
-    opcode_lists_contain(pair[0], pair[1])
-
-fun capabilities_use_only(capabilities, ~req, ~rsp, ~snp, ~dat):
-  for all (condition in [(req || capabilities.req.length() == 0),
-                         (rsp || capabilities.rsp.length() == 0),
-                         (snp || capabilities.snp.length() == 0),
-                         (dat || capabilities.dat.length() == 0)]):
-    condition
-
-fun dvm_snoop_capabilities(capabilities):
-  for all (opcode in capabilities.snp):
-    opcode.packed_value() == CHISnpOpcode.SnpDVMOp.packed_value()
 
 fun validate_endpoint_capabilities(kind :: CHINodeKind,
                                    emits :: CHIChannelCapabilities,
@@ -57,44 +57,44 @@ fun validate_endpoint_capabilities(kind :: CHINodeKind,
     cond
     | side == "node" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
         for all (condition in [
-          capabilities_use_only(emits, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
-          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
-          (kind != CHINodeKind.RND || dvm_snoop_capabilities(supports)),
+          emits.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          supports.uses_only(~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
+          (kind != CHINodeKind.RND || supports.is_dvm_snoop_only()),
           (kind != CHINodeKind.RNF || opcode_lists_contain(supports.snp,
                                                            chi_rnf_snoop_opcodes))
         ]):
           condition
     | side == "icn" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
         for all (condition in [
-          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
-          capabilities_use_only(supports, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
-          (kind != CHINodeKind.RND || dvm_snoop_capabilities(emits)),
+          emits.uses_only(~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
+          supports.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          (kind != CHINodeKind.RND || emits.is_dvm_snoop_only()),
           (kind != CHINodeKind.RNF || opcode_lists_contain(emits.snp,
                                                            chi_rnf_snoop_opcodes))
         ]):
           condition
     | side == "node" && kind == CHINodeKind.RNI:
         for all (condition in [
-          capabilities_use_only(emits, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
-          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
+          emits.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
+          supports.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
         ]):
           condition
     | side == "icn" && kind == CHINodeKind.RNI:
         for all (condition in [
-          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
-          capabilities_use_only(supports, ~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true)
+          emits.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
+          supports.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true)
         ]):
           condition
     | side == "node" && chi_subordinate_node_kind(kind):
         for all (condition in [
-          capabilities_use_only(emits, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
-          capabilities_use_only(supports, ~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true)
+          emits.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
+          supports.uses_only(~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true)
         ]):
           condition
     | side == "icn" && chi_subordinate_node_kind(kind):
         for all (condition in [
-          capabilities_use_only(emits, ~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true),
-          capabilities_use_only(supports, ~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
+          emits.uses_only(~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true),
+          supports.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
         ]):
           condition
     | ~else: #false
@@ -161,8 +161,8 @@ fun endpoint_pair_legal(node, icn, flit, kinds):
     node.node_id == icn.node_id,
     node.max_outstanding == icn.max_outstanding,
     bits.length(node.node_id) <= flit.node_id_width,
-    capabilities_contain(icn.supports, node.emits),
-    capabilities_contain(node.supports, icn.emits)
+    icn.supports.contains_all(node.emits),
+    node.supports.contains_all(icn.emits)
   ]):
     condition
 
