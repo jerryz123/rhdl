@@ -175,12 +175,12 @@ hardware value separately with the most specific hardware annotation its
 operation accepts. This keeps elaboration-time type descriptors distinct from
 runtime circuit values.
 
-The elaboration-local specialization cache compares the circuit declaration
-identity and its normalized positional and keyword argument values. Equivalent
-calls share one definition; distinct parameter values receive deterministic
-suffixes such as `Adder` and `Adder_1`. Parameters are not embedded into module
-names, and the cache is not persisted across compiler runs. Active recursion
-is rejected by generator identity.
+The elaboration-local specialization cache indexes candidates by circuit
+declaration identity, then compares their normalized positional and keyword
+argument values. Equivalent calls share one definition; distinct parameter
+values receive deterministic suffixes such as `Adder` and `Adder_1`.
+Parameters are not embedded into module names, and the cache is not persisted
+across compiler runs. Active recursion is rejected by generator identity.
 
 Circuit bodies and parameter defaults must depend only on their parameters,
 stable immutable captures, and local elaboration state. Local mutation used to

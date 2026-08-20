@@ -152,7 +152,7 @@ class ActiveCircuit(identity,
                     name,
                     mutable finalizers = [],
                     mutable vector_writes = [])
-class CircuitSpecialization(identity, arguments, module_def)
+class CircuitSpecialization(arguments, module_def)
 
 fun new_circuit_identity(name :: String):
   CircuitIdentity(name)
@@ -161,7 +161,7 @@ class FrontendContext(design,
                       builder,
                       mutable active = #true,
                       mutable active_circuits = [],
-                      mutable circuit_specializations = [],
+                      specializations_by_circuit = MutableMap.by(===){},
                       mutable allocated_symbols = []):
   method allocate_symbol(circuit_name):
     def base = circuit_name
@@ -317,10 +317,9 @@ fun build_circuit(identity :: CircuitIdentity,
     | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a CircuitParam, not hardware", location)
     unless circuit_param_value(argument)
     | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a stable immutable CircuitParam value", location)
-  def cached = context.circuit_specializations.find(
-    fun (specialization):
-      specialization.identity === identity && circuit_param_lists_same(specialization.arguments, arguments)
-  )
+  def specializations = context.specializations_by_circuit.get(identity, #false)
+  def cached = specializations && specializations.find(
+    fun (specialization): circuit_param_lists_same(specialization.arguments, arguments))
   if cached
   | cached.module_def
   | block:
@@ -338,9 +337,10 @@ fun build_circuit(identity :: CircuitIdentity,
       context.active_circuits := context.active_circuits.filter(
         ~keep: fun (active): !(active.identity === identity)
       )
-      context.circuit_specializations := context.circuit_specializations ++ [
-        CircuitSpecialization(identity, arguments, module_def)
-      ]
+      def specialization = CircuitSpecialization(arguments, module_def)
+      if specializations
+      | specializations.add(specialization)
+      | context.specializations_by_circuit[identity] := MutableList[specialization]
       module_def
 
 fun input(name, type, location = Location()):
