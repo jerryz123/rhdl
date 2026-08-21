@@ -104,6 +104,9 @@ check_matrix_entry examples/cores/ricket.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry examples/ricket/core-diagram.rhdl example_matrix examples-ricket
 check_matrix_entry tools/write-ricket-core-diagram.rhm example_matrix examples-ricket
 check_matrix_entry tools/write-noc-router-diagram.rhm example_matrix examples-noc
+check_field tools/run-racket-tests.sh host true
+check_field tools/run-racket-tests.sh circt false
+check_field tools/run-racket-tests.sh examples true
 check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sim/fesvr/direct_mem_htif.cc fesvr true
 check_field tests/fesvr/fesvr-rtl-test.rhm fesvr true

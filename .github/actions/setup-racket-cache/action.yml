@@ -1,0 +1,44 @@
+# Seeds a fresh project bytecode root from versioned Racket and Rhombus dependencies.
+
+name: Set up Racket bytecode cache
+description: Cache dependency bytecode while keeping checkout-specific bytecode fresh.
+
+inputs:
+  racket-version:
+    description: Installed Racket version.
+    required: true
+  rhombus-checksum:
+    description: Pinned Rhombus package checksum.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure Racket cache directories
+      shell: bash
+      run: |
+        echo "PLTUSERHOME=$RUNNER_TEMP/rhdl-racket-user" >> "$GITHUB_ENV"
+        echo "RHDL_DEPENDENCY_COMPILED_ROOT=$RUNNER_TEMP/rhdl-dependency-compiled" >> "$GITHUB_ENV"
+    - name: Cache Racket and Rhombus dependencies
+      id: racket-dependencies
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/rhdl-racket-user
+          ${{ runner.temp }}/rhdl-dependency-compiled
+        key: ${{ runner.os }}-${{ runner.arch }}-racket-bytecode-v1-${{ inputs.racket-version }}-rhombus-${{ inputs.rhombus-checksum }}
+    - name: Install and compile Rhombus
+      if: steps.racket-dependencies.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p "$RHDL_DEPENDENCY_COMPILED_ROOT"
+        env PLTCOMPILEDROOTS="$RHDL_DEPENDENCY_COMPILED_ROOT" \
+          raco pkg install --user --auto --batch --no-docs \
+          --checksum "${{ inputs.rhombus-checksum }}" rhombus
+    - name: Seed fresh project bytecode root
+      shell: bash
+      run: |
+        project_compiled_root="$RUNNER_TEMP/rhdl-compiled"
+        mkdir -p "$project_compiled_root"
+        cp -a "$RHDL_DEPENDENCY_COMPILED_ROOT"/. "$project_compiled_root"/
+        echo "PLTCOMPILEDROOTS=$project_compiled_root" >> "$GITHUB_ENV"

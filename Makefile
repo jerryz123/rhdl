@@ -53,9 +53,7 @@ analysis-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(ANALYSIS_TESTS)
 
 diagram-test: check-boundaries
-	@diagram_compiled_root="$$(mktemp -d)"; \
-	trap 'rm -rf "$$diagram_compiled_root"' EXIT; \
-	env PLTCOMPILEDROOTS="$$diagram_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct tests/frontend/diagram-test.rhm
+	tools/run-racket-tests.sh tests/frontend/diagram-test.rhm
 
 backend-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(BACKEND_TESTS)
@@ -98,9 +96,7 @@ riscv-test:
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RISCV_TESTS)
 
 ridx-test:
-	@ridx_compiled_root="$$(mktemp -d)"; \
-	trap 'rm -rf "$$ridx_compiled_root"' EXIT; \
-	env PLTCOMPILEDROOTS="$$ridx_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RIDX_TESTS)
+	tools/run-racket-tests.sh $(RIDX_TESTS)
 
 ridx-circt-test:
 	bash ridx/tests/rhdl/run-grid-equivalence.sh
@@ -175,51 +171,51 @@ setup-circt:
 	bash tools/install-circt.sh
 
 examples: check-example-verilog
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(EXAMPLES)
+	tools/run-racket-tests.sh $(EXAMPLES)
 
 examples-rhdl:
 	bash tools/check-example-verilog.sh examples/rhdl
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RHDL_EXAMPLES)
+	tools/run-racket-tests.sh $(RHDL_EXAMPLES)
 
 examples-clocking:
 	bash tools/check-example-verilog.sh examples/clocking
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(CLOCKING_EXAMPLES)
+	tools/run-racket-tests.sh $(CLOCKING_EXAMPLES)
 
 examples-std:
 	bash tools/check-example-verilog.sh examples/std
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(STD_EXAMPLES)
+	tools/run-racket-tests.sh $(STD_EXAMPLES)
 
 examples-noc:
 	bash tools/check-example-verilog.sh examples/noc
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(NOC_EXAMPLES)
+	tools/run-racket-tests.sh $(NOC_EXAMPLES)
 
 examples-lop:
 	bash tools/check-example-verilog.sh examples/lop
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_EXAMPLES)
+	tools/run-racket-tests.sh $(LOP_EXAMPLES)
 
 examples-rfpl:
 	bash tools/check-example-verilog.sh examples/rfpl
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_LOGICAL_EXAMPLES) $(RFPL_EXAMPLES)
+	tools/run-racket-tests.sh $(RFPL_LOGICAL_EXAMPLES) $(RFPL_EXAMPLES)
 
 examples-ridx:
 	bash tools/check-example-verilog.sh examples/ridx
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RIDX_EXAMPLES)
+	tools/run-racket-tests.sh $(RIDX_EXAMPLES)
 
 examples-riscv:
 	bash tools/check-example-verilog.sh examples/riscv
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RISCV_EXAMPLES)
+	tools/run-racket-tests.sh $(RISCV_EXAMPLES)
 
 examples-chi:
 	bash tools/check-example-verilog.sh examples/chi
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(CHI_EXAMPLES)
+	tools/run-racket-tests.sh $(CHI_EXAMPLES)
 
 examples-cores:
 	bash tools/check-example-verilog.sh examples/cores
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_EXAMPLES)
+	tools/run-racket-tests.sh $(CORE_EXAMPLES)
 
 examples-formal: check-boundaries
 	@formal_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$formal_compiled_root"' EXIT; if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''examples-formal "Rosette solver probe failed"))'; then echo 'examples-formal requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; exit 1; fi; env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_EXAMPLES)
 
 examples-ricket:
 	bash tools/check-example-verilog.sh examples/ricket
-	@example_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$example_compiled_root"' EXIT; env PLTCOMPILEDROOTS="$$example_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(RICKET_EXAMPLES)
+	tools/run-racket-tests.sh $(RICKET_EXAMPLES)

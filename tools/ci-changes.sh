@@ -179,6 +179,10 @@ classify_path() {
       mark_all_circt
       mark_all_examples
       ;;
+    tools/run-racket-tests.sh)
+      mark_all_host
+      mark_all_examples
+      ;;
     tools/write-ricket-core-diagram.rhm)
       mark_example_ricket
       ;;
