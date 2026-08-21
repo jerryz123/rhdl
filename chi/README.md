@@ -68,27 +68,38 @@ groups, so disabled CHI options are absent from both the record and its
 packed representation. RSP is an ordinary bundle because all of its fields
 are always present.
 
+Closed protocol fields use nominal authoring types at their specified widths:
+`CHITagOp`, `CHIOrder`, `CHIPAS`, `CHIRespErr`, and `CHITransferSize` are
+hardware enums, while `CHIMemAttr` names the Allocate, Cacheable, Device, and
+Early Write Acknowledge bits. This preserves the exact packed flits while
+preventing unrelated same-width values from being connected accidentally.
+
 CHI assigns several semantic names to the same physical bits depending on the
 opcode. The RHDL records expose one deliberately explicit field for each such
 physical location, including `snp_attr_or_do_dwt`,
 `return_nid_or_stash_nid_or_data_target`, `dbid_or_group_id`, and
 `dbid_or_mecid`. Protocol helpers and monitors interpret the aliases;
 the flit type does not incorrectly allocate separate storage for them.
+The REQ `size_or_num_req` location likewise remains a six-bit union;
+`chi_req_size` returns its typed transfer-size view and `chi_req_num_req`
+returns its complete NumReq view.
 
-[`protocol.rhdl`](protocol.rhdl) classifies atomics, non-snoopable reads and
-writes, DBID responses, and DAT message direction, rejects the reserved Size
-encoding, and derives physical DAT packet counts and legal DataID values from
-`Data_Width`. Generic `enum_valid` checks whether a channel opcode carries one
-of the encodings declared by its CHI hardware enum; the link monitor further
-checks each endpoint's advertised opcode capabilities. These helpers are
-hardware expressions intended for endpoint construction and monitoring.
+The opcode enums own their intrinsic classifiers as dot methods, including
+atomic and non-snoopable request families, DBID allocation, data direction,
+and snoop-response families. [`protocol.rhdl`](protocol.rhdl) owns the REQ
+Size and NumReq views, rejects the reserved Size encoding, and derives physical
+DAT packet counts and legal DataID values from `Data_Width`. Generic
+`enum_valid` checks whether a channel opcode carries one of the encodings
+declared by its CHI hardware enum; the link monitor further checks each
+endpoint's advertised opcode capabilities.
 
-[`coherence.rhdl`](coherence.rhdl) adds the protocol-neutral state vocabulary
-needed by coherent endpoints: cache-line states, response-state decoding,
-PassDirty extraction, and snoop, stash, forward, and snoop-response families.
-It also owns the complete ordinary SNP opcode set that every RN-F endpoint is
-required to accept. These are classifiers and static capability rules; they do
-not implement a cache-state machine.
+[`coherence.rhdl`](coherence.rhdl) adds the state vocabulary needed by coherent
+endpoints. `CHICacheState` owns its validity, dirty, shared, and unique queries.
+Because the wire `Resp` field is opcode-dependent, coherent contexts explicitly
+reinterpret it as the packed `CHICoherentResponse` view before reading `state`
+or `pass_dirty`. The module also owns the complete ordinary SNP opcode set that
+every RN-F endpoint must accept. These are classifiers and static capability
+rules; they do not implement a cache-state machine.
 
 ## Node-role links
 
@@ -138,10 +149,15 @@ the distinct protocol rules without duplicating identical wiring.
 [`flow.rhdl`](flow.rhdl) provides node-side and ICN-side adapters for all three
 physical link shapes. `CHIRNFlowAdapter` and `CHIRNICNFlowAdapter` convert RN-F
 REQ/RSP/DAT transmit channels and RSP/DAT/SNP receive channels between credited
-transport and internal ready-valid flows. RSP and DAT are exposed as separate
-requester-response and snoop-response paths at the semantic endpoint; choosing
-which protocol transaction owns a shared physical channel is endpoint logic,
-not a transport-adapter policy.
+transport and one nested `CHIRNDecoupled` ready-valid endpoint. RN-I uses the
+separate `CHIRNIDecoupled` shape without SNP, while SN-F/SN-I use
+`CHISNDecoupled`. Link activation and credit-drain status remain adapter outputs
+instead of ready-valid subchannels. RSP and DAT expose separate requester- and
+snoop-response paths at the semantic endpoint; choosing which protocol
+transaction owns a shared physical channel is endpoint logic, not a
+transport-adapter policy. The RN node-side adapter also applies the physical
+link monitor at this boundary; its bounded coherent-transaction checks can be
+disabled independently for endpoint behavior they do not yet cover.
 
 ## Fabric and System Address Map parameters
 
@@ -266,7 +282,7 @@ Node and does not implement coherence. A Home Node performs any required
 ordering and coherence work before issuing a non-snoopable transaction to it.
 
 [`home.rhdl`](home.rhdl) implements the first bounded HN-I as
-`CHIHNI`. It operates through a `CHIHNDecoupled` interface containing
+`CHIHNI`. It operates through a `CHIHNIDecoupled` interface containing
 ready-valid requester- and
 subordinate-side REQ/RSP/DAT flows, allocates a Home-owned transaction slot,
 and translates both transaction-ID namespaces. Reads restore the RN's
@@ -392,11 +408,11 @@ turns an externally credited flit channel into a buffered internal flow.
 | Module | Responsibility |
 |---|---|
 | [`params.rhdl`](params.rhdl) | Implemented physical wire parameters and derived widths; node and edge capabilities come with role interfaces |
-| [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal opcode namespaces |
-| [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, Size checking, and DAT packetization |
+| [`flits.rhdl`](flits.rhdl) | Implemented exact parameterized REQ, RSP, SNP, and DAT payloads and nominal closed-field namespaces |
+| [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, typed Size and NumReq views, Size checking, and DAT packetization |
 | [`coherence.rhdl`](coherence.rhdl) | Implemented cache/response states, coherent opcode families, and mandatory RN-F snoop capability set |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
-| [`decoupled.rhdl`](decoupled.rhdl) | Reusable ready-valid `CHIRNDecoupled`, `CHISNDecoupled`, and nested `CHIHNDecoupled` contracts |
+| [`decoupled.rhdl`](decoupled.rhdl) | Reusable ready-valid RN-I, snoop-capable RN-F/RN-D, SN, HN-I, and snoop-capable HN nested-interface contracts |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded initial RN-F `ReadShared`/`CompData`/`CompAck` and snoop-response lifetime checks |

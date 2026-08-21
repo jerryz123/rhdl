@@ -7,7 +7,9 @@ request/response interface carrying XLEN-wide byte addresses, returning 32-bit
 instructions, and accepting distinct speculative-flush and architectural
 invalidate-all controls from Fetch. The
 pipeline checks architectural alignment; the cache translates a miss into one
-line-sized RN-F `ReadShared` transaction.
+line-sized RN-F `ReadShared` transaction. Its CHI boundary is a ready-valid
+`CHIRNDecoupled` endpoint; the enclosing system owns physical link credits and
+activation.
 
 `cache.rhdl` implements a direct-mapped read-only cache with host-configured
 power-of-two set and line counts. A one-stage `Pipe` carries each address beside

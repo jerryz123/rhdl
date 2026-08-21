@@ -91,9 +91,10 @@ fun checked_chi_ram_params(params :: CHIRamParams):
           "NodeID must fit in the physical NodeID width")
   params
 
-fun monitor_chi_ram_request(valid, raw_request, params :: CHIRamParams):
+fun monitor_chi_ram_request(params :: CHIRamParams,
+                            valid :: Bool,
+                            request :: CHIReqFlit(params.flit)):
   def p = params.flit
-  def request = cast(raw_request, CHIReqFlit(p))
   def request_opcode :: CHIReqOpcode = request.opcode
   def size = request.size_or_num_req[0..3]
   def max_size = alignment_bits(p.data_bytes)
@@ -119,12 +120,10 @@ fun monitor_chi_ram_request(valid, raw_request, params :: CHIRamParams):
     assert(address_aligned, "chi_ram_request_address_aligned")
     assert(address_supported, "chi_ram_request_address_supported")
 
-fun monitor_chi_ram_write_data(valid,
-                               raw_data,
-                               raw_request,
-                               p :: CHIFlitParams):
-  def data = cast(raw_data, CHIDatFlit(p))
-  def request = cast(raw_request, CHIReqFlit(p))
+fun monitor_chi_ram_write_data(p :: CHIFlitParams,
+                               valid :: Bool,
+                               data :: CHIDatFlit(p),
+                               request :: CHIReqFlit(p)):
   def expected_mask = transfer_byte_mask(
     request.address,
     request.size_or_num_req[0..3],
@@ -144,19 +143,18 @@ fun monitor_chi_ram_write_data(valid,
 
 fun chi_ram_dbid_response(p :: CHIFlitParams,
                           node_id :: Nat,
-                          raw_request,
-                          slot):
-  def request = cast(raw_request, CHIReqFlit(p))
+                          request :: CHIReqFlit(p),
+                          slot :: Hardware.bits):
   CHIRspFlit(p):
     cache_line_id: bits(0, 6)
     trace_tag: Bool(#false)
-    tag_op: bits(0, 2)
+    tag_op: CHITagOp.Invalid
     pcrd_type: bits(0, 4)
     dbid_or_group_id: zext(slot, 12)
     c_busy: bits(0, 3)
     fwd_state_or_data_pull: bits(0, 3)
     resp: bits(0, 3)
-    resp_err: bits(0, 2)
+    resp_err: CHIRespErr.OK
     opcode: CHIRspOpcode.DBIDResp
     txn_id: request.txn_id
     src_id: bits(node_id, p.node_id_width)
@@ -165,19 +163,18 @@ fun chi_ram_dbid_response(p :: CHIFlitParams,
 
 fun chi_ram_write_completion(p :: CHIFlitParams,
                              node_id :: Nat,
-                             slot,
-                             raw_request):
-  def request = cast(raw_request, CHIReqFlit(p))
+                             slot :: Hardware.bits,
+                             request :: CHIReqFlit(p)):
   CHIRspFlit(p):
     cache_line_id: bits(0, 6)
     trace_tag: Bool(#false)
-    tag_op: bits(0, 2)
+    tag_op: CHITagOp.Invalid
     pcrd_type: bits(0, 4)
     dbid_or_group_id: zext(slot, 12)
     c_busy: bits(0, 3)
     fwd_state_or_data_pull: bits(0, 3)
     resp: bits(0, 3)
-    resp_err: bits(0, 2)
+    resp_err: CHIRespErr.OK
     opcode: CHIRspOpcode.Comp
     txn_id: request.txn_id
     src_id: bits(node_id, p.node_id_width)
@@ -186,9 +183,8 @@ fun chi_ram_write_completion(p :: CHIFlitParams,
 
 fun chi_ram_read_completion(p :: CHIFlitParams,
                             node_id :: Nat,
-                            raw_request,
-                            data):
-  def request = cast(raw_request, CHIReqFlit(p))
+                            request :: CHIReqFlit(p),
+                            data :: Bits(p.data_width)):
   wire response: CHIDatFlit(p)
   if p.poison_width > 0
   | response.poison <== bits(0, p.poison_width)
@@ -211,7 +207,7 @@ fun chi_ram_read_completion(p :: CHIFlitParams,
   response.trace_tag <== Bool(#false)
   response.tag_update <== bits(0, p.tag_update_width)
   response.tag <== bits(0, p.tag_width)
-  response.tag_op <== bits(0, 2)
+  response.tag_op <== CHITagOp.Invalid
   response.cache_line_id <== bits(0, 6)
   response.data_id <== bits(0, 2)
   response.ccid <== bits(0, 2)
@@ -220,7 +216,7 @@ fun chi_ram_read_completion(p :: CHIFlitParams,
   response.data_pull <== Bool(#false)
   response.data_source_or_fwd_state <== bits(0, 8)
   response.resp <== bits(0, 3)
-  response.resp_err <== bits(0, 2)
+  response.resp_err <== CHIRespErr.OK
   response.opcode <== CHIDatOpcode.CompData
   response.home_nid_or_pbha_or_mismatched_mecid <== bits(
     node_id,
@@ -367,11 +363,11 @@ sync_circuit CHIRam(params :: CHIRamParams):
   completion_router.read_response <=> port.response_data
   completion_router.completed <=> transaction_slots.completed
 
-  monitor_chi_ram_request(port.requests.valid, port.requests.bits, checked)
-  monitor_chi_ram_write_data(transaction_slots.matched_write.valid,
+  monitor_chi_ram_request(checked, port.requests.valid, port.requests.bits)
+  monitor_chi_ram_write_data(p,
+                             transaction_slots.matched_write.valid,
                              transaction_slots.matched_write.bits.data,
-                             transaction_slots.matched_write.bits.request,
-                             p)
+                             transaction_slots.matched_write.bits.request)
 
 export:
   CHIRamParams

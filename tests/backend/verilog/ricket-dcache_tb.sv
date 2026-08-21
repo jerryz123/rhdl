@@ -1,4 +1,4 @@
-// Verifies Ricket L1D coherent refills and write-through stores over native RN-F.
+// Verifies Ricket L1D coherent refills and writes over ready-valid RN-F.
 module ricket_dcache_tb;
   typedef struct packed {
     logic [63:0] address;
@@ -15,30 +15,25 @@ module ricket_dcache_tb;
   typedef struct packed { core_req_t request; } core_in_t;
   typedef struct packed { ready_t request; core_resp_t response; logic drained; } core_out_t;
 
-  typedef struct packed { logic credit; } credit_t;
   typedef struct packed { logic valid; CHIReqFlit bits; } req_forward_t;
   typedef struct packed { logic valid; CHIRspFlit bits; } rsp_forward_t;
   typedef struct packed { logic valid; CHIDatFlit bits; } dat_forward_t;
   typedef struct packed { logic valid; CHISnpFlit bits; } snp_forward_t;
   typedef struct packed {
-    credit_t tx_req;
-    credit_t tx_rsp;
-    credit_t tx_dat;
-    logic tx_link_active_ack;
-    logic rx_link_active_request;
-    rsp_forward_t rx_rsp;
-    dat_forward_t rx_dat;
-    snp_forward_t rx_snp;
+    ready_t requests;
+    ready_t requester_responses;
+    ready_t request_data;
+    rsp_forward_t responses;
+    dat_forward_t response_data;
+    snp_forward_t snoops;
   } chi_in_t;
   typedef struct packed {
-    logic tx_link_active_request;
-    logic rx_link_active_ack;
-    req_forward_t tx_req;
-    rsp_forward_t tx_rsp;
-    dat_forward_t tx_dat;
-    credit_t rx_rsp;
-    credit_t rx_dat;
-    credit_t rx_snp;
+    req_forward_t requests;
+    rsp_forward_t requester_responses;
+    dat_forward_t request_data;
+    ready_t responses;
+    ready_t response_data;
+    ready_t snoops;
   } chi_out_t;
 
   localparam logic [6:0] READ_SHARED = 7'h01;
@@ -57,9 +52,6 @@ module ricket_dcache_tb;
   core_out_t core_out;
   chi_in_t chi_in;
   chi_out_t chi_out;
-  integer rx_rsp_credits = 0;
-  integer rx_dat_credits = 0;
-  integer rx_snp_credits = 0;
   logic tx_req_pending = 1'b0;
   logic tx_rsp_pending = 1'b0;
   logic tx_dat_pending = 1'b0;
@@ -71,113 +63,21 @@ module ricket_dcache_tb;
   always #5 clock = ~clock;
 
   task automatic tick;
-    logic rsp_credit;
-    logic dat_credit;
-    logic snp_credit;
     begin
-      rsp_credit = chi_out.rx_rsp.credit;
-      dat_credit = chi_out.rx_dat.credit;
-      snp_credit = chi_out.rx_snp.credit;
-      if (!reset && chi_out.tx_req.valid) begin
+      if (!reset && chi_out.requests.valid) begin
         tx_req_pending = 1'b1;
-        captured_req = chi_out.tx_req.bits;
+        captured_req = chi_out.requests.bits;
       end
-      if (!reset && chi_out.tx_rsp.valid) begin
+      if (!reset && chi_out.requester_responses.valid) begin
         tx_rsp_pending = 1'b1;
-        captured_rsp = chi_out.tx_rsp.bits;
+        captured_rsp = chi_out.requester_responses.bits;
       end
-      if (!reset && chi_out.tx_dat.valid) begin
+      if (!reset && chi_out.request_data.valid) begin
         tx_dat_pending = 1'b1;
-        captured_dat = chi_out.tx_dat.bits;
+        captured_dat = chi_out.request_data.bits;
       end
       @(posedge clock);
       #1;
-      if (!reset) begin
-        if (rsp_credit)
-          rx_rsp_credits = rx_rsp_credits + 1;
-        if (dat_credit)
-          rx_dat_credits = rx_dat_credits + 1;
-        if (snp_credit)
-          rx_snp_credits = rx_snp_credits + 1;
-        if (chi_in.rx_rsp.valid)
-          rx_rsp_credits = rx_rsp_credits - 1;
-        if (chi_in.rx_dat.valid)
-          rx_dat_credits = rx_dat_credits - 1;
-        if (chi_in.rx_snp.valid)
-          rx_snp_credits = rx_snp_credits - 1;
-      end
-    end
-  endtask
-
-  task automatic activate_link;
-    integer cycles;
-    begin
-      chi_in.rx_link_active_request = 1'b1;
-      cycles = 0;
-      while (!chi_out.tx_link_active_request && cycles < 50) begin
-        tick();
-        cycles = cycles + 1;
-      end
-      assert (chi_out.tx_link_active_request)
-        else $fatal(1, "L1D did not request CHI link activation");
-      chi_in.tx_link_active_ack = 1'b1;
-      cycles = 0;
-      while (!chi_out.rx_link_active_ack && cycles < 50) begin
-        tick();
-        cycles = cycles + 1;
-      end
-      assert (chi_out.rx_link_active_ack)
-        else $fatal(1, "L1D did not acknowledge CHI receive activation");
-    end
-  endtask
-
-  task automatic grant_req_credit;
-    begin
-      chi_in.tx_req.credit = 1'b1;
-      tick();
-      chi_in.tx_req.credit = 1'b0;
-    end
-  endtask
-
-  task automatic grant_rsp_credit;
-    begin
-      chi_in.tx_rsp.credit = 1'b1;
-      tick();
-      chi_in.tx_rsp.credit = 1'b0;
-    end
-  endtask
-
-  task automatic grant_dat_credit;
-    begin
-      chi_in.tx_dat.credit = 1'b1;
-      tick();
-      chi_in.tx_dat.credit = 1'b0;
-    end
-  endtask
-
-  task automatic wait_rsp_credit;
-    integer cycles;
-    begin
-      cycles = 0;
-      while (rx_rsp_credits == 0 && cycles < 50) begin
-        tick();
-        cycles = cycles + 1;
-      end
-      assert (rx_rsp_credits > 0)
-        else $fatal(1, "L1D did not grant an RSP credit");
-    end
-  endtask
-
-  task automatic wait_dat_credit;
-    integer cycles;
-    begin
-      cycles = 0;
-      while (rx_dat_credits == 0 && cycles < 50) begin
-        tick();
-        cycles = cycles + 1;
-      end
-      assert (rx_dat_credits > 0)
-        else $fatal(1, "L1D did not grant a DAT credit");
     end
   endtask
 
@@ -239,38 +139,39 @@ module ricket_dcache_tb;
     input logic [255:0] line
   );
     begin
-      wait_dat_credit();
-      chi_in.rx_dat.bits = '0;
-      chi_in.rx_dat.bits.data = line[255:128];
-      chi_in.rx_dat.bits.byte_enable = 16'hffff;
-      chi_in.rx_dat.bits.data_id = {address[5], 1'b1};
-      chi_in.rx_dat.bits.resp = 3'b001;
-      chi_in.rx_dat.bits.opcode = COMP_DATA;
-      chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid = HOME_ID;
-      chi_in.rx_dat.bits.dbid_or_mecid = 16'h0055;
-      chi_in.rx_dat.bits.txn_id = 12'd0;
-      chi_in.rx_dat.bits.src_id = HOME_ID;
-      chi_in.rx_dat.bits.tgt_id = CACHE_ID;
-      chi_in.rx_dat.valid = 1'b1;
+      assert (chi_out.response_data.ready)
+        else $fatal(1, "L1D did not accept response data");
+      chi_in.response_data.bits = '0;
+      chi_in.response_data.bits.data = line[255:128];
+      chi_in.response_data.bits.byte_enable = 16'hffff;
+      chi_in.response_data.bits.data_id = {address[5], 1'b1};
+      chi_in.response_data.bits.resp = 3'b001;
+      chi_in.response_data.bits.opcode = COMP_DATA;
+      chi_in.response_data.bits.home_nid_or_pbha_or_mismatched_mecid = HOME_ID;
+      chi_in.response_data.bits.dbid_or_mecid = 16'h0055;
+      chi_in.response_data.bits.txn_id = 12'd0;
+      chi_in.response_data.bits.src_id = HOME_ID;
+      chi_in.response_data.bits.tgt_id = CACHE_ID;
+      chi_in.response_data.valid = 1'b1;
       tick();
-      chi_in.rx_dat.valid = 1'b0;
-      chi_in.rx_dat.bits = '0;
-      wait_dat_credit();
-      chi_in.rx_dat.bits = '0;
-      chi_in.rx_dat.bits.data = line[127:0];
-      chi_in.rx_dat.bits.byte_enable = 16'hffff;
-      chi_in.rx_dat.bits.data_id = {address[5], 1'b0};
-      chi_in.rx_dat.bits.resp = 3'b001;
-      chi_in.rx_dat.bits.opcode = COMP_DATA;
-      chi_in.rx_dat.bits.home_nid_or_pbha_or_mismatched_mecid = HOME_ID;
-      chi_in.rx_dat.bits.dbid_or_mecid = 16'h0055;
-      chi_in.rx_dat.bits.txn_id = 12'd0;
-      chi_in.rx_dat.bits.src_id = HOME_ID;
-      chi_in.rx_dat.bits.tgt_id = CACHE_ID;
-      chi_in.rx_dat.valid = 1'b1;
+      chi_in.response_data.valid = 1'b0;
+      chi_in.response_data.bits = '0;
+      assert (chi_out.response_data.ready)
+        else $fatal(1, "L1D did not accept response data");
+      chi_in.response_data.bits.data = line[127:0];
+      chi_in.response_data.bits.byte_enable = 16'hffff;
+      chi_in.response_data.bits.data_id = {address[5], 1'b0};
+      chi_in.response_data.bits.resp = 3'b001;
+      chi_in.response_data.bits.opcode = COMP_DATA;
+      chi_in.response_data.bits.home_nid_or_pbha_or_mismatched_mecid = HOME_ID;
+      chi_in.response_data.bits.dbid_or_mecid = 16'h0055;
+      chi_in.response_data.bits.txn_id = 12'd0;
+      chi_in.response_data.bits.src_id = HOME_ID;
+      chi_in.response_data.bits.tgt_id = CACHE_ID;
+      chi_in.response_data.valid = 1'b1;
       tick();
-      chi_in.rx_dat.valid = 1'b0;
-      chi_in.rx_dat.bits = '0;
+      chi_in.response_data.valid = 1'b0;
+      chi_in.response_data.bits = '0;
     end
   endtask
 
@@ -309,17 +210,18 @@ module ricket_dcache_tb;
 
   task automatic send_dbid;
     begin
-      wait_rsp_credit();
-      chi_in.rx_rsp.bits = '0;
-      chi_in.rx_rsp.bits.dbid_or_group_id = 12'h055;
-      chi_in.rx_rsp.bits.opcode = DBID_RESP;
-      chi_in.rx_rsp.bits.txn_id = 12'd1;
-      chi_in.rx_rsp.bits.src_id = HOME_ID;
-      chi_in.rx_rsp.bits.tgt_id = CACHE_ID;
-      chi_in.rx_rsp.valid = 1'b1;
+      assert (chi_out.responses.ready)
+        else $fatal(1, "L1D did not accept DBIDResp");
+      chi_in.responses.bits = '0;
+      chi_in.responses.bits.dbid_or_group_id = 12'h055;
+      chi_in.responses.bits.opcode = DBID_RESP;
+      chi_in.responses.bits.txn_id = 12'd1;
+      chi_in.responses.bits.src_id = HOME_ID;
+      chi_in.responses.bits.tgt_id = CACHE_ID;
+      chi_in.responses.valid = 1'b1;
       tick();
-      chi_in.rx_rsp.valid = 1'b0;
-      chi_in.rx_rsp.bits = '0;
+      chi_in.responses.valid = 1'b0;
+      chi_in.responses.bits = '0;
     end
   endtask
 
@@ -347,17 +249,18 @@ module ricket_dcache_tb;
 
   task automatic send_completion;
     begin
-      wait_rsp_credit();
-      chi_in.rx_rsp.bits = '0;
-      chi_in.rx_rsp.bits.dbid_or_group_id = 12'h055;
-      chi_in.rx_rsp.bits.opcode = COMP;
-      chi_in.rx_rsp.bits.txn_id = 12'd1;
-      chi_in.rx_rsp.bits.src_id = HOME_ID;
-      chi_in.rx_rsp.bits.tgt_id = CACHE_ID;
-      chi_in.rx_rsp.valid = 1'b1;
+      assert (chi_out.responses.ready)
+        else $fatal(1, "L1D did not accept Comp");
+      chi_in.responses.bits = '0;
+      chi_in.responses.bits.dbid_or_group_id = 12'h055;
+      chi_in.responses.bits.opcode = COMP;
+      chi_in.responses.bits.txn_id = 12'd1;
+      chi_in.responses.bits.src_id = HOME_ID;
+      chi_in.responses.bits.tgt_id = CACHE_ID;
+      chi_in.responses.valid = 1'b1;
       tick();
-      chi_in.rx_rsp.valid = 1'b0;
-      chi_in.rx_rsp.bits = '0;
+      chi_in.responses.valid = 1'b0;
+      chi_in.responses.bits = '0;
     end
   endtask
 
@@ -373,11 +276,11 @@ module ricket_dcache_tb;
   initial begin
     core_in = '0;
     chi_in = '0;
+    chi_in.requests.ready = 1'b1;
+    chi_in.requester_responses.ready = 1'b1;
+    chi_in.request_data.ready = 1'b1;
     repeat (2) tick();
     reset = 1'b0;
-    activate_link();
-    grant_req_credit();
-    grant_rsp_credit();
     assert (core_out.drained)
       else $fatal(1, "data cache was not drained after reset");
 
@@ -392,8 +295,6 @@ module ricket_dcache_tb;
     send_core_request(ADDRESS, 1'b0, 64'd0, 5'd4);
     expect_core_response(64'h88776655_44332211, 5'd4);
 
-    grant_req_credit();
-    grant_dat_credit();
     send_core_request(ADDRESS, 1'b1, STORE_DATA, 5'd0);
     expect_core_response(64'd0, 5'd0);
     assert (!core_out.drained)
@@ -406,15 +307,13 @@ module ricket_dcache_tb;
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after store completion");
 
-    grant_req_credit();
-    grant_rsp_credit();
     send_core_request(ADDRESS, 1'b0, 64'd0, 5'd5);
     accept_request(READ_SHARED, ADDRESS, 12'd0, 6'd5);
     return_line(ADDRESS, LINE);
     accept_comp_ack();
     expect_core_response(64'h88776655_44332211, 5'd5);
 
-    $display("Ricket data-cache native RN-F simulation passed");
+    $display("Ricket data-cache ready-valid RN-F simulation passed");
     $finish;
   end
 endmodule

@@ -31,7 +31,6 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def width = xlen_width(xlen)
   def checked = checked_ricket_chi_params(params)
   def p = checked.flit
-  def link = checked.instruction_link
   def node = checked.instruction_node
   check_l1i_geometry(width, sets, line_bytes)
   def beats = line_bytes / 8
@@ -42,7 +41,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def outstanding_width = index_width(3)
 
   interface core(RicketInstructionAccess(xlen), ~role: responder)
-  interface chi(CHIRNLink(link, node), ~role: node)
+  interface chi(CHIRNDecoupled(p), ~role: node)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst lines(SyncRam1RW(sets, Bits(64), beats))
@@ -61,13 +60,12 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   core.response.valid <== responses.egress.valid & !cache_flush
   core.response.bits <== responses.egress.bits
   responses.egress.ready <== core.response.ready & !cache_flush
-  def flows = chi_rn_flow_adapter(chi, link, Bool(#true), Bool(#true))
-  def outgoing_requests :: Endpoint.of(Decoupled(CHIReqFlit(p))) = flows.requests
-  def outgoing_responses :: Endpoint.of(Decoupled(CHIRspFlit(p))) = flows.requester_responses
-  def outgoing_data :: Endpoint.of(Decoupled(CHIDatFlit(p))) = flows.request_data
-  def incoming_responses :: Endpoint.of(Irrevocable(CHIRspFlit(p))) = flows.responses
-  def incoming_data :: Endpoint.of(Irrevocable(CHIDatFlit(p))) = flows.response_data
-  def incoming_snoops :: Endpoint.of(Irrevocable(CHISnpFlit(p))) = flows.snoops
+  def outgoing_requests = chi.requests
+  def outgoing_responses = chi.requester_responses
+  def outgoing_data = chi.request_data
+  def incoming_responses = chi.responses
+  def incoming_data = chi.response_data
+  def incoming_snoops = chi.snoops
   refill.requests |> outgoing_requests
   incoming_data |> refill.response_data
   refill.acknowledgements |> protocol_responses.ingress[0]
@@ -92,8 +90,6 @@ sync_circuit RicketL1ICache(xlen :: XLen,
     CHIRspOpcode.SnpResp
   )
   def snoop_fire = fire(incoming_snoops) & ordinary_snoop
-  monitor_chi_rn(link, node, chi)
-
   def response_fire = fire(core.response)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def lookup_address = lookup.egress.bits

@@ -47,7 +47,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
   interface completion(Irrevocable(RicketLineRefillResult(Context, address_width, line_bytes)), ~role: producer)
   interface requests(Decoupled(CHIReqFlit(p)), ~role: producer)
   interface acknowledgements(Decoupled(CHIRspFlit(p)), ~role: producer)
-  interface response_data(Irrevocable(CHIDatFlit(p)), ~role: consumer)
+  interface response_data(Decoupled(CHIDatFlit(p)), ~role: consumer)
 
   reg active_state(~init: Bool(#false))
   reg request_sent(~init: Bool(#false))
@@ -85,6 +85,8 @@ sync_circuit RicketLineRefill(Context :: DataType,
   def request_fire = fire(requests)
 
   def incoming_data = response_data.bits
+  def raw_coherent_response :: Bits(3) = incoming_data.resp
+  def coherent_response = raw_coherent_response.into(CHICoherentResponse())
   def all_data_received = and_reduce(received_packets)
   def first_data_packet = !or_reduce(received_packets)
   def packet_index:
@@ -123,16 +125,16 @@ sync_circuit RicketLineRefill(Context :: DataType,
            "line_refill_response_num_dat_zero")
     assert(!incoming_data.replicate,
            "line_refill_response_not_replicated")
-    assert(incoming_data.resp_err === bits(0, 2),
+    assert(incoming_data.resp_err === CHIRespErr.OK,
            "line_refill_response_ok")
   when (data_fire & !first_data_packet):
     assert(incoming_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
            "line_refill_response_home_consistent")
     assert(incoming_data.dbid_or_mecid[0..12] === dbid,
            "line_refill_response_dbid_consistent")
-    assert(chi_response_state(incoming_data.resp) === response_state,
+    assert(coherent_response.state === response_state,
            "line_refill_response_state_consistent")
-    assert(chi_response_pass_dirty(incoming_data.resp) === pass_dirty,
+    assert(coherent_response.pass_dirty === pass_dirty,
            "line_refill_response_pass_dirty_consistent")
 
   acknowledgements.valid <== active_state & all_data_received & !acknowledgement_sent
@@ -178,10 +180,10 @@ sync_circuit RicketLineRefill(Context :: DataType,
                     home_id)
     dbid <== mux(first_data_packet, incoming_data.dbid_or_mecid[0..12], dbid)
     response_state <== mux(first_data_packet,
-                           chi_response_state(incoming_data.resp),
+                           coherent_response.state,
                            response_state)
     pass_dirty <== mux(first_data_packet,
-                       chi_response_pass_dirty(incoming_data.resp),
+                       coherent_response.pass_dirty,
                        pass_dirty)
   elsewhen acknowledgement_fire:
     acknowledgement_sent <== Bool(#true)

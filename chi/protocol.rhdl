@@ -5,12 +5,22 @@ import:
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
 
-fun chi_size_valid(size :: Bits(3)) :~ Bool:
-  size =/= bits(7, 3)
+// Size and NumReq share REQ storage. These accessors expose both views so a
+// caller can select the one appropriate for the request opcode.
+fun chi_req_size(p :: CHIFlitParams,
+                 request :: CHIReqFlit(p)) :~ CHITransferSize:
+  cast(request.size_or_num_req[0..3], CHITransferSize)
+
+fun chi_req_num_req(p :: CHIFlitParams,
+                    request :: CHIReqFlit(p)) :~ Bits(6):
+  request.size_or_num_req
+
+fun chi_size_valid(size :: CHITransferSize) :~ Bool:
+  enum_valid(size)
 
 // Returns one less than the physical DAT packet count. Sizes through 16 bytes
 // always occupy one packet; larger transfers are split by Data_Width.
-fun chi_data_beats_minus_one(size :: Bits(3),
+fun chi_data_beats_minus_one(size :: CHITransferSize,
                              p :: CHIFlitParams) :: Bits(2):
   def size_32_beats_minus_one = if p.data_width == 128 | 1 | 0
   def size_64_beats_minus_one:
@@ -19,8 +29,8 @@ fun chi_data_beats_minus_one(size :: Bits(3),
     | p.data_width == 256: 1
     | ~else: 0
   mux_lookup(size, ~default: bits(0, 2)):
-    5: bits(size_32_beats_minus_one, 2)
-    6: bits(size_64_beats_minus_one, 2)
+    CHITransferSize.Bytes32: bits(size_32_beats_minus_one, 2)
+    CHITransferSize.Bytes64: bits(size_64_beats_minus_one, 2)
 
 fun chi_data_id_valid(data_id :: Bits(2), p :: CHIFlitParams) :~ Bool:
   cond
@@ -29,6 +39,8 @@ fun chi_data_id_valid(data_id :: Bits(2), p :: CHIFlitParams) :~ Bool:
   | ~else: data_id === bits(0, 2)
 
 export:
+  chi_req_size
+  chi_req_num_req
   chi_size_valid
   chi_data_beats_minus_one
   chi_data_id_valid

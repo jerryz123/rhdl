@@ -27,6 +27,75 @@ interface ReverseOnly():
 
 interface StrongReverseOnly() refines ReverseOnly()
 
+// Equal tags are deliberately illegal between peers so hierarchy tests prove
+// that forwarding does not reinterpret one endpoint as two protocol peers.
+interface ForwardingPolicy(tag :: String):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    provided[0] != required[0]
+
+  producer -> consumer:
+    payload: Bits(8)
+
+interface ForwardingEnvelope(tag :: String):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    link: ForwardingPolicy(tag)
+
+circuit PolicyForwardSource(tag :: String):
+  interface port(ForwardingPolicy(tag), ~role: producer)
+  port.payload <== bits(90, 8)
+
+circuit PolicyForwardSink(tag :: String):
+  interface port(ForwardingPolicy(tag), ~role: consumer)
+  output observed: Bits(8)
+  observed <== port.payload
+
+circuit ProviderPolicyForwarding():
+  interface port(ForwardingPolicy("same"), ~role: producer)
+  inst source(PolicyForwardSource("same"))
+  source.port <=> port
+
+circuit ConsumerPolicyForwarding():
+  interface port(ForwardingPolicy("same"), ~role: consumer)
+  output observed: Bits(8)
+  inst sink(PolicyForwardSink("same"))
+  port <=> sink.port
+  observed <== sink.observed
+
+circuit NestedPolicyForwardSource(tag :: String):
+  interface port(ForwardingEnvelope(tag), ~role: producer)
+  port.link.payload <== bits(165, 8)
+
+circuit NestedPolicyForwarding():
+  interface port(ForwardingEnvelope("same"), ~role: producer)
+  inst source(NestedPolicyForwardSource("same"))
+  source.port <=> port
+
+circuit PolicyForwardArraySource(tag :: String):
+  interface ports[2](ForwardingPolicy(tag), ~role: producer)
+  ports[0].payload <== bits(1, 8)
+  ports[1].payload <== bits(2, 8)
+
+circuit ArrayPolicyForwarding():
+  interface ports[2](ForwardingPolicy("same"), ~role: producer)
+  inst source(PolicyForwardArraySource("same"))
+  source.ports <=> ports
+
+circuit MismatchedPolicyForwarding():
+  interface port(ForwardingPolicy("outer"), ~role: producer)
+  inst source(PolicyForwardSource("inner"))
+  source.port <=> port
+
+circuit SameOriginPolicyConnection():
+  inst first(PolicyForwardSource("same"))
+  inst second(PolicyForwardSource("same"))
+  first.port <=> second.port
+
 fun require_capacity(
   endpoint :: Endpoint.supports(example.CapacityLink(2, 8))
 ) :~ Endpoint:
@@ -72,6 +141,10 @@ def exact_reverse_design = elaborate(ExactReverseOnly())
 def compatible_reverse_design = elaborate(CompatibleReverseOnly())
 def compatible_specialization_arrays_design = elaborate(CompatibleSpecializationArrays())
 def compatible_endpoint_support_design = elaborate(CompatibleEndpointSupport())
+def provider_policy_forwarding_design = elaborate(ProviderPolicyForwarding())
+def consumer_policy_forwarding_design = elaborate(ConsumerPolicyForwarding())
+def nested_policy_forwarding_design = elaborate(NestedPolicyForwarding())
+def array_policy_forwarding_design = elaborate(ArrayPolicyForwarding())
 
 export:
   ReverseOnly
@@ -82,3 +155,9 @@ export:
   compatible_reverse_design
   compatible_specialization_arrays_design
   compatible_endpoint_support_design
+  provider_policy_forwarding_design
+  consumer_policy_forwarding_design
+  nested_policy_forwarding_design
+  array_policy_forwarding_design
+  MismatchedPolicyForwarding
+  SameOriginPolicyConnection

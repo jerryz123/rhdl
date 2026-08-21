@@ -870,6 +870,16 @@ roles, for example `provider sender`. Endpoint provenance records whether the
 connected component is a module peer or an instance, so compatible connection
 does not infer orientation from the presence of a particular member.
 
+Bulk connection also forwards one endpoint through a hierarchy boundary when
+the boundary and child endpoint have the same declared role, complementary
+represented roles, and the same nominal interface family. Forwarding requires
+the same specialization and recursively wires its complete shape; it does not
+apply the peer compatibility predicate or permit specialization relaxation.
+Different nominal contracts continue to use their declared refinement or
+support compatibility. The ordinary `outer <=> child.port` spelling therefore
+works for interfaces with custom connection policies as well as structurally
+exact interfaces without them.
+
 An interface can declare one nominal parent with `refines` and additional,
 role-qualified, structurally checked contracts such as
 `supports producer: Decoupled(T)`. The support role must be the interface's

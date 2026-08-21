@@ -11,7 +11,7 @@ import:
   lib("chi/protocol.rhdl") open
   lib("chi/transaction.rhdl") open
   lib("chi/link.rhdl") open
-  lib("chi/decoupled.rhdl").CHIHNDecoupled
+  lib("chi/decoupled.rhdl").CHIHNIDecoupled
   lib("chi/fabric.rhdl") open
   lib("chi/monitor.rhdl") open
 
@@ -54,10 +54,9 @@ fun checked_chi_hni_params(params :: CHIHNIParams):
             "subordinate service must support every requester opcode")
   params
 
-fun chi_hni_service_supported(raw_request,
-                              service :: CHISubordinateServiceParams,
-                              p :: CHIFlitParams):
-  def request = cast(raw_request, CHIReqFlit(p))
+fun chi_hni_service_supported(p :: CHIFlitParams,
+                              request :: CHIReqFlit(p),
+                              service :: CHISubordinateServiceParams):
   def size = request.size_or_num_req[0..3]
   or_reduce(vec(
     for List (support in service.requests):
@@ -77,7 +76,7 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   def limit = home.max_outstanding
   def slot_width = index_width(limit)
 
-  interface port(CHIHNDecoupled(p), ~role: home)
+  interface port(CHIHNIDecoupled(p), ~role: home)
   def requester = port.requester
   def subordinate = port.subordinate
 
@@ -109,8 +108,8 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     request_ordinary & request_supported & allocation_available
   )
   subordinate.requests.bits <== chi_hni_downstream_request(
-    upstream_request,
     p,
+    upstream_request,
     home.node_id,
     subordinate_endpoint.node_id,
     allocation_slot
@@ -123,9 +122,9 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     assert(request_supported, "chi_hni_request_opcode_supported")
     assert(upstream_request.tgt_id === bits(home.node_id, p.node_id_width),
            "chi_hni_request_targets_home")
-    assert(chi_hni_service_supported(upstream_request,
-                                     checked.subordinate_service,
-                                     p),
+    assert(chi_hni_service_supported(p,
+                                     upstream_request,
+                                     checked.subordinate_service),
            "chi_hni_request_service_supported")
 
   occupancy.set.valid <== allocate
@@ -152,11 +151,11 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     response_ordinary & response_match
   )
   requester.responses.bits <== chi_hni_upstream_response(
+    p,
     downstream_response,
     response_request.txn_id,
     response_request.src_id,
     response_request.qos,
-    p,
     home.node_id,
     response_slot
   )
@@ -193,9 +192,9 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     write_data_ordinary & write_data_match
   )
   subordinate.request_data.bits <== chi_hni_downstream_write_data(
+    p,
     upstream_write_data,
     write_data_request.qos,
-    p,
     home.node_id,
     subordinate_endpoint.node_id,
     subordinate_dbids[write_data_slot]
@@ -223,11 +222,11 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     read_data_ordinary & read_data_match & !write_completion_now
   )
   requester.response_data.bits <== chi_hni_upstream_read_data(
+    p,
     downstream_read_data,
     read_data_request.return_txn_id_or_stash_lpid,
     read_data_request.return_nid_or_stash_nid_or_data_target,
     read_data_request.qos,
-    p,
     home.node_id
   )
   subordinate.response_data.ready <== !read_data_ordinary ||| !read_data_match ||| (

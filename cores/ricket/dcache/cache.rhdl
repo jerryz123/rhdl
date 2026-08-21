@@ -32,7 +32,6 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   def width = xlen_width(xlen)
   def checked = checked_ricket_chi_params(params)
   def p = checked.flit
-  def link = checked.data_link
   def node = checked.data_node
   check_l1d_geometry(width, sets, line_bytes)
   def beats = line_bytes / 8
@@ -42,7 +41,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   def beat_width = index_width(beats)
 
   interface core(RicketDataAccess(xlen), ~role: responder)
-  interface chi(CHIRNLink(link, node), ~role: node)
+  interface chi(CHIRNDecoupled(p), ~role: node)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
@@ -73,20 +72,17 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   core.response.valid <== responses.egress.valid
   core.response.bits <== responses.egress.bits
 
-  def flows = chi_rn_flow_adapter(chi, link, Bool(#true), Bool(#true))
-  def outgoing_requests :: Endpoint.of(Decoupled(CHIReqFlit(p))) = flows.requests
-  def outgoing_responses :: Endpoint.of(Decoupled(CHIRspFlit(p))) = flows.requester_responses
-  def outgoing_data :: Endpoint.of(Decoupled(CHIDatFlit(p))) = flows.request_data
-  def incoming_responses :: Endpoint.of(Irrevocable(CHIRspFlit(p))) = flows.responses
-  def incoming_data :: Endpoint.of(Irrevocable(CHIDatFlit(p))) = flows.response_data
-  def incoming_snoops :: Endpoint.of(Irrevocable(CHISnpFlit(p))) = flows.snoops
+  def outgoing_requests = chi.requests
+  def outgoing_responses = chi.requester_responses
+  def outgoing_data = chi.request_data
+  def incoming_responses = chi.responses
+  def incoming_data = chi.response_data
+  def incoming_snoops = chi.snoops
   refill.requests |> protocol_requests.ingress[0]
   protocol_requests.egress |> outgoing_requests
   incoming_data |> refill.response_data
   refill.acknowledgements |> protocol_responses.ingress[0]
   protocol_responses.egress |> outgoing_responses
-  monitor_chi_rn(link, node, chi, ~transaction_checks: #false)
-
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def lookup_request = lookup.egress.bits
   def lookup_set = lookup_request.address[offset_width..(offset_width + set_width)]
@@ -210,7 +206,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
            "l1d_chi_response_txn_id")
     assert(incoming_response.src_id === bits(checked.home_node_id, p.node_id_width),
            "l1d_chi_response_home")
-    assert(incoming_response.resp_err === bits(0, 2),
+    assert(incoming_response.resp_err === CHIRespErr.OK,
            "l1d_chi_response_ok")
 
   def data_lane = store_address[3..alignment_bits(p.data_bytes)]

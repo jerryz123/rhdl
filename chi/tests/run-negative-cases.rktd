@@ -9,4 +9,5 @@
  ("bad-chi-role-channel.rhdl" "channel capabilities are not valid")
  ("bad-chi-rnf-snoop-capabilities.rhdl" "channel capabilities are not valid")
  ("bad-chi-opcode-type.rhdl" "List.of(CHIReqOpcode)")
+ ("bad-chi-semantic-field.rhdl" "connection source and target must have exactly the same hardware type")
  ("bad-chi-link-kind.rhdl" "endpoint kind must be RN-I"))

@@ -2,6 +2,7 @@
 // Defines CHI node roles, capabilities, credited links, and connection legality.
 
 import:
+  rhombus/meta open
   lib("host/annotations.rhm") open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/credited.rhdl") open
@@ -18,22 +19,29 @@ enum CHINodeKind
 | SNF
 | SNI
 
-fun chi_subordinate_node_kind(kind):
+fun CHINodeKind.is_subordinate(kind :: CHINodeKind):
   [CHINodeKind.SNF, CHINodeKind.SNI].contains(kind)
+
+fun CHINodeKind.is_home(kind :: CHINodeKind):
+  [CHINodeKind.HNF, CHINodeKind.HNI].contains(kind)
 
 class CHIChannelCapabilities(~req: req :: List.of(CHIReqOpcode) = [],
                              ~rsp: rsp :: List.of(CHIRspOpcode) = [],
                              ~snp: snp :: List.of(CHISnpOpcode) = [],
                              ~dat: dat :: List.of(CHIDatOpcode) = []):
 
-  method contains_all(emitted :: CHIChannelCapabilities):
-    for all (pair in [[req, emitted.req],
-                      [rsp, emitted.rsp],
-                      [snp, emitted.snp],
-                      [dat, emitted.dat]]):
-      opcode_lists_contain(pair[0], pair[1])
+  method contains_all(contained :: CHIChannelCapabilities):
+    for all (pair in [[req, contained.req],
+                      [rsp, contained.rsp],
+                      [snp, contained.snp],
+                      [dat, contained.dat]]):
+      for all (opcode in pair[1]):
+        pair[0].contains(opcode)
 
-  method uses_only(~req, ~rsp, ~snp, ~dat):
+  method uses_only(~req: req :: Boolean,
+                   ~rsp: rsp :: Boolean,
+                   ~snp: snp :: Boolean,
+                   ~dat: dat :: Boolean):
     for all (condition in [(req || this.req.length() == 0),
                            (rsp || this.rsp.length() == 0),
                            (snp || this.snp.length() == 0),
@@ -44,15 +52,11 @@ class CHIChannelCapabilities(~req: req :: List.of(CHIReqOpcode) = [],
     for all (opcode in snp):
       opcode.packed_value() == CHISnpOpcode.SnpDVMOp.packed_value()
 
-fun opcode_lists_contain(supported, emitted):
-  for all (opcode in emitted):
-    supported.contains(opcode)
-
 fun validate_endpoint_capabilities(kind :: CHINodeKind,
                                    emits :: CHIChannelCapabilities,
                                    supports :: CHIChannelCapabilities,
-                                   side,
-                                   who):
+                                   side :: String,
+                                   who :: Symbol):
   def legal:
     cond
     | side == "node" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
@@ -60,8 +64,9 @@ fun validate_endpoint_capabilities(kind :: CHINodeKind,
           emits.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
           supports.uses_only(~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
           (kind != CHINodeKind.RND || supports.is_dvm_snoop_only()),
-          (kind != CHINodeKind.RNF || opcode_lists_contain(supports.snp,
-                                                           chi_rnf_snoop_opcodes))
+          (kind != CHINodeKind.RNF || supports.contains_all(
+            CHIChannelCapabilities(~snp: chi_rnf_snoop_opcodes)
+          ))
         ]):
           condition
     | side == "icn" && [CHINodeKind.RNF, CHINodeKind.RND].contains(kind):
@@ -69,8 +74,9 @@ fun validate_endpoint_capabilities(kind :: CHINodeKind,
           emits.uses_only(~req: #false, ~rsp: #true, ~snp: #true, ~dat: #true),
           supports.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true),
           (kind != CHINodeKind.RND || emits.is_dvm_snoop_only()),
-          (kind != CHINodeKind.RNF || opcode_lists_contain(emits.snp,
-                                                           chi_rnf_snoop_opcodes))
+          (kind != CHINodeKind.RNF || emits.contains_all(
+            CHIChannelCapabilities(~snp: chi_rnf_snoop_opcodes)
+          ))
         ]):
           condition
     | side == "node" && kind == CHINodeKind.RNI:
@@ -85,13 +91,13 @@ fun validate_endpoint_capabilities(kind :: CHINodeKind,
           supports.uses_only(~req: #true, ~rsp: #true, ~snp: #false, ~dat: #true)
         ]):
           condition
-    | side == "node" && chi_subordinate_node_kind(kind):
+    | side == "node" && CHINodeKind.is_subordinate(kind):
         for all (condition in [
           emits.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true),
           supports.uses_only(~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true)
         ]):
           condition
-    | side == "icn" && chi_subordinate_node_kind(kind):
+    | side == "icn" && CHINodeKind.is_subordinate(kind):
         for all (condition in [
           emits.uses_only(~req: #true, ~rsp: #false, ~snp: #false, ~dat: #true),
           supports.uses_only(~req: #false, ~rsp: #true, ~snp: #false, ~dat: #true)
@@ -154,7 +160,16 @@ class CHISNLinkParams(flit :: CHIFlitParams,
                       ~rx_dat_credits: rx_dat_credits :: PosInt = 2):
   implements CircuitParam
 
-fun endpoint_pair_legal(node, icn, flit, kinds):
+fun chi_endpoint_params(value :: Any):
+  value is_a CHINodeParams || value is_a CHIICNPortParams
+
+annot.macro 'CHIEndpointParams':
+  'Any && satisfying(chi_endpoint_params)'
+
+fun endpoint_pair_legal(node :: CHINodeParams,
+                        icn :: CHIICNPortParams,
+                        flit :: CHIFlitParams,
+                        kinds :: List.of(CHINodeKind)):
   node is_a CHINodeParams && icn is_a CHIICNPortParams && for all (condition in [
     kinds.contains(node.kind),
     node.kind == icn.kind,
@@ -166,7 +181,7 @@ fun endpoint_pair_legal(node, icn, flit, kinds):
   ]):
     condition
 
-fun rn_connection_legal(provided, required):
+fun rn_connection_legal(provided :: List, required :: List):
   if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHIRNLinkParams && required[0] is_a CHIRNLinkParams
   | block:
       def node_link = provided[0]
@@ -185,7 +200,7 @@ fun rn_connection_legal(provided, required):
         condition
   | #false
 
-fun rni_connection_legal(provided, required):
+fun rni_connection_legal(provided :: List, required :: List):
   if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHIRNILinkParams && required[0] is_a CHIRNILinkParams
   | block:
       def node_link = provided[0]
@@ -203,7 +218,7 @@ fun rni_connection_legal(provided, required):
         condition
   | #false
 
-fun sn_connection_legal(provided, required):
+fun sn_connection_legal(provided :: List, required :: List):
   if provided.length() == 2 && required.length() == 2 && provided[0] is_a CHISNLinkParams && required[0] is_a CHISNLinkParams
   | block:
       def node_link = provided[0]
@@ -220,7 +235,7 @@ fun sn_connection_legal(provided, required):
         condition
   | #false
 
-fun checked_rn_link(link :: CHIRNLinkParams, endpoint):
+fun checked_rn_link(link :: CHIRNLinkParams, endpoint :: CHIEndpointParams):
   unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHIRNLink,
           "requires CHIRNLinkParams and CHINodeParams or CHIICNPortParams")
@@ -228,7 +243,7 @@ fun checked_rn_link(link :: CHIRNLinkParams, endpoint):
   | error(~who: #'CHIRNLink, "endpoint kind must be RN-F or RN-D")
   link
 
-fun checked_rni_link(link :: CHIRNILinkParams, endpoint):
+fun checked_rni_link(link :: CHIRNILinkParams, endpoint :: CHIEndpointParams):
   unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHIRNILink,
           "requires CHIRNILinkParams and CHINodeParams or CHIICNPortParams")
@@ -236,15 +251,15 @@ fun checked_rni_link(link :: CHIRNILinkParams, endpoint):
   | error(~who: #'CHIRNILink, "endpoint kind must be RN-I")
   link
 
-fun checked_sn_link(link :: CHISNLinkParams, endpoint):
+fun checked_sn_link(link :: CHISNLinkParams, endpoint :: CHIEndpointParams):
   unless endpoint is_a CHINodeParams || endpoint is_a CHIICNPortParams
   | error(~who: #'CHISNLink,
           "requires CHISNLinkParams and CHINodeParams or CHIICNPortParams")
-  unless chi_subordinate_node_kind(endpoint.kind)
+  unless CHINodeKind.is_subordinate(endpoint.kind)
   | error(~who: #'CHISNLink, "endpoint kind must be SN-F or SN-I")
   link
 
-interface CHIRNLink(link :: CHIRNLinkParams, endpoint):
+interface CHIRNLink(link :: CHIRNLinkParams, endpoint :: CHIEndpointParams):
   role node
   role icn
   provider node
@@ -265,7 +280,7 @@ interface CHIRNLink(link :: CHIRNLinkParams, endpoint):
     rx_dat: Credited(CHIDatFlit(link.flit), link.rx_dat_credits)
     rx_snp: Credited(CHISnpFlit(link.flit), link.rx_snp_credits)
 
-interface CHIRNILink(link :: CHIRNILinkParams, endpoint):
+interface CHIRNILink(link :: CHIRNILinkParams, endpoint :: CHIEndpointParams):
   role node
   role icn
   provider node
@@ -285,7 +300,7 @@ interface CHIRNILink(link :: CHIRNILinkParams, endpoint):
     rx_rsp: Credited(CHIRspFlit(link.flit), link.rx_rsp_credits)
     rx_dat: Credited(CHIDatFlit(link.flit), link.rx_dat_credits)
 
-interface CHISNLink(link :: CHISNLinkParams, endpoint):
+interface CHISNLink(link :: CHISNLinkParams, endpoint :: CHIEndpointParams):
   role node
   role icn
   provider node
@@ -307,6 +322,7 @@ interface CHISNLink(link :: CHISNLinkParams, endpoint):
 
 export:
   CHINodeKind
+  CHIEndpointParams
   CHIChannelCapabilities
   CHINodeParams
   CHIICNPortParams

@@ -3,73 +3,29 @@
 
 import:
   lib("rhdl/std/flow.rhdl") open
+  lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
   lib("chi/link.rhdl") open
   lib("chi/decoupled.rhdl") open
-
-class CHIRNFlows(requests :: Endpoint,
-                 requester_responses :: Endpoint,
-                 request_data :: Endpoint,
-                 responses :: Endpoint,
-                 response_data :: Endpoint,
-                 snoops :: Endpoint,
-                 transmit_running :: Bool,
-                 transmit_deactivating :: Bool,
-                 transmit_credit_empty :: Bool,
-                 receive_running :: Bool,
-                 receive_deactivating :: Bool)
-
-class CHIRNICNFlows(requests :: Endpoint,
-                    requester_responses :: Endpoint,
-                    request_data :: Endpoint,
-                    responses :: Endpoint,
-                    response_data :: Endpoint,
-                    snoops :: Endpoint,
-                    transmit_running :: Bool,
-                    transmit_deactivating :: Bool,
-                    transmit_credit_empty :: Bool,
-                    receive_running :: Bool,
-                    receive_deactivating :: Bool)
-
-class CHISNFlows(requests :: Endpoint,
-                 request_data :: Endpoint,
-                 responses :: Endpoint,
-                 response_data :: Endpoint,
-                 transmit_running :: Bool,
-                 transmit_deactivating :: Bool,
-                 transmit_credit_empty :: Bool,
-                 receive_running :: Bool,
-                 receive_deactivating :: Bool)
-
-class CHIRNIICNFlows(requests :: Endpoint,
-                     requester_responses :: Endpoint,
-                     request_data :: Endpoint,
-                     responses :: Endpoint,
-                     response_data :: Endpoint,
-                     transmit_running :: Bool,
-                     transmit_deactivating :: Bool,
-                     transmit_credit_empty :: Bool,
-                     receive_running :: Bool,
-                     receive_deactivating :: Bool)
-
-class CHISNICNFlows(requests :: Endpoint,
-                    request_data :: Endpoint,
-                    responses :: Endpoint,
-                    response_data :: Endpoint,
-                    transmit_running :: Bool,
-                    transmit_deactivating :: Bool,
-                    transmit_credit_empty :: Bool,
-                    receive_running :: Bool,
-                    receive_deactivating :: Bool)
+  lib("chi/monitor.rhdl").monitor_chi_rn
 
 // Adapts an RN-F/RN-D node endpoint. The TX RSP and DAT flows carry both
 // requester traffic and snoop responses; semantic arbitration stays with the
 // node because only it knows which transaction owns each flit.
-fun chi_rn_flow_adapter(port :: Endpoint,
-                        link :: CHIRNLinkParams,
-                        transmit_enable :: Bool,
-                        receive_enable :: Bool):
+sync_circuit CHIRNFlowAdapter(link :: CHIRNLinkParams,
+                              node :: CHINodeParams,
+                              ~transaction_checks: transaction_checks :: Boolean = #true):
   def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHIRNLink(link, node), ~role: node)
+  interface decoupled(CHIRNDecoupled(p), ~role: icn)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
 
   inst request_transmitter(CreditSender(CHIReqFlit(p), link.tx_req_credits))
   inst requester_response_transmitter(CreditSender(CHIRspFlit(p), link.tx_rsp_credits))
@@ -89,7 +45,7 @@ fun chi_rn_flow_adapter(port :: Endpoint,
   reg receive_ack(~init: Bool(#false))
   def transmit_acked = port.tx_link_active_ack
   def receive_requested = port.rx_link_active_request
-  def transmit_credit_empty = !or_reduce(request_transmitter.credit_count) & (
+  def credits_empty = !or_reduce(request_transmitter.credit_count) & (
     !or_reduce(requester_response_transmitter.credit_count)
   ) & !or_reduce(request_data_transmitter.credit_count)
   def receive_drained = !or_reduce(response_receiver.reserved) & (
@@ -113,27 +69,34 @@ fun chi_rn_flow_adapter(port :: Endpoint,
   response_data_receiver.grant_enable <== grant_receive
   snoop_receiver.grant_enable <== grant_receive
 
-  CHIRNFlows(
-    request_transmitter.ingress,
-    requester_response_transmitter.ingress,
-    request_data_transmitter.ingress,
-    response_receiver.egress,
-    response_data_receiver.egress,
-    snoop_receiver.egress,
-    transmit_request & transmit_acked,
-    !transmit_request & transmit_acked,
-    transmit_credit_empty,
-    receive_requested & receive_ack,
-    !receive_requested & receive_ack
-  )
+  decoupled.requests <=> request_transmitter.ingress
+  decoupled.requester_responses <=> requester_response_transmitter.ingress
+  decoupled.request_data <=> request_data_transmitter.ingress
+  decoupled.responses <=> response_receiver.egress
+  decoupled.response_data <=> response_data_receiver.egress
+  decoupled.snoops <=> snoop_receiver.egress
+  transmit_running <== transmit_request & transmit_acked
+  transmit_deactivating <== !transmit_request & transmit_acked
+  transmit_credit_empty <== credits_empty
+  receive_running <== receive_requested & receive_ack
+  receive_deactivating <== !receive_requested & receive_ack
+  monitor_chi_rn(link, node, port, ~transaction_checks: transaction_checks)
 
 // Terminates an RN-F/RN-D link on its ICN side. All node TX channels are
 // buffered independently, as are the ICN-originated RSP, DAT, and SNP paths.
-fun chi_rn_icn_flow_adapter(port :: Endpoint,
-                            link :: CHIRNLinkParams,
-                            transmit_enable :: Bool,
-                            receive_enable :: Bool):
+sync_circuit CHIRNICNFlowAdapter(link :: CHIRNLinkParams,
+                                 endpoint :: CHIICNPortParams):
   def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHIRNLink(link, endpoint), ~role: icn)
+  interface decoupled(CHIRNDecoupled(p), ~role: node)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
 
   inst request_receiver(CreditBuffer(CHIReqFlit(p), link.tx_req_credits))
   inst requester_response_receiver(CreditBuffer(CHIRspFlit(p), link.tx_rsp_credits))
@@ -153,7 +116,7 @@ fun chi_rn_icn_flow_adapter(port :: Endpoint,
   reg receive_ack(~init: Bool(#false))
   def transmit_acked = port.rx_link_active_ack
   def receive_requested = port.tx_link_active_request
-  def transmit_credit_empty = !or_reduce(response_transmitter.credit_count) & (
+  def credits_empty = !or_reduce(response_transmitter.credit_count) & (
     !or_reduce(response_data_transmitter.credit_count)
   ) & !or_reduce(snoop_transmitter.credit_count)
   def receive_drained = !or_reduce(request_receiver.reserved) & (
@@ -177,29 +140,35 @@ fun chi_rn_icn_flow_adapter(port :: Endpoint,
   requester_response_receiver.grant_enable <== grant_receive
   request_data_receiver.grant_enable <== grant_receive
 
-  CHIRNICNFlows(
-    request_receiver.egress,
-    requester_response_receiver.egress,
-    request_data_receiver.egress,
-    response_transmitter.ingress,
-    response_data_transmitter.ingress,
-    snoop_transmitter.ingress,
-    transmit_request & transmit_acked,
-    !transmit_request & transmit_acked,
-    transmit_credit_empty,
-    receive_requested & receive_ack,
-    !receive_requested & receive_ack
-  )
+  decoupled.requests <=> request_receiver.egress
+  decoupled.requester_responses <=> requester_response_receiver.egress
+  decoupled.request_data <=> request_data_receiver.egress
+  decoupled.responses <=> response_transmitter.ingress
+  decoupled.response_data <=> response_data_transmitter.ingress
+  decoupled.snoops <=> snoop_transmitter.ingress
+  transmit_running <== transmit_request & transmit_acked
+  transmit_deactivating <== !transmit_request & transmit_acked
+  transmit_credit_empty <== credits_empty
+  receive_running <== receive_requested & receive_ack
+  receive_deactivating <== !receive_requested & receive_ack
 
 // Activation remains CHI-specific while each channel conversion uses the
 // protocol-neutral credited-flow primitives. During transmit deactivation,
 // the endpoint must inject required Link Credit Return flits through the
-// returned response flows.
-fun chi_sn_flow_adapter(port :: Endpoint,
-                        link :: CHISNLinkParams,
-                        transmit_enable :: Bool,
-                        receive_enable :: Bool):
+// response flows.
+sync_circuit CHISNFlowAdapter(link :: CHISNLinkParams,
+                              node :: CHINodeParams):
   def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHISNLink(link, node), ~role: node)
+  interface decoupled(CHISNDecoupled(p), ~role: icn)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
 
   inst request_receiver(CreditBuffer(CHIReqFlit(p), link.rx_req_credits))
   inst request_data_receiver(CreditBuffer(CHIDatFlit(p), link.rx_dat_credits))
@@ -237,25 +206,31 @@ fun chi_sn_flow_adapter(port :: Endpoint,
   request_receiver.grant_enable <== receive_ack & receive_requested & receive_enable
   request_data_receiver.grant_enable <== receive_ack & receive_requested & receive_enable
 
-  CHISNFlows(
-    request_receiver.egress,
-    request_data_receiver.egress,
-    response_transmitter.ingress,
-    response_data_transmitter.ingress,
-    transmit_request & transmit_acked,
-    !transmit_request & transmit_acked,
-    tx_credit_empty,
-    receive_requested & receive_ack,
-    !receive_requested & receive_ack
-  )
+  decoupled.requests <=> request_receiver.egress
+  decoupled.request_data <=> request_data_receiver.egress
+  decoupled.responses <=> response_transmitter.ingress
+  decoupled.response_data <=> response_data_transmitter.ingress
+  transmit_running <== transmit_request & transmit_acked
+  transmit_deactivating <== !transmit_request & transmit_acked
+  transmit_credit_empty <== tx_credit_empty
+  receive_running <== receive_requested & receive_ack
+  receive_deactivating <== !receive_requested & receive_ack
 
 // Terminates an RN-I link on its ICN side. The ICN receives the node's TX
 // channels and originates the node's RX channels.
-fun chi_rni_icn_flow_adapter(port :: Endpoint,
-                             link :: CHIRNILinkParams,
-                             transmit_enable :: Bool,
-                             receive_enable :: Bool):
+sync_circuit CHIRNIICNFlowAdapter(link :: CHIRNILinkParams,
+                                  endpoint :: CHIICNPortParams):
   def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHIRNILink(link, endpoint), ~role: icn)
+  interface decoupled(CHIRNIDecoupled(p), ~role: node)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
 
   inst request_receiver(CreditBuffer(CHIReqFlit(p), link.tx_req_credits))
   inst request_response_receiver(CreditBuffer(CHIRspFlit(p), link.tx_rsp_credits))
@@ -273,7 +248,7 @@ fun chi_rni_icn_flow_adapter(port :: Endpoint,
   reg receive_ack(~init: Bool(#false))
   def transmit_acked = port.rx_link_active_ack
   def receive_requested = port.tx_link_active_request
-  def transmit_credit_empty = !or_reduce(response_transmitter.credit_count) & (
+  def credits_empty = !or_reduce(response_transmitter.credit_count) & (
     !or_reduce(response_data_transmitter.credit_count)
   )
   def receive_drained = !or_reduce(request_receiver.reserved) & (
@@ -297,26 +272,32 @@ fun chi_rni_icn_flow_adapter(port :: Endpoint,
   request_response_receiver.grant_enable <== grant_receive
   request_data_receiver.grant_enable <== grant_receive
 
-  CHIRNIICNFlows(
-    request_receiver.egress,
-    request_response_receiver.egress,
-    request_data_receiver.egress,
-    response_transmitter.ingress,
-    response_data_transmitter.ingress,
-    transmit_request & transmit_acked,
-    !transmit_request & transmit_acked,
-    transmit_credit_empty,
-    receive_requested & receive_ack,
-    !receive_requested & receive_ack
-  )
+  decoupled.requests <=> request_receiver.egress
+  decoupled.requester_responses <=> request_response_receiver.egress
+  decoupled.request_data <=> request_data_receiver.egress
+  decoupled.responses <=> response_transmitter.ingress
+  decoupled.response_data <=> response_data_transmitter.ingress
+  transmit_running <== transmit_request & transmit_acked
+  transmit_deactivating <== !transmit_request & transmit_acked
+  transmit_credit_empty <== credits_empty
+  receive_running <== receive_requested & receive_ack
+  receive_deactivating <== !receive_requested & receive_ack
 
 // Originates an SN link on its ICN side. Requests are transmitted toward the
 // subordinate while responses are accepted into credited receive buffers.
-fun chi_sn_icn_flow_adapter(port :: Endpoint,
-                            link :: CHISNLinkParams,
-                            transmit_enable :: Bool,
-                            receive_enable :: Bool):
+sync_circuit CHISNICNFlowAdapter(link :: CHISNLinkParams,
+                                 endpoint :: CHIICNPortParams):
   def p = link.flit
+
+  input transmit_enable: Bool
+  input receive_enable: Bool
+  interface port(CHISNLink(link, endpoint), ~role: icn)
+  interface decoupled(CHISNDecoupled(p), ~role: node)
+  output transmit_running: Bool
+  output transmit_deactivating: Bool
+  output transmit_credit_empty: Bool
+  output receive_running: Bool
+  output receive_deactivating: Bool
 
   inst request_transmitter(CreditSender(CHIReqFlit(p), link.rx_req_credits))
   inst request_data_transmitter(CreditSender(CHIDatFlit(p), link.rx_dat_credits))
@@ -332,7 +313,7 @@ fun chi_sn_icn_flow_adapter(port :: Endpoint,
   reg receive_ack(~init: Bool(#false))
   def transmit_acked = port.rx_link_active_ack
   def receive_requested = port.tx_link_active_request
-  def transmit_credit_empty = !or_reduce(request_transmitter.credit_count) & (
+  def credits_empty = !or_reduce(request_transmitter.credit_count) & (
     !or_reduce(request_data_transmitter.credit_count)
   )
   def receive_drained = !or_reduce(response_receiver.reserved) & (
@@ -355,281 +336,17 @@ fun chi_sn_icn_flow_adapter(port :: Endpoint,
   response_receiver.grant_enable <== grant_receive
   response_data_receiver.grant_enable <== grant_receive
 
-  CHISNICNFlows(
-    request_transmitter.ingress,
-    request_data_transmitter.ingress,
-    response_receiver.egress,
-    response_data_receiver.egress,
-    transmit_request & transmit_acked,
-    !transmit_request & transmit_acked,
-    transmit_credit_empty,
-    receive_requested & receive_ack,
-    !receive_requested & receive_ack
-  )
-
-// Forwards an ICN-role port through a hierarchy boundary. Both endpoints have
-// the same non-provider role, so their directional members are wired rather
-// than treated as peer interfaces.
-fun forward_chi_rn_icn_port(outer :: Endpoint, inner :: Endpoint):
-  inner.tx_link_active_request <== outer.tx_link_active_request
-  inner.rx_link_active_ack <== outer.rx_link_active_ack
-  outer.tx_link_active_ack <== inner.tx_link_active_ack
-  outer.rx_link_active_request <== inner.rx_link_active_request
-  inner.tx_req.valid <== outer.tx_req.valid
-  inner.tx_req.bits <== outer.tx_req.bits
-  outer.tx_req.credit <== inner.tx_req.credit
-  inner.tx_rsp.valid <== outer.tx_rsp.valid
-  inner.tx_rsp.bits <== outer.tx_rsp.bits
-  outer.tx_rsp.credit <== inner.tx_rsp.credit
-  inner.tx_dat.valid <== outer.tx_dat.valid
-  inner.tx_dat.bits <== outer.tx_dat.bits
-  outer.tx_dat.credit <== inner.tx_dat.credit
-  outer.rx_rsp.valid <== inner.rx_rsp.valid
-  outer.rx_rsp.bits <== inner.rx_rsp.bits
-  inner.rx_rsp.credit <== outer.rx_rsp.credit
-  outer.rx_dat.valid <== inner.rx_dat.valid
-  outer.rx_dat.bits <== inner.rx_dat.bits
-  inner.rx_dat.credit <== outer.rx_dat.credit
-  outer.rx_snp.valid <== inner.rx_snp.valid
-  outer.rx_snp.bits <== inner.rx_snp.bits
-  inner.rx_snp.credit <== outer.rx_snp.credit
-
-// Forwards a node-role RN port through a hierarchy boundary without applying
-// peer-connection legality to two views of the same endpoint.
-fun forward_chi_rn_node_port(outer :: Endpoint, inner :: Endpoint):
-  outer.tx_link_active_request <== inner.tx_link_active_request
-  outer.rx_link_active_ack <== inner.rx_link_active_ack
-  inner.tx_link_active_ack <== outer.tx_link_active_ack
-  inner.rx_link_active_request <== outer.rx_link_active_request
-  outer.tx_req.valid <== inner.tx_req.valid
-  outer.tx_req.bits <== inner.tx_req.bits
-  inner.tx_req.credit <== outer.tx_req.credit
-  outer.tx_rsp.valid <== inner.tx_rsp.valid
-  outer.tx_rsp.bits <== inner.tx_rsp.bits
-  inner.tx_rsp.credit <== outer.tx_rsp.credit
-  outer.tx_dat.valid <== inner.tx_dat.valid
-  outer.tx_dat.bits <== inner.tx_dat.bits
-  inner.tx_dat.credit <== outer.tx_dat.credit
-  inner.rx_rsp.valid <== outer.rx_rsp.valid
-  inner.rx_rsp.bits <== outer.rx_rsp.bits
-  outer.rx_rsp.credit <== inner.rx_rsp.credit
-  inner.rx_dat.valid <== outer.rx_dat.valid
-  inner.rx_dat.bits <== outer.rx_dat.bits
-  outer.rx_dat.credit <== inner.rx_dat.credit
-  inner.rx_snp.valid <== outer.rx_snp.valid
-  inner.rx_snp.bits <== outer.rx_snp.bits
-  outer.rx_snp.credit <== inner.rx_snp.credit
-
-fun forward_chi_rni_icn_port(outer :: Endpoint, inner :: Endpoint):
-  inner.tx_link_active_request <== outer.tx_link_active_request
-  inner.rx_link_active_ack <== outer.rx_link_active_ack
-  outer.tx_link_active_ack <== inner.tx_link_active_ack
-  outer.rx_link_active_request <== inner.rx_link_active_request
-  inner.tx_req.valid <== outer.tx_req.valid
-  inner.tx_req.bits <== outer.tx_req.bits
-  outer.tx_req.credit <== inner.tx_req.credit
-  inner.tx_rsp.valid <== outer.tx_rsp.valid
-  inner.tx_rsp.bits <== outer.tx_rsp.bits
-  outer.tx_rsp.credit <== inner.tx_rsp.credit
-  inner.tx_dat.valid <== outer.tx_dat.valid
-  inner.tx_dat.bits <== outer.tx_dat.bits
-  outer.tx_dat.credit <== inner.tx_dat.credit
-  outer.rx_rsp.valid <== inner.rx_rsp.valid
-  outer.rx_rsp.bits <== inner.rx_rsp.bits
-  inner.rx_rsp.credit <== outer.rx_rsp.credit
-  outer.rx_dat.valid <== inner.rx_dat.valid
-  outer.rx_dat.bits <== inner.rx_dat.bits
-  inner.rx_dat.credit <== outer.rx_dat.credit
-
-fun forward_chi_sn_icn_port(outer :: Endpoint, inner :: Endpoint):
-  inner.tx_link_active_request <== outer.tx_link_active_request
-  inner.rx_link_active_ack <== outer.rx_link_active_ack
-  outer.tx_link_active_ack <== inner.tx_link_active_ack
-  outer.rx_link_active_request <== inner.rx_link_active_request
-  inner.tx_rsp.valid <== outer.tx_rsp.valid
-  inner.tx_rsp.bits <== outer.tx_rsp.bits
-  outer.tx_rsp.credit <== inner.tx_rsp.credit
-  inner.tx_dat.valid <== outer.tx_dat.valid
-  inner.tx_dat.bits <== outer.tx_dat.bits
-  outer.tx_dat.credit <== inner.tx_dat.credit
-  outer.rx_req.valid <== inner.rx_req.valid
-  outer.rx_req.bits <== inner.rx_req.bits
-  inner.rx_req.credit <== outer.rx_req.credit
-  outer.rx_dat.valid <== inner.rx_dat.valid
-  outer.rx_dat.bits <== inner.rx_dat.bits
-  inner.rx_dat.credit <== outer.rx_dat.credit
-
-// Provides a module boundary for standalone use and backend verification.
-sync_circuit CHIRNFlowAdapter(link :: CHIRNLinkParams,
-                              node :: CHINodeParams):
-  def p = link.flit
-
-  input transmit_enable: Bool
-  input receive_enable: Bool
-  interface port(CHIRNLink(link, node), ~role: node)
-  interface requests(Decoupled(CHIReqFlit(p)), ~role: consumer)
-  interface requester_responses(Decoupled(CHIRspFlit(p)), ~role: consumer)
-  interface request_data(Decoupled(CHIDatFlit(p)), ~role: consumer)
-  interface responses(Irrevocable(CHIRspFlit(p)), ~role: producer)
-  interface response_data(Irrevocable(CHIDatFlit(p)), ~role: producer)
-  interface snoops(Irrevocable(CHISnpFlit(p)), ~role: producer)
-  output transmit_running: Bool
-  output transmit_deactivating: Bool
-  output transmit_credit_empty: Bool
-  output receive_running: Bool
-  output receive_deactivating: Bool
-
-  def flows = chi_rn_flow_adapter(port,
-                                  link,
-                                  transmit_enable,
-                                  receive_enable)
-  requests <=> flows.requests
-  requester_responses <=> flows.requester_responses
-  request_data <=> flows.request_data
-  responses <=> flows.responses
-  response_data <=> flows.response_data
-  snoops <=> flows.snoops
-  transmit_running <== flows.transmit_running
-  transmit_deactivating <== flows.transmit_deactivating
-  transmit_credit_empty <== flows.transmit_credit_empty
-  receive_running <== flows.receive_running
-  receive_deactivating <== flows.receive_deactivating
-
-sync_circuit CHIRNICNFlowAdapter(link :: CHIRNLinkParams,
-                                 endpoint :: CHIICNPortParams):
-  def p = link.flit
-
-  input transmit_enable: Bool
-  input receive_enable: Bool
-  interface port(CHIRNLink(link, endpoint), ~role: icn)
-  interface requests(Irrevocable(CHIReqFlit(p)), ~role: producer)
-  interface requester_responses(Irrevocable(CHIRspFlit(p)), ~role: producer)
-  interface request_data(Irrevocable(CHIDatFlit(p)), ~role: producer)
-  interface responses(Decoupled(CHIRspFlit(p)), ~role: consumer)
-  interface response_data(Decoupled(CHIDatFlit(p)), ~role: consumer)
-  interface snoops(Decoupled(CHISnpFlit(p)), ~role: consumer)
-  output transmit_running: Bool
-  output transmit_deactivating: Bool
-  output transmit_credit_empty: Bool
-  output receive_running: Bool
-  output receive_deactivating: Bool
-
-  def flows = chi_rn_icn_flow_adapter(port,
-                                      link,
-                                      transmit_enable,
-                                      receive_enable)
-  requests <=> flows.requests
-  requester_responses <=> flows.requester_responses
-  request_data <=> flows.request_data
-  responses <=> flows.responses
-  response_data <=> flows.response_data
-  snoops <=> flows.snoops
-  transmit_running <== flows.transmit_running
-  transmit_deactivating <== flows.transmit_deactivating
-  transmit_credit_empty <== flows.transmit_credit_empty
-  receive_running <== flows.receive_running
-  receive_deactivating <== flows.receive_deactivating
-
-sync_circuit CHISNFlowAdapter(link :: CHISNLinkParams,
-                              node :: CHINodeParams):
-  def p = link.flit
-
-  input transmit_enable: Bool
-  input receive_enable: Bool
-  interface port(CHISNLink(link, node), ~role: node)
-  interface decoupled(CHISNDecoupled(p), ~role: icn)
-  output transmit_running: Bool
-  output transmit_deactivating: Bool
-  output transmit_credit_empty: Bool
-  output receive_running: Bool
-  output receive_deactivating: Bool
-
-  def flows = chi_sn_flow_adapter(port,
-                                  link,
-                                  transmit_enable,
-                                  receive_enable)
-  decoupled.requests <=> flows.requests
-  decoupled.request_data <=> flows.request_data
-  decoupled.responses <=> flows.responses
-  decoupled.response_data <=> flows.response_data
-  transmit_running <== flows.transmit_running
-  transmit_deactivating <== flows.transmit_deactivating
-  transmit_credit_empty <== flows.transmit_credit_empty
-  receive_running <== flows.receive_running
-  receive_deactivating <== flows.receive_deactivating
-
-sync_circuit CHIRNIICNFlowAdapter(link :: CHIRNILinkParams,
-                                  endpoint :: CHIICNPortParams):
-  def p = link.flit
-
-  input transmit_enable: Bool
-  input receive_enable: Bool
-  interface port(CHIRNILink(link, endpoint), ~role: icn)
-  interface decoupled(CHIRNDecoupled(p), ~role: node)
-  output transmit_running: Bool
-  output transmit_deactivating: Bool
-  output transmit_credit_empty: Bool
-  output receive_running: Bool
-  output receive_deactivating: Bool
-
-  def flows = chi_rni_icn_flow_adapter(port,
-                                       link,
-                                       transmit_enable,
-                                       receive_enable)
-  decoupled.requests <=> flows.requests
-  decoupled.requester_responses <=> flows.requester_responses
-  decoupled.request_data <=> flows.request_data
-  decoupled.responses <=> flows.responses
-  decoupled.response_data <=> flows.response_data
-  transmit_running <== flows.transmit_running
-  transmit_deactivating <== flows.transmit_deactivating
-  transmit_credit_empty <== flows.transmit_credit_empty
-  receive_running <== flows.receive_running
-  receive_deactivating <== flows.receive_deactivating
-
-sync_circuit CHISNICNFlowAdapter(link :: CHISNLinkParams,
-                                 endpoint :: CHIICNPortParams):
-  def p = link.flit
-
-  input transmit_enable: Bool
-  input receive_enable: Bool
-  interface port(CHISNLink(link, endpoint), ~role: icn)
-  interface decoupled(CHISNDecoupled(p), ~role: node)
-  output transmit_running: Bool
-  output transmit_deactivating: Bool
-  output transmit_credit_empty: Bool
-  output receive_running: Bool
-  output receive_deactivating: Bool
-
-  def flows = chi_sn_icn_flow_adapter(port,
-                                      link,
-                                      transmit_enable,
-                                      receive_enable)
-  decoupled.requests <=> flows.requests
-  decoupled.request_data <=> flows.request_data
-  decoupled.responses <=> flows.responses
-  decoupled.response_data <=> flows.response_data
-  transmit_running <== flows.transmit_running
-  transmit_deactivating <== flows.transmit_deactivating
-  transmit_credit_empty <== flows.transmit_credit_empty
-  receive_running <== flows.receive_running
-  receive_deactivating <== flows.receive_deactivating
+  decoupled.requests <=> request_transmitter.ingress
+  decoupled.request_data <=> request_data_transmitter.ingress
+  decoupled.responses <=> response_receiver.egress
+  decoupled.response_data <=> response_data_receiver.egress
+  transmit_running <== transmit_request & transmit_acked
+  transmit_deactivating <== !transmit_request & transmit_acked
+  transmit_credit_empty <== credits_empty
+  receive_running <== receive_requested & receive_ack
+  receive_deactivating <== !receive_requested & receive_ack
 
 export:
-  CHIRNFlows
-  CHIRNICNFlows
-  CHISNFlows
-  CHIRNIICNFlows
-  CHISNICNFlows
-  chi_rn_flow_adapter
-  chi_rn_icn_flow_adapter
-  chi_sn_flow_adapter
-  chi_rni_icn_flow_adapter
-  chi_sn_icn_flow_adapter
-  forward_chi_rn_node_port
-  forward_chi_rn_icn_port
-  forward_chi_rni_icn_port
-  forward_chi_sn_icn_port
   CHIRNFlowAdapter
   CHIRNICNFlowAdapter
   CHISNFlowAdapter

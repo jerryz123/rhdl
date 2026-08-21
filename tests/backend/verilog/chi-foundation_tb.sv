@@ -24,6 +24,8 @@ module chi_foundation_tb;
   logic rsp_allocates_dbid;
   logic dat_write_data;
   logic dat_response_data;
+  logic [2:0] req_size;
+  logic [5:0] req_num_req;
   logic size_valid;
   logic [1:0] data_beats_minus_one;
   logic data_id_valid;
@@ -53,6 +55,8 @@ module chi_foundation_tb;
       else $fatal(1, "response or data classification failed");
     assert (size_valid && data_beats_minus_one == 2'h3 && data_id_valid)
       else $fatal(1, "128-bit DAT packetization failed");
+    assert (req_size == req_num_req[2:0])
+      else $fatal(1, "REQ Size and NumReq views disagree on shared storage");
 
     req_opcode = 7'h06;
     rsp_opcode = 5'h0f;

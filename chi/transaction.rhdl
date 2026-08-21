@@ -6,6 +6,7 @@ import:
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
   lib("chi/protocol.rhdl") open
+  lib("chi/link.rhdl").CHIChannelCapabilities
 
 hardware_enum CHIInitialTransactionPhase(~width: 3):
   Free = 0
@@ -65,17 +66,17 @@ fun empty_chi_home_transaction(p :: CHIFlitParams):
     subordinate_id: bits(0, p.node_id_width)
     subordinate_dbid: bits(0, 12)
 
-fun chi_initial_single_flit_size(size, p :: CHIFlitParams):
-  size <= bits(alignment_bits(p.data_bytes), 3)
+fun chi_initial_single_flit_size(size :: CHITransferSize,
+                                 p :: CHIFlitParams):
+  as_bits(size) <= bits(alignment_bits(p.data_bytes), 3)
 
 // Reissues an RN request as an HN-owned subordinate transaction. Initial HN-I
 // traffic returns through the Home Node instead of using direct transfer.
-fun chi_hni_downstream_request(raw_request,
-                               p :: CHIFlitParams,
+fun chi_hni_downstream_request(p :: CHIFlitParams,
+                               request :: CHIReqFlit(p),
                                home_node_id :: Nat,
                                subordinate_node_id :: Nat,
-                               slot):
-  def request = cast(raw_request, CHIReqFlit(p))
+                               slot :: Hardware.bits):
   wire downstream_request: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
   | downstream_request.rsvdc <== request.rsvdc
@@ -100,7 +101,7 @@ fun chi_hni_downstream_request(raw_request,
   downstream_request.snp_attr_or_do_dwt <== Bool(#false)
   downstream_request.mem_attr <== request.mem_attr
   downstream_request.pcrd_type <== bits(0, 4)
-  downstream_request.order <== bits(0, 2)
+  downstream_request.order <== CHIOrder.NoOrder
   downstream_request.allow_retry <== Bool(#false)
   downstream_request.likely_shared <== request.likely_shared
   downstream_request.pas <== request.pas
@@ -117,14 +118,13 @@ fun chi_hni_downstream_request(raw_request,
   downstream_request.qos <== request.qos
   downstream_request
 
-fun chi_hni_upstream_response(raw_response,
-                              requester_txn_id,
-                              requester_id,
-                              requester_qos,
-                              p :: CHIFlitParams,
+fun chi_hni_upstream_response(p :: CHIFlitParams,
+                              response :: CHIRspFlit(p),
+                              requester_txn_id :: Bits(12),
+                              requester_id :: Bits(p.node_id_width),
+                              requester_qos :: Bits(4),
                               home_node_id :: Nat,
-                              slot):
-  def response = cast(raw_response, CHIRspFlit(p))
+                              slot :: Hardware.bits):
   CHIRspFlit(p):
     cache_line_id: response.cache_line_id
     trace_tag: response.trace_tag
@@ -141,13 +141,12 @@ fun chi_hni_upstream_response(raw_response,
     tgt_id: requester_id
     qos: requester_qos
 
-fun chi_hni_downstream_write_data(raw_data,
-                                  requester_qos,
-                                  p :: CHIFlitParams,
+fun chi_hni_downstream_write_data(p :: CHIFlitParams,
+                                  data :: CHIDatFlit(p),
+                                  requester_qos :: Bits(4),
                                   home_node_id :: Nat,
                                   subordinate_node_id :: Nat,
-                                  subordinate_dbid):
-  def data = cast(raw_data, CHIDatFlit(p))
+                                  subordinate_dbid :: Bits(12)):
   wire downstream_data: CHIDatFlit(p)
   if p.poison_width > 0
   | downstream_data.poison <== data.poison
@@ -184,13 +183,12 @@ fun chi_hni_downstream_write_data(raw_data,
   downstream_data.qos <== requester_qos
   downstream_data
 
-fun chi_hni_upstream_read_data(raw_data,
-                               requester_return_txn_id,
-                               requester_data_target,
-                               requester_qos,
-                               p :: CHIFlitParams,
+fun chi_hni_upstream_read_data(p :: CHIFlitParams,
+                               data :: CHIDatFlit(p),
+                               requester_return_txn_id :: Bits(12),
+                               requester_data_target :: Bits(p.node_id_width),
+                               requester_qos :: Bits(4),
                                home_node_id :: Nat):
-  def data = cast(raw_data, CHIDatFlit(p))
   wire upstream_data: CHIDatFlit(p)
   if p.poison_width > 0
   | upstream_data.poison <== data.poison
@@ -227,81 +225,72 @@ fun chi_hni_upstream_read_data(raw_data,
   upstream_data.qos <== requester_qos
   upstream_data
 
-fun opcodes_use_only(opcodes, allowed):
-  for all (opcode in opcodes):
-    allowed.contains(opcode)
+fun chi_initial_requester_capabilities(emitted :: CHIChannelCapabilities,
+                                       received :: CHIChannelCapabilities):
+  def allowed_emitted = CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  )
+  def allowed_received = CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  )
+  emitted.req.length() > 0 && allowed_emitted.contains_all(emitted) && allowed_received.contains_all(received)
 
-fun chi_initial_requester_capabilities(emitted, received):
-  emitted.req.length() > 0 && for all (condition in [
-    opcodes_use_only(emitted.req,
-                     [CHIReqOpcode.ReadNoSnp,
-                      CHIReqOpcode.WriteNoSnpFull,
-                      CHIReqOpcode.WriteNoSnpPtl]),
-    emitted.rsp.length() == 0,
-    emitted.snp.length() == 0,
-    opcodes_use_only(emitted.dat, [CHIDatOpcode.NonCopyBackWriteData]),
-    received.req.length() == 0,
-    opcodes_use_only(received.rsp, [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp]),
-    received.snp.length() == 0,
-    opcodes_use_only(received.dat, [CHIDatOpcode.CompData])
-  ]):
-    condition
+fun chi_initial_subordinate_capabilities(emitted :: CHIChannelCapabilities,
+                                         received :: CHIChannelCapabilities):
+  def allowed_emitted = CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  )
+  def allowed_received = CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  )
+  received.req.length() > 0 && allowed_emitted.contains_all(emitted) && allowed_received.contains_all(received)
 
-fun chi_initial_subordinate_capabilities(emitted, received):
-  received.req.length() > 0 && for all (condition in [
-    emitted.req.length() == 0,
-    opcodes_use_only(emitted.rsp, [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp]),
-    emitted.snp.length() == 0,
-    opcodes_use_only(emitted.dat, [CHIDatOpcode.CompData]),
-    opcodes_use_only(received.req,
-                     [CHIReqOpcode.ReadNoSnp,
-                      CHIReqOpcode.WriteNoSnpFull,
-                      CHIReqOpcode.WriteNoSnpPtl]),
-    received.rsp.length() == 0,
-    received.snp.length() == 0,
-    opcodes_use_only(received.dat, [CHIDatOpcode.NonCopyBackWriteData])
-  ]):
-    condition
-
-fun chi_initial_request_fields(multi_req,
-                               size,
-                               order,
-                               pcrd_type,
-                               exp_comp_ack,
-                               tag_op,
+fun chi_initial_request_fields(multi_req :: Bool,
+                               size :: CHITransferSize,
+                               order :: CHIOrder,
+                               pcrd_type :: Bits(4),
+                               exp_comp_ack :: Bool,
+                               tag_op :: CHITagOp,
                                p :: CHIFlitParams,
                                label_prefix :: String):
   assert(!multi_req, label_prefix ++ "_single_request")
   assert(chi_initial_single_flit_size(size, p),
          label_prefix ++ "_single_flit_size")
-  assert(order === bits(0, 2), label_prefix ++ "_order_none")
+  assert(order === CHIOrder.NoOrder, label_prefix ++ "_order_none")
   assert(pcrd_type === bits(0, 4), label_prefix ++ "_pcrd_type_zero")
   assert(!exp_comp_ack, label_prefix ++ "_no_comp_ack")
-  assert(tag_op === bits(0, 2), label_prefix ++ "_tag_op_invalid")
+  assert(tag_op === CHITagOp.Invalid, label_prefix ++ "_tag_op_invalid")
 
-fun chi_initial_data_fields(data_id, num_dat, replicate, label_prefix :: String):
+fun chi_initial_data_fields(data_id :: Bits(2),
+                            num_dat :: Bits(2),
+                            replicate :: Bool,
+                            label_prefix :: String):
   assert(data_id === bits(0, 2), label_prefix ++ "_data_id_zero")
   assert(num_dat === bits(0, 2), label_prefix ++ "_num_dat_zero")
   assert(!replicate, label_prefix ++ "_not_replicated")
 
-fun requester_transaction_monitor(tx_req_valid,
-                                  raw_req,
-                                  rx_rsp_valid,
-                                  raw_rsp,
-                                  tx_dat_valid,
-                                  raw_tx_dat,
-                                  rx_dat_valid,
-                                  raw_rx_dat,
-                                  p :: CHIFlitParams,
+fun requester_transaction_monitor(p :: CHIFlitParams,
                                   limit :: PosInt,
-                                  label_prefix :: String):
+                                  label_prefix :: String,
+                                  tx_req_valid :: Bool,
+                                  req :: CHIReqFlit(p),
+                                  rx_rsp_valid :: Bool,
+                                  rsp :: CHIRspFlit(p),
+                                  tx_dat_valid :: Bool,
+                                  tx_dat :: CHIDatFlit(p),
+                                  rx_dat_valid :: Bool,
+                                  rx_dat :: CHIDatFlit(p)):
   def empty = empty_chi_requester_transaction(p)
   def initial = vec(for List (_index in 0..limit): empty)
   reg entries(~init: initial)
-  def req = cast(raw_req, CHIReqFlit(p))
-  def rsp = cast(raw_rsp, CHIRspFlit(p))
-  def tx_dat = cast(raw_tx_dat, CHIDatFlit(p))
-  def rx_dat = cast(raw_rx_dat, CHIDatFlit(p))
   def req_opcode :: CHIReqOpcode = req.opcode
 
   def req_event = tx_req_valid & (req.opcode =/= CHIReqOpcode.ReqLCrdReturn)
@@ -351,7 +340,7 @@ fun requester_transaction_monitor(tx_req_valid,
     assert(req_opcode.supports_initial_transaction(),
            label_prefix ++ "_request_opcode_supported")
     chi_initial_request_fields(req.multi_req,
-                               req.size_or_num_req[0..3],
+                               chi_req_size(p, req),
                                req.order,
                                req.pcrd_type,
                                req.exp_comp_ack,
@@ -366,7 +355,8 @@ fun requester_transaction_monitor(tx_req_valid,
     when (rsp.opcode === CHIRspOpcode.DBIDResp):
       assert(dbid_response_match, label_prefix ++ "_dbid_response_has_write")
       assert(rsp.resp === bits(0, 3), label_prefix ++ "_dbid_response_resp_zero")
-      assert(rsp.resp_err === bits(0, 2), label_prefix ++ "_dbid_response_ok")
+      assert(rsp.resp_err === CHIRespErr.OK,
+             label_prefix ++ "_dbid_response_ok")
       def duplicate_dbid = or_reduce(
         for List (index in 0..limit):
           is_one_of(entries[index].phase,
@@ -379,7 +369,8 @@ fun requester_transaction_monitor(tx_req_valid,
     when (rsp.opcode === CHIRspOpcode.Comp):
       assert(write_completion_match, label_prefix ++ "_completion_has_write_data")
       assert(rsp.resp === bits(0, 3), label_prefix ++ "_completion_resp_zero")
-      assert(rsp.resp_err === bits(0, 2), label_prefix ++ "_completion_ok")
+      assert(rsp.resp_err === CHIRespErr.OK,
+             label_prefix ++ "_completion_ok")
   when tx_dat_event:
     assert(tx_dat.opcode === CHIDatOpcode.NonCopyBackWriteData,
            label_prefix ++ "_write_data_opcode_supported")
@@ -393,7 +384,8 @@ fun requester_transaction_monitor(tx_req_valid,
            label_prefix ++ "_read_data_opcode_supported")
     assert(read_completion_match, label_prefix ++ "_read_data_has_request")
     assert(rx_dat.resp === bits(0, 3), label_prefix ++ "_read_data_resp_zero")
-    assert(rx_dat.resp_err === bits(0, 2), label_prefix ++ "_read_data_ok")
+    assert(rx_dat.resp_err === CHIRespErr.OK,
+           label_prefix ++ "_read_data_ok")
     chi_initial_data_fields(rx_dat.data_id,
                             rx_dat.num_dat,
                             rx_dat.replicate,
@@ -455,24 +447,20 @@ fun requester_transaction_monitor(tx_req_valid,
   )
   entries <== next_entries
 
-fun subordinate_transaction_monitor(rx_req_valid,
-                                    raw_req,
-                                    tx_rsp_valid,
-                                    raw_rsp,
-                                    rx_dat_valid,
-                                    raw_rx_dat,
-                                    tx_dat_valid,
-                                    raw_tx_dat,
-                                    p :: CHIFlitParams,
+fun subordinate_transaction_monitor(p :: CHIFlitParams,
                                     limit :: PosInt,
-                                    label_prefix :: String):
+                                    label_prefix :: String,
+                                    rx_req_valid :: Bool,
+                                    req :: CHIReqFlit(p),
+                                    tx_rsp_valid :: Bool,
+                                    rsp :: CHIRspFlit(p),
+                                    rx_dat_valid :: Bool,
+                                    rx_dat :: CHIDatFlit(p),
+                                    tx_dat_valid :: Bool,
+                                    tx_dat :: CHIDatFlit(p)):
   def empty = empty_chi_subordinate_transaction(p)
   def initial = vec(for List (_index in 0..limit): empty)
   reg entries(~init: initial)
-  def req = cast(raw_req, CHIReqFlit(p))
-  def rsp = cast(raw_rsp, CHIRspFlit(p))
-  def rx_dat = cast(raw_rx_dat, CHIDatFlit(p))
-  def tx_dat = cast(raw_tx_dat, CHIDatFlit(p))
   def req_opcode :: CHIReqOpcode = req.opcode
 
   def req_event = rx_req_valid & (req.opcode =/= CHIReqOpcode.ReqLCrdReturn)
@@ -522,7 +510,7 @@ fun subordinate_transaction_monitor(rx_req_valid,
     assert(req_opcode.supports_initial_transaction(),
            label_prefix ++ "_request_opcode_supported")
     chi_initial_request_fields(req.multi_req,
-                               req.size_or_num_req[0..3],
+                               chi_req_size(p, req),
                                req.order,
                                req.pcrd_type,
                                req.exp_comp_ack,
@@ -539,7 +527,8 @@ fun subordinate_transaction_monitor(rx_req_valid,
     when (rsp.opcode === CHIRspOpcode.DBIDResp):
       assert(dbid_response_match, label_prefix ++ "_dbid_response_has_write")
       assert(rsp.resp === bits(0, 3), label_prefix ++ "_dbid_response_resp_zero")
-      assert(rsp.resp_err === bits(0, 2), label_prefix ++ "_dbid_response_ok")
+      assert(rsp.resp_err === CHIRespErr.OK,
+             label_prefix ++ "_dbid_response_ok")
       def duplicate_dbid = or_reduce(
         for List (index in 0..limit):
           is_one_of(entries[index].phase,
@@ -552,7 +541,8 @@ fun subordinate_transaction_monitor(rx_req_valid,
     when (rsp.opcode === CHIRspOpcode.Comp):
       assert(write_completion_match, label_prefix ++ "_completion_has_write_data")
       assert(rsp.resp === bits(0, 3), label_prefix ++ "_completion_resp_zero")
-      assert(rsp.resp_err === bits(0, 2), label_prefix ++ "_completion_ok")
+      assert(rsp.resp_err === CHIRespErr.OK,
+             label_prefix ++ "_completion_ok")
   when rx_dat_event:
     assert(rx_dat.opcode === CHIDatOpcode.NonCopyBackWriteData,
            label_prefix ++ "_write_data_opcode_supported")
@@ -566,7 +556,8 @@ fun subordinate_transaction_monitor(rx_req_valid,
            label_prefix ++ "_read_data_opcode_supported")
     assert(read_completion_match, label_prefix ++ "_read_data_has_request")
     assert(tx_dat.resp === bits(0, 3), label_prefix ++ "_read_data_resp_zero")
-    assert(tx_dat.resp_err === bits(0, 2), label_prefix ++ "_read_data_ok")
+    assert(tx_dat.resp_err === CHIRespErr.OK,
+           label_prefix ++ "_read_data_ok")
     chi_initial_data_fields(tx_dat.data_id,
                             tx_dat.num_dat,
                             tx_dat.replicate,
@@ -638,38 +629,30 @@ fun subordinate_transaction_monitor(rx_req_valid,
 
 // Verifies the one-for-one ID and payload translation performed by an initial
 // HN-I between already-buffered ready-valid flows on its RN and SN sides.
-fun home_transaction_monitor(upstream_request_event,
-                             raw_upstream_request,
-                             downstream_request_event,
-                             raw_downstream_request,
-                             downstream_response_event,
-                             raw_downstream_response,
-                             upstream_response_event,
-                             raw_upstream_response,
-                             upstream_write_data_event,
-                             raw_upstream_write_data,
-                             downstream_write_data_event,
-                             raw_downstream_write_data,
-                             downstream_read_data_event,
-                             raw_downstream_read_data,
-                             upstream_read_data_event,
-                             raw_upstream_read_data,
-                             p :: CHIFlitParams,
+fun home_transaction_monitor(p :: CHIFlitParams,
                              home_node_id :: Nat,
                              subordinate_node_id :: Nat,
                              limit :: PosInt,
-                             label_prefix :: String):
+                             label_prefix :: String,
+                             upstream_request_event :: Bool,
+                             upstream_request :: CHIReqFlit(p),
+                             downstream_request_event :: Bool,
+                             downstream_request :: CHIReqFlit(p),
+                             downstream_response_event :: Bool,
+                             downstream_response :: CHIRspFlit(p),
+                             upstream_response_event :: Bool,
+                             upstream_response :: CHIRspFlit(p),
+                             upstream_write_data_event :: Bool,
+                             upstream_write_data :: CHIDatFlit(p),
+                             downstream_write_data_event :: Bool,
+                             downstream_write_data :: CHIDatFlit(p),
+                             downstream_read_data_event :: Bool,
+                             downstream_read_data :: CHIDatFlit(p),
+                             upstream_read_data_event :: Bool,
+                             upstream_read_data :: CHIDatFlit(p)):
   def empty = empty_chi_home_transaction(p)
   def initial = vec(for List (_index in 0..limit): empty)
   reg entries(~init: initial)
-  def upstream_request = cast(raw_upstream_request, CHIReqFlit(p))
-  def downstream_request = cast(raw_downstream_request, CHIReqFlit(p))
-  def downstream_response = cast(raw_downstream_response, CHIRspFlit(p))
-  def upstream_response = cast(raw_upstream_response, CHIRspFlit(p))
-  def upstream_write_data = cast(raw_upstream_write_data, CHIDatFlit(p))
-  def downstream_write_data = cast(raw_downstream_write_data, CHIDatFlit(p))
-  def downstream_read_data = cast(raw_downstream_read_data, CHIDatFlit(p))
-  def upstream_read_data = cast(raw_upstream_read_data, CHIDatFlit(p))
   def upstream_request_opcode :: CHIReqOpcode = upstream_request.opcode
   def slot_width = index_width(limit)
   def request_slot = downstream_request.txn_id[0..slot_width]
@@ -700,7 +683,7 @@ fun home_transaction_monitor(upstream_request_event,
            label_prefix ++ "_request_slot_free")
     assert(!duplicate_request, label_prefix ++ "_request_txn_id_unique")
     chi_initial_request_fields(upstream_request.multi_req,
-                               upstream_request.size_or_num_req[0..3],
+                               chi_req_size(p, upstream_request),
                                upstream_request.order,
                                upstream_request.pcrd_type,
                                upstream_request.exp_comp_ack,
@@ -737,7 +720,7 @@ fun home_transaction_monitor(upstream_request_event,
            label_prefix ++ "_response_opcode")
     assert(downstream_response.resp === bits(0, 3),
            label_prefix ++ "_response_resp_zero")
-    assert(downstream_response.resp_err === bits(0, 2),
+    assert(downstream_response.resp_err === CHIRespErr.OK,
            label_prefix ++ "_response_ok")
     when response_dbid:
       assert(response_entry.phase === CHIInitialTransactionPhase.WriteAwaitDBID,
@@ -791,7 +774,7 @@ fun home_transaction_monitor(upstream_request_event,
            label_prefix ++ "_read_data_has_request")
     assert(downstream_read_data.resp === bits(0, 3),
            label_prefix ++ "_read_data_resp_zero")
-    assert(downstream_read_data.resp_err === bits(0, 2),
+    assert(downstream_read_data.resp_err === CHIRespErr.OK,
            label_prefix ++ "_read_data_ok")
     chi_initial_data_fields(downstream_read_data.data_id,
                             downstream_read_data.num_dat,

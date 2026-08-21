@@ -6,8 +6,24 @@ import:
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
 
-// This is the common non-snoop RN channel set. A future coherent refinement
-// can add SNP without forcing an unused channel onto RN-I implementations.
+// RN-I has no SNP channel; every other requester channel remains ready-valid.
+interface CHIRNIDecoupled(p :: CHIFlitParams):
+  role icn
+  role node
+  provider node
+
+  node -> icn:
+    requests: Decoupled(CHIReqFlit(p))
+    requester_responses: Decoupled(CHIRspFlit(p))
+    request_data: Decoupled(CHIDatFlit(p))
+
+  icn -> node:
+    responses: Decoupled(CHIRspFlit(p))
+    response_data: Decoupled(CHIDatFlit(p))
+
+// RN-F and RN-D use the requester channels plus the ICN-to-node SNP channel.
+// The common members are repeated because parameterized interface refinements
+// cannot currently pass their parameter to the parent specialization.
 interface CHIRNDecoupled(p :: CHIFlitParams):
   role icn
   role node
@@ -21,6 +37,7 @@ interface CHIRNDecoupled(p :: CHIFlitParams):
   icn -> node:
     responses: Decoupled(CHIRspFlit(p))
     response_data: Decoupled(CHIDatFlit(p))
+    snoops: Decoupled(CHISnpFlit(p))
 
 // SN-F and SN-I share this channel shape; their kind and capabilities remain
 // static endpoint metadata rather than changing the ready-valid wires.
@@ -37,8 +54,18 @@ interface CHISNDecoupled(p :: CHIFlitParams):
     requests: Decoupled(CHIReqFlit(p))
     request_data: Decoupled(CHIDatFlit(p))
 
-// A Home represents the ICN role of one requester-side and one
-// subordinate-side endpoint. The fabric role represents both attached nodes.
+// HN-I connects one non-snooping requester side to one subordinate side.
+interface CHIHNIDecoupled(p :: CHIFlitParams):
+  role home
+  role fabric
+  provider home
+
+  home -> fabric:
+    requester: CHIRNIDecoupled(p)
+    subordinate: CHISNDecoupled(p)
+
+// A snoop-capable Home has the same subordinate side and the full RN channel
+// shape on its requester side.
 interface CHIHNDecoupled(p :: CHIFlitParams):
   role home
   role fabric
@@ -49,6 +76,8 @@ interface CHIHNDecoupled(p :: CHIFlitParams):
     subordinate: CHISNDecoupled(p)
 
 export:
+  CHIRNIDecoupled
   CHIRNDecoupled
   CHISNDecoupled
+  CHIHNIDecoupled
   CHIHNDecoupled

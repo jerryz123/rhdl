@@ -420,7 +420,8 @@ fun interface_type_same_specialization(left, right):
 
 fun interface_type_has_compatibility_difference(left, right):
   left is_a InterfaceType && right is_a InterfaceType && left.identity === right.identity && (
-    (left.connection_compatibility && left.specialization_arguments != right.specialization_arguments) || (
+    (left.connection_compatibility && !kernel.circuit_params_same(left.specialization_arguments,
+                                                                  right.specialization_arguments)) || (
       for any (left_member in left.members, right_member in right.members):
         left_member.type is_a InterfaceType && right_member.type is_a InterfaceType && interface_type_has_compatibility_difference(left_member.type, right_member.type)
     ) || (
@@ -1242,13 +1243,38 @@ fun compatible_interface_connection_pairs(left, right, extra_values, extra_field
     pairs := pairs ++ explicit_member_connection_pairs(richer, binding[0], binding[1])
   pairs
 
+// Equal declared roles identify two hierarchical views of one endpoint when
+// boundary reconstruction makes their represented roles complementary. Such
+// forwarding preserves one exact contract and must not apply peer legality.
+fun same_role_interface_forwarding(left :: InterfaceEndpoint,
+                                   right :: InterfaceEndpoint):
+  left.role == right.role && left.represented_role != right.represented_role && (
+    left.type.identity === right.type.identity
+  )
+
+fun forwarded_interface_connection_pairs(left,
+                                         right,
+                                         extra_values,
+                                         extra_fields):
+  unless interface_type_same_specialization(left.type, right.type)
+  | error(~who: #'connect_interfaces,
+          "hierarchy forwarding requires the exact interface specialization")
+  unless extra_values.length() == 0 && extra_fields.length() == 0
+  | error(~who: #'connect_interfaces,
+          "hierarchy forwarding cannot supply refinement members")
+  exact_interface_connection_pairs(left, right)
+
 fun interface_connection_pairs(left :: InterfaceEndpoint,
                                right :: InterfaceEndpoint,
                                extra_values = [],
                                extra_fields = {}):
-  if interface_type_same_specialization(left.type, right.type) && !interface_type_has_connection_policy(left.type) && !interface_type_has_connection_policy(right.type) && extra_values.length() == 0 && extra_fields.length() == 0
-  | exact_interface_connection_pairs(left, right)
-  | compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
+  cond
+  | same_role_interface_forwarding(left, right):
+      forwarded_interface_connection_pairs(left, right, extra_values, extra_fields)
+  | interface_type_same_specialization(left.type, right.type) && !interface_type_has_connection_policy(left.type) && !interface_type_has_connection_policy(right.type) && extra_values.length() == 0 && extra_fields.length() == 0:
+      exact_interface_connection_pairs(left, right)
+  | ~else:
+      compatible_interface_connection_pairs(left, right, extra_values, extra_fields)
 
 fun endpoint_shape_connection_pairs(left, right):
   cond

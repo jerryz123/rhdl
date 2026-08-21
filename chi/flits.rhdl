@@ -4,6 +4,50 @@
 import:
   lib("chi/params.rhdl") open
 
+// Closed non-opcode fields use nominal types so authoring mistakes are caught
+// without changing their specified packed encodings.
+hardware_enum CHITagOp(~width: 2):
+  Invalid = 0
+  Transfer = 1
+  Update = 2
+  MatchOrFetch = 3
+
+hardware_enum CHIOrder(~width: 2):
+  NoOrder = 0
+  RequestAccepted = 1
+  RequestOrder = 2
+  EndpointOrder = 3
+
+hardware_enum CHIPAS(~width: 3):
+  Secure = 0
+  NonSecure = 1
+  Root = 2
+  Realm = 3
+  SystemAgent = 4
+  NonSecureProtected = 5
+
+hardware_enum CHIRespErr(~width: 2):
+  OK = 0
+  EXOK = 1
+  DERR = 2
+  NDERR = 3
+
+hardware_enum CHITransferSize(~width: 3):
+  Bytes1 = 0
+  Bytes2 = 1
+  Bytes4 = 2
+  Bytes8 = 3
+  Bytes16 = 4
+  Bytes32 = 5
+  Bytes64 = 6
+
+// MemAttr[3:0] is Allocate, Cacheable, Device, Early Write Acknowledge.
+bundle CHIMemAttr():
+  allocate: Bool
+  cacheable: Bool
+  device: Bool
+  early_write_acknowledge: Bool
+
 // Opcode encodings are from Issue H Tables B13.12 through B13.16.
 hardware_enum CHIReqOpcode(~width: 7):
   ReqLCrdReturn = 0x00
@@ -174,6 +218,9 @@ hardware_enum CHIRspOpcode(~width: 5):
               CHIRspOpcode.DBIDResp,
               CHIRspOpcode.DBIDRespOrd)
 
+  method is_snoop_response(opcode) :: Bool:
+    is_one_of(opcode, CHIRspOpcode.SnpResp, CHIRspOpcode.SnpRespFwded)
+
 hardware_enum CHISnpOpcode(~width: 5):
   SnpLCrdReturn = 0x00
   SnpShared = 0x01
@@ -197,6 +244,25 @@ hardware_enum CHISnpOpcode(~width: 5):
   SnpPreferUnique = 0x15
   SnpPreferUniqueFwd = 0x16
   SnpUniqueFwd = 0x17
+
+  method is_forward(opcode) :: Bool:
+    is_one_of(opcode,
+              CHISnpOpcode.SnpSharedFwd,
+              CHISnpOpcode.SnpCleanFwd,
+              CHISnpOpcode.SnpOnceFwd,
+              CHISnpOpcode.SnpNotSharedDirtyFwd,
+              CHISnpOpcode.SnpPreferUniqueFwd,
+              CHISnpOpcode.SnpUniqueFwd)
+
+  method is_stash(opcode) :: Bool:
+    is_one_of(opcode,
+              CHISnpOpcode.SnpUniqueStash,
+              CHISnpOpcode.SnpMakeInvalidStash,
+              CHISnpOpcode.SnpStashUnique,
+              CHISnpOpcode.SnpStashShared)
+
+  method is_dvm(opcode) :: Bool:
+    opcode === CHISnpOpcode.SnpDVMOp
 
 hardware_enum CHIDatOpcode(~width: 4):
   DataLCrdReturn = 0x0
@@ -225,6 +291,12 @@ hardware_enum CHIDatOpcode(~width: 4):
               CHIDatOpcode.SnpRespDataFwded,
               CHIDatOpcode.DataSepResp)
 
+  method is_snoop_response(opcode) :: Bool:
+    is_one_of(opcode,
+              CHIDatOpcode.SnpRespData,
+              CHIDatOpcode.SnpRespDataPtl,
+              CHIDatOpcode.SnpRespDataFwded)
+
 // Record fields are listed from the most-significant field to the
 // least-significant field so QoS occupies bits [3:0], as required by B13.9.
 bundle CHIReqFlit(p :: CHIFlitParams):
@@ -239,17 +311,17 @@ bundle CHIReqFlit(p :: CHIFlitParams):
   if p.mpam_width > 0:
     mpam: Bits(p.mpam_width)
   trace_tag: Bool
-  tag_op: Bits(2)
+  tag_op: CHITagOp
   exp_comp_ack: Bool
   excl_snoop_me_cah: Bool
   group_id_or_lpid: Bits(8)
   snp_attr_or_do_dwt: Bool
-  mem_attr: Bits(4)
+  mem_attr: CHIMemAttr()
   pcrd_type: Bits(4)
-  order: Bits(2)
+  order: CHIOrder
   allow_retry: Bool
   likely_shared: Bool
-  pas: Bits(3)
+  pas: CHIPAS
   address: Bits(p.request_address_width)
   size_or_num_req: Bits(6)
   multi_req: Bool
@@ -265,13 +337,13 @@ bundle CHIReqFlit(p :: CHIFlitParams):
 bundle CHIRspFlit(p :: CHIFlitParams):
   cache_line_id: Bits(6)
   trace_tag: Bool
-  tag_op: Bits(2)
+  tag_op: CHITagOp
   pcrd_type: Bits(4)
   dbid_or_group_id: Bits(12)
   c_busy: Bits(3)
   fwd_state_or_data_pull: Bits(3)
   resp: Bits(3)
-  resp_err: Bits(2)
+  resp_err: CHIRespErr
   opcode: CHIRspOpcode
   txn_id: Bits(12)
   src_id: Bits(p.node_id_width)
@@ -286,7 +358,7 @@ bundle CHISnpFlit(p :: CHIFlitParams):
   trace_tag: Bool
   ret_to_src: Bool
   do_not_go_to_sd: Bool
-  pas: Bits(3)
+  pas: CHIPAS
   address: Bits(p.snoop_address_width)
   opcode: CHISnpOpcode
   fwd_txn_id_or_stash_lpid_or_vmid_ext: Bits(12)
@@ -310,7 +382,7 @@ bundle CHIDatFlit(p :: CHIFlitParams):
   trace_tag: Bool
   tag_update: Bits(p.tag_update_width)
   tag: Bits(p.tag_width)
-  tag_op: Bits(2)
+  tag_op: CHITagOp
   cache_line_id: Bits(6)
   data_id: Bits(2)
   ccid: Bits(2)
@@ -319,7 +391,7 @@ bundle CHIDatFlit(p :: CHIFlitParams):
   data_pull: Bool
   data_source_or_fwd_state: Bits(8)
   resp: Bits(3)
-  resp_err: Bits(2)
+  resp_err: CHIRespErr
   opcode: CHIDatOpcode
   home_nid_or_pbha_or_mismatched_mecid: Bits(p.node_id_width)
   txn_id: Bits(12)
@@ -328,6 +400,12 @@ bundle CHIDatFlit(p :: CHIFlitParams):
   qos: Bits(4)
 
 export:
+  CHITagOp
+  CHIOrder
+  CHIPAS
+  CHIRespErr
+  CHITransferSize
+  CHIMemAttr
   CHIReqOpcode
   CHIRspOpcode
   CHISnpOpcode

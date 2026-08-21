@@ -20,7 +20,7 @@ make -C sim/fesvr test
 
 ```text
 FesvrRequester
-  port:  CHIRNDecoupled node
+  port:  CHIRNIDecoupled node
   start: Irrevocable(Bits(32)) producer
   exit:  Bits(32)
 ```

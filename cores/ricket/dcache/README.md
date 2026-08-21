@@ -11,9 +11,11 @@ XLEN-wide normalized load value and echoes the request's five-bit completion
 tag; store response data and tag have no meaning. The pipeline uses the tag to
 clear the destination scoreboard entry when a delayed load returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
-`XLen.X64`; its core-facing addresses use the selected XLEN while its native
-RN-F port uses the configured CHI address width. Its 128-bit DAT width is CHI's
+load/store lane generation. Its CHI boundary is a ready-valid
+`CHIRNDecoupled` endpoint; the enclosing system owns physical link credits and
+activation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or `XLen.X64`; its
+core-facing addresses use the selected XLEN while its RN-F endpoint uses the
+configured CHI address width. Its 128-bit DAT width is CHI's
 minimum, so a 32-byte cache line is assembled from two physical DAT packets.
 The responder also exposes a combinational `drained` observation. It is true
 only when no request is accepted that cycle and no lookup, refill, or coherent

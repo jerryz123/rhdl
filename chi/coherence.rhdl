@@ -14,11 +14,37 @@ hardware_enum CHICacheState(~width: 3):
   UniqueCleanEmpty = 5
   UniqueDirtyPartial = 6
 
+  method is_valid(state) :: Bool:
+    state =/= CHICacheState.Invalid
+
+  method is_dirty(state) :: Bool:
+    is_one_of(state,
+              CHICacheState.SharedDirty,
+              CHICacheState.UniqueDirty,
+              CHICacheState.UniqueDirtyPartial)
+
+  method is_shared(state) :: Bool:
+    is_one_of(state, CHICacheState.SharedClean, CHICacheState.SharedDirty)
+
+  method is_unique(state) :: Bool:
+    is_one_of(state,
+              CHICacheState.UniqueClean,
+              CHICacheState.UniqueDirty,
+              CHICacheState.UniqueCleanEmpty,
+              CHICacheState.UniqueDirtyPartial)
+
 hardware_enum CHIResponseState(~width: 2):
   Invalid = 0
   SharedClean = 1
   Unique = 2
   SharedDirty = 3
+
+// Resp is opcode-dependent on the wire. Coherent response contexts explicitly
+// reinterpret its packed bits through this view instead of adding CHI methods
+// to the generic Bits type.
+bundle CHICoherentResponse():
+  pass_dirty: Bool
+  state: CHIResponseState
 
 // Every ordinary SNP opcode is mandatory at an RN-F endpoint. Link Credit
 // Return remains an activation-control flit and is accepted independently.
@@ -46,75 +72,8 @@ def chi_rnf_snoop_opcodes = [
   CHISnpOpcode.SnpUniqueFwd
 ]
 
-fun chi_cache_state_valid(state :: CHICacheState) :~ Bool:
-  state =/= CHICacheState.Invalid
-
-fun chi_cache_state_dirty(state :: CHICacheState) :~ Bool:
-  is_one_of(state,
-            CHICacheState.SharedDirty,
-            CHICacheState.UniqueDirty,
-            CHICacheState.UniqueDirtyPartial)
-
-fun chi_cache_state_shared(state :: CHICacheState) :~ Bool:
-  is_one_of(state,
-            CHICacheState.SharedClean,
-            CHICacheState.SharedDirty)
-
-fun chi_cache_state_unique(state :: CHICacheState) :~ Bool:
-  is_one_of(state,
-            CHICacheState.UniqueClean,
-            CHICacheState.UniqueDirty,
-            CHICacheState.UniqueCleanEmpty,
-            CHICacheState.UniqueDirtyPartial)
-
-fun chi_response_state(resp :: Bits(3)) :~ CHIResponseState:
-  cast(resp[0..2], CHIResponseState)
-
-fun chi_response_pass_dirty(resp :: Bits(3)) :~ Bool:
-  cast(resp[2], Bool)
-
-fun chi_snp_is_forward(opcode :: CHISnpOpcode) :~ Bool:
-  is_one_of(opcode,
-            CHISnpOpcode.SnpSharedFwd,
-            CHISnpOpcode.SnpCleanFwd,
-            CHISnpOpcode.SnpOnceFwd,
-            CHISnpOpcode.SnpNotSharedDirtyFwd,
-            CHISnpOpcode.SnpPreferUniqueFwd,
-            CHISnpOpcode.SnpUniqueFwd)
-
-fun chi_snp_is_stash(opcode :: CHISnpOpcode) :~ Bool:
-  is_one_of(opcode,
-            CHISnpOpcode.SnpUniqueStash,
-            CHISnpOpcode.SnpMakeInvalidStash,
-            CHISnpOpcode.SnpStashUnique,
-            CHISnpOpcode.SnpStashShared)
-
-fun chi_snp_is_dvm(opcode :: CHISnpOpcode) :~ Bool:
-  opcode === CHISnpOpcode.SnpDVMOp
-
-fun chi_rsp_is_snoop_response(opcode :: CHIRspOpcode) :~ Bool:
-  is_one_of(opcode,
-            CHIRspOpcode.SnpResp,
-            CHIRspOpcode.SnpRespFwded)
-
-fun chi_dat_is_snoop_response(opcode :: CHIDatOpcode) :~ Bool:
-  is_one_of(opcode,
-            CHIDatOpcode.SnpRespData,
-            CHIDatOpcode.SnpRespDataPtl,
-            CHIDatOpcode.SnpRespDataFwded)
-
 export:
   CHICacheState
   CHIResponseState
+  CHICoherentResponse
   chi_rnf_snoop_opcodes
-  chi_cache_state_valid
-  chi_cache_state_dirty
-  chi_cache_state_shared
-  chi_cache_state_unique
-  chi_response_state
-  chi_response_pass_dirty
-  chi_snp_is_forward
-  chi_snp_is_stash
-  chi_snp_is_dvm
-  chi_rsp_is_snoop_response
-  chi_dat_is_snoop_response

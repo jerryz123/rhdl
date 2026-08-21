@@ -1,5 +1,5 @@
 #lang rhdl
-// Composes the Ricket core with private pipelined-hit L1 instruction and data caches.
+// Composes Ricket's core and ready-valid L1 caches with external credited CHI links.
 
 import:
   "core-flow.rhdl" open
@@ -26,12 +26,20 @@ sync_circuit Ricket(xlen :: XLen,
   inst core(RicketCore(xlen))
   inst l1i(RicketL1ICache(xlen, cache_sets, line_bytes, ~chi: checked))
   inst l1d(RicketL1DCache(xlen, cache_sets, line_bytes, ~chi: checked))
+  inst instruction_link_adapter(CHIRNFlowAdapter(checked.instruction_link, checked.instruction_node))
+  inst data_link_adapter(CHIRNFlowAdapter(checked.data_link, checked.data_node, ~transaction_checks: #false))
 
   start |> core.start
   core.instruction_access |> l1i.core
   core.data_access |> l1d.core
-  forward_chi_rn_node_port(imem, l1i.chi)
-  forward_chi_rn_node_port(dmem, l1d.chi)
+  l1i.chi <=> instruction_link_adapter.decoupled
+  l1d.chi <=> data_link_adapter.decoupled
+  imem <=> instruction_link_adapter.port
+  dmem <=> data_link_adapter.port
+  instruction_link_adapter.transmit_enable <== Bool(#true)
+  instruction_link_adapter.receive_enable <== Bool(#true)
+  data_link_adapter.transmit_enable <== Bool(#true)
+  data_link_adapter.receive_enable <== Bool(#true)
   fault <== core.fault
 
 export:

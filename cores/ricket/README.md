@@ -28,8 +28,9 @@ ricket.rhdl                         composition selects core-flow.rhdl
 
 `RicketCore` speaks only Ricket's semantic instruction and data access
 protocols. Cache modules own line lookup, refill, CHI transactions, snoop
-serialization, byte masks, and load/store lane generation. The wrapper
-composes the core and caches into two native RN-F links.
+serialization, byte masks, and load/store lane generation over ready-valid
+`CHIRNDecoupled` endpoints. The wrapper owns the transport boundary: it adapts
+those semantic endpoints into the two externally visible credited RN-F links.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
