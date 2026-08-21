@@ -52,6 +52,30 @@ def decode_circt = emit_circt(decode_fixture.design)
 def signed_circt = emit_circt(signed_fixture.design)
 def one_hot_circt = emit_circt(one_hot_fixture.design)
 
+// Backend-owned decode names must depend on module structure, not IDs consumed
+// elsewhere in the design before the module is built.
+fun stable_decode_circt(consumed_ids):
+  def design = Design()
+  for (_index in 0..consumed_ids):
+    design.fresh_id()
+  def builder = Builder(design)
+  def module_def = builder.module("StableDecode")
+  def selector = builder.input(module_def, "selector", Bits(1))
+  def output = builder.output(module_def, "result", Bits(1))
+  def decoded = builder.decode(module_def,
+                               selector,
+                               Bits(1),
+                               Bits(1),
+                               [[1, 1, 1, 1]],
+                               0,
+                               1)
+  builder.drive(output, decoded)
+  builder.finish(module_def)
+  emit_circt(design)
+
+def early_decode_circt = stable_decode_circt(0)
+def late_decode_circt = stable_decode_circt(100)
+
 // A direct two-port write set makes the collision-undefined symmetric merge
 // visible without relying on a larger frontend fixture's incidental logic.
 def write_set_design = Design()
@@ -167,6 +191,8 @@ check:
   decode_circt.contains("comb.icmp eq") ~is #false
   decode_circt.contains("comb.mux") ~is #false
   decode_circt.contains("hw.bitcast") ~is #true
+  early_decode_circt.contains("%__rhdl_decode_2_result = sv.logic") ~is #true
+  late_decode_circt.contains("%__rhdl_decode_2_result = sv.logic") ~is #true
   signed_circt.contains("comb.add %a, %b : i8") ~is #true
   signed_circt.contains("comb.icmp slt %a, %b : i8") ~is #true
   signed_circt.contains("comb.shrs %a") ~is #true

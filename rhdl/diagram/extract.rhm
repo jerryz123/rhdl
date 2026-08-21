@@ -227,44 +227,58 @@ fun append_unique_terminals(left, right):
 
 // Walks backward through unrepresented combinational logic, but stops as soon
 // as it reaches a block output so abstraction boundaries never gain shortcuts.
-fun value_source_terminals(value :: Value, outputs, seen = []):
-  def matching = outputs.filter(
-    ~keep: fun (terminal): terminal_produces(terminal, value)
-  )
-  if matching.length() > 0
-  | matching
-  | if value.id in seen
-    | []
-    | block:
-        def operation = value.module_def.find_operation(value.defining_op_id)
-        if !operation
-        | []
-        | if operation.opcode == "rtl.wire"
+fun value_source_terminals(value :: Value,
+                           outputs,
+                           source_cache,
+                           visiting = []):
+  def cached = source_cache.get(value.id, #false)
+  if cached != #false
+  | cached
+  | block:
+      def matching = outputs.filter(
+        ~keep: fun (terminal): terminal_produces(terminal, value)
+      )
+      def sources:
+        if matching.length() > 0
+        | matching
+        | if value.id in visiting
+          | []
           | block:
-              def driver = operation.places[0].driver
-              if driver
-              | value_source_terminals(driver, outputs, seen ++ [value.id])
+              def operation = value.module_def.find_operation(value.defining_op_id)
+              if !operation
               | []
-          | if operation.opcode == "rtl.input_port" || operation.opcode == "rtl.instance" || operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset" || operation.opcode == "rtl.sync_memory"
-            | []
-            | block:
-                def mutable sources = []
-                for (operand in operation.operands):
-                  sources := append_unique_terminals(
-                    sources,
-                    value_source_terminals(operand,
-                                           outputs,
-                                           seen ++ [value.id])
-                  )
-                sources
+              | if operation.opcode == "rtl.wire"
+                | block:
+                    def driver = operation.places[0].driver
+                    if driver
+                    | value_source_terminals(driver,
+                                             outputs,
+                                             source_cache,
+                                             visiting ++ [value.id])
+                    | []
+                | if operation.opcode == "rtl.input_port" || operation.opcode == "rtl.instance" || operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset" || operation.opcode == "rtl.sync_memory"
+                  | []
+                  | block:
+                      def mutable operand_sources = []
+                      for (operand in operation.operands):
+                        operand_sources := append_unique_terminals(
+                          operand_sources,
+                          value_source_terminals(operand,
+                                                 outputs,
+                                                 source_cache,
+                                                 visiting ++ [value.id])
+                        )
+                      operand_sources
+      source_cache[value.id] := sources
+      sources
 
-fun destination_sources(destination :: DiagramTerminal, outputs):
+fun destination_sources(destination :: DiagramTerminal, outputs, source_cache):
   def mutable sources = []
   for (entity in destination.entities):
     when entity is_a Place && entity.driver
     | sources := append_unique_terminals(
         sources,
-        value_source_terminals(entity.driver, outputs)
+        value_source_terminals(entity.driver, outputs, source_cache)
       )
   sources
 
@@ -637,8 +651,9 @@ fun diagram_module(module_def :: Module):
                              connection.source.type.name)
             ]
 
+  def source_cache = MutableMap{}
   for (destination in inputs):
-    for (source in destination_sources(destination, outputs)):
+    for (source in destination_sources(destination, outputs, source_cache)):
       def already_connected = channels.find(
         fun (channel):
           channel.source_block == source.block_id && channel.destination_block == destination.block_id

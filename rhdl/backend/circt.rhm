@@ -145,6 +145,18 @@ fun value_ref(value):
     | "%" ++ value.name
     | "%__rhdl_value_" ++ to_string(value.id)
 
+// Backend-owned names are scoped to one emitted module. Use the operation's
+// module-local order so elaborating a child module cannot perturb visible RTL.
+fun operation_local_index(operation):
+  def mutable found = #false
+  for (candidate in operation.module_def.operations,
+       index in 0..operation.module_def.operations.length()):
+    when candidate === operation
+    | found := index
+  unless found != #false
+  | error(~who: #'emit_circt, "operation is not owned by its module")
+  found
+
 fun decode_bit_set(value, index):
   (value bits.and (1 << index)) != 0
 
@@ -177,7 +189,7 @@ fun emit_decode(operation):
   def cases = operation.attribute("cases")
   def input_width = selector.type.packed_width()
   def output_width = result.type.packed_width()
-  def operation_prefix = "%__rhdl_decode_" ++ to_string(operation.id)
+  def operation_prefix = "%__rhdl_decode_" ++ to_string(operation_local_index(operation))
   def selector_ref:
     if flat_data_type(selector.type)
     | value_ref(selector)

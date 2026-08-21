@@ -101,6 +101,7 @@ module chi_coherent_tb;
     tx_req_bits.txn_id = 12'h101;
     tx_req_bits.size_or_num_req = 6'h05;
     tx_req_bits.exp_comp_ack = 1'b1;
+    tx_req_bits.allow_retry = 1'b1;
     tick();
     clear_flits();
 
