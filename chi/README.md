@@ -15,10 +15,11 @@ The package currently implements the physical parameter and flit foundation,
 protocol and coherence classifiers, node capabilities, credited node-role
 links, link-local monitors, bounded initial non-coherent and RN-F transaction
 checking, separate requester-side and home-side SAM metadata, an initial HN-I
-bridge, and a non-coherent backing RAM. Its first NoC integration maps CHI
+bridge, a serialized clean-data HN-F manager, and a non-coherent backing RAM.
+Its first NoC integration maps CHI
 NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
-and DAT transports. SNP integration, coherent cache controllers, and HN-F
-remain planned below.
+SNP, and DAT transports. Multibeat subordinate memory and HN-F directory
+optimization remain planned below.
 
 ## Architectural boundary
 
@@ -238,8 +239,9 @@ data, change line state, arbitrate shared RSP/DAT producers, or implement
 coherent writes, evictions, separated read responses, or multibeat snoop data.
 It permits retry opcodes and retry-shaped request repetition, while the endpoint
 still owns RetryAck/PCrdGrant association. Those policies belong in an RN-F
-cache endpoint. HN-F directory, snoop generation, and completion aggregation
-are likewise outside this first step.
+cache endpoint. Directory-backed coherence remains outside this requester
+monitoring step; the initial serialized `CHIHNF` supplies broadcast
+invalidation and completion aggregation without a directory.
 
 ## Initial non-coherent transaction monitoring
 
@@ -277,7 +279,7 @@ zero Protocol Credit type, no completion acknowledge, and invalid `TagOp`.
 Control Link Credit Return flits remain link-local and do not allocate
 transaction state.
 
-## Non-coherent-first scope
+## Home and subordinate transaction engines
 
 [`ram.rhdl`](ram.rhdl) implements `CHIRam`, a finite backing-memory
 Subordinate transaction engine. Its `CHISNDecoupled` boundary groups the
@@ -301,6 +303,22 @@ credit state belong to the integrating system, so a NoC can connect channel
 transports directly without creating internal CHI links or credit loops. This
 is still a non-coherent Home Node, not yet a generated interconnect or coherent
 Home Node.
+
+[`coherent-home.rhdl`](coherent-home.rhdl) implements the initial `CHIHNF` for
+mixed RN-I and RN-F traffic. Its requester side is one NodeID-addressed
+ready-valid aggregate rather than one port per requester. Since SNP has no
+physical TgtID field, `CHISnoopDispatch` retains the selected RN-F NodeID beside
+the exact SNP payload until a fabric ejects it onto that requester's endpoint.
+The manager globally serializes transactions. It translates `ReadClean` into
+`ReadNoSnp`, returns every coherent refill as SharedClean, and waits for the
+requester's `CompAck` after the complete DataID set. Before translating any
+write to the subordinate profile, it sends `SnpMakeInvalid` to every RN-F
+except the writer and waits for each clean `SnpResp`. Excluding the writer is
+required because Ricket's blocking write engine cannot accept its own snoop
+while that write remains active. RN-I writes invalidate every RN-F. This
+broadcast policy needs no directory and is correct only for the implemented
+clean/write-through requester profile; dirty snoop data, concurrent
+transactions, retry, and directory optimization remain separate milestones.
 
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
@@ -419,9 +437,9 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, typed Size and NumReq views, Size checking, and DAT packetization |
 | [`coherence.rhdl`](coherence.rhdl) | Implemented cache/response states, coherent opcode families, and mandatory RN-F snoop capability set |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
-| [`decoupled.rhdl`](decoupled.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, SN, and HN-I contracts, alongside the full snoop-capable RN and HN shapes |
-| [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, and DAT channel results with derived route keys |
-| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations, without topology or router ownership |
+| [`decoupled.rhdl`](decoupled.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, SN, HN-I, and HN-F contracts; multi-requester HN snoops carry destination NodeID beside the exact target-less SNP flit until endpoint ejection |
+| [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, SNP, and DAT channel results with derived route keys; RN-I connections omit SNP while RN-F connections add it |
+| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations, without topology or router ownership |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
@@ -429,6 +447,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
+| [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean reads, conservative write invalidation, and non-snooping subordinate translation |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
@@ -470,12 +489,17 @@ turns an externally credited flit channel into a buffered internal flow.
    writes. Transaction engines expose ready-valid flows; a system adds credited
    link adapters only where its physical boundaries require them. Next, connect
    multiple ports through the generated crossbar and then add multibeat traffic.
-8. **Initial RN-F substrate complete:** Add RN-F node/ICN flow adapters,
+8. **Initial clean-data HN-F complete:** Add RN-F node/ICN flow adapters,
    mandatory snoop capability validation, cache/response classifiers, and
    bounded `ReadShared`/`ReadClean` plus snoop-response lifetime monitoring.
-   Ricket now provides the first clean-only RN-F cache endpoint over this
-   substrate. Next, add HN-F directory and snoop aggregation behavior. Optional
-   CHI features follow as independently verified vertical slices.
+   Ricket provides two clean-only RN-F cache endpoints over this substrate.
+   `CHIHNF` accepts aggregate traffic from mixed requester NodeIDs, returns
+   coherent reads as SharedClean, and serially invalidates every other RN-F
+   before forwarding a write to its non-snooping subordinate. It intentionally
+   has one global transaction slot and no directory because the current Ricket
+   caches never hold dirty data. Next, add the independently routed SNP plane
+   and multibeat subordinate support; a sharer directory is a later performance
+   optimization rather than a correctness prerequisite.
 
 Each milestone requires host elaboration tests, invalid-parameter and invalid
 connection tests, generated CIRCT verification, and a cycle-level Verilator
@@ -483,7 +507,7 @@ test of the supported transaction flows.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home' bash tests/backend/run-circt.sh`
+`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home chi-coherent-home' bash tests/backend/run-circt.sh`
 for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
 
 ## Specification references

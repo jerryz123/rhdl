@@ -1,0 +1,520 @@
+#lang rhdl
+// Implements a serialized clean-data HN-F manager for mixed RN-I and RN-F requesters.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/interconnect.rhdl").address_sets_match
+  lib("chi/params.rhdl") open
+  lib("chi/flits.rhdl") open
+  lib("chi/protocol.rhdl") open
+  lib("chi/coherence.rhdl") open
+  lib("chi/coherent-transaction.rhdl").coherent_read_data_ids
+  lib("chi/transaction.rhdl") open
+  lib("chi/link.rhdl") open
+  lib("chi/decoupled.rhdl") open
+  lib("chi/fabric.rhdl") open
+
+class CHIHNFParams(home :: CHIHomeParams,
+                   flit :: CHIFlitParams,
+                   requester_endpoints :: NonemptyList.of(CHIICNPortParams),
+                   subordinate_endpoint :: CHIICNPortParams,
+                   subordinate_service :: CHISubordinateServiceParams):
+  implements CircuitParam
+
+  property snoop_endpoints:
+    requester_endpoints.filter(
+      ~keep: fun (endpoint): endpoint.kind == CHINodeKind.RNF
+    )
+
+  constructor (home :: CHIHomeParams,
+               flit :: CHIFlitParams,
+               requester_endpoints :: NonemptyList.of(CHIICNPortParams),
+               subordinate_endpoint :: CHIICNPortParams,
+               subordinate_service :: CHISubordinateServiceParams):
+    unless home.kind == CHINodeKind.HNF
+    | error(~who: #'CHIHNFParams, "home kind must be HN-F")
+    unless home.max_outstanding == 1
+    | error(~who: #'CHIHNFParams,
+            "the serialized HN-F must allow exactly one outstanding transaction")
+    unless [CHINodeKind.SNF, CHINodeKind.SNI].contains(subordinate_endpoint.kind)
+    | error(~who: #'CHIHNFParams,
+            "subordinate endpoint must describe an SN-F or SN-I")
+    unless subordinate_service.endpoint == subordinate_endpoint
+    | error(~who: #'CHIHNFParams,
+            "subordinate service must describe the subordinate endpoint")
+    unless chi_initial_subordinate_capabilities(subordinate_endpoint.supports,
+                                                subordinate_endpoint.emits)
+    | error(~who: #'CHIHNFParams,
+            "subordinate endpoint must use the initial non-coherent capabilities")
+    unless bits.length(home.node_id) <= flit.node_id_width && (
+      bits.length(subordinate_endpoint.node_id) <= flit.node_id_width
+    )
+    | error(~who: #'CHIHNFParams,
+            "Home and subordinate NodeIDs must fit the physical NodeID width")
+    for (endpoint in requester_endpoints):
+      unless [CHINodeKind.RNI, CHINodeKind.RNF].contains(endpoint.kind)
+      | error(~who: #'CHIHNFParams,
+              "requester endpoints must be RN-I or RN-F")
+      unless bits.length(endpoint.node_id) <= flit.node_id_width
+      | error(~who: #'CHIHNFParams,
+              "requester NodeIDs must fit the physical NodeID width")
+      unless endpoint.node_id != home.node_id && (
+        endpoint.node_id != subordinate_endpoint.node_id
+      )
+      | error(~who: #'CHIHNFParams,
+              "requester, Home, and subordinate NodeIDs must be distinct")
+      def allowed_requests:
+        if endpoint.kind == CHINodeKind.RNI
+        | [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl]
+        | [CHIReqOpcode.ReadClean,
+           CHIReqOpcode.WriteUniquePtl]
+      unless endpoint.supports.req.length() > 0 && for all (opcode in endpoint.supports.req):
+               allowed_requests.contains(opcode)
+      | error(~who: #'CHIHNFParams,
+              "requester endpoint advertises an unsupported request opcode")
+    for (left_index in 0..requester_endpoints.length()):
+      for (right_index in (left_index + 1)..requester_endpoints.length()):
+        if requester_endpoints[left_index].node_id == requester_endpoints[right_index].node_id
+        | error(~who: #'CHIHNFParams,
+                "requester NodeIDs must be unique")
+        | #void
+    def snoop_endpoints = requester_endpoints.filter(
+      ~keep: fun (endpoint): endpoint.kind == CHINodeKind.RNF
+    )
+    unless snoop_endpoints.length() > 0
+    | error(~who: #'CHIHNFParams,
+            "the coherent Home requires at least one RN-F requester")
+    super(home,
+          flit,
+          requester_endpoints,
+          subordinate_endpoint,
+          subordinate_service)
+
+hardware_enum CHIHNFPhase(~width: 4):
+  Idle = 0
+  SendRequesterDBID = 1
+  ReceiveWriteData = 2
+  SendSnoop = 3
+  AwaitSnoop = 4
+  SendSubordinateRequest = 5
+  AwaitSubordinateDBID = 6
+  SendSubordinateData = 7
+  AwaitSubordinateCompletion = 8
+  SendRequesterCompletion = 9
+  ForwardReadData = 10
+  AwaitCompAck = 11
+
+fun chi_hnf_translated_opcode(opcode :: CHIReqOpcode) :~ CHIReqOpcode:
+  mux_lookup(opcode, ~default: CHIReqOpcode.ReadNoSnp):
+    CHIReqOpcode.ReadClean: CHIReqOpcode.ReadNoSnp
+    CHIReqOpcode.ReadNoSnp: CHIReqOpcode.ReadNoSnp
+    CHIReqOpcode.WriteUniquePtl: CHIReqOpcode.WriteNoSnpPtl
+    CHIReqOpcode.WriteNoSnpPtl: CHIReqOpcode.WriteNoSnpPtl
+    CHIReqOpcode.WriteNoSnpFull: CHIReqOpcode.WriteNoSnpFull
+
+fun chi_hnf_request_is_write(opcode :: CHIReqOpcode) :~ Bool:
+  is_one_of(opcode,
+            CHIReqOpcode.WriteUniquePtl,
+            CHIReqOpcode.WriteNoSnpPtl,
+            CHIReqOpcode.WriteNoSnpFull)
+
+fun chi_hnf_source_known(p :: CHIFlitParams,
+                         params :: CHIHNFParams,
+                         request :: CHIReqFlit(p)) :~ Bool:
+  or_reduce(vec(
+    for List (endpoint in params.requester_endpoints):
+      request.src_id === bits(endpoint.node_id, p.node_id_width)
+  ))
+
+fun chi_hnf_source_is_rnf(p :: CHIFlitParams,
+                          params :: CHIHNFParams,
+                          request :: CHIReqFlit(p)) :~ Bool:
+  or_reduce(vec(
+    for List (endpoint in params.snoop_endpoints):
+      request.src_id === bits(endpoint.node_id, p.node_id_width)
+  ))
+
+fun chi_hnf_request_supported(p :: CHIFlitParams,
+                              params :: CHIHNFParams,
+                              request :: CHIReqFlit(p)) :~ Bool:
+  or_reduce(vec(
+    for List (endpoint in params.requester_endpoints):
+      (request.src_id === bits(endpoint.node_id, p.node_id_width)) & or_reduce(vec(
+        for List (opcode in endpoint.supports.req):
+          request.opcode === opcode
+      ))
+  ))
+
+fun chi_hnf_service_supported(p :: CHIFlitParams,
+                              request :: CHIReqFlit(p),
+                              service :: CHISubordinateServiceParams) :~ Bool:
+  def opcode = chi_hnf_translated_opcode(request.opcode)
+  def size = request.size_or_num_req[0..3]
+  or_reduce(vec(
+    for List (support in service.requests):
+      (opcode === support.opcode) & (
+        size >= bits(alignment_bits(support.sizes.min_bytes), 3)
+      ) & (size <= bits(alignment_bits(support.sizes.max_bytes), 3))
+  )) & address_sets_match(request.address, service.address_sets)
+
+fun chi_hnf_response(p :: CHIFlitParams,
+                     home_node_id :: Nat,
+                     request :: CHIReqFlit(p),
+                     opcode :: CHIRspOpcode) :~ CHIRspFlit(p):
+  CHIRspFlit(p):
+    cache_line_id: bits(0, 6)
+    trace_tag: Bool(#false)
+    tag_op: CHITagOp.Invalid
+    pcrd_type: bits(0, 4)
+    dbid_or_group_id: bits(0, 12)
+    c_busy: bits(0, 3)
+    fwd_state_or_data_pull: bits(0, 3)
+    resp: bits(0, 3)
+    resp_err: CHIRespErr.OK
+    opcode: opcode
+    txn_id: request.txn_id
+    src_id: bits(home_node_id, p.node_id_width)
+    tgt_id: request.src_id
+    qos: request.qos
+
+fun chi_hnf_snoop(p :: CHIFlitParams,
+                  home_node_id :: Nat,
+                  request :: CHIReqFlit(p)) :~ CHISnpFlit(p):
+  wire snoop: CHISnpFlit(p)
+  if p.mecid_width > 0
+  | snoop.mecid <== bits(0, p.mecid_width)
+  | #void
+  if p.mpam_width > 0
+  | snoop.mpam <== bits(0, p.mpam_width)
+  | #void
+  snoop.trace_tag <== request.trace_tag
+  snoop.ret_to_src <== Bool(#false)
+  snoop.do_not_go_to_sd <== Bool(#false)
+  snoop.pas <== request.pas
+  snoop.address <== request.address[3..(3 + p.snoop_address_width)]
+  snoop.opcode <== CHISnpOpcode.SnpMakeInvalid
+  snoop.fwd_txn_id_or_stash_lpid_or_vmid_ext <== bits(0, 12)
+  snoop.fwd_nid_or_pbha <== bits(0, p.node_id_width)
+  snoop.txn_id <== bits(0, 12)
+  snoop.src_id <== bits(home_node_id, p.node_id_width)
+  snoop.qos <== request.qos
+  snoop
+
+fun chi_hnf_downstream_request(p :: CHIFlitParams,
+                               home_node_id :: Nat,
+                               subordinate_node_id :: Nat,
+                               request :: CHIReqFlit(p)) :~ CHIReqFlit(p):
+  wire downstream: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | downstream.rsvdc <== request.rsvdc
+  | #void
+  if p.sec_sid_width > 0
+  | downstream.sec_sid1 <== request.sec_sid1
+  | #void
+  if p.request_security_width > 0
+  | downstream.mecid_or_stream_id <== request.mecid_or_stream_id
+  | #void
+  if p.pbha_width > 0
+  | downstream.pbha <== request.pbha
+  | #void
+  if p.mpam_width > 0
+  | downstream.mpam <== request.mpam
+  | #void
+  downstream.trace_tag <== request.trace_tag
+  downstream.tag_op <== request.tag_op
+  downstream.exp_comp_ack <== Bool(#false)
+  downstream.excl_snoop_me_cah <== Bool(#false)
+  downstream.group_id_or_lpid <== request.group_id_or_lpid
+  downstream.snp_attr_or_do_dwt <== Bool(#false)
+  downstream.mem_attr <== request.mem_attr
+  downstream.pcrd_type <== bits(0, 4)
+  downstream.order <== CHIOrder.NoOrder
+  downstream.allow_retry <== Bool(#false)
+  downstream.likely_shared <== request.likely_shared
+  downstream.pas <== request.pas
+  downstream.address <== request.address
+  downstream.size_or_num_req <== request.size_or_num_req
+  downstream.multi_req <== Bool(#false)
+  downstream.opcode <== chi_hnf_translated_opcode(request.opcode)
+  downstream.return_txn_id_or_stash_lpid <== bits(0, 12)
+  downstream.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
+  downstream.return_nid_or_stash_nid_or_data_target <== bits(home_node_id, p.node_id_width)
+  downstream.txn_id <== bits(0, 12)
+  downstream.src_id <== bits(home_node_id, p.node_id_width)
+  downstream.tgt_id <== bits(subordinate_node_id, p.node_id_width)
+  downstream.qos <== request.qos
+  downstream
+
+fun chi_hnf_upstream_read_data(p :: CHIFlitParams,
+                               home_node_id :: Nat,
+                               request :: CHIReqFlit(p),
+                               coherent :: Bool,
+                               data :: CHIDatFlit(p)) :~ CHIDatFlit(p):
+  wire upstream: CHIDatFlit(p)
+  if p.poison_width > 0
+  | upstream.poison <== data.poison
+  | #void
+  if p.data_check_width > 0
+  | upstream.data_check <== data.data_check
+  | #void
+  upstream.data <== data.data
+  upstream.byte_enable <== data.byte_enable
+  if p.dat_rsvdc_width > 0
+  | upstream.rsvdc <== data.rsvdc
+  | #void
+  upstream.replicate <== data.replicate
+  upstream.num_dat <== data.num_dat
+  upstream.cah <== data.cah
+  upstream.trace_tag <== data.trace_tag
+  upstream.tag_update <== data.tag_update
+  upstream.tag <== data.tag
+  upstream.tag_op <== data.tag_op
+  upstream.cache_line_id <== data.cache_line_id
+  upstream.data_id <== data.data_id
+  upstream.ccid <== data.ccid
+  upstream.dbid_or_mecid <== bits(0, 16)
+  upstream.c_busy <== data.c_busy
+  upstream.data_pull <== Bool(#false)
+  upstream.data_source_or_fwd_state <== bits(0, 8)
+  def shared_clean = CHICoherentResponse():
+    pass_dirty: Bool(#false)
+    state: CHIResponseState.SharedClean
+  upstream.resp <== mux(coherent, as_bits(shared_clean), bits(0, 3))
+  upstream.resp_err <== data.resp_err
+  upstream.opcode <== CHIDatOpcode.CompData
+  upstream.home_nid_or_pbha_or_mismatched_mecid <== bits(home_node_id, p.node_id_width)
+  upstream.txn_id <== request.return_txn_id_or_stash_lpid
+  upstream.src_id <== bits(home_node_id, p.node_id_width)
+  upstream.tgt_id <== request.return_nid_or_stash_nid_or_data_target
+  upstream.qos <== request.qos
+  upstream
+
+sync_circuit CHIHNF(params :: CHIHNFParams):
+  def checked = params
+  def p = checked.flit
+  def home_id = checked.home.node_id
+  def subordinate_id = checked.subordinate_endpoint.node_id
+  def snoop_count :: PosInt = checked.snoop_endpoints.length()
+  def snoop_node_ids = vec(
+    for List (endpoint in checked.snoop_endpoints):
+      bits(endpoint.node_id, p.node_id_width)
+  )
+  def empty_snoops = vec(
+    for List (_index in 0..snoop_count): Bool(#false)
+  )
+
+  interface port(CHIHNDecoupled(p), ~role: home)
+  def requester = port.requester
+  def subordinate = port.subordinate
+
+  reg phase(~init: CHIHNFPhase.Idle)
+  reg request(CHIReqFlit(p))
+  reg requester_is_rnf(~init: Bool(#false))
+  reg write_data(CHIDatFlit(p))
+  reg subordinate_dbid(~init: bits(0, 12))
+  reg pending_snoops(~init: empty_snoops)
+  reg expected_snoop_node(~init: bits(0, p.node_id_width))
+  reg received_data_ids(~init: bits(0, 4))
+
+  def idle = phase === CHIHNFPhase.Idle
+  def incoming_request = requester.requests.bits
+  def incoming_write = chi_hnf_request_is_write(incoming_request.opcode)
+  requester.requests.ready <== idle
+  def request_fire = fire(requester.requests)
+  when (requester.requests.valid & idle):
+    assert(chi_hnf_source_known(p, checked, incoming_request),
+           "chi_hnf_request_source_known")
+    assert(incoming_request.tgt_id === bits(home_id, p.node_id_width),
+           "chi_hnf_request_targets_home")
+    assert(chi_hnf_request_supported(p, checked, incoming_request),
+           "chi_hnf_request_opcode_supported")
+    assert(chi_hnf_service_supported(p,
+                                     incoming_request,
+                                     checked.subordinate_service),
+           "chi_hnf_request_service_supported")
+
+  def send_requester_dbid = phase === CHIHNFPhase.SendRequesterDBID
+  def send_requester_completion = phase === CHIHNFPhase.SendRequesterCompletion
+  requester.responses.valid <== send_requester_dbid ||| send_requester_completion
+  requester.responses.bits <== chi_hnf_response(
+    p,
+    home_id,
+    request,
+    mux(send_requester_dbid, CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp)
+  )
+  def requester_response_fire = fire(requester.responses)
+
+  requester.request_data.ready <== phase === CHIHNFPhase.ReceiveWriteData
+  def write_data_fire = fire(requester.request_data)
+  when (requester.request_data.valid):
+    assert(phase === CHIHNFPhase.ReceiveWriteData,
+           "chi_hnf_write_data_expected")
+    assert(requester.request_data.bits.opcode === CHIDatOpcode.NonCopyBackWriteData,
+           "chi_hnf_write_data_opcode")
+    assert(requester.request_data.bits.src_id === request.src_id,
+           "chi_hnf_write_data_source")
+    assert(requester.request_data.bits.tgt_id === bits(home_id, p.node_id_width),
+           "chi_hnf_write_data_targets_home")
+    assert(requester.request_data.bits.txn_id === bits(0, 12),
+           "chi_hnf_write_data_dbid")
+
+  def snoops_remaining = or_reduce(pending_snoops)
+  def next_snoop_index = priority_encoder(pending_snoops)
+  def next_snoop_node = snoop_node_ids[next_snoop_index]
+  requester.snoops.valid <== (phase === CHIHNFPhase.SendSnoop) & snoops_remaining
+  requester.snoops.bits <== CHISnoopDispatch(p):
+    target_id: next_snoop_node
+    flit: chi_hnf_snoop(p, home_id, request)
+  def snoop_fire = fire(requester.snoops)
+
+  def awaiting_snoop = phase === CHIHNFPhase.AwaitSnoop
+  def awaiting_comp_ack = phase === CHIHNFPhase.AwaitCompAck
+  requester.requester_responses.ready <== awaiting_snoop ||| awaiting_comp_ack
+  def incoming_requester_response = requester.requester_responses.bits
+  def requester_control_fire = fire(requester.requester_responses)
+  when (requester.requester_responses.valid):
+    assert(awaiting_snoop ||| awaiting_comp_ack,
+           "chi_hnf_requester_response_expected")
+    assert(incoming_requester_response.tgt_id === bits(home_id, p.node_id_width),
+           "chi_hnf_requester_response_targets_home")
+    when awaiting_snoop:
+      assert(incoming_requester_response.opcode === CHIRspOpcode.SnpResp,
+             "chi_hnf_snoop_response_opcode")
+      assert(incoming_requester_response.src_id === expected_snoop_node,
+             "chi_hnf_snoop_response_source")
+      assert(incoming_requester_response.txn_id === bits(0, 12),
+             "chi_hnf_snoop_response_txn")
+      def snoop_response = incoming_requester_response.resp.into(CHICoherentResponse())
+      assert(!snoop_response.pass_dirty,
+             "chi_hnf_snoop_response_clean")
+    when awaiting_comp_ack:
+      assert(incoming_requester_response.opcode === CHIRspOpcode.CompAck,
+             "chi_hnf_comp_ack_opcode")
+      assert(incoming_requester_response.src_id === request.src_id,
+             "chi_hnf_comp_ack_source")
+      assert(incoming_requester_response.txn_id === bits(0, 12),
+             "chi_hnf_comp_ack_txn")
+
+  def send_subordinate_request = phase === CHIHNFPhase.SendSubordinateRequest
+  subordinate.req.valid <== send_subordinate_request
+  subordinate.req.bits <== chi_hnf_downstream_request(p,
+                                                      home_id,
+                                                      subordinate_id,
+                                                      request)
+  def subordinate_request_fire = fire(subordinate.req)
+
+  def awaiting_subordinate_dbid = phase === CHIHNFPhase.AwaitSubordinateDBID
+  def awaiting_subordinate_completion = phase === CHIHNFPhase.AwaitSubordinateCompletion
+  subordinate.rsp.ready <== awaiting_subordinate_dbid ||| awaiting_subordinate_completion
+  def incoming_subordinate_response = subordinate.rsp.bits
+  def subordinate_response_fire = fire(subordinate.rsp)
+  when (subordinate.rsp.valid):
+    assert(awaiting_subordinate_dbid ||| awaiting_subordinate_completion,
+           "chi_hnf_subordinate_response_expected")
+    assert(incoming_subordinate_response.src_id === bits(subordinate_id, p.node_id_width),
+           "chi_hnf_subordinate_response_source")
+    assert(incoming_subordinate_response.tgt_id === bits(home_id, p.node_id_width),
+           "chi_hnf_subordinate_response_targets_home")
+    assert(incoming_subordinate_response.txn_id === bits(0, 12),
+           "chi_hnf_subordinate_response_txn")
+    assert(incoming_subordinate_response.opcode === mux(
+             awaiting_subordinate_dbid,
+             CHIRspOpcode.DBIDResp,
+             CHIRspOpcode.Comp
+           ),
+           "chi_hnf_subordinate_response_opcode")
+
+  subordinate.dat.request.valid <== phase === CHIHNFPhase.SendSubordinateData
+  subordinate.dat.request.bits <== chi_hni_downstream_write_data(
+    p,
+    write_data,
+    request.qos,
+    home_id,
+    subordinate_id,
+    subordinate_dbid
+  )
+  def subordinate_data_fire = fire(subordinate.dat.request)
+
+  def forwarding_read = phase === CHIHNFPhase.ForwardReadData
+  requester.response_data.valid <== forwarding_read & subordinate.dat.response.valid
+  requester.response_data.bits <== chi_hnf_upstream_read_data(
+    p,
+    home_id,
+    request,
+    requester_is_rnf,
+    subordinate.dat.response.bits
+  )
+  subordinate.dat.response.ready <== forwarding_read & requester.response_data.ready
+  def read_data_fire = fire(subordinate.dat.response)
+  def read_data_id = as_bits(one_hot(subordinate.dat.response.bits.data_id))
+  def next_received_data_ids = received_data_ids ||| read_data_id
+  def expected_data_ids = coherent_read_data_ids(request.address,
+                                                 chi_req_size(p, request),
+                                                 p)
+  def final_read_data = next_received_data_ids === expected_data_ids
+  when (subordinate.dat.response.valid & forwarding_read):
+    assert(subordinate.dat.response.bits.opcode === CHIDatOpcode.CompData,
+           "chi_hnf_read_data_opcode")
+    assert(subordinate.dat.response.bits.src_id === bits(subordinate_id, p.node_id_width),
+           "chi_hnf_read_data_source")
+    assert(subordinate.dat.response.bits.tgt_id === bits(home_id, p.node_id_width),
+           "chi_hnf_read_data_targets_home")
+    assert(subordinate.dat.response.bits.txn_id === bits(0, 12),
+           "chi_hnf_read_data_txn")
+    assert(!or_reduce(received_data_ids & read_data_id),
+           "chi_hnf_read_data_id_unique")
+
+  when request_fire:
+    request <== incoming_request
+    requester_is_rnf <== chi_hnf_source_is_rnf(p, checked, incoming_request)
+    pending_snoops <== vec(
+      for List (endpoint in checked.snoop_endpoints):
+        incoming_write & (
+          incoming_request.src_id =/= bits(endpoint.node_id, p.node_id_width)
+        )
+    )
+    received_data_ids <== bits(0, 4)
+    phase <== mux(incoming_write,
+                  CHIHNFPhase.SendRequesterDBID,
+                  CHIHNFPhase.SendSubordinateRequest)
+  elsewhen (requester_response_fire & send_requester_dbid):
+    phase <== CHIHNFPhase.ReceiveWriteData
+  elsewhen write_data_fire:
+    write_data <== requester.request_data.bits
+    phase <== CHIHNFPhase.SendSnoop
+  elsewhen ((phase === CHIHNFPhase.SendSnoop) & !snoops_remaining):
+    phase <== CHIHNFPhase.SendSubordinateRequest
+  elsewhen snoop_fire:
+    pending_snoops <== pending_snoops.updated(next_snoop_index, Bool(#false))
+    expected_snoop_node <== next_snoop_node
+    phase <== CHIHNFPhase.AwaitSnoop
+  elsewhen (requester_control_fire & awaiting_snoop):
+    phase <== CHIHNFPhase.SendSnoop
+  elsewhen subordinate_request_fire:
+    phase <== mux(chi_hnf_request_is_write(request.opcode),
+                  CHIHNFPhase.AwaitSubordinateDBID,
+                  CHIHNFPhase.ForwardReadData)
+  elsewhen (subordinate_response_fire & awaiting_subordinate_dbid):
+    subordinate_dbid <== incoming_subordinate_response.dbid_or_group_id
+    phase <== CHIHNFPhase.SendSubordinateData
+  elsewhen subordinate_data_fire:
+    phase <== CHIHNFPhase.AwaitSubordinateCompletion
+  elsewhen (subordinate_response_fire & awaiting_subordinate_completion):
+    phase <== CHIHNFPhase.SendRequesterCompletion
+  elsewhen (requester_response_fire & send_requester_completion):
+    phase <== CHIHNFPhase.Idle
+  elsewhen read_data_fire:
+    received_data_ids <== next_received_data_ids
+    when final_read_data:
+      phase <== mux(request.exp_comp_ack,
+                    CHIHNFPhase.AwaitCompAck,
+                    CHIHNFPhase.Idle)
+  elsewhen (requester_control_fire & awaiting_comp_ack):
+    phase <== CHIHNFPhase.Idle
+
+export:
+  CHIHNFParams
+  CHIHNF

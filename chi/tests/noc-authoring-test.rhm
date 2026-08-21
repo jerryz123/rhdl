@@ -18,7 +18,7 @@ def home_subordinate = CHISNICNSite(NamePath(["system", "home", "subordinate"]),
                                     router)
 def memory = CHISNSite(NamePath(["system", "memory"]), 9, router)
 
-def connections = [CHIRNConnection(requester, home_requester),
+def connections = [CHIRNIConnection(requester, home_requester),
                    CHISNConnection(home_subordinate, memory)]
 def compilations = compile_chi_connections(
   physical,
@@ -34,11 +34,13 @@ check:
   memory.rsp_response.terminal.describe() ~is "system/memory/rsp/response"
   connections.map(fun (connection): connection.req_routes().length()) ~is [1, 1]
   connections.map(fun (connection): connection.rsp_routes().length()) ~is [2, 1]
+  connections.map(fun (connection): connection.snp_routes().length()) ~is [0, 0]
   connections.map(fun (connection): connection.dat_routes().length()) ~is [2, 2]
   compilations.req.network.terminal_placement.injections.length() ~is 2
   compilations.req.network.terminal_placement.ejections.length() ~is 2
   compilations.rsp.network.terminal_placement.injections.length() ~is 3
   compilations.rsp.network.terminal_placement.ejections.length() ~is 3
+  compilations.snp ~is #false
   compilations.dat.network.terminal_placement.injections.length() ~is 4
   compilations.dat.network.terminal_placement.ejections.length() ~is 4
   compilations.req.injections.map(fun (site): site.node_id) ~is [5, 3]
@@ -52,6 +54,26 @@ check:
        ).describe()]
   ) ~is [[5, 9, "system/home/subordinate/req/to/system/memory/req"],
          [3, 5, "system/requester/req/to/system/home/requester/req"]]
+
+def coherent_requester = CHIRNSite(NamePath(["system", "coherent-requester"]),
+                                   7,
+                                   router)
+def coherent_connections = [CHIRNFConnection(coherent_requester,
+                                             home_requester)]
+def coherent_compilations = compile_chi_connections(
+  physical,
+  coherent_connections,
+  uniform_chi_routing(deny_all)
+)
+
+check:
+  coherent_requester.snp.terminal.describe() ~is "system/coherent-requester/snp"
+  home_requester.snp.terminal.describe() ~is "system/home/requester/snp"
+  coherent_connections[0].snp_routes().length() ~is 1
+  coherent_compilations.snp is_a CHIChannelCompilation ~is #true
+  coherent_compilations.snp.injections.map(fun (site): site.node_id) ~is [5]
+  coherent_compilations.snp.ejections.map(fun (site): site.node_id) ~is [7]
+  coherent_compilations.snp.route(home_requester.snp.terminal, 7).route_key ~is 0
 
 def shared_source = CHIInjectionSite(3, InjectionRef("shared"), router)
 def conflicting_source = CHIInjectionSite(4, InjectionRef("shared"), router)

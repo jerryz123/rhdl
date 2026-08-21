@@ -16,7 +16,8 @@ export:
   CHISNSite
   CHIChannelRouteSpec
   CHIConnection
-  CHIRNConnection
+  CHIRNIConnection
+  CHIRNFConnection
   CHISNConnection
   CHIChannelRouting
   CHICompiledRoute
@@ -63,6 +64,7 @@ class CHIRNSite(path :: NamePath,
                 req :: CHIInjectionSite,
                 rsp_requester :: CHIInjectionSite,
                 rsp_response :: CHIEjectionSite,
+                snp :: CHIEjectionSite,
                 dat_request :: CHIInjectionSite,
                 dat_response :: CHIEjectionSite):
   constructor (path :: NamePath, node_id :: Nat, router :: NodeRef):
@@ -72,6 +74,7 @@ class CHIRNSite(path :: NamePath,
           injection_site(path, ["req"], node_id, router),
           injection_site(path, ["rsp", "requester"], node_id, router),
           ejection_site(path, ["rsp", "response"], node_id, router),
+          ejection_site(path, ["snp"], node_id, router),
           injection_site(path, ["dat", "request"], node_id, router),
           ejection_site(path, ["dat", "response"], node_id, router))
 
@@ -81,6 +84,7 @@ class CHIRNICNSite(path :: NamePath,
                    req :: CHIEjectionSite,
                    rsp_requester :: CHIEjectionSite,
                    rsp_response :: CHIInjectionSite,
+                   snp :: CHIInjectionSite,
                    dat_request :: CHIEjectionSite,
                    dat_response :: CHIInjectionSite):
   constructor (path :: NamePath, node_id :: Nat, router :: NodeRef):
@@ -90,6 +94,7 @@ class CHIRNICNSite(path :: NamePath,
           ejection_site(path, ["req"], node_id, router),
           ejection_site(path, ["rsp", "requester"], node_id, router),
           injection_site(path, ["rsp", "response"], node_id, router),
+          injection_site(path, ["snp"], node_id, router),
           ejection_site(path, ["dat", "request"], node_id, router),
           injection_site(path, ["dat", "response"], node_id, router))
 
@@ -140,9 +145,10 @@ class CHIChannelRouteSpec(ref :: RouteClassRef,
 interface CHIConnection:
   method req_routes() :: NonemptyList.of(CHIChannelRouteSpec)
   method rsp_routes() :: NonemptyList.of(CHIChannelRouteSpec)
+  method snp_routes() :: List.of(CHIChannelRouteSpec)
   method dat_routes() :: NonemptyList.of(CHIChannelRouteSpec)
 
-class CHIRNConnection(node :: CHIRNSite, icn :: CHIRNICNSite):
+class CHIRNIConnection(node :: CHIRNSite, icn :: CHIRNICNSite):
   implements CHIConnection
 
   override method req_routes():
@@ -151,6 +157,26 @@ class CHIRNConnection(node :: CHIRNSite, icn :: CHIRNICNSite):
   override method rsp_routes():
     [CHIChannelRouteSpec(node.rsp_requester, icn.rsp_requester),
      CHIChannelRouteSpec(icn.rsp_response, node.rsp_response)]
+
+  override method snp_routes(): []
+
+  override method dat_routes():
+    [CHIChannelRouteSpec(node.dat_request, icn.dat_request),
+     CHIChannelRouteSpec(icn.dat_response, node.dat_response)]
+
+// Adds the independently routed SNP path required by a fully coherent RN-F.
+class CHIRNFConnection(node :: CHIRNSite, icn :: CHIRNICNSite):
+  implements CHIConnection
+
+  override method req_routes():
+    [CHIChannelRouteSpec(node.req, icn.req)]
+
+  override method rsp_routes():
+    [CHIChannelRouteSpec(node.rsp_requester, icn.rsp_requester),
+     CHIChannelRouteSpec(icn.rsp_response, node.rsp_response)]
+
+  override method snp_routes():
+    [CHIChannelRouteSpec(icn.snp, node.snp)]
 
   override method dat_routes():
     [CHIChannelRouteSpec(node.dat_request, icn.dat_request),
@@ -165,12 +191,15 @@ class CHISNConnection(icn :: CHISNICNSite, node :: CHISNSite):
   override method rsp_routes():
     [CHIChannelRouteSpec(node.rsp_response, icn.rsp_response)]
 
+  override method snp_routes(): []
+
   override method dat_routes():
     [CHIChannelRouteSpec(icn.dat_request, node.dat_request),
      CHIChannelRouteSpec(node.dat_response, icn.dat_response)]
 
 class CHIChannelRouting(req :: RoutingPolicy,
                         rsp :: RoutingPolicy,
+                        snp :: RoutingPolicy,
                         dat :: RoutingPolicy)
 
 // Records the route key derived from generic validation for one CHI path.
@@ -236,10 +265,11 @@ class CHIChannelCompilation(network :: NetworkCompilation,
 
 class CHIChannelCompilations(req :: CHIChannelCompilation,
                              rsp :: CHIChannelCompilation,
+                             snp :: False || CHIChannelCompilation,
                              dat :: CHIChannelCompilation)
 
 fun uniform_chi_routing(policy :: RoutingPolicy) :: CHIChannelRouting:
-  CHIChannelRouting(policy, policy, policy)
+  CHIChannelRouting(policy, policy, policy, policy)
 
 fun collect_connection_routes(connections, select):
   def mutable routes = []
@@ -364,6 +394,10 @@ fun compile_chi_connections(topology :: TopologySpec,
                             connections :: NonemptyList.of(CHIConnection),
                             routing :: CHIChannelRouting)
   :: CHIChannelCompilations:
+  def snp_routes = collect_connection_routes(
+    connections,
+    fun (connection): connection.snp_routes()
+  )
   CHIChannelCompilations(
     compile_chi_channel(
       topology,
@@ -377,6 +411,9 @@ fun compile_chi_connections(topology :: TopologySpec,
                                 fun (connection): connection.rsp_routes()),
       routing.rsp
     ),
+    if snp_routes.length() == 0
+    | #false
+    | compile_chi_channel(topology, snp_routes, routing.snp),
     compile_chi_channel(
       topology,
       collect_connection_routes(connections,

@@ -72,6 +72,28 @@ interface CHISNDecoupled(p :: CHIFlitParams):
     req: Decoupled(CHIReqFlit(p))
     dat: CHIDatDecoupled(p)
 
+// SNP has no physical TgtID field because a CHI link identifies its receiver.
+// An HN connected to an internal multi-node fabric therefore carries the
+// selected requester beside the exact SNP flit until endpoint ejection.
+bundle CHISnoopDispatch(p :: CHIFlitParams):
+  target_id: Bits(p.node_id_width)
+  flit: CHISnpFlit(p)
+
+interface CHIHNRequesterDecoupled(p :: CHIFlitParams):
+  role home
+  role fabric
+  provider home
+
+  fabric -> home:
+    requests: Decoupled(CHIReqFlit(p))
+    requester_responses: Decoupled(CHIRspFlit(p))
+    request_data: Decoupled(CHIDatFlit(p))
+
+  home -> fabric:
+    responses: Decoupled(CHIRspFlit(p))
+    response_data: Decoupled(CHIDatFlit(p))
+    snoops: Decoupled(CHISnoopDispatch(p))
+
 // HN-I connects one recursively grouped non-snooping requester side to one
 // subordinate side.
 interface CHIHNIDecoupled(p :: CHIFlitParams):
@@ -83,15 +105,15 @@ interface CHIHNIDecoupled(p :: CHIFlitParams):
     requester: CHIRNIDecoupled(p)
     subordinate: CHISNDecoupled(p)
 
-// A snoop-capable Home uses the full RN requester shape and the common
-// subordinate shape.
+// A snoop-capable Home aggregates requester traffic by NodeID and dispatches
+// SNP to a selected RN-F while retaining the common subordinate shape.
 interface CHIHNDecoupled(p :: CHIFlitParams):
   role home
   role fabric
   provider home
 
   home -> fabric:
-    requester: CHIRNDecoupled(p)
+    requester: CHIHNRequesterDecoupled(p)
     subordinate: CHISNDecoupled(p)
 
 export:
@@ -100,5 +122,7 @@ export:
   CHIRNIDecoupled
   CHIRNDecoupled
   CHISNDecoupled
+  CHISnoopDispatch
+  CHIHNRequesterDecoupled
   CHIHNIDecoupled
   CHIHNDecoupled

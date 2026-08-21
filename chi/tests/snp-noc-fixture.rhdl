@@ -1,0 +1,74 @@
+#lang rhdl
+// Elaborates a one-router SNP plane from one HN-F to two RN-F endpoints.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").Decoupled
+  lib("rhdl/std/flow/queue.rhdl").queue
+  lib("chi/main.rhdl") open
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/rtl/router.rhdl") open
+
+def snp_noc_flit = CHIFlitParams()
+def snp_noc_topology = topology:
+  node xbar
+def snp_noc_router = snp_noc_topology.node("xbar")
+def snp_noc_home = CHIRNICNSite(NamePath(["home", "requesters"]),
+                                5,
+                                snp_noc_router)
+def snp_noc_first = CHIRNSite(NamePath(["requesters", "first"]),
+                              2,
+                              snp_noc_router)
+def snp_noc_second = CHIRNSite(NamePath(["requesters", "second"]),
+                               3,
+                               snp_noc_router)
+def snp_noc_compilations = compile_chi_connections(
+  snp_noc_topology,
+  [CHIRNFConnection(snp_noc_first, snp_noc_home),
+   CHIRNFConnection(snp_noc_second, snp_noc_home)],
+  uniform_chi_routing(deny_all)
+)
+def snp_noc_compilation :: CHIChannelCompilation = snp_noc_compilations.snp
+def snp_noc_adapters = compile_chi_channel_adapter_plans(
+  snp_noc_compilations,
+  snp_noc_flit
+)
+def snp_noc_adapter :: CHIChannelAdapterPlan = snp_noc_adapters.snp
+def snp_noc_router_config :: SimpleRouterConfig = compile_simple_router(
+  snp_noc_compilation.network.router_plan(snp_noc_router)
+)
+
+sync_circuit CHISnpNoCFixture():
+  interface dispatch(Decoupled(CHISnoopDispatch(snp_noc_flit)), ~role: consumer)
+  interface snoops[2](Decoupled(CHISnpFlit(snp_noc_flit)), ~role: producer)
+
+  inst router(SimpleRouter(CHISnpFlit(snp_noc_flit), snp_noc_router_config))
+  def home_config = snp_noc_adapter.injection(snp_noc_home.snp.terminal)
+  (dispatch |> chi_snp_noc_inject(home_config)) <=> router.ingress[home_config.input_index]
+
+  def first_config = snp_noc_adapter.ejection(snp_noc_first.snp.terminal)
+  def first_target :: Endpoint = router.target[first_config.target_index]
+  (first_target.egress |> queue(1) |> chi_snp_noc_eject(first_config)) <=> snoops[0]
+  first_target.available <== first_target.egress.ready
+
+  def second_config = snp_noc_adapter.ejection(snp_noc_second.snp.terminal)
+  def second_target :: Endpoint = router.target[second_config.target_index]
+  (second_target.egress |> queue(1) |> chi_snp_noc_eject(second_config)) <=> snoops[1]
+  second_target.available <== second_target.egress.ready
+
+def snp_noc_design = elaborate(CHISnpNoCFixture())
+
+export:
+  snp_noc_flit
+  snp_noc_topology
+  snp_noc_router
+  snp_noc_home
+  snp_noc_first
+  snp_noc_second
+  snp_noc_compilations
+  snp_noc_compilation
+  snp_noc_adapters
+  snp_noc_adapter
+  snp_noc_router_config
+  CHISnpNoCFixture
+  snp_noc_design

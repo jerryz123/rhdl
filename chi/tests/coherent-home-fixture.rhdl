@@ -1,0 +1,92 @@
+#lang rhdl
+// Elaborates a serialized HN-F serving one RN-I, two RN-Fs, and one SN-F.
+
+import:
+  lib("chi/main.rhdl") open
+
+def coherent_home_flit = CHIFlitParams()
+def htif_endpoint = CHIICNPortParams(
+  "htif",
+  1,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~max_outstanding: 1
+)
+def instruction_endpoint = CHIICNPortParams(
+  "ricket-l1i",
+  2,
+  CHINodeKind.RNF,
+  ~emits: CHIChannelCapabilities(
+    ~snp: chi_rnf_snoop_opcodes,
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadClean],
+    ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
+  ),
+  ~max_outstanding: 2
+)
+def data_endpoint = CHIICNPortParams(
+  "ricket-l1d",
+  3,
+  CHINodeKind.RNF,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~snp: chi_rnf_snoop_opcodes,
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadClean, CHIReqOpcode.WriteUniquePtl],
+    ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~max_outstanding: 2
+)
+def memory_endpoint = CHIICNPortParams(
+  "memory",
+  9,
+  CHINodeKind.SNF,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 1
+)
+def memory_service = CHISubordinateServiceParams(
+  memory_endpoint,
+  [AddressSet(0x80000000, 0x0fffffff)],
+  [CHIRequestSupport(CHIReqOpcode.ReadNoSnp, TransferSizes(1, 64)),
+   CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, TransferSizes(1, 64)),
+   CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, TransferSizes(1, 64))]
+)
+def coherent_home_params = CHIHNFParams(
+  CHIHomeParams("coherent-home", 5, CHINodeKind.HNF, ~max_outstanding: 1),
+  coherent_home_flit,
+  [htif_endpoint, instruction_endpoint, data_endpoint],
+  memory_endpoint,
+  memory_service
+)
+def coherent_home_design = elaborate(CHIHNF(coherent_home_params))
+
+export:
+  coherent_home_flit
+  htif_endpoint
+  instruction_endpoint
+  data_endpoint
+  memory_endpoint
+  memory_service
+  coherent_home_params
+  coherent_home_design

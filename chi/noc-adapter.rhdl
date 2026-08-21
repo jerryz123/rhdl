@@ -8,6 +8,7 @@ import:
   lib("rhdl/std/flow/ready-valid-support.rhdl") open
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
+  lib("chi/decoupled.rhdl").CHISnoopDispatch
   lib("chi/noc-authoring.rhm") open
   lib("noc/authoring/main.rhm") open
   lib("noc/rtl/router.rhdl").RoutedBeat
@@ -24,6 +25,8 @@ export:
   chi_req_noc_eject
   chi_rsp_noc_inject
   chi_rsp_noc_eject
+  chi_snp_noc_inject
+  chi_snp_noc_eject
   chi_dat_noc_inject
   chi_dat_noc_eject
 
@@ -69,6 +72,7 @@ class CHIChannelAdapterPlan(compilation :: CHIChannelCompilation,
 
 class CHIChannelAdapterPlans(req :: CHIChannelAdapterPlan,
                              rsp :: CHIChannelAdapterPlan,
+                             snp :: False || CHIChannelAdapterPlan,
                              dat :: CHIChannelAdapterPlan)
 
 fun compile_chi_noc_injection_config(
@@ -141,6 +145,9 @@ fun compile_chi_channel_adapter_plans(
   CHIChannelAdapterPlans(
     compile_chi_channel_adapter_plan(compilations.req, p),
     compile_chi_channel_adapter_plan(compilations.rsp, p),
+    if compilations.snp == #false
+    | #false
+    | compile_chi_channel_adapter_plan(compilations.snp, p),
     compile_chi_channel_adapter_plan(compilations.dat, p)
   )
 
@@ -221,6 +228,18 @@ sync_circuit CHIRspNoCInjector(config :: CHINoCInjectionConfig):
   egress.bits.payload <== ingress.bits
   assert(!ingress.valid ||| decision.valid, "chi_rsp_noc_target_has_route")
 
+sync_circuit CHISnpNoCInjector(config :: CHINoCInjectionConfig):
+  def Beat = RoutedBeat(CHISnpFlit(config.p), config.route_width)
+  interface ingress(Decoupled(CHISnoopDispatch(config.p)), ~role: consumer)
+  interface egress(Decoupled(Beat), ~role: producer)
+
+  def decision = config.decoder(ingress.bits.target_id)
+  ingress.ready <== decision.valid & egress.ready
+  egress.valid <== ingress.valid & decision.valid
+  egress.bits.route_key <== decision.route_key
+  egress.bits.payload <== ingress.bits.flit
+  assert(!ingress.valid ||| decision.valid, "chi_snp_noc_target_has_route")
+
 sync_circuit CHIDatNoCInjector(config :: CHINoCInjectionConfig):
   def Beat = RoutedBeat(CHIDatFlit(config.p), config.route_width)
   interface ingress(Decoupled(CHIDatFlit(config.p)), ~role: consumer)
@@ -254,6 +273,15 @@ sync_circuit CHIRspNoCEjector(config :: CHINoCEjectionConfig):
   egress.bits <== ingress.bits.payload
   assert(!ingress.valid ||| (ingress.bits.payload.tgt_id === bits(config.site.node_id, config.p.node_id_width)),
          "chi_rsp_noc_ejection_target")
+
+sync_circuit CHISnpNoCEjector(config :: CHINoCEjectionConfig):
+  def Beat = RoutedBeat(CHISnpFlit(config.p), config.route_width)
+  interface ingress(Decoupled(Beat), ~role: consumer)
+  interface egress(Decoupled(CHISnpFlit(config.p)), ~role: producer)
+
+  ingress.ready <== egress.ready
+  egress.valid <== ingress.valid
+  egress.bits <== ingress.bits.payload
 
 sync_circuit CHIDatNoCEjector(config :: CHINoCEjectionConfig):
   def Beat = RoutedBeat(CHIDatFlit(config.p), config.route_width)
@@ -289,6 +317,18 @@ fun chi_rsp_noc_eject(config :: CHINoCEjectionConfig):
     flow_protocol_type(source)
     inst stage(CHIRspNoCEjector(config))
     finish_interface_transform(source, describe_interface_transform(InterfaceHandle(stage.ingress, stage.egress), "chi-rsp-noc-eject", {"node-id": config.site.node_id}, stage))
+
+fun chi_snp_noc_inject(config :: CHINoCInjectionConfig):
+  fun (source) :~ InterfaceTransformResult(source, Endpoint):
+    flow_protocol_type(source)
+    inst stage(CHISnpNoCInjector(config))
+    finish_interface_transform(source, describe_interface_transform(InterfaceHandle(stage.ingress, stage.egress), "chi-snp-noc-inject", {"node-id": config.site.node_id}, stage))
+
+fun chi_snp_noc_eject(config :: CHINoCEjectionConfig):
+  fun (source) :~ InterfaceTransformResult(source, Endpoint):
+    flow_protocol_type(source)
+    inst stage(CHISnpNoCEjector(config))
+    finish_interface_transform(source, describe_interface_transform(InterfaceHandle(stage.ingress, stage.egress), "chi-snp-noc-eject", {"node-id": config.site.node_id}, stage))
 
 fun chi_dat_noc_inject(config :: CHINoCInjectionConfig):
   fun (source) :~ InterfaceTransformResult(source, Endpoint):
