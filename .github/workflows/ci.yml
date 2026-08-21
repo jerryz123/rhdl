@@ -58,9 +58,41 @@ jobs:
               >> "$GITHUB_OUTPUT"
           fi
 
+  compile-racket:
+    name: Compile RHDL once
+    needs: changes
+    if: needs.changes.outputs.host == 'true' || needs.changes.outputs.examples == 'true' || needs.changes.outputs.circt == 'true' || needs.changes.outputs.fesvr == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out RHDL
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: "${{ env.RACKET_VERSION }}"
+      - name: Prepare cached Racket dependencies
+        uses: ./.github/actions/setup-racket-cache
+        with:
+          racket-version: "${{ env.RACKET_VERSION }}"
+          rhombus-checksum: "${{ env.RHOMBUS_CHECKSUM }}"
+      - name: Compile positive CI entrypoints
+        run: tools/compile-racket-sources.sh
+      - name: Publish exact compiled root
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rhdl-bytecode-${{ github.sha }}
+          path: ${{ runner.temp }}/rhdl-compiled
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
   host:
     name: Host (${{ matrix.name }})
-    needs: changes
+    needs: [changes, compile-racket]
     if: needs.changes.outputs.host == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -77,17 +109,18 @@ jobs:
           distribution: full
           variant: CS
           version: "${{ env.RACKET_VERSION }}"
-      - name: Prepare cached Racket dependencies
-        uses: ./.github/actions/setup-racket-cache
+      - name: Prepare precompiled RHDL
+        uses: ./.github/actions/setup-racket-artifact
         with:
           racket-version: "${{ env.RACKET_VERSION }}"
           rhombus-checksum: "${{ env.RHOMBUS_CHECKSUM }}"
+          artifact-name: rhdl-bytecode-${{ github.sha }}
       - name: Run affected host test group
         run: make "${{ matrix.target }}"
 
   examples:
     name: Examples (${{ matrix.name }})
-    needs: changes
+    needs: [changes, compile-racket]
     if: needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -104,17 +137,18 @@ jobs:
           distribution: full
           variant: CS
           version: "${{ env.RACKET_VERSION }}"
-      - name: Prepare cached Racket dependencies
-        uses: ./.github/actions/setup-racket-cache
+      - name: Prepare precompiled RHDL
+        uses: ./.github/actions/setup-racket-artifact
         with:
           racket-version: "${{ env.RACKET_VERSION }}"
           rhombus-checksum: "${{ env.RHOMBUS_CHECKSUM }}"
+          artifact-name: rhdl-bytecode-${{ github.sha }}
       - name: Run affected example group
         run: make "${{ matrix.target }}"
 
   circt:
     name: CIRCT (${{ matrix.name }})
-    needs: changes
+    needs: [changes, compile-racket]
     if: needs.changes.outputs.circt == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -131,11 +165,12 @@ jobs:
           distribution: full
           variant: CS
           version: "${{ env.RACKET_VERSION }}"
-      - name: Prepare cached Racket dependencies
-        uses: ./.github/actions/setup-racket-cache
+      - name: Prepare precompiled RHDL
+        uses: ./.github/actions/setup-racket-artifact
         with:
           racket-version: "${{ env.RACKET_VERSION }}"
           rhombus-checksum: "${{ env.RHOMBUS_CHECKSUM }}"
+          artifact-name: rhdl-bytecode-${{ github.sha }}
       - name: Install Verilator
         run: |
           sudo apt-get update
@@ -152,7 +187,7 @@ jobs:
 
   fesvr:
     name: FESVR integration
-    needs: changes
+    needs: [changes, compile-racket]
     if: needs.changes.outputs.fesvr == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -166,11 +201,12 @@ jobs:
           distribution: full
           variant: CS
           version: "${{ env.RACKET_VERSION }}"
-      - name: Prepare cached Racket dependencies
-        uses: ./.github/actions/setup-racket-cache
+      - name: Prepare precompiled RHDL
+        uses: ./.github/actions/setup-racket-artifact
         with:
           racket-version: "${{ env.RACKET_VERSION }}"
           rhombus-checksum: "${{ env.RHOMBUS_CHECKSUM }}"
+          artifact-name: rhdl-bytecode-${{ github.sha }}
       - name: Install native toolchain
         run: |
           sudo apt-get update

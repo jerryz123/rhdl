@@ -689,7 +689,7 @@ for spec in "${direct_fixture_specs[@]}"; do
 done
 
 if (( ${#materialize_args[@]} > 0 )); then
-  racket -y -S "$repo_dir" tests/backend/load-example.rkt \
+  "$repo_dir/tools/run-racket.sh" -S "$repo_dir" tests/backend/load-example.rkt \
     materialize "$test_tmp_dir" "${materialize_args[@]}"
 fi
 

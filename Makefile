@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-ricket
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-ricket
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -31,6 +31,17 @@ CORE_EXAMPLES := $(sort $(shell find examples/cores -type f \( -name '*.rhm' -o 
 FORMAL_EXAMPLES := $(sort $(shell find examples/formal -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 RICKET_EXAMPLES := $(sort $(shell find examples/ricket -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f \( -name '*.rhm' -o -name '*.rhdl' \) -print) $(RFPL_EXAMPLES))
+RACKET_COMPILE_SOURCES := $(sort \
+  $(HOST_ANNOTATION_TESTS) $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS) \
+  $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) $(RIDX_TESTS) \
+  $(CHI_TESTS) $(RICKET_TESTS) $(EXAMPLES) \
+  $(wildcard tests/backend/emit-*.rhm) $(wildcard ridx/tests/rhdl/emit-*.rhm) \
+  $(wildcard tests/fesvr/*.rhm) $(wildcard tools/emit-fesvr-*.rhm) \
+  tests/backend/load-example.rkt tests/support/run-negative.rkt \
+  noc/tests/language/run-negative.rkt)
+
+print-racket-compile-sources:
+	@printf '%s\n' $(RACKET_COMPILE_SOURCES)
 
 check-boundaries:
 	bash tools/check-boundaries.sh

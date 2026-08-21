@@ -25,9 +25,11 @@
   temporary root within one focused validation batch so dependencies are not
   repeatedly rebuilt.
 - Add `-y` when invoking `racket` directly so changed dependencies are rebuilt.
-  Treat an `instantiate-linklet` mismatch or a reference to a moved module as
-  stale bytecode first, and reproduce it with a fresh compiled root before
-  diagnosing the source.
+  The only exception is `tools/run-racket.sh` after it verifies an immutable
+  bytecode artifact for the exact commit, Racket and Rhombus versions, platform,
+  and workspace path. Treat an `instantiate-linklet` mismatch or a reference to
+  a moved module as stale bytecode first, and reproduce it with a fresh compiled
+  root before diagnosing the source.
 - Test supported behavior and invalid uses of supported features. Do not add
   tests whose purpose is to prove that a removed or unimplemented feature does
   not exist.
