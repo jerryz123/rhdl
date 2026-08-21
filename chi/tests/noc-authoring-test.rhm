@@ -1,0 +1,67 @@
+#lang rhombus
+// Checks logical CHI connections and their expansion into independent NoC planes.
+
+import:
+  "../../noc/authoring/main.rhm" open
+  "../../noc/language/main.rhm".topology
+  "../noc-authoring.rhm" open
+
+def physical = topology:
+  node xbar
+def router = physical.node("xbar")
+def requester = CHIRNSite(NamePath(["system", "requester"]), 3, router)
+def home_requester = CHIRNICNSite(NamePath(["system", "home", "requester"]),
+                                  5,
+                                  router)
+def home_subordinate = CHISNICNSite(NamePath(["system", "home", "subordinate"]),
+                                    5,
+                                    router)
+def memory = CHISNSite(NamePath(["system", "memory"]), 9, router)
+
+def connections = [CHIRNConnection(requester, home_requester),
+                   CHISNConnection(home_subordinate, memory)]
+def compilations = compile_chi_connections(
+  physical,
+  connections,
+  uniform_chi_routing(deny_all)
+)
+
+check:
+  requester.req.terminal.describe() ~is "system/requester/req"
+  requester.rsp_requester.terminal.describe() ~is "system/requester/rsp/requester"
+  home_requester.dat_response.terminal.describe() ~is "system/home/requester/dat/response"
+  home_subordinate.dat_response.terminal.describe() ~is "system/home/subordinate/dat/response"
+  memory.rsp_response.terminal.describe() ~is "system/memory/rsp/response"
+  connections.map(fun (connection): connection.req_routes().length()) ~is [1, 1]
+  connections.map(fun (connection): connection.rsp_routes().length()) ~is [2, 1]
+  connections.map(fun (connection): connection.dat_routes().length()) ~is [2, 2]
+  compilations.req.network.terminal_placement.injections.length() ~is 2
+  compilations.req.network.terminal_placement.ejections.length() ~is 2
+  compilations.rsp.network.terminal_placement.injections.length() ~is 3
+  compilations.rsp.network.terminal_placement.ejections.length() ~is 3
+  compilations.dat.network.terminal_placement.injections.length() ~is 4
+  compilations.dat.network.terminal_placement.ejections.length() ~is 4
+  compilations.req.injections.map(fun (site): site.node_id) ~is [5, 3]
+  compilations.req.ejections.map(fun (site): site.node_id) ~is [5, 9]
+  compilations.req.routes.map(
+    fun (route):
+      [route.source.node_id,
+       route.destination.node_id,
+       compilations.req.network.lowered_routes.route_ref(
+         route.route_class.id
+       ).describe()]
+  ) ~is [[5, 9, "system/home/subordinate/req/to/system/memory/req"],
+         [3, 5, "system/requester/req/to/system/home/requester/req"]]
+
+def shared_source = CHIInjectionSite(3, InjectionRef("shared"), router)
+def conflicting_source = CHIInjectionSite(4, InjectionRef("shared"), router)
+def first_destination = CHIEjectionSite(5, EjectionRef("first"), router)
+def second_destination = CHIEjectionSite(6, EjectionRef("second"), router)
+
+check:
+  compile_chi_channel(
+    physical,
+    [CHIChannelRouteSpec(shared_source, first_destination),
+     CHIChannelRouteSpec(conflicting_source, second_destination)],
+    deny_all
+  ) ~throws "must identify one NodeID and router"

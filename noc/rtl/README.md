@@ -17,8 +17,8 @@ and outgoing-VC masks are local to one router. The decode relation uses a typed
 `target_mask`, its certified `fallback_mask` subset, and a Boolean `valid`
 field. Whole-graph-acyclic plans mark every legal target as fallback.
 Escape-certified plans mark only escape VCs and exact local ejection targets.
-The receiver-explicit
-`route_decoder_lookup` function preserves those decoder-dependent exact types
+The receiver-explicit `route_decoder_lookup` function accepts an explicitly
+declared typed selector wire and preserves those decoder-dependent exact types
 at its boundary. Compilation returns an opaque `RouteDecoder` that stores only
 the plan, derived decode widths, and compiled `DecodeGen`; route mappings and
 rows remain owned by `RouterPlan`. `DecodeGen` alone owns any flattening needed
@@ -53,9 +53,12 @@ same-cycle replacement (`pipe`) remain disabled so the registered timing is
 preserved. Route decisions form the NoC-specific request matrix. A parallel
 flow handle connects the ingress array through those queues, and the
 endpoint-first `grant_crossbar` helper connects their outputs directly to
-egress. The allocator remains an explicit sideband controller: it observes
-requests, fallback classification, availability, and completed transfers but
-does not pretend to consume or forward payload flow.
+the nested egress endpoint of each `SimpleRouterTarget`. That interface couples
+one ready-valid egress with the downstream-owned availability indication used
+by adaptive allocation, instead of exposing unrelated top-level ports. The
+allocator remains an explicit sideband controller: it observes requests,
+fallback classification, availability, and completed transfers but does not
+pretend to consume or forward payload flow.
 A NoC-specific ingress monitor checks every externally offered route key
 against the physical input's origin key before buffering. Outgoing VCs are the
 first targets and every local ejection terminal follows. The router contains
@@ -65,7 +68,7 @@ an ordinary many-input, many-output crossbar instance.
 `compile_simple_router_family` and `SimpleRouterFamily` provide the uniform
 counterpart. It accepts the same uniform `input_buffer_depth`; every occurrence
 in one family necessarily shares that physical queue implementation. All
-occurrences have the family maxima for their ingress and egress arrays and
+occurrences have the family maxima for their ingress and target arrays and
 differ only in the constant `site_key` connection. Defining the generated
 module once and passing that module value to several `inst` forms produces one
 shared module definition with multiple occurrences. The pure family plan

@@ -1,0 +1,86 @@
+#lang rhombus
+// Compiles orthogonal topology, terminal, flow, and routing inputs into a validated network plan.
+
+import:
+  "../model/main.rhm" open
+  "../analysis/escape-validation.rhm".EscapeValidationRequest
+  "../authoring/main.rhm" open
+  "validated-routing.rhm" open
+  "router-plan.rhm".RouterPlan
+  "network-plan.rhm" open
+  "diagnostics.rhm" open
+
+export:
+  NetworkCompilation
+  compile_network
+
+class NetworkCompilation(topology :: TopologySpec,
+                         terminal_placement :: TerminalPlacement,
+                         route_specs :: NonemptyList.of(RouteClassSpec),
+                         routing_policy :: RoutingPolicy,
+                         lowered_topology :: LoweredTopology,
+                         lowered_routes :: LoweredRouteClasses,
+                         routing_compilation :: AuthoredRoutingCompilation,
+                         validated_routing :: ValidatedRouting,
+                         network_plan :: NetworkPlan):
+  opaque
+  internal _NetworkCompilation
+  constructor ~none
+
+  method router_id(ref :: NodeRef) :: NodeId:
+    lowered_topology.node_id(ref)
+
+  method injection_terminal(ref :: InjectionRef) :: InjectionTerminal:
+    lowered_topology.injection_terminal(ref)
+
+  method ejection_terminal(ref :: EjectionRef) :: EjectionTerminal:
+    lowered_topology.ejection_terminal(ref)
+
+  method injection_port(ref :: InjectionRef) :: NetworkInjectionPort:
+    network_plan.injection_port(injection_terminal(ref).id)
+
+  method ejection_port(ref :: EjectionRef) :: NetworkEjectionPort:
+    network_plan.ejection_port(ejection_terminal(ref).id)
+
+  method router_plan(ref :: NodeRef) :: RouterPlan:
+    network_plan.router_plan(router_id(ref))
+
+fun compile_network(topology :: TopologySpec,
+                    terminal_placement :: TerminalPlacement,
+                    route_specs :: NonemptyList.of(RouteClassSpec),
+                    routing_policy :: RoutingPolicy,
+                    ~escape: escape_request :: False || EscapeValidationRequest = #false)
+  :: NetworkCompilation:
+  def attached_topology :: TopologySpec = attach_terminal_placement(
+    topology,
+    terminal_placement
+  )
+  def lowered_topology :: LoweredTopology = lower_topology(attached_topology)
+  def lowered_routes :: LoweredRouteClasses = lower_route_classes(
+    lowered_topology,
+    route_specs
+  )
+  def routing_compilation :: AuthoredRoutingCompilation = compile_authored_routing(
+    lowered_routes,
+    routing_policy,
+    ~escape: escape_request
+  )
+  def result = routing_compilation.result
+  unless result is_a ValidatedRouting
+  | error(
+      ~who: #'compile_network,
+      if routing_compilation.diagnostic
+      | routing_compilation.diagnostic.describe()
+      | result.describe()
+    )
+  def validated_routing :: ValidatedRouting = result
+  def network_plan :: NetworkPlan = NetworkPlan(validated_routing)
+  _NetworkCompilation(topology,
+                      terminal_placement,
+                      route_specs,
+                      routing_policy,
+                      lowered_topology,
+                      lowered_routes,
+                      routing_compilation,
+                      validated_routing,
+                      network_plan)

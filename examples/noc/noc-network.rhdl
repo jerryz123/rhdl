@@ -66,8 +66,8 @@ sync_circuit SourceSubsystem(config :: SimpleRouterConfig,
 
   inst router(SimpleRouter(Bits(8), config))
   injection |> router.ingress[injection_index]
-  router.egress[outgoing_index] |> outgoing
-  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
+  router.target[outgoing_index].egress |> outgoing
+  router.target[outgoing_index].available <== router.target[outgoing_index].egress.ready
 
 sync_circuit TransitSubsystem(config :: SimpleRouterConfig,
                               incoming_index :: Nat,
@@ -80,9 +80,10 @@ sync_circuit TransitSubsystem(config :: SimpleRouterConfig,
 
   inst router(SimpleRouter(Bits(8), config))
   incoming |> router.ingress[incoming_index]
-  router.egress[outgoing_index] |> outgoing
-  router.egress[ejection_index] |> ejection
-  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
+  router.target[outgoing_index].egress |> outgoing
+  router.target[outgoing_index].available <== router.target[outgoing_index].egress.ready
+  router.target[ejection_index].egress |> ejection
+  router.target[ejection_index].available <== router.target[ejection_index].egress.ready
 
 sync_circuit DestinationSubsystem(config :: SimpleRouterConfig,
                                   incoming_index :: Nat,
@@ -93,8 +94,8 @@ sync_circuit DestinationSubsystem(config :: SimpleRouterConfig,
 
   inst router(SimpleRouter(Bits(8), config))
   incoming |> router.ingress[incoming_index]
-  router.egress[ejection_index] |> ejection
-  router.target_available <== vec(for List (index in 0..config.target_count): router.egress[index].ready)
+  router.target[ejection_index].egress |> ejection
+  router.target[ejection_index].available <== router.target[ejection_index].egress.ready
 
 // The system, not noc/rtl, owns placement in the hierarchy and physical-link
 // connections between independently elaborated router-containing subsystems.
@@ -194,66 +195,69 @@ module SourceSubsystem(
   output struct packed {logic valid; RoutedBeat bits; } outgoing_out
 );
 
+  wire struct packed {struct packed {logic valid; RoutedBeat bits; } egress; }
+    _router_target_0_out;
+  wire struct packed {struct packed {logic ready; } egress; logic available; } _GEN =
+    '{egress: outgoing_in, available: outgoing_in.ready};
   SimpleRouter router (
-    .clock            (clock),
-    .reset            (reset),
-    .ingress_0_in     (injection_in),
-    .target_available ({1{outgoing_in.ready}}),
-    .egress_0_in      (outgoing_in),
-    .ingress_0_out    (injection_out),
-    .egress_0_out     (outgoing_out)
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (injection_in),
+    .target_0_in   (_GEN),
+    .ingress_0_out (injection_out),
+    .target_0_out  (_router_target_0_out)
   );
+  assign outgoing_out = _router_target_0_out.egress;
 endmodule
 
 module SimpleRouter(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
-  input  [0:0]                                          target_available,
-  input  struct packed {logic ready; }                  egress_0_in,
-  output struct packed {logic ready; }                  ingress_0_out,
-  output struct packed {logic valid; RoutedBeat bits; } egress_0_out
+  input                                                                          clock,
+                                                                                 reset,
+  input  struct packed {logic valid; RoutedBeat bits; }                          ingress_0_in,
+  input  struct packed {struct packed {logic ready; } egress; logic available; } target_0_in,
+  output struct packed {logic ready; }                                           ingress_0_out,
+  output struct packed {struct packed {logic valid; RoutedBeat bits; } egress; } target_0_out
 );
 
   wire  struct packed {logic ready; } _crossbar_stage_ingress_0_out;
   wire  struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_0_out;
   wire  [0:0][0:0]                    _allocator_grants;
   wire  struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
-  logic [2:0]                         __rhdl_decode_53_result;
+  logic [2:0]                         __rhdl_decode_51_result;
   wire  RouteLookupKey                _GEN =
     '{route_key: ingress_0_in.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
   always_comb begin
     case (_GEN_0)
       2'b00:
-        __rhdl_decode_53_result = 3'h7;
+        __rhdl_decode_51_result = 3'h7;
       2'b10:
-        __rhdl_decode_53_result = 3'h7;
+        __rhdl_decode_51_result = 3'h7;
       default:
-        __rhdl_decode_53_result = 3'h0;
+        __rhdl_decode_51_result = 3'h0;
     endcase
   end // always_comb
-  wire  RouteDecision                 _GEN_1 = /*cast(bit)*/__rhdl_decode_53_result;
+  wire  RouteDecision                 _GEN_1 = /*cast(bit)*/__rhdl_decode_51_result;
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_0_in.valid | _GEN_1.valid);
   `endif // not def SYNTHESIS
-  logic [2:0]                         __rhdl_decode_150_result;
+  logic [2:0]                         __rhdl_decode_152_result;
   wire  RouteLookupKey                _GEN_2 =
     '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
   always_comb begin
     case (_GEN_3)
       2'b00:
-        __rhdl_decode_150_result = 3'h7;
+        __rhdl_decode_152_result = 3'h7;
       2'b10:
-        __rhdl_decode_150_result = 3'h7;
+        __rhdl_decode_152_result = 3'h7;
       default:
-        __rhdl_decode_150_result = 3'h0;
+        __rhdl_decode_152_result = 3'h0;
     endcase
   end // always_comb
-  wire  RouteDecision                 _GEN_4 = /*cast(bit)*/__rhdl_decode_150_result;
+  wire  RouteDecision                 _GEN_4 = /*cast(bit)*/__rhdl_decode_152_result;
   Queue queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -270,18 +274,19 @@ module SimpleRouter(
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.target_mask}}}}),
     .fallback_requests
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask}}}}),
-    .target_available  (target_available),
-    .accepts           ({1{_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+    .target_available  ({1{target_0_in.available}}),
+    .accepts
+      ({1{_crossbar_stage_egress_0_out.valid & target_0_in.egress.ready}}),
     .grants            (_allocator_grants)
   );
   GrantCrossbar crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
     .grants        (_allocator_grants),
-    .egress_0_in   (egress_0_in),
+    .egress_0_in   (target_0_in.egress),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
     .egress_0_out  (_crossbar_stage_egress_0_out)
   );
-  assign egress_0_out = _crossbar_stage_egress_0_out;
+  assign target_0_out = '{egress: _crossbar_stage_egress_0_out};
 endmodule
 
 module Queue(
@@ -422,29 +427,37 @@ module TransitSubsystem(
                                                         ejection_out
 );
 
+  wire struct packed {struct packed {logic valid; RoutedBeat bits; } egress; }
+    _router_target_0_out;
+  wire struct packed {struct packed {logic valid; RoutedBeat bits; } egress; }
+    _router_target_1_out;
+  wire struct packed {struct packed {logic ready; } egress; logic available; } _GEN =
+    '{egress: ejection_in, available: ejection_in.ready};
+  wire struct packed {struct packed {logic ready; } egress; logic available; } _GEN_0 =
+    '{egress: outgoing_in, available: outgoing_in.ready};
   SimpleRouter_1 router (
-    .clock            (clock),
-    .reset            (reset),
-    .ingress_0_in     (incoming_in),
-    .target_available ({{ejection_in.ready}, {outgoing_in.ready}}),
-    .egress_0_in      (outgoing_in),
-    .egress_1_in      (ejection_in),
-    .ingress_0_out    (incoming_out),
-    .egress_0_out     (outgoing_out),
-    .egress_1_out     (ejection_out)
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (incoming_in),
+    .target_0_in   (_GEN_0),
+    .target_1_in   (_GEN),
+    .ingress_0_out (incoming_out),
+    .target_0_out  (_router_target_0_out),
+    .target_1_out  (_router_target_1_out)
   );
+  assign outgoing_out = _router_target_0_out.egress;
+  assign ejection_out = _router_target_1_out.egress;
 endmodule
 
 module SimpleRouter_1(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
-  input  [1:0]                                          target_available,
-  input  struct packed {logic ready; }                  egress_0_in,
-                                                        egress_1_in,
-  output struct packed {logic ready; }                  ingress_0_out,
-  output struct packed {logic valid; RoutedBeat bits; } egress_0_out,
-                                                        egress_1_out
+  input                                                                          clock,
+                                                                                 reset,
+  input  struct packed {logic valid; RoutedBeat bits; }                          ingress_0_in,
+  input  struct packed {struct packed {logic ready; } egress; logic available; } target_0_in,
+                                                                                 target_1_in,
+  output struct packed {logic ready; }                                           ingress_0_out,
+  output struct packed {struct packed {logic valid; RoutedBeat bits; } egress; } target_0_out,
+                                                                                 target_1_out
 );
 
   wire  struct packed {logic ready; } _crossbar_stage_ingress_0_out;
@@ -452,41 +465,41 @@ module SimpleRouter_1(
   wire  struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_1_out;
   wire  [0:0][1:0]                    _allocator_grants;
   wire  struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
-  logic [4:0]                         __rhdl_decode_675_result;
+  logic [4:0]                         __rhdl_decode_681_result;
   wire  RouteLookupKey                _GEN =
     '{route_key: ingress_0_in.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
   always_comb begin
     case (_GEN_0)
       2'b00:
-        __rhdl_decode_675_result = 5'h15;
+        __rhdl_decode_681_result = 5'h15;
       2'b10:
-        __rhdl_decode_675_result = 5'hB;
+        __rhdl_decode_681_result = 5'hB;
       default:
-        __rhdl_decode_675_result = 5'h0;
+        __rhdl_decode_681_result = 5'h0;
     endcase
   end // always_comb
-  wire  RouteDecision_1               _GEN_1 = /*cast(bit)*/__rhdl_decode_675_result;
+  wire  RouteDecision_1               _GEN_1 = /*cast(bit)*/__rhdl_decode_681_result;
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_0_in.valid | _GEN_1.valid);
   `endif // not def SYNTHESIS
-  logic [4:0]                         __rhdl_decode_708_result;
+  logic [4:0]                         __rhdl_decode_720_result;
   wire  RouteLookupKey                _GEN_2 =
     '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
   always_comb begin
     case (_GEN_3)
       2'b00:
-        __rhdl_decode_708_result = 5'h15;
+        __rhdl_decode_720_result = 5'h15;
       2'b10:
-        __rhdl_decode_708_result = 5'hB;
+        __rhdl_decode_720_result = 5'hB;
       default:
-        __rhdl_decode_708_result = 5'h0;
+        __rhdl_decode_720_result = 5'h0;
     endcase
   end // always_comb
-  wire  RouteDecision_1               _GEN_4 = /*cast(bit)*/__rhdl_decode_708_result;
+  wire  RouteDecision_1               _GEN_4 = /*cast(bit)*/__rhdl_decode_720_result;
   Queue queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -505,23 +518,23 @@ module SimpleRouter_1(
     .fallback_requests
       ({1{{{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask[1]},
            {_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask[0]}}}}),
-    .target_available  (target_available),
+    .target_available  ({{target_1_in.available}, {target_0_in.available}}),
     .accepts
-      ({{_crossbar_stage_egress_1_out.valid & egress_1_in.ready},
-        {_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+      ({{_crossbar_stage_egress_1_out.valid & target_1_in.egress.ready},
+        {_crossbar_stage_egress_0_out.valid & target_0_in.egress.ready}}),
     .grants            (_allocator_grants)
   );
   GrantCrossbar_1 crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
     .grants        (_allocator_grants),
-    .egress_0_in   (egress_0_in),
-    .egress_1_in   (egress_1_in),
+    .egress_0_in   (target_0_in.egress),
+    .egress_1_in   (target_1_in.egress),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
     .egress_0_out  (_crossbar_stage_egress_0_out),
     .egress_1_out  (_crossbar_stage_egress_1_out)
   );
-  assign egress_0_out = _crossbar_stage_egress_0_out;
-  assign egress_1_out = _crossbar_stage_egress_1_out;
+  assign target_0_out = '{egress: _crossbar_stage_egress_0_out};
+  assign target_1_out = '{egress: _crossbar_stage_egress_1_out};
 endmodule
 
 module RouterAllocator_1(
@@ -649,62 +662,65 @@ module DestinationSubsystem(
   output struct packed {logic valid; RoutedBeat bits; } ejection_out
 );
 
+  wire struct packed {struct packed {logic valid; RoutedBeat bits; } egress; }
+    _router_target_0_out;
+  wire struct packed {struct packed {logic ready; } egress; logic available; } _GEN =
+    '{egress: ejection_in, available: ejection_in.ready};
   SimpleRouter_2 router (
-    .clock            (clock),
-    .reset            (reset),
-    .ingress_0_in     (incoming_in),
-    .target_available ({1{ejection_in.ready}}),
-    .egress_0_in      (ejection_in),
-    .ingress_0_out    (incoming_out),
-    .egress_0_out     (ejection_out)
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (incoming_in),
+    .target_0_in   (_GEN),
+    .ingress_0_out (incoming_out),
+    .target_0_out  (_router_target_0_out)
   );
+  assign ejection_out = _router_target_0_out.egress;
 endmodule
 
 module SimpleRouter_2(
-  input                                                 clock,
-                                                        reset,
-  input  struct packed {logic valid; RoutedBeat bits; } ingress_0_in,
-  input  [0:0]                                          target_available,
-  input  struct packed {logic ready; }                  egress_0_in,
-  output struct packed {logic ready; }                  ingress_0_out,
-  output struct packed {logic valid; RoutedBeat bits; } egress_0_out
+  input                                                                          clock,
+                                                                                 reset,
+  input  struct packed {logic valid; RoutedBeat bits; }                          ingress_0_in,
+  input  struct packed {struct packed {logic ready; } egress; logic available; } target_0_in,
+  output struct packed {logic ready; }                                           ingress_0_out,
+  output struct packed {struct packed {logic valid; RoutedBeat bits; } egress; } target_0_out
 );
 
   wire  struct packed {logic ready; } _crossbar_stage_ingress_0_out;
   wire  struct packed {logic valid; RoutedBeat bits; } _crossbar_stage_egress_0_out;
   wire  [0:0][0:0]                    _allocator_grants;
   wire  struct packed {logic valid; RoutedBeat bits; } _queue_stage_egress_out;
-  logic [2:0]                         __rhdl_decode_1439_result;
+  logic [2:0]                         __rhdl_decode_1465_result;
   wire  RouteLookupKey                _GEN =
     '{route_key: ingress_0_in.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_0 = /*cast(bit[1:0])*/_GEN;
   always_comb begin
     case (_GEN_0)
       2'b10:
-        __rhdl_decode_1439_result = 3'h7;
+        __rhdl_decode_1465_result = 3'h7;
       default:
-        __rhdl_decode_1439_result = 3'h0;
+        __rhdl_decode_1465_result = 3'h0;
     endcase
   end // always_comb
-  wire  RouteDecision                 _GEN_1 = /*cast(bit)*/__rhdl_decode_1439_result;
+  wire  RouteDecision                 _GEN_1 = /*cast(bit)*/__rhdl_decode_1465_result;
   `ifndef SYNTHESIS
     simple_router_ingress_valid_route_0:
       assert property (@(posedge clock) disable iff (reset)
                          ~ingress_0_in.valid | _GEN_1.valid);
   `endif // not def SYNTHESIS
-  logic [2:0]                         __rhdl_decode_1472_result;
+  logic [2:0]                         __rhdl_decode_1502_result;
   wire  RouteLookupKey                _GEN_2 =
     '{route_key: _queue_stage_egress_out.bits.route_key, origin_key: (1'h0)};
   wire  [1:0]                         _GEN_3 = /*cast(bit[1:0])*/_GEN_2;
   always_comb begin
     case (_GEN_3)
       2'b10:
-        __rhdl_decode_1472_result = 3'h7;
+        __rhdl_decode_1502_result = 3'h7;
       default:
-        __rhdl_decode_1472_result = 3'h0;
+        __rhdl_decode_1502_result = 3'h0;
     endcase
   end // always_comb
-  wire  RouteDecision                 _GEN_4 = /*cast(bit)*/__rhdl_decode_1472_result;
+  wire  RouteDecision                 _GEN_4 = /*cast(bit)*/__rhdl_decode_1502_result;
   Queue queue_stage (
     .clock       (clock),
     .reset       (reset),
@@ -721,18 +737,19 @@ module SimpleRouter_2(
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.target_mask}}}}),
     .fallback_requests
       ({1{{1{_queue_stage_egress_out.valid & _GEN_4.valid & _GEN_4.fallback_mask}}}}),
-    .target_available  (target_available),
-    .accepts           ({1{_crossbar_stage_egress_0_out.valid & egress_0_in.ready}}),
+    .target_available  ({1{target_0_in.available}}),
+    .accepts
+      ({1{_crossbar_stage_egress_0_out.valid & target_0_in.egress.ready}}),
     .grants            (_allocator_grants)
   );
   GrantCrossbar crossbar_stage (
     .ingress_0_in  (_queue_stage_egress_out),
     .grants        (_allocator_grants),
-    .egress_0_in   (egress_0_in),
+    .egress_0_in   (target_0_in.egress),
     .ingress_0_out (_crossbar_stage_ingress_0_out),
     .egress_0_out  (_crossbar_stage_egress_0_out)
   );
-  assign egress_0_out = _crossbar_stage_egress_0_out;
+  assign target_0_out = '{egress: _crossbar_stage_egress_0_out};
 endmodule
 }>>|
 

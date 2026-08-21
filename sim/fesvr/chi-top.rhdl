@@ -1,9 +1,12 @@
 #lang rhdl
-// Composes decoupled FESVR requester, HN-I, and SN-I RAM transaction engines.
+// Composes FESVR CHI engines through independently routed REQ, RSP, and DAT planes.
 
 import:
   lib("rhdl/std/ready-valid.rhdl").fire
   lib("chi/main.rhdl") open
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/rtl/router.rhdl") open
   "direct-memory-htif.rhdl".FesvrRequester
 
 def fesvr_flit = CHIFlitParams()
@@ -50,6 +53,43 @@ def fesvr_home_params = CHIHNIParams(
   fesvr_ram_params.service
 )
 
+// The physical site is protocol-independent. The RN-I to HN-I connection
+// expands into independently compiled REQ, RSP, and DAT transport planes.
+def fesvr_topology = topology:
+  node xbar
+def fesvr_router = fesvr_topology.node("xbar")
+
+def fesvr_requester_site = CHIRNSite(NamePath("requester"),
+                                     fesvr_node.node_id,
+                                     fesvr_router)
+def fesvr_home_requester_site = CHIRNICNSite(
+  NamePath("home").child("requester"),
+  fesvr_home.node_id,
+  fesvr_router
+)
+
+def fesvr_connections = [
+  CHIRNConnection(fesvr_requester_site, fesvr_home_requester_site)
+]
+def fesvr_compilations = compile_chi_connections(
+  fesvr_topology,
+  fesvr_connections,
+  uniform_chi_routing(deny_all)
+)
+def fesvr_adapter_plans = compile_chi_channel_adapter_plans(
+  fesvr_compilations,
+  fesvr_flit
+)
+def fesvr_req_router_config :: SimpleRouterConfig = compile_simple_router(
+  fesvr_compilations.req.network.router_plan(fesvr_router)
+)
+def fesvr_rsp_router_config :: SimpleRouterConfig = compile_simple_router(
+  fesvr_compilations.rsp.network.router_plan(fesvr_router)
+)
+def fesvr_dat_router_config :: SimpleRouterConfig = compile_simple_router(
+  fesvr_compilations.dat.network.router_plan(fesvr_router)
+)
+
 sync_circuit FesvrTop():
   output loaded: Bool
   output entry: Bits(32)
@@ -60,8 +100,21 @@ sync_circuit FesvrTop():
                                 fesvr_home.node_id))
   inst home(CHIHNI(fesvr_home_params))
   inst ram(CHIRam(fesvr_ram_params))
+  inst req_router(SimpleRouter(CHIReqFlit(fesvr_flit), fesvr_req_router_config))
+  inst rsp_router(SimpleRouter(CHIRspFlit(fesvr_flit), fesvr_rsp_router_config))
+  inst dat_router(SimpleRouter(CHIDatFlit(fesvr_flit), fesvr_dat_router_config))
 
-  requester.port <=> home.port.requester
+  connect_chi_rni(requester.port,
+                  home.port.requester,
+                  ~node: fesvr_requester_site,
+                  ~icn: fesvr_home_requester_site,
+                  ~req_ingress: req_router.ingress,
+                  ~req_targets: req_router.target,
+                  ~rsp_ingress: rsp_router.ingress,
+                  ~rsp_targets: rsp_router.target,
+                  ~dat_ingress: dat_router.ingress,
+                  ~dat_targets: dat_router.target,
+                  ~adapters: fesvr_adapter_plans)
   home.port.subordinate <=> ram.port
 
   reg load_complete(~init: Bool(#false))
@@ -84,5 +137,15 @@ export:
   fesvr_ram_params
   fesvr_home
   fesvr_home_params
+  fesvr_topology
+  fesvr_router
+  fesvr_requester_site
+  fesvr_home_requester_site
+  fesvr_connections
+  fesvr_compilations
+  fesvr_adapter_plans
+  fesvr_req_router_config
+  fesvr_rsp_router_config
+  fesvr_dat_router_config
   FesvrTop
   design

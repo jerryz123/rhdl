@@ -5,16 +5,20 @@ module chi_ram_invalid_tb;
   typedef struct packed { logic valid; CHIRspFlit bits; } rsp_forward_t;
   typedef struct packed { logic valid; CHIDatFlit bits; } dat_forward_t;
   typedef struct packed {
-    ready_t responses;
-    ready_t response_data;
-    req_forward_t requests;
-    dat_forward_t request_data;
+    struct packed { ready_t response; } rsp;
+    req_forward_t req;
+    struct packed {
+      dat_forward_t request;
+      ready_t response;
+    } dat;
   } sn_in_t;
   typedef struct packed {
-    rsp_forward_t responses;
-    dat_forward_t response_data;
-    ready_t requests;
-    ready_t request_data;
+    struct packed { rsp_forward_t response; } rsp;
+    ready_t req;
+    struct packed {
+      ready_t request;
+      dat_forward_t response;
+    } dat;
   } sn_out_t;
 
   logic clock = 1'b0;
@@ -30,14 +34,14 @@ module chi_ram_invalid_tb;
   sn_in_t port_in;
   sn_out_t port_out;
 
-  assign port_in.responses = responses_in;
-  assign port_in.response_data = response_data_in;
-  assign port_in.requests = requests_in;
-  assign port_in.request_data = request_data_in;
-  assign responses_out = port_out.responses;
-  assign response_data_out = port_out.response_data;
-  assign requests_out = port_out.requests;
-  assign request_data_out = port_out.request_data;
+  assign port_in.rsp.response = responses_in;
+  assign port_in.req = requests_in;
+  assign port_in.dat.request = request_data_in;
+  assign port_in.dat.response = response_data_in;
+  assign responses_out = port_out.rsp.response;
+  assign requests_out = port_out.req;
+  assign request_data_out = port_out.dat.request;
+  assign response_data_out = port_out.dat.response;
 
   CHIRam dut (.*);
   always #5 clock = ~clock;

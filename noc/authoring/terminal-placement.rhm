@@ -1,0 +1,71 @@
+#lang rhombus
+// Defines symbolic ingress and egress placement independently of physical links.
+
+import:
+  "names.rhm" open
+  "topology-spec.rhm" open
+
+export:
+  TerminalPlacement
+  attach_terminal_placement
+
+fun duplicate_injection_ref(terminals :: List.of(InjectionTerminalSpec),
+                            ref :: InjectionRef) :: Boolean:
+  terminals.filter(
+    ~keep: fun (terminal): injection_ref_equal(terminal.ref, ref)
+  ).length() > 1
+
+fun duplicate_ejection_ref(terminals :: List.of(EjectionTerminalSpec),
+                           ref :: EjectionRef) :: Boolean:
+  terminals.filter(
+    ~keep: fun (terminal): ejection_ref_equal(terminal.ref, ref)
+  ).length() > 1
+
+class TerminalPlacement(injections :: List.of(InjectionTerminalSpec),
+                        ejections :: List.of(EjectionTerminalSpec)):
+  constructor (injections :: List.of(InjectionTerminalSpec),
+               ejections :: List.of(EjectionTerminalSpec)):
+    for (terminal in injections):
+      when duplicate_injection_ref(injections, terminal.ref)
+      | error(~who: #'TerminalPlacement,
+              "duplicate placed injection " ++ terminal.ref.describe())
+    for (terminal in ejections):
+      when duplicate_ejection_ref(ejections, terminal.ref)
+      | error(~who: #'TerminalPlacement,
+              "duplicate placed ejection " ++ terminal.ref.describe())
+    super(
+      injections.sort(
+        fun (left, right): injection_ref_less(left.ref, right.ref)
+      ),
+      ejections.sort(
+        fun (left, right): ejection_ref_less(left.ref, right.ref)
+      )
+    )
+
+  method injection(ref :: InjectionRef) :: InjectionTerminalSpec:
+    def found = injections.find(
+      fun (terminal): injection_ref_equal(terminal.ref, ref)
+    )
+    unless found
+    | error(~who: #'TerminalPlacement,
+            "unknown placed injection " ++ ref.describe())
+    found
+
+  method ejection(ref :: EjectionRef) :: EjectionTerminalSpec:
+    def found = ejections.find(
+      fun (terminal): ejection_ref_equal(terminal.ref, ref)
+    )
+    unless found
+    | error(~who: #'TerminalPlacement,
+            "unknown placed ejection " ++ ref.describe())
+    found
+
+fun attach_terminal_placement(topology :: TopologySpec,
+                              placement :: TerminalPlacement) :: TopologySpec:
+  when topology.injections.length() > 0 || topology.ejections.length() > 0
+  | error(~who: #'attach_terminal_placement,
+          "physical topology must not already contain terminal placement")
+  TopologySpec(topology.nodes,
+               topology.links,
+               ~injections: placement.injections,
+               ~ejections: placement.ejections)

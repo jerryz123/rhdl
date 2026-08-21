@@ -202,47 +202,38 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   reg request_word(~init: bits(0, 32))
   reg write_dbid(~init: bits(0, 12))
   def idle = state === FesvrCHIState.Idle
-  port.requests.valid <== raw.request_valid & idle
-  port.requests.bits <== fesvr_chi_request(raw.request_address,
-                                           raw.request_write,
-                                           p,
-                                           node.node_id,
-                                           home_node_id)
-  raw.request_ready <== idle & port.requests.ready
-  def request_fire = fire(port.requests)
+  port.req.valid <== raw.request_valid & idle
+  port.req.bits <== fesvr_chi_request(raw.request_address, raw.request_write, p, node.node_id, home_node_id)
+  raw.request_ready <== idle & port.req.ready
+  def request_fire = fire(port.req)
 
-  def response = port.responses.bits
+  def response = port.rsp.response.bits
   def accepting_dbid = (state === FesvrCHIState.WriteAwaitDBID) & (
     response.opcode === CHIRspOpcode.DBIDResp
   )
   def accepting_completion = (state === FesvrCHIState.WriteAwaitComp) & (
     response.opcode === CHIRspOpcode.Comp
   ) & raw.response_ready
-  port.responses.ready <== accepting_dbid ||| accepting_completion
-  def dbid_fire = fire(port.responses) & accepting_dbid
+  port.rsp.response.ready <== accepting_dbid ||| accepting_completion
+  def dbid_fire = fire(port.rsp.response) & accepting_dbid
 
-  port.request_data.valid <== state === FesvrCHIState.WriteData
-  port.request_data.bits <== fesvr_chi_write_data(request_address,
-                                                  request_word,
-                                                  write_dbid,
-                                                  p,
-                                                  node.node_id,
-                                                  home_node_id)
-  def write_data_fire = fire(port.request_data)
+  port.dat.request.valid <== state === FesvrCHIState.WriteData
+  port.dat.request.bits <== fesvr_chi_write_data(request_address, request_word, write_dbid, p, node.node_id, home_node_id)
+  def write_data_fire = fire(port.dat.request)
 
-  def read_data = port.response_data.bits
+  def read_data = port.dat.response.bits
   def read_pending = state === FesvrCHIState.ReadPending
   def read_words = cast(read_data.data, Vec(word_lanes, Bits(32)))
   def read_lane = request_address[2..(2 + lane_width)]
-  def read_response_valid = read_pending & port.response_data.valid
+  def read_response_valid = read_pending & port.dat.response.valid
   def write_response_valid = (state === FesvrCHIState.WriteAwaitComp) & (
-    port.responses.valid
+    port.rsp.response.valid
   ) & (response.opcode === CHIRspOpcode.Comp)
   raw.response_valid <== read_response_valid ||| write_response_valid
   raw.response_data <== mux(read_response_valid,
                             read_words[read_lane],
                             bits(0, 32))
-  port.response_data.ready <== read_pending & raw.response_ready
+  port.dat.response.ready <== read_pending & raw.response_ready
   def response_fire = raw.response_valid & raw.response_ready
 
   when request_fire:
@@ -259,15 +250,15 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   elsewhen response_fire:
     state <== FesvrCHIState.Idle
 
-  when (port.responses.valid):
+  when (port.rsp.response.valid):
     assert(accepting_dbid ||| write_response_valid,
            "fesvr_chi_response_expected")
-  when (port.response_data.valid):
+  when (port.dat.response.valid):
     assert(read_pending, "fesvr_chi_read_data_expected")
 
   raw.start_ready <== start.ready
-  port.requester_responses.valid <== Bool(#false)
-  port.requester_responses.bits <== literal(CHIRspFlit(p), 0)
+  port.rsp.requester.valid <== Bool(#false)
+  port.rsp.requester.bits <== literal(CHIRspFlit(p), 0)
   start.valid <== raw.start_valid
   start.bits <== raw.start_entry
   exit <== raw.exit

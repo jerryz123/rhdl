@@ -1,0 +1,58 @@
+#lang rhombus
+// Checks generic compilation from separate topology, terminal, flow, and routing inputs.
+
+import:
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm".topology
+  "../../plan/main.rhm" open
+
+def physical :: TopologySpec = topology:
+  vc_group transport: 1
+  node source_router
+  node destination_router
+  directed forward:
+    source_router -> destination_router
+    vcs [transport]
+
+def source :: InjectionRef = InjectionRef("source")
+def destination :: EjectionRef = EjectionRef("destination")
+def terminals :: TerminalPlacement = TerminalPlacement(
+  [InjectionTerminalSpec(source, physical.node("source_router"))],
+  [EjectionTerminalSpec(destination, physical.node("destination_router"))]
+)
+def route :: RouteClassSpec = RouteClassSpec(
+  RouteClassRef("source_to_destination"),
+  source,
+  destination
+)
+def network :: NetworkCompilation = compile_network(
+  physical,
+  terminals,
+  [route],
+  inject_into_vc_groups(["transport"])
+)
+
+check:
+  physical.injections ~is []
+  physical.ejections ~is []
+  network.topology === physical ~is #true
+  network.terminal_placement === terminals ~is #true
+  network.validated_routing.dependency_graph.vertices.map(
+    fun (vc): vc.describe()
+  ) ~is ["l0.vc0"]
+  network.router_id(physical.node("source_router")).describe() ~is "n1"
+  network.router_id(physical.node("destination_router")).describe() ~is "n0"
+  network.injection_port(source).input_index ~is 0
+  network.ejection_port(destination).target_index ~is 0
+  network.router_plan(physical.node("source_router")).origins.length() ~is 1
+
+check:
+  terminals.injection(source).router === physical.node("source_router") ~is #true
+  terminals.ejection(destination).router === physical.node("destination_router") ~is #true
+  terminals.injection(InjectionRef("unknown")) ~throws "unknown placed injection"
+  terminals.ejection(EjectionRef("unknown")) ~throws "unknown placed ejection"
+  TerminalPlacement(
+    [InjectionTerminalSpec(source, physical.node("source_router")),
+     InjectionTerminalSpec(source, physical.node("destination_router"))],
+    [EjectionTerminalSpec(destination, physical.node("destination_router"))]
+  ) ~throws "duplicate placed injection"

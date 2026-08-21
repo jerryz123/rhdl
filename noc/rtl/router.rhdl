@@ -12,6 +12,7 @@ import:
 
 export:
   RoutedBeat
+  SimpleRouterTarget
   SimpleRouterConfig
   SimpleRouterFamilyConfig
   compile_simple_router
@@ -25,6 +26,19 @@ export:
 bundle RoutedBeat(T :: DataType, route_width :: PosInt):
   route_key: Bits(route_width)
   payload: T
+
+// Couples one routed output with the allocator-availability indication owned
+// by its downstream attachment.
+interface SimpleRouterTarget(T :: DataType):
+  role router
+  role downstream
+  provider router
+
+  router -> downstream:
+    egress: Decoupled(T)
+
+  downstream -> router:
+    available: Bool
 
 // Fixes all widths and local port meanings before circuit elaboration.
 class SimpleRouterConfig(router_plan :: RouterPlan,
@@ -114,8 +128,7 @@ fun monitor_router_family_ingress(
 sync_circuit SimpleRouter(T :: DataType, config :: SimpleRouterConfig):
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
-  input target_available: Vec(config.target_count, Bool)
-  interface egress[config.target_count](Decoupled(Beat), ~role: producer)
+  interface target[config.target_count](SimpleRouterTarget(Beat), ~role: router)
   monitor_router_ingress(ingress, config.route_decoder)
 
   // Compose the ingress array with one ordinary queue per local origin.
@@ -156,9 +169,10 @@ sync_circuit SimpleRouter(T :: DataType, config :: SimpleRouterConfig):
   inst allocator(RouterAllocator(config.input_count, config.target_count))
   allocator.requests <== requests
   allocator.fallback_requests <== fallback_requests
-  allocator.target_available <== target_available
-  (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
-  allocator.accepts <== vec(for List (target_index in 0..config.target_count): egress[target_index].valid & egress[target_index].ready)
+  allocator.target_available <== vec(for List (target_index in 0..config.target_count): target[target_index].available)
+  def traversal = input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)
+  for (target_index in 0..config.target_count): traversal[target_index] <=> target[target_index].egress
+  allocator.accepts <== vec(for List (target_index in 0..config.target_count): target[target_index].egress.valid & target[target_index].egress.ready)
 
 // Implements one member of a router family. The site key changes only which
 // prevalidated row is selected; it never changes the routing proof or policy.
@@ -167,8 +181,7 @@ sync_circuit SimpleRouterFamily(T :: DataType,
   def Beat = RoutedBeat(T, config.route_decoder.route_width)
   input site_key: Bits(config.route_decoder.site_width)
   interface ingress[config.input_count](Decoupled(Beat), ~role: consumer)
-  input target_available: Vec(config.target_count, Bool)
-  interface egress[config.target_count](Decoupled(Beat), ~role: producer)
+  interface target[config.target_count](SimpleRouterTarget(Beat), ~role: router)
   monitor_router_family_ingress(ingress, site_key, config.route_decoder)
 
   def input_buffers = ingress |> parallel_handles(
@@ -208,6 +221,7 @@ sync_circuit SimpleRouterFamily(T :: DataType,
   inst allocator(RouterAllocator(config.input_count, config.target_count))
   allocator.requests <== requests
   allocator.fallback_requests <== fallback_requests
-  allocator.target_available <== target_available
-  (input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)) <=> egress
-  allocator.accepts <== vec(for List (target_index in 0..config.target_count): egress[target_index].valid & egress[target_index].ready)
+  allocator.target_available <== vec(for List (target_index in 0..config.target_count): target[target_index].available)
+  def traversal = input_buffers |> grant_crossbar(config.target_count, ~grants: allocator.grants)
+  for (target_index in 0..config.target_count): traversal[target_index] <=> target[target_index].egress
+  allocator.accepts <== vec(for List (target_index in 0..config.target_count): target[target_index].egress.valid & target[target_index].egress.ready)

@@ -5,30 +5,42 @@ module chi_home_tb;
   typedef struct packed { logic valid; CHIRspFlit bits; } rsp_t;
   typedef struct packed { logic valid; CHIDatFlit bits; } dat_t;
   typedef struct packed {
-    req_t requests;
-    rsp_t requester_responses;
-    dat_t request_data;
-    ready_t responses;
-    ready_t response_data;
+    req_t req;
+    struct packed {
+      rsp_t requester;
+      ready_t response;
+    } rsp;
+    struct packed {
+      dat_t request;
+      ready_t response;
+    } dat;
   } requester_in_t;
   typedef struct packed {
-    ready_t requests;
-    ready_t requester_responses;
-    ready_t request_data;
-    rsp_t responses;
-    dat_t response_data;
+    ready_t req;
+    struct packed {
+      ready_t requester;
+      rsp_t response;
+    } rsp;
+    struct packed {
+      ready_t request;
+      dat_t response;
+    } dat;
   } requester_out_t;
   typedef struct packed {
-    rsp_t responses;
-    dat_t response_data;
-    ready_t requests;
-    ready_t request_data;
+    struct packed { rsp_t response; } rsp;
+    ready_t req;
+    struct packed {
+      ready_t request;
+      dat_t response;
+    } dat;
   } subordinate_in_t;
   typedef struct packed {
-    ready_t responses;
-    ready_t response_data;
-    req_t requests;
-    dat_t request_data;
+    struct packed { ready_t response; } rsp;
+    req_t req;
+    struct packed {
+      dat_t request;
+      ready_t response;
+    } dat;
   } subordinate_out_t;
   typedef struct packed {
     requester_in_t requester;
@@ -75,24 +87,24 @@ module chi_home_tb;
   hni_in_t port_in;
   hni_out_t port_out;
 
-  assign port_in.requester.requests = upstream_requests_in;
-  assign port_in.requester.requester_responses = upstream_requester_responses_in;
-  assign port_in.requester.request_data = upstream_request_data_in;
-  assign port_in.requester.responses = upstream_responses_in;
-  assign port_in.requester.response_data = upstream_response_data_in;
-  assign port_in.subordinate.requests = downstream_requests_in;
-  assign port_in.subordinate.request_data = downstream_request_data_in;
-  assign port_in.subordinate.responses = downstream_responses_in;
-  assign port_in.subordinate.response_data = downstream_response_data_in;
-  assign upstream_requests_out = port_out.requester.requests;
-  assign upstream_requester_responses_out = port_out.requester.requester_responses;
-  assign upstream_request_data_out = port_out.requester.request_data;
-  assign upstream_responses_out = port_out.requester.responses;
-  assign upstream_response_data_out = port_out.requester.response_data;
-  assign downstream_requests_out = port_out.subordinate.requests;
-  assign downstream_request_data_out = port_out.subordinate.request_data;
-  assign downstream_responses_out = port_out.subordinate.responses;
-  assign downstream_response_data_out = port_out.subordinate.response_data;
+  assign port_in.requester.req = upstream_requests_in;
+  assign port_in.requester.rsp.requester = upstream_requester_responses_in;
+  assign port_in.requester.rsp.response = upstream_responses_in;
+  assign port_in.requester.dat.request = upstream_request_data_in;
+  assign port_in.requester.dat.response = upstream_response_data_in;
+  assign port_in.subordinate.rsp.response = downstream_responses_in;
+  assign port_in.subordinate.req = downstream_requests_in;
+  assign port_in.subordinate.dat.request = downstream_request_data_in;
+  assign port_in.subordinate.dat.response = downstream_response_data_in;
+  assign upstream_requests_out = port_out.requester.req;
+  assign upstream_requester_responses_out = port_out.requester.rsp.requester;
+  assign upstream_responses_out = port_out.requester.rsp.response;
+  assign upstream_request_data_out = port_out.requester.dat.request;
+  assign upstream_response_data_out = port_out.requester.dat.response;
+  assign downstream_responses_out = port_out.subordinate.rsp.response;
+  assign downstream_requests_out = port_out.subordinate.req;
+  assign downstream_request_data_out = port_out.subordinate.dat.request;
+  assign downstream_response_data_out = port_out.subordinate.dat.response;
 
   CHIHNI dut (.*);
   always #5 clock = ~clock;

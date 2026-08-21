@@ -48,10 +48,10 @@ def ram_verilog_reference = @str|<<{
   typedef struct packed {logic all; logic [1:0] except; } AndExclusionReduction;
 `endif // _TYPESCOPE_rhdl_types
 module CHIRam(
-  input                                                                                                                                                                                                                               clock,
-                                                                                                                                                                                                                                      reset,
-  input  struct packed {struct packed {logic ready; } responses; struct packed {logic ready; } response_data; struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIDatFlit bits; } request_data; } port_in,
-  output struct packed {struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic ready; } requests; struct packed {logic ready; } request_data; } port_out
+  input                                                                                                                                                                                                                                clock,
+                                                                                                                                                                                                                                       reset,
+  input  struct packed {struct packed {logic ready; } rsp; struct packed {logic valid; CHIReqFlit bits; } req; struct packed {struct packed {logic valid; CHIDatFlit bits; } request; struct packed {logic ready; } response; } dat; } port_in,
+  output struct packed {struct packed {logic valid; CHIRspFlit bits; } rsp; struct packed {logic ready; } req; struct packed {struct packed {logic ready; } request; struct packed {logic valid; CHIDatFlit bits; } response; } dat; } port_out
 );
 
   wire                               _GEN;
@@ -97,12 +97,12 @@ module CHIRam(
   wire struct packed {logic ready; } _dbid_responses_ingress_out;
   wire struct packed {logic valid; CHIRspFlit bits; } _dbid_responses_egress_out;
   wire struct packed {logic ready; } _GEN_2 = '{ready: 1'h1};
-  wire                               _GEN_3 = port_in.requests.bits.opcode == 7'h1D;
-  wire                               _GEN_4 = port_in.requests.bits.opcode == 7'h1C;
+  wire                               _GEN_3 = port_in.req.bits.opcode == 7'h1D;
+  wire                               _GEN_4 = port_in.req.bits.opcode == 7'h1C;
   wire                               _GEN_5 =
-    port_in.requests.bits.opcode == 7'h4 | _GEN_3 | _GEN_4;
+    port_in.req.bits.opcode == 7'h4 | _GEN_3 | _GEN_4;
   wire CHISNTransactionAllocation    _GEN_6 =
-    '{write: (_GEN_3 | _GEN_4), request: port_in.requests.bits};
+    '{write: (_GEN_3 | _GEN_4), request: port_in.req.bits};
   assign _GEN_1 = _transaction_slots_allocation_out.ready;
   wire CHIRamMemoryOperation         _GEN_7 =
     '{write: (1'h0),
@@ -146,7 +146,7 @@ module CHIRam(
     '{memory_operation: _valid_pipe_stage_egress_out.bits,
       data: (_valid_pipe_stage_egress_out.bits.write ? 128'h0 : _GEN_12)};
   wire                               _GEN_14 =
-    port_in.requests.valid & (|port_in.requests.bits.opcode) & ~reset;
+    port_in.req.valid & (|port_in.req.bits.opcode) & ~reset;
   wire                               _GEN_15 = ~_GEN_14;
   `ifndef SYNTHESIS
     chi_ram_request_opcode_supported:
@@ -156,28 +156,28 @@ module CHIRam(
   `ifndef SYNTHESIS
     chi_ram_request_size_supported:
       assert property (@(posedge clock) disable iff (_GEN_16)
-                         port_in.requests.bits.size_or_num_req[2:0] < 3'h5);
+                         port_in.req.bits.size_or_num_req[2:0] < 3'h5);
   `endif // not def SYNTHESIS
   wire                               _GEN_17 = ~_GEN_14;
   `ifndef SYNTHESIS
     chi_ram_request_address_aligned:
       assert property (@(posedge clock) disable iff (_GEN_17)
-                         port_in.requests.bits.size_or_num_req[2:0] == 3'h0
-                         | (port_in.requests.bits.size_or_num_req[2:0] == 3'h1
-                              ? ~(port_in.requests.bits.address[0])
-                              : port_in.requests.bits.size_or_num_req[2:0] == 3'h2
-                                  ? port_in.requests.bits.address[1:0] == 2'h0
-                                  : port_in.requests.bits.size_or_num_req[2:0] == 3'h3
-                                      ? port_in.requests.bits.address[2:0] == 3'h0
-                                      : port_in.requests.bits.size_or_num_req[2:0] == 3'h4
-                                        & port_in.requests.bits.address[3:0] == 4'h0));
+                         port_in.req.bits.size_or_num_req[2:0] == 3'h0
+                         | (port_in.req.bits.size_or_num_req[2:0] == 3'h1
+                              ? ~(port_in.req.bits.address[0])
+                              : port_in.req.bits.size_or_num_req[2:0] == 3'h2
+                                  ? port_in.req.bits.address[1:0] == 2'h0
+                                  : port_in.req.bits.size_or_num_req[2:0] == 3'h3
+                                      ? port_in.req.bits.address[2:0] == 3'h0
+                                      : port_in.req.bits.size_or_num_req[2:0] == 3'h4
+                                        & port_in.req.bits.address[3:0] == 4'h0));
   `endif // not def SYNTHESIS
   wire                               _GEN_18 = ~_GEN_14;
   `ifndef SYNTHESIS
     chi_ram_request_address_supported:
       assert property (@(posedge clock) disable iff (_GEN_18)
-                         (|(port_in.requests.bits.address[43:31]))
-                         & port_in.requests.bits.address < 44'h80000040);
+                         (|(port_in.req.bits.address[43:31]))
+                         & port_in.req.bits.address < 44'h80000040);
   `endif // not def SYNTHESIS
   wire [15:0]                        _GEN_19 =
     (_transaction_slots_matched_write_out.bits.request.size_or_num_req[2:0] == 3'h0
@@ -224,10 +224,15 @@ module CHIRam(
         (|({{_transaction_slots_allocated_out.bits.write & _GEN},
             {~_transaction_slots_allocated_out.bits.write & _GEN_0}}))};
   wire struct packed {logic valid; CHISNTransactionAllocation bits; } _GEN_28 =
-    '{valid: (port_in.requests.valid & _GEN_5), bits: _GEN_6};
+    '{valid: (port_in.req.valid & _GEN_5), bits: _GEN_6};
   wire struct packed {logic ready; } _GEN_29 = '{ready: (~_GEN_5 | _GEN_1)};
   wire struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }
     _GEN_30 = '{request: _GEN_23};
+  wire
+    struct packed {struct packed {logic ready; } request; struct packed {logic valid; CHIDatFlit bits; } response; }
+    _GEN_31 =
+    '{request: _transaction_slots_write_data_out,
+      response: _completion_router_read_response_out};
   Queue dbid_responses (
     .clock       (clock),
     .reset       (reset),
@@ -284,7 +289,7 @@ module CHIRam(
   );
   CHIRamCompletionRouter completion_router (
     .ingress_in         (_memory_operations_response_out),
-    .read_response_in   (port_in.response_data),
+    .read_response_in   (port_in.dat.response),
     .write_response_in  (_response_arbiter_ingress_1_out),
     .ingress_out        (_completion_router_ingress_out),
     .read_response_out  (_completion_router_read_response_out),
@@ -296,7 +301,7 @@ module CHIRam(
     .reset         (reset),
     .ingress_0_in  (_fork_stage_egress_0_out),
     .ingress_1_in  (_completion_router_write_response_out),
-    .egress_in     (port_in.responses),
+    .egress_in     (port_in.rsp),
     .ingress_0_out (_response_arbiter_ingress_0_out),
     .ingress_1_out (_response_arbiter_ingress_1_out),
     .egress_out    (_response_arbiter_egress_out),
@@ -308,7 +313,7 @@ module CHIRam(
     .allocation_in     (_GEN_28),
     .allocated_in      (_GEN_27),
     .dbid_sent_in      (_GEN_21),
-    .write_data_in     (port_in.request_data),
+    .write_data_in     (port_in.dat.request),
     .matched_write_in  (_write_operations_ingress_out),
     .completed_in      (_completion_router_completed_out),
     .allocation_out    (_transaction_slots_allocation_out),
@@ -330,11 +335,7 @@ module CHIRam(
     .egress_0_out (_fork_stage_egress_0_out),
     .egress_1_out (_fork_stage_egress_1_out)
   );
-  assign port_out =
-    '{responses: _response_arbiter_egress_out,
-      response_data: _completion_router_read_response_out,
-      requests: _GEN_29,
-      request_data: _transaction_slots_write_data_out};
+  assign port_out = '{rsp: _response_arbiter_egress_out, req: _GEN_29, dat: _GEN_31};
 endmodule
 
 module Queue(

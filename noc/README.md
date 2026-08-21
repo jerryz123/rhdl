@@ -15,6 +15,8 @@ The current implementation provides:
   directed-link handles for topology authoring.
 - Named VC groups with deterministic local VC assignment.
 - Immutable symbolic topology specifications with early structural validation.
+- Symbolic injection and ejection placement that is authored independently of
+  the physical router-and-link topology.
 - Deterministic lowering to the normalized topology model with bidirectional
   identity-provenance lookups.
 - Hierarchical prefixing and collision-checked topology composition.
@@ -76,6 +78,8 @@ The current implementation provides:
 - Deterministic whole-network plans assigning router indices, external
   injection and ejection ports, and every physical VC's source-target and
   destination-input indices without importing RHDL.
+- A generic network compiler that joins peer topology, terminal-placement,
+  route-class, and routing-policy inputs only at validation and planning time.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
@@ -134,6 +138,7 @@ env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.r
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/authored-diagnostics-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/router-plan-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/network-plan-test.rhm
+env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/network-compilation-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
 env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
@@ -190,6 +195,21 @@ composition operations make no assumptions about topology families,
 coordinates, directions, or routing metrics. A user-defined topology view only
 needs to contain an ordinary `TopologySpec`; it can expose any additional
 domain queries without modifying core authoring or analysis modules.
+
+For integrations that need protocol-independent physical structure,
+`TerminalPlacement` names injection and ejection terminals and attaches each
+one to a `NodeRef` separately from the router-and-link `TopologySpec`.
+`compile_network` accepts that physical topology, placement, route-class list,
+and routing policy as peer inputs. It attaches the terminals transiently for
+the existing normalization and validation pipeline, then returns a
+`NetworkCompilation` containing the symbolic inputs, their normalized
+bindings, the `ValidatedRouting`, and the resulting `NetworkPlan`. The physical
+topology supplied to this path must not already contain terminals.
+
+The embedded topology syntax below can still describe a complete
+`TopologySpec`, including terminals, for compact standalone examples. It is an
+authoring convenience rather than a requirement that physical topology own
+protocol endpoint placement.
 
 ## Embedded topology syntax
 

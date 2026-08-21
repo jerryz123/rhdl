@@ -1,0 +1,88 @@
+#lang rhombus
+// Checks pure CHI channel compilation through generic topology and routing inputs.
+
+import:
+  "../../noc/authoring/main.rhm" open
+  "../../noc/language/main.rhm".topology
+  "../noc-authoring.rhm" open
+
+def physical = topology:
+  node xbar
+def router = physical.node("xbar")
+
+def requester = CHIInjectionSite(3, InjectionRef("requester"), router)
+def home_source = CHIInjectionSite(5, InjectionRef("home"), router)
+def home_target = CHIEjectionSite(5, EjectionRef("home"), router)
+def memory = CHIEjectionSite(9, EjectionRef("memory"), router)
+def compilation = compile_chi_channel(
+  physical,
+  [CHIChannelRouteSpec(requester, home_target),
+   CHIChannelRouteSpec(home_source, memory)],
+  deny_all
+)
+
+check:
+  compilation.injection(requester.terminal) === requester ~is #true
+  compilation.ejection(memory.terminal) === memory ~is #true
+  compilation.injection_port(requester.terminal).input_index ~is 1
+  compilation.injection_port(home_source.terminal).input_index ~is 0
+  compilation.ejection_port(home_target.terminal).target_index ~is 0
+  compilation.ejection_port(memory.terminal).target_index ~is 1
+  compilation.routes.map(
+    fun (route):
+      [route.source.node_id,
+       route.destination.node_id,
+       route.route_key]
+  ) ~is [[5, 9, 0], [3, 5, 1]]
+  compilation.routes_from(requester.terminal).map(
+    fun (route): route.route_key
+  ) ~is [1]
+  compilation.route(home_source.terminal, 9).route_class === (
+    compilation.network.lowered_routes.route_class(
+      RouteClassRef(["home", "to", "memory"])
+    )
+  ) ~is #true
+  compilation.injection(InjectionRef("unknown")) ~throws "no injection terminal"
+  compilation.ejection(EjectionRef("unknown")) ~throws "no ejection terminal"
+  compilation.route(requester.terminal, 9) ~throws "no route"
+
+def ambiguous_source = CHIInjectionSite(3, InjectionRef("ambiguous"), router)
+def ambiguous_target_a = CHIEjectionSite(5, EjectionRef("target-a"), router)
+def ambiguous_target_b = CHIEjectionSite(5, EjectionRef("target-b"), router)
+
+check:
+  compile_chi_channel(
+    physical,
+    [CHIChannelRouteSpec(ambiguous_source, ambiguous_target_a),
+     CHIChannelRouteSpec(ambiguous_source, ambiguous_target_b)],
+    deny_all
+  ) ~throws "must select one route class"
+
+// Topology and placement remain independent inputs: the same NodeID relation
+// compiles over a distributed topology by changing only the physical sites.
+def distributed = topology:
+  vc_group transport: 1
+  node left
+  node right
+  directed forward:
+    left -> right
+    vcs [transport]
+def distributed_requester = CHIInjectionSite(
+  3,
+  InjectionRef("requester"),
+  distributed.node("left")
+)
+def distributed_home = CHIEjectionSite(
+  5,
+  EjectionRef("home"),
+  distributed.node("right")
+)
+def distributed_compilation = compile_chi_channel(
+  distributed,
+  [CHIChannelRouteSpec(distributed_requester, distributed_home)],
+  inject_into_vc_groups(["transport"])
+)
+
+check:
+  distributed_compilation.route(distributed_requester.terminal, 5).route_key ~is 0
+  distributed_compilation.network.validated_routing.dependency_graph.vertices.length() ~is 1

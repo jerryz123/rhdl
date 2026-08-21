@@ -83,15 +83,33 @@ FESVR.
 TestDriver.sv
 └── FesvrTop
     ├── FesvrRequester (RN-I behavior, NodeID 3)
+    ├── SimpleRouter (validated REQ transport)
+    ├── SimpleRouter (validated RSP transport)
+    ├── SimpleRouter (validated DAT transport)
     ├── CHIHNI (HN-I, NodeID 5)
-    └── CHIRam (SN-I behavior, NodeID 9)
+    └── CHIRam (direct SN-I behavior, NodeID 9)
 ```
 
-The three transaction engines connect directly over ready-valid flows. A later
-NoC can transport each flow without creating redundant internal CHI links or
-credit loops; physical CHI adapters belong only at boundaries that actually
-expose CHI credited links. There is no `SimpleMemory` protocol, compatibility
-adapter, shared-memory owner queue, processor port, or crossbar.
+Only RN-I-to-HN-I traffic crosses the generated NoC. Its REQ, RSP, and DAT
+planes reuse one physical topology definition but separately compile
+validation, route keys, buffering, and allocation. `CHIRNSite` and
+`CHIRNICNSite` values declare the two requester-side NodeIDs and router
+attachments. Their one logical connection expands into the directionally
+correct channel flows and independently derives each plane's terminal
+placement, route classes, and CHI mapping. The system owns three independent
+generic router instances. One `connect_chi_rni` call attaches their ingress and
+typed target interfaces to the nested RN-I and HN-I ports using the compiled
+adapter plans; it does not instantiate routers or select routing policy. The
+HN-I subordinate interface connects directly to the RAM's SN-I interface, so
+local backing-memory traffic does not consume NoC ports.
+Registered queues at the NoC ejections cut combinational paths through the
+RN-I and HN-I engines.
+
+No internal CHI link or credit loop is introduced; the direct HN-I-to-SN-I
+connection is between linkless ready-valid transaction engines. Physical CHI
+adapters belong only at boundaries that actually expose credited links. There is no
+`SimpleMemory` protocol, compatibility adapter, shared-memory owner queue, or
+processor port.
 The RAM covers `0x80000000` through `0x80001fff`, which includes both the ELF
 entry point and the test program's HTIF mailbox.
 

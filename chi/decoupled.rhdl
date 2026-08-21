@@ -6,24 +6,43 @@ import:
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
 
-// RN-I has no SNP channel; every other requester channel remains ready-valid.
+interface CHIRNRspDecoupled(p :: CHIFlitParams):
+  role node
+  role icn
+  provider node
+
+  node -> icn:
+    requester: Decoupled(CHIRspFlit(p))
+
+  icn -> node:
+    response: Decoupled(CHIRspFlit(p))
+
+interface CHIDatDecoupled(p :: CHIFlitParams):
+  role requester
+  role responder
+  provider requester
+
+  requester -> responder:
+    request: Decoupled(CHIDatFlit(p))
+
+  responder -> requester:
+    response: Decoupled(CHIDatFlit(p))
+
+// RN-I recursively groups its independent REQ, RSP, and DAT flows without
+// forcing the coherent RN SNP channel onto a non-snooping requester.
 interface CHIRNIDecoupled(p :: CHIFlitParams):
   role icn
   role node
   provider node
 
   node -> icn:
-    requests: Decoupled(CHIReqFlit(p))
-    requester_responses: Decoupled(CHIRspFlit(p))
-    request_data: Decoupled(CHIDatFlit(p))
+    req: Decoupled(CHIReqFlit(p))
+    rsp: CHIRNRspDecoupled(p)
+    dat: CHIDatDecoupled(p)
 
-  icn -> node:
-    responses: Decoupled(CHIRspFlit(p))
-    response_data: Decoupled(CHIDatFlit(p))
-
-// RN-F and RN-D use the requester channels plus the ICN-to-node SNP channel.
-// The common members are repeated because parameterized interface refinements
-// cannot currently pass their parameter to the parent specialization.
+// RN-F and RN-D share the full requester shape. These physical RSP and DAT
+// flows may carry both ordinary requester traffic and snoop responses, so they
+// remain explicit alongside the ICN-to-node SNP flow.
 interface CHIRNDecoupled(p :: CHIFlitParams):
   role icn
   role node
@@ -47,14 +66,14 @@ interface CHISNDecoupled(p :: CHIFlitParams):
   provider node
 
   node -> icn:
-    responses: Decoupled(CHIRspFlit(p))
-    response_data: Decoupled(CHIDatFlit(p))
+    rsp: Decoupled(CHIRspFlit(p))
 
   icn -> node:
-    requests: Decoupled(CHIReqFlit(p))
-    request_data: Decoupled(CHIDatFlit(p))
+    req: Decoupled(CHIReqFlit(p))
+    dat: CHIDatDecoupled(p)
 
-// HN-I connects one non-snooping requester side to one subordinate side.
+// HN-I connects one recursively grouped non-snooping requester side to one
+// subordinate side.
 interface CHIHNIDecoupled(p :: CHIFlitParams):
   role home
   role fabric
@@ -64,8 +83,8 @@ interface CHIHNIDecoupled(p :: CHIFlitParams):
     requester: CHIRNIDecoupled(p)
     subordinate: CHISNDecoupled(p)
 
-// A snoop-capable Home has the same subordinate side and the full RN channel
-// shape on its requester side.
+// A snoop-capable Home uses the full RN requester shape and the common
+// subordinate shape.
 interface CHIHNDecoupled(p :: CHIFlitParams):
   role home
   role fabric
@@ -76,6 +95,8 @@ interface CHIHNDecoupled(p :: CHIFlitParams):
     subordinate: CHISNDecoupled(p)
 
 export:
+  CHIRNRspDecoupled
+  CHIDatDecoupled
   CHIRNIDecoupled
   CHIRNDecoupled
   CHISNDecoupled

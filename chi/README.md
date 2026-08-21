@@ -14,9 +14,10 @@ wire definitions; it is not a configurable parameter in the API.
 The package currently implements the physical parameter and flit foundation,
 protocol and coherence classifiers, node capabilities, credited node-role
 links, link-local monitors, bounded initial non-coherent and RN-F transaction
-checking, separate
-requester-side and home-side SAM metadata, an initial HN-I bridge, and a
-non-coherent backing RAM. Crossbar RTL, coherent cache controllers, and HN-F
+checking, separate requester-side and home-side SAM metadata, an initial HN-I
+bridge, and a non-coherent backing RAM. Its first NoC integration maps CHI
+NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
+and DAT transports. SNP integration, coherent cache controllers, and HN-F
 remain planned below.
 
 ## Architectural boundary
@@ -29,9 +30,10 @@ will preserve those boundaries:
   protocol monitoring.
 - `rhdl/std` owns only protocol-neutral credited transport, buffering, ID and
   address sets, storage, and ordinary hardware utilities.
-- `noc/` remains pure host-side topology and routing analysis. A future CHI
-  fabric may consume validated, materialized routing artifacts, but CHI RTL
-  must not pull RHDL construction into the NoC model.
+- `noc/` remains pure host-side topology and routing analysis. CHI consumes
+  validated, materialized routing artifacts through its pure channel
+  compilations and RTL endpoint adapters, but CHI RTL does not pull RHDL
+  construction into the NoC model.
 - RHDL core and frontend need no CHI-specific operations. Bundles, parameterized
   interfaces, connection compatibility, registers, memories, and assertions
   can express the initial implementation.
@@ -147,15 +149,13 @@ types. Their exact kind remains endpoint metadata so later monitors can apply
 the distinct protocol rules without duplicating identical wiring.
 
 [`flow.rhdl`](flow.rhdl) provides node-side and ICN-side adapters for all three
-physical link shapes. `CHIRNFlowAdapter` and `CHIRNICNFlowAdapter` convert RN-F
-REQ/RSP/DAT transmit channels and RSP/DAT/SNP receive channels between credited
-transport and one nested `CHIRNDecoupled` ready-valid endpoint. RN-I uses the
-separate `CHIRNIDecoupled` shape without SNP, while SN-F/SN-I use
-`CHISNDecoupled`. Link activation and credit-drain status remain adapter outputs
-instead of ready-valid subchannels. RSP and DAT expose separate requester- and
-snoop-response paths at the semantic endpoint; choosing which protocol
-transaction owns a shared physical channel is endpoint logic, not a
-transport-adapter policy. The RN node-side adapter also applies the physical
+physical link shapes. RN-I converts to the recursively composed
+`CHIRNIDecoupled` REQ/RSP/DAT endpoint, while SN-F/SN-I use
+`CHISNDecoupled`. RN-F/RN-D adapters expose their physical channel flows
+separately because their RSP and DAT channels can carry both ordinary requester
+traffic and snoop responses; the endpoint owns that arbitration. Link
+activation and credit-drain status remain adapter outputs instead of
+ready-valid subchannels. The RN node-side adapter also applies the physical
 link monitor at this boundary; its bounded coherent-transaction checks can be
 disabled independently for endpoint behavior they do not yet cover.
 
@@ -276,16 +276,19 @@ transaction state.
 ## Non-coherent-first scope
 
 [`ram.rhdl`](ram.rhdl) implements `CHIRam`, a finite backing-memory
-Subordinate transaction engine. Its `CHISNDecoupled` REQ/RSP/DAT boundary is
-ready-valid, so it does not own physical CHI link activation or credit state. It is not a Home
-Node and does not implement coherence. A Home Node performs any required
-ordering and coherence work before issuing a non-snoopable transaction to it.
+Subordinate transaction engine. Its `CHISNDecoupled` boundary groups the
+ready-valid flows into independently connectable `.req`, `.rsp`, and `.dat`
+channel interfaces, so it does not own physical CHI link activation or credit
+state. It is not a Home Node and does not implement coherence. A Home Node
+performs any required ordering and coherence work before issuing a
+non-snoopable transaction to it.
 
 [`home.rhdl`](home.rhdl) implements the first bounded HN-I as
 `CHIHNI`. It operates through a `CHIHNIDecoupled` interface containing
-ready-valid requester- and
-subordinate-side REQ/RSP/DAT flows, allocates a Home-owned transaction slot,
-and translates both transaction-ID namespaces. Reads restore the RN's
+ready-valid requester- and subordinate-side channel interfaces, allocates a
+Home-owned transaction slot, and translates both transaction-ID namespaces.
+REQ, RSP, and DAT can each attach to an independent transport. Reads restore
+the RN's
 ReturnTxnID and data target. Writes expose the Home slot as the RN-facing DBID,
 retain the subordinate's DBID internally, translate write data to that DBID,
 and restore the original RN TxnID on completion. Paired transaction translation
@@ -412,7 +415,9 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`protocol.rhdl`](protocol.rhdl) | Implemented operation groups, typed Size and NumReq views, Size checking, and DAT packetization |
 | [`coherence.rhdl`](coherence.rhdl) | Implemented cache/response states, coherent opcode families, and mandatory RN-F snoop capability set |
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
-| [`decoupled.rhdl`](decoupled.rhdl) | Reusable ready-valid RN-I, snoop-capable RN-F/RN-D, SN, HN-I, and snoop-capable HN nested-interface contracts |
+| [`decoupled.rhdl`](decoupled.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, SN, and HN-I contracts, alongside the full snoop-capable RN and HN shapes |
+| [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, and DAT channel results with derived route keys |
+| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations, without topology or router ownership |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded initial RN-F `ReadShared`/`CompData`/`CompAck` and snoop-response lifetime checks |
@@ -438,7 +443,24 @@ turns an externally credited flit channel into a buffered internal flow.
    ordering, retry and Protocol Credits, and other transaction families remain.
 6. **Parameters complete:** Define `CHIFabricParams`, Home Node identities, and
    separate requester-to-home and home-to-subordinate System Address Maps.
-   Next, generate a small crossbar over the ICN-side ready-valid adapters.
+   Independently validated one-router REQ, RSP, and DAT transports now connect
+   the FESVR RN-I to the requester side of its HN-I. The HN-I subordinate side
+   connects directly to the local SN-I transaction engine. Generic NoC compilation joins an
+   independently authored physical topology, terminal placement, route-class
+   set, and routing policy. CHI separately maps NodeIDs to the symbolic
+   terminals and derives only target decode and flow adaptation. Pure RN and
+   RN-ICN site values declare each transported endpoint's NodeID and
+   router attachment once. The logical RN-to-ICN connection expands into the
+   directionally correct REQ, RSP, and DAT flows before each plane is compiled
+   and validated independently. The system instantiates each generic router
+   directly; CHI does not define an aggregate router or own topology or routing
+   policy. `connect_chi_rni` connects the corresponding nested CHI fields to
+   three independently instantiated router interface arrays through the
+   compiled injection and ejection adapters. It neither constructs an
+   aggregate router nor owns topology or routing. Each local ejection drives
+   allocator availability from its registered ejection queue; physical links
+   remain responsible for the targets they attach. SNP remains for a coherent
+   profile.
 7. **Initial non-coherent path complete:** Implement `CHIRam` over
    `SyncRam1RW` and a bounded `CHIHNI` for single-flit reads and
    writes. Transaction engines expose ready-valid flows; a system adds credited

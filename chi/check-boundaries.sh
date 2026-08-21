@@ -24,6 +24,21 @@ if [[ -n "$implementation_imports" ]]; then
   exit 1
 fi
 
+pure_noc_imports="$(
+  if command -v rg >/dev/null 2>&1; then
+    rg -n '^[[:space:]]+.*(rhdl/|circt)' \
+      chi/noc-authoring.rhm || true
+  else
+    grep -nHE '^[[:space:]]+.*(rhdl/|circt)' \
+      chi/noc-authoring.rhm || true
+  fi
+)"
+if [[ -n "$pure_noc_imports" ]]; then
+  echo "pure CHI-to-NoC compilation must not import RHDL or CIRCT modules" >&2
+  echo "$pure_noc_imports" >&2
+  exit 1
+fi
+
 misplaced_sources="$(find rhdl/std -type f -path '*chi*' \
   \( -name '*.rhdl' -o -name '*.rhm' \) -print)"
 if [[ -n "$misplaced_sources" ]]; then
