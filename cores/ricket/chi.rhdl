@@ -19,10 +19,11 @@ class RicketCHIParams(flit :: CHIFlitParams,
       instruction_node_id,
       CHINodeKind.RNF,
       ~emits: CHIChannelCapabilities(
-        ~req: [CHIReqOpcode.ReadShared],
+        ~req: [CHIReqOpcode.ReadClean],
         ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
       ),
       ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant],
         ~snp: chi_rnf_snoop_opcodes,
         ~dat: [CHIDatOpcode.CompData]
       ),
@@ -34,12 +35,14 @@ class RicketCHIParams(flit :: CHIFlitParams,
       data_node_id,
       CHINodeKind.RNF,
       ~emits: CHIChannelCapabilities(
-        ~req: [CHIReqOpcode.ReadShared, CHIReqOpcode.WriteUniquePtl],
+        ~req: [CHIReqOpcode.ReadClean, CHIReqOpcode.WriteUniquePtl],
         ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp],
         ~dat: [CHIDatOpcode.NonCopyBackWriteData]
       ),
       ~supports: CHIChannelCapabilities(
-        ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant,
+               CHIRspOpcode.DBIDResp, CHIRspOpcode.DBIDRespOrd,
+               CHIRspOpcode.Comp, CHIRspOpcode.CompDBIDResp],
         ~snp: chi_rnf_snoop_opcodes,
         ~dat: [CHIDatOpcode.CompData]
       ),
@@ -53,7 +56,7 @@ def default_ricket_chi_params = RicketCHIParams(
   3
 )
 
-fun checked_ricket_chi_params(params :: RicketCHIParams):
+fun checked_ricket_chi_params(params :: RicketCHIParams) :: RicketCHIParams:
   def p = params.flit
   unless bits.length(params.home_node_id) <= p.node_id_width
   | error(~who: #'RicketCHIParams,
@@ -89,11 +92,14 @@ fun ricket_chi_address_fits(address :: Hardware.bits,
 fun ricket_chi_request(p :: CHIFlitParams,
                        node_id :: Nat,
                        home_node_id :: Nat,
-                       raw_address,
-                       size,
+                       raw_address :: Hardware.bits,
+                       size :: CHITransferSize,
                        opcode :: CHIReqOpcode,
                        txn_id :: Bits(12),
-                       expect_comp_ack :: Bool):
+                       expect_comp_ack :: Bool,
+                       allocate_hint :: Bool,
+                       allow_retry :: Bool,
+                       protocol_credit_type :: Bits(4)) :~ CHIReqFlit(p):
   wire request: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
   | request.rsvdc <== bits(0, p.req_rsvdc_width)
@@ -116,21 +122,24 @@ fun ricket_chi_request(p :: CHIFlitParams,
   request.excl_snoop_me_cah <== Bool(#false)
   request.group_id_or_lpid <== bits(0, 8)
   request.snp_attr_or_do_dwt <== Bool(#true)
+  // Ricket accesses Normal, snoopable, cacheable memory. Refills recommend
+  // downstream allocation while write-around stores do not.
   request.mem_attr <== CHIMemAttr():
-    allocate: Bool(#false)
-    cacheable: Bool(#false)
+    allocate: allocate_hint
+    cacheable: Bool(#true)
     device: Bool(#false)
-    early_write_acknowledge: Bool(#false)
-  request.pcrd_type <== bits(0, 4)
+    early_write_acknowledge: Bool(#true)
+  request.pcrd_type <== protocol_credit_type
   request.order <== CHIOrder.NoOrder
-  request.allow_retry <== Bool(#false)
+  request.allow_retry <== allow_retry
   request.likely_shared <== Bool(#false)
   request.pas <== CHIPAS.Secure
   request.address <== ricket_chi_address(raw_address, p)
-  request.size_or_num_req <== zext(size, 6)
+  request.size_or_num_req <== zext(as_bits(size), 6)
   request.multi_req <== Bool(#false)
   request.opcode <== opcode
-  request.return_txn_id_or_stash_lpid <== txn_id
+  // ReturnTxnID is inapplicable on Requester-to-Home traffic.
+  request.return_txn_id_or_stash_lpid <== bits(0, 12)
   request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
   request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
   request.txn_id <== txn_id
@@ -141,9 +150,11 @@ fun ricket_chi_request(p :: CHIFlitParams,
 
 fun ricket_chi_response(p :: CHIFlitParams,
                         node_id :: Nat,
-                        target_id,
-                        txn_id,
-                        opcode :: CHIRspOpcode):
+                        target_id :: Bits(p.node_id_width),
+                        txn_id :: Bits(12),
+                        opcode :: CHIRspOpcode,
+                        ~resp: response :: Bits(3) = bits(0, 3))
+  :~ CHIRspFlit(p):
   CHIRspFlit(p):
     cache_line_id: bits(0, 6)
     trace_tag: Bool(#false)
@@ -152,7 +163,7 @@ fun ricket_chi_response(p :: CHIFlitParams,
     dbid_or_group_id: bits(0, 12)
     c_busy: bits(0, 3)
     fwd_state_or_data_pull: bits(0, 3)
-    resp: bits(0, 3)
+    resp: response
     resp_err: CHIRespErr.OK
     opcode: opcode
     txn_id: txn_id
@@ -160,12 +171,41 @@ fun ricket_chi_response(p :: CHIFlitParams,
     tgt_id: target_id
     qos: bits(0, 4)
 
+fun ricket_snoop_shares_cache_state(opcode :: CHISnpOpcode) :~ Bool:
+  is_one_of(opcode,
+            CHISnpOpcode.SnpShared,
+            CHISnpOpcode.SnpClean,
+            CHISnpOpcode.SnpNotSharedDirty,
+            CHISnpOpcode.SnpCleanShared)
+
+// Ricket silently evicts its clean copy before servicing a forwarding snoop.
+// Reporting I is legal and lets Home source the data elsewhere without a
+// multibeat forwarded-data path in these deliberately small L1s.
+fun ricket_snoop_invalidates_cache_state(opcode :: CHISnpOpcode) :~ Bool:
+  is_one_of(opcode,
+            CHISnpOpcode.SnpUniqueStash,
+            CHISnpOpcode.SnpMakeInvalidStash,
+            CHISnpOpcode.SnpUnique,
+            CHISnpOpcode.SnpCleanInvalid,
+            CHISnpOpcode.SnpMakeInvalid,
+            CHISnpOpcode.SnpPreferUnique,
+            CHISnpOpcode.SnpSharedFwd,
+            CHISnpOpcode.SnpCleanFwd,
+            CHISnpOpcode.SnpOnceFwd,
+            CHISnpOpcode.SnpNotSharedDirtyFwd,
+            CHISnpOpcode.SnpPreferUniqueFwd,
+            CHISnpOpcode.SnpUniqueFwd)
+
 fun ricket_chi_write_data(p :: CHIFlitParams,
                           node_id :: Nat,
-                          home_node_id,
-                          dbid,
-                          data,
-                          byte_enable):
+                          home_node_id :: Bits(p.node_id_width),
+                          dbid :: Bits(12),
+                          raw_address :: Hardware.bits,
+                          data :: Bits(p.data_width),
+                          byte_enable :: Bits(p.byte_enable_width))
+  :~ CHIDatFlit(p):
+  def address = ricket_chi_address(raw_address, p)
+  def critical_chunk = address[4..6]
   wire flit: CHIDatFlit(p)
   if p.poison_width > 0
   | flit.poison <== bits(0, p.poison_width)
@@ -186,8 +226,10 @@ fun ricket_chi_write_data(p :: CHIFlitParams,
   flit.tag <== bits(0, p.tag_width)
   flit.tag_op <== CHITagOp.Invalid
   flit.cache_line_id <== bits(0, 6)
-  flit.data_id <== bits(0, 2)
-  flit.ccid <== bits(0, 2)
+  // Ricket writes at most eight bytes, so the single narrow packet uses the
+  // exact Addr[5:4] of its lowest addressed byte at every CHI data width.
+  flit.data_id <== critical_chunk
+  flit.ccid <== critical_chunk
   flit.dbid_or_mecid <== zext(dbid, 16)
   flit.c_busy <== bits(0, 3)
   flit.data_pull <== Bool(#false)
@@ -210,4 +252,6 @@ export:
   ricket_chi_address_fits
   ricket_chi_request
   ricket_chi_response
+  ricket_snoop_shares_cache_state
+  ricket_snoop_invalidates_cache_state
   ricket_chi_write_data

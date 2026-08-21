@@ -1,5 +1,5 @@
 #lang rhdl
-// Checks bounded coherent read packet completion and RN-F snoop response lifetimes.
+// Checks bounded coherent reads, retry-shaped repeats, paired DVM, and RN-F snoops.
 
 import:
   lib("rhdl/std/bits.rhdl") open
@@ -33,25 +33,34 @@ bundle CHISnoopTransaction(p :: CHIFlitParams):
   response_seen: Bool
   forward_data_seen: Bool
 
-// Selects the deliberately bounded first coherent profile. It covers complete
-// ReadShared data packet sets and every snoop opcode, while excluding coherent
-// writes, separated read responses, retries, and multibeat snoop data.
+// Selects the deliberately bounded coherent requester profile. It monitors
+// complete ReadShared/ReadClean packet sets and every snoop opcode while
+// tolerating independently checked immediate writes and retry responses.
 fun chi_initial_coherent_requester_capabilities(
     emitted :: CHIChannelCapabilities,
     received :: CHIChannelCapabilities):
   def allowed_emitted = CHIChannelCapabilities(
-    ~req: [CHIReqOpcode.ReadShared],
+    ~req: [CHIReqOpcode.ReadShared,
+           CHIReqOpcode.ReadClean,
+           CHIReqOpcode.WriteUniquePtl],
     ~rsp: [CHIRspOpcode.CompAck,
            CHIRspOpcode.SnpResp,
            CHIRspOpcode.SnpRespFwded],
     ~dat: [CHIDatOpcode.SnpRespData,
            CHIDatOpcode.SnpRespDataPtl,
            CHIDatOpcode.SnpRespDataFwded,
-           CHIDatOpcode.CompData]
+           CHIDatOpcode.CompData,
+           CHIDatOpcode.NonCopyBackWriteData]
   )
   // CompData is optional, while every ordinary RN-F snoop operation is
   // required below.
   def allowed_received = CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.RetryAck,
+           CHIRspOpcode.PCrdGrant,
+           CHIRspOpcode.DBIDResp,
+           CHIRspOpcode.DBIDRespOrd,
+           CHIRspOpcode.Comp,
+           CHIRspOpcode.CompDBIDResp],
     ~snp: chi_rnf_snoop_opcodes,
     ~dat: [CHIDatOpcode.CompData]
   )
@@ -79,11 +88,16 @@ fun coherent_unelided_data_fields(num_dat :: Bits(2),
 fun coherent_read_data_ids(address :: Hardware.bits,
                            size :: CHITransferSize,
                            p :: CHIFlitParams) :~ Bits(4):
-  def base_data_id:
+  def packet_data_id:
     cond
     | p.data_width == 128: address[4..6]
     | p.data_width == 256: concat(address[5], bits(0, 1))
     | ~else: bits(0, 2)
+  // Transfers through sixteen bytes use the exact Addr[5:4]. Larger
+  // transfers use the physical packet-aligned data identifier.
+  def base_data_id = mux(as_bits(size) <= bits(4, 3),
+                         address[4..6],
+                         packet_data_id)
   def one_packet = as_bits(one_hot(base_data_id))
   mux_lookup(size, ~default: one_packet):
     CHITransferSize.Bytes32:
@@ -115,15 +129,23 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
   def initial_snoops = vec(for List (_index in 0..limit): empty_snoop)
   reg reads(~init: initial_reads)
   reg snoops(~init: initial_snoops)
+  reg coherent_dvm_first_pending(~init: Bool(#false))
+  reg coherent_dvm_source_id(~init: bits(0, p.node_id_width))
+  reg coherent_dvm_txn_id(~init: bits(0, 12))
   def tx_rsp_opcode :: CHIRspOpcode = tx_rsp.opcode
   def tx_dat_opcode :: CHIDatOpcode = tx_dat.opcode
   def rx_snp_opcode :: CHISnpOpcode = rx_snp.opcode
 
-  def req_event = tx_req_valid & (req.opcode =/= CHIReqOpcode.ReqLCrdReturn)
+  def req_event = tx_req_valid & is_one_of(req.opcode,
+                                           CHIReqOpcode.ReadShared,
+                                           CHIReqOpcode.ReadClean)
   def comp_ack_event = tx_rsp_valid & (tx_rsp.opcode === CHIRspOpcode.CompAck)
   def read_data_event = rx_dat_valid & (rx_dat.opcode === CHIDatOpcode.CompData)
   def read_data_id = as_bits(one_hot(rx_dat.data_id))
   def snoop_event = rx_snp_valid & (rx_snp.opcode =/= CHISnpOpcode.SnpLCrdReturn)
+  def dvm_event = snoop_event & (rx_snp.opcode === CHISnpOpcode.SnpDVMOp)
+  def dvm_second_event = dvm_event & coherent_dvm_first_pending
+  def tracked_snoop_event = snoop_event & (!dvm_event ||| dvm_second_event)
   def snoop_rsp_event = tx_rsp_valid & tx_rsp_opcode.is_snoop_response()
   def snoop_dat_event = tx_dat_valid & tx_dat_opcode.is_snoop_response()
   def forward_data_event = tx_dat_valid & (tx_dat.opcode === CHIDatOpcode.CompData)
@@ -180,14 +202,15 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
   )
 
   when req_event:
-    assert(req.opcode === CHIReqOpcode.ReadShared,
-           label_prefix ++ "_read_request_opcode_supported")
     assert(!req.multi_req, label_prefix ++ "_read_single_request")
     assert(chi_size_valid(chi_req_size(p, req)),
            label_prefix ++ "_read_size_valid")
     assert(req.exp_comp_ack, label_prefix ++ "_read_expects_comp_ack")
-    assert(!duplicate_read_txn, label_prefix ++ "_read_txn_id_unique")
-    assert(read_allocation_available,
+    assert(!duplicate_read_txn ||| !req.allow_retry,
+           label_prefix ++ "_read_txn_id_unique")
+    assert(req.allow_retry ||| duplicate_read_txn,
+           label_prefix ++ "_read_first_attempt_retryable")
+    assert(duplicate_read_txn ||| read_allocation_available,
            label_prefix ++ "_read_within_outstanding_limit")
   when read_data_event:
     assert(read_data_match, label_prefix ++ "_read_data_has_request")
@@ -203,9 +226,7 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
   when comp_ack_event:
     assert(comp_ack_match, label_prefix ++ "_comp_ack_has_read_data")
 
-  def allocate_read = req_event & (req.opcode === CHIReqOpcode.ReadShared) & (
-    !duplicate_read_txn & read_allocation_available
-  )
+  def allocate_read = req_event & !duplicate_read_txn & read_allocation_available
   def allocated_read:
     CHICoherentReadTransaction(p):
       phase: CHICoherentReadPhase.AwaitData
@@ -296,7 +317,7 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
       ) & (snoops[index].forward_id === tx_dat.tgt_id)
   )
 
-  when snoop_event:
+  when tracked_snoop_event:
     assert(!duplicate_snoop, label_prefix ++ "_snoop_id_unique")
     assert(snoop_allocation_available,
            label_prefix ++ "_snoop_within_outstanding_limit")
@@ -315,7 +336,12 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
                                 tx_dat.replicate,
                                 label_prefix ++ "_forward_data")
 
-  def allocate_snoop = snoop_event & !duplicate_snoop & snoop_allocation_available
+  when dvm_second_event:
+    assert(rx_snp.src_id === coherent_dvm_source_id,
+           label_prefix ++ "_dvm_source_consistent")
+    assert(rx_snp.txn_id === coherent_dvm_txn_id,
+           label_prefix ++ "_dvm_txn_id_consistent")
+  def allocate_snoop = tracked_snoop_event & !duplicate_snoop & snoop_allocation_available
   def allocated_snoop:
     CHISnoopTransaction(p):
       live: Bool(#true)
@@ -366,6 +392,14 @@ fun coherent_requester_transaction_monitor(p :: CHIFlitParams,
         mux(allocate_here, allocated_snoop, progressed)
   )
   snoops <== next_snoops
+  when dvm_event:
+    coherent_dvm_first_pending <== !coherent_dvm_first_pending
+    coherent_dvm_source_id <== mux(coherent_dvm_first_pending,
+                                   coherent_dvm_source_id,
+                                   rx_snp.src_id)
+    coherent_dvm_txn_id <== mux(coherent_dvm_first_pending,
+                                coherent_dvm_txn_id,
+                                rx_snp.txn_id)
 
 export:
   CHICoherentReadPhase

@@ -20,17 +20,21 @@ core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   |--> dcache/protocol.rhdl
   `--> ../../rhdl/std/scoreboard.rhdl
 ricket.rhdl                         composition selects core-flow.rhdl
+  |--> cache.rhdl                   fixed 64-byte private-L1 line geometry
   |--> chi.rhdl                     RN-F parameters and flit construction
-  |--> refill.rhdl                  blocking ReadShared/CompData/CompAck engine
-  |--> icache/cache.rhdl            instruction access plus clean RN-F snoops
-  `--> dcache/cache.rhdl            data access plus coherent write-through RN-F
+  |--> refill.rhdl                  blocking ReadClean/CompData/CompAck engine
+  |--> write-unique.rhdl             retryable WriteUniquePtl transaction engine
+  |--> snoop.rhdl                    shared clean-line snoop and DVM engine
+  |--> icache/cache.rhdl             instruction arrays, policy, and CHI routing
+  `--> dcache/cache.rhdl             data arrays, policy, and CHI routing
 ```
 
 `RicketCore` speaks only Ricket's semantic instruction and data access
-protocols. Cache modules own line lookup, refill, CHI transactions, snoop
-serialization, byte masks, and load/store lane generation over ready-valid
-`CHIRNDecoupled` endpoints. The wrapper owns the transport boundary: it adapts
-those semantic endpoints into the two externally visible credited RN-F links.
+protocols. Cache modules own line lookup, array arbitration, transaction
+scheduling, CHI channel routing, byte masks, and load/store lane generation.
+The shared transaction engines own protocol sequencing, retry state, response
+stability, and DVM pairing. The wrapper composes the core and caches into two
+native RN-F links.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
@@ -166,9 +170,11 @@ of being flattened into the same graph.
 ## Top-level core
 
 [`ricket.rhdl`](ricket.rhdl) defines
-`Ricket(xlen, ~cache_sets: 64, ~line_bytes: 32, ~chi: ...)`. `xlen` is an
+`Ricket(xlen, ~cache_sets: 64, ~chi: ...)`. `xlen` is an
 `XLen` enum value. Architectural addresses and cache tags use
-`xlen_width(xlen)` internally. The RN-F boundary uses the explicit CHI request
+`xlen_width(xlen)` internally. Both private L1 caches use the architectural
+64-byte line size from [`cache.rhdl`](cache.rhdl); line geometry is not a
+top-level generator option. The RN-F boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
 The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer,
 separate instruction and data `CHIRNLink` node ports, and a sticky `fault`
@@ -184,8 +190,8 @@ completion tag. Stores complete through the registered response path and drain
 through an ordered one-entry coherent write-through transaction. The two
 external ports intentionally remain separate RN-F Request Nodes. Home Node,
 fabric, and SoC integration remain outside the core. Ricket uses CHI's minimum
-128-bit DAT width; each 32-byte cache-line refill therefore completes from two
-ordinary, unelided DAT packets before the cache returns `CompAck`.
+128-bit DAT width; each fixed 64-byte cache-line refill therefore completes
+from four ordinary, unelided DAT packets before the cache returns `CompAck`.
 
 ## Verification
 

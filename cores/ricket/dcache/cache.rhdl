@@ -3,8 +3,11 @@
 
 import:
   "protocol.rhdl" open
+  "../cache.rhdl" open
   "../chi.rhdl" open
   "../refill.rhdl" open
+  "../snoop.rhdl" open
+  "../write-unique.rhdl" open
   "../../load-store.rhdl" open
   "../../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl") open
@@ -14,28 +17,24 @@ import:
   lib("rhdl/std/flow.rhdl") open
   lib("chi/main.rhdl") open
 
-fun check_l1d_geometry(width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
+fun check_l1d_geometry(width :: PosInt, sets :: Pow2Int):
   unless sets >= 2
   | error(~who: #'RicketL1DCache,
           "set count must be a power of two of at least two")
-  unless line_bytes >= 8
-  | error(~who: #'RicketL1DCache,
-          "line byte count must be a power of two of at least eight")
-  unless width > (alignment_bits(line_bytes) + alignment_bits(sets))
+  unless width > (alignment_bits(RicketCacheLineBytes) + alignment_bits(sets))
   | error(~who: #'RicketL1DCache,
           "address width must include line offset, set, and tag bits")
 
 sync_circuit RicketL1DCache(xlen :: XLen,
                             sets :: Pow2Int,
-                            line_bytes :: Pow2Int,
                             ~chi: params :: RicketCHIParams = default_ricket_chi_params):
   def width = xlen_width(xlen)
   def checked = checked_ricket_chi_params(params)
   def p = checked.flit
   def node = checked.data_node
-  check_l1d_geometry(width, sets, line_bytes)
-  def beats = line_bytes / 8
-  def offset_width = alignment_bits(line_bytes)
+  check_l1d_geometry(width, sets)
+  def beats = RicketCacheLineBytes / 8
+  def offset_width = alignment_bits(RicketCacheLineBytes)
   def set_width = alignment_bits(sets)
   def tag_width = width - offset_width - set_width
   def beat_width = index_width(beats)
@@ -44,10 +43,13 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   interface chi(CHIRNDecoupled(p), ~role: node)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
-  inst lines(SyncRam1RW(sets, Bits(8), line_bytes))
+  inst states(SyncRam1RW(sets, CHIResponseState, 1))
+  inst lines(SyncRam1RW(sets, Bits(8), RicketCacheLineBytes))
   inst load_gen(LoadGen(xlen))
   inst store_gen(StoreGen(xlen))
-  inst refill(RicketLineRefill(RicketDataReq(xlen), width, line_bytes, checked, node.node_id))
+  inst refill(RicketLineRefill(RicketDataReq(xlen), width, checked, node))
+  inst snoop(RicketCleanSnoop(width, checked, node))
+  inst write_unique(RicketWriteUnique(RicketDataReq(xlen), width, checked, 1))
   // Hits and stores leave the lookup stage directly; a miss transfers its
   // complete request context into the refill engine.
   inst lookup(Pipe(RicketDataReq(xlen), 1))
@@ -58,16 +60,6 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   inst protocol_responses(Arbiter(CHIRspFlit(p), 2))
 
   reg valid_lines(~init: as_vec(bits(0, sets), Bool))
-  reg store_active(~init: Bool(#false))
-  reg store_request_sent(~init: Bool(#false))
-  reg store_dbid_received(~init: Bool(#false))
-  reg store_data_sent(~init: Bool(#false))
-  reg store_address(~init: bits(0, width))
-  reg store_width(~init: MemoryWidth.Byte)
-  reg store_data(~init: bits(0, 64))
-  reg store_mask(~init: bits(0, 8))
-  reg store_home_id(~init: bits(0, p.node_id_width))
-  reg store_dbid(~init: bits(0, 12))
 
   core.response.valid <== responses.egress.valid
   core.response.bits <== responses.egress.bits
@@ -79,10 +71,19 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   def incoming_data = chi.response_data
   def incoming_snoops = chi.snoops
   refill.requests |> protocol_requests.ingress[0]
+  write_unique.requests |> protocol_requests.ingress[1]
   protocol_requests.egress |> outgoing_requests
   incoming_data |> refill.response_data
   refill.acknowledgements |> protocol_responses.ingress[0]
+  snoop.responses |> protocol_responses.ingress[1]
   protocol_responses.egress |> outgoing_responses
+  write_unique.data |> outgoing_data
+  def write_active = !write_unique.command.ready
+  refill.responses.valid <== incoming_responses.valid & !write_active
+  refill.responses.bits <== incoming_responses.bits
+  write_unique.responses.valid <== incoming_responses.valid & write_active
+  write_unique.responses.bits <== incoming_responses.bits
+  incoming_responses.ready <== mux(write_active, write_unique.responses.ready, refill.responses.ready)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def lookup_request = lookup.egress.bits
   def lookup_set = lookup_request.address[offset_width..(offset_width + set_width)]
@@ -104,7 +105,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   def refill_commands = (
     lookup.egress |> filter_flow(request => lookup_miss)
       |> map_flow(request => RicketLineRefillCommand(RicketDataReq(xlen), width)):
-      line_address: align_down(as_bits(request.address), line_bytes)
+      line_address: align_down(as_bits(request.address), RicketCacheLineBytes)
       context: request
   )
   refill_commands |> refill.command
@@ -113,8 +114,10 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   refill.completion.ready <== Bool(#true)
   def install_refill = fire(refill.completion)
   when install_refill:
-    assert(refill.completion.bits.state =/= CHIResponseState.Invalid,
-           "l1d_refill_state_valid")
+    assert(is_one_of(refill.completion.bits.state,
+                     CHIResponseState.SharedClean,
+                     CHIResponseState.Unique),
+           "l1d_refill_state_clean")
     assert(!refill.completion.bits.pass_dirty,
            "l1d_refill_not_dirty")
   def completion_request = cast(refill.completion.bits.context, RicketDataReq(xlen))
@@ -139,32 +142,40 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   store_gen.value <== lookup_request.data
   store_gen.width <== lookup_request.width
 
+  write_unique.command.valid <== lookup_store
+  write_unique.command.bits <== RicketWriteUniqueCommand(RicketDataReq(xlen), width):
+    address: lookup_request.address
+    width: lookup_request.width
+    data: store_gen.data
+    mask: store_gen.mask
+    context: lookup_request
+  assert(!lookup_store ||| write_unique.command.ready,
+         "l1d_write_command_accepted")
+  write_unique.completion.ready <== Bool(#true)
+
   def cache_write = install_refill
   def cache_write_set = completion_set
-  assert(refill.command.ready ||| !store_active, "l1d_backing_owner_exclusive")
+  assert(refill.command.ready ||| write_unique.command.ready,
+         "l1d_backing_owner_exclusive")
 
   // Loads can follow hit lookups every cycle. A miss blocks until refill, and
   // a store blocks only the cache-request stream while its one-entry backing
   // write buffer drains; the store completion enters the response register at
   // lookup and reaches the pipeline in WB.
-  def snoop = incoming_snoops.bits
-  def ordinary_snoop = snoop.opcode =/= CHISnpOpcode.SnpLCrdReturn
-  def snoop_pending = incoming_snoops.valid & ordinary_snoop
-  def snoop_can_respond = refill.command.ready & !store_active & !lookup.egress.valid
-  incoming_snoops.ready <== !ordinary_snoop ||| (
-    snoop_can_respond & protocol_responses.ingress[1].ready
-  )
-  protocol_responses.ingress[1].valid <== snoop_pending & snoop_can_respond
-  protocol_responses.ingress[1].bits <== ricket_chi_response(
-    p,
-    node.node_id,
-    snoop.src_id,
-    snoop.txn_id,
-    CHIRspOpcode.SnpResp
-  )
-  def snoop_fire = fire(incoming_snoops) & ordinary_snoop
+  incoming_snoops |> snoop.snoops
+  snoop.cache_ready <== refill.command.ready & write_unique.command.ready & !lookup.egress.valid
+  def snoop_lookup_start = snoop.lookup.valid
+  def snoop_address = snoop.address
+  def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
+  def snoop_tag = snoop_address[(offset_width + set_width)..width]
+  def snoop_line_hit = valid_lines[snoop_set] & (tags.port.response.bits[0] === snoop_tag)
+  snoop.lookup_result.valid <== tags.port.response.valid & states.port.response.valid
+  snoop.lookup_result.bits <== RicketCleanSnoopLookupResult():
+    hit: snoop_line_hit
+    state: states.port.response.bits[0]
+  def snoop_pending = snoop.pending
 
-  def lookup_accepts_input = refill.command.ready & !store_active & !snoop_pending & !lookup_miss & !lookup_store
+  def lookup_accepts_input = refill.command.ready & write_unique.command.ready & !snoop_pending & !lookup_miss & !lookup_store
   core.request.ready <== lookup.ingress.ready & lookup_accepts_input
   lookup.ingress.valid <== core.request.valid & lookup_accepts_input
   lookup.ingress.bits <== core.request.bits
@@ -172,56 +183,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   // A fence observes accepted lookup work, active refills, and the backing
   // store buffer. Same-cycle acceptance is included so no request can cross
   // the reported quiescent boundary.
-  core.drained <== !request_fire & !lookup.egress.valid & refill.command.ready & !store_active
-
-  protocol_requests.ingress[1].valid <== store_active & !store_request_sent
-  protocol_requests.ingress[1].bits <== ricket_chi_request(
-    p,
-    node.node_id,
-    checked.home_node_id,
-    store_address,
-    as_bits(store_width),
-    CHIReqOpcode.WriteUniquePtl,
-    bits(1, 12),
-    Bool(#false)
-  )
-  def store_request_fire = fire(protocol_requests.ingress[1])
-
-  def incoming_response = incoming_responses.bits
-  def response_ordinary = incoming_response.opcode =/= CHIRspOpcode.RespLCrdReturn
-  def response_dbid = incoming_response.opcode === CHIRspOpcode.DBIDResp
-  def response_completion = incoming_response.opcode === CHIRspOpcode.Comp
-  def response_expected = store_active & (
-    (response_dbid & store_request_sent & !store_dbid_received) ||| (
-      response_completion & store_data_sent
-    )
-  )
-  incoming_responses.ready <== !response_ordinary ||| response_expected
-  def response_fire = fire(incoming_responses) & response_ordinary
-  def dbid_fire = response_fire & response_dbid
-  def store_completion_fire = response_fire & response_completion
-  when (incoming_responses.valid & response_ordinary):
-    assert(response_expected, "l1d_chi_response_expected")
-    assert(incoming_response.txn_id === bits(1, 12),
-           "l1d_chi_response_txn_id")
-    assert(incoming_response.src_id === bits(checked.home_node_id, p.node_id_width),
-           "l1d_chi_response_home")
-    assert(incoming_response.resp_err === CHIRespErr.OK,
-           "l1d_chi_response_ok")
-
-  def data_lane = store_address[3..alignment_bits(p.data_bytes)]
-  def store_bus_data = zext(store_data, p.data_width) << concat(data_lane, bits(0, 6))
-  def store_bus_mask = zext(store_mask, p.data_bytes) << concat(data_lane, bits(0, 3))
-  outgoing_data.valid <== store_active & store_dbid_received & !store_data_sent
-  outgoing_data.bits <== ricket_chi_write_data(
-    p,
-    node.node_id,
-    store_home_id,
-    store_dbid,
-    store_bus_data,
-    store_bus_mask
-  )
-  def store_data_fire = fire(outgoing_data)
+  core.drained <== !request_fire & !lookup.egress.valid & refill.command.ready & write_unique.command.ready
   def produces_load_hit = lookup_load & line_hit
   def produces_response = produces_load_hit ||| lookup_store ||| install_refill
   responses.ingress.valid <== produces_response
@@ -229,50 +191,43 @@ sync_circuit RicketL1DCache(xlen :: XLen,
     data: mux(produces_load_hit ||| install_refill, load_gen.value, bits(0, width))
     tag: mux(install_refill, completion_request.tag, lookup_request.tag)
 
-  tags.port.request.valid <== request_fire ||| install_refill
+  tags.port.request.valid <== request_fire ||| install_refill ||| snoop_lookup_start
   tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
-    address: mux(cache_write, cache_write_set, request_set_value)
+    address: mux(cache_write,
+                 cache_write_set,
+                 mux(snoop_lookup_start,
+                     snoop_set,
+                     request_set_value))
     write: install_refill
     data: vec(mux(install_refill, completion_tag, lookup_tag))
     mask: bits(1, 1)
+  def update_snoop_state = snoop.update.valid & !snoop.update.bits.invalidate
+  states.port.request.valid <== install_refill ||| snoop_lookup_start ||| update_snoop_state
+  states.port.request.bits <== ReadWriteRequest(set_width, CHIResponseState, 1):
+    address: mux(install_refill,
+                 completion_set,
+                 mux(update_snoop_state,
+                     snoop_set,
+                     snoop.update.bits.address[offset_width..(offset_width + set_width)]))
+    write: install_refill ||| update_snoop_state
+    data: vec(mux(update_snoop_state, snoop.update.bits.state, refill.completion.bits.state))
+    mask: bits(1, 1)
   lines.port.request.valid <== request_fire ||| cache_write
-  lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), line_bytes):
+  lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), RicketCacheLineBytes):
     address: mux(cache_write, cache_write_set, request_set_value)
     write: cache_write
     data: as_vec(refill.completion.bits.line, Bits(8))
-    mask: !bits(0, line_bytes)
+    mask: !bits(0, RicketCacheLineBytes)
 
-  when snoop_fire:
-    valid_lines <== as_vec(bits(0, sets), Bool)
+  when (snoop.update.valid & snoop.update.bits.invalidate):
+    valid_lines <== valid_lines.updated(
+      snoop.update.bits.address[offset_width..(offset_width + set_width)],
+      Bool(#false)
+    )
   elsewhen lookup_store:
     valid_lines <== valid_lines.updated(lookup_set, Bool(#false))
   elsewhen install_refill:
     valid_lines <== valid_lines.updated(completion_set, Bool(#true))
-
-  when lookup_store:
-    assert(ricket_chi_address_fits(lookup_request.address, p),
-           "l1d_store_address_fits_chi")
-    store_address <== lookup_request.address
-    store_width <== lookup_request.width
-    store_data <== store_gen.data
-    store_mask <== store_gen.mask
-    store_active <== Bool(#true)
-    store_request_sent <== Bool(#false)
-    store_dbid_received <== Bool(#false)
-    store_data_sent <== Bool(#false)
-  elsewhen store_request_fire:
-    store_request_sent <== Bool(#true)
-  elsewhen dbid_fire:
-    store_dbid_received <== Bool(#true)
-    store_home_id <== incoming_response.src_id
-    store_dbid <== incoming_response.dbid_or_group_id
-  elsewhen store_data_fire:
-    store_data_sent <== Bool(#true)
-  elsewhen store_completion_fire:
-    store_active <== Bool(#false)
-    store_request_sent <== Bool(#false)
-    store_dbid_received <== Bool(#false)
-    store_data_sent <== Bool(#false)
 
 export:
   RicketL1DCache

@@ -3,8 +3,10 @@
 
 import:
   "protocol.rhdl" open
+  "../cache.rhdl" open
   "../chi.rhdl" open
   "../refill.rhdl" open
+  "../snoop.rhdl" open
   "../../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/read-write.rhdl") open
@@ -13,28 +15,24 @@ import:
   lib("rhdl/std/flow.rhdl") open
   lib("chi/main.rhdl") open
 
-fun check_l1i_geometry(width :: PosInt, sets :: Pow2Int, line_bytes :: Pow2Int):
+fun check_l1i_geometry(width :: PosInt, sets :: Pow2Int):
   unless sets >= 2
   | error(~who: #'RicketL1ICache,
           "set count must be a power of two of at least two")
-  unless line_bytes >= 8
-  | error(~who: #'RicketL1ICache,
-          "line byte count must be a power of two of at least eight")
-  unless width > (alignment_bits(line_bytes) + alignment_bits(sets))
+  unless width > (alignment_bits(RicketCacheLineBytes) + alignment_bits(sets))
   | error(~who: #'RicketL1ICache,
           "address width must include line offset, set, and tag bits")
 
 sync_circuit RicketL1ICache(xlen :: XLen,
                             sets :: Pow2Int,
-                            line_bytes :: Pow2Int,
                             ~chi: params :: RicketCHIParams = default_ricket_chi_params):
   def width = xlen_width(xlen)
   def checked = checked_ricket_chi_params(params)
   def p = checked.flit
   def node = checked.instruction_node
-  check_l1i_geometry(width, sets, line_bytes)
-  def beats = line_bytes / 8
-  def offset_width = alignment_bits(line_bytes)
+  check_l1i_geometry(width, sets)
+  def beats = RicketCacheLineBytes / 8
+  def offset_width = alignment_bits(RicketCacheLineBytes)
   def set_width = alignment_bits(sets)
   def tag_width = width - offset_width - set_width
   def beat_width = index_width(beats)
@@ -44,8 +42,10 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   interface chi(CHIRNDecoupled(p), ~role: node)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
+  inst states(SyncRam1RW(sets, CHIResponseState, 1))
   inst lines(SyncRam1RW(sets, Bits(64), beats))
-  inst refill(RicketLineRefill(Bits(width), width, line_bytes, checked, node.node_id))
+  inst refill(RicketLineRefill(Bits(width), width, checked, node))
+  inst snoop(RicketCleanSnoop(width, checked, node))
   inst lookup(Pipe(Bits(width), 1))
   inst response_arbiter(Arbiter(RicketInstructionResp(), 2))
   def cache_flush = core.flush ||| core.invalidate_all
@@ -67,29 +67,26 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def incoming_data = chi.response_data
   def incoming_snoops = chi.snoops
   refill.requests |> outgoing_requests
+  incoming_responses |> refill.responses
   incoming_data |> refill.response_data
   refill.acknowledgements |> protocol_responses.ingress[0]
+  snoop.responses |> protocol_responses.ingress[1]
   protocol_responses.egress |> outgoing_responses
   outgoing_data.valid <== Bool(#false)
   outgoing_data.bits <== literal(CHIDatFlit(p), 0)
-  incoming_responses.ready <== Bool(#true)
 
-  def snoop = incoming_snoops.bits
-  def ordinary_snoop = snoop.opcode =/= CHISnpOpcode.SnpLCrdReturn
-  def snoop_pending = incoming_snoops.valid & ordinary_snoop
-  def snoop_can_respond = refill.command.ready & !lookup.egress.valid
-  incoming_snoops.ready <== !ordinary_snoop ||| (
-    snoop_can_respond & protocol_responses.ingress[1].ready
-  )
-  protocol_responses.ingress[1].valid <== snoop_pending & snoop_can_respond
-  protocol_responses.ingress[1].bits <== ricket_chi_response(
-    p,
-    node.node_id,
-    snoop.src_id,
-    snoop.txn_id,
-    CHIRspOpcode.SnpResp
-  )
-  def snoop_fire = fire(incoming_snoops) & ordinary_snoop
+  incoming_snoops |> snoop.snoops
+  snoop.cache_ready <== refill.command.ready & !lookup.egress.valid & !cache_flush
+  def snoop_lookup_start = snoop.lookup.valid
+  def snoop_address = snoop.address
+  def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
+  def snoop_tag = snoop_address[(offset_width + set_width)..width]
+  def snoop_line_hit = valid_lines[snoop_set] & (tags.port.response.bits[0] === snoop_tag)
+  snoop.lookup_result.valid <== tags.port.response.valid & states.port.response.valid
+  snoop.lookup_result.bits <== RicketCleanSnoopLookupResult():
+    hit: snoop_line_hit
+    state: states.port.response.bits[0]
+  def snoop_pending = snoop.pending
   def response_fire = fire(core.response)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def lookup_address = lookup.egress.bits
@@ -143,7 +140,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def refill_commands = (
     miss_path
       |> map_flow(address => RicketLineRefillCommand(Bits(width), width)):
-        line_address: align_down(address, line_bytes)
+        line_address: align_down(address, RicketCacheLineBytes)
         context: address
   )
   refill_commands |> refill.command
@@ -157,7 +154,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   )
   hit_responses |> response_arbiter.ingress[0]
 
-  def refill_results = RicketLineRefillResult(Bits(width), width, line_bytes)
+  def refill_results = RicketLineRefillResult(Bits(width), width)
   def refill_responses = (
     refill.completion
       |> filter_flow(result => refill_live)
@@ -173,16 +170,33 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def refill_complete = fire(refill.completion)
   def install = refill_complete & refill_installable & !core.invalidate_all
   when refill_complete:
-    assert(refill.completion.bits.state =/= CHIResponseState.Invalid,
-           "l1i_refill_state_valid")
+    assert(is_one_of(refill.completion.bits.state,
+                     CHIResponseState.SharedClean,
+                     CHIResponseState.Unique),
+           "l1i_refill_state_clean")
     assert(!refill.completion.bits.pass_dirty,
            "l1i_refill_not_dirty")
 
-  tags.port.request.valid <== request_fire ||| install
+  tags.port.request.valid <== request_fire ||| install ||| snoop_lookup_start
   tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
-    address: mux(install, completion_set, request_set_value)
+    address: mux(install,
+                 completion_set,
+                 mux(snoop_lookup_start,
+                     snoop_set,
+                     request_set_value))
     write: install
     data: vec(completion_tag)
+    mask: bits(1, 1)
+  def update_snoop_state = snoop.update.valid & !snoop.update.bits.invalidate
+  states.port.request.valid <== install ||| snoop_lookup_start ||| update_snoop_state
+  states.port.request.bits <== ReadWriteRequest(set_width, CHIResponseState, 1):
+    address: mux(install,
+                 completion_set,
+                 mux(update_snoop_state,
+                     snoop_set,
+                     snoop.update.bits.address[offset_width..(offset_width + set_width)]))
+    write: install ||| update_snoop_state
+    data: vec(mux(update_snoop_state, snoop.update.bits.state, refill.completion.bits.state))
     mask: bits(1, 1)
   lines.port.request.valid <== request_fire ||| install
   lines.port.request.bits <== ReadWriteRequest(set_width, Bits(64), beats):
@@ -191,8 +205,13 @@ sync_circuit RicketL1ICache(xlen :: XLen,
     data: refill.completion.bits.line
     mask: !bits(0, beats)
 
-  when (core.invalidate_all ||| snoop_fire):
+  when (core.invalidate_all):
     valid_lines <== as_vec(bits(0, sets), Bool)
+  elsewhen (snoop.update.valid & snoop.update.bits.invalidate):
+    valid_lines <== valid_lines.updated(
+      snoop.update.bits.address[offset_width..(offset_width + set_width)],
+      Bool(#false)
+    )
   elsewhen install:
     valid_lines <== valid_lines.updated(completion_set, Bool(#true))
 

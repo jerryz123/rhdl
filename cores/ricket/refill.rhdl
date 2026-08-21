@@ -1,7 +1,8 @@
 #lang rhdl
-// Implements Ricket's packet-complete blocking RN-F ReadShared cache-line refill.
+// Implements Ricket's retry-aware packet-complete RN-F ReadClean cache-line refill.
 
 import:
+  "cache.rhdl" open
   "chi.rhdl" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
@@ -13,40 +14,40 @@ bundle RicketLineRefillCommand(Context :: DataType,
   context: Context
 
 bundle RicketLineRefillResult(Context :: DataType,
-                              address_width :: PosInt,
-                              line_bytes :: Pow2Int):
+                              address_width :: PosInt):
   line_address: Bits(address_width)
   context: Context
-  line: Vec(line_bytes / 8, Bits(64))
+  line: Vec(RicketCacheLineBytes / 8, Bits(64))
   state: CHIResponseState
   pass_dirty: Bool
 
 sync_circuit RicketLineRefill(Context :: DataType,
                               address_width :: PosInt,
-                              line_bytes :: Pow2Int,
                               params :: RicketCHIParams,
-                              node_id :: Nat):
+                              node :: CHINodeParams):
   def checked = checked_ricket_chi_params(params)
   def p = checked.flit
-  unless line_bytes >= p.data_bytes && line_bytes <= 64
+  def node_id = node.node_id
+  unless RicketCacheLineBytes >= p.data_bytes
   | error(~who: #'RicketLineRefill,
-          "cache line size must span one to four complete CHI data packets")
-  unless address_width >= alignment_bits(line_bytes)
+          "cache line must span at least one complete CHI data packet")
+  unless address_width >= alignment_bits(RicketCacheLineBytes)
   | error(~who: #'RicketLineRefill,
           "address width must cover the line offset")
   unless node_id == checked.instruction_node_id || node_id == checked.data_node_id
   | error(~who: #'RicketLineRefill,
-          "refill NodeID must identify a Ricket cache")
-  def packet_count = line_bytes / p.data_bytes
+          "refill node must identify a Ricket cache")
+  def packet_count = RicketCacheLineBytes / p.data_bytes
   def packet_index_width = index_width(packet_count)
   def data_id_stride = p.data_bytes / 16
   def data_id_stride_width = alignment_bits(data_id_stride)
 
   interface command(Decoupled(RicketLineRefillCommand(Context, address_width)),
                     ~role: consumer)
-  interface completion(Irrevocable(RicketLineRefillResult(Context, address_width, line_bytes)), ~role: producer)
+  interface completion(Irrevocable(RicketLineRefillResult(Context, address_width)), ~role: producer)
   interface requests(Decoupled(CHIReqFlit(p)), ~role: producer)
   interface acknowledgements(Decoupled(CHIRspFlit(p)), ~role: producer)
+  interface responses(Decoupled(CHIRspFlit(p)), ~role: consumer)
   interface response_data(Decoupled(CHIDatFlit(p)), ~role: consumer)
 
   reg active_state(~init: Bool(#false))
@@ -57,36 +58,68 @@ sync_circuit RicketLineRefill(Context :: DataType,
   reg acknowledgement_sent(~init: Bool(#false))
   reg line_address(~init: bits(0, address_width))
   reg context(Context)
-  reg line(~init: bits(0, line_bytes * 8))
+  reg line(~init: bits(0, RicketCacheLineBytes * 8))
   reg home_id(~init: bits(0, p.node_id_width))
   reg dbid(~init: bits(0, 12))
   reg response_state(~init: CHIResponseState.Invalid)
   reg pass_dirty(~init: Bool(#false))
+  reg retry_received(~init: Bool(#false))
+  reg retry_credit_received(~init: Bool(#false))
+  reg retry_credit_type(~init: bits(0, 4))
+  reg granted_credit_type(~init: bits(0, 4))
 
   command.ready <== !active_state
   def command_fire = fire(command)
   when command_fire:
-    assert(is_aligned(command.bits.line_address, line_bytes),
+    assert(is_aligned(command.bits.line_address, RicketCacheLineBytes),
            "line_refill_address_aligned")
     assert(ricket_chi_address_fits(command.bits.line_address, p),
            "line_refill_address_fits_chi")
 
-  requests.valid <== active_state & !request_sent
+  def retry_ready = retry_received & retry_credit_received
+  requests.valid <== active_state & !request_sent & (!retry_received ||| retry_ready)
   requests.bits <== ricket_chi_request(
     p,
     node_id,
     checked.home_node_id,
     line_address,
-    bits(alignment_bits(line_bytes), 3),
-    CHIReqOpcode.ReadShared,
+    CHITransferSize.Bytes64,
+    CHIReqOpcode.ReadClean,
     bits(0, 12),
-    Bool(#true)
+    Bool(#true),
+    Bool(#true),
+    !retry_received,
+    mux(retry_received, retry_credit_type, bits(0, 4))
   )
   def request_fire = fire(requests)
 
+  def incoming_response = responses.bits
+  def response_ordinary = incoming_response.opcode =/= CHIRspOpcode.RespLCrdReturn
+  def retry_ack = incoming_response.opcode === CHIRspOpcode.RetryAck
+  def protocol_credit = incoming_response.opcode === CHIRspOpcode.PCrdGrant
+  def retry_response = retry_ack ||| protocol_credit
+  responses.ready <== !response_ordinary ||| (
+    active_state & retry_response & (request_sent ||| retry_received)
+  )
+  def retry_response_fire = fire(responses) & response_ordinary
+  def retry_ack_fire = retry_response_fire & retry_ack
+  def protocol_credit_fire = retry_response_fire & protocol_credit
+  when retry_response_fire:
+    assert(retry_response, "line_refill_retry_response_supported")
+    assert(incoming_response.tgt_id === bits(node_id, p.node_id_width),
+           "line_refill_retry_response_target")
+    assert(incoming_response.src_id === bits(checked.home_node_id, p.node_id_width),
+           "line_refill_retry_response_home")
+  when retry_ack_fire:
+    assert(request_sent, "line_refill_retry_has_request")
+    assert(incoming_response.txn_id === bits(0, 12),
+           "line_refill_retry_txn_id")
+  when (retry_received & retry_credit_received):
+    assert(retry_credit_type === granted_credit_type,
+           "line_refill_retry_credit_type_matches")
+
   def incoming_data = response_data.bits
-  def raw_coherent_response :: Bits(3) = incoming_data.resp
-  def coherent_response = raw_coherent_response.into(CHICoherentResponse())
+  def coherent_response = incoming_data.resp.into(CHICoherentResponse())
   def all_data_received = and_reduce(received_packets)
   def first_data_packet = !or_reduce(received_packets)
   def packet_index:
@@ -148,7 +181,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
   def acknowledgement_fire = fire(acknowledgements)
 
   completion.valid <== active_state & acknowledgement_sent
-  completion.bits <== RicketLineRefillResult(Context, address_width, line_bytes):
+  completion.bits <== RicketLineRefillResult(Context, address_width):
     line_address: line_address
     context: context
     line: as_vec(line, Bits(64))
@@ -158,20 +191,17 @@ sync_circuit RicketLineRefill(Context :: DataType,
 
   when command_fire:
     active_state <== Bool(#true)
-    request_sent <== Bool(#false)
     received_packets <== vec(
       for List (_index in 0..packet_count): Bool(#false)
     )
     acknowledgement_sent <== Bool(#false)
     line_address <== command.bits.line_address
     context <== command.bits.context
-    line <== bits(0, line_bytes * 8)
+    line <== bits(0, RicketCacheLineBytes * 8)
     home_id <== bits(0, p.node_id_width)
     dbid <== bits(0, 12)
     response_state <== CHIResponseState.Invalid
     pass_dirty <== Bool(#false)
-  elsewhen request_fire:
-    request_sent <== Bool(#true)
   elsewhen data_fire:
     received_packets <== next_received_packets
     line <== as_bits(next_line)
@@ -179,16 +209,31 @@ sync_circuit RicketLineRefill(Context :: DataType,
                     incoming_data.home_nid_or_pbha_or_mismatched_mecid,
                     home_id)
     dbid <== mux(first_data_packet, incoming_data.dbid_or_mecid[0..12], dbid)
-    response_state <== mux(first_data_packet,
-                           coherent_response.state,
-                           response_state)
-    pass_dirty <== mux(first_data_packet,
-                       coherent_response.pass_dirty,
-                       pass_dirty)
+    response_state <== mux(first_data_packet, coherent_response.state, response_state)
+    pass_dirty <== mux(first_data_packet, coherent_response.pass_dirty, pass_dirty)
   elsewhen acknowledgement_fire:
     acknowledgement_sent <== Bool(#true)
   elsewhen completion_fire:
     active_state <== Bool(#false)
+
+  when command_fire:
+    request_sent <== Bool(#false)
+  elsewhen retry_ack_fire:
+    request_sent <== Bool(#false)
+  elsewhen request_fire:
+    request_sent <== Bool(#true)
+
+  when (command_fire ||| (request_fire & retry_received) ||| completion_fire):
+    retry_received <== Bool(#false)
+    retry_credit_received <== Bool(#false)
+    retry_credit_type <== bits(0, 4)
+    granted_credit_type <== bits(0, 4)
+  elsewhen retry_ack_fire:
+    retry_received <== Bool(#true)
+    retry_credit_type <== incoming_response.pcrd_type
+  elsewhen protocol_credit_fire:
+    retry_credit_received <== Bool(#true)
+    granted_credit_type <== incoming_response.pcrd_type
 
 export:
   RicketLineRefillCommand

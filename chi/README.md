@@ -209,19 +209,22 @@ On a valid flit, the monitor checks:
 
 For an RN-F advertising the initial coherent capability profile, the same
 monitor also enables the bounded coherent requester checker described below.
-Opcode-dependent rules outside the implemented transaction profiles, retry,
-and general ordering remain later stateful-monitor milestones.
+Opcode-dependent rules outside the implemented transaction profiles and
+general ordering remain later stateful-monitor milestones.
 
 ## Initial RN-F transaction monitoring
 
 [`coherent-transaction.rhdl`](coherent-transaction.rhdl) implements the first
-bounded coherent requester profile. It accepts legal-size `ReadShared`
-requests, derives their complete DataID set from Size, address, and DAT width,
-and rejects unexpected and duplicate packets. It accepts a matching `CompAck`
-after the first data packet, as CHI permits, but keeps the transaction live
-until both the acknowledgement and the complete DataID set have arrived. Live
-requester TxnIDs are unique and bounded by the endpoint's `max_outstanding`
-resource.
+bounded coherent requester profile. It accepts legal-size `ReadShared` and
+`ReadClean` requests, derives their complete DataID set from Size, address, and
+DAT width, and rejects unexpected and duplicate packets. A first attempt must
+permit retry; the bounded checker recognizes a repeated request by a deasserted
+`AllowRetry` and a retained live TxnID. Endpoint logic remains responsible for
+associating that repetition with `RetryAck` and `PCrdGrant`. The checker accepts
+a matching `CompAck` after the first data packet, as CHI permits, but keeps the
+transaction live until both the acknowledgement and the complete DataID set
+have arrived. Live requester TxnIDs are otherwise unique and bounded by the
+endpoint's `max_outstanding` resource.
 
 The same checker tracks every ordinary incoming SNP transaction by Home Node
 and TxnID. A non-forward snoop completes on a matching `SnpResp` or snoop DAT
@@ -232,10 +235,11 @@ single-flit DataID/NumDat/Replicate contract.
 
 This substrate deliberately does not decide a cache response, store tags or
 data, change line state, arbitrate shared RSP/DAT producers, or implement
-coherent writes, evictions, retries, separated read responses, or multibeat
-snoop data. Those policies belong in the future RN-F cache endpoint. HN-F directory,
-snoop generation, and completion aggregation are likewise outside this first
-step.
+coherent writes, evictions, separated read responses, or multibeat snoop data.
+It permits retry opcodes and retry-shaped request repetition, while the endpoint
+still owns RetryAck/PCrdGrant association. Those policies belong in an RN-F
+cache endpoint. HN-F directory, snoop generation, and completion aggregation
+are likewise outside this first step.
 
 ## Initial non-coherent transaction monitoring
 
@@ -420,7 +424,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations, without topology or router ownership |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
-| [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded initial RN-F `ReadShared`/`CompData`/`CompAck` and snoop-response lifetime checks |
+| [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
 | [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-F/RN-D/RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
@@ -468,10 +472,10 @@ turns an externally credited flit channel into a buffered internal flow.
    multiple ports through the generated crossbar and then add multibeat traffic.
 8. **Initial RN-F substrate complete:** Add RN-F node/ICN flow adapters,
    mandatory snoop capability validation, cache/response classifiers, and
-   bounded `ReadShared` plus snoop-response lifetime monitoring. Next, build an
-   RN-F cache endpoint on this substrate, then add HN-F directory and snoop
-   aggregation behavior. Optional CHI features follow as independently
-   verified vertical slices.
+   bounded `ReadShared`/`ReadClean` plus snoop-response lifetime monitoring.
+   Ricket now provides the first clean-only RN-F cache endpoint over this
+   substrate. Next, add HN-F directory and snoop aggregation behavior. Optional
+   CHI features follow as independently verified vertical slices.
 
 Each milestone requires host elaboration tests, invalid-parameter and invalid
 connection tests, generated CIRCT verification, and a cycle-level Verilator
