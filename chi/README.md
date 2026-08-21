@@ -367,6 +367,15 @@ zero, cache maintenance, and optional CHI features without changing the
 meaning of the initial subset. Coherent RN-F/HN-F behavior is a separate
 milestone layered above this backing-memory endpoint.
 
+[`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) keeps that RAM contract
+small while allowing an upstream Home to request a full cache line. The
+serialized `CHITransferFragmenter` presents a widened `ReadNoSnp` service,
+issues one downstream request per physical DAT beat, offsets each child
+address, and restores the parent transaction's DataID sequence. Requests that
+already fit one DAT beat pass through unchanged, including the initial write
+profile. Multibeat writes remain explicitly unsupported until both the Home
+and adapter can collect and complete the whole parent write transaction.
+
 ## Credited channel abstraction
 
 CHI channels are not ready-valid. A transmitter asserts a valid flit only
@@ -446,6 +455,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`flow.rhdl`](flow.rhdl) | Node-side and ICN-side RN-F/RN-D/RN-I/SN channel conversion between credited CHI transport and internal ready-valid flows, with CHI activation control |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
+| [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read fragmentation into single-DAT-beat subordinate transactions while passing through the initial single-beat write profile |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
 | [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean reads, conservative write invalidation, and non-snooping subordinate translation |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |

@@ -1,0 +1,234 @@
+#lang rhdl
+// Fragments large CHI reads into serialized single-DAT-beat subordinate transactions.
+
+import:
+  lib("host/annotations.rhm") open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("chi/params.rhdl").CHIFlitParams
+  lib("chi/flits.rhdl") open
+  lib("chi/protocol.rhdl") open
+  lib("chi/decoupled.rhdl").CHISNDecoupled
+  lib("chi/fabric.rhdl") open
+
+class CHITransferFragmenterParams(flit :: CHIFlitParams,
+                                  downstream_service :: CHISubordinateServiceParams,
+                                  max_read_bytes :: Pow2Int):
+  implements CircuitParam
+
+  property upstream_service:
+    CHISubordinateServiceParams(
+      downstream_service.endpoint,
+      downstream_service.address_sets,
+      downstream_service.requests.map(
+        fun (support):
+          CHIRequestSupport(
+            support.opcode,
+            if support.opcode == CHIReqOpcode.ReadNoSnp
+            | TransferSizes(support.sizes.min_bytes, max_read_bytes)
+            | support.sizes
+          )
+      )
+    )
+
+  constructor (flit :: CHIFlitParams,
+               downstream_service :: CHISubordinateServiceParams,
+               ~max_read_bytes: max_read_bytes :: Pow2Int = 64):
+    unless max_read_bytes >= flit.data_bytes && max_read_bytes <= 64
+    | error(~who: #'CHITransferFragmenterParams,
+            "maximum read size must be from one DAT beat through 64 bytes")
+    unless downstream_service.supports(CHIReqOpcode.ReadNoSnp,
+                                       flit.data_bytes)
+    | error(~who: #'CHITransferFragmenterParams,
+            "downstream service must support one-DAT-beat reads")
+    super(flit, downstream_service, max_read_bytes)
+
+hardware_enum CHITransferFragmenterPhase(~width: 3):
+  Idle = 0
+  SendRequest = 1
+  AwaitReadData = 2
+  AwaitWriteDBID = 3
+  ForwardWriteData = 4
+  AwaitWriteCompletion = 5
+
+fun chi_fragmented_request(p :: CHIFlitParams,
+                           request :: CHIReqFlit(p),
+                           child_index :: Bits(2),
+                           last_child :: Bits(2)) :~ CHIReqFlit(p):
+  wire child: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | child.rsvdc <== request.rsvdc
+  | #void
+  if p.sec_sid_width > 0
+  | child.sec_sid1 <== request.sec_sid1
+  | #void
+  if p.request_security_width > 0
+  | child.mecid_or_stream_id <== request.mecid_or_stream_id
+  | #void
+  if p.pbha_width > 0
+  | child.pbha <== request.pbha
+  | #void
+  if p.mpam_width > 0
+  | child.mpam <== request.mpam
+  | #void
+  child.trace_tag <== request.trace_tag
+  child.tag_op <== request.tag_op
+  child.exp_comp_ack <== request.exp_comp_ack
+  child.excl_snoop_me_cah <== request.excl_snoop_me_cah
+  child.group_id_or_lpid <== request.group_id_or_lpid
+  child.snp_attr_or_do_dwt <== request.snp_attr_or_do_dwt
+  child.mem_attr <== request.mem_attr
+  child.pcrd_type <== request.pcrd_type
+  child.order <== request.order
+  child.allow_retry <== request.allow_retry
+  child.likely_shared <== request.likely_shared
+  child.pas <== request.pas
+  def child_offset = zext(
+    concat(child_index, bits(0, alignment_bits(p.data_bytes))),
+    p.request_address_width
+  )
+  child.address <== request.address + child_offset
+  child.size_or_num_req <== mux(last_child =/= bits(0, 2), bits(alignment_bits(p.data_bytes), 6), request.size_or_num_req)
+  child.multi_req <== request.multi_req
+  child.opcode <== request.opcode
+  child.return_txn_id_or_stash_lpid <== request.return_txn_id_or_stash_lpid
+  child.stash_nid_valid_endian_deep_prefetch_tgt_hint <== request.stash_nid_valid_endian_deep_prefetch_tgt_hint
+  child.return_nid_or_stash_nid_or_data_target <== request.return_nid_or_stash_nid_or_data_target
+  child.txn_id <== request.txn_id
+  child.src_id <== request.src_id
+  child.tgt_id <== request.tgt_id
+  child.qos <== request.qos
+  child
+
+fun chi_fragmented_read_data(p :: CHIFlitParams,
+                             data :: CHIDatFlit(p),
+                             child_index :: Bits(2)) :~ CHIDatFlit(p):
+  wire parent: CHIDatFlit(p)
+  if p.poison_width > 0
+  | parent.poison <== data.poison
+  | #void
+  if p.data_check_width > 0
+  | parent.data_check <== data.data_check
+  | #void
+  parent.data <== data.data
+  parent.byte_enable <== data.byte_enable
+  if p.dat_rsvdc_width > 0
+  | parent.rsvdc <== data.rsvdc
+  | #void
+  parent.replicate <== data.replicate
+  parent.num_dat <== data.num_dat
+  parent.cah <== data.cah
+  parent.trace_tag <== data.trace_tag
+  parent.tag_update <== data.tag_update
+  parent.tag <== data.tag
+  parent.tag_op <== data.tag_op
+  parent.cache_line_id <== data.cache_line_id
+  def parent_data_id:
+    cond
+    | p.data_width == 128: child_index
+    | p.data_width == 256: concat(child_index[0..1], bits(0, 1))
+    | ~else: bits(0, 2)
+  parent.data_id <== parent_data_id
+  parent.ccid <== data.ccid
+  parent.dbid_or_mecid <== data.dbid_or_mecid
+  parent.c_busy <== data.c_busy
+  parent.data_pull <== data.data_pull
+  parent.data_source_or_fwd_state <== data.data_source_or_fwd_state
+  parent.resp <== data.resp
+  parent.resp_err <== data.resp_err
+  parent.opcode <== data.opcode
+  parent.home_nid_or_pbha_or_mismatched_mecid <== data.home_nid_or_pbha_or_mismatched_mecid
+  parent.txn_id <== data.txn_id
+  parent.src_id <== data.src_id
+  parent.tgt_id <== data.tgt_id
+  parent.qos <== data.qos
+  parent
+
+sync_circuit CHITransferFragmenter(params :: CHITransferFragmenterParams):
+  def p = params.flit
+  interface upstream(CHISNDecoupled(p), ~role: node)
+  interface downstream(CHISNDecoupled(p), ~role: icn)
+
+  reg phase(~init: CHITransferFragmenterPhase.Idle)
+  reg request(CHIReqFlit(p))
+  reg child_index(~init: bits(0, 2))
+  reg last_child(~init: bits(0, 2))
+
+  def idle = phase === CHITransferFragmenterPhase.Idle
+  def incoming_request = upstream.req.bits
+  def incoming_opcode :: CHIReqOpcode = incoming_request.opcode
+  def incoming_size = chi_req_size(p, incoming_request)
+  def incoming_last_child = chi_data_beats_minus_one(incoming_size, p)
+  def incoming_write = incoming_opcode.is_initial_write()
+  def incoming_address_aligned = mux_lookup(
+    as_bits(incoming_size),
+    ~default: Bool(#false),
+    for List (encoded_size in 0..7):
+      [encoded_size, is_aligned(incoming_request.address, 1 << encoded_size)]
+  )
+  upstream.req.ready <== idle
+  def upstream_request_fire = fire(upstream.req)
+  when (upstream.req.valid & idle):
+    assert(is_one_of(incoming_opcode,
+                     CHIReqOpcode.ReadNoSnp,
+                     CHIReqOpcode.WriteNoSnpFull,
+                     CHIReqOpcode.WriteNoSnpPtl),
+           "chi_transfer_fragmenter_request_opcode_supported")
+    assert(chi_size_valid(incoming_size) & (
+             as_bits(incoming_size) <= bits(alignment_bits(params.max_read_bytes), 3)
+           ),
+           "chi_transfer_fragmenter_request_size_supported")
+    assert(incoming_address_aligned,
+           "chi_transfer_fragmenter_request_address_aligned")
+    assert(!incoming_write ||| (incoming_last_child === bits(0, 2)),
+           "chi_transfer_fragmenter_multibeat_write_unsupported")
+
+  def send_request = phase === CHITransferFragmenterPhase.SendRequest
+  downstream.req.valid <== send_request
+  downstream.req.bits <== chi_fragmented_request(p, request, child_index, last_child)
+  def downstream_request_fire = fire(downstream.req)
+
+  def await_write_dbid = phase === CHITransferFragmenterPhase.AwaitWriteDBID
+  def await_write_completion = phase === CHITransferFragmenterPhase.AwaitWriteCompletion
+  def relay_write_response = await_write_dbid ||| await_write_completion
+  upstream.rsp.valid <== relay_write_response & downstream.rsp.valid
+  upstream.rsp.bits <== downstream.rsp.bits
+  downstream.rsp.ready <== relay_write_response & upstream.rsp.ready
+  def downstream_response_fire = fire(downstream.rsp)
+
+  def forward_write_data = phase === CHITransferFragmenterPhase.ForwardWriteData
+  downstream.dat.request.valid <== forward_write_data & upstream.dat.request.valid
+  downstream.dat.request.bits <== upstream.dat.request.bits
+  upstream.dat.request.ready <== forward_write_data & downstream.dat.request.ready
+  def write_data_fire = fire(upstream.dat.request)
+
+  def await_read_data = phase === CHITransferFragmenterPhase.AwaitReadData
+  upstream.dat.response.valid <== await_read_data & downstream.dat.response.valid
+  upstream.dat.response.bits <== chi_fragmented_read_data(p, downstream.dat.response.bits, child_index)
+  downstream.dat.response.ready <== await_read_data & upstream.dat.response.ready
+  def read_data_fire = fire(downstream.dat.response)
+  def final_child = child_index === last_child
+
+  when upstream_request_fire:
+    request <== incoming_request
+    child_index <== bits(0, 2)
+    last_child <== incoming_last_child
+    phase <== CHITransferFragmenterPhase.SendRequest
+  elsewhen downstream_request_fire:
+    phase <== mux(request.opcode === CHIReqOpcode.ReadNoSnp, CHITransferFragmenterPhase.AwaitReadData, CHITransferFragmenterPhase.AwaitWriteDBID)
+  elsewhen (downstream_response_fire & await_write_dbid):
+    phase <== CHITransferFragmenterPhase.ForwardWriteData
+  elsewhen write_data_fire:
+    phase <== CHITransferFragmenterPhase.AwaitWriteCompletion
+  elsewhen (downstream_response_fire & await_write_completion):
+    phase <== CHITransferFragmenterPhase.Idle
+  elsewhen read_data_fire:
+    when final_child:
+      phase <== CHITransferFragmenterPhase.Idle
+    otherwise:
+      child_index <== child_index + bits(1, 2)
+      phase <== CHITransferFragmenterPhase.SendRequest
+
+export:
+  CHITransferFragmenterParams
+  CHITransferFragmenter
