@@ -13,18 +13,20 @@ export:
   lift_decode_inputs
   zip_decode_cases
 
-fun exact_type_equal(left, right):
+fun exact_type_equal(left :: DataType, right :: DataType):
   left.type_equal(right) && right.type_equal(left)
 
-fun require_pattern(value :: Pattern, role, who):
+fun require_pattern(value :: Pattern, role :: String, who :: Any):
   value
 
 class DecodeCase(input :: Pattern, output :: Pattern)
 
-fun require_decode_cases(cases :: NonemptyList.of(DecodeCase), role, who):
+fun require_decode_cases(cases :: NonemptyList.of(DecodeCase),
+                         role :: String,
+                         who :: Any):
   cases
 
-fun exact_pattern_equal(left, right):
+fun exact_pattern_equal(left :: Pattern, right :: Pattern):
   exact_type_equal(left.type, right.type) && left.width == right.width && left.value_bits == right.value_bits && left.care_bits == right.care_bits
 
 // Explicitly embeds every input cube into a new domain while preserving each
@@ -59,27 +61,27 @@ fun zip_decode_cases(left_cases :: NonemptyList.of(DecodeCase),
           "zipped decode relations must have the same number of input cubes")
   for (case in left):
     unless right.filter(
-      ~keep: fun (candidate): exact_pattern_equal(case.input, candidate.input)
+      ~keep: fun (candidate :: DecodeCase): exact_pattern_equal(case.input, candidate.input)
     ).length() == 1
     | error(~who: #'zip_decode_cases,
             "each left input cube must have exactly one right counterpart")
   for (case in right):
     unless left.filter(
-      ~keep: fun (candidate): exact_pattern_equal(case.input, candidate.input)
+      ~keep: fun (candidate :: DecodeCase): exact_pattern_equal(case.input, candidate.input)
     ).length() == 1
     | error(~who: #'zip_decode_cases,
             "each right input cube must have exactly one left counterpart")
   for List (left_case in left):
     def right_case = right.find(
-      fun (candidate): exact_pattern_equal(left_case.input, candidate.input)
+      fun (candidate :: DecodeCase): exact_pattern_equal(left_case.input, candidate.input)
     )
     DecodeCase(
       left_case.input,
       as_pattern(combine(left_case.output, right_case.output))
     )
 
-fun build_decode_group(inputs,
-                       output,
+fun build_decode_group(inputs :: Any,
+                       output :: Pattern,
                        input_pattern :: Function.of_arity(1)):
   def supplied:
     if inputs is_a List | inputs | [inputs]
@@ -92,10 +94,10 @@ fun build_decode_group(inputs,
 
 // Expands Pattern and PatternSet inputs into the single-cube rows consumed by
 // DecodeTable and the core rtl.decode operation.
-fun decode_cases(inputs, output):
+fun decode_cases(inputs :: Any, output :: Any):
   build_decode_group(inputs, as_pattern(output), as_pattern_set)
 
-fun flatten_decode_groups(groups):
+fun flatten_decode_groups(groups :: List):
   def mutable cases = []
   for (group in groups):
     cases := cases ++ group
@@ -111,7 +113,7 @@ meta:
        $(field_name :: Identifier): $field_value
        ...':
       field expand:
-        fun (output_type, input_pattern):
+        fun (output_type :: Syntax, input_pattern :: Any):
           'build_decode_group(
              [$input, ...],
              (partial_pattern($output_type):
@@ -123,7 +125,7 @@ meta:
        $(field_name :: Identifier): $field_value
        ...':
       field expand:
-        fun (output_type, input_pattern):
+        fun (output_type :: Syntax, input_pattern :: Any):
           'build_decode_group(
              $inputs,
              (partial_pattern($output_type):
@@ -144,14 +146,15 @@ expr.macro
     let [group, ...] = [row.expand(output_type, input_pattern), ...]
     'flatten_decode_groups([$group, ...])'
 
-class DecodeTable(cases,
-                  default,
-                  input_type,
-                  output_type,
-                  input_width,
-                  output_width,
-                  packed_cases):
-  constructor (supplied_cases :: NonemptyList.of(DecodeCase), ~default: supplied_default):
+class DecodeTable(cases :: NonemptyList.of(DecodeCase),
+                  default :: Pattern,
+                  input_type :: DataType,
+                  output_type :: DataType,
+                  input_width :: PosInt,
+                  output_width :: PosInt,
+                  packed_cases :: List):
+  constructor (supplied_cases :: NonemptyList.of(DecodeCase),
+               ~default: supplied_default :: Pattern):
     def default = require_pattern(supplied_default,
                                   "decode default",
                                   #'DecodeTable)
@@ -179,7 +182,7 @@ class DecodeTable(cases,
         | #void
     def packed_cases:
       supplied_cases.map(
-        fun (case):
+        fun (case :: DecodeCase):
           [case.input.value_bits,
            case.input.care_bits,
            case.output.value_bits,

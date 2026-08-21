@@ -4,6 +4,7 @@
 import:
   "../../rhdl/core/main.rhm" open
   "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../rhdl/frontend/layers/bundle.rhm" as bundles
   "../../examples/rhdl/bundle.rhdl" as bundle_fixture
   "hardware-literal-fixture.rhdl" as literal_fixture
 
@@ -12,6 +13,11 @@ def pipeline = pipeline_design.modules[0]
 def pair_type = bundle_fixture.Pair(Bits(8))
 def pair_type_family = bundle_fixture.Pair
 def indirect_pair_type = pair_type_family(Bits(8))
+def pair_arguments = pair_type_family.specialization_arguments(pair_type)
+def structural_pair_type = RecordType([
+  RecordField("left", Bits(8)),
+  RecordField("right", Bits(8))
+])
 def selected = pipeline.operations.find(
   fun (operation): operation.opcode == "rtl.mux_lookup"
 )
@@ -44,8 +50,15 @@ def swap_ir = dump_ir(swap_design)
 
 check:
   record_type(pair_type) ~is #true
+  pair_type is_a bundles.BundleType ~is #true
+  pair_type_family is_a Function ~is #true
   pair_type.preferred_name ~is "Pair"
   type_equal(indirect_pair_type, pair_type) ~is #true
+  pair_arguments.length() ~is 1
+  type_equal(pair_arguments[0], Bits(8)) ~is #true
+  type_equal(structural_pair_type, pair_type) ~is #true
+  pair_type_family.specialization_arguments(structural_pair_type) ~is #false
+  pair_type_family.require_specialization(structural_pair_type) ~throws "expected a Pair specialization"
   pair_type.fields.map(fun (field): field.name) ~is ["left", "right"]
   type_equal(pipeline.find_input("direct").type, pair_type) ~is #true
   type_equal(pipeline.find_output("result").type, pair_type) ~is #true

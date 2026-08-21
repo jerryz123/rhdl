@@ -13,12 +13,12 @@ export:
   as_pattern
   as_pattern_set
 
-fun literal_types_equal(left, right):
+fun literal_types_equal(left :: HardwareLiteral, right :: HardwareLiteral):
   def left_type = left.literal_type()
   def right_type = right.literal_type()
   left_type.type_equal(right_type) && right_type.type_equal(left_type)
 
-fun require_literal(value :: HardwareLiteral, role):
+fun require_literal(value :: HardwareLiteral, role :: String):
   def width = value.literal_width()
   unless width is_a PosInt
   | error(~who: #'Pattern, role ++ " must have a positive packed width")
@@ -27,15 +27,23 @@ fun require_literal(value :: HardwareLiteral, role):
   | error(~who: #'Pattern, role ++ " packed value does not fit its literal type")
   value
 
-fun require_same_pattern_type(left, right, role):
+fun require_same_pattern_type(left :: HardwareLiteral,
+                              right :: HardwareLiteral,
+                              role :: String):
   unless literal_types_equal(left, right) && left.literal_width() == right.literal_width()
   | error(~who: #'Pattern,
           role ++ " must have exactly the same hardware type and width")
 
 // Pattern is deliberately ordinary host data, not a HardwareLiteral. It
 // denotes a set of packed values and therefore cannot be connected to hardware.
-class Pattern(value, care, type, width, value_bits, care_bits):
-  constructor (~value: supplied_value, ~care: supplied_care):
+class Pattern(value :: HardwareLiteral,
+              care :: HardwareLiteral,
+              type :: DataType,
+              width :: PosInt,
+              value_bits :: Nat,
+              care_bits :: Nat):
+  constructor (~value: supplied_value :: HardwareLiteral,
+               ~care: supplied_care :: HardwareLiteral):
     def value = require_literal(supplied_value, "value")
     def care = require_literal(supplied_care, "care")
     require_same_pattern_type(value, care, "value and care")
@@ -44,12 +52,12 @@ class Pattern(value, care, type, width, value_bits, care_bits):
     def value_bits = value.packed_value() bits.and care_bits
     super(value, care, value.literal_type(), width, value_bits, care_bits)
 
-  method matches(candidate):
+  method matches(candidate :: HardwareLiteral):
     def literal = require_literal(candidate, "candidate")
     require_same_pattern_type(value, literal, "candidate")
     (literal.packed_value() bits.and care_bits) == value_bits
 
-  method overlaps(other):
+  method overlaps(other :: Any):
     if other is_a PatternSet
     | as_pattern_set(this).overlaps(other)
     | block:
@@ -61,7 +69,7 @@ class Pattern(value, care, type, width, value_bits, care_bits):
         def jointly_cared = care_bits bits.and other.care_bits
         (differing bits.and jointly_cared) == 0
 
-  method subsumes(other):
+  method subsumes(other :: Any):
     if other is_a PatternSet
     | as_pattern_set(this).subsumes(other)
     | block:
@@ -73,19 +81,19 @@ class Pattern(value, care, type, width, value_bits, care_bits):
         def differing = value_bits bits.xor other.value_bits
         shared_care == care_bits && (differing bits.and care_bits) == 0
 
-  method union(other):
+  method union(other :: Any):
     as_pattern_set(this).union(other)
 
-  method intersection(other):
+  method intersection(other :: Any):
     as_pattern_set(this).intersection(other)
 
-  method subtract(other):
+  method subtract(other :: Any):
     as_pattern_set(this).subtract(other)
 
   method inverse():
     as_pattern_set(this).inverse()
 
-fun pattern_from_bits(type, value_bits, care_bits):
+fun pattern_from_bits(type :: DataType, value_bits :: Nat, care_bits :: Nat):
   Pattern(
     ~value: literal(type, value_bits bits.and care_bits),
     ~care: literal(type, care_bits)
@@ -152,7 +160,7 @@ fun subtract_term_cover(term :: Pattern, cover :: List):
 
 // Produces a deterministic, pairwise-disjoint cover without trying to
 // minimize it; downstream RTL synthesis remains free to optimize the relation.
-fun normalize_pattern_terms(type, supplied_terms :: List):
+fun normalize_pattern_terms(type :: DataType, supplied_terms :: List):
   for (term in supplied_terms):
     unless term is_a Pattern && pattern_type_equal(term.type, type)
     | error(~who: #'PatternSet,
@@ -163,14 +171,16 @@ fun normalize_pattern_terms(type, supplied_terms :: List):
     terms := terms ++ subtract_term_cover(term, terms)
   terms.sort(pattern_order)
 
-fun require_same_pattern_set_type(left, right, role):
+fun require_same_pattern_set_type(left :: Any,
+                                  right :: Any,
+                                  role :: String):
   unless pattern_type_equal(left.type, right.type) && left.width == right.width
   | error(~who: #'PatternSet,
           role ++ " must have exactly the same hardware type and width")
 
 // PatternSet denotes a finite union of typed Pattern cubes. Its normalized
 // terms are always pairwise disjoint so they can expand into rtl.decode rows.
-class PatternSet(type, width, terms):
+class PatternSet(type :: DataType, width :: PosInt, terms :: List.of(Pattern)):
   constructor (type :: DataType, supplied_terms :: List):
     def width = type.packed_width()
     unless width is_a PosInt
@@ -182,31 +192,31 @@ class PatternSet(type, width, terms):
   method is_empty():
     terms.length() == 0
 
-  method matches(candidate):
+  method matches(candidate :: HardwareLiteral):
     def literal = require_literal(candidate, "candidate")
     unless pattern_type_equal(type, literal.literal_type()) && width == literal.literal_width()
     | error(~who: #'PatternSet,
             "candidate must have exactly the PatternSet hardware type and width")
     for any (term in terms): term.matches(literal)
 
-  method overlaps(other):
+  method overlaps(other :: Any):
     def right = as_pattern_set(other)
     require_same_pattern_set_type(this, right, "sets")
     for any (left_term in terms):
       for any (right_term in right.terms):
         left_term.overlaps(right_term)
 
-  method subsumes(other):
+  method subsumes(other :: Any):
     def right = as_pattern_set(other)
     require_same_pattern_set_type(this, right, "sets")
     right.subtract(this).is_empty()
 
-  method union(other):
+  method union(other :: Any):
     def right = as_pattern_set(other)
     require_same_pattern_set_type(this, right, "sets")
     PatternSet(type, terms ++ right.terms)
 
-  method intersection(other):
+  method intersection(other :: Any):
     def right = as_pattern_set(other)
     require_same_pattern_set_type(this, right, "sets")
     def mutable intersections = []
@@ -218,7 +228,7 @@ class PatternSet(type, width, terms):
         | #void
     PatternSet(type, intersections)
 
-  method subtract(other):
+  method subtract(other :: Any):
     def right = as_pattern_set(other)
     require_same_pattern_set_type(this, right, "sets")
     def mutable residual = []
@@ -231,7 +241,7 @@ class PatternSet(type, width, terms):
 
 // Infers a nonempty set's type from its first Pattern-like value. Empty sets
 // use the explicit PatternSet(type, []) constructor.
-fun pattern_set(first_pattern, ...):
+fun pattern_set(first_pattern :: Any, ...):
   def supplied = [first_pattern, ...]
   def patterns:
     if supplied.length() == 1 && supplied[0] is_a List
@@ -243,7 +253,7 @@ fun pattern_set(first_pattern, ...):
   def terms = patterns.map(as_pattern)
   PatternSet(terms[0].type, terms)
 
-fun as_pattern_set(value):
+fun as_pattern_set(value :: Any):
   cond
   | value is_a PatternSet: value
   | value is_a Pattern: PatternSet(value.type, [value])
@@ -260,10 +270,10 @@ fun as_pattern_set(value):
 class _PatternWildcard()
 def pattern_wildcard = _PatternWildcard()
 
-fun pattern_type_equal(left, right):
+fun pattern_type_equal(left :: DataType, right :: DataType):
   left.type_equal(right) && right.type_equal(left)
 
-fun exact_pattern(value):
+fun exact_pattern(value :: HardwareLiteral):
   def value_literal = require_literal(value, "pattern field")
   def width = value_literal.literal_width()
   Pattern(
@@ -274,7 +284,7 @@ fun exact_pattern(value):
 
 // Normalizes the two public forms accepted by typed decode consumers. Existing
 // cubes retain partial care; exact literal shadows receive full care.
-fun as_pattern(value):
+fun as_pattern(value :: Any):
   cond
   | value is_a Pattern:
       value
@@ -284,11 +294,13 @@ fun as_pattern(value):
       error(~who: #'as_pattern,
             "expected a HardwareLiteral or Pattern")
 
-fun wildcard_pattern(type):
+fun wildcard_pattern(type :: DataType):
   def zero = literal(type, 0)
   Pattern(~value: zero, ~care: zero)
 
-fun normalize_pattern_component(component, expected_type, role):
+fun normalize_pattern_component(component :: Any,
+                                expected_type :: DataType,
+                                role :: String):
   def cube:
     cond
     | component is_a _PatternWildcard:
@@ -310,11 +322,11 @@ fun build_record_pattern(type :: RecordType,
   for (field in fields):
     unless field is_a List && field.length() == 2 && field[0] is_a String
     | error(~who: #'pattern, "record pattern fields must be [name, value] pairs")
-    unless type.fields.find(fun (declared): declared.name == field[0])
+    unless type.fields.find(fun (declared :: Any): declared.name == field[0])
     | error(~who: #'pattern,
             "record pattern has no field named " ++ field[0])
     def matching_fields = fields.filter(
-      ~keep: fun (candidate): candidate[0] == field[0]
+      ~keep: fun (candidate :: List): candidate[0] == field[0]
     )
     unless matching_fields.length() == 1
     | error(~who: #'pattern,
@@ -322,7 +334,7 @@ fun build_record_pattern(type :: RecordType,
   def cubes = for List (declared in type.fields):
     block:
       def matching = fields.filter(
-        ~keep: fun (field): field is_a List && field.length() == 2 && field[0] == declared.name
+        ~keep: fun (field :: Any): field is_a List && field.length() == 2 && field[0] == declared.name
       )
       if matching.length() == 1
       | normalize_pattern_component(

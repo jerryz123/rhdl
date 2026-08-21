@@ -16,8 +16,40 @@ export:
   RecordField
   RecordType
   RecordLiteral
+  BundleFamily
+  BundleType
   bundle
   record
+
+class BundleIdentity()
+
+// Retains declaration provenance and concrete generator arguments without
+// changing RecordType's structural hardware equality.
+class BundleType(family_identity :: BundleIdentity = BundleIdentity(),
+                 specialization_arguments :: List = []):
+  extends RecordType
+
+class BundleFamily(name :: String,
+                   identity :: BundleIdentity,
+                   constructor :: Function):
+  implements Callable
+
+  override method call(& arguments :: List, ~& keywords :: Map):
+    constructor(& arguments, ~& keywords)
+
+  // Returns concrete arguments only for a specialization of this declaration.
+  method specialization_arguments(type :: DataType):
+    if type is_a BundleType && type.family_identity === identity
+    | type.specialization_arguments
+    | #false
+
+  // Requires a specialization of this declaration and returns its arguments.
+  method require_specialization(type :: DataType):
+    def arguments = specialization_arguments(type)
+    unless arguments
+    | error(~who: name,
+            "expected a " ++ name ++ " specialization")
+    arguments
 
 // A record literal recursively packs its first declared field into the most
 // significant part of the canonical representation, matching core casts.
@@ -59,14 +91,20 @@ fun build_record(type, fields) :~ HardwareFields:
 fun conditional_bundle_fields(condition :: Boolean, fields_thunk):
   if condition | fields_thunk() | []
 
-fun build_bundle_type(name, field_groups):
+fun build_bundle_type(name :: String,
+                      field_groups :: List,
+                      family_identity :: BundleIdentity,
+                      specialization_arguments :: List):
   def mutable fields = []
   for (group in field_groups):
     fields := fields ++ group
   unless fields.length() > 0
   | error(~who: #'bundle,
           "bundle specialization must contain at least one field")
-  RecordType(fields, name)
+  BundleType(fields,
+             name,
+             family_identity,
+             specialization_arguments)
 
 // Carries the declared type of every bundle field so projection preserves the
 // field type's custom authoring surface, including enum-owned methods.
@@ -132,6 +170,14 @@ annot.macro 'BundleTypeDescriptor':
 defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...): $clause; ...':
   def type_constructor = Syntax.make_id(
     name.to_source_string() ++ "_bundle_type",
+    name
+  )
+  def family_name = Syntax.make_id(
+    name.to_source_string() ++ "_bundle_family",
+    name
+  )
+  def identity_name = Syntax.make_id(
+    name.to_source_string() ++ "_bundle_identity",
     name
   )
   def bundle_name = name.to_source_string()
@@ -264,8 +310,15 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
   | block:
       def type_descriptor = Syntax.make_id(bundle_name ++ "_bundle_descriptor", name)
       '«
+         def $identity_name = BundleIdentity()
          fun $type_constructor($parameter, ...):
-           build_bundle_type($bundle_name, [$field_group, ...])
+           build_bundle_type($bundle_name,
+                             [$field_group, ...],
+                             $identity_name,
+                             [$parameter, ...])
+         def $family_name = BundleFamily($bundle_name,
+                                         $identity_name,
+                                         $type_constructor)
          def $type_descriptor :: HardwareFields.describes(
            BundleTypeDescriptor,
            BundleFields($type_constructor(), $static_field, ...) && HardwareMethods($method_entry, ...)
@@ -276,15 +329,22 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
                 $('$')field
                 $('...')'
          | '$name()': '$type_descriptor'
-         | '$name': '$type_constructor'
+         | '$name': '$family_name'
          annot.macro '$name()':
            'BundleFields($type_constructor(), $static_field, ...) && HardwareMethods($method_entry, ...)'
          $method_definition
          ...
        »'
   | '«
+       def $identity_name = BundleIdentity()
        fun $type_constructor($parameter, ...):
-         build_bundle_type($bundle_name, [$field_group, ...])
+         build_bundle_type($bundle_name,
+                           [$field_group, ...],
+                           $identity_name,
+                           [$parameter, ...])
+       def $family_name = BundleFamily($bundle_name,
+                                       $identity_name,
+                                       $type_constructor)
        expr.macro
        | '$name($('$')$parameter_binding, ...):
             $('$')field; $('...')':
@@ -299,7 +359,7 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
                 BundleTypeDescriptor,
                 BundleStaticFields($descriptor_static_field, ...)
               )'
-       | '$name': '$type_constructor'
+       | '$name': '$family_name'
        annot.macro '$name($('$')$parameter_binding, ...)':
          'HardwareFields.of($type_constructor($('$')$parameter_binding, ...))'
      »'

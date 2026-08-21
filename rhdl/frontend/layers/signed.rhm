@@ -9,7 +9,7 @@ import:
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_as_bits
-  "../support/hardware-literal.rhm".HardwareLiteral
+  "../support/hardware-literal.rhm".packed_literal
 
 export:
   SInt
@@ -50,29 +50,19 @@ annot.macro 'SInt($width)':
 fun sint_type(type):
   type is_a _SIntType
 
-// Stores the packed two's-complement image expected by generic literal
-// materialization while validating the signed source value at construction.
-class SIntLiteral(type :: _SIntType, value :: Int, name = #false):
-  implements HardwareLiteral
-
-  constructor (type :: _SIntType, value :: Int, name = #false):
-    def minimum = -(1 << (type.width - 1))
-    def maximum = (1 << (type.width - 1)) - 1
-    unless minimum <= value && value <= maximum
-    | error(~who: #'sint,
-            "literal value must fit the declared signed width")
-    unless name == #false || name is_a String
-    | error(~who: #'sint, "literal name must be a String or #false")
-    super(type, value, name)
-
-  override method literal_type(): type
-
-  override method packed_value():
-    if value < 0
-    | (1 << type.width) + value
-    | value
-
-  override method literal_name(): name
+// Validates the signed source value, then stores only its canonical packed
+// two's-complement image in the shared literal representation.
+fun SIntLiteral(type :: _SIntType, value :: Int, name = #false):
+  def minimum = -(1 << (type.width - 1))
+  def maximum = (1 << (type.width - 1)) - 1
+  unless minimum <= value && value <= maximum
+  | error(~who: #'sint,
+          "literal value must fit the declared signed width")
+  packed_literal(
+    type,
+    if value < 0 | (1 << type.width) + value | value,
+    name
+  )
 
 fun sint(value :: Int, width :: PosInt, name = #false):
   SIntLiteral(SInt(width), value, name)
