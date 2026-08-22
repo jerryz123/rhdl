@@ -15,6 +15,7 @@ import:
   "bundles.rhdl" open
   "csr.rhdl" open
   "multiply.rhdl" open
+  "divide.rhdl" open
   "register-file.rhdl" open
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
@@ -43,7 +44,7 @@ sync_circuit RicketCore(xlen :: XLen):
   fun instruction_value(instruction :: Bits(32)):
     if width == 32 | instruction | zext(instruction, width)
   fun deferred_writeback(source):
-    (source === WritebackSelect.Memory) ||| (source === WritebackSelect.Multiply)
+    is_one_of(source, WritebackSelect.Memory, WritebackSelect.Multiply, WritebackSelect.Divide)
   fun serializing_operation(system :: SystemControl(), fence :: FenceControl()) :~ Bool:
     system.is_system_operation() ||| fence.is_fence_operation()
   reg faulted(~init: Bool(#false))
@@ -60,6 +61,7 @@ sync_circuit RicketCore(xlen :: XLen):
   inst alu(ALU(xlen))
   inst branch_resolver(BranchResolver(width))
   inst multiplier(RicketMultiplier(xlen))
+  inst divider(RicketDivider(xlen))
   inst scoreboard(Scoreboard(register_count))
   inst csrs(RicketCsrFile(xlen))
 
@@ -168,8 +170,8 @@ sync_circuit RicketCore(xlen :: XLen):
     ]
   )
 
-  registers.read_address_1 <== rs1
-  registers.read_address_2 <== rs2
+  registers.read_address_1 <== id_ex.bits.rs1
+  registers.read_address_2 <== id_ex.bits.rs2
   fun ricket_register_busy(index):
     (
       scoreboard_busy(register_count, scoreboard.busy, index) ||| (
@@ -231,6 +233,7 @@ sync_circuit RicketCore(xlen :: XLen):
     memory_width: control.memory.width
     memory_unsigned: control.memory.unsigned
     multiply_control: control.multiply
+    divide_control: control.divide
     writeback_enable: control.writeback.enable
     writeback_source: control.writeback.source
     system: control.system
@@ -240,8 +243,6 @@ sync_circuit RicketCore(xlen :: XLen):
     rs1: rs1
     rs2: rs2
     rd: rd
-    rs1_value: registers.read_data_1
-    rs2_value: registers.read_data_2
 
   // Execute (EX) consumes the registered ID/EX token. Forwarding is live and
   // sampled together with the other effects when Execute transfers.
@@ -255,8 +256,8 @@ sync_circuit RicketCore(xlen :: XLen):
         register_value
       )
     )
-  def forwarded_rs1 = forwarded_register_value(id_ex.bits.rs1, id_ex.bits.rs1_value)
-  def forwarded_rs2 = forwarded_register_value(id_ex.bits.rs2, id_ex.bits.rs2_value)
+  def forwarded_rs1 = forwarded_register_value(id_ex.bits.rs1, registers.read_data_1)
+  def forwarded_rs2 = forwarded_register_value(id_ex.bits.rs2, registers.read_data_2)
 
   alu.left <== mux_lookup(
     id_ex.bits.operand_left,
@@ -321,14 +322,25 @@ sync_circuit RicketCore(xlen :: XLen):
     right: forwarded_rs2
     control: id_ex.bits.multiply_control
     rd: id_ex.bits.rd
+  def execute_is_divide = id_ex.bits.writeback_source === WritebackSelect.Divide
+  def execute_needs_divider = execute_is_divide & id_ex.bits.writeback_enable & or_reduce(id_ex.bits.rd)
+  def memory_has_divide = memory.valid & (memory.bits.writeback_source === WritebackSelect.Divide) & memory.bits.writeback_enable & or_reduce(memory.bits.rd)
+  def commit_has_divide = commit.valid & (commit.bits.writeback_source === WritebackSelect.Divide) & commit.bits.write_enable & or_reduce(commit.bits.rd)
+  def divider_available = divider.available & !memory_has_divide & !commit_has_divide
+  def execute_divide_issue = RicketDivideIssue(xlen):
+    dividend: forwarded_rs1
+    divisor: forwarded_rs2
+    control: id_ex.bits.divide_control
+    rd: id_ex.bits.rd
 
-  // Cache capacity and multiplier reservation are Execute's only sources of
+  // Cache capacity and long-latency reservations are Execute's only sources of
   // backpressure. Branch resolution and EX/MEM observe an instruction only
   // when both optional effects can advance.
   def issue_memory_request = execute_is_memory & !execute_nonredirect_fault
   def execute_cache_ready = !issue_memory_request ||| data_access.request.ready
   def execute_multiplier_ready = !execute_needs_multiplier ||| multiplier_available
-  def execute_ready = execute_cache_ready & execute_multiplier_ready
+  def execute_divider_ready = !execute_needs_divider ||| divider_available
+  def execute_ready = execute_cache_ready & execute_multiplier_ready & execute_divider_ready
   def execute_transfer = id_ex.valid & execute_ready
   id_ex.ready <== execute_ready
   branch_resolver.request.valid <== execute_transfer
@@ -339,7 +351,7 @@ sync_circuit RicketCore(xlen :: XLen):
 
   // A legal memory access starts its synchronous cache lookup at the same
   // edge that captures the instruction in EX/MEM.
-  data_access.request.valid <== id_ex.valid & execute_multiplier_ready & issue_memory_request
+  data_access.request.valid <== id_ex.valid & execute_multiplier_ready & execute_divider_ready & issue_memory_request
   data_access.request.bits <== RicketDataReq(xlen):
     address: alu.result
     write: id_ex.bits.memory_operation === MemoryOperation.Write
@@ -361,6 +373,7 @@ sync_circuit RicketCore(xlen :: XLen):
     rd: id_ex.bits.rd
     result: execute_result
     multiply_issue: execute_multiply_issue
+    divide_issue: execute_divide_issue
     system: id_ex.bits.system
     fence: id_ex.bits.fence
     csr_address: id_ex.bits.instruction[20..32]
@@ -384,6 +397,7 @@ sync_circuit RicketCore(xlen :: XLen):
     rd: memory.bits.rd
     value: memory.bits.result
     multiply_issue: memory.bits.multiply_issue
+    divide_issue: memory.bits.divide_issue
     system: memory.bits.system
     fence: memory.bits.fence
     csr_address: memory.bits.csr_address
@@ -399,7 +413,7 @@ sync_circuit RicketCore(xlen :: XLen):
     rd: memory.bits.rd
     value: memory.bits.result
 
-  // Writeback (WB) is the ordered commit point. Deferred loads and multiplies
+  // Writeback (WB) is the ordered commit point. Deferred loads and arithmetic
   // mark their destinations busy here; immediate and CSR results update the
   // register file and remain available to Execute through the bypass link.
   csrs.commit.valid <== commit.valid
@@ -444,11 +458,15 @@ sync_circuit RicketCore(xlen :: XLen):
     commit.bits.writeback_source === WritebackSelect.Multiply
   ) & commit.bits.write_enable & or_reduce(commit.bits.rd)
   multiplier.issue.bits <== commit.bits.multiply_issue
+  divider.issue.valid <== commit.valid & (
+    commit.bits.writeback_source === WritebackSelect.Divide
+  ) & commit.bits.write_enable & or_reduce(commit.bits.rd)
+  divider.issue.bits <== commit.bits.divide_issue
 
-  // Deferred loads and multiplies complete outside the ordered pipeline. The
+  // Deferred loads and arithmetic complete outside the ordered pipeline. The
   // fixed-priority arbiter lets nonbackpressured L1D responses win while the
-  // multiplier holds its irrevocable result.
-  inst deferred_completion_arbiter(Arbiter(RegisterFileWrite(xlen), 2))
+  // arithmetic units hold their irrevocable results.
+  inst deferred_completion_arbiter(Arbiter(RegisterFileWrite(xlen), 3))
   deferred_completion_arbiter.ingress[0].valid <== data_access.response.valid & or_reduce(
     data_access.response.bits.tag
   )
@@ -460,6 +478,11 @@ sync_circuit RicketCore(xlen :: XLen):
     address: multiplier.completion.bits.rd
     data: multiplier.completion.bits.value
   multiplier.completion.ready <== deferred_completion_arbiter.ingress[1].ready
+  deferred_completion_arbiter.ingress[2].valid <== divider.completion.valid
+  deferred_completion_arbiter.ingress[2].bits <== RegisterFileWrite(xlen):
+    address: divider.completion.bits.rd
+    data: divider.completion.bits.value
+  divider.completion.ready <== deferred_completion_arbiter.ingress[2].ready
   deferred_completion_arbiter.egress.ready <== Bool(#true)
 
   scoreboard_clear_link.left.valid <== deferred_completion_arbiter.egress.valid

@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks base, Zmmul, CSR, and system controls in the integrated decoder.
+// Checks base, M, CSR, and system controls in the integrated decoder.
 
 import:
   "../../../rhdl/core/main.rhm" open
@@ -9,6 +9,7 @@ import:
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/zmmul.rhm" open
+  "../../../riscv/isa/m.rhm" open
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
@@ -21,6 +22,7 @@ import:
   "../decode/branch-ctrl.rhdl" as branch_controls
   "../decode/mem-ctrl.rhdl" as memory_controls
   "../decode/writeback-ctrl.rhdl" as writeback_controls
+  "../decode/divide-ctrl.rhdl" as divide_controls
   "../decode/system-ctrl.rhdl" as system_controls
   "../decode/fence-ctrl.rhdl" as fence_controls
   "../decode/core-ctrl.rhdl" as controls
@@ -147,6 +149,9 @@ def load_writeback = writeback_controls.WritebackControl():
 def multiply_writeback = writeback_controls.WritebackControl():
   enable: bool.Bool(#true)
   source: writeback_controls.WritebackSelect.Multiply
+def divide_writeback = writeback_controls.WritebackControl():
+  enable: bool.Bool(#true)
+  source: writeback_controls.WritebackSelect.Divide
 def ecall_system = system_controls.SystemControl():
   csr: system_controls.CsrOperation.None
   immediate: bool.Bool(#false)
@@ -259,6 +264,7 @@ check:
   control_for(branch_controls.RV64IBranchCases, "BGEU").matches(bgeu_branch) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "LD").matches(load_writeback) ~is #true
   control_for_instruction(writeback_controls.RV64RicketWritebackCases, MUL).matches(multiply_writeback) ~is #true
+  control_for_instruction(writeback_controls.RV64RicketWritebackCases, DIV).matches(divide_writeback) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_a) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_b) ~is #true
   // Address generation requires addition; instructions with no ALU consumer
@@ -283,11 +289,15 @@ check:
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
   controls.RV32IControlDecode.table.packed_cases.length() ~is 40
-  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 66
-  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 53
+  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 74
+  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 57
   record_field(
     control_for_instruction(controls.RV64RicketControlCases, MUL).care,
     "multiply"
+  ).packed_value() != 0 ~is #true
+  record_field(
+    control_for_instruction(controls.RV64RicketControlCases, DIV).care,
+    "divide"
   ).packed_value() != 0 ~is #true
   alu_controls.RV32IAluCases.length() ~is 19
   module_def.outputs.map(fun (port): port.name) ~is [
@@ -299,7 +309,7 @@ check:
              controls.RicketControl()) ~is #true
   module_def.find_output("control").type.fields.map(
     fun (field): field.name
-  ) ~is ["alu", "operand", "branch", "memory", "multiply", "writeback", "system", "fence"]
+  ) ~is ["alu", "operand", "branch", "memory", "multiply", "divide", "writeback", "system", "fence"]
   verify_design(design) ~is #void
   type_equal(rv32_module.find_output("control").type,
              controls.RicketControl()) ~is #true

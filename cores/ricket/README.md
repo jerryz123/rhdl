@@ -3,7 +3,7 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with Zmmul, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with M, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -15,7 +15,7 @@ caches live here. Reusable execution components remain directly under
 ```text
 core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   |--> bundles + decode + register-file + csr
-  |--> ../{alu,branch-resolver,load-store,multiplier}.rhdl
+  |--> ../{alu,branch-resolver,load-store,multiplier,divider}.rhdl
   |--> icache/protocol.rhdl
   |--> dcache/protocol.rhdl
   `--> ../../rhdl/std/scoreboard.rhdl
@@ -75,30 +75,35 @@ start, and completed request update `fetch_pc` in that priority order, while
 paired valid equations make the L1I request and PC correlation queue advance
 together. The flow core deliberately keeps the same explicit sequential state;
 its abstraction boundary is the combinational interface topology around it.
-Decode holds a token behind deferred loads or multiplies in ID/EX and EX/MEM
+Decode holds a token behind deferred loads, multiplies, or divides in ID/EX and EX/MEM
 until they reach WB.
 Execute owns forwarding, branch resolution, target and access alignment
 checks, and synchronous-exception classification. In the explicit core, one
-readiness equation combines cache capacity and multiplier reservation; branch
+readiness equation combines cache capacity and arithmetic-unit reservations; branch
 resolution and EX/MEM observe the resulting transfer together. The flow core
-uses an atomic fork for the same four-way admission policy. A legal request
+uses an atomic fork for the same five-way admission policy. A legal request
 transfers at the same edge that places its instruction in EX/MEM. The L1D
 registers its SRAM lookup result so a hit arrives with the
 instruction in WB. WB is the ordered commit point: a load whose result has not
-returned or a multiply that starts there sets its destination in the standard
+returned or long-latency arithmetic that starts there sets its destination in the standard
 `Scoreboard` and releases the pipeline before its result returns.
-Multiplication is reserved in Execute but issued only when the instruction
-reaches WB, so redirects and older faults never need to kill multiplier state.
+ID/EX carries register indices rather than captured register data. Execute
+reads the register file live, so an instruction held behind cache or arithmetic
+capacity observes an older write even after that write's forwarding window has
+passed.
+Multiplication and division are reserved in Execute but issued only when the
+instruction reaches WB, so redirects and older faults never need to kill
+either arithmetic unit's state.
 Decode stalls on
 scoreboard RAW and WAW
 hazards, while independent younger instructions may complete first. A returning
-load or multiply clears its destination and writes through one element of the register
+load, multiply, or divide clears its destination and writes through one element of the register
 file's `Valid(RegisterFileWrite(xlen))` write array. Valid-flow filtering,
 mapping, and fanout connect both update streams to the scoreboard without
 making its continuously observable busy bitmap into a transaction stream. A
 fixed-priority completion arbiter gives loads priority because they cannot be
-backpressured; the multiplier's irrevocable response remains stable until the
-following cycle. The
+backpressured; multiplier and divider responses remain stable until selected.
+The
 other array element independently accepts the ordinary MEM/WB result through
 the same valid-only payload contract, so a load completion never backpressures
 either feed-forward stage. A WB-aligned hit sets and clears the entry without
@@ -112,7 +117,7 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32I+Zmmul+Zicsr+Zifencei or RV64I+Zmmul+Zicsr+Zifencei catalog at host
+The integrated structured decoder selects the RV32IM+Zicsr+Zifencei or RV64IM+Zicsr+Zifencei catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
@@ -121,7 +126,7 @@ whether decoded values have architectural meaning.
 [`csr.rhdl`](csr.rhdl) owns the named machine and supervisor CSRs, current
 privilege mode, synchronous trap entry, and `MRET`/`SRET`. CSR instructions
 atomically return the old value and update state at WB. System instructions
-serialize in Decode and wait for older deferred loads or multiplies before
+serialize in Decode and wait for older deferred loads, multiplies, or divides before
 entering the pipeline, so younger instructions cannot create side effects
 before the system operation commits. Execute-detected exceptions immediately
 squash younger work but carry the faulting instruction to WB, where the CSR

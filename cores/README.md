@@ -19,22 +19,25 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
 | [`load-store.rhdl`](load-store.rhdl) | XLEN scalar-access width, alignment, load extraction, and store lane generation |
 | [`multiplier.rhdl`](multiplier.rhdl) | Width-generic iterative signed and unsigned multiplication |
+| [`divider.rhdl`](divider.rhdl) | Width-generic iterative signed and unsigned division |
 | [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
 | [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
 | [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
+| [`tests/divider-test.rhm`](tests/divider-test.rhm) | Direct structural tests for the iterative divider |
 | [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, CSR/privilege state, caches, and tests |
 
 The dependency direction is one way:
 
 ```text
-cores/ricket/ --> cores/{alu,branch-resolver,load-store,multiplier}.rhdl
+cores/ricket/ --> cores/{alu,branch-resolver,load-store,multiplier,divider}.rhdl
        |-------> riscv/isa + riscv/rhdl
        `-------> rhdl/std
 
 cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhdl + rhdl/std
 cores/branch-resolver.rhdl --> #lang rhdl only
 cores/multiplier.rhdl --> #lang rhdl + rhdl/std
+cores/divider.rhdl --> #lang rhdl + rhdl/std
 ```
 
 Neither reusable components nor named cores may import the optional CIRCT
@@ -56,6 +59,19 @@ response is consumed.
 The component does not select architectural high, low, or word results and
 does not import an instruction catalog. Those policies remain in a named
 core's decode and writeback logic.
+
+## Iterative divider
+
+[`divider.rhdl`](divider.rhdl) defines a one-request-at-a-time restoring
+divider parameterized by operand width. A request selects signed or unsigned
+interpretation, and the irrevocable response returns both quotient and
+remainder after one quotient bit is resolved per cycle. Division by zero
+returns an all-one quotient and the original dividend; fixed-width signed
+overflow returns the wrapped minimum quotient and zero remainder.
+
+The component does not select quotient versus remainder or define
+architecture-specific word operations. Ricket owns those projections in its
+adapter and decode logic.
 
 ## Integer ALU
 

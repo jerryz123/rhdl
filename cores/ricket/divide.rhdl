@@ -1,0 +1,67 @@
+#lang rhdl
+// Adapts the reusable iterative divider to Ricket's deferred-writeback protocol.
+
+import:
+  "../divider.rhdl" open
+  "decode/divide-ctrl.rhdl" open
+  "../../riscv/isa/xlen.rhm" open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+bundle RicketDivideIssue(xlen :: XLen):
+  dividend: Bits(xlen_width(xlen))
+  divisor: Bits(xlen_width(xlen))
+  control: RicketDivideControl()
+  rd: Bits(5)
+
+bundle RicketDivideCompletion(xlen :: XLen):
+  rd: Bits(5)
+  value: Bits(xlen_width(xlen))
+
+sync_circuit RicketDivider(xlen :: XLen):
+  def width = xlen_width(xlen)
+
+  interface issue(Valid(RicketDivideIssue(xlen)), ~role: consumer)
+  interface completion(Irrevocable(RicketDivideCompletion(xlen)), ~role: producer)
+  output available: Bool
+
+  inst divider(IterativeDivider(width))
+  reg destination(Bits(5))
+  reg remainder_result(Bool)
+  reg word_result(Bool)
+
+  def signed_dividend = if xlen == XLen.X64 | as_bits(sext(cast(issue.bits.dividend[0..32], SInt(32)), 64)) | issue.bits.dividend
+  def unsigned_dividend = if xlen == XLen.X64 | zext(issue.bits.dividend[0..32], 64) | issue.bits.dividend
+  def signed_divisor = if xlen == XLen.X64 | as_bits(sext(cast(issue.bits.divisor[0..32], SInt(32)), 64)) | issue.bits.divisor
+  def unsigned_divisor = if xlen == XLen.X64 | zext(issue.bits.divisor[0..32], 64) | issue.bits.divisor
+  def word_dividend = mux(issue.bits.control.signed_mode, signed_dividend, unsigned_dividend)
+  def word_divisor = mux(issue.bits.control.signed_mode, signed_divisor, unsigned_divisor)
+  def normalized_dividend = if xlen == XLen.X64 | mux(issue.bits.control.word_result, word_dividend, issue.bits.dividend) | issue.bits.dividend
+  def normalized_divisor = if xlen == XLen.X64 | mux(issue.bits.control.word_result, word_divisor, issue.bits.divisor) | issue.bits.divisor
+
+  available <== divider.request.ready
+  divider.request.valid <== issue.valid
+  divider.request.bits <== DividerRequest(width):
+    dividend: normalized_dividend
+    divisor: normalized_divisor
+    signed_mode: issue.bits.control.signed_mode
+
+  assert(!issue.valid ||| available, "ricket_divider_issue_available")
+  when (issue.valid):
+    destination <== issue.bits.rd
+    remainder_result <== issue.bits.control.remainder
+    word_result <== issue.bits.control.word_result
+
+  def result :: Bits(width) = mux(remainder_result, divider.response.bits.remainder, divider.response.bits.quotient)
+  def word_result_value = if xlen == XLen.X64 | as_bits(sext(cast(result[0..32], SInt(32)), 64)) | result
+  def selected_result = if xlen == XLen.X64 | mux(word_result, word_result_value, result) | result
+
+  completion.valid <== divider.response.valid
+  completion.bits <== RicketDivideCompletion(xlen):
+    rd: destination
+    value: selected_result
+  divider.response.ready <== completion.ready
+
+export:
+  RicketDivideIssue
+  RicketDivideCompletion
+  RicketDivider

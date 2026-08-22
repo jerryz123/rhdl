@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:scoreboard|cores:ricket-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:scoreboard|cores:ricket-*)
       return 0
       ;;
     *)
@@ -614,10 +614,12 @@ direct_fixture_specs=(
   'chi-transfer-fragmenter|chi_transfer_fragmenter_tb'
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'
+  'iterative-divider|iterative_divider_tb'
   'ricket-register-file|ricket_register_file_tb'
   'ricket-csr|ricket_csr_tb'
   'ricket-core|ricket_core_tb'
   'ricket-multiply|ricket_multiply_tb'
+  'ricket-divide|ricket_divide_tb'
   'ricket-core-flow|ricket_core_tb'
   'ricket-core-rv32|'
   'ricket-icache|ricket_icache_tb'

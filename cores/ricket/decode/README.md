@@ -14,6 +14,7 @@ authored control columns.
 | [`branch-ctrl.rhdl`](branch-ctrl.rhdl) | Orthogonal branch-resolver controls and JALR target selection |
 | [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load/store operation and unsigned extension plus selection of the shared `MemoryWidth` |
 | [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Zmmul signedness and high/word result selection |
+| [`divide-ctrl.rhdl`](divide-ctrl.rhdl) | M signedness and quotient/remainder/word result selection |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`system-ctrl.rhdl`](system-ctrl.rhdl) | Zicsr operations, ECALL/EBREAK, and MRET/SRET |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
@@ -46,11 +47,13 @@ whose only job would be to construct and distribute one output pattern.
 
 `multiply-ctrl.rhdl` decodes the four RV32 Zmmul instructions and RV64 `MULW`
 into a nested reusable `MultiplierMode` plus orthogonal high-result and
-word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and the
+word-result controls. `divide-ctrl.rhdl` decodes the four RV32 divide/remainder
+instructions and four RV64 word variants into orthogonal signed, remainder,
+and word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and the
 initial privileged returns. `core-ctrl.rhdl` composes both columns with the
 base ISA columns into the same selected decode table.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one
-hardware decode operation. The focused decoder test checks all 52 RV32 and 65
+hardware decode operation. The focused decoder test checks all 57 RV32 and 74
 RV64 Ricket rows against their canonical instruction-pattern domains.

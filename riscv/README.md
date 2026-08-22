@@ -104,6 +104,12 @@ RV64 catalog adds `MULW`. Keeping the extension separate preserves the exact
 base-ISA catalogs and allows cores to adopt multiplication without claiming
 the divide and remainder operations from the full M extension.
 
+[`isa/m.rhm`](isa/m.rhm) builds complete RV32M and RV64M catalogs by retaining
+the Zmmul instruction objects and adding signed and unsigned divide and
+remainder operations. RV64M additionally contributes the four 32-bit word
+variants. Keeping both catalogs public lets a core select Zmmul alone or claim
+the complete M extension without duplicating multiply encodings.
+
 [`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
 read/modify/write encodings independently of any core's CSR implementation.
 [`isa/zifencei.rhm`](isa/zifencei.rhm) describes the XLEN-independent

@@ -38,7 +38,7 @@ fi
 component_domain_imports="$(
   search_sources '^[[:space:]]+"[^"]*(riscv/|ricket/)' \
     cores/alu.rhdl cores/branch-resolver.rhdl cores/load-store.rhdl \
-    cores/multiplier.rhdl \
+    cores/multiplier.rhdl cores/divider.rhdl \
     | grep -Ev 'riscv/isa/xlen\.rhm' \
     || true
 )"
@@ -54,6 +54,7 @@ component_control_imports="$(search_sources '^[[:space:]]+"(alu|operand|branch|m
   cores/ricket/decode/branch-ctrl.rhdl \
   cores/ricket/decode/mem-ctrl.rhdl \
   cores/ricket/decode/multiply-ctrl.rhdl \
+  cores/ricket/decode/divide-ctrl.rhdl \
   cores/ricket/decode/writeback-ctrl.rhdl \
   cores/ricket/decode/system-ctrl.rhdl || true)"
 if [[ -n "$component_control_imports" ]]; then
@@ -89,7 +90,8 @@ fi
 
 unexpected_root_sources="$(find cores -maxdepth 1 -type f \( -name '*.rhm' -o -name '*.rhdl' \) \
   ! -name 'alu.rhdl' ! -name 'branch-resolver.rhdl' \
-  ! -name 'load-store.rhdl' ! -name 'multiplier.rhdl' -print)"
+  ! -name 'load-store.rhdl' ! -name 'multiplier.rhdl' \
+  ! -name 'divider.rhdl' -print)"
 if [[ -n "$unexpected_root_sources" ]]; then
   echo "only reusable processor components may live directly under cores/" >&2
   echo "$unexpected_root_sources" >&2
