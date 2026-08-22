@@ -1,4 +1,4 @@
-// Clocks FesvrTop until FESVR finishes loading and hands off the ELF entry.
+// Clocks the FESVR-backed SimpleSoC through load, handoff, and host exit.
 module TestDriver;
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -6,7 +6,7 @@ module TestDriver;
   wire [31:0] entry;
   wire [31:0] exit;
 
-  FesvrTop dut (
+  SimpleSoC dut (
     .clock(clock),
     .reset(reset),
     .loaded(loaded),
@@ -29,11 +29,11 @@ module TestDriver;
           $fatal(1, "FESVR handed off unexpected entry point %08x", entry);
         if (exit != 1)
           $fatal(1, "FESVR reported target failure: exit word %0d", exit);
-        $display("FESVR CHI read/write smoke passed");
+        $display("SimpleSoC coherent CHI smoke passed");
         $finish;
       end
     end
 
-    $fatal(1, "FesvrTop timed out");
+    $fatal(1, "SimpleSoC timed out");
   end
 endmodule

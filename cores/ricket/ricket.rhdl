@@ -1,5 +1,5 @@
 #lang rhdl
-// Composes Ricket's core and ready-valid L1 caches with external credited CHI links.
+// Composes Ricket's core and L1 caches behind ready-valid CHI channel bundles.
 
 import:
   "core-flow.rhdl" open
@@ -18,27 +18,18 @@ sync_circuit Ricket(xlen :: XLen,
   def checked = checked_ricket_chi_params(params)
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
-  interface imem(CHIRNLink(checked.instruction_link, checked.instruction_node), ~role: node)
-  interface dmem(CHIRNLink(checked.data_link, checked.data_node), ~role: node)
+  interface imem(CHIRNChannels(checked.flit), ~role: node)
+  interface dmem(CHIRNChannels(checked.flit), ~role: node)
   output fault: Bool
 
   inst core(RicketCore(xlen))
   inst l1i(RicketL1ICache(xlen, cache_sets, ~chi: checked))
   inst l1d(RicketL1DCache(xlen, cache_sets, ~chi: checked))
-  inst instruction_link_adapter(CHIRNFlowAdapter(checked.instruction_link, checked.instruction_node))
-  inst data_link_adapter(CHIRNFlowAdapter(checked.data_link, checked.data_node, ~transaction_checks: #false))
-
   start |> core.start
   core.instruction_access |> l1i.core
   core.data_access |> l1d.core
-  l1i.chi <=> instruction_link_adapter.decoupled
-  l1d.chi <=> data_link_adapter.decoupled
-  imem <=> instruction_link_adapter.port
-  dmem <=> data_link_adapter.port
-  instruction_link_adapter.transmit_enable <== Bool(#true)
-  instruction_link_adapter.receive_enable <== Bool(#true)
-  data_link_adapter.transmit_enable <== Bool(#true)
-  data_link_adapter.receive_enable <== Bool(#true)
+  l1i.chi <=> imem
+  l1d.chi <=> dmem
   fault <== core.fault
 
 export:

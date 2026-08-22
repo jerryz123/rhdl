@@ -34,7 +34,8 @@ protocols. Cache modules own line lookup, array arbitration, transaction
 scheduling, CHI channel routing, byte masks, and load/store lane generation.
 The shared transaction engines own protocol sequencing, retry state, response
 stability, and DVM pairing. The wrapper composes the core and caches into two
-native RN-F links.
+ready-valid RN-F channel bundles; physical credited links belong to system
+integration when the channels actually cross a CHI link boundary.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
@@ -182,7 +183,7 @@ of being flattened into the same graph.
 top-level generator option. The RN-F boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
 The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer,
-separate instruction and data `CHIRNLink` node ports, and a sticky `fault`
+separate instruction and data `CHIRNChannels` node ports, and a sticky `fault`
 output for a rejected misaligned external start address. Architectural
 instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
 one-request-per-cycle throughput. In both caches, a one-stage lookup flow

@@ -1,0 +1,74 @@
+#lang rhombus
+// Checks the complete FESVR-backed SimpleSoC and its four validated NoC planes.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../chi/main.rhdl" as chi
+  "../../socs/simple-soc.rhdl" as soc
+
+def soc_design = soc.design
+def requester_top = soc_design.modules.find(
+  fun (module_def): module_def.name == "FesvrRequester"
+)
+def soc_top = soc_design.modules.find(
+  fun (module_def): module_def.name == "SimpleSoC"
+)
+def module_names = soc_design.modules.map(fun (module_def): module_def.name)
+def snp_adapters :: chi.CHIChannelAdapterPlan = soc.simple_soc_adapter_plans.snp
+
+check:
+  requester_top.name ~is "FesvrRequester"
+  requester_top.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "port_in", "start_in"
+  ]
+  requester_top.outputs.map(fun (port): port.name) ~is [
+    "port_out", "start_out", "exit"
+  ]
+  soc_design.dpi_imports.map(fun (dpi): dpi.name) ~is ["rhdl_htif_tick"]
+  module_names.contains("Ricket") ~is #true
+  module_names.contains("CHIHNF") ~is #true
+  module_names.contains("CHITransferFragmenter") ~is #true
+  module_names.contains("CHIRam") ~is #true
+  module_names.contains("SimpleRouter") ~is #true
+  module_names.contains("CHIReqNoCInjector") ~is #true
+  module_names.contains("CHIReqNoCEjector") ~is #true
+  module_names.contains("CHIRspNoCInjector") ~is #true
+  module_names.contains("CHIRspNoCEjector") ~is #true
+  module_names.contains("CHISnpNoCInjector") ~is #true
+  module_names.contains("CHISnpNoCEjector") ~is #true
+  module_names.contains("CHIDatNoCInjector") ~is #true
+  module_names.contains("CHIDatNoCEjector") ~is #true
+  soc.simple_soc_topology.injections ~is []
+  soc.simple_soc_topology.ejections ~is []
+  soc.simple_soc_compilations.req.network.validated_routing.dependency_graph.vertices ~is []
+  soc.simple_soc_compilations.rsp.network.validated_routing.dependency_graph.vertices ~is []
+  soc.simple_soc_snp_compilation.network.validated_routing.dependency_graph.vertices ~is []
+  soc.simple_soc_compilations.dat.network.validated_routing.dependency_graph.vertices ~is []
+  soc.simple_soc_compilations.req.routes.map(
+    fun (route):
+      [route.source.node_id,
+       route.destination.node_id,
+       route.route_key]
+  ) ~is [[1, 5, 0], [3, 5, 1], [2, 5, 2]]
+  soc.simple_soc_req_router_config.input_count ~is 3
+  soc.simple_soc_req_router_config.target_count ~is 1
+  soc.simple_soc_rsp_router_config.input_count ~is 4
+  soc.simple_soc_rsp_router_config.target_count ~is 4
+  soc.simple_soc_snp_router_config.input_count ~is 1
+  soc.simple_soc_snp_router_config.target_count ~is 2
+  soc.simple_soc_dat_router_config.input_count ~is 4
+  soc.simple_soc_dat_router_config.target_count ~is 4
+  soc.simple_soc_adapter_plans.req.injections.length() ~is 3
+  soc.simple_soc_adapter_plans.rsp.injections.length() ~is 4
+  snp_adapters.injections.length() ~is 1
+  snp_adapters.ejections.length() ~is 2
+  soc.simple_soc_adapter_plans.dat.injections.length() ~is 4
+  soc.simple_soc_fesvr_site.req.terminal.describe() ~is "requesters/fesvr/req"
+  soc.simple_soc_instruction_site.snp.terminal.describe() ~is "requesters/ricket-l1i/snp"
+  soc.simple_soc_data_site.snp.terminal.describe() ~is "requesters/ricket-l1d/snp"
+  soc.simple_soc_home_requester_site.req.terminal.describe() ~is "home/requesters/req"
+  soc_top.name ~is "SimpleSoC"
+  soc_top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
+  soc_top.outputs.map(fun (port): port.name) ~is ["loaded", "entry", "exit"]
+
+  verify_design(soc_design) ~is #void

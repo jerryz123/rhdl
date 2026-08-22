@@ -8,7 +8,7 @@ import:
   lib("rhdl/std/flow/ready-valid-support.rhdl") open
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
-  lib("chi/decoupled.rhdl").CHISnoopDispatch
+  lib("chi/channels.rhdl").CHISnoopDispatch
   lib("chi/noc-authoring.rhm") open
   lib("noc/authoring/main.rhm") open
   lib("noc/rtl/router.rhdl").RoutedBeat
@@ -20,6 +20,9 @@ export:
   CHIChannelAdapterPlans
   compile_chi_channel_adapter_plan
   compile_chi_channel_adapter_plans
+  connect_chi_rni_node
+  connect_chi_rnf_node
+  connect_chi_hn_requesters
   connect_chi_rni
   chi_req_noc_inject
   chi_req_noc_eject
@@ -151,8 +154,105 @@ fun compile_chi_channel_adapter_plans(
     compile_chi_channel_adapter_plan(compilations.dat, p)
   )
 
-// Attaches one RN-I endpoint to its ICN peer through independently instantiated
-// REQ, RSP, and DAT routers. Placement and routing remain in the supplied plans.
+// Attaches one RN-I endpoint to the requester-side NoC planes. The Home's
+// aggregate requester port is connected independently and exactly once.
+fun connect_chi_rni_node(node_port :: Endpoint,
+                         ~node: node_site :: CHIRNSite,
+                         ~req_ingress: req_ingress :: Array,
+                         ~rsp_ingress: rsp_ingress :: Array,
+                         ~rsp_targets: rsp_targets :: Array,
+                         ~dat_ingress: dat_ingress :: Array,
+                         ~dat_targets: dat_targets :: Array,
+                         ~adapters: adapters :: CHIChannelAdapterPlans):
+  def node_req :: Endpoint = node_port.field("req")
+  def node_rsp :: Endpoint = node_port.field("rsp")
+  def node_dat :: Endpoint = node_port.field("dat")
+
+  def node_req_config = adapters.req.injection(node_site.req.terminal)
+  (node_req |> chi_req_noc_inject(node_req_config)) <=> req_ingress[node_req_config.input_index]
+
+  def node_rsp_requester_config = adapters.rsp.injection(node_site.rsp_requester.terminal)
+  def node_rsp_response_config = adapters.rsp.ejection(node_site.rsp_response.terminal)
+  def node_rsp_response_target :: Endpoint = rsp_targets[node_rsp_response_config.target_index]
+  (node_rsp.field("requester") |> chi_rsp_noc_inject(node_rsp_requester_config)) <=> rsp_ingress[node_rsp_requester_config.input_index]
+  (node_rsp_response_target.field("egress") |> queue(1) |> chi_rsp_noc_eject(node_rsp_response_config)) <=> node_rsp.field("response")
+  node_rsp_response_target.field("available") <== node_rsp_response_target.field("egress").field("ready")
+
+  def node_dat_request_config = adapters.dat.injection(node_site.dat_request.terminal)
+  def node_dat_response_config = adapters.dat.ejection(node_site.dat_response.terminal)
+  def node_dat_response_target :: Endpoint = dat_targets[node_dat_response_config.target_index]
+  (node_dat.field("request") |> chi_dat_noc_inject(node_dat_request_config)) <=> dat_ingress[node_dat_request_config.input_index]
+  (node_dat_response_target.field("egress") |> queue(1) |> chi_dat_noc_eject(node_dat_response_config)) <=> node_dat.field("response")
+  node_dat_response_target.field("available") <== node_dat_response_target.field("egress").field("ready")
+
+// Attaches one RN-F endpoint, including its independently routed SNP input.
+fun connect_chi_rnf_node(node_port :: Endpoint,
+                         ~node: node_site :: CHIRNSite,
+                         ~req_ingress: req_ingress :: Array,
+                         ~rsp_ingress: rsp_ingress :: Array,
+                         ~rsp_targets: rsp_targets :: Array,
+                         ~snp_targets: snp_targets :: Array,
+                         ~dat_ingress: dat_ingress :: Array,
+                         ~dat_targets: dat_targets :: Array,
+                         ~adapters: adapters :: CHIChannelAdapterPlans):
+  def node_req_config = adapters.req.injection(node_site.req.terminal)
+  (node_port.field("requests") |> chi_req_noc_inject(node_req_config)) <=> req_ingress[node_req_config.input_index]
+
+  def node_rsp_requester_config = adapters.rsp.injection(node_site.rsp_requester.terminal)
+  def node_rsp_response_config = adapters.rsp.ejection(node_site.rsp_response.terminal)
+  def node_rsp_response_target :: Endpoint = rsp_targets[node_rsp_response_config.target_index]
+  (node_port.field("requester_responses") |> chi_rsp_noc_inject(node_rsp_requester_config)) <=> rsp_ingress[node_rsp_requester_config.input_index]
+  (node_rsp_response_target.field("egress") |> queue(1) |> chi_rsp_noc_eject(node_rsp_response_config)) <=> node_port.field("responses")
+  node_rsp_response_target.field("available") <== node_rsp_response_target.field("egress").field("ready")
+
+  def snp_adapters :: CHIChannelAdapterPlan = adapters.snp
+  def node_snp_config = snp_adapters.ejection(node_site.snp.terminal)
+  def node_snp_target :: Endpoint = snp_targets[node_snp_config.target_index]
+  (node_snp_target.field("egress") |> queue(1) |> chi_snp_noc_eject(node_snp_config)) <=> node_port.field("snoops")
+  node_snp_target.field("available") <== node_snp_target.field("egress").field("ready")
+
+  def node_dat_request_config = adapters.dat.injection(node_site.dat_request.terminal)
+  def node_dat_response_config = adapters.dat.ejection(node_site.dat_response.terminal)
+  def node_dat_response_target :: Endpoint = dat_targets[node_dat_response_config.target_index]
+  (node_port.field("request_data") |> chi_dat_noc_inject(node_dat_request_config)) <=> dat_ingress[node_dat_request_config.input_index]
+  (node_dat_response_target.field("egress") |> queue(1) |> chi_dat_noc_eject(node_dat_response_config)) <=> node_port.field("response_data")
+  node_dat_response_target.field("available") <== node_dat_response_target.field("egress").field("ready")
+
+// Attaches the HN's aggregate requester side to all four requester-side NoC
+// planes. This shared endpoint must not be repeated once per requester.
+fun connect_chi_hn_requesters(home_port :: Endpoint,
+                              ~home: home_site :: CHIRNICNSite,
+                              ~req_targets: req_targets :: Array,
+                              ~rsp_ingress: rsp_ingress :: Array,
+                              ~rsp_targets: rsp_targets :: Array,
+                              ~snp_ingress: snp_ingress :: Array,
+                              ~dat_ingress: dat_ingress :: Array,
+                              ~dat_targets: dat_targets :: Array,
+                              ~adapters: adapters :: CHIChannelAdapterPlans):
+  def home_req_config = adapters.req.ejection(home_site.req.terminal)
+  def home_req_target :: Endpoint = req_targets[home_req_config.target_index]
+  (home_req_target.field("egress") |> queue(1) |> chi_req_noc_eject(home_req_config)) <=> home_port.field("requests")
+  home_req_target.field("available") <== home_req_target.field("egress").field("ready")
+
+  def home_rsp_requester_config = adapters.rsp.ejection(home_site.rsp_requester.terminal)
+  def home_rsp_response_config = adapters.rsp.injection(home_site.rsp_response.terminal)
+  def home_rsp_requester_target :: Endpoint = rsp_targets[home_rsp_requester_config.target_index]
+  (home_rsp_requester_target.field("egress") |> queue(1) |> chi_rsp_noc_eject(home_rsp_requester_config)) <=> home_port.field("requester_responses")
+  home_rsp_requester_target.field("available") <== home_rsp_requester_target.field("egress").field("ready")
+  (home_port.field("responses") |> chi_rsp_noc_inject(home_rsp_response_config)) <=> rsp_ingress[home_rsp_response_config.input_index]
+
+  def snp_adapters :: CHIChannelAdapterPlan = adapters.snp
+  def home_snp_config = snp_adapters.injection(home_site.snp.terminal)
+  (home_port.field("snoops") |> chi_snp_noc_inject(home_snp_config)) <=> snp_ingress[home_snp_config.input_index]
+
+  def home_dat_request_config = adapters.dat.ejection(home_site.dat_request.terminal)
+  def home_dat_response_config = adapters.dat.injection(home_site.dat_response.terminal)
+  def home_dat_request_target :: Endpoint = dat_targets[home_dat_request_config.target_index]
+  (home_dat_request_target.field("egress") |> queue(1) |> chi_dat_noc_eject(home_dat_request_config)) <=> home_port.field("request_data")
+  home_dat_request_target.field("available") <== home_dat_request_target.field("egress").field("ready")
+  (home_port.field("response_data") |> chi_dat_noc_inject(home_dat_response_config)) <=> dat_ingress[home_dat_response_config.input_index]
+
+// Convenience composition for the point-to-point RN-I/HN-I case.
 fun connect_chi_rni(node_port :: Endpoint,
                     icn_port :: Endpoint,
                     ~node: node_site :: CHIRNSite,
@@ -164,42 +264,30 @@ fun connect_chi_rni(node_port :: Endpoint,
                     ~dat_ingress: dat_ingress :: Array,
                     ~dat_targets: dat_targets :: Array,
                     ~adapters: adapters :: CHIChannelAdapterPlans):
-  def node_req :: Endpoint = node_port.field("req")
+  connect_chi_rni_node(node_port,
+                       ~node: node_site,
+                       ~req_ingress: req_ingress,
+                       ~rsp_ingress: rsp_ingress,
+                       ~rsp_targets: rsp_targets,
+                       ~dat_ingress: dat_ingress,
+                       ~dat_targets: dat_targets,
+                       ~adapters: adapters)
   def icn_req :: Endpoint = icn_port.field("req")
-  def node_rsp :: Endpoint = node_port.field("rsp")
   def icn_rsp :: Endpoint = icn_port.field("rsp")
-  def node_dat :: Endpoint = node_port.field("dat")
   def icn_dat :: Endpoint = icn_port.field("dat")
-
-  def node_req_config = adapters.req.injection(node_site.req.terminal)
   def icn_req_config = adapters.req.ejection(icn_site.req.terminal)
   def req_target :: Endpoint = req_targets[icn_req_config.target_index]
-  (node_req |> chi_req_noc_inject(node_req_config)) <=> req_ingress[node_req_config.input_index]
   (req_target.field("egress") |> queue(1) |> chi_req_noc_eject(icn_req_config)) <=> icn_req
   req_target.field("available") <== req_target.field("egress").field("ready")
-
-  def node_rsp_requester_config = adapters.rsp.injection(node_site.rsp_requester.terminal)
-  def node_rsp_response_config = adapters.rsp.ejection(node_site.rsp_response.terminal)
   def icn_rsp_requester_config = adapters.rsp.ejection(icn_site.rsp_requester.terminal)
   def icn_rsp_response_config = adapters.rsp.injection(icn_site.rsp_response.terminal)
-  def node_rsp_response_target :: Endpoint = rsp_targets[node_rsp_response_config.target_index]
   def icn_rsp_requester_target :: Endpoint = rsp_targets[icn_rsp_requester_config.target_index]
-  (node_rsp.field("requester") |> chi_rsp_noc_inject(node_rsp_requester_config)) <=> rsp_ingress[node_rsp_requester_config.input_index]
-  (node_rsp_response_target.field("egress") |> queue(1) |> chi_rsp_noc_eject(node_rsp_response_config)) <=> node_rsp.field("response")
-  node_rsp_response_target.field("available") <== node_rsp_response_target.field("egress").field("ready")
   (icn_rsp_requester_target.field("egress") |> queue(1) |> chi_rsp_noc_eject(icn_rsp_requester_config)) <=> icn_rsp.field("requester")
   icn_rsp_requester_target.field("available") <== icn_rsp_requester_target.field("egress").field("ready")
   (icn_rsp.field("response") |> chi_rsp_noc_inject(icn_rsp_response_config)) <=> rsp_ingress[icn_rsp_response_config.input_index]
-
-  def node_dat_request_config = adapters.dat.injection(node_site.dat_request.terminal)
-  def node_dat_response_config = adapters.dat.ejection(node_site.dat_response.terminal)
   def icn_dat_request_config = adapters.dat.ejection(icn_site.dat_request.terminal)
   def icn_dat_response_config = adapters.dat.injection(icn_site.dat_response.terminal)
-  def node_dat_response_target :: Endpoint = dat_targets[node_dat_response_config.target_index]
   def icn_dat_request_target :: Endpoint = dat_targets[icn_dat_request_config.target_index]
-  (node_dat.field("request") |> chi_dat_noc_inject(node_dat_request_config)) <=> dat_ingress[node_dat_request_config.input_index]
-  (node_dat_response_target.field("egress") |> queue(1) |> chi_dat_noc_eject(node_dat_response_config)) <=> node_dat.field("response")
-  node_dat_response_target.field("available") <== node_dat_response_target.field("egress").field("ready")
   (icn_dat_request_target.field("egress") |> queue(1) |> chi_dat_noc_eject(icn_dat_request_config)) <=> icn_dat.field("request")
   icn_dat_request_target.field("available") <== icn_dat_request_target.field("egress").field("ready")
   (icn_dat.field("response") |> chi_dat_noc_inject(icn_dat_response_config)) <=> dat_ingress[icn_dat_response_config.input_index]

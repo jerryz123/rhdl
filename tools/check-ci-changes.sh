@@ -108,8 +108,12 @@ check_field tools/run-racket-tests.sh host true
 check_field tools/run-racket-tests.sh circt false
 check_field tools/run-racket-tests.sh examples true
 check_field tests/backend/verilog/adder_tb.sv circt true
-check_field sim/fesvr/direct_mem_htif.cc fesvr true
-check_field tests/fesvr/fesvr-rtl-test.rhm fesvr true
+check_field fesvr/direct_mem_htif.cc fesvr true
+check_field socs/tests/simple-soc-test.rhm fesvr true
+check_field socs/simple-soc.rhdl host true
+check_field socs/simple-soc.rhdl circt true
+check_field socs/simple-soc.rhdl fesvr true
+check_field support/TestDriver.sv fesvr true
 check_field tools/emit-fesvr-stub-soc.rhm fesvr true
 check_field unrecognized/new-tool.py host true
 check_field unrecognized/new-tool.py circt true

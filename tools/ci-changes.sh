@@ -310,7 +310,15 @@ classify_path() {
       mark_example_cores
       mark_example_ricket
       ;;
-    sim/fesvr/*|tests/fesvr/*|tools/emit-fesvr-stub-soc.rhm|tools/install-fesvr.sh)
+    fesvr/*|tools/emit-fesvr-stub-soc.rhm|tools/install-fesvr.sh)
+      fesvr=true
+      ;;
+    socs/*|tools/emit-simple-soc.rhm)
+      host_cores=true
+      circt_cores=true
+      fesvr=true
+      ;;
+    support/*)
       fesvr=true
       ;;
     tools/install-circt.sh)

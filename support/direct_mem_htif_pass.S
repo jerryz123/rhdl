@@ -1,4 +1,4 @@
-// Defines an inert RV32 payload whose preloaded mailbox completes the host-only smoke.
+// Defines an inert RV32 payload whose preloaded mailbox completes transport smokes.
 .section .text
 .globl _start
 _start:

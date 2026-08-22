@@ -1,0 +1,210 @@
+#lang rhdl
+// Composes FESVR, Ricket, a coherent four-plane CHI NoC, HN-F, and backing RAM.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").fire
+  lib("rhdl/std/flow.rhdl").map_flow
+  lib("chi/main.rhdl") open
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/rtl/router.rhdl") open
+  lib("cores/ricket/ricket.rhdl").Ricket
+  lib("cores/ricket/chi.rhdl") open
+  lib("riscv/isa/xlen.rhm").XLen
+  lib("fesvr/direct-memory-htif.rhdl").FesvrRequester
+
+def simple_soc_flit = CHIFlitParams()
+def simple_soc_home = CHIHomeParams("simple-home", 5, CHINodeKind.HNF, ~max_outstanding: 1)
+def simple_soc_fesvr_node = CHINodeParams(
+  "fesvr",
+  1,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 1
+)
+def simple_soc_ricket_params = RicketCHIParams(simple_soc_flit,
+                                               simple_soc_home.node_id,
+                                               2,
+                                               3)
+
+fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
+  CHIICNPortParams(
+    node.name ++ "-icn",
+    node.node_id,
+    node.kind,
+    ~emits: node.supports,
+    ~supports: node.emits,
+    ~max_outstanding: node.max_outstanding
+  )
+
+def simple_soc_fesvr_port = requester_icn_endpoint(simple_soc_fesvr_node)
+def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_ricket_params.instruction_node)
+def simple_soc_data_port = requester_icn_endpoint(simple_soc_ricket_params.data_node)
+def simple_soc_ram_params = CHIRamParams(
+  "simple-ram",
+  9,
+  simple_soc_flit,
+  0x2000,
+  ~base_address: 0x80000000,
+  ~kind: CHINodeKind.SNF,
+  ~max_outstanding: 2
+)
+def simple_soc_fragmenter_params = CHITransferFragmenterParams(
+  simple_soc_flit,
+  simple_soc_ram_params.service,
+  ~max_read_bytes: 64
+)
+def simple_soc_home_params = CHIHNFParams(
+  simple_soc_home,
+  simple_soc_flit,
+  [simple_soc_fesvr_port, simple_soc_instruction_port, simple_soc_data_port],
+  simple_soc_ram_params.icn_port,
+  simple_soc_fragmenter_params.upstream_service
+)
+
+// The logical RN-I/RN-F relationships compile independently onto the four
+// transport planes while sharing one physical single-router topology.
+def simple_soc_topology = topology:
+  node xbar
+def simple_soc_router = simple_soc_topology.node("xbar")
+def simple_soc_fesvr_site = CHIRNSite(NamePath(["requesters", "fesvr"]),
+                                      simple_soc_fesvr_node.node_id,
+                                      simple_soc_router)
+def simple_soc_instruction_site = CHIRNSite(NamePath(["requesters", "ricket-l1i"]),
+                                            simple_soc_ricket_params.instruction_node_id,
+                                            simple_soc_router)
+def simple_soc_data_site = CHIRNSite(NamePath(["requesters", "ricket-l1d"]),
+                                     simple_soc_ricket_params.data_node_id,
+                                     simple_soc_router)
+def simple_soc_home_requester_site = CHIRNICNSite(NamePath(["home", "requesters"]),
+                                                  simple_soc_home.node_id,
+                                                  simple_soc_router)
+def simple_soc_connections = [
+  CHIRNIConnection(simple_soc_fesvr_site, simple_soc_home_requester_site),
+  CHIRNFConnection(simple_soc_instruction_site, simple_soc_home_requester_site),
+  CHIRNFConnection(simple_soc_data_site, simple_soc_home_requester_site)
+]
+def simple_soc_compilations = compile_chi_connections(
+  simple_soc_topology,
+  simple_soc_connections,
+  uniform_chi_routing(deny_all)
+)
+def simple_soc_adapter_plans = compile_chi_channel_adapter_plans(simple_soc_compilations,
+                                                                 simple_soc_flit)
+def simple_soc_snp_compilation :: CHIChannelCompilation = simple_soc_compilations.snp
+def simple_soc_req_router_config :: SimpleRouterConfig = compile_simple_router(
+  simple_soc_compilations.req.network.router_plan(simple_soc_router)
+)
+def simple_soc_rsp_router_config :: SimpleRouterConfig = compile_simple_router(
+  simple_soc_compilations.rsp.network.router_plan(simple_soc_router)
+)
+def simple_soc_snp_router_config :: SimpleRouterConfig = compile_simple_router(
+  simple_soc_snp_compilation.network.router_plan(simple_soc_router)
+)
+def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
+  simple_soc_compilations.dat.network.router_plan(simple_soc_router)
+)
+
+sync_circuit SimpleSoC():
+  output loaded: Bool
+  output entry: Bits(32)
+  output exit: Bits(32)
+
+  inst requester(FesvrRequester(simple_soc_flit,
+                                simple_soc_fesvr_node,
+                                simple_soc_home.node_id))
+  inst ricket(Ricket(XLen.X64, ~chi: simple_soc_ricket_params))
+  inst home(CHIHNF(simple_soc_home_params))
+  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_params))
+  inst ram(CHIRam(simple_soc_ram_params))
+  inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
+  inst rsp_router(SimpleRouter(CHIRspFlit(simple_soc_flit), simple_soc_rsp_router_config))
+  inst snp_router(SimpleRouter(CHISnpFlit(simple_soc_flit), simple_soc_snp_router_config))
+  inst dat_router(SimpleRouter(CHIDatFlit(simple_soc_flit), simple_soc_dat_router_config))
+
+  connect_chi_rni_node(requester.port,
+                       ~node: simple_soc_fesvr_site,
+                       ~req_ingress: req_router.ingress,
+                       ~rsp_ingress: rsp_router.ingress,
+                       ~rsp_targets: rsp_router.target,
+                       ~dat_ingress: dat_router.ingress,
+                       ~dat_targets: dat_router.target,
+                       ~adapters: simple_soc_adapter_plans)
+  connect_chi_rnf_node(ricket.imem,
+                       ~node: simple_soc_instruction_site,
+                       ~req_ingress: req_router.ingress,
+                       ~rsp_ingress: rsp_router.ingress,
+                       ~rsp_targets: rsp_router.target,
+                       ~snp_targets: snp_router.target,
+                       ~dat_ingress: dat_router.ingress,
+                       ~dat_targets: dat_router.target,
+                       ~adapters: simple_soc_adapter_plans)
+  connect_chi_rnf_node(ricket.dmem,
+                       ~node: simple_soc_data_site,
+                       ~req_ingress: req_router.ingress,
+                       ~rsp_ingress: rsp_router.ingress,
+                       ~rsp_targets: rsp_router.target,
+                       ~snp_targets: snp_router.target,
+                       ~dat_ingress: dat_router.ingress,
+                       ~dat_targets: dat_router.target,
+                       ~adapters: simple_soc_adapter_plans)
+  connect_chi_hn_requesters(home.port.requester,
+                            ~home: simple_soc_home_requester_site,
+                            ~req_targets: req_router.target,
+                            ~rsp_ingress: rsp_router.ingress,
+                            ~rsp_targets: rsp_router.target,
+                            ~snp_ingress: snp_router.ingress,
+                            ~dat_ingress: dat_router.ingress,
+                            ~dat_targets: dat_router.target,
+                            ~adapters: simple_soc_adapter_plans)
+  home.port.subordinate <=> fragmenter.upstream
+  fragmenter.downstream <=> ram.port
+  requester.start |> map_flow(start_entry => zext(start_entry, 64)) |> ricket.start
+
+  reg load_complete(~init: Bool(#false))
+  reg loaded_entry(~init: bits(0, 32))
+  when (fire(requester.start)):
+    load_complete <== Bool(#true)
+    loaded_entry <== requester.start.bits
+
+  loaded <== load_complete
+  entry <== loaded_entry
+  exit <== requester.exit
+
+def design = elaborate(SimpleSoC())
+
+export:
+  simple_soc_flit
+  simple_soc_home
+  simple_soc_fesvr_node
+  simple_soc_ricket_params
+  requester_icn_endpoint
+  simple_soc_fesvr_port
+  simple_soc_instruction_port
+  simple_soc_data_port
+  simple_soc_ram_params
+  simple_soc_fragmenter_params
+  simple_soc_home_params
+  simple_soc_topology
+  simple_soc_router
+  simple_soc_fesvr_site
+  simple_soc_instruction_site
+  simple_soc_data_site
+  simple_soc_home_requester_site
+  simple_soc_connections
+  simple_soc_compilations
+  simple_soc_adapter_plans
+  simple_soc_snp_compilation
+  simple_soc_req_router_config
+  simple_soc_rsp_router_config
+  simple_soc_snp_router_config
+  simple_soc_dat_router_config
+  SimpleSoC
+  design

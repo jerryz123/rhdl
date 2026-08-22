@@ -1,4 +1,4 @@
-/* Places the transport-test payload and HTIF mailboxes at deterministic RV32 addresses. */
+/* Places the transport smoke payload and HTIF mailboxes at deterministic addresses. */
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 

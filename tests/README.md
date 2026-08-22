@@ -12,10 +12,10 @@ Tests mirror the implementation boundaries:
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
 | [`formal/`](formal/) | Optional Rosette semantics, equivalence, output reachability, combinational properties, witnesses, and unsupported cases |
 | [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
-| [`fesvr/`](fesvr/) | Assertions and target programs for the FESVR simulation SoC |
 
 Domain-library tests live with their owning packages, including
-[`../chi/tests/`](../chi/tests/).
+[`../chi/tests/`](../chi/tests/). SoC integration tests similarly live under
+[`../socs/tests/`](../socs/tests/).
 
 Valid canonical authoring programs live under [`../examples/`](../examples/README.md).
 Intentional language failures live under `frontend/invalid/` and are exercised
@@ -67,7 +67,8 @@ make test                   # complete host and CIRCT suite
 ```
 
 The standalone FESVR transport has its own setup, native test, and DPI compile
-checks in [`../sim/fesvr/`](../sim/fesvr/README.md). CI also elaborates and
+checks in [`../fesvr/`](../fesvr/README.md) and system-level checks in
+[`../socs/`](../socs/README.md). CI also elaborates and
 simulates its generated native CHI host, HN-I, and backing RAM in an independent
 external-toolchain job.
 

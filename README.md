@@ -146,9 +146,11 @@ Detailed documentation lives with the component that owns it:
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
 | Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
-| Direct-memory FESVR transport | [`sim/fesvr/README.md`](sim/fesvr/README.md) |
+| Direct-memory FESVR transport | [`fesvr/README.md`](fesvr/README.md) |
 | RISC-V instruction model, RV32I/RV64I catalogs, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
 | Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
+| Example SoC composition and end-to-end simulation | [`socs/README.md`](socs/README.md) |
+| Shared executable-simulation fixtures | [`support/README.md`](support/README.md) |
 
 ## Current status
 
