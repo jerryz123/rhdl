@@ -45,6 +45,7 @@ bundle RicketCsrState(xlen :: XLen):
   sepc: Bits(xlen_width(xlen))
   scause: Bits(xlen_width(xlen))
   stval: Bits(xlen_width(xlen))
+  satp: Bits(xlen_width(xlen))
 
 bundle RicketTrapDecision(xlen :: XLen):
   valid: Bool
@@ -142,6 +143,7 @@ sync_circuit RicketCsrFile(xlen :: XLen):
   output writeback_valid: Bool
   output writeback_value: Bits(width)
   output privilege: PrivilegeMode
+  output mstatus: Bits(width)
   output satp: Bits(width)
 
   reg privilege_state(PrivilegeMode, ~init: PrivilegeMode.Machine)
@@ -178,7 +180,12 @@ sync_circuit RicketCsrFile(xlen :: XLen):
     storage CsrId.Scause: state.scause
     storage CsrId.Stval: state.stval
     read CsrId.Sip: zero
-    read CsrId.Satp: zero
+    csr CsrId.Satp:
+      read: state.satp
+      write value:
+        def satp_replacement = as_bits(value)
+        when (if xlen == XLen.X32 | Bool(#false) | is_one_of(satp_replacement[60..64], bits(0, 4), bits(8, 4))):
+          state.satp <== if xlen == XLen.X32 | zero | concat(satp_replacement[60..64], bits(0, 16), satp_replacement[0..44])
     csr CsrId.Mstatus:
       read: state.mstatus
       write value:
@@ -298,7 +305,8 @@ sync_circuit RicketCsrFile(xlen :: XLen):
   writeback_valid <== csr_commit & csr_access_legal & or_reduce(commit.bits.rd)
   writeback_value <== csr_read_value
   privilege <== privilege_state
-  satp <== zero
+  mstatus <== state.mstatus
+  satp <== state.satp
   redirect.valid <== trap.valid ||| mret ||| sret
   redirect.bits <== mux(
     trap.valid,

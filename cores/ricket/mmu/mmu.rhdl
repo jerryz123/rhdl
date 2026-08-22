@@ -1,0 +1,225 @@
+#lang rhdl
+// Composes Ricket's Sv39 TLBs and shared walker ahead of its physical L1 ports.
+
+import:
+  "protocol.rhdl" open
+  "tlb.rhdl" open
+  "walker.rhdl" open
+  "../csr.rhdl" open
+  "../memory.rhdl" open
+  "../icache/protocol.rhdl" open
+  "../dcache/protocol.rhdl" open
+  "../../load-store.rhdl" open
+  "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/rhdl/sv39.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+
+sync_circuit RicketMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
+  def width = xlen_width(xlen)
+  interface instruction(RicketInstructionAccess(xlen), ~role: responder)
+  interface data(RicketDataAccess(xlen), ~role: responder)
+  interface instruction_memory(RicketInstructionAccess(xlen), ~role: requester)
+  interface data_memory(RicketDataAccess(xlen), ~role: requester)
+  input privilege: PrivilegeMode
+  input mstatus: Bits(width)
+  input satp: Bits(width)
+  input invalidate_all: Bool
+
+  inst itlb(RicketTlb(tlb_entries))
+  inst dtlb(RicketTlb(tlb_entries))
+  inst walker(RicketPageTableWalker())
+  inst instruction_owners(Queue(Bool, 2), ~reset_when: instruction.flush)
+
+  def satp_sv39 = if xlen == XLen.X32 | Bool(#false) | satp[60..64] === bits(8, 4)
+  def root_ppn = if xlen == XLen.X32 | bits(0, 44) | satp[0..44]
+  def supervisor_or_user = privilege =/= PrivilegeMode.Machine
+  def instruction_translation_enabled = satp_sv39 & supervisor_or_user
+  def mprv = if xlen == XLen.X32 | Bool(#false) | mstatus[17].into(Bool)
+  def mpp = if xlen == XLen.X32 | bits(3, 2) | mstatus[11..13]
+  def mpp_privilege = mux_lookup(
+    mpp,
+    ~default: PrivilegeMode.Machine,
+    [[0, PrivilegeMode.User], [1, PrivilegeMode.Supervisor]]
+  )
+  def data_privilege = mux((privilege === PrivilegeMode.Machine) & mprv, mpp_privilege, privilege)
+  def data_translation_enabled = satp_sv39 & (data_privilege =/= PrivilegeMode.Machine)
+  def sum = if xlen == XLen.X32 | Bool(#false) | mstatus[18].into(Bool)
+  def mxr = if xlen == XLen.X32 | Bool(#false) | mstatus[19].into(Bool)
+  def instruction_virtual_address = if xlen == XLen.X32 | zext(instruction.request.bits.address, 64) | instruction.request.bits.address
+  def data_request :: RicketDataReq(xlen) = data.request.bits
+  def data_memory_operation :: MemoryOperation = data_request.access
+  def data_virtual_address = if xlen == XLen.X32 | zext(data_request.address, 64) | data_request.address
+  def data_access_kind = mux(data_memory_operation.needs_unique(), Sv39Access.Store, Sv39Access.Load)
+
+  itlb.virtual_address <== instruction_virtual_address
+  itlb.access <== Sv39Access.Fetch
+  itlb.privilege <== privilege
+  itlb.sum <== sum
+  itlb.mxr <== mxr
+  itlb.enabled <== instruction_translation_enabled
+  itlb.invalidate_all <== invalidate_all
+  dtlb.virtual_address <== data_virtual_address
+  dtlb.access <== data_access_kind
+  dtlb.privilege <== data_privilege
+  dtlb.sum <== sum
+  dtlb.mxr <== mxr
+  dtlb.enabled <== data_translation_enabled
+  dtlb.invalidate_all <== invalidate_all
+
+  reg walk_active(~init: Bool(#false))
+  reg walk_is_data(~init: Bool(#false))
+  reg fault_valid(~init: Bool(#false))
+  reg fault_is_data(~init: Bool(#false))
+  reg fault_address(Bits(64))
+  reg walker_data_quiet_previous(~init: Bool(#false))
+  reg walker_data_quiet_twice(~init: Bool(#false))
+  reg walker_memory_outstanding(~init: Bool(#false))
+
+  def data_quiet = data_memory.drained & !data_memory.response.valid
+  def can_start_walk = !walk_active & !fault_valid
+  def instruction_miss = instruction.request.valid & instruction_translation_enabled & !itlb.hit
+  def data_miss = data.request.valid & data_translation_enabled & !dtlb.hit
+  def start_instruction_walk = can_start_walk & instruction_miss
+  def start_data_walk = can_start_walk & !instruction_miss & data_miss
+  walker.request.valid <== start_instruction_walk ||| start_data_walk
+  walker.request.bits <== RicketTranslationRequest():
+    virtual_address: mux(start_data_walk, data_virtual_address, instruction_virtual_address)
+    root_ppn: root_ppn
+    access: mux(start_data_walk, data_access_kind, Sv39Access.Fetch)
+    privilege: mux(start_data_walk, data_privilege, privilege)
+    sum: sum
+    mxr: mxr
+  def walker_request_fire = fire(walker.request)
+  def cancel_instruction_walk = instruction.flush & walk_active & !walk_is_data
+  walker.cancel <== invalidate_all ||| cancel_instruction_walk
+
+  walker.completion.ready <== !fault_valid
+  def walker_completion_fire = fire(walker.completion)
+  itlb.fill.valid <== walker_completion_fire & !walk_is_data
+  itlb.fill.bits <== walker.completion.bits
+  dtlb.fill.valid <== walker_completion_fire & walk_is_data
+  dtlb.fill.bits <== walker.completion.bits
+
+  def latched_instruction_fault = fault_valid & !fault_is_data & (fault_address === instruction_virtual_address)
+  def latched_data_fault = fault_valid & fault_is_data & (fault_address === data_virtual_address)
+  def instruction_fault = instruction_translation_enabled & (
+    (itlb.hit & itlb.fault) ||| latched_instruction_fault
+  )
+  def data_fault = data_translation_enabled & ((dtlb.hit & dtlb.fault) ||| latched_data_fault)
+
+  // Every accepted fetch records whether its response comes from L1I or is a
+  // locally generated page fault, preserving response order across both paths.
+  def instruction_ready_source = mux(
+    instruction_fault,
+    Bool(#true),
+    instruction_memory.request.ready
+  )
+  def instruction_lookup_ready = !instruction_translation_enabled ||| itlb.hit ||| latched_instruction_fault
+  instruction.request.ready <== instruction_lookup_ready & instruction_owners.ingress.ready & instruction_ready_source
+  instruction_memory.request.valid <== instruction.request.valid & instruction_lookup_ready & !instruction_fault & instruction_owners.ingress.ready
+  instruction_memory.request.bits.address <== if xlen == XLen.X32 | instruction.request.bits.address | mux(
+    instruction_translation_enabled,
+    zext(itlb.physical_address, 64),
+    instruction.request.bits.address
+  )
+  instruction_owners.ingress.valid <== fire(instruction.request)
+  instruction_owners.ingress.bits <== instruction_fault
+  instruction_memory.flush <== instruction.flush
+  instruction_memory.invalidate_all <== instruction.invalidate_all
+
+  def oldest_instruction_fault = instruction_owners.egress.bits
+  instruction.response.valid <== instruction_owners.egress.valid & (
+    oldest_instruction_fault ||| instruction_memory.response.valid
+  )
+  instruction.response.bits <== mux(
+    oldest_instruction_fault,
+    RicketInstructionResp():
+      instruction: bits(0, 32)
+      page_fault: Bool(#true),
+    instruction_memory.response.bits
+  )
+  instruction_owners.egress.ready <== instruction.response.ready & instruction.response.valid
+  instruction_memory.response.ready <== instruction.response.ready & instruction_owners.egress.valid & !oldest_instruction_fault
+
+  // The walker owns L1D exclusively. Its PTE request waits for two quiescent
+  // observations, which drain the cache's nonbackpressured response stage.
+  def walker_memory_request = walker.memory.request
+  def walk_uses_data_memory = walk_active & walker_data_quiet_twice & walker_memory_request.valid
+  def data_forwarding_enabled = !walk_active
+  data.request.ready <== mux(
+    data_fault,
+    Bool(#true),
+    data_forwarding_enabled & (!data_translation_enabled ||| dtlb.hit) & data_memory.request.ready
+  )
+  data.request_fault <== data.request.valid & data_fault
+  data_memory.request.valid <== mux(
+    walk_uses_data_memory,
+    walker_memory_request.valid,
+    data.request.valid & data_forwarding_enabled & (!data_translation_enabled ||| dtlb.hit) & !data_fault
+  )
+  data_memory.request.bits <== mux(
+    walk_uses_data_memory,
+    RicketDataReq(xlen):
+      address: if xlen == XLen.X32 | walker_memory_request.bits[0..32] | walker_memory_request.bits
+      access: MemoryOperation.Load
+      atomic: RicketAtomicOperation.Swap
+      width: MemoryWidth.Double
+      unsigned: Bool(#true)
+      data: bits(0, width)
+      tag: bits(0, 5),
+    RicketDataReq(xlen):
+      address: if xlen == XLen.X32 | data_request.address | mux(
+        data_translation_enabled,
+        zext(dtlb.physical_address, 64),
+        data_request.address
+      )
+      access: data_memory_operation
+      atomic: data_request.atomic
+      width: data_request.width
+      unsigned: data_request.unsigned
+      data: data_request.data
+      tag: data_request.tag
+  )
+  walker_memory_request.ready <== walk_active & walker_data_quiet_twice & data_memory.request.ready
+  def walker_memory_request_fire = fire(walker_memory_request)
+  walker.memory.response.valid <== data_memory.response.valid & walker_memory_outstanding
+  walker.memory.response.bits <== if xlen == XLen.X32 | zext(data_memory.response.bits.data, 64) | data_memory.response.bits.data
+  data.response.valid <== data_memory.response.valid & !walker_memory_outstanding
+  data.response.bits <== data_memory.response.bits
+  data.drained <== !walk_active & !fault_valid & data_memory.drained
+
+  def instruction_fault_accepted = fire(instruction.request) & instruction_fault
+  def data_fault_accepted = fire(data.request) & data_fault
+  when (invalidate_all ||| cancel_instruction_walk):
+    walk_active <== Bool(#false)
+  elsewhen walker_request_fire:
+    walk_active <== Bool(#true)
+    walk_is_data <== start_data_walk
+  elsewhen walker_completion_fire:
+    walk_active <== Bool(#false)
+
+  when (invalidate_all ||| cancel_instruction_walk):
+    fault_valid <== Bool(#false)
+  elsewhen (instruction_fault_accepted ||| data_fault_accepted):
+    fault_valid <== Bool(#false)
+  elsewhen (walker_completion_fire & walker.completion.bits.fault):
+    fault_valid <== Bool(#true)
+    fault_is_data <== walk_is_data
+    fault_address <== walker.completion.bits.virtual_address
+
+  when walker_request_fire:
+    walker_data_quiet_previous <== Bool(#false)
+    walker_data_quiet_twice <== Bool(#false)
+  elsewhen walk_active:
+    walker_data_quiet_previous <== data_quiet
+    walker_data_quiet_twice <== data_quiet & walker_data_quiet_previous
+  when (invalidate_all ||| cancel_instruction_walk):
+    walker_memory_outstanding <== Bool(#false)
+  elsewhen walker_memory_request_fire:
+    walker_memory_outstanding <== Bool(#true)
+  elsewhen (data_memory.response.valid & walker_memory_outstanding):
+    walker_memory_outstanding <== Bool(#false)
+
+export:
+  RicketMmu

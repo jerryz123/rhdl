@@ -21,6 +21,7 @@ import:
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm" open
+  "../../riscv/isa/csr.rhm" open
   "../../riscv/isa/trap.rhm" open
   "../../riscv/rhdl/trap.rhdl" open
   "../../riscv/model/formats.rhm" as riscv_fields
@@ -40,6 +41,10 @@ sync_circuit RicketCore(xlen :: XLen):
   interface instruction_access(RicketInstructionAccess(xlen), ~role: requester)
   interface data_access(RicketDataAccess(xlen), ~role: requester)
   output fault: Bool
+  output privilege: PrivilegeMode
+  output mstatus: Bits(width)
+  output satp: Bits(width)
+  output translation_flush: Bool
 
   def zero = bits(0, width)
   fun instruction_value(instruction :: Bits(32)):
@@ -74,6 +79,9 @@ sync_circuit RicketCore(xlen :: XLen):
   def Array(commit_write :: Endpoint, deferred_completion_write :: Endpoint) = registers.writes
 
   fault <== faulted
+  privilege <== csrs.privilege
+  mstatus <== csrs.mstatus
+  satp <== csrs.satp
 
   // Backward-traveling observations use local Valid interface links. Their
   // producers remain in their pipeline stages below, despite earlier stages
@@ -90,12 +98,22 @@ sync_circuit RicketCore(xlen :: XLen):
   scoreboard.clear.valid <== scoreboard_clear_link.right.valid
   scoreboard.clear.bits <== scoreboard_clear_link.right.bits
   def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
+  def sfence_vma_commit = commit.valid & commit.bits.fence.is_address_translation_fence()
+  def satp_write_requested = (commit.bits.system.csr === CsrOperation.Write) ||| (
+    is_one_of(commit.bits.system.csr, CsrOperation.Set, CsrOperation.Clear) & or_reduce(commit.bits.csr_source)
+  )
+  def satp_write_commit = commit.valid & !commit.bits.exception_valid & (
+    commit.bits.csr_address === bits(csr_address(CsrId.Satp), 12)
+  ) & satp_write_requested
+  def translation_restart_commit = sfence_vma_commit ||| satp_write_commit
+  translation_flush <== translation_restart_commit
   def fence_i_resume_pc = commit.bits.pc + bits(4, width)
-  redirect_link.left.valid <== csrs.redirect.valid ||| fence_i_commit ||| execute_redirect_link.right.valid
+  def fence_commit = fence_i_commit ||| translation_restart_commit
+  redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
     csrs.redirect.bits,
-    mux(fence_i_commit, fence_i_resume_pc, execute_redirect_link.right.bits)
+    mux(fence_commit, fence_i_resume_pc, execute_redirect_link.right.bits)
   )
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
@@ -138,6 +156,7 @@ sync_circuit RicketCore(xlen :: XLen):
   if_id_pipe.ingress.bits <== FetchDecode(xlen):
     pc: fetch_pcs.egress.bits
     instruction: instruction_access.response.bits.instruction
+    instruction_page_fault: instruction_access.response.bits.page_fault
   def decode_valid = if_id_pipe.egress.valid & !squash
   def decode_bits = if_id_pipe.egress.bits
 
@@ -240,7 +259,8 @@ sync_circuit RicketCore(xlen :: XLen):
     writeback_source: control.writeback.source
     system: control.system
     fence: control.fence
-    illegal: !decoder.valid
+    illegal: !decoder.valid ||| (control.fence.is_address_translation_fence() & (csrs.privilege === PrivilegeMode.User))
+    instruction_page_fault: if_id_pipe.egress.bits.instruction_page_fault
     immediate: decoded_immediate
     rs1: rs1
     rs2: rs2
@@ -286,24 +306,46 @@ sync_circuit RicketCore(xlen :: XLen):
   def memory_aligned = id_ex.bits.memory_width.is_aligned(alu.result)
   def execute_memory_operation :: MemoryOperation = id_ex.bits.memory_operation
   def execute_is_memory = execute_memory_operation.is_memory()
-  def execute_nonredirect_fault = id_ex.bits.illegal ||| (
+  def execute_request_fault = id_ex.bits.instruction_page_fault ||| id_ex.bits.illegal ||| (
     execute_is_memory & !memory_aligned
   )
+  def data_page_fault = execute_is_memory & data_access.request_fault
+  def execute_nonredirect_fault = execute_request_fault ||| data_page_fault
   def redirect_fault = redirect_requested & !redirect_aligned
   def execute_fault = execute_nonredirect_fault ||| redirect_fault
   def execute_exception_cause = mux(
-    id_ex.bits.illegal,
-    exception_cause_bits(ExceptionCause.IllegalInstruction, width),
-    mux(redirect_fault,
+    id_ex.bits.instruction_page_fault,
+    exception_cause_bits(ExceptionCause.InstructionPageFault, width),
+    mux(
+      id_ex.bits.illegal,
+      exception_cause_bits(ExceptionCause.IllegalInstruction, width),
+      mux(
+        redirect_fault,
         exception_cause_bits(ExceptionCause.InstructionAddressMisaligned, width),
-        mux(execute_memory_operation.needs_unique(),
+        mux(
+          data_page_fault,
+          mux(
+            execute_memory_operation.needs_unique(),
+            exception_cause_bits(ExceptionCause.StorePageFault, width),
+            exception_cause_bits(ExceptionCause.LoadPageFault, width)
+          ),
+          mux(
+            execute_memory_operation.needs_unique(),
             exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
-            exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width)))
+            exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width)
+          )
+        )
+      )
+    )
   )
   def execute_exception_value = mux(
-    id_ex.bits.illegal,
-    instruction_value(id_ex.bits.instruction),
-    mux(redirect_fault, computed_redirect_target, alu.result)
+    id_ex.bits.instruction_page_fault,
+    id_ex.bits.pc,
+    mux(
+      id_ex.bits.illegal,
+      instruction_value(id_ex.bits.instruction),
+      mux(redirect_fault, computed_redirect_target, alu.result)
+    )
   )
   def csr_source = mux(
     id_ex.bits.system.immediate,
@@ -339,7 +381,7 @@ sync_circuit RicketCore(xlen :: XLen):
   // Cache capacity and long-latency reservations are Execute's only sources of
   // backpressure. Branch resolution and EX/MEM observe an instruction only
   // when both optional effects can advance.
-  def issue_memory_request = execute_is_memory & !execute_nonredirect_fault
+  def issue_memory_request = execute_is_memory & !execute_request_fault
   def execute_cache_ready = !issue_memory_request ||| data_access.request.ready
   def execute_multiplier_ready = !execute_needs_multiplier ||| multiplier_available
   def execute_divider_ready = !execute_needs_divider ||| divider_available

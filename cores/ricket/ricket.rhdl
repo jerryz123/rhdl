@@ -6,6 +6,7 @@ import:
   "chi.rhdl" open
   "icache/cache.rhdl" open
   "dcache/cache.rhdl" open
+  "mmu/mmu.rhdl" open
   "../../riscv/isa/xlen.rhm" open
   lib("rhdl/std/bits.rhdl").Pow2Int
   lib("rhdl/std/ready-valid.rhdl") open
@@ -23,11 +24,18 @@ sync_circuit Ricket(xlen :: XLen,
   output fault: Bool
 
   inst core(RicketCore(xlen))
+  inst mmu(RicketMmu(xlen))
   inst l1i(RicketL1ICache(xlen, cache_sets, ~chi: checked))
   inst l1d(RicketL1DCache(xlen, cache_sets, ~chi: checked))
   start |> core.start
-  core.instruction_access |> l1i.core
-  core.data_access |> l1d.core
+  core.instruction_access |> mmu.instruction
+  core.data_access |> mmu.data
+  mmu.instruction_memory |> l1i.core
+  mmu.data_memory |> l1d.core
+  mmu.privilege <== core.privilege
+  mmu.mstatus <== core.mstatus
+  mmu.satp <== core.satp
+  mmu.invalidate_all <== core.translation_flush
   l1i.chi <=> imem
   l1d.chi <=> dmem
   fault <== core.fault

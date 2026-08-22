@@ -130,7 +130,10 @@ enum or a collection of numeric literals.
 [`isa/trap.rhm`](isa/trap.rhm) similarly owns synchronous `ExceptionCause`
 members, cause codes, and masks assembled from cause sets.
 [`isa/privileged.rhm`](isa/privileged.rhm) currently contributes the exact
-`MRET` and `SRET` encodings used by Ricket's first privileged control slice.
+`MRET`, `SRET`, and `SFENCE.VMA` encodings used by Ricket's privileged control
+plane. [`isa/sv39.rhm`](isa/sv39.rhm) owns pure Sv39 geometry and canonical
+address helpers, while [`rhdl/sv39.rhdl`](rhdl/sv39.rhdl) provides typed PTE,
+permission, superpage, and physical-address combinational operations.
 Keeping these catalogs separate lets a core select the mechanisms it actually
 implements without adding them to the RV32I or RV64I base catalogs.
 

@@ -20,6 +20,7 @@ core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   |--> dcache/protocol.rhdl
   `--> ../../rhdl/std/scoreboard.rhdl
 ricket.rhdl                         composition selects core-flow.rhdl
+  |--> mmu/{mmu,tlb,walker}.rhdl    Sv39 translation before physical L1s
   |--> cache.rhdl                   fixed 64-byte private-L1 line geometry
   |--> chi.rhdl                     RN-F parameters and flit construction
   |--> refill.rhdl                  blocking ReadClean/ReadUnique acquisition
@@ -34,8 +35,8 @@ ricket.rhdl                         composition selects core-flow.rhdl
 protocols. Cache modules own line lookup, array arbitration, transaction
 scheduling, CHI channel routing, byte masks, and load/store lane generation.
 The shared transaction engines own protocol sequencing, retry state, response
-stability, and DVM pairing. The wrapper composes the core and caches into two
-ready-valid RN-F channel bundles; physical credited links belong to system
+stability, and DVM pairing. The wrapper composes the core, MMU, and caches into
+two ready-valid RN-F channel bundles; physical credited links belong to system
 integration when the channels actually cross a CHI link boundary.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
@@ -140,11 +141,28 @@ entering the pipeline, so younger instructions cannot create side effects
 before the system operation commits. Execute-detected exceptions immediately
 squash younger work but carry the faulting instruction to WB, where the CSR
 file records EPC, cause, and trap value and selects the direct `mtvec` or
-`stvec` target. The first cut has no interrupts, PMP, counters, vectored trap
-mode, or virtual memory; `satp` is a recognized WARL-zero CSR and translation
-therefore remains Bare.
+`stvec` target. The first cut has no interrupts, PMP, counters, or vectored
+trap mode.
 
-Base `FENCE` and `FENCE.I` share the same serialization boundary. Decode waits
+RV64 Ricket implements Bare and Sv39 address translation ahead of its
+physically indexed, physically tagged L1 caches. `satp.MODE` accepts Bare or
+Sv39, `satp.ASID` is WARL zero, and RV32 remains permanently Bare. Separate
+eight-entry fully associative ITLB and DTLB instances retain raw PTE
+permissions and recheck current privilege, `SUM`, and `MXR` on every hit. One
+serialized, non-speculative walker handles a miss at a time and reads PTEs
+through the physical L1D path only after older cache work has drained. It
+supports 4 KiB, 2 MiB, and 1 GiB leaves, rejects malformed or misaligned
+superpages, and implements Svade by raising a page fault when an accessed or
+required dirty bit is clear rather than modifying page tables in hardware.
+Instruction, load, and store page faults carry the original virtual address
+through the ordinary precise WB trap path. M-mode instruction accesses remain
+Bare; data accesses honor `MPRV`, while `SUM` and `MXR` affect permission
+checks. `SFENCE.VMA` is a serializing operation and currently performs a full
+ITLB/DTLB flush regardless of its operands. A `satp` write conservatively does
+the same. Sv48/Sv57, nonzero ASIDs, hardware A/D updates, PBMT, NAPOT, PMP,
+multi-hart shootdown, and speculative walks remain outside this slice.
+
+Base `FENCE`, `FENCE.I`, and `SFENCE.VMA` share the same serialization boundary. Decode waits
 for older deferred register completions and for the L1D to report that its
 lookup, ownership acquisition, and dirty writeback are drained, then
 prevents younger instructions from entering Execute until the fence reaches
