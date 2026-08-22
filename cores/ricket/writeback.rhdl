@@ -1,0 +1,85 @@
+#lang rhdl
+// Drains one dirty Ricket cache line through serialized supported CHI writes.
+
+import:
+  "cache.rhdl" open
+  "chi.rhdl" open
+  "write-unique.rhdl" open
+  "../load-store.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("chi/main.rhdl") open
+
+bundle RicketLineWritebackCommand(Context :: DataType,
+                                  address_width :: PosInt):
+  line_address: Bits(address_width)
+  line: Vec(RicketCacheLineBytes / 8, Bits(64))
+  context: Context
+
+bundle RicketLineWritebackResult(Context :: DataType):
+  context: Context
+
+sync_circuit RicketLineWriteback(Context :: DataType,
+                                 address_width :: PosInt,
+                                 params :: RicketCHIParams,
+                                 txn_id :: Nat):
+  def p = params.flit
+  def beats :: PosInt = RicketCacheLineBytes / 8
+  def beat_width = index_width(beats)
+
+  interface command(Decoupled(RicketLineWritebackCommand(Context, address_width)), ~role: consumer)
+  interface completion(Irrevocable(RicketLineWritebackResult(Context)), ~role: producer)
+  interface requests(Decoupled(CHIReqFlit(p)), ~role: producer)
+  interface data(Decoupled(CHIDatFlit(p)), ~role: producer)
+  interface responses(Decoupled(CHIRspFlit(p)), ~role: consumer)
+
+  inst beat_write(RicketWriteUnique(Context, address_width, params, txn_id))
+  reg active_state(~init: Bool(#false))
+  reg beat_started(~init: Bool(#false))
+  reg beat_index(~init: bits(0, beat_width))
+  reg line_address(~init: bits(0, address_width))
+  reg line(Vec(beats, Bits(64)))
+  reg context(Context)
+
+  command.ready <== !active_state
+  def command_fire = fire(command)
+  def beat_offset = zext(concat(beat_index, bits(0, 3)), address_width)
+  beat_write.command.valid <== active_state & !beat_started
+  beat_write.command.bits <== RicketWriteUniqueCommand(Context, address_width):
+    address: line_address + beat_offset
+    width: MemoryWidth.Double
+    data: line[beat_index]
+    mask: bits(0xff, 8)
+    context: context
+  def beat_command_fire = fire(beat_write.command)
+  def final_beat = beat_index === bits(beats - 1, beat_width)
+  completion.valid <== beat_write.completion.valid & final_beat
+  completion.bits <== RicketLineWritebackResult(Context):
+    context: beat_write.completion.bits.context
+  beat_write.completion.ready <== !final_beat ||| completion.ready
+  def beat_completion_fire = fire(beat_write.completion)
+
+  beat_write.requests |> requests
+  beat_write.data |> data
+  responses |> beat_write.responses
+
+  when command_fire:
+    active_state <== Bool(#true)
+    beat_started <== Bool(#false)
+    beat_index <== bits(0, beat_width)
+    line_address <== command.bits.line_address
+    line <== command.bits.line
+    context <== command.bits.context
+  elsewhen beat_command_fire:
+    beat_started <== Bool(#true)
+  elsewhen beat_completion_fire:
+    active_state <== !final_beat
+    beat_started <== Bool(#false)
+    beat_index <== mux(final_beat,
+                       beat_index,
+                       beat_index + bits(1, beat_width))
+
+export:
+  RicketLineWritebackCommand
+  RicketLineWritebackResult
+  RicketLineWriteback

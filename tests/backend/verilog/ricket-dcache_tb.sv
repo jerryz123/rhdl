@@ -1,4 +1,4 @@
-// Verifies Ricket L1D retryable refills and ordered write-through ready-valid RN-F stores.
+// Verifies Ricket L1D coherent acquisition, local dirty stores, and dirty replacement.
 module ricket_dcache_tb;
   typedef struct packed {
     logic [63:0] address;
@@ -37,6 +37,7 @@ module ricket_dcache_tb;
   } chi_out_t;
 
   localparam logic [6:0] READ_CLEAN = 7'h02;
+  localparam logic [6:0] READ_UNIQUE = 7'h07;
   localparam logic [6:0] WRITE_UNIQUE_PTL = 7'h18;
   localparam logic [4:0] COMP_ACK = 5'h02;
   localparam logic [4:0] COMP = 5'h04;
@@ -44,6 +45,8 @@ module ricket_dcache_tb;
   localparam logic [4:0] DBID_RESP_ORD = 5'h0e;
   localparam logic [4:0] RETRY_ACK = 5'h03;
   localparam logic [4:0] PCRD_GRANT = 5'h07;
+  localparam logic [4:0] SNP_MAKE_INVALID = 5'h0a;
+  localparam logic [3:0] SNP_RESP_DATA = 4'h1;
   localparam logic [3:0] NON_COPY_BACK_WRITE_DATA = 4'h3;
   localparam logic [3:0] COMP_DATA = 4'h4;
   localparam logic [6:0] HOME_ID = 7'd1;
@@ -180,8 +183,10 @@ module ricket_dcache_tb;
               captured_req.address == address[43:0] &&
               captured_req.size_or_num_req == size &&
               captured_req.snp_attr_or_do_dwt == 1'b1 &&
-              captured_req.mem_attr == ((opcode == READ_CLEAN) ? 4'hd : 4'h5) &&
-              captured_req.exp_comp_ack == (opcode == READ_CLEAN) &&
+              captured_req.mem_attr == (((opcode == READ_CLEAN) ||
+                                         (opcode == READ_UNIQUE)) ? 4'hd : 4'h5) &&
+              captured_req.exp_comp_ack == ((opcode == READ_CLEAN) ||
+                                             (opcode == READ_UNIQUE)) &&
               captured_req.allow_retry == allow_retry &&
               captured_req.pcrd_type == pcrd_type)
         else $fatal(1, "L1D emitted malformed CHI request");
@@ -191,7 +196,8 @@ module ricket_dcache_tb;
 
   task automatic return_line(
     input logic [63:0] address,
-    input logic [511:0] line
+    input logic [511:0] line,
+    input logic [2:0] response_state
   );
     integer packet;
     begin
@@ -201,7 +207,7 @@ module ricket_dcache_tb;
         chi_in.response_data.bits.data = line[packet * 128 +: 128];
         chi_in.response_data.bits.byte_enable = 16'hffff;
         chi_in.response_data.bits.data_id = address[5:4] + packet[1:0];
-        chi_in.response_data.bits.resp = 3'b001;
+        chi_in.response_data.bits.resp = response_state;
         chi_in.response_data.bits.opcode = COMP_DATA;
         chi_in.response_data.bits.home_nid_or_pbha_or_mismatched_mecid = HOME_ID;
         chi_in.response_data.bits.dbid_or_mecid = 16'h0055;
@@ -244,7 +250,13 @@ module ricket_dcache_tb;
       assert (core_out.response.valid &&
               core_out.response.bits.data == data &&
               core_out.response.bits.tag == tag)
-        else $fatal(1, "L1D core response data or tag mismatch");
+        else $fatal(1,
+                    "L1D response mismatch: valid=%0d data=%h expected=%h tag=%0d expected_tag=%0d",
+                    core_out.response.valid,
+                    core_out.response.bits.data,
+                    data,
+                    core_out.response.bits.tag,
+                    tag);
       tick();
     end
   endtask
@@ -273,7 +285,7 @@ module ricket_dcache_tb;
 
   task automatic accept_write_data(
     input logic [63:0] data,
-    input logic [1:0] data_id,
+    input integer data_id,
     input logic high_lane
   );
     integer cycles;
@@ -289,13 +301,71 @@ module ricket_dcache_tb;
               captured_dat.src_id == CACHE_ID &&
               captured_dat.tgt_id == HOME_ID &&
               captured_dat.txn_id == 12'h055 &&
-              captured_dat.data_id == data_id &&
-              captured_dat.ccid == data_id &&
+              captured_dat.data_id == data_id[1:0] &&
+              captured_dat.ccid == data_id[1:0] &&
               captured_dat.data[63:0] == (high_lane ? 64'd0 : data) &&
               captured_dat.data[127:64] == (high_lane ? data : 64'd0) &&
               captured_dat.byte_enable == (high_lane ? 16'hff00 : 16'h00ff))
         else $fatal(1, "L1D emitted malformed write data");
       tx_dat_pending = 1'b0;
+    end
+  endtask
+
+  task automatic send_snoop(input logic [63:0] address,
+                            input logic [11:0] txn_id);
+    integer cycles;
+    begin
+      cycles = 0;
+      while (!chi_out.snoops.ready && cycles < 100) begin
+        tick();
+        cycles = cycles + 1;
+      end
+      assert (chi_out.snoops.ready)
+        else $fatal(1, "L1D did not accept a snoop");
+      chi_in.snoops.bits = '0;
+      chi_in.snoops.bits.address = address[43:3];
+      chi_in.snoops.bits.opcode = SNP_MAKE_INVALID;
+      chi_in.snoops.bits.txn_id = txn_id;
+      chi_in.snoops.bits.src_id = HOME_ID;
+      chi_in.snoops.valid = 1'b1;
+      tick();
+      chi_in.snoops = '0;
+    end
+  endtask
+
+  task automatic accept_snoop_data(input integer packet,
+                                   input logic [511:0] line,
+                                   input logic [11:0] txn_id);
+    integer cycles;
+    begin
+      chi_in.request_data.ready = 1'b0;
+      cycles = 0;
+      while (!chi_out.request_data.valid && cycles < 100) begin
+        tick();
+        cycles = cycles + 1;
+      end
+      assert (chi_out.request_data.valid &&
+              chi_out.request_data.bits.opcode == SNP_RESP_DATA &&
+              chi_out.request_data.bits.src_id == CACHE_ID &&
+              chi_out.request_data.bits.tgt_id == HOME_ID &&
+              chi_out.request_data.bits.txn_id == txn_id &&
+              chi_out.request_data.bits.data_id == packet[1:0] &&
+              chi_out.request_data.bits.resp == 3'b100 &&
+              chi_out.request_data.bits.data == line[packet * 128 +: 128])
+        else $fatal(1,
+                    "dirty snoop DAT mismatch packet=%0d opcode=%h src=%0d tgt=%0d txn=%h id=%0d resp=%b data=%h expected=%h",
+                    packet,
+                    chi_out.request_data.bits.opcode,
+                    chi_out.request_data.bits.src_id,
+                    chi_out.request_data.bits.tgt_id,
+                    chi_out.request_data.bits.txn_id,
+                    chi_out.request_data.bits.data_id,
+                    chi_out.request_data.bits.resp,
+                    chi_out.request_data.bits.data,
+                    line[packet * 128 +: 128]);
+      chi_in.request_data.ready = 1'b1;
+      tick();
+      chi_in.request_data.ready = 1'b0;
     end
   endtask
 
@@ -311,6 +381,21 @@ module ricket_dcache_tb;
     64'h88776655_44332211
   };
   localparam logic [63:0] STORE_DATA = 64'hdeadbeef_cafef00d;
+  localparam logic [63:0] STORE_DATA_2 = 64'h01234567_89abcdef;
+  localparam logic [63:0] EVICT_ADDRESS = ADDRESS + 64'h200;
+  localparam logic [511:0] EVICT_LINE = {
+    64'h17161514_13121110,
+    64'h0f0e0d0c_0b0a0908,
+    64'hfffefdfc_fbfaf9f8,
+    64'hf7f6f5f4_f3f2f1f0,
+    64'h27262524_23222120,
+    64'h1f1e1d1c_1b1a1918,
+    64'h07060504_03020100,
+    64'h37363534_33323130
+  };
+  logic [511:0] dirty_line;
+  logic [511:0] evict_dirty_line;
+  integer beat;
 
   initial begin
     core_in = '0;
@@ -330,54 +415,84 @@ module ricket_dcache_tb;
     send_response(RETRY_ACK, 12'd0, 12'd0, 4'd6);
     grant_req_credit();
     accept_request(READ_CLEAN, ADDRESS, 12'd0, 6'd6, 1'b0, 4'd6);
-    return_line(ADDRESS, LINE);
+    return_line(ADDRESS, LINE, 3'b001);
     accept_comp_ack();
     expect_core_response(64'h88776655_44332211, 5'd3);
 
     send_core_request(ADDRESS, 1'b0, 64'd0, 5'd4);
     expect_core_response(64'h88776655_44332211, 5'd4);
 
+    // A store to a shared line acquires Unique ownership, merges into the
+    // returned line, and becomes dirty without emitting write data.
     grant_req_credit();
-    grant_dat_credit();
     send_core_request(ADDRESS + 64'h18, 1'b1, STORE_DATA, 5'd0);
-    expect_core_response(64'd0, 5'd0);
     assert (!core_out.drained)
-      else $fatal(1, "data cache reported drained before store completion");
-    accept_request(WRITE_UNIQUE_PTL, ADDRESS + 64'h18, 12'd1, 6'd3, 1'b1, 4'd0);
-    send_response(COMP, 12'd1, 12'h055, 4'd0);
-    send_response(DBID_RESP_ORD, 12'd1, 12'h055, 4'd0);
-    accept_write_data(STORE_DATA, 2'd1, 1'b1);
-    tick();
-    assert (core_out.drained)
-      else $fatal(1, "data cache did not drain after store completion");
-
-    // A retried write accepts a matching protocol credit and a combined
-    // completion/DBID response. The nonzero DataID checks address-derived DAT
-    // metadata independently of the physical byte lane.
-    grant_req_credit();
-    grant_dat_credit();
-    send_core_request(ADDRESS + 64'h28, 1'b1, STORE_DATA, 5'd0);
+      else $fatal(1, "data cache reported drained during ownership acquisition");
+    accept_request(READ_UNIQUE, ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
+    return_line(ADDRESS, LINE, 3'b010);
+    accept_comp_ack();
     expect_core_response(64'd0, 5'd0);
-    accept_request(WRITE_UNIQUE_PTL, ADDRESS + 64'h28, 12'd1, 6'd3, 1'b1, 4'd0);
-    send_response(RETRY_ACK, 12'd1, 12'd0, 4'd9);
-    send_response(PCRD_GRANT, 12'd0, 12'd0, 4'd9);
-    grant_req_credit();
-    accept_request(WRITE_UNIQUE_PTL, ADDRESS + 64'h28, 12'd1, 6'd3, 1'b0, 4'd9);
-    send_response(COMP_DBID_RESP, 12'd1, 12'h055, 4'd0);
-    accept_write_data(STORE_DATA, 2'd2, 1'b1);
-    tick();
     assert (core_out.drained)
-      else $fatal(1, "data cache did not drain after combined store completion");
+      else $fatal(1, "data cache did not drain after ownership acquisition");
+    assert (!tx_dat_pending)
+      else $fatal(1, "write-allocate store unexpectedly emitted write data");
 
+    send_core_request(ADDRESS + 64'h18, 1'b0, 64'd0, 5'd6);
+    expect_core_response(STORE_DATA, 5'd6);
+
+    // A second store hits UniqueDirty and remains entirely local.
+    send_core_request(ADDRESS + 64'h28, 1'b1, STORE_DATA_2, 5'd0);
+    expect_core_response(64'd0, 5'd0);
+    tick();
+    assert (!tx_req_pending && !tx_dat_pending)
+      else $fatal(1, "UniqueDirty store unexpectedly reached CHI");
+    assert (core_out.drained)
+      else $fatal(1, "data cache did not drain after local dirty store");
+
+    // Replacing the direct-mapped dirty line drains all eight 64-bit beats
+    // before issuing the new line's ReadClean.
+    dirty_line = LINE;
+    dirty_line[3 * 64 +: 64] = STORE_DATA;
+    dirty_line[5 * 64 +: 64] = STORE_DATA_2;
     grant_req_credit();
     grant_rsp_credit();
-    send_core_request(ADDRESS, 1'b0, 64'd0, 5'd5);
-    accept_request(READ_CLEAN, ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
-    return_line(ADDRESS, LINE);
+    grant_dat_credit();
+    send_core_request(EVICT_ADDRESS, 1'b0, 64'd0, 5'd5);
+    for (beat = 0; beat < 8; beat = beat + 1) begin
+      accept_request(WRITE_UNIQUE_PTL,
+                     ADDRESS + beat * 8,
+                     12'd1,
+                     6'd3,
+                     1'b1,
+                     4'd0);
+      send_response(COMP_DBID_RESP, 12'd1, 12'h055, 4'd0);
+      accept_write_data(dirty_line[beat * 64 +: 64],
+                        beat / 2,
+                        (beat & 1) != 0);
+    end
+    accept_request(READ_CLEAN, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
+    return_line(EVICT_ADDRESS, EVICT_LINE, 3'b001);
     accept_comp_ack();
-    expect_core_response(64'h88776655_44332211, 5'd5);
+    expect_core_response(64'h37363534_33323130, 5'd5);
 
-    $display("Ricket data-cache ready-valid RN-F simulation passed");
+    // Dirty snoop intervention returns the complete authoritative line and
+    // invalidates the local copy without issuing a control-only SnpResp.
+    send_core_request(EVICT_ADDRESS + 64'h8, 1'b1, STORE_DATA, 5'd0);
+    accept_request(READ_UNIQUE, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
+    return_line(EVICT_ADDRESS, EVICT_LINE, 3'b010);
+    accept_comp_ack();
+    expect_core_response(64'd0, 5'd0);
+    evict_dirty_line = EVICT_LINE;
+    evict_dirty_line[1 * 64 +: 64] = STORE_DATA;
+    chi_in.request_data.ready = 1'b0;
+    send_snoop(EVICT_ADDRESS, 12'h077);
+    for (beat = 0; beat < 4; beat = beat + 1)
+      accept_snoop_data(beat, evict_dirty_line, 12'h077);
+    tick();
+    assert (core_out.drained)
+      else $fatal(1, "data cache did not drain after dirty snoop response");
+
+    $display("Ricket write-back data-cache simulation passed");
     $finish;
   end
 endmodule

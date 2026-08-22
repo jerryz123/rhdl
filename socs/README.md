@@ -29,8 +29,9 @@ the permitted protocol paths instead of an all-node cross product.
 Ricket exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
 boundary, so the SoC connects both cache endpoints to the NoC without creating
 internal credited links. The serialized HN-F translates coherent Ricket traffic
-into non-coherent subordinate transactions, and the fragmenter expands 64-byte
-cache-line reads into the RAM's one-DAT-beat transactions.
+and authoritative dirty snoop packets into non-coherent subordinate
+transactions, and the fragmenter expands 64-byte cache-line reads into the
+RAM's one-DAT-beat transactions.
 
 The FESVR transport implementation remains owned by
 [`fesvr/`](../fesvr/README.md); `simple-soc.rhdl` owns its use in this concrete

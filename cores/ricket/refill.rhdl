@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements Ricket's retry-aware packet-complete RN-F ReadClean cache-line refill.
+// Implements Ricket's retry-aware packet-complete coherent cache-line acquisition.
 
 import:
   "cache.rhdl" open
@@ -11,6 +11,7 @@ import:
 bundle RicketLineRefillCommand(Context :: DataType,
                                address_width :: PosInt):
   line_address: Bits(address_width)
+  opcode: CHIReqOpcode
   context: Context
 
 bundle RicketLineRefillResult(Context :: DataType,
@@ -57,6 +58,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
   ))
   reg acknowledgement_sent(~init: Bool(#false))
   reg line_address(~init: bits(0, address_width))
+  reg opcode(~init: CHIReqOpcode.ReadClean)
   reg context(Context)
   reg line(~init: bits(0, RicketCacheLineBytes * 8))
   reg home_id(~init: bits(0, p.node_id_width))
@@ -75,6 +77,10 @@ sync_circuit RicketLineRefill(Context :: DataType,
            "line_refill_address_aligned")
     assert(ricket_chi_address_fits(command.bits.line_address, p),
            "line_refill_address_fits_chi")
+    assert(is_one_of(command.bits.opcode,
+                     CHIReqOpcode.ReadClean,
+                     CHIReqOpcode.ReadUnique),
+           "line_refill_opcode_supported")
 
   def retry_ready = retry_received & retry_credit_received
   requests.valid <== active_state & !request_sent & (!retry_received ||| retry_ready)
@@ -84,7 +90,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
     checked.home_node_id,
     line_address,
     CHITransferSize.Bytes64,
-    CHIReqOpcode.ReadClean,
+    opcode,
     bits(0, 12),
     Bool(#true),
     Bool(#true),
@@ -196,6 +202,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
     )
     acknowledgement_sent <== Bool(#false)
     line_address <== command.bits.line_address
+    opcode <== command.bits.opcode
     context <== command.bits.context
     line <== bits(0, RicketCacheLineBytes * 8)
     home_id <== bits(0, p.node_id_width)

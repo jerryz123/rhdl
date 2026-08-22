@@ -22,9 +22,10 @@ core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
 ricket.rhdl                         composition selects core-flow.rhdl
   |--> cache.rhdl                   fixed 64-byte private-L1 line geometry
   |--> chi.rhdl                     RN-F parameters and flit construction
-  |--> refill.rhdl                  blocking ReadClean/CompData/CompAck engine
-  |--> write-unique.rhdl             retryable WriteUniquePtl transaction engine
-  |--> snoop.rhdl                    shared clean-line snoop and DVM engine
+  |--> refill.rhdl                  blocking ReadClean/ReadUnique acquisition
+  |--> write-unique.rhdl            retryable partial-write transaction engine
+  |--> writeback.rhdl               serialized dirty-line drain engine
+  |--> snoop.rhdl                   clean/dirty snoop-data and DVM engines
   |--> icache/cache.rhdl             instruction arrays, policy, and CHI routing
   `--> dcache/cache.rhdl             data arrays, policy, and CHI routing
 ```
@@ -138,7 +139,7 @@ therefore remains Bare.
 
 Base `FENCE` and `FENCE.I` share the same serialization boundary. Decode waits
 for older deferred register completions and for the L1D to report that its
-lookup, refill, and coherent write-through transaction are drained, then
+lookup, ownership acquisition, and dirty writeback are drained, then
 prevents younger instructions from entering Execute until the fence reaches
 WB. `FENCE.I`
 additionally invalidates every L1I line at WB and redirects Fetch to the
@@ -192,8 +193,8 @@ into the shared refill engine, which returns that context with the completed
 line. L1I maps hits and live refill completions into response flows and merges
 them before its response queue. L1D load hits have the same throughput and pass through a mandatory
 non-backpressurable post-SRAM register while preserving a five-bit pipeline
-completion tag. Stores complete through the registered response path and drain
-through an ordered one-entry coherent write-through transaction. The two
+completion tag. Stores acquire ownership on a miss or shared hit, then update
+Unique lines locally as dirty until replacement or snoop intervention. The two
 external ports intentionally remain separate RN-F Request Nodes. Home Node,
 fabric, and SoC integration remain outside the core. Ricket uses CHI's minimum
 128-bit DAT width; each fixed 64-byte cache-line refill therefore completes

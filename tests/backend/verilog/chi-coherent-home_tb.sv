@@ -1,4 +1,4 @@
-// Simulates serialized coherent reads and write invalidation through CHIHNF.
+// Simulates serialized coherent reads, dirty intervention, and invalidation through CHIHNF.
 module chi_coherent_home_tb;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic valid; CHIReqFlit bits; } req_t;
@@ -50,11 +50,14 @@ module chi_coherent_home_tb;
   localparam logic [6:0] READ_NO_SNP = 7'h04;
   localparam logic [6:0] WRITE_UNIQUE_PTL = 7'h18;
   localparam logic [6:0] WRITE_NO_SNP_PTL = 7'h1c;
+  localparam logic [6:0] WRITE_NO_SNP_FULL = 7'h1d;
   localparam logic [4:0] SNP_RESP = 5'h01;
   localparam logic [4:0] COMP_ACK = 5'h02;
   localparam logic [4:0] COMP = 5'h04;
   localparam logic [4:0] DBID_RESP = 5'h06;
   localparam logic [4:0] SNP_MAKE_INVALID = 5'h0a;
+  localparam logic [4:0] SNP_CLEAN_SHARED = 5'h08;
+  localparam logic [3:0] SNP_RESP_DATA = 4'h1;
   localparam logic [3:0] NON_COPY_BACK_WRITE_DATA = 4'h3;
   localparam logic [3:0] COMP_DATA = 4'h4;
   localparam logic [6:0] HTIF_ID = 7'h01;
@@ -143,6 +146,77 @@ module chi_coherent_home_tb;
     end
   endtask
 
+  task automatic accept_snoop(input logic [6:0] target,
+                              input logic [4:0] opcode);
+    begin
+      snoops_ready_in.ready = 1'b1;
+      #1;
+      assert (port_out.requester.snoops.valid &&
+              port_out.requester.snoops.bits.target_id == target &&
+              port_out.requester.snoops.bits.flit.opcode == opcode &&
+              port_out.requester.snoops.bits.flit.src_id == HOME_ID)
+        else $fatal(1, "HN-F emitted incorrect snoop metadata");
+      tick();
+      snoops_ready_in = '0;
+    end
+  endtask
+
+  task automatic service_dirty_snoop_packet(input logic [1:0] packet_id);
+    begin
+      request_data_in.bits = '0;
+      request_data_in.bits.opcode = SNP_RESP_DATA;
+      request_data_in.bits.src_id = DATA_ID;
+      request_data_in.bits.tgt_id = HOME_ID;
+      request_data_in.bits.txn_id = 12'h000;
+      request_data_in.bits.data_id = packet_id;
+      request_data_in.bits.byte_enable = 16'hffff;
+      request_data_in.bits.resp = 3'b100;
+      request_data_in.bits.data = {120'h0, 6'h0, packet_id};
+      request_data_in.valid = 1'b1;
+      #1;
+      assert (port_out.requester.request_data.ready)
+        else $fatal(1, "HN-F did not accept dirty snoop data");
+      tick();
+      request_data_in = '0;
+
+      accept_subordinate_request(WRITE_NO_SNP_FULL);
+      subordinate_responses_in.bits = '0;
+      subordinate_responses_in.bits.opcode = DBID_RESP;
+      subordinate_responses_in.bits.src_id = MEMORY_ID;
+      subordinate_responses_in.bits.tgt_id = HOME_ID;
+      subordinate_responses_in.bits.txn_id = 12'h000;
+      subordinate_responses_in.bits.dbid_or_group_id = MEMORY_DBID;
+      subordinate_responses_in.valid = 1'b1;
+      #1;
+      assert (port_out.subordinate.rsp.ready)
+        else $fatal(1, "HN-F did not accept dirty-data write DBID");
+      tick();
+      subordinate_responses_in = '0;
+
+      subordinate_data_ready_in.ready = 1'b1;
+      #1;
+      assert (port_out.subordinate.dat.request.valid &&
+              port_out.subordinate.dat.request.bits.opcode == NON_COPY_BACK_WRITE_DATA &&
+              port_out.subordinate.dat.request.bits.data_id == packet_id &&
+              port_out.subordinate.dat.request.bits.data == {120'h0, 6'h0, packet_id})
+        else $fatal(1, "HN-F did not translate dirty snoop data");
+      tick();
+      subordinate_data_ready_in = '0;
+
+      subordinate_responses_in.bits = '0;
+      subordinate_responses_in.bits.opcode = COMP;
+      subordinate_responses_in.bits.src_id = MEMORY_ID;
+      subordinate_responses_in.bits.tgt_id = HOME_ID;
+      subordinate_responses_in.bits.txn_id = 12'h000;
+      subordinate_responses_in.valid = 1'b1;
+      #1;
+      assert (port_out.subordinate.rsp.ready)
+        else $fatal(1, "HN-F did not accept dirty-data write completion");
+      tick();
+      subordinate_responses_in = '0;
+    end
+  endtask
+
   task automatic return_read_packet(
     input logic [1:0] packet_id,
     input logic [6:0] target_id,
@@ -190,6 +264,12 @@ module chi_coherent_home_tb;
     reset = 1'b0;
 
     send_request(INSTRUCTION_ID, READ_CLEAN, 6'd6, 1'b1);
+    accept_snoop(DATA_ID, SNP_CLEAN_SHARED);
+    service_dirty_snoop_packet(2'd0);
+    service_dirty_snoop_packet(2'd1);
+    service_dirty_snoop_packet(2'd2);
+    service_dirty_snoop_packet(2'd3);
+    tick();
     accept_subordinate_request(READ_NO_SNP);
     return_read_packet(2'd0, INSTRUCTION_ID, 3'b001);
     return_read_packet(2'd1, INSTRUCTION_ID, 3'b001);
@@ -241,15 +321,7 @@ module chi_coherent_home_tb;
     tick();
     request_data_in = '0;
 
-    snoops_ready_in.ready = 1'b1;
-    #1;
-    assert (port_out.requester.snoops.valid &&
-            port_out.requester.snoops.bits.target_id == INSTRUCTION_ID &&
-            port_out.requester.snoops.bits.flit.opcode == SNP_MAKE_INVALID &&
-            port_out.requester.snoops.bits.flit.src_id == HOME_ID)
-      else $fatal(1, "HN-F did not invalidate only the other RN-F");
-    tick();
-    snoops_ready_in = '0;
+    accept_snoop(INSTRUCTION_ID, SNP_MAKE_INVALID);
 
     requester_responses_in.bits = '0;
     requester_responses_in.bits.opcode = SNP_RESP;

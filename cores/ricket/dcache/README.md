@@ -1,4 +1,4 @@
-<!-- Specifies Ricket's data-cache protocol and first-cut L1D policy. -->
+<!-- Specifies Ricket's data-cache protocol and blocking write-back L1D policy. -->
 
 # Ricket data cache
 
@@ -17,41 +17,36 @@ RN-F port uses the configured CHI address width. Ricket cache lines are always
 64 bytes. The default 128-bit DAT width is CHI's minimum, so each refill is
 assembled from four physical DAT packets.
 The responder also exposes a combinational `drained` observation. It is true
-only when no request is accepted that cycle and no lookup, refill, or coherent
-write-through transaction remains active, giving architectural fences a
+only when no request is accepted that cycle and no lookup, acquisition, or
+dirty-line writeback remains active, giving architectural fences a
 precise quiescence boundary without creating a separate fence transaction.
 
-`cache.rhdl` implements a direct-mapped, read-allocating,
-write-through/write-no-allocate cache. A one-stage `Pipe` carries lookup
+`cache.rhdl` implements a direct-mapped, blocking write-back/write-allocate
+cache. A one-stage `Pipe` carries lookup
 context alongside the synchronous SRAM access and advances on consecutive
-hits. A miss passes through typed `filter_flow` and `map_flow` stages into the
-Ricket-local `../refill.rhdl` transaction engine. The engine owns the aligned
-line address, complete client context, retryable `ReadClean`, `CompData`, and
-`CompAck`, then returns the context with one completed clean line and its CHI
-state over an irrevocable flow. The cache installs that result into its tag,
-state, and data arrays. A mandatory non-backpressurable
+hits. Load misses request `ReadClean`; store misses and stores to SharedClean
+lines request `ReadUnique`. The common `../refill.rhdl` engine owns the aligned
+line address, complete client context, retry, `CompData`, and `CompAck`. A
+completed store acquisition merges the store bytes into the returned line and
+installs it as UniqueDirty. Stores that hit UniqueClean or UniqueDirty update
+the data SRAM and dirty state locally without producing REQ or DAT traffic.
+A mandatory non-backpressurable
 `ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
-aligning an EX request's hit response with WB. A miss blocks
-new cache requests until refill completes. A store produces its registered
-completion during lookup and transfers a typed command into the one-entry
-`../write-unique.rhdl` engine. That engine owns retry, DBID, data, and completion
-state for `WriteUniquePtl`, accepts separate responses in either order or
-`CompDBIDResp`, and sends address-labeled `NonCopyBackWriteData`; the cache
-invalidates the local line instead of making it dirty.
+aligning an EX request's hit response with WB. An acquisition or miss blocks
+new cache requests until it completes. Before replacing a dirty direct-mapped
+victim, `../writeback.rhdl` captures the entire line and drains its eight
+64-bit beats through the currently supported retryable `WriteUniquePtl`
+transaction engine; only then can the replacement refill begin.
 
 Incoming snoops serialize behind any lookup, refill, or store. The shared
 `../snoop.rhdl` engine owns request lifetime, DVM pairing, lookup-result capture,
-and response stability. The cache owns the tag/state lookup and applies the
-engine's typed invalidate-or-downgrade update. Sharing snoops downgrade Unique
-to SharedClean, invalidating snoops discard the match, and state-preserving
-snoops retain it.
-Forwarding snoops silently evict a clean match and report Invalid so Home can
-source the line elsewhere without a snoop-data path. `SnpQuery` reports the
-stored state without changing it. Any non-forward snoop with `RetToSrc` also
-silently evicts before returning Invalid because this first cut has no
-snoop-data path. Each two-packet `SnpDVMOp` receives one response. Reset clears
-lookup, refill, write transaction, snoop, and valid state.
+and response stability. Clean lines use `SnpResp` and the requested
+invalidate-or-downgrade transition. Dirty lines return all line packets as
+`SnpRespData` with `PassDirty`, then invalidate locally so Home receives the
+authoritative copy. Each two-packet `SnpDVMOp` receives one response. Reset
+clears lookup, acquisition, writeback, snoop, and valid state.
 
-The first cut has no associativity, dirty state, eviction writeback,
-hit-under-miss, prefetching, snoop data return, or direct coherence connection
-to the instruction cache.
+The cache has no associativity, hit-under-miss, prefetching, background
+writeback, or direct coherence connection to the instruction cache. Dirty
+replacement currently decomposes a line into supported partial writes rather
+than using CHI's `WriteBackFull` transaction family.

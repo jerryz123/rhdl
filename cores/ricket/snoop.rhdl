@@ -2,6 +2,7 @@
 // Implements Ricket's clean-line RN-F snoop and paired-DVM transaction engine.
 
 import:
+  "cache.rhdl" open
   "chi.rhdl" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
@@ -15,6 +16,16 @@ bundle RicketCleanSnoopUpdate(address_width :: PosInt):
   address: Bits(address_width)
   invalidate: Bool
   state: CHIResponseState
+
+bundle RicketDataSnoopLookupResult():
+  hit: Bool
+  state: CHICacheState
+  line: Vec(RicketCacheLineBytes / 8, Bits(64))
+
+bundle RicketDataSnoopUpdate(address_width :: PosInt):
+  address: Bits(address_width)
+  invalidate: Bool
+  state: CHICacheState
 
 sync_circuit RicketCleanSnoop(address_width :: PosInt,
                               params :: RicketCHIParams,
@@ -126,7 +137,179 @@ sync_circuit RicketCleanSnoop(address_width :: PosInt,
   elsewhen dvm_second_fire:
     dvm_first_pending <== Bool(#false)
 
+sync_circuit RicketDataSnoop(address_width :: PosInt,
+                             params :: RicketCHIParams,
+                             node :: CHINodeParams):
+  def checked = checked_ricket_chi_params(params)
+  def p = checked.flit
+  def node_id = node.node_id
+  def packet_count :: PosInt = RicketCacheLineBytes / p.data_bytes
+  def packet_index_width = index_width(packet_count)
+  def data_id_stride = p.data_bytes / 16
+  unless node_id == checked.data_node_id
+  | error(~who: #'RicketDataSnoop,
+          "data snoop node must identify Ricket's data cache")
+
+  input cache_ready: Bool
+  output pending: Bool
+  output address: Bits(address_width)
+  interface snoops(Decoupled(CHISnpFlit(p)), ~role: consumer)
+  interface responses(Decoupled(CHIRspFlit(p)), ~role: producer)
+  interface data(Decoupled(CHIDatFlit(p)), ~role: producer)
+  interface lookup(Valid(Bits(address_width)), ~role: producer)
+  interface lookup_result(Valid(RicketDataSnoopLookupResult()), ~role: consumer)
+  interface update(Valid(RicketDataSnoopUpdate(address_width)), ~role: producer)
+
+  reg active_state(~init: Bool(#false))
+  reg uses_lookup(~init: Bool(#false))
+  reg request(CHISnpFlit(p))
+  reg lookup_complete(~init: Bool(#false))
+  reg line_hit(~init: Bool(#false))
+  reg line_state(~init: CHICacheState.Invalid)
+  reg line(Vec(RicketCacheLineBytes / 8, Bits(64)))
+  reg packet_index(~init: bits(0, packet_index_width))
+  reg dvm_first_pending(~init: Bool(#false))
+  reg dvm_source_id(~init: bits(0, p.node_id_width))
+  reg dvm_txn_id(~init: bits(0, 12))
+
+  def incoming_snoop = snoops.bits
+  def ordinary_snoop = incoming_snoop.opcode =/= CHISnpOpcode.SnpLCrdReturn
+  def incoming_dvm = incoming_snoop.opcode === CHISnpOpcode.SnpDVMOp
+  def can_start = !active_state & cache_ready & (!dvm_first_pending ||| incoming_dvm)
+  snoops.ready <== !ordinary_snoop ||| can_start
+  def snoop_fire = fire(snoops) & ordinary_snoop
+  def lookup_start = snoop_fire & !incoming_dvm
+  def dvm_first_fire = snoop_fire & incoming_dvm & !dvm_first_pending
+  def dvm_second_fire = snoop_fire & incoming_dvm & dvm_first_pending
+
+  fun local_address(snoop_address :: Bits(p.snoop_address_width)) :~ Bits(address_width):
+    def raw_address = concat(snoop_address, bits(0, 3))
+    if address_width <= p.request_address_width
+    | raw_address[0..address_width]
+    | zext(raw_address, address_width)
+  address <== mux(lookup_start,
+                  local_address(incoming_snoop.address),
+                  local_address(request.address))
+  lookup.valid <== lookup_start
+  lookup.bits <== address
+  def lookup_result_fire = active_state & uses_lookup & !lookup_complete & lookup_result.valid
+
+  def dirty_hit = uses_lookup & line_hit & line_state.is_dirty()
+  def shares_state = ricket_snoop_shares_cache_state(request.opcode)
+  def invalidates_state = ricket_snoop_invalidates_cache_state(request.opcode)
+  def discards_clean_line = invalidates_state ||| request.ret_to_src
+  def cached_clean_state = mux(line_state.is_shared(),
+                               CHIResponseState.SharedClean,
+                               CHIResponseState.Unique)
+  def clean_response_state = mux(
+    uses_lookup & line_hit,
+    mux(discards_clean_line,
+        CHIResponseState.Invalid,
+        mux(shares_state, CHIResponseState.SharedClean, cached_clean_state)),
+    CHIResponseState.Invalid
+  )
+  responses.valid <== active_state & (!uses_lookup ||| lookup_complete) & !dirty_hit
+  responses.bits <== ricket_chi_response(
+    p,
+    node_id,
+    request.src_id,
+    request.txn_id,
+    CHIRspOpcode.SnpResp,
+    ~resp: zext(as_bits(clean_response_state), 3)
+  )
+  def response_fire = fire(responses)
+
+  def packet_data = as_vec(as_bits(line), Bits(p.data_width))[packet_index]
+  def packet_data_id = mux_lookup(
+    packet_index,
+    ~default: bits(0, 2),
+    for List (index in 0..packet_count):
+      [index, bits(index * data_id_stride, 2)]
+  )
+  wire snoop_data: CHIDatFlit(p)
+  if p.poison_width > 0
+  | snoop_data.poison <== bits(0, p.poison_width)
+  | #void
+  if p.data_check_width > 0
+  | snoop_data.data_check <== bits(0, p.data_check_width)
+  | #void
+  snoop_data.data <== packet_data
+  snoop_data.byte_enable <== !bits(0, p.byte_enable_width)
+  if p.dat_rsvdc_width > 0
+  | snoop_data.rsvdc <== bits(0, p.dat_rsvdc_width)
+  | #void
+  snoop_data.replicate <== Bool(#false)
+  snoop_data.num_dat <== bits(0, 2)
+  snoop_data.cah <== Bool(#false)
+  snoop_data.trace_tag <== request.trace_tag
+  snoop_data.tag_update <== bits(0, p.tag_update_width)
+  snoop_data.tag <== bits(0, p.tag_width)
+  snoop_data.tag_op <== CHITagOp.Invalid
+  snoop_data.cache_line_id <== bits(0, 6)
+  snoop_data.data_id <== packet_data_id
+  snoop_data.ccid <== packet_data_id
+  snoop_data.dbid_or_mecid <== bits(0, 16)
+  snoop_data.c_busy <== bits(0, 3)
+  snoop_data.data_pull <== Bool(#false)
+  snoop_data.data_source_or_fwd_state <== bits(0, 8)
+  def dirty_response:
+    CHICoherentResponse():
+      pass_dirty: Bool(#true)
+      state: CHIResponseState.Invalid
+  snoop_data.resp <== as_bits(dirty_response)
+  snoop_data.resp_err <== CHIRespErr.OK
+  snoop_data.opcode <== CHIDatOpcode.SnpRespData
+  snoop_data.home_nid_or_pbha_or_mismatched_mecid <== request.src_id
+  snoop_data.txn_id <== request.txn_id
+  snoop_data.src_id <== bits(node_id, p.node_id_width)
+  snoop_data.tgt_id <== request.src_id
+  snoop_data.qos <== request.qos
+  data.valid <== active_state & lookup_complete & dirty_hit
+  data.bits <== snoop_data
+  def data_fire = fire(data)
+  def final_packet = packet_index === bits(packet_count - 1, packet_index_width)
+  def snoop_complete = response_fire ||| (data_fire & final_packet)
+
+  update.valid <== snoop_complete & uses_lookup & line_hit & (
+    dirty_hit ||| discards_clean_line ||| shares_state
+  )
+  update.bits <== RicketDataSnoopUpdate(address_width):
+    address: local_address(request.address)
+    invalidate: dirty_hit ||| discards_clean_line
+    state: CHICacheState.SharedClean
+  pending <== (snoops.valid & ordinary_snoop) ||| active_state ||| dvm_first_pending
+
+  when (lookup_start ||| dvm_second_fire):
+    active_state <== Bool(#true)
+    uses_lookup <== lookup_start
+    request <== incoming_snoop
+    lookup_complete <== Bool(#false)
+    line_hit <== Bool(#false)
+    line_state <== CHICacheState.Invalid
+    packet_index <== bits(0, packet_index_width)
+  elsewhen lookup_result_fire:
+    lookup_complete <== Bool(#true)
+    line_hit <== lookup_result.bits.hit
+    line_state <== lookup_result.bits.state
+    line <== lookup_result.bits.line
+  elsewhen (data_fire & !final_packet):
+    packet_index <== packet_index + bits(1, packet_index_width)
+  elsewhen snoop_complete:
+    active_state <== Bool(#false)
+    uses_lookup <== Bool(#false)
+    lookup_complete <== Bool(#false)
+
+  when dvm_first_fire:
+    dvm_first_pending <== Bool(#true)
+    dvm_source_id <== incoming_snoop.src_id
+    dvm_txn_id <== incoming_snoop.txn_id
+  elsewhen dvm_second_fire:
+    dvm_first_pending <== Bool(#false)
+
 export:
   RicketCleanSnoopLookupResult
   RicketCleanSnoopUpdate
   RicketCleanSnoop
+  RicketDataSnoopLookupResult
+  RicketDataSnoopUpdate
+  RicketDataSnoop
