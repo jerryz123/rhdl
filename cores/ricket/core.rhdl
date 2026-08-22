@@ -5,6 +5,7 @@ import:
   "../alu.rhdl" open
   "../branch-resolver.rhdl" open
   "../load-store.rhdl" open
+  "memory.rhdl" open
   "decode/core-ctrl.rhdl" open
   "decode/operand-ctrl.rhdl" open
   "decode/branch-ctrl.rhdl" open
@@ -230,6 +231,7 @@ sync_circuit RicketCore(xlen :: XLen):
     branch_control: control.branch.resolver
     target_from_rs1: control.branch.target_from_rs1
     memory_operation: control.memory.access
+    memory_atomic: control.memory.atomic
     memory_width: control.memory.width
     memory_unsigned: control.memory.unsigned
     multiply_control: control.multiply
@@ -282,7 +284,8 @@ sync_circuit RicketCore(xlen :: XLen):
   )
   def redirect_aligned = is_aligned(computed_redirect_target, 4)
   def memory_aligned = id_ex.bits.memory_width.is_aligned(alu.result)
-  def execute_is_memory = id_ex.bits.memory_operation =/= MemoryOperation.None
+  def execute_memory_operation :: MemoryOperation = id_ex.bits.memory_operation
+  def execute_is_memory = execute_memory_operation.is_memory()
   def execute_nonredirect_fault = id_ex.bits.illegal ||| (
     execute_is_memory & !memory_aligned
   )
@@ -293,7 +296,7 @@ sync_circuit RicketCore(xlen :: XLen):
     exception_cause_bits(ExceptionCause.IllegalInstruction, width),
     mux(redirect_fault,
         exception_cause_bits(ExceptionCause.InstructionAddressMisaligned, width),
-        mux(id_ex.bits.memory_operation === MemoryOperation.Write,
+        mux(execute_memory_operation.needs_unique(),
             exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
             exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width)))
   )
@@ -354,12 +357,13 @@ sync_circuit RicketCore(xlen :: XLen):
   data_access.request.valid <== id_ex.valid & execute_multiplier_ready & execute_divider_ready & issue_memory_request
   data_access.request.bits <== RicketDataReq(xlen):
     address: alu.result
-    write: id_ex.bits.memory_operation === MemoryOperation.Write
+    access: execute_memory_operation
+    atomic: id_ex.bits.memory_atomic
     width: id_ex.bits.memory_width
     unsigned: id_ex.bits.memory_unsigned
     data: forwarded_rs2
     tag: mux(
-      id_ex.bits.memory_operation === MemoryOperation.Read,
+      execute_memory_operation.returns_result(),
       id_ex.bits.rd,
       bits(0, 5)
     )

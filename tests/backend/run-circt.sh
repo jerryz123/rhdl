@@ -617,6 +617,7 @@ direct_fixture_specs=(
   'iterative-divider|iterative_divider_tb'
   'ricket-register-file|ricket_register_file_tb'
   'ricket-csr|ricket_csr_tb'
+  'ricket-atomic|ricket_atomic_tb'
   'ricket-core|ricket_core_tb'
   'ricket-multiply|ricket_multiply_tb'
   'ricket-divide|ricket_divide_tb'

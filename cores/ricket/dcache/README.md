@@ -3,13 +3,15 @@
 # Ricket data cache
 
 `protocol.rhdl` defines `RicketDataAccess`, an ordered `Decoupled` request and
-`Valid` response interface carrying the original byte address, read/write
-intent, scalar width, load signedness, and XLEN-wide store source. The request
+`Valid` response interface carrying the original byte address, a typed load,
+store, LR, SC, or AMO operation, scalar width, load signedness, and XLEN-wide
+source operand. The request
 is deliberately Decoupled because live Execute forwarding may change its
 payload before the cache accepts the instruction. The response returns an
-XLEN-wide normalized load value and echoes the request's five-bit completion
-tag; store response data and tag have no meaning. The pipeline uses the tag to
-clear the destination scoreboard entry when a delayed load returns. It checks
+XLEN-wide normalized load or atomic result and echoes the request's five-bit
+completion tag; ordinary store response data and tag have no meaning. The
+pipeline uses the tag to clear the destination scoreboard entry when a delayed
+load or atomic operation returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
 load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
 `XLen.X64`; its core-facing addresses use the selected XLEN while its native
@@ -25,7 +27,10 @@ precise quiescence boundary without creating a separate fence transaction.
 cache. A one-stage `Pipe` carries lookup
 context alongside the synchronous SRAM access and advances on consecutive
 hits. Load misses request `ReadClean`; store misses and stores to SharedClean
-lines request `ReadUnique`. The common `../refill.rhdl` engine owns the aligned
+lines request `ReadUnique`. AMOs and successful SCs use the same unique-owner
+path, then update the cached word or doubleword and leave the line UniqueDirty.
+AMOs return the pre-update value; RV64 word results are sign extended. The
+common `../refill.rhdl` engine owns the aligned
 line address, complete client context, retry, `CompData`, and `CompAck`. A
 completed store acquisition merges the store bytes into the returned line and
 installs it as UniqueDirty. Stores that hit UniqueClean or UniqueDirty update
@@ -44,7 +49,14 @@ and response stability. Clean lines use `SnpResp` and the requested
 invalidate-or-downgrade transition. Dirty lines return all line packets as
 `SnpRespData` with `PassDirty`, then invalidate locally so Home receives the
 authoritative copy. Each two-packet `SnpDVMOp` receives one response. Reset
-clears lookup, acquisition, writeback, snoop, and valid state.
+clears lookup, acquisition, writeback, snoop, valid, and reservation state.
+
+LR records one exact address and scalar width in a cache-local reservation.
+SC succeeds only when that reservation still matches, acquiring Unique
+ownership before updating the line, and every SC attempt clears the
+reservation. Same-line local writes, invalidating snoops, and replacement of
+the reserved line also clear it. A failed SC returns one without issuing CHI
+traffic; a successful SC returns zero.
 
 The cache has no associativity, hit-under-miss, prefetching, background
 writeback, or direct coherence connection to the instruction cache. Dirty

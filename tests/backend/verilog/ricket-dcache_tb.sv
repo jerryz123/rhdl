@@ -1,8 +1,9 @@
-// Verifies Ricket L1D coherent acquisition, local dirty stores, and dirty replacement.
+// Verifies Ricket L1D coherence, dirty replacement, AMOs, and LR/SC reservations.
 module ricket_dcache_tb;
   typedef struct packed {
     logic [63:0] address;
-    logic write;
+    logic [2:0] access;
+    logic [3:0] atomic;
     logic [1:0] width;
     logic unsigned_load;
     logic [63:0] data;
@@ -51,6 +52,13 @@ module ricket_dcache_tb;
   localparam logic [3:0] COMP_DATA = 4'h4;
   localparam logic [6:0] HOME_ID = 7'd1;
   localparam logic [6:0] CACHE_ID = 7'd3;
+  localparam logic [2:0] MEMORY_LOAD = 3'd1;
+  localparam logic [2:0] MEMORY_STORE = 3'd2;
+  localparam logic [2:0] MEMORY_LR = 3'd3;
+  localparam logic [2:0] MEMORY_SC = 3'd4;
+  localparam logic [2:0] MEMORY_ATOMIC = 3'd5;
+  localparam logic [3:0] ATOMIC_SWAP = 4'd0;
+  localparam logic [3:0] ATOMIC_ADD = 4'd1;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -133,7 +141,8 @@ module ricket_dcache_tb;
 
   task automatic send_core_request(
     input logic [63:0] address,
-    input logic write,
+    input logic [2:0] access,
+    input logic [3:0] atomic,
     input logic [63:0] data,
     input logic [4:0] tag
   );
@@ -147,7 +156,8 @@ module ricket_dcache_tb;
       assert (core_out.request.ready)
         else $fatal(1, "L1D did not accept a core request");
       core_in.request.bits = '{address: address,
-                               write: write,
+                               access: access,
+                               atomic: atomic,
                                width: 2'd3,
                                unsigned_load: 1'b0,
                                data: data,
@@ -366,6 +376,7 @@ module ricket_dcache_tb;
       chi_in.request_data.ready = 1'b1;
       tick();
       chi_in.request_data.ready = 1'b0;
+      tx_dat_pending = 1'b0;
     end
   endtask
 
@@ -407,7 +418,7 @@ module ricket_dcache_tb;
     assert (core_out.drained)
       else $fatal(1, "data cache was not drained after reset");
 
-    send_core_request(ADDRESS, 1'b0, 64'd0, 5'd3);
+    send_core_request(ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd3);
     assert (!core_out.drained)
       else $fatal(1, "data cache reported drained during a refill");
     accept_request(READ_CLEAN, ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
@@ -419,29 +430,29 @@ module ricket_dcache_tb;
     accept_comp_ack();
     expect_core_response(64'h88776655_44332211, 5'd3);
 
-    send_core_request(ADDRESS, 1'b0, 64'd0, 5'd4);
+    send_core_request(ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd4);
     expect_core_response(64'h88776655_44332211, 5'd4);
 
-    // A store to a shared line acquires Unique ownership, merges into the
-    // returned line, and becomes dirty without emitting write data.
+    // An AMO to a shared line acquires Unique ownership, returns the old
+    // doubleword, installs the updated value, and leaves the line dirty.
     grant_req_credit();
-    send_core_request(ADDRESS + 64'h18, 1'b1, STORE_DATA, 5'd0);
+    send_core_request(ADDRESS + 64'h18, MEMORY_ATOMIC, ATOMIC_ADD, 64'd1, 5'd7);
     assert (!core_out.drained)
       else $fatal(1, "data cache reported drained during ownership acquisition");
     accept_request(READ_UNIQUE, ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(ADDRESS, LINE, 3'b010);
     accept_comp_ack();
-    expect_core_response(64'd0, 5'd0);
+    expect_core_response(64'hffeeddcc_bbaa9988, 5'd7);
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after ownership acquisition");
     assert (!tx_dat_pending)
-      else $fatal(1, "write-allocate store unexpectedly emitted write data");
+      else $fatal(1, "write-allocate AMO unexpectedly emitted write data");
 
-    send_core_request(ADDRESS + 64'h18, 1'b0, 64'd0, 5'd6);
-    expect_core_response(STORE_DATA, 5'd6);
+    send_core_request(ADDRESS + 64'h18, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd6);
+    expect_core_response(64'hffeeddcc_bbaa9989, 5'd6);
 
     // A second store hits UniqueDirty and remains entirely local.
-    send_core_request(ADDRESS + 64'h28, 1'b1, STORE_DATA_2, 5'd0);
+    send_core_request(ADDRESS + 64'h28, MEMORY_STORE, ATOMIC_SWAP, STORE_DATA_2, 5'd0);
     expect_core_response(64'd0, 5'd0);
     tick();
     assert (!tx_req_pending && !tx_dat_pending)
@@ -449,15 +460,31 @@ module ricket_dcache_tb;
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after local dirty store");
 
+    // LR observes the dirty line. Its matching SC succeeds once, returns zero,
+    // and a second SC fails without issuing any coherence traffic.
+    send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd8);
+    expect_core_response(STORE_DATA_2, 5'd8);
+    send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA, 5'd9);
+    expect_core_response(64'd0, 5'd9);
+    send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd10);
+    expect_core_response(64'd1, 5'd10);
+    tick();
+    assert (!tx_req_pending && !tx_dat_pending)
+      else $fatal(1, "failed SC unexpectedly reached CHI");
+    send_core_request(ADDRESS + 64'h28, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd11);
+    expect_core_response(STORE_DATA, 5'd11);
+
     // Replacing the direct-mapped dirty line drains all eight 64-bit beats
     // before issuing the new line's ReadClean.
     dirty_line = LINE;
-    dirty_line[3 * 64 +: 64] = STORE_DATA;
-    dirty_line[5 * 64 +: 64] = STORE_DATA_2;
+    dirty_line[3 * 64 +: 64] = 64'hffeeddcc_bbaa9989;
+    dirty_line[5 * 64 +: 64] = STORE_DATA;
+    send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd14);
+    expect_core_response(STORE_DATA, 5'd14);
     grant_req_credit();
     grant_rsp_credit();
     grant_dat_credit();
-    send_core_request(EVICT_ADDRESS, 1'b0, 64'd0, 5'd5);
+    send_core_request(EVICT_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd5);
     for (beat = 0; beat < 8; beat = beat + 1) begin
       accept_request(WRITE_UNIQUE_PTL,
                      ADDRESS + beat * 8,
@@ -474,14 +501,18 @@ module ricket_dcache_tb;
     return_line(EVICT_ADDRESS, EVICT_LINE, 3'b001);
     accept_comp_ack();
     expect_core_response(64'h37363534_33323130, 5'd5);
+    send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd15);
+    expect_core_response(64'd1, 5'd15);
 
     // Dirty snoop intervention returns the complete authoritative line and
     // invalidates the local copy without issuing a control-only SnpResp.
-    send_core_request(EVICT_ADDRESS + 64'h8, 1'b1, STORE_DATA, 5'd0);
+    send_core_request(EVICT_ADDRESS + 64'h8, MEMORY_STORE, ATOMIC_SWAP, STORE_DATA, 5'd0);
     accept_request(READ_UNIQUE, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(EVICT_ADDRESS, EVICT_LINE, 3'b010);
     accept_comp_ack();
     expect_core_response(64'd0, 5'd0);
+    send_core_request(EVICT_ADDRESS + 64'h8, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd12);
+    expect_core_response(STORE_DATA, 5'd12);
     evict_dirty_line = EVICT_LINE;
     evict_dirty_line[1 * 64 +: 64] = STORE_DATA;
     chi_in.request_data.ready = 1'b0;
@@ -489,6 +520,11 @@ module ricket_dcache_tb;
     for (beat = 0; beat < 4; beat = beat + 1)
       accept_snoop_data(beat, evict_dirty_line, 12'h077);
     tick();
+    send_core_request(EVICT_ADDRESS + 64'h8, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd13);
+    expect_core_response(64'd1, 5'd13);
+    tick();
+    assert (!tx_req_pending && !tx_dat_pending)
+      else $fatal(1, "snoop-invalidated SC unexpectedly reached CHI");
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after dirty snoop response");
 

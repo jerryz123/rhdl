@@ -15,7 +15,8 @@ module ricket_core_tb;
   } instruction_out_t;
   typedef struct packed {
     logic [63:0] address;
-    logic write;
+    logic [2:0] access;
+    logic [3:0] atomic;
     logic [1:0] width;
     logic unsigned_0;
     logic [63:0] data;
@@ -51,6 +52,7 @@ module ricket_core_tb;
   logic saw_redirect;
   logic saw_fence_i_invalidate;
   logic saw_fence_i_refetch;
+  localparam logic [2:0] MEMORY_LOAD = 3'd1;
 
   RicketCore dut (.*);
   always #5 clock = ~clock;
@@ -155,7 +157,7 @@ module ricket_core_tb;
       end
 
       if (data_access_out.request.valid && data_access_in.request.ready) begin
-        if (!data_access_out.request.bits.write) begin
+        if (data_access_out.request.bits.access == MEMORY_LOAD) begin
           if (load_requests == 0)
             assert (data_access_out.request.bits.address == 64'd0 &&
                     data_access_out.request.bits.tag == 5'd5)

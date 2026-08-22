@@ -1,24 +1,22 @@
 #lang rhdl
-// Defines base load/store controls and Ricket's no-memory extension cases.
+// Defines Ricket's load, store, LR/SC, and AMO decode controls.
 
 import:
+  "../memory.rhdl" open
   "decode-support.rhdl" open
   "../../load-store.rhdl" open
   "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
   lib("rhdl/std/decode.rhdl") open
 
-hardware_enum MemoryOperation:
-  None
-  Read
-  Write
-
 bundle MemoryControl():
   access: MemoryOperation
+  atomic: RicketAtomicOperation
   width: MemoryWidth
   unsigned: Bool
 
@@ -33,40 +31,40 @@ def SharedMemoryCases = decode_groups(
   ~input: instruction_pattern
 ):
   [LB]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Byte
     unsigned: Bool(#false)
 
   [LBU]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Byte
     unsigned: Bool(#true)
 
   [LH]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Half
     unsigned: Bool(#false)
 
   [LHU]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Half
     unsigned: Bool(#true)
 
   [LW]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Word
     unsigned: Bool(#false)
 
   [SB]:
-    access: MemoryOperation.Write
+    access: MemoryOperation.Store
     width: MemoryWidth.Byte
 
   [SH]:
-    access: MemoryOperation.Write
+    access: MemoryOperation.Store
     width: MemoryWidth.Half
 
   [SW]:
-    access: MemoryOperation.Write
+    access: MemoryOperation.Store
     width: MemoryWidth.Word
 
 def RV64IOnlyMemoryCases = decode_groups(
@@ -74,17 +72,17 @@ def RV64IOnlyMemoryCases = decode_groups(
   ~input: instruction_pattern
 ):
   [LWU]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Word
     unsigned: Bool(#true)
 
   [LD]:
-    access: MemoryOperation.Read
+    access: MemoryOperation.Load
     width: MemoryWidth.Double
     unsigned: Bool(#false)
 
   [SD]:
-    access: MemoryOperation.Write
+    access: MemoryOperation.Store
     width: MemoryWidth.Double
 
 def RV32IMemoryCases = SharedMemoryCases ++ instruction_cases(
@@ -96,20 +94,140 @@ def RV64IMemoryCases = SharedMemoryCases ++ RV64IOnlyMemoryCases ++ instruction_
   excluding_instructions(RV64IInstructions, rv64_memory_instructions),
   no_memory
 )
+def RV32AMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LR_W]:
+    access: MemoryOperation.LoadReserved
+    width: MemoryWidth.Word
+    unsigned: Bool(#false)
+
+  [SC_W]:
+    access: MemoryOperation.StoreConditional
+    width: MemoryWidth.Word
+
+  [AMOSWAP_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Swap
+    width: MemoryWidth.Word
+
+  [AMOADD_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Add
+    width: MemoryWidth.Word
+
+  [AMOXOR_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Xor
+    width: MemoryWidth.Word
+
+  [AMOAND_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.And
+    width: MemoryWidth.Word
+
+  [AMOOR_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Or
+    width: MemoryWidth.Word
+
+  [AMOMIN_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Min
+    width: MemoryWidth.Word
+
+  [AMOMAX_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Max
+    width: MemoryWidth.Word
+
+  [AMOMINU_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.MinUnsigned
+    width: MemoryWidth.Word
+
+  [AMOMAXU_W]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.MaxUnsigned
+    width: MemoryWidth.Word
+
+def RV64AOnlyMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LR_D]:
+    access: MemoryOperation.LoadReserved
+    width: MemoryWidth.Double
+    unsigned: Bool(#false)
+
+  [SC_D]:
+    access: MemoryOperation.StoreConditional
+    width: MemoryWidth.Double
+
+  [AMOSWAP_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Swap
+    width: MemoryWidth.Double
+
+  [AMOADD_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Add
+    width: MemoryWidth.Double
+
+  [AMOXOR_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Xor
+    width: MemoryWidth.Double
+
+  [AMOAND_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.And
+    width: MemoryWidth.Double
+
+  [AMOOR_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Or
+    width: MemoryWidth.Double
+
+  [AMOMIN_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Min
+    width: MemoryWidth.Double
+
+  [AMOMAX_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.Max
+    width: MemoryWidth.Double
+
+  [AMOMINU_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.MinUnsigned
+    width: MemoryWidth.Double
+
+  [AMOMAXU_D]:
+    access: MemoryOperation.Atomic
+    atomic: RicketAtomicOperation.MaxUnsigned
+    width: MemoryWidth.Double
+
+def RV64AMemoryCases = RV32AMemoryCases ++ RV64AOnlyMemoryCases
 def RV32RicketMemoryCases = RV32IMemoryCases ++ instruction_cases(
   RV32MInstructions ++ ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions,
   no_memory
-)
+) ++ RV32AMemoryCases
 def RV64RicketMemoryCases = RV64IMemoryCases ++ instruction_cases(
   RV64MInstructions ++ ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions,
   no_memory
-)
+) ++ RV64AMemoryCases
 def RV32IMemoryDecode = ValidDecodeGen(RV32IMemoryCases)
 def RV64IMemoryDecode = ValidDecodeGen(RV64IMemoryCases)
 
 export:
   MemoryOperation
+  RicketAtomicOperation
   MemoryControl
+  RV32AMemoryCases
+  RV64AMemoryCases
   RV32IMemoryCases
   RV64IMemoryCases
   RV32RicketMemoryCases

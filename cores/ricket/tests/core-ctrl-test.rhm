@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks base, M, CSR, and system controls in the integrated decoder.
+// Checks base, A, M, CSR, and system controls in the integrated decoder.
 
 import:
   "../../../rhdl/core/main.rhm" open
@@ -10,6 +10,7 @@ import:
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/zmmul.rhm" open
   "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
@@ -117,7 +118,8 @@ def addi_operand = operand_controls.OperandControl():
   right: operand_controls.OperandBSelect.Immediate
   immediate: operand_controls.ImmediateSelect.I
 def lbu_memory = memory_controls.MemoryControl():
-  access: memory_controls.MemoryOperation.Read
+  access: memory_controls.MemoryOperation.Load
+  atomic: memory_controls.RicketAtomicOperation.Swap
   width: load_store.MemoryWidth.Byte
   unsigned: bool.Bool(#true)
 fun resolver_value(enable, unconditional, compare_equal, signed_mode, invert):
@@ -207,13 +209,25 @@ def add_operand_b = operand_controls.OperandControl():
 def no_branch_a = branch_value(#false, #false, #false, #false, #false, #false)
 def no_branch_b = branch_value(#false, #true, #true, #true, #true, #true)
 def store_memory_a = memory_controls.MemoryControl():
-  access: memory_controls.MemoryOperation.Write
+  access: memory_controls.MemoryOperation.Store
+  atomic: memory_controls.RicketAtomicOperation.Swap
   width: load_store.MemoryWidth.Word
   unsigned: bool.Bool(#false)
 def store_memory_b = memory_controls.MemoryControl():
-  access: memory_controls.MemoryOperation.Write
+  access: memory_controls.MemoryOperation.Store
+  atomic: memory_controls.RicketAtomicOperation.Max
   width: load_store.MemoryWidth.Word
   unsigned: bool.Bool(#true)
+def amoadd_memory = memory_controls.MemoryControl():
+  access: memory_controls.MemoryOperation.Atomic
+  atomic: memory_controls.RicketAtomicOperation.Add
+  width: load_store.MemoryWidth.Word
+  unsigned: bool.Bool(#false)
+def lr_memory = memory_controls.MemoryControl():
+  access: memory_controls.MemoryOperation.LoadReserved
+  atomic: memory_controls.RicketAtomicOperation.Swap
+  width: load_store.MemoryWidth.Double
+  unsigned: bool.Bool(#false)
 def no_writeback_a = writeback_controls.WritebackControl():
   enable: bool.Bool(#false)
   source: writeback_controls.WritebackSelect.Alu
@@ -250,6 +264,9 @@ check:
   // are intentionally outside their respective care masks.
   control_for(memory_controls.RV64IMemoryCases, "SW").matches(store_memory_a) ~is #true
   control_for(memory_controls.RV64IMemoryCases, "SW").matches(store_memory_b) ~is #true
+  control_for_instruction(memory_controls.RV64AMemoryCases, AMOADD_W).matches(amoadd_memory) ~is #true
+  control_for_instruction(memory_controls.RV64AMemoryCases, LR_D).matches(lr_memory) ~is #true
+  control_for_instruction(writeback_controls.RV64RicketWritebackCases, AMOMAXU_D).matches(load_writeback) ~is #true
   control_for(branch_controls.RV64IBranchCases, "ADDI").matches(no_branch_a) ~is #true
   control_for(branch_controls.RV64IBranchCases, "ADDI").matches(no_branch_b) ~is #true
   control_for(branch_controls.RV64IBranchCases, "JALR").matches(jalr_branch_a) ~is #true
@@ -289,8 +306,8 @@ check:
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
   controls.RV32IControlDecode.table.packed_cases.length() ~is 40
-  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 74
-  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 57
+  controls.RV64RicketControlDecode.table.packed_cases.length() ~is 96
+  controls.RV32RicketControlDecode.table.packed_cases.length() ~is 68
   record_field(
     control_for_instruction(controls.RV64RicketControlCases, MUL).care,
     "multiply"

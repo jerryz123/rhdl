@@ -110,6 +110,13 @@ remainder operations. RV64M additionally contributes the four 32-bit word
 variants. Keeping both catalogs public lets a core select Zmmul alone or claim
 the complete M extension without duplicating multiply encodings.
 
+[`isa/a.rhm`](isa/a.rhm) defines the RV32A word and RV64A word/doubleword
+load-reserved, store-conditional, and atomic memory-operation encodings. Its
+dedicated formats keep `aq` and `rl` as variable architectural fields while
+fixing `rs2` to zero for LR. The catalog describes ISA encodings only;
+reservation granules, coherence ownership, and read-modify-write execution
+remain core policy.
+
 [`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
 read/modify/write encodings independently of any core's CSR implementation.
 [`isa/zifencei.rhm`](isa/zifencei.rhm) describes the XLEN-independent
@@ -133,4 +140,6 @@ The catalogs were checked against the RISC-V International
 and canonical [`rv_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv_i)
 and [`rv64_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv64_i)
 opcode listings. Zmmul follows the ratified
-[multiply-only extension](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html#_zmmul_extension_version_1_0).
+[multiply-only extension](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html#_zmmul_extension_version_1_0),
+and A follows the ratified
+[atomic extension](https://docs.riscv.org/reference/isa/unpriv/a-st-ext.html).

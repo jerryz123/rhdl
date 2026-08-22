@@ -15,7 +15,8 @@ module ricket_multiply_tb;
   } instruction_out_t;
   typedef struct packed {
     logic [63:0] address;
-    logic write;
+    logic [2:0] access;
+    logic [3:0] atomic;
     logic [1:0] width;
     logic unsigned_0;
     logic [63:0] data;
@@ -40,6 +41,7 @@ module ricket_multiply_tb;
   logic [31:0] instruction_response_bits;
   logic [8:0] cycles;
   logic [2:0] stores_seen;
+  localparam logic [2:0] MEMORY_STORE = 3'd2;
 
   RicketCore dut (.*);
   always #5 clock = ~clock;
@@ -91,7 +93,7 @@ module ricket_multiply_tb;
       end
 
       if (data_access_out.request.valid && data_access_in.request.ready) begin
-        assert (data_access_out.request.bits.write)
+        assert (data_access_out.request.bits.access == MEMORY_STORE)
           else $fatal(1, "multiply program unexpectedly issued a load");
         case (stores_seen)
           0: begin

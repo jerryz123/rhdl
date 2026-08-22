@@ -3,7 +3,7 @@
 # Ricket
 
 Ricket is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with M, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with A, M, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -14,7 +14,7 @@ caches live here. Reusable execution components remain directly under
 
 ```text
 core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
-  |--> bundles + decode + register-file + csr
+  |--> bundles + decode + memory + register-file + csr
   |--> ../{alu,branch-resolver,load-store,multiplier,divider}.rhdl
   |--> icache/protocol.rhdl
   |--> dcache/protocol.rhdl
@@ -119,11 +119,18 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32IM+Zicsr+Zifencei or RV64IM+Zicsr+Zifencei catalog at host
+The integrated structured decoder selects the RV32IMA+Zicsr+Zifencei or RV64IMA+Zicsr+Zifencei catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
 whether decoded values have architectural meaning.
+
+[`memory.rhdl`](memory.rhdl) owns the semantic load, store, LR, SC, and AMO
+operations plus the word/doubleword atomic ALU. A operations return through the
+same deferred memory-writeback path as loads. The ordered blocking L1D gives
+all memory accesses stronger ordering than the architectural `aq` and `rl`
+annotations require, so those instruction bits do not add a second fence or
+transaction mechanism.
 
 [`csr.rhdl`](csr.rhdl) owns the named machine and supervisor CSRs, current
 privilege mode, synchronous trap entry, and `MRET`/`SRET`. CSR instructions
