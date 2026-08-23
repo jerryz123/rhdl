@@ -66,22 +66,27 @@ hardware_enum FesvrCHIState:
 
 fun checked_fesvr_chi_requester(p :: CHIFlitParams,
                                 node :: CHINodeParams,
-                                home_node_id :: Nat):
+                                home_map :: CHIHomeMap):
   unless node.kind == CHINodeKind.RNI
   | error(~who: #'FesvrRequester, "node must be an RN-I")
   unless node.max_outstanding == 1
   | error(~who: #'FesvrRequester,
           "node must allow exactly one outstanding transaction")
-  unless home_node_id < (1 << p.node_id_width)
+  unless home_map.flit == p
   | error(~who: #'FesvrRequester,
-          "Home NodeID must fit the physical NodeID width")
+          "Home map must use FESVR's CHI flit parameters")
+  for (entry in home_map.entries):
+    if entry.target_node_id == node.node_id
+    | error(~who: #'FesvrRequester,
+            "Requester and Home NodeIDs must be distinct")
+    | #void
   p
 
 fun fesvr_chi_request(address :: Bits(32),
                       write :: Bool,
                       p :: CHIFlitParams,
                       node_id :: Nat,
-                      home_node_id :: Nat):
+                      home_node_id :: Bits(p.node_id_width)):
   wire request: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
   | request.rsvdc <== bits(0, p.req_rsvdc_width)
@@ -125,7 +130,7 @@ fun fesvr_chi_request(address :: Bits(32),
   request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
   request.txn_id <== bits(0, 12)
   request.src_id <== bits(node_id, p.node_id_width)
-  request.tgt_id <== bits(home_node_id, p.node_id_width)
+  request.tgt_id <== home_node_id
   request.qos <== bits(0, 4)
   request
 
@@ -134,7 +139,7 @@ fun fesvr_chi_write_data(address :: Bits(32),
                          dbid :: Bits(12),
                          p :: CHIFlitParams,
                          node_id :: Nat,
-                         home_node_id :: Nat):
+                         home_node_id :: Bits(p.node_id_width)):
   def word_lanes = p.data_bytes / 4
   def lane_width = index_width(word_lanes)
   def lane = address[2..(2 + lane_width)]
@@ -174,11 +179,10 @@ fun fesvr_chi_write_data(address :: Bits(32),
   write_data.resp <== bits(0, 3)
   write_data.resp_err <== CHIRespErr.OK
   write_data.opcode <== CHIDatOpcode.NonCopyBackWriteData
-  write_data.home_nid_or_pbha_or_mismatched_mecid <== bits(home_node_id,
-                                                           p.node_id_width)
+  write_data.home_nid_or_pbha_or_mismatched_mecid <== home_node_id
   write_data.txn_id <== dbid
   write_data.src_id <== bits(node_id, p.node_id_width)
-  write_data.tgt_id <== bits(home_node_id, p.node_id_width)
+  write_data.tgt_id <== home_node_id
   write_data.qos <== bits(0, 4)
   write_data
 
@@ -186,8 +190,8 @@ fun fesvr_chi_write_data(address :: Bits(32),
 // only ready-valid CHI flows; physical activation and credits belong outside it.
 sync_circuit FesvrRequester(flit :: CHIFlitParams,
                             node :: CHINodeParams,
-                            home_node_id :: Nat):
-  def p = checked_fesvr_chi_requester(flit, node, home_node_id)
+                            home_map :: CHIHomeMap):
+  def p = checked_fesvr_chi_requester(flit, node, home_map)
   def word_lanes = p.data_bytes / 4
   def lane_width = index_width(word_lanes)
 
@@ -200,12 +204,16 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   reg state(~init: FesvrCHIState.Idle)
   reg request_address(~init: bits(0, 32))
   reg request_word(~init: bits(0, 32))
+  reg home_id(~init: bits(0, p.node_id_width))
   reg write_dbid(~init: bits(0, 12))
   def idle = state === FesvrCHIState.Idle
-  port.req.valid <== raw.request_valid & idle
-  port.req.bits <== fesvr_chi_request(raw.request_address, raw.request_write, p, node.node_id, home_node_id)
-  raw.request_ready <== idle & port.req.ready
+  def request_home = home_map.lookup(zext(raw.request_address, p.request_address_width))
+  port.req.valid <== raw.request_valid & idle & request_home.valid
+  port.req.bits <== fesvr_chi_request(raw.request_address, raw.request_write, p, node.node_id, request_home.node_id)
+  raw.request_ready <== idle & request_home.valid & port.req.ready
   def request_fire = fire(port.req)
+  when (raw.request_valid & idle):
+    assert(request_home.valid, "fesvr_chi_address_has_home")
 
   def response = port.rsp.response.bits
   def accepting_dbid = (state === FesvrCHIState.WriteAwaitDBID) & (
@@ -218,7 +226,7 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   def dbid_fire = fire(port.rsp.response) & accepting_dbid
 
   port.dat.request.valid <== state === FesvrCHIState.WriteData
-  port.dat.request.bits <== fesvr_chi_write_data(request_address, request_word, write_dbid, p, node.node_id, home_node_id)
+  port.dat.request.bits <== fesvr_chi_write_data(request_address, request_word, write_dbid, p, node.node_id, home_id)
   def write_data_fire = fire(port.dat.request)
 
   def read_data = port.dat.response.bits
@@ -239,6 +247,7 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   when request_fire:
     request_address <== raw.request_address
     request_word <== raw.request_data
+    home_id <== request_home.node_id
     state <== mux(raw.request_write,
                   FesvrCHIState.WriteAwaitDBID,
                   FesvrCHIState.ReadPending)
@@ -253,8 +262,11 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   when (port.rsp.response.valid):
     assert(accepting_dbid ||| write_response_valid,
            "fesvr_chi_response_expected")
+    assert(response.src_id === home_id, "fesvr_chi_response_home")
   when (port.dat.response.valid):
     assert(read_pending, "fesvr_chi_read_data_expected")
+    assert(read_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
+           "fesvr_chi_read_data_home")
 
   raw.start_ready <== start.ready
   port.rsp.requester.valid <== Bool(#false)

@@ -166,16 +166,22 @@ capacity. `CHIHomeServiceParams` describes the operations and address regions
 that an RN routes to a Home Node. `CHIFabricPortParams` pairs each RN or SN ICN
 endpoint with the link parameter class required by its node kind.
 
+`CHIHomeMap` is the single requester-side address map. Its typed
+`CHIHomeMapEntry` values associate disjoint `AddressSet` regions with
+`CHIHomeParams`, and `CHIHomeMap.lookup` lowers that map to a combinational
+`valid` plus Home NodeID decision. A requester latches that decision when it
+accepts a transaction; NoC compilation independently translates the resulting
+NodeID into a route key.
+
 `CHIFabricParams` accepts a common `CHIFlitParams`, physical ports, Home Nodes,
-home services, and subordinate services. It derives two deliberately separate
-maps: `rn_sam` routes requester addresses to `CHIHomeSAMEntry` targets, while
-`hn_sam` routes Home Node traffic to `CHISubordinateSAMEntry` targets. A flat
-RN-to-SN map would bypass the Home Node and is not a valid model of CHI
-topology. Construction rejects duplicate or width-overflowing NodeIDs,
-mismatched physical flit parameters, absent service targets, out-of-range
-addresses, overlap within either map, duplicate service opcodes, and transfer
-sizes that cannot be represented by CHI's Size field. These are host-side
-topology parameters; they do not yet generate routing or arbitration RTL.
+home services, and subordinate services. It derives the executable `home_map`
+from the Home services. Subordinate services remain capability and region
+metadata; there is no subordinate-map abstraction yet. A flat RN-to-SN map
+would bypass the Home Node and is not a valid model of CHI topology.
+Construction rejects duplicate or width-overflowing NodeIDs, mismatched
+physical flit parameters, absent service targets, out-of-range addresses,
+overlap within the Home map, duplicate service opcodes, and transfer sizes that
+cannot be represented by CHI's Size field.
 
 ## Link-local monitoring
 
@@ -463,8 +469,8 @@ turns an externally credited flit channel into a buffered internal flow.
    response, and single-flit data-completeness transaction monitors. General
    ordering, retry and Protocol Credits, and other transaction families remain.
 6. **Parameters and NoC mapping complete:** Define `CHIFabricParams`, Home Node
-   identities, and separate requester-to-home and home-to-subordinate System
-   Address Maps. Generic NoC compilation joins an
+   identities, executable requester-to-home selection, and passive
+   home-to-subordinate service metadata. Generic NoC compilation joins an
    independently authored physical topology, terminal placement, route-class
    set, and routing policy. CHI separately maps NodeIDs to the symbolic
    terminals and derives only target decode and flow adaptation. Pure RN and

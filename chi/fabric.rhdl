@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines CHI fabric ports, subordinate services, and validated System Address Maps.
+// Defines CHI fabric ports, services, and executable Home address selection.
 
 import:
   rhombus/meta open
@@ -70,6 +70,8 @@ class CHIHomeParams(name :: NonemptyString,
                     node_id :: Nat,
                     kind :: CHINodeKind,
                     max_outstanding :: Int.in(1 ..= 1024)):
+  implements CircuitParam
+
   constructor (name :: NonemptyString,
                node_id :: Nat,
                kind :: CHINodeKind,
@@ -92,19 +94,62 @@ class CHIHomeServiceParams(home :: CHIHomeParams,
     for any (request in requests):
       request.opcode == opcode && request.sizes.contains(bytes)
 
-class CHIHomeSAMEntry(address_set :: AddressSet,
-                      service :: CHIHomeServiceParams):
-  property target_node_id: service.home.node_id
+class CHIHomeMapEntry(address_set :: AddressSet,
+                      home :: CHIHomeParams):
+  implements CircuitParam
 
-  method supports(opcode :: CHIReqOpcode, bytes :: PosInt):
-    service.supports(opcode, bytes)
+  property target_node_id: home.node_id
 
-class CHISubordinateSAMEntry(address_set :: AddressSet,
-                             service :: CHISubordinateServiceParams):
-  property target_node_id: service.endpoint.node_id
+fun require_disjoint_sam(sam :: List, who :: Symbol):
+  for (left_index in 0..sam.length()):
+    for (right_index in (left_index + 1)..sam.length()):
+      if sam[left_index].address_set.overlaps(sam[right_index].address_set)
+      | error(~who: who, "System Address Map entries must not overlap")
+      | #void
 
-  method supports(opcode :: CHIReqOpcode, bytes :: PosInt):
-    service.supports(opcode, bytes)
+bundle CHIHomeLookup(node_id_width :: PosInt):
+  valid: Bool
+  node_id: Bits(node_id_width)
+
+class CHIHomeMap(flit :: CHIFlitParams,
+                 entries :: NonemptyList.of(CHIHomeMapEntry)):
+  implements CircuitParam
+
+  constructor (flit :: CHIFlitParams,
+               entries :: NonemptyList.of(CHIHomeMapEntry)):
+    for (entry in entries):
+      unless entry.address_set.fits_unsigned_width(flit.request_address_width)
+      | error(~who: #'CHIHomeMap,
+              "Home map entry must fit the request address width")
+      unless bits.length(entry.target_node_id) <= flit.node_id_width
+      | error(~who: #'CHIHomeMap,
+              "Home map NodeID must fit the physical NodeID width")
+    require_disjoint_sam(entries, #'CHIHomeMap)
+    super(flit, entries)
+
+  method entry(address :: Nat):
+    entries.find(fun (entry): entry.address_set.contains(address))
+
+  method lookup(address :: Bits(flit.request_address_width))
+    :~ CHIHomeLookup(flit.node_id_width):
+    def mutable valid = Bool(#false)
+    def mutable node_id = bits(0, flit.node_id_width)
+    for (entry in entries):
+      def matches = entry.address_set.matches(address)
+      valid := valid ||| matches
+      node_id := mux(matches, bits(entry.target_node_id, flit.node_id_width), node_id)
+    CHIHomeLookup(flit.node_id_width):
+      valid: valid
+      node_id: node_id
+
+fun chi_home_map_from_services(flit :: CHIFlitParams,
+                               services :: NonemptyList.of(CHIHomeServiceParams))
+  :: CHIHomeMap:
+  def mutable entries = []
+  for (service in services):
+    for (address_set in service.address_sets):
+      entries := entries ++ [CHIHomeMapEntry(address_set, service.home)]
+  CHIHomeMap(flit, entries)
 
 fun require_unique_node_ids(ports :: List.of(CHIFabricPortParams),
                             homes :: List.of(CHIHomeParams),
@@ -118,20 +163,12 @@ fun require_unique_node_ids(ports :: List.of(CHIFabricPortParams),
       | error(~who: who, "fabric NodeIDs must be unique")
       | #void
 
-fun require_disjoint_sam(sam :: List, who :: Symbol):
-  for (left_index in 0..sam.length()):
-    for (right_index in (left_index + 1)..sam.length()):
-      if sam[left_index].address_set.overlaps(sam[right_index].address_set)
-      | error(~who: who, "System Address Map entries must not overlap")
-      | #void
-
 class CHIFabricParams(flit :: CHIFlitParams,
                       ports :: NonemptyList.of(CHIFabricPortParams),
                       homes :: NonemptyList.of(CHIHomeParams),
                       home_services :: NonemptyList.of(CHIHomeServiceParams),
                       subordinate_services :: NonemptyList.of(CHISubordinateServiceParams),
-                      rn_sam :: NonemptyList.of(CHIHomeSAMEntry),
-                      hn_sam :: NonemptyList.of(CHISubordinateSAMEntry)):
+                      home_map :: CHIHomeMap):
   constructor (flit :: CHIFlitParams,
                ports :: NonemptyList.of(CHIFabricPortParams),
                homes :: NonemptyList.of(CHIHomeParams),
@@ -149,17 +186,11 @@ class CHIFabricParams(flit :: CHIFlitParams,
       unless bits.length(home.node_id) <= flit.node_id_width
       | error(~who: #'CHIFabricParams,
               "fabric NodeID must fit the physical NodeID width")
-    def mutable rn_entries = []
     for (service in home_services):
       unless homes.contains(service.home)
       | error(~who: #'CHIFabricParams,
               "home service must reference a fabric Home Node")
-      for (address_set in service.address_sets):
-        unless address_set.fits_unsigned_width(flit.request_address_width)
-        | error(~who: #'CHIFabricParams,
-                "Request Node System Address Map entry must fit the request address width")
-        rn_entries := rn_entries ++ [CHIHomeSAMEntry(address_set, service)]
-    def mutable hn_entries = []
+    def home_map = chi_home_map_from_services(flit, home_services)
     for (service in subordinate_services):
       unless for any (port in ports):
                port.endpoint == service.endpoint
@@ -168,17 +199,13 @@ class CHIFabricParams(flit :: CHIFlitParams,
       for (address_set in service.address_sets):
         unless address_set.fits_unsigned_width(flit.request_address_width)
         | error(~who: #'CHIFabricParams,
-                "Home Node System Address Map entry must fit the request address width")
-        hn_entries := hn_entries ++ [CHISubordinateSAMEntry(address_set, service)]
-    require_disjoint_sam(rn_entries, #'CHIFabricParams)
-    require_disjoint_sam(hn_entries, #'CHIFabricParams)
+                "subordinate service address must fit the request address width")
     super(flit,
           ports,
           homes,
           home_services,
           subordinate_services,
-          rn_entries,
-          hn_entries)
+          home_map)
 
 export:
   AddressSet
@@ -188,6 +215,8 @@ export:
   CHIFabricPortParams
   CHIHomeParams
   CHIHomeServiceParams
-  CHIHomeSAMEntry
-  CHISubordinateSAMEntry
+  CHIHomeMapEntry
+  CHIHomeMap
+  CHIHomeLookup
+  chi_home_map_from_services
   CHIFabricParams

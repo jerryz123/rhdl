@@ -30,7 +30,9 @@ The private ready-valid signals between `DirectMemoryHTIF` and
 belong only to the DPI procedure call. They are not a hardware memory protocol
 and are not exposed outside the requester. The requester owns these
 one-outstanding CHI transaction flows but no physical link activation or credit
-state:
+state. Its `CHIHomeMap` parameter selects the destination Home from each
+accepted request address, and the requester retains that NodeID for the entire
+transaction:
 
 | FESVR operation | Native CHI sequence |
 |---|---|

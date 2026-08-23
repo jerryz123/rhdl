@@ -38,6 +38,9 @@ The shared transaction engines own protocol sequencing, retry state, response
 stability, and DVM pairing. The wrapper composes the core, MMU, and caches into
 two ready-valid RN-F channel bundles; physical credited links belong to system
 integration when the channels actually cross a CHI link boundary.
+`RicketCHIParams` supplies one `CHIHomeMap`; each cache transaction decodes its
+address once and retains the selected HN-F NodeID through retries, data, and
+completion acknowledgement.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
@@ -206,7 +209,10 @@ of being flattened into the same graph.
 `XLen` enum value. Architectural addresses and cache tags use
 `xlen_width(xlen)` internally. Both private L1 caches use the architectural
 64-byte line size from [`cache.rhdl`](cache.rhdl); line geometry is not a
-top-level generator option. The RN-F boundary uses the explicit CHI request
+top-level generator option. The required `~chi:` parameter is integration
+policy: the containing SoC supplies Ricket's RN-F NodeIDs, physical flit
+parameters, and Home map. Ricket has no implicit standalone fabric. The RN-F
+boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
 The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer,
 separate instruction and data `CHIRNChannels` node ports, and a sticky `fault`

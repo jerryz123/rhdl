@@ -55,16 +55,18 @@ sync_circuit RicketWriteUnique(Context :: DataType,
 
   command.ready <== !active_state
   def command_fire = fire(command)
+  def command_home = checked.home_map.lookup(ricket_chi_address(command.bits.address, p))
   when command_fire:
     assert(ricket_chi_address_fits(command.bits.address, p),
            "write_unique_address_fits_chi")
+    assert(command_home.valid, "write_unique_address_has_home")
 
   def retry_ready = retry_received & retry_credit_received
   requests.valid <== active_state & !request_sent & (!retry_received ||| retry_ready)
   requests.bits <== ricket_chi_request(
     p,
     node_id,
-    checked.home_node_id,
+    home_id,
     address,
     cast(zext(as_bits(width), 3), CHITransferSize),
     CHIReqOpcode.WriteUniquePtl,
@@ -105,7 +107,7 @@ sync_circuit RicketWriteUnique(Context :: DataType,
   def transaction_id_already_received = dbid_received ||| completion_received
   when (responses.valid & response_ordinary):
     assert(response_expected, "write_unique_response_expected")
-    assert(incoming_response.src_id === bits(checked.home_node_id, p.node_id_width),
+    assert(incoming_response.src_id === home_id,
            "write_unique_response_home")
     assert(incoming_response.resp_err === CHIRespErr.OK,
            "write_unique_response_ok")
@@ -146,6 +148,7 @@ sync_circuit RicketWriteUnique(Context :: DataType,
     write_data <== command.bits.data
     write_mask <== command.bits.mask
     context <== command.bits.context
+    home_id <== command_home.node_id
   elsewhen completion_fire:
     active_state <== Bool(#false)
 
@@ -170,7 +173,6 @@ sync_circuit RicketWriteUnique(Context :: DataType,
     completion_received <== Bool(#true)
 
   when transaction_id_response_fire:
-    home_id <== incoming_response.src_id
     dbid <== incoming_response.dbid_or_group_id
 
   when (command_fire ||| (request_fire & retry_received) ||| completion_fire):

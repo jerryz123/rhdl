@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks CHI fabric ports, Home Nodes, services, and both System Address Maps.
+// Checks CHI fabric services, executable Home selection, and subordinate metadata.
 
 import:
   rhombus.bits.(<<) as <<
@@ -73,12 +73,11 @@ check:
   fabric.homes ~is [home]
   fabric.home_services ~is [home_service]
   fabric.subordinate_services ~is [memory_service]
-  fabric.rn_sam.length() ~is 1
-  fabric.rn_sam[0].address_set ~is chi.AddressSet(0x80000000, 0x0fffffff)
-  fabric.rn_sam[0].target_node_id ~is 5
-  fabric.hn_sam.length() ~is 1
-  fabric.hn_sam[0].target_node_id ~is 9
-  fabric.hn_sam[0].supports(chi.CHIReqOpcode.ReadNoSnp, 64) ~is #true
+  fabric.home_map.entries.length() ~is 1
+  fabric.home_map.entries[0].address_set ~is chi.AddressSet(0x80000000, 0x0fffffff)
+  fabric.home_map.entries[0].home === home ~is #true
+  fabric.home_map.entry(0x81234567).target_node_id ~is 5
+  fabric.home_map.entry(0x70000000) ~is #false
 
   chi.CHIRequestSupport("ReadNoSnp", chi.TransferSizes(1, 8)) ~throws "CHIReqOpcode"
   chi.CHIHomeParams("bad-home", 4, chi.CHINodeKind.RNI, ~max_outstanding: 1) ~throws "HN-F or HN-I"
@@ -102,6 +101,22 @@ check:
     [chi.AddressSet(0, 0xfff)],
     [read_support, read_support]
   ) ~throws "duplicate opcodes"
+  chi.CHIHomeMap(
+    flit,
+    [chi.CHIHomeMapEntry(chi.AddressSet(0x80000000, 0x0fffffff), home),
+     chi.CHIHomeMapEntry(chi.AddressSet(0x88000000, 0x07ffffff), home)]
+  ) ~throws "must not overlap"
+  chi.CHIHomeMap(
+    flit,
+    [chi.CHIHomeMapEntry(chi.AddressSet(1 << 44, 0xfff), home)]
+  ) ~throws "fit the request address width"
+  chi.CHIHomeMap(
+    flit,
+    [chi.CHIHomeMapEntry(
+       chi.AddressSet(0, 0xfff),
+       chi.CHIHomeParams("wide-home", 128, chi.CHINodeKind.HNI, ~max_outstanding: 1)
+     )]
+  ) ~throws "fit the physical NodeID width"
   chi.CHISubordinateServiceParams(
     memory,
     [chi.AddressSet(0, 0xfff)],
@@ -180,15 +195,3 @@ check:
        [read_support]
      )]
   ) ~throws "fit the request address width"
-  chi.CHIFabricParams(
-    flit,
-    [requester_port, memory_port],
-    [home],
-    [home_service],
-    [memory_service,
-     chi.CHISubordinateServiceParams(
-       memory,
-       [chi.AddressSet(0x88000000, 0x07ffffff)],
-       [read_support]
-     )]
-  ) ~throws "must not overlap"

@@ -13,9 +13,11 @@ completion tag; ordinary store response data and tag have no meaning. The
 pipeline uses the tag to clear the destination scoreboard entry when a delayed
 load or atomic operation returns. It checks
 architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation. `RicketL1DCache(xlen, ...)` accepts `XLen.X32` or
-`XLen.X64`; its core-facing addresses use the selected XLEN while its native
-RN-F port uses the configured CHI address width. Ricket cache lines are always
+load/store lane generation. `RicketL1DCache(xlen, ..., ~chi: ...)` accepts
+`XLen.X32` or `XLen.X64`; the required CHI parameter comes from system
+integration and supplies the RN-F identity, flit geometry, and Home map. Its
+core-facing addresses use the selected XLEN while its native RN-F port uses the
+configured CHI address width. Ricket cache lines are always
 64 bytes. The default 128-bit DAT width is CHI's minimum, so each refill is
 assembled from four physical DAT packets.
 The responder also exposes a combinational `drained` observation. It is true

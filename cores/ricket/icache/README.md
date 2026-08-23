@@ -12,7 +12,9 @@ ownership. The line size is an architectural Ricket constant, not a cache
 generator parameter.
 
 `cache.rhdl` implements a direct-mapped read-only cache with host-configured
-power-of-two set and line counts. A one-stage `Pipe` carries each address beside
+power-of-two set and line counts. Its required `~chi:` parameter supplies the
+RN-F identity, flit geometry, and Home map from the containing integration. A
+one-stage `Pipe` carries each address beside
 the synchronous tag/data lookup, so consecutive hits accept and return one
 ordered instruction every cycle. A hit maps directly into a response flow; a
 miss is filtered and mapped into the shared `../refill.rhdl` transaction engine.
