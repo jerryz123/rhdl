@@ -1,10 +1,18 @@
 // Verifies RicketCore ordered commit, scoreboard hazards, and FENCE.I refetch control.
 module ricket_core_tb;
+  typedef struct packed {
+    logic supervisor_software;
+    logic machine_software;
+    logic supervisor_timer;
+    logic machine_timer;
+    logic supervisor_external;
+    logic machine_external;
+  } interrupts_t;
   typedef struct packed { logic valid; logic [63:0] bits; } start_in_t;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [63:0] address; } instruction_req_bits_t;
   typedef struct packed { logic valid; instruction_req_bits_t bits; } instruction_req_t;
-  typedef struct packed { logic [31:0] instruction; } instruction_resp_bits_t;
+  typedef struct packed { logic [31:0] instruction; logic page_fault; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
   typedef struct packed {
@@ -25,11 +33,12 @@ module ricket_core_tb;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
-  typedef struct packed { ready_t request; data_resp_t response; logic drained; } data_in_t;
+  typedef struct packed { ready_t request; logic request_fault; data_resp_t response; logic drained; } data_in_t;
   typedef struct packed { data_req_t request; } data_out_t;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  interrupts_t interrupts;
   start_in_t start_in;
   instruction_in_t instruction_access_in;
   data_in_t data_access_in;
@@ -37,6 +46,10 @@ module ricket_core_tb;
   instruction_out_t instruction_access_out;
   data_out_t data_access_out;
   logic fault;
+  logic [1:0] privilege;
+  logic [63:0] mstatus;
+  logic [63:0] satp;
+  logic translation_flush;
   logic instruction_response_valid;
   logic [31:0] instruction_response_bits;
   logic data_response_valid;
@@ -77,7 +90,9 @@ module ricket_core_tb;
     instruction_access_in.request.ready = !instruction_response_valid;
     instruction_access_in.response.valid = instruction_response_valid;
     instruction_access_in.response.bits.instruction = instruction_response_bits;
+    instruction_access_in.response.bits.page_fault = 1'b0;
     data_access_in.request.ready = 1'b1;
+    data_access_in.request_fault = 1'b0;
     data_access_in.response.valid = data_response_valid;
     data_access_in.response.bits.data = data_response_bits;
     data_access_in.response.bits.tag = data_response_tag;
@@ -197,6 +212,7 @@ module ricket_core_tb;
   end
 
   initial begin
+    interrupts = '0;
     start_in.valid = 1'b0;
     start_in.bits = 64'h00000001_00000000;
     repeat (2) @(posedge clock);

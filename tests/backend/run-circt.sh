@@ -620,6 +620,8 @@ direct_fixture_specs=(
   'ricket-csr|ricket_csr_tb'
   'ricket-atomic|ricket_atomic_tb'
   'ricket-core|ricket_core_tb'
+  'ricket-interrupt|ricket_interrupt_tb'
+  'ricket-interrupt-flow|ricket_interrupt_tb'
   'ricket-multiply|ricket_multiply_tb'
   'ricket-divide|ricket_divide_tb'
   'ricket-core-flow|ricket_core_tb'

@@ -19,6 +19,8 @@ SimpleSoC
 FESVR loads memory through its RN-I endpoint, then hands the widened entry point
 directly to Ricket. The SoC exposes the `loaded`, `entry`, and `exit` signals
 consumed by [`support/TestDriver.sv`](../support/TestDriver.sv).
+Ricket's controller-independent interrupt input is tied inactive in this
+composition until the SoC gains an ACLINT timer or another platform source.
 
 The RN-I and two RN-F relationships reuse one physical single-router topology
 but independently compile validation, route keys, buffering, and allocation for

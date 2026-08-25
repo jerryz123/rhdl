@@ -137,15 +137,27 @@ annotations require, so those instruction bits do not add a second fence or
 transaction mechanism.
 
 [`csr.rhdl`](csr.rhdl) owns the named machine and supervisor CSRs, current
-privilege mode, synchronous trap entry, and `MRET`/`SRET`. CSR instructions
+privilege mode, trap entry, interrupt selection, and `MRET`/`SRET`. CSR instructions
 atomically return the old value and update state at WB. System instructions
 serialize in Decode and wait for older deferred loads, multiplies, or divides before
 entering the pipeline, so younger instructions cannot create side effects
 before the system operation commits. Execute-detected exceptions immediately
 squash younger work but carry the faulting instruction to WB, where the CSR
 file records EPC, cause, and trap value and selects the direct `mtvec` or
-`stvec` target. The first cut has no interrupts, PMP, counters, or vectored
-trap mode.
+`stvec` target.
+
+[`interrupt.rhdl`](interrupt.rhdl) defines six controller-independent standard
+pending inputs for supervisor and machine software, timer, and external
+interrupts. The CSR file merges those levels with writable supervisor pending
+bits, exposes the resulting `mip`/`sip` views, applies `mie`/`sie`, global
+`mstatus` enables, and `mideleg`, and selects the architectural fixed priority.
+An eligible interrupt stops Fetch and Decode while accepted instructions and
+deferred completions drain. It is then taken after the last retired instruction,
+with EPC set to that instruction's architectural successor; every younger
+pipeline token and same-cycle memory effect is discarded. `WFI` is a serialized
+legal no-op for now, so it completes without idling the clock.
+PMP, counters, vectored trap mode, and platform interrupt controllers remain
+outside this slice.
 
 RV64 Ricket implements Bare and Sv39 address translation ahead of its
 physically indexed, physically tagged L1 caches. `satp.MODE` accepts Bare or
@@ -214,7 +226,8 @@ policy: the containing SoC supplies Ricket's RN-F NodeIDs, physical flit
 parameters, and Home map. Ricket has no implicit standalone fabric. The RN-F
 boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
-The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer,
+The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer, a
+packed `RicketInterrupts` input independent of any ACLINT, PLIC, or AIA block,
 separate instruction and data `CHIRNChannels` node ports, and a sticky `fault`
 output for a rejected misaligned external start address. Architectural
 instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and

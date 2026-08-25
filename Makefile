@@ -124,7 +124,7 @@ ricket-host-test: check-boundaries
 	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
 
 ricket-test: ricket-host-test
-	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard ricket-register-file ricket-csr ricket-atomic ricket-core ricket-core-flow ricket-multiply ricket-divide ricket-core-rv32 ricket-icache ricket-dcache ricket-dcache-rv32' bash tests/backend/run-circt.sh
+	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard ricket-register-file ricket-csr ricket-atomic ricket-core ricket-core-flow ricket-interrupt ricket-interrupt-flow ricket-multiply ricket-divide ricket-core-rv32 ricket-icache ricket-dcache ricket-dcache-rv32' bash tests/backend/run-circt.sh
 
 circt-test: check-example-verilog
 	bash tests/backend/run-circt.sh

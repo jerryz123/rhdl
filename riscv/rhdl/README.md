@@ -32,3 +32,7 @@ this adapter boundary.
 [`trap.rhdl`](trap.rhdl) converts an architectural `ExceptionCause` into a
 width-specialized hardware value. Core-specific trap selection stays in the
 processor while the cause-number namespace remains shared.
+
+[`interrupt.rhdl`](interrupt.rhdl) converts an architectural `InterruptCause`
+into a width-specialized `xcause` value with the interrupt bit set. Pending
+sources, interrupt selection, and privilege transitions remain core policy.

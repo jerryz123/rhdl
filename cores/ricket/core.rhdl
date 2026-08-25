@@ -15,6 +15,7 @@ import:
   "decode/writeback-ctrl.rhdl" open
   "bundles.rhdl" open
   "csr.rhdl" open
+  "interrupt.rhdl" open
   "multiply.rhdl" open
   "divide.rhdl" open
   "register-file.rhdl" open
@@ -38,6 +39,7 @@ sync_circuit RicketCore(xlen :: XLen):
   def register_count = 32
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
+  input interrupts: RicketInterrupts()
   interface instruction_access(RicketInstructionAccess(xlen), ~role: requester)
   interface data_access(RicketDataAccess(xlen), ~role: requester)
   output fault: Bool
@@ -70,6 +72,7 @@ sync_circuit RicketCore(xlen :: XLen):
   inst divider(RicketDivider(xlen))
   inst scoreboard(Scoreboard(register_count))
   inst csrs(RicketCsrFile(xlen))
+  csrs.interrupts <== interrupts
 
   // Name the pipeline boundaries once so later sections can be presented in
   // stage order while still observing downstream occupancy and results.
@@ -109,6 +112,7 @@ sync_circuit RicketCore(xlen :: XLen):
   translation_flush <== translation_restart_commit
   def fence_i_resume_pc = commit.bits.pc + bits(4, width)
   def fence_commit = fence_i_commit ||| translation_restart_commit
+  def commit_redirect = csrs.redirect.valid ||| fence_commit
   redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
@@ -127,6 +131,7 @@ sync_circuit RicketCore(xlen :: XLen):
   )
   reg started(~init: Bool(#false))
   reg fetch_pc(~init: zero)
+  reg architectural_pc(~init: zero)
   start.ready <== !started & !(faulted ||| execute_exception_event)
   def start_fire = fire(start)
   def start_fault = start_fire & !is_aligned(start.bits, 4)
@@ -134,7 +139,7 @@ sync_circuit RicketCore(xlen :: XLen):
   inst fetch_pcs(Queue(Bits(width), 2, ~pipe: #true), ~reset_when: fetch_flush)
   instruction_access.flush <== fetch_flush
   instruction_access.invalidate_all <== fence_i_commit
-  def fetch_valid = started & !squash
+  def fetch_valid = started & !squash & !csrs.interrupt_request
   instruction_access.request.valid <== fetch_valid & fetch_pcs.ingress.ready
   instruction_access.request.bits <== RicketInstructionReq(xlen):
     address: fetch_pc
@@ -148,6 +153,12 @@ sync_circuit RicketCore(xlen :: XLen):
     fetch_pc <== start.bits
   elsewhen (fire(instruction_access.request)):
     fetch_pc <== fetch_pc + bits(4, width)
+  when (csrs.redirect.valid):
+    architectural_pc <== csrs.redirect.bits
+  elsewhen start_fire:
+    architectural_pc <== start.bits
+  elsewhen (commit.valid):
+    architectural_pc <== commit.bits.resume_pc
 
   def fetch_pair_ready = squash ||| if_id_pipe.ingress.ready
   instruction_access.response.ready <== fetch_pair_ready & fetch_pcs.egress.valid
@@ -236,7 +247,7 @@ sync_circuit RicketCore(xlen :: XLen):
   def fence_waits_for_data = control.fence.is_fence_operation() & !data_access.drained
   def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
     scoreboard_waw_hazard
-  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| exception_in_flight ||| (
+  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| csrs.interrupt_request ||| exception_in_flight ||| (
     execute_exception_event
   )
   if_id_pipe.egress.ready <== squash ||| (id_ex_pipe.ingress.ready & !pipeline_hazard)
@@ -386,8 +397,9 @@ sync_circuit RicketCore(xlen :: XLen):
   def execute_multiplier_ready = !execute_needs_multiplier ||| multiplier_available
   def execute_divider_ready = !execute_needs_divider ||| divider_available
   def execute_ready = execute_cache_ready & execute_multiplier_ready & execute_divider_ready
-  def execute_transfer = id_ex.valid & execute_ready
-  id_ex.ready <== execute_ready
+  def older_pipeline_squash = faulted ||| (memory.valid & memory.bits.exception_valid) ||| commit_redirect
+  def execute_transfer = id_ex.valid & execute_ready & !older_pipeline_squash
+  id_ex.ready <== older_pipeline_squash ||| execute_ready
   branch_resolver.request.valid <== execute_transfer
   branch_resolver.request.bits <== BranchResolverRequest(width):
     left: forwarded_rs1
@@ -396,7 +408,7 @@ sync_circuit RicketCore(xlen :: XLen):
 
   // A legal memory access starts its synchronous cache lookup at the same
   // edge that captures the instruction in EX/MEM.
-  data_access.request.valid <== id_ex.valid & execute_multiplier_ready & execute_divider_ready & issue_memory_request
+  data_access.request.valid <== id_ex.valid & !older_pipeline_squash & execute_multiplier_ready & execute_divider_ready & issue_memory_request
   data_access.request.bits <== RicketDataReq(xlen):
     address: alu.result
     access: execute_memory_operation
@@ -413,6 +425,7 @@ sync_circuit RicketCore(xlen :: XLen):
   ex_mem_pipe.ingress.valid <== execute_transfer
   ex_mem_pipe.ingress.bits <== ExecuteMemory(xlen):
     pc: id_ex.bits.pc
+    resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.pc + bits(4, width))
     instruction: id_ex.bits.instruction
     writeback_source: id_ex.bits.writeback_source
     writeback_enable: id_ex.bits.writeback_enable & !execute_fault
@@ -434,9 +447,10 @@ sync_circuit RicketCore(xlen :: XLen):
 
   // Memory advances every instruction into WB; exception payloads have their
   // ordinary side effects disabled. No instruction commits at this boundary.
-  mem_wb_pipe.ingress.valid <== memory.valid
+  mem_wb_pipe.ingress.valid <== memory.valid & !commit_redirect
   mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
     pc: memory.bits.pc
+    resume_pc: memory.bits.resume_pc
     instruction: memory.bits.instruction
     writeback_source: memory.bits.writeback_source
     write_enable: memory.bits.writeback_enable
@@ -462,6 +476,9 @@ sync_circuit RicketCore(xlen :: XLen):
   // Writeback (WB) is the ordered commit point. Deferred loads and arithmetic
   // mark their destinations busy here; immediate and CSR results update the
   // register file and remain available to Execute through the bypass link.
+  def interrupt_commit_safe = !commit.valid ||| (!commit.bits.exception_valid & !serializing_operation(commit.bits.system, commit.bits.fence) & !deferred_writeback(commit.bits.writeback_source))
+  csrs.interrupt_boundary <== !id_ex.valid & !memory.valid & !deferred_state_pending & interrupt_commit_safe
+  csrs.interrupt_pc <== mux(commit.valid, commit.bits.resume_pc, architectural_pc)
   csrs.commit.valid <== commit.valid
   csrs.commit.bits <== RicketCsrCommit(xlen):
     pc: commit.bits.pc

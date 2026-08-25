@@ -1,12 +1,15 @@
 #lang rhdl
-// Implements Ricket's commit-owned CSR, privilege, and synchronous-trap state.
+// Implements Ricket's commit-owned CSR, privilege, trap, and interrupt state.
 
 import:
   "decode/system-ctrl.rhdl" open
+  "interrupt.rhdl" open
   "../../riscv/isa/csr.rhm" open
+  "../../riscv/isa/interrupt.rhm" open
   "../../riscv/isa/trap.rhm" open
   "../../riscv/isa/xlen.rhm" open
   "../../riscv/rhdl/csr.rhdl" open
+  "../../riscv/rhdl/interrupt.rhdl" open
   "../../riscv/rhdl/trap.rhdl" open
   lib("rhdl/std/bits.rhdl") open
   lib("rhdl/std/ready-valid.rhdl") open
@@ -33,6 +36,7 @@ bundle RicketCsrState(xlen :: XLen):
   medeleg: Bits(xlen_width(xlen))
   mideleg: Bits(xlen_width(xlen))
   mie: Bits(xlen_width(xlen))
+  mip: Bits(xlen_width(xlen))
   mtvec: Bits(xlen_width(xlen))
   mcounteren: Bits(xlen_width(xlen))
   mscratch: Bits(xlen_width(xlen))
@@ -51,6 +55,11 @@ bundle RicketTrapDecision(xlen :: XLen):
   valid: Bool
   cause: Bits(xlen_width(xlen))
   value: Bits(xlen_width(xlen))
+  to_supervisor: Bool
+
+bundle RicketInterruptDecision(xlen :: XLen):
+  valid: Bool
+  cause: Bits(xlen_width(xlen))
   to_supervisor: Bool
 
 def RicketDelegatableExceptions = [
@@ -124,6 +133,67 @@ fun resolve_ricket_trap(xlen :: XLen,
     value: value
     to_supervisor: trap_event & (privilege =/= PrivilegeMode.Machine) & delegated
 
+fun resolve_ricket_interrupt(xlen :: XLen,
+                             pending :: Bits(xlen_width(xlen)),
+                             enabled :: Bits(xlen_width(xlen)),
+                             delegated :: Bits(xlen_width(xlen)),
+                             mstatus :: Bits(xlen_width(xlen)),
+                             privilege :: PrivilegeMode) :~ RicketInterruptDecision(xlen):
+  def width = xlen_width(xlen)
+  def machine_globally_enabled = (privilege =/= PrivilegeMode.Machine) ||| mstatus[3].into(Bool)
+  def supervisor_globally_enabled = (privilege === PrivilegeMode.User) ||| (
+    (privilege === PrivilegeMode.Supervisor) & mstatus[1].into(Bool)
+  )
+  fun candidate(cause :: InterruptCause) :~ Bool:
+    def code = interrupt_code(cause)
+    def to_supervisor = delegated[code].into(Bool)
+    pending[code].into(Bool) & enabled[code].into(Bool) & mux(
+      to_supervisor,
+      supervisor_globally_enabled,
+      machine_globally_enabled
+    )
+  def machine_external = candidate(InterruptCause.MachineExternal)
+  def machine_software = candidate(InterruptCause.MachineSoftware)
+  def machine_timer = candidate(InterruptCause.MachineTimer)
+  def supervisor_external = candidate(InterruptCause.SupervisorExternal)
+  def supervisor_software = candidate(InterruptCause.SupervisorSoftware)
+  def supervisor_timer = candidate(InterruptCause.SupervisorTimer)
+  def valid = machine_external ||| machine_software ||| machine_timer ||| supervisor_external ||| supervisor_software ||| supervisor_timer
+  def cause = mux(
+    machine_external,
+    interrupt_cause_bits(InterruptCause.MachineExternal, width),
+    mux(
+      machine_software,
+      interrupt_cause_bits(InterruptCause.MachineSoftware, width),
+      mux(
+        machine_timer,
+        interrupt_cause_bits(InterruptCause.MachineTimer, width),
+        mux(
+          supervisor_external,
+          interrupt_cause_bits(InterruptCause.SupervisorExternal, width),
+          mux(
+            supervisor_software,
+            interrupt_cause_bits(InterruptCause.SupervisorSoftware, width),
+            interrupt_cause_bits(InterruptCause.SupervisorTimer, width)
+          )
+        )
+      )
+    )
+  )
+  def to_supervisor = mux_lookup(
+    cause[0..4],
+    ~default: Bool(#false),
+    [
+      [interrupt_code(InterruptCause.SupervisorSoftware), delegated[interrupt_code(InterruptCause.SupervisorSoftware)].into(Bool)],
+      [interrupt_code(InterruptCause.SupervisorTimer), delegated[interrupt_code(InterruptCause.SupervisorTimer)].into(Bool)],
+      [interrupt_code(InterruptCause.SupervisorExternal), delegated[interrupt_code(InterruptCause.SupervisorExternal)].into(Bool)]
+    ]
+  )
+  RicketInterruptDecision(xlen):
+    valid: valid
+    cause: cause
+    to_supervisor: valid & to_supervisor
+
 sync_circuit RicketCsrFile(xlen :: XLen):
   def width = xlen_width(xlen)
   def zero = bits(0, width)
@@ -132,14 +202,19 @@ sync_circuit RicketCsrFile(xlen :: XLen):
   def medeleg_mask = bits(exception_mask(RicketDelegatableExceptions), width)
   def mideleg_mask = bits(0x222, width)
   def interrupt_enable_mask = bits(0xaaa, width)
+  def supervisor_interrupt_mask = bits(0x222, width)
   def counter_enable_mask = bits(0x7, width)
   def tvec_mask = !bits(0x3, width)
   def epc_mask = !bits(0x3, width)
   def mpp_mask = bits(0x1800, width)
   def misa_value = if xlen == XLen.X32 | bits(0x40140101, width) | bits(0x8000000000140101, width)
 
+  input interrupts: RicketInterrupts()
+  input interrupt_boundary: Bool
+  input interrupt_pc: Bits(width)
   interface commit(Valid(RicketCsrCommit(xlen)), ~role: consumer)
   interface redirect(Valid(Bits(width)), ~role: producer)
+  output interrupt_request: Bool
   output writeback_valid: Bool
   output writeback_value: Bits(width)
   output privilege: PrivilegeMode
@@ -153,6 +228,7 @@ sync_circuit RicketCsrFile(xlen :: XLen):
     mux(enabled, original ||| mask, original & !mask)
 
   def sstatus_value = state.mstatus & sstatus_mask
+  def interrupt_pending = ricket_interrupt_pending(xlen, interrupts) ||| state.mip
   def csr = commit.bits.csr_address
   def bank = csr_bank(csr, ~default: zero):
     csr CsrId.Sstatus:
@@ -179,7 +255,14 @@ sync_circuit RicketCsrFile(xlen :: XLen):
         state.sepc <== value & epc_mask
     storage CsrId.Scause: state.scause
     storage CsrId.Stval: state.stval
-    read CsrId.Sip: zero
+    csr CsrId.Sip:
+      read: interrupt_pending & state.mideleg
+      write value:
+        state.mip <== masked_merge(
+          state.mip,
+          value,
+          state.mideleg & supervisor_interrupt_mask
+        )
     csr CsrId.Satp:
       read: state.satp
       write value:
@@ -219,7 +302,10 @@ sync_circuit RicketCsrFile(xlen :: XLen):
         state.mepc <== value & epc_mask
     storage CsrId.Mcause: state.mcause
     storage CsrId.Mtval: state.mtval
-    read CsrId.Mip: zero
+    csr CsrId.Mip:
+      read: interrupt_pending
+      write value:
+        state.mip <== value & supervisor_interrupt_mask
     read CsrId.Mvendorid: zero
     read CsrId.Marchid: zero
     read CsrId.Mimpid: zero
@@ -236,7 +322,26 @@ sync_circuit RicketCsrFile(xlen :: XLen):
     privilege_bits < required_privilege
   ) & !(csr_write_requested & csr_read_only)
   def csr_commit = commit.valid & (commit.bits.csr_operation =/= CsrOperation.None)
-  def trap = resolve_ricket_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
+  def synchronous_trap = resolve_ricket_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
+  def interrupt = resolve_ricket_interrupt(
+    xlen,
+    interrupt_pending,
+    state.mie,
+    state.mideleg,
+    state.mstatus,
+    privilege_state
+  )
+  def interrupt_take = interrupt_boundary & !synchronous_trap.valid & interrupt.valid
+  def trap = RicketTrapDecision(xlen):
+    valid: synchronous_trap.valid ||| interrupt_take
+    cause: mux(synchronous_trap.valid, synchronous_trap.cause, interrupt.cause)
+    value: mux(synchronous_trap.valid, synchronous_trap.value, zero)
+    to_supervisor: mux(
+      synchronous_trap.valid,
+      synchronous_trap.to_supervisor,
+      interrupt.to_supervisor
+    )
+  def trap_pc = mux(interrupt_take, interrupt_pc, commit.bits.pc)
 
   def csr_replacement = mux_lookup(
     commit.bits.csr_operation,
@@ -304,6 +409,7 @@ sync_circuit RicketCsrFile(xlen :: XLen):
 
   writeback_valid <== csr_commit & csr_access_legal & or_reduce(commit.bits.rd)
   writeback_value <== csr_read_value
+  interrupt_request <== interrupt.valid
   privilege <== privilege_state
   mstatus <== state.mstatus
   satp <== state.satp
@@ -323,12 +429,12 @@ sync_circuit RicketCsrFile(xlen :: XLen):
 
   when (trap.valid & trap.to_supervisor):
     state.mstatus <== trap_mstatus
-    state.sepc <== commit.bits.pc & epc_mask
+    state.sepc <== trap_pc & epc_mask
     state.scause <== trap.cause
     state.stval <== trap.value
   elsewhen (trap.valid):
     state.mstatus <== trap_mstatus
-    state.mepc <== commit.bits.pc & epc_mask
+    state.mepc <== trap_pc & epc_mask
     state.mcause <== trap.cause
     state.mtval <== trap.value
   elsewhen mret:
@@ -343,5 +449,7 @@ export:
   RicketCsrCommit
   RicketCsrState
   RicketTrapDecision
+  RicketInterruptDecision
   RicketCsrFile
+  resolve_ricket_interrupt
   resolve_ricket_trap
