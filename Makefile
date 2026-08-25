@@ -55,20 +55,20 @@ check-example-verilog:
 	bash tools/check-example-verilog.sh
 
 host-annotation-test:
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(HOST_ANNOTATION_TESTS)
+	tools/run-racket-tests.sh $(HOST_ANNOTATION_TESTS)
 
 frontend-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS)
+	tools/run-racket-tests.sh $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS)
 	bash tests/frontend/run-negative.sh
 
 analysis-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(ANALYSIS_TESTS)
+	tools/run-racket-tests.sh $(ANALYSIS_TESTS)
 
 diagram-test: check-boundaries
 	tools/run-racket-tests.sh tests/frontend/diagram-test.rhm
 
 backend-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(BACKEND_TESTS)
+	tools/run-racket-tests.sh $(BACKEND_TESTS)
 
 formal-test: check-boundaries
 	@formal_compiled_root="$$(mktemp -d)"; \
@@ -85,12 +85,11 @@ formal-differential-test: check-boundaries
 unit-test: frontend-test backend-test
 
 lop-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_FRONTEND_TESTS)
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(LOP_BACKEND_TESTS)
+	tools/run-racket-tests.sh $(LOP_FRONTEND_TESTS) $(LOP_BACKEND_TESTS)
 
 rfpl-unit-test:
 	bash rfpl/check-boundaries.sh
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RFPL_TESTS)
+	tools/run-racket-tests.sh $(RFPL_TESTS)
 	bash rfpl/tests/run-negative.sh
 
 rfpl-test: rfpl-unit-test examples-rfpl
@@ -100,12 +99,12 @@ rfpl-circt-test:
 
 noc-test:
 	bash noc/check-boundaries.sh
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(NOC_TESTS)
+	tools/run-racket-tests.sh $(NOC_TESTS)
 	bash noc/tests/language/run-negative.sh
 
 riscv-test:
 	bash riscv/check-boundaries.sh
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RISCV_TESTS)
+	tools/run-racket-tests.sh $(RISCV_TESTS)
 
 ridx-test:
 	tools/run-racket-tests.sh $(RIDX_TESTS)
@@ -114,14 +113,14 @@ ridx-circt-test:
 	bash ridx/tests/rhdl/run-grid-equivalence.sh
 
 chi-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(CHI_TESTS)
+	tools/run-racket-tests.sh $(CHI_TESTS)
 	bash chi/tests/run-negative.sh
 
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
 ricket-host-test: check-boundaries
-	env PLTCOLLECTS=$(CURDIR): raco test --direct $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
+	tools/run-racket-tests.sh $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
 
 ricket-test: ricket-host-test
 	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard ricket-register-file ricket-csr ricket-atomic ricket-core ricket-core-flow ricket-interrupt ricket-interrupt-flow ricket-multiply ricket-divide ricket-core-rv32 ricket-icache ricket-dcache ricket-dcache-rv32' bash tests/backend/run-circt.sh

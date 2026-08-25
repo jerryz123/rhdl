@@ -1,4 +1,4 @@
-<!-- Defines the standalone AMBA CHI package, its implemented layers, and non-coherent-first roadmap. -->
+<!-- Defines the standalone AMBA CHI package, its implemented layers, and supported transaction profile. -->
 
 # AMBA CHI domain library
 
@@ -18,13 +18,13 @@ checking, separate requester-side and home-side SAM metadata, an initial HN-I
 bridge, a serialized dirty-capable HN-F manager, and a non-coherent backing RAM.
 Its first NoC integration maps CHI
 NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
-SNP, and DAT transports. Multibeat subordinate memory and HN-F directory
-optimization remain planned below.
+SNP, and DAT transports. Multibeat subordinate memory beyond the fragmenter
+profile and HN-F directory optimization are outside the current contract.
 
 ## Architectural boundary
 
 CHI separates its protocol, network, and link responsibilities. The library
-will preserve those boundaries:
+preserves those boundaries:
 
 - `chi/` owns CHI node roles, exact REQ/RSP/SNP/DAT flits, opcodes,
   transactions, protocol credits, link activation, optional CHI features, and
@@ -432,7 +432,7 @@ ready-valid channels.
 at a ready-valid request handshake; it neither transports Link Credits nor
 turns an externally credited flit channel into a buffered internal flow.
 
-## Planned package layout
+## Module map
 
 | Module | Responsibility |
 |---|---|
@@ -455,63 +455,28 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
-## Implementation order
+## Delivered profile and limits
 
-1. **Complete:** Add and verify `Credited`, `CreditSender`, `CreditBuffer`,
-   credit accounting, and their monitors under `rhdl/std`.
-2. **Complete:** Define validated physical parameters, every defined
-   opcode, exact parameterized flit layouts, and initial protocol classifiers.
-3. **Complete:** Define node capabilities, node-role interfaces, link
-   activation signals, and static connection legality.
-4. **Complete:** Add link-local activation, credit, opcode, conditional-field,
-   and NodeID monitoring.
-5. **Initial non-coherent subset complete:** Add bounded TxnID/DBID,
-   response, and single-flit data-completeness transaction monitors. General
-   ordering, retry and Protocol Credits, and other transaction families remain.
-6. **Parameters and NoC mapping complete:** Define `CHIFabricParams`, Home Node
-   identities, executable requester-to-home selection, and passive
-   home-to-subordinate service metadata. Generic NoC compilation joins an
-   independently authored physical topology, terminal placement, route-class
-   set, and routing policy. CHI separately maps NodeIDs to the symbolic
-   terminals and derives only target decode and flow adaptation. Pure RN and
-   RN-ICN site values declare each transported endpoint's NodeID and
-   router attachment once. The logical RN-to-ICN connection expands into the
-   directionally correct REQ, RSP, and DAT flows before each plane is compiled
-   and validated independently. The system instantiates each generic router
-   directly; CHI does not define an aggregate router or own topology or routing
-   policy. `connect_chi_rni_node` and `connect_chi_rnf_node` attach individual
-   endpoints to independently instantiated router arrays, while
-   `connect_chi_hn_requesters` attaches the shared HN-F requester interface
-   exactly once. The point-to-point `connect_chi_rni` helper remains a
-   composition of the same stages for HN-I systems. None constructs an
-   aggregate router or owns topology or routing. Each local ejection drives
-   allocator availability from its registered ejection queue; physical links
-   remain responsible for the targets they attach.
-7. **Initial non-coherent path complete:** Implement `CHIRam` over
-   `SyncRam1RW` and a bounded `CHIHNI` for single-flit reads and
-   writes. Transaction engines expose ready-valid flows. Next, connect multiple
-   ports through the generated crossbar and then add multibeat traffic.
-8. **Serialized dirty-capable HN-F complete:** Add mandatory snoop capability
-   validation, cache/response classifiers, and
-   bounded `ReadShared`/`ReadClean` plus snoop-response lifetime monitoring.
-   `CHIHNF` accepts aggregate traffic from mixed requester NodeIDs, broadcasts
-   conservative snoops before coherent access, and commits `SnpRespData` from
-   dirty owners before completing SharedClean or Unique acquisition. It
-   intentionally has one global transaction slot and no directory.
-   `socs/simple-soc.rhdl` compiles REQ, RSP, SNP,
-   and DAT planes for one host RN-I and two Ricket RN-Fs, then connects the HN-F
-   through a cache-line read fragmenter to the single-DAT-beat RAM. A sharer
-   directory is a later performance optimization rather than a correctness
-   prerequisite.
+The package implements exact parameterized flits and opcodes, node-role and
+credited-link contracts, link and transaction monitors, pure CHI-to-NoC
+compilation, flow adapters, an initial non-coherent HN-I/RAM path, and a
+globally serialized dirty-capable HN-F path. CHI supplies endpoints, logical
+connections, target decoding, and flow adaptation; the generic NoC package and
+the containing system retain topology, routing-policy, router, and physical
+link ownership.
 
-Each milestone requires host elaboration tests, invalid-parameter and invalid
-connection tests, generated CIRCT verification, and a cycle-level Verilator
-test of the supported transaction flows.
+The coherent home intentionally has one global transaction slot and no sharer
+directory. It conservatively broadcasts snoops, accepts dirty intervention,
+and supports the documented SharedClean and Unique acquisition subset. General
+ordering, Protocol Credits, broader retry handling and transaction families,
+multibeat subordinate traffic beyond the fragmenter profile, and a parallel
+directory-based home remain outside the implemented contract.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
-`FIXTURES='chi-foundation chi-link chi-monitor chi-transaction chi-transaction-sn chi-ram chi-home chi-coherent-home' bash tests/backend/run-circt.sh`
-for CIRCT lowering and cycle-level classifier, link, and monitor simulations.
+`bash tests/backend/run-circt.sh --group protocols` for the manifest-owned
+protocol CIRCT and Verilator fixtures, including the complete current CHI
+fixture set.
 
 ## Specification references
 

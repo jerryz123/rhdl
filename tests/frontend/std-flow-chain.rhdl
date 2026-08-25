@@ -53,13 +53,36 @@ circuit MapFlowReusedSource():
   mapped |> egress0
   ingress |> mapping
 
-// A renamed nominal refinement is normalized to its canonical ready-valid
-// contract while preserving the irrevocable stability promise.
+// A renamed nominal refinement can explicitly preserve its irrevocable
+// stability promise for a payload-only mapping.
 circuit RefinedMapFlowChain():
   interface ingress(StableAlias8(), ~role: consumer)
   interface egress(Irrevocable(Bits(8)), ~role: producer)
 
+  ingress |> map_flow(~stable: #true, payload => payload) |> egress
+
+// An ordinary mapping conservatively weakens an irrevocable source because its
+// body may capture changing hardware.
+circuit UnstableMapFlowToIrrevocable():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress(Irrevocable(Bits(8)), ~role: producer)
+
   ingress |> map_flow(payload => payload) |> egress
+
+// Payload-only demultiplexing can explicitly retain an irrevocable contract.
+circuit StableDemuxFlowChain():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress[2](Irrevocable(Bits(8)), ~role: producer)
+
+  (ingress |> demux_flow(2, ~stable: #true, payload => payload[0])) <=> egress
+
+// An ordinary demultiplexer is conservatively Decoupled even when its source
+// is irrevocable.
+circuit UnstableDemuxFlowToIrrevocable():
+  interface ingress(Irrevocable(Bits(8)), ~role: consumer)
+  interface egress[2](Irrevocable(Bits(8)), ~role: producer)
+
+  (ingress |> demux_flow(2, payload => payload[0])) <=> egress
 
 circuit FilterFlowWrongProtocol():
   interface ingress(Valid(Bits(8)), ~role: consumer)
@@ -251,6 +274,9 @@ export:
   MapFlowStrongerDestination
   MapFlowReusedSource
   RefinedMapFlowChain
+  UnstableMapFlowToIrrevocable
+  StableDemuxFlowChain
+  UnstableDemuxFlowToIrrevocable
   FilterFlowWrongProtocol
   GateFlowWrongProtocol
   ZipFlowOutput

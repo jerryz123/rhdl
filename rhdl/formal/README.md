@@ -27,14 +27,9 @@ Rosette checksum `373c8c35e4a7667f38fce10cf0b74ae17de07f1d` and its transitive
 `rfc6455` resolution failure was caused by a restricted test environment, not
 an unavailable package source; the repository does not vendor either package.
 
-Confirm that Rosette and its solver are usable:
-
-```sh
-racket -e '(require rosette) (displayln (solve (assert #t)))'
-```
-
-Ordinary RHDL host and backend targets do not require Rosette. Run the focused
-formal suite with:
+Ordinary RHDL host and backend targets do not require Rosette. The focused
+formal suite probes both Rosette and its solver under an isolated compiled
+root before running the RHDL proofs:
 
 ```sh
 make formal-test

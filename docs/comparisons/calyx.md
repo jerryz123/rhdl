@@ -92,8 +92,8 @@ the controls relevant to that selector region.
 `DecodeTable` validates those rows as an unordered, nonoverlapping relation
 with exact input and output types. Relations can gain rows, be lifted into a
 wider selector, or be zipped across independently defined output structures.
-`DecodeGen` can then minimize same-default result groups, use output
-don't-cares, and merge identical product terms across groups.
+`DecodeGen` then preserves the combined sparse relation and its output
+don't-cares in one backend operation for downstream synthesis.
 
 Calyx constants, guarded assignments, comparison primitives, groups, and
 control are sufficient to express the same circuit, and a Calyx frontend can

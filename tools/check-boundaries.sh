@@ -34,11 +34,11 @@ fail_matches "core must not import analysis, frontend, backend, or formal module
 fail_matches "analysis must depend only on core and other analysis modules" \
   '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' rhdl/analysis
 fail_matches "host annotations must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' host
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' host
 fail_matches "pure Ridx model must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' ridx/model
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' ridx/model
 fail_matches "pure Ridx materialization must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/|sim/)' ridx/materialize
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' ridx/materialize
 fail_matches "the Ridx RHDL adapter must not import implementation or backend packages" \
   '^[[:space:]]+.*rhdl/(core|frontend|backend|formal)/' ridx/rhdl
 fail_matches "RHDL core must not import Ridx" \
@@ -67,8 +67,6 @@ fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
 fail_matches "RHDL packages must not import the external CHI domain library" \
   '^[[:space:]]+.*chi/' rhdl
-fail_matches "simulation adapters must not import RHDL implementation packages" \
-  '^[[:space:]]+.*(core/|analysis/|backend/|frontend/)' sim
 fail_matches "standard language assembly must not import analysis, core, backend, or formal modules" \
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/language.rhm
 fail_matches "base language assembly must not import analysis, core, backend, or formal modules" \
@@ -93,6 +91,26 @@ while IFS= read -r layer_file; do
     exit 1
   fi
 done < <(find rhdl/frontend/layers -maxdepth 1 -type f -name '*.rhm' | sort)
+
+while IFS= read -r std_file; do
+  documented_path="${std_file#rhdl/}"
+  dependency_row="$(grep -F "| \`$documented_path\` |" rhdl/README.md || true)"
+  if [[ -z "$dependency_row" ]]; then
+    echo "standard-library module is missing from the rhdl/README.md dependency table: $std_file" >&2
+    exit 1
+  fi
+  if [[ "$documented_path" == "std/flow.rhdl" ]]; then
+    continue
+  fi
+  while IFS= read -r dependency; do
+    [[ -z "$dependency" ]] && continue
+    documented_dependency="${dependency#rhdl/}"
+    if [[ "$dependency_row" != *"\`$documented_dependency\`"* ]]; then
+      echo "standard-library dependency is missing from the rhdl/README.md table: $documented_path imports $documented_dependency" >&2
+      exit 1
+    fi
+  done < <(sed -n 's/.*lib("\(rhdl\/std\/[^\"]*\.rhdl\)").*/\1/p' "$std_file")
+done < <(find rhdl/std -type f -name '*.rhdl' | sort)
 
 fail_matches "core tests must not import analysis or backend modules" \
   '^[[:space:]]+"[^"]*(analysis|backend)/' tests/core

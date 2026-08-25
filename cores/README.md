@@ -119,7 +119,7 @@ request.
 Run the reusable components' direct host tests from the repository root:
 
 ```sh
-env PLTCOLLECTS="$PWD": raco test cores/tests/*-test.rhm
+tools/run-racket-tests.sh cores/tests/*-test.rhm
 ```
 
 Run [`make ricket-host-test`](../Makefile) for all reusable components together

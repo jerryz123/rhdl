@@ -40,13 +40,21 @@ make examples-std           # standard-library examples only
 make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only
 make examples-rfpl          # logical and physical RFPL examples only
+make examples-ridx          # Ridx-backed structural examples only
+make examples-riscv         # RISC-V model and adapter examples only
+make examples-chi           # CHI protocol examples only
+make examples-cores         # reusable processor-component examples only
+make examples-formal        # formal-engine examples only
+make examples-ricket        # Ricket examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make ridx-test              # finite structural index-space model
+make ridx-circt-test        # Ridx-backed RHDL CIRCT fixtures
 make chi-test               # CHI boundaries, flits, links, and invalid connections
 make ricket-host-test       # Ricket core and reusable ALU host checks
-make ricket-test            # host checks plus external ALU simulation
+make ricket-test            # host checks plus Ricket CIRCT and Verilator fixtures
 make frontend-test          # core and frontend tests, including invalid uses
+make diagram-test           # logical diagram extraction and serialization
 make backend-test           # textual CIRCT lowering, including sparse decode relations
 make formal-test            # Rosette equivalence, reachability, property, and witness checks
 make formal-differential-test # replay Rosette models through CIRCT and Verilator
@@ -55,7 +63,6 @@ make rfpl-circt-test        # RFPL CIRCT and example-owned Verilog golden
 make unit-test              # frontend plus backend Rhombus tests
 make emacs-test             # project-aware Emacs mode integration helpers
 make noc-test               # pure host-side NoC model and its package boundary
-make riscv-test             # pure RISC-V model, decode, and package boundaries
 make host-checks            # host and model checks without the explicit example sweep
 make host-test              # unit tests, examples, models, protocols, and cores
 make circt-test             # curated CIRCT, golden, and Verilator integration spine
@@ -63,7 +70,8 @@ make circt-verify-test      # curated CIRCT lowering without simulation
 make verilator-test         # curated behavioral SystemVerilog simulations
 make verilog-golden-test    # every exact example-owned SystemVerilog reference
 make circt-full-test        # comprehensive goldens and available simulations
-make test                   # complete host and CIRCT suite
+make check-example-verilog  # verify every example owns a generated Verilog reference
+make test                   # default host, curated CIRCT, and RFPL CIRCT suite
 ```
 
 The standalone FESVR transport has its own setup, native test, and DPI compile
@@ -92,5 +100,5 @@ of version control.
 - Use language-layer equivalence tests when syntax should lower to existing
   kernel or core meaning.
 - Run `make check-boundaries` after moving modules or changing dependencies.
-- Reserve the complete suite for cross-layer, shared-infrastructure, or
+- Reserve the broader suites for cross-layer, shared-infrastructure, or
   backend-pipeline changes.

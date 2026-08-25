@@ -2,10 +2,10 @@
 
 # Pure NoC model and analysis
 
-This package defines the host-side graph vocabulary that will eventually feed
-routing-relation materialization, virtual-channel dependency validation, and
-route-table generation. It is intentionally independent of RHDL hardware
-construction and CIRCT.
+This package defines the host-side graph vocabulary used for routing-relation
+materialization, virtual-channel dependency validation, route-table generation,
+and validated hardware plans. Its pure model is intentionally independent of
+RHDL hardware construction and CIRCT.
 
 ## Current scope
 
@@ -117,50 +117,16 @@ per-destination ordering, and conservation under independent randomized
 ejection backpressure. None of these consumers grants hardware code access to
 unvalidated relations or proof construction.
 
-Run the focused checks from the repository root:
+Run the complete host-side NoC checks and package-boundary validation from the
+repository root:
 
 ```sh
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/model-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-authoring-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/topology-composition-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/route-class-authoring-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-policy-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/routing-phase-authoring-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/authoring/escape-composition-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/topology-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/language/routing-test.rhm
-bash noc/tests/language/run-negative.sh
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/irregular-three-way-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/mesh-xy-three-way-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/adaptive-escape-three-way-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/equivalence/composition-three-way-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/support/routing-equivalence-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/authored-diagnostics-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/router-plan-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/network-plan-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/plan/network-compilation-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/line-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/topology/rectangular-mesh-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/traffic/all-pairs-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/dimension-order-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/minimal-adaptive-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/adaptive-minimal-escape-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/std/routing/up-down-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-topology-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-traffic-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-xy-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-phased-xy-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/mesh-adaptive-escape-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/examples/irregular-adaptive-escape-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/materialize-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/reachability-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/dependency-graph-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/acyclicity-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/escape-validation-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/hop-distance-test.rhm
-env PLTCOLLECTS="$(pwd):" raco test noc/tests/validated-routing-test.rhm
-bash noc/check-boundaries.sh
+make noc-test
 ```
+
+For one focused host test, use the repository wrapper so it receives a fresh
+compiled root, for example
+`tools/run-racket-tests.sh noc/tests/plan/router-family-plan-test.rhm`.
 
 ## Topology authoring
 

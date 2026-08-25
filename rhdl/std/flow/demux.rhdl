@@ -42,10 +42,9 @@ circuit CtrlDemux(n :: PosInt):
 
   ingress.ready <== selected_ready
 
-// Builds an inline payload-selected routing handle. The output protocol
-// retains the input's Decoupled or Irrevocable contract because selection is
-// derived from the payload and therefore remains stable with an irrevocable
-// offer.
+// Builds an inline payload-selected routing handle. The caller selects whether
+// the output retains an Irrevocable input contract; ordinary mappings weaken
+// to Decoupled because the selector body may capture changing hardware.
 fun finish_demux_flow_handle(input_link :: Handle,
                              output_links :: Array,
                              selector :: Hardware.packable):
@@ -73,15 +72,28 @@ fun finish_demux_flow_handle(input_link :: Handle,
 // cardinality-changing stage for ordinary pipeline composition.
 expr.macro
 | 'demux_flow($count,
+              ~stable: #true,
+              $(payload :: Identifier) => $selector ...)':
+    'demux_flow($count, ~stable: #true, $payload): $selector ...'
+| 'demux_flow($count,
+              ~stable: #true,
+              $(payload :: Identifier)): $selector':
+    'demux_flow_impl($count, #true, $payload): $selector'
+| 'demux_flow($count,
               $(payload :: Identifier) => $selector ...)':
     'demux_flow($count, $payload): $selector ...'
 | 'demux_flow($count, $(payload :: Identifier)): $selector':
+    'demux_flow_impl($count, #false, $payload): $selector'
+
+expr.macro
+| 'demux_flow_impl($count, $stable, $(payload :: Identifier)): $selector':
     'fun (demux_flow_source :: Any) :~ InterfaceTransformResult(demux_flow_source, InterfaceArrayFields):
        def demux_flow_count = $count
        unless demux_flow_count is_a PosInt
        | error(~who: #'demux_flow,
                "output count must be PosInt")
        def demux_flow_protocol = flow_protocol_type(demux_flow_source)
+       def demux_flow_output_protocol = if $stable | demux_flow_protocol | Decoupled(flow_payload_type(demux_flow_source))
        def demux_flow_input_link = interface_link(
          demux_flow_protocol,
          "demux_input"
@@ -93,7 +105,7 @@ expr.macro
        def demux_flow_output_links = Array.make(demux_flow_count)
        for (index in 0..demux_flow_count):
          demux_flow_output_links[index] := interface_link(
-           demux_flow_protocol,
+           demux_flow_output_protocol,
            "demux_output"
          )
        def demux_flow_handle = finish_demux_flow_handle(

@@ -17,6 +17,7 @@ authored control columns.
 | [`divide-ctrl.rhdl`](divide-ctrl.rhdl) | M signedness and quotient/remainder/word result selection |
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`system-ctrl.rhdl`](system-ctrl.rhdl) | Zicsr operations, ECALL/EBREAK, and MRET/SRET |
+| [`fence-ctrl.rhdl`](fence-ctrl.rhdl) | FENCE, FENCE.I, and SFENCE.VMA serialization and translation-fence controls |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
 | [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the XLEN-selected integrated decoder circuit |
 
@@ -49,11 +50,14 @@ whose only job would be to construct and distribute one output pattern.
 into a nested reusable `MultiplierMode` plus orthogonal high-result and
 word-result controls. `divide-ctrl.rhdl` decodes the four RV32 divide/remainder
 instructions and four RV64 word variants into orthogonal signed, remainder,
-and word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and the
-initial privileged returns. `core-ctrl.rhdl` composes both columns with the
-base ISA columns into the same selected decode table.
+and word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and
+the initial privileged returns. `fence-ctrl.rhdl` owns architectural
+serialization and translation fences. `core-ctrl.rhdl` composes these columns
+with the base ISA columns into the same selected decode table.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one
-hardware decode operation. The focused decoder test checks all 57 RV32 and 74
-RV64 Ricket rows against their canonical instruction-pattern domains.
+hardware decode operation. The focused decoder test checks every selected RV32
+and RV64 Ricket row against its canonical instruction-pattern domain; the
+catalog-derived coverage avoids a documentation count that drifts as supported
+extensions grow.

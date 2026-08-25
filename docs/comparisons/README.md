@@ -171,18 +171,19 @@ language that elaborates away.
 
 The current weakness is semantic enforcement rather than structural reach.
 `Irrevocable` stability is documented but not backed by generated assertions.
-Moreover, [`map_flow`](../../rhdl/std/flow/map.rhdl) and
-[`demux_flow`](../../rhdl/std/flow/demux.rhdl) preserve an irrevocable protocol
-even though their bodies may capture changing ambient hardware. Those helpers
-can therefore promise stability that their implementation does not establish.
-The layer also has no generic arbitrary forward/backward protocol algebra and
-no compositional latency, initiation-interval, deadlock, fairness, or liveness
+[`map_flow`](../../rhdl/std/flow/map.rhdl) and
+[`demux_flow`](../../rhdl/std/flow/demux.rhdl) conservatively weaken to
+`Decoupled` because their bodies may capture changing ambient hardware; an
+explicit `~stable: #true` assertion preserves an irrevocable input contract
+when the author knows the transformation remains stable while stalled. The
+layer still has no generic arbitrary forward/backward protocol algebra and no
+compositional latency, initiation-interval, deadlock, fairness, or liveness
 contracts.
 
 The principled next step is consequently not a flow-specific core IR or a
-larger component inventory. It is an enforceable distinction between
-payload-only transformations and transformations that observe live hardware,
-followed by a protocol-polymorphic stage abstraction over the existing generic
+larger component inventory. It is static certification of payload-only
+transformations so preservation need not rely on an author assertion, followed
+by a protocol-polymorphic stage abstraction over the existing generic
 interface subsystem.
 
 ## Decode, patterns, and literals across the comparison set

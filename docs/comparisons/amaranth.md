@@ -105,17 +105,17 @@ aggregate relation.
 RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
 instead represents exact typed literals and recursive aggregate `Pattern` cubes
 as host data. `DecodeTable` validates an unordered, nonoverlapping relation;
-sparse output patterns preserve which fields are free, and `DecodeGen` can
-minimize same-default output groups and merge shared products across groups.
-This is more concise when several control fields or independently authored
-decoder fragments must remain one relation. Amaranth remains more general for
-arbitrary Python-generated tests and ordered conditional behavior.
+sparse output patterns preserve which fields are free, and `DecodeGen` carries
+the combined relation into one sparse backend operation. This is more concise
+when several control fields or independently authored decoder fragments must
+remain one relation. Amaranth remains more general for arbitrary
+Python-generated tests and ordered conditional behavior.
 
-The resulting RHDL decoder may share Boolean work across outputs and use
-output don't-cares that a naïve sequence of comparisons would lose. That is an
-optimization opportunity, not a general QoR promise: an Amaranth design can
-state the same Boolean function and a downstream synthesis tool may recover
-the same or better implementation.
+The resulting RHDL decoder leaves downstream synthesis free to share Boolean
+work across outputs and use output don't-cares that a naive sequence of
+comparisons might lose. RHDL does not run a minimizer itself. An Amaranth
+design can state the same Boolean function and a downstream synthesis tool may
+recover the same or better implementation.
 
 ## State, assignment, and priority
 

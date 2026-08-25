@@ -27,7 +27,7 @@ RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
 exact rectangular dimensions and child-instance coordinates, and leaves the
 logical IR and generated RTL unchanged. See the
-[RFPL plan](rfpl/PLAN.md).
+[RFPL guide](rfpl/README.md).
 
 ## Architecture
 
@@ -94,7 +94,7 @@ of `circt-opt` when running backend integration tests.
 ```rhombus
 #lang rhdl
 
-circuit Adder(width):
+circuit Adder(width :: PosInt):
   input(a, b): Bits(width)
   output sum: Bits(width)
   sum <== a + b
@@ -106,13 +106,13 @@ export:
   design
 ```
 
-Run the standard adder from the checkout:
+Run the standard adder example from the checkout:
 
 ```sh
-racket -S "$(pwd)" examples/lop/adder-standard.rhdl
+tools/run-racket-tests.sh examples/lop/adder-standard.rhdl
 ```
 
-Run all canonical examples or the complete test suite:
+Run all canonical examples or the default host and CIRCT test suite:
 
 ```sh
 make examples
@@ -131,7 +131,7 @@ Detailed documentation lives with the component that owns it:
 | Shared dependency-neutral host refinements | [`host/README.md`](host/README.md) |
 | Finite structural index spaces and architecture | [`ridx/README.md`](ridx/README.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
-| RFPL structural language and roadmap | [`rfpl/PLAN.md`](rfpl/PLAN.md) |
+| RFPL physical-view language and validation | [`rfpl/README.md`](rfpl/README.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
 | Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
 | Clock/reset inventory and temporal provenance analysis | [`rhdl/analysis/README.md`](rhdl/analysis/README.md) |
@@ -139,6 +139,7 @@ Detailed documentation lives with the component that owns it:
 | Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
+| Pure NoC authoring, validation, planning, and hardware bridge | [`noc/README.md`](noc/README.md) |
 | AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
 | Rosette equivalence, counterexamples, reachability, and output properties | [`rhdl/formal/README.md`](rhdl/formal/README.md) |
@@ -186,11 +187,11 @@ The current vertical slice includes:
 - Backend-independent clock/reset inventory and hierarchy-aware temporal
   provenance reports that distinguish same-clock, foreign-clock, external,
   static, and multi-clock fan-in sources.
-- Ricket, a standalone five-stage RV32I/RV64I integer core with direct
-  component-oriented structured decode, M, Zicsr, initial M/S/U synchronous
-  trap handling, separate instruction and data memory ports, forwarding,
-  scoreboarded deferred completion, and redirect flushing. Its typed, shared
-  integer ALU remains independently reusable.
+- Ricket, a five-stage RV32I/RV64I core with component-oriented decode, M,
+  Zicsr, privilege and trap state, private coherent L1 caches, and separate
+  CHI RN-F ports for SoC integration. Its exact current pipeline, cache, and
+  integration contracts are documented in
+  [`cores/ricket/README.md`](cores/ricket/README.md).
 
 ## Deferred work
 

@@ -255,7 +255,7 @@ make ricket-host-test
 For only the changed core/cache hierarchy:
 
 ```sh
-env PLTCOLLECTS="$PWD": raco test --direct \
+tools/run-racket-tests.sh \
   cores/ricket/tests/refill-test.rhm \
   cores/ricket/tests/icache-test.rhm \
   cores/ricket/tests/dcache-test.rhm \

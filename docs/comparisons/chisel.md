@@ -30,7 +30,7 @@ separate current- and next-state semantics.
 | Hierarchy | Circuit generators create definitions; instances cross explicit ports | Scala `Module` construction creates hierarchy; `RawModule` removes ambient clock/reset |
 | Interface relation | Nominal identity, named roles, refinement, and support | Aggregate structure, orientation, `Flipped`, and `Connectable` relations |
 | Flow composition | One-shot `InterfaceHandle` topologies compose serially, in parallel, and across cardinality changes | `DecoupledIO`, connections, and components compose through ordinary Scala construction and explicit wiring |
-| Patterns and decode | Typed literals and aggregate cubes form validated unordered relations that `DecodeGen` may minimize by output-default group | `BitPat` and `TruthTable` form multi-output bit-vector tables; `DecodeTable` organizes structured fields and `decoder` selects a minimizer |
+| Patterns and decode | Typed literals and aggregate cubes form validated unordered relations that `DecodeGen` preserves as sparse backend operations | `BitPat` and `TruthTable` form multi-output bit-vector tables; `DecodeTable` organizes structured fields and `decoder` selects a minimizer |
 | Primary abstraction tools | Rhombus functions, macros, classes, frontend layers, semantic type capabilities | Scala functions, classes, traits, generics, collections, and compiler-supported `Data` APIs |
 
 ## Denotation and staging

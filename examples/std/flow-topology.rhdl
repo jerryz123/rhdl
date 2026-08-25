@@ -85,8 +85,8 @@ sync_circuit FanInProjectTopology():
   ingress |> path
 
 // Array-shaped inputs can also rendezvous through a heterogeneous zip. The
-// queue makes the offer irrevocable, payload-selected routing preserves that
-// contract, and parallel maps remove the routing metadata at both outputs.
+// queue makes the offer irrevocable; the payload-only routing and projection
+// stages explicitly preserve that contract.
 sync_circuit ZipRouteTopology():
   interface data_ingress(Decoupled(Bits(8)), ~role: consumer)
   interface destination_ingress(Decoupled(Bool), ~role: consumer)
@@ -99,11 +99,11 @@ sync_circuit ZipRouteTopology():
           data: data
           destination: destination
     ) |> queue(2)
-      |> demux_flow(2, routed => routed.destination)
+      |> demux_flow(2, ~stable: #true, routed => routed.destination)
       |> parallel(
-           (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
+           (Irrevocable(RoutedByte()) |> map_flow(~stable: #true, routed => routed.data))
              |> egress[0],
-           (Irrevocable(RoutedByte()) |> map_flow(routed => routed.data))
+           (Irrevocable(RoutedByte()) |> map_flow(~stable: #true, routed => routed.data))
              |> egress[1]
          )
   Array(data_ingress, destination_ingress) |> path

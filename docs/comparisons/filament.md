@@ -179,8 +179,8 @@ An RHDL `DecodeTable` requires exact common types and pairwise nonoverlapping
 inputs, making its rows an unordered relation rather than a priority-ordered
 case statement. Tables can be extended by list concatenation subject to
 overlap validation, lifted into a wider input domain, and zipped across
-separately authored output relations. `DecodeGen` minimizes same-default output
-groups using don't-care outputs, then merges identical products across groups.
+separately authored output relations. `DecodeGen` preserves that complete
+sparse relation and its don't-care outputs in one backend operation.
 
 Filament has bit-vector constants, expressions, conditions, and components
 from which the same Boolean decoder can be constructed. Its standard language
@@ -192,10 +192,10 @@ decoder cubes as a composable authoring object.
 
 RHDL is consequently more expressive and concise specifically for structured
 control decoding, while Filament is far more expressive for stating when the
-decoder's inputs and outputs may be used. Giving a minimizer the complete
-relation can produce better logic than naive compare-and-mux construction, but
-it does not establish universal PPA superiority over an equivalent Filament
-design passed through capable logic synthesis.
+decoder's inputs and outputs may be used. Giving downstream synthesis the
+complete sparse relation may produce better logic than naive compare-and-mux
+construction, but it does not establish universal PPA superiority over an
+equivalent Filament design.
 
 ## Locality and predictability
 

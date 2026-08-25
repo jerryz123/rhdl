@@ -104,8 +104,8 @@ input and output types, and rejects overlapping input patterns rather than
 giving source order an accidental priority meaning. Tables can be extended by
 list concatenation subject to overlap validation, lifted into a wider input
 type, and zipped across independently authored output relations. `DecodeGen`
-can minimize same-default output groups using output don't-cares, then merge
-identical product terms across groups.
+preserves the combined sparse relation and its output don't-cares in one
+backend operation.
 
 PyMTL3 has excellent concrete `BitsN` and `BitStruct` values, but its standard
 synthesizable vocabulary has no corresponding typed partial-pattern and
@@ -116,11 +116,11 @@ prioritized behavior; RHDL is more concise and analyzable for an unordered
 finite relation.
 
 Both can generate equivalent Boolean logic, and a downstream synthesis tool
-may optimize either form well. RHDL's advantage is that partitioned
-multi-output minimization, shared terms, and don't-care freedom are explicit
-inputs to generation rather than facts a translator must recover from
-procedural RTL. This can improve on naive compare-and-mux construction, but it
-is not a universal area, timing, or power advantage.
+may optimize either form well. RHDL's advantage is that the complete relation
+and its don't-care freedom remain explicit inputs to downstream optimization
+rather than facts a translator must recover from procedural RTL. RHDL itself
+does not choose a cover, so this is not a universal area, timing, or power
+advantage.
 
 ## Time, state, and scheduling
 

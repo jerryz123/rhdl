@@ -105,13 +105,13 @@ zipping compose finite relations before a `DecodeGen` consumes them. Zipping
 does not infer a join: it deliberately requires matching input partitions.
 
 Because the relation retains every output bit and its don't-care freedom,
-RHDL can minimize same-default groups and merge identical products into a
-shared PLA rather than spelling a separate comparison tree per result. That
-may improve the starting structure for a control decoder, but is not a claim
-of universally better hardware: XLS can optimize a `match`-derived dataflow
-graph, and its scheduler and target flow can choose a different implementation.
-The difference is explicit finite-relation algebra versus a general functional
-decision expression.
+RHDL emits one sparse `casez` relation rather than spelling a separate
+comparison tree per result. Downstream synthesis may share product terms and
+exploit the preserved X-valued outputs, but RHDL does not run a Boolean
+minimizer itself. XLS can optimize a `match`-derived dataflow graph and its
+scheduler and target flow can choose a different implementation. The
+difference is explicit finite-relation algebra versus a general functional
+decision expression, not a portable hardware-quality advantage.
 
 ## Time, state, and scheduling
 

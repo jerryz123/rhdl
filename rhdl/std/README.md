@@ -542,9 +542,11 @@ same item in different cycles.
 `map_flow(payload => expression)` configures an inline payload mapping while
 forwarding valid and ready. The binder retains precise bundle field
 information, and the result type is inferred from the body. The colon form
-supports multiline mappings. For an `Irrevocable` input, the body must remain
-stable while an offer is stalled; transformations that observe changing
-sidebands should start from or produce an explicit `Decoupled` stage instead:
+supports multiline mappings. The ordinary form returns `Decoupled`, even for
+an `Irrevocable` input, because the body may observe changing ambient hardware.
+Use `map_flow(~stable: #true, ...)` only when the expression is a stable
+function of the held payload; that explicit assertion preserves the input's
+`Decoupled` or `Irrevocable` protocol strength:
 
 ```rhombus
 def tagging:
@@ -629,10 +631,13 @@ def stable = buffered
 ```
 
 `demux_flow(n, payload => selector)` is a one-to-many routing stage whose
-selector is derived from the offered payload. It retains the input protocol and
-returns an array of `n` endpoints; an out-of-range selector blocks the input.
-This distinguishes exclusive routing from `atomic_fork(n)`, which requires
-every output to accept the same item.
+selector may observe the offered payload and ambient hardware. The ordinary
+form returns an array of `n` `Decoupled` endpoints. Use
+`demux_flow(n, ~stable: #true, ...)` only when the selector remains stable for
+the entire stalled offer; that explicit assertion preserves an `Irrevocable`
+input contract. An out-of-range selector blocks the input. This distinguishes
+exclusive routing from `atomic_fork(n)`, which requires every output to accept
+the same item.
 
 `GreedyMatcher(inputs, outputs)` maps an input-major Boolean request matrix to
 a Boolean one-to-one grant matrix. Lower input indices have priority, and each
@@ -726,11 +731,11 @@ The arrow form is especially useful for routing in the middle of a chain:
 
 ```rhombus
 buffered
-|> demux_flow(2, tagged => tagged.processor)
+|> demux_flow(2, ~stable: #true, tagged => tagged.processor)
 |> parallel(
-     (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
+     (Irrevocable(TaggedResponse()) |> map_flow(~stable: #true, tagged => tagged.response))
        |> fesvr_response,
-     (Irrevocable(TaggedResponse()) |> map_flow(tagged => tagged.response))
+     (Irrevocable(TaggedResponse()) |> map_flow(~stable: #true, tagged => tagged.response))
        |> processor_response
    )
 ```

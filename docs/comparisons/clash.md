@@ -149,11 +149,12 @@ more uniform and protocol-parametric than RHDL's fixed flow family.
 The static types do not by themselves prove every `Df` law. The project states
 that its harnesses check invariants where possible and explicitly notes that
 stable data until acknowledgment is not yet checked. RHDL has a corresponding,
-unproven contract: `Irrevocable` stability is documentary, and `map_flow` or
-`demux_flow` bodies can capture changing sidebands while preserving the nominal
-promise. Clash has the cleaner reusable circuit algebra; RHDL has clearer
-source-level ownership of the realized buffering, readiness paths, hierarchy,
-and cycle-verified whole-design dependency graph.
+unproven contract: `Irrevocable` stability is documentary. Ordinary `map_flow`
+and `demux_flow` stages now weaken to `Decoupled`; preserving an irrevocable
+contract requires an explicit author assertion that is not itself proven.
+Clash has the cleaner reusable circuit algebra; RHDL has clearer source-level
+ownership of the realized buffering, readiness paths, hierarchy, and
+cycle-verified whole-design dependency graph.
 
 ## Time, state, and concurrency
 

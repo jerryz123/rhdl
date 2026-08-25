@@ -119,12 +119,11 @@ large control decoder whose meaningful outputs vary per instruction; Hardcaml's
 ordinary functional composition is more general for a decoder interleaved with
 arbitrary Boolean or arithmetic computation.
 
-RHDL can minimize same-default output groups, exploit output don't-cares, and
-merge shared products before it constructs the Boolean network. This may beat
-a naïve expression of separate muxes and comparisons. It is not a universal
-quality advantage: Hardcaml's graph and a downstream synthesizer can realize
-the same function differently, and target-specific optimization decides the
-final PPA.
+RHDL preserves the combined sparse relation and its output don't-cares for
+downstream synthesis instead of constructing separate mux and comparison
+trees. RHDL does not run a Boolean minimizer itself. Hardcaml's graph and a
+downstream synthesizer can realize the same function differently, and
+target-specific optimization decides the final PPA.
 
 ## State, assignment, and priority
 

@@ -165,14 +165,14 @@ HazardFlow's guarantee is narrower and more protocol-aware. The strongest
 language design would not confuse these layers: a local dependency type is a
 composition aid, while whole-graph cycle verification remains the final fact.
 
-RHDL's nominal flow contracts currently exceed what it proves. `Irrevocable`
-stability is documented rather than automatically asserted, and the bodies of
-`map_flow` and `demux_flow` may capture changing hardware sidebands while the
-result retains the input's `Irrevocable` contract. HazardFlow's dependency
-types do not solve every temporal property either, but its generic protocol
-signature states more of the transfer relation. RHDL should either constrain
-those dependencies, conservatively weaken the result to `Decoupled`, or verify
-the retained promise.
+RHDL's nominal flow contracts still exceed what it proves. `Irrevocable`
+stability is documented rather than automatically asserted. Ordinary
+`map_flow` and `demux_flow` stages conservatively weaken to `Decoupled`, while
+their explicit `~stable: #true` preservation mode remains an unchecked author
+assertion. HazardFlow's dependency types do not solve every temporal property
+either, but its generic protocol signature states more of the transfer
+relation. RHDL still needs static dependency certification or generated
+assertions to prove a retained promise.
 
 ## Typed literals, patterns, and relational decode
 
@@ -185,9 +185,9 @@ can specify both input regions and partial output values.
 An RHDL `DecodeTable` is an unordered, nonoverlapping typed relation rather
 than a prioritized control construct. Ordinary table values can be combined by
 adding rows, lifting their selector patterns into a wider input type, or
-zipping independently authored output relations. `DecodeGen` retains all
-output don't-cares, minimizes same-default result groups, and merges identical
-products across groups.
+zipping independently authored output relations. `DecodeGen` retains the
+combined sparse relation and all output don't-cares in one backend operation;
+downstream synthesis owns minimization and product sharing.
 
 HazardFlow has typed literals, structs, tuples, arrays, enums, and Rust-shaped
 expressions for selection, but its standard language abstraction is the hazard

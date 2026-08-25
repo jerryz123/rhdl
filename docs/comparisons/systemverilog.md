@@ -201,10 +201,11 @@ protocol stability, and stage construction.
 SystemVerilog Assertions provide a major complementary advantage: an author
 can assert that `valid` and payload remain stable while stalled and can state
 bounded progress or environmental fairness properties. RHDL's `Irrevocable`
-contract is currently not automatically checked. Worse, `map_flow` and
-`demux_flow` can appear to preserve it while capturing a changing sideband.
-RHDL also has no latency, throughput, liveness, or deadlock types. Its advantage
-is therefore the cleanliness of constructing an exact elastic topology, not a
+contract is currently not automatically checked. Ordinary `map_flow` and
+`demux_flow` stages conservatively weaken to `Decoupled`; their explicit
+`~stable: #true` preservation mode remains an unchecked author assertion. RHDL
+also has no latency, throughput, liveness, or deadlock types. Its advantage is
+therefore the cleanliness of constructing an exact elastic topology, not a
 stronger temporal verification language.
 
 ## Locality, predictability, and syntax

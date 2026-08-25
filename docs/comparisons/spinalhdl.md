@@ -110,16 +110,16 @@ RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
 uses semantic literals and recursive aggregate cubes to validate one unordered
 decode relation before materializing it. Its sparse output patterns expose
 don't-care freedom, and independently authored rows or output relations can be
-combined before `DecodeGen` selects a shared implementation. RHDL's distinction
-is therefore recursive semantic aggregate structure and explicit relation
-composition, not the existence of masked tables or minimization. SpinalHDL
-remains terser for a local `switch` and competitive for a flat decode table.
+combined before `DecodeGen` preserves them in one sparse backend operation.
+RHDL's distinction is therefore recursive semantic aggregate structure and
+explicit relation composition, not the existence of masked tables or
+minimization. SpinalHDL remains terser for a local `switch` and competitive
+for a flat decode table.
 
-Minimizing same-default output groups and merging common products can give RHDL
-a more compact starting Boolean network than a literal comparison/mux chain.
-It does not guarantee better PPA than SpinalHDL's decoder minimization plus
-synthesis: target mapping and the surrounding logic determine the eventual
-result.
+RHDL leaves output don't-cares and the complete relation available to
+downstream synthesis, but it does not run a Boolean minimizer itself. It does
+not guarantee better PPA than SpinalHDL's decoder minimization plus synthesis:
+target mapping and the surrounding logic determine the eventual result.
 
 ## State, assignment, and priority
 
