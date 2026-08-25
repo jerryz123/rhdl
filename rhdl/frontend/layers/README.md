@@ -17,6 +17,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
 | [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions and population count, equality, typed membership, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
+| [`tagged-union.rhm`](tagged-union.rhm) | Nominal tagged unions with shared enum tags, typed payload construction, and dot-based tag tests and guarded views |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
 | [`vector.rhm`](vector.rhm) | `Vec`, construction, selection, and functional update |

@@ -1,0 +1,417 @@
+#lang rhombus/and_meta
+// Defines nominal tagged unions whose tags reuse shared hardware-enum schemas.
+
+import:
+  rhombus.bits.(<<) as <<
+  rhombus/meta open
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "../support/fields.rhm".HardwareFields
+  "../support/fields.rhm".HardwareVariantType
+  "../support/fields.rhm".HardwareVariantView
+  "../support/fields.rhm".hardware_as_bits
+  "../support/fields.rhm".hardware_value_type
+  "../support/hardware-literal.rhm".HardwareLiteral
+  "../support/variants.rhm" open
+
+export:
+  tagged_union
+
+class TaggedUnionType(schema :: VariantSchema,
+                      tag_type,
+                      payload_width :: Nat):
+  implements FlatDataType
+  implements HardwareVariantType
+
+  property variants:
+    schema.members.map(fun (member): member.name)
+
+  override method describe(): "tagged-union<" ++ schema.name ++ ">"
+  override method type_equal(other):
+    tagged_union_type(other) && variant_schema_equal(schema, other.schema)
+  override method bit_width(): schema.width + payload_width
+  override method packed_width(): schema.width + payload_width
+  override method hardware_variant_tag(entity, location):
+    tagged_union_value_tag(entity, location)
+  override method hardware_variant_is(entity, variant, location):
+    tagged_union_value_is(entity, variant, location)
+  override method hardware_variant_view(entity, variant, location):
+    tagged_union_value_view(entity, variant, location)
+
+fun tagged_union_type(type):
+  type is_a TaggedUnionType
+
+fun tag_schema(schema :: VariantSchema):
+  VariantSchema(
+    schema.name ++ ".tag",
+    schema.identity,
+    for List (member in schema.members):
+      VariantMember(member.name, member.encoding),
+    schema.width,
+    schema.one_hot
+  )
+
+fun build_tagged_union_type(schema :: VariantSchema):
+  def mutable maximum_payload_width = 0
+  for (member in schema.members):
+    when member.payload_type != #false
+    | unless member.payload_type is_a DataType && packable_type(member.payload_type)
+      | error(~who: #'tagged_union,
+              "variant payloads must have packable DataType types")
+      def width = member.payload_type.packed_width()
+      when width > maximum_payload_width
+      | maximum_payload_width := width
+  TaggedUnionType(schema,
+                  enum_type_from_schema(tag_schema(schema)),
+                  maximum_payload_width)
+
+fun make_automatic_tagged_union(name, identity, members, requested_width = #false):
+  build_tagged_union_type(
+    make_automatic_variant_schema(name, identity, members, requested_width)
+  )
+
+fun make_explicit_tagged_union(name, identity, members, requested_width = #false):
+  build_tagged_union_type(
+    make_explicit_variant_schema(name, identity, members, requested_width)
+  )
+
+fun make_one_hot_tagged_union(name, identity, members):
+  build_tagged_union_type(
+    make_one_hot_variant_schema(name, identity, members)
+  )
+
+fun union_member(type :: TaggedUnionType, member_name :: String):
+  def member = type.schema.members.find(
+    fun (candidate): candidate.name == member_name
+  )
+  unless member
+  | error(~who: #'tagged_union,
+          "tagged union " ++ type.schema.name ++ " has no variant named " ++ member_name)
+  member
+
+fun materialize_union_bits(type :: TaggedUnionType,
+                           member :: VariantMember,
+                           payload,
+                           location):
+  def tag_bits = kernel.literal(Bits(type.schema.width), member.encoding, #false, location)
+  if type.payload_width == 0
+  | kernel.cast(tag_bits, type, #false, location)
+  | block:
+      def payload_bits:
+        if payload == #false
+        | kernel.literal(Bits(type.payload_width), 0, #false, location)
+        | block:
+            def packed = hardware_as_bits(payload, #'tagged_union, "variant payload", #false, location)
+            def width = member.payload_type.packed_width()
+            if width == type.payload_width
+            | packed
+            | kernel.zext(packed, type.payload_width, #false, location)
+      kernel.cast(kernel.concat([tag_bits, payload_bits], #false, location),
+                  type,
+                  #false,
+                  location)
+
+class UnionLiteral(type :: TaggedUnionType,
+                   member :: VariantMember,
+                   payload :: HardwareLiteral):
+  implements HardwareLiteral
+
+  override method literal_type(): type
+  override method packed_value():
+    (member.encoding << type.payload_width) + payload.packed_value()
+
+class DeferredUnionValue(type :: TaggedUnionType,
+                         member :: VariantMember,
+                         payload):
+  implements kernel.DeferredHardwareValue
+
+  override method materialize_hardware(location):
+    materialize_union_bits(type, member, payload, location)
+
+class NullaryUnionVariant(type :: TaggedUnionType,
+                          member :: VariantMember,
+                          tag):
+  implements Callable
+  implements HardwareLiteral
+
+  override method call(): this
+  override method literal_type(): type
+  override method packed_value(): member.encoding << type.payload_width
+
+class PayloadUnionVariant(type :: TaggedUnionType,
+                          member :: VariantMember,
+                          tag):
+  implements Callable
+
+  override method call(payload) :~ HardwareFields:
+    def payload_type = hardware_value_type(payload)
+    unless type_equal(payload_type, member.payload_type)
+    | error(~who: #'tagged_union,
+            "variant payload has the wrong hardware type")
+    if payload is_a HardwareLiteral
+    | UnionLiteral(type, member, payload)
+    | DeferredUnionValue(type, member, payload)
+
+fun tagged_union_variant(value):
+  value is_a NullaryUnionVariant || value is_a PayloadUnionVariant
+
+fun require_tagged_union_variant(value):
+  unless tagged_union_variant(value)
+  | error(~who: #'tagged_union, "expected a tagged-union variant")
+  value
+
+fun union_variant(type, member_name):
+  unless tagged_union_type(type)
+  | error(~who: #'tagged_union, "variant access requires a tagged-union type")
+  def member = union_member(type, member_name)
+  def tag = enum_value(type.tag_type, member_name)
+  if member.payload_type == #false
+  | NullaryUnionVariant(type, member, tag)
+  | PayloadUnionVariant(type, member, tag)
+
+fun require_union_value(entity, location):
+  def value = kernel.read(entity, location)
+  unless tagged_union_type(value.type)
+  | error(~who: #'tagged_union, "expected tagged-union hardware data")
+  value
+
+fun packed_union_tag_bits(value, packed, location):
+  if value.type.payload_width == 0
+  | packed
+  | kernel.extract(packed,
+                   value.type.bit_width() - 1,
+                   value.type.payload_width,
+                   #false,
+                   location)
+
+fun union_variant_valid(value, packed, variant, location):
+  def tag_bits = packed_union_tag_bits(value, packed, location)
+  def expected_tag = kernel.literal(Bits(value.type.schema.width),
+                                    variant.member.encoding,
+                                    #false,
+                                    location)
+  kernel.hw_eq(tag_bits, expected_tag, #false, location)
+
+fun tagged_union_value_tag(entity,
+                           location = Location()) :~ HardwareFields:
+  def value = require_union_value(entity, location)
+  def type = value.type
+  def packed = hardware_as_bits(value, #'tag, "value", #false, location)
+  kernel.cast(packed_union_tag_bits(value, packed, location),
+              type.tag_type,
+              #false,
+              location)
+
+fun tagged_union_value_view(entity,
+                            supplied_variant,
+                            location = Location()):
+  def variant = require_tagged_union_variant(supplied_variant)
+  def value = require_union_value(entity, location)
+  unless type_equal(value.type, variant.type)
+  | error(~who: #'view,
+          "variant must belong to the viewed tagged-union type")
+  def packed = hardware_as_bits(value, #'view, "value", #false, location)
+  def valid = union_variant_valid(value, packed, variant, location)
+  def payload:
+    if variant.member.payload_type == #false
+    | #false
+    | block:
+        def payload_width = variant.member.payload_type.packed_width()
+        kernel.cast(kernel.extract(packed,
+                                   payload_width - 1,
+                                   0,
+                                   #false,
+                                   location),
+                    variant.member.payload_type,
+                    #false,
+                    location)
+  HardwareVariantView(valid, payload)
+
+fun tagged_union_value_is(entity,
+                          supplied_variant,
+                          location = Location()) :~ HardwareFields:
+  def variant = require_tagged_union_variant(supplied_variant)
+  def value = require_union_value(entity, location)
+  unless type_equal(value.type, variant.type)
+  | error(~who: #'is,
+          "variant must belong to the tested tagged-union type")
+  def packed = hardware_as_bits(value, #'is, "value", #false, location)
+  union_variant_valid(value, packed, variant, location)
+
+annot.macro 'TaggedUnionMembers':
+  annot_meta.pack_predicate(
+    'tagged_union_type',
+    '(($(statinfo_meta.dot_provider_key), tagged_union_member_dot))'
+  )
+
+dot.macro 'tagged_union_member_dot $left $dot $right':
+  if ["schema", "variants", "tag_type", "payload_width", "bit_width",
+      "packed_width", "describe", "type_equal"].contains(
+       right.to_source_string()
+     )
+  | #false
+  | 'union_variant($left, $(right.to_source_string()))'
+
+meta:
+  syntax_class TaggedUnionParameter
+  | '$(binding :: Identifier) $_ ...'
+
+  fun parse_union_members(clauses):
+    def mutable members = []
+    for (item in clauses):
+      match item
+      | '$(member :: Identifier)':
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, #false]']
+      | '$(member :: Identifier)($payload_type)':
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, $payload_type]']
+      | ~else:
+          syntax_meta.error(
+            "expected a nullary variant or a variant with one payload type",
+            item
+          )
+    members
+
+  fun parse_encoded_union_members(clauses):
+    def mutable mode = "unset"
+    def mutable members = []
+    for (item in clauses):
+      match item
+      | '$(member :: Identifier)':
+          when mode == "explicit"
+          | syntax_meta.error("cannot mix automatic and explicit variant encodings", item)
+          mode := "automatic"
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, #false]']
+      | '$(member :: Identifier)($payload_type)':
+          when mode == "explicit"
+          | syntax_meta.error("cannot mix automatic and explicit variant encodings", item)
+          mode := "automatic"
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, $payload_type]']
+      | '$(member :: Identifier) = $encoding':
+          when mode == "automatic"
+          | syntax_meta.error("cannot mix automatic and explicit variant encodings", item)
+          mode := "explicit"
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, $encoding, #false]']
+      | '$(member :: Identifier)($payload_type) = $encoding':
+          when mode == "automatic"
+          | syntax_meta.error("cannot mix automatic and explicit variant encodings", item)
+          mode := "explicit"
+          def member_name = member.to_source_string()
+          members := members ++ ['[$member_name, $encoding, $payload_type]']
+      | ~else:
+          syntax_meta.error(
+            "expected a nullary variant or a variant with one payload type",
+            item
+          )
+    [mode == "explicit", members]
+
+defn.macro
+| 'tagged_union $(name :: Identifier)($(parameter :: TaggedUnionParameter), ...): $clause; ...':
+    def union_name = name.to_source_string()
+    def type_constructor = Syntax.make_id(union_name ++ "_tagged_union_type", name)
+    def identity = Syntax.make_id(union_name ++ "_tagged_union_identity", name)
+    def parsed = parse_encoded_union_members([clause, ...])
+    def explicit = parsed[0]
+    def members = parsed[1]
+    when members.length() == 0
+    | syntax_meta.error("tagged_union requires at least one variant", name)
+    let [member_spec, ...] = members
+    def constructor:
+      if explicit
+      | 'make_explicit_tagged_union(
+           $union_name,
+           $identity,
+           [$member_spec, ...]
+         )'
+      | 'make_automatic_tagged_union(
+           $union_name,
+           $identity,
+           [$member_spec, ...]
+         )'
+    '«
+       def $identity = VariantIdentity()
+       fun $type_constructor($parameter, ...):
+         $constructor
+       expr.macro
+       | '$name($('$')type_argument, $'...')':
+           '$type_constructor($('$')type_argument, $'...') :: TaggedUnionMembers'
+       | '$name':
+           '$type_constructor'
+       annot.macro '$name($('$')type_argument, $'...')':
+         'HardwareFields.of($type_constructor($('$')type_argument, $'...'))'
+     »'
+| 'tagged_union $(name :: Identifier)(~encoding: one_hot): $clause; ...':
+    def union_name = name.to_source_string()
+    def members = parse_union_members([clause, ...])
+    when members.length() == 0
+    | syntax_meta.error("tagged_union requires at least one variant", name)
+    let [member_spec, ...] = members
+    '«
+       def $name :: TaggedUnionMembers = make_one_hot_tagged_union(
+         $union_name,
+         VariantIdentity(),
+         [$member_spec, ...]
+       )
+       annot.macro '$name':
+         'HardwareFields.of($name)'
+     »'
+| 'tagged_union $(name :: Identifier)(~width: $width): $clause; ...':
+    def union_name = name.to_source_string()
+    def parsed = parse_encoded_union_members([clause, ...])
+    def explicit = parsed[0]
+    def members = parsed[1]
+    when members.length() == 0
+    | syntax_meta.error("tagged_union requires at least one variant", name)
+    let [member_spec, ...] = members
+    if explicit
+    | '«
+         def $name :: TaggedUnionMembers = make_explicit_tagged_union(
+           $union_name,
+           VariantIdentity(),
+           [$member_spec, ...],
+           $width
+         )
+         annot.macro '$name':
+           'HardwareFields.of($name)'
+       »'
+    | '«
+         def $name :: TaggedUnionMembers = make_automatic_tagged_union(
+           $union_name,
+           VariantIdentity(),
+           [$member_spec, ...],
+           $width
+         )
+         annot.macro '$name':
+           'HardwareFields.of($name)'
+       »'
+| 'tagged_union $(name :: Identifier): $clause; ...':
+    def union_name = name.to_source_string()
+    def parsed = parse_encoded_union_members([clause, ...])
+    def explicit = parsed[0]
+    def members = parsed[1]
+    when members.length() == 0
+    | syntax_meta.error("tagged_union requires at least one variant", name)
+    let [member_spec, ...] = members
+    if explicit
+    | '«
+         def $name :: TaggedUnionMembers = make_explicit_tagged_union(
+           $union_name,
+           VariantIdentity(),
+           [$member_spec, ...]
+         )
+         annot.macro '$name':
+           'HardwareFields.of($name)'
+       »'
+    | '«
+         def $name :: TaggedUnionMembers = make_automatic_tagged_union(
+           $union_name,
+           VariantIdentity(),
+           [$member_spec, ...]
+         )
+         annot.macro '$name':
+           'HardwareFields.of($name)'
+       »'

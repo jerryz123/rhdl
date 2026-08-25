@@ -16,6 +16,8 @@ export:
   CircuitMemberFields
   hardware_port_static_info_key
   value_surface_static_info_key
+  HardwareVariantType
+  HardwareVariantView
   hardware_value_type
   hardware_as_bits
   hardware_index
@@ -105,6 +107,15 @@ fun hardware_has_packable_data_type(value):
   def type = hardware_entity_type(value)
   type is_a DataType && packable_type(type)
 
+// Lets independently selectable frontend layers attach variant inspection to
+// hardware values without teaching the shared field syntax their encoding.
+interface HardwareVariantType:
+  method hardware_variant_tag(entity, location)
+  method hardware_variant_is(entity, variant, location)
+  method hardware_variant_view(entity, variant, location)
+
+class HardwareVariantView(valid, payload)
+
 annot.macro 'HardwareFields':
   annot_meta.pack_predicate(
     'hardware_fields',
@@ -163,6 +174,45 @@ namespace HardwareFields:
       'hardware_has_packable_data_type',
       '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
     )
+
+fun require_hardware_variant_type(value, who):
+  def type = hardware_entity_type(value)
+  unless type is_a HardwareVariantType
+  | error(~who: who, "expected hardware data with variants")
+  type
+
+fun hardware_variant_tag(value, location = Location()) :~ HardwareFields:
+  require_hardware_variant_type(value, #'tag).hardware_variant_tag(value, location)
+
+fun hardware_variant_is(value, variant, location = Location()) :~ HardwareFields:
+  require_hardware_variant_type(value, #'is).hardware_variant_is(value, variant, location)
+
+fun hardware_variant_view_valid(view :: HardwareVariantView) :~ HardwareFields:
+  view.valid
+
+fun hardware_variant_view_payload(view :: HardwareVariantView) :~ HardwareFields:
+  unless view.payload != #false
+  | error(~who: #'view, "nullary hardware variants do not have payloads")
+  view.payload
+
+annot.macro 'HardwareVariantViewFields':
+  annot_meta.pack_predicate(
+    'fun (value): value is_a HardwareVariantView',
+    '(($(statinfo_meta.dot_provider_key), hardware_variant_view_dot))'
+  )
+
+fun hardware_variant_view(value,
+                          variant,
+                          location = Location()) :~ HardwareVariantViewFields:
+  require_hardware_variant_type(value, #'view).hardware_variant_view(value,
+                                                                     variant,
+                                                                     location)
+
+dot.macro 'hardware_variant_view_dot $left $dot $right':
+  match right
+  | 'valid': 'hardware_variant_view_valid($left) :: HardwareFields'
+  | 'payload': 'hardware_variant_view_payload($left) :: HardwareFields'
+  | ~else: #false
 
 fun hardware_index(value, index) :: HardwareFields:
   def value_type = hardware_entity_type(value)
@@ -265,6 +315,9 @@ dot.macro 'hardware_field_dot $left $dot $right':
   | 'literal_width': #false
   | 'current': #false
   | 'next': 'hardware_next($left) :: HardwareFields'
+  | 'tag': 'hardware_variant_tag($left) :: HardwareFields'
+  | 'is': 'fun (variant) :~ HardwareFields: hardware_variant_is($left, variant)'
+  | 'view': 'fun (variant) :~ HardwareVariantViewFields: hardware_variant_view($left, variant)'
   | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
   | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
   | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'

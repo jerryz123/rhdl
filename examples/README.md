@@ -131,6 +131,8 @@ instances, or logic to the generated RTL.
 | [`rhdl/unsigned-comparisons.rhdl`](rhdl/unsigned-comparisons.rhdl) | Unsigned ordering derived from one core comparison |
 | [`rhdl/signed-integers.rhdl`](rhdl/signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
 | [`rhdl/enum-state.rhdl`](rhdl/enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
+| [`rhdl/tagged-union.rhdl`](rhdl/tagged-union.rhdl) | Nullary and payload variants with `.tag`, `.is(...)`, and `.view(...)` inspection |
+| [`rhdl/nested-tagged-union.rhdl`](rhdl/nested-tagged-union.rhdl) | Nested tagged-union literals, chained payload views, and runtime reconstruction |
 | [`rhdl/one-hot.rhdl`](rhdl/one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
 | [`rhdl/one-hot-enum.rhdl`](rhdl/one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
 | [`rhdl/shifts.rhdl`](rhdl/shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |

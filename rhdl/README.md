@@ -164,7 +164,8 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed reductions, lower-index-first priority encoders, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support |
-| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | core IR, kernel, field support, finite-enum support, mux-lookup support |
+| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | field support, variant-schema support |
+| `tagged-union.rhm` | Nominal tagged unions, shared enum tags, typed payload construction, and `.tag`/`.is(...)`/`.view(...)` inspection | core IR, kernel, field support, hardware-literal support, variant-schema support |
 | `one-hot.rhm` | One-hot selector types, literals, total `Bits` index conversion, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
 | `bundle.rhm` | Bundle declarations, type-named construction, family identity and generator-argument reflection, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
@@ -200,6 +201,9 @@ language profiles:
 - `mux-lookup.rhm` lets independent layers contribute typed static keys,
   lookup selector behavior, and one-hot selector types without importing one
   another.
+- `variants.rhm` centralizes nominal variant identity, automatic and explicit
+  tag encodings, enum tag types, and exact member literals for enum and tagged-
+  union layers.
 
 Domain libraries and adapters such as `chi/` and `riscv/rhdl` consume the
 public language and standard libraries. They do not become frontend layers and

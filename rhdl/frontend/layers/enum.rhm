@@ -1,15 +1,11 @@
 #lang rhombus/and_meta
-// Defines introspectable nominal enum types and hardware member literals over flat core data.
+// Defines hardware-enum declarations over shared nominal variant schemas.
 
 import:
-  rhombus.bits.(<<) as <<
   rhombus/meta open
-  "../../core/ir.rhm" open
-  "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
-  "../support/finite-enum.rhm".FiniteEnumType
   "../support/hardware-methods.rhm".HardwareMethods
-  "../support/mux-lookup.rhm" as mux_support
+  "../support/variants.rhm" open
 
 export:
   hardware_enum
@@ -18,158 +14,34 @@ export:
   enum_members
   enum_encoding
 
-class EnumIdentity()
-class EnumMember(name, encoding)
-
-class EnumType(name, identity, members, width):
-  implements FlatDataType
-  implements FiniteEnumType
-  implements mux_support.MuxLookupSelectorType
-
-  override method describe():
-    "enum<" ++ name ++ ">"
-
-  override method type_equal(other):
-    enum_type(other) && identity === other.identity
-
-  override method bit_width():
-    width
-
-  override method packed_width():
-    width
-
-  override method enum_encodings():
-    members.map(fun (member): member.encoding)
-
-  override method normalize_mux_lookup_key(key):
-    unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
-    | error(~who: #'mux_lookup,
-            "enum mux lookup keys must be members of the selector's enum type")
-    key.mux_lookup_key_encoding()
-
-// One-hot enums remain nominal enums while advertising that each packed bit
-// selects the correspondingly declared member.
-class OneHotEnumType(name, identity, members, width):
-  implements FlatDataType
-  implements FiniteEnumType
-  implements mux_support.OneHotSelectorType
-
-  override method describe():
-    "one-hot enum<" ++ name ++ ">"
-
-  override method type_equal(other):
-    enum_type(other) && identity === other.identity
-
-  override method bit_width():
-    width
-
-  override method packed_width():
-    width
-
-  override method enum_encodings():
-    members.map(fun (member): member.encoding)
-
-  override method normalize_mux_lookup_key(key):
-    unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
-    | error(~who: #'mux_lookup,
-            "enum mux lookup keys must be members of the selector's enum type")
-    key.mux_lookup_key_encoding()
-
-  override method one_hot_selector_width():
-    width
-
-fun enum_type(type):
-  type is_a EnumType || type is_a OneHotEnumType
-
-fun enum_width(type):
-  unless enum_type(type)
-  | error(~who: #'enum_width, "expected a hardware enum type")
-  type.width
-
-fun enum_members(type):
-  unless enum_type(type)
-  | error(~who: #'enum_members, "expected a hardware enum type")
-  type.members.map(fun (member): member.name)
-
-fun enum_encoding(type, member_name :: String):
-  unless enum_type(type)
-  | error(~who: #'enum_encoding, "expected a hardware enum type")
-  def member = type.members.find(fun (candidate): candidate.name == member_name)
-  unless member
-  | error(~who: #'enum_encoding,
-          "enum " ++ type.name ++ " has no member named " ++ member_name)
-  member.encoding
-
-fun required_enum_width(maximum_encoding):
-  fun loop(width, capacity):
-    if maximum_encoding < capacity
-    | width
-    | loop(width + 1, capacity * 2)
-  loop(1, 2)
-
-fun validate_enum_declaration(name :: String,
-                              member_names :: NonemptyList.of(String),
-                              encodings :: List.of(Nat),
-                              requested_width,
-                              ~one_hot: one_hot :: Boolean = #false):
-  unless encodings.length() == member_names.length()
-  | error(~who: #'hardware_enum, "enum members and encodings must have the same length")
-  for (member_name in member_names):
-    when member_names.filter(
-      ~keep: fun (candidate): candidate == member_name
-    ).length() != 1
-    | error(~who: #'hardware_enum, "enum member names must be unique")
-  for (encoding in encodings):
-    when encodings.filter(
-      ~keep: fun (candidate): candidate == encoding
-    ).length() != 1
-    | error(~who: #'hardware_enum, "enum encodings must be unique")
-  def mutable maximum_encoding = 0
-  for (encoding in encodings):
-    when encoding > maximum_encoding
-    | maximum_encoding := encoding
-  def minimum_width = required_enum_width(maximum_encoding)
-  def width:
-    if requested_width == #false
-    | minimum_width
-    | block:
-        unless requested_width is_a PosInt
-        | error(~who: #'hardware_enum, "enum width must be a positive host integer")
-        when requested_width < minimum_width
-        | error(~who: #'hardware_enum, "enum encoding does not fit the declared width")
-        requested_width
-  def members = for List (member_name in member_names, encoding in encodings):
-    EnumMember(member_name, encoding)
-  if one_hot
-  | OneHotEnumType(name, EnumIdentity(), members, width)
-  | EnumType(name, EnumIdentity(), members, width)
-
 fun make_automatic_enum(name, member_names, requested_width = #false):
-  validate_enum_declaration(name,
-                            member_names,
-                            for List (encoding in 0..member_names.length()): encoding,
-                            requested_width)
-
-fun make_explicit_enum(name, members, requested_width = #false):
-  validate_enum_declaration(name,
-                            members.map(fun (member): member[0]),
-                            members.map(fun (member): member[1]),
-                            requested_width)
-
-fun make_one_hot_enum(name, member_names):
-  validate_enum_declaration(
-    name,
-    member_names,
-    for List (index in 0..member_names.length()): 1 << index,
-    member_names.length(),
-    ~one_hot: #true
+  enum_type_from_schema(
+    make_automatic_variant_schema(
+      name,
+      VariantIdentity(),
+      member_names.map(fun (member_name): [member_name, #false]),
+      requested_width
+    )
   )
 
-fun enum_value(type, member_name) :~ HardwareFields:
-  unless enum_type(type)
-  | error(~who: #'hardware_enum, "member access requires an enum type")
-  def encoding = enum_encoding(type, member_name)
-  mux_support.mux_lookup_literal(type, encoding)
+fun make_explicit_enum(name, members, requested_width = #false):
+  enum_type_from_schema(
+    make_explicit_variant_schema(
+      name,
+      VariantIdentity(),
+      members.map(fun (member): [member[0], member[1], #false]),
+      requested_width
+    )
+  )
+
+fun make_one_hot_enum(name, member_names):
+  enum_type_from_schema(
+    make_one_hot_variant_schema(
+      name,
+      VariantIdentity(),
+      member_names.map(fun (member_name): [member_name, #false])
+    )
+  )
 
 annot.macro 'EnumMembers':
   annot_meta.pack_predicate(
