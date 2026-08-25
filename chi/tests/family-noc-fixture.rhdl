@@ -1,0 +1,144 @@
+#lang rhdl
+// Defines an asymmetric CHI channel whose family ejection index differs from its local index.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("chi/noc-authoring.rhm") as chi_authoring
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/plan/main.rhm") open
+  lib("noc/rtl/router.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl").Decoupled
+  lib("rhdl/std/flow/queue.rhdl").queue
+
+def family_noc_flit = CHIFlitParams()
+def family_noc_topology = topology:
+  vc_group transport: 1
+  node source
+  node middle
+  node target
+  directed source_middle:
+    source -> middle
+    vcs [transport]
+  directed middle_target:
+    middle -> target
+    vcs [transport]
+def family_noc_source_router = family_noc_topology.node("source")
+def family_noc_middle_router = family_noc_topology.node("middle")
+def family_noc_target_router = family_noc_topology.node("target")
+def family_noc_source = chi_authoring.CHIInjectionSite(3, InjectionRef("source"), family_noc_source_router)
+def family_noc_target = chi_authoring.CHIEjectionSite(5, EjectionRef("target"), family_noc_target_router)
+def family_noc_routing = policy_union(
+  [inject_into_vc_groups(["transport"]),
+   transition_vc_groups(["transport"], ["transport"])]
+)
+def family_noc_compilation = chi_authoring.compile_chi_channel(
+  family_noc_topology,
+  [chi_authoring.CHIChannelRouteSpec(family_noc_source, family_noc_target)],
+  family_noc_routing
+)
+def family_noc_router_family = RouterFamilyPlan(family_noc_compilation.network.network_plan)
+def family_noc_local_adapters = compile_chi_channel_adapter_plan(family_noc_compilation, family_noc_flit)
+def family_noc_family_adapters = compile_chi_channel_family_adapter_plan(
+  family_noc_compilation,
+  family_noc_router_family,
+  family_noc_flit
+)
+def family_noc_router_config = compile_simple_router_family(family_noc_router_family)
+def family_noc_source_node = family_noc_compilation.network.router_id(family_noc_source_router)
+def family_noc_middle_node = family_noc_compilation.network.router_id(family_noc_middle_router)
+def family_noc_target_node = family_noc_compilation.network.router_id(family_noc_target_router)
+
+fun require_family_link(source_router, destination_router):
+  def source_site_key = family_noc_router_family.site_key(
+    family_noc_compilation.network.router_id(source_router)
+  )
+  def destination_site_key = family_noc_router_family.site_key(
+    family_noc_compilation.network.router_id(destination_router)
+  )
+  def found = family_noc_router_family.link_connections.find(
+    fun (connection): connection.source_site_key == source_site_key && (
+      connection.destination_site_key == destination_site_key
+    )
+  )
+  unless found
+  | error(~who: #'require_family_link, "missing family link connection")
+  found
+
+def family_noc_source_middle = require_family_link(
+  family_noc_source_router,
+  family_noc_middle_router
+)
+def family_noc_middle_target = require_family_link(
+  family_noc_middle_router,
+  family_noc_target_router
+)
+
+sync_circuit CHIFamilyNoCFixture():
+  interface request_in(Decoupled(CHIReqFlit(family_noc_flit)), ~role: consumer)
+  interface request_out(Decoupled(CHIReqFlit(family_noc_flit)), ~role: producer)
+
+  def SharedRouter = SimpleRouterFamily(CHIReqFlit(family_noc_flit), family_noc_router_config)
+  inst source(SharedRouter)
+  inst middle(SharedRouter)
+  inst target(SharedRouter)
+  bind_simple_router_family_site(
+    CHIReqFlit(family_noc_flit), family_noc_router_config, family_noc_source_node,
+    ~site_key: source.site_key, ~ingress: source.ingress, ~targets: source.target
+  )
+  bind_simple_router_family_site(
+    CHIReqFlit(family_noc_flit), family_noc_router_config, family_noc_middle_node,
+    ~site_key: middle.site_key, ~ingress: middle.ingress, ~targets: middle.target
+  )
+  bind_simple_router_family_site(
+    CHIReqFlit(family_noc_flit), family_noc_router_config, family_noc_target_node,
+    ~site_key: target.site_key, ~ingress: target.ingress, ~targets: target.target
+  )
+
+  def injection_config = family_noc_family_adapters.injection(family_noc_source.terminal)
+  (request_in |> chi_req_noc_inject(injection_config)) <=> source.ingress[injection_config.input_index]
+
+  def source_target :: Endpoint = source.target[family_noc_source_middle.source_target_indices[0]]
+  source_target.egress <=> middle.ingress[family_noc_source_middle.destination_input_indices[0]]
+  source_target.available <== source_target.egress.ready
+  def middle_target :: Endpoint = middle.target[family_noc_middle_target.source_target_indices[0]]
+  middle_target.egress <=> target.ingress[family_noc_middle_target.destination_input_indices[0]]
+  middle_target.available <== middle_target.egress.ready
+
+  def ejection_config = family_noc_family_adapters.ejection(family_noc_target.terminal)
+  def ejection_target :: Endpoint = target.target[ejection_config.target_index]
+  (ejection_target.egress |> queue(1) |> chi_req_noc_eject(ejection_config)) <=> request_out
+  ejection_target.available <== ejection_target.egress.ready
+
+def family_noc_design = elaborate(CHIFamilyNoCFixture())
+
+def other_topology = topology:
+  node xbar
+def other_router = other_topology.node("xbar")
+def other_source = chi_authoring.CHIInjectionSite(7, InjectionRef("other-source"), other_router)
+def other_target = chi_authoring.CHIEjectionSite(8, EjectionRef("other-target"), other_router)
+def other_compilation = chi_authoring.compile_chi_channel(
+  other_topology,
+  [chi_authoring.CHIChannelRouteSpec(other_source, other_target)],
+  deny_all
+)
+def other_router_family = RouterFamilyPlan(other_compilation.network.network_plan)
+
+export:
+  family_noc_flit
+  family_noc_topology
+  family_noc_source_router
+  family_noc_middle_router
+  family_noc_target_router
+  family_noc_source
+  family_noc_target
+  family_noc_compilation
+  family_noc_router_family
+  family_noc_local_adapters
+  family_noc_family_adapters
+  family_noc_router_config
+  family_noc_source_middle
+  family_noc_middle_target
+  CHIFamilyNoCFixture
+  family_noc_design
+  other_router_family

@@ -14,6 +14,7 @@ export:
   RouterFamilyEjectionPort
   RouterFamilyVCConnection
   RouterFamilyLinkConnection
+  RouterFamilySitePlan
   RouterFamilyPlan
 
 fun max_length(items, project):
@@ -30,6 +31,14 @@ fun remap_mask(local_mask, target_slots):
     when (local_mask bits.and (1 << local_bit)) != 0
     | family_mask := family_mask bits.or (1 << target_slots[local_bit])
   family_mask
+
+fun unused_slots(count :: Nat,
+                 used_slots :: List.of(Nat)) :: List.of(Nat):
+  def mutable unused = []
+  for (index in 0..count):
+    unless used_slots.find(fun (used): used == index)
+    | unused := unused ++ [index]
+  unused
 
 class RouterFamilyMember(site_key :: Nat,
                          router_plan :: RouterPlan,
@@ -93,6 +102,22 @@ class RouterFamilyLinkConnection(link :: PhysicalLink,
   internal _RouterFamilyLinkConnection
   constructor ~none
 
+// Projects one family member into the endpoint, link, and padding slots that
+// its owning subsystem must bind around a stamped router instance.
+class RouterFamilySitePlan(node :: NodeId,
+                           site_key :: Nat,
+                           injection_ports :: List.of(RouterFamilyInjectionPort),
+                           ejection_ports :: List.of(RouterFamilyEjectionPort),
+                           incoming_vcs :: List.of(RouterFamilyVCConnection),
+                           outgoing_vcs :: List.of(RouterFamilyVCConnection),
+                           incoming_links :: List.of(RouterFamilyLinkConnection),
+                           outgoing_links :: List.of(RouterFamilyLinkConnection),
+                           unused_input_indices :: List.of(Nat),
+                           unused_target_indices :: List.of(Nat)):
+  opaque
+  internal _RouterFamilySitePlan
+  constructor ~none
+
 class RouterFamilyPlan(network_plan :: NetworkPlan,
                        members :: NonemptyList.of(RouterFamilyMember),
                        injection_count :: Nat,
@@ -105,7 +130,8 @@ class RouterFamilyPlan(network_plan :: NetworkPlan,
                        injection_ports :: List.of(RouterFamilyInjectionPort),
                        ejection_ports :: List.of(RouterFamilyEjectionPort),
                        vc_connections :: List.of(RouterFamilyVCConnection),
-                       link_connections :: List.of(RouterFamilyLinkConnection)):
+                       link_connections :: List.of(RouterFamilyLinkConnection),
+                       sites :: NonemptyList.of(RouterFamilySitePlan)):
   constructor (network_plan :: NetworkPlan):
     def router_plans = network_plan.router_plans
     def injection_count = max_length(router_plans, fun (plan): plan.injection_terminals)
@@ -195,6 +221,22 @@ class RouterFamilyPlan(network_plan :: NetworkPlan,
           )
         )
 
+    def sites:
+      for List (member in members):
+        def site_key = member.site_key
+        _RouterFamilySitePlan(
+          member.router_plan.node,
+          site_key,
+          injection_ports.filter(~keep: fun (port): port.site_key == site_key),
+          ejection_ports.filter(~keep: fun (port): port.site_key == site_key),
+          vc_connections.filter(~keep: fun (connection): connection.destination_site_key == site_key),
+          vc_connections.filter(~keep: fun (connection): connection.source_site_key == site_key),
+          link_connections.filter(~keep: fun (connection): connection.destination_site_key == site_key),
+          link_connections.filter(~keep: fun (connection): connection.source_site_key == site_key),
+          unused_slots(input_count, member.origin_slots),
+          unused_slots(target_count, member.target_slots)
+        )
+
     super(network_plan,
           members,
           injection_count,
@@ -207,7 +249,8 @@ class RouterFamilyPlan(network_plan :: NetworkPlan,
           injection_ports,
           ejection_ports,
           vc_connections,
-          link_connections)
+          link_connections,
+          sites)
 
   method member(node :: NodeId):
     def found = members.find(
@@ -219,6 +262,41 @@ class RouterFamilyPlan(network_plan :: NetworkPlan,
 
   method site_key(node :: NodeId):
     member(node).site_key
+
+  method derives_from(plan :: NetworkPlan) :: Boolean:
+    network_plan === plan
+
+  method site(node :: NodeId) :: RouterFamilySitePlan:
+    def found = sites.find(
+      fun (candidate): node_id_equal(candidate.node, node)
+    )
+    unless found
+    | error(~who: #'RouterFamilyPlan, "unknown router-family site")
+    found
+
+  method injection_port(id :: InjectionId) :: RouterFamilyInjectionPort:
+    def found = injection_ports.find(
+      fun (port): injection_id_equal(port.terminal.id, id)
+    )
+    unless found
+    | error(~who: #'RouterFamilyPlan,
+            "unknown router-family injection terminal")
+    found
+
+  method ejection_port(id :: EjectionId) :: RouterFamilyEjectionPort:
+    def found = ejection_ports.find(
+      fun (port): ejection_id_equal(port.terminal.id, id)
+    )
+    unless found
+    | error(~who: #'RouterFamilyPlan,
+            "unknown router-family ejection terminal")
+    found
+
+  method incoming_links(node :: NodeId) :: List.of(RouterFamilyLinkConnection):
+    site(node).incoming_links
+
+  method outgoing_links(node :: NodeId) :: List.of(RouterFamilyLinkConnection):
+    site(node).outgoing_links
 
   method origin_slot(node :: NodeId, origin):
     member(node).origin_slot(origin)

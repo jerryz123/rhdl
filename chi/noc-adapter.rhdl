@@ -11,6 +11,7 @@ import:
   lib("chi/channels.rhdl").CHISnoopDispatch
   lib("chi/noc-authoring.rhm") open
   lib("noc/authoring/main.rhm") open
+  lib("noc/plan/router-family-plan.rhm").RouterFamilyPlan
   lib("noc/rtl/router.rhdl").RoutedBeat
 
 export:
@@ -19,6 +20,7 @@ export:
   CHIChannelAdapterPlan
   CHIChannelAdapterPlans
   compile_chi_channel_adapter_plan
+  compile_chi_channel_family_adapter_plan
   compile_chi_channel_adapter_plans
   connect_chi_rni_node
   connect_chi_rnf_node
@@ -82,7 +84,8 @@ fun compile_chi_noc_injection_config(
       compilation :: CHIChannelCompilation,
       site :: CHIInjectionSite,
       p :: CHIFlitParams,
-      route_width :: PosInt) :: CHINoCInjectionConfig:
+      route_width :: PosInt,
+      input_index :: Nat) :: CHINoCInjectionConfig:
   def routes = compilation.routes_from(site.terminal)
   unless routes.length() > 0
   | error(~who: #'compile_chi_channel_adapter_plan,
@@ -110,14 +113,15 @@ fun compile_chi_noc_injection_config(
     p,
     route_width,
     decoder,
-    compilation.injection_port(site.terminal).input_index
+    input_index
   )
 
 fun compile_chi_noc_ejection_config(
       compilation :: CHIChannelCompilation,
       site :: CHIEjectionSite,
       p :: CHIFlitParams,
-      route_width :: PosInt) :: CHINoCEjectionConfig:
+      route_width :: PosInt,
+      target_index :: Nat) :: CHINoCEjectionConfig:
   unless bits.length(site.node_id) <= p.node_id_width
   | error(~who: #'compile_chi_channel_adapter_plan,
           "CHI ejection NodeID does not fit the flit")
@@ -125,22 +129,66 @@ fun compile_chi_noc_ejection_config(
     site,
     p,
     route_width,
-    compilation.ejection_port(site.terminal).target_index
+    target_index
   )
 
-fun compile_chi_channel_adapter_plan(
+fun compile_chi_channel_adapter_plan_with_indices(
       compilation :: CHIChannelCompilation,
-      p :: CHIFlitParams) :: CHIChannelAdapterPlan:
+      p :: CHIFlitParams,
+      input_index :: Function.of_arity(1),
+      target_index :: Function.of_arity(1)) :: CHIChannelAdapterPlan:
   def route_width = index_width(
     compilation.network.validated_routing.route_classes.length()
   )
   def injections:
     for List (site in compilation.injections):
-      compile_chi_noc_injection_config(compilation, site, p, route_width)
+      compile_chi_noc_injection_config(
+        compilation,
+        site,
+        p,
+        route_width,
+        input_index(site)
+      )
   def ejections:
     for List (site in compilation.ejections):
-      compile_chi_noc_ejection_config(compilation, site, p, route_width)
+      compile_chi_noc_ejection_config(
+        compilation,
+        site,
+        p,
+        route_width,
+        target_index(site)
+      )
   CHIChannelAdapterPlan(compilation, injections, ejections)
+
+fun compile_chi_channel_adapter_plan(
+      compilation :: CHIChannelCompilation,
+      p :: CHIFlitParams) :: CHIChannelAdapterPlan:
+  compile_chi_channel_adapter_plan_with_indices(
+    compilation,
+    p,
+    fun (site): compilation.injection_port(site.terminal).input_index,
+    fun (site): compilation.ejection_port(site.terminal).target_index
+  )
+
+// Resolves endpoint adapter indices through the uniform family layout while
+// preserving the channel compilation's route-key decoder.
+fun compile_chi_channel_family_adapter_plan(
+      compilation :: CHIChannelCompilation,
+      family :: RouterFamilyPlan,
+      p :: CHIFlitParams) :: CHIChannelAdapterPlan:
+  unless family.derives_from(compilation.network.network_plan)
+  | error(~who: #'compile_chi_channel_family_adapter_plan,
+          "router family must derive from the CHI channel network plan")
+  compile_chi_channel_adapter_plan_with_indices(
+    compilation,
+    p,
+    fun (site):
+      def terminal = compilation.network.injection_terminal(site.terminal)
+      family.injection_port(terminal.id).input_index,
+    fun (site):
+      def terminal = compilation.network.ejection_terminal(site.terminal)
+      family.ejection_port(terminal.id).target_index
+  )
 
 fun compile_chi_channel_adapter_plans(
       compilations :: CHIChannelCompilations,

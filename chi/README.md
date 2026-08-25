@@ -443,7 +443,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
 | [`channels.rhdl`](channels.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, RN-F, SN, HN-I, and HN-F contracts; multi-requester HN snoops carry destination NodeID beside the exact target-less SNP flit until endpoint ejection |
 | [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, SNP, and DAT channel results with derived route keys; RN-I connections omit SNP while RN-F connections add it |
-| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations, without topology or router ownership |
+| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations; adapters may resolve either local router ports or uniform `RouterFamilyPlan` slots without taking topology or router ownership |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean`/`ReadUnique` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |

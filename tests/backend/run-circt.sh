@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-transfer-fragmenter
+  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
   ricket-core ricket-multiply ricket-dcache
 )
 
@@ -611,6 +611,7 @@ direct_fixture_specs=(
   'chi-coherent|chi_coherent_tb'
   'chi-coherent-home|chi_coherent_home_tb'
   'chi-snp-noc|chi_snp_noc_tb'
+  'chi-family-noc|chi_family_noc_tb'
   'chi-transfer-fragmenter|chi_transfer_fragmenter_tb'
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'

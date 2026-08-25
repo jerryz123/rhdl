@@ -7,6 +7,7 @@ import:
   lib("rhdl/std/flow/crossbar.rhdl") open
   "allocator.rhdl" open
   "route-computer.rhdl" open
+  "../model/identities.rhm".NodeId
   "../plan/router-plan.rhm" open
   "../plan/router-family-plan.rhm" open
 
@@ -17,6 +18,7 @@ export:
   SimpleRouterFamilyConfig
   compile_simple_router
   compile_simple_router_family
+  bind_simple_router_family_site
   SimpleRouter
   SimpleRouterFamily
 
@@ -91,6 +93,26 @@ fun compile_simple_router_family(
                             router_family_plan.input_count,
                             router_family_plan.target_count,
                             input_buffer_depth)
+
+// Selects one family member and closes only the uniform padding slots around
+// its router occurrence; endpoint and physical-link slots remain integration-owned.
+fun bind_simple_router_family_site(T :: DataType,
+                                   config :: SimpleRouterFamilyConfig,
+                                   node :: NodeId,
+                                   ~site_key: site_key :: Hardware.bits,
+                                   ~ingress: ingress :: Array,
+                                   ~targets: targets :: Array):
+  def site = config.router_family_plan.site(node)
+  def Beat = RoutedBeat(T, config.route_decoder.route_width)
+  site_key <== bits(site.site_key, config.route_decoder.site_width)
+  for (input_index in site.unused_input_indices):
+    def input :: Endpoint = ingress[input_index]
+    input.valid <== Bool(#false)
+    input.bits <== dont_care(Beat)
+  for (target_index in site.unused_target_indices):
+    def target :: Endpoint = targets[target_index]
+    target.available <== Bool(#false)
+    target.egress.ready <== Bool(#false)
 
 // Checks the route metadata contract on each external ingress offer. The
 // physical ingress index supplies the origin key that is intentionally absent

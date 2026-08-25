@@ -74,6 +74,9 @@ module once and passing that module value to several `inst` forms produces one
 shared module definition with multiple occurrences. The pure family plan
 supplies the remapped connection indices; this RTL package still does not
 instantiate the network or assume that its routers share a parent module.
+`bind_simple_router_family_site` drives one occurrence's constant site key and
+closes only its family-padding inputs and targets. Local endpoint attachment and
+physical-link wiring remain explicit responsibilities of the owning subsystem.
 
 Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through

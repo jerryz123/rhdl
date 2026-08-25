@@ -684,3 +684,9 @@ same mapping. The family is derived from one `NetworkPlan`, so all selected
 rows still come from the same globally validated routing relation. No mesh
 coordinate, dimension, direction, or other topology-specific concept is part
 of this API.
+
+Each `RouterFamilySitePlan` projects one member's injection and ejection ports,
+incoming and outgoing VC/link connections, and uniform padding slots. Its used
+and unused indices partition the complete family arrays, letting the subsystem
+that owns a stamped router bind local endpoints and physical links while tying
+off only slots that the member does not possess.
