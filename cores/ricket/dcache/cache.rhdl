@@ -28,11 +28,9 @@ fun check_l1d_geometry(width :: PosInt, sets :: Pow2Int):
 
 sync_circuit RicketL1DCache(xlen :: XLen,
                             sets :: Pow2Int,
-                            ~chi: params :: RicketCHIParams):
+                            ~chi: config :: RicketCHIConfig):
   def width = xlen_width(xlen)
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node = checked.data_node
+  def p = config.flit
   check_l1d_geometry(width, sets)
   def beats = RicketCacheLineBytes / 8
   def offset_width = alignment_bits(RicketCacheLineBytes)
@@ -40,6 +38,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   def tag_width = width - offset_width - set_width
   def beat_width = index_width(beats)
 
+  input node_id: Bits(p.node_id_width)
   interface core(RicketDataAccess(xlen), ~role: responder)
   interface chi(CHIRNChannels(p), ~role: node)
 
@@ -49,9 +48,12 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   inst load_gen(LoadGen(xlen))
   inst store_gen(StoreGen(xlen))
   inst atomic_alu(RicketAtomicALU(xlen))
-  inst refill(RicketLineRefill(RicketDataReq(xlen), width, checked, node))
-  inst snoop(RicketDataSnoop(width, checked, node))
-  inst writeback(RicketLineWriteback(RicketDataReq(xlen), width, checked, 1))
+  inst refill(RicketLineRefill(RicketDataReq(xlen), width, config))
+  inst snoop(RicketDataSnoop(width, config))
+  inst writeback(RicketLineWriteback(RicketDataReq(xlen), width, config, 1))
+  refill.node_id <== node_id
+  snoop.node_id <== node_id
+  writeback.node_id <== node_id
   // Hits leave the lookup stage directly. Ownership acquisitions and misses
   // transfer their complete request context into the refill engine, after a
   // dirty victim has drained when replacement is necessary.

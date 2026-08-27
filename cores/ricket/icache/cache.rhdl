@@ -25,11 +25,9 @@ fun check_l1i_geometry(width :: PosInt, sets :: Pow2Int):
 
 sync_circuit RicketL1ICache(xlen :: XLen,
                             sets :: Pow2Int,
-                            ~chi: params :: RicketCHIParams):
+                            ~chi: config :: RicketCHIConfig):
   def width = xlen_width(xlen)
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node = checked.instruction_node
+  def p = config.flit
   check_l1i_geometry(width, sets)
   def beats = RicketCacheLineBytes / 8
   def offset_width = alignment_bits(RicketCacheLineBytes)
@@ -38,14 +36,17 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def beat_width = index_width(beats)
   def outstanding_width = index_width(3)
 
+  input node_id: Bits(p.node_id_width)
   interface core(RicketInstructionAccess(xlen), ~role: responder)
   interface chi(CHIRNChannels(p), ~role: node)
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst states(SyncRam1RW(sets, CHIResponseState, 1))
   inst lines(SyncRam1RW(sets, Bits(64), beats))
-  inst refill(RicketLineRefill(Bits(width), width, checked, node))
-  inst snoop(RicketCleanSnoop(width, checked, node))
+  inst refill(RicketLineRefill(Bits(width), width, config))
+  inst snoop(RicketCleanSnoop(width, config))
+  refill.node_id <== node_id
+  snoop.node_id <== node_id
   inst lookup(Pipe(Bits(width), 1))
   inst response_arbiter(Arbiter(RicketInstructionResp(), 2))
   def cache_flush = core.flush ||| core.invalidate_all

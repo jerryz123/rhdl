@@ -11,37 +11,48 @@ import:
   lib("chi/channels.rhdl").CHISNChannels
   lib("chi/fabric.rhdl") open
 
-class CHITransferFragmenterParams(flit :: CHIFlitParams,
-                                  downstream_service :: CHISubordinateServiceParams,
+class CHITransferFragmenterConfig(flit :: CHIFlitParams,
                                   max_read_bytes :: Pow2Int):
   implements CircuitParam
+
+  method upstream_requests(downstream_requests :: NonemptyList.of(CHIRequestSupport)):
+    downstream_requests.map(
+      fun (support):
+        CHIRequestSupport(
+          support.opcode,
+          if support.opcode == CHIReqOpcode.ReadNoSnp
+          | TransferSizes(support.sizes.min_bytes, max_read_bytes)
+          | support.sizes
+        )
+    )
+
+  constructor (flit :: CHIFlitParams,
+               ~max_read_bytes: max_read_bytes :: Pow2Int):
+    unless max_read_bytes >= flit.data_bytes && max_read_bytes <= 64
+    | error(~who: #'CHITransferFragmenterConfig,
+            "maximum read size must be from one DAT beat through 64 bytes")
+    super(flit, max_read_bytes)
+
+class CHITransferFragmenterParams(config :: CHITransferFragmenterConfig,
+                                  downstream_service :: CHISubordinateServiceParams):
+
+  property flit: config.flit
+  property max_read_bytes: config.max_read_bytes
 
   property upstream_service:
     CHISubordinateServiceParams(
       downstream_service.endpoint,
       downstream_service.address_sets,
-      downstream_service.requests.map(
-        fun (support):
-          CHIRequestSupport(
-            support.opcode,
-            if support.opcode == CHIReqOpcode.ReadNoSnp
-            | TransferSizes(support.sizes.min_bytes, max_read_bytes)
-            | support.sizes
-          )
-      )
+      config.upstream_requests(downstream_service.requests)
     )
 
-  constructor (flit :: CHIFlitParams,
-               downstream_service :: CHISubordinateServiceParams,
-               ~max_read_bytes: max_read_bytes :: Pow2Int = 64):
-    unless max_read_bytes >= flit.data_bytes && max_read_bytes <= 64
-    | error(~who: #'CHITransferFragmenterParams,
-            "maximum read size must be from one DAT beat through 64 bytes")
+  constructor (config :: CHITransferFragmenterConfig,
+               downstream_service :: CHISubordinateServiceParams):
     unless downstream_service.supports(CHIReqOpcode.ReadNoSnp,
-                                       flit.data_bytes)
+                                       config.flit.data_bytes)
     | error(~who: #'CHITransferFragmenterParams,
             "downstream service must support one-DAT-beat reads")
-    super(flit, downstream_service, max_read_bytes)
+    super(config, downstream_service)
 
 hardware_enum CHITransferFragmenterPhase(~width: 3):
   Idle = 0
@@ -144,8 +155,8 @@ fun chi_fragmented_read_data(p :: CHIFlitParams,
   parent.qos <== data.qos
   parent
 
-sync_circuit CHITransferFragmenter(params :: CHITransferFragmenterParams):
-  def p = params.flit
+sync_circuit CHITransferFragmenter(config :: CHITransferFragmenterConfig):
+  def p = config.flit
   interface upstream(CHISNChannels(p), ~role: node)
   interface downstream(CHISNChannels(p), ~role: icn)
 
@@ -175,7 +186,7 @@ sync_circuit CHITransferFragmenter(params :: CHITransferFragmenterParams):
                      CHIReqOpcode.WriteNoSnpPtl),
            "chi_transfer_fragmenter_request_opcode_supported")
     assert(chi_size_valid(incoming_size) & (
-             as_bits(incoming_size) <= bits(alignment_bits(params.max_read_bytes), 3)
+             as_bits(incoming_size) <= bits(alignment_bits(config.max_read_bytes), 3)
            ),
            "chi_transfer_fragmenter_request_size_supported")
     assert(incoming_address_aligned,
@@ -230,5 +241,6 @@ sync_circuit CHITransferFragmenter(params :: CHITransferFragmenterParams):
       phase <== CHITransferFragmenterPhase.SendRequest
 
 export:
+  CHITransferFragmenterConfig
   CHITransferFragmenterParams
   CHITransferFragmenter

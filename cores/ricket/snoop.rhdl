@@ -28,15 +28,10 @@ bundle RicketDataSnoopUpdate(address_width :: PosInt):
   state: CHICacheState
 
 sync_circuit RicketCleanSnoop(address_width :: PosInt,
-                              params :: RicketCHIParams,
-                              node :: CHINodeParams):
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node_id = node.node_id
-  unless node_id == checked.instruction_node_id || node_id == checked.data_node_id
-  | error(~who: #'RicketCleanSnoop,
-          "snoop node must identify a Ricket cache")
+                              config :: RicketCHIConfig):
+  def p = config.flit
 
+  input node_id: Bits(p.node_id_width)
   input cache_ready: Bool
   output pending: Bool
   output address: Bits(address_width)
@@ -138,18 +133,13 @@ sync_circuit RicketCleanSnoop(address_width :: PosInt,
     dvm_first_pending <== Bool(#false)
 
 sync_circuit RicketDataSnoop(address_width :: PosInt,
-                             params :: RicketCHIParams,
-                             node :: CHINodeParams):
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node_id = node.node_id
+                             config :: RicketCHIConfig):
+  def p = config.flit
   def packet_count :: PosInt = RicketCacheLineBytes / p.data_bytes
   def packet_index_width = index_width(packet_count)
   def data_id_stride = p.data_bytes / 16
-  unless node_id == checked.data_node_id
-  | error(~who: #'RicketDataSnoop,
-          "data snoop node must identify Ricket's data cache")
 
+  input node_id: Bits(p.node_id_width)
   input cache_ready: Bool
   output pending: Bool
   output address: Bits(address_width)
@@ -261,7 +251,7 @@ sync_circuit RicketDataSnoop(address_width :: PosInt,
   snoop_data.opcode <== CHIDatOpcode.SnpRespData
   snoop_data.home_nid_or_pbha_or_mismatched_mecid <== request.src_id
   snoop_data.txn_id <== request.txn_id
-  snoop_data.src_id <== bits(node_id, p.node_id_width)
+  snoop_data.src_id <== node_id
   snoop_data.tgt_id <== request.src_id
   snoop_data.qos <== request.qos
   data.valid <== active_state & lookup_complete & dirty_hit

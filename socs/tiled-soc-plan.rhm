@@ -1,0 +1,163 @@
+#lang rhombus
+// Defines the pure 4x3 mesh placement and validated four-plane CHI routing plan.
+
+import:
+  "../chi/noc-authoring.rhm" open
+  "../noc/authoring/main.rhm" open
+  "../noc/plan/main.rhm" open
+  "../noc/std/topology/main.rhm" open
+  "../noc/std/routing/main.rhm" open
+
+export:
+  TiledRicketPlacement
+  TiledMemoryPlacement
+  TiledChannelFamilyPlans
+  tiled_soc_columns
+  tiled_soc_rows
+  tiled_soc_ricket_count
+  tiled_soc_bank_count
+  tiled_soc_bank_base
+  tiled_soc_bank_bytes
+  tiled_soc_stripe_bytes
+  tiled_soc_mesh
+  tiled_soc_rickets
+  tiled_soc_memories
+  tiled_soc_rnf_sites
+  tiled_soc_connections
+  tiled_soc_compilations
+  tiled_soc_snp_compilation
+  tiled_soc_families
+  tiled_soc_physical_plan
+  tiled_soc_site_key
+  tiled_soc_node_ids
+
+def tiled_soc_columns = 4
+def tiled_soc_rows = 3
+def tiled_soc_ricket_count = 8
+def tiled_soc_bank_count = 4
+def tiled_soc_bank_base = 0x80000000
+def tiled_soc_bank_bytes = 0x2000
+def tiled_soc_stripe_bytes = 64
+def tiled_soc_home_node_base = 32
+def tiled_soc_subordinate_node_base = 48
+
+def tiled_soc_mesh = rectangular_mesh(
+  tiled_soc_columns,
+  tiled_soc_rows,
+  [VCGroup("transport", 1)]
+)
+
+class TiledRicketPlacement(index :: Nat,
+                           coordinate :: MeshCoordinate,
+                           router :: NodeRef,
+                           instruction_node_id :: Nat,
+                           data_node_id :: Nat,
+                           instruction_site :: CHIRNSite,
+                           data_site :: CHIRNSite)
+
+class TiledMemoryPlacement(index :: Nat,
+                           coordinate :: MeshCoordinate,
+                           router :: NodeRef,
+                           home_node_id :: Nat,
+                           subordinate_node_id :: Nat,
+                           bank_index :: Nat,
+                           bank_bytes :: PosInt,
+                           home_site :: CHIRNICNSite)
+
+class TiledChannelFamilyPlans(req :: RouterFamilyPlan,
+                              rsp :: RouterFamilyPlan,
+                              snp :: RouterFamilyPlan,
+                              dat :: RouterFamilyPlan)
+
+def tiled_soc_rickets:
+  def mutable placements = []
+  for (y in 0..2):
+    for (x in 0..tiled_soc_columns):
+      def index = (y * tiled_soc_columns) + x
+      def router = tiled_soc_mesh.node_at(x, y)
+      def path = NamePath(["ricket", to_string(index)])
+      def instruction_node_id = index * 2
+      def data_node_id = instruction_node_id + 1
+      placements := placements ++ [
+        TiledRicketPlacement(
+          index,
+          MeshCoordinate(x, y),
+          router,
+          instruction_node_id,
+          data_node_id,
+          CHIRNSite(path.child("l1i"), instruction_node_id, router),
+          CHIRNSite(path.child("l1d"), data_node_id, router)
+        )
+      ]
+  placements
+
+def tiled_soc_memories:
+  for List (x in 0..tiled_soc_columns):
+    def router = tiled_soc_mesh.node_at(x, 2)
+    def home_node_id = tiled_soc_home_node_base + x
+    def subordinate_node_id = tiled_soc_subordinate_node_base + x
+    TiledMemoryPlacement(
+      x,
+      MeshCoordinate(x, 2),
+      router,
+      home_node_id,
+      subordinate_node_id,
+      x,
+      tiled_soc_bank_bytes,
+      CHIRNICNSite(NamePath(["memory", to_string(x), "home"]), home_node_id, router)
+    )
+
+def tiled_soc_rnf_sites:
+  def mutable sites = []
+  for (placement in tiled_soc_rickets):
+    sites := sites ++ [placement.instruction_site, placement.data_site]
+  sites
+
+def tiled_soc_connections:
+  def mutable connections = []
+  for (requester in tiled_soc_rnf_sites):
+    for (memory in tiled_soc_memories):
+      connections := connections ++ [
+        CHIRNFConnection(requester, memory.home_site)
+      ]
+  connections
+
+def tiled_soc_routing = uniform_chi_routing(
+  xy_dimension_order(tiled_soc_mesh, ~vc_groups: ["transport"])
+)
+
+def tiled_soc_compilations = compile_chi_connections(
+  tiled_soc_mesh.spec,
+  tiled_soc_connections,
+  tiled_soc_routing
+)
+def tiled_soc_snp_compilation :: CHIChannelCompilation = tiled_soc_compilations.snp
+def tiled_soc_families = TiledChannelFamilyPlans(
+  RouterFamilyPlan(tiled_soc_compilations.req.network.network_plan),
+  RouterFamilyPlan(tiled_soc_compilations.rsp.network.network_plan),
+  RouterFamilyPlan(tiled_soc_snp_compilation.network.network_plan),
+  RouterFamilyPlan(tiled_soc_compilations.dat.network.network_plan)
+)
+def tiled_soc_physical_plan = RouterFamilyPhysicalPlan(tiled_soc_families.req)
+tiled_soc_physical_plan.require_match(tiled_soc_families.rsp)
+tiled_soc_physical_plan.require_match(tiled_soc_families.snp)
+tiled_soc_physical_plan.require_match(tiled_soc_families.dat)
+
+fun tiled_soc_site_key(router):
+  tiled_soc_physical_plan.site_key(
+    tiled_soc_compilations.req.network.router_id(router)
+  )
+
+def tiled_soc_node_ids = tiled_soc_rickets.map(
+  fun (placement): placement.instruction_node_id
+) ++ tiled_soc_rickets.map(
+  fun (placement): placement.data_node_id
+) ++ tiled_soc_memories.map(
+  fun (placement): placement.home_node_id
+) ++ tiled_soc_memories.map(
+  fun (placement): placement.subordinate_node_id
+)
+
+for (node_id in tiled_soc_node_ids):
+  when tiled_soc_node_ids.filter(~keep: fun (candidate): candidate == node_id).length() > 1
+  | error(~who: #'tiled_soc_plan, "tiled SoC NodeIDs must be unique")

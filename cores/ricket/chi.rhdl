@@ -5,11 +5,27 @@ import:
   lib("rhdl/std/bits.rhdl") open
   lib("chi/main.rhdl") open
 
-class RicketCHIParams(flit :: CHIFlitParams,
-                      home_map :: CHIHomeMap,
+class RicketCHIConfig(flit :: CHIFlitParams,
+                      home_map :: CHIHomeMap):
+  implements CircuitParam
+
+  constructor (flit :: CHIFlitParams,
+               home_map :: CHIHomeMap):
+    unless home_map.flit == flit
+    | error(~who: #'RicketCHIConfig,
+            "Home map must use Ricket's CHI flit parameters")
+    for (entry in home_map.entries):
+      unless entry.home.kind == CHINodeKind.HNF
+      | error(~who: #'RicketCHIConfig,
+              "Ricket Home map entries must target HN-F nodes")
+    super(flit, home_map)
+
+class RicketCHIParams(config :: RicketCHIConfig,
                       instruction_node_id :: Nat,
                       data_node_id :: Nat):
-  implements CircuitParam
+
+  property flit: config.flit
+  property home_map: config.home_map
 
   property instruction_node:
     CHINodeParams(
@@ -27,6 +43,7 @@ class RicketCHIParams(flit :: CHIFlitParams,
       ),
       ~max_outstanding: 2
     )
+
   property data_node:
     CHINodeParams(
       "ricket-l1d",
@@ -50,30 +67,29 @@ class RicketCHIParams(flit :: CHIFlitParams,
       ~max_outstanding: 2
     )
 
-fun checked_ricket_chi_params(params :: RicketCHIParams) :: RicketCHIParams:
-  def p = params.flit
-  unless params.home_map.flit == p
-  | error(~who: #'RicketCHIParams,
-          "Home map must use Ricket's CHI flit parameters")
-  unless bits.length(params.instruction_node_id) <= p.node_id_width
-  | error(~who: #'RicketCHIParams,
-          "instruction NodeID must fit in the CHI NodeID width")
-  unless bits.length(params.data_node_id) <= p.node_id_width
-  | error(~who: #'RicketCHIParams,
-          "data NodeID must fit in the CHI NodeID width")
-  unless params.instruction_node_id != params.data_node_id
-  | error(~who: #'RicketCHIParams,
-          "instruction and data NodeIDs must be distinct")
-  for (entry in params.home_map.entries):
-    unless entry.home.kind == CHINodeKind.HNF
+  constructor (config :: RicketCHIConfig,
+               instruction_node_id :: Nat,
+               data_node_id :: Nat):
+    unless bits.length(instruction_node_id) <= config.flit.node_id_width
     | error(~who: #'RicketCHIParams,
-            "Ricket Home map entries must target HN-F nodes")
-    unless entry.target_node_id != params.instruction_node_id && (
-      entry.target_node_id != params.data_node_id
-    )
+            "instruction NodeID must fit in the CHI NodeID width")
+    unless bits.length(data_node_id) <= config.flit.node_id_width
     | error(~who: #'RicketCHIParams,
-            "Home, instruction, and data NodeIDs must be distinct")
-  params
+            "data NodeID must fit in the CHI NodeID width")
+    unless instruction_node_id != data_node_id
+    | error(~who: #'RicketCHIParams,
+            "instruction and data NodeIDs must be distinct")
+    for (entry in config.home_map.entries):
+      unless entry.target_node_id != instruction_node_id && (
+        entry.target_node_id != data_node_id
+      )
+      | error(~who: #'RicketCHIParams,
+              "Home, instruction, and data NodeIDs must be distinct")
+    super(config, instruction_node_id, data_node_id)
+
+bundle RicketCHIIdentity(p :: CHIFlitParams):
+  instruction_node_id: Bits(p.node_id_width)
+  data_node_id: Bits(p.node_id_width)
 
 fun ricket_chi_address(address :: Hardware.bits,
                        p :: CHIFlitParams) :~ Bits(p.request_address_width):
@@ -91,7 +107,7 @@ fun ricket_chi_address_fits(address :: Hardware.bits,
   | !or_reduce(address[p.request_address_width..width])
 
 fun ricket_chi_request(p :: CHIFlitParams,
-                       node_id :: Nat,
+                       node_id :: Bits(p.node_id_width),
                        home_node_id :: Bits(p.node_id_width),
                        raw_address :: Hardware.bits,
                        size :: CHITransferSize,
@@ -142,15 +158,15 @@ fun ricket_chi_request(p :: CHIFlitParams,
   // ReturnTxnID is inapplicable on Requester-to-Home traffic.
   request.return_txn_id_or_stash_lpid <== bits(0, 12)
   request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
-  request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
+  request.return_nid_or_stash_nid_or_data_target <== node_id
   request.txn_id <== txn_id
-  request.src_id <== bits(node_id, p.node_id_width)
+  request.src_id <== node_id
   request.tgt_id <== home_node_id
   request.qos <== bits(0, 4)
   request
 
 fun ricket_chi_response(p :: CHIFlitParams,
-                        node_id :: Nat,
+                        node_id :: Bits(p.node_id_width),
                         target_id :: Bits(p.node_id_width),
                         txn_id :: Bits(12),
                         opcode :: CHIRspOpcode,
@@ -168,7 +184,7 @@ fun ricket_chi_response(p :: CHIFlitParams,
     resp_err: CHIRespErr.OK
     opcode: opcode
     txn_id: txn_id
-    src_id: bits(node_id, p.node_id_width)
+    src_id: node_id
     tgt_id: target_id
     qos: bits(0, 4)
 
@@ -198,7 +214,7 @@ fun ricket_snoop_invalidates_cache_state(opcode :: CHISnpOpcode) :~ Bool:
             CHISnpOpcode.SnpUniqueFwd)
 
 fun ricket_chi_write_data(p :: CHIFlitParams,
-                          node_id :: Nat,
+                          node_id :: Bits(p.node_id_width),
                           home_node_id :: Bits(p.node_id_width),
                           dbid :: Bits(12),
                           raw_address :: Hardware.bits,
@@ -240,14 +256,15 @@ fun ricket_chi_write_data(p :: CHIFlitParams,
   flit.opcode <== CHIDatOpcode.NonCopyBackWriteData
   flit.home_nid_or_pbha_or_mismatched_mecid <== home_node_id
   flit.txn_id <== dbid
-  flit.src_id <== bits(node_id, p.node_id_width)
+  flit.src_id <== node_id
   flit.tgt_id <== home_node_id
   flit.qos <== bits(0, 4)
   flit
 
 export:
+  RicketCHIConfig
   RicketCHIParams
-  checked_ricket_chi_params
+  RicketCHIIdentity
   ricket_chi_address
   ricket_chi_address_fits
   ricket_chi_request

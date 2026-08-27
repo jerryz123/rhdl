@@ -3,7 +3,6 @@
 
 import:
   "../../rhdl/core/main.rhm" open
-  "../../rhdl/frontend/kernel.rhm" as embedded
   "../main.rhdl" as chi
   "coherent-home-fixture.rhdl" as fixture
 
@@ -22,7 +21,7 @@ check:
   fixture.coherent_home_params.requester_endpoints.length() ~is 3
   fixture.coherent_home_params.snoop_endpoints.length() ~is 2
   fixture.coherent_home_params.subordinate_endpoint.kind ~is chi.CHINodeKind.SNF
-  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "port_in"]
+  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "identity", "port_in"]
   top.outputs.map(fun (output): output.name) ~is ["port_out"]
   register_names.contains("phase") ~is #true
   register_names.contains("request") ~is #true
@@ -37,32 +36,15 @@ check:
   ).length() ~is 0
   verify_design(fixture.coherent_home_design) ~is #void
 
-  embedded.run_elaboration(
-    fun ():
-      chi.CHIHNF(
-        chi.CHIHNFParams(
-          chi.CHIHomeParams("bad-capacity", 5, chi.CHINodeKind.HNF,
-                            ~max_outstanding: 2),
-          fixture.coherent_home_flit,
-          [fixture.htif_endpoint,
-           fixture.instruction_endpoint,
-           fixture.data_endpoint],
-          fixture.memory_endpoint,
-          fixture.memory_service
-        )
-      )
+  chi.CHIHNFParams(
+    chi.CHIHomeParams("bad-capacity", 5, chi.CHINodeKind.HNF,
+                      ~max_outstanding: 2),
+    fixture.coherent_home_config,
+    fixture.memory_endpoint,
+    fixture.memory_service
   ) ~throws "exactly one outstanding transaction"
 
-  embedded.run_elaboration(
-    fun ():
-      chi.CHIHNF(
-        chi.CHIHNFParams(
-          chi.CHIHomeParams("no-rnf", 5, chi.CHINodeKind.HNF,
-                            ~max_outstanding: 1),
-          fixture.coherent_home_flit,
-          [fixture.htif_endpoint],
-          fixture.memory_endpoint,
-          fixture.memory_service
-        )
-      )
-  ) ~throws "at least one RN-F requester"
+  chi.CHIHNFConfig(fixture.coherent_home_flit,
+                   [fixture.htif_endpoint],
+                   fixture.memory_service.address_sets[0].mask,
+                   fixture.memory_service.requests) ~throws "at least one RN-F requester"

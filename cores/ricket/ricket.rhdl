@@ -15,20 +15,23 @@ import:
 
 sync_circuit Ricket(xlen :: XLen,
                     ~cache_sets: cache_sets :: Pow2Int = 64,
-                    ~chi: params :: RicketCHIParams):
+                    ~chi: config :: RicketCHIConfig):
   def width = xlen_width(xlen)
-  def checked = checked_ricket_chi_params(params)
+  def p = config.flit
 
+  input chi_identity: RicketCHIIdentity(p)
   interface start(Irrevocable(Bits(width)), ~role: consumer)
   input interrupts: RicketInterrupts()
-  interface imem(CHIRNChannels(checked.flit), ~role: node)
-  interface dmem(CHIRNChannels(checked.flit), ~role: node)
+  interface imem(CHIRNChannels(p), ~role: node)
+  interface dmem(CHIRNChannels(p), ~role: node)
   output fault: Bool
 
   inst core(RicketCore(xlen))
   inst mmu(RicketMmu(xlen))
-  inst l1i(RicketL1ICache(xlen, cache_sets, ~chi: checked))
-  inst l1d(RicketL1DCache(xlen, cache_sets, ~chi: checked))
+  inst l1i(RicketL1ICache(xlen, cache_sets, ~chi: config))
+  inst l1d(RicketL1DCache(xlen, cache_sets, ~chi: config))
+  l1i.node_id <== chi_identity.instruction_node_id
+  l1d.node_id <== chi_identity.data_node_id
   start |> core.start
   core.interrupts <== interrupts
   core.instruction_access |> mmu.instruction

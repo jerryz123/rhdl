@@ -38,9 +38,13 @@ The shared transaction engines own protocol sequencing, retry state, response
 stability, and DVM pairing. The wrapper composes the core, MMU, and caches into
 two ready-valid RN-F channel bundles; physical credited links belong to system
 integration when the channels actually cross a CHI link boundary.
-`RicketCHIParams` supplies one `CHIHomeMap`; each cache transaction decodes its
-address once and retains the selected HN-F NodeID through retries, data, and
-completion acknowledgement.
+`RicketCHIConfig` supplies the structural flit shape and one shared
+`CHIHomeMap`; each cache transaction decodes its address once and retains the
+selected HN-F NodeID through retries, data, and completion acknowledgement.
+`RicketCHIParams` is host-only placement metadata for the instruction and data
+RN-F NodeIDs, while `RicketCHIIdentity` carries those IDs into an occurrence as
+hardware inputs. Consequently one Ricket specialization can be stamped at
+multiple placements without inheriting a representative tile's NodeIDs.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test

@@ -5,24 +5,26 @@ import:
   lib("chi/main.rhdl") open
 
 def fragmenter_flit = CHIFlitParams()
+def fragmenter_ram_config = CHIRamConfig(fragmenter_flit, 256, ~max_outstanding: 2)
 def fragmenter_ram_params = CHIRamParams(
   "fragmenter-ram",
   9,
-  fragmenter_flit,
-  256,
-  ~base_address: 0x80000000,
-  ~max_outstanding: 2
+  fragmenter_ram_config,
+  ~base_address: 0x80000000
 )
+def fragmenter_config = CHITransferFragmenterConfig(fragmenter_flit, ~max_read_bytes: 64)
 def fragmenter_params = CHITransferFragmenterParams(
-  fragmenter_flit,
-  fragmenter_ram_params.service,
-  ~max_read_bytes: 64
+  fragmenter_config,
+  fragmenter_ram_params.service
 )
 
 sync_circuit CHITransferFragmenterFixture():
   interface port(CHISNChannels(fragmenter_flit), ~role: node)
-  inst fragmenter(CHITransferFragmenter(fragmenter_params))
-  inst ram(CHIRam(fragmenter_ram_params))
+  inst fragmenter(CHITransferFragmenter(fragmenter_config))
+  inst ram(CHIRam(fragmenter_ram_config))
+  ram.identity <== CHIRamIdentity(fragmenter_flit):
+    node_id: bits(fragmenter_ram_params.node_id, fragmenter_flit.node_id_width)
+    base_address: bits(fragmenter_ram_params.base_address, fragmenter_flit.request_address_width)
   port <=> fragmenter.upstream
   fragmenter.downstream <=> ram.port
 
@@ -30,7 +32,9 @@ def fragmenter_design = elaborate(CHITransferFragmenterFixture())
 
 export:
   fragmenter_flit
+  fragmenter_ram_config
   fragmenter_ram_params
+  fragmenter_config
   fragmenter_params
   CHITransferFragmenterFixture
   fragmenter_design

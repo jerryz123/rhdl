@@ -372,6 +372,14 @@ already fit one DAT beat pass through unchanged, including the initial write
 profile. Multibeat writes remain explicitly unsupported until both the Home
 and adapter can collect and complete the whole parent write transaction.
 
+[`address-projector.rhdl`](address-projector.rhdl) composes above the
+fragmenter when multiple Homes stripe one global memory region. Its service
+metadata fixes the bank-select bits while leaving line-offset and row bits
+variable. The hardware removes those bank bits from each REQ address, so the
+downstream fragmenter and RAM retain ordinary dense local address spaces. RSP
+and DAT pass through unchanged. A stripe must be at least as wide as every
+advertised transfer, keeping one coherent request within one Home.
+
 ## Credited channel abstraction
 
 CHI channels are not ready-valid. A transmitter asserts a valid flit only
@@ -443,13 +451,15 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`link.rhdl`](link.rhdl) | Implemented node capabilities, role-specific credited links, activation, and static connection compatibility |
 | [`channels.rhdl`](channels.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, RN-F, SN, HN-I, and HN-F contracts; multi-requester HN snoops carry destination NodeID beside the exact target-less SNP flit until endpoint ejection |
 | [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, SNP, and DAT channel results with derived route keys; RN-I connections omit SNP while RN-F connections add it |
-| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT target decoding plus flow-form injection/ejection stages derived from pure channel compilations; adapters may resolve either local router ports or uniform `RouterFamilyPlan` slots without taking topology or router ownership |
+| [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT destination selection plus typed wrappers around protocol-neutral routed-flow stages; family adapters compile every `(site key, target NodeID)` relation into one decode table before RTL elaboration |
+| [`noc-router.rhdl`](noc-router.rhdl) | A four-plane CHI router shell over independent generic router families, a shared topology-only physical-link manifest, and precompiled local attachment plans |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean`/`ReadUnique` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
 | [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read fragmentation into single-DAT-beat subordinate transactions while passing through the initial single-beat write profile |
+| [`address-projector.rhdl`](address-projector.rhdl) | Cache-line-striped global service metadata and transparent REQ projection into dense local subordinate addresses |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
 | [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean/Unique reads, dirty snoop intervention, conservative invalidation, and non-snooping subordinate translation |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
@@ -464,6 +474,15 @@ globally serialized dirty-capable HN-F path. CHI supplies endpoints, logical
 connections, target decoding, and flow adaptation; the generic NoC package and
 the containing system retain topology, routing-policy, router, and physical
 link ownership.
+
+The initial tiled transport uses a topology-only `RouterFamilyPhysicalPlan` to
+prove that independently routed REQ, RSP, SNP, and DAT families share one
+ordered physical-link shape. Host-compiled local attachment plans account for
+family-remapped slots and unused ports. `CHIRouter` stamps four generic router
+families without owning topology or routing policy; tile modules own router
+instances, while the SoC parent owns inter-tile links. Cache-line-striped Home
+services project sparse global addresses into dense local CHIRam spaces before
+fragmentation.
 
 The coherent home intentionally has one global transaction slot and no sharer
 directory. It conservatively broadcasts snoops, accepts dirty intervention,

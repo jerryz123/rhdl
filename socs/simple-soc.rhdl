@@ -37,8 +37,9 @@ def simple_soc_fesvr_node = CHINodeParams(
   ),
   ~max_outstanding: 1
 )
-def simple_soc_ricket_params = RicketCHIParams(simple_soc_flit,
-                                               simple_soc_home_map,
+def simple_soc_ricket_config = RicketCHIConfig(simple_soc_flit,
+                                               simple_soc_home_map)
+def simple_soc_ricket_params = RicketCHIParams(simple_soc_ricket_config,
                                                2,
                                                3)
 
@@ -55,24 +56,31 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
 def simple_soc_fesvr_port = requester_icn_endpoint(simple_soc_fesvr_node)
 def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_ricket_params.instruction_node)
 def simple_soc_data_port = requester_icn_endpoint(simple_soc_ricket_params.data_node)
+def simple_soc_ram_config = CHIRamConfig(simple_soc_flit,
+                                         simple_soc_memory_bytes,
+                                         ~max_outstanding: 2)
 def simple_soc_ram_params = CHIRamParams(
   "simple-ram",
   9,
-  simple_soc_flit,
-  simple_soc_memory_bytes,
+  simple_soc_ram_config,
   ~base_address: simple_soc_memory_base,
-  ~kind: CHINodeKind.SNF,
-  ~max_outstanding: 2
+  ~kind: CHINodeKind.SNF
 )
+def simple_soc_fragmenter_config = CHITransferFragmenterConfig(simple_soc_flit,
+                                                               ~max_read_bytes: 64)
 def simple_soc_fragmenter_params = CHITransferFragmenterParams(
+  simple_soc_fragmenter_config,
+  simple_soc_ram_params.service
+)
+def simple_soc_home_config = CHIHNFConfig(
   simple_soc_flit,
-  simple_soc_ram_params.service,
-  ~max_read_bytes: 64
+  [simple_soc_fesvr_port, simple_soc_instruction_port, simple_soc_data_port],
+  simple_soc_ram_config.size_bytes - 1,
+  simple_soc_fragmenter_config.upstream_requests(simple_soc_ram_config.requests)
 )
 def simple_soc_home_params = CHIHNFParams(
   simple_soc_home,
-  simple_soc_flit,
-  [simple_soc_fesvr_port, simple_soc_instruction_port, simple_soc_data_port],
+  simple_soc_home_config,
   simple_soc_ram_params.icn_port,
   simple_soc_fragmenter_params.upstream_service
 )
@@ -128,14 +136,25 @@ sync_circuit SimpleSoC():
   inst requester(FesvrRequester(simple_soc_flit,
                                 simple_soc_fesvr_node,
                                 simple_soc_home_map))
-  inst ricket(Ricket(XLen.X64, ~chi: simple_soc_ricket_params))
-  inst home(CHIHNF(simple_soc_home_params))
-  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_params))
-  inst ram(CHIRam(simple_soc_ram_params))
+  inst ricket(Ricket(XLen.X64, ~chi: simple_soc_ricket_config))
+  inst home(CHIHNF(simple_soc_home_config))
+  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
+  inst ram(CHIRam(simple_soc_ram_config))
   inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
   inst rsp_router(SimpleRouter(CHIRspFlit(simple_soc_flit), simple_soc_rsp_router_config))
   inst snp_router(SimpleRouter(CHISnpFlit(simple_soc_flit), simple_soc_snp_router_config))
   inst dat_router(SimpleRouter(CHIDatFlit(simple_soc_flit), simple_soc_dat_router_config))
+
+  ricket.chi_identity <== RicketCHIIdentity(simple_soc_flit):
+    instruction_node_id: bits(simple_soc_ricket_params.instruction_node_id, simple_soc_flit.node_id_width)
+    data_node_id: bits(simple_soc_ricket_params.data_node_id, simple_soc_flit.node_id_width)
+  home.identity <== CHIHNFIdentity(simple_soc_flit):
+    home_node_id: bits(simple_soc_home_params.home.node_id, simple_soc_flit.node_id_width)
+    subordinate_node_id: bits(simple_soc_home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
+    service_base: bits(simple_soc_memory_base, simple_soc_flit.request_address_width)
+  ram.identity <== CHIRamIdentity(simple_soc_flit):
+    node_id: bits(simple_soc_ram_params.node_id, simple_soc_flit.node_id_width)
+    base_address: bits(simple_soc_ram_params.base_address, simple_soc_flit.request_address_width)
 
   connect_chi_rni_node(requester.port,
                        ~node: simple_soc_fesvr_site,
@@ -194,13 +213,17 @@ export:
   simple_soc_home
   simple_soc_home_map
   simple_soc_fesvr_node
+  simple_soc_ricket_config
   simple_soc_ricket_params
   requester_icn_endpoint
   simple_soc_fesvr_port
   simple_soc_instruction_port
   simple_soc_data_port
+  simple_soc_ram_config
   simple_soc_ram_params
+  simple_soc_fragmenter_config
   simple_soc_fragmenter_params
+  simple_soc_home_config
   simple_soc_home_params
   simple_soc_topology
   simple_soc_router

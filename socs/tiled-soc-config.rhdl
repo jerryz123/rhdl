@@ -1,0 +1,193 @@
+#lang rhdl
+// Compiles the tiled SoC plan into shared CHI endpoints, Homes, RAMs, adapters, and router families.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("noc/rtl/router.rhdl") open
+  lib("cores/ricket/chi.rhdl") open
+  "ricket-tile.rhdl" open
+  "memory-tile.rhdl" open
+  "tiled-soc-plan.rhm" as plan
+
+fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
+  CHIICNPortParams(
+    node.name ++ "-icn",
+    node.node_id,
+    node.kind,
+    ~emits: node.supports,
+    ~supports: node.emits,
+    ~max_outstanding: node.max_outstanding
+  )
+
+def tiled_soc_flit = CHIFlitParams()
+
+def tiled_soc_projector_config = CHIAddressProjectorConfig(
+  tiled_soc_flit,
+  plan.tiled_soc_bank_bytes,
+  plan.tiled_soc_stripe_bytes,
+  plan.tiled_soc_bank_count
+)
+
+def tiled_soc_homes:
+  for List (placement in plan.tiled_soc_memories):
+    CHIHomeParams("tiled-home-" ++ to_string(placement.index),
+                  placement.home_node_id,
+                  CHINodeKind.HNF,
+                  ~max_outstanding: 1)
+
+def tiled_soc_home_map = CHIHomeMap(
+  tiled_soc_flit,
+  for List (placement in plan.tiled_soc_memories,
+            home in tiled_soc_homes):
+    CHIHomeMapEntry(
+      tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
+                                             placement.bank_index),
+      home
+    )
+)
+
+def tiled_soc_ricket_config = RicketCHIConfig(tiled_soc_flit,
+                                              tiled_soc_home_map)
+
+def tiled_soc_ricket_params:
+  for List (placement in plan.tiled_soc_rickets):
+    RicketCHIParams(tiled_soc_ricket_config,
+                    placement.instruction_node_id,
+                    placement.data_node_id)
+
+def tiled_soc_requester_ports:
+  def mutable ports = []
+  for (params in tiled_soc_ricket_params):
+    ports := ports ++ [
+      tiled_requester_icn_endpoint(params.instruction_node),
+      tiled_requester_icn_endpoint(params.data_node)
+    ]
+  ports
+
+def tiled_soc_ram_config = CHIRamConfig(tiled_soc_flit,
+                                        plan.tiled_soc_bank_bytes,
+                                        ~max_outstanding: 2)
+
+def tiled_soc_ram_params:
+  for List (placement in plan.tiled_soc_memories):
+    CHIRamParams("tiled-ram-" ++ to_string(placement.index),
+                 placement.subordinate_node_id,
+                 tiled_soc_ram_config,
+                 ~base_address: 0,
+                 ~kind: CHINodeKind.SNF)
+
+def tiled_soc_fragmenter_config = CHITransferFragmenterConfig(tiled_soc_flit,
+                                                              ~max_read_bytes: 64)
+
+def tiled_soc_fragmenter_params:
+  for List (ram in tiled_soc_ram_params):
+    CHITransferFragmenterParams(tiled_soc_fragmenter_config, ram.service)
+
+def tiled_soc_projector_params:
+  for List (placement in plan.tiled_soc_memories,
+            fragmenter in tiled_soc_fragmenter_params):
+    CHIAddressProjectorParams(tiled_soc_projector_config,
+                              fragmenter.upstream_service,
+                              plan.tiled_soc_bank_base,
+                              placement.bank_index)
+
+def tiled_soc_hnf_config = CHIHNFConfig(
+  tiled_soc_flit,
+  tiled_soc_requester_ports,
+  tiled_soc_projector_config.global_mask,
+  tiled_soc_fragmenter_config.upstream_requests(tiled_soc_ram_config.requests)
+)
+
+def tiled_soc_hnf_params:
+  for List (home in tiled_soc_homes,
+            ram in tiled_soc_ram_params,
+            projector in tiled_soc_projector_params):
+    CHIHNFParams(home,
+                 tiled_soc_hnf_config,
+                 ram.icn_port,
+                 projector.upstream_service)
+
+def tiled_soc_adapter_plans = CHIChannelAdapterPlans(
+  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.req,
+                                          plan.tiled_soc_families.req,
+                                          tiled_soc_flit),
+  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.rsp,
+                                          plan.tiled_soc_families.rsp,
+                                          tiled_soc_flit),
+  compile_chi_channel_family_adapter_plan(plan.tiled_soc_snp_compilation,
+                                          plan.tiled_soc_families.snp,
+                                          tiled_soc_flit),
+  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.dat,
+                                          plan.tiled_soc_families.dat,
+                                          tiled_soc_flit)
+)
+
+def tiled_soc_router_configs = CHIRouterFamilyConfigs(
+  compile_simple_router_family(plan.tiled_soc_families.req),
+  compile_simple_router_family(plan.tiled_soc_families.rsp),
+  compile_simple_router_family(plan.tiled_soc_families.snp),
+  compile_simple_router_family(plan.tiled_soc_families.dat),
+  plan.tiled_soc_physical_plan
+)
+
+def tiled_soc_ricket_router_params = CHIRouterParams(
+  tiled_soc_flit,
+  tiled_soc_router_configs,
+  compile_chi_router_attachment_plan(
+    tiled_soc_router_configs,
+    tiled_soc_adapter_plans,
+    CHIRNFRouterAttachment(
+      for List (placement in plan.tiled_soc_rickets):
+        [placement.instruction_site, placement.data_site]
+    )
+  )
+)
+
+def tiled_soc_memory_router_params = CHIRouterParams(
+  tiled_soc_flit,
+  tiled_soc_router_configs,
+  compile_chi_router_attachment_plan(
+    tiled_soc_router_configs,
+    tiled_soc_adapter_plans,
+    CHIHNFRouterAttachment(
+      for List (placement in plan.tiled_soc_memories):
+        [placement.home_site]
+    )
+  )
+)
+
+def tiled_soc_ricket_tile_params = RicketTileParams(
+  tiled_soc_ricket_config,
+  tiled_soc_ricket_router_params
+)
+
+def tiled_soc_memory_tile_params = MemoryTileParams(
+  tiled_soc_hnf_config,
+  tiled_soc_projector_config,
+  tiled_soc_fragmenter_config,
+  tiled_soc_ram_config,
+  tiled_soc_memory_router_params
+)
+
+export:
+  tiled_requester_icn_endpoint
+  tiled_soc_flit
+  tiled_soc_projector_config
+  tiled_soc_homes
+  tiled_soc_home_map
+  tiled_soc_ricket_config
+  tiled_soc_ricket_params
+  tiled_soc_requester_ports
+  tiled_soc_ram_config
+  tiled_soc_ram_params
+  tiled_soc_fragmenter_config
+  tiled_soc_fragmenter_params
+  tiled_soc_projector_params
+  tiled_soc_hnf_config
+  tiled_soc_hnf_params
+  tiled_soc_adapter_plans
+  tiled_soc_router_configs
+  tiled_soc_ricket_router_params
+  tiled_soc_memory_router_params
+  tiled_soc_ricket_tile_params
+  tiled_soc_memory_tile_params

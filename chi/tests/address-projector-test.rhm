@@ -1,0 +1,36 @@
+#lang rhombus
+// Checks striped CHI service selection, dense address projection, and adapter elaboration.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../main.rhdl" as chi
+  "address-projector-fixture.rhdl" as fixture
+
+def config = fixture.projector_config
+def params = fixture.projector_params
+def modules = fixture.projector_design.modules.map(fun (module): module.name)
+
+check:
+  config.total_bytes ~is 0x8000
+  config.bank_mask ~is 0x00c0
+  config.global_mask ~is 0x7f3f
+  config.address_set(0x80000000, 0) ~is chi.AddressSet(0x80000000, 0x7f3f)
+  config.address_set(0x80000000, 1) ~is chi.AddressSet(0x80000040, 0x7f3f)
+  config.address_set(0x80000000, 2) ~is chi.AddressSet(0x80000080, 0x7f3f)
+  config.address_set(0x80000000, 3) ~is chi.AddressSet(0x800000c0, 0x7f3f)
+
+  params.upstream_service.address_sets ~is [chi.AddressSet(0x80000080, 0x7f3f)]
+  params.local_address_set ~is chi.AddressSet(0, 0x1fff)
+  params.project(0x80000080) ~is 0
+  params.project(0x800000bf) ~is 0x3f
+  params.project(0x80000180) ~is 0x40
+  params.project(0x80007fbf) ~is 0x1fff
+  params.project(0x80000040) ~throws "outside this bank's global stripe"
+
+  modules.contains("CHIAddressProjector") ~is #true
+  verify_design(fixture.projector_design) ~is #void
+
+  chi.CHIAddressProjectorConfig(fixture.projector_flit, 0x2000, 64, 1) ~throws "at least two banks"
+  chi.CHIAddressProjectorConfig(fixture.projector_flit, 0x2000, 0x4000, 4) ~throws "must not exceed"
+  config.address_set(0x80000040, 0) ~throws "aligned to the total"
+  config.address_set(0x80000000, 4) ~throws "less than the bank count"

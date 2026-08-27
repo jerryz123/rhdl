@@ -1,0 +1,48 @@
+#lang rhombus
+// Defines the topology-only physical-link manifest shared by stamped router families.
+
+import:
+  "../model/main.rhm" open
+  "router-family-plan.rhm" open
+
+export:
+  RouterFamilyPhysicalPlan
+
+fun physical_link_shape_equal(left :: RouterFamilyLinkConnection,
+                              right :: RouterFamilyLinkConnection) :: Boolean:
+  node_id_equal(left.link.source, right.link.source) && (
+    node_id_equal(left.link.destination, right.link.destination)
+  ) && left.link.virtual_channels().length() == right.link.virtual_channels().length()
+
+fun physical_link_lists_equal(left :: List.of(RouterFamilyLinkConnection),
+                              right :: List.of(RouterFamilyLinkConnection)) :: Boolean:
+  left.length() == right.length() && for all (index in 0..left.length()):
+    physical_link_shape_equal(left[index], right[index])
+
+class RouterFamilyPhysicalPlan(canonical :: RouterFamilyPlan):
+  property members: canonical.members
+  property sites: canonical.sites
+  property ingress_count: canonical.ingress_count
+  property egress_count: canonical.egress_count
+  property link_connections: canonical.link_connections
+
+  method matches(family :: RouterFamilyPlan) :: Boolean:
+    members.length() == family.members.length() && (
+      ingress_count == family.ingress_count
+    ) && egress_count == family.egress_count && for all (index in 0..sites.length()):
+      def left = sites[index]
+      def right = family.sites[index]
+      left.site_key == right.site_key && node_id_equal(left.node, right.node) && (
+        physical_link_lists_equal(left.incoming_links, right.incoming_links)
+      ) && physical_link_lists_equal(left.outgoing_links, right.outgoing_links)
+
+  method require_match(family :: RouterFamilyPlan):
+    unless matches(family)
+    | error(~who: #'RouterFamilyPhysicalPlan,
+            "router family does not match the canonical physical-link manifest")
+
+  method site(node :: NodeId) :: RouterFamilySitePlan:
+    canonical.site(node)
+
+  method site_key(node :: NodeId) :: Nat:
+    canonical.site_key(node)

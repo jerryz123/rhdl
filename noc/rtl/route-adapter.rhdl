@@ -1,0 +1,32 @@
+#lang rhdl
+// Implements protocol-neutral ready-valid attachment and removal of NoC route metadata.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").Decoupled
+  "router.rhdl".RoutedBeat
+
+export:
+  RoutedFlowInjector
+  RoutedFlowEjector
+
+circuit RoutedFlowInjector(Input :: DataType,
+                           Payload :: DataType,
+                           route_width :: PosInt):
+  input route_valid: Bool
+  input route_key: Bits(route_width)
+  input payload: Payload
+  interface ingress(Decoupled(Input), ~role: consumer)
+  interface egress(Decoupled(RoutedBeat(Payload, route_width)), ~role: producer)
+
+  ingress.ready <== route_valid & egress.ready
+  egress.valid <== ingress.valid & route_valid
+  egress.bits.route_key <== route_key
+  egress.bits.payload <== payload
+
+circuit RoutedFlowEjector(Payload :: DataType, route_width :: PosInt):
+  interface ingress(Decoupled(RoutedBeat(Payload, route_width)), ~role: consumer)
+  interface egress(Decoupled(Payload), ~role: producer)
+
+  ingress.ready <== egress.ready
+  egress.valid <== ingress.valid
+  egress.bits <== ingress.bits.payload

@@ -21,15 +21,14 @@ bundle RicketWriteUniqueResult(Context :: DataType):
 
 sync_circuit RicketWriteUnique(Context :: DataType,
                                address_width :: PosInt,
-                               params :: RicketCHIParams,
+                               config :: RicketCHIConfig,
                                txn_id :: Nat):
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node_id = checked.data_node.node_id
+  def p = config.flit
   unless bits.length(txn_id) <= 12
   | error(~who: #'RicketWriteUnique,
           "transaction ID must fit in twelve bits")
 
+  input node_id: Bits(p.node_id_width)
   interface command(Decoupled(RicketWriteUniqueCommand(Context, address_width)), ~role: consumer)
   interface completion(Irrevocable(RicketWriteUniqueResult(Context)), ~role: producer)
   interface requests(Decoupled(CHIReqFlit(p)), ~role: producer)
@@ -55,7 +54,7 @@ sync_circuit RicketWriteUnique(Context :: DataType,
 
   command.ready <== !active_state
   def command_fire = fire(command)
-  def command_home = checked.home_map.lookup(ricket_chi_address(command.bits.address, p))
+  def command_home = config.home_map.lookup(ricket_chi_address(command.bits.address, p))
   when command_fire:
     assert(ricket_chi_address_fits(command.bits.address, p),
            "write_unique_address_fits_chi")

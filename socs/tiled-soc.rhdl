@@ -1,0 +1,109 @@
+#lang rhdl
+// Composes eight Ricket tiles and four memory tiles by wiring their cardinal CHI mesh boundaries.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").Irrevocable
+  lib("chi/main.rhdl") open
+  lib("cores/ricket/chi.rhdl").RicketCHIIdentity
+  lib("cores/ricket/interrupt.rhdl").RicketInterrupts
+  lib("noc/plan/router-family-physical-plan.rhm").RouterFamilyPhysicalPlan
+  "tiled-soc-plan.rhm" as plan
+  "tiled-soc-config.rhdl" as config
+  "ricket-tile.rhdl" open
+  "memory-tile.rhdl" open
+
+class TiledTileEndpoints(site_key :: Nat,
+                         incoming_links :: Array,
+                         outgoing_links :: Array)
+
+fun require_tiled_tile_endpoints(endpoints :: List.of(TiledTileEndpoints),
+                                 site_key :: Nat) :: TiledTileEndpoints:
+  def found = endpoints.find(fun (candidate): candidate.site_key == site_key)
+  unless found
+  | error(~who: #'connect_tiled_router_family,
+          "missing tile boundary for router-family site")
+  found
+
+// The parent consumes the exact physical-link manifest compiled by the family;
+// tiles remain unaware of their neighbors or the enclosing network hierarchy.
+fun connect_tiled_router_family(family :: RouterFamilyPhysicalPlan,
+                                endpoints :: List.of(TiledTileEndpoints)):
+  unless endpoints.length() == family.members.length()
+  | error(~who: #'connect_tiled_router_family,
+          "router-family wiring requires one tile boundary per family member")
+  for (connection in family.link_connections):
+    def source = require_tiled_tile_endpoints(endpoints, connection.source_site_key)
+    def destination = require_tiled_tile_endpoints(endpoints, connection.destination_site_key)
+    def source_site = family.site(connection.link.source)
+    def destination_site = family.site(connection.link.destination)
+    def source_index = chi_router_link_index(source_site.outgoing_links, connection)
+    def destination_index = chi_router_link_index(destination_site.incoming_links, connection)
+    def source_link :: Endpoint = source.outgoing_links[source_index]
+    def destination_link :: Endpoint = destination.incoming_links[destination_index]
+    source_link <=> destination_link
+  for (endpoint in endpoints):
+    def site = family.sites[endpoint.site_key]
+    for (index in site.incoming_links.length()..endpoint.incoming_links.length()):
+      tie_off_chi_noc_incoming(endpoint.incoming_links[index])
+    for (index in site.outgoing_links.length()..endpoint.outgoing_links.length()):
+      tie_off_chi_noc_outgoing(endpoint.outgoing_links[index])
+
+sync_circuit TiledSoC():
+  def p = config.tiled_soc_flit
+  def site_width = config.tiled_soc_router_configs.req.route_decoder.site_width
+  interface start[plan.tiled_soc_ricket_count](Irrevocable(Bits(64)), ~role: consumer)
+  input interrupts: Vec(plan.tiled_soc_ricket_count, RicketInterrupts())
+  output faults: Vec(plan.tiled_soc_ricket_count, Bool)
+
+  def rickets = for InstanceArray (_ in 0..plan.tiled_soc_ricket_count):
+    inst ricket(RicketTile(config.tiled_soc_ricket_tile_params))
+  def memories = for InstanceArray (_ in 0..plan.tiled_soc_bank_count):
+    inst memory(MemoryTile(config.tiled_soc_memory_tile_params))
+
+  for (index in 0..plan.tiled_soc_ricket_count):
+    def placement = plan.tiled_soc_rickets[index]
+    def placement_params = config.tiled_soc_ricket_params[index]
+    rickets[index].identity <== RicketTileIdentity(p, site_width):
+      site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
+      chi: (RicketCHIIdentity(p):
+              instruction_node_id: bits(placement_params.instruction_node_id, p.node_id_width)
+              data_node_id: bits(placement_params.data_node_id, p.node_id_width))
+    start[index] |> rickets[index].start
+    rickets[index].interrupts <== interrupts[index]
+  for (index in 0..plan.tiled_soc_bank_count):
+    def placement = plan.tiled_soc_memories[index]
+    def home_params = config.tiled_soc_hnf_params[index]
+    def projector_params = config.tiled_soc_projector_params[index]
+    def ram_params = config.tiled_soc_ram_params[index]
+    memories[index].identity <== MemoryTileIdentity(p, site_width):
+      site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
+      home: (CHIHNFIdentity(p):
+               home_node_id: bits(home_params.home.node_id, p.node_id_width)
+               subordinate_node_id: bits(home_params.subordinate_endpoint.node_id, p.node_id_width)
+               service_base: bits(projector_params.global_address_set.base, p.request_address_width))
+      projector: (CHIAddressProjectorIdentity(p):
+                    global_service_base: bits(projector_params.global_address_set.base, p.request_address_width)
+                    local_base: bits(projector_params.local_address_set.base, p.request_address_width))
+      ram: (CHIRamIdentity(p):
+              node_id: bits(ram_params.node_id, p.node_id_width)
+              base_address: bits(ram_params.base_address, p.request_address_width))
+  faults <== vec(for List (index in 0..plan.tiled_soc_ricket_count): rickets[index].fault)
+
+  def physical_plan = plan.tiled_soc_physical_plan
+  def tiles = (
+    for List (index in 0..plan.tiled_soc_ricket_count):
+      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_rickets[index].router),
+                         rickets[index].incoming_links,
+                         rickets[index].outgoing_links)
+  ) ++ (
+    for List (index in 0..plan.tiled_soc_bank_count):
+      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_memories[index].router),
+                         memories[index].incoming_links,
+                         memories[index].outgoing_links)
+  )
+  connect_tiled_router_family(physical_plan, tiles)
+
+export:
+  TiledTileEndpoints
+  connect_tiled_router_family
+  TiledSoC

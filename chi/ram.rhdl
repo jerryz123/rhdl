@@ -27,16 +27,40 @@ bundle CHIRamMemoryCompletion(p :: CHIFlitParams, slot_width :: PosInt):
   memory_operation: CHIRamMemoryOperation(p, slot_width)
   data: Bits(p.data_width)
 
-class CHIRamParams(name :: NonemptyString,
-                   node_id :: Nat,
-                   flit :: CHIFlitParams,
+bundle CHIRamIdentity(p :: CHIFlitParams):
+  node_id: Bits(p.node_id_width)
+  base_address: Bits(p.request_address_width)
+
+class CHIRamConfig(flit :: CHIFlitParams,
                    size_bytes :: Pow2Int,
-                   ~base_address: base_address :: Nat = 0,
-                   ~kind: kind :: CHINodeKind = CHINodeKind.SNF,
-                   ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024) = 2):
+                   max_outstanding :: Int.in(1 ..= 1024)):
   implements CircuitParam
 
   property transfers: TransferSizes(1, flit.data_bytes)
+  property requests:
+    [CHIRequestSupport(CHIReqOpcode.ReadNoSnp, transfers),
+     CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, transfers),
+     CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, transfers)]
+
+  constructor (flit :: CHIFlitParams,
+               size_bytes :: Pow2Int,
+               ~max_outstanding: max_outstanding :: Int.in(1 ..= 1024)):
+    unless size_bytes >= (2 * flit.data_bytes)
+    | error(~who: #'CHIRamConfig,
+            "size must contain at least two physical data beats")
+    super(flit, size_bytes, max_outstanding)
+
+class CHIRamParams(name :: NonemptyString,
+                   node_id :: Nat,
+                   config :: CHIRamConfig,
+                   ~base_address: base_address :: Nat = 0,
+                   ~kind: kind :: CHINodeKind = CHINodeKind.SNF):
+
+  property flit: config.flit
+  property size_bytes: config.size_bytes
+  property max_outstanding: config.max_outstanding
+
+  property transfers: config.transfers
   property node:
     CHINodeParams(
       name,
@@ -67,34 +91,44 @@ class CHIRamParams(name :: NonemptyString,
     CHISubordinateServiceParams(
       icn_port,
       [AddressSet(base_address, size_bytes - 1)],
-      [CHIRequestSupport(CHIReqOpcode.ReadNoSnp, transfers),
-       CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, transfers),
-       CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, transfers)]
+      config.requests
     )
 
-fun checked_chi_ram_params(params :: CHIRamParams):
-  def p = params.flit
-  unless [CHINodeKind.SNF, CHINodeKind.SNI].contains(params.kind)
-  | error(~who: #'CHIRam,
-          "kind must be SN-F or SN-I")
-  unless params.size_bytes >= (2 * p.data_bytes)
+  constructor (name :: NonemptyString,
+               node_id :: Nat,
+               config :: CHIRamConfig,
+               ~base_address: base_address :: Nat = 0,
+               ~kind: kind :: CHINodeKind = CHINodeKind.SNF):
+    unless [CHINodeKind.SNF, CHINodeKind.SNI].contains(kind)
+    | error(~who: #'CHIRamParams,
+            "kind must be SN-F or SN-I")
+    unless base_address mod config.size_bytes == 0
+    | error(~who: #'CHIRamParams,
+            "base address must be aligned to the RAM size")
+    unless bits.length((base_address + config.size_bytes) - 1) <= config.flit.request_address_width
+    | error(~who: #'CHIRamParams,
+            "memory region must fit in the request address width")
+    unless bits.length(node_id) <= config.flit.node_id_width
+    | error(~who: #'CHIRamParams,
+            "NodeID must fit in the physical NodeID width")
+    super(name,
+          node_id,
+          config,
+          ~base_address: base_address,
+          ~kind: kind)
+
+fun checked_chi_ram_config(config :: CHIRamConfig):
+  def p = config.flit
+  unless config.size_bytes >= (2 * p.data_bytes)
   | error(~who: #'CHIRam,
           "size must contain at least two physical data beats")
-  unless params.base_address mod params.size_bytes == 0
-  | error(~who: #'CHIRam,
-          "base address must be aligned to the RAM size")
-  unless bits.length((params.base_address + params.size_bytes) - 1) <= p.request_address_width
-  | error(~who: #'CHIRam,
-          "memory region must fit in the request address width")
-  unless bits.length(params.node_id) <= p.node_id_width
-  | error(~who: #'CHIRam,
-          "NodeID must fit in the physical NodeID width")
-  params
+  config
 
-fun monitor_chi_ram_request(params :: CHIRamParams,
+fun monitor_chi_ram_request(config :: CHIRamConfig,
+                            base_address :: Bits(config.flit.request_address_width),
                             valid :: Bool,
-                            request :: CHIReqFlit(params.flit)):
-  def p = params.flit
+                            request :: CHIReqFlit(config.flit)):
+  def p = config.flit
   def request_opcode :: CHIReqOpcode = request.opcode
   def size = request.size_or_num_req[0..3]
   def max_size = alignment_bits(p.data_bytes)
@@ -106,11 +140,9 @@ fun monitor_chi_ram_request(params :: CHIRamParams,
     alignment_cases
   )
   def address_supported = (
-    request.address >= bits(params.base_address,
-                            p.request_address_width)
+    request.address >= base_address
   ) & (
-    request.address < bits(params.base_address + params.size_bytes,
-                           p.request_address_width)
+    request.address < (base_address + bits(config.size_bytes, p.request_address_width))
   )
   when (valid & (request.opcode =/= CHIReqOpcode.ReqLCrdReturn)):
     assert(request_opcode.supports_initial_transaction(),
@@ -142,7 +174,7 @@ fun monitor_chi_ram_write_data(p :: CHIFlitParams,
     | #void
 
 fun chi_ram_dbid_response(p :: CHIFlitParams,
-                          node_id :: Nat,
+                          node_id :: Bits(p.node_id_width),
                           request :: CHIReqFlit(p),
                           slot :: Hardware.bits):
   CHIRspFlit(p):
@@ -157,12 +189,12 @@ fun chi_ram_dbid_response(p :: CHIFlitParams,
     resp_err: CHIRespErr.OK
     opcode: CHIRspOpcode.DBIDResp
     txn_id: request.txn_id
-    src_id: bits(node_id, p.node_id_width)
+    src_id: node_id
     tgt_id: request.src_id
     qos: request.qos
 
 fun chi_ram_write_completion(p :: CHIFlitParams,
-                             node_id :: Nat,
+                             node_id :: Bits(p.node_id_width),
                              slot :: Hardware.bits,
                              request :: CHIReqFlit(p)):
   CHIRspFlit(p):
@@ -177,12 +209,12 @@ fun chi_ram_write_completion(p :: CHIFlitParams,
     resp_err: CHIRespErr.OK
     opcode: CHIRspOpcode.Comp
     txn_id: request.txn_id
-    src_id: bits(node_id, p.node_id_width)
+    src_id: node_id
     tgt_id: request.src_id
     qos: request.qos
 
 fun chi_ram_read_completion(p :: CHIFlitParams,
-                            node_id :: Nat,
+                            node_id :: Bits(p.node_id_width),
                             request :: CHIReqFlit(p),
                             data :: Bits(p.data_width)):
   wire response: CHIDatFlit(p)
@@ -218,19 +250,16 @@ fun chi_ram_read_completion(p :: CHIFlitParams,
   response.resp <== bits(0, 3)
   response.resp_err <== CHIRespErr.OK
   response.opcode <== CHIDatOpcode.CompData
-  response.home_nid_or_pbha_or_mismatched_mecid <== bits(
-    node_id,
-    p.node_id_width
-  )
+  response.home_nid_or_pbha_or_mismatched_mecid <== node_id
   response.txn_id <== request.return_txn_id_or_stash_lpid
-  response.src_id <== bits(node_id, p.node_id_width)
+  response.src_id <== node_id
   response.tgt_id <== request.return_nid_or_stash_nid_or_data_target
   response.qos <== request.qos
   response
 
 circuit CHIRamCompletionRouter(p :: CHIFlitParams,
-                               node_id :: Nat,
                                slot_width :: PosInt):
+  input node_id: Bits(p.node_id_width)
   interface ingress(Irrevocable(CHIRamMemoryCompletion(p, slot_width)),
                     ~role: consumer)
   interface read_response(Irrevocable(CHIDatFlit(p)), ~role: producer)
@@ -256,8 +285,8 @@ circuit CHIRamCompletionRouter(p :: CHIFlitParams,
   completed.valid <== fire(ingress)
   completed.bits <== operation.slot
 
-sync_circuit CHIRam(params :: CHIRamParams):
-  def checked = checked_chi_ram_params(params)
+sync_circuit CHIRam(config :: CHIRamConfig):
+  def checked = checked_chi_ram_config(config)
   def p = checked.flit
   def limit = checked.max_outstanding
   def slot_width = index_width(limit)
@@ -268,6 +297,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
   def MemoryOperation = CHIRamMemoryOperation(p, slot_width)
   def MemoryCompletion = CHIRamMemoryCompletion(p, slot_width)
 
+  input identity: CHIRamIdentity(p)
   interface port(CHISNChannels(p), ~role: node)
   inst dbid_responses(Queue(CHIRspFlit(p), limit, ~pipe: #true))
   inst read_operations(Queue(MemoryOperation, limit, ~pipe: #true))
@@ -277,9 +307,8 @@ sync_circuit CHIRam(params :: CHIRamParams):
                                          MemoryCompletion,
                                          limit))
   inst storage(SyncRam1RW(depth, Bits(8), p.data_bytes))
-  inst completion_router(CHIRamCompletionRouter(p,
-                                                checked.node_id,
-                                                slot_width))
+  inst completion_router(CHIRamCompletionRouter(p, slot_width))
+  completion_router.node_id <== identity.node_id
   inst response_arbiter(RRArbiter(CHIRspFlit(p), 2))
   inst transaction_slots(CHISNTransactionSlots(p, limit))
 
@@ -310,7 +339,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
   dbid_responses.ingress <=> (
     allocated_writes |> map_flow(allocated):
       chi_ram_dbid_response(p,
-                            checked.node_id,
+                            identity.node_id,
                             allocated.request,
                             allocated.slot)
   )
@@ -332,8 +361,7 @@ sync_circuit CHIRam(params :: CHIRamParams):
   (
     memory_operations.issue |> map_valid(operation):
       def relative_address :: Bits(p.request_address_width) = (
-        operation.request.address - bits(checked.base_address,
-                                         p.request_address_width)
+        operation.request.address - identity.base_address
       )
       def word_address = relative_address[low_width..(low_width + word_address_width)]
       ReadWriteRequest(word_address_width, Bits(8), p.data_bytes):
@@ -363,12 +391,14 @@ sync_circuit CHIRam(params :: CHIRamParams):
   completion_router.read_response <=> port.dat.response
   completion_router.completed <=> transaction_slots.completed
 
-  monitor_chi_ram_request(checked, port.req.valid, port.req.bits)
+  monitor_chi_ram_request(checked, identity.base_address, port.req.valid, port.req.bits)
   monitor_chi_ram_write_data(p,
                              transaction_slots.matched_write.valid,
                              transaction_slots.matched_write.bits.data,
                              transaction_slots.matched_write.bits.request)
 
 export:
+  CHIRamConfig
   CHIRamParams
+  CHIRamIdentity
   CHIRam

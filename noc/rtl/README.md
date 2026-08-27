@@ -26,6 +26,12 @@ by CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 
+`route-adapter.rhdl` contains the protocol-neutral ready-valid boundary around
+that metadata. `RoutedFlowInjector` adds a compiled route key and permits a
+transfer only for a valid route decision; `RoutedFlowEjector` removes the
+`RoutedBeat` envelope. Protocol packages remain responsible only for selecting
+their destination field and checking endpoint identity.
+
 For shared physical implementations, `RouterFamilyRouteDecoder` adds a
 `site_key` field ahead of the same route and origin lookup. Its rows come only
 from `RouterFamilyPlan`; the site key is intended to be tied to a static value
@@ -77,6 +83,11 @@ instantiate the network or assume that its routers share a parent module.
 `bind_simple_router_family_site` drives one occurrence's constant site key and
 closes only its family-padding inputs and targets. Local endpoint attachment and
 physical-link wiring remain explicit responsibilities of the owning subsystem.
+`RouterFamilyPhysicalPlan`, in the pure planning package, projects the one
+canonical ordered physical-link shape shared by several independently compiled
+route families. It rejects a channel family whose per-site physical ingress,
+egress, or link ordering differs, while leaving each channel's routes, route
+keys, and local terminal slots independent.
 
 Router runtime collections are RHDL `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through

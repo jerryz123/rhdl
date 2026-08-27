@@ -13,12 +13,14 @@ def example_home_map = CHIHomeMap(
   example_flit,
   [CHIHomeMapEntry(AddressSet(0, (1 << example_flit.request_address_width) - 1), example_home)]
 )
-def example_chi = RicketCHIParams(example_flit, example_home_map, 2, 3)
-def design = elaborate(Ricket(XLen.X64, ~chi: example_chi))
+def example_chi_config = RicketCHIConfig(example_flit, example_home_map)
+def design = elaborate(Ricket(XLen.X64, ~chi: example_chi_config))
 
 def verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhdl_types
 `define _TYPESCOPE_rhdl_types
+  typedef struct packed {logic [6:0] instruction_node_id; logic [6:0] data_node_id; }
+    RicketCHIIdentity;
   typedef
     struct packed {logic supervisor_software; logic machine_software; logic supervisor_timer; logic machine_timer; logic supervisor_external; logic machine_external; }
     RicketInterrupts;
@@ -142,6 +144,7 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [5:0] address; logic write; logic [7:0][63:0] data; logic [7:0] mask; }
     ReadWriteRequest_2;
+  typedef struct packed {logic valid; logic [6:0] node_id; } CHIHomeLookup;
   typedef struct packed {logic pass_dirty; logic [1:0] state; } CHICoherentResponse;
   typedef
     struct packed {logic [63:0] line_address; RicketDataReq context_0; logic [7:0][63:0] line; logic [1:0] state; logic pass_dirty; }
@@ -170,6 +173,7 @@ def verilog_reference = @str|<<{
 module Ricket(
   input                                                                                                                                                                                                                                                                                                                                         clock,
                                                                                                                                                                                                                                                                                                                                                 reset,
+  input  RicketCHIIdentity                                                                                                                                                                                                                                                                                                                      chi_identity,
   input  struct packed {logic valid; logic [63:0] bits; }                                                                                                                                                                                                                                                                                       start_in,
   input  RicketInterrupts                                                                                                                                                                                                                                                                                                                       interrupts,
   input  struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic valid; CHISnpFlit bits; } snoops; } imem_in,
@@ -241,6 +245,7 @@ module Ricket(
   RicketL1ICache l1i (
     .clock    (clock),
     .reset    (reset),
+    .node_id  (chi_identity.instruction_node_id),
     .core_in  (_mmu_instruction_memory_out),
     .chi_in   (imem_in),
     .core_out (_l1i_core_out),
@@ -249,6 +254,7 @@ module Ricket(
   RicketL1DCache l1d (
     .clock    (clock),
     .reset    (reset),
+    .node_id  (chi_identity.data_node_id),
     .core_in  (_mmu_data_memory_out),
     .chi_in   (dmem_in),
     .core_out (_l1d_core_out),
@@ -3458,6 +3464,7 @@ endmodule
 module RicketL1ICache(
   input                                                                                                                                                                                                                                                                                                                                         clock,
                                                                                                                                                                                                                                                                                                                                                 reset,
+  input  [6:0]                                                                                                                                                                                                                                                                                                                                  node_id,
   input  struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                                                                                                                                                                          core_in,
   input  struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic valid; CHISnpFlit bits; } snoops; } chi_in,
   output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                                                                                                                                                                                            core_out,
@@ -3889,6 +3896,7 @@ module RicketL1ICache(
   RicketLineRefill refill (
     .clock                (clock),
     .reset                (reset),
+    .node_id              (node_id),
     .command_in           (_GEN_42),
     .completion_in        (_GEN_40),
     .requests_in          (chi_in.requests),
@@ -3905,6 +3913,7 @@ module RicketL1ICache(
   RicketCleanSnoop snoop (
     .clock            (clock),
     .reset            (reset),
+    .node_id          (node_id),
     .cache_ready      (_refill_command_out.ready & ~_lookup_egress_out.valid & ~_GEN_5),
     .snoops_in        (chi_in.snoops),
     .responses_in     (_protocol_responses_ingress_1_out),
@@ -4214,6 +4223,7 @@ endmodule
 module RicketLineRefill(
   input                                                              clock,
                                                                      reset,
+  input  [6:0]                                                       node_id,
   input  struct packed {logic valid; RicketLineRefillCommand bits; } command_in,
   input  struct packed {logic ready; }                               completion_in,
                                                                      requests_in,
@@ -4290,13 +4300,13 @@ module RicketLineRefill(
   `ifndef SYNTHESIS
     line_refill_retry_response_target:
       assert property (@(posedge clock) disable iff (_GEN_18)
-                         responses_in.bits.tgt_id == 7'h2);
+                         responses_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
   wire                        _GEN_19 = ~_GEN_16;
   `ifndef SYNTHESIS
     line_refill_retry_response_home:
       assert property (@(posedge clock) disable iff (_GEN_19)
-                         responses_in.bits.src_id == 7'h1);
+                         responses_in.bits.src_id == home_id);
   `endif // not def SYNTHESIS
   wire                        _GEN_20 = _GEN_14 & ~reset;
   wire                        _GEN_21 = ~_GEN_20;
@@ -4350,58 +4360,58 @@ module RicketLineRefill(
   `ifndef SYNTHESIS
     line_refill_response_target:
       assert property (@(posedge clock) disable iff (_GEN_39)
-                         response_data_in.bits.tgt_id == 7'h2);
+                         response_data_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
   wire                        _GEN_40 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_data_id:
+    line_refill_response_home:
       assert property (@(posedge clock) disable iff (_GEN_40)
-                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
+                         response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
   `endif // not def SYNTHESIS
   wire                        _GEN_41 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_data_id_unique:
+    line_refill_response_data_id:
       assert property (@(posedge clock) disable iff (_GEN_41)
-                         ~received_packets[response_data_in.bits.data_id]);
+                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
   wire                        _GEN_42 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_num_dat_zero:
+    line_refill_response_data_id_unique:
       assert property (@(posedge clock) disable iff (_GEN_42)
-                         response_data_in.bits.num_dat == 2'h0);
+                         ~received_packets[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
   wire                        _GEN_43 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_not_replicated:
+    line_refill_response_num_dat_zero:
       assert property (@(posedge clock) disable iff (_GEN_43)
-                         ~response_data_in.bits.replicate);
+                         response_data_in.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
   wire                        _GEN_44 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_ok:
+    line_refill_response_not_replicated:
       assert property (@(posedge clock) disable iff (_GEN_44)
+                         ~response_data_in.bits.replicate);
+  `endif // not def SYNTHESIS
+  wire                        _GEN_45 = ~_GEN_36;
+  `ifndef SYNTHESIS
+    line_refill_response_ok:
+      assert property (@(posedge clock) disable iff (_GEN_45)
                          response_data_in.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                        _GEN_45 = _GEN_35 & ~_GEN_27 & ~reset;
-  wire                        _GEN_46 = ~_GEN_45;
-  `ifndef SYNTHESIS
-    line_refill_response_home_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_46)
-                         response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
-  `endif // not def SYNTHESIS
-  wire                        _GEN_47 = ~_GEN_45;
+  wire                        _GEN_46 = _GEN_35 & ~_GEN_27 & ~reset;
+  wire                        _GEN_47 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_dbid_consistent:
       assert property (@(posedge clock) disable iff (_GEN_47)
                          response_data_in.bits.dbid_or_mecid[11:0] == dbid);
   `endif // not def SYNTHESIS
-  wire                        _GEN_48 = ~_GEN_45;
+  wire                        _GEN_48 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_state_consistent:
       assert property (@(posedge clock) disable iff (_GEN_48)
                          _GEN_24.state == response_state);
   `endif // not def SYNTHESIS
-  wire                        _GEN_49 = ~_GEN_45;
+  wire                        _GEN_49 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_pass_dirty_consistent:
       assert property (@(posedge clock) disable iff (_GEN_49)
@@ -4420,7 +4430,7 @@ module RicketLineRefill(
       resp_err: (2'h0),
       opcode: (5'h2),
       txn_id: dbid,
-      src_id: (7'h2),
+      src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
   wire                        _GEN_52 = _GEN_50 & acknowledgements_in.ready;
@@ -4459,10 +4469,10 @@ module RicketLineRefill(
       opcode: opcode,
       return_txn_id_or_stash_lpid: (12'h0),
       stash_nid_valid_endian_deep_prefetch_tgt_hint: (1'h0),
-      return_nid_or_stash_nid_or_data_target: (7'h2),
+      return_nid_or_stash_nid_or_data_target: node_id,
       txn_id: (12'h0),
-      src_id: (7'h2),
-      tgt_id: (7'h1),
+      src_id: node_id,
+      tgt_id: home_id,
       qos: (4'h0)};
   always @(posedge clock) begin
     if (reset) begin
@@ -4498,12 +4508,7 @@ module RicketLineRefill(
       line_address <= _GEN_1 ? command_in.bits.line_address : line_address;
       opcode <= _GEN_1 ? command_in.bits.opcode : opcode;
       line <= _GEN_1 ? 512'h0 : _GEN_35 ? _GEN_57 : line;
-      home_id <=
-        _GEN_1
-          ? 7'h0
-          : _GEN_58
-              ? response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid
-              : home_id;
+      home_id <= _GEN_1 ? 7'h1 : home_id;
       dbid <= _GEN_1 ? 12'h0 : _GEN_58 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
       response_state <= _GEN_1 ? 2'h0 : _GEN_58 ? _GEN_24.state : response_state;
       pass_dirty <= ~_GEN_1 & (_GEN_58 ? _GEN_24.pass_dirty : pass_dirty);
@@ -4530,7 +4535,8 @@ endmodule
 module RicketCleanSnoop(
   input                                                                   clock,
                                                                           reset,
-                                                                          cache_ready,
+  input  [6:0]                                                            node_id,
+  input                                                                   cache_ready,
   input  struct packed {logic valid; CHISnpFlit bits; }                   snoops_in,
   input  struct packed {logic ready; }                                    responses_in,
   input  struct packed {logic valid; RicketCleanSnoopLookupResult bits; } lookup_result_in,
@@ -4599,7 +4605,7 @@ module RicketCleanSnoop(
       resp_err: (2'h0),
       opcode: (5'h1),
       txn_id: request.txn_id,
-      src_id: (7'h2),
+      src_id: node_id,
       tgt_id: request.src_id,
       qos: (4'h0)};
   wire                        _GEN_15 = _GEN_13 & responses_in.ready;
@@ -4778,6 +4784,7 @@ endmodule
 module RicketL1DCache(
   input                                                                                                                                                                                                                                                                                                                                         clock,
                                                                                                                                                                                                                                                                                                                                                 reset,
+  input  [6:0]                                                                                                                                                                                                                                                                                                                                  node_id,
   input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                                                                                                                                                                            core_in,
   input  struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic valid; CHISnpFlit bits; } snoops; } chi_in,
   output struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                                                                                                                                                                               core_out,
@@ -5438,6 +5445,7 @@ module RicketL1DCache(
   RicketLineRefill_1 refill (
     .clock                (clock),
     .reset                (reset),
+    .node_id              (node_id),
     .command_in           (_refill_commands_egress_out),
     .completion_in        (_GEN_2),
     .requests_in          (_protocol_requests_ingress_0_out),
@@ -5454,6 +5462,7 @@ module RicketL1DCache(
   RicketDataSnoop snoop (
     .clock            (clock),
     .reset            (reset),
+    .node_id          (node_id),
     .cache_ready
       (_refill_command_out.ready & _writeback_command_out.ready
        & ~_lookup_egress_out.valid),
@@ -5472,6 +5481,7 @@ module RicketL1DCache(
   RicketLineWriteback writeback (
     .clock          (clock),
     .reset          (reset),
+    .node_id        (node_id),
     .command_in     (_GEN_65),
     .completion_in  (_refill_commands_ingress_1_out),
     .requests_in    (_protocol_requests_ingress_1_out),
@@ -6094,6 +6104,7 @@ endmodule
 module RicketLineRefill_1(
   input                                                                clock,
                                                                        reset,
+  input  [6:0]                                                         node_id,
   input  struct packed {logic valid; RicketLineRefillCommand_1 bits; } command_in,
   input  struct packed {logic ready; }                                 completion_in,
                                                                        requests_in,
@@ -6170,13 +6181,13 @@ module RicketLineRefill_1(
   `ifndef SYNTHESIS
     line_refill_retry_response_target:
       assert property (@(posedge clock) disable iff (_GEN_18)
-                         responses_in.bits.tgt_id == 7'h3);
+                         responses_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
   wire                          _GEN_19 = ~_GEN_16;
   `ifndef SYNTHESIS
     line_refill_retry_response_home:
       assert property (@(posedge clock) disable iff (_GEN_19)
-                         responses_in.bits.src_id == 7'h1);
+                         responses_in.bits.src_id == home_id);
   `endif // not def SYNTHESIS
   wire                          _GEN_20 = _GEN_14 & ~reset;
   wire                          _GEN_21 = ~_GEN_20;
@@ -6230,58 +6241,58 @@ module RicketLineRefill_1(
   `ifndef SYNTHESIS
     line_refill_response_target:
       assert property (@(posedge clock) disable iff (_GEN_39)
-                         response_data_in.bits.tgt_id == 7'h3);
+                         response_data_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
   wire                          _GEN_40 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_data_id:
+    line_refill_response_home:
       assert property (@(posedge clock) disable iff (_GEN_40)
-                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
+                         response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
   `endif // not def SYNTHESIS
   wire                          _GEN_41 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_data_id_unique:
+    line_refill_response_data_id:
       assert property (@(posedge clock) disable iff (_GEN_41)
-                         ~received_packets[response_data_in.bits.data_id]);
+                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
   wire                          _GEN_42 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_num_dat_zero:
+    line_refill_response_data_id_unique:
       assert property (@(posedge clock) disable iff (_GEN_42)
-                         response_data_in.bits.num_dat == 2'h0);
+                         ~received_packets[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
   wire                          _GEN_43 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_not_replicated:
+    line_refill_response_num_dat_zero:
       assert property (@(posedge clock) disable iff (_GEN_43)
-                         ~response_data_in.bits.replicate);
+                         response_data_in.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
   wire                          _GEN_44 = ~_GEN_36;
   `ifndef SYNTHESIS
-    line_refill_response_ok:
+    line_refill_response_not_replicated:
       assert property (@(posedge clock) disable iff (_GEN_44)
+                         ~response_data_in.bits.replicate);
+  `endif // not def SYNTHESIS
+  wire                          _GEN_45 = ~_GEN_36;
+  `ifndef SYNTHESIS
+    line_refill_response_ok:
+      assert property (@(posedge clock) disable iff (_GEN_45)
                          response_data_in.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_45 = _GEN_35 & ~_GEN_27 & ~reset;
-  wire                          _GEN_46 = ~_GEN_45;
-  `ifndef SYNTHESIS
-    line_refill_response_home_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_46)
-                         response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
-  `endif // not def SYNTHESIS
-  wire                          _GEN_47 = ~_GEN_45;
+  wire                          _GEN_46 = _GEN_35 & ~_GEN_27 & ~reset;
+  wire                          _GEN_47 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_dbid_consistent:
       assert property (@(posedge clock) disable iff (_GEN_47)
                          response_data_in.bits.dbid_or_mecid[11:0] == dbid);
   `endif // not def SYNTHESIS
-  wire                          _GEN_48 = ~_GEN_45;
+  wire                          _GEN_48 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_state_consistent:
       assert property (@(posedge clock) disable iff (_GEN_48)
                          _GEN_24.state == response_state);
   `endif // not def SYNTHESIS
-  wire                          _GEN_49 = ~_GEN_45;
+  wire                          _GEN_49 = ~_GEN_46;
   `ifndef SYNTHESIS
     line_refill_response_pass_dirty_consistent:
       assert property (@(posedge clock) disable iff (_GEN_49)
@@ -6300,7 +6311,7 @@ module RicketLineRefill_1(
       resp_err: (2'h0),
       opcode: (5'h2),
       txn_id: dbid,
-      src_id: (7'h3),
+      src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
   wire                          _GEN_52 = _GEN_50 & acknowledgements_in.ready;
@@ -6339,10 +6350,10 @@ module RicketLineRefill_1(
       opcode: opcode,
       return_txn_id_or_stash_lpid: (12'h0),
       stash_nid_valid_endian_deep_prefetch_tgt_hint: (1'h0),
-      return_nid_or_stash_nid_or_data_target: (7'h3),
+      return_nid_or_stash_nid_or_data_target: node_id,
       txn_id: (12'h0),
-      src_id: (7'h3),
-      tgt_id: (7'h1),
+      src_id: node_id,
+      tgt_id: home_id,
       qos: (4'h0)};
   always @(posedge clock) begin
     if (reset) begin
@@ -6378,12 +6389,7 @@ module RicketLineRefill_1(
       line_address <= _GEN_1 ? command_in.bits.line_address : line_address;
       opcode <= _GEN_1 ? command_in.bits.opcode : opcode;
       line <= _GEN_1 ? 512'h0 : _GEN_35 ? _GEN_57 : line;
-      home_id <=
-        _GEN_1
-          ? 7'h0
-          : _GEN_58
-              ? response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid
-              : home_id;
+      home_id <= _GEN_1 ? 7'h1 : home_id;
       dbid <= _GEN_1 ? 12'h0 : _GEN_58 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
       response_state <= _GEN_1 ? 2'h0 : _GEN_58 ? _GEN_24.state : response_state;
       pass_dirty <= ~_GEN_1 & (_GEN_58 ? _GEN_24.pass_dirty : pass_dirty);
@@ -6410,7 +6416,8 @@ endmodule
 module RicketDataSnoop(
   input                                                                  clock,
                                                                          reset,
-                                                                         cache_ready,
+  input  [6:0]                                                           node_id,
+  input                                                                  cache_ready,
   input  struct packed {logic valid; CHISnpFlit bits; }                  snoops_in,
   input  struct packed {logic ready; }                                   responses_in,
                                                                          data_in,
@@ -6477,7 +6484,7 @@ module RicketDataSnoop(
       resp_err: (2'h0),
       opcode: (5'h1),
       txn_id: request.txn_id,
-      src_id: (7'h3),
+      src_id: node_id,
       tgt_id: request.src_id,
       qos: (4'h0)};
   wire [3:0][127:0]          _GEN_14 = /*cast(bit[3:0][127:0])*/line;
@@ -6516,7 +6523,7 @@ module RicketDataSnoop(
       opcode: (4'h1),
       home_nid_or_pbha_or_mismatched_mecid: request.src_id,
       txn_id: request.txn_id,
-      src_id: (7'h3),
+      src_id: node_id,
       tgt_id: request.src_id,
       qos: request.qos};
   always @(posedge clock) begin
@@ -6562,6 +6569,7 @@ endmodule
 module RicketLineWriteback(
   input                                                                 clock,
                                                                         reset,
+  input  [6:0]                                                          node_id,
   input  struct packed {logic valid; RicketLineWritebackCommand bits; } command_in,
   input  struct packed {logic ready; }                                  completion_in,
                                                                         requests_in,
@@ -6601,6 +6609,7 @@ module RicketLineWriteback(
   RicketWriteUnique beat_write (
     .clock          (clock),
     .reset          (reset),
+    .node_id        (node_id),
     .command_in     (_GEN_7),
     .completion_in  (_GEN_6),
     .requests_in    (requests_in),
@@ -6640,6 +6649,7 @@ endmodule
 module RicketWriteUnique(
   input                                                                clock,
                                                                        reset,
+  input  [6:0]                                                         node_id,
   input  struct packed {logic valid; RicketWriteUniqueCommand bits; }  command_in,
   input  struct packed {logic ready; }                                 completion_in,
                                                                        requests_in,
@@ -6711,7 +6721,7 @@ module RicketWriteUnique(
   `ifndef SYNTHESIS
     write_unique_response_home:
       assert property (@(posedge clock) disable iff (_GEN_20)
-                         responses_in.bits.src_id == 7'h1);
+                         responses_in.bits.src_id == home_id);
   `endif // not def SYNTHESIS
   wire                           _GEN_21 = ~_GEN_18;
   `ifndef SYNTHESIS
@@ -6767,7 +6777,7 @@ module RicketWriteUnique(
       opcode: (4'h3),
       home_nid_or_pbha_or_mismatched_mecid: home_id,
       txn_id: dbid,
-      src_id: (7'h3),
+      src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
   wire CHIReqFlit                _GEN_32 =
@@ -6789,10 +6799,10 @@ module RicketWriteUnique(
       opcode: (7'h18),
       return_txn_id_or_stash_lpid: (12'h0),
       stash_nid_valid_endian_deep_prefetch_tgt_hint: (1'h0),
-      return_nid_or_stash_nid_or_data_target: (7'h3),
+      return_nid_or_stash_nid_or_data_target: node_id,
       txn_id: (12'h1),
-      src_id: (7'h3),
-      tgt_id: (7'h1),
+      src_id: node_id,
+      tgt_id: home_id,
       qos: (4'h0)};
   always @(posedge clock) begin
     if (reset) begin
@@ -6830,7 +6840,7 @@ module RicketWriteUnique(
       width <= _GEN_0 ? command_in.bits.width : width;
       write_data <= _GEN_0 ? command_in.bits.data : write_data;
       write_mask <= _GEN_0 ? command_in.bits.mask : write_mask;
-      home_id <= _GEN_17 ? responses_in.bits.src_id : home_id;
+      home_id <= _GEN_0 ? 7'h1 : home_id;
       dbid <= _GEN_17 ? responses_in.bits.dbid_or_group_id : dbid;
     end
   end // always @(posedge)

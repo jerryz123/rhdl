@@ -24,25 +24,20 @@ bundle RicketLineRefillResult(Context :: DataType,
 
 sync_circuit RicketLineRefill(Context :: DataType,
                               address_width :: PosInt,
-                              params :: RicketCHIParams,
-                              node :: CHINodeParams):
-  def checked = checked_ricket_chi_params(params)
-  def p = checked.flit
-  def node_id = node.node_id
+                              config :: RicketCHIConfig):
+  def p = config.flit
   unless RicketCacheLineBytes >= p.data_bytes
   | error(~who: #'RicketLineRefill,
           "cache line must span at least one complete CHI data packet")
   unless address_width >= alignment_bits(RicketCacheLineBytes)
   | error(~who: #'RicketLineRefill,
           "address width must cover the line offset")
-  unless node_id == checked.instruction_node_id || node_id == checked.data_node_id
-  | error(~who: #'RicketLineRefill,
-          "refill node must identify a Ricket cache")
   def packet_count = RicketCacheLineBytes / p.data_bytes
   def packet_index_width = index_width(packet_count)
   def data_id_stride = p.data_bytes / 16
   def data_id_stride_width = alignment_bits(data_id_stride)
 
+  input node_id: Bits(p.node_id_width)
   interface command(Decoupled(RicketLineRefillCommand(Context, address_width)),
                     ~role: consumer)
   interface completion(Irrevocable(RicketLineRefillResult(Context, address_width)), ~role: producer)
@@ -72,7 +67,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
 
   command.ready <== !active_state
   def command_fire = fire(command)
-  def command_home = checked.home_map.lookup(ricket_chi_address(command.bits.line_address, p))
+  def command_home = config.home_map.lookup(ricket_chi_address(command.bits.line_address, p))
   when command_fire:
     assert(is_aligned(command.bits.line_address, RicketCacheLineBytes),
            "line_refill_address_aligned")
@@ -114,7 +109,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
   def protocol_credit_fire = retry_response_fire & protocol_credit
   when retry_response_fire:
     assert(retry_response, "line_refill_retry_response_supported")
-    assert(incoming_response.tgt_id === bits(node_id, p.node_id_width),
+    assert(incoming_response.tgt_id === node_id,
            "line_refill_retry_response_target")
     assert(incoming_response.src_id === home_id,
            "line_refill_retry_response_home")
@@ -156,7 +151,7 @@ sync_circuit RicketLineRefill(Context :: DataType,
            "line_refill_response_is_comp_data")
     assert(incoming_data.txn_id === bits(0, 12),
            "line_refill_response_txn_id")
-    assert(incoming_data.tgt_id === bits(node_id, p.node_id_width),
+    assert(incoming_data.tgt_id === node_id,
            "line_refill_response_target")
     assert(incoming_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
            "line_refill_response_home")

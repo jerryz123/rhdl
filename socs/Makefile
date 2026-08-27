@@ -1,4 +1,4 @@
-# Elaborates and runs the FESVR-backed SimpleSoC end-to-end simulation.
+# Runs focused elaboration for repository SoCs and the FESVR-backed SimpleSoC simulation.
 REPO_DIR := $(abspath ..)
 FESVR_DIR := $(REPO_DIR)/fesvr
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
@@ -17,7 +17,7 @@ SOC_VERILOG := $(BUILD_DIR)/SimpleSoC.sv
 SOC_OBJECT_DIR := $(BUILD_DIR)/obj
 SOC_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 
-.PHONY: all rtl-elaboration-test e2e-test
+.PHONY: all rtl-elaboration-test tiled-plan-test tiled-elaboration-test e2e-test
 
 all: rtl-elaboration-test
 
@@ -25,6 +25,20 @@ rtl-elaboration-test:
 	compiled_root="$$(mktemp -d /tmp/rhdl-simple-soc-rtl.XXXXXX)"; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test socs/tests/simple-soc-test.rhm
+
+tiled-plan-test:
+	compiled_root="$$(mktemp -d /tmp/rhdl-tiled-soc-plan.XXXXXX)"; \
+	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
+	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
+	  socs/tests/tiled-soc-plan-test.rhm \
+	  socs/tests/tiled-soc-config-test.rhm
+
+tiled-elaboration-test:
+	compiled_root="$$(mktemp -d /tmp/rhdl-tiled-soc-rtl.XXXXXX)"; \
+	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
+	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
+	  socs/tests/tiled-tiles-test.rhm \
+	  socs/tests/tiled-soc-test.rhm
 
 e2e-test: $(FESVR_LIBRARY) $(TEST_ELF) | $(BUILD_DIR)
 	@test -x "$(CIRCT_OPT)" || \
