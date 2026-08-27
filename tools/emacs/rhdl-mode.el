@@ -54,7 +54,7 @@ registered for that root."
   `((,(regexp-opt
        '("assert" "bundle" "case" "circuit" "dpi_import" "dpi_reg"
          "elaborate" "elsewhen" "hardware_enum" "input" "inst"
-         "interface" "mem" "mux_lookup" "mux_onehot" "otherwise"
+         "interface" "mem" "mux_lookup" "otherwise"
          "output" "record" "refines" "reg" "supports" "switch"
          "sync_circuit" "sync_mem" "when" "wire")
        'symbols)

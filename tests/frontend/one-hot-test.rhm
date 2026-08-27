@@ -27,6 +27,11 @@ def aggregate_module = aggregate_design.modules[0]
 def aggregate_onehot_mux = aggregate_module.operations.find(
   fun (operation): operation.opcode == "rtl.onehot_mux"
 )
+def keyed_aggregate_design = embedded.run_elaboration(fun (): invalid.KeyedAggregateMux())
+def keyed_aggregate_module = keyed_aggregate_design.modules[0]
+def keyed_aggregate_onehot_mux = keyed_aggregate_module.operations.find(
+  fun (operation): operation.opcode == "rtl.onehot_mux"
+)
 def dynamic_design = embedded.run_elaboration(fun (): invalid.DynamicOneHot())
 def dynamic_module = dynamic_design.modules[0]
 def dynamic_shift = dynamic_module.operations.find(
@@ -34,6 +39,11 @@ def dynamic_shift = dynamic_module.operations.find(
 )
 def dynamic_cast = dynamic_module.operations.find(
   fun (operation): operation.opcode == "rtl.cast"
+)
+def dynamic_mux_design = embedded.run_elaboration(fun (): invalid.DynamicOneHotMux())
+def dynamic_mux_module = dynamic_mux_design.modules[0]
+def dynamic_onehot_mux = dynamic_mux_module.operations.find(
+  fun (operation): operation.opcode == "rtl.onehot_mux"
 )
 
 check:
@@ -65,17 +75,26 @@ check:
     ~keep: fun (operation): operation.opcode == "rtl.record_get"
   ).length() ~is 1
   verify_design(aggregate_design) ~is #void
+  record_type(keyed_aggregate_onehot_mux.results[0].type) ~is #true
+  type_equal(keyed_aggregate_onehot_mux.results[0].type, invalid.Pair()) ~is #true
+  keyed_aggregate_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.record_get"
+  ).length() ~is 1
+  verify_design(keyed_aggregate_design) ~is #void
   type_equal(dynamic_module.find_output("result").type, one_hot.OneHot(4)) ~is #true
   type_equal(dynamic_shift.operands[0].type, Bits(4)) ~is #true
   type_equal(dynamic_shift.operands[1].type, Bits(2)) ~is #true
   type_equal(dynamic_cast.results[0].type, one_hot.OneHot(4)) ~is #true
   verify_design(dynamic_design) ~is #void
+  dynamic_onehot_mux.operands.length() ~is 5
+  type_equal(dynamic_onehot_mux.results[0].type, Bits(8)) ~is #true
+  verify_design(dynamic_mux_design) ~is #void
 
   one_hot.OneHot(0) ~throws "PosInt"
   one_hot.one_hot_width(Bits(4)) ~throws "expected a OneHot type"
   fixture.Grant(-1) ~throws "Nat"
   fixture.Grant(4) ~throws "literal index must satisfy 0 <= index < width"
-  embedded.run_elaboration(fun (): invalid.NonOneHotSelector()) ~throws "selector must have a one-hot selector type"
+  embedded.run_elaboration(fun (): invalid.NonOneHotSelector()) ~throws "record_get operand must have a RecordType"
   embedded.run_elaboration(fun (): invalid.NonBitsOneHot()) ~throws "index must be Bits"
   embedded.run_elaboration(fun (): invalid.NonListChoices()) ~throws "List"
   embedded.run_elaboration(fun (): invalid.TooFewChoices()) ~throws "choice count must equal the one-hot selector width"

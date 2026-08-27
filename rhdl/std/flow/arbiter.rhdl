@@ -14,16 +14,14 @@ circuit ValidArbiter(T :: DataType, n :: PosInt):
   output chosen: Bits(index_width(n))
 
   def requests = vec(for List (index in 0..n): ingress[index].valid)
-  def mutable selected_bits = ingress[0].bits
-  for (offset in 0..n):
-    def index = n - offset - 1
-    selected_bits := mux(ingress[index].valid,
-                         ingress[index].bits,
-                         selected_bits)
+  def grant = priority_encoder_oh(requests)
 
-  egress.valid <== or_reduce(requests)
-  egress.bits <== selected_bits
-  chosen <== priority_encoder(requests)
+  egress.valid <== grant.valid
+  egress.bits <== grant.mux(
+    for List (index in 0..n): ingress[index].bits,
+    ~default: ingress[0].bits
+  )
+  chosen <== grant.index
 
 // Lower indices have higher priority. The output uses Decoupled because a new
 // higher-priority arrival may change the selected payload while stalled.
@@ -34,19 +32,16 @@ circuit Arbiter(T :: DataType, n :: PosInt):
   output chosen: Bits(index_width(n))
 
   def requests = vec(for List (index in 0..n): ingress[index].valid)
-  def grants = cast(priority_encoder_oh(requests), Vec(n, Bool))
-  def mutable selected_bits = ingress[0].bits
-  for (offset in 0..n):
-    def index = n - offset - 1
-    selected_bits := mux(ingress[index].valid,
-                         ingress[index].bits,
-                         selected_bits)
+  def grant = priority_encoder_oh(requests)
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & grants[index]
+    ingress[index].ready <== egress.ready & grant[index]
 
-  egress.valid <== or_reduce(requests)
-  egress.bits <== selected_bits
-  chosen <== priority_encoder(requests)
+  egress.valid <== grant.valid
+  egress.bits <== grant.mux(
+    for List (index in 0..n): ingress[index].bits,
+    ~default: ingress[0].bits
+  )
+  chosen <== grant.index
 
 // Lower indices have higher priority among payloadless token offers.
 circuit CtrlArbiter(n :: PosInt):
@@ -56,12 +51,12 @@ circuit CtrlArbiter(n :: PosInt):
   output chosen: Bits(index_width(n))
 
   def requests = vec(for List (index in 0..n): ingress[index].valid)
-  def grants = cast(priority_encoder_oh(requests), Vec(n, Bool))
+  def grant = priority_encoder_oh(requests)
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & grants[index]
+    ingress[index].ready <== egress.ready & grant[index]
 
-  egress.valid <== or_reduce(requests)
-  chosen <== priority_encoder(requests)
+  egress.valid <== grant.valid
+  chosen <== grant.index
 
 // A connected endpoint array supplies its input count. A disconnected
 // topology starts from a payload type and states the count in arbiter.

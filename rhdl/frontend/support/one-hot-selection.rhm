@@ -1,0 +1,101 @@
+#lang rhombus
+// Defines shared exact and optional one-hot selector protocols and lowering builders.
+
+import:
+  rhombus.bits.(<<) as <<
+  "../../core/ir.rhm" open
+  "../kernel.rhm" as kernel
+  "fields.rhm".HardwareFields
+  "fields.rhm".hardware_as_bits
+  "mux-lookup.rhm" as mux_support
+
+export:
+  MaybeOneHotSelectorType
+  build_one_hot_mux
+  build_maybe_one_hot_mux
+  build_keyed_one_hot_mux
+
+// Optional selectors deliberately do not implement OneHotSelectorType: zero is
+// a valid absence encoding and therefore cannot satisfy a partial mux contract.
+interface MaybeOneHotSelectorType:
+  method maybe_one_hot_selector_width()
+
+// Preserves exact one-hot selection as a partial core operation. Exactly one
+// bit set is a caller precondition; invalid encodings have no result contract.
+fun build_one_hot_mux(selector,
+                      choices :: List,
+                      name = #false,
+                      location = Location()) :~ HardwareFields:
+  def value = kernel.read(selector, location)
+  unless value.type is_a mux_support.OneHotSelectorType
+  | error(~who: #'mux,
+          location.describe() ++ ": selector without a default must have an exactly-one selector type")
+  def width = value.type.one_hot_selector_width()
+  unless choices.length() == width
+  | error(~who: #'mux,
+          location.describe() ++ ": choice count must equal the one-hot selector width")
+  def selector_bits = hardware_as_bits(value,
+                                       #'mux,
+                                       "one-hot selector",
+                                       #false,
+                                       location)
+  kernel.hw_onehot_mux(selector_bits,
+                       choices,
+                       name,
+                       location,
+                       Origin("embedded one-hot mux", name || ""))
+
+// Adds one default lane selected only by the absent encoding. Every legal
+// optional selector is exactly one-hot after this transformation.
+fun build_maybe_one_hot_mux(selector,
+                            choices :: List,
+                            default_value,
+                            name = #false,
+                            location = Location()) :~ HardwareFields:
+  def value = kernel.read(selector, location)
+  unless value.type is_a MaybeOneHotSelectorType
+  | error(~who: #'mux,
+          location.describe() ++ ": selector with a default must have a MaybeOneHot type")
+  def width = value.type.maybe_one_hot_selector_width()
+  unless choices.length() == width
+  | error(~who: #'mux,
+          location.describe() ++ ": choice count must equal the MaybeOneHot width")
+  def selector_bits = hardware_as_bits(value,
+                                       #'mux,
+                                       "MaybeOneHot selector",
+                                       #false,
+                                       location)
+  def absent = kernel.hw_eq(selector_bits,
+                            kernel.literal(Bits(width), 0, #false, location),
+                            #false,
+                            location)
+  def total_selector = kernel.concat([absent, selector_bits], #false, location)
+  kernel.hw_onehot_mux(total_selector,
+                       choices ++ [default_value],
+                       name,
+                       location,
+                       Origin("embedded maybe-one-hot mux", name || ""))
+
+// Converts typed-key map entries to physical selector-bit order before reusing
+// the exact one-hot lowering path.
+fun build_keyed_one_hot_mux(selector,
+                            cases :: Map,
+                            mux_name = #false,
+                            location = Location()) :~ HardwareFields:
+  def value = kernel.read(selector, location)
+  unless value.type is_a mux_support.OneHotSelectorType
+  | error(~who: #'mux,
+          location.describe() ++ ": keyed mux arms require an exact one-hot selector")
+  def width = value.type.one_hot_selector_width()
+  unless cases.length() == width
+  | error(~who: #'mux,
+          location.describe() ++ ": keyed mux arms must cover every one-hot selector lane exactly once")
+  def normalized_cases = for List ((key, choice) in cases):
+    [value.type.normalize_mux_lookup_key(key), choice]
+  def ordered_cases = normalized_cases.sort(fun (left, right): left[0] < right[0])
+  for (index in 0..width):
+    unless ordered_cases[index][0] == (1 << index)
+    | error(~who: #'mux,
+            location.describe() ++ ": keyed mux arms must cover every one-hot selector lane exactly once")
+  def ordered_choices = ordered_cases.map(fun (arm): arm[1])
+  build_one_hot_mux(value, ordered_choices, mux_name, location)

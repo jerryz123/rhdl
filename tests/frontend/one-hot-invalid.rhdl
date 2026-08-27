@@ -4,9 +4,15 @@
 def Grant4 = OneHot(4)
 def Grant3 = OneHot(3)
 
+hardware_enum PairSelect(~encoding: one_hot):
+  First
+  Second
+
 bundle Pair():
   left: Bits(8)
   right: Bits(8)
+  method left_value(pair) :: Bits(8):
+    pair.left
 
 fun require_grant4(value :: OneHot(4)):
   value
@@ -15,23 +21,39 @@ circuit ListMux():
   input selector: Grant4
   input(a, b, c, d): Bits(8)
   output result: Bits(8)
-  result <== mux_onehot(selector,
-                        [a, b, c, d])
+  result <== selector.mux([a, b, c, d])
 
 circuit AggregateMux():
   input selector: Grant4
   input(a, b, c, d): Pair()
   output result: Pair()
   output selected_left: Bits(8)
-  def selected = mux_onehot(selector,
-                            [a, b, c, d])
+  def selected = selector.mux([a, b, c, d])
   result <== selected
   selected_left <== selected.left
+
+circuit KeyedAggregateMux():
+  input selector: PairSelect
+  input(first, second): Pair()
+  output result: Pair()
+  output selected_left: Bits(8)
+  def selected = selector.mux({
+    PairSelect.Second: second,
+    PairSelect.First: first
+  })
+  result <== selected
+  selected_left <== selected.left_value()
 
 circuit DynamicOneHot():
   input index: Bits(2)
   output result: OneHot(4)
   result <== one_hot(index)
+
+circuit DynamicOneHotMux():
+  input index: Bits(2)
+  input(a, b, c, d): Bits(8)
+  output result: Bits(8)
+  result <== one_hot(index).mux([a, b, c, d])
 
 circuit NonBitsOneHot():
   input index: Bool
@@ -41,32 +63,28 @@ circuit NonBitsOneHot():
 circuit NonOneHotSelector():
   input selector: Bits(4)
   output result: Grant4
-  result <== mux_onehot(selector,
-                        [Grant4(0), Grant4(1), Grant4(2), Grant4(3)])
+  result <== selector.mux([Grant4(0), Grant4(1), Grant4(2), Grant4(3)])
 
 circuit NonListChoices():
   input selector: Grant4
   output result: Grant4
-  result <== mux_onehot(selector, Grant4(1))
+  result <== selector.mux(Grant4(1))
 
 circuit TooFewChoices():
   input selector: Grant4
   output result: Grant4
-  result <== mux_onehot(selector,
-                        [Grant4(0), Grant4(1), Grant4(2)])
+  result <== selector.mux([Grant4(0), Grant4(1), Grant4(2)])
 
 circuit TooManyChoices():
   input selector: Grant4
   output result: Grant4
-  result <== mux_onehot(selector,
-                        [Grant4(0), Grant4(1), Grant4(2), Grant4(3), Grant4(0)])
+  result <== selector.mux([Grant4(0), Grant4(1), Grant4(2), Grant4(3), Grant4(0)])
 
 circuit MixedChoices():
   input selector: Grant4
   input byte: Bits(8)
   output result: Bits(8)
-  result <== mux_onehot(selector,
-                        [byte, byte, Grant4(0), byte])
+  result <== selector.mux([byte, byte, Grant4(0), byte])
 
 circuit ForeignMuxKey():
   input selector: Grant4
@@ -98,7 +116,9 @@ export:
   Pair
   ListMux
   AggregateMux
+  KeyedAggregateMux
   DynamicOneHot
+  DynamicOneHotMux
   NonBitsOneHot
   NonOneHotSelector
   NonListChoices

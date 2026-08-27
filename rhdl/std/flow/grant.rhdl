@@ -13,7 +13,7 @@ export:
 // stalled, so the output offers use the Decoupled contract.
 circuit GrantDemux(T :: DataType, output_count :: PosInt):
   interface ingress(Decoupled(T), ~role: consumer)
-  input grants: Vec(output_count, Bool)
+  input grants: MaybeOneHot(output_count)
   interface egress[output_count](Decoupled(T), ~role: producer)
 
   ingress.ready <== or_reduce(vec(
@@ -30,19 +30,19 @@ circuit GrantDemux(T :: DataType, output_count :: PosInt):
 // the selected input, and the output remains Decoupled under changing grants.
 circuit GrantMerge(T :: DataType, input_count :: PosInt):
   interface ingress[input_count](Decoupled(T), ~role: consumer)
-  input grants: Vec(input_count, Bool)
+  input grants: MaybeOneHot(input_count)
   interface egress(Decoupled(T), ~role: producer)
 
-  def mutable selected_valid = Bool(#false)
-  def mutable selected_bits = ingress[0].bits
+  def active = grants.mask(vec(
+    for List (input_index in 0..input_count):
+      ingress[input_index].valid
+  ))
   for (input_index in 0..input_count):
     def selected = grants[input_index]
-    def active = selected & ingress[input_index].valid
-    selected_valid := selected_valid ||| active
-    selected_bits := mux(active,
-                         ingress[input_index].bits,
-                         selected_bits)
     ingress[input_index].ready <== selected & egress.ready
 
-  egress.valid <== selected_valid
-  egress.bits <== selected_bits
+  egress.valid <== active.valid
+  egress.bits <== active.mux(
+    for List (input_index in 0..input_count): ingress[input_index].bits,
+    ~default: ingress[0].bits
+  )

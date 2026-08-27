@@ -466,6 +466,7 @@ fixture_specs=(
   'standard-counter|standard_counter_tb|examples/std/standard-counter.rhdl|design|verilog_reference'
   'multiply|multiply_tb|examples/rhdl/multiply.rhdl|design|verilog_reference'
   'expanding-arithmetic|expanding_arithmetic_tb|examples/rhdl/expanding-arithmetic.rhdl|design|verilog_reference'
+  'fir-filter|fir_filter_tb|examples/rhdl/fir-filter.rhdl|design|verilog_reference'
   'unsigned-comparisons|unsigned_comparisons_tb|examples/rhdl/unsigned-comparisons.rhdl|design|verilog_reference'
   'signed-integers|signed_integers_tb|examples/rhdl/signed-integers.rhdl|design|verilog_reference'
   'sync-counter||examples/rhdl/sync-counter.rhdl|design|verilog_reference'

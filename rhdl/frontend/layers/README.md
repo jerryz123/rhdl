@@ -15,10 +15,10 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, packed Boolean reductions and population count, equality, typed membership, enum validity, ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, typed membership, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`tagged-union.rhm`](tagged-union.rhm) | Nominal tagged unions with shared enum tags, typed payload construction, and dot-based tag tests and guarded views |
-| [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and partial selection |
+| [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and selector-owned exact selection |
 | [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
 | [`vector.rhm`](vector.rhm) | `Vec`, construction, selection, and functional update |
 | [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
@@ -139,10 +139,13 @@ sum <== a +& b
 product <== a *& b
 ```
 
-`+&` widens both operands to `max(width(a), width(b)) + 1`; `*&` widens them
-to the sum of their widths. Both then use the existing modular core operation.
-Unsigned expanding subtraction remains undefined because borrow policy is not
-implied by a result width.
+For unsigned `Bits`, `+&` widens both operands to
+`max(width(a), width(b)) + 1`; `*&` widens them to the sum of their widths.
+Signed arithmetic values also support `*&`: both operands are sign-extended to
+the summed width, and the result preserves their compatible signed type.
+Mixed signed/unsigned multiplication is rejected. Each form then uses the
+existing modular core operation. Expanding subtraction and signed expanding
+addition remain undefined because their result-width policies are not implied.
 
 The canonical selection form is N-way lookup:
 
@@ -202,11 +205,11 @@ logarithmic depth without widening small subtrees beyond the values they can
 represent.
 `priority_encoder(value)` returns the index of the lowest asserted bit in the
 canonical packed representation, while `priority_encoder_oh(value)` returns a
-`Bits` mask containing only that bit. Both return zero for an all-zero operand;
-use `or_reduce(value)` when binary index zero must be distinguished from no
-asserted input. A `Vec`'s logical element zero is its lowest packed lane, so the
-same lower-index-first rule applies directly to vectors. The optional-one-hot
-result is `Bits` rather than `OneHot`, because an all-zero result is valid.
+`MaybeOneHot(n)` containing only that bit. Both use packed zero for an all-zero
+operand; `MaybeOneHot.valid` distinguishes absence and `MaybeOneHot.index`
+returns the same zero-defaulted binary index. A `Vec`'s logical element zero is
+its lowest packed lane, so the same lower-index-first rule applies directly to
+vectors.
 Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from
@@ -234,8 +237,9 @@ constant amounts may be nonnegative host `Int` values. Mixed widths and mixed
 `sext(value, target_width)` explicitly sign-extends. `strunc(value,
 target_width)` explicitly retains the low bits and returns the same signed type
 at the narrower width. Equal-width representation changes between `Bits` and
-`SInt` continue to use `cast` or `.into`. Signed expanding arithmetic,
-division, remainder, and implicit width inference are not part of this layer.
+`SInt` continue to use `cast` or `.into`. Signed expanding multiplication uses
+`*&`; expanding signed addition, division, remainder, and implicit width
+inference are not part of this layer.
 
 See [`../../../examples/rhdl/signed-integers.rhdl`](../../../examples/rhdl/signed-integers.rhdl).
 
@@ -295,19 +299,20 @@ hardware_enum ResultKind(~encoding: one_hot):
   Or
   And
 
-result <== mux_onehot(select):
-  ResultKind.Arithmetic: arithmetic_result
-  ResultKind.Shift: shift_result
-  ResultKind.Compare: compare_result
-  ResultKind.Xor: xor_result
-  ResultKind.Or: or_result
+result <== select.mux({
+  ResultKind.Arithmetic: arithmetic_result,
+  ResultKind.Shift: shift_result,
+  ResultKind.Compare: compare_result,
+  ResultKind.Xor: xor_result,
+  ResultKind.Or: or_result,
   ResultKind.And: and_result
+})
 ```
 
 This produces a six-bit nominal enum with encodings `1`, `2`, `4`, `8`, `16`,
 and `32`. It is distinct from both `OneHot(6)` and every other enum declaration,
-but its packed representation can directly drive `mux_onehot`. Keyed arms are
-checked against that nominal enum and must cover each member exactly once. See
+but its packed representation can directly drive `.mux`. Typed-key map arms
+are checked against that nominal enum and must cover each member exactly once. See
 [`../../../examples/rhdl/one-hot-enum.rhdl`](../../../examples/rhdl/one-hot-enum.rhdl).
 
 Each evaluated declaration has distinct nominal identity. Members lower to
@@ -324,11 +329,12 @@ nominal members:
 
 ```rhombus
 def Grant = OneHot(4)
-next_grant <== mux_onehot(current):
-  Grant(1)
-  Grant(2)
-  Grant(3)
+next_grant <== current.mux([
+  Grant(1),
+  Grant(2),
+  Grant(3),
   Grant(0)
+])
 ```
 
 `one_hot(index)` converts a hardware `Bits(n)` index to `OneHot(2^n)`. Inferring
@@ -338,11 +344,28 @@ may produce zero or multiple asserted bits.
 
 One-hot values deliberately do not implement `BitwiseType`, because bitwise
 operations do not preserve the exactly-one invariant. Equality, aggregates,
-ports, state, and explicit casts work normally. `mux_onehot` accepts either a
-structural `OneHot(n)` value or a nominal one-hot hardware enum and lowers to
-the partial `rtl.onehot_mux` operation. Exactly one selector bit must be set;
+ports, state, and explicit casts work normally. `.mux` lowers exact selectors
+to the partial `rtl.onehot_mux` operation. Exactly one selector bit must be set;
 zero-hot and multi-hot results are unspecified. This contract needs no default
 value and allows the backend to use selector-bit gating and a balanced OR tree.
+Structural values use `selector.mux(choices)`. One-hot enums use typed-key map
+arms so member-to-lane mappings stay explicit and independent of call order.
+
+`MaybeOneHot(n)` is the compact optional counterpart: zero represents no
+selection and every present value has exactly one asserted bit. Calling the
+type without an argument constructs absence; calling it with a host index
+constructs that lane. Native values support lane indexing, `.valid`, `.index`,
+and `.mask(mask)`, where masking may turn a present selection into absence but
+cannot create a second selected lane.
+
+Because absence does not satisfy the partial exact-one-hot contract,
+`selector.mux(choices, ~default: value)` requires an explicit default and is
+total for every legal `MaybeOneHot` encoding. Exact and optional selectors
+share the `.mux` method name while the selector type and presence of a default
+determine the contract. `MaybeOneHot` does not implement
+`BitwiseType`; arbitrary bitwise OR could violate its at-most-one invariant.
+External ports remain contracts and can still require a formal assumption when
+their environment could physically drive a multi-hot encoding.
 
 ## Packing and width operations
 

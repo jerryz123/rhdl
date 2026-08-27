@@ -7,6 +7,51 @@ public `#lang rhdl` language. It is not another language profile and adds no
 core IR, elaboration, or backend behavior. Its dependency contract is listed
 in [`../README.md`](../README.md).
 
+## Shift registers
+
+[`shift-register.rhdl`](shift-register.rhdl) exports the `shift_register`
+definition form, a generic ambient-clock delay line over any RHDL `DataType`.
+The declared name binds every stored stage as `Vec(stages, T)`, with the newest
+value at index zero. Callers can therefore select only the final delayed value
+or reuse all taps for filters and windows. Explicit naming makes multiple shift
+registers in one circuit collision-free and preserves useful RTL names.
+
+The register is resetless when `~init` is omitted. An initializer may be one
+literal of `T`, replicated across every stage, or a `Vec(stages, T)` literal
+that initializes stages independently. Optional `~enable` must be hardware
+`Bool`; when omitted, the generated register advances directly without enable
+muxing. The helper uses the ambient synchronous domain and therefore belongs
+inside a `sync_circuit` or another ambient-clock scope:
+
+```rhombus
+import:
+  lib("rhdl/std/shift-register.rhdl").shift_register
+
+shift_register taps(sample, 4, ~init: bits(0, 8), ~enable: advance)
+filtered <== taps[3]
+```
+
+## Reduction trees
+
+[`reduction.rhdl`](reduction.rhdl) exports `tree_reduce(values, combine)`, an
+elaboration-time balanced reduction over a nonempty host `List`. Each level
+combines adjacent pairs in source order and carries an unmatched final value
+to the next level. It therefore emits exactly `values.length() - 1` calls to
+the supplied binary function with logarithmic tree depth:
+
+```rhombus
+import:
+  lib("rhdl/std/reduction.rhdl").tree_reduce
+
+def sum = tree_reduce(products, fun (left, right): left + right)
+```
+
+The combiner can be any binary host function that returns the next tree node,
+including a named function over bundles. Since tree grouping is observable,
+use an associative combiner when the result must agree with a sequential fold.
+An empty list is rejected; callers that define an identity should supply it as
+an explicit leaf.
+
 ## Clock-domain crossings
 
 [`cdc.rhdl`](cdc.rhdl) exports the first standard crossing circuit,
@@ -655,7 +700,7 @@ not make the fixed inter-output ordering fair.
 
 `circular_priority_onehot(requests, start)` is the stateless selection primitive
 under the matcher and round-robin arbiters. It returns one shared `valid`,
-optional-one-hot `grant`, and binary `index` result. It builds one masked
+native `MaybeOneHot` `grant`, and binary `index` result. It builds one masked
 priority selection and one wraparound selection instead of replicating a full
 arbiter for every possible start. `RRArbiter` and `CtrlRRArbiter` own their
 priority registers directly and advance them only after successful transfers.
@@ -668,7 +713,9 @@ independently rebuilding full and peer reductions for every lane.
 `GrantDemux(T, outputs)` routes one input according to an optional-one-hot grant
 row, while `GrantMerge(T, inputs)` selects one input according to an
 optional-one-hot grant column. A zero grant blocks the corresponding flow;
-asserting multiple bits violates each primitive's contract.
+both scalar grant ports use `MaybeOneHot`, so ordinary RHDL construction keeps
+the zero-or-one invariant explicit. An external environment can still violate
+the physical encoding and must satisfy the corresponding boundary contract.
 
 `GrantCrossbar(T, inputs, outputs)` structurally composes one `GrantDemux` per
 input with one `GrantMerge` per output around an externally generated

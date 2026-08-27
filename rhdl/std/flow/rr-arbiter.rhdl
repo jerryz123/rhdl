@@ -19,16 +19,17 @@ sync_circuit RRArbiter(T :: DataType, n :: PosInt):
   reg next_priority(~init: bits(0, width))
   assert(next_priority <= bits(n - 1, width), "rr_priority_in_range")
   def requests = vec(for List (index in 0..n): ingress[index].valid)
-  def choice = circular_priority_onehot(requests, next_priority)
-  def mutable selected_bits = ingress[0].bits
-  for (index in 0..n):
-    selected_bits := mux(choice.grant[index], ingress[index].bits, selected_bits)
+  def choice :: CircularPriorityChoice(n, width) = circular_priority_onehot(requests, next_priority)
+  def grant :: MaybeOneHot(n) = choice.grant
 
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & choice.grant[index]
+    ingress[index].ready <== egress.ready & grant[index]
 
   egress.valid <== choice.valid
-  egress.bits <== selected_bits
+  egress.bits <== grant.mux(
+    for List (index in 0..n): ingress[index].bits,
+    ~default: ingress[0].bits
+  )
   chosen <== choice.index
 
   when (choice.valid & egress.ready):
@@ -49,10 +50,11 @@ sync_circuit CtrlRRArbiter(n :: PosInt):
   reg next_priority(~init: bits(0, width))
   assert(next_priority <= bits(n - 1, width), "ctrl_rr_priority_in_range")
   def requests = vec(for List (index in 0..n): ingress[index].valid)
-  def choice = circular_priority_onehot(requests, next_priority)
+  def choice :: CircularPriorityChoice(n, width) = circular_priority_onehot(requests, next_priority)
+  def grant :: MaybeOneHot(n) = choice.grant
 
   for (index in 0..n):
-    ingress[index].ready <== egress.ready & choice.grant[index]
+    ingress[index].ready <== egress.ready & grant[index]
 
   egress.valid <== choice.valid
   chosen <== choice.index

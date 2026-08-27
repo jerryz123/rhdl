@@ -85,7 +85,7 @@ The 64-bit specialization additionally supports
 32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;
 `word` is inert in the 32-bit specialization.
 
-Keyed `mux_onehot` arms select the arithmetic, shift, comparison, XOR, OR, or
+Typed-key one-hot-enum `.mux` arms select the arithmetic, shift, comparison, XOR, OR, or
 AND result directly. `subtract`, `signed_mode`, `shift_right`, and `word`
 modify only the selected family. The ALU deliberately knows nothing about
 instruction encodings, operand routing, memory, branches, or writeback.

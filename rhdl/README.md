@@ -107,6 +107,8 @@ import one primitive without loading unrelated generators.
 | Module | Provides | Direct RHDL dependencies |
 |---|---|---|
 | `std/counter.rhdl` | Enabled bounded `Counter` | None |
+| `std/shift-register.rhdl` | Generic named ambient-clock delay line with optional initialization and enable | None |
+| `std/reduction.rhdl` | Generic ordered balanced reduction with a caller-supplied binary function | None |
 | `std/cdc/level.rhdl` | Resetless two-stage stable one-bit `SyncLevel` synchronizer | None |
 | `std/cdc.rhdl` | Public CDC circuit facade | `std/cdc/level.rhdl` |
 | `std/bits.rhdl` | Host `Pow2Int` refinement plus alignment, transfer-byte-mask, and masked-merge operations for `Bits` | None |
@@ -123,7 +125,7 @@ import one primitive without loading unrelated generators.
 | `std/read-write.rhdl` | Generic addressed `Valid` read-or-write request flow over lane-replicated data and masks | `std/ready-valid.rhdl` |
 | `std/sync-ram.rhdl` | Fixed-latency lane-masked shared 1RW RAM | `std/read-write.rhdl` |
 | `std/flow/ready-valid-support.rhdl` | Ready-valid protocol normalization, payload inference, and contract-preserving payload replacement for flow stages | `std/ready-valid.rhdl` |
-| `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and configured unary stages | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
+| `std/flow/pipe.rhdl` | Registered fixed-latency `ValidPipe`, elastic `Pipe`/`CtrlPipe`, and configured unary stages | `std/ready-valid.rhdl`, `std/shift-register.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/queue.rhdl` | Configurable FIFO `Queue`/`CtrlQueue` and configured unary stages | `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/completion-queue.rhdl` | Reserved response buffering between ready-valid requests and nonstallable issues/completions | `std/ready-valid.rhdl`, `std/flow/queue.rhdl` |
 | `std/flow/credit.rhdl` | Credited sender and receiver adapters, bounded accounting, and configured unary stages | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/queue.rhdl` |
@@ -139,7 +141,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/zip.rhdl` | Configured inline binary heterogeneous atomic `zip_flow` stage | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/broadcast.rhdl` | Exactly-once buffered `Broadcast`/`CtrlBroadcast` | `std/ready-valid.rhdl` |
 | `std/flow/atomic-fork.rhdl` | Combinational all-or-none `AtomicFork`/`CtrlAtomicFork` plus configured fanout stages | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl`, `std/flow/reduction.rhdl` |
-| `std/flow/reduction.rhdl` | Shared balanced full and all-except-one Boolean reduction helper | None |
+| `std/flow/reduction.rhdl` | Shared balanced full and all-except-one Boolean reduction helper | `std/reduction.rhdl` |
 | `std/flow/map.rhdl` | Configured inline payload substitution with conservative `Decoupled` output and explicit stable-contract preservation | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/map-valid.rhdl` | Configured inline payload substitution for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/flit.rhdl` | Transfer-counted ready-valid conversion among standard flit formats | `std/flit.rhdl`, `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/ready-valid-support.rhdl` |
@@ -164,11 +166,11 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `cast.rhm` | Equal-width representation casts plus inferred packing to `Bits` and splitting into uniform vectors | core IR, kernel, field support |
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
-| `expanding-arithmetic.rhm` | Lossless unsigned addition and multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, static host-Boolean literal shadows, packed reductions, lower-index-first priority encoders, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support |
-| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals | field support, variant-schema support |
+| `expanding-arithmetic.rhm` | Lossless unsigned addition plus signed and unsigned multiplication with `+&` and `*&` sugar | core types, kernel, field support |
+| `bool.rhm` | Nominal `Bool`, compact `MaybeOneHot`, packed reductions, lower-index-first priority encoders, total optional-one-hot selection, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support, one-hot-selection support |
+| `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals and typed-key one-hot selection | kernel, field support, hardware-method support, variant-schema support, one-hot-selection support |
 | `tagged-union.rhm` | Nominal tagged unions, shared enum tags, typed payload construction, and `.tag`/`.is(...)`/`.view(...)` inspection | core IR, kernel, field support, hardware-literal support, variant-schema support |
-| `one-hot.rhm` | One-hot selector types, literals, total `Bits` index conversion, typed mux keys, and partial `mux_onehot` selection | core IR, kernel, field support, mux-lookup support |
+| `one-hot.rhm` | One-hot selector types, literals, total `Bits` index conversion, typed mux keys, and selector-owned muxing | core IR, kernel, field support, mux-lookup support, one-hot-selection support |
 | `bundle.rhm` | Bundle declarations, type-named construction, family identity and generator-argument reflection, generic runtime records, recursive literal shadows, and field access | core IR, kernel, field support, hardware-literal support |
 | `vector.rhm` | `Vec` types, runtime vector construction, and recursive vector literal shadows | core types, kernel, field support, hardware-literal support |
 | `memory.rhm` | Binding-derived memories, async reads, synchronous writes, and address-width helpers | core IR, kernel, clocking support, field support |
@@ -206,6 +208,9 @@ language profiles:
 - `variants.rhm` centralizes nominal variant identity, automatic and explicit
   tag encodings, enum tag types, and exact member literals for enum and tagged-
   union layers.
+- `one-hot-selection.rhm` defines the optional-selector protocol and keeps the
+  partial exact-one-hot and total optional-one-hot lowering paths available to
+  independent layers without sibling imports.
 
 Domain libraries and adapters such as `chi/` and `riscv/rhdl` consume the
 public language and standard libraries. They do not become frontend layers and

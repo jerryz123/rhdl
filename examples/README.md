@@ -133,15 +133,16 @@ instances, or logic to the generated RTL.
 | [`rhdl/enum-state.rhdl`](rhdl/enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
 | [`rhdl/tagged-union.rhdl`](rhdl/tagged-union.rhdl) | Nullary and payload variants with `.tag`, `.is(...)`, and `.view(...)` inspection |
 | [`rhdl/nested-tagged-union.rhdl`](rhdl/nested-tagged-union.rhdl) | Nested tagged-union literals, chained payload views, and runtime reconstruction |
-| [`rhdl/one-hot.rhdl`](rhdl/one-hot.rhdl) | One-hot literals, selection, equality, and representation casts |
+| [`rhdl/one-hot.rhdl`](rhdl/one-hot.rhdl) | One-hot literals, selector-owned selection, equality, and representation casts |
 | [`rhdl/one-hot-enum.rhdl`](rhdl/one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
 | [`rhdl/shifts.rhdl`](rhdl/shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |
 | [`rhdl/multiply.rhdl`](rhdl/multiply.rhdl) | Modular same-width unsigned multiplication |
-| [`rhdl/expanding-arithmetic.rhdl`](rhdl/expanding-arithmetic.rhdl) | Lossless arithmetic over unequal-width operands |
+| [`rhdl/expanding-arithmetic.rhdl`](rhdl/expanding-arithmetic.rhdl) | Lossless unsigned addition plus signed and unsigned multiplication |
+| [`rhdl/fir-filter.rhdl`](rhdl/fir-filter.rhdl) | Signed direct-form FIR filtering with generated taps, explicit widths, and balanced summation |
 | [`rhdl/counter.rhdl`](rhdl/counter.rhdl) | Host helper functions accepting and returning hardware |
 | [`rhdl/sync-counter.rhdl`](rhdl/sync-counter.rhdl) | Ambient clock/reset policy and explicit override |
 | [`rhdl/enable-shift-register.rhdl`](rhdl/enable-shift-register.rhdl) | Hardware conditionals, register hold, and synchronous reset |
-| [`rhdl/reset-shift-register.rhdl`](rhdl/reset-shift-register.rhdl) | Inferred reset-initialized registers |
+| [`rhdl/reset-shift-register.rhdl`](rhdl/reset-shift-register.rhdl) | Generic enabled shift register with ambient synchronous reset |
 | [`rhdl/hierarchy.rhdl`](rhdl/hierarchy.rhdl) | Reused module definitions and child-port access |
 | [`rhdl/nested-circuit.rhdl`](rhdl/nested-circuit.rhdl) | Lexically private child generators with explicit hardware boundaries |
 | [`rhdl/layered-adder.rhdl`](rhdl/layered-adder.rhdl) | Ordinary imported library plus generated structure |
@@ -174,7 +175,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/nested-interface.rhdl`](rhdl/nested-interface.rhdl) | Recursive interface composition and orientation |
 | [`rhdl/interface-monitor.rhdl`](rhdl/interface-monitor.rhdl) | Read-only endpoint observations and explicit protocol assertions |
 | [`rhdl/interface-transform.rhdl`](rhdl/interface-transform.rhdl) | Typed custom interface transforms, fanout, and detached terminals |
-| [`rhdl/priority-encoder.rhdl`](rhdl/priority-encoder.rhdl) | Lower-index-first priority selection over packed and aggregate inputs |
+| [`rhdl/priority-encoder.rhdl`](rhdl/priority-encoder.rhdl) | Lower-index-first binary and native `MaybeOneHot` selection over packed and aggregate inputs |
 | [`rhdl/bit-utilities.rhdl`](rhdl/bit-utilities.rhdl) | Negation, reductions, membership predicates, and enum validity |
 
 ## Standard-library examples

@@ -3,8 +3,11 @@
 
 import:
   rhombus/meta open
+  "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
+  "../support/fields.rhm".hardware_value_type
   "../support/hardware-methods.rhm".HardwareMethods
+  "../support/one-hot-selection.rhm" as one_hot_selection
   "../support/variants.rhm" open
 
 export:
@@ -42,6 +45,53 @@ fun make_one_hot_enum(name, member_names):
       member_names.map(fun (member_name): [member_name, #false])
     )
   )
+
+fun hardware_has_one_hot_enum_type(value):
+  kernel.hardware_entity(value) && hardware_value_type(value) is_a OneHotEnumType
+
+meta:
+  fun one_hot_enum_mux_result(result, cases):
+    match cases.group
+    | '{$(_key :: expr_meta.Parsed): $(first :: Block), $rest, ...}':
+        match first
+        | ': $(first_expr :: expr_meta.Parsed)':
+            match first_expr.group
+            | '$(type_name :: Identifier) $dot $(member :: Identifier)' when dot.to_source_string() == ".":
+                '$result :: HardwareFields.from_type($type_name)'
+            | ~else:
+                statinfo_meta.wrap(result, statinfo_meta.gather(first_expr))
+        | ~else: result
+    | ~else: result
+
+dot.macro 'one_hot_enum_value_dot $left $dot $right':
+  ~tail: '$tail ...'
+  match '$right $tail ...'
+  | 'mux($(cases :: expr_meta.Parsed)) $rest ...':
+      values(
+        one_hot_enum_mux_result(
+          'one_hot_selection.build_keyed_one_hot_mux($left, $cases)',
+          cases
+        ),
+        '$rest ...'
+      )
+  | 'mux $rest ...':
+      syntax_meta.error(
+        "one-hot enum .mux expects one typed-key map",
+        right
+      )
+  | ~else: #false
+
+annot.macro 'OneHotEnumValue':
+  annot_meta.pack_predicate(
+    'hardware_has_one_hot_enum_type',
+    '(($(statinfo_meta.dot_provider_key), one_hot_enum_value_dot))'
+  )
+
+annot.macro
+| 'EnumHardwareFields($type, one_hot)':
+    'HardwareFields.of($type) && OneHotEnumValue'
+| 'EnumHardwareFields($type, ordinary)':
+    'HardwareFields.of($type)'
 
 annot.macro 'EnumMembers':
   annot_meta.pack_predicate(
@@ -94,6 +144,8 @@ meta:
           encodings := encodings ++ [encoding]
       | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
            $method_body; ...':
+          when one_hot && method_name.to_source_string() == "mux"
+          | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
           when method_names.find(fun (declared): declared == method_name.to_source_string())
           | syntax_meta.error("enum method names must be unique", method_name)
           method_names := method_names ++ [method_name.to_source_string()]
@@ -112,6 +164,8 @@ meta:
           ]
       | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_type :: Identifier):
            $method_body; ...':
+          when one_hot && method_name.to_source_string() == "mux"
+          | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
           when method_names.find(fun (declared): declared == method_name.to_source_string())
           | syntax_meta.error("enum method names must be unique", method_name)
           method_names := method_names ++ [method_name.to_source_string()]
@@ -129,6 +183,8 @@ meta:
           ]
       | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...):
            $method_body; ...':
+          when one_hot && method_name.to_source_string() == "mux"
+          | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
           when method_names.find(fun (declared): declared == method_name.to_source_string())
           | syntax_meta.error("enum method names must be unique", method_name)
           method_names := method_names ++ [method_name.to_source_string()]
@@ -161,6 +217,7 @@ meta:
     def member_dot = Syntax.make_id(enum_name ++ "_member_dot", name)
     def member_annotation = Syntax.make_id(enum_name ++ "_members", name)
     def method_annotation = Syntax.make_id(enum_name ++ "_value_methods", name)
+    def enum_value_kind = if one_hot | 'one_hot' | 'ordinary'
     def constructor:
       cond
       | one_hot:
@@ -183,7 +240,7 @@ meta:
          annot.macro '$method_annotation':
            'HardwareMethods($method_entry, ...)'
          annot.macro '$name':
-           'HardwareFields.of($name) && $method_annotation'
+           'EnumHardwareFields($name, $enum_value_kind) && $method_annotation'
          dot.macro '$member_dot $('$')left $('$')dot $('$')right':
            if [$member_name, ...].contains(right.to_source_string())
            | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
@@ -204,7 +261,7 @@ meta:
        »'
     | '«
          annot.macro '$name':
-           'HardwareFields.of($name)'
+           'EnumHardwareFields($name, $enum_value_kind)'
          dot.macro '$member_dot $('$')left $('$')dot $('$')right':
            if [$member_name, ...].contains(right.to_source_string())
            | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'

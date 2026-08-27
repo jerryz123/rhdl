@@ -1,0 +1,101 @@
+#lang rhdl
+// Provides generic, resetless, initialized, enabled, and invalid shift-register fixtures.
+
+import:
+  lib("rhdl/std/shift-register.rhdl").shift_register
+
+bundle Sample():
+  data: Bits(8)
+  flag: Bool
+
+sync_circuit BundleShiftRegister():
+  input source: Sample()
+  input enable: Bool
+  output stages: Vec(3, Sample())
+  output oldest_data: Bits(8)
+
+  def zero = Sample():
+    data: bits(0, 8)
+    flag: Bool(#false)
+  shift_register pipeline(source, 3, ~init: zero, ~enable: enable)
+  stages <== pipeline
+  oldest_data <== pipeline[2].data
+
+sync_circuit ResetlessShiftRegister():
+  input source: Bits(4)
+  output delayed: Bits(4)
+
+  shift_register pipeline(source, 2)
+  delayed <== pipeline[1]
+
+sync_circuit PerStageInitialShiftRegister():
+  input source: Bits(4)
+  output stages: Vec(3, Bits(4))
+
+  def initial = vec(bits(1, 4), bits(2, 4), bits(3, 4))
+  shift_register pipeline(source, 3, ~init: initial)
+  stages <== pipeline
+
+sync_circuit DualShiftRegister():
+  input(first, second): Bits(4)
+  output(first_delayed, second_delayed): Bits(4)
+
+  shift_register first_stages(first, 2)
+  shift_register second_stages(second, 3)
+  first_delayed <== first_stages[1]
+  second_delayed <== second_stages[2]
+
+sync_circuit OptionCoverageShiftRegister():
+  input source: Bits(4)
+  input enable: Bool
+  output(resetless, initialized): Vec(2, Bits(4))
+
+  shift_register resetless_stages(source, 2, ~enable: enable)
+  shift_register initialized_stages(source, 2, ~enable: enable, ~init: bits(0, 4))
+  resetless <== resetless_stages
+  initialized <== initialized_stages
+
+sync_circuit BadShiftRegisterInitialType():
+  input source: Bits(8)
+  shift_register stages(source, 2, ~init: Bool(#false))
+  stages
+
+sync_circuit BadShiftRegisterInitialLength():
+  input source: Bits(8)
+  def initial = vec(bits(0, 8), bits(0, 8), bits(0, 8))
+  shift_register stages(source, 2, ~init: initial)
+  stages
+
+sync_circuit BadShiftRegisterDynamicInitial():
+  input source: Bits(8)
+  shift_register stages(source, 2, ~init: source)
+  stages
+
+sync_circuit BadShiftRegisterEnable():
+  input source: Bits(8)
+  input enable: Bits(1)
+  shift_register stages(source, 2, ~enable: enable)
+  stages
+
+def bundle_design = elaborate(BundleShiftRegister())
+def resetless_design = elaborate(ResetlessShiftRegister())
+def per_stage_design = elaborate(PerStageInitialShiftRegister())
+def dual_design = elaborate(DualShiftRegister())
+def option_design = elaborate(OptionCoverageShiftRegister())
+
+export:
+  Sample
+  BundleShiftRegister
+  ResetlessShiftRegister
+  PerStageInitialShiftRegister
+  DualShiftRegister
+  OptionCoverageShiftRegister
+  BadShiftRegisterInitialType
+  BadShiftRegisterInitialLength
+  BadShiftRegisterDynamicInitial
+  BadShiftRegisterEnable
+  bundle_design
+  resetless_design
+  per_stage_design
+  dual_design
+  option_design

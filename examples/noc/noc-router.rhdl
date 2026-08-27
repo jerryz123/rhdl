@@ -341,28 +341,25 @@ module OutputGreedyRoundRobinMatcher(
     {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
   wire [1:0] _GEN_0 = {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0]}};
   wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
-  wire       _GEN_2 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
-  wire       _GEN_3 = requests[1'h0][1'h1] & ~_GEN_1[1'h0];
-  wire       _GEN_4 = requests[1'h1][1'h1] & ~_GEN_1[1'h1];
-  wire [1:0] _GEN_5 = {{_GEN_4}, {_GEN_3 & ~next_priorities[1'h1]}};
-  wire [1:0] _GEN_6 = {{_GEN_4}, {_GEN_3}};
-  wire [1:0] _GEN_7 =
-    (|_GEN_5) ? _GEN_5 & {~(_GEN_5[0]), 1'h1} : _GEN_6 & {~(_GEN_6[0]), 1'h1};
-  wire       _GEN_8 = /*cast(bit)*/{1{_GEN_7[1'h1]}};
-  wire       _GEN_9 =
-    (|_GEN_0) & accepts[1'h0] ? ~_GEN_2 & _GEN_2 - 1'h1 : next_priorities[1'h0];
-  wire       _GEN_10 =
-    (|_GEN_6) & accepts[1'h1] ? ~_GEN_8 & _GEN_8 - 1'h1 : next_priorities[1'h1];
+  wire       _GEN_2 = requests[1'h0][1'h1] & ~(_GEN_1[0]);
+  wire       _GEN_3 = requests[1'h1][1'h1] & ~(_GEN_1[1]);
+  wire [1:0] _GEN_4 = {{_GEN_3}, {_GEN_2 & ~next_priorities[1'h1]}};
+  wire [1:0] _GEN_5 = {{_GEN_3}, {_GEN_2}};
+  wire [1:0] _GEN_6 =
+    (|_GEN_4) ? _GEN_4 & {~(_GEN_4[0]), 1'h1} : _GEN_5 & {~(_GEN_5[0]), 1'h1};
+  wire       _GEN_7 =
+    (|_GEN_1) & accepts[1'h0] ? ~(_GEN_1[1]) & _GEN_1[1] - 1'h1 : next_priorities[1'h0];
+  wire       _GEN_8 =
+    (|_GEN_6) & accepts[1'h1] ? ~(_GEN_6[1]) & _GEN_6[1] - 1'h1 : next_priorities[1'h1];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{1'h0, 1'h0};
     else begin
-      next_priorities[1'h1] <= _GEN_10;
-      next_priorities[1'h0] <= _GEN_9;
+      next_priorities[1'h1] <= _GEN_8;
+      next_priorities[1'h0] <= _GEN_7;
     end
   end // always @(posedge)
-  assign grants =
-    {{{{_GEN_7[1'h1]}, {_GEN_1[1'h1]}}}, {{{_GEN_7[1'h0]}, {_GEN_1[1'h0]}}}};
+  assign grants = {{{{_GEN_6[1]}, {_GEN_1[1]}}}, {{{_GEN_6[0]}, {_GEN_1[0]}}}};
 endmodule
 
 module GrantCrossbar(
@@ -434,12 +431,9 @@ module GrantDemux(
 );
 
   assign ingress_out =
-    '{ready:
-        (|({{grants[1'h1] & egress_1_in.ready}, {grants[1'h0] & egress_0_in.ready}}))};
-  assign egress_0_out =
-    '{valid: (ingress_in.valid & grants[1'h0]), bits: ingress_in.bits};
-  assign egress_1_out =
-    '{valid: (ingress_in.valid & grants[1'h1]), bits: ingress_in.bits};
+    '{ready: (|({{grants[1] & egress_1_in.ready}, {grants[0] & egress_0_in.ready}}))};
+  assign egress_0_out = '{valid: (ingress_in.valid & grants[0]), bits: ingress_in.bits};
+  assign egress_1_out = '{valid: (ingress_in.valid & grants[1]), bits: ingress_in.bits};
 endmodule
 
 module GrantMerge(
@@ -452,13 +446,15 @@ module GrantMerge(
   output struct packed {logic valid; RoutedBeat bits; } egress_out
 );
 
-  wire _GEN = grants[1'h0] & ingress_0_in.valid;
-  wire _GEN_0 = grants[1'h1] & ingress_1_in.valid;
-  assign ingress_0_out = '{ready: (grants[1'h0] & egress_in.ready)};
-  assign ingress_1_out = '{ready: (grants[1'h1] & egress_in.ready)};
-  assign egress_out =
-    '{valid: (_GEN | _GEN_0),
-      bits: (_GEN_0 ? ingress_1_in.bits : _GEN ? ingress_0_in.bits : ingress_0_in.bits)};
+  wire [1:0]      _GEN = grants & {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [8:0]      _GEN_0 = /*cast(bit[8:0])*/ingress_0_in.bits;
+  wire [8:0]      _GEN_1 = /*cast(bit[8:0])*/ingress_1_in.bits;
+  wire RoutedBeat _GEN_2 =
+    /*cast(bit)*/_GEN_0 & {9{_GEN[0]}} | _GEN_1 & {9{_GEN[1]}} | _GEN_0
+    & {9{_GEN == 2'h0}};
+  assign ingress_0_out = '{ready: (grants[0] & egress_in.ready)};
+  assign ingress_1_out = '{ready: (grants[1] & egress_in.ready)};
+  assign egress_out = '{valid: (|_GEN), bits: _GEN_2};
 endmodule
 
 module SimpleRouter_1(
@@ -632,17 +628,15 @@ module OutputGreedyRoundRobinMatcher_1(
     {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0] & ~next_priorities[1'h0]}};
   wire [1:0] _GEN_0 = {{requests[1'h1][1'h0]}, {requests[1'h0][1'h0]}};
   wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
-  wire [0:0] _GEN_2 = {1{_GEN_1[1'h1]}};
-  wire       _GEN_3 = /*cast(bit)*/_GEN_2;
-  wire       _GEN_4 =
-    (|_GEN_0) & accepts[1'h0] ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priorities[1'h0];
+  wire       _GEN_2 =
+    (|_GEN_1) & accepts[1'h0] ? ~(_GEN_1[1]) & _GEN_1[1] - 1'h1 : next_priorities[1'h0];
   always @(posedge clock) begin
     if (reset)
       next_priorities <= '{1'h0};
     else
-      next_priorities[1'h0] <= _GEN_4;
+      next_priorities[1'h0] <= _GEN_2;
   end // always @(posedge)
-  assign grants = {{_GEN_2}, {{1{_GEN_1[1'h0]}}}};
+  assign grants = {{{1{_GEN_1[1]}}}, {{1{_GEN_1[0]}}}};
 endmodule
 
 module GrantCrossbar_1(
@@ -659,16 +653,18 @@ module GrantCrossbar_1(
   wire struct packed {logic ready; } _output_stage_ingress_1_out;
   wire struct packed {logic valid; RoutedBeat bits; } _input_stage_1_egress_0_out;
   wire struct packed {logic valid; RoutedBeat bits; } _input_stage_egress_0_out;
+  wire                               _GEN = /*cast(bit)*/grants[1'h0];
+  wire                               _GEN_0 = /*cast(bit)*/grants[1'h1];
   GrantDemux_1 input_stage (
     .ingress_in   (ingress_0_in),
-    .grants       (grants[1'h0]),
+    .grants       (_GEN),
     .egress_0_in  (_output_stage_ingress_0_out),
     .ingress_out  (ingress_0_out),
     .egress_0_out (_input_stage_egress_0_out)
   );
   GrantDemux_1 input_stage_1 (
     .ingress_in   (ingress_1_in),
-    .grants       (grants[1'h1]),
+    .grants       (_GEN_0),
     .egress_0_in  (_output_stage_ingress_1_out),
     .ingress_out  (ingress_1_out),
     .egress_0_out (_input_stage_1_egress_0_out)
@@ -686,16 +682,15 @@ endmodule
 
 module GrantDemux_1(
   input  struct packed {logic valid; RoutedBeat bits; } ingress_in,
-  input  [0:0]                                          grants,
+  input                                                 grants,
   input  struct packed {logic ready; }                  egress_0_in,
   output struct packed {logic ready; }                  ingress_out,
   output struct packed {logic valid; RoutedBeat bits; } egress_0_out
 );
 
-  wire _GEN = /*cast(bit)*/{1{grants[1'h0] & egress_0_in.ready}};
+  wire _GEN = /*cast(bit)*/{1{grants & egress_0_in.ready}};
   assign ingress_out = '{ready: _GEN};
-  assign egress_0_out =
-    '{valid: (ingress_in.valid & grants[1'h0]), bits: ingress_in.bits};
+  assign egress_0_out = '{valid: (ingress_in.valid & grants), bits: ingress_in.bits};
 endmodule
 }>>|
 

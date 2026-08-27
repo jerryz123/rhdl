@@ -1,0 +1,88 @@
+#lang rhdl
+// Exercises native optional-one-hot construction, inspection, masking, and total selection.
+
+def Maybe3 = MaybeOneHot(3)
+
+circuit MaybeOneHotFixture():
+  input requests: Bits(3)
+  input supplied: MaybeOneHot(3)
+  input exact: OneHot(3)
+  input mask: Bits(3)
+  input choices: Vec(3, Bits(8))
+  input fallback: Bits(8)
+  output selection: Maybe3
+  output masked: Maybe3
+  output valid: Bool
+  output lane_one: Bool
+  output supplied_lane_two: Bool
+  output supplied_bits: Bits(3)
+  output index: Bits(2)
+  output result: Bits(8)
+  output exact_result: Bits(8)
+
+  def selected = priority_encoder_oh(requests)
+  selection <== selected
+  masked <== selected.mask(mask)
+  valid <== selected.valid
+  lane_one <== selected[1]
+  supplied_lane_two <== supplied[2]
+  supplied_bits <== supplied.into(Bits(3))
+  index <== selected.index
+  result <== selected.mux(
+    for List (lane in 0..3): choices[lane],
+    ~default: fallback
+  )
+  exact_result <== exact.mux(for List (lane in 0..3): choices[lane])
+
+circuit ExactSelectorWithDefault():
+  input selector: OneHot(3)
+  input choices: Vec(3, Bits(8))
+  output result: Bits(8)
+  result <== selector.mux(for List (lane in 0..3): choices[lane],
+                          ~default: bits(0, 8))
+
+circuit MaybeSelectorWithoutDefault():
+  input selector: Maybe3
+  input choices: Vec(3, Bits(8))
+  output result: Bits(8)
+  result <== selector.mux(for List (lane in 0..3): choices[lane])
+
+circuit BitsSelectorWithoutDefault():
+  input selector: Bits(3)
+  input choices: Vec(3, Bits(8))
+  output result: Bits(8)
+  result <== selector.mux(for List (lane in 0..3): choices[lane])
+
+circuit WrongMaybeChoiceCount():
+  input selector: Maybe3
+  input choices: Vec(2, Bits(8))
+  output result: Bits(8)
+  result <== selector.mux(for List (lane in 0..2): choices[lane],
+                          ~default: bits(0, 8))
+
+circuit WrongMaybeMaskWidth():
+  input selector: Maybe3
+  input mask: Bits(2)
+  output result: Maybe3
+  result <== selector.mask(mask)
+
+circuit BitwiseMaybeOneHot():
+  input(left, right): Maybe3
+  output result: Maybe3
+  result <== left & right
+
+circuit WrongMaybeDrive():
+  input raw: Bits(3)
+  output result: Maybe3
+  result <== raw
+
+export:
+  Maybe3
+  MaybeOneHotFixture
+  ExactSelectorWithDefault
+  MaybeSelectorWithoutDefault
+  BitsSelectorWithoutDefault
+  WrongMaybeChoiceCount
+  WrongMaybeMaskWidth
+  BitwiseMaybeOneHot
+  WrongMaybeDrive

@@ -1,26 +1,10 @@
 #lang rhdl
 // Selects one request from a hardware-supplied circular starting priority.
 
-import:
-  rhombus.bits.(?) as ?
-
 bundle CircularPriorityChoice(n :: PosInt, index_width :: PosInt):
   valid: Bool
-  grant: Vec(n, Bool)
+  grant: MaybeOneHot(n)
   index: Bits(index_width)
-
-fun onehot_index(grant :: Hardware.packable,
-                 n :: PosInt,
-                 width :: PosInt) :~ Hardware.packable:
-  def result_bits = for List (result_bit in 0..width):
-    def mutable contributors = []
-    for (index in 0..n):
-      def contributes = index ? result_bit
-      if contributes
-      | contributors := contributors ++ [grant[index]]
-      | #void
-    or_reduce(contributors)
-  as_bits(vec(result_bits))
 
 // The start index must be in range. Selection first considers requests at or
 // above start, then wraps to the ordinary lower-index-first priority result.
@@ -41,17 +25,14 @@ fun circular_priority_onehot(requests :: Hardware.packable,
     for List (index in 0..n):
       requests[index] & (start <= bits(index, width))
   )
-  def eligible_grant = cast(priority_encoder_oh(eligible), Vec(n, Bool))
-  def wrapped_grant = cast(priority_encoder_oh(requests), Vec(n, Bool))
+  def eligible_grant = priority_encoder_oh(eligible)
+  def wrapped_grant = priority_encoder_oh(requests)
   def use_eligible = or_reduce(eligible)
-  def grant = vec(
-    for List (index in 0..n):
-      mux(use_eligible, eligible_grant[index], wrapped_grant[index])
-  )
+  def grant = mux(use_eligible, eligible_grant, wrapped_grant)
   CircularPriorityChoice(n, width):
-    valid: or_reduce(requests)
+    valid: grant.valid
     grant: grant
-    index: onehot_index(grant, n, width)
+    index: grant.index
 
 export:
   CircularPriorityChoice

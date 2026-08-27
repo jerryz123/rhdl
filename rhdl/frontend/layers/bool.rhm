@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines Bool literals, reductions, population counts, encoders, comparisons, and selection.
+// Defines Bool, optional-one-hot values, reductions, encoders, comparisons, and selection.
 
 import:
   rhombus.bits.(<<) as <<
@@ -10,12 +10,19 @@ import:
   "../kernel.rhm" as kernel
   "../support/finite-enum.rhm" as finite_enum_support
   "../support/fields.rhm".HardwareFields
+  "../support/fields.rhm".HardwareIntoFunction
   "../support/fields.rhm".hardware_as_bits
+  "../support/fields.rhm".hardware_into
+  "../support/fields.rhm".hardware_value_type
   "../support/hardware-literal.rhm".packed_literal
+  "../support/one-hot-selection.rhm" as one_hot_selection
 
 export:
   Bool
   bool_type
+  MaybeOneHot
+  maybe_one_hot_type
+  maybe_one_hot_width
   bool_eq
   bool_ne
   or_reduce
@@ -55,6 +62,141 @@ annot.macro 'Bool':
 
 fun bool_type(type):
   type is_a _BoolType
+
+// Represents an absent selection as zero and a present selection as exactly
+// one asserted bit. The refinement is intentionally distinct from OneHot:
+// MaybeOneHot cannot directly satisfy a partial one-hot mux precondition.
+class _MaybeOneHotType(width :: PosInt):
+  implements FlatDataType
+  implements Callable
+  implements one_hot_selection.MaybeOneHotSelectorType
+
+  override method describe():
+    "maybe-onehot<" ++ to_string(width) ++ ">"
+
+  override method type_equal(other):
+    maybe_one_hot_type(other) && width == other.width
+
+  override method bit_width():
+    width
+
+  override method packed_width():
+    width
+
+  override method maybe_one_hot_selector_width():
+    width
+
+  // No argument constructs absence; a host index constructs a present lane.
+  override method call(index :: False || Nat = #false):
+    if index == #false
+    | packed_literal(this, 0)
+    | block:
+        unless index < width
+        | error(~who: #'MaybeOneHot,
+                "literal index must satisfy 0 <= index < width")
+        packed_literal(this, 1 << index)
+
+fun build_maybe_one_hot_type(width :: PosInt):
+  _MaybeOneHotType(width)
+
+fun maybe_one_hot_type(type):
+  type is_a _MaybeOneHotType
+
+fun maybe_one_hot_width(type):
+  unless maybe_one_hot_type(type)
+  | error(~who: #'maybe_one_hot_width, "expected a MaybeOneHot type")
+  type.width
+
+fun hardware_has_maybe_one_hot_type(value):
+  kernel.hardware_entity(value) && maybe_one_hot_type(hardware_value_type(value))
+
+meta:
+  fun maybe_one_hot_mux_result(result, choices):
+    match choices.group
+    | '[$(first :: expr_meta.Parsed), $rest, ...]':
+        statinfo_meta.wrap(result, statinfo_meta.gather(first))
+    | ~else: result
+
+dot.macro 'maybe_one_hot_value_dot $left $dot $right':
+  ~tail: '$tail ...'
+  match '$right $tail ...'
+  | 'mux($(choices :: expr_meta.Parsed),
+         ~default: $(default_value :: expr_meta.Parsed)) $rest ...':
+      values(
+        maybe_one_hot_mux_result(
+          'one_hot_selection.build_maybe_one_hot_mux($left, $choices, $default_value)',
+          choices
+        ),
+        '$rest ...'
+      )
+  | 'mux($(choices :: expr_meta.Parsed)) $rest ...':
+      values(
+        maybe_one_hot_mux_result(
+          'one_hot_selection.build_one_hot_mux($left, $choices)',
+          choices
+        ),
+        '$rest ...'
+      )
+  | 'mux $rest ...':
+      syntax_meta.error(
+        "MaybeOneHot.mux expects a choice list and an explicit ~default",
+        right
+      )
+  | ~else:
+      values(
+        match right
+        | 'valid': 'maybe_one_hot_valid($left) :: Bool'
+        | 'index': 'maybe_one_hot_index_value($left) :: HardwareFields'
+        | 'mask': 'fun (mask) :~ MaybeOneHotValue: maybe_one_hot_mask($left, mask)'
+        | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
+        | ~else: #false,
+        '$tail ...'
+      )
+
+fun maybe_one_hot_index(value, index) :~ HardwareFields:
+  unless index is_a Nat
+  | error(~who: #'MaybeOneHot,
+          "MaybeOneHot lane selection requires a host natural-number index")
+  def selector = kernel.read(value)
+  unless maybe_one_hot_type(selector.type)
+  | error(~who: #'MaybeOneHot, "expected a MaybeOneHot value")
+  def selector_bits = hardware_as_bits(selector,
+                                       #'MaybeOneHot,
+                                       "MaybeOneHot selector",
+                                       #false,
+                                       Location())
+  kernel.cast(kernel.index(selector_bits, index), Bool)
+
+annot.macro 'MaybeOneHotValue':
+  let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
+  annot_meta.pack_predicate(
+    'hardware_has_maybe_one_hot_type',
+    '(($(statinfo_meta.dot_provider_key), maybe_one_hot_value_dot),
+      ($(statinfo_meta.index_get_key), maybe_one_hot_index),
+      ($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+  )
+
+annot.macro 'MaybeOneHotTypeDescriptor':
+  annot_meta.pack_predicate('maybe_one_hot_type')
+
+annot.macro 'MaybeOneHot($width)':
+  let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
+  annot_meta.pack_predicate(
+    'fun (value): kernel.hardware_entity(value) && type_equal(hardware_value_type(value), build_maybe_one_hot_type($width))',
+    '(($(statinfo_meta.dot_provider_key), maybe_one_hot_value_dot),
+      ($(statinfo_meta.index_get_key), maybe_one_hot_index),
+      ($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+  )
+
+expr.macro 'MaybeOneHot($(width :: expr_meta.Parsed))':
+  'build_maybe_one_hot_type($width) :: HardwareFields.describes(
+     MaybeOneHotTypeDescriptor,
+     MaybeOneHotValue
+   )'
 
 // Equality remains a Bits core operation. Frontend nominal flat types compare
 // by explicitly exposing equal-width representations first.
@@ -264,11 +406,11 @@ fun packed_priority_encoder_oh(packed, width :: PosInt, name, location):
     location
   )
 
-// Returns an optional-one-hot Bits mask selecting the lowest asserted packed
-// bit. Bits zero is also the lowest logical lane of Vec values.
-fun priority_encoder_oh(entity,
-                        name = #false,
-                        location = Location()) :~ HardwareFields:
+// Returns a native optional-one-hot value selecting the lowest asserted packed
+// bit. The all-zero input maps to the distinguished absent representation.
+fun build_priority_encoder_oh(entity,
+                              name = #false,
+                              location = Location()) :~ HardwareFields:
   when entity is_a List
   | error(~who: #'priority_encoder_oh,
           location.describe() ++ ": priority_encoder_oh operand must be one packable DataType")
@@ -284,7 +426,78 @@ fun priority_encoder_oh(entity,
     #false,
     location
   )
-  packed_priority_encoder_oh(packed, width, name, location)
+  kernel.cast(packed_priority_encoder_oh(packed, width, #false, location),
+              build_maybe_one_hot_type(width),
+              name,
+              location)
+
+expr.macro
+| 'priority_encoder_oh($(entity :: expr_meta.Parsed))':
+    'build_priority_encoder_oh($entity) :: MaybeOneHotValue'
+| 'priority_encoder_oh($(entity :: expr_meta.Parsed),
+                       $(name :: expr_meta.Parsed))':
+    'build_priority_encoder_oh($entity, $name) :: MaybeOneHotValue'
+| 'priority_encoder_oh($(entity :: expr_meta.Parsed),
+                       $(name :: expr_meta.Parsed),
+                       $(location :: expr_meta.Parsed))':
+    'build_priority_encoder_oh($entity, $name, $location) :: MaybeOneHotValue'
+
+fun require_maybe_one_hot(selector, who, location):
+  def value = kernel.read(selector, location)
+  unless maybe_one_hot_type(value.type)
+  | error(~who: who,
+          location.describe() ++ ": selector must have a MaybeOneHot type")
+  value
+
+// Presence is encoded without a separate hardware bit and is therefore just
+// the nonzero predicate over the compact selector representation.
+fun maybe_one_hot_valid(selector,
+                        name = #false,
+                        location = Location()) :~ HardwareFields:
+  def value = require_maybe_one_hot(selector, #'maybe_one_hot_valid, location)
+  def width = value.type.width
+  def equal_zero = kernel.hw_eq(
+    hardware_as_bits(value,
+                     #'maybe_one_hot_valid,
+                     "MaybeOneHot selector",
+                     #false,
+                     location),
+    kernel.literal(Bits(width), 0, #false, location),
+    #false,
+    location
+  )
+  kernel.cast(kernel.bit_not(equal_zero, #false, location),
+              Bool,
+              name,
+              location)
+
+// Masking can remove the selected lane but cannot create a second asserted
+// lane, so the result remains a MaybeOneHot value of the same width.
+fun maybe_one_hot_mask(selector,
+                       mask,
+                       name = #false,
+                       location = Location()) :~ HardwareFields:
+  def value = require_maybe_one_hot(selector, #'maybe_one_hot_mask, location)
+  def width = value.type.width
+  def mask_value = kernel.read(mask, location)
+  unless data_type(mask_value.type) && mask_value.type.packed_width() == width
+  | error(~who: #'maybe_one_hot_mask,
+          location.describe() ++ ": mask width must equal the MaybeOneHot width")
+  def masked = kernel.bit_and(
+    hardware_as_bits(value,
+                     #'maybe_one_hot_mask,
+                     "MaybeOneHot selector",
+                     #false,
+                     location),
+    hardware_as_bits(mask_value,
+                     #'maybe_one_hot_mask,
+                     "MaybeOneHot mask",
+                     #false,
+                     location),
+    #false,
+    location
+  )
+  kernel.cast(masked, value.type, name, location)
 
 fun priority_index_mask(width :: PosInt, result_bit :: Nat):
   def mutable mask = 0
@@ -293,27 +506,12 @@ fun priority_index_mask(width :: PosInt, result_bit :: Nat):
     | mask := mask + (1 << index)
   mask
 
-// Encodes the lowest asserted packed bit. Zero input returns index zero; use
-// or_reduce when the caller must distinguish that case from bit zero winning.
-fun priority_encoder(entity,
-                     name = #false,
-                     location = Location()) :~ HardwareFields:
-  when entity is_a List
-  | error(~who: #'priority_encoder,
-          location.describe() ++ ": priority_encoder operand must be one packable DataType")
-  def value = kernel.read(entity, location)
-  def width = value.type.packed_width()
-  unless data_type(value.type) && width != #false
-  | error(~who: #'priority_encoder,
-          location.describe() ++ ": priority_encoder operand must have a packable DataType")
-  def packed = hardware_as_bits(
-    value,
-    #'priority_encoder,
-    "priority_encoder operand",
-    #false,
-    location
-  )
-  def selected = packed_priority_encoder_oh(packed, width, #false, location)
+// Encodes an already-isolated zero-or-one mask without rebuilding the priority
+// network used for arbitrary packed operands.
+fun packed_one_hot_index(selected,
+                         width :: PosInt,
+                         name,
+                         location):
   def result_width = count_index_width(width)
   def result_bits = for List (result_bit in 0..result_width):
     def selected_for_bit = kernel.bit_and(
@@ -341,12 +539,58 @@ fun priority_encoder(entity,
   | result_bits[0]
   | kernel.concat(result_bits.reverse(), name, location)
 
+fun maybe_one_hot_index_value(selector,
+                              name = #false,
+                              location = Location()) :~ HardwareFields:
+  def value = require_maybe_one_hot(selector, #'MaybeOneHot, location)
+  def width = value.type.width
+  packed_one_hot_index(
+    hardware_as_bits(value,
+                     #'MaybeOneHot,
+                     "MaybeOneHot selector",
+                     #false,
+                     location),
+    width,
+    name,
+    location
+  )
+
+// Encodes the lowest asserted packed bit. Zero input returns index zero; use
+// or_reduce when the caller must distinguish that case from bit zero winning.
+fun priority_encoder(entity,
+                     name = #false,
+                     location = Location()) :~ HardwareFields:
+  when entity is_a List
+  | error(~who: #'priority_encoder,
+          location.describe() ++ ": priority_encoder operand must be one packable DataType")
+  def value = kernel.read(entity, location)
+  def width = value.type.packed_width()
+  unless data_type(value.type) && width != #false
+  | error(~who: #'priority_encoder,
+          location.describe() ++ ": priority_encoder operand must have a packable DataType")
+  def packed = hardware_as_bits(
+    value,
+    #'priority_encoder,
+    "priority_encoder operand",
+    #false,
+    location
+  )
+  def selected = packed_priority_encoder_oh(packed, width, #false, location)
+  packed_one_hot_index(selected, width, name, location)
+
 operator (left =/= right):
   ~same_as: ===
   bool_ne(left, right)
 
+// Avoids adding a second equality for the singleton case while routing every
+// actual disjunction through the common packed reduction implementation.
+fun reduce_boolean_comparisons(comparisons :: List, name, location):
+  if comparisons.length() == 1
+  | kernel.cast(comparisons[0], Bool, name, location)
+  | or_reduce(comparisons, name, location)
+
 // Compares one hardware value against a host-authored set of typed choices.
-// The fold happens during elaboration and therefore needs no dedicated IR op.
+// The equality results use the common packed Boolean reduction path.
 fun is_one_of(value, candidate, ...) :~ HardwareFields:
   def location = Location()
   def value_read = kernel.read(value, location)
@@ -369,10 +613,7 @@ fun is_one_of(value, candidate, ...) :~ HardwareFields:
                         "is_one_of",
                         location)
       )
-      def mutable combined = comparisons[0]
-      for (comparison in comparisons.drop(1)):
-        combined := kernel.bit_or(combined, comparison, #false, location)
-      kernel.cast(combined, Bool, #false, location)
+      reduce_boolean_comparisons(comparisons, #false, location)
 
 // Generates a runtime membership predicate from the enum type's declared
 // encodings, keeping sparse wire encodings distinct from host type safety.
@@ -395,10 +636,7 @@ fun enum_valid(value, name = #false, location = Location()) :~ HardwareFields:
                    #false,
                    location)
   )
-  def mutable combined = comparisons[0]
-  for (comparison in comparisons.drop(1)):
-    combined := kernel.bit_or(combined, comparison, #false, location)
-  kernel.cast(combined, Bool, name, location)
+  reduce_boolean_comparisons(comparisons, name, location)
 
 fun require_unsigned_bits(left, right, who, location):
   def left_value = kernel.read(left, location)

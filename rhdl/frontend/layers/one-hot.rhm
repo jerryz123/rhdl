@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines structurally sized one-hot values, index conversion, and partial selection.
+// Defines structurally sized one-hot values, index conversion, and typed selection.
 
 import:
   rhombus.bits.(<<) as <<
@@ -7,14 +7,17 @@ import:
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
+  "../support/fields.rhm".HardwareIntoFunction
+  "../support/fields.rhm".hardware_into
+  "../support/fields.rhm".hardware_value_type
   "../support/mux-lookup.rhm" as mux_support
+  "../support/one-hot-selection.rhm" as one_hot_selection
 
 export:
   OneHot
   one_hot
   one_hot_type
   one_hot_width
-  mux_onehot
 
 fun one_hot_encoding(index):
   1 << index
@@ -51,11 +54,8 @@ class _OneHotType(width :: PosInt):
   override method one_hot_selector_width():
     width
 
-fun OneHot(width :: PosInt):
+fun build_one_hot_type(width :: PosInt):
   _OneHotType(width)
-
-annot.macro 'OneHot($width)':
-  'HardwareFields.of(OneHot($width))'
 
 fun one_hot_type(type):
   type is_a _OneHotType
@@ -65,9 +65,70 @@ fun one_hot_width(type):
   | error(~who: #'one_hot_width, "expected a OneHot type")
   type.width
 
+fun hardware_has_one_hot_type(value):
+  kernel.hardware_entity(value) && one_hot_type(hardware_value_type(value))
+
+meta:
+  fun one_hot_mux_result(result, choices):
+    match choices.group
+    | '[$(first :: expr_meta.Parsed), $rest, ...]':
+        statinfo_meta.wrap(result, statinfo_meta.gather(first))
+    | ~else: result
+
+dot.macro 'one_hot_value_dot $left $dot $right':
+  ~tail: '$tail ...'
+  match '$right $tail ...'
+  | 'mux($(choices :: expr_meta.Parsed)) $rest ...':
+      values(
+        one_hot_mux_result(
+          'one_hot_selection.build_one_hot_mux($left, $choices)',
+          choices
+        ),
+        '$rest ...'
+      )
+  | 'mux($(choices :: expr_meta.Parsed),
+         ~default: $(default_value :: expr_meta.Parsed)) $rest ...':
+      values(
+        one_hot_mux_result(
+          'one_hot_selection.build_maybe_one_hot_mux($left, $choices, $default_value)',
+          choices
+        ),
+        '$rest ...'
+      )
+  | 'mux $rest ...':
+      syntax_meta.error("OneHot.mux expects exactly one list of choices", right)
+  | ~else:
+      values(
+        match right
+        | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
+        | ~else: #false,
+        '$tail ...'
+      )
+
+annot.macro 'OneHotValue':
+  annot_meta.pack_predicate(
+    'hardware_has_one_hot_type',
+    '(($(statinfo_meta.dot_provider_key), one_hot_value_dot))'
+  )
+
+annot.macro 'OneHotTypeDescriptor':
+  annot_meta.pack_predicate('one_hot_type')
+
+annot.macro 'OneHot($width)':
+  annot_meta.pack_predicate(
+    'fun (value): kernel.hardware_entity(value) && type_equal(hardware_value_type(value), build_one_hot_type($width))',
+    '(($(statinfo_meta.dot_provider_key), one_hot_value_dot))'
+  )
+
+expr.macro 'OneHot($(width :: expr_meta.Parsed))':
+  'build_one_hot_type($width) :: HardwareFields.describes(
+     OneHotTypeDescriptor,
+     OneHotValue
+   )'
+
 // Converts every encoding of Bits(n) into one of the 2^n lanes, so the result
 // preserves the exactly-one invariant without an out-of-range case.
-fun one_hot(index, name = #false, location = Location()) :~ HardwareFields:
+fun build_one_hot(index, name = #false, location = Location()) :~ HardwareFields:
   def index_value = kernel.read(index, location)
   unless bits_type(index_value.type)
   | error(~who: #'one_hot,
@@ -79,59 +140,14 @@ fun one_hot(index, name = #false, location = Location()) :~ HardwareFields:
     #false,
     location
   )
-  kernel.cast(encoded_bits, OneHot(result_width), name, location)
-
-// Preserves one-hot selection as a partial core operation. Exactly one bit set
-// is a caller precondition; invalid selector encodings have no result contract.
-fun build_one_hot_mux(selector, choices :: List) :~ HardwareFields:
-  def selector_value = kernel.read(selector)
-  unless selector_value.type is_a mux_support.OneHotSelectorType
-  | error(~who: #'mux_onehot, "selector must have a one-hot selector type")
-  def selector_width = selector_value.type.one_hot_selector_width()
-  unless choices.length() == selector_width
-  | error(~who: #'mux_onehot,
-          "choice count must equal the one-hot selector width")
-  def selector_bits = kernel.cast(selector_value,
-                                  Bits(selector_width))
-  kernel.hw_onehot_mux(selector_bits,
-                       choices,
-                       #false,
-                       Location(),
-                       Origin("embedded one-hot mux", ""))
-
-// Keyed arms make the logical member-to-lane mapping explicit, then lower in
-// physical selector-bit order to the same core operation as positional arms.
-fun build_keyed_one_hot_mux(selector, cases :: List) :~ HardwareFields:
-  def selector_value = kernel.read(selector)
-  unless selector_value.type is_a mux_support.OneHotSelectorType
-  | error(~who: #'mux_onehot, "selector must have a one-hot selector type")
-  def selector_width = selector_value.type.one_hot_selector_width()
-  unless cases.length() == selector_width
-  | error(~who: #'mux_onehot,
-          "keyed arms must cover every one-hot selector lane exactly once")
-  def normalized_cases = cases.map(
-    fun (case):
-      unless case is_a List && case.length() == 2
-      | error(~who: #'mux_onehot, "cases must be [key, value] pairs")
-      [selector_value.type.normalize_mux_lookup_key(case[0]), case[1]]
-  ).sort(fun (left, right): left[0] < right[0])
-  for (index in 0..selector_width):
-    unless normalized_cases[index][0] == one_hot_encoding(index)
-    | error(~who: #'mux_onehot,
-            "keyed arms must cover every one-hot selector lane exactly once")
-  build_one_hot_mux(selector_value,
-                    normalized_cases.map(fun (case): case[1]))
+  kernel.cast(encoded_bits, build_one_hot_type(result_width), name, location)
 
 expr.macro
-| 'mux_onehot($selector, $choices)':
-    'build_one_hot_mux($selector, $choices)'
-| 'mux_onehot($selector):
-     $(key :: expr_meta.Parsed): $case_value
-     ...':
-    'build_keyed_one_hot_mux($selector,
-                             [[$key, $case_value], ...])'
-| 'mux_onehot($selector):
-     $(choice :: expr_meta.Parsed)
-     ...':
-    'build_one_hot_mux($selector,
-                       [$choice, ...])'
+| 'one_hot($(index :: expr_meta.Parsed))':
+    'build_one_hot($index) :: OneHotValue'
+| 'one_hot($(index :: expr_meta.Parsed), $(name :: expr_meta.Parsed))':
+    'build_one_hot($index, $name) :: OneHotValue'
+| 'one_hot($(index :: expr_meta.Parsed),
+           $(name :: expr_meta.Parsed),
+           $(location :: expr_meta.Parsed))':
+    'build_one_hot($index, $name, $location) :: OneHotValue'
