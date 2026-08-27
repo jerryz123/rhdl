@@ -10,6 +10,7 @@ import:
 
 export:
   HardwareFields
+  HardwareVariantFields
   HardwareIntoFunction
   ValueSurfaceFields
   CircuitPortFields
@@ -184,6 +185,16 @@ fun require_hardware_variant_type(value, who):
 fun hardware_variant_tag(value, location = Location()) :~ HardwareFields:
   require_hardware_variant_type(value, #'tag).hardware_variant_tag(value, location)
 
+// Preserves variant tag inspection after an intermediate operation has erased
+// exact static type information, while treating tag as an ordinary projection
+// on non-variant records.
+fun hardware_variant_tag_or_project(value,
+                                    location = Location()) :~ HardwareFields:
+  def type = hardware_entity_type(value)
+  if type is_a HardwareVariantType
+  | type.hardware_variant_tag(value, location)
+  | kernel.project(value, "tag", #false, location)
+
 fun hardware_variant_is(value, variant, location = Location()) :~ HardwareFields:
   require_hardware_variant_type(value, #'is).hardware_variant_is(value, variant, location)
 
@@ -207,6 +218,25 @@ fun hardware_variant_view(value,
   require_hardware_variant_type(value, #'view).hardware_variant_view(value,
                                                                      variant,
                                                                      location)
+
+// Adds variant inspection only to types that explicitly advertise the
+// HardwareVariantType protocol, leaving ordinary fields named tag, is, or view
+// available to records and bundles.
+annot.macro 'HardwareVariantFields($expected_type)':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields.of($expected_type)'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
+  def result_infos = statinfo_meta.and(
+    '(($(statinfo_meta.dot_provider_key), hardware_variant_field_dot))',
+    base_infos
+  )
+  annot_meta.pack_predicate(predicate, result_infos)
+
+dot.macro 'hardware_variant_field_dot $left $dot $right':
+  match right
+  | 'tag': 'hardware_variant_tag($left) :: HardwareFields'
+  | 'is': 'fun (variant) :~ HardwareFields: hardware_variant_is($left, variant)'
+  | 'view': 'fun (variant) :~ HardwareVariantViewFields: hardware_variant_view($left, variant)'
+  | ~else: #false
 
 dot.macro 'hardware_variant_view_dot $left $dot $right':
   match right
@@ -296,30 +326,45 @@ fun hardware_updated(value, selector, replacement) :~ HardwareFields:
   kernel.vector_updated(value, selector, replacement)
 
 dot.macro 'hardware_field_dot $left $dot $right':
-  match right
-  | 'id': #false
-  | 'name': #false
-  | 'type': #false
-  | 'module_def': #false
-  | 'module_id': #false
-  | 'design': #false
-  | 'defining_op_id': #false
-  | 'users': #false
-  | 'ref': #false
-  | 'owner_op_id': #false
-  | 'driver': #false
-  | 'operation': #false
-  | 'literal_type': #false
-  | 'packed_value': #false
-  | 'literal_name': #false
-  | 'literal_width': #false
-  | 'current': #false
-  | 'next': 'hardware_next($left) :: HardwareFields'
-  | 'tag': 'hardware_variant_tag($left) :: HardwareFields'
-  | 'is': 'fun (variant) :~ HardwareFields: hardware_variant_is($left, variant)'
-  | 'view': 'fun (variant) :~ HardwareVariantViewFields: hardware_variant_view($left, variant)'
-  | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
-  | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
-  | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'
+  ~tail: '$tail ...'
+  match '$right $tail ...'
+  | 'is($(variant :: expr_meta.Parsed)) $rest ...':
+      values(
+        'hardware_variant_is($left, $variant) :: HardwareFields',
+        '$rest ...'
+      )
+  | 'view($(variant :: expr_meta.Parsed)) $rest ...':
+      values(
+        'hardware_variant_view($left, $variant) :: HardwareVariantViewFields',
+        '$rest ...'
+      )
   | ~else:
-      'kernel.project($left, $(right.to_source_string())) :: HardwareFields'
+      def expansion:
+        match right
+        | 'id': #false
+        | 'name': #false
+        | 'type': #false
+        | 'module_def': #false
+        | 'module_id': #false
+        | 'design': #false
+        | 'defining_op_id': #false
+        | 'users': #false
+        | 'ref': #false
+        | 'owner_op_id': #false
+        | 'driver': #false
+        | 'operation': #false
+        | 'literal_type': #false
+        | 'packed_value': #false
+        | 'literal_name': #false
+        | 'literal_width': #false
+        | 'current': #false
+        | 'next': 'hardware_next($left) :: HardwareFields'
+        | 'tag': 'hardware_variant_tag_or_project($left) :: HardwareFields'
+        | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
+        | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
+        | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'
+        | ~else:
+            'kernel.project($left, $(right.to_source_string())) :: HardwareFields'
+      if expansion
+      | values(expansion, '$tail ...')
+      | #false

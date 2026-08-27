@@ -488,6 +488,8 @@ fixture_specs=(
   'bundle-conditional-specialization||examples/rhdl/bundle.rhdl|conditional_specialization_design|conditional_specialization_verilog_reference'
   'bundle-nested-swap||examples/rhdl/bundle.rhdl|nested_swap_design|nested_swap_verilog_reference'
   'bundle-hierarchy||examples/rhdl/bundle.rhdl|hierarchy_design|hierarchy_verilog_reference'
+  'tagged-union||examples/rhdl/tagged-union.rhdl|design|verilog_reference'
+  'nested-tagged-union||examples/rhdl/nested-tagged-union.rhdl|design|verilog_reference'
   'interface|interface_tb|examples/rhdl/interface.rhdl|design|verilog_reference'
   'interface-hierarchy||examples/rhdl/interface.rhdl|hierarchy_design|hierarchy_verilog_reference'
   'interface-specialization||examples/rhdl/interface-specialization.rhdl|design|verilog_reference'
