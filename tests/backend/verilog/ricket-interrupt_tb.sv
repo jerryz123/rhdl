@@ -33,7 +33,7 @@ module ricket_interrupt_tb;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
-  typedef struct packed { ready_t request; logic request_fault; data_resp_t response; logic drained; } data_in_t;
+  typedef struct packed { ready_t request; logic request_fault; logic request_access_fault; data_resp_t response; logic drained; } data_in_t;
   typedef struct packed { data_req_t request; } data_out_t;
 
   localparam logic [2:0] MEMORY_STORE = 3'd2;
@@ -41,6 +41,8 @@ module ricket_interrupt_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  logic [63:0] time_counter = '0;
+  logic [63:0] hart_id = '0;
   interrupts_t interrupts;
   start_in_t start_in;
   instruction_in_t instruction_access_in;
@@ -92,6 +94,7 @@ module ricket_interrupt_tb;
     instruction_access_in.response.bits.page_fault = 1'b0;
     data_access_in.request.ready = 1'b1;
     data_access_in.request_fault = 1'b0;
+    data_access_in.request_access_fault = 1'b0;
     data_access_in.response = '0;
     data_access_in.drained = 1'b1;
   end

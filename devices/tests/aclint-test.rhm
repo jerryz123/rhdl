@@ -1,0 +1,33 @@
+#lang rhombus
+// Checks ACLINT host parameters, register state, ports, and elaborated validity.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../chi/main.rhdl" as chi
+  "../aclint.rhdl" as aclint
+  "aclint-fixture.rhdl" as fixture
+
+def top = fixture.design.modules.find(fun (module_def): module_def.name == "Aclint")
+def register_names = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+).map(fun (operation): operation.attribute("name"))
+
+check:
+  fixture.config.hart_count ~is 2
+  fixture.config.data_bytes ~is 16
+  fixture.params.node.kind ~is chi.CHINodeKind.SNI
+  fixture.params.service.address_sets[0] ~is chi.AddressSet(0x02000000, 0xffff)
+  fixture.params.service.supports(chi.CHIReqOpcode.ReadNoSnp, 8) ~is #true
+  fixture.params.service.supports(chi.CHIReqOpcode.WriteNoSnpPtl, 8) ~is #true
+  fixture.params.service.supports(chi.CHIReqOpcode.ReadNoSnp, 16) ~is #false
+  top.inputs.map(fun (port): port.name) ~is ["clock", "reset", "identity", "tick", "port_in"]
+  top.outputs.map(fun (port): port.name) ~is [
+    "port_out", "time_counter", "machine_software", "machine_timer"
+  ]
+  register_names ~is [
+    "state", "request", "read_response_data", "mtime", "mtimecmp", "msip"
+  ]
+  top.find_output("time_counter").type.width ~is 64
+  top.find_output("machine_software").type.length ~is 2
+  top.find_input("port_in").type.field("req").type.field("bits").type.field("address").type.width ~is 44
+  verify_design(fixture.design) ~is #void

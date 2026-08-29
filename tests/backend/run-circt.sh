@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
+  aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
   ricket-core ricket-multiply ricket-dcache
 )
 
@@ -180,7 +180,7 @@ fixture_in_group() {
     std:round-robin-matcher|std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
       return 0
       ;;
-    protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
+    protocols:aclint|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
     cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:scoreboard|cores:ricket-*)
@@ -593,6 +593,7 @@ fixture_specs=(
 )
 
 direct_fixture_specs=(
+  'aclint|aclint_tb'
   'nested-bundle|'
   'aggregate-memory|'
   'one-hot-aggregate|'

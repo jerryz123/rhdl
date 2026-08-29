@@ -21,6 +21,8 @@ core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   `--> ../../rhdl/std/scoreboard.rhdl
 ricket.rhdl                         composition selects core-flow.rhdl
   |--> mmu/{mmu,tlb,walker}.rhdl    Sv39 translation before physical L1s
+  |--> memory-router.rhdl            device-region split after translation
+  |--> uncached.rhdl                 one-outstanding RN-I device transaction
   |--> cache.rhdl                   fixed 64-byte private-L1 line geometry
   |--> chi.rhdl                     RN-F parameters and flit construction
   |--> refill.rhdl                  blocking ReadClean/ReadUnique acquisition
@@ -42,9 +44,10 @@ integration when the channels actually cross a CHI link boundary.
 `CHIHomeMap`; each cache transaction decodes its address once and retains the
 selected HN-F NodeID through retries, data, and completion acknowledgement.
 `RicketCHIParams` is host-only placement metadata for the instruction and data
-RN-F NodeIDs, while `RicketCHIIdentity` carries those IDs into an occurrence as
-hardware inputs. Consequently one Ricket specialization can be stamped at
-multiple placements without inheriting a representative tile's NodeIDs.
+RN-F NodeIDs plus the optional device RN-I NodeID, while `RicketCHIIdentity`
+carries those IDs into an occurrence as hardware inputs. Consequently one
+Ricket specialization can be stamped at multiple placements without inheriting
+a representative tile's NodeIDs.
 
 Ricket may consume RHDL, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
@@ -160,8 +163,13 @@ deferred completions drain. It is then taken after the last retired instruction,
 with EPC set to that instruction's architectural successor; every younger
 pipeline token and same-cycle memory effect is discarded. `WFI` is a serialized
 legal no-op for now, so it completes without idling the clock.
-PMP, counters, vectored trap mode, and platform interrupt controllers remain
+PMP, hardware performance counters, vectored trap mode, and platform interrupt controllers remain
 outside this slice.
+
+The CSR file reads the platform-supplied `hart_id` through `mhartid` and the
+64-bit `time_counter` through the standard `time` CSR, exposing `timeh` for
+RV32. User and supervisor timer access obeys `mcounteren` and `scounteren`;
+Ricket does not create a second internal timer.
 
 RV64 Ricket implements Bare and Sv39 address translation ahead of its
 physically indexed, physically tagged L1 caches. `satp.MODE` accepts Bare or
@@ -232,8 +240,12 @@ boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
 The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer, a
 packed `RicketInterrupts` input independent of any ACLINT, PLIC, or AIA block,
-separate instruction and data `CHIRNChannels` node ports, and a sticky `fault`
-output for a rejected misaligned external start address. Architectural
+a platform `hart_id`, a 64-bit platform `time_counter`, separate instruction
+and data RN-F channel ports, a device RN-I channel port, and a sticky `fault`
+output for a rejected misaligned external start address. Physical addresses in configured device
+sets bypass L1D through a one-outstanding uncached engine; cacheable addresses
+retain the coherent L1D path. Device LR, SC, and AMO requests raise load or
+store access faults instead of being weakened into ordinary MMIO. Architectural
 instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
 one-request-per-cycle throughput. In both caches, a one-stage lookup flow
 carries request context beside the SRAM access; a miss is filtered and mapped

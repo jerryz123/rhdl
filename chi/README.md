@@ -29,6 +29,8 @@ preserves those boundaries:
 - `chi/` owns CHI node roles, exact REQ/RSP/SNP/DAT flits, opcodes,
   transactions, protocol credits, link activation, optional CHI features, and
   protocol monitoring.
+- `devices/` consumes this public CHI surface and owns endpoint-specific
+  register maps and device behavior; CHI does not import platform devices.
 - `rhdl/std` owns only protocol-neutral credited transport, buffering, ID and
   address sets, storage, and ordinary hardware utilities.
 - `noc/` remains pure host-side topology and routing analysis. CHI consumes
@@ -291,6 +293,8 @@ non-snoopable transaction to it.
 `CHIHNI`. It operates through a `CHIHNIChannels` interface containing
 ready-valid requester- and subordinate-side channel interfaces, allocates a
 Home-owned transaction slot, and translates both transaction-ID namespaces.
+Its parameters accept every RN-I endpoint allowed to address the Home; the
+shared requester channel retains the source NodeID in each allocated request.
 REQ, RSP, and DAT can each attach to an independent transport. Reads restore
 the RN's
 ReturnTxnID and data target. Writes expose the Home slot as the RN-facing DBID,
@@ -479,8 +483,10 @@ The initial tiled transport uses a topology-only `RouterFamilyPhysicalPlan` to
 prove that independently routed REQ, RSP, SNP, and DAT families share one
 ordered physical-link shape. Host-compiled local attachment plans account for
 family-remapped slots and unused ports. `CHIRouter` stamps four generic router
-families without owning topology or routing policy; tile modules own router
-instances, while the SoC parent owns inter-tile links. Cache-line-striped Home
+families without owning topology or routing policy. Its attachment plans cover
+RN-I, RN-F, mixed RN-F/RN-I, HN-I, HN-F, and transit-only sites without adding
+snoop paths to non-coherent endpoints. Tile modules own router instances,
+while the SoC parent owns inter-tile links. Cache-line-striped Home
 services project sparse global addresses into dense local CHIRam spaces before
 fragmentation.
 

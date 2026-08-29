@@ -9,20 +9,31 @@ class RicketCHIConfig(flit :: CHIFlitParams,
                       home_map :: CHIHomeMap):
   implements CircuitParam
 
+  property normal_address_sets:
+    home_map.entries.filter(
+      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNF
+    ).map(fun (entry): entry.address_set)
+  property device_address_sets:
+    home_map.entries.filter(
+      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNI
+    ).map(fun (entry): entry.address_set)
+  property has_devices: device_address_sets.length() > 0
+
   constructor (flit :: CHIFlitParams,
                home_map :: CHIHomeMap):
     unless home_map.flit == flit
     | error(~who: #'RicketCHIConfig,
             "Home map must use Ricket's CHI flit parameters")
-    for (entry in home_map.entries):
-      unless entry.home.kind == CHINodeKind.HNF
-      | error(~who: #'RicketCHIConfig,
-              "Ricket Home map entries must target HN-F nodes")
+    unless for any (entry in home_map.entries):
+      entry.home.kind == CHINodeKind.HNF
+    | error(~who: #'RicketCHIConfig,
+            "Ricket Home map must contain at least one HN-F normal-memory range")
     super(flit, home_map)
 
 class RicketCHIParams(config :: RicketCHIConfig,
                       instruction_node_id :: Nat,
-                      data_node_id :: Nat):
+                      data_node_id :: Nat,
+                      device_node_id :: Nat):
 
   property flit: config.flit
   property home_map: config.home_map
@@ -66,10 +77,26 @@ class RicketCHIParams(config :: RicketCHIConfig,
       ),
       ~max_outstanding: 2
     )
+  property device_node:
+    CHINodeParams(
+      "ricket-device",
+      device_node_id,
+      CHINodeKind.RNI,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpPtl],
+        ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 1
+    )
 
   constructor (config :: RicketCHIConfig,
                instruction_node_id :: Nat,
-               data_node_id :: Nat):
+               data_node_id :: Nat,
+               ~device_node_id: device_node_id :: Nat = 0):
     unless bits.length(instruction_node_id) <= config.flit.node_id_width
     | error(~who: #'RicketCHIParams,
             "instruction NodeID must fit in the CHI NodeID width")
@@ -79,17 +106,27 @@ class RicketCHIParams(config :: RicketCHIConfig,
     unless instruction_node_id != data_node_id
     | error(~who: #'RicketCHIParams,
             "instruction and data NodeIDs must be distinct")
+    if config.has_devices
+    | block:
+        unless bits.length(device_node_id) <= config.flit.node_id_width
+        | error(~who: #'RicketCHIParams,
+                "device NodeID must fit in the CHI NodeID width")
+        unless device_node_id != instruction_node_id && device_node_id != data_node_id
+        | error(~who: #'RicketCHIParams,
+                "instruction, data, and device NodeIDs must be distinct")
+    | #void
     for (entry in config.home_map.entries):
-      unless entry.target_node_id != instruction_node_id && (
-        entry.target_node_id != data_node_id
+      unless entry.target_node_id != instruction_node_id && entry.target_node_id != data_node_id && (
+        (!config.has_devices) || (entry.target_node_id != device_node_id)
       )
       | error(~who: #'RicketCHIParams,
               "Home, instruction, and data NodeIDs must be distinct")
-    super(config, instruction_node_id, data_node_id)
+    super(config, instruction_node_id, data_node_id, device_node_id)
 
 bundle RicketCHIIdentity(p :: CHIFlitParams):
   instruction_node_id: Bits(p.node_id_width)
   data_node_id: Bits(p.node_id_width)
+  device_node_id: Bits(p.node_id_width)
 
 fun ricket_chi_address(address :: Hardware.bits,
                        p :: CHIFlitParams) :~ Bits(p.request_address_width):
@@ -116,7 +153,10 @@ fun ricket_chi_request(p :: CHIFlitParams,
                        expect_comp_ack :: Bool,
                        allocate_hint :: Bool,
                        allow_retry :: Bool,
-                       protocol_credit_type :: Bits(4)) :~ CHIReqFlit(p):
+                       protocol_credit_type :: Bits(4),
+                       ~cacheable: cacheable :: Bool = Bool(#true),
+                       ~device: device :: Bool = Bool(#false),
+                       ~early_write_acknowledge: early_write_acknowledge :: Bool = Bool(#true)) :~ CHIReqFlit(p):
   wire request: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
   | request.rsvdc <== bits(0, p.req_rsvdc_width)
@@ -139,13 +179,11 @@ fun ricket_chi_request(p :: CHIFlitParams,
   request.excl_snoop_me_cah <== Bool(#false)
   request.group_id_or_lpid <== bits(0, 8)
   request.snp_attr_or_do_dwt <== Bool(#true)
-  // Ricket accesses Normal, snoopable, cacheable memory. Refills recommend
-  // downstream allocation while write-around stores do not.
   request.mem_attr <== CHIMemAttr():
     allocate: allocate_hint
-    cacheable: Bool(#true)
-    device: Bool(#false)
-    early_write_acknowledge: Bool(#true)
+    cacheable: cacheable
+    device: device
+    early_write_acknowledge: early_write_acknowledge
   request.pcrd_type <== protocol_credit_type
   request.order <== CHIOrder.NoOrder
   request.allow_retry <== allow_retry

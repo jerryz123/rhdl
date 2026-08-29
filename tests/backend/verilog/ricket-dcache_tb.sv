@@ -14,7 +14,7 @@ module ricket_dcache_tb;
   typedef struct packed { logic [63:0] data; logic [4:0] tag; } core_resp_bits_t;
   typedef struct packed { logic valid; core_resp_bits_t bits; } core_resp_t;
   typedef struct packed { core_req_t request; } core_in_t;
-  typedef struct packed { ready_t request; core_resp_t response; logic drained; } core_out_t;
+  typedef struct packed { ready_t request; logic request_fault; logic request_access_fault; core_resp_t response; logic drained; } core_out_t;
 
   typedef struct packed { logic valid; CHIReqFlit bits; } req_forward_t;
   typedef struct packed { logic valid; CHIRspFlit bits; } rsp_forward_t;
@@ -62,6 +62,7 @@ module ricket_dcache_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  logic [6:0] node_id = CACHE_ID;
   core_in_t core_in;
   core_out_t core_out;
   chi_in_t chi_in;

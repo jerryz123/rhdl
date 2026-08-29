@@ -40,6 +40,8 @@ sync_circuit RicketCore(xlen :: XLen):
 
   interface start(Irrevocable(Bits(width)), ~role: consumer)
   input interrupts: RicketInterrupts()
+  input hart_id: Bits(width)
+  input time_counter: Bits(64)
   interface instruction_access(RicketInstructionAccess(xlen), ~role: requester)
   interface data_access(RicketDataAccess(xlen), ~role: requester)
   output fault: Bool
@@ -73,6 +75,8 @@ sync_circuit RicketCore(xlen :: XLen):
   inst scoreboard(Scoreboard(register_count))
   inst csrs(RicketCsrFile(xlen))
   csrs.interrupts <== interrupts
+  csrs.hart_id <== hart_id
+  csrs.time_counter <== time_counter
 
   // Name the pipeline boundaries once so later sections can be presented in
   // stage order while still observing downstream occupancy and results.
@@ -321,7 +325,8 @@ sync_circuit RicketCore(xlen :: XLen):
     execute_is_memory & !memory_aligned
   )
   def data_page_fault = execute_is_memory & data_access.request_fault
-  def execute_nonredirect_fault = execute_request_fault ||| data_page_fault
+  def data_access_fault = execute_is_memory & data_access.request_access_fault
+  def execute_nonredirect_fault = execute_request_fault ||| data_page_fault ||| data_access_fault
   def redirect_fault = redirect_requested & !redirect_aligned
   def execute_fault = execute_nonredirect_fault ||| redirect_fault
   def execute_exception_cause = mux(
@@ -335,15 +340,17 @@ sync_circuit RicketCore(xlen :: XLen):
         exception_cause_bits(ExceptionCause.InstructionAddressMisaligned, width),
         mux(
           data_page_fault,
+          mux(execute_memory_operation.needs_unique(),
+              exception_cause_bits(ExceptionCause.StorePageFault, width),
+              exception_cause_bits(ExceptionCause.LoadPageFault, width)),
           mux(
-            execute_memory_operation.needs_unique(),
-            exception_cause_bits(ExceptionCause.StorePageFault, width),
-            exception_cause_bits(ExceptionCause.LoadPageFault, width)
-          ),
-          mux(
-            execute_memory_operation.needs_unique(),
-            exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
-            exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width)
+            data_access_fault,
+            mux(execute_memory_operation.needs_unique(),
+                exception_cause_bits(ExceptionCause.StoreAccessFault, width),
+                exception_cause_bits(ExceptionCause.LoadAccessFault, width)),
+            mux(execute_memory_operation.needs_unique(),
+                exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
+                exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width))
           )
         )
       )

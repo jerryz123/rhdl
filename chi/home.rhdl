@@ -19,7 +19,7 @@ import:
 // to be realized as a physical CHI link.
 class CHIHNIParams(home :: CHIHomeParams,
                    flit :: CHIFlitParams,
-                   requester_endpoint :: CHIICNPortParams,
+                   requester_endpoints :: NonemptyList.of(CHIICNPortParams),
                    subordinate_endpoint :: CHIICNPortParams,
                    subordinate_service :: CHISubordinateServiceParams):
   implements CircuitParam
@@ -27,9 +27,10 @@ class CHIHNIParams(home :: CHIHomeParams,
 fun checked_chi_hni_params(params :: CHIHNIParams):
   unless params.home.kind == CHINodeKind.HNI
   | error(~who: #'CHIHNI, "home kind must be HN-I")
-  unless params.requester_endpoint.kind == CHINodeKind.RNI
-  | error(~who: #'CHIHNI,
-          "requester endpoint must describe an RN-I")
+  for (endpoint in params.requester_endpoints):
+    unless endpoint.kind == CHINodeKind.RNI
+    | error(~who: #'CHIHNI,
+            "requester endpoints must describe RN-Is")
   unless params.subordinate_endpoint.kind == CHINodeKind.SNI
   | error(~who: #'CHIHNI,
           "subordinate endpoint must describe an SN-I")
@@ -39,19 +40,20 @@ fun checked_chi_hni_params(params :: CHIHNIParams):
   unless bits.length(params.home.node_id) <= params.flit.node_id_width
   | error(~who: #'CHIHNI,
           "Home NodeID must fit the physical NodeID width")
-  unless chi_initial_requester_capabilities(params.requester_endpoint.supports,
-                                            params.requester_endpoint.emits)
-  | error(~who: #'CHIHNI,
-          "requester endpoint must use the initial non-coherent capabilities")
+  for (endpoint in params.requester_endpoints):
+    unless chi_initial_requester_capabilities(endpoint.supports, endpoint.emits)
+    | error(~who: #'CHIHNI,
+            "requester endpoints must use the initial non-coherent capabilities")
   unless chi_initial_subordinate_capabilities(params.subordinate_endpoint.supports,
                                               params.subordinate_endpoint.emits)
   | error(~who: #'CHIHNI,
           "subordinate endpoint must use the initial non-coherent capabilities")
-  for (opcode in params.requester_endpoint.supports.req):
-    unless for any (request in params.subordinate_service.requests):
-      request.opcode == opcode
-    | error(~who: #'CHIHNI,
-            "subordinate service must support every requester opcode")
+  for (endpoint in params.requester_endpoints):
+    for (opcode in endpoint.supports.req):
+      unless for any (request in params.subordinate_service.requests):
+        request.opcode == opcode
+      | error(~who: #'CHIHNI,
+              "subordinate service must support every requester opcode")
   params
 
 fun chi_hni_service_supported(p :: CHIFlitParams,
@@ -71,7 +73,6 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   def checked = checked_chi_hni_params(params)
   def p :: CHIFlitParams = checked.flit
   def home = checked.home
-  def requester_endpoint = checked.requester_endpoint
   def subordinate_endpoint = checked.subordinate_endpoint
   def limit = home.max_outstanding
   def slot_width = index_width(limit)

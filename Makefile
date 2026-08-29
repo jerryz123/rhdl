@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-ricket
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test device-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-ricket
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -13,6 +13,7 @@ LOP_BACKEND_TESTS := $(sort $(wildcard tests/backend/*equivalence-test.rhm))
 NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 RIDX_TESTS := $(sort $(shell find ridx/tests -type f -name '*-test.rhm'))
+DEVICE_TESTS := $(sort $(wildcard devices/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
 RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
 RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
@@ -34,7 +35,7 @@ EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f
 RACKET_COMPILE_SOURCES := $(sort \
   $(HOST_ANNOTATION_TESTS) $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS) \
   $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) $(RIDX_TESTS) \
-  $(CHI_TESTS) $(RICKET_TESTS) $(EXAMPLES) \
+  $(DEVICE_TESTS) $(CHI_TESTS) $(RICKET_TESTS) $(EXAMPLES) \
   $(wildcard tests/backend/emit-*.rhm) $(wildcard ridx/tests/rhdl/emit-*.rhm) \
   $(wildcard socs/tests/*.rhm) \
   $(wildcard tools/emit-fesvr-*.rhm) $(wildcard tools/emit-simple-soc*.rhm) \
@@ -112,6 +113,9 @@ ridx-test:
 ridx-circt-test:
 	bash ridx/tests/rhdl/run-grid-equivalence.sh
 
+device-test: check-boundaries
+	tools/run-racket-tests.sh $(DEVICE_TESTS)
+
 chi-test: check-boundaries
 	tools/run-racket-tests.sh $(CHI_TESTS)
 	bash chi/tests/run-negative.sh
@@ -160,7 +164,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test chi-test ricket-host-test
+host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test device-test chi-test ricket-host-test
 
 ci-host-foundation-test: host-annotation-test frontend-test lop-test
 
@@ -168,7 +172,7 @@ ci-host-backend-test: backend-test
 
 ci-host-models-test: noc-test riscv-test ridx-test
 
-ci-host-protocols-test: rfpl-unit-test chi-test
+ci-host-protocols-test: rfpl-unit-test device-test chi-test
 
 ci-host-cores-test: ricket-host-test
 

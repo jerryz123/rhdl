@@ -15,6 +15,7 @@ class RicketTileParams(ricket :: RicketCHIConfig,
 
 bundle RicketTileIdentity(p :: CHIFlitParams, site_width :: PosInt):
   site_key: Bits(site_width)
+  hart_id: Bits(64)
   chi: RicketCHIIdentity(p)
 
 sync_circuit RicketTile(params :: RicketTileParams):
@@ -26,6 +27,7 @@ sync_circuit RicketTile(params :: RicketTileParams):
   input identity: RicketTileIdentity(p, site_width)
   interface start(Irrevocable(Bits(64)), ~role: consumer)
   input interrupts: RicketInterrupts()
+  input time_counter: Bits(64)
   output fault: Bool
   interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
   interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
@@ -35,13 +37,17 @@ sync_circuit RicketTile(params :: RicketTileParams):
 
   ricket.chi_identity <== identity.chi
   ricket.interrupts <== interrupts
+  ricket.hart_id <== identity.hart_id
+  ricket.time_counter <== time_counter
   router.site_key <== identity.site_key
   start |> ricket.start
   fault <== ricket.fault
-  def instruction_channels :: Endpoint = router.local[0]
-  def data_channels :: Endpoint = router.local[1]
+  def instruction_channels :: Endpoint = router.rnf_local[0]
+  def data_channels :: Endpoint = router.rnf_local[1]
+  def device_channels :: Endpoint = router.rni_local[0]
   ricket.imem <=> instruction_channels
   ricket.dmem <=> data_channels
+  ricket.umem <=> device_channels
   router.incoming_links <=> incoming_links
   router.outgoing_links <=> outgoing_links
 

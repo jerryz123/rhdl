@@ -141,6 +141,7 @@ Detailed documentation lives with the component that owns it:
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
 | Pure NoC authoring, validation, planning, and hardware bridge | [`noc/README.md`](noc/README.md) |
 | AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
+| CHI platform devices and register blocks | [`devices/README.md`](devices/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
 | Rosette equivalence, counterexamples, reachability, and output properties | [`rhdl/formal/README.md`](rhdl/formal/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |

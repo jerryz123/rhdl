@@ -19,7 +19,8 @@ def design = elaborate(Ricket(XLen.X64, ~chi: example_chi_config))
 def verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhdl_types
 `define _TYPESCOPE_rhdl_types
-  typedef struct packed {logic [6:0] instruction_node_id; logic [6:0] data_node_id; }
+  typedef
+    struct packed {logic [6:0] instruction_node_id; logic [6:0] data_node_id; logic [6:0] device_node_id; }
     RicketCHIIdentity;
   typedef
     struct packed {logic supervisor_software; logic machine_software; logic supervisor_timer; logic machine_timer; logic supervisor_external; logic machine_external; }
@@ -176,16 +177,30 @@ module Ricket(
   input  RicketCHIIdentity                                                                                                                                                                                                                                                                                                                      chi_identity,
   input  struct packed {logic valid; logic [63:0] bits; }                                                                                                                                                                                                                                                                                       start_in,
   input  RicketInterrupts                                                                                                                                                                                                                                                                                                                       interrupts,
+  input  [63:0]                                                                                                                                                                                                                                                                                                                                 hart_id,
+                                                                                                                                                                                                                                                                                                                                                time_counter,
   input  struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic valid; CHISnpFlit bits; } snoops; } imem_in,
                                                                                                                                                                                                                                                                                                                                                 dmem_in,
+  input  struct packed {struct packed {logic ready; } req; struct packed {struct packed {logic ready; } requester; struct packed {logic valid; CHIRspFlit bits; } response; } rsp; struct packed {struct packed {logic ready; } request; struct packed {logic valid; CHIDatFlit bits; } response; } dat; }                                      umem_in,
   output struct packed {logic ready; }                                                                                                                                                                                                                                                                                                          start_out,
   output struct packed {struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIRspFlit bits; } requester_responses; struct packed {logic valid; CHIDatFlit bits; } request_data; struct packed {logic ready; } responses; struct packed {logic ready; } response_data; struct packed {logic ready; } snoops; } imem_out,
                                                                                                                                                                                                                                                                                                                                                 dmem_out,
+  output struct packed {struct packed {logic valid; CHIReqFlit bits; } req; struct packed {struct packed {logic valid; CHIRspFlit bits; } requester; struct packed {logic ready; } response; } rsp; struct packed {struct packed {logic valid; CHIDatFlit bits; } request; struct packed {logic ready; } response; } dat; }                     umem_out,
   output                                                                                                                                                                                                                                                                                                                                        fault
 );
 
   wire
-    struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
+    struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
+    _uncached_core_out;
+  wire
+    struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
+    _memory_router_core_out;
+  wire struct packed {struct packed {logic valid; RicketDataReq bits; } request; }
+    _memory_router_cache_out;
+  wire struct packed {struct packed {logic valid; RicketDataReq bits; } request; }
+    _memory_router_device_out;
+  wire
+    struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
     _l1d_core_out;
   wire
     struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }
@@ -194,7 +209,7 @@ module Ricket(
     struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }
     _mmu_instruction_out;
   wire
-    struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
+    struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }
     _mmu_data_out;
   wire
     struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }
@@ -215,6 +230,8 @@ module Ricket(
     .reset                  (reset),
     .start_in               (start_in),
     .interrupts             (interrupts),
+    .hart_id                (hart_id),
+    .time_counter           (time_counter),
     .instruction_access_in  (_mmu_instruction_out),
     .data_access_in         (_mmu_data_out),
     .start_out              (start_out),
@@ -232,7 +249,7 @@ module Ricket(
     .instruction_in         (_core_instruction_access_out),
     .data_in                (_core_data_access_out),
     .instruction_memory_in  (_l1i_core_out),
-    .data_memory_in         (_l1d_core_out),
+    .data_memory_in         (_memory_router_core_out),
     .privilege              (_core_privilege),
     .mstatus                (_core_mstatus),
     .satp                   (_core_satp),
@@ -255,28 +272,49 @@ module Ricket(
     .clock    (clock),
     .reset    (reset),
     .node_id  (chi_identity.data_node_id),
-    .core_in  (_mmu_data_memory_out),
+    .core_in  (_memory_router_cache_out),
     .chi_in   (dmem_in),
     .core_out (_l1d_core_out),
     .chi_out  (dmem_out)
   );
+  RicketMemoryRouter memory_router (
+    .clock      (clock),
+    .reset      (reset),
+    .core_in    (_mmu_data_memory_out),
+    .cache_in   (_l1d_core_out),
+    .device_in  (_uncached_core_out),
+    .core_out   (_memory_router_core_out),
+    .cache_out  (_memory_router_cache_out),
+    .device_out (_memory_router_device_out)
+  );
+  RicketUncached uncached (
+    .clock    (clock),
+    .reset    (reset),
+    .node_id  (chi_identity.device_node_id),
+    .core_in  (_memory_router_device_out),
+    .chi_in   (umem_in),
+    .core_out (_uncached_core_out),
+    .chi_out  (umem_out)
+  );
 endmodule
 
 module RicketCore(
-  input                                                                                                                                                                clock,
-                                                                                                                                                                       reset,
-  input  struct packed {logic valid; logic [63:0] bits; }                                                                                                              start_in,
-  input  RicketInterrupts                                                                                                                                              interrupts,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                   instruction_access_in,
-  input  struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }      data_access_in,
-  output struct packed {logic ready; }                                                                                                                                 start_out,
-  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; } instruction_access_out,
-  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                   data_access_out,
-  output                                                                                                                                                               fault,
-  output [1:0]                                                                                                                                                         privilege,
-  output [63:0]                                                                                                                                                        mstatus,
-                                                                                                                                                                       satp,
-  output                                                                                                                                                               translation_flush
+  input                                                                                                                                                                                       clock,
+                                                                                                                                                                                              reset,
+  input  struct packed {logic valid; logic [63:0] bits; }                                                                                                                                     start_in,
+  input  RicketInterrupts                                                                                                                                                                     interrupts,
+  input  [63:0]                                                                                                                                                                               hart_id,
+                                                                                                                                                                                              time_counter,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                                          instruction_access_in,
+  input  struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; } data_access_in,
+  output struct packed {logic ready; }                                                                                                                                                        start_out,
+  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                        instruction_access_out,
+  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                          data_access_out,
+  output                                                                                                                                                                                      fault,
+  output [1:0]                                                                                                                                                                                privilege,
+  output [63:0]                                                                                                                                                                               mstatus,
+                                                                                                                                                                                              satp,
+  output                                                                                                                                                                                      translation_flush
 );
 
   wire [4:0]                         _GEN;
@@ -343,8 +381,8 @@ module RicketCore(
     | _mem_wb_pipe_egress_out.valid & ~_mem_wb_pipe_egress_out.bits.exception_valid
     & _mem_wb_pipe_egress_out.bits.csr_address == 12'h180
     & (_mem_wb_pipe_egress_out.bits.system.csr == 2'h1
-       | (_mem_wb_pipe_egress_out.bits.system.csr == 2'h2
-          | (&_mem_wb_pipe_egress_out.bits.system.csr))
+       | (|{_mem_wb_pipe_egress_out.bits.system.csr == 2'h2,
+            &_mem_wb_pipe_egress_out.bits.system.csr})
        & (|_mem_wb_pipe_egress_out.bits.csr_source));
   wire                               _GEN_20 = _GEN_18 | _GEN_19;
   wire                               _GEN_21 = _csrs_redirect_out.valid | _GEN_20;
@@ -403,14 +441,14 @@ module RicketCore(
     _id_ex_pipe_egress_out.bits.writeback_source == 3'h4;
   wire                               _GEN_40 =
     _id_ex_pipe_egress_out.valid
-    & (_id_ex_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_38 | _GEN_39);
+    & (|{_id_ex_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_38, _GEN_39});
   wire                               _GEN_41 =
     _ex_mem_pipe_egress_out.bits.writeback_source == 3'h3;
   wire                               _GEN_42 =
     _ex_mem_pipe_egress_out.bits.writeback_source == 3'h4;
-  wire                               _GEN_43 =
-    _ex_mem_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_41 | _GEN_42;
-  wire                               _GEN_44 = _ex_mem_pipe_egress_out.valid & _GEN_43;
+  wire [2:0]                         _GEN_43 =
+    {_ex_mem_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_41, _GEN_42};
+  wire                               _GEN_44 = _ex_mem_pipe_egress_out.valid & (|_GEN_43);
   wire                               _GEN_45 = |_id_ex_pipe_egress_out.bits.rd;
   wire                               _GEN_46 = |_ex_mem_pipe_egress_out.bits.rd;
   wire                               _GEN_47 =
@@ -421,13 +459,14 @@ module RicketCore(
     _mem_wb_pipe_egress_out.bits.writeback_source == 3'h3;
   wire                               _GEN_49 =
     _mem_wb_pipe_egress_out.bits.writeback_source == 3'h4;
-  wire                               _GEN_50 =
-    _mem_wb_pipe_egress_out.bits.writeback_source == 3'h1 | _GEN_48 | _GEN_49;
-  wire                               _GEN_51 =
-    _GEN_40 | _GEN_44 | _mem_wb_pipe_egress_out.valid & _GEN_50
+  wire [2:0]                         _GEN_50 =
+    {_mem_wb_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_48, _GEN_49};
+  wire                               _GEN_51 = |_GEN_50;
+  wire                               _GEN_52 =
+    _GEN_40 | _GEN_44 | _mem_wb_pipe_egress_out.valid & _GEN_51
     & _mem_wb_pipe_egress_out.bits.write_enable | (|_scoreboard_busy) | _GEN_5;
-  wire                               _GEN_52 = |_decoder_control.fence.action;
-  wire                               _GEN_53 =
+  wire                               _GEN_53 = |_decoder_control.fence.action;
+  wire                               _GEN_54 =
     _GEN_33
     & (_GEN_40 & _GEN_45
        & (_decoder_control.operand.uses_rs1
@@ -466,11 +505,11 @@ module RicketCore(
        | (|_ex_mem_pipe_egress_out.bits.system.action)
        | (|_ex_mem_pipe_egress_out.bits.fence.action)) | _mem_wb_pipe_egress_out.valid
     & _GEN_47
-    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action) | _GEN_52)
-    & _GEN_51 | _GEN_52 & ~data_access_in.drained | _csrs_interrupt_request | _GEN_24
+    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action) | _GEN_53)
+    & _GEN_52 | _GEN_53 & ~data_access_in.drained | _csrs_interrupt_request | _GEN_24
     | _GEN_10;
-  assign _GEN_15 = _GEN_14 & ~_GEN_53;
-  wire DecodeExecute                 _GEN_54 =
+  assign _GEN_15 = _GEN_14 & ~_GEN_54;
+  wire DecodeExecute                 _GEN_55 =
     '{pc: _pipe_stage_egress_out.bits.pc,
       instruction: _pipe_stage_egress_out.bits.instruction,
       alu_control: _decoder_control.alu,
@@ -496,121 +535,127 @@ module RicketCore(
       rs2: (_pipe_stage_egress_out.bits.instruction[24:20]),
       rd: (_pipe_stage_egress_out.bits.instruction[11:7])};
   assign _GEN_14 = _id_ex_pipe_ingress_out.ready;
-  wire [63:0]                        _GEN_55 =
+  wire [63:0]                        _GEN_56 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs1
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs1
           ? _GEN_1
           : _registers_read_data_1;
-  wire [63:0]                        _GEN_56 =
+  wire [63:0]                        _GEN_57 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs2
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs2
           ? _GEN_1
           : _registers_read_data_2;
-  wire [63:0]                        _GEN_57 =
-    _GEN_55 + _id_ex_pipe_egress_out.bits.immediate;
+  wire [63:0]                        _GEN_58 =
+    _GEN_56 + _id_ex_pipe_egress_out.bits.immediate;
   assign _GEN_13 =
     _id_ex_pipe_egress_out.bits.target_from_rs1
-      ? {_GEN_57[63:1], 1'h0}
+      ? {_GEN_58[63:1], 1'h0}
       : _id_ex_pipe_egress_out.bits.pc + _id_ex_pipe_egress_out.bits.immediate;
-  wire                               _GEN_58 =
-    |_id_ex_pipe_egress_out.bits.memory_operation;
   wire                               _GEN_59 =
+    |_id_ex_pipe_egress_out.bits.memory_operation;
+  wire                               _GEN_60 =
     _id_ex_pipe_egress_out.bits.instruction_page_fault
-    | _id_ex_pipe_egress_out.bits.illegal | _GEN_58
+    | _id_ex_pipe_egress_out.bits.illegal | _GEN_59
     & ~(_id_ex_pipe_egress_out.bits.memory_width == 2'h0
         | (_id_ex_pipe_egress_out.bits.memory_width == 2'h1
              ? ~(_alu_result[0])
              : _id_ex_pipe_egress_out.bits.memory_width == 2'h2
                  ? _alu_result[1:0] == 2'h0
                  : _alu_result[2:0] == 3'h0));
-  wire                               _GEN_60 = _GEN_58 & data_access_in.request_fault;
-  wire                               _GEN_61 =
-    _branch_resolver_result_out.bits.taken & (|(_GEN_13[1:0]));
-  wire                               _GEN_62 = _GEN_59 | _GEN_60 | _GEN_61;
+  wire                               _GEN_61 = _GEN_59 & data_access_in.request_fault;
+  wire                               _GEN_62 =
+    _GEN_59 & data_access_in.request_access_fault;
   wire                               _GEN_63 =
-    _id_ex_pipe_egress_out.bits.memory_operation == 3'h4;
-  wire                               _GEN_64 =
-    _id_ex_pipe_egress_out.bits.memory_operation == 3'h5;
+    _branch_resolver_result_out.bits.taken & (|(_GEN_13[1:0]));
+  wire                               _GEN_64 = _GEN_60 | _GEN_61 | _GEN_62 | _GEN_63;
   wire                               _GEN_65 =
-    _id_ex_pipe_egress_out.bits.memory_operation == 3'h2 | _GEN_63 | _GEN_64;
-  wire [63:0]                        _GEN_66 = _id_ex_pipe_egress_out.bits.pc + 64'h4;
-  wire                               _GEN_67 = |_mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_68 =
+    _id_ex_pipe_egress_out.bits.memory_operation == 3'h4;
+  wire                               _GEN_66 =
+    _id_ex_pipe_egress_out.bits.memory_operation == 3'h5;
+  wire                               _GEN_67 =
+    |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h2, _GEN_65, _GEN_66};
+  wire [63:0]                        _GEN_68 = _id_ex_pipe_egress_out.bits.pc + 64'h4;
+  wire                               _GEN_69 = |_mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_70 =
     _mem_wb_pipe_egress_out.valid & _GEN_48 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_67;
-  wire RicketMultiplyIssue           _GEN_69 =
-    '{left: _GEN_55,
-      right: _GEN_56,
+    & _GEN_69;
+  wire RicketMultiplyIssue           _GEN_71 =
+    '{left: _GEN_56,
+      right: _GEN_57,
       control: _id_ex_pipe_egress_out.bits.multiply_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_70 =
+  wire                               _GEN_72 =
     _mem_wb_pipe_egress_out.valid & _GEN_49 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_67;
-  wire RicketDivideIssue             _GEN_71 =
-    '{dividend: _GEN_55,
-      divisor: _GEN_56,
+    & _GEN_69;
+  wire RicketDivideIssue             _GEN_73 =
+    '{dividend: _GEN_56,
+      divisor: _GEN_57,
       control: _id_ex_pipe_egress_out.bits.divide_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_72 = faulted | _GEN_23 | _GEN_21;
-  wire BranchResolverRequest         _GEN_73 =
-    '{left: _GEN_55,
-      right: _GEN_56,
+  wire                               _GEN_74 = faulted | _GEN_23 | _GEN_21;
+  wire BranchResolverRequest         _GEN_75 =
+    '{left: _GEN_56,
+      right: _GEN_57,
       control: _fork_stage_egress_0_out.bits.branch_control};
-  wire                               _GEN_74 = _GEN_58 & ~_GEN_59;
-  wire RicketDataReq                 _GEN_75 =
+  wire                               _GEN_76 = _GEN_59 & ~_GEN_60;
+  wire RicketDataReq                 _GEN_77 =
     '{address: _alu_result,
       access: _id_ex_pipe_egress_out.bits.memory_operation,
       atomic: _fork_stage_egress_1_out.bits.memory_atomic,
       width: _fork_stage_egress_1_out.bits.memory_width,
       unsigned_0: _fork_stage_egress_1_out.bits.memory_unsigned,
-      data: _GEN_56,
+      data: _GEN_57,
       tag:
-        (_id_ex_pipe_egress_out.bits.memory_operation == 3'h1
-         | _id_ex_pipe_egress_out.bits.memory_operation == 3'h3 | _GEN_63 | _GEN_64
+        ((|{_id_ex_pipe_egress_out.bits.memory_operation == 3'h1,
+            _id_ex_pipe_egress_out.bits.memory_operation == 3'h3,
+            _GEN_65,
+            _GEN_66})
            ? _fork_stage_egress_1_out.bits.rd
            : 5'h0)};
   assign _GEN_12 = _GEN_11.ready;
   assign _GEN_11 = data_access_in.request;
-  wire ExecuteMemory                 _GEN_76 =
+  wire ExecuteMemory                 _GEN_78 =
     '{pc: _fork_stage_egress_4_out.bits.pc,
-      resume_pc: (_branch_resolver_result_out.bits.taken ? _GEN_13 : _GEN_66),
+      resume_pc: (_branch_resolver_result_out.bits.taken ? _GEN_13 : _GEN_68),
       instruction: _fork_stage_egress_4_out.bits.instruction,
       writeback_source: _fork_stage_egress_4_out.bits.writeback_source,
-      writeback_enable: (_fork_stage_egress_4_out.bits.writeback_enable & ~_GEN_62),
+      writeback_enable: (_fork_stage_egress_4_out.bits.writeback_enable & ~_GEN_64),
       rd: _fork_stage_egress_4_out.bits.rd,
       result:
-        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2 ? _GEN_66 : _alu_result),
-      multiply_issue: _GEN_69,
-      divide_issue: _GEN_71,
+        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2 ? _GEN_68 : _alu_result),
+      multiply_issue: _GEN_71,
+      divide_issue: _GEN_73,
       system: _fork_stage_egress_4_out.bits.system,
       fence: _fork_stage_egress_4_out.bits.fence,
       csr_address: (_fork_stage_egress_4_out.bits.instruction[31:20]),
       csr_source:
         (_id_ex_pipe_egress_out.bits.system.immediate
            ? {59'h0, _id_ex_pipe_egress_out.bits.instruction[19:15]}
-           : _GEN_55),
-      exception_valid: _GEN_62,
+           : _GEN_56),
+      exception_valid: _GEN_64,
       exception_cause:
         (_id_ex_pipe_egress_out.bits.instruction_page_fault
            ? 64'hC
            : _id_ex_pipe_egress_out.bits.illegal
                ? 64'h2
-               : _GEN_61
+               : _GEN_63
                    ? 64'h0
-                   : _GEN_60 ? {62'h3, _GEN_65, 1'h1} : {62'h1, _GEN_65, 1'h0}),
+                   : _GEN_61
+                       ? {62'h3, _GEN_67, 1'h1}
+                       : {62'h1, _GEN_62 ? {_GEN_67, 1'h1} : {_GEN_67, 1'h0}}),
       exception_value:
         (_id_ex_pipe_egress_out.bits.instruction_page_fault
            ? _id_ex_pipe_egress_out.bits.pc
            : _id_ex_pipe_egress_out.bits.illegal
                ? {32'h0, _id_ex_pipe_egress_out.bits.instruction}
-               : _GEN_61 ? _GEN_13 : _alu_result)};
-  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_62;
+               : _GEN_63 ? _GEN_13 : _alu_result)};
+  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_64;
   assign _GEN_9 =
-    _branch_resolver_result_out.valid & ~_GEN_62 & _branch_resolver_result_out.bits.taken;
-  wire                               _GEN_77 = _ex_mem_pipe_egress_out.valid & ~_GEN_21;
-  wire MemoryWriteback               _GEN_78 =
+    _branch_resolver_result_out.valid & ~_GEN_64 & _branch_resolver_result_out.bits.taken;
+  wire                               _GEN_79 = _ex_mem_pipe_egress_out.valid & ~_GEN_21;
+  wire MemoryWriteback               _GEN_80 =
     '{pc: _ex_mem_pipe_egress_out.bits.pc,
       resume_pc: _ex_mem_pipe_egress_out.bits.resume_pc,
       instruction: _ex_mem_pipe_egress_out.bits.instruction,
@@ -628,11 +673,12 @@ module RicketCore(
       exception_cause: _ex_mem_pipe_egress_out.bits.exception_cause,
       exception_value: _ex_mem_pipe_egress_out.bits.exception_value};
   assign _GEN_8 =
-    _GEN_77 & _ex_mem_pipe_egress_out.bits.writeback_enable & ~_GEN_43
+    _GEN_79 & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_43 == 3'h0
     & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h5 & _GEN_46;
   assign _GEN_7 = _ex_mem_pipe_egress_out.bits.rd;
   assign _GEN_6 = _ex_mem_pipe_egress_out.bits.result;
-  wire RicketCsrCommit               _GEN_79 =
+  wire                               _GEN_81 = _GEN_50 == 3'h0;
+  wire RicketCsrCommit               _GEN_82 =
     '{pc: _mem_wb_pipe_egress_out.bits.pc,
       instruction: _mem_wb_pipe_egress_out.bits.instruction,
       rd: _mem_wb_pipe_egress_out.bits.rd,
@@ -644,118 +690,118 @@ module RicketCore(
       exception_cause: _mem_wb_pipe_egress_out.bits.exception_cause,
       exception_value: _mem_wb_pipe_egress_out.bits.exception_value};
   assign _GEN_5 =
-    _mem_wb_pipe_egress_out.valid & _GEN_50 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_67;
+    _mem_wb_pipe_egress_out.valid & _GEN_51 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_69;
   assign _GEN_4 = _mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_80 =
+  wire                               _GEN_83 =
     _mem_wb_pipe_egress_out.bits.writeback_source != 3'h5;
   assign _GEN_3 =
-    _mem_wb_pipe_egress_out.valid & ~_GEN_50 & _GEN_80
-    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_67;
+    _mem_wb_pipe_egress_out.valid & _GEN_81 & _GEN_83
+    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_69;
   assign _GEN_2 = _mem_wb_pipe_egress_out.bits.rd;
   assign _GEN_1 = _mem_wb_pipe_egress_out.bits.value;
-  wire RegisterFileWrite             _GEN_81 =
+  wire RegisterFileWrite             _GEN_84 =
     '{address: _mem_wb_pipe_egress_out.bits.rd,
       data:
         (_mem_wb_pipe_egress_out.bits.writeback_source == 3'h5
            ? _csrs_writeback_value
            : _GEN_1)};
-  wire                               _GEN_82 =
+  wire                               _GEN_85 =
     data_access_in.response.valid & (|data_access_in.response.bits.tag);
-  wire RegisterFileWrite             _GEN_83 =
+  wire RegisterFileWrite             _GEN_86 =
     '{address: data_access_in.response.bits.tag, data: data_access_in.response.bits.data};
   `ifndef SYNTHESIS
     assert property (@(posedge clock) disable iff (reset)
-                       ~_GEN_82 | _arbiter_stage_ingress_0_out.ready);
+                       ~_GEN_85 | _arbiter_stage_ingress_0_out.ready);
   `endif // not def SYNTHESIS
-  wire RegisterFileWrite             _GEN_84 =
+  wire RegisterFileWrite             _GEN_87 =
     '{address: _multiplier_completion_out.bits.rd,
       data: _multiplier_completion_out.bits.value};
-  wire RegisterFileWrite             _GEN_85 =
+  wire RegisterFileWrite             _GEN_88 =
     '{address: _divider_completion_out.bits.rd, data: _divider_completion_out.bits.value};
   assign _GEN_0 = _arbiter_stage_egress_out.valid;
   assign _GEN = _arbiter_stage_egress_out.bits.address;
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_86 =
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_89 =
     '{valid: _GEN_0, bits: _GEN};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_87 =
-    '{valid: _divider_completion_out.valid, bits: _GEN_85};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_88 =
-    '{valid: _multiplier_completion_out.valid, bits: _GEN_84};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_89 =
-    '{valid: _GEN_82, bits: _GEN_83};
-  wire struct packed {logic valid; RicketDivideIssue bits; } _GEN_90 =
-    '{valid: _GEN_70, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
-  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_91 =
-    '{valid: _GEN_68, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_90 =
+    '{valid: _divider_completion_out.valid, bits: _GEN_88};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_91 =
+    '{valid: _multiplier_completion_out.valid, bits: _GEN_87};
   wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_92 =
+    '{valid: _GEN_85, bits: _GEN_86};
+  wire struct packed {logic valid; RicketDivideIssue bits; } _GEN_93 =
+    '{valid: _GEN_72, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
+  wire struct packed {logic valid; RicketMultiplyIssue bits; } _GEN_94 =
+    '{valid: _GEN_70, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_95 =
     '{valid:
-        (_mem_wb_pipe_egress_out.valid & ~_GEN_50
-         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_80 | _csrs_writeback_valid)),
-      bits: _GEN_81};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_93 =
+        (_mem_wb_pipe_egress_out.valid & _GEN_81
+         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_83 | _csrs_writeback_valid)),
+      bits: _GEN_84};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_96 =
     '{valid: _GEN_5, bits: _mem_wb_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; RicketCsrCommit bits; } _GEN_94 =
-    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_79};
-  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_95 =
-    '{valid: _GEN_77, bits: _GEN_78};
-  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_96 =
-    '{valid: _fork_stage_egress_4_out.valid, bits: _GEN_76};
-  wire struct packed {logic valid; RicketDataReq bits; } _GEN_97 =
-    '{valid: (_fork_stage_egress_1_out.valid & _GEN_74), bits: _GEN_75};
-  wire struct packed {logic ready; } _GEN_98 = '{ready: (~_GEN_74 | _GEN_12)};
-  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_99 =
-    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_73};
-  wire struct packed {logic ready; } _GEN_100 =
+  wire struct packed {logic valid; RicketCsrCommit bits; } _GEN_97 =
+    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_82};
+  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_98 =
+    '{valid: _GEN_79, bits: _GEN_80};
+  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_99 =
+    '{valid: _fork_stage_egress_4_out.valid, bits: _GEN_78};
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN_100 =
+    '{valid: (_fork_stage_egress_1_out.valid & _GEN_76), bits: _GEN_77};
+  wire struct packed {logic ready; } _GEN_101 = '{ready: (~_GEN_76 | _GEN_12)};
+  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_102 =
+    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_75};
+  wire struct packed {logic ready; } _GEN_103 =
     '{ready:
         (~(_GEN_39 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_45)
          | _divider_available
          & ~(_ex_mem_pipe_egress_out.valid & _GEN_42
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_70)};
-  wire struct packed {logic ready; } _GEN_101 =
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_72)};
+  wire struct packed {logic ready; } _GEN_104 =
     '{ready:
         (~(_GEN_38 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_45)
          | _multiplier_available
          & ~(_ex_mem_pipe_egress_out.valid & _GEN_41
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_68)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_102 =
-    '{valid: (_id_ex_pipe_egress_out.valid & ~_GEN_72),
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_70)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_105 =
+    '{valid: (_id_ex_pipe_egress_out.valid & ~_GEN_74),
       bits: _id_ex_pipe_egress_out.bits};
-  wire struct packed {logic ready; } _GEN_103 =
-    '{ready: (_GEN_72 | _fork_stage_ingress_out.ready)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_104 =
-    '{valid: (_GEN_33 & ~_GEN_53), bits: _GEN_54};
-  wire struct packed {logic ready; } _GEN_105 = '{ready: (_GEN_25 | _GEN_15)};
-  wire struct packed {logic valid; FetchDecode bits; } _GEN_106 =
+  wire struct packed {logic ready; } _GEN_106 =
+    '{ready: (_GEN_74 | _fork_stage_ingress_out.ready)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_107 =
+    '{valid: (_GEN_33 & ~_GEN_54), bits: _GEN_55};
+  wire struct packed {logic ready; } _GEN_108 = '{ready: (_GEN_25 | _GEN_15)};
+  wire struct packed {logic valid; FetchDecode bits; } _GEN_109 =
     '{valid:
         (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_25),
       bits: _GEN_32};
-  wire struct packed {logic ready; } _GEN_107 =
+  wire struct packed {logic ready; } _GEN_110 =
     '{ready: (_GEN_16 & instruction_access_in.response.valid)};
-  wire struct packed {logic ready; } _GEN_108 =
+  wire struct packed {logic ready; } _GEN_111 =
     '{ready: (_GEN_16 & _fetch_pcs_egress_out.valid)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_109 =
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_112 =
     '{valid: (_GEN_30 & instruction_access_in.request.ready), bits: fetch_pc};
-  wire RicketInstructionReq          _GEN_110 = '{address: fetch_pc};
-  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_111 =
-    '{valid: _GEN_31, bits: _GEN_110};
+  wire RicketInstructionReq          _GEN_113 = '{address: fetch_pc};
+  wire struct packed {logic valid; RicketInstructionReq bits; } _GEN_114 =
+    '{valid: _GEN_31, bits: _GEN_113};
   Pipe id_ex_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_104),
-    .egress_in   (_GEN_103),
+    .ingress_in  (_GEN_107),
+    .egress_in   (_GEN_106),
     .ingress_out (_id_ex_pipe_ingress_out),
     .egress_out  (_id_ex_pipe_egress_out)
   );
   ValidPipe ex_mem_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_96),
+    .ingress_in (_GEN_99),
     .egress_out (_ex_mem_pipe_egress_out)
   );
   ValidPipe_1 mem_wb_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_95),
+    .ingress_in (_GEN_98),
     .egress_out (_mem_wb_pipe_egress_out)
   );
   RicketInstructionDecoder decoder (
@@ -768,7 +814,7 @@ module RicketCore(
     .reset          (reset),
     .read_address_1 (_id_ex_pipe_egress_out.bits.rs1),
     .read_address_2 (_id_ex_pipe_egress_out.bits.rs2),
-    .writes_0_in    (_GEN_92),
+    .writes_0_in    (_GEN_95),
     .writes_1_in    (_arbiter_stage_egress_out),
     .read_data_1    (_registers_read_data_1),
     .read_data_2    (_registers_read_data_2)
@@ -777,22 +823,22 @@ module RicketCore(
     .left
       (_id_ex_pipe_egress_out.bits.operand_left == 2'h1
          ? _id_ex_pipe_egress_out.bits.pc
-         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_55),
+         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_56),
     .right
       (_id_ex_pipe_egress_out.bits.operand_right
          ? _id_ex_pipe_egress_out.bits.immediate
-         : _GEN_56),
+         : _GEN_57),
     .control (_id_ex_pipe_egress_out.bits.alu_control),
     .result  (_alu_result)
   );
   BranchResolver branch_resolver (
-    .request_in (_GEN_99),
+    .request_in (_GEN_102),
     .result_out (_branch_resolver_result_out)
   );
   RicketMultiplier multiplier (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_91),
+    .issue_in       (_GEN_94),
     .completion_in  (_arbiter_stage_ingress_1_out),
     .completion_out (_multiplier_completion_out),
     .available      (_multiplier_available)
@@ -800,7 +846,7 @@ module RicketCore(
   RicketDivider divider (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_90),
+    .issue_in       (_GEN_93),
     .completion_in  (_arbiter_stage_ingress_2_out),
     .completion_out (_divider_completion_out),
     .available      (_divider_available)
@@ -808,20 +854,22 @@ module RicketCore(
   Scoreboard scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_93),
-    .clear_in (_GEN_86),
+    .set_in   (_GEN_96),
+    .clear_in (_GEN_89),
     .busy     (_scoreboard_busy)
   );
   RicketCsrFile csrs (
     .clock              (clock),
     .reset              (reset),
     .interrupts         (interrupts),
+    .hart_id            (hart_id),
+    .time_counter       (time_counter),
     .interrupt_boundary
-      (~_id_ex_pipe_egress_out.valid & ~_ex_mem_pipe_egress_out.valid & ~_GEN_51
+      (~_id_ex_pipe_egress_out.valid & ~_ex_mem_pipe_egress_out.valid & ~_GEN_52
        & (~_mem_wb_pipe_egress_out.valid | ~_mem_wb_pipe_egress_out.bits.exception_valid
-          & ~_GEN_47 & ~_GEN_50)),
+          & ~_GEN_47 & _GEN_81)),
     .interrupt_pc       (_GEN_34),
-    .commit_in          (_GEN_94),
+    .commit_in          (_GEN_97),
     .redirect_out       (_csrs_redirect_out),
     .interrupt_request  (_csrs_interrupt_request),
     .writeback_valid    (_csrs_writeback_valid),
@@ -833,8 +881,8 @@ module RicketCore(
   Queue fetch_pcs (
     .clock       (clock),
     .reset       (reset | _GEN_29),
-    .ingress_in  (_GEN_109),
-    .egress_in   (_GEN_107),
+    .ingress_in  (_GEN_112),
+    .egress_in   (_GEN_110),
     .ingress_out (_fetch_pcs_ingress_out),
     .egress_out  (_fetch_pcs_egress_out),
     .count       (/* unused */)
@@ -842,17 +890,17 @@ module RicketCore(
   Pipe_1 pipe_stage (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_106),
-    .egress_in   (_GEN_105),
+    .ingress_in  (_GEN_109),
+    .egress_in   (_GEN_108),
     .ingress_out (_pipe_stage_ingress_out),
     .egress_out  (_pipe_stage_egress_out)
   );
   AtomicFork fork_stage (
-    .ingress_in   (_GEN_102),
+    .ingress_in   (_GEN_105),
     .egress_0_in  (_GEN_17),
-    .egress_1_in  (_GEN_98),
-    .egress_2_in  (_GEN_101),
-    .egress_3_in  (_GEN_100),
+    .egress_1_in  (_GEN_101),
+    .egress_2_in  (_GEN_104),
+    .egress_3_in  (_GEN_103),
     .egress_4_in  (_GEN_17),
     .ingress_out  (_fork_stage_ingress_out),
     .egress_0_out (_fork_stage_egress_0_out),
@@ -862,9 +910,9 @@ module RicketCore(
     .egress_4_out (_fork_stage_egress_4_out)
   );
   Arbiter arbiter_stage (
-    .ingress_0_in  (_GEN_89),
-    .ingress_1_in  (_GEN_88),
-    .ingress_2_in  (_GEN_87),
+    .ingress_0_in  (_GEN_92),
+    .ingress_1_in  (_GEN_91),
+    .ingress_2_in  (_GEN_90),
     .egress_in     (_GEN_17),
     .ingress_0_out (_arbiter_stage_ingress_0_out),
     .ingress_1_out (_arbiter_stage_ingress_1_out),
@@ -900,8 +948,8 @@ module RicketCore(
   end // always @(posedge)
   assign start_out = '{ready: _GEN_26};
   assign instruction_access_out =
-    '{flush: _GEN_29, invalidate_all: _GEN_18, request: _GEN_111, response: _GEN_108};
-  assign data_access_out = '{request: _GEN_97};
+    '{flush: _GEN_29, invalidate_all: _GEN_18, request: _GEN_114, response: _GEN_111};
+  assign data_access_out = '{request: _GEN_100};
   assign fault = faulted;
   assign privilege = _csrs_privilege;
   assign translation_flush = _GEN_19;
@@ -2172,6 +2220,8 @@ module RicketCsrFile(
   input                                                      clock,
                                                              reset,
   input  RicketInterrupts                                    interrupts,
+  input  [63:0]                                              hart_id,
+                                                             time_counter,
   input                                                      interrupt_boundary,
   input  [63:0]                                              interrupt_pc,
   input  struct packed {logic valid; RicketCsrCommit bits; } commit_in,
@@ -2204,20 +2254,25 @@ module RicketCsrFile(
   wire                _GEN_9 = commit_in.bits.csr_address == 12'h143;
   wire                _GEN_10 = commit_in.bits.csr_address == 12'h144;
   wire                _GEN_11 = commit_in.bits.csr_address == 12'h180;
-  wire                _GEN_12 = commit_in.bits.csr_address == 12'h300;
-  wire                _GEN_13 = commit_in.bits.csr_address == 12'h301;
-  wire                _GEN_14 = commit_in.bits.csr_address == 12'h302;
-  wire                _GEN_15 = commit_in.bits.csr_address == 12'h303;
-  wire                _GEN_16 = commit_in.bits.csr_address == 12'h304;
-  wire                _GEN_17 = commit_in.bits.csr_address == 12'h305;
-  wire                _GEN_18 = commit_in.bits.csr_address == 12'h306;
-  wire                _GEN_19 = commit_in.bits.csr_address == 12'h30A;
-  wire                _GEN_20 = commit_in.bits.csr_address == 12'h340;
-  wire                _GEN_21 = commit_in.bits.csr_address == 12'h341;
-  wire                _GEN_22 = commit_in.bits.csr_address == 12'h342;
-  wire                _GEN_23 = commit_in.bits.csr_address == 12'h343;
-  wire                _GEN_24 = commit_in.bits.csr_address == 12'h344;
-  wire [63:0]         _GEN_25 =
+  wire                _GEN_12 = commit_in.bits.csr_address == 12'hC01;
+  wire                _GEN_13 = commit_in.bits.csr_address == 12'hC81;
+  wire                _GEN_14 = commit_in.bits.csr_address == 12'h300;
+  wire                _GEN_15 = commit_in.bits.csr_address == 12'h301;
+  wire                _GEN_16 = commit_in.bits.csr_address == 12'h302;
+  wire                _GEN_17 = commit_in.bits.csr_address == 12'h303;
+  wire                _GEN_18 = commit_in.bits.csr_address == 12'h304;
+  wire                _GEN_19 = commit_in.bits.csr_address == 12'h305;
+  wire                _GEN_20 = commit_in.bits.csr_address == 12'h306;
+  wire                _GEN_21 = commit_in.bits.csr_address == 12'h30A;
+  wire                _GEN_22 = commit_in.bits.csr_address == 12'h340;
+  wire                _GEN_23 = commit_in.bits.csr_address == 12'h341;
+  wire                _GEN_24 = commit_in.bits.csr_address == 12'h342;
+  wire                _GEN_25 = commit_in.bits.csr_address == 12'h343;
+  wire                _GEN_26 = commit_in.bits.csr_address == 12'h344;
+  wire                _GEN_27 = commit_in.bits.csr_address == 12'hF11;
+  wire                _GEN_28 = commit_in.bits.csr_address == 12'hF12;
+  wire                _GEN_29 = commit_in.bits.csr_address == 12'hF13;
+  wire [63:0]         _GEN_30 =
     _GEN_1
       ? {44'h0, state.mstatus[19:0] & 20'hC0133}
       : _GEN_2
@@ -2240,329 +2295,373 @@ module RicketCsrFile(
                                           ? _GEN_0 & state.mideleg
                                           : _GEN_11
                                               ? state.satp
-                                              : _GEN_12
+                                              : _GEN_14
                                                   ? state.mstatus
-                                                  : _GEN_13
+                                                  : _GEN_15
                                                       ? 64'h8000000000140101
-                                                      : _GEN_14
+                                                      : _GEN_16
                                                           ? state.medeleg
-                                                          : _GEN_15
+                                                          : _GEN_17
                                                               ? state.mideleg
-                                                              : _GEN_16
+                                                              : _GEN_18
                                                                   ? state.mie
-                                                                  : _GEN_17
+                                                                  : _GEN_19
                                                                       ? state.mtvec
-                                                                      : _GEN_18
+                                                                      : _GEN_20
                                                                           ? state.mcounteren
-                                                                          : _GEN_19
+                                                                          : _GEN_21
                                                                               ? 64'h0
-                                                                              : _GEN_20
+                                                                              : _GEN_22
                                                                                   ? state.mscratch
-                                                                                  : _GEN_21
+                                                                                  : _GEN_23
                                                                                       ? state.mepc
-                                                                                      : _GEN_22
+                                                                                      : _GEN_24
                                                                                           ? state.mcause
-                                                                                          : _GEN_23
+                                                                                          : _GEN_25
                                                                                               ? state.mtval
-                                                                                              : _GEN_24
+                                                                                              : _GEN_26
                                                                                                   ? _GEN_0
-                                                                                                  : 64'h0;
-  wire                _GEN_26 = commit_in.bits.csr_operation == 2'h1;
-  wire                _GEN_27 = commit_in.bits.csr_operation == 2'h2;
-  wire                _GEN_28 =
-    _GEN_26 | (_GEN_27 | (&commit_in.bits.csr_operation)) & (|commit_in.bits.csr_source);
-  wire                _GEN_29 =
-    (_GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-     | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
-     | _GEN_18 | _GEN_19 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23 | _GEN_24
-     | commit_in.bits.csr_address == 12'hF11 | commit_in.bits.csr_address == 12'hF12
-     | commit_in.bits.csr_address == 12'hF13 | commit_in.bits.csr_address == 12'hF14)
+                                                                                                  : _GEN_12
+                                                                                                      ? time_counter
+                                                                                                      : _GEN_13
+                                                                                                        | _GEN_27
+                                                                                                        | _GEN_28
+                                                                                                        | _GEN_29
+                                                                                                        | commit_in.bits.csr_address != 12'hF14
+                                                                                                          ? 64'h0
+                                                                                                          : hart_id;
+  wire                _GEN_31 = commit_in.bits.csr_operation == 2'h1;
+  wire                _GEN_32 = commit_in.bits.csr_operation == 2'h2;
+  wire                _GEN_33 =
+    _GEN_31 | (|{_GEN_32, &commit_in.bits.csr_operation}) & (|commit_in.bits.csr_source);
+  wire                _GEN_34 = privilege_state == 2'h1;
+  wire                _GEN_35 =
+    (|{_GEN_1,
+       _GEN_2,
+       _GEN_3,
+       _GEN_4,
+       _GEN_5,
+       _GEN_6,
+       _GEN_7,
+       _GEN_8,
+       _GEN_9,
+       _GEN_10,
+       _GEN_11,
+       _GEN_12,
+       _GEN_13,
+       _GEN_14,
+       _GEN_15,
+       _GEN_16,
+       _GEN_17,
+       _GEN_18,
+       _GEN_19,
+       _GEN_20,
+       _GEN_21,
+       _GEN_22,
+       _GEN_23,
+       _GEN_24,
+       _GEN_25,
+       _GEN_26,
+       _GEN_27,
+       _GEN_28,
+       _GEN_29,
+       commit_in.bits.csr_address == 12'hF14}) & commit_in.bits.csr_address != 12'hC81
     & privilege_state >= commit_in.bits.csr_address[9:8]
-    & ~(_GEN_28 & (&(commit_in.bits.csr_address[11:10])));
-  wire                _GEN_30 = |commit_in.bits.csr_operation;
-  wire                _GEN_31 = commit_in.valid & _GEN_30;
-  wire                _GEN_32 = commit_in.valid & _GEN_30 & ~_GEN_29;
-  wire                _GEN_33 = commit_in.bits.system_operation == 3'h3;
-  wire                _GEN_34 = privilege_state != 2'h3;
-  wire                _GEN_35 = commit_in.bits.system_operation == 3'h4;
-  wire                _GEN_36 = privilege_state == 2'h0;
-  wire                _GEN_37 = commit_in.valid & (_GEN_33 & _GEN_34 | _GEN_35 & _GEN_36);
-  wire                _GEN_38 = commit_in.valid & commit_in.bits.exception_valid;
-  wire                _GEN_39 = commit_in.valid & commit_in.bits.system_operation == 3'h1;
-  wire                _GEN_40 = commit_in.valid & commit_in.bits.system_operation == 3'h2;
-  wire                _GEN_41 = _GEN_38 | _GEN_32 | _GEN_37 | _GEN_39 | _GEN_40;
-  wire [63:0]         _GEN_42 =
-    _GEN_38
+    & ~(_GEN_33 & (&(commit_in.bits.csr_address[11:10])))
+    & ({_GEN_12, _GEN_13} == 2'h0
+       | (_GEN_34
+            ? state.mcounteren[1]
+            : (&privilege_state) | state.mcounteren[1] & state.scounteren[1]));
+  wire                _GEN_36 = |commit_in.bits.csr_operation;
+  wire                _GEN_37 = commit_in.valid & _GEN_36;
+  wire                _GEN_38 = commit_in.valid & _GEN_36 & ~_GEN_35;
+  wire                _GEN_39 = commit_in.bits.system_operation == 3'h3;
+  wire                _GEN_40 = privilege_state != 2'h3;
+  wire                _GEN_41 = commit_in.bits.system_operation == 3'h4;
+  wire                _GEN_42 = privilege_state == 2'h0;
+  wire                _GEN_43 = commit_in.valid & (_GEN_39 & _GEN_40 | _GEN_41 & _GEN_42);
+  wire                _GEN_44 = commit_in.valid & commit_in.bits.exception_valid;
+  wire                _GEN_45 = commit_in.valid & commit_in.bits.system_operation == 3'h1;
+  wire                _GEN_46 = commit_in.valid & commit_in.bits.system_operation == 3'h2;
+  wire                _GEN_47 = _GEN_44 | _GEN_38 | _GEN_43 | _GEN_45 | _GEN_46;
+  wire [63:0]         _GEN_48 =
+    _GEN_44
       ? commit_in.bits.exception_cause
-      : _GEN_39 ? _GEN[privilege_state] : {63'h1, _GEN_40};
-  wire                _GEN_43 = _GEN_34 | state.mstatus[3];
-  wire                _GEN_44 = privilege_state == 2'h1;
-  wire                _GEN_45 = _GEN_36 | _GEN_44 & state.mstatus[1];
-  wire                _GEN_46 =
-    _GEN_0[11] & state.mie[11] & (state.mideleg[11] ? _GEN_45 : _GEN_43);
-  wire                _GEN_47 =
-    _GEN_0[3] & state.mie[3] & (state.mideleg[3] ? _GEN_45 : _GEN_43);
-  wire                _GEN_48 =
-    _GEN_0[7] & state.mie[7] & (state.mideleg[7] ? _GEN_45 : _GEN_43);
-  wire                _GEN_49 =
-    _GEN_0[9] & state.mie[9] & (state.mideleg[9] ? _GEN_45 : _GEN_43);
-  wire                _GEN_50 =
-    _GEN_0[1] & state.mie[1] & (state.mideleg[1] ? _GEN_45 : _GEN_43);
+      : _GEN_45 ? _GEN[privilege_state] : {63'h1, _GEN_46};
+  wire                _GEN_49 = _GEN_40 | state.mstatus[3];
+  wire                _GEN_50 = _GEN_42 | _GEN_34 & state.mstatus[1];
   wire                _GEN_51 =
-    _GEN_46 | _GEN_47 | _GEN_48 | _GEN_49 | _GEN_50 | _GEN_0[5] & state.mie[5]
-    & (state.mideleg[5] ? _GEN_45 : _GEN_43);
-  wire [63:0]         _GEN_52 =
-    _GEN_46
+    _GEN_0[11] & state.mie[11] & (state.mideleg[11] ? _GEN_50 : _GEN_49);
+  wire                _GEN_52 =
+    _GEN_0[3] & state.mie[3] & (state.mideleg[3] ? _GEN_50 : _GEN_49);
+  wire                _GEN_53 =
+    _GEN_0[7] & state.mie[7] & (state.mideleg[7] ? _GEN_50 : _GEN_49);
+  wire                _GEN_54 =
+    _GEN_0[9] & state.mie[9] & (state.mideleg[9] ? _GEN_50 : _GEN_49);
+  wire                _GEN_55 =
+    _GEN_0[1] & state.mie[1] & (state.mideleg[1] ? _GEN_50 : _GEN_49);
+  wire                _GEN_56 =
+    _GEN_51 | _GEN_52 | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_0[5] & state.mie[5]
+    & (state.mideleg[5] ? _GEN_50 : _GEN_49);
+  wire [63:0]         _GEN_57 =
+    _GEN_51
       ? 64'h800000000000000B
-      : _GEN_47
+      : _GEN_52
           ? 64'h8000000000000003
-          : _GEN_48
+          : _GEN_53
               ? 64'h8000000000000007
-              : _GEN_49 ? 64'h8000000000000009 : {61'h1000000000000000, ~_GEN_50, 2'h1};
-  wire                _GEN_53 = interrupt_boundary & ~_GEN_41 & _GEN_51;
-  wire                _GEN_54 = _GEN_41 | _GEN_53;
-  wire [63:0]         _GEN_55 = _GEN_41 ? _GEN_42 : _GEN_52;
-  wire [63:0]         _GEN_56 =
-    _GEN_41
-      ? (_GEN_38
+              : _GEN_54 ? 64'h8000000000000009 : {61'h1000000000000000, ~_GEN_55, 2'h1};
+  wire                _GEN_58 = interrupt_boundary & ~_GEN_47 & _GEN_56;
+  wire                _GEN_59 = _GEN_47 | _GEN_58;
+  wire [63:0]         _GEN_60 = _GEN_47 ? _GEN_48 : _GEN_57;
+  wire [63:0]         _GEN_61 =
+    _GEN_47
+      ? (_GEN_44
            ? commit_in.bits.exception_value
-           : _GEN_32 | _GEN_37 ? {32'h0, commit_in.bits.instruction} : 64'h0)
+           : _GEN_38 | _GEN_43 ? {32'h0, commit_in.bits.instruction} : 64'h0)
       : 64'h0;
-  wire                _GEN_57 =
-    _GEN_41
-      ? _GEN_34
-        & (_GEN_42 == 64'h0
+  wire                _GEN_62 =
+    _GEN_47
+      ? _GEN_40
+        & (_GEN_48 == 64'h0
              ? state.medeleg[0]
-             : _GEN_42 == 64'h2
-                 ? state.medeleg[2]
-                 : _GEN_42 == 64'h3
-                     ? state.medeleg[3]
-                     : _GEN_42 == 64'h4
-                         ? state.medeleg[4]
-                         : _GEN_42 == 64'h6
-                             ? state.medeleg[6]
-                             : _GEN_42 == 64'h8
-                                 ? state.medeleg[8]
-                                 : _GEN_42 == 64'hC
-                                     ? state.medeleg[12]
-                                     : _GEN_42 == 64'hD
-                                         ? state.medeleg[13]
-                                         : _GEN_42 == 64'hF & state.medeleg[15])
-      : _GEN_51
-        & (_GEN_52[3:0] == 4'h1
+             : _GEN_48 == 64'h1
+                 ? state.medeleg[1]
+                 : _GEN_48 == 64'h2
+                     ? state.medeleg[2]
+                     : _GEN_48 == 64'h3
+                         ? state.medeleg[3]
+                         : _GEN_48 == 64'h4
+                             ? state.medeleg[4]
+                             : _GEN_48 == 64'h5
+                                 ? state.medeleg[5]
+                                 : _GEN_48 == 64'h6
+                                     ? state.medeleg[6]
+                                     : _GEN_48 == 64'h7
+                                         ? state.medeleg[7]
+                                         : _GEN_48 == 64'h8
+                                             ? state.medeleg[8]
+                                             : _GEN_48 == 64'hC
+                                                 ? state.medeleg[12]
+                                                 : _GEN_48 == 64'hD
+                                                     ? state.medeleg[13]
+                                                     : _GEN_48 == 64'hF
+                                                       & state.medeleg[15])
+      : _GEN_56
+        & (_GEN_57[3:0] == 4'h1
              ? state.mideleg[1]
-             : _GEN_52[3:0] == 4'h5
+             : _GEN_57[3:0] == 4'h5
                  ? state.mideleg[5]
-                 : _GEN_52[3:0] == 4'h9 & state.mideleg[9]);
-  wire [63:0]         _GEN_58 =
-    _GEN_26
-      ? commit_in.bits.csr_source
-      : _GEN_27
-          ? _GEN_25 | commit_in.bits.csr_source
-          : ({64{commit_in.bits.csr_operation != 2'h3}} | ~commit_in.bits.csr_source)
-            & _GEN_25;
-  wire                _GEN_59 = _GEN_31 & _GEN_29 & _GEN_28;
-  wire                _GEN_60 = commit_in.valid & ~_GEN_54 & _GEN_33;
-  wire                _GEN_61 = commit_in.valid & ~_GEN_54 & _GEN_35;
-  wire [1:0]          _GEN_62 =
-    state.mstatus[12:11] == 2'h1 ? 2'h1 : {2{&(state.mstatus[12:11])}};
+                 : _GEN_57[3:0] == 4'h9 & state.mideleg[9]);
   wire [63:0]         _GEN_63 =
+    _GEN_31
+      ? commit_in.bits.csr_source
+      : _GEN_32
+          ? _GEN_30 | commit_in.bits.csr_source
+          : ({64{commit_in.bits.csr_operation != 2'h3}} | ~commit_in.bits.csr_source)
+            & _GEN_30;
+  wire                _GEN_64 = _GEN_37 & _GEN_35 & _GEN_33;
+  wire                _GEN_65 = commit_in.valid & ~_GEN_59 & _GEN_39;
+  wire                _GEN_66 = commit_in.valid & ~_GEN_59 & _GEN_41;
+  wire [1:0]          _GEN_67 =
+    state.mstatus[12:11] == 2'h1 ? 2'h1 : {2{&(state.mstatus[12:11])}};
+  wire [63:0]         _GEN_68 =
     state.mstatus[1] ? state.mstatus | 64'h20 : state.mstatus & 64'hFFFFFFFFFFFFFFDF;
-  wire                _GEN_64 = _GEN_54 & _GEN_57;
-  wire [63:0]         _GEN_65 =
-    {_GEN_53 ? interrupt_pc[63:2] : commit_in.bits.pc[63:2], 2'h0};
-  wire [63:0]         _GEN_66 = {_GEN_58[63:2], 2'h0};
-  wire [63:0]         _GEN_67 = {61'h0, _GEN_58[2:0]};
-  wire [8:0]          _GEN_68 = state.mideleg[9:1] & 9'h111;
-  wire [63:0]         _GEN_69 = {54'h0, _GEN_58[9:1] & 9'h111, 1'h0};
-  wire                _GEN_70 = _GEN_54 | _GEN_60 | _GEN_61 | ~_GEN_59;
-  wire                _GEN_71 = _GEN_60 | _GEN_61 | ~_GEN_59;
-  wire                _GEN_72 = _GEN_64 | _GEN_54 | _GEN_60 | _GEN_61 | ~_GEN_59;
-  wire RicketCsrState _GEN_73 =
+  wire                _GEN_69 = _GEN_59 & _GEN_62;
+  wire [63:0]         _GEN_70 =
+    {_GEN_58 ? interrupt_pc[63:2] : commit_in.bits.pc[63:2], 2'h0};
+  wire [63:0]         _GEN_71 = {_GEN_63[63:2], 2'h0};
+  wire [63:0]         _GEN_72 = {61'h0, _GEN_63[2:0]};
+  wire [8:0]          _GEN_73 = state.mideleg[9:1] & 9'h111;
+  wire [63:0]         _GEN_74 = {54'h0, _GEN_63[9:1] & 9'h111, 1'h0};
+  wire                _GEN_75 = _GEN_59 | _GEN_65 | _GEN_66 | ~_GEN_64;
+  wire                _GEN_76 = _GEN_65 | _GEN_66 | ~_GEN_64;
+  wire                _GEN_77 = _GEN_69 | _GEN_59 | _GEN_65 | _GEN_66 | ~_GEN_64;
+  wire RicketCsrState _GEN_78 =
     '{mstatus:
-        (_GEN_64 | _GEN_54
-           ? (_GEN_57
-                ? (_GEN_44
-                     ? _GEN_63 & 64'hFFFFFFFFFFFFFFFD | 64'h100
-                     : _GEN_63 & 64'hFFFFFFFFFFFFFEFD)
+        (_GEN_69 | _GEN_59
+           ? (_GEN_62
+                ? (_GEN_34
+                     ? _GEN_68 & 64'hFFFFFFFFFFFFFFFD | 64'h100
+                     : _GEN_68 & 64'hFFFFFFFFFFFFFEFD)
                 : (state.mstatus[3]
                      ? state.mstatus | 64'h80
                      : state.mstatus & 64'hFFFFFFFFFFFFFF7F) & 64'hFFFFFFFFFFFFE7F7
                   | {51'h0, privilege_state, 11'h0})
-           : _GEN_60
-               ? ({64{&_GEN_62}} | 64'hFFFFFFFFFFFDFFFF)
+           : _GEN_65
+               ? ({64{&_GEN_67}} | 64'hFFFFFFFFFFFDFFFF)
                  & ((state.mstatus[7]
                        ? state.mstatus & 64'hFFFFFFFFFFFFE7FF | 64'h8
                        : state.mstatus & 64'hFFFFFFFFFFFFE7F7) | 64'h80)
-               : _GEN_61
+               : _GEN_66
                    ? ((state.mstatus[5]
                          ? state.mstatus | 64'h2
                          : state.mstatus & 64'hFFFFFFFFFFFFFFFD) | 64'h20)
                      & 64'hFFFFFFFFFFFDFEFF
-                   : _GEN_59
+                   : _GEN_64
                        ? (_GEN_1
                             ? {state.mstatus[63:2] & 62'h3FFFFFFFFFFCFFB3, 2'h0}
-                              | {44'h0, _GEN_58[19:0] & 20'hC0133}
+                              | {44'h0, _GEN_63[19:0] & 20'hC0133}
                             : _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
                               | _GEN_10 | _GEN_11 | commit_in.bits.csr_address != 12'h300
                                 ? state.mstatus
                                 : {state.mstatus[63:2] & 62'h3FFFFFFFFFFC7991, 2'h0}
-                                  | {44'h0, _GEN_58[19:0] & 20'hE19BB})
+                                  | {44'h0, _GEN_63[19:0] & 20'hE19BB})
                        : state.mstatus),
       medeleg:
-        (_GEN_72
+        (_GEN_77
            ? state.medeleg
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_12 | commit_in.bits.csr_address != 12'h302
+             | _GEN_10 | _GEN_11 | _GEN_14 | commit_in.bits.csr_address != 12'h302
                ? state.medeleg
-               : {48'h0, _GEN_58[15:0] & 16'hB15D}),
+               : {48'h0, _GEN_63[15:0] & 16'hB1FF}),
       mideleg:
-        (_GEN_72
+        (_GEN_77
            ? state.mideleg
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14
+             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16
              | commit_in.bits.csr_address != 12'h303
                ? state.mideleg
-               : _GEN_69),
+               : _GEN_74),
       mie:
-        (_GEN_72
+        (_GEN_77
            ? state.mie
            : _GEN_1
                ? state.mie
                : _GEN_2
-                   ? state.mie & ~state.mideleg | _GEN_58 & state.mideleg
+                   ? state.mie & ~state.mideleg | _GEN_63 & state.mideleg
                    : _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9 | _GEN_10
-                     | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15
+                     | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17
                      | commit_in.bits.csr_address != 12'h304
                        ? state.mie
-                       : {52'h0, _GEN_58[11:1] & 11'h555, 1'h0}),
+                       : {52'h0, _GEN_63[11:1] & 11'h555, 1'h0}),
       mip:
-        (_GEN_72
+        (_GEN_77
            ? state.mip
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
                ? state.mip
                : _GEN_10
-                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_68, 1'h1} | _GEN_58
-                     & {54'h0, _GEN_68, 1'h0}
-                   : _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17 | _GEN_18
-                     | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
+                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_73, 1'h1} | _GEN_63
+                     & {54'h0, _GEN_73, 1'h0}
+                   : _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19 | _GEN_20
+                     | _GEN_22 | _GEN_23 | _GEN_24 | _GEN_25
                      | commit_in.bits.csr_address != 12'h344
                        ? state.mip
-                       : _GEN_69),
+                       : _GEN_74),
       mtvec:
-        (_GEN_72
+        (_GEN_77
            ? state.mtvec
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16
+             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18
              | commit_in.bits.csr_address != 12'h305
                ? state.mtvec
-               : _GEN_66),
+               : _GEN_71),
       mcounteren:
-        (_GEN_72
+        (_GEN_77
            ? state.mcounteren
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
+             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
              | commit_in.bits.csr_address != 12'h306
                ? state.mcounteren
-               : _GEN_67),
+               : _GEN_72),
       mscratch:
-        (_GEN_72
+        (_GEN_77
            ? state.mscratch
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
-             | _GEN_18 | commit_in.bits.csr_address != 12'h340
+             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
+             | _GEN_20 | commit_in.bits.csr_address != 12'h340
                ? state.mscratch
-               : _GEN_58),
+               : _GEN_63),
       mepc:
-        (_GEN_64
+        (_GEN_69
            ? state.mepc
-           : _GEN_54
-               ? _GEN_65
-               : _GEN_71
+           : _GEN_59
+               ? _GEN_70
+               : _GEN_76
                    ? state.mepc
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
-                     | _GEN_18 | _GEN_20 | commit_in.bits.csr_address != 12'h341
+                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
+                     | _GEN_20 | _GEN_22 | commit_in.bits.csr_address != 12'h341
                        ? state.mepc
-                       : _GEN_66),
+                       : _GEN_71),
       mcause:
-        (_GEN_64
+        (_GEN_69
            ? state.mcause
-           : _GEN_54
-               ? _GEN_55
-               : _GEN_71
+           : _GEN_59
+               ? _GEN_60
+               : _GEN_76
                    ? state.mcause
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
-                     | _GEN_18 | _GEN_20 | _GEN_21 | commit_in.bits.csr_address != 12'h342
+                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
+                     | _GEN_20 | _GEN_22 | _GEN_23 | commit_in.bits.csr_address != 12'h342
                        ? state.mcause
-                       : _GEN_58),
+                       : _GEN_63),
       mtval:
-        (_GEN_64
+        (_GEN_69
            ? state.mtval
-           : _GEN_54
-               ? _GEN_56
-               : _GEN_71
+           : _GEN_59
+               ? _GEN_61
+               : _GEN_76
                    ? state.mtval
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_14 | _GEN_15 | _GEN_16 | _GEN_17
-                     | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22
+                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
+                     | _GEN_20 | _GEN_22 | _GEN_23 | _GEN_24
                      | commit_in.bits.csr_address != 12'h343
                        ? state.mtval
-                       : _GEN_58),
+                       : _GEN_63),
       stvec:
-        (_GEN_72
+        (_GEN_77
            ? state.stvec
            : _GEN_1 | _GEN_2 | commit_in.bits.csr_address != 12'h105
                ? state.stvec
-               : _GEN_66),
+               : _GEN_71),
       scounteren:
-        (_GEN_72
+        (_GEN_77
            ? state.scounteren
            : _GEN_1 | _GEN_2 | _GEN_3 | commit_in.bits.csr_address != 12'h106
                ? state.scounteren
-               : _GEN_67),
+               : _GEN_72),
       sscratch:
-        (_GEN_72
+        (_GEN_77
            ? state.sscratch
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | commit_in.bits.csr_address != 12'h140
                ? state.sscratch
-               : _GEN_58),
+               : _GEN_63),
       sepc:
-        (_GEN_64
-           ? _GEN_65
-           : _GEN_70
+        (_GEN_69
+           ? _GEN_70
+           : _GEN_75
                ? state.sepc
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6
                  | commit_in.bits.csr_address != 12'h141
                    ? state.sepc
-                   : _GEN_66),
+                   : _GEN_71),
       scause:
-        (_GEN_64
-           ? _GEN_55
-           : _GEN_70
+        (_GEN_69
+           ? _GEN_60
+           : _GEN_75
                ? state.scause
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7
                  | commit_in.bits.csr_address != 12'h142
                    ? state.scause
-                   : _GEN_58),
+                   : _GEN_63),
       stval:
-        (_GEN_64
-           ? _GEN_56
-           : _GEN_70
+        (_GEN_69
+           ? _GEN_61
+           : _GEN_75
                ? state.stval
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8
                  | commit_in.bits.csr_address != 12'h143
                    ? state.stval
-                   : _GEN_58),
+                   : _GEN_63),
       satp:
-        (_GEN_72
+        (_GEN_77
            ? state.satp
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
              | _GEN_10 | commit_in.bits.csr_address != 12'h180
                ? state.satp
-               : _GEN_58[63:60] == 4'h0 | _GEN_58[63:60] == 4'h8
-                   ? {_GEN_58[63:60], 16'h0, _GEN_58[43:0]}
+               : (|{_GEN_63[63:60] == 4'h0, _GEN_63[63:60] == 4'h8})
+                   ? {_GEN_63[63:60], 16'h0, _GEN_63[43:0]}
                    : state.satp)};
   always @(posedge clock) begin
     if (reset) begin
@@ -2589,21 +2688,21 @@ module RicketCsrFile(
     end
     else begin
       privilege_state <=
-        _GEN_54
-          ? {~_GEN_57, 1'h1}
-          : _GEN_60 ? _GEN_62 : _GEN_61 ? {1'h0, state.mstatus[8]} : privilege_state;
-      state <= _GEN_73;
+        _GEN_59
+          ? {~_GEN_62, 1'h1}
+          : _GEN_65 ? _GEN_67 : _GEN_66 ? {1'h0, state.mstatus[8]} : privilege_state;
+      state <= _GEN_78;
     end
   end // always @(posedge)
   assign redirect_out =
-    '{valid: (_GEN_54 | _GEN_60 | _GEN_61),
+    '{valid: (_GEN_59 | _GEN_65 | _GEN_66),
       bits:
-        (_GEN_54
-           ? (_GEN_57 ? state.stvec : state.mtvec)
-           : _GEN_60 ? state.mepc : state.sepc)};
-  assign interrupt_request = _GEN_51;
-  assign writeback_valid = _GEN_31 & _GEN_29 & (|commit_in.bits.rd);
-  assign writeback_value = _GEN_25;
+        (_GEN_59
+           ? (_GEN_62 ? state.stvec : state.mtvec)
+           : _GEN_65 ? state.mepc : state.sepc)};
+  assign interrupt_request = _GEN_56;
+  assign writeback_valid = _GEN_37 & _GEN_35 & (|commit_in.bits.rd);
+  assign writeback_value = _GEN_30;
   assign privilege = privilege_state;
   assign mstatus = state.mstatus;
   assign satp = state.satp;
@@ -2731,20 +2830,20 @@ module AtomicFork(
 );
 
   wire _GEN = egress_0_in.ready & egress_1_in.ready;
-  wire _GEN_0 = egress_3_in.ready & egress_4_in.ready;
-  wire _GEN_1 = egress_2_in.ready & _GEN_0;
-  wire _GEN_2 = _GEN & egress_2_in.ready;
-  assign ingress_out = '{ready: (_GEN & _GEN_1)};
+  wire _GEN_0 = egress_2_in.ready & egress_3_in.ready;
+  wire _GEN_1 = _GEN & _GEN_0;
+  wire _GEN_2 = egress_4_in.ready & _GEN_0;
+  wire _GEN_3 = egress_4_in.ready & _GEN;
+  assign ingress_out = '{ready: (_GEN_1 & egress_4_in.ready)};
   assign egress_0_out =
-    '{valid: (ingress_in.valid & _GEN_1 & egress_1_in.ready), bits: ingress_in.bits};
+    '{valid: (ingress_in.valid & _GEN_2 & egress_1_in.ready), bits: ingress_in.bits};
   assign egress_1_out =
-    '{valid: (ingress_in.valid & _GEN_1 & egress_0_in.ready), bits: ingress_in.bits};
+    '{valid: (ingress_in.valid & _GEN_2 & egress_0_in.ready), bits: ingress_in.bits};
   assign egress_2_out =
-    '{valid: (ingress_in.valid & _GEN & _GEN_0), bits: ingress_in.bits};
+    '{valid: (ingress_in.valid & _GEN_3 & egress_3_in.ready), bits: ingress_in.bits};
   assign egress_3_out =
-    '{valid: (ingress_in.valid & _GEN_2 & egress_4_in.ready), bits: ingress_in.bits};
-  assign egress_4_out =
-    '{valid: (ingress_in.valid & _GEN_2 & egress_3_in.ready), bits: ingress_in.bits};
+    '{valid: (ingress_in.valid & _GEN_3 & egress_2_in.ready), bits: ingress_in.bits};
+  assign egress_4_out = '{valid: (ingress_in.valid & _GEN_1), bits: ingress_in.bits};
 endmodule
 
 module Arbiter(
@@ -2759,38 +2858,37 @@ module Arbiter(
   output [1:0]                                                 chosen
 );
 
-  wire [2:0] _GEN = {{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN[1:0] | {_GEN[0], 1'h0};
-  wire [2:0] _GEN_1 = _GEN & {~_GEN_0, 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[2'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[2'h1])};
-  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_1[2'h2])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid
-               ? ingress_1_in.bits
-               : ingress_2_in.valid ? ingress_2_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[2:1] & ~_GEN_0;
+  wire [2:0]             _GEN =
+    {{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [2:0]             _GEN_0 = _GEN & {~(_GEN[1:0] | {_GEN[0], 1'h0}), 1'h1};
+  wire [68:0]            _GEN_1 = /*cast(bit[68:0])*/ingress_0_in.bits;
+  wire [68:0]            _GEN_2 = /*cast(bit[68:0])*/ingress_1_in.bits;
+  wire [68:0]            _GEN_3 = /*cast(bit[68:0])*/ingress_2_in.bits;
+  wire RegisterFileWrite _GEN_4 =
+    /*cast(bit)*/_GEN_1 & {69{_GEN_0[0]}} | _GEN_2 & {69{_GEN_0[1]}} | _GEN_3
+    & {69{_GEN_0[2]}} | _GEN_1 & {69{_GEN_0 == 3'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_0[2])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_4};
+  assign chosen = _GEN_0[2:1];
 endmodule
 
 module RicketMmu(
-  input                                                                                                                                                                clock,
-                                                                                                                                                                       reset,
-  input  struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; } instruction_in,
-  input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                   data_in,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                   instruction_memory_in,
-  input  struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }      data_memory_in,
-  input  [1:0]                                                                                                                                                         privilege,
-  input  [63:0]                                                                                                                                                        mstatus,
-                                                                                                                                                                       satp,
-  input                                                                                                                                                                invalidate_all,
-  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                   instruction_out,
-  output struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }      data_out,
-  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; } instruction_memory_out,
-  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                   data_memory_out
+  input                                                                                                                                                                                       clock,
+                                                                                                                                                                                              reset,
+  input  struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                        instruction_in,
+  input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                          data_in,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                                          instruction_memory_in,
+  input  struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; } data_memory_in,
+  input  [1:0]                                                                                                                                                                                privilege,
+  input  [63:0]                                                                                                                                                                               mstatus,
+                                                                                                                                                                                              satp,
+  input                                                                                                                                                                                       invalidate_all,
+  output struct packed {struct packed {logic ready; } request; struct packed {logic valid; RicketInstructionResp bits; } response; }                                                          instruction_out,
+  output struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; } data_out,
+  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RicketInstructionReq bits; } request; struct packed {logic ready; } response; }                        instruction_memory_out,
+  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                          data_memory_out
 );
 
   wire struct packed {logic ready; } _instruction_owners_ingress_out;
@@ -2815,8 +2913,9 @@ module RicketMmu(
   wire [1:0]                         _GEN_4 = _GEN_3 ? _GEN_2 : privilege;
   wire                               _GEN_5 = _GEN_0 & _GEN_4 != 2'h3;
   wire [1:0]                         _GEN_6 =
-    data_in.request.bits.access == 3'h2 | data_in.request.bits.access == 3'h4
-    | data_in.request.bits.access == 3'h5
+    (|{data_in.request.bits.access == 3'h2,
+       data_in.request.bits.access == 3'h4,
+       data_in.request.bits.access == 3'h5})
       ? 2'h2
       : 2'h1;
   reg                                walk_active;
@@ -3023,6 +3122,8 @@ module RicketMmu(
   assign data_out =
     '{request: _GEN_45,
       request_fault: (data_in.request.valid & _GEN_18),
+      request_access_fault:
+        (data_in.request.valid & ~_GEN_18 & data_memory_in.request_access_fault),
       response: _GEN_46,
       drained: (~walk_active & ~fault_valid & data_memory_in.drained)};
   assign instruction_memory_out =
@@ -3669,8 +3770,8 @@ module RicketL1ICache(
   `ifndef SYNTHESIS
     l1i_refill_state_clean:
       assert property (@(posedge clock) disable iff (_GEN_29)
-                         _refill_completion_out.bits.state == 2'h1
-                         | _refill_completion_out.bits.state == 2'h2);
+                         |{_refill_completion_out.bits.state == 2'h1,
+                           _refill_completion_out.bits.state == 2'h2});
   `endif // not def SYNTHESIS
   wire                               _GEN_30 = ~_GEN_28;
   `ifndef SYNTHESIS
@@ -4275,7 +4376,8 @@ module RicketLineRefill(
   `ifndef SYNTHESIS
     line_refill_opcode_supported:
       assert property (@(posedge clock) disable iff (_GEN_5)
-                         command_in.bits.opcode == 7'h2 | command_in.bits.opcode == 7'h7);
+                         |{command_in.bits.opcode == 7'h2,
+                           command_in.bits.opcode == 7'h7});
   `endif // not def SYNTHESIS
   wire                        _GEN_6 =
     active_state & ~request_sent
@@ -4583,14 +4685,23 @@ module RicketCleanSnoop(
   wire                        _GEN_10 =
     active_state & uses_lookup & ~lookup_complete & lookup_result_in.valid;
   wire                        _GEN_11 =
-    request.opcode == 5'h1 | request.opcode == 5'h2 | request.opcode == 5'h4
-    | request.opcode == 5'h8;
+    |{request.opcode == 5'h1,
+      request.opcode == 5'h2,
+      request.opcode == 5'h4,
+      request.opcode == 5'h8};
   wire                        _GEN_12 =
-    request.opcode == 5'h5 | request.opcode == 5'h6 | request.opcode == 5'h7
-    | request.opcode == 5'h9 | request.opcode == 5'hA | request.opcode == 5'h15
-    | request.opcode == 5'h11 | request.opcode == 5'h12 | request.opcode == 5'h13
-    | request.opcode == 5'h14 | request.opcode == 5'h16 | request.opcode == 5'h17
-    | request.ret_to_src;
+    (|{request.opcode == 5'h5,
+       request.opcode == 5'h6,
+       request.opcode == 5'h7,
+       request.opcode == 5'h9,
+       request.opcode == 5'hA,
+       request.opcode == 5'h15,
+       request.opcode == 5'h11,
+       request.opcode == 5'h12,
+       request.opcode == 5'h13,
+       request.opcode == 5'h14,
+       request.opcode == 5'h16,
+       request.opcode == 5'h17}) | request.ret_to_src;
   wire                        _GEN_13 = active_state & (~uses_lookup | lookup_complete);
   wire CHIRspFlit             _GEN_14 =
     '{cache_line_id: (6'h0),
@@ -4683,17 +4794,17 @@ module Arbiter_1(
   output                                                           chosen
 );
 
-  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1'h1])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid ? ingress_1_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
+  wire [1:0]                 _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0]                 _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
+  wire [32:0]                _GEN_1 = /*cast(bit[32:0])*/ingress_0_in.bits;
+  wire [32:0]                _GEN_2 = /*cast(bit[32:0])*/ingress_1_in.bits;
+  wire RicketInstructionResp _GEN_3 =
+    /*cast(bit)*/_GEN_1 & {33{_GEN_0[0]}} | _GEN_2 & {33{_GEN_0[1]}} | _GEN_1
+    & {33{_GEN_0 == 2'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
+  assign chosen = _GEN_0[1];
 endmodule
 
 module Queue_2(
@@ -4768,17 +4879,17 @@ module Arbiter_2(
   output                                                chosen
 );
 
-  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1'h1])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid ? ingress_1_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
+  wire [1:0]      _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0]      _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
+  wire [70:0]     _GEN_1 = /*cast(bit[70:0])*/ingress_0_in.bits;
+  wire [70:0]     _GEN_2 = /*cast(bit[70:0])*/ingress_1_in.bits;
+  wire CHIRspFlit _GEN_3 =
+    /*cast(bit)*/_GEN_1 & {71{_GEN_0[0]}} | _GEN_2 & {71{_GEN_0[1]}} | _GEN_1
+    & {71{_GEN_0 == 2'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
+  assign chosen = _GEN_0[1];
 endmodule
 
 module RicketL1DCache(
@@ -4787,7 +4898,7 @@ module RicketL1DCache(
   input  [6:0]                                                                                                                                                                                                                                                                                                                                  node_id,
   input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                                                                                                                                                                            core_in,
   input  struct packed {struct packed {logic ready; } requests; struct packed {logic ready; } requester_responses; struct packed {logic ready; } request_data; struct packed {logic valid; CHIRspFlit bits; } responses; struct packed {logic valid; CHIDatFlit bits; } response_data; struct packed {logic valid; CHISnpFlit bits; } snoops; } chi_in,
-  output struct packed {struct packed {logic ready; } request; logic request_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                                                                                                                                                                               core_out,
+  output struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                                                                                                                                                   core_out,
   output struct packed {struct packed {logic valid; CHIReqFlit bits; } requests; struct packed {logic valid; CHIRspFlit bits; } requester_responses; struct packed {logic valid; CHIDatFlit bits; } request_data; struct packed {logic ready; } responses; struct packed {logic ready; } response_data; struct packed {logic ready; } snoops; } chi_out
 );
 
@@ -4854,7 +4965,7 @@ module RicketL1DCache(
     & _states_port_out.response.valid;
   wire                               _GEN_6 = _lookup_egress_out.bits.access == 3'h3;
   wire                               _GEN_7 =
-    _GEN_5 & (_lookup_egress_out.bits.access == 3'h1 | _GEN_6);
+    _GEN_5 & (|{_lookup_egress_out.bits.access == 3'h1, _GEN_6});
   wire                               _GEN_8 = _lookup_egress_out.bits.access == 3'h2;
   wire                               _GEN_9 = _GEN_5 & _GEN_8;
   wire                               _GEN_10 = _lookup_egress_out.bits.access == 3'h5;
@@ -4871,12 +4982,14 @@ module RicketL1DCache(
     _states_port_out.response.bits[1'h0] == 3'h6;
   wire                               _GEN_18 =
     _GEN_15 & _GEN_4
-    & (_states_port_out.response.bits[1'h0] == 3'h2 | _GEN_16
-       | _states_port_out.response.bits[1'h0] == 3'h5 | _GEN_17);
+    & (|{_states_port_out.response.bits[1'h0] == 3'h2,
+         _GEN_16,
+         _states_port_out.response.bits[1'h0] == 3'h5,
+         _GEN_17});
   wire                               _GEN_19 = _GEN_7 & ~_GEN_4 | _GEN_15 & ~_GEN_18;
   wire                               _GEN_20 =
     _GEN_19 & ~_GEN_4 & _GEN_3
-    & (_states_port_out.response.bits[1'h0] == 3'h3 | _GEN_16 | _GEN_17);
+    & (|{_states_port_out.response.bits[1'h0] == 3'h3, _GEN_16, _GEN_17});
   wire [7:0][63:0]                   _GEN_21 =
     /*cast(bit[7:0][63:0])*/_lines_port_out.response.bits;
   wire                               _GEN_22 = _lookup_egress_out.valid & _GEN_19;
@@ -4885,7 +4998,7 @@ module RicketL1DCache(
   assign _GEN_1 = |({{_GEN_20 & _GEN}, {~_GEN_20 & _GEN_0}});
   wire RicketLineRefillCommand_1     _GEN_25 =
     '{line_address: {_lookup_egress_out.bits.address[63:6], 6'h0},
-      opcode: (_GEN_8 | _GEN_12 | _GEN_10 ? 7'h7 : 7'h2),
+      opcode: ((|{_GEN_8, _GEN_12, _GEN_10}) ? 7'h7 : 7'h2),
       context_0: _lookup_egress_out.bits};
   assign _GEN_0 = _refill_commands_ingress_0_out.ready;
   wire RicketLineWritebackCommand    _GEN_26 =
@@ -4897,9 +5010,9 @@ module RicketL1DCache(
   wire RicketLineRefillCommand_1     _GEN_27 =
     '{line_address: {_writeback_completion_out.bits.context_0.address[63:6], 6'h0},
       opcode:
-        (_writeback_completion_out.bits.context_0.access == 3'h2
-         | _writeback_completion_out.bits.context_0.access == 3'h4
-         | _writeback_completion_out.bits.context_0.access == 3'h5
+        ((|{_writeback_completion_out.bits.context_0.access == 3'h2,
+            _writeback_completion_out.bits.context_0.access == 3'h4,
+            _writeback_completion_out.bits.context_0.access == 3'h5})
            ? 7'h7
            : 7'h2),
       context_0: _writeback_completion_out.bits.context_0};
@@ -4924,9 +5037,9 @@ module RicketL1DCache(
   wire                               _GEN_32 = _GEN_31 == 3'h1;
   wire                               _GEN_33 =
     _refill_completion_out.valid
-    & (_refill_completion_out.bits.context_0.access == 3'h2
-       | _refill_completion_out.bits.context_0.access == 3'h4
-       | _refill_completion_out.bits.context_0.access == 3'h5);
+    & (|{_refill_completion_out.bits.context_0.access == 3'h2,
+         _refill_completion_out.bits.context_0.access == 3'h4,
+         _refill_completion_out.bits.context_0.access == 3'h5});
   wire [63:0]                        _GEN_34 =
     _GEN_33
       ? _refill_completion_out.bits.context_0.address
@@ -5028,7 +5141,7 @@ module RicketL1DCache(
   wire                               _GEN_48 = _GEN_13 & ~_GEN_14;
   wire RicketDataResp                _GEN_49 =
     '{data:
-        (_GEN_32 | _GEN_31 == 3'h3 | _GEN_31 == 3'h5
+        ((|{_GEN_32, _GEN_31 == 3'h3, _GEN_31 == 3'h5})
            ? _load_gen_value
            : {63'h0, _GEN_31 == 3'h4 & _GEN_48}),
       tag:
@@ -5346,20 +5459,20 @@ module RicketL1DCache(
          {_snoop_update_out.bits.address[11:6] != 6'h1 & valid_lines[6'h1]},
          {(|(_snoop_update_out.bits.address[11:6])) & valid_lines[6'h0]}}
       : _GEN_57;
-  wire struct packed {logic ready; } _GEN_59 = '{ready: _GEN_23};
-  wire struct packed {logic valid; RicketLineRefillCommand_1 bits; } _GEN_60 =
+  wire struct packed {logic valid; RicketLineRefillCommand_1 bits; } _GEN_59 =
     '{valid: _writeback_completion_out.valid, bits: _GEN_27};
+  wire struct packed {logic valid; RicketLineWritebackCommand bits; } _GEN_60 =
+    '{valid: _GEN_24, bits: _GEN_26};
   wire struct packed {logic valid; RicketLineRefillCommand_1 bits; } _GEN_61 =
     '{valid: (_GEN_22 & ~_GEN_20), bits: _GEN_25};
-  wire struct packed {logic valid; RicketDataResp bits; } _GEN_62 =
+  wire struct packed {logic ready; } _GEN_62 = '{ready: _GEN_23};
+  wire struct packed {logic valid; RicketDataResp bits; } _GEN_63 =
     '{valid: (_GEN_47 | _GEN_18 | _GEN_48 | _refill_completion_out.valid), bits: _GEN_49};
-  wire struct packed {logic valid; RicketDataReq bits; } _GEN_63 =
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN_64 =
     '{valid: (core_in.request.valid & _GEN_44), bits: core_in.request.bits};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_64 =
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_65 =
     '{valid: (chi_in.responses.valid & ~_writeback_command_out.ready),
       bits: chi_in.responses.bits};
-  wire struct packed {logic valid; RicketLineWritebackCommand bits; } _GEN_65 =
-    '{valid: _GEN_24, bits: _GEN_26};
   wire struct packed {logic valid; RicketDataSnoopLookupResult bits; } _GEN_66 =
     '{valid: (_tags_port_out.response.valid & _states_port_out.response.valid),
       bits: _GEN_43};
@@ -5482,11 +5595,11 @@ module RicketL1DCache(
     .clock          (clock),
     .reset          (reset),
     .node_id        (node_id),
-    .command_in     (_GEN_65),
+    .command_in     (_GEN_60),
     .completion_in  (_refill_commands_ingress_1_out),
     .requests_in    (_protocol_requests_ingress_1_out),
     .data_in        (_protocol_data_ingress_0_out),
-    .responses_in   (_GEN_64),
+    .responses_in   (_GEN_65),
     .command_out    (_writeback_command_out),
     .completion_out (_writeback_completion_out),
     .requests_out   (_writeback_requests_out),
@@ -5496,15 +5609,15 @@ module RicketL1DCache(
   Pipe_3 lookup (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_63),
-    .egress_in   (_GEN_59),
+    .ingress_in  (_GEN_64),
+    .egress_in   (_GEN_62),
     .ingress_out (_lookup_ingress_out),
     .egress_out  (_lookup_egress_out)
   );
   ValidPipe_2 responses (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_62),
+    .ingress_in (_GEN_63),
     .egress_out (_responses_egress_out)
   );
   Arbiter_3 protocol_requests (
@@ -5536,7 +5649,7 @@ module RicketL1DCache(
   );
   Arbiter_5 refill_commands (
     .ingress_0_in  (_GEN_61),
-    .ingress_1_in  (_GEN_60),
+    .ingress_1_in  (_GEN_59),
     .egress_in     (_refill_command_out),
     .ingress_0_out (_refill_commands_ingress_0_out),
     .ingress_1_out (_refill_commands_ingress_1_out),
@@ -5635,6 +5748,7 @@ module RicketL1DCache(
   assign core_out =
     '{request: _GEN_75,
       request_fault: (1'h0),
+      request_access_fault: (1'h0),
       response: _responses_egress_out,
       drained:
         (~_GEN_46 & ~_lookup_egress_out.valid & _refill_command_out.ready
@@ -6156,7 +6270,8 @@ module RicketLineRefill_1(
   `ifndef SYNTHESIS
     line_refill_opcode_supported:
       assert property (@(posedge clock) disable iff (_GEN_5)
-                         command_in.bits.opcode == 7'h2 | command_in.bits.opcode == 7'h7);
+                         |{command_in.bits.opcode == 7'h2,
+                           command_in.bits.opcode == 7'h7});
   `endif // not def SYNTHESIS
   wire                          _GEN_6 =
     active_state & ~request_sent
@@ -6456,16 +6571,25 @@ module RicketDataSnoop(
     active_state & uses_lookup & ~lookup_complete & lookup_result_in.valid;
   wire                       _GEN_8 = line_state == 3'h3;
   wire                       _GEN_9 =
-    uses_lookup & line_hit & (_GEN_8 | line_state == 3'h4 | line_state == 3'h6);
+    uses_lookup & line_hit & (|{_GEN_8, line_state == 3'h4, line_state == 3'h6});
   wire                       _GEN_10 =
-    request.opcode == 5'h1 | request.opcode == 5'h2 | request.opcode == 5'h4
-    | request.opcode == 5'h8;
+    |{request.opcode == 5'h1,
+      request.opcode == 5'h2,
+      request.opcode == 5'h4,
+      request.opcode == 5'h8};
   wire                       _GEN_11 =
-    request.opcode == 5'h5 | request.opcode == 5'h6 | request.opcode == 5'h7
-    | request.opcode == 5'h9 | request.opcode == 5'hA | request.opcode == 5'h15
-    | request.opcode == 5'h11 | request.opcode == 5'h12 | request.opcode == 5'h13
-    | request.opcode == 5'h14 | request.opcode == 5'h16 | request.opcode == 5'h17
-    | request.ret_to_src;
+    (|{request.opcode == 5'h5,
+       request.opcode == 5'h6,
+       request.opcode == 5'h7,
+       request.opcode == 5'h9,
+       request.opcode == 5'hA,
+       request.opcode == 5'h15,
+       request.opcode == 5'h11,
+       request.opcode == 5'h12,
+       request.opcode == 5'h13,
+       request.opcode == 5'h14,
+       request.opcode == 5'h16,
+       request.opcode == 5'h17}) | request.ret_to_src;
   wire                       _GEN_12 =
     active_state & (~uses_lookup | lookup_complete) & ~_GEN_9;
   wire CHIRspFlit            _GEN_13 =
@@ -6480,7 +6604,7 @@ module RicketDataSnoop(
         {1'h0,
          ~(uses_lookup & line_hit) | _GEN_11
            ? 2'h0
-           : _GEN_10 | line_state == 3'h1 | _GEN_8 ? 2'h1 : 2'h2},
+           : _GEN_10 | (|{line_state == 3'h1, _GEN_8}) ? 2'h1 : 2'h2},
       resp_err: (2'h0),
       opcode: (5'h1),
       txn_id: request.txn_id,
@@ -6695,7 +6819,7 @@ module RicketWriteUnique(
   wire                           _GEN_5 = responses_in.bits.opcode == 5'h3;
   wire                           _GEN_6 = responses_in.bits.opcode == 5'h7;
   wire                           _GEN_7 =
-    responses_in.bits.opcode == 5'h6 | responses_in.bits.opcode == 5'hE;
+    |{responses_in.bits.opcode == 5'h6, responses_in.bits.opcode == 5'hE};
   wire                           _GEN_8 = responses_in.bits.opcode == 5'h4;
   wire                           _GEN_9 = responses_in.bits.opcode == 5'h5;
   wire                           _GEN_10 =
@@ -6911,17 +7035,17 @@ module Arbiter_3(
   output                                                chosen
 );
 
-  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1'h1])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid ? ingress_1_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
+  wire [1:0]      _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0]      _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
+  wire [136:0]    _GEN_1 = /*cast(bit[136:0])*/ingress_0_in.bits;
+  wire [136:0]    _GEN_2 = /*cast(bit[136:0])*/ingress_1_in.bits;
+  wire CHIReqFlit _GEN_3 =
+    /*cast(bit)*/_GEN_1 & {137{_GEN_0[0]}} | _GEN_2 & {137{_GEN_0[1]}} | _GEN_1
+    & {137{_GEN_0 == 2'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
+  assign chosen = _GEN_0[1];
 endmodule
 
 module Arbiter_4(
@@ -6934,17 +7058,17 @@ module Arbiter_4(
   output                                                chosen
 );
 
-  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1'h1])};
-  assign egress_out =
-    '{valid: (|_GEN),
-      bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid ? ingress_1_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
+  wire [1:0]      _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0]      _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
+  wire [239:0]    _GEN_1 = /*cast(bit[239:0])*/ingress_0_in.bits;
+  wire [239:0]    _GEN_2 = /*cast(bit[239:0])*/ingress_1_in.bits;
+  wire CHIDatFlit _GEN_3 =
+    /*cast(bit)*/_GEN_1 & {240{_GEN_0[0]}} | _GEN_2 & {240{_GEN_0[1]}} | _GEN_1
+    & {240{_GEN_0 == 2'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
+  assign chosen = _GEN_0[1];
 endmodule
 
 module Arbiter_5(
@@ -6957,17 +7081,276 @@ module Arbiter_5(
   output                                                               chosen
 );
 
-  wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
-  wire [1:0] _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1'h1])};
-  assign egress_out =
-    '{valid: (|_GEN),
+  wire [1:0]                     _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [1:0]                     _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
+  wire [213:0]                   _GEN_1 = /*cast(bit[213:0])*/ingress_0_in.bits;
+  wire [213:0]                   _GEN_2 = /*cast(bit[213:0])*/ingress_1_in.bits;
+  wire RicketLineRefillCommand_1 _GEN_3 =
+    /*cast(bit)*/_GEN_1 & {214{_GEN_0[0]}} | _GEN_2 & {214{_GEN_0[1]}} | _GEN_1
+    & {214{_GEN_0 == 2'h0}};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
+  assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
+  assign chosen = _GEN_0[1];
+endmodule
+
+module RicketMemoryRouter(
+  input                                                                                                                                                                                       clock,
+                                                                                                                                                                                              reset,
+  input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                          core_in,
+  input  struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; } cache_in,
+                                                                                                                                                                                              device_in,
+  output struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; } core_out,
+  output struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                          cache_out,
+                                                                                                                                                                                              device_out
+);
+
+  `ifndef SYNTHESIS
+    ricket_memory_response_paths_exclusive:
+      assert property (@(posedge clock) disable iff (reset)
+                         ~(cache_in.response.valid & device_in.response.valid));
+  `endif // not def SYNTHESIS
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN =
+    '{valid: (1'h0), bits: core_in.request.bits};
+  wire struct packed {logic valid; RicketDataReq bits; } _GEN_0 =
+    '{valid: (core_in.request.valid & device_in.drained), bits: core_in.request.bits};
+  wire struct packed {logic ready; } _GEN_1 =
+    '{ready: (device_in.drained & cache_in.request.ready)};
+  wire struct packed {logic valid; RicketDataResp bits; } _GEN_2 =
+    '{valid: (cache_in.response.valid | device_in.response.valid),
       bits:
-        (ingress_0_in.valid
-           ? ingress_0_in.bits
-           : ingress_1_in.valid ? ingress_1_in.bits : ingress_0_in.bits)};
-  assign chosen = _GEN[1] & ~(_GEN[0]);
+        (device_in.response.valid ? device_in.response.bits : cache_in.response.bits)};
+  assign core_out =
+    '{request: _GEN_1,
+      request_fault: cache_in.request_fault,
+      request_access_fault: cache_in.request_access_fault,
+      response: _GEN_2,
+      drained: (cache_in.drained & device_in.drained)};
+  assign cache_out = '{request: _GEN_0};
+  assign device_out = '{request: _GEN};
+endmodule
+
+module RicketUncached(
+  input                                                                                                                                                                                                                                                                                                                     clock,
+                                                                                                                                                                                                                                                                                                                            reset,
+  input  [6:0]                                                                                                                                                                                                                                                                                                              node_id,
+  input  struct packed {struct packed {logic valid; RicketDataReq bits; } request; }                                                                                                                                                                                                                                        core_in,
+  input  struct packed {struct packed {logic ready; } req; struct packed {struct packed {logic ready; } requester; struct packed {logic valid; CHIRspFlit bits; } response; } rsp; struct packed {struct packed {logic ready; } request; struct packed {logic valid; CHIDatFlit bits; } response; } dat; }                  chi_in,
+  output struct packed {struct packed {logic ready; } request; logic request_fault; logic request_access_fault; struct packed {logic valid; RicketDataResp bits; } response; logic drained; }                                                                                                                               core_out,
+  output struct packed {struct packed {logic valid; CHIReqFlit bits; } req; struct packed {struct packed {logic valid; CHIRspFlit bits; } requester; struct packed {logic ready; } response; } rsp; struct packed {struct packed {logic valid; CHIDatFlit bits; } request; struct packed {logic ready; } response; } dat; } chi_out
+);
+
+  wire [63:0]                        _store_gen_data;
+  wire [7:0]                         _store_gen_mask;
+  wire [63:0]                        _load_gen_value;
+  wire CHIRspFlit                    _GEN =
+    '{cache_line_id: 6'h0,
+      trace_tag: 1'h0,
+      tag_op: 2'h0,
+      pcrd_type: 4'h0,
+      dbid_or_group_id: 12'h0,
+      c_busy: 3'h0,
+      fwd_state_or_data_pull: 3'h0,
+      resp: 3'h0,
+      resp_err: 2'h0,
+      opcode: 5'h0,
+      txn_id: 12'h0,
+      src_id: 7'h0,
+      tgt_id: 7'h0,
+      qos: 4'h0};
+  wire CHIMemAttr                    _GEN_0 =
+    '{allocate: 1'h0, cacheable: 1'h0, device: 1'h1, early_write_acknowledge: 1'h0};
+  reg  [2:0]                         state;
+  reg  [63:0]                        address;
+  reg  [1:0]                         memory_width;
+  reg                                unsigned_load;
+  reg  [4:0]                         tag;
+  reg  [11:0]                        dbid;
+  reg  [63:0]                        write_data;
+  reg  [7:0]                         write_mask;
+  wire                               _GEN_1 = state == 3'h0;
+  wire                               _GEN_2 = core_in.request.bits.access == 3'h2;
+  wire                               _GEN_3 =
+    |{core_in.request.bits.access == 3'h1, _GEN_2};
+  wire                               _GEN_4 = core_in.request.valid & _GEN_1 & _GEN_3;
+  wire                               _GEN_5 = _GEN_4 & chi_in.req.ready;
+  wire                               _GEN_6 = |chi_in.rsp.response.bits.opcode;
+  wire                               _GEN_7 = state == 3'h2;
+  wire                               _GEN_8 = state == 3'h4;
+  wire                               _GEN_9 =
+    _GEN_7 & chi_in.rsp.response.bits.opcode == 5'h6 | _GEN_8
+    & chi_in.rsp.response.bits.opcode == 5'h4;
+  wire                               _GEN_10 = ~_GEN_6 | _GEN_9;
+  wire                               _GEN_11 =
+    chi_in.rsp.response.valid & _GEN_10 & _GEN_6;
+  wire                               _GEN_12 = _GEN_11 & _GEN_7;
+  wire                               _GEN_13 = state == 3'h3;
+  wire                               _GEN_14 = |chi_in.dat.response.bits.opcode;
+  wire                               _GEN_15 = state == 3'h1;
+  wire [1:0][63:0]                   _GEN_16 =
+    /*cast(bit[1:0][63:0])*/chi_in.dat.response.bits.data;
+  wire                               _GEN_17 = ~_GEN_14 | _GEN_15;
+  wire                               _GEN_18 =
+    chi_in.dat.response.valid & _GEN_17 & _GEN_14;
+  wire                               _GEN_19 = _GEN_18 | _GEN_11 & _GEN_8;
+  wire RicketDataResp                _GEN_20 =
+    '{data: (_GEN_18 ? _load_gen_value : 64'h0), tag: tag};
+  wire                               _GEN_21 =
+    ~(core_in.request.valid & _GEN_1 & _GEN_3 & ~reset);
+  `ifndef SYNTHESIS
+    ricket_uncached_address_fits:
+      assert property (@(posedge clock) disable iff (_GEN_21)
+                         core_in.request.bits.address[63:44] == 20'h0);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_22 =
+    chi_in.rsp.response.valid & _GEN_6 & ~reset;
+  wire                               _GEN_23 = ~_GEN_22;
+  `ifndef SYNTHESIS
+    ricket_uncached_response_expected:
+      assert property (@(posedge clock) disable iff (_GEN_23) _GEN_9);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_24 = ~_GEN_22;
+  `ifndef SYNTHESIS
+    ricket_uncached_response_home:
+      assert property (@(posedge clock) disable iff (_GEN_24)
+                         chi_in.rsp.response.bits.src_id == 7'h1);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_25 = ~_GEN_22;
+  `ifndef SYNTHESIS
+    ricket_uncached_response_ok:
+      assert property (@(posedge clock) disable iff (_GEN_25)
+                         chi_in.rsp.response.bits.resp_err == 2'h0);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_26 =
+    chi_in.dat.response.valid & _GEN_14 & ~reset;
+  wire                               _GEN_27 = ~_GEN_26;
+  `ifndef SYNTHESIS
+    ricket_uncached_read_data_expected:
+      assert property (@(posedge clock) disable iff (_GEN_27) _GEN_15);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_28 = ~_GEN_26;
+  `ifndef SYNTHESIS
+    ricket_uncached_read_data_home:
+      assert property (@(posedge clock) disable iff (_GEN_28)
+                         chi_in.dat.response.bits.home_nid_or_pbha_or_mismatched_mecid == 7'h1);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_29 = ~_GEN_26;
+  `ifndef SYNTHESIS
+    ricket_uncached_read_data_ok:
+      assert property (@(posedge clock) disable iff (_GEN_29)
+                         chi_in.dat.response.bits.resp_err == 2'h0);
+  `endif // not def SYNTHESIS
+  wire CHIDatFlit                    _GEN_30 =
+    '{data: ({64'h0, write_data} << {121'h0, address[3], 6'h0}),
+      byte_enable: ({8'h0, write_mask} << {12'h0, address[3], 3'h0}),
+      replicate: (1'h0),
+      num_dat: (2'h0),
+      cah: (1'h0),
+      trace_tag: (1'h0),
+      tag_update: (1'h0),
+      tag: (4'h0),
+      tag_op: (2'h0),
+      cache_line_id: (6'h0),
+      data_id: (address[5:4]),
+      ccid: (address[5:4]),
+      dbid_or_mecid: {4'h0, dbid},
+      c_busy: (3'h0),
+      data_pull: (1'h0),
+      data_source_or_fwd_state: (8'h0),
+      resp: (3'h0),
+      resp_err: (2'h0),
+      opcode: (4'h3),
+      home_nid_or_pbha_or_mismatched_mecid: (7'h1),
+      txn_id: dbid,
+      src_id: node_id,
+      tgt_id: (7'h1),
+      qos: (4'h0)};
+  wire CHIReqFlit                    _GEN_31 =
+    '{trace_tag: (1'h0),
+      tag_op: (2'h0),
+      exp_comp_ack: (1'h0),
+      excl_snoop_me_cah: (1'h0),
+      group_id_or_lpid: (8'h0),
+      snp_attr_or_do_dwt: (1'h1),
+      mem_attr: _GEN_0,
+      pcrd_type: (4'h0),
+      order: (2'h0),
+      allow_retry: (1'h0),
+      likely_shared: (1'h0),
+      pas: (3'h0),
+      address: (core_in.request.bits.address[43:0]),
+      size_or_num_req: {4'h0, core_in.request.bits.width},
+      multi_req: (1'h0),
+      opcode: (_GEN_2 ? 7'h1C : 7'h4),
+      return_txn_id_or_stash_lpid: (12'h0),
+      stash_nid_valid_endian_deep_prefetch_tgt_hint: (1'h0),
+      return_nid_or_stash_nid_or_data_target: node_id,
+      txn_id: (12'h0),
+      src_id: node_id,
+      tgt_id: (7'h1),
+      qos: (4'h0)};
+  wire struct packed {logic valid; CHIReqFlit bits; } _GEN_32 =
+    '{valid: _GEN_4, bits: _GEN_31};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_33 =
+    '{valid: (1'h0), bits: _GEN};
+  wire struct packed {logic ready; } _GEN_34 = '{ready: _GEN_10};
+  wire
+    struct packed {struct packed {logic valid; CHIRspFlit bits; } requester; struct packed {logic ready; } response; }
+    _GEN_35 = '{requester: _GEN_33, response: _GEN_34};
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_36 =
+    '{valid: _GEN_13, bits: _GEN_30};
+  wire struct packed {logic ready; } _GEN_37 = '{ready: _GEN_17};
+  wire
+    struct packed {struct packed {logic valid; CHIDatFlit bits; } request; struct packed {logic ready; } response; }
+    _GEN_38 = '{request: _GEN_36, response: _GEN_37};
+  wire struct packed {logic ready; } _GEN_39 =
+    '{ready: (_GEN_1 & (~_GEN_3 | chi_in.req.ready))};
+  wire struct packed {logic valid; RicketDataResp bits; } _GEN_40 =
+    '{valid: _GEN_19, bits: _GEN_20};
+  LoadGen load_gen (
+    .address       (address),
+    .data          (_GEN_16[address[3]]),
+    .width         (memory_width),
+    .unsigned_load (unsigned_load),
+    .value         (_load_gen_value)
+  );
+  StoreGen store_gen (
+    .address (core_in.request.bits.address),
+    .value   (core_in.request.bits.data),
+    .width   (core_in.request.bits.width),
+    .data    (_store_gen_data),
+    .mask    (_store_gen_mask)
+  );
+  always @(posedge clock) begin
+    if (reset) begin
+      state <= 3'h0;
+      unsigned_load <= 1'h0;
+    end
+    else begin
+      state <=
+        _GEN_5
+          ? (_GEN_2 ? 3'h2 : 3'h1)
+          : _GEN_12
+              ? 3'h3
+              : _GEN_13 & chi_in.dat.request.ready ? 3'h4 : _GEN_19 ? 3'h0 : state;
+      unsigned_load <= _GEN_5 ? core_in.request.bits.unsigned_0 : unsigned_load;
+    end
+  end // always @(posedge)
+  always @(posedge clock) begin
+    address <= _GEN_5 ? core_in.request.bits.address : address;
+    memory_width <= _GEN_5 ? core_in.request.bits.width : memory_width;
+    tag <= _GEN_5 ? core_in.request.bits.tag : tag;
+    dbid <= _GEN_5 | ~_GEN_12 ? dbid : chi_in.rsp.response.bits.dbid_or_group_id;
+    write_data <= _GEN_5 ? _store_gen_data : write_data;
+    write_mask <= _GEN_5 ? _store_gen_mask : write_mask;
+  end // always @(posedge)
+  assign core_out =
+    '{request: _GEN_39,
+      request_fault: (1'h0),
+      request_access_fault: (core_in.request.valid & ~_GEN_3),
+      response: _GEN_40,
+      drained: _GEN_1};
+  assign chi_out = '{req: _GEN_32, rsp: _GEN_35, dat: _GEN_38};
 endmodule
 }>>|
 

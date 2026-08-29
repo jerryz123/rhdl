@@ -1,0 +1,49 @@
+#lang rhdl
+// Attaches one shared ACLINT to a dedicated CHI HN-I service-row router.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("devices/aclint.rhdl") open
+
+class AclintTileParams(home :: CHIHNIParams,
+                       aclint :: AclintConfig,
+                       router :: CHIRouterParams):
+  implements CircuitParam
+
+bundle AclintTileIdentity(p :: CHIFlitParams, site_width :: PosInt):
+  site_key: Bits(site_width)
+  aclint: AclintIdentity(p)
+
+sync_circuit AclintTile(params :: AclintTileParams):
+  def router_params = params.router
+  def p = params.aclint.flit
+  def site_width = router_params.routers.req.route_decoder.site_width
+  def Link = chi_noc_link_type(router_params)
+
+  input identity: AclintTileIdentity(p, site_width)
+  input tick: Bool
+  output time_counter: Bits(64)
+  output machine_software: Vec(params.aclint.hart_count, Bool)
+  output machine_timer: Vec(params.aclint.hart_count, Bool)
+  interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
+  interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
+
+  inst home(CHIHNI(params.home))
+  inst aclint(Aclint(params.aclint))
+  inst router(CHIRouter(router_params))
+
+  aclint.identity <== identity.aclint
+  aclint.tick <== tick
+  router.site_key <== identity.site_key
+  home.port.requester <=> router.local[0]
+  home.port.subordinate <=> aclint.port
+  time_counter <== aclint.time_counter
+  machine_software <== aclint.machine_software
+  machine_timer <== aclint.machine_timer
+  router.incoming_links <=> incoming_links
+  router.outgoing_links <=> outgoing_links
+
+export:
+  AclintTileParams
+  AclintTileIdentity
+  AclintTile

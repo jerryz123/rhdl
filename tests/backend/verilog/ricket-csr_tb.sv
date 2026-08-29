@@ -42,6 +42,8 @@ module ricket_csr_tb;
   localparam logic [11:0] CSR_MCAUSE = 12'h342;
   localparam logic [11:0] CSR_MTVAL = 12'h343;
   localparam logic [11:0] CSR_MIP = 12'h344;
+  localparam logic [11:0] CSR_TIME = 12'hc01;
+  localparam logic [11:0] CSR_MHARTID = 12'hf14;
   localparam logic [2:0] SYSTEM_NONE = 3'd0;
   localparam logic [2:0] SYSTEM_ECALL = 3'd1;
   localparam logic [2:0] SYSTEM_EBREAK = 3'd2;
@@ -53,6 +55,8 @@ module ricket_csr_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  logic [63:0] time_counter = 64'h12345678_9abcdef0;
+  logic [63:0] hart_id = 64'd7;
   interrupts_t interrupts;
   logic interrupt_boundary;
   logic [63:0] interrupt_pc;
@@ -150,6 +154,8 @@ module ricket_csr_tb;
     csr_access(CSR_SET, CSR_MSCRATCH, 64'h1, 64'h12);
     csr_access(CSR_CLEAR, CSR_MSCRATCH, 64'h10, 64'h13);
     csr_access(CSR_SET, CSR_MSCRATCH, 64'h0, 64'h3);
+    csr_access(CSR_SET, CSR_TIME, 64'h0, time_counter);
+    csr_access(CSR_SET, CSR_MHARTID, 64'h0, hart_id);
 
     csr_access(CSR_WRITE, CSR_MTVEC, 64'h100, 64'h0);
     csr_access(CSR_WRITE, CSR_STVEC, 64'h200, 64'h0);

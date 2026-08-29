@@ -5,8 +5,11 @@ import:
   lib("chi/main.rhdl") open
   lib("noc/rtl/router.rhdl") open
   lib("cores/ricket/chi.rhdl") open
+  lib("devices/aclint.rhdl") open
   "ricket-tile.rhdl" open
   "memory-tile.rhdl" open
+  "aclint-tile.rhdl" open
+  "transit-tile.rhdl" open
   "tiled-soc-plan.rhm" as plan
 
 fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
@@ -20,6 +23,7 @@ fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   )
 
 def tiled_soc_flit = CHIFlitParams()
+def tiled_soc_aclint_base = 0x02000000
 
 def tiled_soc_projector_config = CHIAddressProjectorConfig(
   tiled_soc_flit,
@@ -35,15 +39,22 @@ def tiled_soc_homes:
                   CHINodeKind.HNF,
                   ~max_outstanding: 1)
 
+def tiled_soc_aclint_home = CHIHomeParams("tiled-aclint-home",
+                                          plan.tiled_soc_aclint.home_node_id,
+                                          CHINodeKind.HNI,
+                                          ~max_outstanding: 1)
+
 def tiled_soc_home_map = CHIHomeMap(
   tiled_soc_flit,
-  for List (placement in plan.tiled_soc_memories,
-            home in tiled_soc_homes):
-    CHIHomeMapEntry(
-      tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
-                                             placement.bank_index),
-      home
-    )
+  (for List (placement in plan.tiled_soc_memories,
+             home in tiled_soc_homes):
+     CHIHomeMapEntry(
+       tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
+                                              placement.bank_index),
+       home
+     )) ++ [CHIHomeMapEntry(AddressSet(tiled_soc_aclint_base,
+                                       AclintWindowBytes - 1),
+                            tiled_soc_aclint_home)]
 )
 
 def tiled_soc_ricket_config = RicketCHIConfig(tiled_soc_flit,
@@ -53,7 +64,8 @@ def tiled_soc_ricket_params:
   for List (placement in plan.tiled_soc_rickets):
     RicketCHIParams(tiled_soc_ricket_config,
                     placement.instruction_node_id,
-                    placement.data_node_id)
+                    placement.data_node_id,
+                    ~device_node_id: placement.device_node_id)
 
 def tiled_soc_requester_ports:
   def mutable ports = []
@@ -63,6 +75,24 @@ def tiled_soc_requester_ports:
       tiled_requester_icn_endpoint(params.data_node)
     ]
   ports
+
+def tiled_soc_device_ports:
+  for List (params in tiled_soc_ricket_params):
+    tiled_requester_icn_endpoint(params.device_node)
+
+def tiled_soc_aclint_config = AclintConfig(tiled_soc_flit,
+                                           plan.tiled_soc_ricket_count)
+def tiled_soc_aclint_params = AclintParams("tiled-aclint",
+                                           plan.tiled_soc_aclint.subordinate_node_id,
+                                           tiled_soc_aclint_config,
+                                           tiled_soc_aclint_base)
+def tiled_soc_aclint_home_params = CHIHNIParams(
+  tiled_soc_aclint_home,
+  tiled_soc_flit,
+  tiled_soc_device_ports,
+  tiled_soc_aclint_params.icn_port,
+  tiled_soc_aclint_params.service
+)
 
 def tiled_soc_ram_config = CHIRamConfig(tiled_soc_flit,
                                         plan.tiled_soc_bank_bytes,
@@ -136,9 +166,11 @@ def tiled_soc_ricket_router_params = CHIRouterParams(
   compile_chi_router_attachment_plan(
     tiled_soc_router_configs,
     tiled_soc_adapter_plans,
-    CHIRNFRouterAttachment(
-      for List (placement in plan.tiled_soc_rickets):
-        [placement.instruction_site, placement.data_site]
+    CHIRNFRNIRouterAttachment(
+      (for List (placement in plan.tiled_soc_rickets):
+         [placement.instruction_site, placement.data_site]),
+      (for List (placement in plan.tiled_soc_rickets):
+         [placement.device_site])
     )
   )
 )
@@ -156,6 +188,26 @@ def tiled_soc_memory_router_params = CHIRouterParams(
   )
 )
 
+def tiled_soc_aclint_router_params = CHIRouterParams(
+  tiled_soc_flit,
+  tiled_soc_router_configs,
+  compile_chi_router_attachment_plan(
+    tiled_soc_router_configs,
+    tiled_soc_adapter_plans,
+    CHIHNIRouterAttachment([[plan.tiled_soc_aclint.home_site]])
+  )
+)
+
+def tiled_soc_transit_router_params = CHIRouterParams(
+  tiled_soc_flit,
+  tiled_soc_router_configs,
+  compile_chi_router_attachment_plan(
+    tiled_soc_router_configs,
+    tiled_soc_adapter_plans,
+    CHITransitRouterAttachment()
+  )
+)
+
 def tiled_soc_ricket_tile_params = RicketTileParams(
   tiled_soc_ricket_config,
   tiled_soc_ricket_router_params
@@ -169,15 +221,29 @@ def tiled_soc_memory_tile_params = MemoryTileParams(
   tiled_soc_memory_router_params
 )
 
+def tiled_soc_aclint_tile_params = AclintTileParams(
+  tiled_soc_aclint_home_params,
+  tiled_soc_aclint_config,
+  tiled_soc_aclint_router_params
+)
+
+def tiled_soc_transit_tile_params = TransitTileParams(tiled_soc_transit_router_params)
+
 export:
   tiled_requester_icn_endpoint
   tiled_soc_flit
+  tiled_soc_aclint_base
   tiled_soc_projector_config
   tiled_soc_homes
   tiled_soc_home_map
   tiled_soc_ricket_config
   tiled_soc_ricket_params
   tiled_soc_requester_ports
+  tiled_soc_device_ports
+  tiled_soc_aclint_home
+  tiled_soc_aclint_config
+  tiled_soc_aclint_params
+  tiled_soc_aclint_home_params
   tiled_soc_ram_config
   tiled_soc_ram_params
   tiled_soc_fragmenter_config
@@ -189,5 +255,9 @@ export:
   tiled_soc_router_configs
   tiled_soc_ricket_router_params
   tiled_soc_memory_router_params
+  tiled_soc_aclint_router_params
+  tiled_soc_transit_router_params
   tiled_soc_ricket_tile_params
   tiled_soc_memory_tile_params
+  tiled_soc_aclint_tile_params
+  tiled_soc_transit_tile_params

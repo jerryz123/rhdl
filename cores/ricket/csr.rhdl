@@ -64,10 +64,13 @@ bundle RicketInterruptDecision(xlen :: XLen):
 
 def RicketDelegatableExceptions = [
   ExceptionCause.InstructionAddressMisaligned,
+  ExceptionCause.InstructionAccessFault,
   ExceptionCause.IllegalInstruction,
   ExceptionCause.Breakpoint,
   ExceptionCause.LoadAddressMisaligned,
+  ExceptionCause.LoadAccessFault,
   ExceptionCause.StoreAddressMisaligned,
+  ExceptionCause.StoreAccessFault,
   ExceptionCause.EnvironmentCallFromUser,
   ExceptionCause.InstructionPageFault,
   ExceptionCause.LoadPageFault,
@@ -210,6 +213,8 @@ sync_circuit RicketCsrFile(xlen :: XLen):
   def misa_value = if xlen == XLen.X32 | bits(0x40140101, width) | bits(0x8000000000140101, width)
 
   input interrupts: RicketInterrupts()
+  input hart_id: Bits(width)
+  input time_counter: Bits(64)
   input interrupt_boundary: Bool
   input interrupt_pc: Bits(width)
   interface commit(Valid(RicketCsrCommit(xlen)), ~role: consumer)
@@ -228,6 +233,8 @@ sync_circuit RicketCsrFile(xlen :: XLen):
     mux(enabled, original ||| mask, original & !mask)
 
   def sstatus_value = state.mstatus & sstatus_mask
+  def time_value = if xlen == XLen.X32 | time_counter[0..32] | time_counter
+  def timeh_value = if xlen == XLen.X32 | time_counter[32..64] | zero
   def interrupt_pending = ricket_interrupt_pending(xlen, interrupts) ||| state.mip
   def csr = commit.bits.csr_address
   def bank = csr_bank(csr, ~default: zero):
@@ -269,6 +276,8 @@ sync_circuit RicketCsrFile(xlen :: XLen):
         def satp_replacement = as_bits(value)
         when (if xlen == XLen.X32 | Bool(#false) | is_one_of(satp_replacement[60..64], bits(0, 4), bits(8, 4))):
           state.satp <== if xlen == XLen.X32 | zero | concat(satp_replacement[60..64], bits(0, 16), satp_replacement[0..44])
+    read CsrId.Time: time_value
+    read CsrId.Timeh: timeh_value
     csr CsrId.Mstatus:
       read: state.mstatus
       write value:
@@ -309,8 +318,11 @@ sync_circuit RicketCsrFile(xlen :: XLen):
     read CsrId.Mvendorid: zero
     read CsrId.Marchid: zero
     read CsrId.Mimpid: zero
-    read CsrId.Mhartid: zero
-  def csr_recognized = bank.recognized
+    read CsrId.Mhartid: hart_id
+  def timeh_unavailable = (csr === bits(csr_address(CsrId.Timeh), 12)) & (
+    if xlen == XLen.X32 | Bool(#false) | Bool(#true)
+  )
+  def csr_recognized = bank.recognized & !timeh_unavailable
   def csr_read_value = bank.read_value
   def csr_write_requested = (commit.bits.csr_operation === CsrOperation.Write) ||| (
     is_one_of(commit.bits.csr_operation, CsrOperation.Set, CsrOperation.Clear) & or_reduce(commit.bits.csr_source)
@@ -318,9 +330,22 @@ sync_circuit RicketCsrFile(xlen :: XLen):
   def csr_read_only = csr[10..12] === bits(3, 2)
   def required_privilege = csr[8..10]
   def privilege_bits = cast(privilege_state, Bits(2))
+  def time_csr = is_one_of(csr,
+                           bits(csr_address(CsrId.Time), 12),
+                           bits(csr_address(CsrId.Timeh), 12))
+  def machine_time_enabled = state.mcounteren[1].into(Bool)
+  def supervisor_time_enabled = state.scounteren[1].into(Bool)
+  def time_access_enabled = mux_lookup(
+    privilege_state,
+    ~default: machine_time_enabled & supervisor_time_enabled,
+    [
+      [PrivilegeMode.Machine, Bool(#true)],
+      [PrivilegeMode.Supervisor, machine_time_enabled]
+    ]
+  )
   def csr_access_legal = csr_recognized & !(
     privilege_bits < required_privilege
-  ) & !(csr_write_requested & csr_read_only)
+  ) & !(csr_write_requested & csr_read_only) & (!time_csr ||| time_access_enabled)
   def csr_commit = commit.valid & (commit.bits.csr_operation =/= CsrOperation.None)
   def synchronous_trap = resolve_ricket_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
   def interrupt = resolve_ricket_interrupt(

@@ -1,16 +1,19 @@
 #lang rhdl
-// Composes eight Ricket tiles and four memory tiles by wiring their cardinal CHI mesh boundaries.
+// Composes Ricket, service, ACLINT, and memory tiles across a four-row CHI mesh.
 
 import:
   lib("rhdl/std/ready-valid.rhdl").Irrevocable
   lib("chi/main.rhdl") open
   lib("cores/ricket/chi.rhdl").RicketCHIIdentity
   lib("cores/ricket/interrupt.rhdl").RicketInterrupts
+  lib("devices/aclint.rhdl").AclintIdentity
   lib("noc/plan/router-family-physical-plan.rhm").RouterFamilyPhysicalPlan
   "tiled-soc-plan.rhm" as plan
   "tiled-soc-config.rhdl" as config
   "ricket-tile.rhdl" open
   "memory-tile.rhdl" open
+  "aclint-tile.rhdl" open
+  "transit-tile.rhdl" open
 
 class TiledTileEndpoints(site_key :: Nat,
                          incoming_links :: Array,
@@ -59,17 +62,29 @@ sync_circuit TiledSoC():
     inst ricket(RicketTile(config.tiled_soc_ricket_tile_params))
   def memories = for InstanceArray (_ in 0..plan.tiled_soc_bank_count):
     inst memory(MemoryTile(config.tiled_soc_memory_tile_params))
+  def transits = for InstanceArray (_ in 0..plan.tiled_soc_transits.length()):
+    inst transit(TransitTile(config.tiled_soc_transit_tile_params))
+  inst aclint(AclintTile(config.tiled_soc_aclint_tile_params))
 
   for (index in 0..plan.tiled_soc_ricket_count):
     def placement = plan.tiled_soc_rickets[index]
     def placement_params = config.tiled_soc_ricket_params[index]
     rickets[index].identity <== RicketTileIdentity(p, site_width):
       site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
+      hart_id: bits(index, 64)
       chi: (RicketCHIIdentity(p):
               instruction_node_id: bits(placement_params.instruction_node_id, p.node_id_width)
-              data_node_id: bits(placement_params.data_node_id, p.node_id_width))
+              data_node_id: bits(placement_params.data_node_id, p.node_id_width)
+              device_node_id: bits(placement_params.device_node_id, p.node_id_width))
     start[index] |> rickets[index].start
-    rickets[index].interrupts <== interrupts[index]
+    rickets[index].interrupts <== RicketInterrupts():
+      supervisor_software: interrupts[index].supervisor_software
+      machine_software: interrupts[index].machine_software ||| aclint.machine_software[index]
+      supervisor_timer: interrupts[index].supervisor_timer
+      machine_timer: interrupts[index].machine_timer ||| aclint.machine_timer[index]
+      supervisor_external: interrupts[index].supervisor_external
+      machine_external: interrupts[index].machine_external
+    rickets[index].time_counter <== aclint.time_counter
   for (index in 0..plan.tiled_soc_bank_count):
     def placement = plan.tiled_soc_memories[index]
     def home_params = config.tiled_soc_hnf_params[index]
@@ -87,6 +102,14 @@ sync_circuit TiledSoC():
       ram: (CHIRamIdentity(p):
               node_id: bits(ram_params.node_id, p.node_id_width)
               base_address: bits(ram_params.base_address, p.request_address_width))
+  for (index in 0..plan.tiled_soc_transits.length()):
+    transits[index].site_key <== bits(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router), site_width)
+  aclint.identity <== AclintTileIdentity(p, site_width):
+    site_key: bits(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router), site_width)
+    aclint: (AclintIdentity(p):
+               node_id: bits(config.tiled_soc_aclint_params.node.node_id, p.node_id_width)
+               base_address: bits(config.tiled_soc_aclint_params.base_address, p.request_address_width))
+  aclint.tick <== Bool(#true)
   faults <== vec(for List (index in 0..plan.tiled_soc_ricket_count): rickets[index].fault)
 
   def physical_plan = plan.tiled_soc_physical_plan
@@ -96,6 +119,15 @@ sync_circuit TiledSoC():
                          rickets[index].incoming_links,
                          rickets[index].outgoing_links)
   ) ++ (
+    for List (index in 0..plan.tiled_soc_transits.length()):
+      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router),
+                         transits[index].incoming_links,
+                         transits[index].outgoing_links)
+  ) ++ [
+    TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router),
+                       aclint.incoming_links,
+                       aclint.outgoing_links)
+  ] ++ (
     for List (index in 0..plan.tiled_soc_bank_count):
       TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_memories[index].router),
                          memories[index].incoming_links,
