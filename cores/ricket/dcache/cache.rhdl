@@ -209,7 +209,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
     zext(store_gen.data, RicketCacheLineBytes * 8) << concat(store_beat, bits(0, 6)),
     Bits(8)
   )
-  def store_line_mask = zext(store_gen.mask, RicketCacheLineBytes) << concat(store_beat, bits(0, 3))
+  def store_line_mask = zext(store_gen.mask.into(Bits(8)), RicketCacheLineBytes) << concat(store_beat, bits(0, 3))
   def store_byte_mask = as_vec(store_line_mask, Bool)
   def refill_line_bytes = as_vec(refill.completion.bits.line, Bits(8))
   def merged_refill_line = vec(
@@ -271,7 +271,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
                      request_set_value))
     write: install_refill
     data: vec(mux(install_refill, completion_tag, lookup_tag))
-    mask: bits(1, 1)
+    mask: Mask(1)(1)
   def update_snoop_state = snoop.update.valid & !snoop.update.bits.invalidate
   states.port.request.valid <== request_fire ||| install_refill ||| local_mutation ||| snoop_lookup_start ||| update_snoop_state
   def refill_cache_state = mux(refill.completion.bits.state === CHIResponseState.Unique,
@@ -293,7 +293,7 @@ sync_circuit RicketL1DCache(xlen :: XLen,
                   mux(local_mutation,
                       CHICacheState.UniqueDirty,
                       mux(update_snoop_state, snoop.update.bits.state, refill_cache_state))))
-    mask: bits(1, 1)
+    mask: Mask(1)(1)
   lines.port.request.valid <== request_fire ||| cache_write ||| snoop_lookup_start
   lines.port.request.bits <== ReadWriteRequest(set_width, Bits(8), RicketCacheLineBytes):
     address: mux(cache_write,
@@ -303,7 +303,9 @@ sync_circuit RicketL1DCache(xlen :: XLen,
     data: mux(local_mutation,
               store_line_data,
               mux(completing_mutation, merged_refill_line, refill_line_bytes))
-    mask: mux(local_mutation, store_line_mask, !bits(0, RicketCacheLineBytes))
+    mask: mux(local_mutation,
+              store_line_mask,
+              !bits(0, RicketCacheLineBytes)).into(Mask(RicketCacheLineBytes))
 
   def reservation_line_address = align_down(reservation_address, RicketCacheLineBytes)
   def lookup_line_address = align_down(lookup_request.address, RicketCacheLineBytes)

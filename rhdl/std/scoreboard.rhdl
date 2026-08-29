@@ -15,7 +15,7 @@ fun scoreboard_index_in_range(entries :: PosInt,
   | index < bits(entries, index_width(entries))
 
 fun scoreboard_busy(entries :: PosInt,
-                    busy :: Bits(entries),
+                    busy :: Mask(entries),
                     index :: Bits(index_width(entries))) :~ Bool:
   def busy_vector = as_vec(busy, Bool)
   if scoreboard_index_capacity(entries) == entries
@@ -24,10 +24,10 @@ fun scoreboard_busy(entries :: PosInt,
 
 fun scoreboard_index_bit(entries :: PosInt,
                          index :: Bits(index_width(entries))):
-  def encoded = as_bits(one_hot(index))
   if scoreboard_index_capacity(entries) == entries
-  | encoded
-  | trunc(encoded, entries)
+  | one_hot(index).into(Mask(entries))
+  | trunc(one_hot(index).into(Bits(scoreboard_index_capacity(entries))),
+          entries).into(Mask(entries))
 
 // Set and clear are nonbackpressured operations. Updates take effect at the
 // edge, with clear winning when both operations address the same entry.
@@ -36,13 +36,13 @@ sync_circuit Scoreboard(entries :: PosInt):
 
   interface set(Valid(Index), ~role: consumer)
   interface clear(Valid(Index), ~role: consumer)
-  output busy: Bits(entries)
+  output busy: Mask(entries)
 
-  reg state(~init: bits(0, entries))
+  reg state(~init: Mask(entries)(0))
   def set_bit = scoreboard_index_bit(entries, set.bits)
   def clear_bit = scoreboard_index_bit(entries, clear.bits)
-  def set_mask = mux(set.valid, set_bit, bits(0, entries))
-  def clear_mask = mux(clear.valid, clear_bit, bits(0, entries))
+  def set_mask = mux(set.valid, set_bit, Mask(entries)(0))
+  def clear_mask = mux(clear.valid, clear_bit, Mask(entries)(0))
   def set_was_free = !or_reduce(state & set_bit) ||| (
     clear.valid & (clear.bits === set.bits)
   )

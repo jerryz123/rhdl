@@ -107,7 +107,7 @@ execute-stage acceptance, or redirects.
 two stateless XLEN-parameterized datapath components. `LoadGen` selects a byte,
 halfword, word, or doubleword from an eight-byte returned beat and extends it to
 32 or 64 bits. `StoreGen` shifts an XLEN scalar source into its addressed byte
-lane and generates the corresponding eight-bit write mask.
+lane and generates the corresponding `Mask(8)` write-lane set.
 
 `MemoryWidth.is_aligned(address)` checks the same size contract independently. The
 generators deliberately know nothing about instruction encodings, memory

@@ -135,6 +135,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/nested-tagged-union.rhdl`](rhdl/nested-tagged-union.rhdl) | Nested tagged-union literals, chained payload views, and runtime reconstruction |
 | [`rhdl/one-hot.rhdl`](rhdl/one-hot.rhdl) | One-hot literals, selector-owned selection, equality, and representation casts |
 | [`rhdl/one-hot-enum.rhdl`](rhdl/one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
+| [`rhdl/masks.rhdl`](rhdl/masks.rhdl) | Non-numeric lane sets, bitwise set operations, and explicit selector widening |
 | [`rhdl/shifts.rhdl`](rhdl/shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |
 | [`rhdl/multiply.rhdl`](rhdl/multiply.rhdl) | Modular same-width unsigned multiplication |
 | [`rhdl/expanding-arithmetic.rhdl`](rhdl/expanding-arithmetic.rhdl) | Lossless unsigned addition plus signed and unsigned multiplication |

@@ -59,7 +59,7 @@ registered for that root."
          "sync_circuit" "sync_mem" "when" "wire")
        'symbols)
      . font-lock-keyword-face)
-    (,(regexp-opt '("Bits" "Bool" "Clock" "OneHot" "Reset" "SInt" "Vec")
+    (,(regexp-opt '("Bits" "Bool" "Clock" "Mask" "MaybeOneHot" "OneHot" "Reset" "SInt" "Vec")
                   'symbols)
      . font-lock-type-face))
   "Additional font-lock rules for RHDL-specific syntax and types.")

@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, typed membership, enum validity, ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Nominal `Bool`, non-numeric `Mask`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, typed membership, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`tagged-union.rhm`](tagged-union.rhm) | Nominal tagged unions with shared enum tags, typed payload construction, and dot-based tag tests and guarded views |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and selector-owned exact selection |
@@ -131,6 +131,9 @@ Rhombus meaning on host values; the symbolic bitwise family requires hardware
 operands. A hardware value may be shifted by either an unsigned hardware `Bits`
 amount or a nonnegative host `Int`; a host amount becomes a minimally wide
 constant during elaboration. Negative host amounts are rejected.
+Bitwise and shift expressions retain the left operand's authoring surface, so
+type-owned indexing and methods remain available on their results. `mux` and
+`mux_lookup` likewise retain the selected value surface.
 
 Expanding arithmetic is explicit:
 
@@ -214,6 +217,21 @@ Host code continues to use `!=`. `<`, `>`, `<=`, and `>=` require equal-width
 operands with the same numeric type and return `Bool`. `Bits` uses unsigned
 ordering while `SInt` uses signed ordering; the layer derives all forms from
 the corresponding core less-than operation.
+
+`Mask(n)` is a nominal `n`-lane set whose every packed encoding is legal.
+`Mask(n)(value)` constructs a host-known packed lane set; the value is not a
+lane index. Mask intersection, union, symmetric difference, and complement use
+`&`, `|||`, `^`, and `!`, and `mask[index]` returns `Bool`. Generic reductions,
+population count, and priority encoding accept masks through their canonical
+packed representation. `Mask` implements `BitwiseType`, but deliberately does
+not implement `ArithmeticType`: addition, subtraction, multiplication, and
+both shifts are rejected.
+
+Equal-width representation changes remain explicit. `Bits`, `OneHot`, and
+`MaybeOneHot` values widen to an unrestricted lane set with `.into(Mask(n))`.
+A `Mask` does not safely refine to an exactly-one or optional-one selector;
+such a cast is an explicit unchecked representation assertion rather than a
+validation operation. See [`../../../examples/rhdl/masks.rhdl`](../../../examples/rhdl/masks.rhdl).
 
 ## Signed integers
 
@@ -355,8 +373,8 @@ arms so member-to-lane mappings stay explicit and independent of call order.
 selection and every present value has exactly one asserted bit. Calling the
 type without an argument constructs absence; calling it with a host index
 constructs that lane. Native values support lane indexing, `.valid`, `.index`,
-and `.mask(mask)`, where masking may turn a present selection into absence but
-cannot create a second selected lane.
+and `.mask(mask)`, where the operand must be an equal-width `Mask`. Masking may
+turn a present selection into absence but cannot create a second selected lane.
 
 Because absence does not satisfy the partial exact-one-hot contract,
 `selector.mux(choices, ~default: value)` requires an explicit default and is

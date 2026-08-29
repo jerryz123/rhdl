@@ -21,7 +21,7 @@ bundle CHIRamMemoryOperation(p :: CHIFlitParams, slot_width :: PosInt):
   slot: Bits(slot_width)
   request: CHIReqFlit(p)
   data: Bits(p.data_width)
-  mask: Bits(p.data_bytes)
+  mask: Mask(p.data_bytes)
 
 bundle CHIRamMemoryCompletion(p :: CHIFlitParams, slot_width :: PosInt):
   memory_operation: CHIRamMemoryOperation(p, slot_width)
@@ -161,11 +161,12 @@ fun monitor_chi_ram_write_data(p :: CHIFlitParams,
     request.size_or_num_req[0..3],
     p.data_bytes
   )
+  def supplied_mask = data.byte_enable.into(Mask(p.data_bytes))
   def partial = request.opcode === CHIReqOpcode.WriteNoSnpPtl
   def mask_supported = mux(
     partial,
-    (data.byte_enable & expected_mask) === data.byte_enable,
-    data.byte_enable === expected_mask
+    (supplied_mask & expected_mask) === supplied_mask,
+    supplied_mask === expected_mask
   )
   when valid:
     assert(mask_supported, "chi_ram_write_data_mask_supported")
@@ -229,7 +230,7 @@ fun chi_ram_read_completion(p :: CHIFlitParams,
     request.address,
     request.size_or_num_req[0..3],
     p.data_bytes
-  )
+  ).into(Bits(p.data_bytes))
   if p.dat_rsvdc_width > 0
   | response.rsvdc <== bits(0, p.dat_rsvdc_width)
   | #void
@@ -334,7 +335,7 @@ sync_circuit CHIRam(config :: CHIRamConfig):
         slot: allocated.slot
         request: allocated.request
         data: bits(0, p.data_width)
-        mask: bits(0, p.data_bytes)
+        mask: Mask(p.data_bytes)(0)
   )
   dbid_responses.ingress <=> (
     allocated_writes |> map_flow(allocated):
@@ -352,7 +353,7 @@ sync_circuit CHIRam(config :: CHIRamConfig):
         slot: matched.slot
         request: matched.request
         data: matched.data.data
-        mask: matched.data.byte_enable
+        mask: matched.data.byte_enable.into(Mask(p.data_bytes))
   )
 
   read_operations.egress <=> operation_arbiter.ingress[0]

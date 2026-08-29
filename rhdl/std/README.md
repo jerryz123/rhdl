@@ -430,7 +430,7 @@ permanently free must filter that policy at their own boundary.
 [`read-write.rhdl`](read-write.rhdl) defines
 `ReadWritePort(address_width, T, n)`. `T` is one data-lane type and `n` is the
 number of lanes. Its single `request` flow carries a `Bits(address_width)`
-address, a read/write selector, `Vec(n, T)` data, and a `Bits(n)` mask. The
+address, a read/write selector, `Vec(n, T)` data, and a `Mask(n)` lane set. The
 `response` flow returns `Vec(n, T)`. Request data and mask are meaningful only
 for writes; response data is meaningful only for reads.
 
@@ -449,7 +449,7 @@ tags.port.request.bits <== ReadWriteRequest(6, Bits(20), 1):
   address: index
   write: update
   data: vec(new_tag)
-  mask: bits(1, 1)
+  mask: Mask(1)(1)
 ```
 
 Every asserted request is accepted; there is no readiness or retry state. A

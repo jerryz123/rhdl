@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines Bool, optional-one-hot values, reductions, encoders, comparisons, and selection.
+// Defines Bool, lane masks, optional-one-hot values, reductions, encoders, comparisons, and selection.
 
 import:
   rhombus.bits.(<<) as <<
@@ -15,11 +15,15 @@ import:
   "../support/fields.rhm".hardware_into
   "../support/fields.rhm".hardware_value_type
   "../support/hardware-literal.rhm".packed_literal
+  "../support/mask-type.rhm" as mask_support
   "../support/one-hot-selection.rhm" as one_hot_selection
 
 export:
   Bool
   bool_type
+  Mask
+  mask_type
+  mask_width
   MaybeOneHot
   maybe_one_hot_type
   maybe_one_hot_width
@@ -62,6 +66,96 @@ annot.macro 'Bool':
 
 fun bool_type(type):
   type is_a _BoolType
+
+// Represents an arbitrary set of fixed lanes. Every packed encoding is legal,
+// so bitwise set operations preserve the type while arithmetic and shifting do not.
+class _MaskType(width :: PosInt):
+  implements BitwiseType
+  implements Callable
+  implements mask_support.MaskType
+
+  override method describe():
+    "mask<" ++ to_string(width) ++ ">"
+
+  override method type_equal(other):
+    mask_type(other) && width == other.width
+
+  override method bit_width():
+    width
+
+  override method packed_width():
+    width
+
+  override method mask_width():
+    width
+
+  // Host literals name a packed lane set, not a lane index.
+  override method call(value :: Nat):
+    packed_literal(this, value)
+
+fun build_mask_type(width :: PosInt):
+  _MaskType(width)
+
+fun mask_type(type):
+  type is_a _MaskType
+
+fun mask_width(type):
+  unless mask_type(type)
+  | error(~who: #'mask_width, "expected a Mask type")
+  type.width
+
+fun hardware_has_mask_type(value):
+  kernel.hardware_entity(value) && mask_type(hardware_value_type(value))
+
+dot.macro 'mask_value_dot $left $dot $right':
+  match right
+  | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
+  | ~else: #false
+
+fun mask_index(value, index) :~ HardwareFields:
+  unless index is_a Nat
+  | error(~who: #'Mask,
+          "Mask lane selection requires a host natural-number index")
+  def lanes = kernel.read(value)
+  unless mask_type(lanes.type)
+  | error(~who: #'Mask, "expected a Mask value")
+  def packed = hardware_as_bits(lanes,
+                                #'Mask,
+                                "Mask value",
+                                #false,
+                                Location())
+  kernel.cast(kernel.index(packed, index), Bool)
+
+annot.macro 'MaskValue':
+  let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
+  annot_meta.pack_predicate(
+    'hardware_has_mask_type',
+    '(($(statinfo_meta.dot_provider_key), mask_value_dot),
+      ($(statinfo_meta.index_get_key), mask_index),
+      ($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+  )
+
+annot.macro 'MaskTypeDescriptor':
+  annot_meta.pack_predicate('mask_type')
+
+annot.macro 'Mask($width)':
+  let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
+  annot_meta.pack_predicate(
+    'fun (value): kernel.hardware_entity(value) && type_equal(hardware_value_type(value), build_mask_type($width))',
+    '(($(statinfo_meta.dot_provider_key), mask_value_dot),
+      ($(statinfo_meta.index_get_key), mask_index),
+      ($(statinfo_meta.index_result_key),
+       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+  )
+
+expr.macro 'Mask($(width :: expr_meta.Parsed))':
+  'build_mask_type($width) :: HardwareFields.describes(
+     MaskTypeDescriptor,
+     MaskValue
+   )'
 
 // Represents an absent selection as zero and a present selection as exactly
 // one asserted bit. The refinement is intentionally distinct from OneHot:
@@ -480,9 +574,9 @@ fun maybe_one_hot_mask(selector,
   def value = require_maybe_one_hot(selector, #'maybe_one_hot_mask, location)
   def width = value.type.width
   def mask_value = kernel.read(mask, location)
-  unless data_type(mask_value.type) && mask_value.type.packed_width() == width
+  unless mask_value.type is_a mask_support.MaskType && mask_value.type.mask_width() == width
   | error(~who: #'maybe_one_hot_mask,
-          location.describe() ++ ": mask width must equal the MaybeOneHot width")
+          location.describe() ++ ": mask must have a matching Mask type")
   def masked = kernel.bit_and(
     hardware_as_bits(value,
                      #'maybe_one_hot_mask,

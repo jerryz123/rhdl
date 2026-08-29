@@ -167,7 +167,7 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
 | `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition plus signed and unsigned multiplication with `+&` and `*&` sugar | core types, kernel, field support |
-| `bool.rhm` | Nominal `Bool`, compact `MaybeOneHot`, packed reductions, lower-index-first priority encoders, total optional-one-hot selection, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support, one-hot-selection support |
+| `bool.rhm` | Nominal `Bool`, non-numeric lane `Mask`, compact `MaybeOneHot`, packed reductions, lower-index-first priority encoders, total optional-one-hot selection, equality, typed membership, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support, mask-type support, one-hot-selection support |
 | `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals and typed-key one-hot selection | kernel, field support, hardware-method support, variant-schema support, one-hot-selection support |
 | `tagged-union.rhm` | Nominal tagged unions, shared enum tags, typed payload construction, and `.tag`/`.is(...)`/`.view(...)` inspection | core IR, kernel, field support, hardware-literal support, variant-schema support |
 | `one-hot.rhm` | One-hot selector types, literals, total `Bits` index conversion, typed mux keys, and selector-owned muxing | core IR, kernel, field support, mux-lookup support, one-hot-selection support |
@@ -205,6 +205,9 @@ language profiles:
 - `mux-lookup.rhm` lets independent layers contribute typed static keys,
   lookup selector behavior, and one-hot selector types without importing one
   another.
+- `mask-type.rhm` lets independent layers require nominal lane-set semantics
+  without importing the Boolean layer that owns `Mask` and its `Bool` indexing
+  surface.
 - `variants.rhm` centralizes nominal variant identity, automatic and explicit
   tag encodings, enum tag types, and exact member literals for enum and tagged-
   union layers.

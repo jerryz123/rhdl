@@ -13,12 +13,22 @@ import:
       literal
       dont_care
       zext
+      trunc
+      bit_not
+      bit_and
+      bit_or
+      bit_xor
       hw_shl
       hw_shru
       hw_shrs
   "../kernel.rhm".concat as kernel_concat
   "../kernel.rhm".dont_care as kernel_dont_care
   "../kernel.rhm".zext as kernel_zext
+  "../kernel.rhm".trunc as kernel_trunc
+  "../kernel.rhm".bit_not as kernel_bit_not
+  "../kernel.rhm".bit_and as kernel_bit_and
+  "../kernel.rhm".bit_or as kernel_bit_or
+  "../kernel.rhm".bit_xor as kernel_bit_xor
   "../kernel.rhm".hw_shl as kernel_hw_shl
   "../kernel.rhm".hw_shru as kernel_hw_shru
   "../kernel.rhm".hw_shrs as kernel_hw_shrs
@@ -57,12 +67,16 @@ export:
   ^
   !
 
+meta:
+  fun preserve_operand_surface(result, operand):
+    statinfo_meta.wrap(result, statinfo_meta.gather(operand))
+
 // Frontend literals are static host shadows. They allocate core operations
 // only when a hardware consumer reads them during elaboration.
 fun literal(type, value, name = #false):
   packed_literal(type, value, name)
 
-fun bits(value, width, name = #false):
+fun bits(value, width, name = #false) :~ HardwareFields:
   literal(Bits(width), value, name)
 
 // Host shift amounts are elaboration-time constants. Convert them to the
@@ -86,7 +100,7 @@ fun normalize_shift_amount(amount, who):
 fun hw_shl(value,
            amount,
            name = #false,
-           location = Location()):
+           location = Location()) :~ HardwareFields:
   kernel_hw_shl(value,
                 normalize_shift_amount(amount, #'hw_shl),
                 name,
@@ -95,7 +109,7 @@ fun hw_shl(value,
 fun hw_shru(value,
             amount,
             name = #false,
-            location = Location()):
+            location = Location()) :~ HardwareFields:
   kernel_hw_shru(value,
                  normalize_shift_amount(amount, #'hw_shru),
                  name,
@@ -104,11 +118,34 @@ fun hw_shru(value,
 fun hw_shrs(value,
             amount,
             name = #false,
-            location = Location()):
+            location = Location()) :~ HardwareFields:
   kernel_hw_shrs(value,
                  normalize_shift_amount(amount, #'hw_shrs),
                  name,
                  location)
+
+fun bit_not(entity,
+            name = #false,
+            location = Location()) :~ HardwareFields:
+  kernel_bit_not(entity, name, location)
+
+fun bit_and(left,
+            right,
+            name = #false,
+            location = Location()) :~ HardwareFields:
+  kernel_bit_and(left, right, name, location)
+
+fun bit_or(left,
+           right,
+           name = #false,
+           location = Location()) :~ HardwareFields:
+  kernel_bit_or(left, right, name, location)
+
+fun bit_xor(left,
+            right,
+            name = #false,
+            location = Location()) :~ HardwareFields:
+  kernel_bit_xor(left, right, name, location)
 
 // Like a literal shadow, a typed don't-care is materialized only when a
 // hardware consumer reads it. Core IR carries only its packed Bits image.
@@ -157,6 +194,9 @@ fun concat(entity, ...) :~ HardwareFields:
 fun zext(entity, target_width, name = #false) :~ HardwareFields:
   kernel_zext(entity, target_width, name)
 
+fun trunc(entity, target_width, name = #false) :~ HardwareFields:
+  kernel_trunc(entity, target_width, name)
+
 fun build_mux_lookup(selector, default_value, cases):
   def selector_value = read(selector)
   cond
@@ -175,14 +215,23 @@ fun build_mux_lookup(selector, default_value, cases):
       hw_mux_lookup(selector_value, default_value, cases)
 
 expr.macro
-| 'mux_lookup($selector, ~default: $default_value, $cases)':
-    'build_mux_lookup($selector, $default_value, $cases)'
-| 'mux_lookup($selector, ~default: $default_value):
+| 'mux_lookup($(selector :: expr_meta.Parsed),
+              ~default: $(default_value :: expr_meta.Parsed),
+              $cases)':
+    preserve_operand_surface(
+      'build_mux_lookup($selector, $default_value, $cases)',
+      default_value
+    )
+| 'mux_lookup($(selector :: expr_meta.Parsed),
+              ~default: $(default_value :: expr_meta.Parsed)):
      $(key :: expr_meta.Parsed): $case_value
      ...':
-    'build_mux_lookup($selector,
-                      $default_value,
-                      [[$key, $case_value], ...])'
+    preserve_operand_surface(
+      'build_mux_lookup($selector,
+                        $default_value,
+                        [[$key, $case_value], ...])',
+      default_value
+    )
 
 operator (left + right):
   if hardware_entity(left) || hardware_entity(right)
@@ -207,12 +256,12 @@ operator
         hw_sub(literal(value.type, 0), value)
     | rhombus.(-) entity
 
-operator (left << right):
+fun shift_left_operator(left, right):
   if hardware_entity(left) || hardware_entity(right)
   | hw_shl(left, right)
   | left rhombus.bits.(<<) right
 
-operator (left >> right):
+fun shift_right_operator(left, right):
   if hardware_entity(left) || hardware_entity(right)
   | block:
       def value = read(left)
@@ -221,20 +270,40 @@ operator (left >> right):
       | hw_shru(value, right)
   | left rhombus.bits.(>>) right
 
-operator (left & right):
-  ~order: bitwise_conjunction
+fun bit_and_operator(left, right):
   bit_and(left, right)
 
-operator (left ||| right):
-  ~order: bitwise_disjunction
+fun bit_or_operator(left, right):
   bit_or(left, right)
 
-operator (left ^ right):
-  ~order: bitwise_disjunction
+fun bit_xor_operator(left, right):
   bit_xor(left, right)
 
-operator (! entity):
-  ~order: bitwise_negation
+fun bit_not_operator(entity):
   if hardware_entity(entity)
   | bit_not(entity)
   | host_invert(entity)
+
+expr.macro '$left << $right':
+  ~order: bitwise_shift
+  preserve_operand_surface('shift_left_operator($left, $right)', left)
+
+expr.macro '$left >> $right':
+  ~order: bitwise_shift
+  preserve_operand_surface('shift_right_operator($left, $right)', left)
+
+expr.macro '$left & $right':
+  ~order: bitwise_conjunction
+  preserve_operand_surface('bit_and_operator($left, $right)', left)
+
+expr.macro '$left ||| $right':
+  ~order: bitwise_disjunction
+  preserve_operand_surface('bit_or_operator($left, $right)', left)
+
+expr.macro '$left ^ $right':
+  ~order: bitwise_disjunction
+  preserve_operand_surface('bit_xor_operator($left, $right)', left)
+
+expr.macro '! $entity':
+  ~order: bitwise_negation
+  preserve_operand_surface('bit_not_operator($entity)', entity)
