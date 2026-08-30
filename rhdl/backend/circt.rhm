@@ -794,6 +794,19 @@ fun circt_memory_type(memory):
 fun memory_ref(memory):
   "%__rhdl_memory_" ++ to_string(memory.id)
 
+// CIRCT represents the sole address of a depth-one memory with i0, while RHDL
+// deliberately keeps collection indices authorable as at least Bits(1).
+fun memory_index_ref(operation, memory, address):
+  if memory.depth == 1
+  | "%__rhdl_memory_index_" ++ to_string(operation.id)
+  | value_ref(address)
+
+fun emit_memory_index(operation, memory, address):
+  if memory.depth == 1
+  | String.append("    ", memory_index_ref(operation, memory, address),
+                  " = hw.constant 0 : i0\n")
+  | ""
+
 fun emit_memory(operation):
   def memory = operation.attribute("memory")
   def writes = operation.module_def.operations.filter(
@@ -815,14 +828,18 @@ fun emit_memory(operation):
 
 fun emit_memory_read_async(operation):
   def memory = operation.attribute("memory")
-  String.append("    ", value_ref(operation.results[0]), " = seq.read ",
-                memory_ref(memory), "[", value_ref(operation.operands[0]),
+  def address = operation.operands[0]
+  String.append(emit_memory_index(operation, memory, address),
+                "    ", value_ref(operation.results[0]), " = seq.read ",
+                memory_ref(memory), "[", memory_index_ref(operation, memory, address),
                 "] {latency = 0 : i64} : ", circt_memory_type(memory))
 
 fun emit_memory_write(operation):
   def memory = operation.attribute("memory")
-  String.append("    seq.write ", memory_ref(memory), "[",
-                value_ref(operation.operands[0]), "] ",
+  def address = operation.operands[0]
+  String.append(emit_memory_index(operation, memory, address),
+                "    seq.write ", memory_ref(memory), "[",
+                memory_index_ref(operation, memory, address), "] ",
                 value_ref(operation.operands[1]), " wren ",
                 value_ref(operation.operands[3]),
                 " {latency = 1 : i64} : ", circt_memory_type(memory))

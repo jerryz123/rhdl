@@ -1,5 +1,5 @@
 #lang rhombus
-// Emits CIRCT for asynchronous and masked shared-port memories with structural elements.
+// Emits CIRCT for aggregate, masked, and depth-one memory lowering cases.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -64,6 +64,45 @@ builder.drive(sync_storage.read_write_port.write_data, sync_write_data)
 builder.drive(sync_storage.read_write_port.write_mask, sync_write_mask)
 builder.drive(sync_read_data, sync_storage.read_write_port.read_data)
 def sync_finished = builder.finish(sync_module)
+
+// RHDL keeps both author-facing addresses at Bits(1). CIRCT's hlmem operation
+// uses i0 for its sole physical address, while firmem retains the i1 port.
+def singleton_module = builder.module("SingletonMemories")
+def singleton_clock = builder.input(singleton_module, "clock", Clock)
+def singleton_address = builder.input(singleton_module, "address", Bits(1))
+def singleton_write = builder.input(singleton_module, "write", Bits(1))
+def singleton_write_data = builder.input(singleton_module, "write_data", Bits(8))
+def singleton_enable = builder.input(singleton_module, "enable", Bits(1))
+def singleton_async_data = builder.output(singleton_module, "async_data", Bits(8))
+def singleton_sync_data = builder.output(singleton_module, "sync_data", Bits(8))
+def singleton_async_storage = builder.memory(singleton_module,
+                                             "async_storage",
+                                             1,
+                                             Bits(8))
+def singleton_async_value = builder.memory_read_async(singleton_module,
+                                                      singleton_async_storage,
+                                                      singleton_address)
+def singleton_async_write = builder.memory_write(singleton_module,
+                                                 singleton_async_storage,
+                                                 singleton_address,
+                                                 singleton_write_data,
+                                                 singleton_clock,
+                                                 singleton_enable)
+def singleton_sync_storage = builder.sync_memory(singleton_module,
+                                                 "sync_storage",
+                                                 1,
+                                                 Bits(8),
+                                                 singleton_clock,
+                                                 #false,
+                                                 #false,
+                                                 #true)
+builder.drive(singleton_sync_storage.read_write_port.address, singleton_address)
+builder.drive(singleton_sync_storage.read_write_port.enable, singleton_enable)
+builder.drive(singleton_sync_storage.read_write_port.write, singleton_write)
+builder.drive(singleton_sync_storage.read_write_port.write_data, singleton_write_data)
+builder.drive(singleton_async_data, singleton_async_value)
+builder.drive(singleton_sync_data, singleton_sync_storage.read_write_port.read_data)
+def singleton_finished = builder.finish(singleton_module)
 
 verify_design(design)
 print(emit_circt(design))
