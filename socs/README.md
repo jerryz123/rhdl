@@ -97,7 +97,7 @@ make -C socs rtl-elaboration-test
 ```
 
 The executable smoke additionally requires FESVR, CIRCT, Verilator, and an
-RV32-capable `riscv64-unknown-elf-gcc`:
+RV64-capable `riscv64-unknown-elf-gcc`:
 
 ```sh
 make -C socs e2e-test

@@ -6,6 +6,7 @@ import:
   "../../rhdl/frontend/kernel.rhm" as embedded
   "../../examples/rhdl/clocked-dpi.rhdl" as fixture
   "../../fesvr/direct-memory-htif.rhdl" as fesvr_fixture
+  "../../riscv/isa/xlen.rhm".XLen
   "clocked-dpi-options.rhdl" as options_fixture
   "clocked-dpi-invalid.rhdl" as invalid
 
@@ -34,6 +35,9 @@ def always_enable = always_module.find_operation(always_register.operands[1].def
 def fesvr_import = fesvr_fixture.design.dpi_imports[0]
 def fesvr_module = fesvr_fixture.design.modules.find(
   fun (module_def): module_def.name == "DirectMemoryHTIF"
+)
+def fesvr_rv32_design = embedded.run_elaboration(
+  fun (): fesvr_fixture.DirectMemoryHTIF(XLen.X32)
 )
 def fesvr_register = fesvr_module.operations.find(
   fun (operation): operation.opcode == "sim.dpi_register"
@@ -68,13 +72,20 @@ check:
   always_enable.opcode ~is "rtl.constant"
   always_enable.attribute("value") ~is 1
   fesvr_import.name ~is "rhdl_htif_tick"
+  fesvr_import.input_names ~is [
+    "reset", "target_xlen", "request_ready", "response_valid",
+    "response_data", "start_ready"
+  ]
   fesvr_import.results.map(fun (result): result.name) ~is fesvr_result_names
+  type_equal(fesvr_import.results[2].type, Bits(64)) ~is #true
+  type_equal(fesvr_import.results[6].type, Bits(64)) ~is #true
   fesvr_register.results.length() ~is 8
   option_registers.length() ~is 2
   (for all (operation in option_registers):
      operation.operands[0] === option_module.find_input("clock").value && operation.operands[1] === option_module.find_input("enable").value) ~is #true
   verify_design(fixture.design) ~is #void
   verify_design(fesvr_fixture.design) ~is #void
+  verify_design(fesvr_rv32_design) ~is #void
   verify_design(explicit_design) ~is #void
   verify_design(always_design) ~is #void
   verify_design(options_fixture.design) ~is #void

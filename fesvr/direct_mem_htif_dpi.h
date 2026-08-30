@@ -2,14 +2,15 @@
 #pragma once
 
 extern "C" int rhdl_htif_tick(unsigned char reset,
+                              unsigned char target_xlen,
                               unsigned char request_ready,
                               unsigned char response_valid,
                               int response_data,
                               unsigned char start_ready,
                               unsigned char* request_valid,
                               unsigned char* request_write,
-                              int* request_address,
+                              long long* request_address,
                               int* request_data,
                               unsigned char* response_ready,
                               unsigned char* start_valid,
-                              int* start_entry);
+                              long long* start_entry);

@@ -3,9 +3,10 @@
 # CHI-channel FESVR simulation support
 
 `DirectMemoryHtif` derives from FESVR's `htif_t` and presents its abstract
-memory chunks to RHDL as one-outstanding, aligned 32-bit transactions. It is
-deliberately limited to an RV32 little-endian target. FESVR splits larger
-accesses and performs read-modify-write for partial words.
+memory chunks to RHDL as one-outstanding, aligned 32-bit transactions. Target
+XLEN is explicit and may be 32 or 64; addresses and entry points remain 64-bit
+independently of the word-sized chunk payload. FESVR splits larger accesses and
+performs read-modify-write for partial words.
 
 Install the pinned optional dependency, then build and test the C++ transport:
 
@@ -19,9 +20,9 @@ make -C fesvr test
 `FesvrRequester` is its ready-valid CHI requester transaction engine:
 
 ```text
-FesvrRequester
+FesvrRequester(xlen, ...)
   port:  CHIRNIChannels node
-  start: Irrevocable(Bits(32)) producer
+  start: Irrevocable(Bits(xlen_width(xlen))) producer
   exit:  Bits(32)
 ```
 
@@ -48,6 +49,7 @@ The underlying DPI declaration remains:
 ```rhombus
 dpi_import function rhdl_htif_tick(
   reset: Bool,
+  target_xlen: Bits(8),
   request_ready: Bool,
   response_valid: Bool,
   response_data: Bits(32),
@@ -55,17 +57,19 @@ dpi_import function rhdl_htif_tick(
 ) -> (
   out request_valid: Bool,
   out request_write: Bool,
-  out request_address: Bits(32),
+  out request_address: Bits(64),
   out request_data: Bits(32),
   out response_ready: Bool,
   out start_valid: Bool,
-  out start_entry: Bits(32),
+  out start_entry: Bits(64),
   return exit: Bits(32)
 )
 ```
 
 The flat wrapper binds those ordered results with one parenthesized `dpi_reg`
-declaration. The exact C signature is declared in `direct_mem_htif_dpi.h`.
+declaration. Before narrowing a request to the configured CHI physical address
+width, the requester asserts that every discarded high bit is zero. The exact
+C signature is declared in `direct_mem_htif_dpi.h`.
 Check it against the installed Verilator headers with:
 
 ```sh

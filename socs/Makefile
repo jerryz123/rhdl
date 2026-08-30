@@ -72,6 +72,6 @@ $(BUILD_DIR):
 
 $(TEST_ELF): $(REPO_DIR)/support/direct_mem_htif_pass.S \
              $(REPO_DIR)/support/direct_mem_htif_pass.ld | $(BUILD_DIR)
-	$(RISCV_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
+	$(RISCV_CC) -march=rv64i -mabi=lp64 -nostdlib -nostartfiles \
 	  -Wl,--build-id=none -Wl,-T,$(REPO_DIR)/support/direct_mem_htif_pass.ld \
 	  $< -o $@

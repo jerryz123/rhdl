@@ -1,7 +1,6 @@
-// Implements an RV32 direct-memory HTIF transport on top of FESVR's abstract chunk API.
+// Implements a width-aware direct-memory HTIF transport over aligned word chunks.
 #include "direct_mem_htif.h"
 
-#include <limits>
 #include <stdexcept>
 
 namespace rhdl::fesvr {
@@ -29,15 +28,16 @@ void require_word_transfer(addr_t address, std::size_t length) {
   if (length != kWordBytes || (address & (kWordBytes - 1)) != 0) {
     throw std::runtime_error("direct-memory HTIF requires aligned four-byte transfers");
   }
-  if (address > std::numeric_limits<std::uint32_t>::max()) {
-    throw std::runtime_error("direct-memory HTIF address exceeds the RV32 address space");
-  }
 }
 
 }  // namespace
 
-DirectMemoryHtif::DirectMemoryHtif(int argc, char** argv) : htif_t(argc, argv) {
-  set_expected_xlen(32);
+DirectMemoryHtif::DirectMemoryHtif(int argc, char** argv, int expected_xlen)
+    : htif_t(argc, argv) {
+  if (expected_xlen != 32 && expected_xlen != 64) {
+    throw std::invalid_argument("direct-memory HTIF target XLEN must be 32 or 64");
+  }
+  set_expected_xlen(expected_xlen);
   target_context_ = context_t::current();
   host_context_.init(host_thread_main, this);
 }
@@ -97,7 +97,7 @@ bool DirectMemoryHtif::start_valid() const {
   return start_pending_ && start_exposed_;
 }
 
-std::uint32_t DirectMemoryHtif::start_entry() const {
+std::uint64_t DirectMemoryHtif::start_entry() const {
   return start_entry_;
 }
 
@@ -106,11 +106,7 @@ std::uint32_t DirectMemoryHtif::exit_word() {
 }
 
 void DirectMemoryHtif::reset() {
-  const auto entry = get_entry_point();
-  if (entry > std::numeric_limits<std::uint32_t>::max()) {
-    throw std::runtime_error("direct-memory HTIF entry point exceeds the RV32 address space");
-  }
-  start_entry_ = static_cast<std::uint32_t>(entry);
+  start_entry_ = get_entry_point();
   start_pending_ = true;
   start_exposed_ = false;
   while (start_pending_) {
@@ -153,7 +149,7 @@ std::uint32_t DirectMemoryHtif::transact(bool write,
 
   request_ = DirectMemoryRequest{
       .write = write,
-      .address = static_cast<std::uint32_t>(address),
+      .address = address,
       .data = data,
   };
   request_pending_ = true;

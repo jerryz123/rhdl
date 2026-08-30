@@ -7,7 +7,7 @@ protocol implementation or a particular SoC definition.
 
 - `TestDriver.sv` clocks the FESVR-backed `SimpleSoC` and checks its entry
   handoff and HTIF exit.
-- `direct_mem_htif_pass.S` and `direct_mem_htif_pass.ld` provide the inert RV32
+- `direct_mem_htif_pass.S` and `direct_mem_htif_pass.ld` provide the inert RV64
   ELF used by both the direct FESVR transport test and the SimpleSoC end-to-end
   smoke.
 

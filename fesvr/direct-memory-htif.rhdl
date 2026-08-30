@@ -5,9 +5,11 @@ import:
   lib("rhdl/std/bits.rhdl").transfer_byte_mask
   lib("rhdl/std/ready-valid.rhdl") open
   lib("chi/main.rhdl") open
+  lib("riscv/isa/xlen.rhm") open
 
 dpi_import function rhdl_htif_tick(
   reset: Bool,
+  target_xlen: Bits(8),
   request_ready: Bool,
   response_valid: Bool,
   response_data: Bits(32),
@@ -15,21 +17,22 @@ dpi_import function rhdl_htif_tick(
 ) -> (
   out request_valid: Bool,
   out request_write: Bool,
-  out request_address: Bits(32),
+  out request_address: Bits(64),
   out request_data: Bits(32),
   out response_ready: Bool,
   out start_valid: Bool,
-  out start_entry: Bits(32),
+  out start_entry: Bits(64),
   return exit: Bits(32)
 )
 
 // Keeps the generated DPI signature flat and stable for the C++ boundary.
 // RHDL designs should normally instantiate FesvrRequester below.
-sync_circuit DirectMemoryHTIF():
+sync_circuit DirectMemoryHTIF(xlen :: XLen):
   input(request_ready, response_valid, start_ready): Bool
   input response_data: Bits(32)
   output(request_valid, request_write, response_ready, start_valid): Bool
-  output(request_address, request_data, start_entry, exit): Bits(32)
+  output(request_address, start_entry): Bits(64)
+  output(request_data, exit): Bits(32)
 
   dpi_reg (htif_request_valid,
            htif_request_write,
@@ -40,6 +43,7 @@ sync_circuit DirectMemoryHTIF():
            htif_start_entry,
            htif_exit) = rhdl_htif_tick(
     cast(reset_active(), Bool),
+    bits(xlen_width(xlen), 8),
     request_ready,
     response_valid,
     response_data,
@@ -55,7 +59,7 @@ sync_circuit DirectMemoryHTIF():
   start_entry <== htif_start_entry
   exit <== htif_exit
 
-def design = elaborate(DirectMemoryHTIF())
+def design = elaborate(DirectMemoryHTIF(XLen.X64))
 
 hardware_enum FesvrCHIState:
   Idle
@@ -82,9 +86,9 @@ fun checked_fesvr_chi_requester(p :: CHIFlitParams,
     | #void
   p
 
-fun fesvr_chi_request(address :: Bits(32),
+fun fesvr_chi_request(p :: CHIFlitParams,
+                      address :: Bits(p.request_address_width),
                       write :: Bool,
-                      p :: CHIFlitParams,
                       node_id :: Nat,
                       home_node_id :: Bits(p.node_id_width)):
   wire request: CHIReqFlit(p)
@@ -119,7 +123,7 @@ fun fesvr_chi_request(address :: Bits(32),
   request.allow_retry <== Bool(#false)
   request.likely_shared <== Bool(#false)
   request.pas <== CHIPAS.Secure
-  request.address <== zext(address, p.request_address_width)
+  request.address <== address
   request.size_or_num_req <== bits(2, 6)
   request.multi_req <== Bool(#false)
   request.opcode <== mux(write,
@@ -134,10 +138,10 @@ fun fesvr_chi_request(address :: Bits(32),
   request.qos <== bits(0, 4)
   request
 
-fun fesvr_chi_write_data(address :: Bits(32),
+fun fesvr_chi_write_data(p :: CHIFlitParams,
+                         address :: Bits(p.request_address_width),
                          data :: Bits(32),
                          dbid :: Bits(12),
-                         p :: CHIFlitParams,
                          node_id :: Nat,
                          home_node_id :: Bits(p.node_id_width)):
   def word_lanes = p.data_bytes / 4
@@ -186,9 +190,10 @@ fun fesvr_chi_write_data(address :: Bits(32),
   write_data.qos <== bits(0, 4)
   write_data
 
-// The requester is fixed to FESVR's RV32, one-outstanding contract and exposes
-// only ready-valid CHI flows; physical activation and credits belong outside it.
-sync_circuit FesvrRequester(flit :: CHIFlitParams,
+// The requester specializes startup width to the target XLEN while keeping
+// FESVR's aligned word chunks independent of architectural register width.
+sync_circuit FesvrRequester(xlen :: XLen,
+                            flit :: CHIFlitParams,
                             node :: CHINodeParams,
                             home_map :: CHIHomeMap):
   def p = checked_fesvr_chi_requester(flit, node, home_map)
@@ -196,24 +201,28 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   def lane_width = index_width(word_lanes)
 
   interface port(CHIRNIChannels(p), ~role: node)
-  interface start(Irrevocable(Bits(32)), ~role: producer)
+  interface start(Irrevocable(Bits(xlen_width(xlen))), ~role: producer)
   output exit: Bits(32)
 
-  inst raw(DirectMemoryHTIF())
+  inst raw(DirectMemoryHTIF(xlen))
 
   reg state(~init: FesvrCHIState.Idle)
-  reg request_address(~init: bits(0, 32))
+  reg request_address(~init: bits(0, p.request_address_width))
   reg request_word(~init: bits(0, 32))
   reg home_id(~init: bits(0, p.node_id_width))
   reg write_dbid(~init: bits(0, 12))
   def idle = state === FesvrCHIState.Idle
-  def request_home = home_map.lookup(zext(raw.request_address, p.request_address_width))
-  port.req.valid <== raw.request_valid & idle & request_home.valid
-  port.req.bits <== fesvr_chi_request(raw.request_address, raw.request_write, p, node.node_id, request_home.node_id)
-  raw.request_ready <== idle & request_home.valid & port.req.ready
+  def incoming_address = raw.request_address[0..p.request_address_width]
+  def incoming_address_fits = !or_reduce(raw.request_address[p.request_address_width..64])
+  def request_home = home_map.lookup(incoming_address)
+  port.req.valid <== raw.request_valid & idle & incoming_address_fits & request_home.valid
+  port.req.bits <== fesvr_chi_request(p, incoming_address, raw.request_write, node.node_id, request_home.node_id)
+  raw.request_ready <== idle & incoming_address_fits & request_home.valid & port.req.ready
   def request_fire = fire(port.req)
   when (raw.request_valid & idle):
-    assert(request_home.valid, "fesvr_chi_address_has_home")
+    assert(incoming_address_fits, "fesvr_chi_address_fits")
+    assert(!incoming_address_fits ||| request_home.valid,
+           "fesvr_chi_address_has_home")
 
   def response = port.rsp.response.bits
   def accepting_dbid = (state === FesvrCHIState.WriteAwaitDBID) & (
@@ -226,7 +235,7 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   def dbid_fire = fire(port.rsp.response) & accepting_dbid
 
   port.dat.request.valid <== state === FesvrCHIState.WriteData
-  port.dat.request.bits <== fesvr_chi_write_data(request_address, request_word, write_dbid, p, node.node_id, home_id)
+  port.dat.request.bits <== fesvr_chi_write_data(p, request_address, request_word, write_dbid, node.node_id, home_id)
   def write_data_fire = fire(port.dat.request)
 
   def read_data = port.dat.response.bits
@@ -245,7 +254,7 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
   def response_fire = raw.response_valid & raw.response_ready
 
   when request_fire:
-    request_address <== raw.request_address
+    request_address <== incoming_address
     request_word <== raw.request_data
     home_id <== request_home.node_id
     state <== mux(raw.request_write,
@@ -268,11 +277,14 @@ sync_circuit FesvrRequester(flit :: CHIFlitParams,
     assert(read_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
            "fesvr_chi_read_data_home")
 
-  raw.start_ready <== start.ready
+  def start_entry_fits = if xlen == XLen.X32 | !or_reduce(raw.start_entry[32..64]) | Bool(#true)
+  when (raw.start_valid):
+    assert(start_entry_fits, "fesvr_start_entry_fits_xlen")
+  raw.start_ready <== start.ready & start_entry_fits
   port.rsp.requester.valid <== Bool(#false)
   port.rsp.requester.bits <== literal(CHIRspFlit(p), 0)
-  start.valid <== raw.start_valid
-  start.bits <== raw.start_entry
+  start.valid <== raw.start_valid & start_entry_fits
+  start.bits <== if xlen == XLen.X32 | raw.start_entry[0..32] | raw.start_entry
   exit <== raw.exit
 
 export:

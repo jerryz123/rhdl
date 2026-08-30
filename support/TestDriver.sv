@@ -3,7 +3,7 @@ module TestDriver;
   logic clock = 1'b0;
   logic reset = 1'b1;
   wire loaded;
-  wire [31:0] entry;
+  wire [63:0] entry;
   wire [31:0] exit;
 
   SimpleSoC dut (
@@ -25,8 +25,8 @@ module TestDriver;
       if (exit != 0) begin
         if (!loaded)
           $fatal(1, "FESVR exited before handing off the ELF entry point");
-        if (entry != 32'h80000000)
-          $fatal(1, "FESVR handed off unexpected entry point %08x", entry);
+        if (entry != 64'h0000000080000000)
+          $fatal(1, "FESVR handed off unexpected entry point %016x", entry);
         if (exit != 1)
           $fatal(1, "FESVR reported target failure: exit word %0d", exit);
         $display("SimpleSoC coherent CHI smoke passed");

@@ -1,4 +1,4 @@
-// Defines an inert RV32 payload whose preloaded mailbox completes transport smokes.
+// Defines an inert RV64 payload whose preloaded mailbox completes transport smokes.
 .section .text
 .globl _start
 _start:

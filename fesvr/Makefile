@@ -46,8 +46,9 @@ $(TRANSPORT_LIBRARY): $(TRANSPORT_OBJECT)
 
 $(TEST_ELF): $(REPO_DIR)/support/direct_mem_htif_pass.S \
              $(REPO_DIR)/support/direct_mem_htif_pass.ld | $(BUILD_DIR)
-	$(RISCV_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
-	  -Wl,--build-id=none -Wl,-T,$(REPO_DIR)/support/direct_mem_htif_pass.ld \
+	$(RISCV_CC) -march=rv64i -mabi=lp64 -nostdlib -nostartfiles \
+	  -Wl,--build-id=none -Wl,--defsym=__memory_base=0x180000000 \
+	  -Wl,-T,$(REPO_DIR)/support/direct_mem_htif_pass.ld \
 	  $< -o $@
 
 $(TEST_BINARY): tests/direct_mem_htif_test.cc \

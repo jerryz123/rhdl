@@ -10,8 +10,8 @@
 
 namespace {
 
-constexpr std::uint32_t kEntryAddress = 0x80000000;
-constexpr std::uint32_t kTohostAddress = 0x80001000;
+constexpr std::uint64_t kEntryAddress = 0x0000000180000000ULL;
+constexpr std::uint64_t kTohostAddress = kEntryAddress + 0x1000;
 
 [[noreturn]] void fail(const std::string& message) {
   throw std::runtime_error(message);
@@ -27,9 +27,9 @@ int main(int argc, char** argv) {
 
   char program_name[] = "direct_mem_htif_test";
   char* htif_arguments[] = {program_name, argv[1]};
-  auto* transport = new rhdl::fesvr::DirectMemoryHtif(2, htif_arguments);
+  auto* transport = new rhdl::fesvr::DirectMemoryHtif(2, htif_arguments, 64);
 
-  std::unordered_map<std::uint32_t, std::uint32_t> memory;
+  std::unordered_map<std::uint64_t, std::uint32_t> memory;
   bool response_valid = false;
   std::uint32_t response_data = 0;
   bool response_pending = false;
@@ -40,14 +40,14 @@ int main(int argc, char** argv) {
   bool request_stalled = false;
   rhdl::fesvr::DirectMemoryRequest stalled_request = {};
   bool start_stalled = false;
-  std::uint32_t stalled_entry = 0;
+  std::uint64_t stalled_entry = 0;
 
   for (std::size_t cycle = 0; cycle < 100000; ++cycle) {
     const bool request_valid = transport->request_valid();
     const auto request = transport->request();
     const bool response_ready = transport->response_ready();
     const bool start_valid = transport->start_valid();
-    const std::uint32_t start_entry = transport->start_entry();
+    const std::uint64_t start_entry = transport->start_entry();
     const bool request_ready = !request_valid || request_stalled;
     const bool start_ready = !start_valid || start_stalled;
 

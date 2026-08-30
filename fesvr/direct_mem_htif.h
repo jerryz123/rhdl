@@ -11,13 +11,13 @@ namespace rhdl::fesvr {
 
 struct DirectMemoryRequest {
   bool write;
-  std::uint32_t address;
+  std::uint64_t address;
   std::uint32_t data;
 };
 
 class DirectMemoryHtif final : public htif_t {
  public:
-  DirectMemoryHtif(int argc, char** argv);
+  DirectMemoryHtif(int argc, char** argv, int expected_xlen);
   ~DirectMemoryHtif() override = default;
 
   void tick(bool request_ready,
@@ -30,7 +30,7 @@ class DirectMemoryHtif final : public htif_t {
   bool response_ready() const;
 
   bool start_valid() const;
-  std::uint32_t start_entry() const;
+  std::uint64_t start_entry() const;
 
   std::uint32_t exit_word();
 
@@ -59,7 +59,7 @@ class DirectMemoryHtif final : public htif_t {
 
   bool start_pending_ = false;
   bool start_exposed_ = false;
-  std::uint32_t start_entry_ = 0;
+  std::uint64_t start_entry_ = 0;
 };
 
 }  // namespace rhdl::fesvr
