@@ -37,5 +37,8 @@ make -C sims tiled-lowering-test
 
 `DirectMemoryHtif` presents FESVR's abstract memory chunks as one-outstanding,
 aligned 32-bit transactions. Target XLEN may be 32 or 64; addresses and entry
-points remain 64-bit. `FesvrRequester` converts those private ready-valid DPI
-signals into native CHI `ReadNoSnp` and `WriteNoSnpFull` transactions.
+points remain 64-bit. `FesvrRequester` is a non-caching RN-F: it converts those
+private ready-valid DPI signals into coherent CHI `ReadClean` and
+`WriteUniquePtl` transactions and reports Invalid for every snoop. Consequently
+ELF loading and `tohost`/`fromhost` polling observe dirty Ricket cache lines
+without reserving a special mailbox address range.

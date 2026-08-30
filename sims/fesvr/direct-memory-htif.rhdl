@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements the direct-memory FESVR DPI tick as a CHI requester.
+// Implements the direct-memory FESVR DPI tick as a coherent non-caching CHI requester.
 
 import:
   lib("rhdl/std/bits.rhdl").transfer_byte_mask
@@ -71,8 +71,8 @@ hardware_enum FesvrCHIState:
 fun checked_fesvr_chi_requester(p :: CHIFlitParams,
                                 node :: CHINodeParams,
                                 home_map :: CHIHomeMap):
-  unless node.kind == CHINodeKind.RNI
-  | error(~who: #'FesvrRequester, "node must be an RN-I")
+  unless node.kind == CHINodeKind.RNF
+  | error(~who: #'FesvrRequester, "node must be an RN-F")
   unless node.max_outstanding == 1
   | error(~who: #'FesvrRequester,
           "node must allow exactly one outstanding transaction")
@@ -112,10 +112,10 @@ fun fesvr_chi_request(p :: CHIFlitParams,
   request.exp_comp_ack <== Bool(#false)
   request.excl_snoop_me_cah <== Bool(#false)
   request.group_id_or_lpid <== bits(0, 8)
-  request.snp_attr_or_do_dwt <== Bool(#false)
+  request.snp_attr_or_do_dwt <== Bool(#true)
   request.mem_attr <== CHIMemAttr():
     allocate: Bool(#false)
-    cacheable: Bool(#false)
+    cacheable: Bool(#true)
     device: Bool(#false)
     early_write_acknowledge: Bool(#false)
   request.pcrd_type <== bits(0, 4)
@@ -126,9 +126,7 @@ fun fesvr_chi_request(p :: CHIFlitParams,
   request.address <== address
   request.size_or_num_req <== bits(2, 6)
   request.multi_req <== Bool(#false)
-  request.opcode <== mux(write,
-                         CHIReqOpcode.WriteNoSnpFull,
-                         CHIReqOpcode.ReadNoSnp)
+  request.opcode <== mux(write, CHIReqOpcode.WriteUniquePtl, CHIReqOpcode.ReadClean)
   request.return_txn_id_or_stash_lpid <== bits(0, 12)
   request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
   request.return_nid_or_stash_nid_or_data_target <== bits(node_id, p.node_id_width)
@@ -137,6 +135,71 @@ fun fesvr_chi_request(p :: CHIFlitParams,
   request.tgt_id <== home_node_id
   request.qos <== bits(0, 4)
   request
+
+fun fesvr_chi_snoop_response(p :: CHIFlitParams,
+                             node_id :: Nat,
+                             snoop :: CHISnpFlit(p)) :~ CHIRspFlit(p):
+  def response = CHICoherentResponse():
+    pass_dirty: Bool(#false)
+    state: CHIResponseState.Invalid
+  CHIRspFlit(p):
+    cache_line_id: bits(0, 6)
+    trace_tag: snoop.trace_tag
+    tag_op: CHITagOp.Invalid
+    pcrd_type: bits(0, 4)
+    dbid_or_group_id: bits(0, 12)
+    c_busy: bits(0, 3)
+    fwd_state_or_data_pull: bits(0, 3)
+    resp: as_bits(response)
+    resp_err: CHIRespErr.OK
+    opcode: CHIRspOpcode.SnpResp
+    txn_id: snoop.txn_id
+    src_id: bits(node_id, p.node_id_width)
+    tgt_id: snoop.src_id
+    qos: snoop.qos
+
+// FESVR never retains a cache line, but its RN-F endpoint still participates
+// in broadcast snooping and the paired DVM protocol.
+sync_circuit FesvrSnoopResponder(p :: CHIFlitParams, node_id :: Nat):
+  interface snoops(Decoupled(CHISnpFlit(p)), ~role: consumer)
+  interface responses(Decoupled(CHIRspFlit(p)), ~role: producer)
+
+  reg active(~init: Bool(#false))
+  reg request(CHISnpFlit(p))
+  reg dvm_first_pending(~init: Bool(#false))
+  reg dvm_source_id(~init: bits(0, p.node_id_width))
+  reg dvm_txn_id(~init: bits(0, 12))
+
+  def incoming = snoops.bits
+  def ordinary = incoming.opcode =/= CHISnpOpcode.SnpLCrdReturn
+  def incoming_dvm = incoming.opcode === CHISnpOpcode.SnpDVMOp
+  def can_start = !active & (!dvm_first_pending ||| incoming_dvm)
+  snoops.ready <== !ordinary ||| can_start
+  def snoop_fire = fire(snoops) & ordinary
+  def dvm_first_fire = snoop_fire & incoming_dvm & !dvm_first_pending
+  def dvm_second_fire = snoop_fire & incoming_dvm & dvm_first_pending
+  def response_start = snoop_fire & (!incoming_dvm ||| dvm_first_pending)
+
+  responses.valid <== active
+  responses.bits <== fesvr_chi_snoop_response(p, node_id, request)
+  def response_fire = fire(responses)
+
+  when dvm_second_fire:
+    assert(incoming.src_id === dvm_source_id, "fesvr_snoop_dvm_source_consistent")
+    assert(incoming.txn_id === dvm_txn_id, "fesvr_snoop_dvm_txn_consistent")
+
+  when response_start:
+    active <== Bool(#true)
+    request <== incoming
+  elsewhen response_fire:
+    active <== Bool(#false)
+
+  when dvm_first_fire:
+    dvm_first_pending <== Bool(#true)
+    dvm_source_id <== incoming.src_id
+    dvm_txn_id <== incoming.txn_id
+  elsewhen dvm_second_fire:
+    dvm_first_pending <== Bool(#false)
 
 fun fesvr_chi_write_data(p :: CHIFlitParams,
                          address :: Bits(p.request_address_width),
@@ -200,11 +263,12 @@ sync_circuit FesvrRequester(xlen :: XLen,
   def word_lanes = p.data_bytes / 4
   def lane_width = index_width(word_lanes)
 
-  interface port(CHIRNIChannels(p), ~role: node)
+  interface port(CHIRNChannels(p), ~role: node)
   interface start(Irrevocable(Bits(xlen_width(xlen))), ~role: producer)
   output exit: Bits(32)
 
   inst raw(DirectMemoryHTIF(xlen))
+  inst snoop(FesvrSnoopResponder(p, node.node_id))
 
   reg state(~init: FesvrCHIState.Idle)
   reg request_address(~init: bits(0, p.request_address_width))
@@ -215,42 +279,42 @@ sync_circuit FesvrRequester(xlen :: XLen,
   def incoming_address = raw.request_address[0..p.request_address_width]
   def incoming_address_fits = !or_reduce(raw.request_address[p.request_address_width..64])
   def request_home = home_map.lookup(incoming_address)
-  port.req.valid <== raw.request_valid & idle & incoming_address_fits & request_home.valid
-  port.req.bits <== fesvr_chi_request(p, incoming_address, raw.request_write, node.node_id, request_home.node_id)
-  raw.request_ready <== idle & incoming_address_fits & request_home.valid & port.req.ready
-  def request_fire = fire(port.req)
+  port.requests.valid <== raw.request_valid & idle & incoming_address_fits & request_home.valid
+  port.requests.bits <== fesvr_chi_request(p, incoming_address, raw.request_write, node.node_id, request_home.node_id)
+  raw.request_ready <== idle & incoming_address_fits & request_home.valid & port.requests.ready
+  def request_fire = fire(port.requests)
   when (raw.request_valid & idle):
     assert(incoming_address_fits, "fesvr_chi_address_fits")
     assert(!incoming_address_fits ||| request_home.valid,
            "fesvr_chi_address_has_home")
 
-  def response = port.rsp.response.bits
+  def response = port.responses.bits
   def accepting_dbid = (state === FesvrCHIState.WriteAwaitDBID) & (
     response.opcode === CHIRspOpcode.DBIDResp
   )
   def accepting_completion = (state === FesvrCHIState.WriteAwaitComp) & (
     response.opcode === CHIRspOpcode.Comp
   ) & raw.response_ready
-  port.rsp.response.ready <== accepting_dbid ||| accepting_completion
-  def dbid_fire = fire(port.rsp.response) & accepting_dbid
+  port.responses.ready <== accepting_dbid ||| accepting_completion
+  def dbid_fire = fire(port.responses) & accepting_dbid
 
-  port.dat.request.valid <== state === FesvrCHIState.WriteData
-  port.dat.request.bits <== fesvr_chi_write_data(p, request_address, request_word, write_dbid, node.node_id, home_id)
-  def write_data_fire = fire(port.dat.request)
+  port.request_data.valid <== state === FesvrCHIState.WriteData
+  port.request_data.bits <== fesvr_chi_write_data(p, request_address, request_word, write_dbid, node.node_id, home_id)
+  def write_data_fire = fire(port.request_data)
 
-  def read_data = port.dat.response.bits
+  def read_data = port.response_data.bits
   def read_pending = state === FesvrCHIState.ReadPending
   def read_words = cast(read_data.data, Vec(word_lanes, Bits(32)))
   def read_lane = request_address[2..(2 + lane_width)]
-  def read_response_valid = read_pending & port.dat.response.valid
+  def read_response_valid = read_pending & port.response_data.valid
   def write_response_valid = (state === FesvrCHIState.WriteAwaitComp) & (
-    port.rsp.response.valid
+    port.responses.valid
   ) & (response.opcode === CHIRspOpcode.Comp)
   raw.response_valid <== read_response_valid ||| write_response_valid
   raw.response_data <== mux(read_response_valid,
                             read_words[read_lane],
                             bits(0, 32))
-  port.dat.response.ready <== read_pending & raw.response_ready
+  port.response_data.ready <== read_pending & raw.response_ready
   def response_fire = raw.response_valid & raw.response_ready
 
   when request_fire:
@@ -268,11 +332,11 @@ sync_circuit FesvrRequester(xlen :: XLen,
   elsewhen response_fire:
     state <== FesvrCHIState.Idle
 
-  when (port.rsp.response.valid):
+  when (port.responses.valid):
     assert(accepting_dbid ||| write_response_valid,
            "fesvr_chi_response_expected")
     assert(response.src_id === home_id, "fesvr_chi_response_home")
-  when (port.dat.response.valid):
+  when (port.response_data.valid):
     assert(read_pending, "fesvr_chi_read_data_expected")
     assert(read_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
            "fesvr_chi_read_data_home")
@@ -281,8 +345,8 @@ sync_circuit FesvrRequester(xlen :: XLen,
   when (raw.start_valid):
     assert(start_entry_fits, "fesvr_start_entry_fits_xlen")
   raw.start_ready <== start.ready & start_entry_fits
-  port.rsp.requester.valid <== Bool(#false)
-  port.rsp.requester.bits <== literal(CHIRspFlit(p), 0)
+  port.snoops |> snoop.snoops
+  snoop.responses |> port.requester_responses
   start.valid <== raw.start_valid & start_entry_fits
   start.bits <== if xlen == XLen.X32 | raw.start_entry[0..32] | raw.start_entry
   exit <== raw.exit
@@ -290,5 +354,6 @@ sync_circuit FesvrRequester(xlen :: XLen,
 export:
   DirectMemoryHTIF
   FesvrCHIState
+  FesvrSnoopResponder
   FesvrRequester
   design

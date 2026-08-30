@@ -6,7 +6,7 @@
 
 ```text
 SimpleSoC
-├── External host RN-I (NodeID 1)
+├── External non-caching host RN-F (NodeID 1)
 ├── Ricket
 │   ├── L1I RN-F (NodeID 2)
 │   ├── L1D RN-F (NodeID 3)
@@ -18,9 +18,12 @@ SimpleSoC
     └── ACLINT SN-I (NodeID 10)
 ```
 
-The external host loads memory through its RN-I endpoint and hands a 64-bit boot
-entry directly to Ricket. Both concrete SoCs expose this memory/start contract
-through `SoCHostInterface`; neither contains DPI calls or simulator behavior.
+The external host loads and observes memory through its non-caching RN-F
+endpoint and hands a 64-bit boot entry directly to Ricket. Both concrete SoCs
+expose this memory/start contract through `SoCHostInterface`; neither contains
+DPI calls or simulator behavior. Host `ReadClean` and `WriteUniquePtl`
+transactions snoop the private caches, so simulator mailboxes may reside in
+ordinary coherent memory.
 The ACLINT window occupies `0x02000000..0x0200ffff`. Its `mtime` counter drives
 Ricket's `time` CSR, while hart 0's MTIP and MSIP levels drive the corresponding
 machine interrupt inputs. The platform currently advances `mtime` once per SoC
@@ -28,10 +31,10 @@ clock; a later clock-rate adapter can replace that explicit tick policy. Both
 SoCs currently expose no external interrupt-controller input: supervisor and
 external interrupt lines remain low until a platform interrupt device exists.
 
-The two RN-I and two RN-F relationships reuse one physical single-router topology
+The one RN-I and three RN-F relationships reuse one physical single-router topology
 but independently compile validation, route keys, buffering, and allocation for
 the four CHI channel planes. REQ is 4-to-2, RSP and DAT are 6-to-6, and SNP is
-1-to-2 because only the two RN-Fs receive snoops. Router arity therefore follows
+1-to-3 because all three RN-Fs receive snoops. Router arity therefore follows
 the permitted protocol paths instead of an all-node cross product.
 
 Ricket exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
@@ -52,18 +55,18 @@ The FESVR implementation and generated executable harness remain owned by
 plan places eight `RicketTile`s in the lower two rows of a 4x4 mesh, four
 service routers in the middle row, and four `MemoryTile`s in the upper row.
 One service router owns the shared eight-hart ACLINT behind an HN-I, another
-owns the external host RN-I, and the other two are transit-only. The system
+owns the external host RN-F, and the other two are transit-only. The system
 allocates 16 RN-F NodeIDs for the eight L1I/L1D pairs, eight RN-I NodeIDs for
-uncached device traffic, one host RN-I, four HN-Fs, one HN-I, four SN-Fs, and
+uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, and
 one ACLINT SN-I.
 
 Four 8 KiB banks cover `0x80000000` through `0x80007fff` with 64-byte
 cache-line striping. One shared `CHIHomeMap` maps successive lines to successive
 HN-Fs. Each memory tile projects its sparse global bank addresses into a dense
 local RAM address space before fragmentation. The 16 coherent requester
-endpoints and host RN-I connect to all four HN-Fs, while the eight uncached
+endpoints plus the host RN-F connect to all four HN-Fs, while the eight uncached
 requester endpoints connect to the ACLINT HN-I. Together they compile 76 REQ,
-152 RSP, 64 SNP, and 152 DAT routes before any hardware elaborates.
+152 RSP, 68 SNP, and 152 DAT routes before any hardware elaborates.
 
 Each tile owns one `CHIRouter`, which contains the independent REQ/RSP/SNP/DAT
 `SimpleRouterFamily` instances and site-keyed CHI adapters. Every Ricket tile
