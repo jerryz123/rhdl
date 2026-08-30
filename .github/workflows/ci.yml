@@ -1,4 +1,4 @@
-# Runs dependency-sensitive RHDL host, example, CIRCT, and FESVR checks.
+# Runs dependency-sensitive RHDL host, example, CIRCT, and simulation checks.
 
 name: CI
 
@@ -31,7 +31,7 @@ jobs:
       host_matrix: "${{ steps.filter.outputs.host_matrix }}"
       circt: "${{ steps.filter.outputs.circt }}"
       circt_matrix: "${{ steps.filter.outputs.circt_matrix }}"
-      fesvr: "${{ steps.filter.outputs.fesvr }}"
+      simulation: "${{ steps.filter.outputs.simulation }}"
       examples: "${{ steps.filter.outputs.examples }}"
       example_matrix: "${{ steps.filter.outputs.example_matrix }}"
     steps:
@@ -61,7 +61,7 @@ jobs:
   compile-racket:
     name: Compile RHDL once
     needs: changes
-    if: needs.changes.outputs.host == 'true' || needs.changes.outputs.examples == 'true' || needs.changes.outputs.circt == 'true' || needs.changes.outputs.fesvr == 'true'
+    if: needs.changes.outputs.host == 'true' || needs.changes.outputs.examples == 'true' || needs.changes.outputs.circt == 'true' || needs.changes.outputs.simulation == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -185,10 +185,10 @@ jobs:
       - name: Verify affected CIRCT fixture group
         run: make "${{ matrix.target }}"
 
-  fesvr:
-    name: FESVR and SimpleSoC integration
+  simulation:
+    name: SoC simulation harnesses
     needs: [changes, compile-racket]
-    if: needs.changes.outputs.fesvr == 'true'
+    if: needs.changes.outputs.simulation == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -220,9 +220,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools/fesvr-*
-          key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('tools/install-fesvr.sh', 'fesvr/Makefile', 'socs/Makefile') }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('sims/fesvr/install.sh', 'sims/Makefile') }}"
       - name: Build pinned FESVR
-        run: make -C fesvr setup
+        run: make -C sims setup
       - name: Cache CIRCT
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -231,13 +231,13 @@ jobs:
       - name: Install CIRCT
         run: make setup-circt
       - name: Test direct-memory transport
-        run: make -C fesvr test
+        run: make -C sims fesvr-test
       - name: Compile Verilator DPI adapter
         run: |
           verilator_root="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
           test -n "$verilator_root"
-          make -C fesvr dpi-compile-check VERILATOR_ROOT="$verilator_root"
-      - name: Elaborate SimpleSoC
-        run: make -C socs rtl-elaboration-test
-      - name: Simulate SimpleSoC end to end
-        run: make -C socs e2e-test
+          make -C sims dpi-compile-check VERILATOR_ROOT="$verilator_root"
+      - name: Elaborate SoC harnesses
+        run: make -C sims elaboration-test
+      - name: Simulate simple SoC harness end to end
+        run: make -C sims verilator-test

@@ -1,0 +1,36 @@
+#lang rhdl
+// Wraps a selected SoC with the FESVR host model used by executable simulations.
+
+import:
+  lib("riscv/isa/xlen.rhm").XLen
+  lib("socs/simple-soc.rhdl") as simple
+  lib("socs/tiled-soc.rhdl") as tiled
+  lib("socs/tiled-soc-config.rhdl") as tiled_config
+  "fesvr/direct-memory-htif.rhdl".FesvrRequester
+
+sync_circuit SoCHarness(use_tiled_soc :: Boolean):
+  output exit: Bits(32)
+
+  if use_tiled_soc
+  | block:
+      inst requester(FesvrRequester(XLen.X64, tiled_config.tiled_soc_flit, tiled_config.tiled_soc_host_node, tiled_config.tiled_soc_home_map))
+      inst soc(tiled.TiledSoC())
+      requester.port <=> soc.host.memory
+      requester.start |> soc.host.start
+      exit <== requester.exit
+      #void
+  | block:
+      inst requester(FesvrRequester(XLen.X64, simple.simple_soc_flit, simple.simple_soc_host_node, simple.simple_soc_home_map))
+      inst soc(simple.SimpleSoC())
+      requester.port <=> soc.host.memory
+      requester.start |> soc.host.start
+      exit <== requester.exit
+      #void
+
+def design = elaborate(SoCHarness(#false))
+def tiled_design = elaborate(SoCHarness(#true))
+
+export:
+  SoCHarness
+  design
+  tiled_design

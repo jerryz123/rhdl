@@ -21,7 +21,8 @@ user base-profile imports -----> selected frontend/layers/*
 
 std/* -------------------------> public #lang rhdl authoring surface
 chi/* -------------------------> public #lang rhdl and generic std/* libraries
-fesvr/* and socs/* ------------> public #lang rhdl and domain libraries
+socs/* ------------------------> public #lang rhdl and domain libraries
+sims/* ------------------------> public SoC and backend surfaces
 riscv/rhdl --------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* and domain libraries
 
@@ -65,8 +66,8 @@ internal module implementing its shared frontend forms is called the
 | [`backend/`](backend/README.md) | Consume verified public IR; currently lower it through CIRCT | Core only |
 | [`formal/`](formal/README.md) | Optional Rosette-backed behavioral equivalence, output reachability, and combinational output properties over verified public IR | Core only; Rosette through one Racket interoperability module |
 | [`../chi/`](../chi/README.md) | AMBA CHI parameters, exact flits, credited node-role links, monitors, fabric metadata, and initial non-coherent endpoints | Public `#lang rhdl`; protocol-neutral `std/` libraries |
-| [`../fesvr/`](../fesvr/README.md) | Optional FESVR transport and external runtime support | Public `#lang rhdl` authoring surface only; external C++ libraries |
 | [`../socs/`](../socs/README.md) | Concrete system composition and end-to-end integration | Public domain-library and core surfaces only |
+| [`../sims/`](../sims/README.md) | Executable SoC harnesses, FESVR host model, target payloads, and simulator bindings | Public SoC and RHDL surfaces; backend emission; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
 
@@ -76,13 +77,15 @@ Frontend code never imports a backend; it may use an approved optional analysis
 for certification without making that analysis part of core IR. A backend
 never imports frontend syntax or elaboration. Layers do not import sibling
 layers. Shared machinery needed by multiple layers belongs in
-`frontend/support/`. Standard-library modules and simulation adapters use
+`frontend/support/`. Standard-library modules and simulation harnesses use
 public RHDL forms rather than importing implementation modules. RFPL is a
 downstream annotation language: it inspects the public RHDL IR but does not
 construct hardware or import frontend/backend implementation modules. RHDL
 core, analysis, frontend, and backend modules never import RFPL.
 The diagram package is similarly downstream and read-only; its dependency on
 interface metadata does not make visualization part of frontend elaboration.
+SoCs expose hardware host interfaces and never import `sims/`; simulation
+harnesses depend inward on public SoC and backend surfaces.
 
 ## Design commitments
 

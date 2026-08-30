@@ -11,6 +11,7 @@ import:
 export:
   TiledRicketPlacement
   TiledServicePlacement
+  TiledHostPlacement
   TiledMemoryPlacement
   TiledAclintPlacement
   TiledChannelFamilyPlans
@@ -26,9 +27,11 @@ export:
   tiled_soc_rickets
   tiled_soc_services
   tiled_soc_transits
+  tiled_soc_host
   tiled_soc_memories
   tiled_soc_aclint
   tiled_soc_rnf_sites
+  tiled_soc_device_sites
   tiled_soc_rni_sites
   tiled_soc_connections
   tiled_soc_compilations
@@ -49,6 +52,7 @@ def tiled_soc_stripe_bytes = 64
 def tiled_soc_home_node_base = 32
 def tiled_soc_subordinate_node_base = 48
 def tiled_soc_device_node_base = 16
+def tiled_soc_host_node_id = 24
 def tiled_soc_aclint_home_node_id = 36
 def tiled_soc_aclint_subordinate_node_id = 52
 
@@ -71,6 +75,11 @@ class TiledRicketPlacement(index :: Nat,
 class TiledServicePlacement(index :: Nat,
                             coordinate :: MeshCoordinate,
                             router :: NodeRef)
+
+class TiledHostPlacement(coordinate :: MeshCoordinate,
+                         router :: NodeRef,
+                         node_id :: Nat,
+                         site :: CHIRNSite)
 
 class TiledMemoryPlacement(index :: Nat,
                            coordinate :: MeshCoordinate,
@@ -140,8 +149,18 @@ def tiled_soc_memories:
     )
 
 def tiled_soc_aclint_service = tiled_soc_services[1]
+def tiled_soc_host_service = tiled_soc_services[0]
 def tiled_soc_transits = tiled_soc_services.filter(
-  ~keep: fun (placement): placement.index != tiled_soc_aclint_service.index
+  ~keep: fun (placement): ![
+    tiled_soc_host_service.index,
+    tiled_soc_aclint_service.index
+  ].contains(placement.index)
+)
+def tiled_soc_host = TiledHostPlacement(
+  tiled_soc_host_service.coordinate,
+  tiled_soc_host_service.router,
+  tiled_soc_host_node_id,
+  CHIRNSite(NamePath(["host"]), tiled_soc_host_node_id, tiled_soc_host_service.router)
 )
 def tiled_soc_aclint = TiledAclintPlacement(
   tiled_soc_aclint_service.coordinate,
@@ -157,8 +176,10 @@ def tiled_soc_rnf_sites:
     sites := sites ++ [placement.instruction_site, placement.data_site]
   sites
 
-def tiled_soc_rni_sites:
+def tiled_soc_device_sites:
   for List (placement in tiled_soc_rickets): placement.device_site
+
+def tiled_soc_rni_sites = tiled_soc_device_sites ++ [tiled_soc_host.site]
 
 def tiled_soc_connections:
   def mutable connections = []
@@ -167,9 +188,13 @@ def tiled_soc_connections:
       connections := connections ++ [
         CHIRNFConnection(requester, memory.home_site)
       ]
-  for (requester in tiled_soc_rni_sites):
+  for (requester in tiled_soc_device_sites):
     connections := connections ++ [
       CHIRNIConnection(requester, tiled_soc_aclint.home_site)
+    ]
+  for (memory in tiled_soc_memories):
+    connections := connections ++ [
+      CHIRNIConnection(tiled_soc_host.site, memory.home_site)
     ]
   connections
 
@@ -209,7 +234,8 @@ def tiled_soc_node_ids = tiled_soc_rickets.map(
   fun (placement): placement.home_node_id
 ) ++ tiled_soc_memories.map(
   fun (placement): placement.subordinate_node_id
-) ++ [tiled_soc_aclint.home_node_id,
+) ++ [tiled_soc_host.node_id,
+      tiled_soc_aclint.home_node_id,
       tiled_soc_aclint.subordinate_node_id]
 
 for (node_id in tiled_soc_node_ids):

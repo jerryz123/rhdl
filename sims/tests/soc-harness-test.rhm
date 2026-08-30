@@ -1,0 +1,57 @@
+#lang rhombus
+// Checks FESVR DPI structure and both host-specialized SoC harnesses.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  "../../riscv/isa/xlen.rhm".XLen
+  "../fesvr/direct-memory-htif.rhdl" as fesvr
+  "../soc-harness.rhdl" as harness
+
+def fesvr_import = fesvr.design.dpi_imports[0]
+def fesvr_module = fesvr.design.modules.find(
+  fun (module_def): module_def.name == "DirectMemoryHTIF"
+)
+def fesvr_rv32_design = embedded.run_elaboration(
+  fun (): fesvr.DirectMemoryHTIF(XLen.X32)
+)
+def fesvr_register = fesvr_module.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def result_names = ["request_valid",
+                    "request_write",
+                    "request_address",
+                    "request_data",
+                    "response_ready",
+                    "start_valid",
+                    "start_entry",
+                    "exit"]
+def simple_top = harness.design.modules.find(fun (module_def): module_def.name == "SoCHarness")
+def tiled_top = harness.tiled_design.modules.find(fun (module_def): module_def.name == "SoCHarness")
+def simple_modules = harness.design.modules.map(fun (module_def): module_def.name)
+def tiled_modules = harness.tiled_design.modules.map(fun (module_def): module_def.name)
+
+check:
+  fesvr_import.name ~is "rhdl_htif_tick"
+  fesvr_import.input_names ~is [
+    "reset", "target_xlen", "request_ready", "response_valid",
+    "response_data", "start_ready"
+  ]
+  fesvr_import.results.map(fun (result): result.name) ~is result_names
+  type_equal(fesvr_import.results[2].type, Bits(64)) ~is #true
+  type_equal(fesvr_import.results[6].type, Bits(64)) ~is #true
+  fesvr_register.results.length() ~is 8
+  simple_top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
+  simple_top.outputs.map(fun (port): port.name) ~is ["exit"]
+  tiled_top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
+  tiled_top.outputs.map(fun (port): port.name) ~is ["exit"]
+  simple_modules.contains("SimpleSoC") ~is #true
+  simple_modules.contains("TiledSoC") ~is #false
+  tiled_modules.contains("TiledSoC") ~is #true
+  tiled_modules.contains("SimpleSoC") ~is #false
+  simple_modules.contains("FesvrRequester") ~is #true
+  tiled_modules.contains("FesvrRequester") ~is #true
+  verify_design(fesvr.design) ~is #void
+  verify_design(fesvr_rv32_design) ~is #void
+  verify_design(harness.design) ~is #void
+  verify_design(harness.tiled_design) ~is #void

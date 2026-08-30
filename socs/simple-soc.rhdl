@@ -1,8 +1,7 @@
 #lang rhdl
-// Composes FESVR, Ricket, coherent RAM, and an ACLINT device over one CHI NoC.
+// Composes a host-facing Ricket, coherent RAM, and ACLINT over one CHI NoC.
 
 import:
-  lib("rhdl/std/ready-valid.rhdl").fire
   lib("chi/main.rhdl") open
   lib("noc/authoring/main.rhm") open
   lib("noc/language/main.rhm").topology
@@ -11,8 +10,8 @@ import:
   lib("cores/ricket/interrupt.rhdl").RicketInterrupts
   lib("cores/ricket/chi.rhdl") open
   lib("riscv/isa/xlen.rhm").XLen
-  lib("fesvr/direct-memory-htif.rhdl").FesvrRequester
   lib("devices/aclint.rhdl") open
+  "host-interface.rhdl".SoCHostInterface
 
 def simple_soc_flit = CHIFlitParams()
 def simple_soc_home = CHIHomeParams("simple-home", 5, CHINodeKind.HNF, ~max_outstanding: 1)
@@ -28,8 +27,8 @@ def simple_soc_home_map = CHIHomeMap(
    CHIHomeMapEntry(AddressSet(simple_soc_aclint_base, simple_soc_aclint_bytes - 1),
                    simple_soc_device_home)]
 )
-def simple_soc_fesvr_node = CHINodeParams(
-  "fesvr",
+def simple_soc_host_node = CHINodeParams(
+  "host",
   1,
   CHINodeKind.RNI,
   ~emits: CHIChannelCapabilities(
@@ -59,7 +58,7 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
     ~max_outstanding: node.max_outstanding
   )
 
-def simple_soc_fesvr_port = requester_icn_endpoint(simple_soc_fesvr_node)
+def simple_soc_host_port = requester_icn_endpoint(simple_soc_host_node)
 def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_ricket_params.instruction_node)
 def simple_soc_data_port = requester_icn_endpoint(simple_soc_ricket_params.data_node)
 def simple_soc_device_port = requester_icn_endpoint(simple_soc_ricket_params.device_node)
@@ -81,7 +80,7 @@ def simple_soc_fragmenter_params = CHITransferFragmenterParams(
 )
 def simple_soc_home_config = CHIHNFConfig(
   simple_soc_flit,
-  [simple_soc_fesvr_port, simple_soc_instruction_port, simple_soc_data_port],
+  [simple_soc_host_port, simple_soc_instruction_port, simple_soc_data_port],
   simple_soc_ram_config.size_bytes - 1,
   simple_soc_fragmenter_config.upstream_requests(simple_soc_ram_config.requests)
 )
@@ -109,9 +108,9 @@ def simple_soc_device_home_params = CHIHNIParams(
 def simple_soc_topology = topology:
   node xbar
 def simple_soc_router = simple_soc_topology.node("xbar")
-def simple_soc_fesvr_site = CHIRNSite(NamePath(["requesters", "fesvr"]),
-                                      simple_soc_fesvr_node.node_id,
-                                      simple_soc_router)
+def simple_soc_host_site = CHIRNSite(NamePath(["requesters", "host"]),
+                                     simple_soc_host_node.node_id,
+                                     simple_soc_router)
 def simple_soc_instruction_site = CHIRNSite(NamePath(["requesters", "ricket-l1i"]),
                                             simple_soc_ricket_params.instruction_node_id,
                                             simple_soc_router)
@@ -130,7 +129,7 @@ def simple_soc_device_home_requester_site = CHIRNICNSite(
   simple_soc_router
 )
 def simple_soc_connections = [
-  CHIRNIConnection(simple_soc_fesvr_site, simple_soc_home_requester_site),
+  CHIRNIConnection(simple_soc_host_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_instruction_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_data_site, simple_soc_home_requester_site),
   CHIRNIConnection(simple_soc_device_site,
@@ -158,14 +157,8 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
 )
 
 sync_circuit SimpleSoC():
-  output loaded: Bool
-  output entry: Bits(64)
-  output exit: Bits(32)
+  interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
 
-  inst requester(FesvrRequester(XLen.X64,
-                                simple_soc_flit,
-                                simple_soc_fesvr_node,
-                                simple_soc_home_map))
   inst ricket(Ricket(XLen.X64, ~chi: simple_soc_ricket_config))
   inst home(CHIHNF(simple_soc_home_config))
   inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
@@ -192,8 +185,8 @@ sync_circuit SimpleSoC():
     node_id: bits(simple_soc_aclint_params.node.node_id, simple_soc_flit.node_id_width)
     base_address: bits(simple_soc_aclint_params.base_address, simple_soc_flit.request_address_width)
 
-  connect_chi_rni_node(requester.port,
-                       ~node: simple_soc_fesvr_site,
+  connect_chi_rni_node(host.memory,
+                       ~node: simple_soc_host_site,
                        ~req_ingress: req_router.ingress,
                        ~rsp_ingress: rsp_router.ingress,
                        ~rsp_targets: rsp_router.target,
@@ -242,7 +235,7 @@ sync_circuit SimpleSoC():
   fragmenter.downstream <=> ram.port
   device_home.port.subordinate <=> aclint.port
   aclint.tick <== Bool(#true)
-  requester.start |> ricket.start
+  host.start |> ricket.start
   ricket.interrupts <== RicketInterrupts():
     supervisor_software: Bool(#false)
     machine_software: aclint.machine_software[0]
@@ -253,16 +246,6 @@ sync_circuit SimpleSoC():
   ricket.hart_id <== bits(0, 64)
   ricket.time_counter <== aclint.time_counter
 
-  reg load_complete(~init: Bool(#false))
-  reg loaded_entry(~init: bits(0, 64))
-  when (fire(requester.start)):
-    load_complete <== Bool(#true)
-    loaded_entry <== requester.start.bits
-
-  loaded <== load_complete
-  entry <== loaded_entry
-  exit <== requester.exit
-
 def design = elaborate(SimpleSoC())
 
 export:
@@ -270,11 +253,11 @@ export:
   simple_soc_home
   simple_soc_device_home
   simple_soc_home_map
-  simple_soc_fesvr_node
+  simple_soc_host_node
   simple_soc_ricket_config
   simple_soc_ricket_params
   requester_icn_endpoint
-  simple_soc_fesvr_port
+  simple_soc_host_port
   simple_soc_instruction_port
   simple_soc_data_port
   simple_soc_device_port
@@ -289,7 +272,7 @@ export:
   simple_soc_device_home_params
   simple_soc_topology
   simple_soc_router
-  simple_soc_fesvr_site
+  simple_soc_host_site
   simple_soc_instruction_site
   simple_soc_data_site
   simple_soc_device_site

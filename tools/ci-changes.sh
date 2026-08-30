@@ -13,7 +13,7 @@ circt_std=false
 circt_protocols=false
 circt_cores=false
 circt_rfpl=false
-fesvr=false
+simulation=false
 examples=false
 example_rhdl=false
 example_clocking=false
@@ -73,7 +73,7 @@ mark_all_examples() {
 mark_all() {
   mark_all_host
   mark_all_circt
-  fesvr=true
+  simulation=true
   mark_all_examples
 }
 
@@ -154,7 +154,7 @@ emit_jobs() {
   echo "host_matrix={\"include\":[$host_matrix]}"
   echo "circt=$circt"
   echo "circt_matrix={\"include\":[$circt_matrix]}"
-  echo "fesvr=$fesvr"
+  echo "simulation=$simulation"
   echo "examples=$examples"
   echo "example_matrix={\"include\":[$example_matrix]}"
 }
@@ -204,7 +204,7 @@ classify_path() {
       circt_std=true
       circt_protocols=true
       circt_cores=true
-      fesvr=true
+      simulation=true
       mark_example_rhdl
       mark_example_clocking
       mark_example_std
@@ -218,7 +218,7 @@ classify_path() {
     rhdl/backend/*)
       host_backend=true
       mark_all_circt
-      fesvr=true
+      simulation=true
       ;;
     host/*|tests/core/*|tests/analysis/*|tests/frontend/*)
       host_foundation=true
@@ -310,20 +310,17 @@ classify_path() {
       mark_example_cores
       mark_example_ricket
       ;;
-    fesvr/*|tools/emit-fesvr-stub-soc.rhm|tools/install-fesvr.sh)
-      fesvr=true
+    sims/*)
+      simulation=true
       ;;
-    socs/*|tools/emit-simple-soc.rhm)
+    socs/*)
       host_cores=true
       circt_cores=true
-      fesvr=true
-      ;;
-    support/*)
-      fesvr=true
+      simulation=true
       ;;
     tools/install-circt.sh)
       mark_all_circt
-      fesvr=true
+      simulation=true
       ;;
     *)
       # Unknown paths are executable until explicitly proven documentation-only.

@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks the FESVR-backed SimpleSoC, ACLINT device path, and four NoC planes.
+// Checks the host-facing SimpleSoC, ACLINT device path, and four NoC planes.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -7,9 +7,6 @@ import:
   "../../socs/simple-soc.rhdl" as soc
 
 def soc_design = soc.design
-def requester_top = soc_design.modules.find(
-  fun (module_def): module_def.name == "FesvrRequester"
-)
 def soc_top = soc_design.modules.find(
   fun (module_def): module_def.name == "SimpleSoC"
 )
@@ -17,15 +14,7 @@ def module_names = soc_design.modules.map(fun (module_def): module_def.name)
 def snp_adapters :: chi.CHIChannelAdapterPlan = soc.simple_soc_adapter_plans.snp
 
 check:
-  requester_top.name ~is "FesvrRequester"
-  requester_top.inputs.map(fun (port): port.name) ~is [
-    "clock", "reset", "port_in", "start_in"
-  ]
-  requester_top.outputs.map(fun (port): port.name) ~is [
-    "port_out", "start_out", "exit"
-  ]
-  requester_top.find_output("start_out").type.field("bits").type.width ~is 64
-  soc_design.dpi_imports.map(fun (dpi): dpi.name) ~is ["rhdl_htif_tick"]
+  soc_design.dpi_imports ~is []
   module_names.contains("Ricket") ~is #true
   module_names.contains("CHIHNF") ~is #true
   module_names.contains("CHIHNI") ~is #true
@@ -70,15 +59,14 @@ check:
   snp_adapters.injections.length() ~is 1
   snp_adapters.ejections.length() ~is 2
   soc.simple_soc_adapter_plans.dat.injections.length() ~is 6
-  soc.simple_soc_fesvr_site.req.terminal.describe() ~is "requesters/fesvr/req"
+  soc.simple_soc_host_site.req.terminal.describe() ~is "requesters/host/req"
   soc.simple_soc_instruction_site.snp.terminal.describe() ~is "requesters/ricket-l1i/snp"
   soc.simple_soc_data_site.snp.terminal.describe() ~is "requesters/ricket-l1d/snp"
   soc.simple_soc_device_site.req.terminal.describe() ~is "requesters/ricket-device/req"
   soc.simple_soc_home_requester_site.req.terminal.describe() ~is "home/requesters/req"
   soc.simple_soc_device_home_requester_site.req.terminal.describe() ~is "device-home/requesters/req"
   soc_top.name ~is "SimpleSoC"
-  soc_top.inputs.map(fun (port): port.name) ~is ["clock", "reset"]
-  soc_top.outputs.map(fun (port): port.name) ~is ["loaded", "entry", "exit"]
-  soc_top.find_output("entry").type.width ~is 64
+  soc_top.inputs.map(fun (port): port.name) ~is ["clock", "reset", "host_in"]
+  soc_top.outputs.map(fun (port): port.name) ~is ["host_out"]
 
   verify_design(soc_design) ~is #void

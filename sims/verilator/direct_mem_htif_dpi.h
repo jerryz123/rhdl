@@ -1,4 +1,4 @@
-// Declares the stable C ABI between generated simulation RTL and the direct-memory HTIF.
+// Declares the stable C ABI between generated simulation RTL and Verilator.
 #pragma once
 
 extern "C" int rhdl_htif_tick(unsigned char reset,

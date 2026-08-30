@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Installs the pinned FESVR library and headers used by RHDL simulation support.
+# Installs the pinned FESVR library and headers used by the simulation harness.
 set -euo pipefail
 
 revision="e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154"
-repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 install_dir="$repo_dir/.tools/fesvr-$revision"
 
 if [[ -f "$install_dir/.complete" ]]; then

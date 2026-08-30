@@ -48,7 +48,7 @@ check_no_jobs() {
   output="$(classification_for "$path")"
   if [[ "$(field_value "$output" host)" != false \
       || "$(field_value "$output" circt)" != false \
-      || "$(field_value "$output" fesvr)" != false \
+      || "$(field_value "$output" simulation)" != false \
       || "$(field_value "$output" examples)" != false ]]; then
     echo "$path: expected no CI jobs" >&2
     echo "$output" >&2
@@ -63,7 +63,7 @@ check_no_jobs vlsi/src/rhdl-top.rhdl
 
 check_matrix_entry rhdl/core/ir.rhm host_matrix ci-host-foundation-test
 check_matrix_entry rhdl/core/ir.rhm circt_matrix ci-circt-language-test
-check_field rhdl/core/ir.rhm fesvr true
+check_field rhdl/core/ir.rhm simulation true
 check_matrix_entry rhdl/analysis/clocking.rhm host_matrix ci-host-foundation-test
 check_matrix_entry tests/analysis/clocking-test.rhm host_matrix ci-host-foundation-test
 check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-cores-test
@@ -108,22 +108,22 @@ check_field tools/run-racket-tests.sh host true
 check_field tools/run-racket-tests.sh circt false
 check_field tools/run-racket-tests.sh examples true
 check_field tests/backend/verilog/adder_tb.sv circt true
-check_field fesvr/direct_mem_htif.cc fesvr true
-check_field socs/tests/simple-soc-test.rhm fesvr true
+check_field sims/fesvr/direct_mem_htif.cc simulation true
+check_field sims/TestDriver.v simulation true
+check_field sims/soc-harness.rhdl simulation true
+check_field socs/tests/simple-soc-test.rhm simulation true
 check_field socs/simple-soc.rhdl host true
 check_field socs/simple-soc.rhdl circt true
-check_field socs/simple-soc.rhdl fesvr true
-check_field support/TestDriver.sv fesvr true
-check_field tools/emit-fesvr-stub-soc.rhm fesvr true
+check_field socs/simple-soc.rhdl simulation true
 check_field unrecognized/new-tool.py host true
 check_field unrecognized/new-tool.py circt true
-check_field unrecognized/new-tool.py fesvr true
+check_field unrecognized/new-tool.py simulation true
 check_field unrecognized/new-tool.py examples true
 
 all_output="$(classification_for .github/workflows/ci.yml)"
 if [[ "$(field_value "$all_output" host)" != true \
     || "$(field_value "$all_output" circt)" != true \
-    || "$(field_value "$all_output" fesvr)" != true \
+    || "$(field_value "$all_output" simulation)" != true \
     || "$(field_value "$all_output" examples)" != true ]]; then
   echo "the CI workflow must select every job" >&2
   exit 1
@@ -138,7 +138,7 @@ while IFS= read -r path; do
       output="$(classification_for "$path")"
       if [[ "$(field_value "$output" host)" != true \
           && "$(field_value "$output" circt)" != true \
-          && "$(field_value "$output" fesvr)" != true \
+          && "$(field_value "$output" simulation)" != true \
           && "$(field_value "$output" examples)" != true ]]; then
         echo "$path: tracked executable source selects no CI job" >&2
         exit 1
@@ -150,7 +150,7 @@ done < <(git -C "$repo_dir" ls-files)
 all_jobs="$($classifier --all)"
 if [[ "$(field_value "$all_jobs" host)" != true \
     || "$(field_value "$all_jobs" circt)" != true \
-    || "$(field_value "$all_jobs" fesvr)" != true \
+    || "$(field_value "$all_jobs" simulation)" != true \
     || "$(field_value "$all_jobs" examples)" != true ]]; then
   echo "--all did not select every CI job" >&2
   exit 1

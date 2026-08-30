@@ -37,8 +37,8 @@ RACKET_COMPILE_SOURCES := $(sort \
   $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) $(RIDX_TESTS) \
   $(DEVICE_TESTS) $(CHI_TESTS) $(RICKET_TESTS) $(EXAMPLES) \
   $(wildcard tests/backend/emit-*.rhm) $(wildcard ridx/tests/rhdl/emit-*.rhm) \
-  $(wildcard socs/tests/*.rhm) \
-  $(wildcard tools/emit-fesvr-*.rhm) $(wildcard tools/emit-simple-soc*.rhm) \
+  $(wildcard socs/tests/*.rhm) $(wildcard sims/tests/*.rhm) \
+  $(wildcard sims/emit-*.rhm) \
   tests/backend/load-example.rkt tests/support/run-negative.rkt \
   noc/tests/language/run-negative.rkt)
 

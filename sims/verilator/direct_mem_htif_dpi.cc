@@ -1,4 +1,4 @@
-// Exposes DirectMemoryHtif through the multi-output DPI-C tick used by generated simulation RTL.
+// Exposes DirectMemoryHtif through the multi-output DPI-C tick used by Verilator.
 #include "direct_mem_htif.h"
 #include "direct_mem_htif_dpi.h"
 

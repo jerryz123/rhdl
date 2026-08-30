@@ -67,6 +67,16 @@ fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
 fail_matches "RHDL packages must not import the external CHI domain library" \
   '^[[:space:]]+.*chi/' rhdl
+fail_matches "RHDL packages must not import simulation harnesses" \
+  '^[[:space:]]+.*sims/' rhdl
+fail_matches "CHI must not import simulation harnesses" \
+  '^[[:space:]]+.*sims/' chi
+fail_matches "processor cores must not import simulation harnesses" \
+  '^[[:space:]]+.*sims/' cores
+fail_matches "devices must not import simulation harnesses" \
+  '^[[:space:]]+.*sims/' devices
+fail_matches "SoCs must expose hardware boundaries instead of importing simulation harnesses" \
+  '^[[:space:]]+.*sims/' socs
 fail_matches "standard language assembly must not import analysis, core, backend, or formal modules" \
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/language.rhm
 fail_matches "base language assembly must not import analysis, core, backend, or formal modules" \
@@ -146,9 +156,9 @@ unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './noc/rtl/*' \
   ! -path './devices/*' \
   ! -path './chi/*' \
-  ! -path './fesvr/*' ! -path './socs/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
+  ! -path './sims/*' ! -path './socs/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then
-  echo ".rhdl files may appear only in std, domain libraries, public adapters, examples, concrete cores and systems, simulation adapters, physical-design fixtures, and frontend or FESVR fixtures" >&2
+  echo ".rhdl files may appear only in std, domain libraries, public adapters, examples, concrete cores and systems, simulation harnesses, physical-design fixtures, and frontend fixtures" >&2
   echo "$unexpected_rhdl" >&2
   exit 1
 fi

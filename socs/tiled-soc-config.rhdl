@@ -9,6 +9,7 @@ import:
   "ricket-tile.rhdl" open
   "memory-tile.rhdl" open
   "aclint-tile.rhdl" open
+  "host-tile.rhdl" open
   "transit-tile.rhdl" open
   "tiled-soc-plan.rhm" as plan
 
@@ -24,6 +25,22 @@ fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
 
 def tiled_soc_flit = CHIFlitParams()
 def tiled_soc_aclint_base = 0x02000000
+
+def tiled_soc_host_node = CHINodeParams(
+  "host",
+  plan.tiled_soc_host.node_id,
+  CHINodeKind.RNI,
+  ~emits: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpFull],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~max_outstanding: 1
+)
+def tiled_soc_host_port = tiled_requester_icn_endpoint(tiled_soc_host_node)
 
 def tiled_soc_projector_config = CHIAddressProjectorConfig(
   tiled_soc_flit,
@@ -68,7 +85,7 @@ def tiled_soc_ricket_params:
                     ~device_node_id: placement.device_node_id)
 
 def tiled_soc_requester_ports:
-  def mutable ports = []
+  def mutable ports = [tiled_soc_host_port]
   for (params in tiled_soc_ricket_params):
     ports := ports ++ [
       tiled_requester_icn_endpoint(params.instruction_node),
@@ -198,6 +215,16 @@ def tiled_soc_aclint_router_params = CHIRouterParams(
   )
 )
 
+def tiled_soc_host_router_params = CHIRouterParams(
+  tiled_soc_flit,
+  tiled_soc_router_configs,
+  compile_chi_router_attachment_plan(
+    tiled_soc_router_configs,
+    tiled_soc_adapter_plans,
+    CHIRNIRouterAttachment([[plan.tiled_soc_host.site]])
+  )
+)
+
 def tiled_soc_transit_router_params = CHIRouterParams(
   tiled_soc_flit,
   tiled_soc_router_configs,
@@ -227,12 +254,16 @@ def tiled_soc_aclint_tile_params = AclintTileParams(
   tiled_soc_aclint_router_params
 )
 
+def tiled_soc_host_tile_params = HostTileParams(tiled_soc_host_router_params)
+
 def tiled_soc_transit_tile_params = TransitTileParams(tiled_soc_transit_router_params)
 
 export:
   tiled_requester_icn_endpoint
   tiled_soc_flit
   tiled_soc_aclint_base
+  tiled_soc_host_node
+  tiled_soc_host_port
   tiled_soc_projector_config
   tiled_soc_homes
   tiled_soc_home_map
@@ -256,8 +287,10 @@ export:
   tiled_soc_ricket_router_params
   tiled_soc_memory_router_params
   tiled_soc_aclint_router_params
+  tiled_soc_host_router_params
   tiled_soc_transit_router_params
   tiled_soc_ricket_tile_params
   tiled_soc_memory_tile_params
   tiled_soc_aclint_tile_params
+  tiled_soc_host_tile_params
   tiled_soc_transit_tile_params

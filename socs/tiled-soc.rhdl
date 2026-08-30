@@ -2,7 +2,6 @@
 // Composes Ricket, service, ACLINT, and memory tiles across a four-row CHI mesh.
 
 import:
-  lib("rhdl/std/ready-valid.rhdl").Irrevocable
   lib("chi/main.rhdl") open
   lib("cores/ricket/chi.rhdl").RicketCHIIdentity
   lib("cores/ricket/interrupt.rhdl").RicketInterrupts
@@ -13,6 +12,8 @@ import:
   "ricket-tile.rhdl" open
   "memory-tile.rhdl" open
   "aclint-tile.rhdl" open
+  "host-interface.rhdl".SoCHostInterface
+  "host-tile.rhdl" open
   "transit-tile.rhdl" open
 
 class TiledTileEndpoints(site_key :: Nat,
@@ -54,8 +55,7 @@ fun connect_tiled_router_family(family :: RouterFamilyPhysicalPlan,
 sync_circuit TiledSoC():
   def p = config.tiled_soc_flit
   def site_width = config.tiled_soc_router_configs.req.route_decoder.site_width
-  interface start[plan.tiled_soc_ricket_count](Irrevocable(Bits(64)), ~role: consumer)
-  input interrupts: Vec(plan.tiled_soc_ricket_count, RicketInterrupts())
+  interface host(SoCHostInterface(p), ~role: soc)
   output faults: Vec(plan.tiled_soc_ricket_count, Bool)
 
   def rickets = for InstanceArray (_ in 0..plan.tiled_soc_ricket_count):
@@ -64,6 +64,7 @@ sync_circuit TiledSoC():
     inst memory(MemoryTile(config.tiled_soc_memory_tile_params))
   def transits = for InstanceArray (_ in 0..plan.tiled_soc_transits.length()):
     inst transit(TransitTile(config.tiled_soc_transit_tile_params))
+  inst host_tile(HostTile(config.tiled_soc_host_tile_params))
   inst aclint(AclintTile(config.tiled_soc_aclint_tile_params))
 
   for (index in 0..plan.tiled_soc_ricket_count):
@@ -76,15 +77,18 @@ sync_circuit TiledSoC():
               instruction_node_id: bits(placement_params.instruction_node_id, p.node_id_width)
               data_node_id: bits(placement_params.data_node_id, p.node_id_width)
               device_node_id: bits(placement_params.device_node_id, p.node_id_width))
-    start[index] |> rickets[index].start
     rickets[index].interrupts <== RicketInterrupts():
-      supervisor_software: interrupts[index].supervisor_software
-      machine_software: interrupts[index].machine_software ||| aclint.machine_software[index]
-      supervisor_timer: interrupts[index].supervisor_timer
-      machine_timer: interrupts[index].machine_timer ||| aclint.machine_timer[index]
-      supervisor_external: interrupts[index].supervisor_external
-      machine_external: interrupts[index].machine_external
+      supervisor_software: Bool(#false)
+      machine_software: aclint.machine_software[index]
+      supervisor_timer: Bool(#false)
+      machine_timer: aclint.machine_timer[index]
+      supervisor_external: Bool(#false)
+      machine_external: Bool(#false)
     rickets[index].time_counter <== aclint.time_counter
+  host.start |> rickets[0].start
+  for (index in 1..plan.tiled_soc_ricket_count):
+    rickets[index].start.valid <== Bool(#false)
+    rickets[index].start.bits <== dont_care(Bits(64))
   for (index in 0..plan.tiled_soc_bank_count):
     def placement = plan.tiled_soc_memories[index]
     def home_params = config.tiled_soc_hnf_params[index]
@@ -104,6 +108,8 @@ sync_circuit TiledSoC():
               base_address: bits(ram_params.base_address, p.request_address_width))
   for (index in 0..plan.tiled_soc_transits.length()):
     transits[index].site_key <== bits(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router), site_width)
+  host_tile.site_key <== bits(plan.tiled_soc_site_key(plan.tiled_soc_host.router), site_width)
+  host.memory <=> host_tile.host
   aclint.identity <== AclintTileIdentity(p, site_width):
     site_key: bits(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router), site_width)
     aclint: (AclintIdentity(p):
@@ -124,6 +130,9 @@ sync_circuit TiledSoC():
                          transits[index].incoming_links,
                          transits[index].outgoing_links)
   ) ++ [
+    TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_host.router),
+                       host_tile.incoming_links,
+                       host_tile.outgoing_links),
     TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router),
                        aclint.incoming_links,
                        aclint.outgoing_links)

@@ -74,11 +74,10 @@ make check-example-verilog  # verify every example owns a generated Verilog refe
 make test                   # default host, curated CIRCT, and RFPL CIRCT suite
 ```
 
-The standalone FESVR transport has its own setup, native test, and DPI compile
-checks in [`../fesvr/`](../fesvr/README.md) and system-level checks in
-[`../socs/`](../socs/README.md). CI also elaborates and
-simulates its generated native CHI host, HN-I, and backing RAM in an independent
-external-toolchain job.
+The standalone FESVR transport, DPI binding, and SoC harness checks are owned by
+[`../sims/`](../sims/README.md). CI elaborates both harness specializations and
+runs the focused external-toolchain workflow independently from backend fixture
+tests.
 
 Pull-request CI classifies changed paths into parallel host, example, and CIRCT
 matrices. Unknown executable paths fail closed by selecting every job; only
