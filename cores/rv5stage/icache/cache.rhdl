@@ -1,0 +1,250 @@
+#lang rhdl
+// Implements RV5Stage's pipelined-hit direct-mapped instruction cache.
+
+import:
+  "protocol.rhdl" open
+  "../cache.rhdl" open
+  "../chi.rhdl" open
+  "../refill.rhdl" open
+  "../snoop.rhdl" open
+  "../../../riscv/isa/xlen.rhm" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/read-write.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("rhdl/std/sync-ram.rhdl") open
+  lib("rhdl/std/flow.rhdl") open
+  lib("chi/main.rhdl") open
+
+fun check_l1i_geometry(width :: PosInt, sets :: Pow2Int):
+  unless sets >= 2
+  | error(~who: #'RV5StageL1ICache,
+          "set count must be a power of two of at least two")
+  unless width > (alignment_bits(RV5StageCacheLineBytes) + alignment_bits(sets))
+  | error(~who: #'RV5StageL1ICache,
+          "address width must include line offset, set, and tag bits")
+
+sync_circuit RV5StageL1ICache(xlen :: XLen,
+                              sets :: Pow2Int,
+                              ~chi: config :: RV5StageCHIConfig):
+  def width = xlen_width(xlen)
+  def p = config.flit
+  check_l1i_geometry(width, sets)
+  def beats = RV5StageCacheLineBytes / 8
+  def offset_width = alignment_bits(RV5StageCacheLineBytes)
+  def set_width = alignment_bits(sets)
+  def tag_width = width - offset_width - set_width
+  def beat_width = index_width(beats)
+  def outstanding_width = index_width(3)
+
+  input node_id: Bits(p.node_id_width)
+  interface core(RV5StageInstructionAccess(xlen), ~role: responder)
+  interface chi(CHIRNChannels(p), ~role: node)
+
+  inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
+  inst states(SyncRam1RW(sets, CHIResponseState, 1))
+  inst lines(SyncRam1RW(sets, Bits(64), beats))
+  inst refill(RV5StageLineRefill(Bits(width), width, config))
+  inst snoop(RV5StageCleanSnoop(width, config))
+  refill.node_id <== node_id
+  snoop.node_id <== node_id
+  inst lookup(Pipe(Bits(width), 1))
+  inst response_arbiter(Arbiter(RV5StageInstructionResp(), 2))
+  def cache_flush = core.flush ||| core.invalidate_all
+  inst responses(Queue(RV5StageInstructionResp(), 2, ~pipe: #true, ~flow: #true), ~reset_when: cache_flush)
+  inst protocol_responses(Arbiter(CHIRspFlit(p), 2))
+
+  reg valid_lines(~init: as_vec(bits(0, sets), Bool))
+  reg refill_live(~init: Bool(#false))
+  reg refill_installable(~init: Bool(#false))
+  reg outstanding(~init: bits(0, outstanding_width))
+
+  core.response.valid <== responses.egress.valid & !cache_flush
+  core.response.bits <== responses.egress.bits
+  responses.egress.ready <== core.response.ready & !cache_flush
+  def outgoing_requests = chi.requests
+  def outgoing_responses = chi.requester_responses
+  def outgoing_data = chi.request_data
+  def incoming_responses = chi.responses
+  def incoming_data = chi.response_data
+  def incoming_snoops = chi.snoops
+  refill.requests |> outgoing_requests
+  incoming_responses |> refill.responses
+  incoming_data |> refill.response_data
+  refill.acknowledgements |> protocol_responses.ingress[0]
+  snoop.responses |> protocol_responses.ingress[1]
+  protocol_responses.egress |> outgoing_responses
+  outgoing_data.valid <== Bool(#false)
+  outgoing_data.bits <== literal(CHIDatFlit(p), 0)
+
+  incoming_snoops |> snoop.snoops
+  // A queued refill does not make its line resident. Let snoops inspect the
+  // current cache while that transaction waits, and hold installation until
+  // the snoop completes so the shared SRAM ports remain single-owner.
+  snoop.cache_ready <== !lookup.egress.valid & !cache_flush
+  def snoop_lookup_start = snoop.lookup.valid
+  def snoop_address = snoop.address
+  def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
+  def snoop_tag = snoop_address[(offset_width + set_width)..width]
+  def snoop_line_hit = valid_lines[snoop_set] & (tags.port.response.bits[0] === snoop_tag)
+  snoop.lookup_result.valid <== tags.port.response.valid & states.port.response.valid
+  snoop.lookup_result.bits <== RV5StageCleanSnoopLookupResult():
+    hit: snoop_line_hit
+    state: states.port.response.bits[0]
+  def snoop_pending = snoop.pending
+  def response_fire = fire(core.response)
+  def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
+  def lookup_address = lookup.egress.bits
+  def lookup_set = lookup_address[offset_width..(offset_width + set_width)]
+  def lookup_tag = lookup_address[(offset_width + set_width)..width]
+  def lookup_beat:
+    if beats == 1
+    | bits(0, beat_width)
+    | lookup_address[3..offset_width]
+  def line_hit = valid_lines[lookup_set] & (tags.port.response.bits[0] === lookup_tag)
+  def lookup_miss = lookup.egress.valid & tags.port.response.valid & !line_hit
+  def cached_beat:
+    if beats == 1
+    | lines.port.response.bits[0]
+    | lines.port.response.bits[lookup_beat]
+  def completion_address = as_bits(refill.completion.bits.context)
+  def completion_set = completion_address[offset_width..(offset_width + set_width)]
+  def completion_tag = completion_address[(offset_width + set_width)..width]
+  def completion_beat:
+    if beats == 1
+    | bits(0, beat_width)
+    | completion_address[3..offset_width]
+  def completed_beat:
+    if beats == 1
+    | refill.completion.bits.line[0]
+    | refill.completion.bits.line[completion_beat]
+  def completion_instruction = mux(
+    cast(completion_address[2], Bool),
+    completed_beat[32..64],
+    completed_beat[0..32]
+  )
+  def response_capacity = (outstanding < bits(2, outstanding_width)) ||| response_fire
+  assert(outstanding <= bits(2, outstanding_width), "l1i_outstanding_in_range")
+  when response_fire:
+    assert(or_reduce(outstanding), "l1i_response_has_request")
+
+  // Lookup and SRAM response tokens advance together. A hit can admit the
+  // next request, while a miss transfers its address into the refill engine
+  // and blocks new requests until that transaction completes.
+  def lookup_accepts_input = !cache_flush & !snoop_pending & refill.command.ready & !lookup_miss & response_capacity
+  core.request.ready <== lookup.ingress.ready & lookup_accepts_input
+  lookup.ingress.valid <== core.request.valid & lookup_accepts_input
+  lookup.ingress.bits <== core.request.bits.address
+  def request_fire = fire(core.request)
+
+  def Array(miss_path, hit_path) = (
+    lookup.egress
+      |> filter_flow(address => tags.port.response.valid & !cache_flush)
+      |> demux_flow(2, address => as_bits(line_hit))
+  )
+  def refill_commands = (
+    miss_path
+      |> map_flow(address => RV5StageLineRefillCommand(Bits(width), width)):
+        line_address: align_down(address, RV5StageCacheLineBytes)
+        opcode: CHIReqOpcode.ReadClean
+        context: address
+  )
+  refill_commands |> refill.command
+  assert(!lookup_miss ||| cache_flush ||| refill.command.ready,
+         "l1i_refill_command_accepted")
+
+  def hit_responses = (
+    hit_path
+      |> map_flow(address => RV5StageInstructionResp()):
+        instruction: mux(cast(address[2], Bool), cached_beat[32..64], cached_beat[0..32])
+        page_fault: Bool(#false)
+  )
+  hit_responses |> response_arbiter.ingress[0]
+
+  def refill_results = RV5StageLineRefillResult(Bits(width), width)
+  def refill_responses = (
+    refill.completion
+      |> gate_flow(!snoop_pending)
+      |> filter_flow(result => refill_live)
+      |> map_flow(result => RV5StageInstructionResp()):
+        instruction: completion_instruction
+        page_fault: Bool(#false)
+  )
+  refill_responses |> response_arbiter.ingress[1]
+  response_arbiter.egress |> responses.ingress
+  when (response_arbiter.egress.valid):
+    assert(response_arbiter.egress.ready, "l1i_response_slot_reserved")
+
+  def refill_start = fire(refill.command)
+  def refill_complete = fire(refill.completion)
+  def install = refill_complete & refill_installable & !core.invalidate_all
+  when refill_complete:
+    assert(is_one_of(refill.completion.bits.state,
+                     CHIResponseState.SharedClean,
+                     CHIResponseState.Unique),
+           "l1i_refill_state_clean")
+    assert(!refill.completion.bits.pass_dirty,
+           "l1i_refill_not_dirty")
+
+  tags.port.request.valid <== request_fire ||| install ||| snoop_lookup_start
+  tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), 1):
+    address: mux(install,
+                 completion_set,
+                 mux(snoop_lookup_start,
+                     snoop_set,
+                     request_set_value))
+    write: install
+    data: vec(completion_tag)
+    mask: Mask(1)(1)
+  def update_snoop_state = snoop.update.valid & !snoop.update.bits.invalidate
+  states.port.request.valid <== install ||| snoop_lookup_start ||| update_snoop_state
+  states.port.request.bits <== ReadWriteRequest(set_width, CHIResponseState, 1):
+    address: mux(install,
+                 completion_set,
+                 mux(update_snoop_state,
+                     snoop_set,
+                     snoop.update.bits.address[offset_width..(offset_width + set_width)]))
+    write: install ||| update_snoop_state
+    data: vec(mux(update_snoop_state, snoop.update.bits.state, refill.completion.bits.state))
+    mask: Mask(1)(1)
+  lines.port.request.valid <== request_fire ||| install
+  lines.port.request.bits <== ReadWriteRequest(set_width, Bits(64), beats):
+    address: mux(install, completion_set, request_set_value)
+    write: install
+    data: refill.completion.bits.line
+    mask: (!bits(0, beats)).into(Mask(beats))
+
+  when (core.invalidate_all):
+    valid_lines <== as_vec(bits(0, sets), Bool)
+  elsewhen (snoop.update.valid & snoop.update.bits.invalidate):
+    valid_lines <== valid_lines.updated(
+      snoop.update.bits.address[offset_width..(offset_width + set_width)],
+      Bool(#false)
+    )
+  elsewhen install:
+    valid_lines <== valid_lines.updated(completion_set, Bool(#true))
+
+  def next_outstanding = mux(
+    request_fire,
+    outstanding + bits(1, outstanding_width),
+    outstanding - bits(1, outstanding_width)
+  )
+  def refill_state_event = refill_start ||| refill_complete
+  def accounting_event = request_fire ^ response_fire
+  def cache_state_event = refill_state_event ||| accounting_event
+  def next_refill_live = mux(refill_start, Bool(#true), mux(refill_complete, Bool(#false), refill_live))
+  when cache_flush:
+    refill_live <== Bool(#false)
+    outstanding <== bits(0, outstanding_width)
+  elsewhen cache_state_event:
+    refill_live <== next_refill_live
+    outstanding <== mux(accounting_event, next_outstanding, outstanding)
+
+  when (core.invalidate_all):
+    refill_installable <== Bool(#false)
+  elsewhen refill_start:
+    refill_installable <== Bool(#true)
+  elsewhen refill_complete:
+    refill_installable <== Bool(#false)
+
+export:
+  RV5StageL1ICache

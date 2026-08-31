@@ -1,0 +1,180 @@
+#lang rhdl
+// Defines base and extension register use, operand routing, and immediate controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum OperandASelect:
+  Register
+  Pc
+  Zero
+
+hardware_enum OperandBSelect:
+  Register
+  Immediate
+
+hardware_enum ImmediateSelect:
+  None
+  I
+  S
+  B
+  U
+  J
+
+bundle OperandControl():
+  uses_rs1: Bool
+  uses_rs2: Bool
+  left: OperandASelect
+  right: OperandBSelect
+  immediate: ImmediateSelect
+
+def shared_immediate_alu = [ADDI, SLTI, SLTIU, XORI, ORI, ANDI]
+def shared_register_alu = [ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND]
+def shared_loads = [LB, LH, LW, LBU, LHU]
+def shared_stores = [SB, SH, SW]
+def branch_instructions = [BEQ, BNE, BLT, BGE, BLTU, BGEU]
+
+fun operand_cases(immediate_alu, register_alu, loads, stores):
+  def register_immediate = loads ++ immediate_alu
+  decode_groups(
+    OperandControl(),
+    ~input: instruction_pattern
+  ):
+    [LUI]:
+      uses_rs1: Bool(#false)
+      uses_rs2: Bool(#false)
+      left: OperandASelect.Zero
+      right: OperandBSelect.Immediate
+      immediate: ImmediateSelect.U
+
+    [AUIPC]:
+      uses_rs1: Bool(#false)
+      uses_rs2: Bool(#false)
+      left: OperandASelect.Pc
+      right: OperandBSelect.Immediate
+      immediate: ImmediateSelect.U
+
+    [JAL]:
+      uses_rs1: Bool(#false)
+      uses_rs2: Bool(#false)
+      immediate: ImmediateSelect.J
+
+    [JALR]:
+      uses_rs1: Bool(#true)
+      uses_rs2: Bool(#false)
+      immediate: ImmediateSelect.I
+
+    group register_immediate:
+      uses_rs1: Bool(#true)
+      uses_rs2: Bool(#false)
+      left: OperandASelect.Register
+      right: OperandBSelect.Immediate
+      immediate: ImmediateSelect.I
+
+    group branch_instructions:
+      uses_rs1: Bool(#true)
+      uses_rs2: Bool(#true)
+      immediate: ImmediateSelect.B
+
+    group stores:
+      uses_rs1: Bool(#true)
+      uses_rs2: Bool(#true)
+      left: OperandASelect.Register
+      right: OperandBSelect.Immediate
+      immediate: ImmediateSelect.S
+
+    group register_alu:
+      uses_rs1: Bool(#true)
+      uses_rs2: Bool(#true)
+      left: OperandASelect.Register
+      right: OperandBSelect.Register
+
+    [FENCE, ECALL, EBREAK]:
+      uses_rs1: Bool(#false)
+      uses_rs2: Bool(#false)
+
+def RV32IOperandCases = operand_cases(
+  shared_immediate_alu ++ [rv32.SLLI, rv32.SRLI, rv32.SRAI],
+  shared_register_alu,
+  shared_loads,
+  shared_stores
+)
+def RV64IOperandCases = operand_cases(
+  shared_immediate_alu ++ [SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW],
+  shared_register_alu ++ [ADDW, SUBW, SLLW, SRLW, SRAW],
+  shared_loads ++ [LWU, LD],
+  shared_stores ++ [SD]
+)
+def register_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#true)
+  left: OperandASelect.Register
+  right: OperandBSelect.Register
+def atomic_operands = pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#true)
+  left: OperandASelect.Register
+  right: OperandBSelect.Immediate
+  immediate: ImmediateSelect.None
+def load_reserved_operands = pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#false)
+  left: OperandASelect.Register
+  right: OperandBSelect.Immediate
+  immediate: ImmediateSelect.None
+def csr_register_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#false)
+def csr_immediate_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#false)
+  uses_rs2: Bool(#false)
+def no_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#false)
+  uses_rs2: Bool(#false)
+def RV5StageSystemOperandCases = combine_case_groups([
+  instruction_cases([CSRRW, CSRRS, CSRRC], csr_register_operands),
+  instruction_cases([CSRRWI, CSRRSI, CSRRCI], csr_immediate_operands),
+  instruction_cases(PrivilegedInstructions ++ ZifenceiInstructions, no_operands)
+])
+def RV32RV5StageOperandCases = RV32IOperandCases ++ instruction_cases(
+  RV32MInstructions,
+  register_operands
+) ++ instruction_cases(
+  excluding_instructions(RV32AInstructions, [LR_W]),
+  atomic_operands
+) ++ instruction_cases(
+  [LR_W],
+  load_reserved_operands
+) ++ RV5StageSystemOperandCases
+def RV64RV5StageOperandCases = RV64IOperandCases ++ instruction_cases(
+  RV64MInstructions,
+  register_operands
+) ++ instruction_cases(
+  excluding_instructions(RV64AInstructions, [LR_W, LR_D]),
+  atomic_operands
+) ++ instruction_cases(
+  [LR_W, LR_D],
+  load_reserved_operands
+) ++ RV5StageSystemOperandCases
+def RV32IOperandDecode = ValidDecodeGen(RV32IOperandCases)
+def RV64IOperandDecode = ValidDecodeGen(RV64IOperandCases)
+
+export:
+  OperandASelect
+  OperandBSelect
+  ImmediateSelect
+  OperandControl
+  RV32IOperandCases
+  RV64IOperandCases
+  RV32RV5StageOperandCases
+  RV64RV5StageOperandCases
+  RV32IOperandDecode
+  RV64IOperandDecode

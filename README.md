@@ -187,11 +187,11 @@ The current vertical slice includes:
 - Backend-independent clock/reset inventory and hierarchy-aware temporal
   provenance reports that distinguish same-clock, foreign-clock, external,
   static, and multi-clock fan-in sources.
-- Ricket, a five-stage RV32I/RV64I core with component-oriented decode, M,
+- RV5Stage, a five-stage RV32I/RV64I core with component-oriented decode, M,
   Zicsr, privilege and trap state, private coherent L1 caches, and separate
   CHI RN-F ports for SoC integration. Its exact current pipeline, cache, and
   integration contracts are documented in
-  [`cores/ricket/README.md`](cores/ricket/README.md).
+  [`cores/rv5stage/README.md`](cores/rv5stage/README.md).
 
 ## Deferred work
 

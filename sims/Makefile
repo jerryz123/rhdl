@@ -23,7 +23,7 @@ SOC_MLIR := $(SOC_BUILD_DIR)/soc_harness.mlir
 SOC_VERILOG := $(SOC_BUILD_DIR)/SoCHarness.sv
 SOC_OBJECT_DIR := $(SOC_BUILD_DIR)/obj
 SIMULATOR_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
-SMOKE_BINARY := $(SOC_BUILD_DIR)/ricket_smoke.elf
+SMOKE_BINARY := $(SOC_BUILD_DIR)/rv5stage_smoke.elf
 SIMULATOR_SOURCES := $(addprefix $(REPO_DIR)/,$(shell cd $(REPO_DIR) && rg --files -g '*.rhdl' -g '*.rhm'))
 
 .PHONY: all setup simulator run smoke dpi-compile-check elaboration-test tiled-lowering-test
@@ -104,7 +104,7 @@ $(SIMULATOR_BINARY): $(SOC_VERILOG) $(CURDIR)/TestDriver.v \
 	  -CFLAGS "-I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR) -std=c++20" \
 	  -LDFLAGS "$(FESVR_LIBRARY) -pthread"
 
-$(SMOKE_BINARY): tests/programs/ricket_smoke.S \
-                 tests/programs/ricket_smoke.ld | $(SOC_BUILD_DIR)
+$(SMOKE_BINARY): tests/programs/rv5stage_smoke.S \
+                 tests/programs/rv5stage_smoke.ld | $(SOC_BUILD_DIR)
 	$(RISCV_CC) -march=rv64i -mabi=lp64 -nostdlib -nostartfiles \
-	  -Wl,--build-id=none -Wl,-T,tests/programs/ricket_smoke.ld $< -o $@
+	  -Wl,--build-id=none -Wl,-T,tests/programs/rv5stage_smoke.ld $< -o $@

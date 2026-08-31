@@ -22,7 +22,7 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`lop/`](lop/) | Equivalent designs expressed at different levels of abstraction |
 | [`rfpl/`](rfpl/) | Logical designs paired with physical floorplans |
 | [`formal/`](formal/) | Optional Rosette-backed behavioral proofs |
-| [`ricket/`](ricket/) | Ricket core integration and inspection examples |
+| [`rv5stage/`](rv5stage/) | RV5Stage core integration and inspection examples |
 
 ## One IR, layered languages
 
@@ -213,9 +213,9 @@ instances, or logic to the generated RTL.
 | [`chi/ram.rhdl`](chi/ram.rhdl) | Finite initial-profile non-coherent CHI backing RAM |
 | [`chi/home.rhdl`](chi/home.rhdl) | Decoupled HN-I transaction translation between requester and subordinate flows |
 | [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
-| [`cores/ricket.rhdl`](cores/ricket.rhdl) | Complete RV64 Ricket core with private instruction and data caches |
+| [`cores/rv5stage.rhdl`](cores/rv5stage.rhdl) | Complete RV64 RV5Stage core with private instruction and data caches |
 | [`noc/wormhole-router-diagram.rhdl`](noc/wormhole-router-diagram.rhdl) | Flow-aware diagram of a packet-retaining phased-XY router with five inputs and five targets |
-| [`ricket/core-diagram.rhdl`](ricket/core-diagram.rhdl) | Flow-aware logical diagram extraction for the flow-oriented Ricket core |
+| [`rv5stage/core-diagram.rhdl`](rv5stage/core-diagram.rhdl) | Flow-aware logical diagram extraction for the flow-oriented RV5Stage core |
 
 ## Formal example
 

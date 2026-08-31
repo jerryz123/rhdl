@@ -1,0 +1,46 @@
+#lang rhdl
+// Routes translated RV5Stage data accesses between normal L1D and uncached device paths.
+
+import:
+  "chi.rhdl".RV5StageCHIConfig
+  "dcache/protocol.rhdl" open
+  "../../riscv/isa/xlen.rhm".XLen
+  lib("rhdl/std/interconnect.rhdl").address_sets_match
+
+sync_circuit RV5StageMemoryRouter(xlen :: XLen,
+                                  config :: RV5StageCHIConfig):
+  interface core(RV5StageDataAccess(xlen), ~role: responder)
+  interface cache(RV5StageDataAccess(xlen), ~role: requester)
+  interface device(RV5StageDataAccess(xlen), ~role: requester)
+
+  def request_is_device = address_sets_match(
+    core.request.bits.address,
+    config.device_address_sets
+  )
+  def cache_available = device.drained
+  def device_available = cache.drained
+  cache.request.valid <== core.request.valid & !request_is_device & cache_available
+  cache.request.bits <== core.request.bits
+  device.request.valid <== core.request.valid & request_is_device & device_available
+  device.request.bits <== core.request.bits
+  core.request.ready <== mux(
+    request_is_device,
+    device_available & device.request.ready,
+    cache_available & cache.request.ready
+  )
+  core.request_fault <== mux(request_is_device,
+                             device.request_fault,
+                             cache.request_fault)
+  core.request_access_fault <== mux(request_is_device,
+                                    device.request_access_fault,
+                                    cache.request_access_fault)
+  core.response.valid <== cache.response.valid ||| device.response.valid
+  core.response.bits <== mux(device.response.valid,
+                             device.response.bits,
+                             cache.response.bits)
+  core.drained <== cache.drained & device.drained
+  assert(!(cache.response.valid & device.response.valid),
+         "rv5stage_memory_response_paths_exclusive")
+
+export:
+  RV5StageMemoryRouter

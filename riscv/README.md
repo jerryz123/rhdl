@@ -134,7 +134,7 @@ machine interrupt causes and their architectural cause codes; concrete cores
 remain responsible for pending-source wiring, enable and delegation policy,
 and priority.
 [`isa/privileged.rhm`](isa/privileged.rhm) currently contributes the exact
-`MRET`, `SRET`, `WFI`, and `SFENCE.VMA` encodings used by Ricket's privileged control
+`MRET`, `SRET`, `WFI`, and `SFENCE.VMA` encodings used by RV5Stage's privileged control
 plane. [`isa/sv39.rhm`](isa/sv39.rhm) owns pure Sv39 geometry and canonical
 address helpers, while [`rhdl/sv39.rhdl`](rhdl/sv39.rhdl) provides typed PTE,
 permission, superpage, and physical-address combinational operations.

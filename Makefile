@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test device-test chi-test ricket-host-test ricket-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-ricket
+.PHONY: test host-test host-checks host-annotation-test check-boundaries check-example-verilog analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test ridx-test ridx-circt-test device-test chi-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-ridx examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -15,8 +15,8 @@ RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 RIDX_TESTS := $(sort $(shell find ridx/tests -type f -name '*-test.rhm'))
 DEVICE_TESTS := $(sort $(wildcard devices/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
-RICKET_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/ricket/tests/*-test.rhm))
-RICKET_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/ricket-cache-test.rhm
+RV5STAGE_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/rv5stage/tests/*-test.rhm))
+RV5STAGE_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/rv5stage-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
 RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
 RHDL_EXAMPLES := $(sort $(shell find examples/rhdl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -30,12 +30,12 @@ RISCV_EXAMPLES := $(sort $(shell find examples/riscv -type f \( -name '*.rhm' -o
 CHI_EXAMPLES := $(sort $(shell find examples/chi -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 CORE_EXAMPLES := $(sort $(shell find examples/cores -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 FORMAL_EXAMPLES := $(sort $(shell find examples/formal -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
-RICKET_EXAMPLES := $(sort $(shell find examples/ricket -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+RV5STAGE_EXAMPLES := $(sort $(shell find examples/rv5stage -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f \( -name '*.rhm' -o -name '*.rhdl' \) -print) $(RFPL_EXAMPLES))
 RACKET_COMPILE_SOURCES := $(sort \
   $(HOST_ANNOTATION_TESTS) $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS) \
   $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) $(RIDX_TESTS) \
-  $(DEVICE_TESTS) $(CHI_TESTS) $(RICKET_TESTS) $(EXAMPLES) \
+  $(DEVICE_TESTS) $(CHI_TESTS) $(RV5STAGE_TESTS) $(EXAMPLES) \
   $(wildcard tests/backend/emit-*.rhm) $(wildcard ridx/tests/rhdl/emit-*.rhm) \
   $(wildcard socs/tests/*.rhm) $(wildcard sims/tests/*.rhm) \
   $(wildcard sims/emit-*.rhm) \
@@ -123,11 +123,11 @@ chi-test: check-boundaries
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
-ricket-host-test: check-boundaries
-	tools/run-racket-tests.sh $(RICKET_TESTS) $(RICKET_BACKEND_TESTS)
+rv5stage-host-test: check-boundaries
+	tools/run-racket-tests.sh $(RV5STAGE_TESTS) $(RV5STAGE_BACKEND_TESTS)
 
-ricket-test: ricket-host-test
-	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard ricket-register-file ricket-csr ricket-atomic ricket-core ricket-core-flow ricket-interrupt ricket-interrupt-flow ricket-multiply ricket-divide ricket-core-rv32 ricket-icache ricket-dcache ricket-dcache-rv32' bash tests/backend/run-circt.sh
+rv5stage-test: rv5stage-host-test
+	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard rv5stage-register-file rv5stage-csr rv5stage-atomic rv5stage-core rv5stage-core-flow rv5stage-interrupt rv5stage-interrupt-flow rv5stage-multiply rv5stage-divide rv5stage-core-rv32 rv5stage-icache rv5stage-dcache rv5stage-dcache-rv32' bash tests/backend/run-circt.sh
 
 circt-test: check-example-verilog
 	bash tests/backend/run-circt.sh
@@ -164,7 +164,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test device-test chi-test ricket-host-test
+host-checks: host-annotation-test unit-test rfpl-unit-test noc-test riscv-test ridx-test device-test chi-test rv5stage-host-test
 
 ci-host-foundation-test: host-annotation-test frontend-test lop-test
 
@@ -174,7 +174,7 @@ ci-host-models-test: noc-test riscv-test ridx-test
 
 ci-host-protocols-test: rfpl-unit-test device-test chi-test
 
-ci-host-cores-test: ricket-host-test
+ci-host-cores-test: rv5stage-host-test
 
 ci-host-hygiene-test: check-boundaries check-example-verilog
 
@@ -231,6 +231,6 @@ examples-cores:
 examples-formal: check-boundaries
 	@formal_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$formal_compiled_root"' EXIT; if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''examples-formal "Rosette solver probe failed"))'; then echo 'examples-formal requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; exit 1; fi; env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_EXAMPLES)
 
-examples-ricket:
-	bash tools/check-example-verilog.sh examples/ricket
-	tools/run-racket-tests.sh $(RICKET_EXAMPLES)
+examples-rv5stage:
+	bash tools/check-example-verilog.sh examples/rv5stage
+	tools/run-racket-tests.sh $(RV5STAGE_EXAMPLES)

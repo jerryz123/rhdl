@@ -1,14 +1,14 @@
 #lang rhdl
-// Composes a host-facing Ricket, coherent RAM, and ACLINT over one CHI NoC.
+// Composes a host-facing RV5Stage, coherent RAM, and ACLINT over one CHI NoC.
 
 import:
   lib("chi/main.rhdl") open
   lib("noc/authoring/main.rhm") open
   lib("noc/language/main.rhm").topology
   lib("noc/rtl/router.rhdl") open
-  lib("cores/ricket/ricket.rhdl").Ricket
-  lib("cores/ricket/interrupt.rhdl").RicketInterrupts
-  lib("cores/ricket/chi.rhdl") open
+  lib("cores/rv5stage/rv5stage.rhdl").RV5Stage
+  lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
+  lib("cores/rv5stage/chi.rhdl") open
   lib("riscv/isa/xlen.rhm").XLen
   lib("devices/aclint.rhdl") open
   "host-interface.rhdl".SoCHostInterface
@@ -43,12 +43,12 @@ def simple_soc_host_node = CHINodeParams(
   ),
   ~max_outstanding: 1
 )
-def simple_soc_ricket_config = RicketCHIConfig(simple_soc_flit,
-                                               simple_soc_home_map)
-def simple_soc_ricket_params = RicketCHIParams(simple_soc_ricket_config,
-                                               2,
-                                               3,
-                                               ~device_node_id: 4)
+def simple_soc_rv5stage_config = RV5StageCHIConfig(simple_soc_flit,
+                                                   simple_soc_home_map)
+def simple_soc_rv5stage_params = RV5StageCHIParams(simple_soc_rv5stage_config,
+                                                   2,
+                                                   3,
+                                                   ~device_node_id: 4)
 
 fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   CHIICNPortParams(
@@ -61,9 +61,9 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   )
 
 def simple_soc_host_port = requester_icn_endpoint(simple_soc_host_node)
-def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_ricket_params.instruction_node)
-def simple_soc_data_port = requester_icn_endpoint(simple_soc_ricket_params.data_node)
-def simple_soc_device_port = requester_icn_endpoint(simple_soc_ricket_params.device_node)
+def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_rv5stage_params.instruction_node)
+def simple_soc_data_port = requester_icn_endpoint(simple_soc_rv5stage_params.data_node)
+def simple_soc_device_port = requester_icn_endpoint(simple_soc_rv5stage_params.device_node)
 def simple_soc_ram_config = CHIRamConfig(simple_soc_flit,
                                          simple_soc_memory_bytes,
                                          ~max_outstanding: 2)
@@ -113,14 +113,14 @@ def simple_soc_router = simple_soc_topology.node("xbar")
 def simple_soc_host_site = CHIRNSite(NamePath(["requesters", "host"]),
                                      simple_soc_host_node.node_id,
                                      simple_soc_router)
-def simple_soc_instruction_site = CHIRNSite(NamePath(["requesters", "ricket-l1i"]),
-                                            simple_soc_ricket_params.instruction_node_id,
+def simple_soc_instruction_site = CHIRNSite(NamePath(["requesters", "rv5stage-l1i"]),
+                                            simple_soc_rv5stage_params.instruction_node_id,
                                             simple_soc_router)
-def simple_soc_data_site = CHIRNSite(NamePath(["requesters", "ricket-l1d"]),
-                                     simple_soc_ricket_params.data_node_id,
+def simple_soc_data_site = CHIRNSite(NamePath(["requesters", "rv5stage-l1d"]),
+                                     simple_soc_rv5stage_params.data_node_id,
                                      simple_soc_router)
-def simple_soc_device_site = CHIRNSite(NamePath(["requesters", "ricket-device"]),
-                                       simple_soc_ricket_params.device_node_id,
+def simple_soc_device_site = CHIRNSite(NamePath(["requesters", "rv5stage-device"]),
+                                       simple_soc_rv5stage_params.device_node_id,
                                        simple_soc_router)
 def simple_soc_home_requester_site = CHIRNICNSite(NamePath(["home", "requesters"]),
                                                   simple_soc_home.node_id,
@@ -161,7 +161,7 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
 sync_circuit SimpleSoC():
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
 
-  inst ricket(Ricket(XLen.X64, ~chi: simple_soc_ricket_config))
+  inst rv5stage(RV5Stage(XLen.X64, ~chi: simple_soc_rv5stage_config))
   inst home(CHIHNF(simple_soc_home_config))
   inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
   inst ram(CHIRam(simple_soc_ram_config))
@@ -172,10 +172,10 @@ sync_circuit SimpleSoC():
   inst snp_router(SimpleRouter(CHISnpFlit(simple_soc_flit), simple_soc_snp_router_config))
   inst dat_router(SimpleRouter(CHIDatFlit(simple_soc_flit), simple_soc_dat_router_config))
 
-  ricket.chi_identity <== RicketCHIIdentity(simple_soc_flit):
-    instruction_node_id: bits(simple_soc_ricket_params.instruction_node_id, simple_soc_flit.node_id_width)
-    data_node_id: bits(simple_soc_ricket_params.data_node_id, simple_soc_flit.node_id_width)
-    device_node_id: bits(simple_soc_ricket_params.device_node_id, simple_soc_flit.node_id_width)
+  rv5stage.chi_identity <== RV5StageCHIIdentity(simple_soc_flit):
+    instruction_node_id: bits(simple_soc_rv5stage_params.instruction_node_id, simple_soc_flit.node_id_width)
+    data_node_id: bits(simple_soc_rv5stage_params.data_node_id, simple_soc_flit.node_id_width)
+    device_node_id: bits(simple_soc_rv5stage_params.device_node_id, simple_soc_flit.node_id_width)
   home.identity <== CHIHNFIdentity(simple_soc_flit):
     home_node_id: bits(simple_soc_home_params.home.node_id, simple_soc_flit.node_id_width)
     subordinate_node_id: bits(simple_soc_home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
@@ -196,7 +196,7 @@ sync_circuit SimpleSoC():
                        ~dat_ingress: dat_router.ingress,
                        ~dat_targets: dat_router.target,
                        ~adapters: simple_soc_adapter_plans)
-  connect_chi_rnf_node(ricket.imem,
+  connect_chi_rnf_node(rv5stage.imem,
                        ~node: simple_soc_instruction_site,
                        ~req_ingress: req_router.ingress,
                        ~rsp_ingress: rsp_router.ingress,
@@ -205,7 +205,7 @@ sync_circuit SimpleSoC():
                        ~dat_ingress: dat_router.ingress,
                        ~dat_targets: dat_router.target,
                        ~adapters: simple_soc_adapter_plans)
-  connect_chi_rnf_node(ricket.dmem,
+  connect_chi_rnf_node(rv5stage.dmem,
                        ~node: simple_soc_data_site,
                        ~req_ingress: req_router.ingress,
                        ~rsp_ingress: rsp_router.ingress,
@@ -214,7 +214,7 @@ sync_circuit SimpleSoC():
                        ~dat_ingress: dat_router.ingress,
                        ~dat_targets: dat_router.target,
                        ~adapters: simple_soc_adapter_plans)
-  connect_chi_rni(ricket.umem,
+  connect_chi_rni(rv5stage.umem,
                   device_home.port.requester,
                   ~node: simple_soc_device_site,
                   ~icn: simple_soc_device_home_requester_site,
@@ -238,16 +238,16 @@ sync_circuit SimpleSoC():
   fragmenter.downstream <=> ram.port
   device_home.port.subordinate <=> aclint.port
   aclint.tick <== Bool(#true)
-  host.start |> ricket.start
-  ricket.interrupts <== RicketInterrupts():
+  host.start |> rv5stage.start
+  rv5stage.interrupts <== RV5StageInterrupts():
     supervisor_software: Bool(#false)
     machine_software: aclint.machine_software[0]
     supervisor_timer: Bool(#false)
     machine_timer: aclint.machine_timer[0]
     supervisor_external: Bool(#false)
     machine_external: Bool(#false)
-  ricket.hart_id <== bits(0, 64)
-  ricket.time_counter <== aclint.time_counter
+  rv5stage.hart_id <== bits(0, 64)
+  rv5stage.time_counter <== aclint.time_counter
 
 def design = elaborate(SimpleSoC())
 
@@ -257,8 +257,8 @@ export:
   simple_soc_device_home
   simple_soc_home_map
   simple_soc_host_node
-  simple_soc_ricket_config
-  simple_soc_ricket_params
+  simple_soc_rv5stage_config
+  simple_soc_rv5stage_params
   requester_icn_endpoint
   simple_soc_host_port
   simple_soc_instruction_port

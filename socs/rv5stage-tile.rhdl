@@ -1,0 +1,57 @@
+#lang rhdl
+// Implements one RV5Stage tile around a bundled four-plane CHI router.
+
+import:
+  lib("rhdl/std/ready-valid.rhdl").Irrevocable
+  lib("chi/main.rhdl") open
+  lib("cores/rv5stage/chi.rhdl") open
+  lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
+  lib("cores/rv5stage/rv5stage.rhdl").RV5Stage
+  lib("riscv/isa/xlen.rhm").XLen
+
+class RV5StageTileParams(rv5stage :: RV5StageCHIConfig,
+                         router :: CHIRouterParams):
+  implements CircuitParam
+
+bundle RV5StageTileIdentity(p :: CHIFlitParams, site_width :: PosInt):
+  site_key: Bits(site_width)
+  hart_id: Bits(64)
+  chi: RV5StageCHIIdentity(p)
+
+sync_circuit RV5StageTile(params :: RV5StageTileParams):
+  def router_params = params.router
+  def p = params.rv5stage.flit
+  def site_width = router_params.routers.req.route_decoder.site_width
+  def Link = chi_noc_link_type(router_params)
+
+  input identity: RV5StageTileIdentity(p, site_width)
+  interface start(Irrevocable(Bits(64)), ~role: consumer)
+  input interrupts: RV5StageInterrupts()
+  input time_counter: Bits(64)
+  output fault: Bool
+  interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
+  interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
+
+  inst rv5stage(RV5Stage(XLen.X64, ~chi: params.rv5stage))
+  inst router(CHIRouter(router_params))
+
+  rv5stage.chi_identity <== identity.chi
+  rv5stage.interrupts <== interrupts
+  rv5stage.hart_id <== identity.hart_id
+  rv5stage.time_counter <== time_counter
+  router.site_key <== identity.site_key
+  start |> rv5stage.start
+  fault <== rv5stage.fault
+  def instruction_channels :: Endpoint = router.rnf_local[0]
+  def data_channels :: Endpoint = router.rnf_local[1]
+  def device_channels :: Endpoint = router.rni_local[0]
+  rv5stage.imem <=> instruction_channels
+  rv5stage.dmem <=> data_channels
+  rv5stage.umem <=> device_channels
+  router.incoming_links <=> incoming_links
+  router.outgoing_links <=> outgoing_links
+
+export:
+  RV5StageTileIdentity
+  RV5StageTileParams
+  RV5StageTile

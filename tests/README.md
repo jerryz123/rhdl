@@ -45,14 +45,14 @@ make examples-riscv         # RISC-V model and adapter examples only
 make examples-chi           # CHI protocol examples only
 make examples-cores         # reusable processor-component examples only
 make examples-formal        # formal-engine examples only
-make examples-ricket        # Ricket examples only
+make examples-rv5stage        # RV5Stage examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make ridx-test              # finite structural index-space model
 make ridx-circt-test        # Ridx-backed RHDL CIRCT fixtures
 make chi-test               # CHI boundaries, flits, links, and invalid connections
-make ricket-host-test       # Ricket core and reusable ALU host checks
-make ricket-test            # host checks plus Ricket CIRCT and Verilator fixtures
+make rv5stage-host-test       # RV5Stage core and reusable ALU host checks
+make rv5stage-test            # host checks plus RV5Stage CIRCT and Verilator fixtures
 make frontend-test          # core and frontend tests, including invalid uses
 make diagram-test           # logical diagram extraction and serialization
 make backend-test           # textual CIRCT lowering, including sparse decode relations

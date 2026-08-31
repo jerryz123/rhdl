@@ -66,7 +66,7 @@ make -C sims elaboration-test
 make -C sims tiled-lowering-test
 ```
 
-The smoke starts with `tohost` cleared, executes RV64I instructions on Ricket,
+The smoke starts with `tohost` cleared, executes RV64I instructions on RV5Stage,
 stores the passing value into a dirty L1D line, and succeeds only after the
 coherent FESVR requester observes that write. It uses the same `run` path as an
 external target binary.
@@ -76,5 +76,5 @@ aligned 32-bit transactions. Target XLEN may be 32 or 64; addresses and entry
 points remain 64-bit. `FesvrRequester` is a non-caching RN-F: it converts those
 private ready-valid DPI signals into coherent CHI `ReadClean` and
 `WriteUniquePtl` transactions and reports Invalid for every snoop. Consequently
-ELF loading and `tohost`/`fromhost` polling observe dirty Ricket cache lines
+ELF loading and `tohost`/`fromhost` polling observe dirty RV5Stage cache lines
 without reserving a special mailbox address range.

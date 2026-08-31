@@ -1,0 +1,480 @@
+#lang rhdl
+// Implements RV5Stage's commit-owned CSR, privilege, trap, and interrupt state.
+
+import:
+  "decode/system-ctrl.rhdl" open
+  "interrupt.rhdl" open
+  "../../riscv/isa/csr.rhm" open
+  "../../riscv/isa/interrupt.rhm" open
+  "../../riscv/isa/trap.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rhdl/csr.rhdl" open
+  "../../riscv/rhdl/interrupt.rhdl" open
+  "../../riscv/rhdl/trap.rhdl" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+
+hardware_enum PrivilegeMode(~width: 2):
+  User = 0
+  Supervisor = 1
+  Machine = 3
+
+bundle RV5StageCsrCommit(xlen :: XLen):
+  pc: Bits(xlen_width(xlen))
+  instruction: Bits(32)
+  rd: Bits(5)
+  csr_operation: CsrOperation
+  csr_address: Bits(12)
+  csr_source: Bits(xlen_width(xlen))
+  system_operation: SystemOperation
+  exception_valid: Bool
+  exception_cause: Bits(xlen_width(xlen))
+  exception_value: Bits(xlen_width(xlen))
+
+bundle RV5StageCsrState(xlen :: XLen):
+  mstatus: Bits(xlen_width(xlen))
+  medeleg: Bits(xlen_width(xlen))
+  mideleg: Bits(xlen_width(xlen))
+  mie: Bits(xlen_width(xlen))
+  mip: Bits(xlen_width(xlen))
+  mtvec: Bits(xlen_width(xlen))
+  mcounteren: Bits(xlen_width(xlen))
+  mscratch: Bits(xlen_width(xlen))
+  mepc: Bits(xlen_width(xlen))
+  mcause: Bits(xlen_width(xlen))
+  mtval: Bits(xlen_width(xlen))
+  stvec: Bits(xlen_width(xlen))
+  scounteren: Bits(xlen_width(xlen))
+  sscratch: Bits(xlen_width(xlen))
+  sepc: Bits(xlen_width(xlen))
+  scause: Bits(xlen_width(xlen))
+  stval: Bits(xlen_width(xlen))
+  satp: Bits(xlen_width(xlen))
+
+bundle RV5StageTrapDecision(xlen :: XLen):
+  valid: Bool
+  cause: Bits(xlen_width(xlen))
+  value: Bits(xlen_width(xlen))
+  to_supervisor: Bool
+
+bundle RV5StageInterruptDecision(xlen :: XLen):
+  valid: Bool
+  cause: Bits(xlen_width(xlen))
+  to_supervisor: Bool
+
+def RV5StageDelegatableExceptions = [
+  ExceptionCause.InstructionAddressMisaligned,
+  ExceptionCause.InstructionAccessFault,
+  ExceptionCause.IllegalInstruction,
+  ExceptionCause.Breakpoint,
+  ExceptionCause.LoadAddressMisaligned,
+  ExceptionCause.LoadAccessFault,
+  ExceptionCause.StoreAddressMisaligned,
+  ExceptionCause.StoreAccessFault,
+  ExceptionCause.EnvironmentCallFromUser,
+  ExceptionCause.InstructionPageFault,
+  ExceptionCause.LoadPageFault,
+  ExceptionCause.StorePageFault
+]
+
+fun resolve_rv5stage_trap(xlen :: XLen,
+                          commit_valid :: Bool,
+                          operation :: RV5StageCsrCommit(xlen),
+                          privilege :: PrivilegeMode,
+                          csr_access_legal :: Bool,
+                          medeleg :: Bits(xlen_width(xlen))) :~ RV5StageTrapDecision(xlen):
+  def width = xlen_width(xlen)
+  def zero = bits(0, width)
+  def csr_commit = commit_valid & (operation.csr_operation =/= CsrOperation.None)
+  def illegal_csr = csr_commit & !csr_access_legal
+  def illegal_return = commit_valid & (
+    ((operation.system_operation === SystemOperation.Mret) & (privilege =/= PrivilegeMode.Machine)) ||| (
+      (operation.system_operation === SystemOperation.Sret) & (privilege === PrivilegeMode.User)
+    )
+  )
+  def explicit_exception = commit_valid & operation.exception_valid
+  def ecall = commit_valid & (operation.system_operation === SystemOperation.Ecall)
+  def ebreak = commit_valid & (operation.system_operation === SystemOperation.Ebreak)
+  def trap_event = explicit_exception ||| illegal_csr ||| illegal_return ||| ecall ||| ebreak
+  def ecall_cause = mux_lookup(
+    privilege,
+    ~default: exception_cause_bits(ExceptionCause.EnvironmentCallFromMachine, width),
+    [
+      [PrivilegeMode.User, exception_cause_bits(ExceptionCause.EnvironmentCallFromUser, width)],
+      [PrivilegeMode.Supervisor, exception_cause_bits(ExceptionCause.EnvironmentCallFromSupervisor, width)],
+      [PrivilegeMode.Machine, exception_cause_bits(ExceptionCause.EnvironmentCallFromMachine, width)]
+    ]
+  )
+  def generated_cause = mux(
+    ecall,
+    ecall_cause,
+    mux(
+      ebreak,
+      exception_cause_bits(ExceptionCause.Breakpoint, width),
+      exception_cause_bits(ExceptionCause.IllegalInstruction, width)
+    )
+  )
+  def cause = mux(explicit_exception, operation.exception_cause, generated_cause)
+  def instruction = if width == 32 | operation.instruction | zext(operation.instruction, width)
+  def value = mux(
+    explicit_exception,
+    operation.exception_value,
+    mux(illegal_csr ||| illegal_return, instruction, zero)
+  )
+  def delegated = mux_lookup(
+    cause,
+    ~default: Bool(#false),
+    RV5StageDelegatableExceptions.map(
+      fun (candidate):
+        def code = exception_code(candidate)
+        [code, medeleg[code].into(Bool)]
+    )
+  )
+  RV5StageTrapDecision(xlen):
+    valid: trap_event
+    cause: cause
+    value: value
+    to_supervisor: trap_event & (privilege =/= PrivilegeMode.Machine) & delegated
+
+fun resolve_rv5stage_interrupt(xlen :: XLen,
+                               pending :: Bits(xlen_width(xlen)),
+                               enabled :: Bits(xlen_width(xlen)),
+                               delegated :: Bits(xlen_width(xlen)),
+                               mstatus :: Bits(xlen_width(xlen)),
+                               privilege :: PrivilegeMode) :~ RV5StageInterruptDecision(xlen):
+  def width = xlen_width(xlen)
+  def machine_globally_enabled = (privilege =/= PrivilegeMode.Machine) ||| mstatus[3].into(Bool)
+  def supervisor_globally_enabled = (privilege === PrivilegeMode.User) ||| (
+    (privilege === PrivilegeMode.Supervisor) & mstatus[1].into(Bool)
+  )
+  fun candidate(cause :: InterruptCause) :~ Bool:
+    def code = interrupt_code(cause)
+    def to_supervisor = delegated[code].into(Bool)
+    pending[code].into(Bool) & enabled[code].into(Bool) & mux(
+      to_supervisor,
+      supervisor_globally_enabled,
+      machine_globally_enabled
+    )
+  def machine_external = candidate(InterruptCause.MachineExternal)
+  def machine_software = candidate(InterruptCause.MachineSoftware)
+  def machine_timer = candidate(InterruptCause.MachineTimer)
+  def supervisor_external = candidate(InterruptCause.SupervisorExternal)
+  def supervisor_software = candidate(InterruptCause.SupervisorSoftware)
+  def supervisor_timer = candidate(InterruptCause.SupervisorTimer)
+  def valid = machine_external ||| machine_software ||| machine_timer ||| supervisor_external ||| supervisor_software ||| supervisor_timer
+  def cause = mux(
+    machine_external,
+    interrupt_cause_bits(InterruptCause.MachineExternal, width),
+    mux(
+      machine_software,
+      interrupt_cause_bits(InterruptCause.MachineSoftware, width),
+      mux(
+        machine_timer,
+        interrupt_cause_bits(InterruptCause.MachineTimer, width),
+        mux(
+          supervisor_external,
+          interrupt_cause_bits(InterruptCause.SupervisorExternal, width),
+          mux(
+            supervisor_software,
+            interrupt_cause_bits(InterruptCause.SupervisorSoftware, width),
+            interrupt_cause_bits(InterruptCause.SupervisorTimer, width)
+          )
+        )
+      )
+    )
+  )
+  def to_supervisor = mux_lookup(
+    cause[0..4],
+    ~default: Bool(#false),
+    [
+      [interrupt_code(InterruptCause.SupervisorSoftware), delegated[interrupt_code(InterruptCause.SupervisorSoftware)].into(Bool)],
+      [interrupt_code(InterruptCause.SupervisorTimer), delegated[interrupt_code(InterruptCause.SupervisorTimer)].into(Bool)],
+      [interrupt_code(InterruptCause.SupervisorExternal), delegated[interrupt_code(InterruptCause.SupervisorExternal)].into(Bool)]
+    ]
+  )
+  RV5StageInterruptDecision(xlen):
+    valid: valid
+    cause: cause
+    to_supervisor: valid & to_supervisor
+
+sync_circuit RV5StageCsrFile(xlen :: XLen):
+  def width = xlen_width(xlen)
+  def zero = bits(0, width)
+  def mstatus_mask = bits(0xe19bb, width)
+  def sstatus_mask = bits(0xc0133, width)
+  def medeleg_mask = bits(exception_mask(RV5StageDelegatableExceptions), width)
+  def mideleg_mask = bits(0x222, width)
+  def interrupt_enable_mask = bits(0xaaa, width)
+  def supervisor_interrupt_mask = bits(0x222, width)
+  def counter_enable_mask = bits(0x7, width)
+  def tvec_mask = !bits(0x3, width)
+  def epc_mask = !bits(0x3, width)
+  def mpp_mask = bits(0x1800, width)
+  def misa_value = if xlen == XLen.X32 | bits(0x40140101, width) | bits(0x8000000000140101, width)
+
+  input interrupts: RV5StageInterrupts()
+  input hart_id: Bits(width)
+  input time_counter: Bits(64)
+  input interrupt_boundary: Bool
+  input interrupt_pc: Bits(width)
+  interface commit(Valid(RV5StageCsrCommit(xlen)), ~role: consumer)
+  interface redirect(Valid(Bits(width)), ~role: producer)
+  output interrupt_request: Bool
+  output writeback_valid: Bool
+  output writeback_value: Bits(width)
+  output privilege: PrivilegeMode
+  output mstatus: Bits(width)
+  output satp: Bits(width)
+
+  reg privilege_state(PrivilegeMode, ~init: PrivilegeMode.Machine)
+  reg state(RV5StageCsrState(xlen), ~init: literal(RV5StageCsrState(xlen), 0))
+
+  fun flag_value(original, mask, enabled):
+    mux(enabled, original ||| mask, original & !mask)
+
+  def sstatus_value = state.mstatus & sstatus_mask
+  def time_value = if xlen == XLen.X32 | time_counter[0..32] | time_counter
+  def timeh_value = if xlen == XLen.X32 | time_counter[32..64] | zero
+  def interrupt_pending = rv5stage_interrupt_pending(xlen, interrupts) ||| state.mip
+  def csr = commit.bits.csr_address
+  def bank = csr_bank(csr, ~default: zero):
+    csr CsrId.Sstatus:
+      read: sstatus_value
+      write value:
+        state.mstatus <== masked_merge(state.mstatus, value, sstatus_mask)
+    csr CsrId.Sie:
+      read: state.mie & state.mideleg
+      write value:
+        state.mie <== masked_merge(state.mie, value, state.mideleg)
+    csr CsrId.Stvec:
+      read: state.stvec
+      write value:
+        state.stvec <== value & tvec_mask
+    csr CsrId.Scounteren:
+      read: state.scounteren
+      write value:
+        state.scounteren <== value & counter_enable_mask
+    read CsrId.Senvcfg: zero
+    storage CsrId.Sscratch: state.sscratch
+    csr CsrId.Sepc:
+      read: state.sepc
+      write value:
+        state.sepc <== value & epc_mask
+    storage CsrId.Scause: state.scause
+    storage CsrId.Stval: state.stval
+    csr CsrId.Sip:
+      read: interrupt_pending & state.mideleg
+      write value:
+        state.mip <== masked_merge(
+          state.mip,
+          value,
+          state.mideleg & supervisor_interrupt_mask
+        )
+    csr CsrId.Satp:
+      read: state.satp
+      write value:
+        def satp_replacement = as_bits(value)
+        when (if xlen == XLen.X32 | Bool(#false) | is_one_of(satp_replacement[60..64], bits(0, 4), bits(8, 4))):
+          state.satp <== if xlen == XLen.X32 | zero | concat(satp_replacement[60..64], bits(0, 16), satp_replacement[0..44])
+    read CsrId.Time: time_value
+    read CsrId.Timeh: timeh_value
+    csr CsrId.Mstatus:
+      read: state.mstatus
+      write value:
+        state.mstatus <== masked_merge(state.mstatus, value, mstatus_mask)
+    read CsrId.Misa: misa_value
+    csr CsrId.Medeleg:
+      read: state.medeleg
+      write value:
+        state.medeleg <== value & medeleg_mask
+    csr CsrId.Mideleg:
+      read: state.mideleg
+      write value:
+        state.mideleg <== value & mideleg_mask
+    csr CsrId.Mie:
+      read: state.mie
+      write value:
+        state.mie <== value & interrupt_enable_mask
+    csr CsrId.Mtvec:
+      read: state.mtvec
+      write value:
+        state.mtvec <== value & tvec_mask
+    csr CsrId.Mcounteren:
+      read: state.mcounteren
+      write value:
+        state.mcounteren <== value & counter_enable_mask
+    read CsrId.Menvcfg: zero
+    storage CsrId.Mscratch: state.mscratch
+    csr CsrId.Mepc:
+      read: state.mepc
+      write value:
+        state.mepc <== value & epc_mask
+    storage CsrId.Mcause: state.mcause
+    storage CsrId.Mtval: state.mtval
+    csr CsrId.Mip:
+      read: interrupt_pending
+      write value:
+        state.mip <== value & supervisor_interrupt_mask
+    read CsrId.Mvendorid: zero
+    read CsrId.Marchid: zero
+    read CsrId.Mimpid: zero
+    read CsrId.Mhartid: hart_id
+  def timeh_unavailable = (csr === bits(csr_address(CsrId.Timeh), 12)) & (
+    if xlen == XLen.X32 | Bool(#false) | Bool(#true)
+  )
+  def csr_recognized = bank.recognized & !timeh_unavailable
+  def csr_read_value = bank.read_value
+  def csr_write_requested = (commit.bits.csr_operation === CsrOperation.Write) ||| (
+    is_one_of(commit.bits.csr_operation, CsrOperation.Set, CsrOperation.Clear) & or_reduce(commit.bits.csr_source)
+  )
+  def csr_read_only = csr[10..12] === bits(3, 2)
+  def required_privilege = csr[8..10]
+  def privilege_bits = cast(privilege_state, Bits(2))
+  def time_csr = is_one_of(csr,
+                           bits(csr_address(CsrId.Time), 12),
+                           bits(csr_address(CsrId.Timeh), 12))
+  def machine_time_enabled = state.mcounteren[1].into(Bool)
+  def supervisor_time_enabled = state.scounteren[1].into(Bool)
+  def time_access_enabled = mux_lookup(
+    privilege_state,
+    ~default: machine_time_enabled & supervisor_time_enabled,
+    [
+      [PrivilegeMode.Machine, Bool(#true)],
+      [PrivilegeMode.Supervisor, machine_time_enabled]
+    ]
+  )
+  def csr_access_legal = csr_recognized & !(
+    privilege_bits < required_privilege
+  ) & !(csr_write_requested & csr_read_only) & (!time_csr ||| time_access_enabled)
+  def csr_commit = commit.valid & (commit.bits.csr_operation =/= CsrOperation.None)
+  def synchronous_trap = resolve_rv5stage_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
+  def interrupt = resolve_rv5stage_interrupt(
+    xlen,
+    interrupt_pending,
+    state.mie,
+    state.mideleg,
+    state.mstatus,
+    privilege_state
+  )
+  def interrupt_take = interrupt_boundary & !synchronous_trap.valid & interrupt.valid
+  def trap = RV5StageTrapDecision(xlen):
+    valid: synchronous_trap.valid ||| interrupt_take
+    cause: mux(synchronous_trap.valid, synchronous_trap.cause, interrupt.cause)
+    value: mux(synchronous_trap.valid, synchronous_trap.value, zero)
+    to_supervisor: mux(
+      synchronous_trap.valid,
+      synchronous_trap.to_supervisor,
+      interrupt.to_supervisor
+    )
+  def trap_pc = mux(interrupt_take, interrupt_pc, commit.bits.pc)
+
+  def csr_replacement = mux_lookup(
+    commit.bits.csr_operation,
+    ~default: csr_read_value,
+    [
+      [CsrOperation.Write, commit.bits.csr_source],
+      [CsrOperation.Set, csr_read_value ||| commit.bits.csr_source],
+      [CsrOperation.Clear, csr_read_value & !commit.bits.csr_source]
+    ]
+  )
+  def csr_write = csr_commit & csr_access_legal & csr_write_requested
+  def mret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Mret)
+  def sret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Sret)
+  def mret_privilege = mux_lookup(
+    state.mstatus[11..13],
+    ~default: PrivilegeMode.User,
+    [
+      [1, PrivilegeMode.Supervisor],
+      [3, PrivilegeMode.Machine]
+    ]
+  )
+  def sret_privilege = mux(state.mstatus[8].into(Bool), PrivilegeMode.Supervisor, PrivilegeMode.User)
+  def supervisor_trap_status = flag_value(
+    flag_value(
+      flag_value(state.mstatus, bits(0x20, width), state.mstatus[1].into(Bool)),
+      bits(0x2, width),
+      Bool(#false)
+    ),
+    bits(0x100, width),
+    privilege_state === PrivilegeMode.Supervisor
+  )
+  def machine_trap_status = masked_merge(
+    flag_value(
+      flag_value(state.mstatus, bits(0x80, width), state.mstatus[3].into(Bool)),
+      bits(0x8, width),
+      Bool(#false)
+    ),
+    zext(privilege_bits, width) << 11,
+    mpp_mask
+  )
+  def trap_mstatus = mux(trap.to_supervisor, supervisor_trap_status, machine_trap_status)
+  def mret_status = flag_value(
+    flag_value(
+      masked_merge(state.mstatus, zero, mpp_mask),
+      bits(0x8, width),
+      state.mstatus[7].into(Bool)
+    ),
+    bits(0x80, width),
+    Bool(#true)
+  )
+  def normalized_mret_status = mux(
+    mret_privilege === PrivilegeMode.Machine,
+    mret_status,
+    mret_status & !bits(0x20000, width)
+  )
+  def sret_status = flag_value(
+    flag_value(
+      flag_value(state.mstatus, bits(0x2, width), state.mstatus[5].into(Bool)),
+      bits(0x20, width),
+      Bool(#true)
+    ),
+    bits(0x100, width),
+    Bool(#false)
+  ) & !bits(0x20000, width)
+
+  writeback_valid <== csr_commit & csr_access_legal & or_reduce(commit.bits.rd)
+  writeback_value <== csr_read_value
+  interrupt_request <== interrupt.valid
+  privilege <== privilege_state
+  mstatus <== state.mstatus
+  satp <== state.satp
+  redirect.valid <== trap.valid ||| mret ||| sret
+  redirect.bits <== mux(
+    trap.valid,
+    mux(trap.to_supervisor, state.stvec, state.mtvec),
+    mux(mret, state.mepc, state.sepc)
+  )
+
+  when (trap.valid):
+    privilege_state <== mux(trap.to_supervisor, PrivilegeMode.Supervisor, PrivilegeMode.Machine)
+  elsewhen mret:
+    privilege_state <== mret_privilege
+  elsewhen sret:
+    privilege_state <== sret_privilege
+
+  when (trap.valid & trap.to_supervisor):
+    state.mstatus <== trap_mstatus
+    state.sepc <== trap_pc & epc_mask
+    state.scause <== trap.cause
+    state.stval <== trap.value
+  elsewhen (trap.valid):
+    state.mstatus <== trap_mstatus
+    state.mepc <== trap_pc & epc_mask
+    state.mcause <== trap.cause
+    state.mtval <== trap.value
+  elsewhen mret:
+    state.mstatus <== normalized_mret_status
+  elsewhen sret:
+    state.mstatus <== sret_status
+  elsewhen csr_write:
+    bank.write(csr_replacement)
+
+export:
+  PrivilegeMode
+  RV5StageCsrCommit
+  RV5StageCsrState
+  RV5StageTrapDecision
+  RV5StageInterruptDecision
+  RV5StageCsrFile
+  resolve_rv5stage_interrupt
+  resolve_rv5stage_trap

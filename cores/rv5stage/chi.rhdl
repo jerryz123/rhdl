@@ -1,0 +1,312 @@
+#lang rhdl
+// Defines RV5Stage's native RN-F endpoint parameters and conservative CHI flit constructors.
+
+import:
+  lib("rhdl/std/bits.rhdl") open
+  lib("chi/main.rhdl") open
+
+class RV5StageCHIConfig(flit :: CHIFlitParams,
+                        home_map :: CHIHomeMap):
+  implements CircuitParam
+
+  property normal_address_sets:
+    home_map.entries.filter(
+      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNF
+    ).map(fun (entry): entry.address_set)
+  property device_address_sets:
+    home_map.entries.filter(
+      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNI
+    ).map(fun (entry): entry.address_set)
+  property has_devices: device_address_sets.length() > 0
+
+  constructor (flit :: CHIFlitParams,
+               home_map :: CHIHomeMap):
+    unless home_map.flit == flit
+    | error(~who: #'RV5StageCHIConfig,
+            "Home map must use RV5Stage's CHI flit parameters")
+    unless for any (entry in home_map.entries):
+      entry.home.kind == CHINodeKind.HNF
+    | error(~who: #'RV5StageCHIConfig,
+            "RV5Stage Home map must contain at least one HN-F normal-memory range")
+    super(flit, home_map)
+
+class RV5StageCHIParams(config :: RV5StageCHIConfig,
+                        instruction_node_id :: Nat,
+                        data_node_id :: Nat,
+                        device_node_id :: Nat):
+
+  property flit: config.flit
+  property home_map: config.home_map
+
+  property instruction_node:
+    CHINodeParams(
+      "rv5stage-l1i",
+      instruction_node_id,
+      CHINodeKind.RNF,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadClean],
+        ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant],
+        ~snp: chi_rnf_snoop_opcodes,
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 2
+    )
+
+  property data_node:
+    CHINodeParams(
+      "rv5stage-l1d",
+      data_node_id,
+      CHINodeKind.RNF,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadClean,
+               CHIReqOpcode.ReadUnique,
+               CHIReqOpcode.WriteUniquePtl],
+        ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp],
+        ~dat: [CHIDatOpcode.SnpRespData,
+               CHIDatOpcode.NonCopyBackWriteData]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant,
+               CHIRspOpcode.DBIDResp, CHIRspOpcode.DBIDRespOrd,
+               CHIRspOpcode.Comp, CHIRspOpcode.CompDBIDResp],
+        ~snp: chi_rnf_snoop_opcodes,
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 2
+    )
+  property device_node:
+    CHINodeParams(
+      "rv5stage-device",
+      device_node_id,
+      CHINodeKind.RNI,
+      ~emits: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpPtl],
+        ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~max_outstanding: 1
+    )
+
+  constructor (config :: RV5StageCHIConfig,
+               instruction_node_id :: Nat,
+               data_node_id :: Nat,
+               ~device_node_id: device_node_id :: Nat = 0):
+    unless bits.length(instruction_node_id) <= config.flit.node_id_width
+    | error(~who: #'RV5StageCHIParams,
+            "instruction NodeID must fit in the CHI NodeID width")
+    unless bits.length(data_node_id) <= config.flit.node_id_width
+    | error(~who: #'RV5StageCHIParams,
+            "data NodeID must fit in the CHI NodeID width")
+    unless instruction_node_id != data_node_id
+    | error(~who: #'RV5StageCHIParams,
+            "instruction and data NodeIDs must be distinct")
+    if config.has_devices
+    | block:
+        unless bits.length(device_node_id) <= config.flit.node_id_width
+        | error(~who: #'RV5StageCHIParams,
+                "device NodeID must fit in the CHI NodeID width")
+        unless device_node_id != instruction_node_id && device_node_id != data_node_id
+        | error(~who: #'RV5StageCHIParams,
+                "instruction, data, and device NodeIDs must be distinct")
+    | #void
+    for (entry in config.home_map.entries):
+      unless entry.target_node_id != instruction_node_id && entry.target_node_id != data_node_id && (
+        (!config.has_devices) || (entry.target_node_id != device_node_id)
+      )
+      | error(~who: #'RV5StageCHIParams,
+              "Home, instruction, and data NodeIDs must be distinct")
+    super(config, instruction_node_id, data_node_id, device_node_id)
+
+bundle RV5StageCHIIdentity(p :: CHIFlitParams):
+  instruction_node_id: Bits(p.node_id_width)
+  data_node_id: Bits(p.node_id_width)
+  device_node_id: Bits(p.node_id_width)
+
+fun rv5stage_chi_address(address :: Hardware.bits,
+                         p :: CHIFlitParams) :~ Bits(p.request_address_width):
+  def width = hardware_value_type(address).bit_width()
+  cond
+  | width < p.request_address_width: zext(address, p.request_address_width)
+  | width == p.request_address_width: address
+  | ~else: address[0..p.request_address_width]
+
+fun rv5stage_chi_address_fits(address :: Hardware.bits,
+                              p :: CHIFlitParams) :~ Bool:
+  def width = hardware_value_type(address).bit_width()
+  if width <= p.request_address_width
+  | Bool(#true)
+  | !or_reduce(address[p.request_address_width..width])
+
+fun rv5stage_chi_request(p :: CHIFlitParams,
+                         node_id :: Bits(p.node_id_width),
+                         home_node_id :: Bits(p.node_id_width),
+                         raw_address :: Hardware.bits,
+                         size :: CHITransferSize,
+                         opcode :: CHIReqOpcode,
+                         txn_id :: Bits(12),
+                         expect_comp_ack :: Bool,
+                         allocate_hint :: Bool,
+                         allow_retry :: Bool,
+                         protocol_credit_type :: Bits(4),
+                         ~cacheable: cacheable :: Bool = Bool(#true),
+                         ~device: device :: Bool = Bool(#false),
+                         ~early_write_acknowledge: early_write_acknowledge :: Bool = Bool(#true)) :~ CHIReqFlit(p):
+  wire request: CHIReqFlit(p)
+  if p.req_rsvdc_width > 0
+  | request.rsvdc <== bits(0, p.req_rsvdc_width)
+  | #void
+  if p.sec_sid_width > 0
+  | request.sec_sid1 <== bits(0, p.sec_sid_width)
+  | #void
+  if p.request_security_width > 0
+  | request.mecid_or_stream_id <== bits(0, p.request_security_width)
+  | #void
+  if p.pbha_width > 0
+  | request.pbha <== bits(0, p.pbha_width)
+  | #void
+  if p.mpam_width > 0
+  | request.mpam <== bits(0, p.mpam_width)
+  | #void
+  request.trace_tag <== Bool(#false)
+  request.tag_op <== CHITagOp.Invalid
+  request.exp_comp_ack <== expect_comp_ack
+  request.excl_snoop_me_cah <== Bool(#false)
+  request.group_id_or_lpid <== bits(0, 8)
+  request.snp_attr_or_do_dwt <== Bool(#true)
+  request.mem_attr <== CHIMemAttr():
+    allocate: allocate_hint
+    cacheable: cacheable
+    device: device
+    early_write_acknowledge: early_write_acknowledge
+  request.pcrd_type <== protocol_credit_type
+  request.order <== CHIOrder.NoOrder
+  request.allow_retry <== allow_retry
+  request.likely_shared <== Bool(#false)
+  request.pas <== CHIPAS.Secure
+  request.address <== rv5stage_chi_address(raw_address, p)
+  request.size_or_num_req <== zext(as_bits(size), 6)
+  request.multi_req <== Bool(#false)
+  request.opcode <== opcode
+  // ReturnTxnID is inapplicable on Requester-to-Home traffic.
+  request.return_txn_id_or_stash_lpid <== bits(0, 12)
+  request.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
+  request.return_nid_or_stash_nid_or_data_target <== node_id
+  request.txn_id <== txn_id
+  request.src_id <== node_id
+  request.tgt_id <== home_node_id
+  request.qos <== bits(0, 4)
+  request
+
+fun rv5stage_chi_response(p :: CHIFlitParams,
+                          node_id :: Bits(p.node_id_width),
+                          target_id :: Bits(p.node_id_width),
+                          txn_id :: Bits(12),
+                          opcode :: CHIRspOpcode,
+                          ~resp: response :: Bits(3) = bits(0, 3))
+  :~ CHIRspFlit(p):
+  CHIRspFlit(p):
+    cache_line_id: bits(0, 6)
+    trace_tag: Bool(#false)
+    tag_op: CHITagOp.Invalid
+    pcrd_type: bits(0, 4)
+    dbid_or_group_id: bits(0, 12)
+    c_busy: bits(0, 3)
+    fwd_state_or_data_pull: bits(0, 3)
+    resp: response
+    resp_err: CHIRespErr.OK
+    opcode: opcode
+    txn_id: txn_id
+    src_id: node_id
+    tgt_id: target_id
+    qos: bits(0, 4)
+
+fun rv5stage_snoop_shares_cache_state(opcode :: CHISnpOpcode) :~ Bool:
+  is_one_of(opcode,
+            CHISnpOpcode.SnpShared,
+            CHISnpOpcode.SnpClean,
+            CHISnpOpcode.SnpNotSharedDirty,
+            CHISnpOpcode.SnpCleanShared)
+
+// RV5Stage silently evicts its clean copy before servicing a forwarding snoop.
+// Reporting I is legal and lets Home source the data elsewhere without a
+// multibeat forwarded-data path in these deliberately small L1s.
+fun rv5stage_snoop_invalidates_cache_state(opcode :: CHISnpOpcode) :~ Bool:
+  is_one_of(opcode,
+            CHISnpOpcode.SnpUniqueStash,
+            CHISnpOpcode.SnpMakeInvalidStash,
+            CHISnpOpcode.SnpUnique,
+            CHISnpOpcode.SnpCleanInvalid,
+            CHISnpOpcode.SnpMakeInvalid,
+            CHISnpOpcode.SnpPreferUnique,
+            CHISnpOpcode.SnpSharedFwd,
+            CHISnpOpcode.SnpCleanFwd,
+            CHISnpOpcode.SnpOnceFwd,
+            CHISnpOpcode.SnpNotSharedDirtyFwd,
+            CHISnpOpcode.SnpPreferUniqueFwd,
+            CHISnpOpcode.SnpUniqueFwd)
+
+fun rv5stage_chi_write_data(p :: CHIFlitParams,
+                            node_id :: Bits(p.node_id_width),
+                            home_node_id :: Bits(p.node_id_width),
+                            dbid :: Bits(12),
+                            raw_address :: Hardware.bits,
+                            data :: Bits(p.data_width),
+                            byte_enable :: Bits(p.byte_enable_width))
+  :~ CHIDatFlit(p):
+  def address = rv5stage_chi_address(raw_address, p)
+  def critical_chunk = address[4..6]
+  wire flit: CHIDatFlit(p)
+  if p.poison_width > 0
+  | flit.poison <== bits(0, p.poison_width)
+  | #void
+  if p.data_check_width > 0
+  | flit.data_check <== bits(0, p.data_check_width)
+  | #void
+  flit.data <== data
+  flit.byte_enable <== byte_enable
+  if p.dat_rsvdc_width > 0
+  | flit.rsvdc <== bits(0, p.dat_rsvdc_width)
+  | #void
+  flit.replicate <== Bool(#false)
+  flit.num_dat <== bits(0, 2)
+  flit.cah <== Bool(#false)
+  flit.trace_tag <== Bool(#false)
+  flit.tag_update <== bits(0, p.tag_update_width)
+  flit.tag <== bits(0, p.tag_width)
+  flit.tag_op <== CHITagOp.Invalid
+  flit.cache_line_id <== bits(0, 6)
+  // RV5Stage writes at most eight bytes, so the single narrow packet uses the
+  // exact Addr[5:4] of its lowest addressed byte at every CHI data width.
+  flit.data_id <== critical_chunk
+  flit.ccid <== critical_chunk
+  flit.dbid_or_mecid <== zext(dbid, 16)
+  flit.c_busy <== bits(0, 3)
+  flit.data_pull <== Bool(#false)
+  flit.data_source_or_fwd_state <== bits(0, 8)
+  flit.resp <== bits(0, 3)
+  flit.resp_err <== CHIRespErr.OK
+  flit.opcode <== CHIDatOpcode.NonCopyBackWriteData
+  flit.home_nid_or_pbha_or_mismatched_mecid <== home_node_id
+  flit.txn_id <== dbid
+  flit.src_id <== node_id
+  flit.tgt_id <== home_node_id
+  flit.qos <== bits(0, 4)
+  flit
+
+export:
+  RV5StageCHIConfig
+  RV5StageCHIParams
+  RV5StageCHIIdentity
+  rv5stage_chi_address
+  rv5stage_chi_address_fits
+  rv5stage_chi_request
+  rv5stage_chi_response
+  rv5stage_snoop_shares_cache_state
+  rv5stage_snoop_invalidates_cache_state
+  rv5stage_chi_write_data

@@ -1,0 +1,159 @@
+#lang rhdl
+// Implements RV5Stage's one-outstanding non-cacheable CHI RN-I transaction path.
+
+import:
+  "chi.rhdl" open
+  "memory.rhdl" open
+  "dcache/protocol.rhdl" open
+  "../load-store.rhdl" open
+  "../../riscv/isa/xlen.rhm" open
+  lib("rhdl/std/bits.rhdl") open
+  lib("rhdl/std/ready-valid.rhdl") open
+  lib("chi/main.rhdl") open
+
+hardware_enum RV5StageUncachedState:
+  Idle
+  ReadResponse
+  WriteDBID
+  WriteData
+  WriteResponse
+
+sync_circuit RV5StageUncached(xlen :: XLen,
+                              config :: RV5StageCHIConfig):
+  def width = xlen_width(xlen)
+  def p = config.flit
+  def word_lanes = p.data_bytes / 8
+  def lane_width = index_width(word_lanes)
+
+  input node_id: Bits(p.node_id_width)
+  interface core(RV5StageDataAccess(xlen), ~role: responder)
+  interface chi(CHIRNIChannels(p), ~role: node)
+
+  inst load_gen(LoadGen(xlen))
+  inst store_gen(StoreGen(xlen))
+  reg state(~init: RV5StageUncachedState.Idle)
+  reg address(Bits(width))
+  reg memory_width(MemoryWidth)
+  reg unsigned_load(~init: Bool(#false))
+  reg tag(Bits(5))
+  reg home_id(Bits(p.node_id_width))
+  reg dbid(Bits(12))
+  reg write_data(Bits(64))
+  reg write_mask(Mask(8))
+
+  def idle = state === RV5StageUncachedState.Idle
+  def command :: RV5StageDataReq(xlen) = core.request.bits
+  def command_access :: MemoryOperation = command.access
+  def command_supported = is_one_of(command_access,
+                                    MemoryOperation.Load,
+                                    MemoryOperation.Store)
+  def command_home = config.home_map.lookup(rv5stage_chi_address(command.address, p))
+  core.request.ready <== idle & mux(command_supported, command_home.valid & chi.req.ready, Bool(#true))
+  core.request_fault <== Bool(#false)
+  core.request_access_fault <== core.request.valid & !command_supported
+  chi.req.valid <== core.request.valid & idle & command_supported & command_home.valid
+  chi.req.bits <== rv5stage_chi_request(
+    p,
+    node_id,
+    command_home.node_id,
+    command.address,
+    cast(zext(as_bits(command.width), 3), CHITransferSize),
+    mux(command_access.is_store(), CHIReqOpcode.WriteNoSnpPtl, CHIReqOpcode.ReadNoSnp),
+    bits(0, 12),
+    Bool(#false),
+    Bool(#false),
+    Bool(#false),
+    bits(0, 4),
+    ~cacheable: Bool(#false),
+    ~device: Bool(#true),
+    ~early_write_acknowledge: Bool(#false)
+  )
+  def request_fire = fire(chi.req)
+
+  store_gen.address <== command.address
+  store_gen.value <== command.data
+  store_gen.width <== command.width
+
+  def incoming_response = chi.rsp.response.bits
+  def response_ordinary = incoming_response.opcode =/= CHIRspOpcode.RespLCrdReturn
+  def dbid_expected = state === RV5StageUncachedState.WriteDBID
+  def completion_expected = state === RV5StageUncachedState.WriteResponse
+  def response_expected = (dbid_expected & (
+    incoming_response.opcode === CHIRspOpcode.DBIDResp
+  )) ||| (completion_expected & (incoming_response.opcode === CHIRspOpcode.Comp))
+  chi.rsp.response.ready <== !response_ordinary ||| response_expected
+  def response_fire = fire(chi.rsp.response) & response_ordinary
+  def dbid_fire = response_fire & dbid_expected
+  def completion_fire = response_fire & completion_expected
+
+  def data_lane = address[3..alignment_bits(p.data_bytes)]
+  def bus_data = zext(write_data, p.data_width) << concat(data_lane, bits(0, 6))
+  def bus_mask = zext(write_mask.into(Bits(8)), p.data_bytes) << concat(data_lane, bits(0, 3))
+  chi.dat.request.valid <== state === RV5StageUncachedState.WriteData
+  chi.dat.request.bits <== rv5stage_chi_write_data(
+    p,
+    node_id,
+    home_id,
+    dbid,
+    address,
+    bus_data,
+    bus_mask
+  )
+  def write_data_fire = fire(chi.dat.request)
+
+  def incoming_data = chi.dat.response.bits
+  def data_ordinary = incoming_data.opcode =/= CHIDatOpcode.DataLCrdReturn
+  def read_expected = state === RV5StageUncachedState.ReadResponse
+  def read_lanes = cast(incoming_data.data, Vec(word_lanes, Bits(64)))
+  def read_lane:
+    if word_lanes == 1 | bits(0, lane_width) | address[3..alignment_bits(p.data_bytes)]
+  load_gen.address <== address
+  load_gen.data <== read_lanes[read_lane]
+  load_gen.width <== memory_width
+  load_gen.unsigned_load <== unsigned_load
+  chi.dat.response.ready <== !data_ordinary ||| read_expected
+  def read_fire = fire(chi.dat.response) & data_ordinary
+
+  core.response.valid <== read_fire ||| completion_fire
+  core.response.bits <== RV5StageDataResp(xlen):
+    data: mux(read_fire, load_gen.value, bits(0, width))
+    tag: tag
+  core.drained <== idle
+  chi.rsp.requester.valid <== Bool(#false)
+  chi.rsp.requester.bits <== literal(CHIRspFlit(p), 0)
+
+  when request_fire:
+    address <== command.address
+    memory_width <== command.width
+    unsigned_load <== command.unsigned
+    tag <== command.tag
+    home_id <== command_home.node_id
+    write_data <== store_gen.data
+    write_mask <== store_gen.mask
+    state <== mux(command_access.is_store(),
+                  RV5StageUncachedState.WriteDBID,
+                  RV5StageUncachedState.ReadResponse)
+  elsewhen dbid_fire:
+    dbid <== incoming_response.dbid_or_group_id
+    state <== RV5StageUncachedState.WriteData
+  elsewhen write_data_fire:
+    state <== RV5StageUncachedState.WriteResponse
+  elsewhen (read_fire ||| completion_fire):
+    state <== RV5StageUncachedState.Idle
+
+  when (core.request.valid & idle & command_supported):
+    assert(rv5stage_chi_address_fits(command.address, p), "rv5stage_uncached_address_fits")
+    assert(command_home.valid, "rv5stage_uncached_address_has_home")
+  when (chi.rsp.response.valid & response_ordinary):
+    assert(response_expected, "rv5stage_uncached_response_expected")
+    assert(incoming_response.src_id === home_id, "rv5stage_uncached_response_home")
+    assert(incoming_response.resp_err === CHIRespErr.OK, "rv5stage_uncached_response_ok")
+  when (chi.dat.response.valid & data_ordinary):
+    assert(read_expected, "rv5stage_uncached_read_data_expected")
+    assert(incoming_data.home_nid_or_pbha_or_mismatched_mecid === home_id,
+           "rv5stage_uncached_read_data_home")
+    assert(incoming_data.resp_err === CHIRespErr.OK, "rv5stage_uncached_read_data_ok")
+
+export:
+  RV5StageUncachedState
+  RV5StageUncached

@@ -1,0 +1,95 @@
+#lang rhdl
+// Defines RV5Stage's CSR, synchronous trap, and privileged-return controls.
+
+import:
+  "decode-support.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+hardware_enum CsrOperation:
+  None
+  Write
+  Set
+  Clear
+
+hardware_enum SystemOperation:
+  None
+  Ecall
+  Ebreak
+  Mret
+  Sret
+  Wfi
+
+bundle SystemControl():
+  csr: CsrOperation
+  immediate: Bool
+  action: SystemOperation
+
+  method is_system_operation(control) :: Bool:
+    (control.csr =/= CsrOperation.None) ||| (
+      control.action =/= SystemOperation.None
+    )
+
+def no_system = partial_pattern(SystemControl()):
+  csr: CsrOperation.None
+  action: SystemOperation.None
+
+fun csr_control(operation :: CsrOperation, immediate :: Boolean):
+  pattern(SystemControl()):
+    csr: operation
+    immediate: Bool(immediate)
+    action: SystemOperation.None
+
+fun system_control(operation :: SystemOperation):
+  partial_pattern(SystemControl()):
+    csr: CsrOperation.None
+    action: operation
+
+def ZicsrSystemCases = combine_case_groups([
+  instruction_cases([CSRRW], csr_control(CsrOperation.Write, #false)),
+  instruction_cases([CSRRS], csr_control(CsrOperation.Set, #false)),
+  instruction_cases([CSRRC], csr_control(CsrOperation.Clear, #false)),
+  instruction_cases([CSRRWI], csr_control(CsrOperation.Write, #true)),
+  instruction_cases([CSRRSI], csr_control(CsrOperation.Set, #true)),
+  instruction_cases([CSRRCI], csr_control(CsrOperation.Clear, #true))
+])
+
+def PrivilegedSystemCases = combine_case_groups([
+  instruction_cases([MRET], system_control(SystemOperation.Mret)),
+  instruction_cases([SRET], system_control(SystemOperation.Sret)),
+  instruction_cases([WFI], system_control(SystemOperation.Wfi)),
+  instruction_cases([SFENCE_VMA], no_system)
+])
+
+fun base_system_cases(instructions):
+  combine_case_groups([
+    instruction_cases([ECALL], system_control(SystemOperation.Ecall)),
+    instruction_cases([EBREAK], system_control(SystemOperation.Ebreak)),
+    instruction_cases(excluding_instructions(instructions, [ECALL, EBREAK]), no_system)
+  ])
+
+def RV32ISystemCases = base_system_cases(rv32.RV32IInstructions)
+def RV64ISystemCases = base_system_cases(RV64IInstructions)
+def RV32RV5StageSystemCases = RV32ISystemCases ++ instruction_cases(
+  RV32MInstructions ++ RV32AInstructions,
+  no_system
+) ++ ZicsrSystemCases ++ PrivilegedSystemCases ++ instruction_cases(ZifenceiInstructions, no_system)
+def RV64RV5StageSystemCases = RV64ISystemCases ++ instruction_cases(
+  RV64MInstructions ++ RV64AInstructions,
+  no_system
+) ++ ZicsrSystemCases ++ PrivilegedSystemCases ++ instruction_cases(ZifenceiInstructions, no_system)
+
+export:
+  CsrOperation
+  SystemOperation
+  SystemControl
+  RV32ISystemCases
+  RV64ISystemCases
+  RV32RV5StageSystemCases
+  RV64RV5StageSystemCases

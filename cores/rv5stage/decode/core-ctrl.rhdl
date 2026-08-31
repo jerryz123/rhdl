@@ -1,0 +1,140 @@
+#lang rhdl
+// Composes RV5Stage's integer, A, M, CSR, and privileged controls into one decoder.
+
+import:
+  "../../alu.rhdl" open
+  "decode-support.rhdl" open
+  "alu-ctrl.rhdl" open
+  "operand-ctrl.rhdl" open
+  "branch-ctrl.rhdl" open
+  "mem-ctrl.rhdl" open
+  "multiply-ctrl.rhdl" open
+  "divide-ctrl.rhdl" open
+  "writeback-ctrl.rhdl" open
+  "system-ctrl.rhdl" open
+  "fence-ctrl.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  "../../../riscv/rhdl/instruction-pattern.rhdl" open
+  lib("rhdl/std/decode.rhdl") open
+
+bundle RV5StageControl():
+  alu: AluControl()
+  operand: OperandControl()
+  branch: BranchControl()
+  memory: MemoryControl()
+  multiply: RV5StageMultiplyControl()
+  divide: RV5StageDivideControl()
+  writeback: WritebackControl()
+  system: SystemControl()
+  fence: FenceControl()
+
+// Ordinary host code adds independently authored control columns to one row
+// per instruction. The selected ISA still elaborates to one decode table.
+fun compose_control_cases(instructions, alu_cases, operand_cases, branch_cases,
+                          memory_cases, multiply_cases, divide_cases, writeback_cases, system_cases, fence_cases):
+  for List (instruction in instructions):
+    block:
+      def input = instruction_pattern(instruction)
+      DecodeCase(
+        input,
+        pattern(RV5StageControl()):
+          alu: component_output(alu_cases, input)
+          operand: component_output(operand_cases, input)
+          branch: component_output(branch_cases, input)
+          memory: component_output(memory_cases, input)
+          multiply: component_output(multiply_cases, input)
+          divide: component_output(divide_cases, input)
+          writeback: component_output(writeback_cases, input)
+          system: component_output(system_cases, input)
+          fence: component_output(fence_cases, input)
+      )
+
+def RV32IControlCases = compose_control_cases(
+  rv32.RV32IInstructions,
+  RV32ICompleteAluCases,
+  RV32IOperandCases,
+  RV32IBranchCases,
+  RV32IMemoryCases,
+  RV32RV5StageMultiplyCases,
+  RV32RV5StageDivideCases,
+  RV32IWritebackCases,
+  RV32ISystemCases,
+  RV32IFenceCases
+)
+def RV64IControlCases = compose_control_cases(
+  RV64IInstructions,
+  RV64ICompleteAluCases,
+  RV64IOperandCases,
+  RV64IBranchCases,
+  RV64IMemoryCases,
+  RV64RV5StageMultiplyCases,
+  RV64RV5StageDivideCases,
+  RV64IWritebackCases,
+  RV64ISystemCases,
+  RV64IFenceCases
+)
+def RV32RV5StageInstructions = rv32.RV32IInstructions ++ RV32MInstructions ++ RV32AInstructions ++ (
+  ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions
+)
+def RV64RV5StageInstructions = RV64IInstructions ++ RV64MInstructions ++ RV64AInstructions ++ (
+  ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions
+)
+def RV32RV5StageControlCases = compose_control_cases(
+  RV32RV5StageInstructions,
+  RV32RV5StageAluCases,
+  RV32RV5StageOperandCases,
+  RV32RV5StageBranchCases,
+  RV32RV5StageMemoryCases,
+  RV32RV5StageMultiplyCases,
+  RV32RV5StageDivideCases,
+  RV32RV5StageWritebackCases,
+  RV32RV5StageSystemCases,
+  RV32RV5StageFenceCases
+)
+def RV64RV5StageControlCases = compose_control_cases(
+  RV64RV5StageInstructions,
+  RV64RV5StageAluCases,
+  RV64RV5StageOperandCases,
+  RV64RV5StageBranchCases,
+  RV64RV5StageMemoryCases,
+  RV64RV5StageMultiplyCases,
+  RV64RV5StageDivideCases,
+  RV64RV5StageWritebackCases,
+  RV64RV5StageSystemCases,
+  RV64RV5StageFenceCases
+)
+def RV32IControlDecode = ValidDecodeGen(RV32IControlCases)
+def RV64IControlDecode = ValidDecodeGen(RV64IControlCases)
+def RV32RV5StageControlDecode = ValidDecodeGen(RV32RV5StageControlCases)
+def RV64RV5StageControlDecode = ValidDecodeGen(RV64RV5StageControlCases)
+
+circuit RV5StageInstructionDecoder(xlen :: XLen):
+  input instruction: Bits(32)
+  output valid: Bool
+  output control: RV5StageControl()
+
+  def decoded :: DecodeResult(RV5StageControl()) = if xlen == XLen.X32 | RV32RV5StageControlDecode(instruction) | RV64RV5StageControlDecode(instruction)
+  valid <== decoded.valid
+  control <== decoded.value
+
+export:
+  RV5StageControl
+  compose_control_cases
+  RV32IControlCases
+  RV64IControlCases
+  RV32IControlDecode
+  RV64IControlDecode
+  RV32RV5StageInstructions
+  RV64RV5StageInstructions
+  RV32RV5StageControlCases
+  RV64RV5StageControlCases
+  RV32RV5StageControlDecode
+  RV64RV5StageControlDecode
+  RV5StageInstructionDecoder

@@ -25,7 +25,7 @@ example_ridx=false
 example_riscv=false
 example_chi=false
 example_cores=false
-example_ricket=false
+example_rv5stage=false
 
 mark_all_host() {
   host_foundation=true
@@ -54,7 +54,7 @@ mark_example_ridx() { examples=true; example_ridx=true; }
 mark_example_riscv() { examples=true; example_riscv=true; }
 mark_example_chi() { examples=true; example_chi=true; }
 mark_example_cores() { examples=true; example_cores=true; }
-mark_example_ricket() { examples=true; example_ricket=true; }
+mark_example_rv5stage() { examples=true; example_rv5stage=true; }
 
 mark_all_examples() {
   mark_example_rhdl
@@ -67,7 +67,7 @@ mark_all_examples() {
   mark_example_riscv
   mark_example_chi
   mark_example_cores
-  mark_example_ricket
+  mark_example_rv5stage
 }
 
 mark_all() {
@@ -148,7 +148,7 @@ emit_jobs() {
   [[ "$example_riscv" == true ]] && append_matrix_entry example_matrix '{"name":"RISC-V","target":"examples-riscv"}'
   [[ "$example_chi" == true ]] && append_matrix_entry example_matrix '{"name":"CHI","target":"examples-chi"}'
   [[ "$example_cores" == true ]] && append_matrix_entry example_matrix '{"name":"processor cores","target":"examples-cores"}'
-  [[ "$example_ricket" == true ]] && append_matrix_entry example_matrix '{"name":"Ricket","target":"examples-ricket"}'
+  [[ "$example_rv5stage" == true ]] && append_matrix_entry example_matrix '{"name":"RV5Stage","target":"examples-rv5stage"}'
 
   echo "host=$host"
   echo "host_matrix={\"include\":[$host_matrix]}"
@@ -183,8 +183,8 @@ classify_path() {
       mark_all_host
       mark_all_examples
       ;;
-    tools/write-ricket-core-diagram.rhm)
-      mark_example_ricket
+    tools/write-rv5stage-core-diagram.rhm)
+      mark_example_rv5stage
       ;;
     tools/write-noc-router-diagram.rhm)
       mark_example_noc
@@ -213,7 +213,7 @@ classify_path() {
       mark_example_riscv
       mark_example_chi
       mark_example_cores
-      mark_example_ricket
+      mark_example_rv5stage
       ;;
     rhdl/backend/*)
       host_backend=true
@@ -270,8 +270,8 @@ classify_path() {
       mark_example_cores
       circt_cores=true
       ;;
-    examples/ricket/*)
-      mark_example_ricket
+    examples/rv5stage/*)
+      mark_example_rv5stage
       ;;
     examples/*)
       # Fail closed for new example groups until they receive an explicit shard.
@@ -293,7 +293,7 @@ classify_path() {
       circt_cores=true
       mark_example_riscv
       mark_example_cores
-      mark_example_ricket
+      mark_example_rv5stage
       ;;
     ridx/*)
       host_models=true
@@ -308,7 +308,7 @@ classify_path() {
       host_cores=true
       circt_cores=true
       mark_example_cores
-      mark_example_ricket
+      mark_example_rv5stage
       ;;
     sims/*)
       simulation=true

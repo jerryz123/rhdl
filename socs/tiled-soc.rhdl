@@ -1,15 +1,15 @@
 #lang rhdl
-// Composes Ricket, service, ACLINT, and memory tiles across a four-row CHI mesh.
+// Composes RV5Stage, service, ACLINT, and memory tiles across a four-row CHI mesh.
 
 import:
   lib("chi/main.rhdl") open
-  lib("cores/ricket/chi.rhdl").RicketCHIIdentity
-  lib("cores/ricket/interrupt.rhdl").RicketInterrupts
+  lib("cores/rv5stage/chi.rhdl").RV5StageCHIIdentity
+  lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
   lib("devices/aclint.rhdl").AclintIdentity
   lib("noc/plan/router-family-physical-plan.rhm").RouterFamilyPhysicalPlan
   "tiled-soc-plan.rhm" as plan
   "tiled-soc-config.rhdl" as config
-  "ricket-tile.rhdl" open
+  "rv5stage-tile.rhdl" open
   "memory-tile.rhdl" open
   "aclint-tile.rhdl" open
   "host-interface.rhdl".SoCHostInterface
@@ -56,10 +56,10 @@ sync_circuit TiledSoC():
   def p = config.tiled_soc_flit
   def site_width = config.tiled_soc_router_configs.req.route_decoder.site_width
   interface host(SoCHostInterface(p), ~role: soc)
-  output faults: Vec(plan.tiled_soc_ricket_count, Bool)
+  output faults: Vec(plan.tiled_soc_rv5stage_count, Bool)
 
-  def rickets = for InstanceArray (_ in 0..plan.tiled_soc_ricket_count):
-    inst ricket(RicketTile(config.tiled_soc_ricket_tile_params))
+  def rv5stages = for InstanceArray (_ in 0..plan.tiled_soc_rv5stage_count):
+    inst rv5stage(RV5StageTile(config.tiled_soc_rv5stage_tile_params))
   def memories = for InstanceArray (_ in 0..plan.tiled_soc_bank_count):
     inst memory(MemoryTile(config.tiled_soc_memory_tile_params))
   def transits = for InstanceArray (_ in 0..plan.tiled_soc_transits.length()):
@@ -67,28 +67,28 @@ sync_circuit TiledSoC():
   inst host_tile(HostTile(config.tiled_soc_host_tile_params))
   inst aclint(AclintTile(config.tiled_soc_aclint_tile_params))
 
-  for (index in 0..plan.tiled_soc_ricket_count):
-    def placement = plan.tiled_soc_rickets[index]
-    def placement_params = config.tiled_soc_ricket_params[index]
-    rickets[index].identity <== RicketTileIdentity(p, site_width):
+  for (index in 0..plan.tiled_soc_rv5stage_count):
+    def placement = plan.tiled_soc_rv5stages[index]
+    def placement_params = config.tiled_soc_rv5stage_params[index]
+    rv5stages[index].identity <== RV5StageTileIdentity(p, site_width):
       site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
       hart_id: bits(index, 64)
-      chi: (RicketCHIIdentity(p):
+      chi: (RV5StageCHIIdentity(p):
               instruction_node_id: bits(placement_params.instruction_node_id, p.node_id_width)
               data_node_id: bits(placement_params.data_node_id, p.node_id_width)
               device_node_id: bits(placement_params.device_node_id, p.node_id_width))
-    rickets[index].interrupts <== RicketInterrupts():
+    rv5stages[index].interrupts <== RV5StageInterrupts():
       supervisor_software: Bool(#false)
       machine_software: aclint.machine_software[index]
       supervisor_timer: Bool(#false)
       machine_timer: aclint.machine_timer[index]
       supervisor_external: Bool(#false)
       machine_external: Bool(#false)
-    rickets[index].time_counter <== aclint.time_counter
-  host.start |> rickets[0].start
-  for (index in 1..plan.tiled_soc_ricket_count):
-    rickets[index].start.valid <== Bool(#false)
-    rickets[index].start.bits <== dont_care(Bits(64))
+    rv5stages[index].time_counter <== aclint.time_counter
+  host.start |> rv5stages[0].start
+  for (index in 1..plan.tiled_soc_rv5stage_count):
+    rv5stages[index].start.valid <== Bool(#false)
+    rv5stages[index].start.bits <== dont_care(Bits(64))
   for (index in 0..plan.tiled_soc_bank_count):
     def placement = plan.tiled_soc_memories[index]
     def home_params = config.tiled_soc_hnf_params[index]
@@ -116,14 +116,14 @@ sync_circuit TiledSoC():
                node_id: bits(config.tiled_soc_aclint_params.node.node_id, p.node_id_width)
                base_address: bits(config.tiled_soc_aclint_params.base_address, p.request_address_width))
   aclint.tick <== Bool(#true)
-  faults <== vec(for List (index in 0..plan.tiled_soc_ricket_count): rickets[index].fault)
+  faults <== vec(for List (index in 0..plan.tiled_soc_rv5stage_count): rv5stages[index].fault)
 
   def physical_plan = plan.tiled_soc_physical_plan
   def tiles = (
-    for List (index in 0..plan.tiled_soc_ricket_count):
-      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_rickets[index].router),
-                         rickets[index].incoming_links,
-                         rickets[index].outgoing_links)
+    for List (index in 0..plan.tiled_soc_rv5stage_count):
+      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_rv5stages[index].router),
+                         rv5stages[index].incoming_links,
+                         rv5stages[index].outgoing_links)
   ) ++ (
     for List (index in 0..plan.tiled_soc_transits.length()):
       TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router),

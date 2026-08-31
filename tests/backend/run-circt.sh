@@ -96,7 +96,7 @@ integration_fixtures=(
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
   aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
-  ricket-core ricket-multiply ricket-dcache
+  rv5stage-core rv5stage-multiply rv5stage-dcache
 )
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:aclint|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:scoreboard|cores:ricket-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:scoreboard|cores:rv5stage-*)
       return 0
       ;;
     *)
@@ -589,7 +589,7 @@ fixture_specs=(
   'rv64i-alu-integrated|rv64i_alu_integrated_tb|examples/cores/decoded-alu.rhdl|design|verilog_reference'
   'chi-ram|chi_ram_tb|examples/chi/ram.rhdl|ram_design|ram_verilog_reference'
   'chi-home|chi_home_tb|examples/chi/home.rhdl|home_design|home_verilog_reference'
-  'ricket||examples/cores/ricket.rhdl|design|verilog_reference'
+  'rv5stage||examples/cores/rv5stage.rhdl|design|verilog_reference'
 )
 
 direct_fixture_specs=(
@@ -620,19 +620,19 @@ direct_fixture_specs=(
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'
   'iterative-divider|iterative_divider_tb'
-  'ricket-register-file|ricket_register_file_tb'
-  'ricket-csr|ricket_csr_tb'
-  'ricket-atomic|ricket_atomic_tb'
-  'ricket-core|ricket_core_tb'
-  'ricket-interrupt|ricket_interrupt_tb'
-  'ricket-interrupt-flow|ricket_interrupt_tb'
-  'ricket-multiply|ricket_multiply_tb'
-  'ricket-divide|ricket_divide_tb'
-  'ricket-core-flow|ricket_core_tb'
-  'ricket-core-rv32|'
-  'ricket-icache|ricket_icache_tb'
-  'ricket-dcache|ricket_dcache_tb'
-  'ricket-dcache-rv32|'
+  'rv5stage-register-file|rv5stage_register_file_tb'
+  'rv5stage-csr|rv5stage_csr_tb'
+  'rv5stage-atomic|rv5stage_atomic_tb'
+  'rv5stage-core|rv5stage_core_tb'
+  'rv5stage-interrupt|rv5stage_interrupt_tb'
+  'rv5stage-interrupt-flow|rv5stage_interrupt_tb'
+  'rv5stage-multiply|rv5stage_multiply_tb'
+  'rv5stage-divide|rv5stage_divide_tb'
+  'rv5stage-core-flow|rv5stage_core_tb'
+  'rv5stage-core-rv32|'
+  'rv5stage-icache|rv5stage_icache_tb'
+  'rv5stage-dcache|rv5stage_dcache_tb'
+  'rv5stage-dcache-rv32|'
 )
 
 fixture_declared() {

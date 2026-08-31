@@ -82,7 +82,7 @@ The metadata may affect presentation only. A backend must ignore it, and a
 diagram extractor must still use verified IR connectivity rather than treating
 metadata as a substitute netlist.
 
-The [Ricket core example](../../examples/ricket/core-diagram.rhdl)
+The [RV5Stage core example](../../examples/rv5stage/core-diagram.rhdl)
 elaborates the RV64 core and generates a focused JSON and DOT view of its
 logical pipeline and flow topology.
 

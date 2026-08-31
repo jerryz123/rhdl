@@ -1,0 +1,236 @@
+#lang rhdl
+// Defines RV5Stage's load, store, LR/SC, and AMO decode controls.
+
+import:
+  "../memory.rhdl" open
+  "decode-support.rhdl" open
+  "../../load-store.rhdl" open
+  "../../../riscv/isa/rv32i.rhm" as rv32
+  "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/m.rhm" open
+  "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zicsr.rhm" open
+  "../../../riscv/isa/zifencei.rhm" open
+  "../../../riscv/isa/privileged.rhm" open
+  lib("rhdl/std/decode.rhdl") open
+
+bundle MemoryControl():
+  access: MemoryOperation
+  atomic: RV5StageAtomicOperation
+  width: MemoryWidth
+  unsigned: Bool
+
+def shared_loads = [LB, LH, LW, LBU, LHU]
+def shared_stores = [SB, SH, SW]
+def shared_memory_instructions = shared_loads ++ shared_stores
+def no_memory = partial_pattern(MemoryControl()):
+  access: MemoryOperation.None
+
+def SharedMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LB]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Byte
+    unsigned: Bool(#false)
+
+  [LBU]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Byte
+    unsigned: Bool(#true)
+
+  [LH]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Half
+    unsigned: Bool(#false)
+
+  [LHU]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Half
+    unsigned: Bool(#true)
+
+  [LW]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Word
+    unsigned: Bool(#false)
+
+  [SB]:
+    access: MemoryOperation.Store
+    width: MemoryWidth.Byte
+
+  [SH]:
+    access: MemoryOperation.Store
+    width: MemoryWidth.Half
+
+  [SW]:
+    access: MemoryOperation.Store
+    width: MemoryWidth.Word
+
+def RV64IOnlyMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LWU]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Word
+    unsigned: Bool(#true)
+
+  [LD]:
+    access: MemoryOperation.Load
+    width: MemoryWidth.Double
+    unsigned: Bool(#false)
+
+  [SD]:
+    access: MemoryOperation.Store
+    width: MemoryWidth.Double
+
+def RV32IMemoryCases = SharedMemoryCases ++ instruction_cases(
+  excluding_instructions(rv32.RV32IInstructions, shared_memory_instructions),
+  no_memory
+)
+def rv64_memory_instructions = shared_memory_instructions ++ [LWU, LD, SD]
+def RV64IMemoryCases = SharedMemoryCases ++ RV64IOnlyMemoryCases ++ instruction_cases(
+  excluding_instructions(RV64IInstructions, rv64_memory_instructions),
+  no_memory
+)
+def RV32AMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LR_W]:
+    access: MemoryOperation.LoadReserved
+    width: MemoryWidth.Word
+    unsigned: Bool(#false)
+
+  [SC_W]:
+    access: MemoryOperation.StoreConditional
+    width: MemoryWidth.Word
+
+  [AMOSWAP_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Swap
+    width: MemoryWidth.Word
+
+  [AMOADD_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Add
+    width: MemoryWidth.Word
+
+  [AMOXOR_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Xor
+    width: MemoryWidth.Word
+
+  [AMOAND_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.And
+    width: MemoryWidth.Word
+
+  [AMOOR_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Or
+    width: MemoryWidth.Word
+
+  [AMOMIN_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Min
+    width: MemoryWidth.Word
+
+  [AMOMAX_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Max
+    width: MemoryWidth.Word
+
+  [AMOMINU_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.MinUnsigned
+    width: MemoryWidth.Word
+
+  [AMOMAXU_W]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.MaxUnsigned
+    width: MemoryWidth.Word
+
+def RV64AOnlyMemoryCases = decode_groups(
+  MemoryControl(),
+  ~input: instruction_pattern
+):
+  [LR_D]:
+    access: MemoryOperation.LoadReserved
+    width: MemoryWidth.Double
+    unsigned: Bool(#false)
+
+  [SC_D]:
+    access: MemoryOperation.StoreConditional
+    width: MemoryWidth.Double
+
+  [AMOSWAP_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Swap
+    width: MemoryWidth.Double
+
+  [AMOADD_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Add
+    width: MemoryWidth.Double
+
+  [AMOXOR_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Xor
+    width: MemoryWidth.Double
+
+  [AMOAND_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.And
+    width: MemoryWidth.Double
+
+  [AMOOR_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Or
+    width: MemoryWidth.Double
+
+  [AMOMIN_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Min
+    width: MemoryWidth.Double
+
+  [AMOMAX_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.Max
+    width: MemoryWidth.Double
+
+  [AMOMINU_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.MinUnsigned
+    width: MemoryWidth.Double
+
+  [AMOMAXU_D]:
+    access: MemoryOperation.Atomic
+    atomic: RV5StageAtomicOperation.MaxUnsigned
+    width: MemoryWidth.Double
+
+def RV64AMemoryCases = RV32AMemoryCases ++ RV64AOnlyMemoryCases
+def RV32RV5StageMemoryCases = RV32IMemoryCases ++ instruction_cases(
+  RV32MInstructions ++ ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions,
+  no_memory
+) ++ RV32AMemoryCases
+def RV64RV5StageMemoryCases = RV64IMemoryCases ++ instruction_cases(
+  RV64MInstructions ++ ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions,
+  no_memory
+) ++ RV64AMemoryCases
+def RV32IMemoryDecode = ValidDecodeGen(RV32IMemoryCases)
+def RV64IMemoryDecode = ValidDecodeGen(RV64IMemoryCases)
+
+export:
+  MemoryOperation
+  RV5StageAtomicOperation
+  MemoryControl
+  RV32AMemoryCases
+  RV64AMemoryCases
+  RV32IMemoryCases
+  RV64IMemoryCases
+  RV32RV5StageMemoryCases
+  RV64RV5StageMemoryCases
+  RV32IMemoryDecode
+  RV64IMemoryDecode

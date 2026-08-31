@@ -25,12 +25,12 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
 | [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
 | [`tests/divider-test.rhm`](tests/divider-test.rhm) | Direct structural tests for the iterative divider |
-| [`ricket/`](ricket/README.md) | Ricket's RV32I/RV64I decode, five-stage pipeline, CSR/privilege state, caches, and tests |
+| [`rv5stage/`](rv5stage/README.md) | RV5Stage's RV32I/RV64I decode, five-stage pipeline, CSR/privilege state, caches, and tests |
 
 The dependency direction is one way:
 
 ```text
-cores/ricket/ --> cores/{alu,branch-resolver,load-store,multiplier,divider}.rhdl
+cores/rv5stage/ --> cores/{alu,branch-resolver,load-store,multiplier,divider}.rhdl
        |-------> riscv/isa + riscv/rhdl
        `-------> rhdl/std
 
@@ -70,7 +70,7 @@ returns an all-one quotient and the original dividend; fixed-width signed
 overflow returns the wrapped minimum quotient and zero remainder.
 
 The component does not select quotient versus remainder or define
-architecture-specific word operations. Ricket owns those projections in its
+architecture-specific word operations. RV5Stage owns those projections in its
 adapter and decode logic.
 
 ## Integer ALU
@@ -122,7 +122,7 @@ Run the reusable components' direct host tests from the repository root:
 tools/run-racket-tests.sh cores/tests/*-test.rhm
 ```
 
-Run [`make ricket-host-test`](../Makefile) for all reusable components together
-with Ricket's decode and elaboration tests. `make ricket-test` additionally
+Run [`make rv5stage-host-test`](../Makefile) for all reusable components together
+with RV5Stage's decode and elaboration tests. `make rv5stage-test` additionally
 checks load/store lane behavior, iterative multiplier transactions, and CSR
 privilege/trap transitions after CIRCT lowering with Verilator.
