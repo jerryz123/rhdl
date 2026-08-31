@@ -77,7 +77,10 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   outgoing_data.bits <== literal(CHIDatFlit(p), 0)
 
   incoming_snoops |> snoop.snoops
-  snoop.cache_ready <== refill.command.ready & !lookup.egress.valid & !cache_flush
+  // A queued refill does not make its line resident. Let snoops inspect the
+  // current cache while that transaction waits, and hold installation until
+  // the snoop completes so the shared SRAM ports remain single-owner.
+  snoop.cache_ready <== !lookup.egress.valid & !cache_flush
   def snoop_lookup_start = snoop.lookup.valid
   def snoop_address = snoop.address
   def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
@@ -160,6 +163,7 @@ sync_circuit RicketL1ICache(xlen :: XLen,
   def refill_results = RicketLineRefillResult(Bits(width), width)
   def refill_responses = (
     refill.completion
+      |> gate_flow(!snoop_pending)
       |> filter_flow(result => refill_live)
       |> map_flow(result => RicketInstructionResp()):
         instruction: completion_instruction

@@ -259,6 +259,10 @@ external ports intentionally remain separate RN-F Request Nodes. Home Node,
 fabric, and SoC integration remain outside the core. Ricket uses CHI's minimum
 128-bit DAT width; each fixed 64-byte cache-line refill therefore completes
 from four ordinary, unelided DAT packets before the cache returns `CompAck`.
+Both L1s continue accepting snoops while a refill or writeback transaction is
+queued. A pending snoop takes priority over refill installation at the shared
+SRAM ports, which lets a serialized Home complete its snoop before accepting
+the cache's waiting request without creating a protocol dependency cycle.
 
 ## Verification
 

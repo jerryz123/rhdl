@@ -163,7 +163,9 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   post_eviction_refills |> refill_commands.ingress[1]
   refill_commands.egress |> refill.command
 
-  refill.completion.ready <== Bool(#true)
+  // A pending snoop owns the cache SRAM ports. The refill engine retains its
+  // irrevocable completion until that lookup and any state update finish.
+  refill.completion.ready <== !snoop.pending
   def install_refill = fire(refill.completion)
   when install_refill:
     assert(!refill.completion.bits.pass_dirty, "l1d_refill_not_dirty")
@@ -229,7 +231,10 @@ sync_circuit RicketL1DCache(xlen :: XLen,
   // write buffer drains; the store completion enters the response register at
   // lookup and reaches the pipeline in WB.
   incoming_snoops |> snoop.snoops
-  snoop.cache_ready <== refill.command.ready & writeback.command.ready & !lookup.egress.valid
+  // Active backing transactions have already captured their cache context and
+  // do not occupy the SRAM ports. Serving snoops here prevents a Home waiting
+  // on this RN-F from deadlocking behind this RN-F's queued request.
+  snoop.cache_ready <== !lookup.egress.valid
   def snoop_lookup_start = snoop.lookup.valid
   def snoop_address = snoop.address
   def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
