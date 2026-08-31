@@ -25,6 +25,20 @@ Run the focused package checks from the repository root:
 make riscv-test
 ```
 
+## Architectural tests
+
+[`riscv-isa-tests/`](riscv-isa-tests/) pins the upstream
+[`riscv-tests`](https://github.com/riscv-software-src/riscv-tests) repository.
+Initialize it and its test-environment submodule after cloning RHDL with:
+
+```sh
+git submodule update --init --recursive riscv/riscv-isa-tests
+```
+
+The submodule supplies architectural test sources and their standard target
+environments. Simulator-specific selection, building, and execution belong
+under `sims/`; the pure instruction model does not import this test repository.
+
 ## Host model
 
 [`model/fields.rhm`](model/fields.rhm) defines named instruction `BitField`
