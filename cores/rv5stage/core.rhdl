@@ -328,45 +328,42 @@ sync_circuit RV5StageCore(xlen :: XLen):
   )
   def data_page_fault = execute_is_memory & data_access.request_fault
   def data_access_fault = execute_is_memory & data_access.request_access_fault
-  def execute_nonredirect_fault = execute_request_fault ||| data_page_fault ||| data_access_fault
   def redirect_fault = redirect_requested & !redirect_aligned
-  def execute_fault = execute_nonredirect_fault ||| redirect_fault
-  def execute_exception_cause = mux(
-    id_ex.bits.instruction_page_fault,
-    exception_cause_bits(ExceptionCause.InstructionPageFault, width),
-    mux(
-      id_ex.bits.illegal,
-      exception_cause_bits(ExceptionCause.IllegalInstruction, width),
-      mux(
-        redirect_fault,
-        exception_cause_bits(ExceptionCause.InstructionAddressMisaligned, width),
-        mux(
-          data_page_fault,
-          mux(execute_memory_operation.needs_unique(),
-              exception_cause_bits(ExceptionCause.StorePageFault, width),
-              exception_cause_bits(ExceptionCause.LoadPageFault, width)),
-          mux(
-            data_access_fault,
-            mux(execute_memory_operation.needs_unique(),
-                exception_cause_bits(ExceptionCause.StoreAccessFault, width),
-                exception_cause_bits(ExceptionCause.LoadAccessFault, width)),
-            mux(execute_memory_operation.needs_unique(),
-                exception_cause_bits(ExceptionCause.StoreAddressMisaligned, width),
-                exception_cause_bits(ExceptionCause.LoadAddressMisaligned, width))
-          )
-        )
-      )
-    )
-  )
-  def execute_exception_value = mux(
-    id_ex.bits.instruction_page_fault,
-    id_ex.bits.pc,
-    mux(
-      id_ex.bits.illegal,
-      instruction_value(id_ex.bits.instruction),
-      mux(redirect_fault, computed_redirect_target, alu.result)
-    )
-  )
+  fun exception(cause, value):
+    RV5StageException(xlen):
+      valid: Bool(#true)
+      cause: exception_cause_bits(cause, width)
+      value: value
+  fun memory_exception(store_cause, load_cause):
+    RV5StageException(xlen):
+      valid: Bool(#true)
+      cause: mux(execute_memory_operation.needs_unique(),
+                 exception_cause_bits(store_cause, width),
+                 exception_cause_bits(load_cause, width))
+      value: alu.result
+  wire execute_exception: RV5StageException(xlen)
+  when (id_ex.bits.instruction_page_fault):
+    execute_exception <== exception(ExceptionCause.InstructionPageFault, id_ex.bits.pc)
+  elsewhen (id_ex.bits.illegal):
+    execute_exception <== exception(ExceptionCause.IllegalInstruction,
+                                    instruction_value(id_ex.bits.instruction))
+  elsewhen redirect_fault:
+    execute_exception <== exception(ExceptionCause.InstructionAddressMisaligned,
+                                    computed_redirect_target)
+  elsewhen data_page_fault:
+    execute_exception <== memory_exception(ExceptionCause.StorePageFault,
+                                           ExceptionCause.LoadPageFault)
+  elsewhen data_access_fault:
+    execute_exception <== memory_exception(ExceptionCause.StoreAccessFault,
+                                           ExceptionCause.LoadAccessFault)
+  elsewhen (execute_is_memory & !memory_aligned):
+    execute_exception <== memory_exception(ExceptionCause.StoreAddressMisaligned,
+                                           ExceptionCause.LoadAddressMisaligned)
+  otherwise:
+    execute_exception <== RV5StageException(xlen):
+      valid: Bool(#false)
+      cause: dont_care(Bits(width))
+      value: dont_care(Bits(width))
   def csr_source = mux(
     id_ex.bits.system.immediate,
     zext(id_ex.bits.instruction[15..20], width),
@@ -437,7 +434,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
     resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.pc + bits(4, width))
     instruction: id_ex.bits.instruction
     writeback_source: id_ex.bits.writeback_source
-    writeback_enable: id_ex.bits.writeback_enable & !execute_fault
+    writeback_enable: id_ex.bits.writeback_enable & !execute_exception.valid
     rd: id_ex.bits.rd
     result: execute_result
     multiply_issue: execute_multiply_issue
@@ -446,12 +443,12 @@ sync_circuit RV5StageCore(xlen :: XLen):
     fence: id_ex.bits.fence
     csr_address: id_ex.bits.instruction[20..32]
     csr_source: csr_source
-    exception_valid: execute_fault
-    exception_cause: execute_exception_cause
-    exception_value: execute_exception_value
+    exception_valid: execute_exception.valid
+    exception_cause: execute_exception.cause
+    exception_value: execute_exception.value
 
-  execute_exception_event <== execute_transfer & execute_fault
-  execute_redirect_link.left.valid <== execute_transfer & !execute_fault & redirect_requested
+  execute_exception_event <== execute_transfer & execute_exception.valid
+  execute_redirect_link.left.valid <== execute_transfer & !execute_exception.valid & redirect_requested
   execute_redirect_link.left.bits <== computed_redirect_target
 
   // Memory advances every instruction into WB; exception payloads have their
