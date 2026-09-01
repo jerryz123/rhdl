@@ -1,5 +1,5 @@
 #lang rhdl
-// Defines power-of-two, alignment, byte-mask, and masked-merge utilities for Bits.
+// Defines bit layout, alignment, byte-mask, and masked-merge utilities for Bits.
 
 import:
   rhombus/meta open
@@ -12,6 +12,42 @@ annot.macro 'Pow2Int':
 
 fun unsigned_value_count(width :: Nat):
   1 << width
+
+fun normalized_pack_field(field :: List):
+  unless field.length() == 2 && field[0] is_a Nat
+  | error(~who: #'pack_fields,
+          "fields must be [offset, packable hardware value] pairs")
+  def value :: Hardware.packable = field[1]
+  def packed = as_bits(value)
+  [field[0], packed, hardware_value_type(packed).bit_width()]
+
+// Packs host-positioned hardware values into one Bits value, filling every
+// unspecified bit with zero. Layout errors remain host elaboration errors.
+fun pack_fields(width :: PosInt, fields :: List) :~ Bits(width):
+  def ordered = fields.map(normalized_pack_field).sort(
+    fun (left, right): left[0] < right[0]
+  )
+  def mutable next_offset = 0
+  def mutable fragments = []
+  for (field in ordered):
+    def offset = field[0]
+    def value = field[1]
+    def field_width = field[2]
+    unless offset >= next_offset
+    | error(~who: #'pack_fields, "fields must not overlap")
+    unless (offset + field_width) <= width
+    | error(~who: #'pack_fields, "field must fit the result width")
+    if offset > next_offset
+    | fragments := [bits(0, offset - next_offset)] ++ fragments
+    | #void
+    fragments := [value] ++ fragments
+    next_offset := offset + field_width
+  if next_offset < width
+  | fragments := [bits(0, width - next_offset)] ++ fragments
+  | #void
+  if fragments.length() == 1
+  | fragments[0]
+  | concat(fragments)
 
 fun unchecked_alignment_bits(alignment :: PosInt):
   fun loop(value :: PosInt, bits :: Nat):
@@ -85,6 +121,7 @@ export:
   Pow2Int
   power_of_two
   unsigned_value_count
+  pack_fields
   alignment_bits
   is_aligned
   align_down

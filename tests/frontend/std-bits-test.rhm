@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks generic Bits alignment structure, widths, and host constraints.
+// Checks generic Bits layout and alignment structure, widths, and host constraints.
 
 import:
   "../../rhdl/core/main.rhm" open
@@ -26,6 +26,8 @@ def transfer_module = transfer_design.modules[0]
 def registered_transfer_design = embedded.run_elaboration(
   fun (): fixture.RegisteredTransferByteMaskFixture()
 )
+def pack_design = embedded.run_elaboration(fun (): fixture.PackFieldsFixture())
+def pack_module = pack_design.modules[0]
 
 check:
   bits_std.power_of_two(-2) ~is #false
@@ -68,6 +70,14 @@ check:
   ).length() ~is 3
   verify_design(transfer_design) ~is #void
   verify_design(registered_transfer_design) ~is #void
+  pack_module.outputs.map(fun (port): port.type) ~is [Bits(8), Bits(2), Bits(8)]
+  pack_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.concat"
+  ).length() ~is 1
+  pack_module.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.or"
+  ).length() ~is 0
+  verify_design(pack_design) ~is #void
   bits_std.alignment_bits(0) ~throws "Pow2Int"
   bits_std.alignment_bits(3) ~throws "Pow2Int"
   embedded.run_elaboration(
@@ -85,3 +95,9 @@ check:
   embedded.run_elaboration(
     fun (): fixture.TransferBeatTooWideFixture()
   ) ~throws "alignment must fit the Bits width"
+  embedded.run_elaboration(
+    fun (): fixture.OverlappingPackFieldsFixture()
+  ) ~throws "fields must not overlap"
+  embedded.run_elaboration(
+    fun (): fixture.OutOfRangePackFieldsFixture()
+  ) ~throws "field must fit the result width"
