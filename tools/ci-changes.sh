@@ -162,11 +162,20 @@ emit_jobs() {
 classify_path() {
   local path="$1"
   case "$path" in
+    tests/emacs/*|tools/emacs/*)
+      ;;
+    *.rhm|*.rhdl)
+      # Every maintained Rhombus source participates in annotation hygiene.
+      host_hygiene=true
+      ;;
+  esac
+  case "$path" in
     *.md|LICENSE|LICENSE.*|AGENTS.md|.gitignore|.gitattributes)
       # Documentation and repository metadata cannot affect executable behavior.
       ;;
     tests/emacs/*|tools/emacs/*|vlsi/*)
-      # These optional integrations are intentionally outside automated CI.
+      # Optional integrations have no functional CI; Rhombus files still run
+      # repository-wide source hygiene through the classification above.
       ;;
     .github/workflows/ci.yml|tools/ci-changes.sh|tools/check-ci-changes.sh)
       mark_all
@@ -189,13 +198,14 @@ classify_path() {
     tools/write-noc-router-diagram.rhm)
       mark_example_noc
       ;;
-    tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
+    .githooks/pre-commit|tools/check-parameter-annotations.rkt|tools/parameter-annotation-scope.txt|tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
       host_hygiene=true
       ;;
     rhdl/core/*|rhdl/analysis/*|rhdl/frontend/*|rhdl/base/*|rhdl/language.rhm|rhdl/main.rkt)
       mark_all
       ;;
     rhdl/std/*)
+      host_hygiene=true
       host_foundation=true
       host_backend=true
       host_protocols=true

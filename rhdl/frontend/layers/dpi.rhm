@@ -3,6 +3,7 @@
 
 import:
   rhombus/meta open
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/clocking.rhm".ambient_dpi_call
@@ -15,15 +16,12 @@ export:
   dpi_import
   dpi_reg
 
-class DpiDefinition(name,
-                    input_names,
-                    input_types,
-                    results = []):
+class DpiDefinition(name :: AsciiIdentifier,
+                    input_names :: List.of(AsciiIdentifier),
+                    input_types :: List.of(DataType),
+                    results :: List.of(DpiResult) = []):
   method has_result():
     results.length() != 0
-
-fun dpi_procedure(value):
-  value is_a DpiDefinition && !value.has_result()
 
 fun materialize_import(definition :: DpiDefinition):
   kernel.dpi_import_results(definition.name,
@@ -31,13 +29,13 @@ fun materialize_import(definition :: DpiDefinition):
                             definition.input_types,
                             definition.results)
 
-fun resolved_enable(enable):
+fun resolved_enable(enable :: False || HardwareEntity):
   if enable | enable | kernel.literal(Bits(1), 1)
 
 fun call_dpi_procedure(procedure :: DpiDefinition,
-                       inputs,
-                       clock = #false,
-                       enable = #false):
+                       inputs :: List.of(HardwareEntity),
+                       clock :: False || HardwareEntity = #false,
+                       enable :: False || HardwareEntity = #false):
   when clock
   | reject_explicit_sync_control()
   unless !procedure.has_result()
@@ -48,11 +46,11 @@ fun call_dpi_procedure(procedure :: DpiDefinition,
   | kernel.dpi_call(imported, inputs, clock, enabled)
   | ambient_dpi_call(imported, inputs, enabled)
 
-fun make_dpi_register(name,
+fun make_dpi_register(name :: AsciiIdentifier,
                       function :: DpiDefinition,
-                      inputs,
-                      clock = #false,
-                      enable = #false) :~ HardwareFields:
+                      inputs :: List.of(HardwareEntity),
+                      clock :: False || HardwareEntity = #false,
+                      enable :: False || HardwareEntity = #false) :~ HardwareFields:
   when clock
   | reject_explicit_sync_control()
   unless function.has_result()
@@ -66,11 +64,11 @@ fun make_dpi_register(name,
   | kernel.dpi_register(name, imported, inputs, clock, enabled)
   | ambient_dpi_register(name, imported, inputs, enabled)
 
-fun make_dpi_registers(result_names,
+fun make_dpi_registers(result_names :: NonemptyList.of(AsciiIdentifier),
                        function :: DpiDefinition,
-                       inputs,
-                       clock = #false,
-                       enable = #false):
+                       inputs :: List.of(HardwareEntity),
+                       clock :: False || HardwareEntity = #false,
+                       enable :: False || HardwareEntity = #false):
   when clock
   | reject_explicit_sync_control()
   unless function.results.length() > 1
@@ -85,26 +83,27 @@ fun make_dpi_registers(result_names,
   | kernel.dpi_register_results(result_names, imported, inputs, clock, enabled)
   | ambient_dpi_register_results(result_names, imported, inputs, enabled)
 
-fun find_dpi_register_result(result_values, name) :~ HardwareFields:
+fun find_dpi_register_result(result_values :: List.of(Value),
+                             name :: AsciiIdentifier) :~ HardwareFields:
   result_values.find(fun (result_value): result_value.name == name)
 
-fun declare_dpi_register(name,
-                         function,
-                         ~clock: clock = #false,
-                         ~enable: enable = #false,
-                         & inputs) :~ HardwareFields:
+fun declare_dpi_register(name :: AsciiIdentifier,
+                         function :: DpiDefinition,
+                         ~clock: clock :: False || HardwareEntity = #false,
+                         ~enable: enable :: False || HardwareEntity = #false,
+                         & inputs :: List.of(HardwareEntity)) :~ HardwareFields:
   make_dpi_register(name, function, inputs, clock, enable)
 
-fun declare_dpi_registers(result_names,
-                          function,
-                          ~clock: clock = #false,
-                          ~enable: enable = #false,
-                          & inputs):
+fun declare_dpi_registers(result_names :: NonemptyList.of(AsciiIdentifier),
+                          function :: DpiDefinition,
+                          ~clock: clock :: False || HardwareEntity = #false,
+                          ~enable: enable :: False || HardwareEntity = #false,
+                          & inputs :: List.of(HardwareEntity)):
   make_dpi_registers(result_names, function, inputs, clock, enable)
 
 annot.macro 'DpiProcedureFields':
   annot_meta.pack_predicate(
-    'dpi_procedure',
+    'fun (value): value is_a DpiDefinition && !value.has_result()',
     '(($(statinfo_meta.dot_provider_key), dpi_procedure_dot))'
   )
 

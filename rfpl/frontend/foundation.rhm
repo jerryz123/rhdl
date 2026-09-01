@@ -39,32 +39,37 @@ class Coordinate(x :: Length, y :: Length)
 interface PhysicalView:
   method validate()
 
-class HardMacro(module_def, outline, location = Location()):
+class HardMacro(module_def :: Module,
+                outline :: RectOutline,
+                location :: Location = Location()):
   implements PhysicalView
 
   override method validate():
     validate_physical_view(this)
 
-class CompositeFloorplan(module_def,
-                         outline,
-                         placements,
-                         location = Location()):
+class FloorplanPlacement(parent_module :: Module,
+                         child :: PhysicalView,
+                         instance :: Operation,
+                         coordinate :: Coordinate,
+                         location :: Location = Location())
+
+class CompositeFloorplan(module_def :: Module,
+                         outline :: RectOutline,
+                         placements :: List.of(FloorplanPlacement),
+                         location :: Location = Location()):
   implements PhysicalView
 
   override method validate():
     validate_physical_view(this)
 
-class FloorplanPlacement(parent_module,
-                         child,
-                         instance,
-                         coordinate,
-                         location = Location())
-
-class FloorplanDesign(logical, top, views, placements):
+class FloorplanDesign(logical :: DesignElaboration,
+                      top :: PhysicalView,
+                      views :: List.of(PhysicalView),
+                      placements :: List.of(FloorplanPlacement)):
   property design: logical.design
   property top_module: top.module_def
 
-fun rfpl_fail(message, location = Location()):
+fun rfpl_fail(message :: String, location :: Location = Location()):
   error(~who: #'rfpl, location.describe() ++ ": " ++ message)
 
 fun nm(magnitude :: Nat):
@@ -73,22 +78,26 @@ fun nm(magnitude :: Nat):
 fun um(magnitude :: Nat):
   Length(magnitude * 1000000)
 
-fun physical_view(value):
+fun physical_view(value :~ PhysicalView):
   value is_a PhysicalView
 
-fun require_module(module_def :: Module, location = Location()):
+fun require_module(module_def :: Module, location :: Location = Location()):
   unless module_def.finished
   | rfpl_fail("physical views require a finished RHDL module", location)
   module_def
 
-fun require_outline(width :: Length, height :: Length, location = Location()):
+fun require_outline(width :: Length,
+                    height :: Length,
+                    location :: Location = Location()):
   unless width.picometers > 0
   | rfpl_fail("physical width must be positive", location)
   unless height.picometers > 0
   | rfpl_fail("physical height must be positive", location)
   RectOutline(width, height)
 
-fun child_instance(module_def :: Module, name :: String, location = Location()):
+fun child_instance(module_def :: Module,
+                   name :: String,
+                   location :: Location = Location()):
   require_module(module_def, location)
   def operation = module_def.find_instance(name)
   unless operation
@@ -99,7 +108,8 @@ fun child_instance(module_def :: Module, name :: String, location = Location()):
     )
   operation
 
-fun instance_target(instance :: Operation, location = Location()):
+fun instance_target(instance :: Operation,
+                    location :: Location = Location()):
   unless instance.opcode == "rtl.instance"
   | rfpl_fail("instance_target requires an RHDL instance operation", location)
   def target = instance.attribute("module", #false)
@@ -107,14 +117,17 @@ fun instance_target(instance :: Operation, location = Location()):
   | rfpl_fail("instance operation has no RHDL target module", location)
   target
 
-fun build_hard_macro(module_def, width, height, location = Location()):
+fun build_hard_macro(module_def :: Module,
+                     width :: Length,
+                     height :: Length,
+                     location :: Location = Location()):
   require_module(module_def, location)
   HardMacro(module_def, require_outline(width, height, location), location)
 
 fun build_placement(instance :: Operation,
-                    child,
+                    child :~ PhysicalView,
                     coordinate :: Coordinate,
-                    location = Location()):
+                    location :: Location = Location()):
   unless instance.opcode == "rtl.instance"
   | rfpl_fail("place requires an RHDL instance operation", location)
   unless physical_view(child)
@@ -131,7 +144,8 @@ fun build_placement(instance :: Operation,
     )
   FloorplanPlacement(instance.module_def, child, instance, coordinate, location)
 
-fun verify_containment(parent, placement):
+fun verify_containment(parent :: CompositeFloorplan,
+                       placement :: FloorplanPlacement):
   def coordinate = placement.coordinate
   def child = placement.child
   def right_edge = coordinate.x.picometers + child.outline.width.picometers
@@ -147,11 +161,11 @@ fun verify_containment(parent, placement):
       placement.location
     )
 
-fun build_composite_floorplan(module_def,
-                              width,
-                              height,
+fun build_composite_floorplan(module_def :: Module,
+                              width :: Length,
+                              height :: Length,
                               placements :: List.of(FloorplanPlacement),
-                              location = Location()):
+                              location :: Location = Location()):
   require_module(module_def, location)
   for (placement in placements):
     unless placement.parent_module === module_def
@@ -205,7 +219,9 @@ fun validate_physical_view(view :: PhysicalView):
     )
   view
 
-fun annotate(logical :: DesignElaboration, top, location = Location()):
+fun annotate(logical :: DesignElaboration,
+             top :~ PhysicalView,
+             location :: Location = Location()):
   unless physical_view(top)
   | rfpl_fail("annotate requires a hard-macro or composite-floorplan top view",
               location)
@@ -218,7 +234,7 @@ fun annotate(logical :: DesignElaboration, top, location = Location()):
     )
   def mutable views = []
   def mutable placements = []
-  fun visit(view):
+  fun visit(view :: PhysicalView):
     view.validate()
     unless view.module_def.design === logical.design
     | rfpl_fail(

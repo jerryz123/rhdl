@@ -4,6 +4,7 @@
 import:
   rhombus.bits.(<<) as <<
   rhombus/meta open
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
@@ -19,7 +20,7 @@ export:
   one_hot_type
   one_hot_width
 
-fun one_hot_encoding(index):
+fun one_hot_encoding(index :: Nat):
   1 << index
 
 class _OneHotType(width :: PosInt):
@@ -30,7 +31,7 @@ class _OneHotType(width :: PosInt):
   override method describe():
     "onehot<" ++ to_string(width) ++ ">"
 
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     one_hot_type(other) && width == other.width
 
   override method bit_width():
@@ -45,7 +46,7 @@ class _OneHotType(width :: PosInt):
             "literal index must satisfy 0 <= index < width")
     mux_support.mux_lookup_literal(this, one_hot_encoding(index))
 
-  override method normalize_mux_lookup_key(key):
+  override method normalize_mux_lookup_key(key :: mux_support.MuxLookupKey || Nat):
     unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
     | error(~who: #'mux_lookup,
             "one-hot mux lookup keys must belong to the selector's OneHot type")
@@ -57,19 +58,19 @@ class _OneHotType(width :: PosInt):
 fun build_one_hot_type(width :: PosInt):
   _OneHotType(width)
 
-fun one_hot_type(type):
+fun one_hot_type(type :: HardwareType):
   type is_a _OneHotType
 
-fun one_hot_width(type):
+fun one_hot_width(type :: HardwareType):
   unless one_hot_type(type)
   | error(~who: #'one_hot_width, "expected a OneHot type")
   type.width
 
-fun hardware_has_one_hot_type(value):
-  kernel.hardware_entity(value) && one_hot_type(hardware_value_type(value))
+fun hardware_has_one_hot_type(value :: HardwareEntity):
+  one_hot_type(hardware_value_type(value))
 
 meta:
-  fun one_hot_mux_result(result, choices):
+  fun one_hot_mux_result(result :: Syntax, choices :: Syntax):
     match choices.group
     | '[$(first :: expr_meta.Parsed), $rest, ...]':
         statinfo_meta.wrap(result, statinfo_meta.gather(first))
@@ -107,16 +108,18 @@ dot.macro 'one_hot_value_dot $left $dot $right':
 
 annot.macro 'OneHotValue':
   annot_meta.pack_predicate(
-    'hardware_has_one_hot_type',
+    'fun (value): value is_a HardwareEntity && hardware_has_one_hot_type(value)',
     '(($(statinfo_meta.dot_provider_key), one_hot_value_dot))'
   )
 
 annot.macro 'OneHotTypeDescriptor':
-  annot_meta.pack_predicate('one_hot_type')
+  annot_meta.pack_predicate(
+    'fun (value): value is_a HardwareType && one_hot_type(value)'
+  )
 
 annot.macro 'OneHot($width)':
   annot_meta.pack_predicate(
-    'fun (value): kernel.hardware_entity(value) && type_equal(hardware_value_type(value), build_one_hot_type($width))',
+    'fun (value): value is_a HardwareEntity && type_equal(hardware_value_type(value), build_one_hot_type($width))',
     '(($(statinfo_meta.dot_provider_key), one_hot_value_dot))'
   )
 
@@ -128,7 +131,9 @@ expr.macro 'OneHot($(width :: expr_meta.Parsed))':
 
 // Converts every encoding of Bits(n) into one of the 2^n lanes, so the result
 // preserves the exactly-one invariant without an out-of-range case.
-fun build_one_hot(index, name = #false, location = Location()) :~ HardwareFields:
+fun build_one_hot(index :: HardwareEntity,
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()) :~ HardwareFields:
   def index_value = kernel.read(index, location)
   unless bits_type(index_value.type)
   | error(~who: #'one_hot,

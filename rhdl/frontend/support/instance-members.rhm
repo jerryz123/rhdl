@@ -19,22 +19,26 @@ def mutable member_resolvers = []
 
 // Lets a layer contribute virtual members, such as reconstructed interface
 // endpoints, without making the generic hierarchy layer import that layer.
-fun register_member_resolver(resolver):
+fun register_member_resolver(resolver :: Function.of_arity(2)):
   member_resolvers := member_resolvers ++ [resolver]
 
-fun resolved_member(value, name):
+fun resolved_member(value :: HardwareEntity || Array, name :: String):
   def mutable resolved = #false
   for (resolver in member_resolvers):
     unless resolved
     | resolved := resolver(value, name)
   resolved
 
-fun instance_member(instance :: Instance, name):
-  def input_binding = instance.input_bindings.find(fun (candidate): candidate.name == name)
+fun instance_member(instance :: Instance, name :: String):
+  def input_binding = instance.input_bindings.find(
+    fun (candidate): candidate.name == name
+  )
   if input_binding
   | input_binding.place
   | block:
-      def output_binding = instance.output_bindings.find(fun (candidate): candidate.name == name)
+      def output_binding = instance.output_bindings.find(
+        fun (candidate): candidate.name == name
+      )
       if output_binding
       | output_binding.value
       | block:
@@ -47,7 +51,7 @@ fun instance_member(instance :: Instance, name):
                                 name))
           resolved
 
-fun hardware_member(value, name):
+fun hardware_member(value :: HardwareEntity || Array, name :: String):
   if value is_a Instance
   | instance_member(value, name)
   | block:
@@ -56,13 +60,14 @@ fun hardware_member(value, name):
 
 annot.macro 'InstanceMembers':
   annot_meta.pack_predicate(
-    'fun (value): kernel.hardware_entity(value) || value is_a Array',
+    'fun (value): value is_a HardwareEntity || value is_a Array',
     '(($(statinfo_meta.dot_provider_key), instance_member_dot), ($(statinfo_meta.index_get_key), instance_member_index))'
   )
 
 // Keeps host-array indexing available after a virtual instance member has been
 // reconstructed, while retaining ordinary hardware indexing for data values.
-fun instance_member_index(value, index) :~ InstanceMembers:
+fun instance_member_index(value :: HardwareEntity || Array,
+                          index :: Nat || Range || HardwareEntity) :~ InstanceMembers:
   if value is_a Array
   | block:
       unless index is_a Nat

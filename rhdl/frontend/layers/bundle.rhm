@@ -31,11 +31,11 @@ class BundleType(family_identity :: BundleIdentity = BundleIdentity(),
 
 class BundleFamily(name :: String,
                    identity :: BundleIdentity,
-                   constructor :: Function):
+                   construct :: Function):
   implements Callable
 
   override method call(& arguments :: List, ~& keywords :: Map):
-    constructor(& arguments, ~& keywords)
+    construct(& arguments, ~& keywords)
 
   // Returns concrete arguments only for a specialization of this declaration.
   method specialization_arguments(type :: DataType):
@@ -53,14 +53,14 @@ class BundleFamily(name :: String,
 
 // A record literal recursively packs its first declared field into the most
 // significant part of the canonical representation, matching core casts.
-class RecordLiteral(type :: RecordType, fields :: List):
+class RecordLiteral(type :: RecordType, fields :: List.of(List)):
   implements HardwareLiteral
-  constructor (type :: RecordType, fields :: List):
+  constructor (type :: RecordType, fields :: List.of(List)):
     unless fields.length() == type.fields.length()
     | error(~who: #'record, "literal must supply every record field exactly once")
     for (declared in type.fields):
       def matching = fields.filter(
-        ~keep: fun (field): field is_a List && field.length() == 2 && field[0] == declared.name
+        ~keep: fun (field): field.length() == 2 && field[0] == declared.name
       )
       unless matching.length() == 1
       | error(~who: #'record, "literal must supply every record field exactly once")
@@ -82,13 +82,14 @@ class RecordLiteral(type :: RecordType, fields :: List):
       packed := shifted + field_literal.packed_value()
     packed
 
-fun build_record(type, fields) :~ HardwareFields:
+fun build_record(type :: RecordType, fields :: List.of(List)) :~ HardwareFields:
   if for all (field in fields):
-       field is_a List && field.length() == 2 && field[1] is_a HardwareLiteral
+       field.length() == 2 && field[1] is_a HardwareLiteral
   | RecordLiteral(type, fields)
   | kernel.record_create(type, fields)
 
-fun conditional_bundle_fields(condition :: Boolean, fields_thunk):
+fun conditional_bundle_fields(condition :: Boolean,
+                              fields_thunk :: Function.of_arity(0)):
   if condition | fields_thunk() | []
 
 fun build_bundle_type(name :: String,
@@ -189,9 +190,9 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
   def mutable method_names = []
   def mutable method_entries = []
   def mutable method_definitions = []
-  fun substitute_bundle_parameters(field_type):
+  fun substitute_bundle_parameters(field_type :: Syntax):
     substitute_generator_parameters(field_type, [parameter.binding, ...])
-  fun retain_static_field(field_name, field_type):
+  fun retain_static_field(field_name :: Syntax, field_type :: Syntax):
     static_fields := static_fields ++ [
       '$field_name: HardwareFields.from_type($field_type)'
     ]
@@ -236,7 +237,7 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
              fun (): [$conditional_field, ...]
            )'
         ]
-    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
          $method_body; ...':
         when method_names.find(fun (declared): declared == method_name.to_source_string())
         | syntax_meta.error("bundle method names must be unique", method_name)
@@ -245,8 +246,9 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
           bundle_name ++ "_" ++ method_name.to_source_string(),
           method_name
         )
+        let [argument_binding, ...] = [argument.binding, ...]
         method_entries := method_entries ++ [
-          '($method_name, $method_function, ($argument, ...),
+          '($method_name, $method_function, ($argument_binding, ...),
             (typed ($result_constructor($result_argument, ...))))'
         ]
         method_definitions := method_definitions ++ [
@@ -254,7 +256,7 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
              $method_body
              ...'
         ]
-    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_type :: Identifier):
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...) :: $(result_type :: Identifier):
          $method_body; ...':
         when method_names.find(fun (declared): declared == method_name.to_source_string())
         | syntax_meta.error("bundle method names must be unique", method_name)
@@ -263,15 +265,16 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
           bundle_name ++ "_" ++ method_name.to_source_string(),
           method_name
         )
+        let [argument_binding, ...] = [argument.binding, ...]
         method_entries := method_entries ++ [
-          '($method_name, $method_function, ($argument, ...), (typed ($result_type)))'
+          '($method_name, $method_function, ($argument_binding, ...), (typed ($result_type)))'
         ]
         method_definitions := method_definitions ++ [
           'fun $method_function($receiver :: $name(), $argument, ...) :: $result_type:
              $method_body
              ...'
         ]
-    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...):
+    | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...):
          $method_body; ...':
         when method_names.find(fun (declared): declared == method_name.to_source_string())
         | syntax_meta.error("bundle method names must be unique", method_name)
@@ -280,8 +283,9 @@ defn.macro 'bundle $(name :: Identifier)($(parameter :: GeneratorParameter), ...
           bundle_name ++ "_" ++ method_name.to_source_string(),
           method_name
         )
+        let [argument_binding, ...] = [argument.binding, ...]
         method_entries := method_entries ++ [
-          '($method_name, $method_function, ($argument, ...), untyped)'
+          '($method_name, $method_function, ($argument_binding, ...), untyped)'
         ]
         method_definitions := method_definitions ++ [
           'fun $method_function($receiver :: $name(), $argument, ...) :~ HardwareFields:

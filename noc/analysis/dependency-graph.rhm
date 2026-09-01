@@ -3,6 +3,7 @@
 
 import:
   "../model/main.rhm" open
+  "materialize.rhm" open
   "reachability.rhm" open
 
 export:
@@ -10,23 +11,17 @@ export:
   VCDependencyGraph
   build_dependency_graph
 
-fun edge_matches(edge, source_vc, target_vc):
-  vc_id_equal(edge.source_vc, source_vc) && vc_id_equal(edge.target_vc, target_vc)
-
-fun edge_less(left, right):
-  if vc_id_equal(left.source_vc, right.source_vc)
-  | vc_id_less(left.target_vc, right.target_vc)
-  | vc_id_less(left.source_vc, right.source_vc)
-
-fun append_unique_vc(vcs, vc):
+fun append_unique_vc(vcs :: List.of(VCId), vc :: VCId):
   if vcs.find(fun (candidate): vc_id_equal(candidate, vc))
   | vcs
   | vcs ++ [vc]
 
-fun contains_vc(vcs, vc):
+fun contains_vc(vcs :: List.of(VCId), vc :: VCId):
   vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
 
-class VCDependencyEdge(source_vc, target_vc, decisions):
+class VCDependencyEdge(source_vc :: VCId,
+                       target_vc :: VCId,
+                       decisions :: NonemptyList.of(MaterializedDecision)):
   opaque
   internal _VCDependencyEdge
   constructor ~none
@@ -47,13 +42,23 @@ class VCDependencyEdge(source_vc, target_vc, decisions):
     String.append(source_vc.describe(), " -> ", target_vc.describe(), " [",
                   String.join(route_names, ", "), "]")
 
-class VCDependencyGraph(reachable, vertices, edges):
+fun edge_matches(edge :: VCDependencyEdge, source_vc :: VCId, target_vc :: VCId):
+  vc_id_equal(edge.source_vc, source_vc) && vc_id_equal(edge.target_vc, target_vc)
+
+fun edge_less(left :: VCDependencyEdge, right :: VCDependencyEdge):
+  if vc_id_equal(left.source_vc, right.source_vc)
+  | vc_id_less(left.target_vc, right.target_vc)
+  | vc_id_less(left.source_vc, right.source_vc)
+
+class VCDependencyGraph(reachable :: ReachableRouting,
+                        vertices :: List.of(VCId),
+                        edges :: List.of(VCDependencyEdge)):
   opaque
   internal _VCDependencyGraph
   constructor ~none
 
-  method contains_vertex(vc):
-    vc is_a VCId && vertices.find(
+  method contains_vertex(vc :: VCId):
+    vertices.find(
       fun (candidate): vc_id_equal(candidate, vc)
     ) != #false
 
@@ -62,7 +67,7 @@ class VCDependencyGraph(reachable, vertices, edges):
     | error(~who: #'VCDependencyGraph,
             "VC is not a dependency-graph vertex: " ++ vc.describe())
 
-  method find_edge(source_vc, target_vc):
+  method find_edge(source_vc :: VCId, target_vc :: VCId):
     require_vertex(source_vc)
     require_vertex(target_vc)
     def found = edges.find(
@@ -74,13 +79,13 @@ class VCDependencyGraph(reachable, vertices, edges):
                           " -> ", target_vc.describe()))
     found
 
-  method outgoing_edges(vc):
+  method outgoing_edges(vc :: VCId):
     require_vertex(vc)
     edges.filter(
       ~keep: fun (edge): vc_id_equal(edge.source_vc, vc)
     )
 
-  method incoming_edges(vc):
+  method incoming_edges(vc :: VCId):
     require_vertex(vc)
     edges.filter(
       ~keep: fun (edge): vc_id_equal(edge.target_vc, vc)
@@ -108,7 +113,8 @@ class VCDependencyGraph(reachable, vertices, edges):
   method describe():
     String.join(edges.map(fun (edge): edge.describe()), "\n")
 
-fun add_dependency(edges, decision):
+fun add_dependency(edges :: List.of(VCDependencyEdge),
+                   decision :: MaterializedDecision):
   def source_vc = decision.origin.vc
   def target_vc = decision.candidate_vc
   def existing = edges.find(

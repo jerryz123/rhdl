@@ -3,6 +3,7 @@
 
 import:
   rhombus.bits.(<<) as <<
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "fields.rhm".HardwareFields
@@ -22,10 +23,10 @@ interface MaybeOneHotSelectorType:
 
 // Preserves exact one-hot selection as a partial core operation. Exactly one
 // bit set is a caller precondition; invalid encodings have no result contract.
-fun build_one_hot_mux(selector,
-                      choices :: List,
-                      name = #false,
-                      location = Location()) :~ HardwareFields:
+fun build_one_hot_mux(selector :: HardwareEntity,
+                      choices :: List.of(HardwareEntity),
+                      name :: False || AsciiIdentifier = #false,
+                      location :: Location = Location()) :~ HardwareFields:
   def value = kernel.read(selector, location)
   unless value.type is_a mux_support.OneHotSelectorType
   | error(~who: #'mux,
@@ -47,11 +48,11 @@ fun build_one_hot_mux(selector,
 
 // Adds one default lane selected only by the absent encoding. Every legal
 // optional selector is exactly one-hot after this transformation.
-fun build_maybe_one_hot_mux(selector,
-                            choices :: List,
-                            default_value,
-                            name = #false,
-                            location = Location()) :~ HardwareFields:
+fun build_maybe_one_hot_mux(selector :: HardwareEntity,
+                            choices :: List.of(HardwareEntity),
+                            default_value :: HardwareEntity,
+                            name :: False || AsciiIdentifier = #false,
+                            location :: Location = Location()) :~ HardwareFields:
   def value = kernel.read(selector, location)
   unless value.type is_a MaybeOneHotSelectorType
   | error(~who: #'mux,
@@ -78,10 +79,10 @@ fun build_maybe_one_hot_mux(selector,
 
 // Converts typed-key map entries to physical selector-bit order before reusing
 // the exact one-hot lowering path.
-fun build_keyed_one_hot_mux(selector,
+fun build_keyed_one_hot_mux(selector :: HardwareEntity,
                             cases :: Map,
-                            mux_name = #false,
-                            location = Location()) :~ HardwareFields:
+                            mux_name :: False || AsciiIdentifier = #false,
+                            location :: Location = Location()) :~ HardwareFields:
   def value = kernel.read(selector, location)
   unless value.type is_a mux_support.OneHotSelectorType
   | error(~who: #'mux,
@@ -92,7 +93,9 @@ fun build_keyed_one_hot_mux(selector,
           location.describe() ++ ": keyed mux arms must cover every one-hot selector lane exactly once")
   def normalized_cases = for List ((key, choice) in cases):
     [value.type.normalize_mux_lookup_key(key), choice]
-  def ordered_cases = normalized_cases.sort(fun (left, right): left[0] < right[0])
+  def ordered_cases = normalized_cases.sort(
+    fun (left, right): left[0] < right[0]
+  )
   for (index in 0..width):
     unless ordered_cases[index][0] == (1 << index)
     | error(~who: #'mux,

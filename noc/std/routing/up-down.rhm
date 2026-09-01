@@ -14,19 +14,16 @@ export:
 def up_phase = "up"
 def down_phase = "down"
 
-fun contains_name(names, name):
+fun contains_name(names :: List.of(String), name :: String):
   names.find(fun (candidate): candidate == name) != #false
 
-fun duplicate_name(names, name):
+fun duplicate_name(names :: List.of(String), name :: String):
   names.filter(~keep: fun (candidate): candidate == name).length() > 1
 
-fun contains_node_ref(nodes, node):
+fun contains_node_ref(nodes :: List.of(NodeRef), node :: NodeRef):
   nodes.find(fun (candidate): node_ref_equal(candidate, node)) != #false
 
-fun find_node_order(orders, node):
-  orders.find(fun (order): node_ref_equal(order.node, node))
-
-fun reverse_link_exists(topology, link):
+fun reverse_link_exists(topology :: Topology, link :: PhysicalLink):
   topology.links.find(
     fun (candidate):
       node_id_equal(candidate.source, link.destination) && node_id_equal(
@@ -55,7 +52,7 @@ fun validate_vc_groups(lowered_topology :: LoweredTopology,
               String.append("link ", link.ref.describe(),
                             " has no up/down VC group ", name))
 
-fun validate_suitable_topology(lowered_topology):
+fun validate_suitable_topology(lowered_topology :: LoweredTopology):
   for (link in lowered_topology.topology.links):
     when node_id_equal(link.source, link.destination)
     | error(~who: #'up_down,
@@ -70,13 +67,20 @@ fun validate_suitable_topology(lowered_topology):
               lowered_topology.link_ref(link.id).describe()
             ))
 
-class UpDownNodeOrder(node, depth, rank, parent):
+class UpDownNodeOrder(node :: NodeRef,
+                      depth :: Nat,
+                      rank :: Nat,
+                      parent :: False || NodeRef):
   method describe():
     String.append(node.describe(), ": depth=", to_string(depth),
                   ", rank=", to_string(rank), ", parent=",
                   (if parent | parent.describe() | "root"))
 
-fun unique_sorted_neighbors(lowered_topology, node):
+fun find_node_order(orders :: List.of(UpDownNodeOrder), node :: NodeRef):
+  orders.find(fun (order): node_ref_equal(order.node, node))
+
+fun unique_sorted_neighbors(lowered_topology :: LoweredTopology,
+                            node :: NodeRef):
   def node_id = lowered_topology.node_id(node)
   def mutable neighbors = []
   for (link in lowered_topology.topology.outgoing_links(node_id)):
@@ -85,7 +89,7 @@ fun unique_sorted_neighbors(lowered_topology, node):
     | neighbors := neighbors ++ [neighbor]
   neighbors.sort(node_ref_less)
 
-fun build_node_orders(lowered_topology, root):
+fun build_node_orders(lowered_topology :: LoweredTopology, root :: NodeRef):
   def mutable pending = [root]
   def mutable orders = [UpDownNodeOrder(root, 0, 0, #false)]
   while pending.length() > 0:
@@ -106,7 +110,9 @@ fun build_node_orders(lowered_topology, root):
           "up/down root cannot reach disconnected node " ++ missing.describe())
   orders
 
-fun link_direction(lowered_topology, orders, link_ref):
+fun link_direction(lowered_topology :: LoweredTopology,
+                   orders :: List.of(UpDownNodeOrder),
+                   link_ref :: LinkRef):
   def link = lowered_topology.topology.find_link(
     lowered_topology.link_id(link_ref)
   )
@@ -116,18 +122,23 @@ fun link_direction(lowered_topology, orders, link_ref):
   def destination_rank = find_node_order(orders, destination).rank
   if destination_rank < source_rank | up_phase | down_phase
 
-fun next_phase(direction):
+fun next_phase(direction :: String):
   if direction == down_phase | down_phase | up_phase
 
-fun turn_allowed(phase, direction):
+fun turn_allowed(phase :: String, direction :: String):
   phase == up_phase || direction == down_phase
 
-class UpDownViableState(node, destination, phase):
+class UpDownViableState(node :: NodeRef,
+                        destination :: NodeRef,
+                        phase :: String):
   method describe():
     String.append(node.describe(), " -> ", destination.describe(),
                   " [", phase, "]")
 
-fun viable_state_exists(states, node, destination, phase):
+fun viable_state_exists(states :: List.of(UpDownViableState),
+                        node :: NodeRef,
+                        destination :: NodeRef,
+                        phase :: String):
   states.find(
     fun (state):
       node_ref_equal(state.node, node) && node_ref_equal(
@@ -136,15 +147,15 @@ fun viable_state_exists(states, node, destination, phase):
       ) && state.phase == phase
   ) != #false
 
-fun outgoing_specs(spec, node):
+fun outgoing_specs(spec :: TopologySpec, node :: NodeRef):
   spec.links.filter(~keep: fun (link): node_ref_equal(link.source, node))
 
-fun state_has_progress(lowered_topology,
-                       orders,
-                       states,
-                       node,
-                       destination,
-                       phase):
+fun state_has_progress(lowered_topology :: LoweredTopology,
+                       orders :: List.of(UpDownNodeOrder),
+                       states :: List.of(UpDownViableState),
+                       node :: NodeRef,
+                       destination :: NodeRef,
+                       phase :: String):
   outgoing_specs(lowered_topology.spec, node).find(
     fun (link):
       def direction = link_direction(lowered_topology, orders, link.ref)
@@ -156,7 +167,8 @@ fun state_has_progress(lowered_topology,
       )
   ) != #false
 
-fun build_viable_states(lowered_topology, orders):
+fun build_viable_states(lowered_topology :: LoweredTopology,
+                        orders :: List.of(UpDownNodeOrder)):
   def mutable states = []
   for (destination in lowered_topology.spec.nodes):
     states := states ++ [
@@ -183,11 +195,11 @@ fun build_viable_states(lowered_topology, orders):
               changed := #true
   states
 
-class UpDownPolicy(lowered_topology,
-                   root,
-                   vc_groups,
-                   node_orders,
-                   viable_states):
+class UpDownPolicy(lowered_topology :: LoweredTopology,
+                   root :: NodeRef,
+                   vc_groups :: NonemptyList.of(String),
+                   node_orders :: List.of(UpDownNodeOrder),
+                   viable_states :: List.of(UpDownViableState)):
   implements RoutingPolicy
   constructor (lowered_topology :: LoweredTopology,
                root :: NodeRef,
@@ -212,7 +224,9 @@ class UpDownPolicy(lowered_topology,
   method direction_of(link :: LinkRef):
     link_direction(lowered_topology, node_orders, link)
 
-  method viable(node :: NodeRef, destination :: NodeRef, phase = up_phase):
+  method viable(node :: NodeRef,
+                destination :: NodeRef,
+                phase :: String = up_phase):
     unless phase == up_phase || phase == down_phase
     | error(~who: #'viable,
             "up/down phase must be 'up' or 'down'")
@@ -220,7 +234,7 @@ class UpDownPolicy(lowered_topology,
     node_order(destination)
     viable_state_exists(viable_states, node, destination, phase)
 
-  method initial_phase(context):
+  method initial_phase(context :: RoutingContext):
     cond
     | context.origin is_a RoutingInjection: up_phase
     | context.origin is_a RoutingForwarding:
@@ -229,7 +243,7 @@ class UpDownPolicy(lowered_topology,
         | up_phase
     | ~else: up_phase
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     def candidate_group_allowed = contains_name(
       vc_groups,
       context.candidate_vc.group
@@ -248,7 +262,7 @@ class UpDownPolicy(lowered_topology,
       next_phase(direction)
     )
 
-  override method evaluate(context):
+  override method evaluate(context :: RoutingContext):
     RoutingPolicyEvaluation(allows(context), [])
 
   override method describe():

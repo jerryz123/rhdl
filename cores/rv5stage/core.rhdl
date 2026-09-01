@@ -53,7 +53,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
   def zero = bits(0, width)
   fun instruction_value(instruction :: Bits(32)):
     if width == 32 | instruction | zext(instruction, width)
-  fun deferred_writeback(source):
+  fun deferred_writeback(source :: WritebackSelect):
     is_one_of(source, WritebackSelect.Memory, WritebackSelect.Multiply, WritebackSelect.Divide)
   fun serializing_operation(system :: SystemControl(), fence :: FenceControl()) :~ Bool:
     system.is_system_operation() ||| fence.is_fence_operation()
@@ -207,7 +207,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
 
   registers.read_address_1 <== id_ex.bits.rs1
   registers.read_address_2 <== id_ex.bits.rs2
-  fun rv5stage_register_busy(index):
+  fun rv5stage_register_busy(index :: Bits(5)):
     (
       scoreboard_busy(register_count, scoreboard.busy, index) ||| (
         scoreboard_set_link.right.valid & (scoreboard_set_link.right.bits === index)
@@ -218,7 +218,8 @@ sync_circuit RV5StageCore(xlen :: XLen):
 
   def id_ex_is_deferred = id_ex.valid & deferred_writeback(id_ex.bits.writeback_source)
   def memory_is_deferred = memory.valid & deferred_writeback(memory.bits.writeback_source)
-  fun conflicts_with_deferred(deferred_valid, deferred_destination):
+  fun conflicts_with_deferred(deferred_valid :: Bool,
+                              deferred_destination :: Bits(5)):
     deferred_valid & or_reduce(deferred_destination) & (
       (control.operand.uses_rs1 & (deferred_destination === rs1)) ||| (
         control.operand.uses_rs2 & (deferred_destination === rs2)
@@ -283,7 +284,8 @@ sync_circuit RV5StageCore(xlen :: XLen):
 
   // Execute (EX) consumes the registered ID/EX token. Forwarding is live and
   // sampled together with the other effects when Execute transfers.
-  fun forwarded_register_value(index, register_value):
+  fun forwarded_register_value(index :: Bits(5),
+                               register_value :: Bits(width)):
     mux(
       memory_bypass_link.right.valid & (memory_bypass_link.right.bits.rd === index),
       memory_bypass_link.right.bits.value,

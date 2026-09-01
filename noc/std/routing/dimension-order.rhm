@@ -11,15 +11,15 @@ export:
   xy_dimension_order
   yx_dimension_order
 
-fun valid_dimension_order(dimensions):
-  dimensions is_a List && dimensions.length() == 2 && (
+fun valid_dimension_order(dimensions :: List.of(String)):
+  dimensions.length() == 2 && (
     dimensions == ["x", "y"] || dimensions == ["y", "x"]
   )
 
-fun duplicate_name(names, name):
+fun duplicate_name(names :: List, name :: String):
   names.filter(~keep: fun (candidate): candidate == name).length() > 1
 
-fun validate_vc_groups(mesh, vc_groups):
+fun validate_vc_groups(mesh :: RectangularMesh, vc_groups :: False || List):
   unless vc_groups == #false || (vc_groups is_a List && vc_groups.length() > 0)
   | error(~who: #'dimension_order,
           "dimension-order VC groups must be #false or a nonempty List")
@@ -35,12 +35,16 @@ fun validate_vc_groups(mesh, vc_groups):
       | error(~who: #'dimension_order,
               "mesh has no VC group " ++ name)
 
-fun coordinate_differs(axis, current, destination):
+fun coordinate_differs(axis :: String,
+                       current :: MeshCoordinate,
+                       destination :: MeshCoordinate):
   if axis == "x"
   | current.x != destination.x
   | current.y != destination.y
 
-fun direction_toward(axis, current, destination):
+fun direction_toward(axis :: String,
+                     current :: MeshCoordinate,
+                     destination :: MeshCoordinate):
   cond
   | axis == "x" && current.x < destination.x: mesh_east
   | axis == "x": mesh_west
@@ -49,11 +53,11 @@ fun direction_toward(axis, current, destination):
 
 class DimensionOrderPolicy(mesh :: RectangularMesh,
                            dimensions :: List.of(String),
-                           vc_groups):
+                           vc_groups :: False || NonemptyList.of(String)):
   implements RoutingPolicy
   constructor (mesh :: RectangularMesh,
                dimensions :: List.of(String),
-               vc_groups = #false):
+               vc_groups :: False || List = #false):
     unless valid_dimension_order(dimensions)
     | error(~who: #'dimension_order,
             "dimension order must be ['x', 'y'] or ['y', 'x']")
@@ -64,7 +68,7 @@ class DimensionOrderPolicy(mesh :: RectangularMesh,
            | #false
            | vc_groups.sort(fun (left, right): left < right)))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     def current = mesh.coordinate_of(context.current_node)
     def destination = mesh.coordinate_of(context.destination_router)
     def active_dimension = dimensions.find(
@@ -84,7 +88,7 @@ class DimensionOrderPolicy(mesh :: RectangularMesh,
         ) != #false
         mesh_direction_equal(required_direction, candidate_direction) && group_allowed
 
-  override method evaluate(context):
+  override method evaluate(context :: RoutingContext):
     RoutingPolicyEvaluation(allows(context), [])
 
   override method describe():
@@ -95,13 +99,15 @@ class DimensionOrderPolicy(mesh :: RectangularMesh,
     String.append("dimension-order(", String.join(dimensions, ","),
                   "; vc-groups=", group_description, ")")
 
-fun dimension_order(mesh,
-                    dimensions,
-                    ~vc_groups: vc_groups = #false):
+fun dimension_order(mesh :: RectangularMesh,
+                    dimensions :: List.of(String),
+                    ~vc_groups: vc_groups :: False || List = #false):
   DimensionOrderPolicy(mesh, dimensions, vc_groups)
 
-fun xy_dimension_order(mesh, ~vc_groups: vc_groups = #false):
+fun xy_dimension_order(mesh :: RectangularMesh,
+                       ~vc_groups: vc_groups :: False || List = #false):
   dimension_order(mesh, ["x", "y"], ~vc_groups: vc_groups)
 
-fun yx_dimension_order(mesh, ~vc_groups: vc_groups = #false):
+fun yx_dimension_order(mesh :: RectangularMesh,
+                       ~vc_groups: vc_groups :: False || List = #false):
   dimension_order(mesh, ["y", "x"], ~vc_groups: vc_groups)

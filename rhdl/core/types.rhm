@@ -40,7 +40,7 @@ export:
 
 interface HardwareType:
   method describe()
-  method type_equal(other)
+  method type_equal(other :: HardwareType)
   method packed_width()
 
 interface DataType:
@@ -58,7 +58,7 @@ interface BitwiseType:
 // can retain an extension-defined type without importing its frontend layer.
 interface ArithmeticType:
   extends BitwiseType
-  method with_bit_width(width)
+  method with_bit_width(width :: PosInt)
 
 interface SignedArithmeticType:
   extends ArithmeticType
@@ -69,13 +69,13 @@ class Bits(width :: PosInt):
   override method describe():
     bits_text(this)
 
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     bits_type(other) && width == other.width
 
   override method bit_width():
     width
 
-  override method with_bit_width(new_width):
+  override method with_bit_width(new_width :: PosInt):
     Bits(new_width)
 
   override method packed_width():
@@ -84,13 +84,13 @@ class Bits(width :: PosInt):
 class _ClockType():
   implements HardwareType
   override method describe(): "clock"
-  override method type_equal(other): clock_type(other)
+  override method type_equal(other :: HardwareType): clock_type(other)
   override method packed_width(): 1
 
 class _ResetType():
   implements HardwareType
   override method describe(): "reset"
-  override method type_equal(other): reset_type(other)
+  override method type_equal(other :: HardwareType): reset_type(other)
   override method packed_width(): 1
 
 def Clock = _ClockType()
@@ -98,29 +98,35 @@ def Reset = _ResetType()
 
 class RecordField(name :: AsciiIdentifier, type :: DataType)
 
-class RecordType(fields :: NonemptyList.of(RecordField), preferred_name = #false):
+class RecordType(fields :: NonemptyList.of(RecordField),
+                 preferred_name :: False || AsciiIdentifier = #false):
   implements DataType
   nonfinal
-  constructor (fields :: NonemptyList.of(RecordField), preferred_name = #false):
+  constructor (fields :: NonemptyList.of(RecordField),
+               preferred_name :~ False || AsciiIdentifier = #false):
     unless preferred_name == #false || preferred_name is_a AsciiIdentifier
     | error(~who: #'RecordType,
             "preferred name must be an ASCII identifier or #false")
     for (field in fields):
-      when fields.filter(~keep: fun (candidate): candidate.name == field.name).length() != 1
+      when fields.filter(
+        ~keep: fun (candidate): candidate.name == field.name
+      ).length() != 1
       | error(~who: #'RecordType,
               "record field names must be unique")
     super(fields, preferred_name)
 
-  method field(name):
+  method field(name :: AsciiIdentifier):
     fields.find(fun (candidate): candidate.name == name)
 
   override method describe():
     "record<" ++ String.join(
-      fields.map(fun (field): field.name ++ ": " ++ field.type.describe()),
+      fields.map(
+        fun (field): field.name ++ ": " ++ field.type.describe()
+      ),
       ", "
     ) ++ ">"
 
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     if !record_type(other) || fields.length() != other.fields.length()
     | #false
     | for all (left_field in fields,
@@ -145,91 +151,94 @@ class VectorType(length :: PosInt, element_type :: DataType):
   override method describe():
     "vector<" ++ to_string(length) ++ " x " ++ element_type.describe() ++ ">"
 
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     vector_type(other) && length == other.length && element_type.type_equal(other.element_type) && other.element_type.type_equal(element_type)
 
   override method packed_width():
     def element_width = element_type.packed_width()
     if element_width == #false | #false | length * element_width
 
-fun hardware_type(type):
+fun hardware_type(type :~ matching(_)):
   type is_a HardwareType
 
-fun data_type(type):
+fun data_type(type :~ matching(_)):
   type is_a DataType
 
-fun flat_data_type(type):
+fun flat_data_type(type :~ matching(_)):
   type is_a FlatDataType
 
-fun bitwise_type(type):
+fun bitwise_type(type :~ matching(_)):
   type is_a BitwiseType
 
-fun arithmetic_type(type):
+fun arithmetic_type(type :~ matching(_)):
   type is_a ArithmeticType
 
-fun signed_arithmetic_type(type):
+fun signed_arithmetic_type(type :~ matching(_)):
   type is_a SignedArithmeticType
 
-fun data_width(type):
+fun data_width(type :~ matching(_)):
   if flat_data_type(type)
   | block:
       def width = type.bit_width()
       if width is_a PosInt | width | #false
   | #false
 
-fun packable_type(type):
+fun packable_type(type :~ matching(_)):
   hardware_type(type) && type.packed_width() != #false
 
-fun cast_compatible(source_type, target_type):
-  def source_width = if hardware_type(source_type) | source_type.packed_width() | #false
-  def target_width = if hardware_type(target_type) | target_type.packed_width() | #false
+fun cast_compatible(source_type :~ matching(_),
+                    target_type :~ matching(_)):
+  def source_width:
+    if hardware_type(source_type) | source_type.packed_width() | #false
+  def target_width:
+    if hardware_type(target_type) | target_type.packed_width() | #false
   source_width != #false && target_width != #false && source_width == target_width
 
-fun bits_type(type):
+fun bits_type(type :~ matching(_)):
   type is_a Bits
 
-fun clock_type(type):
+fun clock_type(type :~ matching(_)):
   type is_a _ClockType
 
-fun reset_type(type):
+fun reset_type(type :~ matching(_)):
   type is_a _ResetType
 
-fun record_type(type):
+fun record_type(type :~ matching(_)):
   type is_a RecordType
 
-fun vector_type(type):
+fun vector_type(type :~ matching(_)):
   type is_a VectorType
 
-fun mux_selector_type(type):
+fun mux_selector_type(type :~ matching(_)):
   bits_type(type)
 
-fun selector_width(type):
+fun selector_width(type :~ matching(_)):
   if bits_type(type) | type.width | #false
 
 // Returns the minimum nonzero Bits width that can encode every member of a
 // positive host-known collection size.
 fun count_index_width(count :: PosInt) :: PosInt:
-  fun loop(capacity, width):
+  fun loop(capacity :: PosInt, width :: Nat):
     if capacity >= count
     | block:
         if width == 0 | 1 | width
     | loop(capacity * 2, width + 1)
   loop(1, 0)
 
-fun record_fields_well_formed(fields):
-  fields.length() >= 1 && (for all (field in fields): field is_a RecordField && data_type(field.type) && type_well_formed(field.type))
+fun record_fields_well_formed(fields :: NonemptyList.of(RecordField)):
+  for all (field in fields): type_well_formed(field.type)
 
-fun type_well_formed(type):
+fun type_well_formed(type :~ matching(_)):
   cond
   | !hardware_type(type): #false
   | flat_data_type(type): data_width(type) != #false
   | record_type(type): record_fields_well_formed(type.fields)
   | vector_type(type):
-      data_type(type.element_type) && type_well_formed(type.element_type)
+      type_well_formed(type.element_type)
   | ~else: #true
 
-fun type_equal(left, right):
+fun type_equal(left :~ matching(_), right :~ matching(_)):
   hardware_type(left) && hardware_type(right) && left.type_equal(right) && right.type_equal(left)
 
-fun bits_text(type):
+fun bits_text(type :: Bits):
   "bits<" ++ to_string(type.width) ++ ">"

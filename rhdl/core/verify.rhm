@@ -12,28 +12,31 @@ export:
   verify_design
   verify_module
 
-fun fail(message):
+fun fail(message :: String):
   error(~who: #'verify, message)
 
-fun fail_operation(operation, message):
+fun fail_operation(operation :: Operation, message :: String):
   fail(operation.location.describe() ++ ": " ++ message)
 
-fun contains_identity(items, item):
+fun contains_identity(items :: List.of(Value || Place),
+                      item :: Value || Place):
   items.find(fun (candidate): candidate === item)
 
-fun packed_pattern_well_formed(value, care, width):
-  def naturals = value is_a Nat && care is_a Nat
-  naturals && bits.length(value) <= width && bits.length(care) <= width && value == (value bits.and care)
+fun packed_pattern_well_formed(value :: Nat,
+                               care :: Nat,
+                               width :: PosInt):
+  bits.length(value) <= width && bits.length(care) <= width && value == (value bits.and care)
 
-fun packed_patterns_overlap(left, right):
+fun packed_patterns_overlap(left :: List.of(Nat),
+                            right :: List.of(Nat)):
   def differing = left[0] bits.xor right[0]
   def jointly_cared = left[1] bits.and right[1]
   (differing bits.and jointly_cared) == 0
 
 // Core recognizes only transparent wires when comparing physical clock
 // operands. Relationships between distinct clocks remain analysis policy.
-fun canonical_wire_value(value):
-  fun loop(current, visited):
+fun canonical_wire_value(value :: Value):
+  fun loop(current :: Value, visited :: List.of(Value)):
     if contains_identity(visited, current)
     | current
     | block:
@@ -43,12 +46,12 @@ fun canonical_wire_value(value):
         | current
   loop(value, [])
 
-fun same_wire_value(left, right):
+fun same_wire_value(left :: Value, right :: Value):
   canonical_wire_value(left) === canonical_wire_value(right)
 
 def assertion_label_identifier = rx'bof ["A"-"Z" "a"-"z" "_"] ["A"-"Z" "a"-"z" "0"-"9" "_"]* eof'
 
-fun check_schema(operation):
+fun check_schema(operation :: Operation):
   def schema = schema_for(operation.opcode)
   unless schema
   | fail_operation(operation, "unknown operation " ++ operation.opcode)
@@ -67,7 +70,9 @@ fun check_schema(operation):
                      operation.opcode ++ " requires attribute " ++ attribute_name)
   schema
 
-fun check_operation_types(module_def, operation, schema):
+fun check_operation_types(module_def :: Module,
+                          operation :: Operation,
+                          schema :: OperationSchema):
   match schema.type_rule
   | "hardware_input_port":
       unless type_well_formed(operation.results[0].type)
@@ -104,10 +109,10 @@ fun check_operation_types(module_def, operation, schema):
         unless case is_a List && case.length() == 4
         | fail_operation(operation,
                          "decode case " ++ to_string(index) ++ " is malformed")
-        unless packed_pattern_well_formed(case[0], case[1], input_width)
+        unless case[0] is_a Nat && case[1] is_a Nat && packed_pattern_well_formed(case[0], case[1], input_width)
         | fail_operation(operation,
                          "decode case " ++ to_string(index) ++ " input is malformed")
-        unless packed_pattern_well_formed(case[2], case[3], output_width)
+        unless case[2] is_a Nat && case[3] is_a Nat && packed_pattern_well_formed(case[2], case[3], output_width)
         | fail_operation(operation,
                          "decode case " ++ to_string(index) ++ " output is malformed")
       for (left_index in 0..cases.length()):
@@ -118,9 +123,11 @@ fun check_operation_types(module_def, operation, schema):
           | fail_operation(operation,
                            String.append("decode cases ", to_string(left_index),
                                          " and ", to_string(right_index), " overlap"))
-      unless packed_pattern_well_formed(operation.attribute("default_value", #false),
-                                        operation.attribute("default_care", #false),
-                                        output_width)
+      def default_value = operation.attribute("default_value", #false)
+      def default_care = operation.attribute("default_care", #false)
+      unless default_value is_a Nat && default_care is_a Nat && packed_pattern_well_formed(default_value,
+                                                                                           default_care,
+                                                                                           output_width)
       | fail_operation(operation, "decode default is malformed")
   | "bitwise_same_type_unary":
       def operand = operation.operands[0]
@@ -626,7 +633,7 @@ fun check_operation_types(module_def, operation, schema):
         | def next_stage_operation = module_def.find_operation(
             stages[index + 1].defining_op_id
           )
-          fun unexpected_user(user_id):
+          fun unexpected_user(user_id :: Nat):
             def user = module_def.find_operation(user_id)
             !(user === operation || (user && user.opcode == "rtl.drive" && user.places[0] === next_stage_operation.places[0]))
           def functional_users = stage.users().filter(~keep: unexpected_user)
@@ -665,11 +672,12 @@ fun check_operation_types(module_def, operation, schema):
   | ~else:
       #void
 
-fun increment_count(counts, key):
+fun increment_count(counts :: MutableMap,
+                    key :: False || String || Nat):
   counts[key] := counts.get(key, 0) + 1
 
-fun verify_module_structure(module_def):
-  def module_owned = module_def is_a Module && module_def.design is_a Design && module_def.design.owns_module(module_def)
+fun verify_module_structure(module_def :: Module):
+  def module_owned = module_def.design is_a Design && module_def.design.owns_module(module_def)
   unless module_owned
   | fail("module belongs to a different design")
   unless module_def.finished
@@ -766,10 +774,10 @@ fun verify_module_structure(module_def):
     | fail("value " ++ value.name ++ " does not have a well-formed HardwareType")
   #void
 
-fun verify_module(module_def):
+fun verify_module(module_def :: Module):
   def reachable_modules = MutableList[]
   def visited_modules = MutableSet.by(===){}
-  fun visit(candidate):
+  fun visit(candidate :: Module):
     unless candidate in visited_modules
     | verify_module_structure(candidate)
       visited_modules.add(candidate)
@@ -780,9 +788,7 @@ fun verify_module(module_def):
   visit(module_def)
   verify_combinational_cycles(reachable_modules.snapshot())
 
-fun verify_design(design):
-  unless design is_a Design
-  | fail("expected an IR.Design")
+fun verify_design(design :: Design):
   design.finish_collections()
   def dpi_name_counts = MutableMap{}
   def module_name_counts = MutableMap{}
@@ -830,7 +836,7 @@ fun verify_design(design):
     | fail("duplicate module name " ++ module_def.name)
     verify_module_structure(module_def)
   def entity_ids = MutableSet{}
-  fun verify_unique_id(entity):
+  fun verify_unique_id(entity :: DpiImport || Module || Operation || Value || Place || Memory):
     when entity.id in entity_ids
     | fail("duplicate IR id " ++ to_string(entity.id))
     entity_ids.add(entity.id)

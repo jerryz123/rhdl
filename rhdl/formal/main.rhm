@@ -9,6 +9,7 @@ import:
   lib("racket/base.rkt") as rkt
 
 export:
+  FormalAssumption
   FormalAssignment
   FormalDifference
   FormalDiagnostic
@@ -24,35 +25,47 @@ export:
   check_output_property
   check_reachable
 
-class FormalAssignment(port :: String, type, packed_value :: Nat)
+interface FormalAssumption
+
+class FormalAssignment(port :: String,
+                       type :: HardwareType,
+                       packed_value :: Nat)
 
 class FormalDifference(port :: String,
-                       type,
+                       type :: HardwareType,
                        left_value :: Nat,
                        right_value :: Nat)
 
-class FormalDiagnostic(module_path,
-                       opcode,
-                       operation_id,
-                       location,
-                       origin,
+class FormalDiagnostic(module_path :: False || String,
+                       opcode :: False || String,
+                       operation_id :: False || Nat,
+                       location :: False || String,
+                       origin :: False || String,
                        message :: String)
 
-class FormalInputAssumption(port :: String, value :: Nat, care = #false)
+class FormalInputAssumption(port :: String,
+                            value :: Nat,
+                            care :: False || Nat = #false):
+  implements FormalAssumption
 
-class FormalOneHotAssumption(port :: String)
+class FormalOneHotAssumption(port :: String):
+  implements FormalAssumption
 
-class FormalOutputPattern(port :: String, value :: Nat, care = #false)
+class FormalOutputPattern(port :: String,
+                          value :: Nat,
+                          care :: False || Nat = #false)
 
-class FormalOutputWitness(port :: String, type, packed_value :: Nat)
+class FormalOutputWitness(port :: String,
+                          type :: HardwareType,
+                          packed_value :: Nat)
 
-class FormalQuery(assumptions :: List = [])
+class FormalQuery(assumptions :: List.of(FormalAssumption) = [])
 
 class FormalResult(status :: String,
-                   assignments = [],
-                   differences = [],
-                   diagnostic = #false,
-                   assumptions = []):
+                   assignments :: List.of(FormalAssignment) = [],
+                   differences :: List.of(FormalDifference) = [],
+                   diagnostic :: False || FormalDiagnostic = #false,
+                   assumptions :: List.of(FormalAssumption) = []):
   method equivalent(): status == "equivalent"
   method counterexample(): status == "counterexample"
   method vacuous(): status == "vacuous"
@@ -70,10 +83,10 @@ class FormalResult(status :: String,
 
 class FormalReachabilityResult(status :: String,
                                target :: FormalOutputPattern,
-                               assignments = [],
-                               output = #false,
-                               diagnostic = #false,
-                               assumptions = []):
+                               assignments :: List.of(FormalAssignment) = [],
+                               output :: False || FormalOutputWitness = #false,
+                               diagnostic :: False || FormalDiagnostic = #false,
+                               assumptions :: List.of(FormalAssumption) = []):
   method reachable(): status == "reachable"
   method unreachable(): status == "unreachable"
   method vacuous(): status == "vacuous"
@@ -94,10 +107,10 @@ class FormalReachabilityResult(status :: String,
 
 class FormalPropertyResult(status :: String,
                            target :: FormalOutputPattern,
-                           assignments = [],
-                           output = #false,
-                           diagnostic = #false,
-                           assumptions = []):
+                           assignments :: List.of(FormalAssignment) = [],
+                           output :: False || FormalOutputWitness = #false,
+                           diagnostic :: False || FormalDiagnostic = #false,
+                           assumptions :: List.of(FormalAssumption) = []):
   method proved(): status == "proved"
   method counterexample(): status == "counterexample"
   method vacuous(): status == "vacuous"
@@ -116,15 +129,11 @@ class FormalPropertyResult(status :: String,
         if diagnostic | status ++ ": " ++ diagnostic.message | status
     | ~else: status
 
-fun formal_query_snapshot(query, top, who):
-  unless query is_a FormalQuery
-  | error(~who: who, "formal query must be a FormalQuery")
+fun formal_query_snapshot(query :: FormalQuery,
+                          top :: Module,
+                          who :: Symbol):
   def snapshots:
     for List (assumption in query.assumptions, index in 0..query.assumptions.length()):
-      unless assumption is_a FormalInputAssumption || assumption is_a FormalOneHotAssumption
-      | error(~who: who,
-              String.append("formal assumption ", to_string(index),
-                            " must be a FormalInputAssumption or FormalOneHotAssumption"))
       def port = top.inputs.find(fun (candidate): candidate.name == assumption.port)
       unless port
       | error(~who: who,
@@ -133,10 +142,6 @@ fun formal_query_snapshot(query, top, who):
       if assumption is_a FormalInputAssumption
       | block:
           def width = port.type.packed_width()
-          unless assumption.care == #false || assumption.care is_a Nat
-          | error(~who: who,
-                  String.append("formal assumption ", to_string(index),
-                                " has an invalid care mask"))
           def care:
             if assumption.care is_a Nat
             | assumption.care
@@ -153,18 +158,14 @@ fun formal_query_snapshot(query, top, who):
       | rkt.hash("kind", "onehot", "port", assumption.port)
   PairList[& snapshots]
 
-fun formal_output_pattern_snapshot(target, top, who):
-  unless target is_a FormalOutputPattern
-  | error(~who: who,
-          "formal output target must be a FormalOutputPattern")
+fun formal_output_pattern_snapshot(target :: FormalOutputPattern,
+                                   top :: Module,
+                                   who :: Symbol):
   def port = top.outputs.find(fun (candidate): candidate.name == target.port)
   unless port
   | error(~who: who,
           "formal output target references unknown output " ++ target.port)
   def width = port.type.packed_width()
-  unless target.care == #false || target.care is_a Nat
-  | error(~who: who,
-          "formal output target has an invalid care mask")
   def care:
     if target.care is_a Nat
     | target.care
@@ -175,8 +176,10 @@ fun formal_output_pattern_snapshot(target, top, who):
           "formal output target has an invalid packed pattern")
   rkt.hash("port", target.port, "value", target.value, "care", care)
 
-fun interface_error(left_top, right_top):
-  fun compare(kind, left_ports, right_ports):
+fun interface_error(left_top :: Module, right_top :: Module):
+  fun compare(kind :: String,
+              left_ports :: List.of(Port),
+              right_ports :: List.of(Port)):
     if left_ports.length() != right_ports.length()
     | "formal subjects have different " ++ kind ++ " port names"
     | block:
@@ -200,16 +203,16 @@ fun interface_error(left_top, right_top):
   def input_error = compare("input", left_top.inputs, right_top.inputs)
   input_error || compare("output", left_top.outputs, right_top.outputs)
 
-fun interface_diagnostic(top, message):
+fun interface_diagnostic(top :: Module, message :: String):
   FormalDiagnostic(top.name, #false, #false, #false, #false, message)
 
-fun entry_value(entry, key):
+fun entry_value(entry :: ReadableMap, key :: String):
   rkt.#{hash-ref}(entry, key)
 
-fun optional_string(value):
+fun optional_string(value :: False || String):
   if value | to_string(value) | #false
 
-fun convert_diagnostic(raw):
+fun convert_diagnostic(raw :: False || ReadableMap):
   if raw
   | FormalDiagnostic(optional_string(entry_value(raw, "module_path")),
                      optional_string(entry_value(raw, "opcode")),
@@ -219,7 +222,9 @@ fun convert_diagnostic(raw):
                      to_string(entry_value(raw, "message")))
   | #false
 
-fun convert_engine_result(raw, left_top, query):
+fun convert_engine_result(raw :: satisfying(engine.formal_engine_result),
+                          left_top :: Module,
+                          query :: FormalQuery):
   def status = to_string(engine.engine_result_status(raw))
   def raw_assignments = PairList.to_list(engine.engine_result_inputs(raw))
   def raw_differences = PairList.to_list(engine.engine_result_differences(raw))
@@ -252,7 +257,9 @@ fun convert_engine_result(raw, left_top, query):
                convert_diagnostic(engine.engine_result_diagnostic(raw)),
                query.assumptions)
 
-fun check_equivalent(left, right, query = FormalQuery()):
+fun check_equivalent(left :: DesignElaboration || Module || Design,
+                     right :: DesignElaboration || Module || Design,
+                     query :: FormalQuery = FormalQuery()):
   def left_top = formal_subject_top(left)
   def right_top = formal_subject_top(right)
   def query_snapshot = formal_query_snapshot(query, left_top, #'check_equivalent)
@@ -268,7 +275,10 @@ fun check_equivalent(left, right, query = FormalQuery()):
       query
     )
 
-fun convert_reachability_result(raw, top, target, query):
+fun convert_reachability_result(raw :: satisfying(engine.formal_reachability_result),
+                                top :: Module,
+                                target :: FormalOutputPattern,
+                                query :: FormalQuery):
   def status = to_string(engine.reachability_result_status(raw))
   def raw_assignments = PairList.to_list(engine.reachability_result_inputs(raw))
   def assignments:
@@ -301,7 +311,9 @@ fun convert_reachability_result(raw, top, target, query):
     query.assumptions
   )
 
-fun check_reachable(subject, target, query = FormalQuery()):
+fun check_reachable(subject :: DesignElaboration || Module || Design,
+                    target :: FormalOutputPattern,
+                    query :: FormalQuery = FormalQuery()):
   def top = formal_subject_top(subject)
   def target_snapshot = formal_output_pattern_snapshot(target, top, #'check_reachable)
   def query_snapshot = formal_query_snapshot(query, top, #'check_reachable)
@@ -314,7 +326,10 @@ fun check_reachable(subject, target, query = FormalQuery()):
     query
   )
 
-fun convert_property_result(raw, top, target, query):
+fun convert_property_result(raw :: satisfying(engine.formal_property_result),
+                            top :: Module,
+                            target :: FormalOutputPattern,
+                            query :: FormalQuery):
   def status = to_string(engine.property_result_status(raw))
   def raw_assignments = PairList.to_list(engine.property_result_inputs(raw))
   def assignments:
@@ -347,7 +362,9 @@ fun convert_property_result(raw, top, target, query):
     query.assumptions
   )
 
-fun check_output_property(subject, target, query = FormalQuery()):
+fun check_output_property(subject :: DesignElaboration || Module || Design,
+                          target :: FormalOutputPattern,
+                          query :: FormalQuery = FormalQuery()):
   def top = formal_subject_top(subject)
   def target_snapshot:
     formal_output_pattern_snapshot(target, top, #'check_output_property)

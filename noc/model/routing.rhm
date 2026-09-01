@@ -16,46 +16,6 @@ export:
   injection_origin
   held_vc_origin
 
-fun duplicate_route_class_id(route_classes, id):
-  route_classes.filter(
-    ~keep: fun (candidate): route_class_id_equal(candidate.id, id)
-  ).length() > 1
-
-fun conflicting_injection(route_classes, terminal):
-  route_classes.find(
-    fun (candidate):
-      injection_id_equal(candidate.source.id, terminal.id) && (
-        !node_id_equal(candidate.source.router, terminal.router)
-      )
-  ) != #false
-
-fun conflicting_ejection(route_classes, terminal):
-  route_classes.find(
-    fun (candidate):
-      ejection_id_equal(candidate.destination.id, terminal.id) && (
-        !node_id_equal(candidate.destination.router, terminal.router)
-      )
-  ) != #false
-
-fun unique_injections(route_classes):
-  def mutable terminals = []
-  for (route_class in route_classes):
-    unless terminals.find(
-      fun (terminal): injection_id_equal(terminal.id, route_class.source.id)
-    )
-    | terminals := terminals ++ [route_class.source]
-  terminals.sort(fun (left, right): injection_id_less(left.id, right.id))
-
-fun unique_ejections(route_classes):
-  def mutable terminals = []
-  for (route_class in route_classes):
-    unless terminals.find(
-      fun (terminal): ejection_id_equal(terminal.id,
-                                        route_class.destination.id)
-    )
-    | terminals := terminals ++ [route_class.destination]
-  terminals.sort(fun (left, right): ejection_id_less(left.id, right.id))
-
 class InjectionTerminal(id :: InjectionId, router :: NodeId):
 
   method describe():
@@ -69,7 +29,9 @@ class EjectionTerminal(id :: EjectionId, router :: NodeId):
 class RouteClass(id :: RouteClassId,
                  source :: InjectionTerminal,
                  destination :: EjectionTerminal):
-  constructor (id :: RouteClassId, source, destination):
+  constructor (id :: RouteClassId,
+               source :: NodeId || InjectionTerminal,
+               destination :: NodeId || EjectionTerminal):
     def source_terminal:
       if source is_a NodeId
       | InjectionTerminal(InjectionId(source.value), source)
@@ -85,7 +47,7 @@ class RouteClass(id :: RouteClassId,
                   destination.describe())
 
 class Injection(terminal :: InjectionTerminal):
-  constructor (terminal):
+  constructor (terminal :: NodeId || InjectionTerminal):
     super(
       if terminal is_a NodeId
       | InjectionTerminal(InjectionId(terminal.value), terminal)
@@ -96,26 +58,69 @@ class Injection(terminal :: InjectionTerminal):
     "inject(" ++ terminal.describe() ++ ")"
 
 class HeldVC(vc :: VCId):
-
   method describe():
     "hold(" ++ vc.describe() ++ ")"
 
-fun injection_origin(value):
+fun injection_origin(value :: Injection || HeldVC):
   value is_a Injection
 
-fun held_vc_origin(value):
+fun held_vc_origin(value :: Injection || HeldVC):
   value is_a HeldVC
+
+fun duplicate_route_class_id(route_classes :: List.of(RouteClass),
+                             id :: RouteClassId):
+  route_classes.filter(
+    ~keep: fun (candidate): route_class_id_equal(candidate.id, id)
+  ).length() > 1
+
+fun conflicting_injection(route_classes :: List.of(RouteClass),
+                          terminal :: InjectionTerminal):
+  route_classes.find(
+    fun (candidate):
+      injection_id_equal(candidate.source.id, terminal.id) && (
+        !node_id_equal(candidate.source.router, terminal.router)
+      )
+  ) != #false
+
+fun conflicting_ejection(route_classes :: List.of(RouteClass),
+                         terminal :: EjectionTerminal):
+  route_classes.find(
+    fun (candidate):
+      ejection_id_equal(candidate.destination.id, terminal.id) && (
+        !node_id_equal(candidate.destination.router, terminal.router)
+      )
+  ) != #false
+
+fun unique_injections(route_classes :: List.of(RouteClass)):
+  def mutable terminals = []
+  for (route_class in route_classes):
+    unless terminals.find(
+      fun (terminal): injection_id_equal(terminal.id, route_class.source.id)
+    )
+    | terminals := terminals ++ [route_class.source]
+  terminals.sort(fun (left, right): injection_id_less(left.id, right.id))
+
+fun unique_ejections(route_classes :: List.of(RouteClass)):
+  def mutable terminals = []
+  for (route_class in route_classes):
+    unless terminals.find(
+      fun (terminal): ejection_id_equal(terminal.id, route_class.destination.id)
+    )
+    | terminals := terminals ++ [route_class.destination]
+  terminals.sort(fun (left, right): ejection_id_less(left.id, right.id))
 
 class RoutingRelation(allows :: Function.of_arity(3)):
 
-  method allow(route_class, origin, candidate_vc):
+  method allow(route_class :: RouteClass,
+               origin :: Injection || HeldVC,
+               candidate_vc :: VCId):
     allows(route_class, origin, candidate_vc)
 
 class RoutingProblem(topology :: Topology,
                      route_classes :: NonemptyList.of(RouteClass),
                      relation :: RoutingRelation,
-                     injection_terminals,
-                     ejection_terminals):
+                     injection_terminals :: List.of(InjectionTerminal),
+                     ejection_terminals :: List.of(EjectionTerminal)):
   constructor (topology :: Topology,
                route_classes :: NonemptyList.of(RouteClass),
                relation :: RoutingRelation):
@@ -154,8 +159,8 @@ class RoutingProblem(topology :: Topology,
           unique_injections(ordered_routes),
           unique_ejections(ordered_routes))
 
-  method contains_route_class(route_class):
-    route_class is_a RouteClass && route_classes.find(
+  method contains_route_class(route_class :: RouteClass):
+    route_classes.find(
       fun (candidate): candidate === route_class
     ) != #false
 
@@ -168,7 +173,7 @@ class RoutingProblem(topology :: Topology,
             "unknown route class " ++ id.describe())
     found
 
-  method origin_node(origin):
+  method origin_node(origin :: Injection || HeldVC):
     cond
     | origin is_a Injection:
         unless topology.contains_node(origin.terminal.router)
@@ -180,17 +185,14 @@ class RoutingProblem(topology :: Topology,
         origin.terminal.router
     | origin is_a HeldVC:
         topology.find_vc_link(origin.vc).destination
-    | ~else:
-        error(~who: #'origin_node,
-              "routing origin must be an Injection or HeldVC")
 
-  method at_destination(route_class, origin):
+  method at_destination(route_class :: RouteClass, origin :: Injection || HeldVC):
     unless contains_route_class(route_class)
     | error(~who: #'at_destination,
             "route class does not belong to this routing problem")
     node_id_equal(origin_node(origin), route_class.destination.router)
 
-  method candidates(route_class, origin):
+  method candidates(route_class :: RouteClass, origin :: Injection || HeldVC):
     unless contains_route_class(route_class)
     | error(~who: #'candidates,
             "route class does not belong to this routing problem")

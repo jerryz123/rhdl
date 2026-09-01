@@ -4,6 +4,7 @@
 import:
   "../model/main.rhm" open
   "names.rhm" open
+  "topology-spec.rhm" open
   "topology-lowering.rhm" open
   "route-class-lowering.rhm" open
   "routing-policy.rhm" open
@@ -15,24 +16,27 @@ export:
   lower_routing_policy
   lower_routing_policy_with_evidence
 
-fun find_exact_route_binding(lowered_routes, route_class):
+fun find_exact_route_binding(lowered_routes :: LoweredRouteClasses,
+                             route_class :: RouteClass):
   lowered_routes.bindings.find(
     fun (binding): binding.route_class === route_class
   )
 
-fun topology_has_vc_group(topology_spec, name):
+fun topology_has_vc_group(topology_spec :: TopologySpec, name :: String):
   topology_spec.links.find(
     fun (link):
       link.vc_groups.find(fun (group): group.name == name) != #false
   ) != #false
 
-fun validate_vc_group_references(lowered_routes, names):
+fun validate_vc_group_references(lowered_routes :: LoweredRouteClasses,
+                                 names :: List.of(String)):
   for (name in names):
     unless topology_has_vc_group(lowered_routes.lowered_topology.spec, name)
     | error(~who: #'lower_routing_policy,
             "unknown VC group " ++ name)
 
-fun validate_policy_references(lowered_routes, policy):
+fun validate_policy_references(lowered_routes :: LoweredRouteClasses,
+                               policy :: RoutingPolicy):
   cond
   | policy is_a RouteClassPolicy:
       for (ref in policy.refs):
@@ -61,7 +65,8 @@ fun validate_policy_references(lowered_routes, policy):
       validate_policy_references(lowered_routes, policy.escape_policy)
   | ~else: #void
 
-fun symbolic_origin(lowered_topology, origin):
+fun symbolic_origin(lowered_topology :: LoweredTopology,
+                    origin :: Injection || HeldVC):
   cond
   | origin is_a Injection:
       RoutingInjection(
@@ -70,34 +75,31 @@ fun symbolic_origin(lowered_topology, origin):
       )
   | origin is_a HeldVC:
       RoutingForwarding(lowered_topology.vc_ref(origin.vc))
-  | ~else:
-      error(~who: #'lower_routing_policy,
-            "routing origin must be an Injection or HeldVC")
 
-fun current_node_ref(lowered_topology, origin):
+fun current_node_ref(lowered_topology :: LoweredTopology,
+                     origin :: Injection || HeldVC):
   cond
   | origin is_a Injection:
       lowered_topology.node_ref(origin.terminal.router)
   | origin is_a HeldVC:
       def node_id = lowered_topology.topology.find_vc_link(origin.vc).destination
       lowered_topology.node_ref(node_id)
-  | ~else:
-      error(~who: #'lower_routing_policy,
-            "routing origin must be an Injection or HeldVC")
 
-class LoweredRoutingDecision(route_class,
-                             origin,
-                             candidate_vc,
-                             context,
-                             allowed,
-                             rule_names)
+class LoweredRoutingDecision(route_class :: RouteClass,
+                             origin :: Injection || HeldVC,
+                             candidate_vc :: VCId,
+                             context :: RoutingContext,
+                             allowed :: Boolean,
+                             rule_names :: List.of(String))
 
 class RoutingPolicyLowering(lowered_routes :: LoweredRouteClasses,
                             policy :: RoutingPolicy,
-                            mutable decisions = []):
+                            mutable decisions :: List.of(LoweredRoutingDecision) = []):
   method relation():
     RoutingRelation(
-      fun (route_class, origin, candidate_vc):
+      fun (route_class,
+           origin,
+           candidate_vc):
         def binding = find_exact_route_binding(lowered_routes, route_class)
         unless binding
         | error(~who: #'lower_routing_policy,

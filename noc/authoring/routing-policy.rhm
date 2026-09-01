@@ -45,7 +45,8 @@ interface RoutingOrigin:
 
 class RoutingInjection(terminal :: InjectionRef, router :: NodeRef):
   implements RoutingOrigin
-  constructor (terminal, router = #false):
+  constructor (terminal :: NodeRef || InjectionRef,
+               router :: NodeRef || False = #false):
     if terminal is_a NodeRef
     | super(InjectionRef(terminal.path), if router | router | terminal)
     | super(terminal, router)
@@ -69,8 +70,8 @@ class RoutingContext(route_class :: RouteClassSpec,
                origin :: RoutingOrigin,
                current_node :: NodeRef,
                candidate_vc :: VCRef,
-               source_router = #false,
-               destination_router = #false):
+               source_router :: NodeRef || False = #false,
+               destination_router :: NodeRef || False = #false):
     def resolved_source:
       if source_router | source_router | NodeRef(route_class.source.path)
     def resolved_destination:
@@ -96,8 +97,8 @@ class RoutingContext(route_class :: RouteClassSpec,
                   candidate_vc.describe())
 
 interface RoutingPolicy:
-  method allows(context)
-  method evaluate(context)
+  method allows(context :: RoutingContext)
+  method evaluate(context :: RoutingContext)
   method describe()
 
 class RoutingPolicyEvaluation(allowed :: Boolean,
@@ -105,14 +106,14 @@ class RoutingPolicyEvaluation(allowed :: Boolean,
 
 class AllowAllPolicy():
   implements RoutingPolicy
-  override method allows(_context): #true
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method allows(_context :: RoutingContext): #true
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
   override method describe(): "allow-all"
 
 class DenyAllPolicy():
   implements RoutingPolicy
-  override method allows(_context): #false
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method allows(_context :: RoutingContext): #false
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
   override method describe(): "deny-all"
 
 class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
@@ -120,12 +121,12 @@ class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
   constructor (refs :: NonemptyList.of(RouteClassRef)):
     super(refs.sort(route_class_ref_less))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     refs.find(
       fun (ref): route_class_ref_equal(ref, context.route_class.ref)
     ) != #false
 
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
 
   override method describe():
     "route-class(" ++ String.join(
@@ -135,14 +136,14 @@ class RouteClassPolicy(refs :: NonemptyList.of(RouteClassRef)):
 
 class InjectionPolicy():
   implements RoutingPolicy
-  override method allows(context): context.origin is_a RoutingInjection
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method allows(context :: RoutingContext): context.origin is_a RoutingInjection
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
   override method describe(): "origin(injection)"
 
 class ForwardingPolicy():
   implements RoutingPolicy
-  override method allows(context): context.origin is_a RoutingForwarding
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method allows(context :: RoutingContext): context.origin is_a RoutingForwarding
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
   override method describe(): "origin(forwarding)"
 
 class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
@@ -150,12 +151,12 @@ class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
   constructor (refs :: NonemptyList.of(LinkRef)):
     super(refs.sort(link_ref_less))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     refs.find(
       fun (ref): link_ref_equal(ref, context.candidate_link())
     ) != #false
 
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
 
   override method describe():
     "candidate-link(" ++ String.join(
@@ -163,8 +164,8 @@ class CandidateLinkPolicy(refs :: NonemptyList.of(LinkRef)):
       ", "
     ) ++ ")"
 
-fun require_nonempty_vc_group_names(who,
-                                    subject,
+fun require_nonempty_vc_group_names(who :: Symbol,
+                                    subject :: String,
                                     names :: NonemptyList.of(NonemptyString)):
   for (name in names):
     unless !name.contains("/")
@@ -180,12 +181,12 @@ class CurrentVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
     )
     super(names.sort(fun (left, right): left < right))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     context.origin is_a RoutingForwarding && names.find(
       fun (name): name == context.origin.vc.group
     ) != #false
 
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
 
   override method describe():
     "current-vc-group(" ++ String.join(names, ", ") ++ ")"
@@ -200,10 +201,10 @@ class CandidateVCGroupPolicy(names :: NonemptyList.of(NonemptyString)):
     )
     super(names.sort(fun (left, right): left < right))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     names.find(fun (name): name == context.candidate_vc.group) != #false
 
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
 
   override method describe():
     "candidate-vc-group(" ++ String.join(names, ", ") ++ ")"
@@ -218,10 +219,10 @@ class UnionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
   constructor (policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     evaluate(context).allowed
 
-  override method evaluate(context):
+  override method evaluate(context :: RoutingContext):
     def mutable matched = #false
     for (policy in policies):
       unless matched
@@ -241,10 +242,10 @@ class IntersectionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
   constructor (policies :: NonemptyList.of(RoutingPolicy)):
     super(sort_policies(policies))
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     evaluate(context).allowed
 
-  override method evaluate(context):
+  override method evaluate(context :: RoutingContext):
     def mutable allowed = #true
     def mutable rule_names = []
     for (policy in policies):
@@ -265,10 +266,10 @@ class IntersectionPolicy(policies :: NonemptyList.of(RoutingPolicy)):
 class RoutingPhasePolicy(name :: NonemptyString, policy :: RoutingPolicy):
   implements RoutingPolicy
 
-  override method allows(context):
+  override method allows(context :: RoutingContext):
     evaluate(context).allowed
 
-  override method evaluate(context):
+  override method evaluate(context :: RoutingContext):
     def child = policy.evaluate(context)
     RoutingPolicyEvaluation(
       child.allowed,
@@ -282,8 +283,8 @@ class CustomPolicy(label :: NonemptyString,
                    predicate :: Function.of_arity(1)):
   implements RoutingPolicy
 
-  override method allows(context): predicate(context)
-  override method evaluate(context): checked_policy_evaluation(this, context)
+  override method allows(context :: RoutingContext): predicate(context)
+  override method evaluate(context :: RoutingContext): checked_policy_evaluation(this, context)
   override method describe(): "custom(" ++ label ++ ")"
 
 fun checked_policy_evaluation(policy :: RoutingPolicy,
@@ -299,17 +300,18 @@ def deny_all = DenyAllPolicy()
 def injection_policy = InjectionPolicy()
 def forwarding_policy = ForwardingPolicy()
 
-fun match_route_classes(refs): RouteClassPolicy(refs)
-fun select_candidate_links(refs): CandidateLinkPolicy(refs)
-fun match_current_vc_groups(names): CurrentVCGroupPolicy(names)
-fun restrict_vc_groups(names): CandidateVCGroupPolicy(names)
-fun inject_into_vc_groups(names):
+fun match_route_classes(refs :: NonemptyList.of(RouteClassRef)): RouteClassPolicy(refs)
+fun select_candidate_links(refs :: NonemptyList.of(LinkRef)): CandidateLinkPolicy(refs)
+fun match_current_vc_groups(names :: NonemptyList.of(NonemptyString)): CurrentVCGroupPolicy(names)
+fun restrict_vc_groups(names :: NonemptyList.of(NonemptyString)): CandidateVCGroupPolicy(names)
+fun inject_into_vc_groups(names :: NonemptyList.of(NonemptyString)):
   policy_intersection([injection_policy, restrict_vc_groups(names)])
-fun transition_vc_groups(from_names, to_names):
+fun transition_vc_groups(from_names :: NonemptyList.of(NonemptyString),
+                         to_names :: NonemptyList.of(NonemptyString)):
   policy_intersection(
     [match_current_vc_groups(from_names), restrict_vc_groups(to_names)]
   )
-fun policy_union(policies): UnionPolicy(policies)
-fun policy_intersection(policies): IntersectionPolicy(policies)
-fun routing_phase(name, policy): RoutingPhasePolicy(name, policy)
-fun custom_policy(label, predicate): CustomPolicy(label, predicate)
+fun policy_union(policies :: NonemptyList.of(RoutingPolicy)): UnionPolicy(policies)
+fun policy_intersection(policies :: NonemptyList.of(RoutingPolicy)): IntersectionPolicy(policies)
+fun routing_phase(name :: NonemptyString, policy :: RoutingPolicy): RoutingPhasePolicy(name, policy)
+fun custom_policy(label :: NonemptyString, predicate :: Function.of_arity(1)): CustomPolicy(label, predicate)

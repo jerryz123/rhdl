@@ -4,8 +4,9 @@
 import:
   rhombus.bits.(<<) as <<
   rhombus/meta open
+  "../../../host/annotations.rhm" open
   "../../core/types.rhm" open
-  "../../core/ir.rhm".Location
+  "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_as_bits
@@ -26,7 +27,7 @@ class _SIntType(width :: PosInt):
   override method describe():
     "sint<" ++ to_string(width) ++ ">"
 
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     sint_type(other) && width == other.width
 
   override method bit_width():
@@ -35,10 +36,10 @@ class _SIntType(width :: PosInt):
   override method packed_width():
     width
 
-  override method with_bit_width(new_width):
+  override method with_bit_width(new_width :: PosInt):
     SInt(new_width)
 
-  override method call(value) :~ HardwareFields:
+  override method call(value :: Int) :~ HardwareFields:
     SIntLiteral(this, value)
 
 fun SInt(width :: PosInt):
@@ -47,12 +48,14 @@ fun SInt(width :: PosInt):
 annot.macro 'SInt($width)':
   'HardwareFields.of(SInt($width))'
 
-fun sint_type(type):
+fun sint_type(type :: HardwareType):
   type is_a _SIntType
 
 // Validates the signed source value, then stores only its canonical packed
 // two's-complement image in the shared literal representation.
-fun SIntLiteral(type :: _SIntType, value :: Int, name = #false):
+fun SIntLiteral(type :: _SIntType,
+                value :: Int,
+                name :: False || AsciiIdentifier = #false):
   def minimum = -(1 << (type.width - 1))
   def maximum = (1 << (type.width - 1)) - 1
   unless minimum <= value && value <= maximum
@@ -64,29 +67,33 @@ fun SIntLiteral(type :: _SIntType, value :: Int, name = #false):
     name
   )
 
-fun sint(value :: Int, width :: PosInt, name = #false):
+fun sint(value :: Int,
+         width :: PosInt,
+         name :: False || AsciiIdentifier = #false):
   SIntLiteral(SInt(width), value, name)
 
-fun require_signed_value(entity, who, location):
+fun require_signed_value(entity :: HardwareEntity,
+                         who :: Symbol,
+                         location :: Location):
   def value = kernel.read(entity, location)
   unless signed_arithmetic_type(value.type)
   | error(~who: who,
           location.describe() ++ ": expected a signed arithmetic hardware value")
   value
 
-fun sext(entity,
+fun sext(entity :: HardwareEntity,
          target_width :: PosInt,
-         name = #false,
-         location = Location()) :~ HardwareFields:
+         name :: False || AsciiIdentifier = #false,
+         location :: Location = Location()) :~ HardwareFields:
   def value = require_signed_value(entity, #'sext, location)
   kernel.sext(value, target_width, name, location)
 
 // Signed truncation retains the low bits and restores the same nominal signed
 // type at the smaller width; rtl.trunc itself remains a Bits representation op.
-fun strunc(entity,
+fun strunc(entity :: HardwareEntity,
            target_width :: PosInt,
-           name = #false,
-           location = Location()) :~ HardwareFields:
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()) :~ HardwareFields:
   def value = require_signed_value(entity, #'strunc, location)
   unless target_width < data_width(value.type)
   | error(~who: #'strunc, "target width must be smaller than the source width")

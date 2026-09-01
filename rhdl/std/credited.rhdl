@@ -53,28 +53,25 @@ interface Credited(T :: DataType, credit_limit :: PosInt):
 
 // Finds the canonical specialization beneath a nominal refinement without
 // accepting an unrelated declaration that reuses the same member names.
-fun credited_base_protocol(protocol :: Any):
-  if !(protocol is_a InterfaceType)
-  | #false
+fun credited_base_protocol(protocol :: InterfaceType):
+  def arguments = protocol.specialization_arguments
+  def local_base:
+    if arguments.length() == 2 && data_type(arguments[0]) && (
+      arguments[1] is_a PosInt
+    )
+    | block:
+        def canonical = Credited(arguments[0], arguments[1])
+        if interface_type_supports(protocol, canonical) | canonical | #false
+    | #false
+  if local_base
+  | local_base
   | block:
-      def arguments = protocol.specialization_arguments
-      def local_base:
-        if arguments.length() == 2 && data_type(arguments[0]) && (
-          arguments[1] is_a PosInt
-        )
-        | block:
-            def canonical = Credited(arguments[0], arguments[1])
-            if interface_type_supports(protocol, canonical) | canonical | #false
-        | #false
-      if local_base
-      | local_base
-      | block:
-          if protocol.parent
-          | credited_base_protocol(protocol.parent)
-          | #false
+      if protocol.parent
+      | credited_base_protocol(protocol.parent)
+      | #false
 
 // Normalizes the canonical interface and its refinements.
-fun credited_protocol_type(protocol :: Any):
+fun credited_protocol_type(protocol :: InterfaceType):
   def canonical = credited_base_protocol(protocol)
   if canonical && interface_type_supports(protocol, canonical)
   | canonical
@@ -85,7 +82,7 @@ fun credited_payload_type(endpoint :: Endpoint):
   unless protocol
   | error(~who: #'credited_payload_type,
           "credited-flow chaining requires a Credited endpoint")
-  protocol.members.find(fun (member :: Any): member.name == "bits").type
+  protocol.members.find(fun (member :: InterfaceMember): member.name == "bits").type
 
 // Explicitly instruments one credited endpoint without giving the monitor
 // authority to drive either direction of the interface.

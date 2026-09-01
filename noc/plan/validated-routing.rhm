@@ -16,7 +16,7 @@ export:
 def acyclic_validator_version = "vc-dependency-acyclic/v1"
 def escape_validator_version = "vc-escape-subnetwork/v1"
 
-fun origin_equal(left, right):
+fun origin_equal(left :: Injection || HeldVC, right :: Injection || HeldVC):
   cond
   | left is_a Injection && right is_a Injection:
       injection_id_equal(left.terminal.id, right.terminal.id)
@@ -24,26 +24,24 @@ fun origin_equal(left, right):
       vc_id_equal(left.vc, right.vc)
   | ~else: #false
 
-fun origin_node(materialized, origin):
+fun origin_node(materialized :: MaterializedRouting,
+                origin :: Injection || HeldVC):
   cond
   | origin is_a Injection: origin.terminal.router
   | origin is_a HeldVC:
       materialized.topology.find_vc_link(origin.vc).destination
-  | ~else:
-      error(~who: #'compile_routing,
-            "route-table origin must be an Injection or HeldVC")
 
-class RouteTableRow(route_class,
-                    origin,
-                    router_node,
-                    allowed_vcs,
-                    ejection_terminal):
+class RouteTableRow(route_class :: RouteClass,
+                    origin :: Injection || HeldVC,
+                    router_node :: NodeId,
+                    allowed_vcs :: List.of(VCId),
+                    ejection_terminal :: False || EjectionTerminal):
   opaque
   internal _RouteTableRow
   constructor ~none
 
-  method allows(vc):
-    vc is_a VCId && allowed_vcs.find(
+  method allows(vc :: VCId):
+    allowed_vcs.find(
       fun (candidate): vc_id_equal(candidate, vc)
     ) != #false
 
@@ -57,23 +55,22 @@ class RouteTableRow(route_class,
     String.append(route_class.id.describe(), " ", origin.describe(), " @ ",
                   router_node.describe(), ": ", action)
 
-class RouteTable(topology, route_classes, rows):
+class RouteTable(topology :: Topology,
+                 route_classes :: NonemptyList.of(RouteClass),
+                 rows :: List.of(RouteTableRow)):
   opaque
   internal _RouteTable
   constructor ~none
 
-  method contains_route_class(route_class):
-    route_class is_a RouteClass && route_classes.find(
+  method contains_route_class(route_class :: RouteClass):
+    route_classes.find(
       fun (candidate): candidate === route_class
     ) != #false
 
-  method row(route_class, origin):
+  method row(route_class :: RouteClass, origin :: Injection || HeldVC):
     unless contains_route_class(route_class)
     | error(~who: #'RouteTable,
             "route class does not belong to this route table")
-    unless injection_origin(origin) || held_vc_origin(origin)
-    | error(~who: #'RouteTable,
-            "route-table origin must be an Injection or HeldVC")
     def found = rows.find(
       fun (candidate):
         candidate.route_class === route_class && origin_equal(candidate.origin, origin)
@@ -84,25 +81,26 @@ class RouteTable(topology, route_classes, rows):
                           route_class.id.describe(), " ", origin.describe()))
     found
 
-  method rows_at(node):
+  method rows_at(node :: NodeId):
     unless topology.contains_node(node)
     | error(~who: #'RouteTable, "unknown route-table node")
     rows.filter(
       ~keep: fun (row): node_id_equal(row.router_node, node)
     )
 
-  method allowed_candidates(route_class, origin):
+  method allowed_candidates(route_class :: RouteClass,
+                            origin :: Injection || HeldVC):
     row(route_class, origin).allowed_vcs
 
   method describe():
     String.join(rows.map(fun (row): row.describe()), "\n")
 
-class ValidationAssumptions(resource_model,
-                            deadlock_criterion,
-                            injection_holds_vc,
-                            ejection_acquires_vc,
-                            persistent_escape_request,
-                            eventual_escape_grant):
+class ValidationAssumptions(resource_model :: String,
+                            deadlock_criterion :: String,
+                            injection_holds_vc :: Boolean,
+                            ejection_acquires_vc :: Boolean,
+                            persistent_escape_request :: Boolean,
+                            eventual_escape_grant :: Boolean):
   opaque
   internal _ValidationAssumptions
   constructor ~none
@@ -134,18 +132,18 @@ def escape_assumptions = _ValidationAssumptions(
   #true
 )
 
-class EscapeCertificate(request,
-                        reachability,
-                        closure,
-                        dependency_graph,
-                        acyclic_certificate,
-                        assumptions,
-                        validator_version):
+class EscapeCertificate(request :: EscapeValidationRequest,
+                        reachability :: EscapeReachabilityEvidence,
+                        closure :: EscapeClosureEvidence,
+                        dependency_graph :: VCDependencyGraph,
+                        acyclic_certificate :: AcyclicCertificate,
+                        assumptions :: ValidationAssumptions,
+                        validator_version :: String):
   opaque
   internal _EscapeCertificate
   constructor ~none
 
-  method rank(vc):
+  method rank(vc :: VCId):
     acyclic_certificate.rank(vc)
 
   method describe():
@@ -154,22 +152,22 @@ class EscapeCertificate(request,
                   ", reachable-vcs=",
                   to_string(dependency_graph.vertices.length()))
 
-class ValidatedRouting(topology,
-                       route_classes,
-                       injection_terminals,
-                       ejection_terminals,
-                       materialized,
-                       reachable,
-                       dependency_graph,
-                       certificate,
-                       route_table,
-                       assumptions,
-                       validator_version):
+class ValidatedRouting(topology :: Topology,
+                       route_classes :: NonemptyList.of(RouteClass),
+                       injection_terminals :: List.of(InjectionTerminal),
+                       ejection_terminals :: List.of(EjectionTerminal),
+                       materialized :: MaterializedRouting,
+                       reachable :: ReachableRouting,
+                       dependency_graph :: VCDependencyGraph,
+                       certificate :: AcyclicCertificate || EscapeCertificate,
+                       route_table :: RouteTable,
+                       assumptions :: ValidationAssumptions,
+                       validator_version :: String):
   opaque
   internal _ValidatedRouting
   constructor ~none
 
-  method route_row(route_class, origin):
+  method route_row(route_class :: RouteClass, origin :: Injection || HeldVC):
     route_table.row(route_class, origin)
 
   method describe():
@@ -178,7 +176,9 @@ class ValidatedRouting(topology,
                   ", vcs=", to_string(dependency_graph.vertices.length()),
                   ", rows=", to_string(route_table.rows.length()))
 
-fun make_row(materialized, route_class, origin):
+fun make_row(materialized :: MaterializedRouting,
+             route_class :: RouteClass,
+             origin :: Injection || HeldVC):
   def node = origin_node(materialized, origin)
   def ejection_terminal:
     if node_id_equal(node, route_class.destination.router)
@@ -194,7 +194,8 @@ fun make_row(materialized, route_class, origin):
                  allowed_vcs,
                  ejection_terminal)
 
-fun build_route_table(materialized, reachable):
+fun build_route_table(materialized :: MaterializedRouting,
+                      reachable :: ReachableRouting):
   def mutable rows = []
   for (route in reachable.routes):
     def route_class = route.route_class
@@ -211,12 +212,12 @@ fun build_route_table(materialized, reachable):
       )]
   _RouteTable(materialized.topology, materialized.route_classes, rows)
 
-fun finish_validated_routing(materialized,
-                             reachable,
-                             dependency_graph,
-                             certificate,
-                             assumptions,
-                             version):
+fun finish_validated_routing(materialized :: MaterializedRouting,
+                             reachable :: ReachableRouting,
+                             dependency_graph :: VCDependencyGraph,
+                             certificate :: AcyclicCertificate || EscapeCertificate,
+                             assumptions :: ValidationAssumptions,
+                             version :: String):
   def route_table = build_route_table(materialized, reachable)
   _ValidatedRouting(
     materialized.topology,
@@ -232,10 +233,11 @@ fun finish_validated_routing(materialized,
     version
   )
 
-fun compile_routing(problem :: RoutingProblem, ~escape: escape_request = #false):
+fun compile_routing(problem :: RoutingProblem,
+                    ~escape: escape_request :~ False || EscapeValidationRequest = #false):
   unless escape_request == #false || escape_request is_a EscapeValidationRequest
   | error(~who: #'compile_routing,
-          "escape validation must be an EscapeValidationRequest")
+          "~escape must be an EscapeValidationRequest or #false")
   when escape_request != #false && !(escape_request.topology === problem.topology)
   | error(~who: #'compile_routing,
           "escape validation request belongs to a different topology")

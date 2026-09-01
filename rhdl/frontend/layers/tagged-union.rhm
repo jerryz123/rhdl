@@ -4,10 +4,12 @@
 import:
   rhombus.bits.(<<) as <<
   rhombus/meta open
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".HardwareVariantFields
+  "../support/fields.rhm".HardwareVariant
   "../support/fields.rhm".HardwareVariantType
   "../support/fields.rhm".HardwareVariantView
   "../support/fields.rhm".hardware_as_bits
@@ -18,8 +20,12 @@ import:
 export:
   tagged_union
 
+// Unifies nullary and payload-bearing variant constructors for typed variant APIs.
+interface TaggedUnionVariant:
+  extends HardwareVariant
+
 class TaggedUnionType(schema :: VariantSchema,
-                      tag_type,
+                      tag_type :: EnumType || OneHotEnumType,
                       payload_width :: Nat):
   implements FlatDataType
   implements HardwareVariantType
@@ -28,18 +34,23 @@ class TaggedUnionType(schema :: VariantSchema,
     schema.members.map(fun (member): member.name)
 
   override method describe(): "tagged-union<" ++ schema.name ++ ">"
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     tagged_union_type(other) && variant_schema_equal(schema, other.schema)
   override method bit_width(): schema.width + payload_width
   override method packed_width(): schema.width + payload_width
-  override method hardware_variant_tag(entity, location):
+  override method hardware_variant_tag(entity :: HardwareEntity,
+                                       location :: Location):
     tagged_union_value_tag(entity, location)
-  override method hardware_variant_is(entity, variant, location):
+  override method hardware_variant_is(entity :: HardwareEntity,
+                                      variant :: TaggedUnionVariant,
+                                      location :: Location):
     tagged_union_value_is(entity, variant, location)
-  override method hardware_variant_view(entity, variant, location):
+  override method hardware_variant_view(entity :: HardwareEntity,
+                                        variant :: TaggedUnionVariant,
+                                        location :: Location):
     tagged_union_value_view(entity, variant, location)
 
-fun tagged_union_type(type):
+fun tagged_union_type(type :: HardwareType):
   type is_a TaggedUnionType
 
 fun tag_schema(schema :: VariantSchema):
@@ -56,7 +67,7 @@ fun build_tagged_union_type(schema :: VariantSchema):
   def mutable maximum_payload_width = 0
   for (member in schema.members):
     when member.payload_type != #false
-    | unless member.payload_type is_a DataType && packable_type(member.payload_type)
+    | unless packable_type(member.payload_type)
       | error(~who: #'tagged_union,
               "variant payloads must have packable DataType types")
       def width = member.payload_type.packed_width()
@@ -66,17 +77,25 @@ fun build_tagged_union_type(schema :: VariantSchema):
                   enum_type_from_schema(tag_schema(schema)),
                   maximum_payload_width)
 
-fun make_automatic_tagged_union(name, identity, members, requested_width = #false):
+fun make_automatic_tagged_union(name :: AsciiIdentifier,
+                                identity :: VariantIdentity,
+                                members :: NonemptyList.of(List),
+                                requested_width :: False || PosInt = #false):
   build_tagged_union_type(
     make_automatic_variant_schema(name, identity, members, requested_width)
   )
 
-fun make_explicit_tagged_union(name, identity, members, requested_width = #false):
+fun make_explicit_tagged_union(name :: AsciiIdentifier,
+                               identity :: VariantIdentity,
+                               members :: NonemptyList.of(List),
+                               requested_width :: False || PosInt = #false):
   build_tagged_union_type(
     make_explicit_variant_schema(name, identity, members, requested_width)
   )
 
-fun make_one_hot_tagged_union(name, identity, members):
+fun make_one_hot_tagged_union(name :: AsciiIdentifier,
+                              identity :: VariantIdentity,
+                              members :: NonemptyList.of(List)):
   build_tagged_union_type(
     make_one_hot_variant_schema(name, identity, members)
   )
@@ -92,8 +111,8 @@ fun union_member(type :: TaggedUnionType, member_name :: String):
 
 fun materialize_union_bits(type :: TaggedUnionType,
                            member :: VariantMember,
-                           payload,
-                           location):
+                           payload :: False || HardwareEntity,
+                           location :: Location):
   def tag_bits = kernel.literal(Bits(type.schema.width), member.encoding, #false, location)
   if type.payload_width == 0
   | kernel.cast(tag_bits, type, #false, location)
@@ -123,17 +142,18 @@ class UnionLiteral(type :: TaggedUnionType,
 
 class DeferredUnionValue(type :: TaggedUnionType,
                          member :: VariantMember,
-                         payload):
+                         payload :: HardwareEntity):
   implements kernel.DeferredHardwareValue
 
-  override method materialize_hardware(location):
+  override method materialize_hardware(location :: Location):
     materialize_union_bits(type, member, payload, location)
 
 class NullaryUnionVariant(type :: TaggedUnionType,
                           member :: VariantMember,
-                          tag):
+                          tag :: HardwareLiteral):
   implements Callable
   implements HardwareLiteral
+  implements TaggedUnionVariant
 
   override method call(): this
   override method literal_type(): type
@@ -141,10 +161,11 @@ class NullaryUnionVariant(type :: TaggedUnionType,
 
 class PayloadUnionVariant(type :: TaggedUnionType,
                           member :: VariantMember,
-                          tag):
+                          tag :: HardwareLiteral):
   implements Callable
+  implements TaggedUnionVariant
 
-  override method call(payload) :~ HardwareFields:
+  override method call(payload :: HardwareEntity) :~ HardwareFields:
     def payload_type = hardware_value_type(payload)
     unless type_equal(payload_type, member.payload_type)
     | error(~who: #'tagged_union,
@@ -153,30 +174,26 @@ class PayloadUnionVariant(type :: TaggedUnionType,
     | UnionLiteral(type, member, payload)
     | DeferredUnionValue(type, member, payload)
 
-fun tagged_union_variant(value):
-  value is_a NullaryUnionVariant || value is_a PayloadUnionVariant
-
-fun require_tagged_union_variant(value):
-  unless tagged_union_variant(value)
-  | error(~who: #'tagged_union, "expected a tagged-union variant")
+fun require_tagged_union_variant(value :: TaggedUnionVariant):
   value
 
-fun union_variant(type, member_name):
-  unless tagged_union_type(type)
-  | error(~who: #'tagged_union, "variant access requires a tagged-union type")
+fun union_variant(type :: TaggedUnionType,
+                  member_name :: AsciiIdentifier):
   def member = union_member(type, member_name)
   def tag = enum_value(type.tag_type, member_name)
   if member.payload_type == #false
   | NullaryUnionVariant(type, member, tag)
   | PayloadUnionVariant(type, member, tag)
 
-fun require_union_value(entity, location):
+fun require_union_value(entity :: HardwareEntity, location :: Location):
   def value = kernel.read(entity, location)
   unless tagged_union_type(value.type)
   | error(~who: #'tagged_union, "expected tagged-union hardware data")
   value
 
-fun packed_union_tag_bits(value, packed, location):
+fun packed_union_tag_bits(value :: Value,
+                          packed :: Value,
+                          location :: Location):
   if value.type.payload_width == 0
   | packed
   | kernel.extract(packed,
@@ -185,7 +202,10 @@ fun packed_union_tag_bits(value, packed, location):
                    #false,
                    location)
 
-fun union_variant_valid(value, packed, variant, location):
+fun union_variant_valid(value :: Value,
+                        packed :: Value,
+                        variant :: TaggedUnionVariant,
+                        location :: Location):
   def tag_bits = packed_union_tag_bits(value, packed, location)
   def expected_tag = kernel.literal(Bits(value.type.schema.width),
                                     variant.member.encoding,
@@ -193,8 +213,8 @@ fun union_variant_valid(value, packed, variant, location):
                                     location)
   kernel.hw_eq(tag_bits, expected_tag, #false, location)
 
-fun tagged_union_value_tag(entity,
-                           location = Location()) :~ HardwareFields:
+fun tagged_union_value_tag(entity :: HardwareEntity,
+                           location :: Location = Location()) :~ HardwareFields:
   def value = require_union_value(entity, location)
   def type = value.type
   def packed = hardware_as_bits(value, #'tag, "value", #false, location)
@@ -203,9 +223,9 @@ fun tagged_union_value_tag(entity,
               #false,
               location)
 
-fun tagged_union_value_view(entity,
-                            supplied_variant,
-                            location = Location()):
+fun tagged_union_value_view(entity :: HardwareEntity,
+                            supplied_variant :: TaggedUnionVariant,
+                            location :: Location = Location()):
   def variant = require_tagged_union_variant(supplied_variant)
   def value = require_union_value(entity, location)
   unless type_equal(value.type, variant.type)
@@ -228,9 +248,9 @@ fun tagged_union_value_view(entity,
                     location)
   HardwareVariantView(valid, payload)
 
-fun tagged_union_value_is(entity,
-                          supplied_variant,
-                          location = Location()) :~ HardwareFields:
+fun tagged_union_value_is(entity :: HardwareEntity,
+                          supplied_variant :: TaggedUnionVariant,
+                          location :: Location = Location()) :~ HardwareFields:
   def variant = require_tagged_union_variant(supplied_variant)
   def value = require_union_value(entity, location)
   unless type_equal(value.type, variant.type)
@@ -241,7 +261,7 @@ fun tagged_union_value_is(entity,
 
 annot.macro 'TaggedUnionMembers':
   annot_meta.pack_predicate(
-    'tagged_union_type',
+    'fun (value): value is_a HardwareType && tagged_union_type(value)',
     '(($(statinfo_meta.dot_provider_key), tagged_union_member_dot))'
   )
 
@@ -257,7 +277,7 @@ meta:
   syntax_class TaggedUnionParameter
   | '$(binding :: Identifier) $_ ...'
 
-  fun parse_union_members(clauses):
+  fun parse_union_members(clauses :: List):
     def mutable members = []
     for (item in clauses):
       match item
@@ -274,7 +294,7 @@ meta:
           )
     members
 
-  fun parse_encoded_union_members(clauses):
+  fun parse_encoded_union_members(clauses :: List):
     def mutable mode = "unset"
     def mutable members = []
     for (item in clauses):

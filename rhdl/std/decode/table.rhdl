@@ -16,14 +16,14 @@ export:
 fun exact_type_equal(left :: DataType, right :: DataType):
   left.type_equal(right) && right.type_equal(left)
 
-fun require_pattern(value :: Pattern, role :: String, who :: Any):
+fun require_pattern(value :: Pattern, role :: String, who :: Symbol):
   value
 
 class DecodeCase(input :: Pattern, output :: Pattern)
 
 fun require_decode_cases(cases :: NonemptyList.of(DecodeCase),
                          role :: String,
-                         who :: Any):
+                         who :: Symbol):
   cases
 
 fun exact_pattern_equal(left :: Pattern, right :: Pattern):
@@ -80,7 +80,9 @@ fun zip_decode_cases(left_cases :: NonemptyList.of(DecodeCase),
       as_pattern(combine(left_case.output, right_case.output))
     )
 
-fun build_decode_group(inputs :: Any,
+// The input domain is deliberately supplied by input_pattern, so this helper
+// cannot constrain it before applying that caller-owned normalization.
+fun build_decode_group(inputs :~ matching(_),
                        output :: Pattern,
                        input_pattern :: Function.of_arity(1)):
   def supplied:
@@ -94,7 +96,10 @@ fun build_decode_group(inputs :: Any,
 
 // Expands Pattern and PatternSet inputs into the single-cube rows consumed by
 // DecodeTable and the core rtl.decode operation.
-fun decode_cases(inputs :: Any, output :: Any):
+fun decode_cases(inputs :: HardwareLiteral || Pattern || PatternSet || List.of(HardwareLiteral || Pattern || PatternSet),
+                 output :: HardwareLiteral || Pattern):
+  def supplied:
+    if inputs is_a List | inputs | [inputs]
   build_decode_group(inputs, as_pattern(output), as_pattern_set)
 
 fun flatten_decode_groups(groups :: List):
@@ -113,7 +118,7 @@ meta:
        $(field_name :: Identifier): $field_value
        ...':
       field expand:
-        fun (output_type :: Syntax, input_pattern :: Any):
+        fun (output_type :: Syntax, input_pattern :: Symbol || Syntax):
           'build_decode_group(
              [$input, ...],
              (partial_pattern($output_type):
@@ -125,7 +130,7 @@ meta:
        $(field_name :: Identifier): $field_value
        ...':
       field expand:
-        fun (output_type :: Syntax, input_pattern :: Any):
+        fun (output_type :: Syntax, input_pattern :: Symbol || Syntax):
           'build_decode_group(
              $inputs,
              (partial_pattern($output_type):

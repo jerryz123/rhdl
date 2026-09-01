@@ -3,6 +3,7 @@
 
 import:
   "../host/annotations.rhm" open
+  "../noc/analysis/escape-validation.rhm".EscapeValidationRequest
   "../noc/authoring/main.rhm" open
   "../noc/model/main.rhm".RouteClass
   "../noc/plan/main.rhm" open
@@ -271,13 +272,14 @@ class CHIChannelCompilations(req :: CHIChannelCompilation,
 fun uniform_chi_routing(policy :: RoutingPolicy) :: CHIChannelRouting:
   CHIChannelRouting(policy, policy, policy, policy)
 
-fun collect_connection_routes(connections, select):
+fun collect_connection_routes(connections :: List.of(CHIConnection),
+                              select :: Function.of_arity(1)):
   def mutable routes = []
   for (connection in connections):
     routes := routes ++ select(connection)
   routes
 
-fun collect_injection_sites(routes):
+fun collect_injection_sites(routes :: NonemptyList.of(CHIChannelRouteSpec)):
   def mutable sites = []
   for (route in routes):
     def existing = sites.find(
@@ -296,7 +298,7 @@ fun collect_injection_sites(routes):
     fun (left, right): injection_ref_less(left.terminal, right.terminal)
   )
 
-fun collect_ejection_sites(routes):
+fun collect_ejection_sites(routes :: NonemptyList.of(CHIChannelRouteSpec)):
   def mutable sites = []
   for (route in routes):
     def existing = sites.find(
@@ -315,7 +317,8 @@ fun collect_ejection_sites(routes):
     fun (left, right): ejection_ref_less(left.terminal, right.terminal)
   )
 
-fun require_injection_site(sites, ref):
+fun require_injection_site(sites :: NonemptyList.of(CHIInjectionSite),
+                           ref :: InjectionRef):
   def found = sites.find(
     fun (site): injection_ref_equal(site.terminal, ref)
   )
@@ -324,7 +327,8 @@ fun require_injection_site(sites, ref):
           "validated route has no CHI injection site")
   found
 
-fun require_ejection_site(sites, ref):
+fun require_ejection_site(sites :: NonemptyList.of(CHIEjectionSite),
+                          ref :: EjectionRef):
   def found = sites.find(
     fun (site): ejection_ref_equal(site.terminal, ref)
   )
@@ -333,12 +337,13 @@ fun require_ejection_site(sites, ref):
           "validated route has no CHI ejection site")
   found
 
-fun same_compiled_route(left, right):
+fun same_compiled_route(left :: CHICompiledRoute,
+                        right :: CHICompiledRoute):
   injection_ref_equal(left.source.terminal, right.source.terminal) && (
     left.destination.node_id == right.destination.node_id
   )
 
-fun require_unambiguous_routes(routes):
+fun require_unambiguous_routes(routes :: NonemptyList.of(CHICompiledRoute)):
   for (route in routes):
     when routes.filter(
       ~keep: fun (candidate): same_compiled_route(candidate, route)
@@ -349,7 +354,7 @@ fun require_unambiguous_routes(routes):
 fun compile_chi_channel(topology :: TopologySpec,
                         route_specs :: NonemptyList.of(CHIChannelRouteSpec),
                         routing_policy :: RoutingPolicy,
-                        ~escape: escape_request = #false)
+                        ~escape: escape_request :: False || EscapeValidationRequest = #false)
   :: CHIChannelCompilation:
   def injections = collect_injection_sites(route_specs)
   def ejections = collect_ejection_sites(route_specs)

@@ -59,14 +59,17 @@ check_no_jobs() {
 check_no_jobs README.md
 check_no_jobs tests/backend/README.md
 check_no_jobs tools/emacs/rhdl-mode.el
-check_no_jobs vlsi/src/rhdl-top.rhdl
+check_matrix_entry vlsi/src/rhdl-top.rhdl host_matrix ci-host-hygiene-test
 
 check_matrix_entry rhdl/core/ir.rhm host_matrix ci-host-foundation-test
 check_matrix_entry rhdl/core/ir.rhm circt_matrix ci-circt-language-test
 check_field rhdl/core/ir.rhm simulation true
 check_matrix_entry rhdl/analysis/clocking.rhm host_matrix ci-host-foundation-test
+check_matrix_entry rhdl/analysis/clocking.rhm host_matrix ci-host-hygiene-test
 check_matrix_entry tests/analysis/clocking-test.rhm host_matrix ci-host-foundation-test
+check_matrix_entry tests/analysis/clocking-test.rhm host_matrix ci-host-hygiene-test
 check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-cores-test
+check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-hygiene-test
 check_matrix_entry rhdl/std/flow.rhdl circt_matrix ci-circt-std-test
 check_matrix_entry host/annotations.rhm host_matrix ci-host-foundation-test
 check_matrix_entry tests/frontend/conditional-fixture.rhdl host_matrix ci-host-foundation-test
@@ -76,6 +79,7 @@ check_matrix_entry ridx/tests/model/milestone1-test.rhm host_matrix ci-host-mode
 check_matrix_entry noc/rtl/router.rhdl host_matrix ci-host-models-test
 check_matrix_entry noc/rtl/router.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry chi/link.rhdl host_matrix ci-host-protocols-test
+check_matrix_entry chi/link.rhdl host_matrix ci-host-hygiene-test
 check_matrix_entry chi/link.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry cores/rv5stage/core.rhdl host_matrix ci-host-cores-test
 check_matrix_entry cores/rv5stage/core.rhdl circt_matrix ci-circt-cores-test
@@ -84,6 +88,7 @@ check_matrix_entry cores/rv5stage/core-flow.rhdl host_matrix ci-host-cores-test
 check_matrix_entry cores/rv5stage/core-flow.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry cores/rv5stage/core-flow.rhdl example_matrix examples-rv5stage
 check_matrix_entry examples/rhdl/alu.rhdl example_matrix examples-rhdl
+check_matrix_entry examples/rhdl/alu.rhdl host_matrix ci-host-hygiene-test
 check_matrix_entry examples/rhdl/alu.rhdl circt_matrix ci-circt-language-test
 check_matrix_entry examples/clocking/single-clock.rhm example_matrix examples-clocking
 check_matrix_entry examples/std/flow-control.rhdl example_matrix examples-std
@@ -107,6 +112,9 @@ check_matrix_entry tools/write-noc-router-diagram.rhm example_matrix examples-no
 check_field tools/run-racket-tests.sh host true
 check_field tools/run-racket-tests.sh circt false
 check_field tools/run-racket-tests.sh examples true
+check_matrix_entry tools/check-parameter-annotations.rkt host_matrix ci-host-hygiene-test
+check_matrix_entry tools/parameter-annotation-scope.txt host_matrix ci-host-hygiene-test
+check_matrix_entry .githooks/pre-commit host_matrix ci-host-hygiene-test
 check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sims/fesvr/direct_mem_htif.cc simulation true
 check_field sims/TestDriver.v simulation true

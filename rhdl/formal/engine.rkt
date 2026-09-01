@@ -24,13 +24,22 @@
          property_result_message
          property_result_inputs
          property_result_output
-         property_result_diagnostic)
+         property_result_diagnostic
+         formal_engine_result
+         formal_reachability_result
+         formal_property_result)
 
 (struct formal-engine-result (status message inputs differences diagnostic) #:transparent)
 (struct formal-reachability-result (status message inputs output diagnostic) #:transparent)
 (struct formal-property-result (status message inputs output diagnostic) #:transparent)
 (struct exn:fail:formal:unsupported exn:fail (diagnostic) #:transparent)
 (struct validity-obligation (condition module operation path) #:transparent)
+
+;; Exposes precise predicates so the typed Rhombus facade does not treat
+;; opaque engine results as unrestricted foreign values.
+(define formal_engine_result formal-engine-result?)
+(define formal_reachability_result formal-reachability-result?)
+(define formal_property_result formal-property-result?)
 
 (define supported-opcodes
   (set "rtl.input_port"

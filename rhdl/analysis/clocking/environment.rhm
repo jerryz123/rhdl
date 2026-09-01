@@ -13,13 +13,14 @@ export:
   verify_design_cdc
   dump_design_temporal_report
 
-fun fail(message):
+fun fail(message :: String):
   error(~who: #'summarize_design_temporal, message)
 
-fun contains_identity(items, item):
+fun contains_identity(items :: List.of(Value), item :: Value):
   items.find(fun (candidate): candidate === item)
 
-fun same_instance_path(left, right):
+fun same_instance_path(left :: List.of(Operation),
+                       right :: List.of(Operation)):
   def mutable same = left.length() == right.length()
   when same
   | for (left_step in left,
@@ -28,10 +29,12 @@ fun same_instance_path(left, right):
       | same := #false
   same
 
-fun same_control_reference(left, right):
-  left is_a ControlReference && right is_a ControlReference && left.value === right.value && same_instance_path(left.instance_path, right.instance_path)
+fun same_control_reference(left :: ControlReference,
+                           right :: ControlReference):
+  left.value === right.value && same_instance_path(left.instance_path, right.instance_path)
 
-fun path_prefix(prefix, path):
+fun path_prefix(prefix :: List.of(String || Nat),
+                path :: List.of(String || Nat)):
   def mutable matches = prefix.length() <= path.length()
   when matches
   | for (step in prefix,
@@ -40,7 +43,7 @@ fun path_prefix(prefix, path):
       | matches := #false
   matches
 
-fun type_at_path(type, path):
+fun type_at_path(type :: DataType, path :: List.of(String || Nat)):
   if path.length() == 0
   | type
   | block:
@@ -54,16 +57,16 @@ fun type_at_path(type, path):
       | ~else:
           #false
 
-fun top_input_port(top, value):
+fun top_input_port(top :: Module, value :: Value):
   top.inputs.find(fun (port): port.value === value)
 
-fun valid_top_clock(top, value):
+fun valid_top_clock(top :: Module, value :: Value):
   top_input_port(top, value) && clock_type(value.type)
 
-fun valid_input_timing(timing):
+fun valid_input_timing(timing :~ TopInputTiming):
   timing is_a UnknownInputTiming || timing is_a SynchronousInputTiming || timing is_a AsynchronousInputTiming
 
-fun relationship_left(relationship):
+fun relationship_left(relationship :: EnvironmentClockRelationship):
   cond
   | relationship is_a IdenticalClockRelationship: relationship.left
   | relationship is_a DerivedClockRelationship: relationship.source
@@ -71,7 +74,7 @@ fun relationship_left(relationship):
   | relationship is_a ExclusiveClockRelationship: relationship.left
   | ~else: #false
 
-fun relationship_right(relationship):
+fun relationship_right(relationship :: EnvironmentClockRelationship):
   cond
   | relationship is_a IdenticalClockRelationship: relationship.right
   | relationship is_a DerivedClockRelationship: relationship.destination
@@ -79,7 +82,7 @@ fun relationship_right(relationship):
   | relationship is_a ExclusiveClockRelationship: relationship.right
   | ~else: #false
 
-fun relationship_kind(relationship):
+fun relationship_kind(relationship :: EnvironmentClockRelationship):
   cond
   | relationship is_a IdenticalClockRelationship: "identical"
   | relationship is_a DerivedClockRelationship: "derived"
@@ -87,15 +90,18 @@ fun relationship_kind(relationship):
   | relationship is_a ExclusiveClockRelationship: "exclusive"
   | ~else: #false
 
-fun direct_identical_neighbor(relationship, clock):
+fun direct_identical_neighbor(relationship :: EnvironmentClockRelationship,
+                              clock :: Value):
   cond
   | !(relationship is_a IdenticalClockRelationship): #false
   | relationship.left === clock: relationship.right
   | relationship.right === clock: relationship.left
   | ~else: #false
 
-fun identical_clock_values(environment, left, right):
-  fun visit(current, visited):
+fun identical_clock_values(environment :: TemporalEnvironment,
+                           left :: Value,
+                           right :: Value):
+  fun visit(current :: Value, visited :: List.of(Value)):
     cond
     | current === right: #true
     | contains_identity(visited, current): #false
@@ -109,20 +115,17 @@ fun identical_clock_values(environment, left, right):
         found
   visit(left, [])
 
-fun same_clock_pair(environment,
-                    left_a,
-                    right_a,
-                    left_b,
-                    right_b):
+fun same_clock_pair(environment :: TemporalEnvironment,
+                    left_a :: Value,
+                    right_a :: Value,
+                    left_b :: Value,
+                    right_b :: Value):
   (identical_clock_values(environment, left_a, left_b) && identical_clock_values(environment, right_a, right_b)) || (identical_clock_values(environment, left_a, right_b) && identical_clock_values(environment, right_a, left_b))
 
-fun validate_environment(elaboration, environment):
-  unless environment is_a TemporalEnvironment
-  | fail("environment must be a TemporalEnvironment")
+fun validate_environment(elaboration :: DesignElaboration,
+                         environment :: TemporalEnvironment):
   def top = elaboration.top
   for (contract in environment.input_contracts):
-    unless contract is_a TopInputContract
-    | fail("every environment input contract must be a TopInputContract")
     def port = top_input_port(top, contract.input)
     unless port
     | fail("environment input contract must reference an input of top module " ++ top.name)
@@ -184,27 +187,40 @@ fun validate_environment(elaboration, environment):
       | fail("a non-identical relationship contradicts the identical clock equivalence")
   #void
 
-fun contract_for(environment, input, path):
+fun contract_for(environment :: TemporalEnvironment,
+                 input :: Value,
+                 path :: List.of(String || Nat)):
   environment.input_contracts.find(
     fun (contract): contract.input === input && path_prefix(contract.path, path)
   )
 
-fun input_timing(environment, input, path):
+fun input_timing(environment :: TemporalEnvironment,
+                 input :: Value,
+                 path :: List.of(String || Nat)):
   def contract = contract_for(environment, input, path)
   if contract | contract.timing | UnknownInputTiming()
 
-fun root_top_control(top, reference):
+fun root_top_control(top :: Module, reference :: ControlReference):
   reference.instance_path.length() == 0 && valid_top_clock(top, reference.value)
 
-fun equivalent_control(environment, top, left, right):
+fun equivalent_control(environment :: TemporalEnvironment,
+                       top :: Module,
+                       left :: ControlReference,
+                       right :: ControlReference):
   same_control_reference(left, right) || (root_top_control(top, left) && root_top_control(top, right) && identical_clock_values(environment, left.value, right.value))
 
-fun add_source_clock(clocks, clock, environment, top):
+fun add_source_clock(clocks :: List.of(ControlReference),
+                     clock :: ControlReference,
+                     environment :: TemporalEnvironment,
+                     top :: Module):
   if clocks.find(fun (candidate): equivalent_control(environment, top, candidate, clock))
   | clocks
   | clocks ++ [clock]
 
-fun relationship_for(environment, top, left, right):
+fun relationship_for(environment :: TemporalEnvironment,
+                     top :: Module,
+                     left :: ControlReference,
+                     right :: ControlReference):
   if !(root_top_control(top, left) && root_top_control(top, right))
   | #false
   | environment.clock_relationships.find(
@@ -216,7 +232,10 @@ fun relationship_for(environment, top, left, right):
                                                                            right.value)
     )
 
-fun classify_clock_relationship(environment, top, source_clock, destination_clock):
+fun classify_clock_relationship(environment :: TemporalEnvironment,
+                                top :: Module,
+                                source_clock :: ControlReference,
+                                destination_clock :: ControlReference):
   def relationship = relationship_for(environment,
                                       top,
                                       source_clock,
@@ -235,7 +254,10 @@ fun classify_clock_relationship(environment, top, source_clock, destination_cloc
   | ~else:
       UnknownClockRelationship(source_clock, destination_clock)
 
-fun classify_design_input(environment, top, destination_clock, origins):
+fun classify_design_input(environment :: TemporalEnvironment,
+                          top :: Module,
+                          destination_clock :: ControlReference,
+                          origins :: List.of(TemporalProvenance)):
   def mutable source_clocks = []
   def mutable unknown_inputs = []
   def mutable asynchronous_inputs = []
@@ -318,13 +340,13 @@ fun summarize_design_temporal(elaboration :: DesignElaboration,
                         module_summary.reconvergences,
                         summarize_cdc_violations(sinks))
 
-fun safe_cdc_classification(classification):
+fun safe_cdc_classification(classification :: SinkInputClassification):
   classification is_a StaticInput || classification is_a SameClock || classification is_a IdenticalClock
 
-fun supported_sync_level_source(classification):
+fun supported_sync_level_source(classification :: SinkInputClassification):
   safe_cdc_classification(classification) || classification is_a DerivedClock || classification is_a AsynchronousClock || classification is_a ExclusiveClock || classification is_a UnknownClockRelationship || classification is_a AsynchronousEnvironmentInput
 
-fun cdc_violation_reason(input):
+fun cdc_violation_reason(input :: TemporalSinkInput):
   cond
   | input.name == "reset" || input.name == "reset_value": #false
   | input.crossing:
@@ -338,7 +360,7 @@ fun cdc_violation_reason(input):
       "requires explicit crossing evidence"
   | ~else: #false
 
-fun summarize_cdc_violations(sinks):
+fun summarize_cdc_violations(sinks :: List.of(TemporalSink)):
   def mutable violations = []
   for (sink in sinks):
     for (input in sink.inputs):
@@ -356,13 +378,13 @@ fun summarize_cdc_violations(sinks):
         ]
   violations
 
-fun cdc_violation_name(violation):
+fun cdc_violation_name(violation :: CdcViolation):
   def sink_name = hierarchical_name(violation.instance_path,
                                     operation_name(violation.operation))
   append_path(sink_name ++ "." ++ violation.input_name,
               violation.input_path)
 
-fun cdc_violation_message(violation):
+fun cdc_violation_message(violation :: CdcViolation):
   String.append(cdc_violation_name(violation),
                 ": ",
                 describe_classification(violation.classification),
@@ -386,33 +408,33 @@ fun verify_design_cdc(elaboration :: DesignElaboration,
                         String.join(lines, "\n")))
   summary
 
-fun append_path(name, path):
+fun append_path(name :: String, path :: List.of(String || Nat)):
   def mutable result = name
   for (step in path):
     result := if step is_a String | result ++ "." ++ step | result ++ "[" ++ to_string(step) ++ "]"
   result
 
-fun operation_name(operation):
+fun operation_name(operation :: Operation):
   operation.attribute("name", operation.opcode)
 
-fun hierarchical_name(instance_path, name):
+fun hierarchical_name(instance_path :: List.of(Operation), name :: String):
   def prefix = String.join(
     instance_path.map(fun (operation): operation.attribute("name", "instance")),
     "."
   )
   if prefix == "" | name | prefix ++ "." ++ name
 
-fun describe_control(reference):
+fun describe_control(reference :: ControlReference):
   hierarchical_name(reference.instance_path, reference.value.ref())
 
-fun describe_timing(timing):
+fun describe_timing(timing :: TopInputTiming):
   cond
   | timing is_a SynchronousInputTiming:
       "synchronous " ++ timing.clock.ref()
   | timing is_a AsynchronousInputTiming: "asynchronous"
   | ~else: "unknown"
 
-fun describe_relationship(relationship):
+fun describe_relationship(relationship :: EnvironmentClockRelationship):
   def left = relationship_left(relationship).ref()
   def right = relationship_right(relationship).ref()
   cond
@@ -425,7 +447,7 @@ fun describe_relationship(relationship):
   | relationship is_a ExclusiveClockRelationship:
       "exclusive " ++ left ++ " " ++ right ++ " " ++ relationship.description
 
-fun describe_classification(classification):
+fun describe_classification(classification :: SinkInputClassification):
   cond
   | classification is_a StaticInput: "static"
   | classification is_a SameClock: "same_clock"
@@ -440,7 +462,8 @@ fun describe_classification(classification):
   | classification is_a MixedTimingFanIn: "mixed_timing_fan_in"
   | classification is_a UnknownClock: "unknown_clock"
 
-fun describe_origin(summary, origin):
+fun describe_origin(summary :: DesignTemporalSummary,
+                    origin :: TemporalProvenance):
   cond
   | origin is_a StaticProvenance: "static"
   | origin is_a ExternalProvenance:
@@ -460,7 +483,8 @@ fun describe_origin(summary, origin):
         | "@unknown"
       "crossed " ++ append_path(crossing_name, origin.path) ++ clock
 
-fun append_outputs(lines, summary):
+fun append_outputs(lines :: List.of(String),
+                   summary :: DesignTemporalSummary):
   def mutable result = lines
   for (output in summary.output_leaves):
     def port = summary.elaboration.top.outputs[output.output_index]
@@ -471,7 +495,8 @@ fun append_outputs(lines, summary):
     result := result ++ ["  output " ++ append_path(port.name, output.path) ++ " <- " ++ origins]
   result
 
-fun append_sinks(lines, summary):
+fun append_sinks(lines :: List.of(String),
+                 summary :: DesignTemporalSummary):
   def mutable result = lines
   for (sink in summary.sinks):
     def sink_name = hierarchical_name(sink.instance_path,
@@ -485,7 +510,8 @@ fun append_sinks(lines, summary):
       result := result ++ ["    " ++ append_path(input.name, input.path) ++ ": " ++ describe_classification(input.classification) ++ " <- " ++ origins]
   result
 
-fun append_reconvergences(lines, summary):
+fun append_reconvergences(lines :: List.of(String),
+                          summary :: DesignTemporalSummary):
   def mutable result = lines
   for (finding in summary.reconvergences):
     def sink_name = hierarchical_name(finding.instance_path,
@@ -508,7 +534,8 @@ fun append_reconvergences(lines, summary):
       ]
   result
 
-fun append_cdc_violations(lines, summary):
+fun append_cdc_violations(lines :: List.of(String),
+                          summary :: DesignTemporalSummary):
   def mutable result = lines
   when summary.cdc_violations.length() > 0
   | result := result ++ ["  cdc_violations"]

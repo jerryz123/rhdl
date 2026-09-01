@@ -3,6 +3,7 @@
 
 import:
   rhombus/meta open
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "../../core/types.rhm" open
   "../kernel.rhm" as kernel
@@ -17,6 +18,7 @@ export:
   CircuitMemberFields
   hardware_port_static_info_key
   value_surface_static_info_key
+  HardwareVariant
   HardwareVariantType
   HardwareVariantView
   hardware_value_type
@@ -69,9 +71,6 @@ annot.macro 'CircuitMemberFields($(member_name :: Identifier): $(member_annotati
     '((hardware_port_static_info_key, (($member_name, $member_infos), ...)))'
   )
 
-fun hardware_fields(value):
-  kernel.hardware_entity(value)
-
 // Retains the internal compatibility selector for a register's driveable
 // next-state place; author-level RTL drives registers directly.
 fun hardware_next(value :: Register):
@@ -79,7 +78,7 @@ fun hardware_next(value :: Register):
 
 // Extracts the RHDL type from readable or driveable data objects without
 // changing their identity. Deferred extension values materialize on demand.
-fun hardware_entity_type(value):
+fun hardware_entity_type(value :~ HardwareEntity):
   cond
   | value is_a Value: value.type
   | value is_a Place: value.type
@@ -90,36 +89,43 @@ fun hardware_entity_type(value):
 
 // Exposes type discovery to frontend libraries that derive a result protocol
 // from caller-elaborated hardware without depending on core IR classes.
-fun hardware_value_type(value):
+fun hardware_value_type(value :~ HardwareEntity):
   def type = hardware_entity_type(value)
   unless type is_a HardwareType
   | error(~who: #'hardware_value_type, "expected hardware data")
   type
 
-fun hardware_has_type(value, expected_type):
+fun hardware_has_type(value :: HardwareEntity,
+                      expected_type :: HardwareType):
   def actual_type = hardware_entity_type(value)
-  expected_type is_a HardwareType && actual_type is_a HardwareType && type_equal(actual_type, expected_type)
+  actual_type is_a HardwareType && type_equal(actual_type, expected_type)
 
-fun hardware_has_bits_type(value):
+fun hardware_has_bits_type(value :: HardwareEntity):
   def type = hardware_entity_type(value)
   type is_a HardwareType && bits_type(type)
 
-fun hardware_has_packable_data_type(value):
+fun hardware_has_packable_data_type(value :: HardwareEntity):
   def type = hardware_entity_type(value)
   type is_a DataType && packable_type(type)
 
 // Lets independently selectable frontend layers attach variant inspection to
 // hardware values without teaching the shared field syntax their encoding.
-interface HardwareVariantType:
-  method hardware_variant_tag(entity, location)
-  method hardware_variant_is(entity, variant, location)
-  method hardware_variant_view(entity, variant, location)
+interface HardwareVariant
 
-class HardwareVariantView(valid, payload)
+interface HardwareVariantType:
+  method hardware_variant_tag(entity :: HardwareEntity, location :: Location)
+  method hardware_variant_is(entity :: HardwareEntity,
+                             variant :: HardwareVariant,
+                             location :: Location)
+  method hardware_variant_view(entity :: HardwareEntity,
+                               variant :: HardwareVariant,
+                               location :: Location)
+
+class HardwareVariantView(valid :: Value, payload :: False || Value)
 
 annot.macro 'HardwareFields':
   annot_meta.pack_predicate(
-    'hardware_fields',
+    'fun (value): value is_a HardwareEntity',
     '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
   )
 
@@ -150,21 +156,21 @@ namespace HardwareFields:
     )
     if value_infos
     | annot_meta.pack_predicate(
-        'fun (value): hardware_has_type(value, $type)',
+        'fun (value): value is_a HardwareEntity && hardware_has_type(value, $type)',
         statinfo_meta.unpack(value_infos)
       )
     | 'HardwareFields'
 
   export annot.macro 'of($expected_type)':
     annot_meta.pack_predicate(
-      'fun (value): hardware_has_type(value, $expected_type)',
+      'fun (value): value is_a HardwareEntity && hardware_has_type(value, $expected_type)',
       '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
     )
 
   // Describes a Bits entity whose width is intentionally existential.
   export annot.macro 'bits':
     annot_meta.pack_predicate(
-      'hardware_has_bits_type',
+      'fun (value): value is_a HardwareEntity && hardware_has_bits_type(value)',
       '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
     )
 
@@ -172,30 +178,34 @@ namespace HardwareFields:
   // requirement to the broader Hardware category.
   export annot.macro 'packable':
     annot_meta.pack_predicate(
-      'hardware_has_packable_data_type',
+      'fun (value): value is_a HardwareEntity && hardware_has_packable_data_type(value)',
       '(($(statinfo_meta.dot_provider_key), hardware_field_dot), ($(statinfo_meta.index_get_key), hardware_index))'
     )
 
-fun require_hardware_variant_type(value, who):
+fun require_hardware_variant_type(value :: HardwareEntity, who :: Symbol):
   def type = hardware_entity_type(value)
   unless type is_a HardwareVariantType
   | error(~who: who, "expected hardware data with variants")
   type
 
-fun hardware_variant_tag(value, location = Location()) :~ HardwareFields:
+fun hardware_variant_tag(value :: HardwareEntity,
+                         location :: Location = Location()) :~ HardwareFields:
   require_hardware_variant_type(value, #'tag).hardware_variant_tag(value, location)
 
 // Preserves variant tag inspection after an intermediate operation has erased
 // exact static type information, while treating tag as an ordinary projection
 // on non-variant records.
-fun hardware_variant_tag_or_project(value,
-                                    location = Location()) :~ HardwareFields:
+fun hardware_variant_tag_or_project(
+      value :: HardwareEntity,
+      location :: Location = Location()) :~ HardwareFields:
   def type = hardware_entity_type(value)
   if type is_a HardwareVariantType
   | type.hardware_variant_tag(value, location)
   | kernel.project(value, "tag", #false, location)
 
-fun hardware_variant_is(value, variant, location = Location()) :~ HardwareFields:
+fun hardware_variant_is(value :: HardwareEntity,
+                        variant :: HardwareVariant,
+                        location :: Location = Location()) :~ HardwareFields:
   require_hardware_variant_type(value, #'is).hardware_variant_is(value, variant, location)
 
 fun hardware_variant_view_valid(view :: HardwareVariantView) :~ HardwareFields:
@@ -212,9 +222,10 @@ annot.macro 'HardwareVariantViewFields':
     '(($(statinfo_meta.dot_provider_key), hardware_variant_view_dot))'
   )
 
-fun hardware_variant_view(value,
-                          variant,
-                          location = Location()) :~ HardwareVariantViewFields:
+fun hardware_variant_view(
+      value :: HardwareEntity,
+      variant :: HardwareVariant,
+      location :: Location = Location()) :~ HardwareVariantViewFields:
   require_hardware_variant_type(value, #'view).hardware_variant_view(value,
                                                                      variant,
                                                                      location)
@@ -244,9 +255,9 @@ dot.macro 'hardware_variant_view_dot $left $dot $right':
   | 'payload': 'hardware_variant_view_payload($left) :: HardwareFields'
   | ~else: #false
 
-fun hardware_index(value, index) :: HardwareFields:
+fun hardware_index(value :: HardwareEntity,
+                   index :: Nat || Range || HardwareEntity) :: HardwareFields:
   def value_type = hardware_entity_type(value)
-  def index_type = hardware_entity_type(index)
   cond
   | index is_a Nat:
       kernel.index(value, index)
@@ -262,7 +273,7 @@ fun hardware_index(value, index) :: HardwareFields:
       | error(~who: #'extract,
               "hardware slice range must select at least one bit")
       kernel.extract(value, high, low)
-  | index_type is_a HardwareType && vector_type(value_type):
+  | index is_a HardwareEntity && vector_type(value_type):
       kernel.vector_index(value, index)
   | ~else:
       error(~who: #'extract,
@@ -270,7 +281,8 @@ fun hardware_index(value, index) :: HardwareFields:
 
 // Supplies the concise frontend spelling for an explicit, equal-width
 // representation cast while leaving the operation itself in the kernel.
-fun hardware_into(value, target_type) :~ HardwareFields:
+fun hardware_into(value :: HardwareEntity,
+                  target_type :: HardwareType) :~ HardwareFields:
   kernel.cast(value, target_type)
 
 // Selects the result surface from the target type supplied to an `.into`
@@ -302,11 +314,11 @@ annot.macro 'HardwareIntoFunction':
 
 // Produces the canonical packed Bits image of frontend data while preserving
 // an existing Bits value without introducing a redundant cast operation.
-fun hardware_as_bits(value,
-                     who,
-                     role,
-                     name = #false,
-                     location = Location()) :~ HardwareFields:
+fun hardware_as_bits(value :: HardwareEntity,
+                     who :: Symbol,
+                     role :: String,
+                     name :: False || AsciiIdentifier = #false,
+                     location :: Location = Location()) :~ HardwareFields:
   def source = kernel.read(value, location)
   def width = source.type.packed_width()
   unless data_type(source.type) && width != #false
@@ -317,12 +329,16 @@ fun hardware_as_bits(value,
 
 // Implements deterministic hardware-selected vector reads through the
 // existing mux-lookup semantics and an explicit out-of-range default.
-fun hardware_lookup(value, selector, ~default: default_value) :~ HardwareFields:
+fun hardware_lookup(value :: HardwareEntity,
+                    selector :: HardwareEntity,
+                    ~default: default_value :: HardwareEntity) :~ HardwareFields:
   kernel.vector_lookup(value, selector, default_value)
 
 // Returns a vector value with one hardware-selected element replaced and all
 // other elements, including every out-of-range case, preserved.
-fun hardware_updated(value, selector, replacement) :~ HardwareFields:
+fun hardware_updated(value :: HardwareEntity,
+                     selector :: HardwareEntity,
+                     replacement :: HardwareEntity) :~ HardwareFields:
   kernel.vector_updated(value, selector, replacement)
 
 dot.macro 'hardware_field_dot $left $dot $right':

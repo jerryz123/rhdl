@@ -30,9 +30,9 @@ class ClockingElaboration(elaboration :: DesignElaboration,
 class PendingInputContract(module_def :: Module,
                            contract :: TopInputContract)
 class PendingClockRelationship(module_def :: Module,
-                               relationship)
-class ClockingCollector(mutable input_contracts = [],
-                        mutable clock_relationships = [])
+                               relationship :: IdenticalClockRelationship || DerivedClockRelationship || AsynchronousClockRelationship || ExclusiveClockRelationship)
+class ClockingCollector(mutable input_contracts :: List.of(PendingInputContract) = [],
+                        mutable clock_relationships :: List.of(PendingClockRelationship) = [])
 
 Parameter.def current_clocking_collector = #false
 
@@ -42,7 +42,7 @@ fun require_collector():
   | kernel.frontend_fail("clocking declarations require elaborate_with_clocking")
   collector
 
-fun prepare_declaration(kind):
+fun prepare_declaration(kind :: String):
   def collector = require_collector()
   kernel.reject_unsupported_conditional_effect(
     kind,
@@ -51,12 +51,14 @@ fun prepare_declaration(kind):
   )
   [collector, kernel.active_module()]
 
-fun declaration_value(entity, role):
+fun declaration_value(entity :: HardwareEntity, role :: String):
   unless entity is_a Value
   | kernel.frontend_fail(role ++ " must reference a readable hardware value")
   entity
 
-fun add_input_contract(input, path, timing):
+fun add_input_contract(input :: HardwareEntity,
+                       path :: List,
+                       timing :: UnknownInputTiming || SynchronousInputTiming || AsynchronousInputTiming):
   let [collector, module_def] = prepare_declaration("input timing declaration")
   collector.input_contracts := collector.input_contracts ++ [
     PendingInputContract(module_def,
@@ -67,33 +69,38 @@ fun add_input_contract(input, path, timing):
   ]
   #void
 
-fun synchronous_input(input, clock, path = []):
+fun synchronous_input(input :: HardwareEntity,
+                      clock :: HardwareEntity,
+                      path :: List = []):
   add_input_contract(input,
                      path,
                      SynchronousInputTiming(declaration_value(clock,
                                                               "synchronous input clock")))
 
-fun asynchronous_input(input, path = []):
+fun asynchronous_input(input :: HardwareEntity, path :: List = []):
   add_input_contract(input, path, AsynchronousInputTiming())
 
-fun unknown_input_timing(input, path = []):
+fun unknown_input_timing(input :: HardwareEntity, path :: List = []):
   add_input_contract(input, path, UnknownInputTiming())
 
-fun add_clock_relationship(kind, make_relationship):
+fun add_clock_relationship(kind :: String,
+                           make_relationship :: Function.of_arity(0)):
   let [collector, module_def] = prepare_declaration(kind)
   collector.clock_relationships := collector.clock_relationships ++ [
     PendingClockRelationship(module_def, make_relationship())
   ]
   #void
 
-fun identical_clocks(left, right):
+fun identical_clocks(left :: HardwareEntity, right :: HardwareEntity):
   add_clock_relationship(
     "clock relationship declaration",
     fun (): IdenticalClockRelationship(declaration_value(left, "clock relationship"),
                                        declaration_value(right, "clock relationship"))
   )
 
-fun derived_clock(source, destination, description):
+fun derived_clock(source :: HardwareEntity,
+                  destination :: HardwareEntity,
+                  description :: String):
   add_clock_relationship(
     "clock relationship declaration",
     fun (): DerivedClockRelationship(declaration_value(source, "clock relationship"),
@@ -101,14 +108,16 @@ fun derived_clock(source, destination, description):
                                      description)
   )
 
-fun asynchronous_clocks(left, right):
+fun asynchronous_clocks(left :: HardwareEntity, right :: HardwareEntity):
   add_clock_relationship(
     "clock relationship declaration",
     fun (): AsynchronousClockRelationship(declaration_value(left, "clock relationship"),
                                           declaration_value(right, "clock relationship"))
   )
 
-fun exclusive_clocks(left, right, description):
+fun exclusive_clocks(left :: HardwareEntity,
+                     right :: HardwareEntity,
+                     description :: String):
   add_clock_relationship(
     "clock relationship declaration",
     fun (): ExclusiveClockRelationship(declaration_value(left, "clock relationship"),
@@ -119,9 +128,9 @@ fun exclusive_clocks(left, right, description):
 // This low-level authoring hook is public so an ordinary standard-library
 // circuit can retain verifiable evidence without importing frontend internals.
 // Core verification, not this declaration, proves the register-chain shape.
-fun sync_level_crossing(source,
-                        destination_clock_or_stages,
-                        explicit_stages = #false):
+fun sync_level_crossing(source :: HardwareEntity,
+                        destination_clock_or_stages :: HardwareEntity || List.of(HardwareEntity),
+                        explicit_stages :: False || List.of(HardwareEntity) = #false):
   kernel.reject_unsupported_conditional_effect(
     "sync-level crossing evidence",
     Location(),
@@ -135,14 +144,16 @@ fun sync_level_crossing(source,
                                ambient_clock(),
                                destination_clock_or_stages)
 
-fun ensure_root_declarations(elaboration, pending_declarations):
+fun ensure_root_declarations(elaboration :: DesignElaboration,
+                             pending_declarations :: List):
   for (pending in pending_declarations):
     unless pending.module_def === elaboration.top
     | kernel.frontend_fail(
         "clocking environment declarations must belong to the elaborated top circuit"
       )
 
-fun run_clocking_elaboration(program :: Function, enforce_cdc = #false):
+fun run_clocking_elaboration(program :: Function.of_arity(0),
+                             enforce_cdc :: Boolean = #false):
   def collector = ClockingCollector()
   def elaboration = parameterize { current_clocking_collector: collector }:
                       kernel.run_elaboration_with_top(program)

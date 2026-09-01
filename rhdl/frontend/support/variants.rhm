@@ -3,6 +3,7 @@
 
 import:
   rhombus.bits.(<<) as <<
+  "../../../host/annotations.rhm" open
   "../../core/ir.rhm" open
   "finite-enum.rhm".FiniteEnumType
   "mux-lookup.rhm" as mux_support
@@ -29,7 +30,9 @@ class VariantIdentity()
 
 // A missing payload type denotes a nullary variant. Payload-bearing type
 // families reuse the same tag schema without inventing a zero-width Unit type.
-class VariantMember(name :: String, encoding :: Nat, payload_type = #false)
+class VariantMember(name :: AsciiIdentifier,
+                    encoding :: Nat,
+                    payload_type :: False || DataType = #false)
 
 class VariantSchema(name :: String,
                     identity :: VariantIdentity,
@@ -37,27 +40,26 @@ class VariantSchema(name :: String,
                     width :: PosInt,
                     one_hot :: Boolean)
 
-fun payload_type_equal(left, right):
-  cond
-  | left == #false || right == #false: left == #false && right == #false
-  | left is_a DataType && right is_a DataType: type_equal(left, right)
-  | ~else: #false
+fun payload_type_equal(left :: False || DataType,
+                       right :: False || DataType):
+  if left == #false || right == #false
+  | left == #false && right == #false
+  | type_equal(left, right)
 
 // Declaration identity is nominal, while the realized member payloads remain
 // part of equality so parameterized families can specialize safely.
-fun variant_members_equal(left, right):
+fun variant_members_equal(left :: NonemptyList.of(VariantMember),
+                          right :: NonemptyList.of(VariantMember)):
   if left.length() != right.length()
   | #false
   | for all (left_member in left, right_member in right):
       left_member.name == right_member.name && left_member.encoding == right_member.encoding && payload_type_equal(left_member.payload_type, right_member.payload_type)
 
-fun variant_schema_equal(left, right):
-  if !(left is_a VariantSchema && right is_a VariantSchema)
-  | #false
-  | left.identity === right.identity && left.width == right.width && left.one_hot == right.one_hot && variant_members_equal(left.members, right.members)
+fun variant_schema_equal(left :: VariantSchema, right :: VariantSchema):
+  left.identity === right.identity && left.width == right.width && left.one_hot == right.one_hot && variant_members_equal(left.members, right.members)
 
 fun required_variant_width(maximum_encoding :: Nat):
-  fun loop(width, capacity):
+  fun loop(width :: PosInt, capacity :: PosInt):
     if maximum_encoding < capacity
     | width
     | loop(width + 1, capacity * 2)
@@ -65,20 +67,24 @@ fun required_variant_width(maximum_encoding :: Nat):
 
 fun validate_variant_specs(name :: String,
                            identity :: VariantIdentity,
-                           specs :: NonemptyList,
-                           requested_width,
+                           specs :: NonemptyList.of(List),
+                           requested_width :: False || PosInt,
                            ~one_hot: one_hot :: Boolean = #false):
   for (spec in specs):
-    unless spec is_a List && spec.length() == 3 && spec[0] is_a String && spec[1] is_a Nat
+    unless spec.length() == 3 && spec[0] is_a String && spec[1] is_a Nat
     | error(~who: #'variant_schema,
             "variant specifications must be [name, encoding, payload type] triples")
   def names = specs.map(fun (spec): spec[0])
   def encodings = specs.map(fun (spec): spec[1])
   for (member_name in names):
-    when names.filter(~keep: fun (candidate): candidate == member_name).length() != 1
+    when names.filter(
+      ~keep: fun (candidate): candidate == member_name
+    ).length() != 1
     | error(~who: #'variant_schema, "variant names must be unique")
   for (encoding in encodings):
-    when encodings.filter(~keep: fun (candidate): candidate == encoding).length() != 1
+    when encodings.filter(
+      ~keep: fun (candidate): candidate == encoding
+    ).length() != 1
     | error(~who: #'variant_schema, "variant encodings must be unique")
   def mutable maximum_encoding = 0
   for (encoding in encodings):
@@ -89,9 +95,6 @@ fun validate_variant_specs(name :: String,
     if requested_width == #false
     | minimum_width
     | block:
-        unless requested_width is_a PosInt
-        | error(~who: #'variant_schema,
-                "variant width must be a positive host integer")
         when requested_width < minimum_width
         | error(~who: #'variant_schema,
                 "variant encoding does not fit the declared width")
@@ -106,8 +109,8 @@ fun validate_variant_specs(name :: String,
 
 fun make_automatic_variant_schema(name :: String,
                                   identity :: VariantIdentity,
-                                  members :: NonemptyList,
-                                  requested_width = #false):
+                                  members :: NonemptyList.of(List),
+                                  requested_width :: False || PosInt = #false):
   validate_variant_specs(
     name,
     identity,
@@ -118,13 +121,13 @@ fun make_automatic_variant_schema(name :: String,
 
 fun make_explicit_variant_schema(name :: String,
                                  identity :: VariantIdentity,
-                                 members :: NonemptyList,
-                                 requested_width = #false):
+                                 members :: NonemptyList.of(List),
+                                 requested_width :: False || PosInt = #false):
   validate_variant_specs(name, identity, members, requested_width)
 
 fun make_one_hot_variant_schema(name :: String,
                                 identity :: VariantIdentity,
-                                members :: NonemptyList):
+                                members :: NonemptyList.of(List)):
   validate_variant_specs(
     name,
     identity,
@@ -145,13 +148,13 @@ class EnumType(schema :: VariantSchema):
   property width: schema.width
 
   override method describe(): "enum<" ++ schema.name ++ ">"
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     enum_type(other) && schema.identity === other.schema.identity
   override method bit_width(): schema.width
   override method packed_width(): schema.width
   override method enum_encodings():
     schema.members.map(fun (member): member.encoding)
-  override method normalize_mux_lookup_key(key):
+  override method normalize_mux_lookup_key(key :: mux_support.MuxLookupKey || Nat):
     unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
     | error(~who: #'mux_lookup,
             "enum mux lookup keys must be members of the selector's enum type")
@@ -168,13 +171,13 @@ class OneHotEnumType(schema :: VariantSchema):
   property width: schema.width
 
   override method describe(): "one-hot enum<" ++ schema.name ++ ">"
-  override method type_equal(other):
+  override method type_equal(other :: HardwareType):
     enum_type(other) && schema.identity === other.schema.identity
   override method bit_width(): schema.width
   override method packed_width(): schema.width
   override method enum_encodings():
     schema.members.map(fun (member): member.encoding)
-  override method normalize_mux_lookup_key(key):
+  override method normalize_mux_lookup_key(key :: mux_support.MuxLookupKey || Nat):
     unless key is_a mux_support.MuxLookupKey && this.type_equal(key.mux_lookup_key_type())
     | error(~who: #'mux_lookup,
             "enum mux lookup keys must be members of the selector's enum type")
@@ -184,20 +187,20 @@ class OneHotEnumType(schema :: VariantSchema):
 fun enum_type_from_schema(schema :: VariantSchema):
   if schema.one_hot | OneHotEnumType(schema) | EnumType(schema)
 
-fun enum_type(type):
+fun enum_type(type :: HardwareType):
   type is_a EnumType || type is_a OneHotEnumType
 
-fun enum_width(type):
+fun enum_width(type :: HardwareType):
   unless enum_type(type)
   | error(~who: #'enum_width, "expected a hardware enum type")
   type.schema.width
 
-fun enum_members(type):
+fun enum_members(type :: HardwareType):
   unless enum_type(type)
   | error(~who: #'enum_members, "expected a hardware enum type")
   type.schema.members.map(fun (member): member.name)
 
-fun enum_encoding(type, member_name :: String):
+fun enum_encoding(type :: HardwareType, member_name :: String):
   unless enum_type(type)
   | error(~who: #'enum_encoding, "expected a hardware enum type")
   def member = type.schema.members.find(
@@ -208,14 +211,16 @@ fun enum_encoding(type, member_name :: String):
           "enum " ++ type.schema.name ++ " has no member named " ++ member_name)
   member.encoding
 
-class EnumValue(type, member_name, encoding):
+class EnumValue(type :: EnumType || OneHotEnumType,
+                member_name :: String,
+                encoding :: Nat):
   implements mux_support.MuxLookupKey
   override method literal_type(): type
   override method packed_value(): encoding
   override method mux_lookup_key_type(): type
   override method mux_lookup_key_encoding(): encoding
 
-fun enum_value(type, member_name):
+fun enum_value(type :: HardwareType, member_name :: String):
   unless enum_type(type)
   | error(~who: #'hardware_enum, "member access requires an enum type")
   EnumValue(type, member_name, enum_encoding(type, member_name))

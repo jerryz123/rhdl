@@ -10,39 +10,41 @@ export:
   ReachableRouting
   analyze_reachability
 
-fun contains_vc(vcs, vc):
+fun contains_vc(vcs :: List.of(VCId), vc :: VCId):
   vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
 
-fun at_destination(materialized, route_class, origin):
+fun at_destination(materialized :: MaterializedRouting,
+                   route_class :: RouteClass,
+                   origin :: Injection || HeldVC):
   cond
   | origin is_a Injection:
       node_id_equal(origin.terminal.router, route_class.destination.router)
   | origin is_a HeldVC:
       def link = materialized.topology.find_vc_link(origin.vc)
       node_id_equal(link.destination, route_class.destination.router)
-  | ~else:
-      error(~who: #'analyze_reachability,
-            "reachable origin must be an Injection or HeldVC")
 
-class RouteReachability(route_class, reachable_vcs, reachable_decisions):
+class RouteReachability(route_class :: RouteClass,
+                        reachable_vcs :: List.of(VCId),
+                        reachable_decisions :: List.of(MaterializedDecision)):
   opaque
   internal _RouteReachability
   constructor ~none
 
-  method reaches_vc(vc):
-    vc is_a VCId && contains_vc(reachable_vcs, vc)
+  method reaches_vc(vc :: VCId):
+    contains_vc(reachable_vcs, vc)
 
   method describe():
     def vc_names = reachable_vcs.map(fun (vc): vc.describe())
     String.append(route_class.id.describe(), ": [",
                   String.join(vc_names, ", "), "]")
 
-class ReachableRouting(materialized, routes):
+class ReachableRouting(materialized :: MaterializedRouting,
+                       routes :: List.of(RouteReachability)):
   opaque
   internal _ReachableRouting
   constructor ~none
 
-  method for_route(route_class):
+  method for_route(route_class :: RouteClass):
     unless materialized.contains_route_class(route_class)
     | error(~who: #'ReachableRouting,
             "route class does not belong to this reachable routing")
@@ -63,21 +65,21 @@ class ReachableRouting(materialized, routes):
   method describe():
     String.join(routes.map(fun (route): route.describe()), "\n")
 
-fun dead_end(route_class, origin):
+fun dead_end(route_class :: RouteClass, origin :: Injection || HeldVC):
   error(~who: #'analyze_reachability,
         String.append("reachable dead end for route class ",
                       route_class.id.describe(), " at ", origin.describe(),
                       "; destination is ",
                       route_class.destination.describe()))
 
-fun destination_unreachable(route_class):
+fun destination_unreachable(route_class :: RouteClass):
   error(~who: #'analyze_reachability,
         String.append("destination ", route_class.destination.describe(),
                       " is unreachable for route class ",
                       route_class.id.describe(), " from ",
                       route_class.source.describe()))
 
-fun analyze_route(materialized, route_class):
+fun analyze_route(materialized :: MaterializedRouting, route_class :: RouteClass):
   def mutable pending = [Injection(route_class.source)]
   def mutable reachable_vcs = []
   def mutable reachable_decisions = []

@@ -5,6 +5,12 @@ import:
   "../../core/ir.rhm" open
 
 export:
+  ResetUse
+  ModuleClockingSummary
+  TemporalProvenance
+  SinkInputClassification
+  TopInputTiming
+  EnvironmentClockRelationship
   ClockUse
   ClockGroup
   NoReset
@@ -52,144 +58,181 @@ export:
 
 // Records one module-local clocked effect after transparent wire aliases have
 // been resolved. A false reset means the operation is resetless.
+interface ResetUse
+interface ModuleClockingSummary
+interface TemporalProvenance
+interface SinkInputClassification
+interface TopInputTiming
+interface EnvironmentClockRelationship
+
 class ClockUse(operation :: Operation,
                clock :: Value,
-               reset = #false)
+               reset :: False || Value = #false)
 
 class ClockGroup(clock :: Value,
-                 uses :: List)
+                 uses :: List.of(ClockUse))
 
-class NoReset(operations :: List)
+class NoReset(operations :: List.of(Operation)):
+  implements ResetUse
 class AmbientReset(reset :: Value,
-                   operations :: List)
+                   operations :: List.of(Operation)):
+  implements ResetUse
 class LocalReset(reset :: Value,
-                 operations :: List)
+                 operations :: List.of(Operation)):
+  implements ResetUse
 
 // These three result shapes keep the important clocking distinction explicit
 // without adding domain metadata to the hardware IR itself.
 class Combinational(module_def :: Module,
-                    reset_uses :: List)
+                    reset_uses :: List.of(ResetUse)):
+  implements ModuleClockingSummary
 class SingleClock(module_def :: Module,
                   clock :: Value,
-                  reset_uses :: List,
-                  clocked_operations :: List)
+                  reset_uses :: List.of(ResetUse),
+                  clocked_operations :: List.of(Operation)):
+  implements ModuleClockingSummary
 class MultiClock(module_def :: Module,
-                 clock_groups :: List,
-                 reset_uses :: List)
+                 clock_groups :: List.of(ClockGroup),
+                 reset_uses :: List.of(ResetUse)):
+  implements ModuleClockingSummary
 
 // Temporal provenance remains an analysis result. External leaves are
 // symbolic until a containing instance binds them, while state keeps its
 // defining operation and instance path so reused definitions stay distinct.
-class StaticProvenance()
+class StaticProvenance():
+  implements TemporalProvenance
 class ExternalProvenance(input_index :: Nat,
-                         path :: List)
-class ControlReference(instance_path :: List,
+                         path :: List.of(String || Nat)):
+  implements TemporalProvenance
+class ControlReference(instance_path :: List.of(Operation),
                        value :: Value)
-class StateProvenance(instance_path :: List,
+class StateProvenance(instance_path :: List.of(Operation),
                       operation :: Operation,
-                      path :: List,
-                      clock,
-                      reset = #false)
-class CrossingReference(instance_path :: List,
+                      path :: List.of(String || Nat),
+                      clock :: False || ControlReference,
+                      reset :: False || ControlReference = #false):
+  implements TemporalProvenance
+class CrossingReference(instance_path :: List.of(Operation),
                         operation :: Operation)
 class CrossedProvenance(crossing :: CrossingReference,
-                        path :: List,
-                        source_origins :: List,
-                        destination_clock)
+                        path :: List.of(String || Nat),
+                        source_origins :: List.of(TemporalProvenance),
+                        destination_clock :: False || ControlReference):
+  implements TemporalProvenance
 
 // A sink-input classification records what is known independently of whether
 // a caller chooses report-only analysis or the strict CDC policy.
-class StaticInput()
-class SameClock(clock :: ControlReference)
+class StaticInput():
+  implements SinkInputClassification
+class SameClock(clock :: ControlReference):
+  implements SinkInputClassification
 class ForeignClock(source_clock :: ControlReference,
-                   destination_clock :: ControlReference)
-class UnknownInput(inputs :: List)
-class MultiClockFanIn(clocks :: List)
-class MixedTimingFanIn(clocks :: List,
-                       inputs :: List)
-class UnknownClock(states :: List)
+                   destination_clock :: ControlReference):
+  implements SinkInputClassification
+class UnknownInput(inputs :: List.of(TemporalProvenance)):
+  implements SinkInputClassification
+class MultiClockFanIn(clocks :: List.of(ControlReference)):
+  implements SinkInputClassification
+class MixedTimingFanIn(clocks :: List.of(ControlReference),
+                       inputs :: List.of(TemporalProvenance)):
+  implements SinkInputClassification
+class UnknownClock(states :: List.of(TemporalProvenance)):
+  implements SinkInputClassification
 
 // Closed-design input contracts bind symbolic top input leaves to timing
 // intent without mutating the module or its reusable symbolic summary. A
 // contract path may name one aggregate subtree; overlapping contracts are
 // rejected by closed-design analysis.
-class UnknownInputTiming()
-class SynchronousInputTiming(clock :: Value)
-class AsynchronousInputTiming()
+class UnknownInputTiming():
+  implements TopInputTiming
+class SynchronousInputTiming(clock :: Value):
+  implements TopInputTiming
+class AsynchronousInputTiming():
+  implements TopInputTiming
 class TopInputContract(input :: Value,
-                       path :: List,
-                       timing)
+                       path :: List.of(String || Nat),
+                       timing :~ TopInputTiming)
 
 // Clock relationships are environment facts between concrete top-level Clock
 // inputs. Identical is an equivalence relation; the other relationships remain
 // report-only until their compatibility policies are specified.
 class IdenticalClockRelationship(left :: Value,
-                                 right :: Value)
+                                 right :: Value):
+  implements EnvironmentClockRelationship
 class DerivedClockRelationship(source :: Value,
                                destination :: Value,
-                               description :: String)
+                               description :: String):
+  implements EnvironmentClockRelationship
 class AsynchronousClockRelationship(left :: Value,
-                                    right :: Value)
+                                    right :: Value):
+  implements EnvironmentClockRelationship
 class ExclusiveClockRelationship(left :: Value,
                                  right :: Value,
-                                 description :: String)
-class TemporalEnvironment(input_contracts :: List = [],
-                          clock_relationships :: List = [])
+                                 description :: String):
+  implements EnvironmentClockRelationship
+class TemporalEnvironment(input_contracts :: List.of(TopInputContract) = [],
+                          clock_relationships :: List.of(EnvironmentClockRelationship) = [])
 
 // Closed-design classifications distinguish exact identity from declared
 // relationships and from an asynchronous external input contract.
 class IdenticalClock(source_clock :: ControlReference,
-                     destination_clock :: ControlReference)
+                     destination_clock :: ControlReference):
+  implements SinkInputClassification
 class DerivedClock(source_clock :: ControlReference,
                    destination_clock :: ControlReference,
-                   relationship :: DerivedClockRelationship)
+                   relationship :: DerivedClockRelationship):
+  implements SinkInputClassification
 class AsynchronousClock(source_clock :: ControlReference,
                         destination_clock :: ControlReference,
-                        relationship :: AsynchronousClockRelationship)
+                        relationship :: AsynchronousClockRelationship):
+  implements SinkInputClassification
 class ExclusiveClock(source_clock :: ControlReference,
                      destination_clock :: ControlReference,
-                     relationship :: ExclusiveClockRelationship)
+                     relationship :: ExclusiveClockRelationship):
+  implements SinkInputClassification
 class UnknownClockRelationship(source_clock :: ControlReference,
-                               destination_clock :: ControlReference)
-class AsynchronousEnvironmentInput(inputs :: List)
+                               destination_clock :: ControlReference):
+  implements SinkInputClassification
+class AsynchronousEnvironmentInput(inputs :: List.of(TemporalProvenance)):
+  implements SinkInputClassification
 
 class OutputLeafProvenance(output_index :: Nat,
-                           path :: List,
-                           origins :: List)
+                           path :: List.of(String || Nat),
+                           origins :: List.of(TemporalProvenance))
 class TemporalSinkInput(name :: String,
-                        path :: List,
-                        origins :: List,
-                        classification,
-                        crossing = #false)
-class TemporalSink(instance_path :: List,
+                        path :: List.of(String || Nat),
+                        origins :: List.of(TemporalProvenance),
+                        classification :: SinkInputClassification,
+                        crossing :: False || CrossingReference = #false)
+class TemporalSink(instance_path :: List.of(Operation),
                    operation :: Operation,
                    kind :: String,
                    clock :: ControlReference,
-                   inputs :: List)
+                   inputs :: List.of(TemporalSinkInput))
 // Closed-design CDC policy findings retain enough structure for tools to
 // navigate the sink and explain every unsafe origin without parsing text.
-class CdcViolation(instance_path :: List,
+class CdcViolation(instance_path :: List.of(Operation),
                    operation :: Operation,
                    sink_kind :: String,
                    input_name :: String,
-                   input_path :: List,
-                   classification,
-                   origins :: List,
+                   input_path :: List.of(String || Nat),
+                   classification :: SinkInputClassification,
+                   origins :: List.of(TemporalProvenance),
                    reason :: String)
 class CrossingArrival(input_name :: String,
-                      input_path :: List,
+                      input_path :: List.of(String || Nat),
                       provenance :: CrossedProvenance)
-class CrossingReconvergence(instance_path :: List,
+class CrossingReconvergence(instance_path :: List.of(Operation),
                             operation :: Operation,
                             kind :: String,
-                            arrivals :: List)
+                            arrivals :: List.of(CrossingArrival))
 class ModuleTemporalSummary(module_def :: Module,
-                            output_leaves :: List,
-                            sinks :: List,
-                            reconvergences :: List = [])
+                            output_leaves :: List.of(OutputLeafProvenance),
+                            sinks :: List.of(TemporalSink),
+                            reconvergences :: List.of(CrossingReconvergence) = [])
 class DesignTemporalSummary(elaboration :: DesignElaboration,
                             environment :: TemporalEnvironment,
-                            output_leaves :: List,
-                            sinks :: List,
-                            reconvergences :: List = [],
-                            cdc_violations :: List = [])
+                            output_leaves :: List.of(OutputLeafProvenance),
+                            sinks :: List.of(TemporalSink),
+                            reconvergences :: List.of(CrossingReconvergence) = [],
+                            cdc_violations :: List.of(CdcViolation) = [])

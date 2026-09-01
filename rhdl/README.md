@@ -156,7 +156,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/boundary.rhdl` | Flow-named compatibility aliases for generic interface injection and ejection | None |
 | `std/flow/filter.rhdl` | Configured inline predicate filtering for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/gate.rhdl` | Configured combinational enable gating for ready-valid flows | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
-| `std/flow/parallel.rhdl` | Configured parallel composition over generic interface handles and terminated sinks | None |
+| `std/flow/parallel.rhdl` | Configured parallel composition over generic interface handles and terminated sinks | `std/flow/ready-valid-support.rhdl` |
 | `std/flow.rhdl` | Valid-only, ready-valid, credited, virtual-channel, and flit-format protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flit.rhdl`, and all `std/flow/` modules |
 
 ## Frontend layer dependencies

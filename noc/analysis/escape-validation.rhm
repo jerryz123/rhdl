@@ -20,10 +20,10 @@ export:
   MissingEscapeRoute
   validate_escape_subnetwork
 
-fun contains_vc(vcs, vc):
+fun contains_vc(vcs :: List.of(VCId), vc :: VCId):
   vcs.find(fun (candidate): vc_id_equal(candidate, vc)) != #false
 
-fun duplicate_vc(vcs, vc):
+fun duplicate_vc(vcs :: List.of(VCId), vc :: VCId):
   vcs.filter(~keep: fun (candidate): vc_id_equal(candidate, vc)).length() > 1
 
 class EscapeValidationRequest(topology :: Topology,
@@ -39,8 +39,8 @@ class EscapeValidationRequest(topology :: Topology,
               "duplicate escape VC " ++ vc.describe())
     super(topology, escape_vcs.sort(vc_id_less))
 
-  method contains(vc):
-    vc is_a VCId && contains_vc(escape_vcs, vc)
+  method contains(vc :: VCId):
+    contains_vc(escape_vcs, vc)
 
   method describe():
     "escape-vcs=[" ++ String.join(
@@ -48,7 +48,8 @@ class EscapeValidationRequest(topology :: Topology,
       ", "
     ) ++ "]"
 
-class EscapeEntryEvidence(origin, decisions):
+class EscapeEntryEvidence(origin :: Injection || HeldVC,
+                          decisions :: NonemptyList.of(MaterializedDecision)):
   opaque
   internal _EscapeEntryEvidence
   constructor ~none
@@ -59,11 +60,11 @@ class EscapeEntryEvidence(origin, decisions):
       ", "
     ) ++ "]"
 
-class EscapeRouteEvidence(route_class,
-                          reachable_escape_vcs,
-                          viable_escape_vcs,
-                          escape_decisions,
-                          entries):
+class EscapeRouteEvidence(route_class :: RouteClass,
+                          reachable_escape_vcs :: List.of(VCId),
+                          viable_escape_vcs :: List.of(VCId),
+                          escape_decisions :: List.of(MaterializedDecision),
+                          entries :: List.of(EscapeEntryEvidence)):
   opaque
   internal _EscapeRouteEvidence
   constructor ~none
@@ -73,12 +74,13 @@ class EscapeRouteEvidence(route_class,
                   to_string(reachable_escape_vcs.length()),
                   ", entries=", to_string(entries.length()))
 
-class EscapeReachabilityEvidence(reachable, routes):
+class EscapeReachabilityEvidence(reachable :: ReachableRouting,
+                                 routes :: List.of(EscapeRouteEvidence)):
   opaque
   internal _EscapeReachabilityEvidence
   constructor ~none
 
-  method for_route(route_class):
+  method for_route(route_class :: RouteClass):
     unless reachable.materialized.contains_route_class(route_class)
     | error(~who: #'EscapeReachabilityEvidence,
             "route class does not belong to this escape evidence")
@@ -93,7 +95,7 @@ class EscapeReachabilityEvidence(reachable, routes):
   method describe():
     String.join(routes.map(fun (route): route.describe()), "\n")
 
-class EscapeClosureEvidence(decisions):
+class EscapeClosureEvidence(decisions :: List.of(MaterializedDecision)):
   opaque
   internal _EscapeClosureEvidence
   constructor ~none
@@ -101,16 +103,17 @@ class EscapeClosureEvidence(decisions):
   method describe():
     "closed escape transitions=" ++ to_string(decisions.length())
 
-class EscapeValidationEvidence(request,
-                               reachability,
-                               closure,
-                               dependency_graph,
-                               acyclic_certificate):
+class EscapeValidationEvidence(request :: EscapeValidationRequest,
+                               reachability :: EscapeReachabilityEvidence,
+                               closure :: EscapeClosureEvidence,
+                               dependency_graph :: VCDependencyGraph,
+                               acyclic_certificate :: AcyclicCertificate):
   opaque
   internal _EscapeValidationEvidence
   constructor ~none
 
-class EscapeClosureViolation(route_class, decision):
+class EscapeClosureViolation(route_class :: RouteClass,
+                             decision :: MaterializedDecision):
   opaque
   internal _EscapeClosureViolation
   constructor ~none
@@ -122,7 +125,8 @@ class EscapeClosureViolation(route_class, decision):
                   decision.candidate_vc.describe(),
                   " leaves the escape VC set")
 
-class MissingEscapeEntry(route_class, origin):
+class MissingEscapeEntry(route_class :: RouteClass,
+                         origin :: Injection || HeldVC):
   opaque
   internal _MissingEscapeEntry
   constructor ~none
@@ -131,7 +135,8 @@ class MissingEscapeEntry(route_class, origin):
     String.append("missing viable escape entry for route class ",
                   route_class.id.describe(), " at ", origin.describe())
 
-class MissingEscapeRoute(route_class, origin):
+class MissingEscapeRoute(route_class :: RouteClass,
+                         origin :: Injection || HeldVC):
   opaque
   internal _MissingEscapeRoute
   constructor ~none
@@ -142,7 +147,9 @@ class MissingEscapeRoute(route_class, origin):
                   "; destination is ",
                   route_class.destination.describe())
 
-fun origin_at_destination(materialized, route_class, origin):
+fun origin_at_destination(materialized :: MaterializedRouting,
+                          route_class :: RouteClass,
+                          origin :: Injection || HeldVC):
   cond
   | origin is_a Injection:
       node_id_equal(origin.terminal.router, route_class.destination.router)
@@ -151,26 +158,31 @@ fun origin_at_destination(materialized, route_class, origin):
         materialized.topology.find_vc_link(origin.vc).destination,
         route_class.destination.router
       )
-  | ~else:
-      error(~who: #'validate_escape_subnetwork,
-            "escape origin must be an Injection or HeldVC")
 
-fun allowed_decisions(materialized, route_class, origin):
+fun allowed_decisions(materialized :: MaterializedRouting,
+                      route_class :: RouteClass,
+                      origin :: Injection || HeldVC):
   materialized.decisions_for(route_class, origin).filter(
     ~keep: fun (decision): decision.allowed
   )
 
-fun escape_decisions(materialized, request, route_class, origin):
+fun escape_decisions(materialized :: MaterializedRouting,
+                     request :: EscapeValidationRequest,
+                     route_class :: RouteClass,
+                     origin :: Injection || HeldVC):
   allowed_decisions(materialized, route_class, origin).filter(
     ~keep: fun (decision): request.contains(decision.candidate_vc)
   )
 
-fun reachable_escape_vcs(route, request):
+fun reachable_escape_vcs(route :: RouteReachability,
+                         request :: EscapeValidationRequest):
   route.reachable_vcs.filter(
     ~keep: fun (vc): request.contains(vc)
   ).sort(vc_id_less)
 
-fun find_closure_violation(materialized, reachable, request):
+fun find_closure_violation(materialized :: MaterializedRouting,
+                           reachable :: ReachableRouting,
+                           request :: EscapeValidationRequest):
   def mutable violation = #false
   def mutable closed_decisions = []
   for (route in reachable.routes):
@@ -192,7 +204,10 @@ fun find_closure_violation(materialized, reachable, request):
   | violation
   | _EscapeClosureEvidence(closed_decisions)
 
-fun viable_escape_vcs(materialized, route_class, escape_vcs, request):
+fun viable_escape_vcs(materialized :: MaterializedRouting,
+                      route_class :: RouteClass,
+                      escape_vcs :: List.of(VCId),
+                      request :: EscapeValidationRequest):
   def mutable viable = escape_vcs.filter(
     ~keep: fun (vc): origin_at_destination(materialized, route_class, HeldVC(vc))
   )
@@ -214,7 +229,9 @@ fun viable_escape_vcs(materialized, route_class, escape_vcs, request):
           changed := #true
   viable.sort(vc_id_less)
 
-fun analyze_escape_route(materialized, reachable_route, request):
+fun analyze_escape_route(materialized :: MaterializedRouting,
+                         reachable_route :: RouteReachability,
+                         request :: EscapeValidationRequest):
   def route_class = reachable_route.route_class
   def route_escape_vcs = reachable_escape_vcs(reachable_route, request)
   def viable = viable_escape_vcs(

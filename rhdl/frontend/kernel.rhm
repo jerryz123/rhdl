@@ -2,12 +2,14 @@
 // Implements context-based elaboration and deferred frontend hardware values.
 
 import:
+  "../../host/annotations.rhm" open
   "../core/ir.rhm" open
   "../core/builder.rhm" open
   "../core/verify.rhm" open
 
 export:
   CircuitParam
+  CircuitIdentity
   HardwareEntity
   DeferredHardwareValue
   StaticHardwareValue
@@ -79,13 +81,12 @@ export:
   conditional_chain
   switch_chain
   read
-  hardware_entity
   frontend_fail
 
 // Marks immutable host values for circuit specialization reuse. Ordinary
 // equality is the default; implementations may supply semantic equality.
 interface CircuitParam:
-  method same_circuit_param(other) :: Boolean:
+  method same_circuit_param(other :: CircuitParam) :: Boolean:
     this == other
 
 // Lets frontend-only wrappers carry authoring metadata while still selecting
@@ -93,22 +94,19 @@ interface CircuitParam:
 interface CircuitDefinition:
   method core_module()
 
-fun circuit_module(definition):
+fun circuit_module(definition :: Module || CircuitDefinition):
   cond
   | definition is_a Module: definition
   | definition is_a CircuitDefinition: definition.core_module()
-  | ~else: #false
 
-fun frontend_fail(message, location = Location()):
+fun frontend_fail(message :: String, location :: Location = Location()):
   error(~who: #'rhdl, location.describe() ++ ": " ++ message)
-
-interface HardwareEntity
 
 // Lets frontend layers retain authoring metadata until a value is actually
 // consumed by hardware construction.
 interface DeferredHardwareValue:
   extends HardwareEntity
-  method materialize_hardware(location)
+  method materialize_hardware(location :: Location)
 
 // Marks deferred hardware descriptions that contain no circuit-bound values.
 // Unlike Values, Places, and other live hardware entities, these host values
@@ -120,53 +118,52 @@ interface StaticHardwareValue:
 // next-state place until a read or drive context selects the appropriate side.
 interface RegisterPathValue:
   extends DeferredHardwareValue
-  method drive_hardware(location)
+  method drive_hardware(location :: Location)
 
 // Lets a frontend-only lvalue lower an assignment without pretending that a
 // runtime-selected destination is a structural core Place.
 interface DynamicAssignmentTarget:
   extends DeferredHardwareValue
-  method assign_hardware(entity, location)
+  method assign_hardware(entity :: HardwareEntity, location :: Location)
 
-class RegisterPath(materialize_current, next, mutable current = #false):
+class RegisterPath(materialize_current :: Function.of_arity(0),
+                   next :: Place,
+                   mutable current :: False || Value = #false):
   implements RegisterPathValue
 
-  override method materialize_hardware(location):
+  override method materialize_hardware(location :: Location):
     unless current
     | current := materialize_current()
     current
-  override method drive_hardware(location): next
+  override method drive_hardware(location :: Location): next
 
-fun hardware_entity(value):
-  cond
-  | value is_a Value: #true
-  | value is_a Place: #true
-  | value is_a Register: #true
-  | value is_a Memory: #true
-  | value is_a Operation: #true
-  | value is_a Port: #true
-  | value is_a Instance: #true
-  | ~else: value is_a HardwareEntity
-
-class CircuitIdentity(name)
-class ActiveCircuit(identity,
-                    name,
-                    mutable finalizers = [],
-                    mutable vector_writes = [])
-class CircuitSpecialization(arguments, module_def)
+class CircuitIdentity(name :: String)
+class.together:
+  class ActiveCircuit(identity :: CircuitIdentity,
+                      name :: String,
+                      mutable finalizers :: List.of(Function.of_arity(0)) = [],
+                      mutable vector_writes :: List.of(ConditionalVectorWrite) = [])
+  class ConditionalVectorWrite(register :: Register,
+                               index :: Value,
+                               data :: Value,
+                               enable :: Value,
+                               location :: Location)
+class CircuitSpecialization(arguments :: List, module_def :: Module)
 
 fun new_circuit_identity(name :: String):
   CircuitIdentity(name)
 
-class FrontendContext(design,
-                      builder,
-                      mutable active = #true,
-                      mutable active_circuits = [],
-                      specializations_by_circuit = MutableMap.by(===){},
-                      mutable allocated_symbols = []):
-  method allocate_symbol(circuit_name):
+class FrontendContext(design :: Design,
+                      builder :: Builder,
+                      mutable active :: Boolean = #true,
+                      mutable active_circuits :: List.of(ActiveCircuit) = [],
+                      specializations_by_circuit :: MutableMap = MutableMap.by(===){},
+                      mutable allocated_symbols :: List.of(String) = []):
+  method allocate_symbol(circuit_name :: String):
     def base = circuit_name
-    def count = allocated_symbols.filter(~keep: fun (symbol): symbol == base).length()
+    def count = allocated_symbols.filter(
+      ~keep: fun (symbol): symbol == base
+    ).length()
     allocated_symbols := allocated_symbols ++ [base]
     if count == 0
     | base
@@ -177,73 +174,90 @@ Parameter.def current_module = #false
 Parameter.def current_conditional_branch = #false
 Parameter.def current_conditional_form = "when"
 
-class ConditionalAssignment(place, value)
-class ConditionalMemoryWrite(resource, address, data, clock, enable, location)
-class ConditionalVectorWrite(register, index, data, enable, location)
-class ConditionalAssertion(condition, clock, reset, guard, label, location)
+class ConditionalAssignment(place :: Place, value :: Value)
+class ConditionalMemoryWrite(resource :: Memory,
+                             address :: Value,
+                             data :: Value,
+                             clock :: Value,
+                             enable :: Value,
+                             location :: Location)
+class ConditionalAssertion(condition :: Value,
+                           clock :: Value,
+                           reset :: Value,
+                           guard :: False || Value,
+                           label :: False || AsciiIdentifier,
+                           location :: Location)
 
 // Collects assignments and supported effects along one mutually exclusive
 // hardware branch for guarded resolution after elaboration.
-class ConditionalBranch(mutable assignments = [],
-                        mutable memory_writes = [],
-                        mutable vector_writes = [],
-                        mutable assertions = []):
-  method assignment_for(place):
-    assignments.find(fun (assignment): assignment.place === place)
+class ConditionalBranch(
+      mutable assignments :: List.of(ConditionalAssignment) = [],
+      mutable memory_writes :: List.of(ConditionalMemoryWrite) = [],
+      mutable vector_writes :: List.of(ConditionalVectorWrite) = [],
+      mutable assertions :: List.of(ConditionalAssertion) = []):
+  method assignment_for(place :: Place):
+    assignments.find(
+      fun (assignment): assignment.place === place
+    )
 
-  method memory_writes_for(resource):
-    memory_writes.filter(~keep: fun (write): write.resource === resource)
+  method memory_writes_for(resource :: Memory):
+    memory_writes.filter(
+      ~keep: fun (write): write.resource === resource
+    )
 
-  method vector_writes_for(register):
-    vector_writes.filter(~keep: fun (write): write.register === register)
+  method vector_writes_for(register :: Register):
+    vector_writes.filter(
+      ~keep: fun (write): write.register === register
+    )
 
-  method add(place, value, location):
+  method add(place :: Place, value :: Value, location :: Location):
     when this.assignment_for(place)
     | frontend_fail("conditional branch assigns " ++ place.name ++ " more than once",
                     location)
     assignments := assignments ++ [ConditionalAssignment(place, value)]
 
-  method add_memory_write(write):
+  method add_memory_write(write :: ConditionalMemoryWrite):
     memory_writes := memory_writes ++ [write]
 
-  method add_vector_write(write):
+  method add_vector_write(write :: ConditionalVectorWrite):
     vector_writes := vector_writes ++ [write]
 
-  method add_assertion(assertion):
+  method add_assertion(assertion :: ConditionalAssertion):
     assertions := assertions ++ [assertion]
 
 // Prevents effects with no conditional-lowering protocol from escaping a
 // hardware branch without an explicit guard in their own semantics.
-fun reject_unsupported_conditional_effect(effect,
-                                          location = Location(),
-                                          guidance = "use ~enable for hardware control"):
+fun reject_unsupported_conditional_effect(
+      effect :: String,
+      location :: Location = Location(),
+      guidance :: String = "use ~enable for hardware control"):
   when current_conditional_branch() is_a ConditionalBranch
   | frontend_fail(String.append(effect, " is not supported inside ",
                                 current_conditional_form(), "; ", guidance),
                   location)
 
-fun require_context(location = Location()):
+fun require_context(location :: Location = Location()):
   def context = current_context()
   unless context is_a FrontendContext && context.active
   | frontend_fail("circuit generators may only be called during elaborate", location)
   context
 
-fun require_module(location = Location()):
+fun require_module(location :: Location = Location()):
   def module_def = current_module()
   unless module_def is_a Module
   | frontend_fail("hardware construction requires an active circuit", location)
   module_def
 
-fun active_module(location = Location()):
+fun active_module(location :: Location = Location()):
   require_context(location)
   require_module(location)
 
 // Allocates a deterministic elaboration-local hardware name for frontend
 // facilities that introduce anonymous connection structure.
-fun fresh_name(base :: String, location = Location()):
+fun fresh_name(base :: String, location :: Location = Location()):
   require_context(location).allocate_symbol(base)
 
-fun read(entity, location = Location()):
+fun read(entity :~ HardwareEntity, location :: Location = Location()):
   def context = require_context(location)
   cond
   | entity is_a DeferredHardwareValue:
@@ -258,7 +272,7 @@ fun read(entity, location = Location()):
 // Defers source-order-independent elaboration collateral until the active
 // circuit body has created and driven all of its declared hardware places.
 fun defer_circuit_finalizer(finalizer :: Function.of_arity(0),
-                            location = Location()):
+                            location :: Location = Location()):
   def context = require_context(location)
   unless context.active_circuits.length() > 0
   | frontend_fail("circuit finalizer requires an active circuit", location)
@@ -266,7 +280,7 @@ fun defer_circuit_finalizer(finalizer :: Function.of_arity(0),
   active.finalizers := active.finalizers ++ [finalizer]
   #void
 
-fun run_circuit_finalizers(location = Location()):
+fun run_circuit_finalizers(location :: Location = Location()):
   def context = require_context(location)
   unless context.active_circuits.length() > 0
   | frontend_fail("circuit finalizers require an active circuit", location)
@@ -277,18 +291,9 @@ fun run_circuit_finalizers(location = Location()):
   flush_vector_register_writes(active, location)
   #void
 
-fun circuit_param_value(value):
-  cond
-  | value is_a Boolean: #true
-  | value is_a Int: #true
-  | value is_a String: #true
-  | value is_a Symbol: #true
-  | value is_a List:
-      for all (element in value): circuit_param_value(element)
-  | hardware_type(value): #true
-  | ~else: value is_a CircuitParam
-
-fun circuit_params_same(left, right):
+fun circuit_params_same(
+      left :: Boolean || Int || String || Symbol || List || HardwareType || CircuitParam,
+      right :: Boolean || Int || String || Symbol || List || HardwareType || CircuitParam):
   cond
   | left is_a Boolean && right is_a Boolean: left == right
   | left is_a Int && right is_a Int: left == right
@@ -296,7 +301,7 @@ fun circuit_params_same(left, right):
   | left is_a Symbol && right is_a Symbol: left == right
   | left is_a List && right is_a List:
       circuit_param_lists_same(left, right)
-  | hardware_type(left) && hardware_type(right): type_equal(left, right)
+  | left is_a HardwareType && right is_a HardwareType: type_equal(left, right)
   | left is_a CircuitParam && right is_a CircuitParam:
       left.same_circuit_param(right) && right.same_circuit_param(left)
   | ~else: #false
@@ -311,20 +316,31 @@ fun build_circuit(identity :: CircuitIdentity,
                   name :: String,
                   arguments :: List,
                   implementation :: Function.of_arity(0),
-                  location = Location()):
+                  location :: Location = Location()):
   def context = require_context(location)
   for (argument in arguments, index in 0..arguments.length()):
-    when hardware_entity(argument) && !(argument is_a StaticHardwareValue)
+    when argument is_a HardwareEntity && !(argument is_a StaticHardwareValue)
     | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a CircuitParam, not hardware", location)
-    unless circuit_param_value(argument)
-    | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a stable immutable CircuitParam value", location)
+    def mutable pending = [argument]
+    while pending.length() > 0:
+      def candidate = pending[0]
+      pending := pending.drop(1)
+      cond
+      | candidate is_a Boolean || candidate is_a Int || candidate is_a String || candidate is_a Symbol || candidate is_a HardwareType || candidate is_a CircuitParam: #void
+      | candidate is_a List: pending := candidate ++ pending
+      | ~else:
+          frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a stable immutable CircuitParam value", location)
   def specializations = context.specializations_by_circuit.get(identity, #false)
   def cached = specializations && specializations.find(
-    fun (specialization): circuit_param_lists_same(specialization.arguments, arguments))
+    fun (specialization):
+      circuit_param_lists_same(specialization.arguments, arguments)
+  )
   if cached
   | cached.module_def
   | block:
-      when context.active_circuits.find(fun (active): active.identity === identity)
+      when context.active_circuits.find(
+        fun (active): active.identity === identity
+      )
       | frontend_fail("recursive elaboration of circuit " ++ name, location)
       def active_circuit = ActiveCircuit(identity, name)
       context.active_circuits := context.active_circuits ++ [active_circuit]
@@ -344,7 +360,9 @@ fun build_circuit(identity :: CircuitIdentity,
       | context.specializations_by_circuit[identity] := MutableList[specialization]
       module_def
 
-fun input(name, type, location = Location()):
+fun input(name :: AsciiIdentifier,
+          type :: HardwareType,
+          location :: Location = Location()):
   def context = require_context(location)
   context.builder.input(require_module(location),
                         name,
@@ -352,7 +370,9 @@ fun input(name, type, location = Location()):
                         location,
                         Origin("embedded input", name))
 
-fun output(name, type, location = Location()):
+fun output(name :: AsciiIdentifier,
+           type :: HardwareType,
+           location :: Location = Location()):
   def context = require_context(location)
   context.builder.output(require_module(location),
                          name,
@@ -360,7 +380,9 @@ fun output(name, type, location = Location()):
                          location,
                          Origin("embedded output", name))
 
-fun wire(name, type, location = Location()):
+fun wire(name :: AsciiIdentifier,
+         type :: HardwareType,
+         location :: Location = Location()):
   def context = require_context(location)
   context.builder.wire(require_module(location),
                        name,
@@ -368,7 +390,10 @@ fun wire(name, type, location = Location()):
                        location,
                        Origin("embedded wire", name))
 
-fun memory(name, depth, element_type, location = Location()):
+fun memory(name :: AsciiIdentifier,
+           depth :: PosInt,
+           element_type :: DataType,
+           location :: Location = Location()):
   def context = require_context(location)
   context.builder.memory(require_module(location),
                          name,
@@ -377,10 +402,10 @@ fun memory(name, depth, element_type, location = Location()):
                          location,
                          Origin("embedded memory", name))
 
-fun memory_read_async(memory_resource,
-                      address,
-                      name = #false,
-                      location = Location()):
+fun memory_read_async(memory_resource :: Memory,
+                      address :: HardwareEntity,
+                      name :: False || AsciiIdentifier = #false,
+                      location :: Location = Location()):
   def context = require_context(location)
   context.builder.memory_read_async(require_module(location),
                                     memory_resource,
@@ -390,12 +415,12 @@ fun memory_read_async(memory_resource,
                                     Origin("embedded async memory read",
                                            name || memory_resource.name))
 
-fun memory_write(memory_resource,
-                 address,
-                 data,
-                 clock,
-                 enable,
-                 location = Location()):
+fun memory_write(memory_resource :: Memory,
+                 address :: HardwareEntity,
+                 data :: HardwareEntity,
+                 clock :: HardwareEntity,
+                 enable :: HardwareEntity,
+                 location :: Location = Location()):
   def context = require_context(location)
   def write = ConditionalMemoryWrite(memory_resource,
                                      read(address, location),
@@ -416,15 +441,15 @@ fun memory_write(memory_resource,
                                  Origin("embedded memory write",
                                         memory_resource.name))
 
-fun sync_memory(name,
-                depth,
-                element_type,
-                clock,
-                has_read = #true,
-                has_write = #true,
-                has_read_write = #false,
-                mask_granularity = #false,
-                location = Location()):
+fun sync_memory(name :: AsciiIdentifier,
+                depth :: PosInt,
+                element_type :: DataType,
+                clock :: HardwareEntity,
+                has_read :: Boolean = #true,
+                has_write :: Boolean = #true,
+                has_read_write :: Boolean = #false,
+                mask_granularity :: False || PosInt = #false,
+                location :: Location = Location()):
   def context = require_context(location)
   context.builder.sync_memory(require_module(location),
                               name,
@@ -438,12 +463,12 @@ fun sync_memory(name,
                               location,
                               Origin("embedded synchronous memory", name))
 
-fun dpi_import(name,
-               input_names,
-               input_types,
-               result_name = #false,
-               result_type = #false,
-               location = Location()):
+fun dpi_import(name :: AsciiIdentifier,
+               input_names :: NonemptyList.of(AsciiIdentifier),
+               input_types :: NonemptyList.of(FlatDataType),
+               result_name :: False || AsciiIdentifier = #false,
+               result_type :: False || FlatDataType = #false,
+               location :: Location = Location()):
   def context = require_context(location)
   context.builder.dpi_import(name,
                              input_names,
@@ -452,11 +477,11 @@ fun dpi_import(name,
                              result_type,
                              location)
 
-fun dpi_import_results(name,
-                       input_names,
-                       input_types,
-                       results,
-                       location = Location()):
+fun dpi_import_results(name :: AsciiIdentifier,
+                       input_names :: NonemptyList.of(AsciiIdentifier),
+                       input_types :: NonemptyList.of(FlatDataType),
+                       results :: List.of(DpiResult),
+                       location :: Location = Location()):
   def context = require_context(location)
   context.builder.dpi_import_results(name,
                                      input_names,
@@ -464,11 +489,11 @@ fun dpi_import_results(name,
                                      results,
                                      location)
 
-fun assert(condition,
-           clock,
-           reset,
-           label = #false,
-           location = Location()):
+fun assert(condition :~ HardwareEntity,
+           clock :: HardwareEntity,
+           reset :: HardwareEntity,
+           label :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   def context = require_context(location)
   def assertion = ConditionalAssertion(read(condition, location),
                                        read(clock, location),
@@ -478,56 +503,66 @@ fun assert(condition,
                                        location)
   emit_conditional_assertion(assertion)
 
-fun dpi_call(dpi_import,
-             inputs :: List,
-             clock,
-             enable,
-             location = Location()):
+fun dpi_call(dpi_import :: DpiImport,
+             inputs :: List.of(HardwareEntity),
+             clock :: HardwareEntity,
+             enable :: HardwareEntity,
+             location :: Location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI call", location)
   context.builder.dpi_call(require_module(location),
                            dpi_import,
-                           inputs.map(fun (input): read(input, location)),
+                           inputs.map(
+                             fun (input): read(input, location)
+                           ),
                            read(clock, location),
                            read(enable, location),
                            location,
                            Origin("embedded DPI call", dpi_import.name))
 
-fun dpi_register(name,
-                 dpi_import,
-                 inputs :: List,
-                 clock,
-                 enable,
-                 location = Location()):
+fun dpi_register(name :: AsciiIdentifier,
+                 dpi_import :: DpiImport,
+                 inputs :: List.of(HardwareEntity),
+                 clock :: HardwareEntity,
+                 enable :: HardwareEntity,
+                 location :: Location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI register", location)
   context.builder.dpi_register(require_module(location),
                                name,
                                dpi_import,
-                               inputs.map(fun (input): read(input, location)),
+                               inputs.map(
+                                 fun (input): read(input, location)
+                               ),
                                read(clock, location),
                                read(enable, location),
                                location,
                                Origin("embedded DPI register", dpi_import.name))
 
-fun dpi_register_results(result_names,
-                         dpi_import,
-                         inputs :: List,
-                         clock,
-                         enable,
-                         location = Location()):
+fun dpi_register_results(result_names :: List.of(AsciiIdentifier),
+                         dpi_import :: DpiImport,
+                         inputs :: List.of(HardwareEntity),
+                         clock :: HardwareEntity,
+                         enable :: HardwareEntity,
+                         location :: Location = Location()):
   def context = require_context(location)
   reject_unsupported_conditional_effect("DPI register", location)
   context.builder.dpi_register_results(require_module(location),
                                        result_names,
                                        dpi_import,
-                                       inputs.map(fun (input): read(input, location)),
+                                       inputs.map(
+                                         fun (input):
+                                           read(input, location)
+                                       ),
                                        read(clock, location),
                                        read(enable, location),
                                        location,
                                        Origin("embedded DPI result registers", dpi_import.name))
 
-fun literal(type, integer, name = #false, location = Location()):
+fun literal(type :: HardwareType,
+            integer :: Nat,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   def context = require_context(location)
   context.builder.constant(require_module(location),
                            type,
@@ -536,7 +571,9 @@ fun literal(type, integer, name = #false, location = Location()):
                            location,
                            Origin("embedded literal", name || ""))
 
-fun dont_care(type, name = #false, location = Location()):
+fun dont_care(type :: HardwareType,
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location()):
   def context = require_context(location)
   context.builder.dont_care(require_module(location),
                             type,
@@ -544,7 +581,10 @@ fun dont_care(type, name = #false, location = Location()):
                             location,
                             Origin("embedded don't care", name || ""))
 
-fun unary(opcode, entity, name = #false, location = Location()):
+fun unary(opcode :: String,
+          entity :: HardwareEntity,
+          name :: False || AsciiIdentifier = #false,
+          location :: Location = Location()):
   def context = require_context(location)
   def module_def = require_module(location)
   def value = read(entity, location)
@@ -557,7 +597,11 @@ fun unary(opcode, entity, name = #false, location = Location()):
                               Origin("embedded not", name || ""))
   | ~else: frontend_fail("unknown unary operation " ++ opcode, location)
 
-fun binary(opcode, left_entity, right_entity, name = #false, location = Location()):
+fun binary(opcode :: String,
+           left_entity :: HardwareEntity,
+           right_entity :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   def context = require_context(location)
   def module_def = require_module(location)
   def left = read(left_entity, location)
@@ -601,86 +645,128 @@ fun binary(opcode, left_entity, right_entity, name = #false, location = Location
                           Origin("embedded signed less-than", name || ""))
   | ~else: frontend_fail("unknown binary operation " ++ opcode, location)
 
-fun bit_not(entity, name = #false, location = Location()):
+fun bit_not(entity :: HardwareEntity,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   unary("not", entity, name, location)
 
-fun bit_and(left, right, name = #false, location = Location()):
+fun bit_and(left :: HardwareEntity,
+            right :: HardwareEntity,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   binary("and", left, right, name, location)
 
-fun bit_or(left, right, name = #false, location = Location()):
+fun bit_or(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("or", left, right, name, location)
 
-fun bit_xor(left, right, name = #false, location = Location()):
+fun bit_xor(left :: HardwareEntity,
+            right :: HardwareEntity,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   binary("xor", left, right, name, location)
 
-fun hw_add(left, right, name = #false, location = Location()):
+fun hw_add(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("add", left, right, name, location)
 
-fun hw_mul(left, right, name = #false, location = Location()):
+fun hw_mul(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("mul", left, right, name, location)
 
-fun hw_sub(left, right, name = #false, location = Location()):
+fun hw_sub(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("sub", left, right, name, location)
 
-fun hw_shl(value, amount, name = #false, location = Location()):
+fun hw_shl(value :: HardwareEntity,
+           amount :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("shl", value, amount, name, location)
 
-fun hw_shru(value, amount, name = #false, location = Location()):
+fun hw_shru(value :: HardwareEntity,
+            amount :: HardwareEntity,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   binary("shru", value, amount, name, location)
 
-fun hw_shrs(value, amount, name = #false, location = Location()):
+fun hw_shrs(value :: HardwareEntity,
+            amount :: HardwareEntity,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   binary("shrs", value, amount, name, location)
 
-fun hw_eq(left, right, name = #false, location = Location()):
+fun hw_eq(left :: HardwareEntity,
+          right :: HardwareEntity,
+          name :: False || AsciiIdentifier = #false,
+          location :: Location = Location()):
   binary("eq", left, right, name, location)
 
-fun hw_ult(left, right, name = #false, location = Location()):
+fun hw_ult(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("ult", left, right, name, location)
 
-fun hw_slt(left, right, name = #false, location = Location()):
+fun hw_slt(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   binary("slt", left, right, name, location)
 
-fun hw_mux_lookup(selector,
-                  default_value,
-                  cases,
-                  name = #false,
-                  location = Location(),
-                  origin = #false):
+fun hw_mux_lookup(selector :: HardwareEntity,
+                  default_value :: HardwareEntity,
+                  cases :: List.of(List),
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location(),
+                  origin :: False || Origin = #false):
   def context = require_context(location)
   context.builder.mux_lookup(
     require_module(location),
     read(selector, location),
     read(default_value, location),
-    cases.map(fun (case): [case[0], read(case[1], location)]),
+    cases.map(
+      fun (case): [case[0], read(case[1], location)]
+    ),
     name,
     location,
     origin || Origin("embedded mux lookup", name || "")
   )
 
-fun hw_onehot_mux(selector,
-                  choices :: List,
-                  name = #false,
-                  location = Location(),
-                  origin = #false):
+fun hw_onehot_mux(selector :: HardwareEntity,
+                  choices :: List.of(HardwareEntity),
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location(),
+                  origin :: False || Origin = #false):
   def context = require_context(location)
   context.builder.onehot_mux(
     require_module(location),
     read(selector, location),
-    choices.map(fun (choice): read(choice, location)),
+    choices.map(
+      fun (choice): read(choice, location)
+    ),
     name,
     location,
     origin || Origin("embedded one-hot mux", name || "")
   )
 
-fun hw_decode(selector,
-              input_type,
-              result_type,
-              cases,
-              default_value,
-              default_care,
-              name = #false,
-              location = Location(),
-              origin = #false):
+fun hw_decode(selector :: HardwareEntity,
+              input_type :: DataType,
+              result_type :: DataType,
+              cases :: List.of(List),
+              default_value :: Nat,
+              default_care :: Nat,
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: False || Origin = #false):
   def context = require_context(location)
   context.builder.decode(
     require_module(location),
@@ -695,7 +781,10 @@ fun hw_decode(selector,
     origin || Origin("embedded decode", name || "")
   )
 
-fun cast(entity, target_type, name = #false, location = Location()):
+fun cast(entity :: HardwareEntity,
+         target_type :: HardwareType,
+         name :: False || AsciiIdentifier = #false,
+         location :: Location = Location()):
   def context = require_context(location)
   def module_def = require_module(location)
   def value = read(entity, location)
@@ -704,15 +793,23 @@ fun cast(entity, target_type, name = #false, location = Location()):
   | context.builder.cast(module_def, value, target_type, name, location,
                          Origin("embedded cast", name || ""))
 
-fun concat(entities, name = #false, location = Location()):
+fun concat(entities :: List.of(HardwareEntity),
+           name :: False || AsciiIdentifier = #false,
+           location :: Location = Location()):
   def context = require_context(location)
   context.builder.concat(require_module(location),
-                         entities.map(fun (entity): read(entity, location)),
+                         entities.map(
+                           fun (entity): read(entity, location)
+                         ),
                          name,
                          location,
                          Origin("embedded concat", name || ""))
 
-fun extract(entity, high, low, name = #false, location = Location()):
+fun extract(entity :: HardwareEntity,
+            high :: Nat,
+            low :: Nat,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   def context = require_context(location)
   context.builder.extract(require_module(location),
                           read(entity, location),
@@ -722,7 +819,10 @@ fun extract(entity, high, low, name = #false, location = Location()):
                           location,
                           Origin("embedded extract", name || ""))
 
-fun zext(entity, target_width, name = #false, location = Location()):
+fun zext(entity :: HardwareEntity,
+         target_width :: PosInt,
+         name :: False || AsciiIdentifier = #false,
+         location :: Location = Location()):
   def context = require_context(location)
   context.builder.zext(require_module(location),
                        read(entity, location),
@@ -731,7 +831,10 @@ fun zext(entity, target_width, name = #false, location = Location()):
                        location,
                        Origin("embedded zext", name || ""))
 
-fun sext(entity, target_width, name = #false, location = Location()):
+fun sext(entity :: HardwareEntity,
+         target_width :: PosInt,
+         name :: False || AsciiIdentifier = #false,
+         location :: Location = Location()):
   def context = require_context(location)
   context.builder.sext(require_module(location),
                        read(entity, location),
@@ -740,7 +843,10 @@ fun sext(entity, target_width, name = #false, location = Location()):
                        location,
                        Origin("embedded sext", name || ""))
 
-fun trunc(entity, target_width, name = #false, location = Location()):
+fun trunc(entity :: HardwareEntity,
+          target_width :: PosInt,
+          name :: False || AsciiIdentifier = #false,
+          location :: Location = Location()):
   def context = require_context(location)
   context.builder.trunc(require_module(location),
                         read(entity, location),
@@ -749,18 +855,26 @@ fun trunc(entity, target_width, name = #false, location = Location()):
                         location,
                         Origin("embedded trunc", name || ""))
 
-fun record_create(type, fields :: List, name = #false, location = Location()):
+fun record_create(type :: RecordType,
+                  fields :: List.of(List),
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()):
   def context = require_context(location)
   context.builder.record_create(
     require_module(location),
     type,
-    fields.map(fun (field): [field[0], read(field[1], location)]),
+    fields.map(
+      fun (field): [field[0], read(field[1], location)]
+    ),
     name,
     location,
     Origin("embedded record create", name || "")
   )
 
-fun project(entity, field_name, name = #false, location = Location()):
+fun project(entity :: HardwareEntity,
+            field_name :: AsciiIdentifier,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location()):
   def context = require_context(location)
   def drive_place:
     cond
@@ -789,18 +903,26 @@ fun project(entity, field_name, name = #false, location = Location()):
                                  location,
                                  Origin("embedded record get", field_name))
 
-fun vector_create(type, elements :: List, name = #false, location = Location()):
+fun vector_create(type :: VectorType,
+                  elements :: List.of(HardwareEntity),
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()):
   def context = require_context(location)
   context.builder.vector_create(
     require_module(location),
     type,
-    elements.map(fun (element): read(element, location)),
+    elements.map(
+      fun (element): read(element, location)
+    ),
     name,
     location,
     Origin("embedded vector create", name || "")
   )
 
-fun vector_get(entity, element_index, name = #false, location = Location()):
+fun vector_get(entity :: HardwareEntity,
+               element_index :: Nat,
+               name :: False || AsciiIdentifier = #false,
+               location :: Location = Location()):
   def context = require_context(location)
   context.builder.vector_get(require_module(location),
                              read(entity, location),
@@ -809,7 +931,9 @@ fun vector_get(entity, element_index, name = #false, location = Location()):
                              location,
                              Origin("embedded vector get", to_string(element_index)))
 
-fun vector_project(entity, element_index, location = Location()):
+fun vector_project(entity :: HardwareEntity,
+                   element_index :: Nat,
+                   location :: Location = Location()):
   def context = require_context(location)
   def drive_place:
     cond
@@ -825,7 +949,9 @@ fun vector_project(entity, element_index, location = Location()):
   | ~else:
       vector_get(entity, element_index, #false, location)
 
-fun index(entity, element_index, location = Location()):
+fun index(entity :: HardwareEntity,
+          element_index :: Nat,
+          location :: Location = Location()):
   def type:
     cond
     | entity is_a Value: entity.type
@@ -838,11 +964,11 @@ fun index(entity, element_index, location = Location()):
   // Preserve the established Bits diagnostic for unsupported data types.
   | ~else: extract(entity, element_index, element_index, #false, location)
 
-fun vector_lookup(entity,
-                  selector,
-                  default_value,
-                  name = #false,
-                  location = Location()):
+fun vector_lookup(entity :: HardwareEntity,
+                  selector :: HardwareEntity,
+                  default_value :: HardwareEntity,
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()):
   def vector_value = read(entity, location)
   unless vector_type(vector_value.type)
   | frontend_fail("vector lookup requires a VectorType value", location)
@@ -856,9 +982,9 @@ fun vector_lookup(entity,
                 location,
                 Origin("embedded vector lookup", name || ""))
 
-fun validate_dynamic_vector_selector(vector_value,
-                                     selector_value,
-                                     location):
+fun validate_dynamic_vector_selector(vector_value :: Value,
+                                     selector_value :: Value,
+                                     location :: Location):
   unless vector_type(vector_value.type)
   | frontend_fail("hardware vector indexing requires a VectorType value", location)
   unless bits_type(selector_value.type)
@@ -871,10 +997,10 @@ fun validate_dynamic_vector_selector(vector_value,
 
 // Selects dynamically from a vector. A selector encoding outside the vector
 // length makes the result unconstrained.
-fun vector_select(entity,
-                  selector,
-                  name = #false,
-                  location = Location()):
+fun vector_select(entity :: HardwareEntity,
+                  selector :: HardwareEntity,
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
   validate_dynamic_vector_selector(vector_value, selector_value, location)
@@ -889,11 +1015,11 @@ fun vector_select(entity,
 
 // Injects one dynamically selected element. An out-of-range selector makes the
 // complete result vector unconstrained.
-fun vector_inject(entity,
-                  selector,
-                  replacement,
-                  name = #false,
-                  location = Location()):
+fun vector_inject(entity :: HardwareEntity,
+                  selector :: HardwareEntity,
+                  replacement :: HardwareEntity,
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
   def replacement_value = read(replacement, location)
@@ -911,11 +1037,11 @@ fun vector_inject(entity,
 // Constructs a new vector whose hardware-selected element is replaced. Each
 // element falls back to the original value, so an out-of-range selector leaves
 // the entire vector unchanged.
-fun vector_updated(entity,
-                   selector,
-                   replacement,
-                   name = #false,
-                   location = Location()):
+fun vector_updated(entity :: HardwareEntity,
+                   selector :: HardwareEntity,
+                   replacement :: HardwareEntity,
+                   name :: False || AsciiIdentifier = #false,
+                   location :: Location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
   def replacement_value = read(replacement, location)
@@ -947,13 +1073,13 @@ fun vector_updated(entity,
 
 // Carries a dynamically selected element of a direct vector register. Reads
 // remain ordinary mux selection; writes become one whole next-state update.
-class DynamicVectorRegisterPath(register,
-                                vector_value,
-                                selector_value,
-                                mutable current = #false):
+class DynamicVectorRegisterPath(register :: Register,
+                                vector_value :: Value,
+                                selector_value :: Value,
+                                mutable current :: False || Value = #false):
   implements DynamicAssignmentTarget
 
-  override method materialize_hardware(location):
+  override method materialize_hardware(location :: Location):
     unless current
     | current := vector_select(vector_value,
                                selector_value,
@@ -961,7 +1087,8 @@ class DynamicVectorRegisterPath(register,
                                location)
     current
 
-  override method assign_hardware(entity, location):
+  override method assign_hardware(entity :: HardwareEntity,
+                                  location :: Location):
     def replacement = read(entity, location)
     unless type_equal(replacement.type, vector_value.type.element_type)
     | frontend_fail("dynamic vector assignment requires the vector element type",
@@ -976,10 +1103,10 @@ class DynamicVectorRegisterPath(register,
 
 // Preserves the read behavior of hardware vector indexing while retaining an
 // assignable path only for a direct Reg<Vec>. Other vector entities stay values.
-fun vector_index(entity,
-                 selector,
-                 name = #false,
-                 location = Location()):
+fun vector_index(entity :: HardwareEntity,
+                 selector :: HardwareEntity,
+                 name :: False || AsciiIdentifier = #false,
+                 location :: Location = Location()):
   def vector_value = read(entity, location)
   def selector_value = read(selector, location)
   validate_dynamic_vector_selector(vector_value, selector_value, location)
@@ -987,8 +1114,12 @@ fun vector_index(entity,
   | DynamicVectorRegisterPath(entity, vector_value, selector_value)
   | vector_select(vector_value, selector_value, name, location)
 
-fun reg(name, type, clock, reset = #false, reset_value = #false,
-        location = Location()):
+fun reg(name :: AsciiIdentifier,
+        type :: DataType,
+        clock :: HardwareEntity,
+        reset :: False || HardwareEntity = #false,
+        reset_value :: False || HardwareEntity = #false,
+        location :: Location = Location()):
   def context = require_context(location)
   context.builder.register(require_module(location),
                            name,
@@ -999,10 +1130,10 @@ fun reg(name, type, clock, reset = #false, reset_value = #false,
                            location,
                            Origin("embedded register", name))
 
-fun sync_level_crossing(source,
-                        destination_clock,
-                        stages,
-                        location = Location()):
+fun sync_level_crossing(source :: HardwareEntity,
+                        destination_clock :: HardwareEntity,
+                        stages :: List.of(Register),
+                        location :: Location = Location()):
   def context = require_context(location)
   context.builder.sync_level_crossing(
     require_module(location),
@@ -1013,7 +1144,9 @@ fun sync_level_crossing(source,
     Origin("embedded stable level crossing")
   )
 
-fun inst(name, child, location = Location()):
+fun inst(name :: AsciiIdentifier,
+         child :: Module || CircuitDefinition,
+         location :: Location = Location()):
   def context = require_context(location)
   context.builder.suggested_instance(require_module(location),
                                      circuit_module(child) || child,
@@ -1021,7 +1154,9 @@ fun inst(name, child, location = Location()):
                                      location,
                                      Origin("embedded instance", name))
 
-fun connect(place, entity, location = Location()):
+fun connect(place :: HardwareEntity,
+            entity :: HardwareEntity,
+            location :: Location = Location()):
   cond
   | place is_a DynamicAssignmentTarget:
       place.assign_hardware(entity, location)
@@ -1047,7 +1182,8 @@ fun connect(place, entity, location = Location()):
                               location,
                               Origin("embedded connect", target.name))
 
-fun register_hold_value(place, location = Location()):
+fun register_hold_value(place :: Place,
+                        location :: Location = Location()):
   if place.parent
   | block:
       def parent_hold = register_hold_value(place.parent, location)
@@ -1062,7 +1198,9 @@ fun register_hold_value(place, location = Location()):
       | operation.results[0]
       | #false
 
-fun emit_conditional_assignment(place, value, location = Location()):
+fun emit_conditional_assignment(place :: Place,
+                                value :: Value,
+                                location :: Location = Location()):
   def branch = current_conditional_branch()
   if branch is_a ConditionalBranch
   | branch.add(place, value, location)
@@ -1073,7 +1211,7 @@ fun emit_conditional_assignment(place, value, location = Location()):
       Origin("embedded conditional connect", place.name)
     )
 
-fun emit_conditional_memory_write(write):
+fun emit_conditional_memory_write(write :: ConditionalMemoryWrite):
   def branch = current_conditional_branch()
   if branch is_a ConditionalBranch
   | branch.add_memory_write(write)
@@ -1090,7 +1228,7 @@ fun emit_conditional_memory_write(write):
 
 // Carries a dynamic vector-register write outward through conditional scopes.
 // Top-level writes are collected until all ports for the register are known.
-fun emit_vector_register_write(write):
+fun emit_vector_register_write(write :: ConditionalVectorWrite):
   def branch = current_conditional_branch()
   if branch is_a ConditionalBranch
   | branch.add_vector_write(write)
@@ -1106,12 +1244,14 @@ fun emit_vector_register_write(write):
 // Emits one unordered core write set per vector register, preserving the
 // frontend's ordinary one-driver rule for the register's whole next value.
 fun flush_vector_register_writes(active :: ActiveCircuit,
-                                 location = Location()):
+                                 location :: Location = Location()):
   def writes = active.vector_writes
   active.vector_writes := []
   def mutable registers = []
   for (write in writes):
-    unless registers.find(fun (register): register === write.register)
+    unless registers.find(
+      fun (register): register === write.register
+    )
     | registers := registers ++ [write.register]
   for (register in registers):
     def register_writes = writes.filter(
@@ -1121,19 +1261,25 @@ fun flush_vector_register_writes(active :: ActiveCircuit,
     def port_count = register_writes.length()
     def enables = vector_create(
       VectorType(port_count, Bits(1)),
-      register_writes.map(fun (write): write.enable),
+      register_writes.map(
+        fun (write): write.enable
+      ),
       #false,
       representative.location
     )
     def indices = vector_create(
       VectorType(port_count, representative.index.type),
-      register_writes.map(fun (write): write.index),
+      register_writes.map(
+        fun (write): write.index
+      ),
       #false,
       representative.location
     )
     def elements = vector_create(
       VectorType(port_count, representative.data.type),
-      register_writes.map(fun (write): write.data),
+      register_writes.map(
+        fun (write): write.data
+      ),
       #false,
       representative.location
     )
@@ -1157,15 +1303,17 @@ fun flush_vector_register_writes(active :: ActiveCircuit,
 
 // Combines lexical activation as assertions cross nested conditional chains.
 // A missing guard means the assertion is active throughout its current scope.
-fun combine_assertion_guards(left, right, location = Location()):
+fun combine_assertion_guards(left :: False || Value,
+                             right :: False || Value,
+                             location :: Location = Location()):
   cond
   | left && right: bit_and(left, right, #false, location)
   | left: left
   | right: right
   | ~else: #false
 
-fun emit_conditional_assertion(assertion,
-                               branch_guard = #false):
+fun emit_conditional_assertion(assertion :: ConditionalAssertion,
+                               branch_guard :: False || Value = #false):
   def guard = combine_assertion_guards(assertion.guard,
                                        branch_guard,
                                        assertion.location)
@@ -1189,15 +1337,18 @@ fun emit_conditional_assertion(assertion,
       Origin("embedded clocked assertion", assertion.label || "")
     )
 
-fun validate_conditional_value(condition, location = Location()):
-  unless hardware_entity(condition)
-  | frontend_fail("when condition must be a hardware value", location)
+fun validate_conditional_value(condition :~ HardwareEntity,
+                               location :: Location = Location()):
+  unless condition is_a HardwareEntity
+  | frontend_fail("hardware condition must be a hardware value", location)
   def value = read(condition, location)
   unless flat_data_type(value.type) && data_width(value.type) == 1
   | frontend_fail("hardware condition must have a one-bit FlatDataType", location)
   value
 
-fun collect_conditional_branch(body, form, location = Location()):
+fun collect_conditional_branch(body :: Function.of_arity(0),
+                               form :: String,
+                               location :: Location = Location()):
   def branch = ConditionalBranch()
   parameterize { current_conditional_branch: branch,
                  current_conditional_form: form }:
@@ -1206,12 +1357,13 @@ fun collect_conditional_branch(body, form, location = Location()):
 
 // Resolves collected mutually exclusive branches through a caller-supplied
 // selection strategy, preserving the one-final-driver and shared-port rules.
-fun resolve_conditional_branches(branch_results,
-                                 otherwise_result,
-                                 select_values,
-                                 build_assertion_guards,
-                                 origin_description,
-                                 location):
+fun resolve_conditional_branches(
+      branch_results :: List.of(ConditionalBranch),
+      otherwise_result :: False || ConditionalBranch,
+      select_values :: Function.of_arity(3),
+      build_assertion_guards :: Function.of_arity(1),
+      origin_description :: String,
+      location :: Location):
   def mutable has_assertions = #false
   for (branch_result in branch_results):
     when branch_result.assertions.length() > 0
@@ -1277,16 +1429,21 @@ fun resolve_conditional_branches(branch_results,
     emit_conditional_assignment(place, selected, location)
 
   def mutable memories = []
-  fun include_branch_memories(branch_result):
+  fun include_branch_memories(
+        branch_result :: False || ConditionalBranch):
     when branch_result
     | for (write in branch_result.memory_writes):
-        unless memories.find(fun (resource): resource === write.resource)
+        unless memories.find(
+          fun (resource): resource === write.resource
+        )
         | memories := memories ++ [write.resource]
   for (branch_result in branch_results):
     include_branch_memories(branch_result)
   include_branch_memories(otherwise_result)
 
-  fun memory_write_at(branch_result, resource, port_index):
+  fun memory_write_at(branch_result :: False || ConditionalBranch,
+                      resource :: Memory,
+                      port_index :: Nat):
     if !branch_result
     | #false
     | block:
@@ -1331,12 +1488,18 @@ fun resolve_conditional_branches(branch_results,
         for List (branch_result in branch_results):
           memory_write_at(branch_result, resource, port_index)
       def selected_address = select_values(
-        branch_writes.map(fun (write): if write | write.address | #false),
+        branch_writes.map(
+          fun (write):
+            if write | write.address | #false
+        ),
         fallback_address,
         Origin(origin_description ++ " memory address", resource.name)
       )
       def selected_data = select_values(
-        branch_writes.map(fun (write): if write | write.data | #false),
+        branch_writes.map(
+          fun (write):
+            if write | write.data | #false
+        ),
         fallback_data,
         Origin(origin_description ++ " memory data", resource.name)
       )
@@ -1360,7 +1523,8 @@ fun resolve_conditional_branches(branch_results,
       )
 
   def mutable vector_registers = []
-  fun include_branch_vector_registers(branch_result):
+  fun include_branch_vector_registers(
+        branch_result :: False || ConditionalBranch):
     when branch_result
     | for (write in branch_result.vector_writes):
         unless vector_registers.find(
@@ -1371,7 +1535,9 @@ fun resolve_conditional_branches(branch_results,
     include_branch_vector_registers(branch_result)
   include_branch_vector_registers(otherwise_result)
 
-  fun vector_write_at(branch_result, register, port_index):
+  fun vector_write_at(branch_result :: False || ConditionalBranch,
+                      register :: Register,
+                      port_index :: Nat):
     if !branch_result
     | #false
     | block:
@@ -1404,24 +1570,36 @@ fun resolve_conditional_branches(branch_results,
       def branch_writes:
         for List (branch_result in branch_results):
           vector_write_at(branch_result, register, port_index)
-      fun select_write_value(branch_values, fallback, origin):
+      fun select_write_value(branch_values :: List.of(False || Value),
+                             fallback :: Value,
+                             origin :: Origin):
         if branch_values.find(
-             fun (value): value && !(value === fallback)
+             fun (value):
+               value && !(value === fallback)
            )
         | select_values(branch_values, fallback, origin)
         | fallback
       def selected_index = select_write_value(
-        branch_writes.map(fun (write): if write | write.index | #false),
+        branch_writes.map(
+          fun (write):
+            if write | write.index | #false
+        ),
         fallback_index,
         Origin(origin_description ++ " vector write index", register.next.name)
       )
       def selected_data = select_write_value(
-        branch_writes.map(fun (write): if write | write.data | #false),
+        branch_writes.map(
+          fun (write):
+            if write | write.data | #false
+        ),
         fallback_data,
         Origin(origin_description ++ " vector write data", register.next.name)
       )
       def selected_enable = select_values(
-        branch_writes.map(fun (write): if write | write.enable | disabled),
+        branch_writes.map(
+          fun (write):
+            if write | write.enable | disabled
+        ),
         fallback_enable,
         Origin(origin_description ++ " vector write enable", register.next.name)
       )
@@ -1435,9 +1613,9 @@ fun resolve_conditional_branches(branch_results,
   #void
 
 // Elaborates an ordered hardware-conditional chain into priority mux trees.
-fun conditional_chain(branches :: NonemptyList,
-                      otherwise_body = #false,
-                      location = Location()):
+fun conditional_chain(branches :: NonemptyList.of(List),
+                      otherwise_body :: False || Function.of_arity(0) = #false,
+                      location :: Location = Location()):
   def conditions:
     for List (branch in branches):
       validate_conditional_value(branch[0](), location)
@@ -1448,7 +1626,9 @@ fun conditional_chain(branches :: NonemptyList,
     if otherwise_body
     | collect_conditional_branch(otherwise_body, "when", location)
     | #false
-  fun select_values(branch_values, fallback, origin):
+  fun select_values(branch_values :: List.of(False || Value),
+                    fallback :: Value,
+                    origin :: Origin):
     def mutable selected = fallback
     for (index in (branches.length() - 1) >=..= 0):
       def branch_value = branch_values[index]
@@ -1462,7 +1642,7 @@ fun conditional_chain(branches :: NonemptyList,
           origin
         )
     selected
-  fun build_assertion_guards(needs_otherwise):
+  fun build_assertion_guards(needs_otherwise :: Boolean):
     def mutable unmatched_guard = #false
     def branch_guards:
       for List (condition in conditions, index in 0..conditions.length()):
@@ -1486,17 +1666,17 @@ fun conditional_chain(branches :: NonemptyList,
 
 // Elaborates unordered exact-key cases into direct keyed mux lookups. Keys are
 // normalized host integers, so no switch control-flow operation enters core.
-fun switch_chain(selector,
-                 cases :: NonemptyList,
-                 otherwise_body = #false,
-                 location = Location()):
+fun switch_chain(selector :: HardwareEntity,
+                 cases :: NonemptyList.of(List),
+                 otherwise_body :: False || Function.of_arity(0) = #false,
+                 location :: Location = Location()):
   def selector_value = read(selector, location)
   unless bits_type(selector_value.type)
   | frontend_fail("switch selector must lower to Bits", location)
   def width = data_width(selector_value.type)
   def mutable keys = []
   for (case in cases):
-    unless case is_a List && case.length() == 2 && case[0] is_a Nat
+    unless case.length() == 2 && case[0] is_a Nat
     | frontend_fail("switch cases must contain host natural-number keys and branch bodies",
                     location)
     def key = case[0]
@@ -1512,7 +1692,9 @@ fun switch_chain(selector,
     if otherwise_body
     | collect_conditional_branch(otherwise_body, "switch", location)
     | #false
-  fun select_values(branch_values, fallback, origin):
+  fun select_values(branch_values :: List.of(False || Value),
+                    fallback :: Value,
+                    origin :: Origin):
     def mutable selected_cases = []
     for (key in keys, branch_value in branch_values):
       when branch_value
@@ -1525,7 +1707,7 @@ fun switch_chain(selector,
                     #false,
                     location,
                     origin)
-  fun build_assertion_guards(needs_otherwise):
+  fun build_assertion_guards(needs_otherwise :: Boolean):
     def branch_guards:
       for List (key in keys):
         hw_eq(selector_value,
@@ -1548,23 +1730,27 @@ fun switch_chain(selector,
                                "embedded switch",
                                location)
 
-fun frontend_elaboration(program):
+fun frontend_elaboration(program :: Function.of_arity(0)):
   def design = Design()
   def context = FrontendContext(design, Builder(design))
   def top = parameterize { current_context: context }:
               program()
   context.active := #false
-  def top_module = circuit_module(top)
+  def top_module:
+    cond
+    | top is_a Module: top
+    | top is_a CircuitDefinition: top.core_module()
+    | ~else: #false
   unless top_module is_a Module
   | error(~who: #'rhdl, "elaboration did not select a top circuit")
   verify_design(design)
   DesignElaboration(design, top_module)
 
-fun frontend_run(program):
+fun frontend_run(program :: Function.of_arity(0)):
   frontend_elaboration(program).design
 
-fun run_elaboration(program):
+fun run_elaboration(program :: Function.of_arity(0)):
   frontend_run(program)
 
-fun run_elaboration_with_top(program):
+fun run_elaboration_with_top(program :: Function.of_arity(0)):
   frontend_elaboration(program)

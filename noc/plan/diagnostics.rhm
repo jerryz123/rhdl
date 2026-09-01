@@ -15,7 +15,7 @@ export:
   AuthoredRoutingCompilation
   compile_authored_routing
 
-fun origin_equal(left, right):
+fun origin_equal(left :: Injection || HeldVC, right :: Injection || HeldVC):
   cond
   | left is_a Injection && right is_a Injection:
       injection_id_equal(left.terminal.id, right.terminal.id)
@@ -23,13 +23,15 @@ fun origin_equal(left, right):
       vc_id_equal(left.vc, right.vc)
   | ~else: #false
 
-fun evidence_matches(evidence, decision):
+fun evidence_matches(evidence :: LoweredRoutingDecision,
+                     decision :: MaterializedDecision):
   evidence.route_class === decision.route_class && origin_equal(
     evidence.origin,
     decision.origin
   ) && vc_id_equal(evidence.candidate_vc, decision.candidate_vc)
 
-fun find_evidence(lowering, decision):
+fun find_evidence(lowering :: RoutingPolicyLowering,
+                  decision :: MaterializedDecision):
   def found = lowering.decisions.find(
     fun (evidence): evidence_matches(evidence, decision)
   )
@@ -41,12 +43,16 @@ fun find_evidence(lowering, decision):
           "authored provenance disagrees with its materialized decision")
   found
 
-fun evidence_rule_names(lowering, evidence):
+fun evidence_rule_names(lowering :: RoutingPolicyLowering,
+                        evidence :: LoweredRoutingDecision):
   if evidence.rule_names.length() > 0
   | evidence.rule_names
   | [lowering.policy.describe()]
 
-class AuthoredCycleCause(route_class, origin, candidate_vc, rule_names):
+class AuthoredCycleCause(route_class :: RouteClassRef,
+                         origin :: RoutingOrigin,
+                         candidate_vc :: VCRef,
+                         rule_names :: List.of(String)):
   method describe():
     String.append(
       "route ", route_class.describe(),
@@ -55,7 +61,9 @@ class AuthoredCycleCause(route_class, origin, candidate_vc, rule_names):
       "; rules=[", String.join(rule_names, ", "), "]"
     )
 
-class AuthoredCycleEdge(source_vc, target_vc, causes):
+class AuthoredCycleEdge(source_vc :: VCRef,
+                        target_vc :: VCRef,
+                        causes :: List.of(AuthoredCycleCause)):
   method describe():
     def cause_rows = causes.map(
       fun (cause): "    " ++ cause.describe()
@@ -65,18 +73,19 @@ class AuthoredCycleEdge(source_vc, target_vc, causes):
       "\n", String.join(cause_rows, "\n")
     )
 
-class AuthoredDependencyCycle(normalized_cycle, edges):
+class AuthoredDependencyCycle(normalized_cycle :: DependencyCycle,
+                              edges :: List.of(AuthoredCycleEdge)):
   method describe():
     "authored VC dependency cycle:\n" ++ String.join(
       edges.map(fun (edge): edge.describe()),
       "\n"
     )
 
-class AuthoredRoutingFailure(kind,
-                             route_class,
-                             origin,
-                             candidate_vc,
-                             rule_names):
+class AuthoredRoutingFailure(kind :: String,
+                             route_class :: RouteClassRef,
+                             origin :: RoutingOrigin,
+                             candidate_vc :: False || VCRef,
+                             rule_names :: List.of(String)):
   method describe():
     def candidate:
       if candidate_vc == #false
@@ -89,10 +98,14 @@ class AuthoredRoutingFailure(kind,
     String.append(kind, " for route ", route_class.describe(),
                   " at ", origin.describe(), candidate, rules)
 
-class AuthoredRoutingCompilation(result, lowering, diagnostic):
+class AuthoredRoutingCompilation(
+      result :: ValidatedRouting || DependencyCycle || EscapeClosureViolation || MissingEscapeEntry || MissingEscapeRoute,
+      lowering :: RoutingPolicyLowering,
+      diagnostic :: False || AuthoredDependencyCycle || AuthoredRoutingFailure):
   method decision_provenance(): lowering.decisions
 
-fun symbolic_origin(lowered_topology, origin):
+fun symbolic_origin(lowered_topology :: LoweredTopology,
+                    origin :: Injection || HeldVC):
   cond
   | origin is_a Injection:
       RoutingInjection(
@@ -101,11 +114,9 @@ fun symbolic_origin(lowered_topology, origin):
       )
   | origin is_a HeldVC:
       RoutingForwarding(lowered_topology.vc_ref(origin.vc))
-  | ~else:
-      error(~who: #'compile_authored_routing,
-            "routing origin must be an Injection or HeldVC")
 
-fun cycle_cause(lowering, decision):
+fun cycle_cause(lowering :: RoutingPolicyLowering,
+                decision :: MaterializedDecision):
   def evidence = find_evidence(lowering, decision)
   AuthoredCycleCause(
     evidence.context.route_class.ref,
@@ -114,7 +125,8 @@ fun cycle_cause(lowering, decision):
     evidence_rule_names(lowering, evidence)
   )
 
-fun authored_cycle(lowering, cycle):
+fun authored_cycle(lowering :: RoutingPolicyLowering,
+                   cycle :: DependencyCycle):
   def lowered_topology = lowering.lowered_routes.lowered_topology
   def edges = for List (edge in cycle.edges):
     AuthoredCycleEdge(
@@ -124,7 +136,8 @@ fun authored_cycle(lowering, cycle):
     )
   AuthoredDependencyCycle(cycle, edges)
 
-fun authored_failure(lowering, result):
+fun authored_failure(lowering :: RoutingPolicyLowering,
+                     result :: ValidatedRouting || EscapeClosureViolation || MissingEscapeEntry || MissingEscapeRoute):
   def lowered_routes = lowering.lowered_routes
   def lowered_topology = lowered_routes.lowered_topology
   cond
@@ -155,15 +168,15 @@ fun authored_failure(lowering, result):
       )
   | ~else: #false
 
-fun materialized_result(result):
+fun materialized_result(result :: ValidatedRouting || DependencyCycle || EscapeClosureViolation || MissingEscapeEntry || MissingEscapeRoute):
   cond
   | result is_a ValidatedRouting: result.materialized
   | result is_a DependencyCycle: result.graph.reachable.materialized
   | ~else: #false
 
-fun compile_authored_routing(lowered_routes,
-                             policy,
-                             ~escape: escape_request = #false):
+fun compile_authored_routing(lowered_routes :: LoweredRouteClasses,
+                             policy :: RoutingPolicy,
+                             ~escape: escape_request :: False || EscapeValidationRequest = #false):
   def lowering = lower_routing_policy_with_evidence(lowered_routes, policy)
   def result = compile_routing(
     RoutingProblem(

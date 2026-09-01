@@ -5,21 +5,22 @@ import:
   "../core/main.rhm" open
   "../frontend/layers/interface.rhm" open
   "../frontend/support/clocking.rhm".module_sync_circuit_metadata
+  "../frontend/support/clocking.rhm".SyncCircuitMetadata
   "model.rhm" open
 
 export:
   diagram
   diagram_module
 
-class DiagramTerminal(block_id,
-                      port_id,
-                      direction,
-                      protocol,
-                      backpressured,
-                      compound,
-                      entities)
+class DiagramTerminal(block_id :: String,
+                      port_id :: String,
+                      direction :: String,
+                      protocol :: String,
+                      backpressured :: Boolean,
+                      compound :: Boolean,
+                      entities :: List.of(Value || Place))
 
-fun endpoint_elements(shape):
+fun endpoint_elements(shape :: InterfaceEndpoint || Array):
   cond
   | shape is_a InterfaceEndpoint: [shape]
   | shape is_a Array: for List (element in shape): element
@@ -45,7 +46,7 @@ fun endpoint_backpressured(endpoint :: InterfaceEndpoint):
 fun endpoint_entities(endpoint :: InterfaceEndpoint):
   endpoint.bindings.map(fun (binding): binding.entity)
 
-fun diagram_projection(entity, field_name):
+fun diagram_projection(entity :: Value || Place, field_name :: String):
   cond
   | entity is_a Place:
       entity.projected_place(field_name) || entity
@@ -59,7 +60,8 @@ fun diagram_projection(entity, field_name):
       if operation | operation.results[0] | entity
   | ~else: entity
 
-fun diagram_nested_endpoint(endpoint :: InterfaceEndpoint, member):
+fun diagram_nested_endpoint(endpoint :: InterfaceEndpoint,
+                            member :: InterfaceMember):
   def nested_type = member.type
   def nested_role:
     if endpoint.role == member.from_role
@@ -96,7 +98,9 @@ fun diagram_nested_endpoint(endpoint :: InterfaceEndpoint, member):
                     bindings,
                     "diagram-nested")
 
-fun endpoint_ports(block_id, base_name, shape):
+fun endpoint_ports(block_id :: String,
+                   base_name :: String,
+                   shape :: InterfaceEndpoint || Array):
   def elements = endpoint_elements(shape)
   def mutable ports = []
   def mutable terminals = []
@@ -162,14 +166,14 @@ fun endpoint_ports(block_id, base_name, shape):
         ]
   [ports, terminals]
 
-fun port_index(ports, name):
+fun port_index(ports :: List.of(Port), name :: String):
   def mutable result = #false
   for (port in ports, index in 0..ports.length()):
     when port.name == name
     | result := index
   result
 
-fun instance_endpoint(operation, group :: InterfaceGroup):
+fun instance_endpoint(operation :: Operation, group :: InterfaceGroup):
   def child = operation.attribute("module")
   def bindings:
     group.bindings.map(
@@ -194,11 +198,12 @@ fun instance_endpoint(operation, group :: InterfaceGroup):
                     bindings,
                     "diagram-instance")
 
-fun group_in_arrays(group, arrays):
+fun group_in_arrays(group :: InterfaceGroup,
+                    arrays :: List.of(InterfaceArrayGroup)):
   for any (array_group in arrays):
     array_group.groups.find(fun (element): element === group)
 
-fun grouped_port_names(groups):
+fun grouped_port_names(groups :: List.of(InterfaceGroup)):
   def mutable names = []
   for (group in groups):
     for (binding in group.bindings):
@@ -206,7 +211,8 @@ fun grouped_port_names(groups):
       | names := names ++ [binding.port_name]
   names
 
-fun implicit_sync_port(metadata, port_name):
+fun implicit_sync_port(metadata :: False || SyncCircuitMetadata,
+                       port_name :: String):
   metadata && (
     port_name == metadata.clock_port || port_name == metadata.reset_port
   )
@@ -216,7 +222,8 @@ fun terminal_produces(terminal :: DiagramTerminal, value :: Value):
     fun (entity): entity is_a Value && entity === value
   )
 
-fun append_unique_terminals(left, right):
+fun append_unique_terminals(left :: List.of(DiagramTerminal),
+                            right :: List.of(DiagramTerminal)):
   def mutable result = left
   for (terminal in right):
     unless result.find(
@@ -228,9 +235,9 @@ fun append_unique_terminals(left, right):
 // Walks backward through unrepresented combinational logic, but stops as soon
 // as it reaches a block output so abstraction boundaries never gain shortcuts.
 fun value_source_terminals(value :: Value,
-                           outputs,
-                           source_cache,
-                           visiting = []):
+                           outputs :: List.of(DiagramTerminal),
+                           source_cache :: MutableMap,
+                           visiting :: List.of(Nat) = []):
   def cached = source_cache.get(value.id, #false)
   if cached != #false
   | cached
@@ -272,7 +279,9 @@ fun value_source_terminals(value :: Value,
       source_cache[value.id] := sources
       sources
 
-fun destination_sources(destination :: DiagramTerminal, outputs, source_cache):
+fun destination_sources(destination :: DiagramTerminal,
+                        outputs :: List.of(DiagramTerminal),
+                        source_cache :: MutableMap):
   def mutable sources = []
   for (entity in destination.entities):
     when entity is_a Place && entity.driver
@@ -282,7 +291,9 @@ fun destination_sources(destination :: DiagramTerminal, outputs, source_cache):
       )
   sources
 
-fun entity_originates_from(entity, candidate, seen = []):
+fun entity_originates_from(entity :: Value || Place,
+                           candidate :: Value || Place,
+                           seen :: List.of(Nat) = []):
   if entity === candidate
   | #true
   | cond
@@ -308,17 +319,18 @@ fun terminal_contains_endpoint(terminal :: DiagramTerminal,
 fun same_endpoint(left :: InterfaceEndpoint, right :: InterfaceEndpoint):
   left === right
 
-fun endpoint_seen(endpoint :: InterfaceEndpoint, seen):
+fun endpoint_seen(endpoint :: InterfaceEndpoint,
+                  seen :: List.of(InterfaceEndpoint)):
   seen.find(fun (candidate): same_endpoint(candidate, endpoint)) != #false
 
 // Follows whole-interface connections across local interface_link bridges.
 // Links remain transparent wiring, but their protocol identity survives until
 // the walk reaches a rendered input terminal.
 fun transparent_interface_destinations(endpoint :: InterfaceEndpoint,
-                                       inputs,
-                                       connections,
-                                       links,
-                                       seen = []):
+                                       inputs :: List.of(DiagramTerminal),
+                                       connections :: List.of(InterfaceConnectionGroup),
+                                       links :: List.of(InterfaceLinkGroup),
+                                       seen :: List.of(InterfaceEndpoint) = []):
   def matching = inputs.filter(
     ~keep: fun (terminal): terminal.compound && terminal_contains_endpoint(terminal, endpoint)
   )
@@ -350,7 +362,7 @@ fun transparent_interface_destinations(endpoint :: InterfaceEndpoint,
 
 fun reachable_modules(top :: Module):
   def mutable modules = []
-  fun visit(module_def):
+  fun visit(module_def :: Module):
     unless modules.find(fun (candidate): candidate === module_def)
     | modules := modules ++ [module_def]
       for (operation in module_def.operations):
@@ -361,7 +373,8 @@ fun reachable_modules(top :: Module):
 
 // A block is sequential when its implementation contains a sequential IR
 // operation directly or reaches one through an ordinary child instance.
-fun module_has_synchronous_state(module_def :: Module, seen = []):
+fun module_has_synchronous_state(module_def :: Module,
+                                 seen :: List.of(Nat) = []):
   if module_def.id in seen
   | #false
   | for any (operation in module_def.operations):
@@ -380,7 +393,7 @@ fun module_behavior(module_def :: Module):
 
 // Inline transforms whose configured function is ordinary combinational
 // hardware expose one abstract sideband port without expanding its wiring.
-fun transform_has_combo_input(kind):
+fun transform_has_combo_input(kind :: String):
   kind in ["map", "map-valid", "filter", "filter-valid", "gate", "demux"]
 
 fun diagram_module(module_def :: Module):

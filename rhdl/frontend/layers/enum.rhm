@@ -3,9 +3,12 @@
 
 import:
   rhombus/meta open
+  "../../../host/annotations.rhm" open
+  "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".hardware_value_type
+  "../support/generator-parameters.rhm".GeneratorParameter
   "../support/hardware-methods.rhm".HardwareMethods
   "../support/one-hot-selection.rhm" as one_hot_selection
   "../support/variants.rhm" open
@@ -17,7 +20,9 @@ export:
   enum_members
   enum_encoding
 
-fun make_automatic_enum(name, member_names, requested_width = #false):
+fun make_automatic_enum(name :: AsciiIdentifier,
+                        member_names :: NonemptyList.of(AsciiIdentifier),
+                        requested_width :: False || PosInt = #false):
   enum_type_from_schema(
     make_automatic_variant_schema(
       name,
@@ -27,7 +32,9 @@ fun make_automatic_enum(name, member_names, requested_width = #false):
     )
   )
 
-fun make_explicit_enum(name, members, requested_width = #false):
+fun make_explicit_enum(name :: AsciiIdentifier,
+                       members :: NonemptyList.of(List),
+                       requested_width :: False || PosInt = #false):
   enum_type_from_schema(
     make_explicit_variant_schema(
       name,
@@ -37,7 +44,8 @@ fun make_explicit_enum(name, members, requested_width = #false):
     )
   )
 
-fun make_one_hot_enum(name, member_names):
+fun make_one_hot_enum(name :: AsciiIdentifier,
+                      member_names :: NonemptyList.of(AsciiIdentifier)):
   enum_type_from_schema(
     make_one_hot_variant_schema(
       name,
@@ -46,11 +54,11 @@ fun make_one_hot_enum(name, member_names):
     )
   )
 
-fun hardware_has_one_hot_enum_type(value):
-  kernel.hardware_entity(value) && hardware_value_type(value) is_a OneHotEnumType
+fun hardware_has_one_hot_enum_type(value :: HardwareEntity):
+  hardware_value_type(value) is_a OneHotEnumType
 
 meta:
-  fun one_hot_enum_mux_result(result, cases):
+  fun one_hot_enum_mux_result(result :: Syntax, cases :: Syntax):
     match cases.group
     | '{$(_key :: expr_meta.Parsed): $(first :: Block), $rest, ...}':
         match first
@@ -83,7 +91,7 @@ dot.macro 'one_hot_enum_value_dot $left $dot $right':
 
 annot.macro 'OneHotEnumValue':
   annot_meta.pack_predicate(
-    'hardware_has_one_hot_enum_type',
+    'fun (value): value is_a HardwareEntity && hardware_has_one_hot_enum_type(value)',
     '(($(statinfo_meta.dot_provider_key), one_hot_enum_value_dot))'
   )
 
@@ -95,7 +103,7 @@ annot.macro
 
 annot.macro 'EnumMembers':
   annot_meta.pack_predicate(
-    'enum_type',
+    'fun (value): value is_a HardwareType && enum_type(value)',
     '(($(statinfo_meta.dot_provider_key), enum_member_dot))'
   )
 
@@ -105,7 +113,7 @@ dot.macro 'enum_member_dot $left $dot $right':
 meta:
   // Builds all enum encodings through one declaration path so methods have
   // identical behavior on automatic, explicit, fixed-width, and one-hot forms.
-  fun expand_hardware_enum(name, options, clauses):
+  fun expand_hardware_enum(name :: Syntax, options :: List, clauses :: List):
     def enum_name = name.to_source_string()
     def mutable requested_width = #false
     def mutable one_hot = #false
@@ -142,7 +150,7 @@ meta:
           explicit := #true
           members := members ++ [member]
           encodings := encodings ++ [encoding]
-      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...) :: $(result_constructor :: Identifier)($result_argument, ...):
            $method_body; ...':
           when one_hot && method_name.to_source_string() == "mux"
           | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
@@ -153,8 +161,9 @@ meta:
             enum_name ++ "_" ++ method_name.to_source_string(),
             method_name
           )
+          let [argument_binding, ...] = [argument.binding, ...]
           method_entries := method_entries ++ [
-            '($method_name, $method_function, ($argument, ...),
+            '($method_name, $method_function, ($argument_binding, ...),
               (typed ($result_constructor($result_argument, ...))))'
           ]
           method_definitions := method_definitions ++ [
@@ -162,7 +171,7 @@ meta:
                $method_body
                ...'
           ]
-      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...) :: $(result_type :: Identifier):
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...) :: $(result_type :: Identifier):
            $method_body; ...':
           when one_hot && method_name.to_source_string() == "mux"
           | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
@@ -173,15 +182,16 @@ meta:
             enum_name ++ "_" ++ method_name.to_source_string(),
             method_name
           )
+          let [argument_binding, ...] = [argument.binding, ...]
           method_entries := method_entries ++ [
-            '($method_name, $method_function, ($argument, ...), (typed ($result_type)))'
+            '($method_name, $method_function, ($argument_binding, ...), (typed ($result_type)))'
           ]
           method_definitions := method_definitions ++ [
             'fun $method_function($receiver :: $name, $argument, ...) :: $result_type:
                $method_body
                ...'
           ]
-      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: Identifier), ...):
+      | 'method $(method_name :: Identifier)($(receiver :: Identifier), $(argument :: GeneratorParameter), ...):
            $method_body; ...':
           when one_hot && method_name.to_source_string() == "mux"
           | syntax_meta.error("mux is reserved for one-hot enum selection", method_name)
@@ -192,8 +202,9 @@ meta:
             enum_name ++ "_" ++ method_name.to_source_string(),
             method_name
           )
+          let [argument_binding, ...] = [argument.binding, ...]
           method_entries := method_entries ++ [
-            '($method_name, $method_function, ($argument, ...), untyped)'
+            '($method_name, $method_function, ($argument_binding, ...), untyped)'
           ]
           method_definitions := method_definitions ++ [
             'fun $method_function($receiver :: $name, $argument, ...) :~ HardwareFields:
@@ -252,7 +263,7 @@ meta:
              | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
          annot.macro '$member_annotation':
            annot_meta.pack_predicate(
-             'enum_type',
+             'fun (value): value is_a HardwareType && enum_type(value)',
              '(($(statinfo_meta.dot_provider_key), $member_dot))'
            )
          def $name :: HardwareFields.describes($member_annotation, $name) = $constructor
@@ -273,7 +284,7 @@ meta:
              | 'enum_value($('$')left, $('$')(right.to_source_string())) :: $name'
          annot.macro '$member_annotation':
            annot_meta.pack_predicate(
-             'enum_type',
+             'fun (value): value is_a HardwareType && enum_type(value)',
              '(($(statinfo_meta.dot_provider_key), $member_dot))'
            )
          def $name :: HardwareFields.describes($member_annotation, $name) = $constructor

@@ -9,62 +9,70 @@ import:
 export:
   Builder
 
-fun fail(who, message):
+fun fail(who :: Symbol, message :: String):
   error(~who: who, message)
 
-fun ensure_hardware_type(type, who):
+fun ensure_hardware_type(type :~ HardwareType, who :: Symbol):
   unless type_well_formed(type)
   | fail(who, "expected a well-formed HardwareType")
 
-fun ensure_bits(type, who):
+fun ensure_bits(type :~ HardwareType, who :: Symbol):
   ensure_hardware_type(type, who)
   unless bits_type(type)
   | fail(who, "expected a Bits type")
 
-fun ensure_data_type(type, who):
+fun ensure_data_type(type :~ HardwareType, who :: Symbol):
   ensure_hardware_type(type, who)
   unless data_type(type)
   | fail(who, "expected a DataType")
 
-fun ensure_packable_data_type(type, who):
+fun ensure_packable_data_type(type :~ HardwareType, who :: Symbol):
   ensure_data_type(type, who)
   unless type.packed_width() is_a PosInt
   | fail(who, "expected a packable DataType")
 
-fun normalize_decode_pattern(value :: Nat, care :: Nat, width :: PosInt, who, role):
+fun normalize_decode_pattern(value :: Nat,
+                             care :: Nat,
+                             width :: PosInt,
+                             who :: Symbol,
+                             role :: String):
   unless bits.length(value) <= width && bits.length(care) <= width
   | fail(who, role ++ " value or care does not fit its packed width")
   [value bits.and care, care]
 
-fun decode_patterns_overlap(left, right):
+fun decode_patterns_overlap(left :: List, right :: List):
   def differing = left[0] bits.xor right[0]
   def jointly_cared = left[1] bits.and right[1]
   (differing bits.and jointly_cared) == 0
 
-fun ensure_hardware_name(name :: AsciiIdentifier, who):
+fun ensure_hardware_name(name :: AsciiIdentifier, who :: Symbol):
   when name.starts_with("__rhdl_")
   | fail(who, "hardware names beginning with __rhdl_ are reserved")
 
-fun ensure_module_in_design(design :: Design, module_def :: Module, who):
+fun ensure_module_in_design(design :: Design,
+                            module_def :: Module,
+                            who :: Symbol):
   def owned = module_def.design === design && design.owns_module(module_def)
   unless owned
   | fail(who, "module belongs to a different design")
 
-fun ensure_open(module_def :: Module, who):
+fun ensure_open(module_def :: Module, who :: Symbol):
   when module_def.finished
   | fail(who, "module " ++ module_def.name ++ " is already finished")
 
-fun ensure_value_in(module_def :: Module, value :: Value, who):
+fun ensure_value_in(module_def :: Module, value :: Value, who :: Symbol):
   def owned = value.module_def === module_def && module_def.owns_value(value)
   unless owned
   | fail(who, "hardware value belongs to a different module")
 
-fun ensure_memory_in(module_def :: Module, memory :: Memory, who):
+fun ensure_memory_in(module_def :: Module, memory :: Memory, who :: Symbol):
   def owned = memory.module_def === module_def && module_def.owns_memory(memory)
   unless owned
   | fail(who, "memory belongs to a different module")
 
-fun ensure_dpi_import_in(design :: Design, dpi_import :: DpiImport, who):
+fun ensure_dpi_import_in(design :: Design,
+                         dpi_import :: DpiImport,
+                         who :: Symbol):
   def owned = dpi_import.design === design && design.owns_dpi_import(dpi_import)
   unless owned
   | fail(who, "DPI import belongs to a different design")
@@ -75,7 +83,7 @@ fun check_dpi_operands(design :: Design,
                        inputs :: List.of(Value),
                        clock :: Value,
                        enable :: Value,
-                       who):
+                       who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_dpi_import_in(design, dpi_import, who)
@@ -93,26 +101,26 @@ fun check_dpi_operands(design :: Design,
   | fail(who, "DPI enable must be a one-bit FlatDataType")
   [clock, enable] ++ inputs
 
-fun root_place(place):
-  if place is_a Place && place.parent is_a Place
+fun root_place(place :: Place):
+  if place.parent is_a Place
   | root_place(place.parent)
   | place
 
-fun ensure_place_in(module_def :: Module, place :: Place, who):
+fun ensure_place_in(module_def :: Module, place :: Place, who :: Symbol):
   def root = root_place(place)
   def owned = root && place.module_def === module_def && module_def.owns_place(root)
   unless owned
   | fail(who, "hardware place belongs to a different module")
 
-fun place_has_staged_driver(place):
+fun place_has_staged_driver(place :: Place):
   place.driver || (for any (projected in place.projected_places): place_has_staged_driver(projected))
 
-fun ancestor_has_driver(place):
+fun ancestor_has_driver(place :: Place):
   if place.parent is_a Place
   | place.parent.driver || ancestor_has_driver(place.parent)
   | #false
 
-fun aggregate_place_complete(place):
+fun aggregate_place_complete(place :: Place):
   if place.driver
   | #true
   | if record_type(place.type)
@@ -125,27 +133,31 @@ fun aggregate_place_complete(place):
           projected && aggregate_place_complete(projected)
       | #false
 
-fun ensure_unique_hardware_name(module_def, name, who):
+fun ensure_unique_hardware_name(module_def :: Module,
+                                name :: String,
+                                who :: Symbol):
   when module_def.hardware_name_used(name)
   | fail(who, "duplicate hardware name " ++ name)
 
-fun ensure_unique_instance_name(module_def, name, who):
+fun ensure_unique_instance_name(module_def :: Module,
+                                name :: String,
+                                who :: Symbol):
   when module_def.find_instance(name)
   | fail(who, "duplicate instance name " ++ name)
 
-fun instance_name_used(module_def, name):
+fun instance_name_used(module_def :: Module, name :: String):
   module_def.find_instance(name)
 
-fun build_value_operation(design,
-                          module_def,
-                          opcode,
-                          operands,
-                          result_type,
-                          name,
-                          location,
-                          origin,
-                          who,
-                          attributes = {}):
+fun build_value_operation(design :: Design,
+                          module_def :: Module,
+                          opcode :: String,
+                          operands :: List.of(Value),
+                          result_type :: HardwareType,
+                          name :: False || AsciiIdentifier,
+                          location :: Location,
+                          origin :: Origin,
+                          who :: Symbol,
+                          attributes :: Map = {}):
   def operation_id = design.fresh_id()
   def value_name = name || "v" ++ to_string(operation_id)
   ensure_hardware_name(value_name, who)
@@ -166,15 +178,15 @@ fun build_value_operation(design,
   module_def.add_operation(operation)
   value
 
-fun build_arithmetic_same_type_binary(design,
-                                      module_def,
-                                      opcode,
-                                      left,
-                                      right,
-                                      name,
-                                      location,
-                                      origin,
-                                      who):
+fun build_arithmetic_same_type_binary(design :: Design,
+                                      module_def :: Module,
+                                      opcode :: String,
+                                      left :: Value,
+                                      right :: Value,
+                                      name :: False || AsciiIdentifier,
+                                      location :: Location,
+                                      origin :: Origin,
+                                      who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, left, who)
@@ -192,15 +204,15 @@ fun build_arithmetic_same_type_binary(design,
                         origin,
                         who)
 
-fun build_bitwise_same_type_binary(design,
-                                   module_def,
-                                   opcode,
-                                   left,
-                                   right,
-                                   name,
-                                   location,
-                                   origin,
-                                   who):
+fun build_bitwise_same_type_binary(design :: Design,
+                                   module_def :: Module,
+                                   opcode :: String,
+                                   left :: Value,
+                                   right :: Value,
+                                   name :: False || AsciiIdentifier,
+                                   location :: Location,
+                                   origin :: Origin,
+                                   who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, left, who)
@@ -218,15 +230,15 @@ fun build_bitwise_same_type_binary(design,
                         origin,
                         who)
 
-fun build_bits_shift(design,
-                     module_def,
-                     opcode,
-                     value,
-                     amount,
-                     name,
-                     location,
-                     origin,
-                     who):
+fun build_bits_shift(design :: Design,
+                     module_def :: Module,
+                     opcode :: String,
+                     value :: Value,
+                     amount :: Value,
+                     name :: False || AsciiIdentifier,
+                     location :: Location,
+                     origin :: Origin,
+                     who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, value, who)
@@ -245,15 +257,15 @@ fun build_bits_shift(design,
                         origin,
                         who)
 
-fun build_arithmetic_shift(design,
-                           module_def,
-                           opcode,
-                           value,
-                           amount,
-                           name,
-                           location,
-                           origin,
-                           who):
+fun build_arithmetic_shift(design :: Design,
+                           module_def :: Module,
+                           opcode :: String,
+                           value :: Value,
+                           amount :: Value,
+                           name :: False || AsciiIdentifier,
+                           location :: Location,
+                           origin :: Origin,
+                           who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, value, who)
@@ -272,15 +284,15 @@ fun build_arithmetic_shift(design,
                         origin,
                         who)
 
-fun build_signed_arithmetic_shift(design,
-                                  module_def,
-                                  opcode,
-                                  value,
-                                  amount,
-                                  name,
-                                  location,
-                                  origin,
-                                  who):
+fun build_signed_arithmetic_shift(design :: Design,
+                                  module_def :: Module,
+                                  opcode :: String,
+                                  value :: Value,
+                                  amount :: Value,
+                                  name :: False || AsciiIdentifier,
+                                  location :: Location,
+                                  origin :: Origin,
+                                  who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, value, who)
@@ -299,15 +311,15 @@ fun build_signed_arithmetic_shift(design,
                         origin,
                         who)
 
-fun build_mux_lookup(design,
-                     module_def,
-                     selector,
-                     default_value,
-                     cases :: NonemptyList,
-                     name,
-                     location,
-                     origin,
-                     who):
+fun build_mux_lookup(design :: Design,
+                     module_def :: Module,
+                     selector :: Value,
+                     default_value :: Value,
+                     cases :: NonemptyList.of(List),
+                     name :: False || AsciiIdentifier,
+                     location :: Location,
+                     origin :: Origin,
+                     who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, selector, who)
@@ -318,7 +330,7 @@ fun build_mux_lookup(design,
   | fail(who, "mux lookup values must have a DataType")
   def width = selector_width(selector.type)
   for (case in cases):
-    unless case is_a List && case.length() == 2
+    unless case.length() == 2
     | fail(who, "mux lookup cases must be [key, value] pairs")
     def key = case[0]
     def value = case[1]
@@ -329,7 +341,9 @@ fun build_mux_lookup(design,
     ensure_value_in(module_def, value, who)
     unless data_type(value.type) && type_equal(default_value.type, value.type)
     | fail(who, "mux lookup cases and default must have exactly the same DataType")
-  def normalized_cases = cases.sort(fun (left, right): left[0] < right[0])
+  def normalized_cases = cases.sort(
+    fun (left, right): left[0] < right[0]
+  )
   def mutable previous_key = #false
   for (case in normalized_cases):
     when previous_key != #false && previous_key == case[0]
@@ -338,7 +352,9 @@ fun build_mux_lookup(design,
   build_value_operation(design,
                         module_def,
                         "rtl.mux_lookup",
-                        [selector, default_value] ++ normalized_cases.map(fun (case): case[1]),
+                        [selector, default_value] ++ normalized_cases.map(
+                          fun (case): case[1]
+                        ),
                         default_value.type,
                         name,
                         location,
@@ -349,14 +365,14 @@ fun build_mux_lookup(design,
 // Builds a partial one-hot selection operation. Exactly one selector bit is a
 // caller precondition; zero-hot and multi-hot results are intentionally
 // unspecified so backends can use direct gating and reduction.
-fun build_onehot_mux(design,
-                     module_def,
-                     selector,
+fun build_onehot_mux(design :: Design,
+                     module_def :: Module,
+                     selector :: Value,
                      choices :: List.of(Value),
-                     name,
-                     location,
-                     origin,
-                     who):
+                     name :: False || AsciiIdentifier,
+                     location :: Location,
+                     origin :: Origin,
+                     who :: Symbol):
   ensure_module_in_design(design, module_def, who)
   ensure_open(module_def, who)
   ensure_value_in(module_def, selector, who)
@@ -385,12 +401,12 @@ fun build_onehot_mux(design,
 class Builder(design :: Design):
   // Materializes a design-level declaration lazily so reusable frontend
   // descriptors can be called from any circuit in one elaborated design.
-  method dpi_import(name,
-                    input_names,
-                    input_types,
-                    result_name = #false,
-                    result_type = #false,
-                    location = Location()):
+  method dpi_import(name :: AsciiIdentifier,
+                    input_names :: NonemptyList.of(AsciiIdentifier),
+                    input_types :: NonemptyList.of(FlatDataType),
+                    result_name :: False || AsciiIdentifier = #false,
+                    result_type :: False || FlatDataType = #false,
+                    location :: Location = Location()):
     unless (result_name == #false && result_type == #false) || (result_name != #false && result_type != #false)
     | fail(#'dpi_import, "DPI result name and type must be supplied together")
     def results:
@@ -407,13 +423,15 @@ class Builder(design :: Design):
                             input_names :: NonemptyList.of(AsciiIdentifier),
                             input_types :: NonemptyList.of(FlatDataType),
                             results :: List.of(DpiResult),
-                            location = Location()):
+                            location :: Location = Location()):
     ensure_hardware_name(name, #'dpi_import)
     unless input_names.length() == input_types.length()
     | fail(#'dpi_import, "DPI input names and types must be equal-length Lists")
     for (input_name in input_names):
       ensure_hardware_name(input_name, #'dpi_import)
-      when input_names.filter(~keep: fun (candidate): candidate == input_name).length() != 1
+      when input_names.filter(
+        ~keep: fun (candidate): candidate == input_name
+      ).length() != 1
       | fail(#'dpi_import, "DPI input names must be unique")
     for (input_type in input_types):
       unless flat_data_type(input_type) && type_well_formed(input_type)
@@ -426,12 +444,18 @@ class Builder(design :: Design):
       | fail(#'dpi_import, "DPI result direction must be out or return")
     def result_names = results.map(fun (result): result.name)
     for (result_name in result_names):
-      when result_names.filter(~keep: fun (candidate): candidate == result_name).length() != 1
+      when result_names.filter(
+        ~keep: fun (candidate): candidate == result_name
+      ).length() != 1
       | fail(#'dpi_import, "DPI result names must be unique")
-      when input_names.find(fun (candidate): candidate == result_name)
+      when input_names.find(
+        fun (candidate): candidate == result_name
+      )
       | fail(#'dpi_import, "DPI input and result names must be unique")
     when results.length() != 0
-    | def return_results = results.filter(~keep: fun (result): result.direction == "return")
+    | def return_results = results.filter(
+        ~keep: fun (result): result.direction == "return"
+      )
       unless return_results.length() == 1
       | fail(#'dpi_import, "DPI function requires exactly one return result")
       unless results[results.length() - 1].direction == "return"
@@ -458,14 +482,14 @@ class Builder(design :: Design):
 
   // A clocked assertion is verification collateral, not a readable value or
   // hidden state element. Its guard records derived lexical activation.
-  method assert(module_def,
-                condition,
-                clock,
-                reset,
-                guard,
-                label = #false,
-                location = Location(),
-                origin = Origin("clocked assertion")):
+  method assert(module_def :: Module,
+                condition :: Value,
+                clock :: Value,
+                reset :: Value,
+                guard :: Value,
+                label :: False || AsciiIdentifier = #false,
+                location :: Location = Location(),
+                origin :: Origin = Origin("clocked assertion")):
     ensure_module_in_design(design, module_def, #'assert)
     ensure_open(module_def, #'assert)
     for (operand in [condition, clock, reset, guard]):
@@ -498,13 +522,13 @@ class Builder(design :: Design):
 
   // A procedure call is a clocked side effect and therefore produces no
   // hardware value or hidden result state.
-  method dpi_call(module_def,
-                  dpi_import,
-                  inputs,
-                  clock,
-                  enable,
-                  location = Location(),
-                  origin = Origin("DPI call")):
+  method dpi_call(module_def :: Module,
+                  dpi_import :: DpiImport,
+                  inputs :: List.of(Value),
+                  clock :: Value,
+                  enable :: Value,
+                  location :: Location = Location(),
+                  origin :: Origin = Origin("DPI call")):
     ensure_dpi_import_in(design, dpi_import, #'dpi_call)
     when dpi_import.has_result()
     | fail(#'dpi_call, "result-bearing DPI functions must be instantiated with dpi_register")
@@ -532,14 +556,14 @@ class Builder(design :: Design):
 
   // A DPI register makes the state implied by a result-bearing clocked call
   // explicit in both its operation name and its required hardware binding.
-  method dpi_register(module_def,
-                      name,
+  method dpi_register(module_def :: Module,
+                      name :: AsciiIdentifier,
                       dpi_import :: DpiImport,
-                      inputs,
-                      clock,
-                      enable,
-                      location = Location(),
-                      origin = Origin("DPI register")):
+                      inputs :: List.of(Value),
+                      clock :: Value,
+                      enable :: Value,
+                      location :: Location = Location(),
+                      origin :: Origin = Origin("DPI register")):
     unless dpi_import.results.length() == 1
     | fail(#'dpi_register, "dpi_register requires a function with exactly one result")
     this.dpi_register_results(module_def,
@@ -551,14 +575,14 @@ class Builder(design :: Design):
                               location,
                               origin)[0]
 
-  method dpi_register_results(module_def,
+  method dpi_register_results(module_def :: Module,
                               result_names :: List.of(AsciiIdentifier),
                               dpi_import :: DpiImport,
-                              inputs,
-                              clock,
-                              enable,
-                              location = Location(),
-                              origin = Origin("DPI result registers")):
+                              inputs :: List.of(Value),
+                              clock :: Value,
+                              enable :: Value,
+                              location :: Location = Location(),
+                              origin :: Origin = Origin("DPI result registers")):
     ensure_dpi_import_in(design, dpi_import, #'dpi_register)
     unless dpi_import.has_result()
     | fail(#'dpi_register, "DPI register requires a result-bearing function")
@@ -574,7 +598,9 @@ class Builder(design :: Design):
            "DPI register result names must match the function result count")
     for (value_name in result_names):
       ensure_hardware_name(value_name, #'dpi_register)
-      when result_names.filter(~keep: fun (candidate): candidate == value_name).length() != 1
+      when result_names.filter(
+        ~keep: fun (candidate): candidate == value_name
+      ).length() != 1
       | fail(#'dpi_register, "DPI register result names must be unique")
       ensure_unique_hardware_name(module_def, value_name, #'dpi_register)
     def operation_id = design.fresh_id()
@@ -602,7 +628,7 @@ class Builder(design :: Design):
     module_def.add_operation(operation)
     result_values
 
-  method module(name):
+  method module(name :: AsciiIdentifier):
     ensure_hardware_name(name, #'module)
     when design.find_module_named(name)
     | fail(#'module, "duplicate module name " ++ name)
@@ -612,11 +638,12 @@ class Builder(design :: Design):
 
   // Allocates a stable name from a suggested base without weakening the IR's
   // invariant that every final instance name is unique within its parent.
-  method fresh_instance_name(module_def, base_name):
+  method fresh_instance_name(module_def :: Module,
+                             base_name :: AsciiIdentifier):
     ensure_module_in_design(design, module_def, #'fresh_instance_name)
     ensure_open(module_def, #'fresh_instance_name)
     ensure_hardware_name(base_name, #'fresh_instance_name)
-    fun find_available(suffix):
+    fun find_available(suffix :: Nat):
       def candidate:
         if suffix == 0
         | base_name
@@ -626,7 +653,11 @@ class Builder(design :: Design):
       | candidate
     find_available(0)
 
-  method input(module_def, name, type, location = Location(), origin = Origin("input", name)):
+  method input(module_def :: Module,
+               name :: AsciiIdentifier,
+               type :~ HardwareType,
+               location :: Location = Location(),
+               origin :: Origin = Origin("input", name)):
     ensure_module_in_design(design, module_def, #'input)
     ensure_open(module_def, #'input)
     ensure_hardware_name(name, #'input)
@@ -648,7 +679,11 @@ class Builder(design :: Design):
     module_def.add_input(Port(name, "input", type, value, #false))
     value
 
-  method output(module_def, name, type, location = Location(), origin = Origin("output", name)):
+  method output(module_def :: Module,
+                name :: AsciiIdentifier,
+                type :~ HardwareType,
+                location :: Location = Location(),
+                origin :: Origin = Origin("output", name)):
     ensure_module_in_design(design, module_def, #'output)
     ensure_open(module_def, #'output)
     ensure_hardware_name(name, #'output)
@@ -673,7 +708,11 @@ class Builder(design :: Design):
   // Creates a declaration-order-independent single-driver connection. The
   // place accepts its driver while the paired value can be consumed earlier;
   // verification still requires one complete effective driver.
-  method wire(module_def, name, type, location = Location(), origin = Origin("wire", name)):
+  method wire(module_def :: Module,
+              name :: AsciiIdentifier,
+              type :~ HardwareType,
+              location :: Location = Location(),
+              origin :: Origin = Origin("wire", name)):
     ensure_module_in_design(design, module_def, #'wire)
     ensure_open(module_def, #'wire)
     ensure_hardware_name(name, #'wire)
@@ -696,12 +735,12 @@ class Builder(design :: Design):
     module_def.add_operation(operation)
     place
 
-  method constant(module_def,
-                  type,
+  method constant(module_def :: Module,
+                  type :: HardwareType,
                   integer :: Nat,
-                  name = #false,
-                  location = Location(),
-                  origin = Origin("constant")):
+                  name :: False || AsciiIdentifier = #false,
+                  location :: Location = Location(),
+                  origin :: Origin = Origin("constant")):
     ensure_module_in_design(design, module_def, #'constant)
     ensure_open(module_def, #'constant)
     ensure_bits(type, #'constant)
@@ -727,11 +766,11 @@ class Builder(design :: Design):
     value
 
   // A don't-care is synthesis freedom, not a runtime four-state value.
-  method dont_care(module_def,
-                   type,
-                   name = #false,
-                   location = Location(),
-                   origin = Origin("don't care")):
+  method dont_care(module_def :: Module,
+                   type :: HardwareType,
+                   name :: False || AsciiIdentifier = #false,
+                   location :: Location = Location(),
+                   origin :: Origin = Origin("don't care")):
     ensure_module_in_design(design, module_def, #'dont_care)
     ensure_open(module_def, #'dont_care)
     ensure_bits(type, #'dont_care)
@@ -747,16 +786,16 @@ class Builder(design :: Design):
 
   // A decode preserves an incompletely specified relation for backend
   // synthesis instead of choosing concrete values for uncared output bits.
-  method decode(module_def,
-                selector,
-                input_type,
-                result_type,
-                cases :: List,
-                default_value,
-                default_care,
-                name = #false,
-                location = Location(),
-                origin = Origin("decode")):
+  method decode(module_def :: Module,
+                selector :: Value,
+                input_type :: DataType,
+                result_type :: DataType,
+                cases :: List.of(List),
+                default_value :: Nat,
+                default_care :: Nat,
+                name :: False || AsciiIdentifier = #false,
+                location :: Location = Location(),
+                origin :: Origin = Origin("decode")):
     ensure_module_in_design(design, module_def, #'decode)
     ensure_open(module_def, #'decode)
     ensure_value_in(module_def, selector, #'decode)
@@ -773,7 +812,7 @@ class Builder(design :: Design):
                                                       "decode default")
     def normalized_cases:
       for List (case in cases, index in 0..cases.length()):
-        unless case is_a List && case.length() == 4
+        unless case.length() == 4
         | fail(#'decode,
                String.append("decode case ", to_string(index),
                              " must be [input value, input care, output value, output care]"))
@@ -808,12 +847,12 @@ class Builder(design :: Design):
                            "default_value": normalized_default[0],
                            "default_care": normalized_default[1]})
 
-  method add(module_def,
-             left,
-             right,
-             name = #false,
-             location = Location(),
-             origin = Origin("add")):
+  method add(module_def :: Module,
+             left :: Value,
+             right :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("add")):
     build_arithmetic_same_type_binary(design,
                                       module_def,
                                       "rtl.add",
@@ -824,12 +863,12 @@ class Builder(design :: Design):
                                       origin,
                                       #'add)
 
-  method mul(module_def,
-             left,
-             right,
-             name = #false,
-             location = Location(),
-             origin = Origin("mul")):
+  method mul(module_def :: Module,
+             left :: Value,
+             right :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("mul")):
     build_arithmetic_same_type_binary(design,
                                       module_def,
                                       "rtl.mul",
@@ -840,11 +879,11 @@ class Builder(design :: Design):
                                       origin,
                                       #'mul)
 
-  method bit_not(module_def,
-                 operand,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("not")):
+  method bit_not(module_def :: Module,
+                 operand :: Value,
+                 name :: False || AsciiIdentifier = #false,
+                 location :: Location = Location(),
+                 origin :: Origin = Origin("not")):
     ensure_module_in_design(design, module_def, #'bit_not)
     ensure_open(module_def, #'bit_not)
     ensure_value_in(module_def, operand, #'bit_not)
@@ -860,75 +899,75 @@ class Builder(design :: Design):
                           origin,
                           #'bit_not)
 
-  method bit_and(module_def,
-                 left,
-                 right,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("and")):
+  method bit_and(module_def :: Module,
+                 left :: Value,
+                 right :: Value,
+                 name :: False || AsciiIdentifier = #false,
+                 location :: Location = Location(),
+                 origin :: Origin = Origin("and")):
     build_bitwise_same_type_binary(design, module_def, "rtl.and", left, right,
                                    name, location, origin, #'bit_and)
 
-  method bit_or(module_def,
-                left,
-                right,
-                name = #false,
-                location = Location(),
-                origin = Origin("or")):
+  method bit_or(module_def :: Module,
+                left :: Value,
+                right :: Value,
+                name :: False || AsciiIdentifier = #false,
+                location :: Location = Location(),
+                origin :: Origin = Origin("or")):
     build_bitwise_same_type_binary(design, module_def, "rtl.or", left, right,
                                    name, location, origin, #'bit_or)
 
-  method bit_xor(module_def,
-                 left,
-                 right,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("xor")):
+  method bit_xor(module_def :: Module,
+                 left :: Value,
+                 right :: Value,
+                 name :: False || AsciiIdentifier = #false,
+                 location :: Location = Location(),
+                 origin :: Origin = Origin("xor")):
     build_bitwise_same_type_binary(design, module_def, "rtl.xor", left, right,
                                    name, location, origin, #'bit_xor)
 
-  method sub(module_def,
-             left,
-             right,
-             name = #false,
-             location = Location(),
-             origin = Origin("sub")):
+  method sub(module_def :: Module,
+             left :: Value,
+             right :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("sub")):
     build_arithmetic_same_type_binary(design, module_def, "rtl.sub", left, right,
                                       name, location, origin, #'sub)
 
-  method shl(module_def,
-             value,
-             amount,
-             name = #false,
-             location = Location(),
-             origin = Origin("shl")):
+  method shl(module_def :: Module,
+             value :: Value,
+             amount :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("shl")):
     build_arithmetic_shift(design, module_def, "rtl.shl", value, amount,
                            name, location, origin, #'shl)
 
-  method shru(module_def,
-              value,
-              amount,
-              name = #false,
-              location = Location(),
-              origin = Origin("shru")):
+  method shru(module_def :: Module,
+              value :: Value,
+              amount :: Value,
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: Origin = Origin("shru")):
     build_bits_shift(design, module_def, "rtl.shru", value, amount,
                      name, location, origin, #'shru)
 
-  method shrs(module_def,
-              value,
-              amount,
-              name = #false,
-              location = Location(),
-              origin = Origin("shrs")):
+  method shrs(module_def :: Module,
+              value :: Value,
+              amount :: Value,
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: Origin = Origin("shrs")):
     build_signed_arithmetic_shift(design, module_def, "rtl.shrs", value, amount,
                                   name, location, origin, #'shrs)
 
-  method eq(module_def,
-            left,
-            right,
-            name = #false,
-            location = Location(),
-            origin = Origin("eq")):
+  method eq(module_def :: Module,
+            left :: Value,
+            right :: Value,
+            name :: False || AsciiIdentifier = #false,
+            location :: Location = Location(),
+            origin :: Origin = Origin("eq")):
     ensure_module_in_design(design, module_def, #'eq)
     ensure_open(module_def, #'eq)
     ensure_value_in(module_def, left, #'eq)
@@ -945,12 +984,12 @@ class Builder(design :: Design):
                           origin,
                           #'eq)
 
-  method ult(module_def,
-             left,
-             right,
-             name = #false,
-             location = Location(),
-             origin = Origin("ult")):
+  method ult(module_def :: Module,
+             left :: Value,
+             right :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("ult")):
     ensure_module_in_design(design, module_def, #'ult)
     ensure_open(module_def, #'ult)
     ensure_value_in(module_def, left, #'ult)
@@ -967,12 +1006,12 @@ class Builder(design :: Design):
                           origin,
                           #'ult)
 
-  method slt(module_def,
-             left,
-             right,
-             name = #false,
-             location = Location(),
-             origin = Origin("slt")):
+  method slt(module_def :: Module,
+             left :: Value,
+             right :: Value,
+             name :: False || AsciiIdentifier = #false,
+             location :: Location = Location(),
+             origin :: Origin = Origin("slt")):
     ensure_module_in_design(design, module_def, #'slt)
     ensure_open(module_def, #'slt)
     ensure_value_in(module_def, left, #'slt)
@@ -989,13 +1028,13 @@ class Builder(design :: Design):
                           origin,
                           #'slt)
 
-  method mux_lookup(module_def,
-                    selector,
-                    default_value,
-                    cases,
-                    name = #false,
-                    location = Location(),
-                    origin = Origin("mux_lookup")):
+  method mux_lookup(module_def :: Module,
+                    selector :: Value,
+                    default_value :: Value,
+                    cases :: NonemptyList.of(List),
+                    name :: False || AsciiIdentifier = #false,
+                    location :: Location = Location(),
+                    origin :: Origin = Origin("mux_lookup")):
     build_mux_lookup(design,
                      module_def,
                      selector,
@@ -1006,12 +1045,12 @@ class Builder(design :: Design):
                      origin,
                      #'mux_lookup)
 
-  method onehot_mux(module_def,
-                    selector,
-                    choices,
-                    name = #false,
-                    location = Location(),
-                    origin = Origin("onehot_mux")):
+  method onehot_mux(module_def :: Module,
+                    selector :: Value,
+                    choices :: List.of(Value),
+                    name :: False || AsciiIdentifier = #false,
+                    location :: Location = Location(),
+                    origin :: Origin = Origin("onehot_mux")):
     build_onehot_mux(design,
                      module_def,
                      selector,
@@ -1021,12 +1060,12 @@ class Builder(design :: Design):
                      origin,
                      #'onehot_mux)
 
-  method cast(module_def,
-              value,
-              target_type,
-              name = #false,
-              location = Location(),
-              origin = Origin("cast")):
+  method cast(module_def :: Module,
+              value :: Value,
+              target_type :: HardwareType,
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: Origin = Origin("cast")):
     ensure_module_in_design(design, module_def, #'cast)
     ensure_open(module_def, #'cast)
     ensure_value_in(module_def, value, #'cast)
@@ -1044,11 +1083,11 @@ class Builder(design :: Design):
                           origin,
                           #'cast)
 
-  method concat(module_def,
+  method concat(module_def :: Module,
                 operands :: List.of(Value),
-                name = #false,
-                location = Location(),
-                origin = Origin("concat")):
+                name :: False || AsciiIdentifier = #false,
+                location :: Location = Location(),
+                origin :: Origin = Origin("concat")):
     ensure_module_in_design(design, module_def, #'concat)
     ensure_open(module_def, #'concat)
     unless operands.length() >= 2
@@ -1069,13 +1108,13 @@ class Builder(design :: Design):
                           origin,
                           #'concat)
 
-  method extract(module_def,
-                 value,
+  method extract(module_def :: Module,
+                 value :: Value,
                  high :: Nat,
                  low :: Nat,
-                 name = #false,
-                 location = Location(),
-                 origin = Origin("extract")):
+                 name :: False || AsciiIdentifier = #false,
+                 location :: Location = Location(),
+                 origin :: Origin = Origin("extract")):
     ensure_module_in_design(design, module_def, #'extract)
     ensure_open(module_def, #'extract)
     ensure_value_in(module_def, value, #'extract)
@@ -1095,12 +1134,12 @@ class Builder(design :: Design):
                           #'extract,
                           {"high": high, "low": low})
 
-  method zext(module_def,
-              value,
+  method zext(module_def :: Module,
+              value :: Value,
               target_width :: PosInt,
-              name = #false,
-              location = Location(),
-              origin = Origin("zext")):
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: Origin = Origin("zext")):
     ensure_module_in_design(design, module_def, #'zext)
     ensure_open(module_def, #'zext)
     ensure_value_in(module_def, value, #'zext)
@@ -1119,12 +1158,12 @@ class Builder(design :: Design):
                           #'zext,
                           {"target_width": target_width})
 
-  method sext(module_def,
-              value,
+  method sext(module_def :: Module,
+              value :: Value,
               target_width :: PosInt,
-              name = #false,
-              location = Location(),
-              origin = Origin("sext")):
+              name :: False || AsciiIdentifier = #false,
+              location :: Location = Location(),
+              origin :: Origin = Origin("sext")):
     ensure_module_in_design(design, module_def, #'sext)
     ensure_open(module_def, #'sext)
     ensure_value_in(module_def, value, #'sext)
@@ -1146,12 +1185,12 @@ class Builder(design :: Design):
                           #'sext,
                           {"target_width": target_width})
 
-  method trunc(module_def,
-               value,
+  method trunc(module_def :: Module,
+               value :: Value,
                target_width :: PosInt,
-               name = #false,
-               location = Location(),
-               origin = Origin("trunc")):
+               name :: False || AsciiIdentifier = #false,
+               location :: Location = Location(),
+               origin :: Origin = Origin("trunc")):
     ensure_module_in_design(design, module_def, #'trunc)
     ensure_open(module_def, #'trunc)
     ensure_value_in(module_def, value, #'trunc)
@@ -1170,29 +1209,33 @@ class Builder(design :: Design):
                           #'trunc,
                           {"target_width": target_width})
 
-  method record_create(module_def,
-                       type,
-                       field_values :: List,
-                       name = #false,
-                       location = Location(),
-                       origin = Origin("record_create")):
+  method record_create(module_def :: Module,
+                       type :: RecordType,
+                       field_values :: List.of(List),
+                       name :: False || AsciiIdentifier = #false,
+                       location :: Location = Location(),
+                       origin :: Origin = Origin("record_create")):
     ensure_module_in_design(design, module_def, #'record_create)
     ensure_open(module_def, #'record_create)
     unless record_type(type) && type_well_formed(type)
     | fail(#'record_create, "record_create type must be a well-formed RecordType")
     for (binding in field_values):
-      unless binding is_a List && binding.length() == 2 && binding[0] is_a String
+      unless binding.length() == 2 && binding[0] is_a String
       | fail(#'record_create, "record fields must be [name, value] pairs")
       unless type.field(binding[0])
       | fail(#'record_create, "record has no field named " ++ binding[0])
-      when field_values.filter(~keep: fun (candidate): candidate[0] == binding[0]).length() != 1
+      when field_values.filter(
+        ~keep: fun (candidate): candidate[0] == binding[0]
+      ).length() != 1
       | fail(#'record_create, "record field values must be unique")
     unless field_values.length() == type.fields.length()
     | fail(#'record_create, "record_create requires exactly one value for every field")
     def normalized_values:
       type.fields.map(
         fun (field):
-          def binding = field_values.find(fun (candidate): candidate[0] == field.name)
+          def binding = field_values.find(
+            fun (candidate): candidate[0] == field.name
+          )
           unless binding
           | fail(#'record_create, "record_create is missing field " ++ field.name)
           ensure_value_in(module_def, binding[1], #'record_create)
@@ -1210,14 +1253,16 @@ class Builder(design :: Design):
                           location,
                           origin,
                           #'record_create,
-                          {"fields": type.fields.map(fun (field): field.name)})
+                          {"fields": type.fields.map(
+                            fun (field): field.name
+                          )})
 
-  method record_get(module_def,
-                    record,
-                    field_name :: String,
-                    name = #false,
-                    location = Location(),
-                    origin = Origin("record_get")):
+  method record_get(module_def :: Module,
+                    record :: Value,
+                    field_name :: AsciiIdentifier,
+                    name :: False || AsciiIdentifier = #false,
+                    location :: Location = Location(),
+                    origin :: Origin = Origin("record_get")):
     ensure_module_in_design(design, module_def, #'record_get)
     ensure_open(module_def, #'record_get)
     ensure_value_in(module_def, record, #'record_get)
@@ -1237,12 +1282,12 @@ class Builder(design :: Design):
                           #'record_get,
                           {"field": field_name})
 
-  method vector_create(module_def,
-                       type,
+  method vector_create(module_def :: Module,
+                       type :: VectorType,
                        elements :: List.of(Value),
-                       name = #false,
-                       location = Location(),
-                       origin = Origin("vector_create")):
+                       name :: False || AsciiIdentifier = #false,
+                       location :: Location = Location(),
+                       origin :: Origin = Origin("vector_create")):
     ensure_module_in_design(design, module_def, #'vector_create)
     ensure_open(module_def, #'vector_create)
     unless vector_type(type) && type_well_formed(type)
@@ -1263,12 +1308,12 @@ class Builder(design :: Design):
                           origin,
                           #'vector_create)
 
-  method vector_get(module_def,
-                    vector,
+  method vector_get(module_def :: Module,
+                    vector :: Value,
                     index :: Nat,
-                    name = #false,
-                    location = Location(),
-                    origin = Origin("vector_get")):
+                    name :: False || AsciiIdentifier = #false,
+                    location :: Location = Location(),
+                    origin :: Origin = Origin("vector_get")):
     ensure_module_in_design(design, module_def, #'vector_get)
     ensure_open(module_def, #'vector_get)
     ensure_value_in(module_def, vector, #'vector_get)
@@ -1289,12 +1334,12 @@ class Builder(design :: Design):
 
   // Dynamic vector access is intentionally partial: an index encoding outside
   // the vector length leaves the operation result unconstrained.
-  method vector_index(module_def,
-                      vector,
-                      index,
-                      name = #false,
-                      location = Location(),
-                      origin = Origin("vector_index")):
+  method vector_index(module_def :: Module,
+                      vector :: Value,
+                      index :: Value,
+                      name :: False || AsciiIdentifier = #false,
+                      location :: Location = Location(),
+                      origin :: Origin = Origin("vector_index")):
     ensure_module_in_design(design, module_def, #'vector_index)
     ensure_open(module_def, #'vector_index)
     ensure_value_in(module_def, vector, #'vector_index)
@@ -1315,13 +1360,13 @@ class Builder(design :: Design):
 
   // Dynamic injection preserves the vector type. An out-of-range selector
   // makes the complete result vector unconstrained.
-  method vector_inject(module_def,
-                       vector,
-                       index,
-                       element,
-                       name = #false,
-                       location = Location(),
-                       origin = Origin("vector_inject")):
+  method vector_inject(module_def :: Module,
+                       vector :: Value,
+                       index :: Value,
+                       element :: Value,
+                       name :: False || AsciiIdentifier = #false,
+                       location :: Location = Location(),
+                       origin :: Origin = Origin("vector_inject")):
     ensure_module_in_design(design, module_def, #'vector_inject)
     ensure_open(module_def, #'vector_inject)
     ensure_value_in(module_def, vector, #'vector_inject)
@@ -1345,14 +1390,14 @@ class Builder(design :: Design):
 
   // Applies an unordered set of enabled dynamic writes to one vector. Enabled
   // writes must use in-range, pairwise-distinct indices; other cases are UB.
-  method vector_write_set(module_def,
-                          vector,
-                          enables,
-                          indices,
-                          elements,
-                          name = #false,
-                          location = Location(),
-                          origin = Origin("vector_write_set")):
+  method vector_write_set(module_def :: Module,
+                          vector :: Value,
+                          enables :: Value,
+                          indices :: Value,
+                          elements :: Value,
+                          name :: False || AsciiIdentifier = #false,
+                          location :: Location = Location(),
+                          origin :: Origin = Origin("vector_write_set")):
     ensure_module_in_design(design, module_def, #'vector_write_set)
     ensure_open(module_def, #'vector_write_set)
     ensure_value_in(module_def, vector, #'vector_write_set)
@@ -1378,7 +1423,7 @@ class Builder(design :: Design):
                           origin,
                           #'vector_write_set)
 
-  method project(place :: Place, field_name :: String):
+  method project(place :: Place, field_name :: AsciiIdentifier):
     def module_def = design.find_module(place.module_id)
     ensure_module_in_design(design, module_def, #'project)
     ensure_open(module_def, #'project)
@@ -1427,7 +1472,8 @@ class Builder(design :: Design):
         place.projected_places := place.projected_places ++ [projected]
         projected
 
-  method assemble_aggregate_place(place, location = Location()):
+  method assemble_aggregate_place(place :: Place,
+                                  location :: Location = Location()):
     if !aggregate_place_complete(place)
     | #false
     | cond
@@ -1461,9 +1507,10 @@ class Builder(design :: Design):
                              Origin("aggregate place assembly", place.name))
       | ~else: #false
 
-  method canonicalize_aggregate_place(place,
-                                      location = Location(),
-                                      ~preserve_projections: preserve_projections = #false):
+  method canonicalize_aggregate_place(
+      place :: Place,
+      location :: Location = Location(),
+      ~preserve_projections: preserve_projections :: Boolean = #false):
     def assembled = this.assemble_aggregate_place(place, location)
     if assembled
     | block:
@@ -1480,12 +1527,12 @@ class Builder(design :: Design):
 
   // Allocates state without pretending that the memory handle is ordinary
   // hardware data. Access operations retain an explicit resource reference.
-  method memory(module_def,
-                name,
+  method memory(module_def :: Module,
+                name :: AsciiIdentifier,
                 depth :: PosInt,
-                element_type,
-                location = Location(),
-                origin = Origin("memory", name)):
+                element_type :: DataType,
+                location :: Location = Location(),
+                origin :: Origin = Origin("memory", name)):
     ensure_module_in_design(design, module_def, #'memory)
     ensure_open(module_def, #'memory)
     ensure_hardware_name(name, #'memory)
@@ -1514,12 +1561,12 @@ class Builder(design :: Design):
     module_def.add_operation(operation)
     memory
 
-  method memory_read_async(module_def,
-                           memory,
-                           address,
-                           name = #false,
-                           location = Location(),
-                           origin = Origin("memory read")):
+  method memory_read_async(module_def :: Module,
+                           memory :: Memory,
+                           address :: Value,
+                           name :: False || AsciiIdentifier = #false,
+                           location :: Location = Location(),
+                           origin :: Origin = Origin("memory read")):
     ensure_module_in_design(design, module_def, #'memory_read_async)
     ensure_open(module_def, #'memory_read_async)
     ensure_memory_in(module_def, memory, #'memory_read_async)
@@ -1539,14 +1586,14 @@ class Builder(design :: Design):
                           #'memory_read_async,
                           {"memory": memory})
 
-  method memory_write(module_def,
-                      memory,
-                      address,
-                      data,
-                      clock,
-                      enable,
-                      location = Location(),
-                      origin = Origin("memory write")):
+  method memory_write(module_def :: Module,
+                      memory :: Memory,
+                      address :: Value,
+                      data :: Value,
+                      clock :: Value,
+                      enable :: Value,
+                      location :: Location = Location(),
+                      origin :: Origin = Origin("memory write")):
     ensure_module_in_design(design, module_def, #'memory_write)
     ensure_open(module_def, #'memory_write)
     ensure_memory_in(module_def, memory, #'memory_write)
@@ -1588,17 +1635,17 @@ class Builder(design :: Design):
 
   // Creates a fixed, circuit-shaped synchronous memory interface. Read and
   // write ports are declared here and subsequently wired through Places.
-  method sync_memory(module_def,
-                     name,
+  method sync_memory(module_def :: Module,
+                     name :: AsciiIdentifier,
                      depth :: PosInt,
-                     element_type,
-                     clock,
+                     element_type :: DataType,
+                     clock :: Value,
                      has_read :: Boolean = #true,
                      has_write :: Boolean = #true,
                      has_read_write :: Boolean = #false,
-                     mask_granularity = #false,
-                     location = Location(),
-                     origin = Origin("synchronous memory", name)):
+                     mask_granularity :: False || PosInt = #false,
+                     location :: Location = Location(),
+                     origin :: Origin = Origin("synchronous memory", name)):
     ensure_module_in_design(design, module_def, #'sync_memory)
     ensure_open(module_def, #'sync_memory)
     ensure_hardware_name(name, #'sync_memory)
@@ -1760,14 +1807,14 @@ class Builder(design :: Design):
                if read_write_port | [read_write_port] | [],
                mask_granularity)
 
-  method register(module_def,
-                  name,
-                  type,
-                  clock,
-                  reset = #false,
-                  reset_value = #false,
-                  location = Location(),
-                  origin = Origin("register", name)):
+  method register(module_def :: Module,
+                  name :: AsciiIdentifier,
+                  type :~ DataType,
+                  clock :: Value,
+                  reset :: False || Value = #false,
+                  reset_value :: False || Value = #false,
+                  location :: Location = Location(),
+                  origin :: Origin = Origin("register", name)):
     ensure_module_in_design(design, module_def, #'register)
     ensure_open(module_def, #'register)
     ensure_hardware_name(name, #'register)
@@ -1809,12 +1856,12 @@ class Builder(design :: Design):
 
   // Records a stable one-bit level crossing while leaving its implementation
   // as ordinary, inspectable destination-clock registers.
-  method sync_level_crossing(module_def,
-                             source,
-                             destination_clock,
-                             stages,
-                             location = Location(),
-                             origin = Origin("stable level crossing")):
+  method sync_level_crossing(module_def :: Module,
+                             source :: Value,
+                             destination_clock :: Value,
+                             stages :: List.of(Register),
+                             location :: Location = Location(),
+                             origin :: Origin = Origin("stable level crossing")):
     ensure_module_in_design(design, module_def, #'sync_level_crossing)
     ensure_open(module_def, #'sync_level_crossing)
     ensure_value_in(module_def, source, #'sync_level_crossing)
@@ -1823,14 +1870,14 @@ class Builder(design :: Design):
     | fail(#'sync_level_crossing, "source must be Bits(1)")
     unless clock_type(destination_clock.type)
     | fail(#'sync_level_crossing, "destination clock must be Clock")
-    unless stages is_a List && stages.length() >= 2
+    unless stages.length() >= 2
     | fail(#'sync_level_crossing, "requires at least two register stages")
     for (stage in stages):
-      unless stage is_a Register
-      | fail(#'sync_level_crossing, "stages must be registers")
       ensure_value_in(module_def, stage.current, #'sync_level_crossing)
     def operation_id = design.fresh_id()
-    def operands = [source, destination_clock] ++ stages.map(fun (stage): stage.current)
+    def operands = [source, destination_clock] ++ stages.map(
+      fun (stage): stage.current
+    )
     def operation = Operation(operation_id,
                               "cdc.sync_level",
                               module_def,
@@ -1845,11 +1892,11 @@ class Builder(design :: Design):
     module_def.add_operation(operation)
     operation
 
-  method instance(module_def,
+  method instance(module_def :: Module,
                   child :: Module,
-                  name,
-                  location = Location(),
-                  origin = Origin("instance", name)):
+                  name :: AsciiIdentifier,
+                  location :: Location = Location(),
+                  origin :: Origin = Origin("instance", name)):
     ensure_module_in_design(design, module_def, #'instance)
     ensure_open(module_def, #'instance)
     ensure_hardware_name(name, #'instance)
@@ -1900,11 +1947,11 @@ class Builder(design :: Design):
 
   // Treats the supplied name as a suggestion while `instance` itself retains
   // exact-name behavior for low-level callers that want collision errors.
-  method suggested_instance(module_def,
-                            child,
-                            base_name,
-                            location = Location(),
-                            origin = Origin("instance", base_name)):
+  method suggested_instance(module_def :: Module,
+                            child :: Module,
+                            base_name :: AsciiIdentifier,
+                            location :: Location = Location(),
+                            origin :: Origin = Origin("instance", base_name)):
     this.instance(module_def,
                   child,
                   this.fresh_instance_name(module_def, base_name),
@@ -1913,8 +1960,8 @@ class Builder(design :: Design):
 
   method drive(place :: Place,
                value :: Value,
-               location = Location(),
-               origin = Origin("drive")):
+               location :: Location = Location(),
+               origin :: Origin = Origin("drive")):
     def module_def = design.find_module(place.module_id)
     def root = root_place(place)
     def target_owned = module_def && place.design === design && place.module_def === module_def && module_def.owns_place(root)
@@ -1983,7 +2030,7 @@ class Builder(design :: Design):
           | ~else:
               fail(#'read, "place " ++ place.name ++ " must be driven before it is read")
 
-  method finish(module_def):
+  method finish(module_def :: Module):
     ensure_module_in_design(design, module_def, #'finish)
     ensure_open(module_def, #'finish)
     for (place in module_def.places):

@@ -9,20 +9,6 @@ export:
   MaterializedRouting
   materialize_routing
 
-fun origin_equal(left, right):
-  cond
-  | left is_a Injection && right is_a Injection:
-      injection_id_equal(left.terminal.id, right.terminal.id)
-  | left is_a HeldVC && right is_a HeldVC:
-      vc_id_equal(left.vc, right.vc)
-  | ~else: #false
-
-fun decision_has_origin(decision, route_class, origin):
-  decision.route_class === route_class && origin_equal(decision.origin, origin)
-
-fun decision_matches(decision, route_class, origin, candidate_vc):
-  decision_has_origin(decision, route_class, origin) && vc_id_equal(decision.candidate_vc, candidate_vc)
-
 class MaterializedDecision(route_class :: RouteClass,
                            origin :: (Injection || HeldVC),
                            candidate_vc :: VCId,
@@ -33,22 +19,42 @@ class MaterializedDecision(route_class :: RouteClass,
                   candidate_vc.describe(), ": ",
                   (if allowed | "allow" | "deny"))
 
-class MaterializedRouting(topology,
-                          route_classes,
-                          injection_terminals,
-                          ejection_terminals,
-                          decisions):
+fun origin_equal(left :: Injection || HeldVC, right :: Injection || HeldVC):
+  cond
+  | left is_a Injection && right is_a Injection:
+      injection_id_equal(left.terminal.id, right.terminal.id)
+  | left is_a HeldVC && right is_a HeldVC:
+      vc_id_equal(left.vc, right.vc)
+  | ~else: #false
+
+fun decision_has_origin(decision :: MaterializedDecision,
+                        route_class :: RouteClass,
+                        origin :: Injection || HeldVC):
+  decision.route_class === route_class && origin_equal(decision.origin, origin)
+
+fun decision_matches(decision :: MaterializedDecision,
+                     route_class :: RouteClass,
+                     origin :: Injection || HeldVC,
+                     candidate_vc :: VCId):
+  decision_has_origin(decision, route_class, origin) && vc_id_equal(decision.candidate_vc, candidate_vc)
+
+class MaterializedRouting(topology :: Topology,
+                          route_classes :: NonemptyList.of(RouteClass),
+                          injection_terminals :: List.of(InjectionTerminal),
+                          ejection_terminals :: List.of(EjectionTerminal),
+                          decisions :: List.of(MaterializedDecision)):
   // Hiding the constructor ensures every snapshot came from the user callback.
   opaque
   internal _MaterializedRouting
   constructor ~none
 
-  method contains_route_class(route_class):
-    route_class is_a RouteClass && route_classes.find(
+  method contains_route_class(route_class :: RouteClass):
+    route_classes.find(
       fun (candidate): candidate === route_class
     ) != #false
 
-  method validate_origin(route_class, origin):
+  method validate_origin(route_class :: RouteClass,
+                         origin :: Injection || HeldVC):
     unless contains_route_class(route_class)
     | error(~who: #'MaterializedRouting,
             "route class does not belong to this materialized routing")
@@ -61,22 +67,23 @@ class MaterializedRouting(topology,
                               origin.terminal.describe()))
     | origin is_a HeldVC:
         topology.find_vc_link(origin.vc)
-    | ~else:
-        error(~who: #'MaterializedRouting,
-              "routing origin must be an Injection or HeldVC")
 
-  method decisions_for(route_class, origin):
+  method decisions_for(route_class :: RouteClass,
+                       origin :: Injection || HeldVC):
     validate_origin(route_class, origin)
     decisions.filter(
       ~keep: fun (decision): decision_has_origin(decision, route_class, origin)
     )
 
-  method allowed_candidates(route_class, origin):
+  method allowed_candidates(route_class :: RouteClass,
+                            origin :: Injection || HeldVC):
     decisions_for(route_class, origin).filter(
       ~keep: fun (decision): decision.allowed
     ).map(fun (decision): decision.candidate_vc)
 
-  method decision(route_class, origin, candidate_vc :: VCId):
+  method decision(route_class :: RouteClass,
+                  origin :: Injection || HeldVC,
+                  candidate_vc :: VCId):
     validate_origin(route_class, origin)
     def found = decisions.find(
       fun (candidate): decision_matches(candidate, route_class, origin, candidate_vc)
@@ -88,13 +95,17 @@ class MaterializedRouting(topology,
                           " -> ", candidate_vc.describe()))
     found
 
-  method allowed(route_class, origin, candidate_vc):
+  method allowed(route_class :: RouteClass,
+                 origin :: Injection || HeldVC,
+                 candidate_vc :: VCId):
     decision(route_class, origin, candidate_vc).allowed
 
   method describe():
     String.join(decisions.map(fun (decision): decision.describe()), "\n")
 
-fun materialize_origin(problem, route_class, origin):
+fun materialize_origin(problem :: RoutingProblem,
+                       route_class :: RouteClass,
+                       origin :: Injection || HeldVC):
   for List (candidate_vc in problem.candidates(route_class, origin)):
     def allowed = problem.relation.allow(route_class, origin, candidate_vc)
     unless allowed is_a Boolean
