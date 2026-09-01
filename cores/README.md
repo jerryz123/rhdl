@@ -79,7 +79,7 @@ adapter and decode logic.
 `XLen.X32` or `XLen.X64`. Its `AluControl` input
 contains one nominal one-hot `AluResultSelect` enum and four orthogonal
 modifiers. Its data inputs are already-selected
-`Bits(xlen_width(xlen))` operands. It owns modular arithmetic, bitwise
+`Bits(xlen.width)` operands. It owns modular arithmetic, bitwise
 operations, XLEN-sized shifts, and signed and unsigned set-less-than results.
 The 64-bit specialization additionally supports
 32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;

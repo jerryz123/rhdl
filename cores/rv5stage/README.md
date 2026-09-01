@@ -231,14 +231,14 @@ of being flattened into the same graph.
 [`rv5stage.rhdl`](rv5stage.rhdl) defines
 `RV5Stage(xlen, ~cache_sets: 64, ~chi: ...)`. `xlen` is an
 `XLen` enum value. Architectural addresses and cache tags use
-`xlen_width(xlen)` internally. Both private L1 caches use the architectural
+`xlen.width` internally. Both private L1 caches use the architectural
 64-byte line size from [`cache.rhdl`](cache.rhdl); line geometry is not a
 top-level generator option. The required `~chi:` parameter is integration
 policy: the containing SoC supplies RV5Stage's RN-F NodeIDs, physical flit
 parameters, and Home map. RV5Stage has no implicit standalone fabric. The RN-F
 boundary uses the explicit CHI request
 address width and asserts that a wider accepted address fits before narrowing.
-The core exposes an `Irrevocable(Bits(xlen_width(xlen)))` start consumer, a
+The core exposes an `Irrevocable(Bits(xlen.width))` start consumer, a
 packed `RV5StageInterrupts` input independent of any ACLINT, PLIC, or AIA block,
 a platform `hart_id`, a 64-bit platform `time_counter`, separate instruction
 and data RN-F channel ports, a device RN-I channel port, and a sticky `fault`

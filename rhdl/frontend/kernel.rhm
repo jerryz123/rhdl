@@ -8,7 +8,7 @@ import:
   "../core/verify.rhm" open
 
 export:
-  CircuitParam
+  StableCircuitParam
   CircuitIdentity
   HardwareEntity
   DeferredHardwareValue
@@ -20,7 +20,7 @@ export:
   run_elaboration
   run_elaboration_with_top
   build_circuit
-  circuit_params_same
+  circuit_arguments_same
   defer_circuit_finalizer
   run_circuit_finalizers
   active_module
@@ -83,10 +83,10 @@ export:
   read
   frontend_fail
 
-// Marks immutable host values for circuit specialization reuse. Ordinary
+// Opts an immutable host value into circuit specialization reuse. Ordinary
 // equality is the default; implementations may supply semantic equality.
-interface CircuitParam:
-  method same_circuit_param(other :: CircuitParam) :: Boolean:
+interface StableCircuitParam:
+  method same_stable_circuit_param(other :: StableCircuitParam) :: Boolean:
     this == other
 
 // Lets frontend-only wrappers carry authoring metadata while still selecting
@@ -291,25 +291,29 @@ fun run_circuit_finalizers(location :: Location = Location()):
   flush_vector_register_writes(active, location)
   #void
 
-fun circuit_params_same(
-      left :: Boolean || Int || String || Symbol || List || HardwareType || CircuitParam,
-      right :: Boolean || Int || String || Symbol || List || HardwareType || CircuitParam):
+fun stable_circuit_param_value(value :~ matching(_)):
   cond
-  | left is_a Boolean && right is_a Boolean: left == right
-  | left is_a Int && right is_a Int: left == right
-  | left is_a String && right is_a String: left == right
-  | left is_a Symbol && right is_a Symbol: left == right
-  | left is_a List && right is_a List:
-      circuit_param_lists_same(left, right)
-  | left is_a HardwareType && right is_a HardwareType: type_equal(left, right)
-  | left is_a CircuitParam && right is_a CircuitParam:
-      left.same_circuit_param(right) && right.same_circuit_param(left)
+  | value is_a Boolean || value is_a Int || value is_a String || value is_a Symbol: #true
+  | value is_a List:
+      for all (element in value): stable_circuit_param_value(element)
+  | value is_a HardwareType || value is_a StableCircuitParam: #true
   | ~else: #false
 
-fun circuit_param_lists_same(left :: List, right :: List):
+// Compares arbitrary host arguments for semantic uses such as interface
+// compatibility. Cache reuse separately requires every argument to be stable.
+fun circuit_arguments_same(left :~ matching(_), right :~ matching(_)):
+  cond
+  | left is_a List && right is_a List:
+      circuit_argument_lists_same(left, right)
+  | left is_a HardwareType && right is_a HardwareType: type_equal(left, right)
+  | left is_a StableCircuitParam && right is_a StableCircuitParam:
+      left.same_stable_circuit_param(right) && right.same_stable_circuit_param(left)
+  | ~else: left == right
+
+fun circuit_argument_lists_same(left :: List, right :: List):
   left.length() == right.length() && (
     for all (left_value in left, right_value in right):
-      circuit_params_same(left_value, right_value)
+      circuit_arguments_same(left_value, right_value)
   )
 
 fun build_circuit(identity :: CircuitIdentity,
@@ -320,20 +324,12 @@ fun build_circuit(identity :: CircuitIdentity,
   def context = require_context(location)
   for (argument in arguments, index in 0..arguments.length()):
     when argument is_a HardwareEntity && !(argument is_a StaticHardwareValue)
-    | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a CircuitParam, not hardware", location)
-    def mutable pending = [argument]
-    while pending.length() > 0:
-      def candidate = pending[0]
-      pending := pending.drop(1)
-      cond
-      | candidate is_a Boolean || candidate is_a Int || candidate is_a String || candidate is_a Symbol || candidate is_a HardwareType || candidate is_a CircuitParam: #void
-      | candidate is_a List: pending := candidate ++ pending
-      | ~else:
-          frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a stable immutable CircuitParam value", location)
-  def specializations = context.specializations_by_circuit.get(identity, #false)
+    | frontend_fail("circuit parameter " ++ to_string(index) ++ " must be a host value, not live hardware", location)
+  def reusable = for all (argument in arguments): stable_circuit_param_value(argument)
+  def specializations = reusable && context.specializations_by_circuit.get(identity, #false)
   def cached = specializations && specializations.find(
     fun (specialization):
-      circuit_param_lists_same(specialization.arguments, arguments)
+      circuit_argument_lists_same(specialization.arguments, arguments)
   )
   if cached
   | cached.module_def
@@ -354,10 +350,12 @@ fun build_circuit(identity :: CircuitIdentity,
       context.active_circuits := context.active_circuits.filter(
         ~keep: fun (active): !(active.identity === identity)
       )
-      def specialization = CircuitSpecialization(arguments, module_def)
-      if specializations
-      | specializations.add(specialization)
-      | context.specializations_by_circuit[identity] := MutableList[specialization]
+      when reusable
+      | block:
+          def specialization = CircuitSpecialization(arguments, module_def)
+          if specializations
+          | specializations.add(specialization)
+          | context.specializations_by_circuit[identity] := MutableList[specialization]
       module_def
 
 fun input(name :: AsciiIdentifier,

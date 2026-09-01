@@ -148,7 +148,7 @@ instances, or logic to the generated RTL.
 | [`rhdl/nested-circuit.rhdl`](rhdl/nested-circuit.rhdl) | Lexically private child generators with explicit hardware boundaries |
 | [`rhdl/layered-adder.rhdl`](rhdl/layered-adder.rhdl) | Ordinary imported library plus generated structure |
 | [`rhdl/fresh-generators.rhdl`](rhdl/fresh-generators.rhdl) | Automatic reuse of equivalent module specializations |
-| [`rhdl/host-parameters.rhdl`](rhdl/host-parameters.rhdl) | Stable `CircuitParam` configuration and hardware-type parameters |
+| [`rhdl/host-parameters.rhdl`](rhdl/host-parameters.rhdl) | `StableCircuitParam` reuse and hardware-type parameters |
 | [`rhdl/generator-parameters.rhdl`](rhdl/generator-parameters.rhdl) | Positional, keyword, typed, defaulted, and synchronous generator parameters |
 | [`rhdl/register-forms.rhdl`](rhdl/register-forms.rhdl) | Inferred register types, immediate next values, reset values, and direct drives |
 | [`rhdl/tiny-simd.rhdl`](rhdl/tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |

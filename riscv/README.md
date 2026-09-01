@@ -72,8 +72,8 @@ descriptions.
 ## Integer catalogs
 
 [`isa/xlen.rhm`](isa/xlen.rhm) defines the closed host-side `XLen` configuration
-with `XLen.X32` and `XLen.X64` members. Hardware generators accept this enum
-when their behavior follows architectural XLEN and use `xlen_width` only when
+with `XLen.X32` and `XLen.X64` members. Hardware generators accept this value
+when their behavior follows architectural XLEN and use `xlen.width` only when
 constructing width-indexed RHDL types. Arbitrary implementation dimensions
 such as address, cache, and generic comparator widths remain ordinary `Int`
 values.

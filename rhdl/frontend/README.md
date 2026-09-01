@@ -148,23 +148,25 @@ exact keys. Host values are rejected by both forms.
 
 ## Host parameters and helpers
 
-Circuit parameters are stable immutable host values. RHDL directly accepts
-integers, Booleans, strings, symbols, recursively stable immutable lists, and
-hardware-type descriptors. A user-defined immutable configuration implements
-`CircuitParam`. Its default specialization equality is ordinary Rhombus `==`:
-transparent immutable classes compare structurally, while opaque compiled
-artifacts remain nominal:
+Circuit parameters may be any host value; only live circuit-bound hardware is
+rejected. Integers, Booleans, strings, symbols, recursively stable immutable
+lists, and hardware-type descriptors automatically participate in module
+specialization reuse. A user-defined immutable configuration implements
+`StableCircuitParam` to opt into the same reuse. Its default specialization
+equality is ordinary Rhombus `==`: transparent immutable classes compare
+structurally, while opaque compiled artifacts remain nominal:
 
 ```rhombus
 class EngineConfig(lanes :: PosInt, width :: PosInt):
-  implements CircuitParam
+  implements StableCircuitParam
 ```
 
-Override `same_circuit_param` only when a type needs semantic equality that
+Override `same_stable_circuit_param` only when a type needs semantic equality that
 differs from `==`. An overridden comparison must be symmetric, deterministic,
-and independent of mutable elaboration state. Mutable collections, ordinary
-functions and closures, elaborated modules, circuit-bound hardware, and other
-opaque values that do not implement `CircuitParam` are rejected.
+and independent of mutable elaboration state. Other host objects—including
+mutable collections and ordinary functions or closures—remain legal circuit
+parameters, but each call elaborates a fresh module definition instead of
+reusing a cached specialization.
 
 Generator declarations accept positional and keyword bindings with ordinary
 Rhombus annotations and default expressions. Ordinary and sync circuits share
@@ -175,12 +177,13 @@ hardware value separately with the most specific hardware annotation its
 operation accepts. This keeps elaboration-time type descriptors distinct from
 runtime circuit values.
 
-The elaboration-local specialization cache indexes candidates by circuit
-declaration identity, then compares their normalized positional and keyword
-argument values. Equivalent calls share one definition; distinct parameter
-values receive deterministic suffixes such as `Adder` and `Adder_1`.
-Parameters are not embedded into module names, and the cache is not persisted
-across compiler runs. Active recursion is rejected by generator identity.
+The elaboration-local specialization cache indexes calls whose entire argument
+list is stable by circuit declaration identity, then compares normalized
+positional and keyword values. Equivalent stable calls share one definition;
+distinct stable values and uncached host arguments receive deterministic
+suffixes such as `Adder` and `Adder_1`. Parameters are not embedded into module
+names, and the cache is not persisted across compiler runs. Active recursion is
+rejected by generator identity.
 
 Circuit bodies and parameter defaults must depend only on their parameters,
 stable immutable captures, and local elaboration state. Local mutation used to
