@@ -440,6 +440,7 @@ fixture_specs=(
   'enum-opcode||examples/rhdl/enum-state.rhdl|opcode_design|opcode_verilog_reference'
   'one-hot|one_hot_tb|examples/rhdl/one-hot.rhdl|design|verilog_reference'
   'one-hot-enum||examples/rhdl/one-hot-enum.rhdl|design|verilog_reference'
+  'masks||examples/rhdl/masks.rhdl|design|verilog_reference'
   'shifts|shifts_tb|examples/rhdl/shifts.rhdl|design|verilog_reference'
   'width-ops|width_ops_tb|examples/rhdl/width-ops.rhdl|design|verilog_reference'
   'vector|vector_tb|examples/rhdl/vector.rhdl|design|verilog_reference'

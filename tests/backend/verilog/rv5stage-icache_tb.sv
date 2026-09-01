@@ -3,7 +3,7 @@ module rv5stage_icache_tb;
   typedef struct packed { logic [63:0] address; } core_req_bits_t;
   typedef struct packed { logic valid; core_req_bits_t bits; } core_req_t;
   typedef struct packed { logic ready; } ready_t;
-  typedef struct packed { logic [31:0] instruction; } instruction_bits_t;
+  typedef struct packed { logic [31:0] instruction; logic page_fault; } instruction_bits_t;
   typedef struct packed { logic valid; instruction_bits_t bits; } instruction_resp_t;
   typedef struct packed { logic flush; logic invalidate_all; core_req_t request; ready_t response; } core_in_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } core_out_t;
@@ -42,6 +42,7 @@ module rv5stage_icache_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  logic [6:0] node_id = CACHE_ID;
   core_in_t core_in;
   core_out_t core_out;
   chi_in_t chi_in;
@@ -194,6 +195,7 @@ module rv5stage_icache_tb;
         cycles = cycles + 1;
       end
       assert (core_out.response.valid &&
+              !core_out.response.bits.page_fault &&
               core_out.response.bits.instruction == instruction)
         else $fatal(1, "instruction %h, expected %h",
                     core_out.response.bits.instruction, instruction);

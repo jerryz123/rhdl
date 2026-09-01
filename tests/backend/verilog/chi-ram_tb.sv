@@ -33,6 +33,7 @@ module chi_ram_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  CHIRamIdentity identity;
   req_forward_t requests_in;
   ready_t requests_out;
   dat_forward_t request_data_in;
@@ -201,6 +202,7 @@ module chi_ram_tb;
   logic [11:0] dbid_b;
 
   initial begin
+    identity = '{node_id: RAM_ID, base_address: 44'h080000000};
     requests_in = '0;
     request_data_in = '0;
     responses_in = '0;

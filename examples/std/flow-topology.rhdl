@@ -290,15 +290,15 @@ module AtomicFork(
                                                          egress_2_out
 );
 
-  wire _GEN = egress_1_in.ready & egress_2_in.ready;
-  assign ingress_out = '{ready: (egress_0_in.ready & _GEN)};
-  assign egress_0_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
+  wire _GEN = egress_0_in.ready & egress_1_in.ready;
+  assign ingress_out = '{ready: (_GEN & egress_2_in.ready)};
+  assign egress_0_out =
+    '{valid: (ingress_in.valid & egress_2_in.ready & egress_1_in.ready),
+      bits: ingress_in.bits};
   assign egress_1_out =
-    '{valid: (ingress_in.valid & egress_0_in.ready & egress_2_in.ready),
+    '{valid: (ingress_in.valid & egress_2_in.ready & egress_0_in.ready),
       bits: ingress_in.bits};
-  assign egress_2_out =
-    '{valid: (ingress_in.valid & egress_0_in.ready & egress_1_in.ready),
-      bits: ingress_in.bits};
+  assign egress_2_out = '{valid: (ingress_in.valid & _GEN), bits: ingress_in.bits};
 endmodule
 }>>|
 
@@ -404,21 +404,22 @@ module RRArbiter(
   wire [1:0] _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid & ~next_priority}};
   wire [1:0] _GEN_0 = {{ingress_1_in.valid}, {ingress_0_in.valid}};
   wire [1:0] _GEN_1 = (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
-  wire       _GEN_2 = |_GEN_0;
-  wire       _GEN_3 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
-  wire [1:0] _GEN_4 = _GEN_1;
+  wire       _GEN_2 = |_GEN_1;
   always @(posedge clock) begin
     if (reset)
       next_priority <= 1'h0;
     else
-      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
+      next_priority <=
+        _GEN_2 & egress_in.ready ? ~(_GEN_1[1]) & _GEN_1[1] - 1'h1 : next_priority;
   end // always @(posedge)
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1'h1])};
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1])};
   assign egress_out =
     '{valid: _GEN_2,
-      bits: (ingress_0_in.bits & {8{_GEN_4[0]}} | ingress_1_in.bits & {8{_GEN_4[1]}})};
-  assign chosen = _GEN_3;
+      bits:
+        (ingress_0_in.bits & {8{_GEN_1[0]}} | ingress_1_in.bits & {8{_GEN_1[1]}}
+         | ingress_0_in.bits & {8{_GEN_1 == 2'h0}})};
+  assign chosen = _GEN_1[1];
 endmodule
 
 module Pipe(
@@ -570,22 +571,23 @@ module RRArbiter(
   wire [1:0]      _GEN_0 = {{ingress_1_in.valid}, {ingress_0_in.valid}};
   wire [1:0]      _GEN_1 =
     (|_GEN) ? _GEN & {~(_GEN[0]), 1'h1} : _GEN_0 & {~(_GEN_0[0]), 1'h1};
-  wire            _GEN_2 = |_GEN_0;
-  wire            _GEN_3 = /*cast(bit)*/{1{_GEN_1[1'h1]}};
-  wire [1:0]      _GEN_4 = _GEN_1;
-  wire [8:0]      _GEN_5 = /*cast(bit[8:0])*/ingress_0_in.bits;
-  wire [8:0]      _GEN_6 = /*cast(bit[8:0])*/ingress_1_in.bits;
-  wire TaggedByte _GEN_7 = /*cast(bit)*/_GEN_5 & {9{_GEN_4[0]}} | _GEN_6 & {9{_GEN_4[1]}};
+  wire            _GEN_2 = |_GEN_1;
+  wire [8:0]      _GEN_3 = /*cast(bit[8:0])*/ingress_0_in.bits;
+  wire [8:0]      _GEN_4 = /*cast(bit[8:0])*/ingress_1_in.bits;
+  wire TaggedByte _GEN_5 =
+    /*cast(bit)*/_GEN_3 & {9{_GEN_1[0]}} | _GEN_4 & {9{_GEN_1[1]}} | _GEN_3
+    & {9{_GEN_1 == 2'h0}};
   always @(posedge clock) begin
     if (reset)
       next_priority <= 1'h0;
     else
-      next_priority <= _GEN_2 & egress_in.ready ? ~_GEN_3 & _GEN_3 - 1'h1 : next_priority;
+      next_priority <=
+        _GEN_2 & egress_in.ready ? ~(_GEN_1[1]) & _GEN_1[1] - 1'h1 : next_priority;
   end // always @(posedge)
-  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[1'h0])};
-  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1'h1])};
-  assign egress_out = '{valid: _GEN_2, bits: _GEN_7};
-  assign chosen = _GEN_3;
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_1[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_1[1])};
+  assign egress_out = '{valid: _GEN_2, bits: _GEN_5};
+  assign chosen = _GEN_1[1];
 endmodule
 
 module Pipe_1(

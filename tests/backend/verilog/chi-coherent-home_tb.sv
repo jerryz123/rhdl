@@ -70,6 +70,7 @@ module chi_coherent_home_tb;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  CHIHNFIdentity identity;
   req_t requester_requests_in;
   rsp_t requester_responses_in;
   dat_t request_data_in;
@@ -250,6 +251,9 @@ module chi_coherent_home_tb;
   endtask
 
   initial begin
+    identity = '{home_node_id: HOME_ID,
+                 subordinate_node_id: MEMORY_ID,
+                 service_base: LINE_ADDRESS};
     requester_requests_in = '0;
     requester_responses_in = '0;
     request_data_in = '0;
