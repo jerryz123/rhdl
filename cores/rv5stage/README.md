@@ -27,6 +27,8 @@ rv5stage.rhdl                         composition selects core-flow.rhdl
   |--> chi.rhdl                     RN-F parameters and flit construction
   |--> refill.rhdl                  blocking ReadClean/ReadUnique acquisition
   |--> write-unique.rhdl            retryable partial-write transaction engine
+  |--> ../../chi/retryable-transaction.rhdl
+                                     shared retry and response-profile control
   |--> writeback.rhdl               serialized dirty-line drain engine
   |--> snoop.rhdl                   clean/dirty snoop-data and DVM engines
   |--> icache/cache.rhdl             instruction arrays, policy, and CHI routing
@@ -36,8 +38,10 @@ rv5stage.rhdl                         composition selects core-flow.rhdl
 `RV5StageCore` speaks only RV5Stage's semantic instruction and data access
 protocols. Cache modules own line lookup, array arbitration, transaction
 scheduling, CHI channel routing, byte masks, and load/store lane generation.
-The shared transaction engines own protocol sequencing, retry state, response
-stability, and DVM pairing. The wrapper composes the core, MMU, and caches into
+The shared transaction engines own protocol sequencing, response stability,
+and DVM pairing. Refill and WriteUnique share CHI's profile-driven retry
+controller while retaining their transaction-specific payload and completion
+state. The wrapper composes the core, MMU, and caches into
 two ready-valid RN-F channel bundles; physical credited links belong to system
 integration when the channels actually cross a CHI link boundary.
 `RV5StageCHIConfig` supplies the structural flit shape and one shared

@@ -5,6 +5,20 @@ import:
   lib("rhdl/std/bits.rhdl") open
   lib("chi/main.rhdl") open
 
+def RV5StageRefillResponses = response_profile("rv5stage_refill"):
+  retryable
+
+def RV5StageWriteUniqueResponses = response_profile("rv5stage_write_unique"):
+  retryable
+  milestone dbid
+  milestone completion
+  response [CHIRspOpcode.DBIDResp, CHIRspOpcode.DBIDRespOrd]:
+    completes [dbid]
+  response [CHIRspOpcode.Comp]:
+    completes [completion]
+  response [CHIRspOpcode.CompDBIDResp]:
+    completes [dbid, completion]
+
 class RV5StageCHIConfig(flit :: CHIFlitParams,
                         home_map :: CHIHomeMap):
   implements StableCircuitParam
@@ -48,7 +62,7 @@ class RV5StageCHIParams(config :: RV5StageCHIConfig,
         ~rsp: [CHIRspOpcode.CompAck, CHIRspOpcode.SnpResp]
       ),
       ~supports: CHIChannelCapabilities(
-        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant],
+        ~rsp: RV5StageRefillResponses.response_opcodes,
         ~snp: chi_rnf_snoop_opcodes,
         ~dat: [CHIDatOpcode.CompData]
       ),
@@ -69,9 +83,10 @@ class RV5StageCHIParams(config :: RV5StageCHIConfig,
                CHIDatOpcode.NonCopyBackWriteData]
       ),
       ~supports: CHIChannelCapabilities(
-        ~rsp: [CHIRspOpcode.RetryAck, CHIRspOpcode.PCrdGrant,
-               CHIRspOpcode.DBIDResp, CHIRspOpcode.DBIDRespOrd,
-               CHIRspOpcode.Comp, CHIRspOpcode.CompDBIDResp],
+        ~rsp: chi_response_profile_opcodes([
+          RV5StageRefillResponses,
+          RV5StageWriteUniqueResponses
+        ]),
         ~snp: chi_rnf_snoop_opcodes,
         ~dat: [CHIDatOpcode.CompData]
       ),
@@ -300,6 +315,8 @@ fun rv5stage_chi_write_data(p :: CHIFlitParams,
   flit
 
 export:
+  RV5StageRefillResponses
+  RV5StageWriteUniqueResponses
   RV5StageCHIConfig
   RV5StageCHIParams
   RV5StageCHIIdentity

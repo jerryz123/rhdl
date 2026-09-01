@@ -1,0 +1,81 @@
+#lang rhombus
+// Checks declarative CHI response profiles and retryable controller structure.
+
+import:
+  "../../rhdl/core/main.rhm" open
+  "../../rhdl/frontend/kernel.rhm" as embedded
+  lib("chi/main.rhdl") open
+
+def write_profile = response_profile("test_write"):
+  retryable
+  milestone dbid
+  milestone completion
+  response [CHIRspOpcode.DBIDResp, CHIRspOpcode.DBIDRespOrd]:
+    completes [dbid]
+  response [CHIRspOpcode.Comp]:
+    completes [completion]
+  response [CHIRspOpcode.CompDBIDResp]:
+    completes [dbid, completion]
+
+def p = CHIFlitParams()
+def design = embedded.run_elaboration(
+  fun (): CHIRetryableTransactionControl(p, write_profile)
+)
+def controller = design.modules[0]
+def register_names = controller.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register_reset"
+).map(fun (operation): operation.attribute("name"))
+
+check:
+  write_profile.effect_width ~is 2
+  write_profile.full_effect_mask ~is 3
+  write_profile.milestone_index("dbid") ~is 0
+  write_profile.milestone_index("completion") ~is 1
+  write_profile.progress_opcodes ~is [
+    CHIRspOpcode.DBIDResp,
+    CHIRspOpcode.DBIDRespOrd,
+    CHIRspOpcode.Comp,
+    CHIRspOpcode.CompDBIDResp
+  ]
+  write_profile.response_opcodes ~is [
+    CHIRspOpcode.RetryAck,
+    CHIRspOpcode.PCrdGrant,
+    CHIRspOpcode.DBIDResp,
+    CHIRspOpcode.DBIDRespOrd,
+    CHIRspOpcode.Comp,
+    CHIRspOpcode.CompDBIDResp
+  ]
+  chi_response_profile_opcodes([write_profile, write_profile]) ~is write_profile.response_opcodes
+  controller.find_output("received").type.width ~is 2
+  controller.find_output("event_out").type.field("bits").type.field("effects").type.width ~is 2
+  register_names ~is [
+    "active_state", "attempt_sent", "received_state", "irreversible_progress",
+    "retry_received", "retry_credit_received", "retry_credit_type",
+    "granted_credit_type"
+  ]
+  verify_design(design) ~is #void
+  CHIResponseProfile("empty", [], []) ~throws "at least one response"
+  CHIResponseProfile(
+    "duplicate_milestone",
+    ["done", "done"],
+    [],
+    ~retryable: #true
+  ) ~throws "milestone names must be unique"
+  CHIResponseProfile(
+    "missing_milestone",
+    ["done"],
+    [CHIResponseRule([CHIRspOpcode.Comp], ["other"])]
+  ) ~throws "undeclared milestone"
+  CHIResponseProfile(
+    "reserved_opcode",
+    ["done"],
+    [CHIResponseRule([CHIRspOpcode.RetryAck], ["done"])]
+  ) ~throws "dedicated clauses"
+  CHIResponseProfile(
+    "duplicate_opcode",
+    ["first", "second"],
+    [
+      CHIResponseRule([CHIRspOpcode.Comp], ["first"]),
+      CHIResponseRule([CHIRspOpcode.Comp], ["second"])
+    ]
+  ) ~throws "unique across rules"

@@ -14,8 +14,9 @@ wire definitions; it is not a configurable parameter in the API.
 The package currently implements the physical parameter and flit foundation,
 protocol and coherence classifiers, node capabilities, credited node-role
 links, link-local monitors, bounded initial non-coherent and RN-F transaction
-checking, separate requester-side and home-side SAM metadata, an initial HN-I
-bridge, a serialized dirty-capable HN-F manager, and a non-coherent backing RAM.
+checking, declarative retryable requester control, separate requester-side and
+home-side SAM metadata, an initial HN-I bridge, a serialized dirty-capable HN-F
+manager, and a non-coherent backing RAM.
 Its first NoC integration maps CHI
 NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
 SNP, and DAT transports. Multibeat subordinate memory beyond the fragmenter
@@ -237,11 +238,36 @@ single-flit DataID/NumDat/Replicate contract.
 This substrate deliberately does not decide a cache response, store tags or
 data, change line state, arbitrate shared RSP/DAT producers, or implement
 coherent writes, evictions, separated read responses, or multibeat snoop data.
-It permits retry opcodes and retry-shaped request repetition, while the endpoint
-still owns RetryAck/PCrdGrant association. Those policies belong in an RN-F
-cache endpoint. Directory-backed coherence remains outside this requester
-monitoring step; the initial serialized `CHIHNF` supplies broadcast
-invalidation and completion aggregation without a directory.
+It permits retry opcodes and retry-shaped request repetition, but does not
+duplicate endpoint transaction state to associate them. An endpoint can use the
+shared retryable controller below for that association. Directory-backed
+coherence remains outside this requester monitoring step; the initial
+serialized `CHIHNF` supplies broadcast invalidation and completion aggregation
+without a directory.
+
+## Retryable requester control
+
+[`retryable-transaction.rhdl`](retryable-transaction.rhdl) separates a CHI
+transaction's response grammar from its payload-specific datapath. A
+`CHIResponseProfile` names completion milestones and maps each accepted RSP
+opcode to the milestones it completes. One opcode can complete several
+milestones, and several opcodes can represent the same milestone. Profiles also
+derive the exact RSP capability list advertised by an endpoint.
+
+`CHIRetryableTransactionControl` owns the common stateful protocol mechanism:
+the initial request permits retry, `RetryAck` and `PCrdGrant` may arrive in
+either order, their Protocol Credit types must match, and the repeated request
+carries that type with `AllowRetry` cleared. It rejects duplicate or unexpected
+progress responses and emits one typed event containing the original flit plus
+the profile-derived milestone mask. `RespLCrdReturn` bypasses transaction state.
+An endpoint asserts `external_progress` when progress arrives on another CHI
+channel, such as the first refill DAT packet; retry is illegal afterward.
+
+The controller deliberately does not own addresses, TxnIDs, DBIDs, cache data,
+response metadata checks, or the condition that makes a transaction complete.
+Those remain endpoint state and policy. This keeps one retry mechanism reusable
+across reads and writes without turning unlike CHI transactions into one large
+state machine.
 
 ## Initial non-coherent transaction monitoring
 
@@ -458,8 +484,9 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT destination selection plus typed wrappers around protocol-neutral routed-flow stages; family adapters compile every `(site key, target NodeID)` relation into one decode table before RTL elaboration |
 | [`noc-router.rhdl`](noc-router.rhdl) | A four-plane CHI router shell over independent generic router families, a shared topology-only physical-link manifest, and precompiled local attachment plans |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
-| [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering and retry remain planned |
+| [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering remains planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean`/`ReadUnique` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
+| [`retryable-transaction.rhdl`](retryable-transaction.rhdl) | Declarative response-to-milestone profiles and reusable requester-side RetryAck/PCrdGrant association, request-attempt, and progress state |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
 | [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read fragmentation into single-DAT-beat subordinate transactions while passing through the initial single-beat write profile |
@@ -493,7 +520,7 @@ fragmentation.
 The coherent home intentionally has one global transaction slot and no sharer
 directory. It conservatively broadcasts snoops, accepts dirty intervention,
 and supports the documented SharedClean and Unique acquisition subset. General
-ordering, Protocol Credits, broader retry handling and transaction families,
+ordering, retry use across broader transaction families,
 multibeat subordinate traffic beyond the fragmenter profile, and a parallel
 directory-based home remain outside the implemented contract.
 

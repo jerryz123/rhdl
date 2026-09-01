@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
+  aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
   rv5stage-core rv5stage-multiply rv5stage-dcache
 )
 
@@ -612,6 +612,7 @@ direct_fixture_specs=(
   'chi-link|chi_link_tb'
   'chi-monitor|chi_monitor_tb'
   'chi-transaction|chi_transaction_tb'
+  'chi-retryable-transaction|chi_retryable_transaction_tb'
   'chi-transaction-sn|chi_transaction_sn_tb'
   'chi-coherent|chi_coherent_tb'
   'chi-coherent-home|chi_coherent_home_tb'
