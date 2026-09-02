@@ -147,6 +147,10 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [5:0] address; logic write; logic [7:0][63:0] data; logic [7:0] mask; }
     ReadWriteRequest_2;
+  typedef struct packed {logic allow_retry; logic [3:0] pcrd_type; } CHIRequestAttempt;
+  typedef
+    struct packed {CHIRspFlit flit; logic effects; logic retry_ack; logic protocol_credit; }
+    CHIResponseEvent;
   typedef struct packed {logic valid; logic [6:0] node_id; } CHIHomeLookup;
   typedef struct packed {logic pass_dirty; logic [1:0] state; } CHICoherentResponse;
   typedef
@@ -172,6 +176,9 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [63:0] address; logic [1:0] width; logic [63:0] data; logic [7:0] mask; RV5StageDataReq context_0; }
     RV5StageWriteUniqueCommand;
+  typedef
+    struct packed {CHIRspFlit flit; logic [1:0] effects; logic retry_ack; logic protocol_credit; }
+    CHIResponseEvent_1;
 `endif // _TYPESCOPE_rhdl_types
 module RV5Stage(
   input                                                                                                                                                                                                                                                                                                                                         clock,
@@ -4369,11 +4376,14 @@ module RV5StageLineRefill(
                                                                        response_data_out
 );
 
-  wire CHIMemAttr               _GEN =
+  wire CHIReqFlit               _GEN;
+  wire struct packed {logic valid; CHIRequestAttempt bits; } _control_attempt_out;
+  wire struct packed {logic valid; CHIResponseEvent bits; } _control_event_out;
+  wire                          _control_active;
+  wire                          _control_attempt_outstanding;
+  wire CHIMemAttr               _GEN_0 =
     '{allocate: 1'h1, cacheable: 1'h1, device: 1'h0, early_write_acknowledge: 1'h1};
-  wire [3:0]                    _GEN_0 = '{1'h0, 1'h0, 1'h0, 1'h0};
-  reg                           active_state;
-  reg                           request_sent;
+  wire [3:0]                    _GEN_1 = '{1'h0, 1'h0, 1'h0, 1'h0};
   reg  [3:0]                    received_packets;
   reg                           acknowledgement_sent;
   reg  [63:0]                   line_address;
@@ -4384,173 +4394,141 @@ module RV5StageLineRefill(
   reg  [11:0]                   dbid;
   reg  [1:0]                    response_state;
   reg                           pass_dirty;
-  reg                           retry_received;
-  reg                           retry_credit_received;
-  reg  [3:0]                    retry_credit_type;
-  reg  [3:0]                    granted_credit_type;
-  wire                          _GEN_1 = command_in.valid & ~active_state;
-  wire                          _GEN_2 = _GEN_1 & ~reset;
-  wire                          _GEN_3 = ~_GEN_2;
+  wire                          _GEN_2 = command_in.valid & ~_control_active;
+  wire                          _GEN_3 = _GEN_2 & ~reset;
+  wire                          _GEN_4 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_address_aligned:
-      assert property (@(posedge clock) disable iff (_GEN_3)
+      assert property (@(posedge clock) disable iff (_GEN_4)
                          command_in.bits.line_address[5:0] == 6'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_4 = ~_GEN_2;
+  wire                          _GEN_5 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_address_fits_chi:
-      assert property (@(posedge clock) disable iff (_GEN_4)
+      assert property (@(posedge clock) disable iff (_GEN_5)
                          command_in.bits.line_address[63:44] == 20'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_5 = ~_GEN_2;
+  wire                          _GEN_6 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_5)
+      assert property (@(posedge clock) disable iff (_GEN_6)
                          |{command_in.bits.opcode == 7'h2,
                            command_in.bits.opcode == 7'h7});
   `endif // not def SYNTHESIS
-  wire                          _GEN_6 =
-    active_state & ~request_sent
-    & (~retry_received | retry_received & retry_credit_received);
-  wire                          _GEN_7 = _GEN_6 & requests_in.ready;
-  wire                          _GEN_8 = |responses_in.bits.opcode;
-  wire                          _GEN_9 = responses_in.bits.opcode == 5'h3;
-  wire                          _GEN_10 = responses_in.bits.opcode == 5'h7;
-  wire                          _GEN_11 = _GEN_9 | _GEN_10;
-  wire                          _GEN_12 =
-    ~_GEN_8 | active_state & _GEN_11 & (request_sent | retry_received);
-  wire                          _GEN_13 = responses_in.valid & _GEN_12 & _GEN_8;
-  wire                          _GEN_14 = _GEN_13 & _GEN_9;
-  wire                          _GEN_15 = _GEN_13 & _GEN_10;
-  wire                          _GEN_16 = _GEN_13 & ~reset;
-  wire                          _GEN_17 = ~_GEN_16;
-  `ifndef SYNTHESIS
-    line_refill_retry_response_supported:
-      assert property (@(posedge clock) disable iff (_GEN_17) _GEN_11);
-  `endif // not def SYNTHESIS
-  wire                          _GEN_18 = ~_GEN_16;
+  wire                          _GEN_7 = _control_event_out.valid & ~reset;
+  wire                          _GEN_8 = ~_GEN_7;
   `ifndef SYNTHESIS
     line_refill_retry_response_target:
-      assert property (@(posedge clock) disable iff (_GEN_18)
-                         responses_in.bits.tgt_id == node_id);
+      assert property (@(posedge clock) disable iff (_GEN_8)
+                         _control_event_out.bits.flit.tgt_id == node_id);
   `endif // not def SYNTHESIS
-  wire                          _GEN_19 = ~_GEN_16;
+  wire                          _GEN_9 = ~_GEN_7;
   `ifndef SYNTHESIS
     line_refill_retry_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_19)
-                         responses_in.bits.src_id == home_id);
+      assert property (@(posedge clock) disable iff (_GEN_9)
+                         _control_event_out.bits.flit.src_id == home_id);
   `endif // not def SYNTHESIS
-  wire                          _GEN_20 = _GEN_14 & ~reset;
-  wire                          _GEN_21 = ~_GEN_20;
-  `ifndef SYNTHESIS
-    line_refill_retry_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_21) request_sent);
-  `endif // not def SYNTHESIS
-  wire                          _GEN_22 = ~_GEN_20;
+  wire                          _GEN_10 =
+    ~(_control_event_out.valid & _control_event_out.bits.retry_ack & ~reset);
   `ifndef SYNTHESIS
     line_refill_retry_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_22)
-                         responses_in.bits.txn_id == 12'h0);
+      assert property (@(posedge clock) disable iff (_GEN_10)
+                         _control_event_out.bits.flit.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_23 =
-    ~(retry_received & retry_credit_received & ~reset);
-  `ifndef SYNTHESIS
-    line_refill_retry_credit_type_matches:
-      assert property (@(posedge clock) disable iff (_GEN_23)
-                         retry_credit_type == granted_credit_type);
-  `endif // not def SYNTHESIS
-  wire CHICoherentResponse      _GEN_24 = /*cast(bit)*/response_data_in.bits.resp;
-  wire [3:0]                    _GEN_25 = received_packets;
-  wire                          _GEN_26 = &_GEN_25;
-  wire                          _GEN_27 = _GEN_25 == 4'h0;
-  wire [3:0][1:0]               _GEN_28 =
+  wire CHICoherentResponse      _GEN_11 = /*cast(bit)*/response_data_in.bits.resp;
+  wire [3:0]                    _GEN_12 = received_packets;
+  wire                          _GEN_13 = &_GEN_12;
+  wire                          _GEN_14 = _GEN_12 == 4'h0;
+  wire [3:0][1:0]               _GEN_15 =
     {{line_address[5:4] - 2'h1},
      {line_address[5:4] - 2'h2},
      {line_address[5:4] + 2'h1},
      {line_address[5:4]}};
-  wire                          _GEN_29 = response_data_in.bits.data_id == 2'h0;
-  wire                          _GEN_30 = response_data_in.bits.data_id == 2'h1;
-  wire                          _GEN_31 = response_data_in.bits.data_id == 2'h2;
-  wire                          _GEN_32 = &response_data_in.bits.data_id;
-  wire [3:0][127:0]             _GEN_33 = /*cast(bit[3:0][127:0])*/line;
-  wire                          _GEN_34 = active_state & request_sent & ~_GEN_26;
-  wire                          _GEN_35 = response_data_in.valid & _GEN_34;
-  wire                          _GEN_36 = _GEN_35 & ~reset;
-  wire                          _GEN_37 = ~_GEN_36;
+  wire                          _GEN_16 = response_data_in.bits.data_id == 2'h0;
+  wire                          _GEN_17 = response_data_in.bits.data_id == 2'h1;
+  wire                          _GEN_18 = response_data_in.bits.data_id == 2'h2;
+  wire                          _GEN_19 = &response_data_in.bits.data_id;
+  wire [3:0][127:0]             _GEN_20 = /*cast(bit[3:0][127:0])*/line;
+  wire                          _GEN_21 =
+    _control_active & _control_attempt_outstanding & ~_GEN_13;
+  wire                          _GEN_22 = response_data_in.valid & _GEN_21;
+  wire                          _GEN_23 = _GEN_22 & ~reset;
+  wire                          _GEN_24 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_is_comp_data:
-      assert property (@(posedge clock) disable iff (_GEN_37)
+      assert property (@(posedge clock) disable iff (_GEN_24)
                          response_data_in.bits.opcode == 4'h4);
   `endif // not def SYNTHESIS
-  wire                          _GEN_38 = ~_GEN_36;
+  wire                          _GEN_25 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_38)
+      assert property (@(posedge clock) disable iff (_GEN_25)
                          response_data_in.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_39 = ~_GEN_36;
+  wire                          _GEN_26 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_target:
-      assert property (@(posedge clock) disable iff (_GEN_39)
+      assert property (@(posedge clock) disable iff (_GEN_26)
                          response_data_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
-  wire                          _GEN_40 = ~_GEN_36;
+  wire                          _GEN_27 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_40)
+      assert property (@(posedge clock) disable iff (_GEN_27)
                          response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
   `endif // not def SYNTHESIS
-  wire                          _GEN_41 = ~_GEN_36;
+  wire                          _GEN_28 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id:
-      assert property (@(posedge clock) disable iff (_GEN_41)
-                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
+      assert property (@(posedge clock) disable iff (_GEN_28)
+                         response_data_in.bits.data_id == _GEN_15[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
-  wire                          _GEN_42 = ~_GEN_36;
+  wire                          _GEN_29 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_42)
+      assert property (@(posedge clock) disable iff (_GEN_29)
                          ~received_packets[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
-  wire                          _GEN_43 = ~_GEN_36;
+  wire                          _GEN_30 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_num_dat_zero:
-      assert property (@(posedge clock) disable iff (_GEN_43)
+      assert property (@(posedge clock) disable iff (_GEN_30)
                          response_data_in.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_44 = ~_GEN_36;
+  wire                          _GEN_31 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_44)
+      assert property (@(posedge clock) disable iff (_GEN_31)
                          ~response_data_in.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                          _GEN_45 = ~_GEN_36;
+  wire                          _GEN_32 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_ok:
-      assert property (@(posedge clock) disable iff (_GEN_45)
+      assert property (@(posedge clock) disable iff (_GEN_32)
                          response_data_in.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                          _GEN_46 = _GEN_35 & ~_GEN_27 & ~reset;
-  wire                          _GEN_47 = ~_GEN_46;
+  wire                          _GEN_33 = _GEN_22 & ~_GEN_14 & ~reset;
+  wire                          _GEN_34 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_dbid_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_47)
+      assert property (@(posedge clock) disable iff (_GEN_34)
                          response_data_in.bits.dbid_or_mecid[11:0] == dbid);
   `endif // not def SYNTHESIS
-  wire                          _GEN_48 = ~_GEN_46;
+  wire                          _GEN_35 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_state_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_48)
-                         _GEN_24.state == response_state);
+      assert property (@(posedge clock) disable iff (_GEN_35)
+                         _GEN_11.state == response_state);
   `endif // not def SYNTHESIS
-  wire                          _GEN_49 = ~_GEN_46;
+  wire                          _GEN_36 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_pass_dirty_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_49)
-                         _GEN_24.pass_dirty == pass_dirty);
+      assert property (@(posedge clock) disable iff (_GEN_36)
+                         _GEN_11.pass_dirty == pass_dirty);
   `endif // not def SYNTHESIS
-  wire                          _GEN_50 = active_state & _GEN_26 & ~acknowledgement_sent;
-  wire CHIRspFlit               _GEN_51 =
+  wire                          _GEN_37 =
+    _control_active & _GEN_13 & ~acknowledgement_sent;
+  wire CHIRspFlit               _GEN_38 =
     '{cache_line_id: (6'h0),
       trace_tag: (1'h0),
       tag_op: (2'h0),
@@ -4565,34 +4543,31 @@ module RV5StageLineRefill(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
-  wire                          _GEN_52 = _GEN_50 & acknowledgements_in.ready;
-  wire                          _GEN_53 = active_state & acknowledgement_sent;
-  wire [7:0][63:0]              _GEN_54 = /*cast(bit[7:0][63:0])*/line;
-  wire RV5StageLineRefillResult _GEN_55 =
+  wire                          _GEN_39 = _control_active & acknowledgement_sent;
+  wire [7:0][63:0]              _GEN_40 = /*cast(bit[7:0][63:0])*/line;
+  wire RV5StageLineRefillResult _GEN_41 =
     '{line_address: line_address,
       context_0: context_0,
-      line: _GEN_54,
+      line: _GEN_40,
       state: response_state,
       pass_dirty: pass_dirty};
-  wire                          _GEN_56 = _GEN_53 & completion_in.ready;
-  wire [511:0]                  _GEN_57 =
-    /*cast(bit[511:0])*/{{_GEN_32 ? response_data_in.bits.data : _GEN_33[2'h3]},
-                         {_GEN_31 ? response_data_in.bits.data : _GEN_33[2'h2]},
-                         {_GEN_30 ? response_data_in.bits.data : _GEN_33[2'h1]},
-                         {_GEN_29 ? response_data_in.bits.data : _GEN_33[2'h0]}};
-  wire                          _GEN_58 = _GEN_35 & _GEN_27;
-  wire                          _GEN_59 = _GEN_1 | _GEN_7 & retry_received | _GEN_56;
-  wire CHIReqFlit               _GEN_60 =
+  wire [511:0]                  _GEN_42 =
+    /*cast(bit[511:0])*/{{_GEN_19 ? response_data_in.bits.data : _GEN_20[2'h3]},
+                         {_GEN_18 ? response_data_in.bits.data : _GEN_20[2'h2]},
+                         {_GEN_17 ? response_data_in.bits.data : _GEN_20[2'h1]},
+                         {_GEN_16 ? response_data_in.bits.data : _GEN_20[2'h0]}};
+  wire                          _GEN_43 = _GEN_22 & _GEN_14;
+  assign _GEN =
     '{trace_tag: (1'h0),
       tag_op: (2'h0),
       exp_comp_ack: (1'h1),
       excl_snoop_me_cah: (1'h0),
       group_id_or_lpid: (8'h0),
       snp_attr_or_do_dwt: (1'h1),
-      mem_attr: _GEN,
-      pcrd_type: (retry_received ? retry_credit_type : 4'h0),
+      mem_attr: _GEN_0,
+      pcrd_type: _control_attempt_out.bits.pcrd_type,
       order: (2'h0),
-      allow_retry: (~retry_received),
+      allow_retry: _control_attempt_out.bits.allow_retry,
       likely_shared: (1'h0),
       pas: (3'h0),
       address: (line_address[43:0]),
@@ -4606,11 +4581,24 @@ module RV5StageLineRefill(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
+  CHIRetryableTransactionControl control (
+    .clock               (clock),
+    .reset               (reset),
+    .start               (_GEN_2),
+    .finish              (_GEN_39 & completion_in.ready),
+    .external_progress   (_GEN_22),
+    .attempt_in          (requests_in),
+    .response_in         (responses_in),
+    .attempt_out         (_control_attempt_out),
+    .response_out        (responses_out),
+    .event_out           (_control_event_out),
+    .active              (_control_active),
+    .attempt_outstanding (_control_attempt_outstanding),
+    .received            (/* unused */)
+  );
   always @(posedge clock) begin
     if (reset) begin
-      active_state <= 1'h0;
-      request_sent <= 1'h0;
-      received_packets <= _GEN_0;
+      received_packets <= _GEN_1;
       acknowledgement_sent <= 1'h0;
       line_address <= 64'h0;
       opcode <= 7'h2;
@@ -4619,49 +4607,128 @@ module RV5StageLineRefill(
       dbid <= 12'h0;
       response_state <= 2'h0;
       pass_dirty <= 1'h0;
+    end
+    else begin
+      received_packets <=
+        _GEN_2
+          ? _GEN_1
+          : _GEN_22
+              ? {{_GEN_19 | received_packets[2'h3]},
+                 {_GEN_18 | received_packets[2'h2]},
+                 {_GEN_17 | received_packets[2'h1]},
+                 {_GEN_16 | received_packets[2'h0]}}
+              : received_packets;
+      acknowledgement_sent <=
+        ~_GEN_2 & (~_GEN_22 & _GEN_37 & acknowledgements_in.ready | acknowledgement_sent);
+      line_address <= _GEN_2 ? command_in.bits.line_address : line_address;
+      opcode <= _GEN_2 ? command_in.bits.opcode : opcode;
+      line <= _GEN_2 ? 512'h0 : _GEN_22 ? _GEN_42 : line;
+      home_id <= _GEN_2 ? 7'h1 : home_id;
+      dbid <= _GEN_2 ? 12'h0 : _GEN_43 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
+      response_state <= _GEN_2 ? 2'h0 : _GEN_43 ? _GEN_11.state : response_state;
+      pass_dirty <= ~_GEN_2 & (_GEN_43 ? _GEN_11.pass_dirty : pass_dirty);
+    end
+  end // always @(posedge)
+  always @(posedge clock)
+    context_0 <= _GEN_2 ? command_in.bits.context_0 : context_0;
+  assign command_out = '{ready: (~_control_active)};
+  assign completion_out = '{valid: _GEN_39, bits: _GEN_41};
+  assign requests_out = '{valid: _control_attempt_out.valid, bits: _GEN};
+  assign acknowledgements_out = '{valid: _GEN_37, bits: _GEN_38};
+  assign response_data_out = '{ready: _GEN_21};
+endmodule
+
+module CHIRetryableTransactionControl(
+  input                                                        clock,
+                                                               reset,
+                                                               start,
+                                                               finish,
+                                                               external_progress,
+  input  struct packed {logic ready; }                         attempt_in,
+  input  struct packed {logic valid; CHIRspFlit bits; }        response_in,
+  output struct packed {logic valid; CHIRequestAttempt bits; } attempt_out,
+  output struct packed {logic ready; }                         response_out,
+  output struct packed {logic valid; CHIResponseEvent bits; }  event_out,
+  output                                                       active,
+                                                               attempt_outstanding,
+                                                               received
+);
+
+  reg                    active_state;
+  reg                    attempt_sent;
+  reg                    received_state;
+  reg                    irreversible_progress;
+  reg                    retry_received;
+  reg                    retry_credit_received;
+  reg  [3:0]             retry_credit_type;
+  reg  [3:0]             granted_credit_type;
+  wire                   _GEN =
+    active_state & ~attempt_sent
+    & (~retry_received | retry_received & retry_credit_received);
+  wire CHIRequestAttempt _GEN_0 =
+    '{allow_retry: (~retry_received),
+      pcrd_type: (retry_received ? retry_credit_type : 4'h0)};
+  wire                   _GEN_1 = _GEN & attempt_in.ready;
+  wire                   _GEN_2 = |response_in.bits.opcode;
+  wire                   _GEN_3 = response_in.bits.opcode == 5'h3;
+  wire                   _GEN_4 = response_in.bits.opcode == 5'h7;
+  wire                   _GEN_5 =
+    active_state & _GEN_3 & attempt_sent & ~irreversible_progress | active_state & _GEN_4
+    & (attempt_sent | retry_received);
+  wire                   _GEN_6 = ~_GEN_2 | _GEN_5;
+  wire                   _GEN_7 = response_in.valid & _GEN_6 & _GEN_2;
+  wire                   _GEN_8 = _GEN_7 & _GEN_3;
+  wire                   _GEN_9 = _GEN_7 & _GEN_4;
+  wire CHIResponseEvent  _GEN_10 =
+    '{flit: response_in.bits,
+      effects: (1'h0),
+      retry_ack: _GEN_3,
+      protocol_credit: _GEN_4};
+  wire                   _GEN_11 = ~(response_in.valid & _GEN_2 & ~reset);
+  `ifndef SYNTHESIS
+    rv5stage_refill_response_expected:
+      assert property (@(posedge clock) disable iff (_GEN_11) _GEN_5);
+  `endif // not def SYNTHESIS
+  wire                   _GEN_12 = ~(retry_received & retry_credit_received & ~reset);
+  `ifndef SYNTHESIS
+    rv5stage_refill_retry_credit_type_matches:
+      assert property (@(posedge clock) disable iff (_GEN_12)
+                         retry_credit_type == granted_credit_type);
+  `endif // not def SYNTHESIS
+  wire                   _GEN_13 = start | finish;
+  wire                   _GEN_14 = start | _GEN_1 & retry_received | finish;
+  always @(posedge clock) begin
+    if (reset) begin
+      active_state <= 1'h0;
+      attempt_sent <= 1'h0;
+      received_state <= 1'h0;
+      irreversible_progress <= 1'h0;
       retry_received <= 1'h0;
       retry_credit_received <= 1'h0;
       retry_credit_type <= 4'h0;
       granted_credit_type <= 4'h0;
     end
     else begin
-      active_state <= _GEN_1 | (_GEN_35 | _GEN_52 | ~_GEN_56) & active_state;
-      request_sent <= ~_GEN_1 & ~_GEN_14 & (_GEN_7 | request_sent);
-      received_packets <=
-        _GEN_1
-          ? _GEN_0
-          : _GEN_35
-              ? {{_GEN_32 | received_packets[2'h3]},
-                 {_GEN_31 | received_packets[2'h2]},
-                 {_GEN_30 | received_packets[2'h1]},
-                 {_GEN_29 | received_packets[2'h0]}}
-              : received_packets;
-      acknowledgement_sent <= ~_GEN_1 & (~_GEN_35 & _GEN_52 | acknowledgement_sent);
-      line_address <= _GEN_1 ? command_in.bits.line_address : line_address;
-      opcode <= _GEN_1 ? command_in.bits.opcode : opcode;
-      line <= _GEN_1 ? 512'h0 : _GEN_35 ? _GEN_57 : line;
-      home_id <= _GEN_1 ? 7'h1 : home_id;
-      dbid <= _GEN_1 ? 12'h0 : _GEN_58 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
-      response_state <= _GEN_1 ? 2'h0 : _GEN_58 ? _GEN_24.state : response_state;
-      pass_dirty <= ~_GEN_1 & (_GEN_58 ? _GEN_24.pass_dirty : pass_dirty);
-      retry_received <= ~_GEN_59 & (_GEN_14 | retry_received);
-      retry_credit_received <= ~_GEN_59 & (~_GEN_14 & _GEN_15 | retry_credit_received);
+      active_state <= start | ~finish & active_state;
+      attempt_sent <= ~(start | _GEN_8 | finish) & (_GEN_1 | attempt_sent);
+      received_state <= ~_GEN_13 & received_state;
+      irreversible_progress <= ~_GEN_13 & (external_progress | irreversible_progress);
+      retry_received <= ~_GEN_14 & (_GEN_8 | retry_received);
+      retry_credit_received <= ~_GEN_14 & (~_GEN_8 & _GEN_9 | retry_credit_received);
       retry_credit_type <=
-        _GEN_59 ? 4'h0 : _GEN_14 ? responses_in.bits.pcrd_type : retry_credit_type;
+        _GEN_14 ? 4'h0 : _GEN_8 ? response_in.bits.pcrd_type : retry_credit_type;
       granted_credit_type <=
-        _GEN_59
+        _GEN_14
           ? 4'h0
-          : _GEN_14 | ~_GEN_15 ? granted_credit_type : responses_in.bits.pcrd_type;
+          : _GEN_8 | ~_GEN_9 ? granted_credit_type : response_in.bits.pcrd_type;
     end
   end // always @(posedge)
-  always @(posedge clock)
-    context_0 <= _GEN_1 ? command_in.bits.context_0 : context_0;
-  assign command_out = '{ready: (~active_state)};
-  assign completion_out = '{valid: _GEN_53, bits: _GEN_55};
-  assign requests_out = '{valid: _GEN_6, bits: _GEN_60};
-  assign acknowledgements_out = '{valid: _GEN_50, bits: _GEN_51};
-  assign responses_out = '{ready: _GEN_12};
-  assign response_data_out = '{ready: _GEN_34};
+  assign attempt_out = '{valid: _GEN, bits: _GEN_0};
+  assign response_out = '{ready: _GEN_6};
+  assign event_out = '{valid: _GEN_7, bits: _GEN_10};
+  assign active = active_state;
+  assign attempt_outstanding = attempt_sent;
+  assign received = received_state;
 endmodule
 
 module RV5StageCleanSnoop(
@@ -6254,11 +6321,14 @@ module RV5StageLineRefill_1(
                                                                          response_data_out
 );
 
-  wire CHIMemAttr                 _GEN =
+  wire CHIReqFlit                 _GEN;
+  wire struct packed {logic valid; CHIRequestAttempt bits; } _control_attempt_out;
+  wire struct packed {logic valid; CHIResponseEvent bits; } _control_event_out;
+  wire                            _control_active;
+  wire                            _control_attempt_outstanding;
+  wire CHIMemAttr                 _GEN_0 =
     '{allocate: 1'h1, cacheable: 1'h1, device: 1'h0, early_write_acknowledge: 1'h1};
-  wire [3:0]                      _GEN_0 = '{1'h0, 1'h0, 1'h0, 1'h0};
-  reg                             active_state;
-  reg                             request_sent;
+  wire [3:0]                      _GEN_1 = '{1'h0, 1'h0, 1'h0, 1'h0};
   reg  [3:0]                      received_packets;
   reg                             acknowledgement_sent;
   reg  [63:0]                     line_address;
@@ -6269,174 +6339,141 @@ module RV5StageLineRefill_1(
   reg  [11:0]                     dbid;
   reg  [1:0]                      response_state;
   reg                             pass_dirty;
-  reg                             retry_received;
-  reg                             retry_credit_received;
-  reg  [3:0]                      retry_credit_type;
-  reg  [3:0]                      granted_credit_type;
-  wire                            _GEN_1 = command_in.valid & ~active_state;
-  wire                            _GEN_2 = _GEN_1 & ~reset;
-  wire                            _GEN_3 = ~_GEN_2;
+  wire                            _GEN_2 = command_in.valid & ~_control_active;
+  wire                            _GEN_3 = _GEN_2 & ~reset;
+  wire                            _GEN_4 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_address_aligned:
-      assert property (@(posedge clock) disable iff (_GEN_3)
+      assert property (@(posedge clock) disable iff (_GEN_4)
                          command_in.bits.line_address[5:0] == 6'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_4 = ~_GEN_2;
+  wire                            _GEN_5 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_address_fits_chi:
-      assert property (@(posedge clock) disable iff (_GEN_4)
+      assert property (@(posedge clock) disable iff (_GEN_5)
                          command_in.bits.line_address[63:44] == 20'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_5 = ~_GEN_2;
+  wire                            _GEN_6 = ~_GEN_3;
   `ifndef SYNTHESIS
     line_refill_opcode_supported:
-      assert property (@(posedge clock) disable iff (_GEN_5)
+      assert property (@(posedge clock) disable iff (_GEN_6)
                          |{command_in.bits.opcode == 7'h2,
                            command_in.bits.opcode == 7'h7});
   `endif // not def SYNTHESIS
-  wire                            _GEN_6 =
-    active_state & ~request_sent
-    & (~retry_received | retry_received & retry_credit_received);
-  wire                            _GEN_7 = _GEN_6 & requests_in.ready;
-  wire                            _GEN_8 = |responses_in.bits.opcode;
-  wire                            _GEN_9 = responses_in.bits.opcode == 5'h3;
-  wire                            _GEN_10 = responses_in.bits.opcode == 5'h7;
-  wire                            _GEN_11 = _GEN_9 | _GEN_10;
-  wire                            _GEN_12 =
-    ~_GEN_8 | active_state & _GEN_11 & (request_sent | retry_received);
-  wire                            _GEN_13 = responses_in.valid & _GEN_12 & _GEN_8;
-  wire                            _GEN_14 = _GEN_13 & _GEN_9;
-  wire                            _GEN_15 = _GEN_13 & _GEN_10;
-  wire                            _GEN_16 = _GEN_13 & ~reset;
-  wire                            _GEN_17 = ~_GEN_16;
-  `ifndef SYNTHESIS
-    line_refill_retry_response_supported:
-      assert property (@(posedge clock) disable iff (_GEN_17) _GEN_11);
-  `endif // not def SYNTHESIS
-  wire                            _GEN_18 = ~_GEN_16;
+  wire                            _GEN_7 = _control_event_out.valid & ~reset;
+  wire                            _GEN_8 = ~_GEN_7;
   `ifndef SYNTHESIS
     line_refill_retry_response_target:
-      assert property (@(posedge clock) disable iff (_GEN_18)
-                         responses_in.bits.tgt_id == node_id);
+      assert property (@(posedge clock) disable iff (_GEN_8)
+                         _control_event_out.bits.flit.tgt_id == node_id);
   `endif // not def SYNTHESIS
-  wire                            _GEN_19 = ~_GEN_16;
+  wire                            _GEN_9 = ~_GEN_7;
   `ifndef SYNTHESIS
     line_refill_retry_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_19)
-                         responses_in.bits.src_id == home_id);
+      assert property (@(posedge clock) disable iff (_GEN_9)
+                         _control_event_out.bits.flit.src_id == home_id);
   `endif // not def SYNTHESIS
-  wire                            _GEN_20 = _GEN_14 & ~reset;
-  wire                            _GEN_21 = ~_GEN_20;
-  `ifndef SYNTHESIS
-    line_refill_retry_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_21) request_sent);
-  `endif // not def SYNTHESIS
-  wire                            _GEN_22 = ~_GEN_20;
+  wire                            _GEN_10 =
+    ~(_control_event_out.valid & _control_event_out.bits.retry_ack & ~reset);
   `ifndef SYNTHESIS
     line_refill_retry_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_22)
-                         responses_in.bits.txn_id == 12'h0);
+      assert property (@(posedge clock) disable iff (_GEN_10)
+                         _control_event_out.bits.flit.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_23 =
-    ~(retry_received & retry_credit_received & ~reset);
-  `ifndef SYNTHESIS
-    line_refill_retry_credit_type_matches:
-      assert property (@(posedge clock) disable iff (_GEN_23)
-                         retry_credit_type == granted_credit_type);
-  `endif // not def SYNTHESIS
-  wire CHICoherentResponse        _GEN_24 = /*cast(bit)*/response_data_in.bits.resp;
-  wire [3:0]                      _GEN_25 = received_packets;
-  wire                            _GEN_26 = &_GEN_25;
-  wire                            _GEN_27 = _GEN_25 == 4'h0;
-  wire [3:0][1:0]                 _GEN_28 =
+  wire CHICoherentResponse        _GEN_11 = /*cast(bit)*/response_data_in.bits.resp;
+  wire [3:0]                      _GEN_12 = received_packets;
+  wire                            _GEN_13 = &_GEN_12;
+  wire                            _GEN_14 = _GEN_12 == 4'h0;
+  wire [3:0][1:0]                 _GEN_15 =
     {{line_address[5:4] - 2'h1},
      {line_address[5:4] - 2'h2},
      {line_address[5:4] + 2'h1},
      {line_address[5:4]}};
-  wire                            _GEN_29 = response_data_in.bits.data_id == 2'h0;
-  wire                            _GEN_30 = response_data_in.bits.data_id == 2'h1;
-  wire                            _GEN_31 = response_data_in.bits.data_id == 2'h2;
-  wire                            _GEN_32 = &response_data_in.bits.data_id;
-  wire [3:0][127:0]               _GEN_33 = /*cast(bit[3:0][127:0])*/line;
-  wire                            _GEN_34 = active_state & request_sent & ~_GEN_26;
-  wire                            _GEN_35 = response_data_in.valid & _GEN_34;
-  wire                            _GEN_36 = _GEN_35 & ~reset;
-  wire                            _GEN_37 = ~_GEN_36;
+  wire                            _GEN_16 = response_data_in.bits.data_id == 2'h0;
+  wire                            _GEN_17 = response_data_in.bits.data_id == 2'h1;
+  wire                            _GEN_18 = response_data_in.bits.data_id == 2'h2;
+  wire                            _GEN_19 = &response_data_in.bits.data_id;
+  wire [3:0][127:0]               _GEN_20 = /*cast(bit[3:0][127:0])*/line;
+  wire                            _GEN_21 =
+    _control_active & _control_attempt_outstanding & ~_GEN_13;
+  wire                            _GEN_22 = response_data_in.valid & _GEN_21;
+  wire                            _GEN_23 = _GEN_22 & ~reset;
+  wire                            _GEN_24 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_is_comp_data:
-      assert property (@(posedge clock) disable iff (_GEN_37)
+      assert property (@(posedge clock) disable iff (_GEN_24)
                          response_data_in.bits.opcode == 4'h4);
   `endif // not def SYNTHESIS
-  wire                            _GEN_38 = ~_GEN_36;
+  wire                            _GEN_25 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_38)
+      assert property (@(posedge clock) disable iff (_GEN_25)
                          response_data_in.bits.txn_id == 12'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_39 = ~_GEN_36;
+  wire                            _GEN_26 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_target:
-      assert property (@(posedge clock) disable iff (_GEN_39)
+      assert property (@(posedge clock) disable iff (_GEN_26)
                          response_data_in.bits.tgt_id == node_id);
   `endif // not def SYNTHESIS
-  wire                            _GEN_40 = ~_GEN_36;
+  wire                            _GEN_27 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_40)
+      assert property (@(posedge clock) disable iff (_GEN_27)
                          response_data_in.bits.home_nid_or_pbha_or_mismatched_mecid == home_id);
   `endif // not def SYNTHESIS
-  wire                            _GEN_41 = ~_GEN_36;
+  wire                            _GEN_28 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id:
-      assert property (@(posedge clock) disable iff (_GEN_41)
-                         response_data_in.bits.data_id == _GEN_28[response_data_in.bits.data_id]);
+      assert property (@(posedge clock) disable iff (_GEN_28)
+                         response_data_in.bits.data_id == _GEN_15[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
-  wire                            _GEN_42 = ~_GEN_36;
+  wire                            _GEN_29 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id_unique:
-      assert property (@(posedge clock) disable iff (_GEN_42)
+      assert property (@(posedge clock) disable iff (_GEN_29)
                          ~received_packets[response_data_in.bits.data_id]);
   `endif // not def SYNTHESIS
-  wire                            _GEN_43 = ~_GEN_36;
+  wire                            _GEN_30 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_num_dat_zero:
-      assert property (@(posedge clock) disable iff (_GEN_43)
+      assert property (@(posedge clock) disable iff (_GEN_30)
                          response_data_in.bits.num_dat == 2'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_44 = ~_GEN_36;
+  wire                            _GEN_31 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_not_replicated:
-      assert property (@(posedge clock) disable iff (_GEN_44)
+      assert property (@(posedge clock) disable iff (_GEN_31)
                          ~response_data_in.bits.replicate);
   `endif // not def SYNTHESIS
-  wire                            _GEN_45 = ~_GEN_36;
+  wire                            _GEN_32 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_ok:
-      assert property (@(posedge clock) disable iff (_GEN_45)
+      assert property (@(posedge clock) disable iff (_GEN_32)
                          response_data_in.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                            _GEN_46 = _GEN_35 & ~_GEN_27 & ~reset;
-  wire                            _GEN_47 = ~_GEN_46;
+  wire                            _GEN_33 = _GEN_22 & ~_GEN_14 & ~reset;
+  wire                            _GEN_34 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_dbid_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_47)
+      assert property (@(posedge clock) disable iff (_GEN_34)
                          response_data_in.bits.dbid_or_mecid[11:0] == dbid);
   `endif // not def SYNTHESIS
-  wire                            _GEN_48 = ~_GEN_46;
+  wire                            _GEN_35 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_state_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_48)
-                         _GEN_24.state == response_state);
+      assert property (@(posedge clock) disable iff (_GEN_35)
+                         _GEN_11.state == response_state);
   `endif // not def SYNTHESIS
-  wire                            _GEN_49 = ~_GEN_46;
+  wire                            _GEN_36 = ~_GEN_33;
   `ifndef SYNTHESIS
     line_refill_response_pass_dirty_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_49)
-                         _GEN_24.pass_dirty == pass_dirty);
+      assert property (@(posedge clock) disable iff (_GEN_36)
+                         _GEN_11.pass_dirty == pass_dirty);
   `endif // not def SYNTHESIS
-  wire                            _GEN_50 =
-    active_state & _GEN_26 & ~acknowledgement_sent;
-  wire CHIRspFlit                 _GEN_51 =
+  wire                            _GEN_37 =
+    _control_active & _GEN_13 & ~acknowledgement_sent;
+  wire CHIRspFlit                 _GEN_38 =
     '{cache_line_id: (6'h0),
       trace_tag: (1'h0),
       tag_op: (2'h0),
@@ -6451,34 +6488,31 @@ module RV5StageLineRefill_1(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
-  wire                            _GEN_52 = _GEN_50 & acknowledgements_in.ready;
-  wire                            _GEN_53 = active_state & acknowledgement_sent;
-  wire [7:0][63:0]                _GEN_54 = /*cast(bit[7:0][63:0])*/line;
-  wire RV5StageLineRefillResult_1 _GEN_55 =
+  wire                            _GEN_39 = _control_active & acknowledgement_sent;
+  wire [7:0][63:0]                _GEN_40 = /*cast(bit[7:0][63:0])*/line;
+  wire RV5StageLineRefillResult_1 _GEN_41 =
     '{line_address: line_address,
       context_0: context_0,
-      line: _GEN_54,
+      line: _GEN_40,
       state: response_state,
       pass_dirty: pass_dirty};
-  wire                            _GEN_56 = _GEN_53 & completion_in.ready;
-  wire [511:0]                    _GEN_57 =
-    /*cast(bit[511:0])*/{{_GEN_32 ? response_data_in.bits.data : _GEN_33[2'h3]},
-                         {_GEN_31 ? response_data_in.bits.data : _GEN_33[2'h2]},
-                         {_GEN_30 ? response_data_in.bits.data : _GEN_33[2'h1]},
-                         {_GEN_29 ? response_data_in.bits.data : _GEN_33[2'h0]}};
-  wire                            _GEN_58 = _GEN_35 & _GEN_27;
-  wire                            _GEN_59 = _GEN_1 | _GEN_7 & retry_received | _GEN_56;
-  wire CHIReqFlit                 _GEN_60 =
+  wire [511:0]                    _GEN_42 =
+    /*cast(bit[511:0])*/{{_GEN_19 ? response_data_in.bits.data : _GEN_20[2'h3]},
+                         {_GEN_18 ? response_data_in.bits.data : _GEN_20[2'h2]},
+                         {_GEN_17 ? response_data_in.bits.data : _GEN_20[2'h1]},
+                         {_GEN_16 ? response_data_in.bits.data : _GEN_20[2'h0]}};
+  wire                            _GEN_43 = _GEN_22 & _GEN_14;
+  assign _GEN =
     '{trace_tag: (1'h0),
       tag_op: (2'h0),
       exp_comp_ack: (1'h1),
       excl_snoop_me_cah: (1'h0),
       group_id_or_lpid: (8'h0),
       snp_attr_or_do_dwt: (1'h1),
-      mem_attr: _GEN,
-      pcrd_type: (retry_received ? retry_credit_type : 4'h0),
+      mem_attr: _GEN_0,
+      pcrd_type: _control_attempt_out.bits.pcrd_type,
       order: (2'h0),
-      allow_retry: (~retry_received),
+      allow_retry: _control_attempt_out.bits.allow_retry,
       likely_shared: (1'h0),
       pas: (3'h0),
       address: (line_address[43:0]),
@@ -6492,11 +6526,24 @@ module RV5StageLineRefill_1(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
+  CHIRetryableTransactionControl control (
+    .clock               (clock),
+    .reset               (reset),
+    .start               (_GEN_2),
+    .finish              (_GEN_39 & completion_in.ready),
+    .external_progress   (_GEN_22),
+    .attempt_in          (requests_in),
+    .response_in         (responses_in),
+    .attempt_out         (_control_attempt_out),
+    .response_out        (responses_out),
+    .event_out           (_control_event_out),
+    .active              (_control_active),
+    .attempt_outstanding (_control_attempt_outstanding),
+    .received            (/* unused */)
+  );
   always @(posedge clock) begin
     if (reset) begin
-      active_state <= 1'h0;
-      request_sent <= 1'h0;
-      received_packets <= _GEN_0;
+      received_packets <= _GEN_1;
       acknowledgement_sent <= 1'h0;
       line_address <= 64'h0;
       opcode <= 7'h2;
@@ -6505,49 +6552,35 @@ module RV5StageLineRefill_1(
       dbid <= 12'h0;
       response_state <= 2'h0;
       pass_dirty <= 1'h0;
-      retry_received <= 1'h0;
-      retry_credit_received <= 1'h0;
-      retry_credit_type <= 4'h0;
-      granted_credit_type <= 4'h0;
     end
     else begin
-      active_state <= _GEN_1 | (_GEN_35 | _GEN_52 | ~_GEN_56) & active_state;
-      request_sent <= ~_GEN_1 & ~_GEN_14 & (_GEN_7 | request_sent);
       received_packets <=
-        _GEN_1
-          ? _GEN_0
-          : _GEN_35
-              ? {{_GEN_32 | received_packets[2'h3]},
-                 {_GEN_31 | received_packets[2'h2]},
-                 {_GEN_30 | received_packets[2'h1]},
-                 {_GEN_29 | received_packets[2'h0]}}
+        _GEN_2
+          ? _GEN_1
+          : _GEN_22
+              ? {{_GEN_19 | received_packets[2'h3]},
+                 {_GEN_18 | received_packets[2'h2]},
+                 {_GEN_17 | received_packets[2'h1]},
+                 {_GEN_16 | received_packets[2'h0]}}
               : received_packets;
-      acknowledgement_sent <= ~_GEN_1 & (~_GEN_35 & _GEN_52 | acknowledgement_sent);
-      line_address <= _GEN_1 ? command_in.bits.line_address : line_address;
-      opcode <= _GEN_1 ? command_in.bits.opcode : opcode;
-      line <= _GEN_1 ? 512'h0 : _GEN_35 ? _GEN_57 : line;
-      home_id <= _GEN_1 ? 7'h1 : home_id;
-      dbid <= _GEN_1 ? 12'h0 : _GEN_58 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
-      response_state <= _GEN_1 ? 2'h0 : _GEN_58 ? _GEN_24.state : response_state;
-      pass_dirty <= ~_GEN_1 & (_GEN_58 ? _GEN_24.pass_dirty : pass_dirty);
-      retry_received <= ~_GEN_59 & (_GEN_14 | retry_received);
-      retry_credit_received <= ~_GEN_59 & (~_GEN_14 & _GEN_15 | retry_credit_received);
-      retry_credit_type <=
-        _GEN_59 ? 4'h0 : _GEN_14 ? responses_in.bits.pcrd_type : retry_credit_type;
-      granted_credit_type <=
-        _GEN_59
-          ? 4'h0
-          : _GEN_14 | ~_GEN_15 ? granted_credit_type : responses_in.bits.pcrd_type;
+      acknowledgement_sent <=
+        ~_GEN_2 & (~_GEN_22 & _GEN_37 & acknowledgements_in.ready | acknowledgement_sent);
+      line_address <= _GEN_2 ? command_in.bits.line_address : line_address;
+      opcode <= _GEN_2 ? command_in.bits.opcode : opcode;
+      line <= _GEN_2 ? 512'h0 : _GEN_22 ? _GEN_42 : line;
+      home_id <= _GEN_2 ? 7'h1 : home_id;
+      dbid <= _GEN_2 ? 12'h0 : _GEN_43 ? response_data_in.bits.dbid_or_mecid[11:0] : dbid;
+      response_state <= _GEN_2 ? 2'h0 : _GEN_43 ? _GEN_11.state : response_state;
+      pass_dirty <= ~_GEN_2 & (_GEN_43 ? _GEN_11.pass_dirty : pass_dirty);
     end
   end // always @(posedge)
   always @(posedge clock)
-    context_0 <= _GEN_1 ? command_in.bits.context_0 : context_0;
-  assign command_out = '{ready: (~active_state)};
-  assign completion_out = '{valid: _GEN_53, bits: _GEN_55};
-  assign requests_out = '{valid: _GEN_6, bits: _GEN_60};
-  assign acknowledgements_out = '{valid: _GEN_50, bits: _GEN_51};
-  assign responses_out = '{ready: _GEN_12};
-  assign response_data_out = '{ready: _GEN_34};
+    context_0 <= _GEN_2 ? command_in.bits.context_0 : context_0;
+  assign command_out = '{ready: (~_control_active)};
+  assign completion_out = '{valid: _GEN_39, bits: _GEN_41};
+  assign requests_out = '{valid: _control_attempt_out.valid, bits: _GEN};
+  assign acknowledgements_out = '{valid: _GEN_37, bits: _GEN_38};
+  assign response_data_out = '{ready: _GEN_21};
 endmodule
 
 module RV5StageDataSnoop(
@@ -6808,17 +6841,14 @@ module RV5StageWriteUnique(
   output struct packed {logic ready; }                                   responses_out
 );
 
-  wire CHIMemAttr                  _GEN =
+  wire CHIReqFlit                  _GEN;
+  wire struct packed {logic valid; CHIRequestAttempt bits; } _control_attempt_out;
+  wire struct packed {logic valid; CHIResponseEvent_1 bits; } _control_event_out;
+  wire                             _control_active;
+  wire [1:0]                       _control_received;
+  wire CHIMemAttr                  _GEN_0 =
     '{allocate: 1'h0, cacheable: 1'h1, device: 1'h0, early_write_acknowledge: 1'h1};
-  reg                              active_state;
-  reg                              request_sent;
-  reg                              dbid_received;
   reg                              data_sent;
-  reg                              completion_received;
-  reg                              retry_received;
-  reg                              retry_credit_received;
-  reg  [3:0]                       retry_credit_type;
-  reg  [3:0]                       granted_credit_type;
   reg  [63:0]                      address;
   reg  [1:0]                       width;
   reg  [63:0]                      write_data;
@@ -6826,83 +6856,49 @@ module RV5StageWriteUnique(
   RV5StageDataReq                  context_0;
   reg  [6:0]                       home_id;
   reg  [11:0]                      dbid;
-  wire                             _GEN_0 = command_in.valid & ~active_state;
-  wire                             _GEN_1 = ~(_GEN_0 & ~reset);
+  wire                             _GEN_1 = command_in.valid & ~_control_active;
+  wire                             _GEN_2 = ~(_GEN_1 & ~reset);
   `ifndef SYNTHESIS
     write_unique_address_fits_chi:
-      assert property (@(posedge clock) disable iff (_GEN_1)
+      assert property (@(posedge clock) disable iff (_GEN_2)
                          command_in.bits.address[63:44] == 20'h0);
   `endif // not def SYNTHESIS
-  wire                             _GEN_2 =
-    active_state & ~request_sent
-    & (~retry_received | retry_received & retry_credit_received);
-  wire                             _GEN_3 = _GEN_2 & requests_in.ready;
-  wire                             _GEN_4 = |responses_in.bits.opcode;
-  wire                             _GEN_5 = responses_in.bits.opcode == 5'h3;
-  wire                             _GEN_6 = responses_in.bits.opcode == 5'h7;
-  wire                             _GEN_7 =
-    |{responses_in.bits.opcode == 5'h6, responses_in.bits.opcode == 5'hE};
-  wire                             _GEN_8 = responses_in.bits.opcode == 5'h4;
-  wire                             _GEN_9 = responses_in.bits.opcode == 5'h5;
-  wire                             _GEN_10 =
-    active_state & (_GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9)
-    & (_GEN_6 & (request_sent | retry_received) | _GEN_5 & request_sent & ~dbid_received
-       & ~completion_received | _GEN_7 & request_sent & ~dbid_received | _GEN_8
-       & request_sent & ~completion_received | _GEN_9 & request_sent & ~dbid_received
-       & ~completion_received);
-  wire                             _GEN_11 = ~_GEN_4 | _GEN_10;
-  wire                             _GEN_12 = responses_in.valid & _GEN_11 & _GEN_4;
-  wire                             _GEN_13 = _GEN_12 & _GEN_5;
-  wire                             _GEN_14 = _GEN_12 & _GEN_6;
-  wire                             _GEN_15 = _GEN_12 & (_GEN_7 | _GEN_9);
-  wire                             _GEN_16 = _GEN_12 & (_GEN_8 | _GEN_9);
-  wire                             _GEN_17 = _GEN_15 | _GEN_16;
-  wire                             _GEN_18 = responses_in.valid & _GEN_4 & ~reset;
-  wire                             _GEN_19 = ~_GEN_18;
-  `ifndef SYNTHESIS
-    write_unique_response_expected:
-      assert property (@(posedge clock) disable iff (_GEN_19) _GEN_10);
-  `endif // not def SYNTHESIS
-  wire                             _GEN_20 = ~_GEN_18;
+  wire                             _GEN_3 =
+    _control_event_out.valid & _control_event_out.bits.effects[0]
+    | _control_event_out.valid & _control_event_out.bits.effects[1];
+  wire                             _GEN_4 = _control_event_out.valid & ~reset;
+  wire                             _GEN_5 = ~_GEN_4;
   `ifndef SYNTHESIS
     write_unique_response_home:
-      assert property (@(posedge clock) disable iff (_GEN_20)
-                         responses_in.bits.src_id == home_id);
+      assert property (@(posedge clock) disable iff (_GEN_5)
+                         _control_event_out.bits.flit.src_id == home_id);
   `endif // not def SYNTHESIS
-  wire                             _GEN_21 = ~_GEN_18;
+  wire                             _GEN_6 = ~_GEN_4;
   `ifndef SYNTHESIS
     write_unique_response_ok:
-      assert property (@(posedge clock) disable iff (_GEN_21)
-                         responses_in.bits.resp_err == 2'h0);
+      assert property (@(posedge clock) disable iff (_GEN_6)
+                         _control_event_out.bits.flit.resp_err == 2'h0);
   `endif // not def SYNTHESIS
-  wire                             _GEN_22 = ~(_GEN_12 & ~_GEN_6 & ~reset);
+  wire                             _GEN_7 =
+    ~(_control_event_out.valid & ~_control_event_out.bits.protocol_credit & ~reset);
   `ifndef SYNTHESIS
     write_unique_response_txn_id:
-      assert property (@(posedge clock) disable iff (_GEN_22)
-                         responses_in.bits.txn_id == 12'h1);
+      assert property (@(posedge clock) disable iff (_GEN_7)
+                         _control_event_out.bits.flit.txn_id == 12'h1);
   `endif // not def SYNTHESIS
-  wire                             _GEN_23 =
-    ~(_GEN_17 & (dbid_received | completion_received) & ~reset);
+  wire                             _GEN_8 = ~(_GEN_3 & (|_control_received) & ~reset);
   `ifndef SYNTHESIS
     write_unique_response_dbid_consistent:
-      assert property (@(posedge clock) disable iff (_GEN_23)
-                         responses_in.bits.dbid_or_group_id == dbid);
+      assert property (@(posedge clock) disable iff (_GEN_8)
+                         _control_event_out.bits.flit.dbid_or_group_id == dbid);
   `endif // not def SYNTHESIS
-  wire                             _GEN_24 =
-    ~(retry_received & retry_credit_received & ~reset);
-  `ifndef SYNTHESIS
-    write_unique_retry_credit_type_matches:
-      assert property (@(posedge clock) disable iff (_GEN_24)
-                         retry_credit_type == granted_credit_type);
-  `endif // not def SYNTHESIS
-  wire                             _GEN_25 = active_state & dbid_received & ~data_sent;
-  wire                             _GEN_26 =
-    active_state & data_sent & completion_received;
-  wire RV5StageLineWritebackResult _GEN_27 = '{context_0: context_0};
-  wire                             _GEN_28 = _GEN_26 & completion_in.ready;
-  wire                             _GEN_29 = _GEN_0 | _GEN_28;
-  wire                             _GEN_30 = _GEN_0 | _GEN_3 & retry_received | _GEN_28;
-  wire CHIDatFlit                  _GEN_31 =
+  wire                             _GEN_9 =
+    _control_active & _control_received[0] & ~data_sent;
+  wire                             _GEN_10 =
+    _control_active & data_sent & _control_received[1];
+  wire RV5StageLineWritebackResult _GEN_11 = '{context_0: context_0};
+  wire                             _GEN_12 = _GEN_10 & completion_in.ready;
+  wire CHIDatFlit                  _GEN_13 =
     '{data: ({64'h0, write_data} << {121'h0, address[3], 6'h0}),
       byte_enable: ({8'h0, write_mask} << {12'h0, address[3], 3'h0}),
       replicate: (1'h0),
@@ -6927,17 +6923,17 @@ module RV5StageWriteUnique(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
-  wire CHIReqFlit                  _GEN_32 =
+  assign _GEN =
     '{trace_tag: (1'h0),
       tag_op: (2'h0),
       exp_comp_ack: (1'h0),
       excl_snoop_me_cah: (1'h0),
       group_id_or_lpid: (8'h0),
       snp_attr_or_do_dwt: (1'h1),
-      mem_attr: _GEN,
-      pcrd_type: (retry_received ? retry_credit_type : 4'h0),
+      mem_attr: _GEN_0,
+      pcrd_type: _control_attempt_out.bits.pcrd_type,
       order: (2'h0),
-      allow_retry: (~retry_received),
+      allow_retry: _control_attempt_out.bits.allow_retry,
       likely_shared: (1'h0),
       pas: (3'h0),
       address: (address[43:0]),
@@ -6951,17 +6947,24 @@ module RV5StageWriteUnique(
       src_id: node_id,
       tgt_id: home_id,
       qos: (4'h0)};
+  CHIRetryableTransactionControl_1 control (
+    .clock               (clock),
+    .reset               (reset),
+    .start               (_GEN_1),
+    .finish              (_GEN_12),
+    .external_progress   (1'h0),
+    .attempt_in          (requests_in),
+    .response_in         (responses_in),
+    .attempt_out         (_control_attempt_out),
+    .response_out        (responses_out),
+    .event_out           (_control_event_out),
+    .active              (_control_active),
+    .attempt_outstanding (/* unused */),
+    .received            (_control_received)
+  );
   always @(posedge clock) begin
     if (reset) begin
-      active_state <= 1'h0;
-      request_sent <= 1'h0;
-      dbid_received <= 1'h0;
       data_sent <= 1'h0;
-      completion_received <= 1'h0;
-      retry_received <= 1'h0;
-      retry_credit_received <= 1'h0;
-      retry_credit_type <= 4'h0;
-      granted_credit_type <= 4'h0;
       address <= 64'h0;
       width <= 2'h0;
       write_data <= 64'h0;
@@ -6970,34 +6973,126 @@ module RV5StageWriteUnique(
       dbid <= 12'h0;
     end
     else begin
-      active_state <= _GEN_0 | ~_GEN_28 & active_state;
-      request_sent <= ~(_GEN_0 | _GEN_13 | _GEN_28) & (_GEN_3 | request_sent);
-      dbid_received <= ~_GEN_29 & (_GEN_15 | dbid_received);
-      data_sent <= ~_GEN_29 & (_GEN_25 & data_in.ready | data_sent);
-      completion_received <= ~_GEN_29 & (_GEN_16 | completion_received);
-      retry_received <= ~_GEN_30 & (_GEN_13 | retry_received);
-      retry_credit_received <= ~_GEN_30 & (~_GEN_13 & _GEN_14 | retry_credit_received);
-      retry_credit_type <=
-        _GEN_30 ? 4'h0 : _GEN_13 ? responses_in.bits.pcrd_type : retry_credit_type;
-      granted_credit_type <=
-        _GEN_30
-          ? 4'h0
-          : _GEN_13 | ~_GEN_14 ? granted_credit_type : responses_in.bits.pcrd_type;
-      address <= _GEN_0 ? command_in.bits.address : address;
-      width <= _GEN_0 ? command_in.bits.width : width;
-      write_data <= _GEN_0 ? command_in.bits.data : write_data;
-      write_mask <= _GEN_0 ? command_in.bits.mask : write_mask;
-      home_id <= _GEN_0 ? 7'h1 : home_id;
-      dbid <= _GEN_17 ? responses_in.bits.dbid_or_group_id : dbid;
+      data_sent <= ~(_GEN_1 | _GEN_12) & (_GEN_9 & data_in.ready | data_sent);
+      address <= _GEN_1 ? command_in.bits.address : address;
+      width <= _GEN_1 ? command_in.bits.width : width;
+      write_data <= _GEN_1 ? command_in.bits.data : write_data;
+      write_mask <= _GEN_1 ? command_in.bits.mask : write_mask;
+      home_id <= _GEN_1 ? 7'h1 : home_id;
+      dbid <= _GEN_3 ? _control_event_out.bits.flit.dbid_or_group_id : dbid;
     end
   end // always @(posedge)
   always @(posedge clock)
-    context_0 <= _GEN_0 ? command_in.bits.context_0 : context_0;
-  assign command_out = '{ready: (~active_state)};
-  assign completion_out = '{valid: _GEN_26, bits: _GEN_27};
-  assign requests_out = '{valid: _GEN_2, bits: _GEN_32};
-  assign data_out = '{valid: _GEN_25, bits: _GEN_31};
-  assign responses_out = '{ready: _GEN_11};
+    context_0 <= _GEN_1 ? command_in.bits.context_0 : context_0;
+  assign command_out = '{ready: (~_control_active)};
+  assign completion_out = '{valid: _GEN_10, bits: _GEN_11};
+  assign requests_out = '{valid: _control_attempt_out.valid, bits: _GEN};
+  assign data_out = '{valid: _GEN_9, bits: _GEN_13};
+endmodule
+
+module CHIRetryableTransactionControl_1(
+  input                                                         clock,
+                                                                reset,
+                                                                start,
+                                                                finish,
+                                                                external_progress,
+  input  struct packed {logic ready; }                          attempt_in,
+  input  struct packed {logic valid; CHIRspFlit bits; }         response_in,
+  output struct packed {logic valid; CHIRequestAttempt bits; }  attempt_out,
+  output struct packed {logic ready; }                          response_out,
+  output struct packed {logic valid; CHIResponseEvent_1 bits; } event_out,
+  output                                                        active,
+                                                                attempt_outstanding,
+  output [1:0]                                                  received
+);
+
+  reg                     active_state;
+  reg                     attempt_sent;
+  reg  [1:0]              received_state;
+  reg                     irreversible_progress;
+  reg                     retry_received;
+  reg                     retry_credit_received;
+  reg  [3:0]              retry_credit_type;
+  reg  [3:0]              granted_credit_type;
+  wire                    _GEN =
+    active_state & ~attempt_sent
+    & (~retry_received | retry_received & retry_credit_received);
+  wire CHIRequestAttempt  _GEN_0 =
+    '{allow_retry: (~retry_received),
+      pcrd_type: (retry_received ? retry_credit_type : 4'h0)};
+  wire                    _GEN_1 = _GEN & attempt_in.ready;
+  wire                    _GEN_2 = |response_in.bits.opcode;
+  wire                    _GEN_3 = response_in.bits.opcode == 5'h3;
+  wire                    _GEN_4 = response_in.bits.opcode == 5'h7;
+  wire [1:0]              _GEN_5 =
+    response_in.bits.opcode == 5'h4
+      ? 2'h2
+      : response_in.bits.opcode == 5'h5
+          ? 2'h3
+          : response_in.bits.opcode == 5'h6
+              ? 2'h1
+              : {1'h0, response_in.bits.opcode == 5'hE};
+  wire                    _GEN_6 = |_GEN_5;
+  wire                    _GEN_7 =
+    active_state & attempt_sent & _GEN_6 & (_GEN_5 & received_state) == 2'h0
+    | active_state & _GEN_3 & attempt_sent & ~irreversible_progress | active_state
+    & _GEN_4 & (attempt_sent | retry_received);
+  wire                    _GEN_8 = ~_GEN_2 | _GEN_7;
+  wire                    _GEN_9 = response_in.valid & _GEN_8 & _GEN_2;
+  wire                    _GEN_10 = _GEN_9 & _GEN_3;
+  wire                    _GEN_11 = _GEN_9 & _GEN_4;
+  wire                    _GEN_12 = _GEN_9 & _GEN_6;
+  wire CHIResponseEvent_1 _GEN_13 =
+    '{flit: response_in.bits,
+      effects: _GEN_5,
+      retry_ack: _GEN_3,
+      protocol_credit: _GEN_4};
+  wire                    _GEN_14 = ~(response_in.valid & _GEN_2 & ~reset);
+  `ifndef SYNTHESIS
+    rv5stage_write_unique_response_expected:
+      assert property (@(posedge clock) disable iff (_GEN_14) _GEN_7);
+  `endif // not def SYNTHESIS
+  wire                    _GEN_15 = ~(retry_received & retry_credit_received & ~reset);
+  `ifndef SYNTHESIS
+    rv5stage_write_unique_retry_credit_type_matches:
+      assert property (@(posedge clock) disable iff (_GEN_15)
+                         retry_credit_type == granted_credit_type);
+  `endif // not def SYNTHESIS
+  wire                    _GEN_16 = start | finish;
+  wire                    _GEN_17 = start | _GEN_1 & retry_received | finish;
+  always @(posedge clock) begin
+    if (reset) begin
+      active_state <= 1'h0;
+      attempt_sent <= 1'h0;
+      received_state <= 2'h0;
+      irreversible_progress <= 1'h0;
+      retry_received <= 1'h0;
+      retry_credit_received <= 1'h0;
+      retry_credit_type <= 4'h0;
+      granted_credit_type <= 4'h0;
+    end
+    else begin
+      active_state <= start | ~finish & active_state;
+      attempt_sent <= ~(start | _GEN_10 | finish) & (_GEN_1 | attempt_sent);
+      received_state <= _GEN_16 ? 2'h0 : {2{_GEN_12}} & _GEN_5 | received_state;
+      irreversible_progress <=
+        ~_GEN_16 & (_GEN_12 | external_progress | irreversible_progress);
+      retry_received <= ~_GEN_17 & (_GEN_10 | retry_received);
+      retry_credit_received <= ~_GEN_17 & (~_GEN_10 & _GEN_11 | retry_credit_received);
+      retry_credit_type <=
+        _GEN_17 ? 4'h0 : _GEN_10 ? response_in.bits.pcrd_type : retry_credit_type;
+      granted_credit_type <=
+        _GEN_17
+          ? 4'h0
+          : _GEN_10 | ~_GEN_11 ? granted_credit_type : response_in.bits.pcrd_type;
+    end
+  end // always @(posedge)
+  assign attempt_out = '{valid: _GEN, bits: _GEN_0};
+  assign response_out = '{ready: _GEN_8};
+  assign event_out = '{valid: _GEN_9, bits: _GEN_13};
+  assign active = active_state;
+  assign attempt_outstanding = attempt_sent;
+  assign received = received_state;
 endmodule
 
 module Pipe_3(
