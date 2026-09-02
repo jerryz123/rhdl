@@ -71,7 +71,7 @@ check_matrix_entry tests/analysis/clocking-test.rhm host_matrix ci-host-hygiene-
 check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-cores-test
 check_matrix_entry rhdl/std/flow.rhdl host_matrix ci-host-hygiene-test
 check_matrix_entry rhdl/std/flow.rhdl circt_matrix ci-circt-std-test
-check_matrix_entry host/annotations.rhm host_matrix ci-host-foundation-test
+check_matrix_entry support/annotations.rhm host_matrix ci-host-foundation-test
 check_matrix_entry tests/frontend/conditional-fixture.rhdl host_matrix ci-host-foundation-test
 check_matrix_entry tests/frontend/invalid/bad-width.rhdl host_matrix ci-host-foundation-test
 check_matrix_entry ridx/model/axis.rhm host_matrix ci-host-models-test

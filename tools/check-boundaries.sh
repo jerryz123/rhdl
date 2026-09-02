@@ -33,8 +33,8 @@ fail_matches "core must not import analysis, frontend, backend, or formal module
   '^[[:space:]]+"[^"]*(analysis|frontend|backend|formal)/' rhdl/core
 fail_matches "analysis must depend only on core and other analysis modules" \
   '^[[:space:]]+"[^"]*(frontend|backend|formal|std)/' rhdl/analysis
-fail_matches "host annotations must remain dependency-neutral" \
-  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' host
+fail_matches "support annotations must remain dependency-neutral" \
+  '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' support/annotations.rhm
 fail_matches "pure Ridx model must remain dependency-neutral" \
   '^[[:space:]]+.*(rhdl/|noc/|riscv/|chi/|rfpl/|cores/)' ridx/model
 fail_matches "pure Ridx materialization must remain dependency-neutral" \

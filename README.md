@@ -16,8 +16,8 @@ standard syntax without creating competing hardware semantics.
 
 RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 
-Dependency-neutral host refinements shared by the pure model and hardware
-packages live under [`host/`](host/README.md).
+Dependency-neutral Rhombus refinements shared by the pure model and hardware
+packages live under [`support/`](support/README.md).
 
 Ridx is the dependency-neutral host library for finite structural index spaces,
 canonical views, point-indexed values, mappings, symbolic axis shifts, and
@@ -128,7 +128,7 @@ Detailed documentation lives with the component that owns it:
 
 | Topic | Document |
 |---|---|
-| Shared dependency-neutral host refinements | [`host/README.md`](host/README.md) |
+| Shared dependency-neutral Rhombus refinements | [`support/README.md`](support/README.md) |
 | Finite structural index spaces and architecture | [`ridx/README.md`](ridx/README.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
 | RFPL physical-view language and validation | [`rfpl/README.md`](rfpl/README.md) |

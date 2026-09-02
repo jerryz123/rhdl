@@ -230,7 +230,7 @@ classify_path() {
       mark_all_circt
       simulation=true
       ;;
-    host/*|tests/core/*|tests/analysis/*|tests/frontend/*)
+    tests/core/*|tests/analysis/*|tests/frontend/*)
       host_foundation=true
       ;;
     tests/backend/*)
@@ -327,6 +327,12 @@ classify_path() {
       host_cores=true
       circt_cores=true
       simulation=true
+      ;;
+    support/annotations.rhm|support/tests/*)
+      host_foundation=true
+      ;;
+    support/README.md)
+      host_foundation=true
       ;;
     tools/install-circt.sh)
       mark_all_circt

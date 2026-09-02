@@ -26,7 +26,7 @@ sims/* ------------------------> public SoC and backend surfaces
 riscv/rhdl --------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* and domain libraries
 
-host/annotations -------------> dependency-neutral Rhombus refinements
+support/annotations ----------> dependency-neutral Rhombus refinements
 
 frontend/foundation -----------+
 frontend/layers/* -------------+----> frontend/support/*
@@ -51,8 +51,8 @@ internal module implementing its shared frontend forms is called the
 
 | Area | Responsibility | May depend directly on |
 |---|---|---|
-| [`../host/`](../host/README.md) | Dependency-neutral host refinement annotations | Rhombus only |
-| [`core/`](core/README.md) | Types, IR, Builder, verification, and printing | Other core modules, `../host/`, and Rhombus libraries |
+| [`../support/annotations.rhm`](../support/annotations.rhm) | Dependency-neutral Rhombus refinement annotations | Rhombus only |
+| [`core/`](core/README.md) | Types, IR, Builder, verification, and printing | Other core modules, `../support/annotations.rhm`, and Rhombus libraries |
 | [`analysis/`](analysis/README.md) | Optional certification, provenance, and diagnostic passes over completed public IR | Core and other analysis modules |
 | [`frontend/kernel.rhm`](frontend/kernel.rhm) | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
 | [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, static-information machinery, and policy certification; not a language profile | Kernel, approved core APIs, approved analyses, other support modules |
