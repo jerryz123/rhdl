@@ -52,6 +52,8 @@ module rv5stage_csr_tb;
   localparam logic [1:0] PRIVILEGE_U = 2'd0;
   localparam logic [1:0] PRIVILEGE_S = 2'd1;
   localparam logic [1:0] PRIVILEGE_M = 2'd3;
+  localparam logic [63:0] RV64_MSTATUS_FIXED = 64'h0000000a_00000000;
+  localparam logic [63:0] RV64_SSTATUS_FIXED = 64'h00000002_00000000;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -147,7 +149,7 @@ module rv5stage_csr_tb;
     repeat (2) @(posedge clock);
     #1;
     reset = 1'b0;
-    assert (privilege == PRIVILEGE_M && satp == 0)
+    assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED)
       else $fatal(1, "CSR file did not reset into M mode with bare translation");
 
     csr_access(CSR_WRITE, CSR_MSCRATCH, 64'h12, 64'h0);
@@ -169,7 +171,7 @@ module rv5stage_csr_tb;
       else $fatal(1, "disabled machine timer interrupt became eligible");
     csr_access(CSR_SET, CSR_MIP, 64'h0, 64'h80);
     csr_access(CSR_WRITE, CSR_MIE, 64'h80, 64'h0);
-    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h8, 64'h0);
+    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h8, RV64_MSTATUS_FIXED);
     #1;
     assert (interrupt_request && !redirect_out.valid)
       else $fatal(1, "eligible interrupt redirected without a precise boundary");
@@ -178,7 +180,7 @@ module rv5stage_csr_tb;
     csr_access(CSR_SET, CSR_MEPC, 64'h0, 64'h60);
     csr_access(CSR_SET, CSR_MTVAL, 64'h0, 64'h0);
     system_action(SYSTEM_MRET, 64'h0, 64'h60);
-    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h0, 64'h88);
+    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h0, RV64_MSTATUS_FIXED | 64'h88);
 
     // Supervisor interrupt-pending bits remain software-injectable through
     // mip/sip even when no platform source is asserted.
@@ -190,7 +192,7 @@ module rv5stage_csr_tb;
     csr_access(CSR_WRITE, CSR_MIDELEG, 64'h200, 64'h0);
     csr_access(CSR_WRITE, CSR_MIE, 64'h200, 64'h80);
     csr_access(CSR_WRITE, CSR_MEPC, 64'h80, 64'h60);
-    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h802, 64'h0);
+    csr_access(CSR_WRITE, CSR_MSTATUS, 64'h802, RV64_MSTATUS_FIXED);
     system_action(SYSTEM_MRET, 64'h0, 64'h80);
     assert (privilege == PRIVILEGE_S)
       else $fatal(1, "MRET did not enter S mode");
@@ -206,7 +208,7 @@ module rv5stage_csr_tb;
     system_action(SYSTEM_SRET, 64'h0, 64'h84);
     assert (privilege == PRIVILEGE_S)
       else $fatal(1, "SRET did not resume the interrupted supervisor");
-    csr_access(CSR_CLEAR, CSR_SSTATUS, 64'h100, 64'h22);
+    csr_access(CSR_CLEAR, CSR_SSTATUS, 64'h100, RV64_SSTATUS_FIXED | 64'h22);
 
     csr_access(CSR_WRITE, CSR_SEPC, 64'h40, 64'h84);
     system_action(SYSTEM_SRET, 64'h0, 64'h40);

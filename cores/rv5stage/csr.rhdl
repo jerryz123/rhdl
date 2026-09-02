@@ -200,8 +200,10 @@ fun resolve_rv5stage_interrupt(xlen :: XLen,
 sync_circuit RV5StageCsrFile(xlen :: XLen):
   def width = xlen.width
   def zero = bits(0, width)
-  def mstatus_mask = bits(0xe19bb, width)
-  def sstatus_mask = bits(0xc0133, width)
+  def mstatus_write_mask = bits(0xe19bb, width)
+  def sstatus_write_mask = bits(0xc0133, width)
+  def mstatus_fixed = if xlen == XLen.X32 | zero | bits(0xa00000000, width)
+  def sstatus_fixed = if xlen == XLen.X32 | zero | bits(0x200000000, width)
   def medeleg_mask = bits(exception_mask(RV5StageDelegatableExceptions), width)
   def mideleg_mask = bits(0x222, width)
   def interrupt_enable_mask = bits(0xaaa, width)
@@ -234,7 +236,8 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
                  enabled :: Bool):
     mux(enabled, original ||| mask, original & !mask)
 
-  def sstatus_value = state.mstatus & sstatus_mask
+  def mstatus_value = state.mstatus ||| mstatus_fixed
+  def sstatus_value = (state.mstatus & sstatus_write_mask) ||| sstatus_fixed
   def time_value = if xlen == XLen.X32 | time_counter[0..32] | time_counter
   def timeh_value = if xlen == XLen.X32 | time_counter[32..64] | zero
   def interrupt_pending = rv5stage_interrupt_pending(xlen, interrupts) ||| state.mip
@@ -243,7 +246,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     csr CsrId.Sstatus:
       read: sstatus_value
       write value:
-        state.mstatus <== masked_merge(state.mstatus, value, sstatus_mask)
+        state.mstatus <== masked_merge(state.mstatus, value, sstatus_write_mask)
     csr CsrId.Sie:
       read: state.mie & state.mideleg
       write value:
@@ -281,9 +284,9 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     read CsrId.Time: time_value
     read CsrId.Timeh: timeh_value
     csr CsrId.Mstatus:
-      read: state.mstatus
+      read: mstatus_value
       write value:
-        state.mstatus <== masked_merge(state.mstatus, value, mstatus_mask)
+        state.mstatus <== masked_merge(state.mstatus, value, mstatus_write_mask)
     read CsrId.Misa: misa_value
     csr CsrId.Medeleg:
       read: state.medeleg
@@ -438,7 +441,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   writeback_value <== csr_read_value
   interrupt_request <== interrupt.valid
   privilege <== privilege_state
-  mstatus <== state.mstatus
+  mstatus <== mstatus_value
   satp <== state.satp
   redirect.valid <== trap.valid ||| mret ||| sret
   redirect.bits <== mux(
