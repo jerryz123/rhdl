@@ -74,8 +74,6 @@ check_matrix_entry rhdl/std/flow.rhdl circt_matrix ci-circt-std-test
 check_matrix_entry support/annotations.rhm host_matrix ci-host-foundation-test
 check_matrix_entry tests/frontend/conditional-fixture.rhdl host_matrix ci-host-foundation-test
 check_matrix_entry tests/frontend/invalid/bad-width.rhdl host_matrix ci-host-foundation-test
-check_matrix_entry ridx/model/axis.rhm host_matrix ci-host-models-test
-check_matrix_entry ridx/tests/model/milestone1-test.rhm host_matrix ci-host-models-test
 check_matrix_entry noc/rtl/router.rhdl host_matrix ci-host-models-test
 check_matrix_entry noc/rtl/router.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry chi/link.rhdl host_matrix ci-host-protocols-test
@@ -98,8 +96,6 @@ check_matrix_entry examples/noc/wormhole-router-diagram.rhdl example_matrix exam
 check_matrix_entry examples/lop/adder-core.rhm example_matrix examples-lop
 check_matrix_entry examples/rfpl/circuit-pair.rhdl example_matrix examples-rfpl
 check_matrix_entry examples/rfpl/circuit-pair.rhdl circt_matrix rfpl-circt-test
-check_matrix_entry examples/ridx/grid.rhdl example_matrix examples-ridx
-check_matrix_entry examples/ridx/grid.rhdl circt_matrix ci-circt-protocols-test
 check_matrix_entry examples/riscv/instruction-fields.rhdl example_matrix examples-riscv
 check_matrix_entry examples/riscv/instruction-fields.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry examples/chi/ram.rhdl example_matrix examples-chi

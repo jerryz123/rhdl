@@ -15,7 +15,6 @@ Examples are grouped by the API or domain that owns their primary lesson:
 | [`clocking/`](clocking/) | Frontend timing declarations and backend-independent temporal-provenance analysis over completed RHDL IR |
 | [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
-| [`ridx/`](ridx/) | Ridx-driven structural hardware generation |
 | [`riscv/`](riscv/) | RISC-V descriptor adapters and field extraction |
 | [`chi/`](chi/) | AMBA CHI endpoints and finite components |
 | [`cores/`](cores/) | Reusable processor datapaths and complete named cores |
@@ -207,7 +206,6 @@ instances, or logic to the generated RTL.
 | [`noc/noc-router.rhdl`](noc/noc-router.rhdl) | Validated one-beat NoC routing with per-origin buffers, one-to-one allocation, ejection, and backpressure |
 | [`noc/noc-network.rhdl`](noc/noc-network.rhdl) | Three user-owned router subsystems assembled hierarchically from pure router and VC wiring plans |
 | [`noc/noc-crossbar.rhdl`](noc/noc-crossbar.rhdl) | Linkless one-router NoC elaborated as a three-ingress, three-ejection generalized crossbar |
-| [`ridx/grid.rhdl`](ridx/grid.rhdl) | Ridx views, relations, and mappings generating a finite RHDL grid |
 | [`riscv/instruction-pattern.rhdl`](riscv/instruction-pattern.rhdl) | RV32I and RV64I descriptors materialized as typed patterns |
 | [`riscv/instruction-fields.rhdl`](riscv/instruction-fields.rhdl) | Descriptor-generated instruction fields and sign-extended immediates |
 | [`chi/ram.rhdl`](chi/ram.rhdl) | Finite initial-profile non-coherent CHI backing RAM |
@@ -280,7 +278,7 @@ make examples
 
 The directory-specific targets `examples-rhdl`, `examples-clocking`,
 `examples-std`, `examples-noc`, `examples-lop`,
-`examples-rfpl`, `examples-ridx`, `examples-riscv`, `examples-chi`, and
+`examples-rfpl`, `examples-riscv`, `examples-chi`, and
 `examples-cores` run one ownership group. CI selects only groups affected by
 the changed implementation layer: core and frontend changes reach every group,
 standard-library changes reach every group that imports `rhdl/std`, and domain

@@ -40,7 +40,6 @@ make examples-std           # standard-library examples only
 make examples-noc           # NoC hardware examples only
 make examples-lop           # abstraction-level comparisons only
 make examples-rfpl          # logical and physical RFPL examples only
-make examples-ridx          # Ridx-backed structural examples only
 make examples-riscv         # RISC-V model and adapter examples only
 make examples-chi           # CHI protocol examples only
 make examples-cores         # reusable processor-component examples only
@@ -48,8 +47,6 @@ make examples-formal        # formal-engine examples only
 make examples-rv5stage        # RV5Stage examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
-make ridx-test              # finite structural index-space model
-make ridx-circt-test        # Ridx-backed RHDL CIRCT fixtures
 make chi-test               # CHI boundaries, flits, links, and invalid connections
 make rv5stage-host-test       # RV5Stage core and reusable ALU host checks
 make rv5stage-test            # host checks plus RV5Stage CIRCT and Verilator fixtures

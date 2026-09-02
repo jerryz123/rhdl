@@ -163,7 +163,7 @@ fixture_in_group() {
     IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
     if [[ "$fixture" == "$wanted" ]]; then
       case "$group:$example" in
-        language:examples/rhdl/*|language:examples/lop/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|protocols:examples/ridx/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
+        language:examples/rhdl/*|language:examples/lop/*|language:examples/clocking/*|std:examples/std/*|protocols:examples/noc/*|protocols:examples/chi/*|cores:examples/cores/*|cores:examples/riscv/*|rfpl:examples/rfpl/*)
           return 0
           ;;
         *)
@@ -585,7 +585,6 @@ fixture_specs=(
   'table|table_tb|examples/rhdl/table.rhdl|design|verilog_reference'
   'valid-pipe|valid_pipe_tb|examples/std/valid-pipe.rhdl|design|verilog_reference'
   'vec-search|vec_search_tb|examples/rhdl/vec-search.rhdl|design|verilog_reference'
-  'ridx-grid||examples/ridx/grid.rhdl|design|verilog_reference'
   'riscv-instruction-fields||examples/riscv/instruction-fields.rhdl|design|verilog_reference'
   'rv64i-alu-integrated|rv64i_alu_integrated_tb|examples/cores/decoded-alu.rhdl|design|verilog_reference'
   'chi-ram|chi_ram_tb|examples/chi/ram.rhdl|ram_design|ram_verilog_reference'

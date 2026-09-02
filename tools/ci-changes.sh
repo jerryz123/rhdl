@@ -21,7 +21,6 @@ example_std=false
 example_noc=false
 example_lop=false
 example_rfpl=false
-example_ridx=false
 example_riscv=false
 example_chi=false
 example_cores=false
@@ -50,7 +49,6 @@ mark_example_std() { examples=true; example_std=true; }
 mark_example_noc() { examples=true; example_noc=true; }
 mark_example_lop() { examples=true; example_lop=true; }
 mark_example_rfpl() { examples=true; example_rfpl=true; }
-mark_example_ridx() { examples=true; example_ridx=true; }
 mark_example_riscv() { examples=true; example_riscv=true; }
 mark_example_chi() { examples=true; example_chi=true; }
 mark_example_cores() { examples=true; example_cores=true; }
@@ -63,7 +61,6 @@ mark_all_examples() {
   mark_example_noc
   mark_example_lop
   mark_example_rfpl
-  mark_example_ridx
   mark_example_riscv
   mark_example_chi
   mark_example_cores
@@ -144,7 +141,6 @@ emit_jobs() {
   [[ "$example_noc" == true ]] && append_matrix_entry example_matrix '{"name":"NoC","target":"examples-noc"}'
   [[ "$example_lop" == true ]] && append_matrix_entry example_matrix '{"name":"language-oriented programming","target":"examples-lop"}'
   [[ "$example_rfpl" == true ]] && append_matrix_entry example_matrix '{"name":"RFPL","target":"examples-rfpl"}'
-  [[ "$example_ridx" == true ]] && append_matrix_entry example_matrix '{"name":"Ridx","target":"examples-ridx"}'
   [[ "$example_riscv" == true ]] && append_matrix_entry example_matrix '{"name":"RISC-V","target":"examples-riscv"}'
   [[ "$example_chi" == true ]] && append_matrix_entry example_matrix '{"name":"CHI","target":"examples-chi"}'
   [[ "$example_cores" == true ]] && append_matrix_entry example_matrix '{"name":"processor cores","target":"examples-cores"}'
@@ -219,7 +215,6 @@ classify_path() {
       mark_example_clocking
       mark_example_std
       mark_example_noc
-      mark_example_ridx
       mark_example_riscv
       mark_example_chi
       mark_example_cores
@@ -264,10 +259,6 @@ classify_path() {
       mark_example_rfpl
       circt_rfpl=true
       ;;
-    examples/ridx/*)
-      mark_example_ridx
-      circt_protocols=true
-      ;;
     examples/riscv/*)
       mark_example_riscv
       circt_cores=true
@@ -304,10 +295,6 @@ classify_path() {
       mark_example_riscv
       mark_example_cores
       mark_example_rv5stage
-      ;;
-    ridx/*)
-      host_models=true
-      mark_example_ridx
       ;;
     chi/*)
       host_protocols=true

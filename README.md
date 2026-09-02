@@ -19,10 +19,6 @@ RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
 Dependency-neutral Rhombus refinements shared by the pure model and hardware
 packages live under [`support/`](support/README.md).
 
-Ridx is the dependency-neutral host library for finite structural index spaces,
-canonical views, point-indexed values, mappings, symbolic axis shifts, and
-identity-bearing incidence. See the [Ridx guide and architecture](ridx/README.md).
-
 RFPL is the physical-annotation language above RHDL. It classifies existing
 RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
 exact rectangular dimensions and child-instance coordinates, and leaves the
@@ -129,7 +125,6 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Shared dependency-neutral Rhombus refinements | [`support/README.md`](support/README.md) |
-| Finite structural index spaces and architecture | [`ridx/README.md`](ridx/README.md) |
 | Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
 | RFPL physical-view language and validation | [`rfpl/README.md`](rfpl/README.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
@@ -157,14 +152,6 @@ Detailed documentation lives with the component that owns it:
 
 The current vertical slice includes:
 
-- A pure Ridx host library with named finite product spaces, nominal points,
-  canonical subset views, total point-indexed host values, validated mappings,
-  symbolic axis shifts, canonical immutable materialization, and
-  identity-bearing incidence that preserves parallel edges and self-loops. The
-  NoC rectangular-mesh generator is its first consumer and lowers Ridx
-  enumeration into the existing NoC authoring model. A second RHDL grid
-  consumer uses a public-only traversal adapter and produces hardware identical
-  to explicit host-loop construction without extending the frontend or IR.
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
   RHDL logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.
