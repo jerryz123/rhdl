@@ -141,6 +141,11 @@ cache invalidation and pipeline serialization remain core policy.
 [`rhdl/csr.rhdl`](rhdl/csr.rhdl) when it needs a typed instruction-field value,
 so sparse architectural identifiers do not become a core-specific hardware
 enum or a collection of numeric literals.
+[`rhdl/counters.rhdl`](rhdl/counters.rhdl) implements the reusable 64-bit
+`mcycle` and `minstret` state behind Zicntr's read-only counter views. Concrete
+cores supply their precise retirement event and retain privilege and
+`counteren` policy in their CSR integration; platform real time remains an
+external `mtime`-equivalent source.
 [`isa/trap.rhm`](isa/trap.rhm) similarly owns synchronous `ExceptionCause`
 members, cause codes, and masks assembled from cause sets.
 [`isa/interrupt.rhm`](isa/interrupt.rhm) owns the six standard supervisor and

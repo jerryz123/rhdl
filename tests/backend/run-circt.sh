@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:aclint|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:scoreboard|cores:rv5stage-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:scoreboard|cores:rv5stage-*)
       return 0
       ;;
     *)
@@ -621,6 +621,7 @@ direct_fixture_specs=(
   'load-store|load_store_tb'
   'iterative-multiplier|iterative_multiplier_tb'
   'iterative-divider|iterative_divider_tb'
+  'riscv-counters-rv32|riscv_counters_rv32_tb'
   'rv5stage-register-file|rv5stage_register_file_tb'
   'rv5stage-csr|rv5stage_csr_tb'
   'rv5stage-atomic|rv5stage_atomic_tb'

@@ -116,6 +116,7 @@ def verilog_reference = @str|<<{
     RV5StageTrapDecision;
   typedef struct packed {logic valid; logic [63:0] cause; logic to_supervisor; }
     RV5StageInterruptDecision;
+  typedef struct packed {logic [11:0] address; logic [63:0] value; } RiscvCounterWrite;
   typedef struct packed {logic all; logic [4:0] except; } AndExclusionReduction;
   typedef
     struct packed {logic [63:0] virtual_address; logic [55:0] physical_address; logic [43:0] ppn; logic [1:0] level; logic user; logic read; logic write; logic execute; logic global; logic accessed; logic dirty; logic fault; }
@@ -392,7 +393,7 @@ module RV5StageCore(
     & (_mem_wb_pipe_egress_out.bits.system.csr == 2'h1
        | (|{_mem_wb_pipe_egress_out.bits.system.csr == 2'h2,
             &_mem_wb_pipe_egress_out.bits.system.csr})
-       & (|_mem_wb_pipe_egress_out.bits.csr_source));
+       & (|(_mem_wb_pipe_egress_out.bits.instruction[19:15])));
   wire                               _GEN_20 = _GEN_18 | _GEN_19;
   wire                               _GEN_21 = _csrs_redirect_out.valid | _GEN_20;
   wire                               _GEN_22 =
@@ -2254,10 +2255,12 @@ module RV5StageCsrFile(
                                                                satp
 );
 
-  reg  [1:0]            privilege_state;
-  RV5StageCsrState      state;
-  wire [63:0]           _GEN = state.mstatus | 64'hA00000000;
-  wire [63:0]           _GEN_0 =
+  wire [63:0]            _counters_cycle;
+  wire [63:0]            _counters_instret;
+  reg  [1:0]             privilege_state;
+  RV5StageCsrState       state;
+  wire [63:0]            _GEN = state.mstatus | 64'hA00000000;
+  wire [63:0]            _GEN_0 =
     {52'h0,
      interrupts.machine_external,
      1'h0,
@@ -2271,36 +2274,44 @@ module RV5StageCsrFile(
      1'h0,
      interrupts.supervisor_software,
      1'h0} | state.mip;
-  wire                  _GEN_1 = commit_in.bits.csr_address == 12'h100;
-  wire                  _GEN_2 = commit_in.bits.csr_address == 12'h104;
-  wire                  _GEN_3 = commit_in.bits.csr_address == 12'h105;
-  wire                  _GEN_4 = commit_in.bits.csr_address == 12'h106;
-  wire                  _GEN_5 = commit_in.bits.csr_address == 12'h10A;
-  wire                  _GEN_6 = commit_in.bits.csr_address == 12'h140;
-  wire                  _GEN_7 = commit_in.bits.csr_address == 12'h141;
-  wire                  _GEN_8 = commit_in.bits.csr_address == 12'h142;
-  wire                  _GEN_9 = commit_in.bits.csr_address == 12'h143;
-  wire                  _GEN_10 = commit_in.bits.csr_address == 12'h144;
-  wire                  _GEN_11 = commit_in.bits.csr_address == 12'h180;
-  wire                  _GEN_12 = commit_in.bits.csr_address == 12'hC01;
-  wire                  _GEN_13 = commit_in.bits.csr_address == 12'hC81;
-  wire                  _GEN_14 = commit_in.bits.csr_address == 12'h300;
-  wire                  _GEN_15 = commit_in.bits.csr_address == 12'h301;
-  wire                  _GEN_16 = commit_in.bits.csr_address == 12'h302;
-  wire                  _GEN_17 = commit_in.bits.csr_address == 12'h303;
-  wire                  _GEN_18 = commit_in.bits.csr_address == 12'h304;
-  wire                  _GEN_19 = commit_in.bits.csr_address == 12'h305;
-  wire                  _GEN_20 = commit_in.bits.csr_address == 12'h306;
-  wire                  _GEN_21 = commit_in.bits.csr_address == 12'h30A;
-  wire                  _GEN_22 = commit_in.bits.csr_address == 12'h340;
-  wire                  _GEN_23 = commit_in.bits.csr_address == 12'h341;
-  wire                  _GEN_24 = commit_in.bits.csr_address == 12'h342;
-  wire                  _GEN_25 = commit_in.bits.csr_address == 12'h343;
-  wire                  _GEN_26 = commit_in.bits.csr_address == 12'h344;
-  wire                  _GEN_27 = commit_in.bits.csr_address == 12'hF11;
-  wire                  _GEN_28 = commit_in.bits.csr_address == 12'hF12;
-  wire                  _GEN_29 = commit_in.bits.csr_address == 12'hF13;
-  wire [63:0]           _GEN_30 =
+  wire                   _GEN_1 = commit_in.bits.csr_address == 12'h100;
+  wire                   _GEN_2 = commit_in.bits.csr_address == 12'h104;
+  wire                   _GEN_3 = commit_in.bits.csr_address == 12'h105;
+  wire                   _GEN_4 = commit_in.bits.csr_address == 12'h106;
+  wire                   _GEN_5 = commit_in.bits.csr_address == 12'h10A;
+  wire                   _GEN_6 = commit_in.bits.csr_address == 12'h140;
+  wire                   _GEN_7 = commit_in.bits.csr_address == 12'h141;
+  wire                   _GEN_8 = commit_in.bits.csr_address == 12'h142;
+  wire                   _GEN_9 = commit_in.bits.csr_address == 12'h143;
+  wire                   _GEN_10 = commit_in.bits.csr_address == 12'h144;
+  wire                   _GEN_11 = commit_in.bits.csr_address == 12'h180;
+  wire                   _GEN_12 = commit_in.bits.csr_address == 12'hC00;
+  wire                   _GEN_13 = commit_in.bits.csr_address == 12'hC01;
+  wire                   _GEN_14 = commit_in.bits.csr_address == 12'hC02;
+  wire                   _GEN_15 = commit_in.bits.csr_address == 12'hC80;
+  wire                   _GEN_16 = commit_in.bits.csr_address == 12'hC81;
+  wire                   _GEN_17 = commit_in.bits.csr_address == 12'hC82;
+  wire                   _GEN_18 = commit_in.bits.csr_address == 12'h300;
+  wire                   _GEN_19 = commit_in.bits.csr_address == 12'h301;
+  wire                   _GEN_20 = commit_in.bits.csr_address == 12'h302;
+  wire                   _GEN_21 = commit_in.bits.csr_address == 12'h303;
+  wire                   _GEN_22 = commit_in.bits.csr_address == 12'h304;
+  wire                   _GEN_23 = commit_in.bits.csr_address == 12'h305;
+  wire                   _GEN_24 = commit_in.bits.csr_address == 12'h306;
+  wire                   _GEN_25 = commit_in.bits.csr_address == 12'h30A;
+  wire                   _GEN_26 = commit_in.bits.csr_address == 12'h340;
+  wire                   _GEN_27 = commit_in.bits.csr_address == 12'h341;
+  wire                   _GEN_28 = commit_in.bits.csr_address == 12'h342;
+  wire                   _GEN_29 = commit_in.bits.csr_address == 12'h343;
+  wire                   _GEN_30 = commit_in.bits.csr_address == 12'h344;
+  wire                   _GEN_31 = commit_in.bits.csr_address == 12'hB00;
+  wire                   _GEN_32 = commit_in.bits.csr_address == 12'hB02;
+  wire                   _GEN_33 = commit_in.bits.csr_address == 12'hB80;
+  wire                   _GEN_34 = commit_in.bits.csr_address == 12'hB82;
+  wire                   _GEN_35 = commit_in.bits.csr_address == 12'hF11;
+  wire                   _GEN_36 = commit_in.bits.csr_address == 12'hF12;
+  wire                   _GEN_37 = commit_in.bits.csr_address == 12'hF13;
+  wire [63:0]            _GEN_38 =
     _GEN_1
       ? {44'h2000, state.mstatus[19:0] & 20'hC0133}
       : _GEN_2
@@ -2323,47 +2334,65 @@ module RV5StageCsrFile(
                                           ? _GEN_0 & state.mideleg
                                           : _GEN_11
                                               ? state.satp
-                                              : _GEN_14
+                                              : _GEN_18
                                                   ? _GEN
-                                                  : _GEN_15
+                                                  : _GEN_19
                                                       ? 64'h8000000000140101
-                                                      : _GEN_16
+                                                      : _GEN_20
                                                           ? state.medeleg
-                                                          : _GEN_17
+                                                          : _GEN_21
                                                               ? state.mideleg
-                                                              : _GEN_18
+                                                              : _GEN_22
                                                                   ? state.mie
-                                                                  : _GEN_19
+                                                                  : _GEN_23
                                                                       ? state.mtvec
-                                                                      : _GEN_20
+                                                                      : _GEN_24
                                                                           ? state.mcounteren
-                                                                          : _GEN_21
+                                                                          : _GEN_25
                                                                               ? 64'h0
-                                                                              : _GEN_22
+                                                                              : _GEN_26
                                                                                   ? state.mscratch
-                                                                                  : _GEN_23
+                                                                                  : _GEN_27
                                                                                       ? state.mepc
-                                                                                      : _GEN_24
+                                                                                      : _GEN_28
                                                                                           ? state.mcause
-                                                                                          : _GEN_25
+                                                                                          : _GEN_29
                                                                                               ? state.mtval
-                                                                                              : _GEN_26
+                                                                                              : _GEN_30
                                                                                                   ? _GEN_0
-                                                                                                  : _GEN_12
-                                                                                                      ? time_counter
-                                                                                                      : _GEN_13
-                                                                                                        | _GEN_27
-                                                                                                        | _GEN_28
-                                                                                                        | _GEN_29
-                                                                                                        | commit_in.bits.csr_address != 12'hF14
-                                                                                                          ? 64'h0
-                                                                                                          : hart_id;
-  wire                  _GEN_31 = commit_in.bits.csr_operation == 2'h1;
-  wire                  _GEN_32 = commit_in.bits.csr_operation == 2'h2;
-  wire                  _GEN_33 =
-    _GEN_31 | (|{_GEN_32, &commit_in.bits.csr_operation}) & (|commit_in.bits.csr_source);
-  wire                  _GEN_34 = privilege_state == 2'h1;
-  wire                  _GEN_35 =
+                                                                                                  : _GEN_31
+                                                                                                      ? _counters_cycle
+                                                                                                      : _GEN_32
+                                                                                                          ? _counters_instret
+                                                                                                          : _GEN_33
+                                                                                                            | _GEN_34
+                                                                                                              ? 64'h0
+                                                                                                              : _GEN_12
+                                                                                                                  ? _counters_cycle
+                                                                                                                  : _GEN_13
+                                                                                                                      ? time_counter
+                                                                                                                      : _GEN_14
+                                                                                                                          ? _counters_instret
+                                                                                                                          : _GEN_15
+                                                                                                                            | _GEN_16
+                                                                                                                            | _GEN_17
+                                                                                                                            | _GEN_35
+                                                                                                                            | _GEN_36
+                                                                                                                            | _GEN_37
+                                                                                                                            | commit_in.bits.csr_address != 12'hF14
+                                                                                                                              ? 64'h0
+                                                                                                                              : hart_id;
+  wire                   _GEN_39 = commit_in.bits.csr_operation == 2'h1;
+  wire                   _GEN_40 = commit_in.bits.csr_operation == 2'h2;
+  wire                   _GEN_41 =
+    _GEN_39 | (|{_GEN_40, &commit_in.bits.csr_operation})
+    & (|(commit_in.bits.instruction[19:15]));
+  wire                   _GEN_42 = |{_GEN_12, _GEN_15};
+  wire                   _GEN_43 = |{_GEN_13, _GEN_16};
+  wire                   _GEN_44 =
+    _GEN_42 ? state.mcounteren[0] : _GEN_43 ? state.mcounteren[1] : state.mcounteren[2];
+  wire                   _GEN_45 = privilege_state == 2'h1;
+  wire                   _GEN_46 =
     (|{_GEN_1,
        _GEN_2,
        _GEN_3,
@@ -2393,309 +2422,332 @@ module RV5StageCsrFile(
        _GEN_27,
        _GEN_28,
        _GEN_29,
-       commit_in.bits.csr_address == 12'hF14}) & commit_in.bits.csr_address != 12'hC81
+       _GEN_30,
+       _GEN_31,
+       _GEN_32,
+       _GEN_33,
+       _GEN_34,
+       _GEN_35,
+       _GEN_36,
+       _GEN_37,
+       commit_in.bits.csr_address == 12'hF14})
+    & {_GEN_15, _GEN_16, _GEN_17, _GEN_33, _GEN_34} == 5'h0
     & privilege_state >= commit_in.bits.csr_address[9:8]
-    & ~(_GEN_33 & (&(commit_in.bits.csr_address[11:10])))
-    & ({_GEN_12, _GEN_13} == 2'h0
-       | (_GEN_34
-            ? state.mcounteren[1]
-            : (&privilege_state) | state.mcounteren[1] & state.scounteren[1]));
-  wire                  _GEN_36 = |commit_in.bits.csr_operation;
-  wire                  _GEN_37 = commit_in.valid & _GEN_36;
-  wire                  _GEN_38 = commit_in.valid & _GEN_36 & ~_GEN_35;
-  wire                  _GEN_39 = commit_in.bits.system_operation == 3'h3;
-  wire                  _GEN_40 = privilege_state != 2'h3;
-  wire                  _GEN_41 = commit_in.bits.system_operation == 3'h4;
-  wire                  _GEN_42 = privilege_state == 2'h0;
-  wire                  _GEN_43 =
-    commit_in.valid & (_GEN_39 & _GEN_40 | _GEN_41 & _GEN_42);
-  wire                  _GEN_44 = commit_in.valid & commit_in.bits.exception_valid;
-  wire                  _GEN_45 =
+    & ~(_GEN_41 & (&(commit_in.bits.csr_address[11:10])))
+    & (~(_GEN_42 | _GEN_43 | (|{_GEN_14, _GEN_17}))
+       | (_GEN_45
+            ? _GEN_44
+            : (&privilege_state) | _GEN_44
+              & (_GEN_42
+                   ? state.scounteren[0]
+                   : _GEN_43 ? state.scounteren[1] : state.scounteren[2])));
+  wire                   _GEN_47 = |commit_in.bits.csr_operation;
+  wire                   _GEN_48 = commit_in.valid & _GEN_47;
+  wire                   _GEN_49 = commit_in.valid & _GEN_47 & ~_GEN_46;
+  wire                   _GEN_50 = commit_in.bits.system_operation == 3'h3;
+  wire                   _GEN_51 = privilege_state != 2'h3;
+  wire                   _GEN_52 = commit_in.bits.system_operation == 3'h4;
+  wire                   _GEN_53 = privilege_state == 2'h0;
+  wire                   _GEN_54 =
+    commit_in.valid & (_GEN_50 & _GEN_51 | _GEN_52 & _GEN_53);
+  wire                   _GEN_55 = commit_in.valid & commit_in.bits.exception_valid;
+  wire                   _GEN_56 =
     commit_in.valid & commit_in.bits.system_operation == 3'h1;
-  wire                  _GEN_46 =
+  wire                   _GEN_57 =
     commit_in.valid & commit_in.bits.system_operation == 3'h2;
-  wire                  _GEN_47 = _GEN_44 | _GEN_38 | _GEN_43 | _GEN_45 | _GEN_46;
-  wire [63:0]           _GEN_48 =
-    _GEN_44
+  wire                   _GEN_58 = _GEN_55 | _GEN_49 | _GEN_54 | _GEN_56 | _GEN_57;
+  wire [63:0]            _GEN_59 =
+    _GEN_55
       ? commit_in.bits.exception_cause
-      : _GEN_45
-          ? (_GEN_42 ? 64'h8 : {62'h2, privilege_state != 2'h1, 1'h1})
-          : {63'h1, _GEN_46};
-  wire                  _GEN_49 = _GEN_40 | state.mstatus[3];
-  wire                  _GEN_50 = _GEN_42 | _GEN_34 & state.mstatus[1];
-  wire                  _GEN_51 =
-    _GEN_0[11] & state.mie[11] & (state.mideleg[11] ? _GEN_50 : _GEN_49);
-  wire                  _GEN_52 =
-    _GEN_0[3] & state.mie[3] & (state.mideleg[3] ? _GEN_50 : _GEN_49);
-  wire                  _GEN_53 =
-    _GEN_0[7] & state.mie[7] & (state.mideleg[7] ? _GEN_50 : _GEN_49);
-  wire                  _GEN_54 =
-    _GEN_0[9] & state.mie[9] & (state.mideleg[9] ? _GEN_50 : _GEN_49);
-  wire                  _GEN_55 =
-    _GEN_0[1] & state.mie[1] & (state.mideleg[1] ? _GEN_50 : _GEN_49);
-  wire                  _GEN_56 =
-    _GEN_51 | _GEN_52 | _GEN_53 | _GEN_54 | _GEN_55 | _GEN_0[5] & state.mie[5]
-    & (state.mideleg[5] ? _GEN_50 : _GEN_49);
-  wire [63:0]           _GEN_57 =
-    _GEN_51
-      ? 64'h800000000000000B
-      : _GEN_52
-          ? 64'h8000000000000003
-          : _GEN_53
-              ? 64'h8000000000000007
-              : _GEN_54 ? 64'h8000000000000009 : {61'h1000000000000000, ~_GEN_55, 2'h1};
-  wire                  _GEN_58 = interrupt_boundary & ~_GEN_47 & _GEN_56;
-  wire                  _GEN_59 = _GEN_47 | _GEN_58;
-  wire [63:0]           _GEN_60 = _GEN_47 ? _GEN_48 : _GEN_57;
-  wire [63:0]           _GEN_61 =
-    _GEN_47
-      ? (_GEN_44
-           ? commit_in.bits.exception_value
-           : _GEN_38 | _GEN_43 ? {32'h0, commit_in.bits.instruction} : 64'h0)
-      : 64'h0;
-  wire                  _GEN_62 =
-    _GEN_47
-      ? _GEN_40
-        & (_GEN_48 == 64'h0
-             ? state.medeleg[0]
-             : _GEN_48 == 64'h1
-                 ? state.medeleg[1]
-                 : _GEN_48 == 64'h2
-                     ? state.medeleg[2]
-                     : _GEN_48 == 64'h3
-                         ? state.medeleg[3]
-                         : _GEN_48 == 64'h4
-                             ? state.medeleg[4]
-                             : _GEN_48 == 64'h5
-                                 ? state.medeleg[5]
-                                 : _GEN_48 == 64'h6
-                                     ? state.medeleg[6]
-                                     : _GEN_48 == 64'h7
-                                         ? state.medeleg[7]
-                                         : _GEN_48 == 64'h8
-                                             ? state.medeleg[8]
-                                             : _GEN_48 == 64'hC
-                                                 ? state.medeleg[12]
-                                                 : _GEN_48 == 64'hD
-                                                     ? state.medeleg[13]
-                                                     : _GEN_48 == 64'hF
-                                                       & state.medeleg[15])
       : _GEN_56
-        & (_GEN_57[3:0] == 4'h1
+          ? (_GEN_53 ? 64'h8 : {62'h2, privilege_state != 2'h1, 1'h1})
+          : {63'h1, _GEN_57};
+  wire                   _GEN_60 = _GEN_51 | state.mstatus[3];
+  wire                   _GEN_61 = _GEN_53 | _GEN_45 & state.mstatus[1];
+  wire                   _GEN_62 =
+    _GEN_0[11] & state.mie[11] & (state.mideleg[11] ? _GEN_61 : _GEN_60);
+  wire                   _GEN_63 =
+    _GEN_0[3] & state.mie[3] & (state.mideleg[3] ? _GEN_61 : _GEN_60);
+  wire                   _GEN_64 =
+    _GEN_0[7] & state.mie[7] & (state.mideleg[7] ? _GEN_61 : _GEN_60);
+  wire                   _GEN_65 =
+    _GEN_0[9] & state.mie[9] & (state.mideleg[9] ? _GEN_61 : _GEN_60);
+  wire                   _GEN_66 =
+    _GEN_0[1] & state.mie[1] & (state.mideleg[1] ? _GEN_61 : _GEN_60);
+  wire                   _GEN_67 =
+    _GEN_62 | _GEN_63 | _GEN_64 | _GEN_65 | _GEN_66 | _GEN_0[5] & state.mie[5]
+    & (state.mideleg[5] ? _GEN_61 : _GEN_60);
+  wire [63:0]            _GEN_68 =
+    _GEN_62
+      ? 64'h800000000000000B
+      : _GEN_63
+          ? 64'h8000000000000003
+          : _GEN_64
+              ? 64'h8000000000000007
+              : _GEN_65 ? 64'h8000000000000009 : {61'h1000000000000000, ~_GEN_66, 2'h1};
+  wire                   _GEN_69 = interrupt_boundary & ~_GEN_58 & _GEN_67;
+  wire                   _GEN_70 = _GEN_58 | _GEN_69;
+  wire [63:0]            _GEN_71 = _GEN_58 ? _GEN_59 : _GEN_68;
+  wire [63:0]            _GEN_72 =
+    _GEN_58
+      ? (_GEN_55
+           ? commit_in.bits.exception_value
+           : _GEN_49 | _GEN_54 ? {32'h0, commit_in.bits.instruction} : 64'h0)
+      : 64'h0;
+  wire                   _GEN_73 =
+    _GEN_58
+      ? _GEN_51
+        & (_GEN_59 == 64'h0
+             ? state.medeleg[0]
+             : _GEN_59 == 64'h1
+                 ? state.medeleg[1]
+                 : _GEN_59 == 64'h2
+                     ? state.medeleg[2]
+                     : _GEN_59 == 64'h3
+                         ? state.medeleg[3]
+                         : _GEN_59 == 64'h4
+                             ? state.medeleg[4]
+                             : _GEN_59 == 64'h5
+                                 ? state.medeleg[5]
+                                 : _GEN_59 == 64'h6
+                                     ? state.medeleg[6]
+                                     : _GEN_59 == 64'h7
+                                         ? state.medeleg[7]
+                                         : _GEN_59 == 64'h8
+                                             ? state.medeleg[8]
+                                             : _GEN_59 == 64'hC
+                                                 ? state.medeleg[12]
+                                                 : _GEN_59 == 64'hD
+                                                     ? state.medeleg[13]
+                                                     : _GEN_59 == 64'hF
+                                                       & state.medeleg[15])
+      : _GEN_67
+        & (_GEN_68[3:0] == 4'h1
              ? state.mideleg[1]
-             : _GEN_57[3:0] == 4'h5
+             : _GEN_68[3:0] == 4'h5
                  ? state.mideleg[5]
-                 : _GEN_57[3:0] == 4'h9 & state.mideleg[9]);
-  wire [63:0]           _GEN_63 =
-    _GEN_31
+                 : _GEN_68[3:0] == 4'h9 & state.mideleg[9]);
+  wire [63:0]            _GEN_74 =
+    _GEN_39
       ? commit_in.bits.csr_source
-      : _GEN_32
-          ? _GEN_30 | commit_in.bits.csr_source
+      : _GEN_40
+          ? _GEN_38 | commit_in.bits.csr_source
           : ({64{commit_in.bits.csr_operation != 2'h3}} | ~commit_in.bits.csr_source)
-            & _GEN_30;
-  wire                  _GEN_64 = _GEN_37 & _GEN_35 & _GEN_33;
-  wire                  _GEN_65 = commit_in.valid & ~_GEN_59 & _GEN_39;
-  wire                  _GEN_66 = commit_in.valid & ~_GEN_59 & _GEN_41;
-  wire [1:0]            _GEN_67 =
+            & _GEN_38;
+  wire                   _GEN_75 = _GEN_48 & _GEN_46 & _GEN_41;
+  wire RiscvCounterWrite _GEN_76 = '{address: commit_in.bits.csr_address, value: _GEN_74};
+  wire                   _GEN_77 = commit_in.valid & ~_GEN_70 & _GEN_50;
+  wire                   _GEN_78 = commit_in.valid & ~_GEN_70 & _GEN_52;
+  wire [1:0]             _GEN_79 =
     state.mstatus[12:11] == 2'h1 ? 2'h1 : {2{&(state.mstatus[12:11])}};
-  wire [63:0]           _GEN_68 =
+  wire [63:0]            _GEN_80 =
     state.mstatus[1] ? state.mstatus | 64'h20 : state.mstatus & 64'hFFFFFFFFFFFFFFDF;
-  wire                  _GEN_69 = _GEN_59 & _GEN_62;
-  wire [63:0]           _GEN_70 =
-    {_GEN_58 ? interrupt_pc[63:2] : commit_in.bits.pc[63:2], 2'h0};
-  wire [63:0]           _GEN_71 = {_GEN_63[63:2], 2'h0};
-  wire [63:0]           _GEN_72 = {61'h0, _GEN_63[2:0]};
-  wire [8:0]            _GEN_73 = state.mideleg[9:1] & 9'h111;
-  wire [63:0]           _GEN_74 = {54'h0, _GEN_63[9:1] & 9'h111, 1'h0};
-  wire                  _GEN_75 = _GEN_59 | _GEN_65 | _GEN_66 | ~_GEN_64;
-  wire                  _GEN_76 = _GEN_65 | _GEN_66 | ~_GEN_64;
-  wire                  _GEN_77 = _GEN_69 | _GEN_59 | _GEN_65 | _GEN_66 | ~_GEN_64;
-  wire RV5StageCsrState _GEN_78 =
+  wire                   _GEN_81 = _GEN_70 & _GEN_73;
+  wire [63:0]            _GEN_82 =
+    {_GEN_69 ? interrupt_pc[63:2] : commit_in.bits.pc[63:2], 2'h0};
+  wire [63:0]            _GEN_83 = {_GEN_74[63:2], 2'h0};
+  wire [63:0]            _GEN_84 = {61'h0, _GEN_74[2:0]};
+  wire [8:0]             _GEN_85 = state.mideleg[9:1] & 9'h111;
+  wire [63:0]            _GEN_86 = {54'h0, _GEN_74[9:1] & 9'h111, 1'h0};
+  wire                   _GEN_87 = _GEN_70 | _GEN_77 | _GEN_78 | ~_GEN_75;
+  wire                   _GEN_88 = _GEN_77 | _GEN_78 | ~_GEN_75;
+  wire                   _GEN_89 = _GEN_81 | _GEN_70 | _GEN_77 | _GEN_78 | ~_GEN_75;
+  wire struct packed {logic valid; RiscvCounterWrite bits; } _GEN_90 =
+    '{valid: (_GEN_75 & (|{_GEN_31, _GEN_32, _GEN_33, _GEN_34})), bits: _GEN_76};
+  wire RV5StageCsrState  _GEN_91 =
     '{mstatus:
-        (_GEN_69 | _GEN_59
-           ? (_GEN_62
-                ? (_GEN_34
-                     ? _GEN_68 & 64'hFFFFFFFFFFFFFFFD | 64'h100
-                     : _GEN_68 & 64'hFFFFFFFFFFFFFEFD)
+        (_GEN_81 | _GEN_70
+           ? (_GEN_73
+                ? (_GEN_45
+                     ? _GEN_80 & 64'hFFFFFFFFFFFFFFFD | 64'h100
+                     : _GEN_80 & 64'hFFFFFFFFFFFFFEFD)
                 : (state.mstatus[3]
                      ? state.mstatus | 64'h80
                      : state.mstatus & 64'hFFFFFFFFFFFFFF7F) & 64'hFFFFFFFFFFFFE7F7
                   | {51'h0, privilege_state, 11'h0})
-           : _GEN_65
-               ? ({64{&_GEN_67}} | 64'hFFFFFFFFFFFDFFFF)
+           : _GEN_77
+               ? ({64{&_GEN_79}} | 64'hFFFFFFFFFFFDFFFF)
                  & ((state.mstatus[7]
                        ? state.mstatus & 64'hFFFFFFFFFFFFE7FF | 64'h8
                        : state.mstatus & 64'hFFFFFFFFFFFFE7F7) | 64'h80)
-               : _GEN_66
+               : _GEN_78
                    ? ((state.mstatus[5]
                          ? state.mstatus | 64'h2
                          : state.mstatus & 64'hFFFFFFFFFFFFFFFD) | 64'h20)
                      & 64'hFFFFFFFFFFFDFEFF
-                   : _GEN_64
+                   : _GEN_75
                        ? (_GEN_1
                             ? {state.mstatus[63:2] & 62'h3FFFFFFFFFFCFFB3, 2'h0}
-                              | {44'h0, _GEN_63[19:0] & 20'hC0133}
+                              | {44'h0, _GEN_74[19:0] & 20'hC0133}
                             : _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
                               | _GEN_10 | _GEN_11 | commit_in.bits.csr_address != 12'h300
                                 ? state.mstatus
                                 : {state.mstatus[63:2] & 62'h3FFFFFFFFFFC7991, 2'h0}
-                                  | {44'h0, _GEN_63[19:0] & 20'hE19BB})
+                                  | {44'h0, _GEN_74[19:0] & 20'hE19BB})
                        : state.mstatus),
       medeleg:
-        (_GEN_77
+        (_GEN_89
            ? state.medeleg
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_14 | commit_in.bits.csr_address != 12'h302
+             | _GEN_10 | _GEN_11 | _GEN_18 | commit_in.bits.csr_address != 12'h302
                ? state.medeleg
-               : {48'h0, _GEN_63[15:0] & 16'hB1FF}),
+               : {48'h0, _GEN_74[15:0] & 16'hB1FF}),
       mideleg:
-        (_GEN_77
+        (_GEN_89
            ? state.mideleg
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16
+             | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20
              | commit_in.bits.csr_address != 12'h303
                ? state.mideleg
-               : _GEN_74),
+               : _GEN_86),
       mie:
-        (_GEN_77
+        (_GEN_89
            ? state.mie
            : _GEN_1
                ? state.mie
                : _GEN_2
-                   ? state.mie & ~state.mideleg | _GEN_63 & state.mideleg
+                   ? state.mie & ~state.mideleg | _GEN_74 & state.mideleg
                    : _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9 | _GEN_10
-                     | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17
+                     | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21
                      | commit_in.bits.csr_address != 12'h304
                        ? state.mie
-                       : {52'h0, _GEN_63[11:1] & 11'h555, 1'h0}),
+                       : {52'h0, _GEN_74[11:1] & 11'h555, 1'h0}),
       mip:
-        (_GEN_77
+        (_GEN_89
            ? state.mip
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
                ? state.mip
                : _GEN_10
-                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_73, 1'h1} | _GEN_63
-                     & {54'h0, _GEN_73, 1'h0}
-                   : _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19 | _GEN_20
-                     | _GEN_22 | _GEN_23 | _GEN_24 | _GEN_25
+                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_85, 1'h1} | _GEN_74
+                     & {54'h0, _GEN_85, 1'h0}
+                   : _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23 | _GEN_24
+                     | _GEN_26 | _GEN_27 | _GEN_28 | _GEN_29
                      | commit_in.bits.csr_address != 12'h344
                        ? state.mip
-                       : _GEN_74),
+                       : _GEN_86),
       mtvec:
-        (_GEN_77
+        (_GEN_89
            ? state.mtvec
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18
+             | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22
              | commit_in.bits.csr_address != 12'h305
                ? state.mtvec
-               : _GEN_71),
+               : _GEN_83),
       mcounteren:
-        (_GEN_77
+        (_GEN_89
            ? state.mcounteren
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
+             | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
              | commit_in.bits.csr_address != 12'h306
                ? state.mcounteren
-               : _GEN_72),
+               : _GEN_84),
       mscratch:
-        (_GEN_77
+        (_GEN_89
            ? state.mscratch
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-             | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
-             | _GEN_20 | commit_in.bits.csr_address != 12'h340
+             | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
+             | _GEN_24 | commit_in.bits.csr_address != 12'h340
                ? state.mscratch
-               : _GEN_63),
+               : _GEN_74),
       mepc:
-        (_GEN_69
+        (_GEN_81
            ? state.mepc
-           : _GEN_59
-               ? _GEN_70
-               : _GEN_76
+           : _GEN_70
+               ? _GEN_82
+               : _GEN_88
                    ? state.mepc
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
-                     | _GEN_20 | _GEN_22 | commit_in.bits.csr_address != 12'h341
+                     | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
+                     | _GEN_24 | _GEN_26 | commit_in.bits.csr_address != 12'h341
                        ? state.mepc
-                       : _GEN_71),
+                       : _GEN_83),
       mcause:
-        (_GEN_69
+        (_GEN_81
            ? state.mcause
-           : _GEN_59
-               ? _GEN_60
-               : _GEN_76
+           : _GEN_70
+               ? _GEN_71
+               : _GEN_88
                    ? state.mcause
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
-                     | _GEN_20 | _GEN_22 | _GEN_23 | commit_in.bits.csr_address != 12'h342
+                     | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
+                     | _GEN_24 | _GEN_26 | _GEN_27 | commit_in.bits.csr_address != 12'h342
                        ? state.mcause
-                       : _GEN_63),
+                       : _GEN_74),
       mtval:
-        (_GEN_69
+        (_GEN_81
            ? state.mtval
-           : _GEN_59
-               ? _GEN_61
-               : _GEN_76
+           : _GEN_70
+               ? _GEN_72
+               : _GEN_88
                    ? state.mtval
                    : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
-                     | _GEN_10 | _GEN_11 | _GEN_14 | _GEN_16 | _GEN_17 | _GEN_18 | _GEN_19
-                     | _GEN_20 | _GEN_22 | _GEN_23 | _GEN_24
+                     | _GEN_10 | _GEN_11 | _GEN_18 | _GEN_20 | _GEN_21 | _GEN_22 | _GEN_23
+                     | _GEN_24 | _GEN_26 | _GEN_27 | _GEN_28
                      | commit_in.bits.csr_address != 12'h343
                        ? state.mtval
-                       : _GEN_63),
+                       : _GEN_74),
       stvec:
-        (_GEN_77
+        (_GEN_89
            ? state.stvec
            : _GEN_1 | _GEN_2 | commit_in.bits.csr_address != 12'h105
                ? state.stvec
-               : _GEN_71),
+               : _GEN_83),
       scounteren:
-        (_GEN_77
+        (_GEN_89
            ? state.scounteren
            : _GEN_1 | _GEN_2 | _GEN_3 | commit_in.bits.csr_address != 12'h106
                ? state.scounteren
-               : _GEN_72),
+               : _GEN_84),
       sscratch:
-        (_GEN_77
+        (_GEN_89
            ? state.sscratch
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | commit_in.bits.csr_address != 12'h140
                ? state.sscratch
-               : _GEN_63),
+               : _GEN_74),
       sepc:
-        (_GEN_69
-           ? _GEN_70
-           : _GEN_75
+        (_GEN_81
+           ? _GEN_82
+           : _GEN_87
                ? state.sepc
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6
                  | commit_in.bits.csr_address != 12'h141
                    ? state.sepc
-                   : _GEN_71),
+                   : _GEN_83),
       scause:
-        (_GEN_69
-           ? _GEN_60
-           : _GEN_75
+        (_GEN_81
+           ? _GEN_71
+           : _GEN_87
                ? state.scause
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7
                  | commit_in.bits.csr_address != 12'h142
                    ? state.scause
-                   : _GEN_63),
+                   : _GEN_74),
       stval:
-        (_GEN_69
-           ? _GEN_61
-           : _GEN_75
+        (_GEN_81
+           ? _GEN_72
+           : _GEN_87
                ? state.stval
                : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8
                  | commit_in.bits.csr_address != 12'h143
                    ? state.stval
-                   : _GEN_63),
+                   : _GEN_74),
       satp:
-        (_GEN_77
+        (_GEN_89
            ? state.satp
            : _GEN_1 | _GEN_2 | _GEN_3 | _GEN_4 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_9
              | _GEN_10 | commit_in.bits.csr_address != 12'h180
                ? state.satp
-               : (|{_GEN_63[63:60] == 4'h0, _GEN_63[63:60] == 4'h8})
-                   ? {_GEN_63[63:60], 16'h0, _GEN_63[43:0]}
+               : (|{_GEN_74[63:60] == 4'h0, _GEN_74[63:60] == 4'h8})
+                   ? {_GEN_74[63:60], 16'h0, _GEN_74[43:0]}
                    : state.satp)};
+  RiscvBaseCounters counters (
+    .clock            (clock),
+    .reset            (reset),
+    .retire           (commit_in.valid & ~_GEN_58),
+    .machine_write_in (_GEN_90),
+    .cycle            (_counters_cycle),
+    .instret          (_counters_instret)
+  );
   always @(posedge clock) begin
     if (reset) begin
       privilege_state <= 2'h3;
@@ -2721,24 +2773,55 @@ module RV5StageCsrFile(
     end
     else begin
       privilege_state <=
-        _GEN_59
-          ? {~_GEN_62, 1'h1}
-          : _GEN_65 ? _GEN_67 : _GEN_66 ? {1'h0, state.mstatus[8]} : privilege_state;
-      state <= _GEN_78;
+        _GEN_70
+          ? {~_GEN_73, 1'h1}
+          : _GEN_77 ? _GEN_79 : _GEN_78 ? {1'h0, state.mstatus[8]} : privilege_state;
+      state <= _GEN_91;
     end
   end // always @(posedge)
   assign redirect_out =
-    '{valid: (_GEN_59 | _GEN_65 | _GEN_66),
+    '{valid: (_GEN_70 | _GEN_77 | _GEN_78),
       bits:
-        (_GEN_59
-           ? (_GEN_62 ? state.stvec : state.mtvec)
-           : _GEN_65 ? state.mepc : state.sepc)};
-  assign interrupt_request = _GEN_56;
-  assign writeback_valid = _GEN_37 & _GEN_35 & (|commit_in.bits.rd);
-  assign writeback_value = _GEN_30;
+        (_GEN_70
+           ? (_GEN_73 ? state.stvec : state.mtvec)
+           : _GEN_77 ? state.mepc : state.sepc)};
+  assign interrupt_request = _GEN_67;
+  assign writeback_valid = _GEN_48 & _GEN_46 & (|commit_in.bits.rd);
+  assign writeback_value = _GEN_38;
   assign privilege = privilege_state;
   assign mstatus = _GEN;
   assign satp = state.satp;
+endmodule
+
+module RiscvBaseCounters(
+  input                                                        clock,
+                                                               reset,
+                                                               retire,
+  input  struct packed {logic valid; RiscvCounterWrite bits; } machine_write_in,
+  output [63:0]                                                cycle,
+                                                               instret
+);
+
+  reg [63:0] cycle_counter;
+  reg [63:0] instret_counter;
+  always @(posedge clock) begin
+    if (reset) begin
+      cycle_counter <= 64'h0;
+      instret_counter <= 64'h0;
+    end
+    else begin
+      cycle_counter <=
+        machine_write_in.valid & machine_write_in.bits.address == 12'hB00
+          ? machine_write_in.bits.value
+          : cycle_counter + 64'h1;
+      instret_counter <=
+        machine_write_in.valid & machine_write_in.bits.address == 12'hB02
+          ? machine_write_in.bits.value
+          : retire ? instret_counter + 64'h1 : instret_counter;
+    end
+  end // always @(posedge)
+  assign cycle = cycle_counter;
+  assign instret = instret_counter;
 endmodule
 
 module Queue(

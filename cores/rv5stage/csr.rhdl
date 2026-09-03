@@ -9,6 +9,7 @@ import:
   "../../riscv/isa/trap.rhm" open
   "../../riscv/isa/xlen.rhm" open
   "../../riscv/rhdl/csr.rhdl" open
+  "../../riscv/rhdl/counters.rhdl" open
   "../../riscv/rhdl/interrupt.rhdl" open
   "../../riscv/rhdl/trap.rhdl" open
   lib("rhdl/std/bits.rhdl") open
@@ -230,6 +231,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
 
   reg privilege_state(PrivilegeMode, ~init: PrivilegeMode.Machine)
   reg state(RV5StageCsrState(xlen), ~init: literal(RV5StageCsrState(xlen), 0))
+  inst counters(RiscvBaseCounters(xlen))
 
   fun flag_value(original :: Bits(width),
                  mask :: Bits(width),
@@ -238,8 +240,12 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
 
   def mstatus_value = state.mstatus ||| mstatus_fixed
   def sstatus_value = (state.mstatus & sstatus_write_mask) ||| sstatus_fixed
+  def cycle_value = if xlen == XLen.X32 | counters.cycle[0..32] | counters.cycle
+  def cycleh_value = if xlen == XLen.X32 | counters.cycle[32..64] | zero
   def time_value = if xlen == XLen.X32 | time_counter[0..32] | time_counter
   def timeh_value = if xlen == XLen.X32 | time_counter[32..64] | zero
+  def instret_value = if xlen == XLen.X32 | counters.instret[0..32] | counters.instret
+  def instreth_value = if xlen == XLen.X32 | counters.instret[32..64] | zero
   def interrupt_pending = rv5stage_interrupt_pending(xlen, interrupts) ||| state.mip
   def csr = commit.bits.csr_address
   def bank = csr_bank(csr, ~default: zero):
@@ -281,8 +287,12 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
         def satp_replacement = as_bits(value)
         when (if xlen == XLen.X32 | Bool(#false) | is_one_of(satp_replacement[60..64], bits(0, 4), bits(8, 4))):
           state.satp <== if xlen == XLen.X32 | zero | concat(satp_replacement[60..64], bits(0, 16), satp_replacement[0..44])
+    read CsrId.Cycle: cycle_value
     read CsrId.Time: time_value
+    read CsrId.Instret: instret_value
+    read CsrId.Cycleh: cycleh_value
     read CsrId.Timeh: timeh_value
+    read CsrId.Instreth: instreth_value
     csr CsrId.Mstatus:
       read: mstatus_value
       write value:
@@ -320,37 +330,51 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
       read: interrupt_pending
       write value:
         state.mip <== value & supervisor_interrupt_mask
+    read CsrId.Mcycle: cycle_value
+    read CsrId.Minstret: instret_value
+    read CsrId.Mcycleh: cycleh_value
+    read CsrId.Minstreth: instreth_value
     read CsrId.Mvendorid: zero
     read CsrId.Marchid: zero
     read CsrId.Mimpid: zero
     read CsrId.Mhartid: hart_id
-  def timeh_unavailable = (csr === bits(csr_address(CsrId.Timeh), 12)) & (
-    if xlen == XLen.X32 | Bool(#false) | Bool(#true)
+  def rv32_counter_halves = if xlen == XLen.X32 | Bool(#true) | Bool(#false)
+  def high_counter_unavailable = !rv32_counter_halves & is_one_of(
+    csr,
+    csr_bits(CsrId.Cycleh), csr_bits(CsrId.Timeh), csr_bits(CsrId.Instreth),
+    csr_bits(CsrId.Mcycleh), csr_bits(CsrId.Minstreth)
   )
-  def csr_recognized = bank.recognized & !timeh_unavailable
+  def csr_recognized = bank.recognized & !high_counter_unavailable
   def csr_read_value = bank.read_value
-  def csr_write_requested = (commit.bits.csr_operation === CsrOperation.Write) ||| (
-    is_one_of(commit.bits.csr_operation, CsrOperation.Set, CsrOperation.Clear) & or_reduce(commit.bits.csr_source)
-  )
+  def write_requested = csr_write_requested(commit.bits.csr_operation, commit.bits.instruction[15..20])
   def csr_read_only = csr[10..12] === bits(3, 2)
   def required_privilege = csr[8..10]
   def privilege_bits = cast(privilege_state, Bits(2))
-  def time_csr = is_one_of(csr,
-                           bits(csr_address(CsrId.Time), 12),
-                           bits(csr_address(CsrId.Timeh), 12))
-  def machine_time_enabled = state.mcounteren[1].into(Bool)
-  def supervisor_time_enabled = state.scounteren[1].into(Bool)
-  def time_access_enabled = mux_lookup(
+  def cycle_csr = is_one_of(csr, csr_bits(CsrId.Cycle), csr_bits(CsrId.Cycleh))
+  def time_csr = is_one_of(csr, csr_bits(CsrId.Time), csr_bits(CsrId.Timeh))
+  def instret_csr = is_one_of(csr, csr_bits(CsrId.Instret), csr_bits(CsrId.Instreth))
+  def counter_csr = cycle_csr ||| time_csr ||| instret_csr
+  def machine_counter_enabled = mux(cycle_csr,
+                                    state.mcounteren[0].into(Bool),
+                                    mux(time_csr,
+                                        state.mcounteren[1].into(Bool),
+                                        state.mcounteren[2].into(Bool)))
+  def supervisor_counter_enabled = mux(cycle_csr,
+                                       state.scounteren[0].into(Bool),
+                                       mux(time_csr,
+                                           state.scounteren[1].into(Bool),
+                                           state.scounteren[2].into(Bool)))
+  def counter_access_enabled = mux_lookup(
     privilege_state,
-    ~default: machine_time_enabled & supervisor_time_enabled,
+    ~default: machine_counter_enabled & supervisor_counter_enabled,
     [
       [PrivilegeMode.Machine, Bool(#true)],
-      [PrivilegeMode.Supervisor, machine_time_enabled]
+      [PrivilegeMode.Supervisor, machine_counter_enabled]
     ]
   )
   def csr_access_legal = csr_recognized & !(
     privilege_bits < required_privilege
-  ) & !(csr_write_requested & csr_read_only) & (!time_csr ||| time_access_enabled)
+  ) & !(write_requested & csr_read_only) & (!counter_csr ||| counter_access_enabled)
   def csr_commit = commit.valid & (commit.bits.csr_operation =/= CsrOperation.None)
   def synchronous_trap = resolve_rv5stage_trap(xlen, commit.valid, commit.bits, privilege_state, csr_access_legal, state.medeleg)
   def interrupt = resolve_rv5stage_interrupt(
@@ -382,7 +406,17 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
       [CsrOperation.Clear, csr_read_value & !commit.bits.csr_source]
     ]
   )
-  def csr_write = csr_commit & csr_access_legal & csr_write_requested
+  def csr_write = csr_commit & csr_access_legal & write_requested
+  def machine_counter_csr = is_one_of(csr,
+                                      csr_bits(CsrId.Mcycle),
+                                      csr_bits(CsrId.Minstret),
+                                      csr_bits(CsrId.Mcycleh),
+                                      csr_bits(CsrId.Minstreth))
+  counters.retire <== commit.valid & !synchronous_trap.valid
+  counters.machine_write.valid <== csr_write & machine_counter_csr
+  counters.machine_write.bits <== RiscvCounterWrite(xlen):
+    address: csr
+    value: csr_replacement
   def mret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Mret)
   def sret = commit.valid & !trap.valid & (commit.bits.system_operation === SystemOperation.Sret)
   def mret_privilege = mux_lookup(

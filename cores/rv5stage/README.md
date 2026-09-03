@@ -3,7 +3,7 @@
 # RV5Stage
 
 RV5Stage is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with A, M, Zicsr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with A, M, Zicsr, Zicntr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -15,6 +15,7 @@ caches live here. Reusable execution components remain directly under
 ```text
 core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   |--> bundles + decode + memory + register-file + csr
+  |     `--> ../../riscv/rhdl/counters.rhdl
   |--> ../{alu,branch-resolver,load-store,multiplier,divider}.rhdl
   |--> icache/protocol.rhdl
   |--> dcache/protocol.rhdl
@@ -167,13 +168,19 @@ deferred completions drain. It is then taken after the last retired instruction,
 with EPC set to that instruction's architectural successor; every younger
 pipeline token and same-cycle memory effect is discarded. `WFI` is a serialized
 legal no-op for now, so it completes without idling the clock.
-PMP, hardware performance counters, vectored trap mode, and platform interrupt controllers remain
+PMP, Zihpm performance counters, vectored trap mode, and platform interrupt controllers remain
 outside this slice.
 
 The CSR file reads the platform-supplied `hart_id` through `mhartid` and the
 64-bit `time_counter` through the standard `time` CSR, exposing `timeh` for
-RV32. User and supervisor timer access obeys `mcounteren` and `scounteren`;
-RV5Stage does not create a second internal timer.
+RV32. Reusable 64-bit `mcycle` and `minstret` state supplies the remaining
+Zicntr views, including RV32 high halves. `mcycle` advances each active core
+clock and `minstret` advances only for an instruction that reaches ordered WB
+without a synchronous exception; an explicit machine-counter write suppresses
+that instruction's implicit update. User and supervisor counter access obeys
+the corresponding `mcounteren` and `scounteren` bits. RV5Stage does not create
+a second internal timer. `mcountinhibit`, Zihpm, and privilege-mode counter
+filtering remain outside this slice.
 
 RV64 RV5Stage implements Bare and Sv39 address translation ahead of its
 physically indexed, physically tagged L1 caches. `satp.MODE` accepts Bare or

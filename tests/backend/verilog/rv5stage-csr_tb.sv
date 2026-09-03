@@ -29,6 +29,7 @@ module rv5stage_csr_tb;
   localparam logic [1:0] CSR_CLEAR = 2'd3;
   localparam logic [11:0] CSR_STVEC = 12'h105;
   localparam logic [11:0] CSR_SSTATUS = 12'h100;
+  localparam logic [11:0] CSR_SCOUNTEREN = 12'h106;
   localparam logic [11:0] CSR_SEPC = 12'h141;
   localparam logic [11:0] CSR_SCAUSE = 12'h142;
   localparam logic [11:0] CSR_SIP = 12'h144;
@@ -37,12 +38,17 @@ module rv5stage_csr_tb;
   localparam logic [11:0] CSR_MIDELEG = 12'h303;
   localparam logic [11:0] CSR_MIE = 12'h304;
   localparam logic [11:0] CSR_MTVEC = 12'h305;
+  localparam logic [11:0] CSR_MCOUNTEREN = 12'h306;
   localparam logic [11:0] CSR_MSCRATCH = 12'h340;
   localparam logic [11:0] CSR_MEPC = 12'h341;
   localparam logic [11:0] CSR_MCAUSE = 12'h342;
   localparam logic [11:0] CSR_MTVAL = 12'h343;
   localparam logic [11:0] CSR_MIP = 12'h344;
+  localparam logic [11:0] CSR_MCYCLE = 12'hb00;
+  localparam logic [11:0] CSR_MINSTRET = 12'hb02;
+  localparam logic [11:0] CSR_CYCLE = 12'hc00;
   localparam logic [11:0] CSR_TIME = 12'hc01;
+  localparam logic [11:0] CSR_INSTRET = 12'hc02;
   localparam logic [11:0] CSR_MHARTID = 12'hf14;
   localparam logic [2:0] SYSTEM_NONE = 3'd0;
   localparam logic [2:0] SYSTEM_ECALL = 3'd1;
@@ -112,12 +118,49 @@ module rv5stage_csr_tb;
     commit_in.bits.csr_operation = operation;
     commit_in.bits.csr_address = address;
     commit_in.bits.csr_source = source;
+    if ((operation == CSR_SET || operation == CSR_CLEAR) && source != 0)
+      commit_in.bits.instruction[19:15] = 5'd1;
     #1;
     assert (writeback_valid && writeback_value == expected_old)
       else $fatal(1, "CSR %03h returned %016h instead of %016h",
                   address, writeback_value, expected_old);
     assert (!redirect_out.valid)
       else $fatal(1, "legal CSR access unexpectedly redirected");
+    @(posedge clock);
+    #1;
+    clear_commit();
+  endtask
+
+  task automatic csr_read_legal(input logic [11:0] address);
+    @(negedge clock);
+    clear_commit();
+    commit_in.valid = 1'b1;
+    commit_in.bits.rd = 5'd1;
+    commit_in.bits.csr_operation = CSR_SET;
+    commit_in.bits.csr_address = address;
+    #1;
+    assert (writeback_valid && !redirect_out.valid)
+      else $fatal(1, "legal CSR %03h read trapped", address);
+    @(posedge clock);
+    #1;
+    clear_commit();
+  endtask
+
+  task automatic csr_write_intent_traps(
+    input logic [1:0] operation,
+    input logic [11:0] address,
+    input logic [4:0] source_specifier
+  );
+    @(negedge clock);
+    clear_commit();
+    commit_in.valid = 1'b1;
+    commit_in.bits.rd = 5'd1;
+    commit_in.bits.csr_operation = operation;
+    commit_in.bits.csr_address = address;
+    commit_in.bits.instruction[19:15] = source_specifier;
+    #1;
+    assert (!writeback_valid && redirect_out.valid)
+      else $fatal(1, "illegal CSR %03h write intent did not trap", address);
     @(posedge clock);
     #1;
     clear_commit();
@@ -151,6 +194,11 @@ module rv5stage_csr_tb;
     reset = 1'b0;
     assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED)
       else $fatal(1, "CSR file did not reset into M mode with bare translation");
+
+    csr_access(CSR_WRITE, CSR_MCYCLE, 64'h100, 64'h0);
+    csr_access(CSR_SET, CSR_CYCLE, 64'h0, 64'h100);
+    csr_access(CSR_WRITE, CSR_MINSTRET, 64'h200, 64'h2);
+    csr_access(CSR_SET, CSR_INSTRET, 64'h0, 64'h200);
 
     csr_access(CSR_WRITE, CSR_MSCRATCH, 64'h12, 64'h0);
     csr_access(CSR_SET, CSR_MSCRATCH, 64'h1, 64'h12);
@@ -191,11 +239,15 @@ module rv5stage_csr_tb;
     csr_access(CSR_WRITE, CSR_MEDELEG, 64'h104, 64'h0);
     csr_access(CSR_WRITE, CSR_MIDELEG, 64'h200, 64'h0);
     csr_access(CSR_WRITE, CSR_MIE, 64'h200, 64'h80);
+    csr_access(CSR_WRITE, CSR_MCOUNTEREN, 64'h5, 64'h0);
+    csr_access(CSR_WRITE, CSR_SCOUNTEREN, 64'h5, 64'h0);
     csr_access(CSR_WRITE, CSR_MEPC, 64'h80, 64'h60);
     csr_access(CSR_WRITE, CSR_MSTATUS, 64'h802, RV64_MSTATUS_FIXED);
     system_action(SYSTEM_MRET, 64'h0, 64'h80);
     assert (privilege == PRIVILEGE_S)
       else $fatal(1, "MRET did not enter S mode");
+    csr_read_legal(CSR_CYCLE);
+    csr_read_legal(CSR_INSTRET);
 
     interrupts.supervisor_external = 1'b1;
     #1;
@@ -214,6 +266,8 @@ module rv5stage_csr_tb;
     system_action(SYSTEM_SRET, 64'h0, 64'h40);
     assert (privilege == PRIVILEGE_U)
       else $fatal(1, "SRET did not enter U mode");
+    csr_read_legal(CSR_CYCLE);
+    csr_read_legal(CSR_INSTRET);
 
     system_action(SYSTEM_ECALL, 64'h44, 64'h200);
     assert (privilege == PRIVILEGE_S)
@@ -226,6 +280,10 @@ module rv5stage_csr_tb;
       else $fatal(1, "nondelegated breakpoint did not enter M mode");
     csr_access(CSR_SET, CSR_MCAUSE, 64'h0, 64'h3);
     csr_access(CSR_SET, CSR_MEPC, 64'h0, 64'h48);
+
+    // CSRRS with a nonzero source register is a write attempt even when that
+    // register's runtime value is zero, so the read-only cycle view must trap.
+    csr_write_intent_traps(CSR_SET, CSR_CYCLE, 5'd1);
 
     $display("RV5Stage CSR and privilege transitions passed");
     $finish;

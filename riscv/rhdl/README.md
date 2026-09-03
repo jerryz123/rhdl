@@ -29,6 +29,13 @@ write behavior for aliases and WARL masks. The architectural identifier and
 numeric address remain owned by `riscv/isa`; hardware receives a value only at
 this adapter boundary.
 
+[`counters.rhdl`](counters.rhdl) owns reusable 64-bit `mcycle` and `minstret`
+state for RV32 and RV64. It preserves half-register writes on RV32, gives an
+explicit machine-counter write priority over the same instruction's implicit
+increment, and accepts a core-defined precise retirement event. Counter CSR
+recognition, privilege gating, and the platform-owned `time` source remain in
+the integrating CSR file.
+
 [`trap.rhdl`](trap.rhdl) converts an architectural `ExceptionCause` into a
 width-specialized hardware value. Core-specific trap selection stays in the
 processor while the cause-number namespace remains shared.
