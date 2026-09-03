@@ -25,8 +25,8 @@ The implemented foundation provides:
 - nominal IEEE and recoded floating-point values, typed hardware rounding and
   fused-operation modes, tininess modes, exception flags, raw floating-point
   records, multiplier-pipeline occupancy, and one-hot classification results;
-- the standard RHDL leading-zero utility plus HardFloat-specific mask and
-  grouped-reduction helpers;
+- the standard RHDL leading-zero utility plus HardFloat-specific variable
+  masks;
 - IEEE-to-raw, IEEE-to-recoded, recoded-to-raw, and recoded-to-IEEE helpers;
 - raw-format resizing with exponent saturation and significand sticky-bit
   preservation;
@@ -52,7 +52,7 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 |---|---|
 | [`main.rhdl`](main.rhdl) | Public package facade |
 | [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal packed representations, and typed hardware records/enums |
-| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat-specific variable masks and grouped OR reductions |
+| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat-specific variable masks |
 | [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
 | [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky-bit preservation |
 | [`rtl/round.rhdl`](rtl/round.rhdl) | Shared raw-to-recoded rounding and exception generation |

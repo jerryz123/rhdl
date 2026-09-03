@@ -16,11 +16,6 @@ fun fma_extend(value :: Hardware.bits, width :: PosInt) :~ Bits(width):
   | value
   | zext(value, width)
 
-fun fma_expanding_shift(value :: Hardware.bits, amount :: Nat) :~ Bits(value.type.bit_width() + amount):
-  if amount == 0
-  | value
-  | zext(value, value.type.bit_width() + amount) << amount
-
 fun fma_repeat(value :: Bool, count :: PosInt) :~ Bits(count):
   as_bits(vec(for List (_index in 0..count): value))
 
@@ -91,7 +86,10 @@ circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
   )
   def main_aligned_c = cast(aligned_c_source, SInt(significand_sum_width + 3)) >> c_alignment
   def c_extra_shift = ((significand_sum_width - significand_width) - 1) mod 4
-  def reduced_c_extra = or_reduce_by_4(fma_expanding_shift(raw_c.significand, c_extra_shift))
+  def c_extra_group_count = (significand_width + c_extra_shift + 3) div 4
+  def c_extra_source = fma_extend(raw_c.significand, c_extra_group_count * 4) << c_extra_shift
+  def c_extra_groups = as_vec(c_extra_source, Bits(4))
+  def reduced_c_extra = as_bits(c_extra_groups.map(group => group =/= bits(0, 4)))
   def c_extra_mask_top = (significand_sum_width - 1) div 4
   def c_extra_mask_bottom = ((significand_sum_width - significand_width) - 1) div 4
   def reduced_c_extra_bit:
@@ -192,9 +190,13 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
     significand_width - 3
   )
   def c_dominant_extra_shift = 3 - (significand_width mod 4)
-  def c_dominant_reduced = or_reduce_by_4(
-    fma_expanding_shift(extract(c_dominant_absolute_sum, significand_width - 1, 0), c_dominant_extra_shift)
-  )
+  def c_dominant_group_count = (significand_width + c_dominant_extra_shift + 3) div 4
+  def c_dominant_source = fma_extend(
+    extract(c_dominant_absolute_sum, significand_width - 1, 0),
+    c_dominant_group_count * 4
+  ) << c_dominant_extra_shift
+  def c_dominant_groups = as_vec(c_dominant_source, Bits(4))
+  def c_dominant_reduced = as_bits(c_dominant_groups.map(group => group =/= bits(0, 4)))
   def c_dominant_mask_width = significand_width div 4
   def c_dominant_reduced_extra:
     if c_dominant_mask_width == 0
@@ -221,7 +223,9 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
       (significand_width * 2) + 3
     )
   )
-  def non_dominant_reduced = or_reduce_by_2(non_dominant_absolute_sum)
+  def non_dominant_reduced_source = zext(non_dominant_absolute_sum, (significand_width * 2) + 4)
+  def non_dominant_groups = as_vec(non_dominant_reduced_source, Bits(2))
+  def non_dominant_reduced = as_bits(non_dominant_groups.map(group => group =/= bits(0, 2)))
   def non_dominant_normalization_reduced = count_leading_zeros(non_dominant_reduced)
   def non_dominant_normalization_distance = zext(
     non_dominant_normalization_reduced,
@@ -240,9 +244,13 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   )
   def non_dominant_reduced_slice = extract(non_dominant_reduced, significand_width div 2, 0)
   def non_dominant_reduced_shift = (significand_width div 2) mod 2
-  def non_dominant_reduced_again = or_reduce_by_2(
-    fma_expanding_shift(non_dominant_reduced_slice, non_dominant_reduced_shift)
-  )
+  def non_dominant_reduced_again_width = non_dominant_reduced_slice.type.bit_width() + non_dominant_reduced_shift + 1
+  def non_dominant_reduced_again_source = fma_extend(
+    non_dominant_reduced_slice,
+    non_dominant_reduced_again_width
+  ) << non_dominant_reduced_shift
+  def non_dominant_groups_again = as_vec(non_dominant_reduced_again_source, Bits(2))
+  def non_dominant_reduced_again = as_bits(non_dominant_groups_again.map(group => group =/= bits(0, 2)))
   def normalization_width = non_dominant_normalization_reduced.type.bit_width()
   def normalization_halves = extract(non_dominant_normalization_reduced, normalization_width - 1, 1)
   def non_dominant_mask_width = (significand_width + 2) div 4

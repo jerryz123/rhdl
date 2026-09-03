@@ -21,7 +21,6 @@ module hardfloat_representation_tb;
   logic [15:0] restored_a;
   logic [9:0] classification;
   logic [3:0] leading_zero_count;
-  logic [7:0] reduced_pairs;
   logic [11:0] descending_low_mask;
   logic [11:0] ascending_low_mask;
   logic lt;
@@ -66,7 +65,6 @@ module hardfloat_representation_tb;
     .restored_a(restored_a),
     .classification(classification),
     .leading_zero_count(leading_zero_count),
-    .reduced_pairs(reduced_pairs),
     .descending_low_mask(descending_low_mask),
     .ascending_low_mask(ascending_low_mask),
     .lt(lt),
@@ -454,8 +452,6 @@ module hardfloat_representation_tb;
     #1;
     if (leading_zero_count !== 4'd2)
       $fatal(1, "leading zero count failed: got=%0d", leading_zero_count);
-    if (reduced_pairs !== 8'h0c)
-      $fatal(1, "pair reduction failed: got=%h", reduced_pairs);
     $display("hardfloat representation, conversion, rounding, and arithmetic simulation passed");
     $finish;
   end

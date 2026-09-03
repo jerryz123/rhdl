@@ -341,6 +341,20 @@ fun hardware_updated(value :: HardwareEntity,
                      replacement :: HardwareEntity) :~ HardwareFields:
   kernel.vector_updated(value, selector, replacement)
 
+// Statically unrolls a host transformation over every element of a hardware
+// vector and reconstructs one homogeneous hardware vector from the results.
+fun hardware_vector_map(value :: HardwareEntity,
+                        transform :: Function.of_arity(1)) :~ HardwareFields:
+  def source = kernel.read(value)
+  unless source.type is_a VectorType
+  | error(~who: #'map, "map receiver must have a VectorType")
+  def transformed = for List (index in 0..source.type.length):
+    transform(kernel.vector_get(source, index))
+  def first = kernel.read(transformed[0])
+  unless first.type is_a DataType
+  | error(~who: #'map, "map results must have a DataType")
+  kernel.vector_create(VectorType(source.type.length, first.type), transformed)
+
 dot.macro 'hardware_field_dot $left $dot $right':
   ~tail: '$tail ...'
   match '$right $tail ...'
@@ -352,6 +366,11 @@ dot.macro 'hardware_field_dot $left $dot $right':
   | 'view($(variant :: expr_meta.Parsed)) $rest ...':
       values(
         'hardware_variant_view($left, $variant) :: HardwareVariantViewFields',
+        '$rest ...'
+      )
+  | 'map($(element :: Identifier) => $body ...) $rest ...':
+      values(
+        'hardware_vector_map($left, fun ($element): $body ...) :: HardwareFields',
         '$rest ...'
       )
   | ~else:
@@ -378,6 +397,7 @@ dot.macro 'hardware_field_dot $left $dot $right':
         | 'tag': 'hardware_variant_tag_or_project($left) :: HardwareFields'
         | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
         | 'lookup': 'fun (selector, ~default: default_value) :~ HardwareFields: hardware_lookup($left, selector, ~default: default_value)'
+        | 'map': 'fun (transform :: Function.of_arity(1)) :~ HardwareFields: hardware_vector_map($left, transform)'
         | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'
         | ~else:
             'kernel.project($left, $(right.to_source_string())) :: HardwareFields'
