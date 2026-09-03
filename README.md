@@ -147,7 +147,7 @@ Detailed documentation lives with the component that owns it:
 | Executable SoC simulation harnesses | [`sims/README.md`](sims/README.md) |
 | Technology-independent SRAM mapping and adapters | [`sram/README.md`](sram/README.md) |
 | OpenFrame physical flow and mapped VLSI simulation | [`vlsi/README.md`](vlsi/README.md) |
-| RISC-V instruction model, RV32I/RV64I catalogs, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
+| RISC-V instruction model, integer-extension catalogs, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
 | Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
 | Hardware SoC composition | [`socs/README.md`](socs/README.md) |
 
@@ -177,7 +177,7 @@ The current vertical slice includes:
 - Backend-independent clock/reset inventory and hierarchy-aware temporal
   provenance reports that distinguish same-clock, foreign-clock, external,
   static, and multi-clock fan-in sources.
-- RV5Stage, a five-stage RV32I/RV64I core with component-oriented decode, M,
+- RV5Stage, a five-stage RV32/RV64 core with component-oriented decode, A, B, M,
   Zicsr, Zicntr, privilege and trap state, private coherent L1 caches, and separate
   CHI RN-F ports for SoC integration. Its exact current pipeline, cache, and
   integration contracts are documented in

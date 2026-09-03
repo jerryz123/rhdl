@@ -3,7 +3,7 @@
 # RV5Stage
 
 RV5Stage is the repository's single-issue, in-order five-stage RV32I/RV64I
-processor with A, M, Zicsr, Zicntr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
+processor with A, B, M, Zicsr, Zicntr, Zifencei, and an initial M/S/U privileged control plane. The required `xlen :: XLen` host parameter selects `XLen.X32` or
 `XLen.X64`; the same pipeline and cache implementation is specialized during
 elaboration without admitting arbitrary integer widths.
 Core-specific decode, architectural state, pipeline policy, and private L1
@@ -135,11 +135,18 @@ instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32IMA+Zicsr+Zifencei or RV64IMA+Zicsr+Zifencei catalog at host
+The integrated structured decoder selects the RV32IMAB+Zicsr+Zifencei or RV64IMAB+Zicsr+Zifencei catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
 whether decoded values have architectural meaning.
+
+Standard B instructions are ordinary operations in the shared combinational
+[`../alu.rhdl`](../alu.rhdl). Base and B rows live in one ALU-control module and
+directly select the same physical adder, logic, shifter, compare, count, rotate,
+and unary resources. Zba, Zbb, and Zbs therefore add no second decoder,
+execution unit, pipeline state, reservation, or scoreboard behavior. `misa.B`
+is reported for both XLENs.
 
 [`memory.rhdl`](memory.rhdl) owns the semantic load, store, LR, SC, and AMO
 operations plus the word/doubleword atomic ALU. A operations return through the
@@ -293,5 +300,7 @@ tools/run-racket-tests.sh \
   cores/rv5stage/tests/rv5stage-test.rhm
 ```
 
-`make rv5stage-test` additionally runs RV32I and RV64I decode, ALU, pipeline,
-cache, and load/store CIRCT fixtures plus the applicable Verilator fixtures.
+`make rv5stage-test` additionally runs RV32I and RV64I decode, ALU,
+bit-manipulation, pipeline, cache, and load/store CIRCT fixtures plus the
+applicable Verilator fixtures. The SimpleSoC simulator also passes all 40
+upstream RV64 Zba, Zbb, and Zbs physical architectural tests.

@@ -1,5 +1,5 @@
 #lang rhombus
-// Checks base, A, M, CSR, and system controls in the integrated decoder.
+// Checks base, A, B, M, CSR, and system controls in the integrated decoder.
 
 import:
   "../../../rhdl/core/main.rhm" open
@@ -11,6 +11,7 @@ import:
   "../../../riscv/isa/zmmul.rhm" open
   "../../../riscv/isa/m.rhm" open
   "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zbb.rhm" as zbb
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
@@ -154,6 +155,9 @@ def multiply_writeback = writeback_controls.WritebackControl():
 def divide_writeback = writeback_controls.WritebackControl():
   enable: bool.Bool(#true)
   source: writeback_controls.WritebackSelect.Divide
+def bitmanip_writeback = writeback_controls.WritebackControl():
+  enable: bool.Bool(#true)
+  source: writeback_controls.WritebackSelect.Alu
 def ecall_system = system_controls.SystemControl():
   csr: system_controls.CsrOperation.None
   immediate: bool.Bool(#false)
@@ -176,18 +180,6 @@ def instruction_fence = fence_controls.FenceControl():
   action: fence_controls.FenceOperation.Instruction
 def address_translation_fence = fence_controls.FenceControl():
   action: fence_controls.FenceOperation.AddressTranslation
-def address_add = alu.AluControl():
-  result_select: alu.AluResultSelect.Arithmetic
-  subtract: bool.Bool(#false)
-  signed_mode: bool.Bool(#false)
-  shift_right: bool.Bool(#false)
-  word: bool.Bool(#false)
-def address_subtract = alu.AluControl():
-  result_select: alu.AluResultSelect.Arithmetic
-  subtract: bool.Bool(#true)
-  signed_mode: bool.Bool(#false)
-  shift_right: bool.Bool(#false)
-  word: bool.Bool(#false)
 def jal_operand_a = operand_controls.OperandControl():
   uses_rs1: bool.Bool(#false)
   uses_rs2: bool.Bool(#false)
@@ -243,6 +235,8 @@ def no_writeback_b = writeback_controls.WritebackControl():
 
 check:
   alu_controls.RV64IAluCases.length() ~is 28
+  alu_controls.RV32BAluCases.length() ~is 29
+  alu_controls.RV64BAluCases.length() ~is 40
   alu_controls.RV64INonArithmeticAluCases.length() ~is 24
   (for all (relation in complete_relations):
      has_canonical_domain(relation)) ~is #true
@@ -288,12 +282,13 @@ check:
   control_for(writeback_controls.RV64IWritebackCases, "LD").matches(load_writeback) ~is #true
   control_for_instruction(writeback_controls.RV64RV5StageWritebackCases, MUL).matches(multiply_writeback) ~is #true
   control_for_instruction(writeback_controls.RV64RV5StageWritebackCases, DIV).matches(divide_writeback) ~is #true
+  control_for_instruction(writeback_controls.RV64RV5StageWritebackCases, zbb.ANDN).matches(bitmanip_writeback) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_a) ~is #true
   control_for(writeback_controls.RV64IWritebackCases, "BEQ").matches(no_writeback_b) ~is #true
   // Address generation requires addition; instructions with no ALU consumer
   // leave the entire control bundle unconstrained.
-  control_for(alu_controls.RV64ICompleteAluCases, "LD").matches(address_add) ~is #true
-  control_for(alu_controls.RV64ICompleteAluCases, "LD").matches(address_subtract) ~is #false
+  record_field(control_for(alu_controls.RV64ICompleteAluCases, "LD").value, "result_select").packed_value() ~is alu.AluResultSelect.Adder.packed_value()
+  record_field(control_for(alu_controls.RV64ICompleteAluCases, "LD").value, "subtract").packed_value() ~is 0
   control_for(alu_controls.RV64ICompleteAluCases, "BEQ").care_bits ~is 0
   control_for(system_controls.RV64ISystemCases, "ECALL").matches(ecall_system) ~is #true
   control_for(system_controls.RV64ISystemCases, "FENCE").matches(ecall_system) ~is #false
@@ -314,8 +309,8 @@ check:
   ).packed_value() != 0 ~is #true
   controls.RV64IControlDecode.table.packed_cases.length() ~is 52
   controls.RV32IControlDecode.table.packed_cases.length() ~is 40
-  controls.RV64RV5StageControlDecode.table.packed_cases.length() ~is 98
-  controls.RV32RV5StageControlDecode.table.packed_cases.length() ~is 70
+  controls.RV64RV5StageControlDecode.table.packed_cases.length() ~is 138
+  controls.RV32RV5StageControlDecode.table.packed_cases.length() ~is 99
   record_field(
     control_for_instruction(controls.RV64RV5StageControlCases, MUL).care,
     "multiply"
@@ -323,6 +318,10 @@ check:
   record_field(
     control_for_instruction(controls.RV64RV5StageControlCases, DIV).care,
     "divide"
+  ).packed_value() != 0 ~is #true
+  record_field(
+    control_for_instruction(controls.RV64RV5StageControlCases, zbb.ANDN).care,
+    "alu"
   ).packed_value() != 0 ~is #true
   alu_controls.RV32IAluCases.length() ~is 19
   module_def.outputs.map(fun (port): port.name) ~is [

@@ -1,4 +1,4 @@
-<!-- Defines the pure RISC-V host model, RV32I/RV64I catalogs, and RHDL adapter boundary. -->
+<!-- Defines the pure RISC-V host model, integer-extension catalogs, and RHDL adapter boundary. -->
 
 # RISC-V instruction model
 
@@ -131,6 +131,14 @@ fixing `rs2` to zero for LR. The catalog describes ISA encodings only;
 reservation granules, coherence ownership, and read-modify-write execution
 remain core policy.
 
+[`isa/zba.rhm`](isa/zba.rhm), [`isa/zbb.rhm`](isa/zbb.rhm), and
+[`isa/zbs.rhm`](isa/zbs.rhm) describe the ratified address-generation, basic
+bit-manipulation, and single-bit instruction encodings. [`isa/b.rhm`](isa/b.rhm)
+combines those three independent subsets into the standard RV32B and RV64B
+catalogs without including Zbc or cryptography-oriented subsets. Fixed-operand
+unary encodings use `UnaryFormat`, so their architectural operand list contains
+only `rd` and `rs1` even when fixed instruction bits occupy the `rs2` field.
+
 [`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
 read/modify/write encodings independently of any core's CSR implementation.
 [`isa/zifencei.rhm`](isa/zifencei.rhm) describes the XLEN-independent
@@ -169,3 +177,5 @@ opcode listings. Zmmul follows the ratified
 [multiply-only extension](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html#_zmmul_extension_version_1_0),
 and A follows the ratified
 [atomic extension](https://docs.riscv.org/reference/isa/unpriv/a-st-ext.html).
+B follows the ratified
+[bit-manipulation extension](https://docs.riscv.org/reference/isa/unpriv/b-st-ext.html).

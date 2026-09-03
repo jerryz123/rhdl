@@ -143,7 +143,7 @@ rv5stage-host-test: check-boundaries
 	tools/run-racket-tests.sh $(RV5STAGE_TESTS) $(RV5STAGE_BACKEND_TESTS)
 
 rv5stage-test: rv5stage-host-test
-	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store iterative-multiplier iterative-divider scoreboard rv5stage-register-file rv5stage-csr rv5stage-atomic rv5stage-core rv5stage-core-flow rv5stage-interrupt rv5stage-interrupt-flow rv5stage-multiply rv5stage-divide rv5stage-core-rv32 rv5stage-icache rv5stage-dcache rv5stage-dcache-rv32' bash tests/backend/run-circt.sh
+	FIXTURES='rv32i-alu rv64i-alu rv64i-alu-decode rv64i-alu-integrated load-store bit-manip bit-manip-rv32 iterative-multiplier iterative-divider scoreboard rv5stage-register-file rv5stage-csr rv5stage-atomic rv5stage-core rv5stage-core-flow rv5stage-interrupt rv5stage-interrupt-flow rv5stage-multiply rv5stage-divide rv5stage-core-rv32 rv5stage-icache rv5stage-dcache rv5stage-dcache-rv32' bash tests/backend/run-circt.sh
 
 circt-test: check-example-verilog
 	bash tests/backend/run-circt.sh

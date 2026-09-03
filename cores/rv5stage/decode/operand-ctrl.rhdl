@@ -7,6 +7,9 @@ import:
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/m.rhm" open
   "../../../riscv/isa/a.rhm" open
+  "../../../riscv/isa/zba.rhm" as zba
+  "../../../riscv/isa/zbb.rhm" as zbb
+  "../../../riscv/isa/zbs.rhm" as zbs
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
@@ -121,6 +124,16 @@ def register_operands = partial_pattern(OperandControl()):
   uses_rs2: Bool(#true)
   left: OperandASelect.Register
   right: OperandBSelect.Register
+def register_immediate_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#false)
+  left: OperandASelect.Register
+  right: OperandBSelect.Immediate
+  immediate: ImmediateSelect.I
+def unary_register_operands = partial_pattern(OperandControl()):
+  uses_rs1: Bool(#true)
+  uses_rs2: Bool(#false)
+  left: OperandASelect.Register
 def atomic_operands = pattern(OperandControl()):
   uses_rs1: Bool(#true)
   uses_rs2: Bool(#true)
@@ -147,6 +160,25 @@ def RV5StageSystemOperandCases = combine_case_groups([
   instruction_cases([CSRRWI, CSRRSI, CSRRCI], csr_immediate_operands),
   instruction_cases(PrivilegedInstructions ++ ZifenceiInstructions, no_operands)
 ])
+def shared_bitmanip_register_instructions = [
+  zba.SH1ADD, zba.SH2ADD, zba.SH3ADD,
+  zbb.ANDN, zbb.ORN, zbb.XNOR, zbb.MIN, zbb.MINU, zbb.MAX, zbb.MAXU,
+  zbb.ROL, zbb.ROR,
+  zbs.BCLR, zbs.BEXT, zbs.BINV, zbs.BSET
+]
+def shared_bitmanip_unary_instructions = [
+  zbb.CLZ, zbb.CTZ, zbb.CPOP, zbb.ORC_B, zbb.SEXT_B, zbb.SEXT_H
+]
+def RV32BOperandCases = combine_case_groups([
+  instruction_cases(shared_bitmanip_register_instructions, register_operands),
+  instruction_cases([zbb.RV32_RORI, zbs.RV32_BCLRI, zbs.RV32_BEXTI, zbs.RV32_BINVI, zbs.RV32_BSETI], register_immediate_operands),
+  instruction_cases(shared_bitmanip_unary_instructions ++ [zbb.RV32_REV8, zbb.RV32_ZEXT_H], unary_register_operands)
+])
+def RV64BOperandCases = combine_case_groups([
+  instruction_cases(shared_bitmanip_register_instructions ++ [zba.ADD_UW, zba.SH1ADD_UW, zba.SH2ADD_UW, zba.SH3ADD_UW, zbb.ROLW, zbb.RORW], register_operands),
+  instruction_cases([zba.SLLI_UW, zbb.RORI, zbb.RORIW, zbs.BCLRI, zbs.BEXTI, zbs.BINVI, zbs.BSETI], register_immediate_operands),
+  instruction_cases(shared_bitmanip_unary_instructions ++ [zbb.CLZW, zbb.CTZW, zbb.CPOPW, zbb.REV8, zbb.ZEXT_H], unary_register_operands)
+])
 def RV32RV5StageOperandCases = RV32IOperandCases ++ instruction_cases(
   RV32MInstructions,
   register_operands
@@ -156,7 +188,7 @@ def RV32RV5StageOperandCases = RV32IOperandCases ++ instruction_cases(
 ) ++ instruction_cases(
   [LR_W],
   load_reserved_operands
-) ++ RV5StageSystemOperandCases
+) ++ RV5StageSystemOperandCases ++ RV32BOperandCases
 def RV64RV5StageOperandCases = RV64IOperandCases ++ instruction_cases(
   RV64MInstructions,
   register_operands
@@ -166,7 +198,7 @@ def RV64RV5StageOperandCases = RV64IOperandCases ++ instruction_cases(
 ) ++ instruction_cases(
   [LR_W, LR_D],
   load_reserved_operands
-) ++ RV5StageSystemOperandCases
+) ++ RV5StageSystemOperandCases ++ RV64BOperandCases
 def RV32IOperandDecode = ValidDecodeGen(RV32IOperandCases)
 def RV64IOperandDecode = ValidDecodeGen(RV64IOperandCases)
 

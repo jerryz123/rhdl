@@ -93,7 +93,7 @@ integration_fixtures=(
   queue-options rr-arbiter round-robin-matcher ctrl-queue-options
   dont-care decode noc-route-computer noc-router noc-network noc-wormhole noc-router-family noc-escape-router
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
-  rv32i-alu rv64i-alu-integrated
+  rv32i-alu rv64i-alu-integrated bit-manip bit-manip-rv32
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
   aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
   rv5stage-core rv5stage-multiply rv5stage-dcache
@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:aclint|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:scoreboard|cores:rv5stage-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:bit-manip*|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:scoreboard|cores:rv5stage-*)
       return 0
       ;;
     *)
@@ -619,6 +619,8 @@ direct_fixture_specs=(
   'chi-family-noc|chi_family_noc_tb'
   'chi-transfer-fragmenter|chi_transfer_fragmenter_tb'
   'load-store|load_store_tb'
+  'bit-manip|bit_manip_tb'
+  'bit-manip-rv32|bit_manip_rv32_tb'
   'iterative-multiplier|iterative_multiplier_tb'
   'iterative-divider|iterative_divider_tb'
   'riscv-counters-rv32|riscv_counters_rv32_tb'
