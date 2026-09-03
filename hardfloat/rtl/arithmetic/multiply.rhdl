@@ -1,0 +1,84 @@
+#lang rhdl
+// Implements Berkeley HardFloat raw and rounded recoded multiplication.
+// Derived from hardfloat/src/main/scala/MulRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundRawFNToRecFN
+
+circuit MulFullRawFN(format :: FloatFormat):
+  input a: RawFloat(format.exponent_width, format.significand_width)
+  input b: RawFloat(format.exponent_width, format.significand_width)
+  output invalid_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, ((format.significand_width * 2) - 1))
+
+  def invalid_non_nan = (a.is_infinite & b.is_zero) ||| (a.is_zero & b.is_infinite)
+  def infinite_out = a.is_infinite ||| b.is_infinite
+  def zero_out = a.is_zero ||| b.is_zero
+  def sign_out = a.sign ^ b.sign
+  def exponent_out = (a.signed_exponent + b.signed_exponent) - sint(
+    1 << format.exponent_width,
+    format.exponent_width + 2
+  )
+  def full_product = a.significand *& b.significand
+  def significand_out = extract(full_product, (format.significand_width * 2) - 1, 0)
+
+  invalid_exception <== is_signaling_nan(format, a) ||| is_signaling_nan(format, b) ||| invalid_non_nan
+  raw_out <== RawFloat(format.exponent_width, ((format.significand_width * 2) - 1)):
+    is_nan: a.is_nan ||| b.is_nan
+    is_infinite: infinite_out
+    is_zero: zero_out
+    sign: sign_out
+    signed_exponent: exponent_out
+    significand: significand_out
+
+circuit MulRawFN(format :: FloatFormat):
+  input a: RawFloat(format.exponent_width, format.significand_width)
+  input b: RawFloat(format.exponent_width, format.significand_width)
+  output invalid_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, (format.significand_width + 2))
+
+  inst full(MulFullRawFN(format))
+  full.a <== a
+  full.b <== b
+  def full_significand = full.raw_out.significand
+  def compressed_significand = concat(
+    extract(full_significand, (format.significand_width * 2) - 1, format.significand_width - 2),
+    or_reduce(extract(full_significand, format.significand_width - 3, 0))
+  )
+
+  invalid_exception <== full.invalid_exception
+  raw_out <== RawFloat(format.exponent_width, (format.significand_width + 2)):
+    is_nan: full.raw_out.is_nan
+    is_infinite: full.raw_out.is_infinite
+    is_zero: full.raw_out.is_zero
+    sign: full.raw_out.sign
+    signed_exponent: full.raw_out.signed_exponent
+    significand: compressed_significand
+
+circuit MulRecFN(format :: FloatFormat):
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  inst multiply(MulRawFN(format))
+  multiply.a <== raw_float_from_recfn(format, a)
+  multiply.b <== raw_float_from_recfn(format, b)
+
+  inst round(RoundRawFNToRecFN(format))
+  round.invalid_exception <== multiply.invalid_exception
+  round.infinite_exception <== Bool(#false)
+  round.raw <== multiply.raw_out
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  MulRecFN

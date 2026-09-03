@@ -1,0 +1,54 @@
+#lang rhdl
+// Implements ordered comparison over recoded Berkeley HardFloat values.
+// Derived from hardfloat/src/main/scala/CompareRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2016 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+
+circuit CompareRecFN(format :: FloatFormat):
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input signaling: Bool
+  output lt: Bool
+  output eq: Bool
+  output gt: Bool
+  output exception_flags: ExceptionFlags()
+
+  def raw_a = raw_float_from_recfn(format, a)
+  def raw_b = raw_float_from_recfn(format, b)
+  def ordered = !raw_a.is_nan & !raw_b.is_nan
+  def both_infinite = raw_a.is_infinite & raw_b.is_infinite
+  def both_zero = raw_a.is_zero & raw_b.is_zero
+  def equal_exponents = raw_a.signed_exponent === raw_b.signed_exponent
+  def lesser_magnitude = (raw_a.signed_exponent < raw_b.signed_exponent) ||| (
+    equal_exponents & (raw_a.significand < raw_b.significand)
+  )
+  def equal_magnitudes = equal_exponents & (raw_a.significand === raw_b.significand)
+  def ordered_less = !both_zero & (
+    (raw_a.sign & !raw_b.sign) ||| (
+      !both_infinite & (
+        (raw_a.sign & !lesser_magnitude & !equal_magnitudes) ||| (!raw_b.sign & lesser_magnitude)
+      )
+    )
+  )
+  def ordered_equal = both_zero ||| (
+    (raw_a.sign === raw_b.sign) & (both_infinite ||| equal_magnitudes)
+  )
+  def invalid = is_signaling_nan(format, raw_a) ||| is_signaling_nan(format, raw_b) ||| (
+    signaling & !ordered
+  )
+
+  lt <== ordered & ordered_less
+  eq <== ordered & ordered_equal
+  gt <== ordered & !ordered_less & !ordered_equal
+  exception_flags.invalid <== invalid
+  exception_flags.infinite <== Bool(#false)
+  exception_flags.overflow <== Bool(#false)
+  exception_flags.underflow <== Bool(#false)
+  exception_flags.inexact <== Bool(#false)
+
+export:
+  CompareRecFN

@@ -1,0 +1,325 @@
+#lang rhdl
+// Implements Berkeley HardFloat fused multiply-add preparation, combination, normalization, and rounding.
+// Derived from hardfloat/src/main/scala/MulAddRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../primitives.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundRawFNToRecFN
+
+fun fma_extend(value :: Hardware.bits, width :: PosInt) :~ Bits(width):
+  if value.type.bit_width() == width
+  | value
+  | zext(value, width)
+
+fun fma_expanding_shift(value :: Hardware.bits, amount :: Nat) :~ Bits(value.type.bit_width() + amount):
+  if amount == 0
+  | value
+  | zext(value, value.type.bit_width() + amount) << amount
+
+fun fma_repeat(value :: Bool, count :: PosInt) :~ Bits(count):
+  as_bits(vec(for List (_index in 0..count): value))
+
+bundle MulAddIntermediate(exponent_width :: PosInt, significand_width :: PosInt):
+  signaling_nan: Bool
+  nan_a_or_b: Bool
+  infinite_a: Bool
+  zero_a: Bool
+  infinite_b: Bool
+  zero_b: Bool
+  product_sign: Bool
+  nan_c: Bool
+  infinite_c: Bool
+  zero_c: Bool
+  exponent_sum: SInt(exponent_width + 2)
+  subtract_magnitudes: Bool
+  c_dominant: Bool
+  c_alignment_distance: Bits(index_width(significand_width + 1))
+  high_aligned_c: Bits(significand_width + 2)
+  aligned_c_bit_zero: Bool
+
+circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
+  input operation: Bits(2)
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input c: Bits(format.recoded_width)
+  output multiply_a: Bits(format.significand_width)
+  output multiply_b: Bits(format.significand_width)
+  output multiply_c: Bits(format.significand_width * 2)
+  output intermediate: MulAddIntermediate(format.exponent_width, format.significand_width)
+
+  def significand_width = format.significand_width
+  def exponent_width = format.exponent_width
+  def significand_sum_width = (significand_width * 3) + 3
+  def raw_a = raw_float_from_recfn(format, a)
+  def raw_b = raw_float_from_recfn(format, b)
+  def raw_c = raw_float_from_recfn(format, c)
+  def product_sign = raw_a.sign ^ raw_b.sign ^ cast(extract(operation, 1, 1), Bool)
+  def exponent_sum_width = exponent_width + 3
+  def aligned_product_exponent = (
+    sext(raw_a.signed_exponent, exponent_sum_width) + sext(raw_b.signed_exponent, exponent_sum_width)
+  ) + sint((((-(1 << exponent_width)) + significand_width) + 3), exponent_sum_width)
+  def subtract_magnitudes = product_sign ^ raw_c.sign ^ cast(extract(operation, 0, 0), Bool)
+
+  def natural_c_alignment = aligned_product_exponent - sext(raw_c.signed_exponent, exponent_sum_width)
+  def positive_c_alignment = extract(as_bits(natural_c_alignment), exponent_width + 1, 0)
+  def minimum_c_alignment = raw_a.is_zero ||| raw_b.is_zero ||| (
+    natural_c_alignment < sint(0, exponent_sum_width)
+  )
+  def c_dominant = !raw_c.is_zero & (
+    minimum_c_alignment ||| (positive_c_alignment <= bits(significand_width, exponent_width + 2))
+  )
+  def full_alignment_width = index_width(significand_sum_width)
+  def c_alignment = mux(
+    minimum_c_alignment,
+    bits(0, full_alignment_width),
+    mux(
+      positive_c_alignment < bits(significand_sum_width - 1, exponent_width + 2),
+      extract(positive_c_alignment, full_alignment_width - 1, 0),
+      bits(significand_sum_width - 1, full_alignment_width)
+    )
+  )
+  def selected_c_significand = mux(subtract_magnitudes, !raw_c.significand, raw_c.significand)
+  def aligned_c_source = concat(
+    selected_c_significand,
+    fma_repeat(subtract_magnitudes, (significand_sum_width - significand_width) + 2)
+  )
+  def main_aligned_c = cast(aligned_c_source, SInt(significand_sum_width + 3)) >> c_alignment
+  def c_extra_shift = ((significand_sum_width - significand_width) - 1) mod 4
+  def reduced_c_extra = or_reduce_by_4(fma_expanding_shift(raw_c.significand, c_extra_shift))
+  def c_extra_mask_top = (significand_sum_width - 1) div 4
+  def c_extra_mask_bottom = ((significand_sum_width - significand_width) - 1) div 4
+  def reduced_c_extra_bit:
+    if c_extra_mask_top == c_extra_mask_bottom
+    | Bool(#false)
+    | block:
+        def mask = low_mask(
+          extract(c_alignment, full_alignment_width - 1, 2),
+          c_extra_mask_top,
+          c_extra_mask_bottom
+        )
+        or_reduce(reduced_c_extra & fma_extend(mask, reduced_c_extra.type.bit_width()))
+  def aligned_c_tail = extract(as_bits(main_aligned_c), 2, 0)
+  def aligned_c_sticky = mux(
+    subtract_magnitudes,
+    and_reduce(aligned_c_tail) & !reduced_c_extra_bit,
+    or_reduce(aligned_c_tail) ||| reduced_c_extra_bit
+  )
+  def aligned_c = concat(
+    extract(as_bits(main_aligned_c), significand_sum_width + 2, 3),
+    aligned_c_sticky
+  )
+  def non_dominant_exponent = aligned_product_exponent - sint(significand_width, exponent_sum_width)
+  def output_exponent = mux(
+    c_dominant,
+    raw_c.signed_exponent,
+    cast(extract(as_bits(non_dominant_exponent), exponent_width + 1, 0), SInt(exponent_width + 2))
+  )
+  def post_alignment_width = index_width(significand_width + 1)
+
+  multiply_a <== extract(raw_a.significand, significand_width - 1, 0)
+  multiply_b <== extract(raw_b.significand, significand_width - 1, 0)
+  multiply_c <== extract(aligned_c, significand_width * 2, 1)
+  intermediate <== MulAddIntermediate(exponent_width, significand_width):
+    signaling_nan: is_signaling_nan(format, raw_a) ||| is_signaling_nan(format, raw_b) ||| is_signaling_nan(format, raw_c)
+    nan_a_or_b: raw_a.is_nan ||| raw_b.is_nan
+    infinite_a: raw_a.is_infinite
+    zero_a: raw_a.is_zero
+    infinite_b: raw_b.is_infinite
+    zero_b: raw_b.is_zero
+    product_sign: product_sign
+    nan_c: raw_c.is_nan
+    infinite_c: raw_c.is_infinite
+    zero_c: raw_c.is_zero
+    exponent_sum: output_exponent
+    subtract_magnitudes: subtract_magnitudes
+    c_dominant: c_dominant
+    c_alignment_distance: extract(c_alignment, post_alignment_width - 1, 0)
+    high_aligned_c: extract(aligned_c, significand_sum_width - 1, (significand_width * 2) + 1)
+    aligned_c_bit_zero: cast(extract(aligned_c, 0, 0), Bool)
+
+circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
+  input intermediate: MulAddIntermediate(format.exponent_width, format.significand_width)
+  input multiply_add_result: Bits((format.significand_width * 2) + 1)
+  input rounding_mode: RoundingMode
+  output invalid_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, (format.significand_width + 2))
+
+  def significand_width = format.significand_width
+  def exponent_width = format.exponent_width
+  def significand_sum_width = (significand_width * 3) + 3
+  def minimum_rounding = rounding_mode === RoundingMode.Minimum
+  def operation_sign_c = intermediate.product_sign ^ intermediate.subtract_magnitudes
+  def high_sum = mux(
+    cast(extract(multiply_add_result, significand_width * 2, significand_width * 2), Bool),
+    intermediate.high_aligned_c + bits(1, significand_width + 2),
+    intermediate.high_aligned_c
+  )
+  def significand_sum = concat(
+    high_sum,
+    extract(multiply_add_result, (significand_width * 2) - 1, 0),
+    intermediate.aligned_c_bit_zero
+  )
+
+  def c_dominant_sign = operation_sign_c
+  def subtract_adjustment = cast(
+    zext(as_bits(intermediate.subtract_magnitudes), exponent_width + 2),
+    SInt(exponent_width + 2)
+  )
+  def c_dominant_exponent = intermediate.exponent_sum - subtract_adjustment
+  def c_dominant_absolute_sum = mux(
+    intermediate.subtract_magnitudes,
+    !extract(significand_sum, significand_sum_width - 1, significand_width + 1),
+    concat(
+      bits(0, 1),
+      extract(intermediate.high_aligned_c, significand_width + 1, significand_width),
+      extract(significand_sum, significand_sum_width - 3, significand_width + 2)
+    )
+  )
+  def c_dominant_extra = mux(
+    intermediate.subtract_magnitudes,
+    or_reduce(!extract(significand_sum, significand_width, 1)),
+    or_reduce(extract(significand_sum, significand_width + 1, 1))
+  )
+  def c_dominant_main = extract(
+    c_dominant_absolute_sum << intermediate.c_alignment_distance,
+    (significand_width * 2) + 1,
+    significand_width - 3
+  )
+  def c_dominant_extra_shift = 3 - (significand_width mod 4)
+  def c_dominant_reduced = or_reduce_by_4(
+    fma_expanding_shift(extract(c_dominant_absolute_sum, significand_width - 1, 0), c_dominant_extra_shift)
+  )
+  def c_dominant_mask_width = significand_width div 4
+  def c_dominant_reduced_extra:
+    if c_dominant_mask_width == 0
+    | Bool(#false)
+    | block:
+        def alignment_width = intermediate.c_alignment_distance.type.bit_width()
+        def alignment_quarters = extract(intermediate.c_alignment_distance, alignment_width - 1, 2)
+        def mask = low_mask(alignment_quarters, 0, c_dominant_mask_width)
+        or_reduce(c_dominant_reduced & fma_extend(mask, c_dominant_reduced.type.bit_width()))
+  def c_dominant_significand = concat(
+    extract(c_dominant_main, significand_width + 4, 3),
+    or_reduce(extract(c_dominant_main, 2, 0)) ||| c_dominant_reduced_extra ||| c_dominant_extra
+  )
+
+  def non_dominant_sum_sign = cast(
+    extract(significand_sum, (significand_width * 2) + 3, (significand_width * 2) + 3),
+    Bool
+  )
+  def non_dominant_absolute_sum = mux(
+    non_dominant_sum_sign,
+    !extract(significand_sum, (significand_width * 2) + 2, 0),
+    extract(significand_sum, (significand_width * 2) + 2, 0) + zext(
+      as_bits(intermediate.subtract_magnitudes),
+      (significand_width * 2) + 3
+    )
+  )
+  def non_dominant_reduced = or_reduce_by_2(non_dominant_absolute_sum)
+  def non_dominant_normalization_reduced = count_leading_zeros(non_dominant_reduced)
+  def non_dominant_normalization_distance = zext(
+    non_dominant_normalization_reduced,
+    non_dominant_normalization_reduced.type.bit_width() + 1
+  ) << 1
+  def non_dominant_exponent_adjustment = cast(
+    zext(non_dominant_normalization_distance, exponent_width + 2),
+    SInt(exponent_width + 2)
+  )
+  def non_dominant_exponent = intermediate.exponent_sum - non_dominant_exponent_adjustment
+  def non_dominant_main_source = zext(non_dominant_absolute_sum, (significand_width * 2) + 4)
+  def non_dominant_main = extract(
+    non_dominant_main_source << non_dominant_normalization_distance,
+    (significand_width * 2) + 3,
+    significand_width - 1
+  )
+  def non_dominant_reduced_slice = extract(non_dominant_reduced, significand_width div 2, 0)
+  def non_dominant_reduced_shift = (significand_width div 2) mod 2
+  def non_dominant_reduced_again = or_reduce_by_2(
+    fma_expanding_shift(non_dominant_reduced_slice, non_dominant_reduced_shift)
+  )
+  def normalization_width = non_dominant_normalization_reduced.type.bit_width()
+  def normalization_halves = extract(non_dominant_normalization_reduced, normalization_width - 1, 1)
+  def non_dominant_mask_width = (significand_width + 2) div 4
+  def non_dominant_mask = low_mask(normalization_halves, 0, non_dominant_mask_width)
+  def non_dominant_reduced_extra = or_reduce(
+    non_dominant_reduced_again & fma_extend(non_dominant_mask, non_dominant_reduced_again.type.bit_width())
+  )
+  def non_dominant_significand = concat(
+    extract(non_dominant_main, significand_width + 4, 3),
+    or_reduce(extract(non_dominant_main, 2, 0)) ||| non_dominant_reduced_extra
+  )
+  def non_dominant_cancellation = extract(
+    non_dominant_significand,
+    significand_width + 2,
+    significand_width + 1
+  ) === bits(0, 2)
+  def non_dominant_sign = mux(
+    non_dominant_cancellation,
+    minimum_rounding,
+    intermediate.product_sign ^ non_dominant_sum_sign
+  )
+
+  def infinite_product = intermediate.infinite_a ||| intermediate.infinite_b
+  def infinite_out = infinite_product ||| intermediate.infinite_c
+  def add_zeros = (intermediate.zero_a ||| intermediate.zero_b) & intermediate.zero_c
+  def sign_out = (infinite_product & intermediate.product_sign) ||| (
+    intermediate.infinite_c & operation_sign_c
+  ) ||| (add_zeros & !minimum_rounding & intermediate.product_sign & operation_sign_c) ||| (
+    add_zeros & minimum_rounding & (intermediate.product_sign ||| operation_sign_c)
+  ) ||| (!infinite_out & !add_zeros & mux(
+    intermediate.c_dominant,
+    c_dominant_sign,
+    non_dominant_sign
+  ))
+
+  invalid_exception <== intermediate.signaling_nan ||| (
+    intermediate.infinite_a & intermediate.zero_b
+  ) ||| (intermediate.zero_a & intermediate.infinite_b) ||| (
+    !intermediate.nan_a_or_b & infinite_product & intermediate.infinite_c & intermediate.subtract_magnitudes
+  )
+  raw_out <== RawFloat(exponent_width, (significand_width + 2)):
+    is_nan: intermediate.nan_a_or_b ||| intermediate.nan_c
+    is_infinite: infinite_out
+    is_zero: add_zeros ||| (!intermediate.c_dominant & non_dominant_cancellation)
+    sign: sign_out
+    signed_exponent: mux(intermediate.c_dominant, c_dominant_exponent, non_dominant_exponent)
+    significand: mux(intermediate.c_dominant, c_dominant_significand, non_dominant_significand)
+
+circuit MulAddRecFN(format :: FloatFormat):
+  input operation: Bits(2)
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input c: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  inst prepare(MulAddRecFNToRawPreMultiply(format))
+  prepare.operation <== operation
+  prepare.a <== a
+  prepare.b <== b
+  prepare.c <== c
+  def product = prepare.multiply_a *& prepare.multiply_b
+  def multiply_add_result = product +& prepare.multiply_c
+
+  inst combine(MulAddRecFNToRawPostMultiply(format))
+  combine.intermediate <== prepare.intermediate
+  combine.multiply_add_result <== multiply_add_result
+  combine.rounding_mode <== rounding_mode
+
+  inst round(RoundRawFNToRecFN(format))
+  round.invalid_exception <== combine.invalid_exception
+  round.infinite_exception <== Bool(#false)
+  round.raw <== combine.raw_out
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  MulAddRecFN

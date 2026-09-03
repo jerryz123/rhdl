@@ -1,0 +1,40 @@
+#lang rhdl
+// Converts signed or unsigned fixed-width integers to rounded Berkeley HardFloat recoded values.
+// Derived from hardfloat/src/main/scala/INToRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2016 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../round.rhdl".RoundAnyRawFNToRecFN
+  "raw-from-integer.rhdl".raw_float_from_integer
+
+circuit IntegerToRecFN(integer_width :: PosInt, format :: FloatFormat):
+  unless integer_width >= 2
+  | error(~who: #'IntegerToRecFN, "integer width must be at least two")
+  input signed_input: Bool
+  input value: Bits(integer_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  def raw = raw_float_from_integer(signed_input, value)
+  def raw_exponent_width = index_width(integer_width) + 1
+  inst round(RoundAnyRawFNToRecFN(
+    raw_exponent_width,
+    integer_width,
+    format.exponent_width,
+    format.significand_width,
+    RoundingOptions(#true, #false, #true, #false)
+  ))
+  round.invalid_exception <== Bool(#false)
+  round.infinite_exception <== Bool(#false)
+  round.raw <== raw
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  IntegerToRecFN

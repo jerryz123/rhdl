@@ -1,0 +1,119 @@
+#lang rhdl
+// Defines host format parameters and packed hardware types for the Berkeley HardFloat port.
+// Derived from hardfloat/src/main/scala/common.scala at upstream commit c1105e6.
+// Copyright 2010-2018 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+class FloatFormat(exponent_width :: PosInt, significand_width :: PosInt):
+  implements StableCircuitParam
+
+  constructor (exponent_width :: PosInt, significand_width :: PosInt):
+    unless exponent_width >= 3
+    | error(~who: #'FloatFormat, "exponent width must be at least three")
+    unless significand_width >= 3
+    | error(~who: #'FloatFormat, "significand width must be at least three")
+    unless significand_width <= ((1 << (exponent_width - 2)) + 3)
+    | error(~who: #'FloatFormat,
+            "significand width exceeds the HardFloat format limit")
+    super(exponent_width, significand_width)
+
+  property ieee_width :: PosInt:
+    exponent_width + significand_width
+  property recoded_width :: PosInt:
+    ieee_width + 1
+
+namespace ~extend FloatFormat:
+  def F16 = FloatFormat(5, 11)
+  def BF16 = FloatFormat(8, 8)
+  def F32 = FloatFormat(8, 24)
+  def F64 = FloatFormat(11, 53)
+
+  export:
+    F16
+    BF16
+    F32
+    F64
+
+class RoundingOptions(significand_msb_always_zero :: Boolean = #false,
+                      subnormals_always_exact :: Boolean = #false,
+                      never_underflows :: Boolean = #false,
+                      never_overflows :: Boolean = #false):
+  implements StableCircuitParam
+
+  constructor (significand_msb_always_zero :: Boolean = #false,
+               subnormals_always_exact :: Boolean = #false,
+               never_underflows :: Boolean = #false,
+               never_overflows :: Boolean = #false):
+    super(significand_msb_always_zero,
+          subnormals_always_exact,
+          never_underflows,
+          never_overflows)
+
+namespace ~extend RoundingOptions:
+  def Default = RoundingOptions()
+
+  export:
+    Default
+
+hardware_enum RoundingMode(~width: 3):
+  NearEven = 0
+  MinMagnitude = 1
+  Minimum = 2
+  Maximum = 3
+  NearMaximumMagnitude = 4
+  Odd = 6
+
+hardware_enum TininessMode(~width: 1):
+  BeforeRounding = 0
+  AfterRounding = 1
+
+hardware_enum FloatClass(~encoding: one_hot):
+  NegativeInfinity
+  NegativeNormal
+  NegativeSubnormal
+  NegativeZero
+  PositiveZero
+  PositiveSubnormal
+  PositiveNormal
+  PositiveInfinity
+  SignalingNaN
+  QuietNaN
+
+bundle ExceptionFlags():
+  invalid: Bool
+  infinite: Bool
+  overflow: Bool
+  underflow: Bool
+  inexact: Bool
+
+bundle IntegerExceptionFlags():
+  invalid: Bool
+  overflow: Bool
+  inexact: Bool
+
+bundle RawFloat(exponent_width :: PosInt, significand_width :: PosInt):
+  is_nan: Bool
+  is_infinite: Bool
+  is_zero: Bool
+  sign: Bool
+  signed_exponent: SInt(exponent_width + 2)
+  significand: Bits(significand_width + 1)
+
+fun no_exception_flags() :~ ExceptionFlags():
+  ExceptionFlags():
+    invalid: Bool(#false)
+    infinite: Bool(#false)
+    overflow: Bool(#false)
+    underflow: Bool(#false)
+    inexact: Bool(#false)
+
+export:
+  FloatFormat
+  RoundingOptions
+  RoundingMode
+  TininessMode
+  FloatClass
+  ExceptionFlags
+  IntegerExceptionFlags
+  RawFloat
+  no_exception_flags

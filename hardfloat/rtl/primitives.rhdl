@@ -1,0 +1,73 @@
+#lang rhdl
+// Implements bit-level helper functions used by the Berkeley HardFloat algorithms.
+// Derived from hardfloat/src/main/scala/primitives.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+fun reverse_bits(value :: Hardware.bits) :~ Bits(value.type.bit_width()):
+  def width = value.type.bit_width()
+  if width == 1
+  | value
+  | concat(for List (index in 0..width): extract(value, index, index))
+
+// The all-zero input deliberately returns zero, matching Chisel PriorityEncoder.
+fun count_leading_zeros(value :: Hardware.bits) :~ Bits(index_width(value.type.bit_width())):
+  priority_encoder(reverse_bits(value))
+
+// Produces the variable-width run of low-order ones used to select the active
+// rounding position. This is the direct truth-table form of upstream lowMask;
+// host elaboration builds one comparison per result bit instead of a wide
+// simulation-only arithmetic shifter.
+fun low_mask(value :: Hardware.bits,
+             top_bound :: Nat,
+             bottom_bound :: Nat) :~ Bits(if top_bound > bottom_bound | top_bound - bottom_bound | bottom_bound - top_bound):
+  unless top_bound != bottom_bound
+  | error(~who: #'low_mask, "bounds must be distinct")
+  def input_width = value.type.bit_width()
+  def input_values = 1 << input_width
+  unless top_bound <= input_values && bottom_bound <= input_values
+  | error(~who: #'low_mask, "bounds must fit the input value range")
+  def result_width = if top_bound > bottom_bound | top_bound - bottom_bound | bottom_bound - top_bound
+  def lanes:
+    if top_bound > bottom_bound
+    | for List (index in 0..result_width):
+        def threshold = bottom_bound + 1 + index
+        if threshold >= input_values
+        | Bool(#false)
+        | value >= bits(threshold, input_width)
+    | for List (index in 0..result_width):
+        def threshold = bottom_bound - index
+        if threshold >= input_values
+        | Bool(#true)
+        | if threshold == 0
+          | Bool(#false)
+          | value < bits(threshold, input_width)
+  as_bits(vec(lanes))
+
+fun reduced_group_count(width :: PosInt, group_width :: PosInt) :: PosInt:
+  ((width + group_width) - 1) div group_width
+
+fun or_reduce_groups(value :: Hardware.bits,
+                     group_width :: PosInt) :~ Bits(reduced_group_count(value.type.bit_width(), group_width)):
+  def width = value.type.bit_width()
+  def groups = reduced_group_count(width, group_width)
+  def reduced = vec(
+    for List (group in 0..groups):
+      def low = group * group_width
+      def high = if (low + group_width) < width | low + group_width | width
+      or_reduce(extract(value, high - 1, low))
+  )
+  as_bits(reduced)
+
+fun or_reduce_by_2(value :: Hardware.bits) :~ Bits(reduced_group_count(value.type.bit_width(), 2)):
+  or_reduce_groups(value, 2)
+
+fun or_reduce_by_4(value :: Hardware.bits) :~ Bits(reduced_group_count(value.type.bit_width(), 4)):
+  or_reduce_groups(value, 4)
+
+export:
+  reverse_bits
+  count_leading_zeros
+  low_mask
+  or_reduce_by_2
+  or_reduce_by_4

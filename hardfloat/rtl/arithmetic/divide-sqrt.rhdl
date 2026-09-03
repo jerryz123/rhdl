@@ -1,0 +1,393 @@
+#lang rhdl
+// Implements Berkeley HardFloat's generic iterative recoded division and square-root unit.
+// Derived from hardfloat/src/main/scala/DivSqrtRecFN_small.scala at upstream commit c1105e6.
+// Copyright 2017 SiFive, Inc.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundRawFNToRecFN
+
+class DivSqrtOptions(two_bits_per_cycle :: Boolean = #false):
+  implements StableCircuitParam
+
+  constructor (two_bits_per_cycle :: Boolean = #false):
+    super(two_bits_per_cycle)
+
+namespace ~extend DivSqrtOptions:
+  def Default = DivSqrtOptions()
+  def TwoBitsPerCycle = DivSqrtOptions(#true)
+
+  export:
+    Default
+    TwoBitsPerCycle
+
+sync_circuit DivSqrtRawFN(format :: FloatFormat,
+                          options :: DivSqrtOptions = DivSqrtOptions.Default):
+  input input_valid: Bool
+  output input_ready: Bool
+  input square_root: Bool
+  input a: RawFloat(format.exponent_width, format.significand_width)
+  input b: RawFloat(format.exponent_width, format.significand_width)
+  input rounding_mode: RoundingMode
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output rounding_mode_out: RoundingMode
+  output invalid_exception: Bool
+  output infinite_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, (format.significand_width + 2))
+
+  def exponent_width = format.exponent_width
+  def significand_width = format.significand_width
+  def cycle_width = index_width(significand_width + 3)
+  def remainder_width = significand_width + 2
+  def trial_width = significand_width + 4
+  def second_trial_width = significand_width + 5
+
+  reg cycle_number(~init: bits(0, cycle_width))
+  reg ready_state(~init: Bool(#true))
+  reg output_valid_state(~init: Bool(#false))
+  reg square_root_state(Bool)
+  reg major_exception_state(Bool)
+  reg nan_state(Bool)
+  reg infinite_state(Bool)
+  reg zero_state(Bool)
+  reg sign_state(Bool)
+  reg exponent_state(SInt(exponent_width + 2))
+  reg divisor_fraction_state(Bits(significand_width))
+  reg rounding_mode_state(RoundingMode)
+  reg remainder_state(Bits(remainder_width))
+  reg nonzero_remainder_state(Bool)
+  reg significand_state(Bits(remainder_width))
+
+  def division_invalid = (a.is_zero & b.is_zero) ||| (a.is_infinite & b.is_infinite)
+  def square_root_invalid = !a.is_nan & !a.is_zero & a.sign
+  def input_major_exception = mux(
+    square_root,
+    is_signaling_nan(format, a) ||| square_root_invalid,
+    is_signaling_nan(format, a) ||| is_signaling_nan(format, b) ||| division_invalid ||| (
+      !a.is_nan & !a.is_infinite & b.is_zero
+    )
+  )
+  def input_nan = mux(
+    square_root,
+    a.is_nan ||| square_root_invalid,
+    a.is_nan ||| b.is_nan ||| division_invalid
+  )
+  def input_infinite = mux(square_root, a.is_infinite, a.is_infinite ||| b.is_zero)
+  def input_zero = mux(square_root, a.is_zero, a.is_zero ||| b.is_infinite)
+  def input_sign = a.sign ^ (!square_root & b.sign)
+  def special_a = a.is_nan ||| a.is_infinite ||| a.is_zero
+  def special_b = b.is_nan ||| b.is_infinite ||| b.is_zero
+  def normal_division = !special_a & !special_b
+  def normal_square_root = !special_a & !a.sign
+  def normal_input = mux(square_root, normal_square_root, normal_division)
+
+  def quotient_exponent_width = exponent_width + 3
+  def negated_b_exponent = cast(
+    concat(
+      extract(as_bits(b.signed_exponent), exponent_width, exponent_width),
+      !extract(as_bits(b.signed_exponent), exponent_width - 1, 0)
+    ),
+    SInt(exponent_width + 1)
+  )
+  def quotient_exponent = sext(a.signed_exponent, quotient_exponent_width) + sext(
+    negated_b_exponent,
+    quotient_exponent_width
+  )
+  def saturated_quotient_exponent = cast(
+    concat(
+      mux(
+        sint(7 << (exponent_width - 2), quotient_exponent_width) <= quotient_exponent,
+        bits(6, 4),
+        extract(as_bits(quotient_exponent), exponent_width + 1, exponent_width - 2)
+      ),
+      extract(as_bits(quotient_exponent), exponent_width - 3, 0)
+    ),
+    SInt(exponent_width + 2)
+  )
+  def exponent_is_odd = cast(extract(as_bits(a.signed_exponent), 0, 0), Bool)
+  def even_square_root = square_root & !exponent_is_odd
+  def odd_square_root = square_root & exponent_is_odd
+
+  def idle = cycle_number === bits(0, cycle_width)
+  def entering = ready_state & input_valid
+  def entering_normal = entering & normal_input
+  def process_two_bits:
+    if options.two_bits_per_cycle
+    | cycle_number >= bits(3, cycle_width)
+    | Bool(#false)
+  def skip_second_cycle:
+    if options.two_bits_per_cycle
+    | Bool(#false)
+    | (cycle_number === bits(3, cycle_width)) & cast(
+        extract(significand_state, significand_width + 1, significand_width + 1),
+        Bool
+      )
+  def decrement = mux(process_two_bits, bits(2, cycle_width), bits(1, cycle_width))
+  def normal_initial_cycle = mux(
+    square_root,
+    mux(
+      exponent_is_odd,
+      bits(significand_width, cycle_width),
+      bits(significand_width + 1, cycle_width)
+    ),
+    bits(significand_width + 2, cycle_width)
+  )
+  def next_cycle_number = mux(
+    entering,
+    mux(entering_normal, normal_initial_cycle, bits(1, cycle_width)),
+    mux(skip_second_cycle, bits(1, cycle_width), cycle_number - decrement)
+  )
+
+  when (!idle ||| entering):
+    cycle_number <== next_cycle_number
+    ready_state <== next_cycle_number <= bits(1, cycle_width)
+    output_valid_state <== next_cycle_number === bits(1, cycle_width)
+
+  input_ready <== ready_state
+
+  when entering:
+    square_root_state <== square_root
+    major_exception_state <== input_major_exception
+    nan_state <== input_nan
+    infinite_state <== input_infinite
+    zero_state <== input_zero
+    sign_state <== input_sign
+    exponent_state <== mux(
+      square_root,
+      (a.signed_exponent >> 1) + sint(1 << (exponent_width - 1), exponent_width + 2),
+      saturated_quotient_exponent
+    )
+    rounding_mode_state <== rounding_mode
+
+  def input_divisor_fraction = zext(
+    extract(b.significand, significand_width - 2, 0),
+    significand_width
+  ) << 1
+  def odd_root_fraction = bits(1 << (significand_width - 2), significand_width)
+  def even_root_fraction = bits(1 << (significand_width - 1), significand_width)
+  when entering:
+    divisor_fraction_state <== mux(
+      square_root,
+      mux(exponent_is_odd, odd_root_fraction, even_root_fraction),
+      input_divisor_fraction
+    )
+  elsewhen (!ready_state & square_root_state):
+    divisor_fraction_state <== mux(
+      process_two_bits,
+      divisor_fraction_state >> 2,
+      divisor_fraction_state >> 1
+    )
+
+  def initial_even_remainder = zext(a.significand, significand_width + 3) << 1
+  def initial_odd_remainder = concat(
+    extract(a.significand, significand_width - 1, significand_width - 2) - bits(1, 2),
+    zext(extract(a.significand, significand_width - 3, 0), significand_width + 1) << 3
+  )
+  def busy_remainder = zext(remainder_state, significand_width + 3) << 1
+  def remainder = mux(
+    ready_state,
+    mux(odd_square_root, initial_odd_remainder, initial_even_remainder),
+    busy_remainder
+  )
+
+  def shifted_cycle_one = zext(bits(1, 1), significand_width + 3) << cycle_number
+  def bit_mask = extract(shifted_cycle_one, significand_width + 2, 2)
+  def initial_division_trial = zext(b.significand, significand_width + 3) << 1
+  def initial_even_root_trial = bits(1 << significand_width, significand_width + 3)
+  def initial_odd_root_trial = bits(5 << (significand_width - 1), significand_width + 3)
+  def busy_trial = zext(divisor_fraction_state, significand_width + 3) ||| mux(
+    square_root_state,
+    zext(significand_state, significand_width + 3) << 1,
+    bits(1 << significand_width, significand_width + 3)
+  )
+  def trial_term = mux(
+    ready_state,
+    mux(
+      square_root,
+      mux(exponent_is_odd, initial_odd_root_trial, initial_even_root_trial),
+      initial_division_trial
+    ),
+    busy_trial
+  )
+  def signed_remainder = cast(zext(remainder, trial_width), SInt(trial_width))
+  def signed_trial_term = cast(zext(trial_term, trial_width), SInt(trial_width))
+  def trial_remainder = signed_remainder - signed_trial_term
+  def new_bit = sint(0, trial_width) <= trial_remainder
+  def next_remainder = mux(
+    new_bit,
+    extract(as_bits(trial_remainder), significand_width + 1, 0),
+    extract(remainder, significand_width + 1, 0)
+  )
+
+  def doubled_next_remainder = zext(next_remainder, significand_width + 3) << 1
+  def second_trial_base = mux(
+    square_root_state,
+    zext(divisor_fraction_state >> 1, significand_width + 3) ||| (
+      zext(significand_state, significand_width + 3) << 1
+    ),
+    zext(divisor_fraction_state, significand_width + 3) ||| bits(
+      1 << significand_width,
+      significand_width + 3
+    )
+  )
+  def second_trial_with_new_bit = second_trial_base ||| mux(
+    square_root_state,
+    zext(divisor_fraction_state, significand_width + 3) << 1,
+    bits(0, significand_width + 3)
+  )
+  def second_positive_remainder = sext(trial_remainder, second_trial_width) << 1
+  def second_unsubtracted_remainder = zext(
+    extract(
+      zext(remainder_state, significand_width + 4) << 2,
+      significand_width + 2,
+      0
+    ),
+    second_trial_width
+  )
+  def selected_second_remainder = mux(
+    new_bit,
+    second_positive_remainder,
+    cast(second_unsubtracted_remainder, SInt(second_trial_width))
+  )
+  def selected_second_trial = mux(new_bit, second_trial_with_new_bit, second_trial_base)
+  def second_trial_remainder = selected_second_remainder - cast(
+    zext(selected_second_trial, second_trial_width),
+    SInt(second_trial_width)
+  )
+  def second_new_bit = sint(0, second_trial_width) <= second_trial_remainder
+  def next_nonzero_remainder = mux(
+    ready_state ||| new_bit,
+    trial_remainder =/= sint(0, trial_width),
+    nonzero_remainder_state
+  )
+  def second_positive = sint(0, second_trial_width) < second_trial_remainder
+  def next_nonzero_remainder_two = (
+    process_two_bits & new_bit & second_positive
+  ) ||| (
+    process_two_bits & !new_bit & second_positive
+  ) ||| (!(process_two_bits & second_new_bit) & next_nonzero_remainder)
+  def next_remainder_two = mux(
+    process_two_bits,
+    mux(
+      second_new_bit,
+      extract(as_bits(second_trial_remainder), significand_width + 1, 0),
+      extract(doubled_next_remainder, significand_width + 1, 0)
+    ),
+    next_remainder
+  )
+
+  def initial_division_significand = zext(as_bits(new_bit), remainder_width) << (significand_width + 1)
+  def initial_root_significand = bits(1 << significand_width, remainder_width)
+  def initial_odd_root_bit = zext(as_bits(new_bit), remainder_width) << (significand_width - 1)
+  def continued_significand = significand_state ||| mux(
+    new_bit,
+    zext(bit_mask, remainder_width),
+    bits(0, remainder_width)
+  ) ||| mux(
+    process_two_bits & second_new_bit,
+    zext(bit_mask >> 1, remainder_width),
+    bits(0, remainder_width)
+  )
+  def next_significand = mux(
+    ready_state,
+    mux(
+      square_root,
+      initial_root_significand ||| mux(
+        odd_square_root,
+        initial_odd_root_bit,
+        bits(0, remainder_width)
+      ),
+      initial_division_significand
+    ),
+    continued_significand
+  )
+
+  when (entering ||| !ready_state):
+    nonzero_remainder_state <== next_nonzero_remainder_two
+    remainder_state <== next_remainder_two
+    significand_state <== next_significand
+
+  division_valid <== output_valid_state & !square_root_state
+  square_root_valid <== output_valid_state & square_root_state
+  rounding_mode_out <== rounding_mode_state
+  invalid_exception <== major_exception_state & nan_state
+  infinite_exception <== major_exception_state & !nan_state
+  raw_out <== RawFloat(exponent_width, (significand_width + 2)):
+    is_nan: nan_state
+    is_infinite: infinite_state
+    is_zero: zero_state
+    sign: sign_state
+    signed_exponent: exponent_state
+    significand: (zext(significand_state, significand_width + 3) << 1) ||| zext(
+      as_bits(nonzero_remainder_state),
+      significand_width + 3
+    )
+
+sync_circuit DivSqrtRecFNToRaw(format :: FloatFormat,
+                               options :: DivSqrtOptions = DivSqrtOptions.Default):
+  input input_valid: Bool
+  output input_ready: Bool
+  input square_root: Bool
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output rounding_mode_out: RoundingMode
+  output invalid_exception: Bool
+  output infinite_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, (format.significand_width + 2))
+
+  inst operation(DivSqrtRawFN(format, options))
+  operation.input_valid <== input_valid
+  input_ready <== operation.input_ready
+  operation.square_root <== square_root
+  operation.a <== raw_float_from_recfn(format, a)
+  operation.b <== raw_float_from_recfn(format, b)
+  operation.rounding_mode <== rounding_mode
+  division_valid <== operation.division_valid
+  square_root_valid <== operation.square_root_valid
+  rounding_mode_out <== operation.rounding_mode_out
+  invalid_exception <== operation.invalid_exception
+  infinite_exception <== operation.infinite_exception
+  raw_out <== operation.raw_out
+
+sync_circuit DivSqrtRecFN(format :: FloatFormat,
+                          options :: DivSqrtOptions = DivSqrtOptions.Default):
+  input input_valid: Bool
+  output input_ready: Bool
+  input square_root: Bool
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  inst operation(DivSqrtRecFNToRaw(format, options))
+  operation.input_valid <== input_valid
+  input_ready <== operation.input_ready
+  operation.square_root <== square_root
+  operation.a <== a
+  operation.b <== b
+  operation.rounding_mode <== rounding_mode
+  division_valid <== operation.division_valid
+  square_root_valid <== operation.square_root_valid
+
+  inst round(RoundRawFNToRecFN(format))
+  round.invalid_exception <== operation.invalid_exception
+  round.infinite_exception <== operation.infinite_exception
+  round.raw <== operation.raw_out
+  round.rounding_mode <== operation.rounding_mode_out
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  DivSqrtOptions
+  DivSqrtRecFN

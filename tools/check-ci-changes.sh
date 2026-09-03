@@ -78,6 +78,9 @@ check_matrix_entry tests/frontend/invalid/bad-width.rhdl host_matrix ci-host-fou
 check_matrix_entry noc/rtl/router.rhdl host_matrix ci-host-models-test
 check_matrix_entry noc/rtl/router.rhdl host_matrix ci-host-socs-test
 check_matrix_entry noc/rtl/router.rhdl circt_matrix ci-circt-protocols-test
+check_matrix_entry hardfloat/rtl/recode.rhdl host_matrix ci-host-models-test
+check_matrix_entry hardfloat/rtl/recode.rhdl circt_matrix ci-circt-cores-test
+check_field hardfloat/tests/verilator/representation_tb.sv simulation true
 check_matrix_entry chi/link.rhdl host_matrix ci-host-protocols-test
 check_matrix_entry chi/link.rhdl host_matrix ci-host-socs-test
 check_matrix_entry chi/link.rhdl host_matrix ci-host-hygiene-test

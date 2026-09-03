@@ -1,0 +1,62 @@
+#lang rhdl
+// Exercises both completed iterative HardFloat division and square-root configurations at IEEE F16 boundaries.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "../main.rhdl" open
+
+sync_circuit HardFloatDivideSqrt():
+  def format = FloatFormat.F16
+  input input_valid: Bool
+  output input_ready: Bool
+  input square_root: Bool
+  input a: Bits(format.ieee_width)
+  input b: Bits(format.ieee_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output one_bit_division_valid: Bool
+  output one_bit_square_root_valid: Bool
+  output one_bit_out: Bits(format.ieee_width)
+  output one_bit_flags: ExceptionFlags()
+  output two_bit_division_valid: Bool
+  output two_bit_square_root_valid: Bool
+  output two_bit_out: Bits(format.ieee_width)
+  output two_bit_flags: ExceptionFlags()
+
+  inst one_bit(DivSqrtRecFN(format))
+  inst two_bit(DivSqrtRecFN(format, DivSqrtOptions.TwoBitsPerCycle))
+  def both_ready = one_bit.input_ready & two_bit.input_ready
+  def accepted_valid = input_valid & both_ready
+  def recoded_a = recfn_from_fn(format, a)
+  def recoded_b = recfn_from_fn(format, b)
+
+  input_ready <== both_ready
+  one_bit.input_valid <== accepted_valid
+  one_bit.square_root <== square_root
+  one_bit.a <== recoded_a
+  one_bit.b <== recoded_b
+  one_bit.rounding_mode <== rounding_mode
+  one_bit.tininess_mode <== tininess_mode
+  one_bit_division_valid <== one_bit.division_valid
+  one_bit_square_root_valid <== one_bit.square_root_valid
+  one_bit_out <== fn_from_recfn(format, one_bit.out)
+  one_bit_flags <== one_bit.exception_flags
+
+  two_bit.input_valid <== accepted_valid
+  two_bit.square_root <== square_root
+  two_bit.a <== recoded_a
+  two_bit.b <== recoded_b
+  two_bit.rounding_mode <== rounding_mode
+  two_bit.tininess_mode <== tininess_mode
+  two_bit_division_valid <== two_bit.division_valid
+  two_bit_square_root_valid <== two_bit.square_root_valid
+  two_bit_out <== fn_from_recfn(format, two_bit.out)
+  two_bit_flags <== two_bit.exception_flags
+
+def design = elaborate(HardFloatDivideSqrt())
+def minimum_design = elaborate(DivSqrtRecFN(FloatFormat(3, 3)))
+
+export:
+  HardFloatDivideSqrt
+  design
+  minimum_design

@@ -1,0 +1,49 @@
+#lang rhdl
+// Converts between Berkeley HardFloat recoded formats with narrowing handled by the shared rounder.
+// Derived from hardfloat/src/main/scala/RecFNToRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2016 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundAnyRawFNToRecFN
+
+circuit RecFNToRecFN(input_format :: FloatFormat,
+                     output_format :: FloatFormat):
+  input value: Bits(input_format.recoded_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(output_format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  def raw = raw_float_from_recfn(input_format, value)
+  if input_format.exponent_width == output_format.exponent_width && input_format.significand_width <= output_format.significand_width
+  | block:
+      if input_format.significand_width == output_format.significand_width
+      | out <== value
+      | out <== zext(value, output_format.recoded_width) << (output_format.significand_width - input_format.significand_width)
+      exception_flags <== ExceptionFlags():
+        invalid: is_signaling_nan(input_format, raw)
+        infinite: Bool(#false)
+        overflow: Bool(#false)
+        underflow: Bool(#false)
+        inexact: Bool(#false)
+  | block:
+      inst round(RoundAnyRawFNToRecFN(
+        input_format.exponent_width,
+        input_format.significand_width,
+        output_format.exponent_width,
+        output_format.significand_width,
+        RoundingOptions(#true)
+      ))
+      round.invalid_exception <== is_signaling_nan(input_format, raw)
+      round.infinite_exception <== Bool(#false)
+      round.raw <== raw
+      round.rounding_mode <== rounding_mode
+      round.tininess_mode <== tininess_mode
+      out <== round.out
+      exception_flags <== round.exception_flags
+
+export:
+  RecFNToRecFN

@@ -1,0 +1,191 @@
+#lang rhdl
+// Implements Berkeley HardFloat raw and rounded recoded addition and subtraction.
+// Derived from hardfloat/src/main/scala/AddRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../primitives.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundRawFNToRecFN
+
+circuit AddRawFN(format :: FloatFormat):
+  input subtract: Bool
+  input a: RawFloat(format.exponent_width, format.significand_width)
+  input b: RawFloat(format.exponent_width, format.significand_width)
+  input rounding_mode: RoundingMode
+  output invalid_exception: Bool
+  output raw_out: RawFloat(format.exponent_width, (format.significand_width + 2))
+
+  def significand_width = format.significand_width
+  def exponent_width = format.exponent_width
+  def align_distance_width = index_width(significand_width)
+  def effective_sign_b = b.sign ^ subtract
+  def equal_signs = a.sign === effective_sign_b
+  def unequal_signs_zero_sign = rounding_mode === RoundingMode.Minimum
+  def exponent_difference = a.signed_exponent - b.signed_exponent
+  def negative_exponent_difference = exponent_difference < sint(0, exponent_width + 2)
+  def absolute_exponent_difference = mux(
+    negative_exponent_difference,
+    b.signed_exponent - a.signed_exponent,
+    exponent_difference
+  )
+  def modular_alignment_distance = extract(as_bits(absolute_exponent_difference), align_distance_width - 1, 0)
+  def shifted_exponent_difference = exponent_difference >> align_distance_width
+  def maximum_alignment = (shifted_exponent_difference =/= sint(0, exponent_width + 2)) & (
+    (shifted_exponent_difference =/= sint(-1, exponent_width + 2)) ||| (
+      extract(as_bits(exponent_difference), align_distance_width - 1, 0) === bits(0, align_distance_width)
+    )
+  )
+  def alignment_distance = mux(
+    maximum_alignment,
+    bits((1 << align_distance_width) - 1, align_distance_width),
+    modular_alignment_distance
+  )
+  def close_subtraction = !equal_signs & !maximum_alignment & (
+    modular_alignment_distance <= bits(1, align_distance_width)
+  )
+
+  def close_width = significand_width + 3
+  def aligned_a = mux(
+    !negative_exponent_difference & cast(extract(as_bits(exponent_difference), 0, 0), Bool),
+    zext(a.significand, close_width) << 2,
+    bits(0, close_width)
+  ) ||| mux(
+    !negative_exponent_difference & !cast(extract(as_bits(exponent_difference), 0, 0), Bool),
+    zext(a.significand, close_width) << 1,
+    bits(0, close_width)
+  ) ||| mux(
+    negative_exponent_difference,
+    zext(a.significand, close_width),
+    bits(0, close_width)
+  )
+  def shifted_b = zext(b.significand, close_width) << 1
+  def signed_close_sum = cast(aligned_a, SInt(close_width)) - cast(shifted_b, SInt(close_width))
+  def absolute_close_sum = mux(
+    signed_close_sum < sint(0, close_width),
+    -signed_close_sum,
+    signed_close_sum
+  )
+  def close_sum = extract(as_bits(absolute_close_sum), significand_width + 1, 0)
+  def close_adjusted_sum:
+    if (significand_width mod 2) == 1
+    | zext(close_sum, significand_width + 3) << 1
+    | close_sum
+  def close_reduced_sum = or_reduce_by_2(close_adjusted_sum)
+  def close_normalization_reduced = count_leading_zeros(close_reduced_sum)
+  def close_normalization_distance:
+    if close_normalization_reduced.type.bit_width() == align_distance_width
+    | close_normalization_reduced << 1
+    | zext(close_normalization_reduced, align_distance_width) << 1
+  def close_significand = (
+    zext(close_sum, significand_width + 3) << close_normalization_distance
+  ) << 1
+  def close_total_cancellation = !or_reduce(
+    extract(close_significand, significand_width + 2, significand_width + 1)
+  )
+  def close_sign = a.sign ^ (signed_close_sum < sint(0, close_width))
+
+  def far_sign = mux(negative_exponent_difference, effective_sign_b, a.sign)
+  def far_larger = extract(
+    mux(negative_exponent_difference, b.significand, a.significand),
+    significand_width - 1,
+    0
+  )
+  def far_smaller = extract(
+    mux(negative_exponent_difference, a.significand, b.significand),
+    significand_width - 1,
+    0
+  )
+  def far_main_aligned = (zext(far_smaller, significand_width + 5) << 5) >> alignment_distance
+  def far_reduced = or_reduce_by_4(zext(far_smaller, significand_width + 2) << 2)
+  def far_mask_width = (significand_width + 5) div 4
+  def far_round_extra_mask:
+    if align_distance_width <= 2
+    | bits(0, far_mask_width)
+    | low_mask(extract(alignment_distance, align_distance_width - 1, 2), far_mask_width, 0)
+  def far_sticky = or_reduce(extract(far_main_aligned, 2, 0)) ||| or_reduce(far_reduced & far_round_extra_mask)
+  def far_aligned_smaller = concat(
+    extract(far_main_aligned, significand_width + 4, 3),
+    far_sticky
+  )
+  def far_subtract = !equal_signs
+  def far_negative_smaller = mux(
+    far_subtract,
+    concat(Bool(#true), !far_aligned_smaller),
+    concat(Bool(#false), far_aligned_smaller)
+  )
+  def far_larger_shifted = zext(far_larger, significand_width + 4) << 3
+  def far_sum = (far_larger_shifted + far_negative_smaller) + zext(as_bits(far_subtract), significand_width + 4)
+  def far_added_significand = extract(far_sum, significand_width + 3, 1) ||| zext(
+    extract(far_sum, 0, 0),
+    significand_width + 3
+  )
+  def far_significand = mux(
+    far_subtract,
+    extract(far_sum, significand_width + 2, 0),
+    far_added_significand
+  )
+
+  def invalid_non_nan = a.is_infinite & b.is_infinite & !equal_signs
+  def infinite_out = a.is_infinite ||| b.is_infinite
+  def add_zeros = a.is_zero & b.is_zero
+  def special_non_nan = infinite_out ||| add_zeros
+  def zero_out = add_zeros ||| (!infinite_out & close_subtraction & close_total_cancellation)
+  def sign_out = (equal_signs & a.sign) ||| (a.is_infinite & a.sign) ||| (
+    b.is_infinite & effective_sign_b
+  ) ||| (zero_out & !equal_signs & unequal_signs_zero_sign) ||| (
+    !special_non_nan & close_subtraction & !close_total_cancellation & close_sign
+  ) ||| (!special_non_nan & !close_subtraction & far_sign)
+  def selected_exponent = mux(
+    close_subtraction ||| negative_exponent_difference,
+    b.signed_exponent,
+    a.signed_exponent
+  )
+  def exponent_adjustment_bits = mux(
+    close_subtraction,
+    close_normalization_distance,
+    zext(as_bits(far_subtract), align_distance_width)
+  )
+  def exponent_adjustment = cast(
+    zext(exponent_adjustment_bits, exponent_width + 2),
+    SInt(exponent_width + 2)
+  )
+  def exponent_out = selected_exponent - exponent_adjustment
+
+  invalid_exception <== is_signaling_nan(format, a) ||| is_signaling_nan(format, b) ||| invalid_non_nan
+  raw_out <== RawFloat(exponent_width, (significand_width + 2)):
+    is_nan: a.is_nan ||| b.is_nan
+    is_infinite: infinite_out
+    is_zero: zero_out
+    sign: sign_out
+    signed_exponent: exponent_out
+    significand: mux(close_subtraction, close_significand, far_significand)
+
+circuit AddRecFN(format :: FloatFormat):
+  input subtract: Bool
+  input a: Bits(format.recoded_width)
+  input b: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  inst add(AddRawFN(format))
+  add.subtract <== subtract
+  add.a <== raw_float_from_recfn(format, a)
+  add.b <== raw_float_from_recfn(format, b)
+  add.rounding_mode <== rounding_mode
+
+  inst round(RoundRawFNToRecFN(format))
+  round.invalid_exception <== add.invalid_exception
+  round.infinite_exception <== Bool(#false)
+  round.raw <== add.raw_out
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  AddRecFN

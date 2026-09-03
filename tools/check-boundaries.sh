@@ -55,6 +55,8 @@ fail_matches "standard library must not import RHDL implementation packages" \
   '^[[:space:]]+.*(core/|analysis/|backend/|frontend/|formal/)' rhdl/std
 fail_matches "RHDL packages must not import the external CHI domain library" \
   '^[[:space:]]+.*chi/' rhdl
+fail_matches "RHDL packages must not import the external HardFloat domain library" \
+  '^[[:space:]]+.*hardfloat/' rhdl
 fail_matches "RHDL packages must not import simulation harnesses" \
   '^[[:space:]]+.*sims/' rhdl
 fail_matches "CHI must not import simulation harnesses" \
@@ -142,6 +144,7 @@ unexpected_rhdl="$(find . -path './.git' -prune -o -type f -name '*.rhdl' \
   ! -path './rhdl/std/*' ! -path './riscv/rhdl/*' \
   ! -path './noc/rtl/*' \
   ! -path './devices/*' \
+  ! -path './hardfloat/*' \
   ! -path './chi/*' \
   ! -path './sims/*' ! -path './socs/*' ! -path './cores/*' ! -path './vlsi/src/*' -print)"
 if [[ -n "$unexpected_rhdl" ]]; then

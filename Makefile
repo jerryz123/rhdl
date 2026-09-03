@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test soc-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-socs-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
+.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test soc-test hardfloat-test hardfloat-host-test hardfloat-circt-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-socs-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -15,6 +15,7 @@ RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 DEVICE_TESTS := $(sort $(wildcard devices/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
 SOC_TESTS := $(sort $(wildcard socs/tests/*-test.rhm))
+HARDFLOAT_TESTS := $(sort $(wildcard hardfloat/tests/*-test.rhm))
 RV5STAGE_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/rv5stage/tests/*-test.rhm))
 RV5STAGE_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/rv5stage-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
@@ -34,7 +35,7 @@ EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f
 RACKET_COMPILE_SOURCES := $(sort \
   $(SUPPORT_ANNOTATION_TESTS) $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS) \
   $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) \
-  $(DEVICE_TESTS) $(CHI_TESTS) $(SOC_TESTS) $(RV5STAGE_TESTS) $(EXAMPLES) \
+  $(DEVICE_TESTS) $(CHI_TESTS) $(SOC_TESTS) $(HARDFLOAT_TESTS) $(RV5STAGE_TESTS) $(EXAMPLES) \
   $(wildcard tests/backend/emit-*.rhm) \
   $(wildcard sims/tests/*.rhm) \
   $(wildcard sims/emit-*.rhm) \
@@ -49,6 +50,7 @@ check-boundaries:
 	bash rfpl/check-boundaries.sh
 	bash riscv/check-boundaries.sh
 	bash chi/check-boundaries.sh
+	bash hardfloat/check-boundaries.sh
 	bash cores/check-boundaries.sh
 
 check-example-verilog:
@@ -125,6 +127,14 @@ chi-test: check-boundaries
 soc-test: check-boundaries
 	tools/run-racket-tests.sh $(SOC_TESTS)
 
+hardfloat-host-test: check-boundaries
+	tools/run-racket-tests.sh $(HARDFLOAT_TESTS)
+
+hardfloat-circt-test: check-boundaries
+	bash hardfloat/tests/run-circt.sh
+
+hardfloat-test: hardfloat-host-test hardfloat-circt-test
+
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
@@ -161,6 +171,7 @@ ci-circt-protocols-test:
 ci-circt-cores-test:
 	bash tools/check-example-verilog.sh examples/riscv examples/cores
 	bash tests/backend/run-circt.sh --group cores
+	bash hardfloat/tests/run-circt.sh
 
 verilog-golden-test: check-example-verilog
 	bash tests/backend/run-circt.sh --golden-only
@@ -169,13 +180,13 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: check-parameter-annotations support-annotation-test unit-test rfpl-unit-test noc-test riscv-test device-test chi-test soc-test rv5stage-host-test
+host-checks: check-parameter-annotations support-annotation-test unit-test rfpl-unit-test noc-test riscv-test device-test chi-test soc-test hardfloat-host-test rv5stage-host-test
 
 ci-host-foundation-test: support-annotation-test frontend-test lop-test
 
 ci-host-backend-test: backend-test
 
-ci-host-models-test: noc-test riscv-test
+ci-host-models-test: noc-test riscv-test hardfloat-host-test
 
 ci-host-protocols-test: rfpl-unit-test device-test chi-test
 
@@ -187,7 +198,7 @@ ci-host-hygiene-test: check-boundaries check-example-verilog check-parameter-ann
 
 host-test: host-checks examples
 
-test: host-test circt-test rfpl-circt-test
+test: host-test circt-test rfpl-circt-test hardfloat-circt-test
 
 setup-circt:
 	bash tools/install-circt.sh

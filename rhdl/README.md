@@ -24,6 +24,7 @@ chi/* -------------------------> public #lang rhdl and generic std/* libraries
 socs/* ------------------------> public #lang rhdl and domain libraries
 sims/* ------------------------> public SoC and backend surfaces
 riscv/rhdl --------------------> public #lang rhdl authoring surface
+hardfloat/* -------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* and domain libraries
 
 support/annotations ----------> dependency-neutral Rhombus refinements
@@ -69,6 +70,7 @@ internal module implementing its shared frontend forms is called the
 | [`../socs/`](../socs/README.md) | Concrete system composition and end-to-end integration | Public domain-library and core surfaces only |
 | [`../sims/`](../sims/README.md) | Executable SoC harnesses, FESVR host model, target payloads, and simulator bindings | Public SoC and RHDL surfaces; backend emission; external C++ libraries |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
+| [`../hardfloat/`](../hardfloat/README.md) | RHDL port of Berkeley HardFloat representations and floating-point units | Public `#lang rhdl` authoring surface only |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
 
 The import direction is one-way. Core never imports analysis, frontend, or
@@ -86,6 +88,9 @@ The diagram package is similarly downstream and read-only; its dependency on
 interface metadata does not make visualization part of frontend elaboration.
 SoCs expose hardware host interfaces and never import `sims/`; simulation
 harnesses depend inward on public SoC and backend surfaces.
+HardFloat is an external domain library over the public language: RHDL
+implementation packages never depend on it, while its tests may consume the
+backend to validate ordinary lowering.
 
 ## Design commitments
 

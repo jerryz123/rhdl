@@ -1,0 +1,56 @@
+#lang rhdl
+// Resizes Berkeley HardFloat raw values while preserving exponent saturation and significand sticky information.
+// Derived from hardfloat/src/main/scala/resizeRawFloat.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "types.rhdl" open
+
+fun adjusted_raw_exponent(in_exponent_width :: PosInt,
+                          out_exponent_width :: PosInt,
+                          exponent :: SInt(in_exponent_width + 2)) :~ SInt((if in_exponent_width > out_exponent_width | in_exponent_width | out_exponent_width) + 3):
+  def result_width = (if in_exponent_width > out_exponent_width | in_exponent_width | out_exponent_width) + 3
+  sext(exponent, result_width) + sint((1 << out_exponent_width) - (1 << in_exponent_width), result_width)
+
+fun resize_raw_float(in_exponent_width :: PosInt,
+                     in_significand_width :: PosInt,
+                     out_exponent_width :: PosInt,
+                     out_significand_width :: PosInt,
+                     input :: RawFloat(in_exponent_width, in_significand_width)) :~ RawFloat(out_exponent_width, out_significand_width):
+  def adjusted_exponent = adjusted_raw_exponent(in_exponent_width, out_exponent_width, input.signed_exponent)
+  def output_exponent:
+    if in_exponent_width <= out_exponent_width
+    | cast(extract(as_bits(adjusted_exponent), out_exponent_width + 1, 0), SInt(out_exponent_width + 2))
+    | block:
+        def negative = cast(extract(as_bits(adjusted_exponent), in_exponent_width + 2, in_exponent_width + 2), Bool)
+        def discarded = extract(as_bits(adjusted_exponent), in_exponent_width + 1, out_exponent_width + 1)
+        def saturated = concat(
+          negative,
+          mux(
+            or_reduce(discarded),
+            concat(bits((1 << (out_exponent_width - 1)) - 1, out_exponent_width - 1), bits(0, 2)),
+            extract(as_bits(adjusted_exponent), out_exponent_width, 0)
+          )
+        )
+        cast(saturated, SInt(out_exponent_width + 2))
+  def output_significand:
+    if in_significand_width < out_significand_width
+    | zext(input.significand, out_significand_width + 1) << (out_significand_width - in_significand_width)
+    | if in_significand_width == out_significand_width
+      | input.significand
+      | concat(
+          extract(input.significand, in_significand_width, (in_significand_width - out_significand_width) + 1),
+          or_reduce(extract(input.significand, in_significand_width - out_significand_width, 0))
+        )
+
+  RawFloat(out_exponent_width, out_significand_width):
+    is_nan: input.is_nan
+    is_infinite: input.is_infinite
+    is_zero: input.is_zero
+    sign: input.sign
+    signed_exponent: output_exponent
+    significand: output_significand
+
+export:
+  resize_raw_float

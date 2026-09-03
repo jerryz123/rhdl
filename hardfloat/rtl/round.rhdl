@@ -1,0 +1,229 @@
+#lang rhdl
+// Implements Berkeley HardFloat's shared raw-to-recoded rounding engines and exception flags.
+// Derived from hardfloat/src/main/scala/RoundAnyRawFNToRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "types.rhdl" open
+  "primitives.rhdl".low_mask
+
+fun repeat_bool(value :: Bool, count :: PosInt) :~ Bits(count):
+  as_bits(vec(for List (_index in 0..count): value))
+
+circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
+                             in_significand_width :: PosInt,
+                             out_exponent_width :: PosInt,
+                             out_significand_width :: PosInt,
+                             options :: RoundingOptions = RoundingOptions.Default):
+  input invalid_exception: Bool
+  input infinite_exception: Bool
+  input raw: RawFloat(in_exponent_width, in_significand_width)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits((out_exponent_width + out_significand_width) + 1)
+  output exception_flags: ExceptionFlags()
+
+  def never_underflows = options.never_underflows || options.subnormals_always_exact || in_exponent_width < out_exponent_width
+  def never_overflows = options.never_overflows || in_exponent_width < out_exponent_width
+  def out_nan_exponent = 7 << (out_exponent_width - 2)
+  def out_infinite_exponent = 6 << (out_exponent_width - 2)
+  def out_max_finite_exponent = out_infinite_exponent - 1
+  def out_minimum_normal_exponent = (1 << (out_exponent_width - 1)) + 2
+  def out_minimum_nonzero_exponent = (out_minimum_normal_exponent - out_significand_width) + 1
+
+  def near_even = rounding_mode === RoundingMode.NearEven
+  def minimum = rounding_mode === RoundingMode.Minimum
+  def maximum = rounding_mode === RoundingMode.Maximum
+  def near_maximum_magnitude = rounding_mode === RoundingMode.NearMaximumMagnitude
+  def odd = rounding_mode === RoundingMode.Odd
+  def round_magnitude_up = (minimum & raw.sign) ||| (maximum & !raw.sign)
+
+  def exponent_work_width = (if in_exponent_width > out_exponent_width | in_exponent_width | out_exponent_width) + 3
+  def adjusted_exponent :: SInt(exponent_work_width) = sext(raw.signed_exponent, exponent_work_width) + sint(
+    (1 << out_exponent_width) - (1 << in_exponent_width),
+    exponent_work_width
+  )
+  def adjusted_significand :: Bits(out_significand_width + 3):
+    if in_significand_width < (out_significand_width + 2)
+    | zext(raw.significand, out_significand_width + 3) << ((out_significand_width - in_significand_width) + 2)
+    | if in_significand_width == (out_significand_width + 2)
+      | raw.significand
+      | concat(
+          extract(raw.significand, in_significand_width, (in_significand_width - out_significand_width) - 1),
+          or_reduce(extract(raw.significand, (in_significand_width - out_significand_width) - 2, 0))
+        )
+  def shift_significand_down = if options.significand_msb_always_zero | Bool(#false) | cast(
+    extract(adjusted_significand, out_significand_width + 2, out_significand_width + 2),
+    Bool
+  )
+
+  def round_mask :: Bits(out_significand_width + 3):
+    if never_underflows
+    | concat(bits(0, out_significand_width), shift_significand_down, bits(3, 2))
+    | concat(
+        low_mask(
+          extract(as_bits(adjusted_exponent), out_exponent_width, 0),
+          (out_minimum_normal_exponent - out_significand_width) - 1,
+          out_minimum_normal_exponent
+        ) ||| zext(as_bits(shift_significand_down), out_significand_width + 1),
+        bits(3, 2)
+      )
+  def shifted_round_mask = concat(bits(0, 1), extract(round_mask, out_significand_width + 2, 1))
+  def round_position_mask = !shifted_round_mask & round_mask
+  def round_position_bit = or_reduce(adjusted_significand & round_position_mask)
+  def any_round_extra = or_reduce(adjusted_significand & shifted_round_mask)
+  def any_round = round_position_bit ||| any_round_extra
+  def round_increment = ((near_even ||| near_maximum_magnitude) & round_position_bit) ||| (round_magnitude_up & any_round)
+  def incremented_significand = (
+    zext(extract(adjusted_significand ||| round_mask, out_significand_width + 2, 2), out_significand_width + 2) + bits(1, out_significand_width + 2)
+  ) & !mux(
+    near_even & round_position_bit & !any_round_extra,
+    extract(round_mask, out_significand_width + 2, 1),
+    bits(0, out_significand_width + 2)
+  )
+  def truncated_significand = zext(
+    extract(adjusted_significand & !round_mask, out_significand_width + 2, 2),
+    out_significand_width + 2
+  ) ||| mux(
+    odd & any_round,
+    extract(round_position_mask, out_significand_width + 2, 1),
+    bits(0, out_significand_width + 2)
+  )
+  def rounded_significand = mux(round_increment, incremented_significand, truncated_significand)
+  def rounded_exponent_width = exponent_work_width + 1
+  def rounded_exponent :: SInt(rounded_exponent_width) = sext(adjusted_exponent, rounded_exponent_width) + cast(
+    zext(extract(rounded_significand, out_significand_width + 1, out_significand_width), rounded_exponent_width),
+    SInt(rounded_exponent_width)
+  )
+
+  def common_exponent = extract(as_bits(rounded_exponent), out_exponent_width, 0)
+  def common_fraction = mux(
+    shift_significand_down,
+    extract(rounded_significand, out_significand_width - 1, 1),
+    extract(rounded_significand, out_significand_width - 2, 0)
+  )
+  def common_overflow = if never_overflows | Bool(#false) | rounded_exponent >= sint(
+    3 << (out_exponent_width - 1),
+    rounded_exponent_width
+  )
+  def common_total_underflow = if never_underflows | Bool(#false) | rounded_exponent < sint(
+    out_minimum_nonzero_exponent,
+    rounded_exponent_width
+  )
+  def unbounded_round_position_bit = mux(
+    shift_significand_down,
+    cast(extract(adjusted_significand, 2, 2), Bool),
+    cast(extract(adjusted_significand, 1, 1), Bool)
+  )
+  def unbounded_any_round = (shift_significand_down & cast(extract(adjusted_significand, 2, 2), Bool)) ||| or_reduce(
+    extract(adjusted_significand, 1, 0)
+  )
+  def unbounded_round_increment = ((near_even ||| near_maximum_magnitude) & unbounded_round_position_bit) ||| (
+    round_magnitude_up & unbounded_any_round
+  )
+  def round_carry = mux(
+    shift_significand_down,
+    cast(extract(rounded_significand, out_significand_width + 1, out_significand_width + 1), Bool),
+    cast(extract(rounded_significand, out_significand_width, out_significand_width), Bool)
+  )
+  def common_underflow:
+    if never_underflows
+    | Bool(#false)
+    | common_total_underflow ||| (
+        any_round & ((adjusted_exponent >> out_exponent_width) <= sint(0, exponent_work_width)) & mux(
+          shift_significand_down,
+          cast(extract(round_mask, 3, 3), Bool),
+          cast(extract(round_mask, 2, 2), Bool)
+        ) & !(
+          (tininess_mode === TininessMode.AfterRounding) & !mux(
+            shift_significand_down,
+            cast(extract(round_mask, 4, 4), Bool),
+            cast(extract(round_mask, 3, 3), Bool)
+          ) & round_carry & round_position_bit & unbounded_round_increment
+        )
+      )
+  def common_inexact = common_total_underflow ||| any_round
+
+  def is_nan_out = invalid_exception ||| raw.is_nan
+  def special_infinite_out = infinite_exception ||| raw.is_infinite
+  def common_case = !is_nan_out & !special_infinite_out & !raw.is_zero
+  def overflow = common_case & common_overflow
+  def underflow = common_case & common_underflow
+  def inexact = overflow ||| (common_case & common_inexact)
+  def overflow_round_magnitude_up = near_even ||| near_maximum_magnitude ||| round_magnitude_up
+  def peg_minimum_nonzero = common_case & common_total_underflow & (round_magnitude_up ||| odd)
+  def peg_maximum_finite = overflow & !overflow_round_magnitude_up
+  def infinite_out = special_infinite_out ||| (overflow & overflow_round_magnitude_up)
+  def sign_out = mux(is_nan_out, Bool(#false), raw.sign)
+  def exponent_zero_mask = bits(7 << (out_exponent_width - 2), out_exponent_width + 1)
+  def exponent_out = (
+    common_exponent & !mux(raw.is_zero ||| common_total_underflow, exponent_zero_mask, bits(0, out_exponent_width + 1)) & !mux(
+      peg_minimum_nonzero,
+      bits(((1 << (out_exponent_width + 1)) - 1) - out_minimum_nonzero_exponent, out_exponent_width + 1),
+      bits(0, out_exponent_width + 1)
+    ) & !mux(
+      peg_maximum_finite,
+      bits(1 << (out_exponent_width - 1), out_exponent_width + 1),
+      bits(0, out_exponent_width + 1)
+    ) & !mux(
+      infinite_out,
+      bits(1 << (out_exponent_width - 2), out_exponent_width + 1),
+      bits(0, out_exponent_width + 1)
+    )
+  ) ||| mux(peg_minimum_nonzero, bits(out_minimum_nonzero_exponent, out_exponent_width + 1), bits(0, out_exponent_width + 1)) ||| mux(
+    peg_maximum_finite,
+    bits(out_max_finite_exponent, out_exponent_width + 1),
+    bits(0, out_exponent_width + 1)
+  ) ||| mux(infinite_out, bits(out_infinite_exponent, out_exponent_width + 1), bits(0, out_exponent_width + 1)) ||| mux(
+    is_nan_out,
+    bits(out_nan_exponent, out_exponent_width + 1),
+    bits(0, out_exponent_width + 1)
+  )
+  def nan_or_zero_fraction = mux(
+    is_nan_out,
+    bits(1 << (out_significand_width - 2), out_significand_width - 1),
+    bits(0, out_significand_width - 1)
+  )
+  def fraction_out = mux(
+    is_nan_out ||| raw.is_zero ||| common_total_underflow,
+    nan_or_zero_fraction,
+    common_fraction
+  ) ||| repeat_bool(peg_maximum_finite, out_significand_width - 1)
+
+  out <== concat(sign_out, exponent_out, fraction_out)
+  exception_flags <== ExceptionFlags():
+    invalid: invalid_exception
+    infinite: infinite_exception
+    overflow: overflow
+    underflow: underflow
+    inexact: inexact
+
+circuit RoundRawFNToRecFN(format :: FloatFormat,
+                          options :: RoundingOptions = RoundingOptions.Default):
+  input invalid_exception: Bool
+  input infinite_exception: Bool
+  input raw: RawFloat(format.exponent_width, (format.significand_width + 2))
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output out: Bits(format.recoded_width)
+  output exception_flags: ExceptionFlags()
+
+  inst round(RoundAnyRawFNToRecFN(
+    format.exponent_width,
+    (format.significand_width + 2),
+    format.exponent_width,
+    format.significand_width,
+    options
+  ))
+  round.invalid_exception <== invalid_exception
+  round.infinite_exception <== infinite_exception
+  round.raw <== raw
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+export:
+  RoundAnyRawFNToRecFN
+  RoundRawFNToRecFN

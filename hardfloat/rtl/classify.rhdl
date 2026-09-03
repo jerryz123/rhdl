@@ -1,0 +1,35 @@
+#lang rhdl
+// Classifies recoded values into the ten one-hot Berkeley HardFloat categories.
+// Derived from hardfloat/src/main/scala/classifyRecFN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "types.rhdl" open
+  "recode.rhdl" open
+
+fun classify_recfn(format :: FloatFormat,
+                   value :: Bits(format.recoded_width)) :~ FloatClass:
+  def raw = raw_float_from_recfn(format, value)
+  def signaling_nan = is_signaling_nan(format, raw)
+  def finite_nonzero = !raw.is_nan & !raw.is_infinite & !raw.is_zero
+  def minimum_normal_exponent = (1 << (format.exponent_width - 1)) + 2
+  def subnormal = raw.signed_exponent < sint(minimum_normal_exponent, format.exponent_width + 2)
+  cast(
+    concat(
+      raw.is_nan & !signaling_nan,
+      signaling_nan,
+      !raw.sign & raw.is_infinite,
+      !raw.sign & finite_nonzero & !subnormal,
+      !raw.sign & finite_nonzero & subnormal,
+      !raw.sign & raw.is_zero,
+      raw.sign & raw.is_zero,
+      raw.sign & finite_nonzero & subnormal,
+      raw.sign & finite_nonzero & !subnormal,
+      raw.sign & raw.is_infinite
+    ),
+    FloatClass
+  )
+
+export:
+  classify_recfn

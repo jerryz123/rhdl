@@ -1,0 +1,822 @@
+#lang rhdl
+// Implements Berkeley HardFloat's pipelined multiply-assisted binary64 division and square root.
+// Derived from DivSqrtRecF64_mulAddZ31.scala and DivSqrtRecF64.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "../round.rhdl".RoundRawFNToRecFN
+
+fun f64_repeat(value :: Bool, count :: PosInt) :~ Bits(count):
+  as_bits(vec(for List (_index in 0..count): value))
+
+sync_circuit DivSqrtRecF64ToRawMulAddZ31():
+  input input_valid: Bool
+  input square_root: Bool
+  input a: Bits(65)
+  input b: Bits(65)
+  input rounding_mode: RoundingMode
+  output division_ready: Bool
+  output square_root_ready: Bool
+  output using_multiply_add: Bits(4)
+  output latch_multiply_a: Bool
+  output multiply_a: Bits(54)
+  output latch_multiply_b: Bool
+  output multiply_b: Bits(54)
+  output multiply_c: Bits(105)
+  input multiply_add_result: Bits(105)
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output rounding_mode_out: RoundingMode
+  output invalid_exception: Bool
+  output infinite_exception: Bool
+  output raw_out: RawFloat(11, 55)
+
+  reg cycle_a(~init: bits(0, 3))
+  reg cycle_b(~init: bits(0, 4))
+  reg cycle_c(~init: bits(0, 3))
+  reg cycle_e(~init: bits(0, 3))
+
+  reg valid_pa(~init: Bool(#false))
+  reg square_root_pa(Bool)
+  reg major_exception_pa(Bool)
+  reg nan_pa(Bool)
+  reg infinite_pa(Bool)
+  reg zero_pa(Bool)
+  reg sign_pa(Bool)
+  reg exponent_pa(SInt(13))
+  reg fraction_b_pa(Bits(52))
+  reg fraction_a_pa(Bits(52))
+  reg rounding_mode_pa(RoundingMode)
+
+  reg valid_pb(~init: Bool(#false))
+  reg square_root_pb(Bool)
+  reg major_exception_pb(Bool)
+  reg nan_pb(Bool)
+  reg infinite_pb(Bool)
+  reg zero_pb(Bool)
+  reg sign_pb(Bool)
+  reg exponent_pb(SInt(13))
+  reg fraction_a_bit_zero_pb(Bool)
+  reg fraction_b_pb(Bits(52))
+  reg rounding_mode_pb(RoundingMode)
+
+  reg valid_pc(~init: Bool(#false))
+  reg square_root_pc(Bool)
+  reg major_exception_pc(Bool)
+  reg nan_pc(Bool)
+  reg infinite_pc(Bool)
+  reg zero_pc(Bool)
+  reg sign_pc(Bool)
+  reg exponent_pc(SInt(13))
+  reg fraction_a_bit_zero_pc(Bool)
+  reg fraction_b_pc(Bits(52))
+  reg rounding_mode_pc(RoundingMode)
+
+  reg fraction_r0_a(Bits(9))
+  reg high_square_r0_a(Bits(10))
+  reg partial_negative_sigma0_a(Bits(21))
+  reg next_multiply_9_a(Bits(9))
+  reg next_multiply_9_b(Bits(9))
+  reg er1_b(Bits(17))
+  reg e_square_r1_b(Bits(32))
+  reg significand_x1_b(Bits(58))
+  reg square_sigma1_c(Bits(33))
+  reg significand_xn_c(Bits(58))
+  reg u_c(Bits(31))
+  reg e_e_division(Bool)
+  reg significand_t_e(Bits(54))
+  reg negative_remainder_t_e(Bool)
+  reg zero_remainder_t_e(Bool)
+
+  def raw_a = raw_float_from_recfn(FloatFormat.F64, a)
+  def raw_b = raw_float_from_recfn(FloatFormat.F64, b)
+  def division_invalid = (raw_a.is_zero & raw_b.is_zero) ||| (
+    raw_a.is_infinite & raw_b.is_infinite
+  )
+  def square_root_invalid = !raw_b.is_nan & !raw_b.is_zero & raw_b.sign
+  def input_major_exception = mux(
+    square_root,
+    is_signaling_nan(FloatFormat.F64, raw_b) ||| square_root_invalid,
+    is_signaling_nan(FloatFormat.F64, raw_a) ||| is_signaling_nan(FloatFormat.F64, raw_b) ||| (
+      division_invalid ||| (!raw_a.is_nan & !raw_a.is_infinite & raw_b.is_zero)
+    )
+  )
+  def input_nan = mux(
+    square_root,
+    raw_b.is_nan ||| square_root_invalid,
+    raw_a.is_nan ||| raw_b.is_nan ||| division_invalid
+  )
+  def input_infinite = mux(square_root, raw_b.is_infinite, raw_a.is_infinite ||| raw_b.is_zero)
+  def input_zero = mux(square_root, raw_b.is_zero, raw_a.is_zero ||| raw_b.is_infinite)
+  def input_sign = (!square_root & raw_a.sign) ^ raw_b.sign
+  def special_a = raw_a.is_nan ||| raw_a.is_infinite ||| raw_a.is_zero
+  def special_b = raw_b.is_nan ||| raw_b.is_infinite ||| raw_b.is_zero
+  def normal_division = !special_a & !special_b
+  def normal_square_root = !special_b & !raw_b.sign
+  def normal_input = mux(square_root, normal_square_root, normal_division)
+  def negated_b_exponent = cast(
+    concat(extract(as_bits(raw_b.signed_exponent), 11, 11), !extract(as_bits(raw_b.signed_exponent), 10, 0)),
+    SInt(12)
+  )
+  def quotient_exponent = sext(raw_a.signed_exponent, 14) + sext(negated_b_exponent, 14)
+  def saturated_quotient_exponent = cast(
+    concat(
+      mux(sint(7 << 9, 14) <= quotient_exponent, bits(6, 4), extract(as_bits(quotient_exponent), 12, 9)),
+      extract(as_bits(quotient_exponent), 8, 0)
+    ),
+    SInt(13)
+  )
+
+  def cycle_b10_sqrt = cycle_b === bits(10, 4)
+  def cycle_b9_sqrt = cycle_b === bits(9, 4)
+  def cycle_b8_sqrt = cycle_b === bits(8, 4)
+  def cycle_b7_sqrt = cycle_b === bits(7, 4)
+  def cycle_b6 = cycle_b === bits(6, 4)
+  def cycle_b5 = cycle_b === bits(5, 4)
+  def cycle_b4 = cycle_b === bits(4, 4)
+  def cycle_b3 = cycle_b === bits(3, 4)
+  def cycle_b2 = cycle_b === bits(2, 4)
+  def cycle_b1 = cycle_b === bits(1, 4)
+  def cycle_b6_div = cycle_b6 & valid_pa & !square_root_pa
+  def cycle_b5_div = cycle_b5 & valid_pa & !square_root_pa
+  def cycle_b4_div = cycle_b4 & valid_pa & !square_root_pa
+  def cycle_b3_div = cycle_b3 & !square_root_pb
+  def cycle_b2_div = cycle_b2 & !square_root_pb
+  def cycle_b1_div = cycle_b1 & !square_root_pb
+  def cycle_b6_sqrt = cycle_b6 & valid_pb & square_root_pb
+  def cycle_b5_sqrt = cycle_b5 & valid_pb & square_root_pb
+  def cycle_b4_sqrt = cycle_b4 & valid_pb & square_root_pb
+  def cycle_b3_sqrt = cycle_b3 & square_root_pb
+  def cycle_b2_sqrt = cycle_b2 & square_root_pb
+  def cycle_b1_sqrt = cycle_b1 & square_root_pb
+
+  def cycle_c6_sqrt = cycle_c === bits(6, 3)
+  def cycle_c5 = cycle_c === bits(5, 3)
+  def cycle_c4 = cycle_c === bits(4, 3)
+  def cycle_c3 = cycle_c === bits(3, 3)
+  def cycle_c2 = cycle_c === bits(2, 3)
+  def cycle_c1 = cycle_c === bits(1, 3)
+  def cycle_c5_div = cycle_c5 & !square_root_pb
+  def cycle_c4_div = cycle_c4 & !square_root_pb
+  def cycle_c3_div = cycle_c3 & !square_root_pb
+  def cycle_c2_div = cycle_c2 & !square_root_pc
+  def cycle_c1_div = cycle_c1 & !square_root_pc
+  def cycle_c5_sqrt = cycle_c5 & square_root_pb
+  def cycle_c4_sqrt = cycle_c4 & square_root_pb
+  def cycle_c3_sqrt = cycle_c3 & square_root_pb
+  def cycle_c2_sqrt = cycle_c2 & square_root_pc
+  def cycle_c1_sqrt = cycle_c1 & square_root_pc
+
+  def cycle_e4 = cycle_e === bits(4, 3)
+  def cycle_e3 = cycle_e === bits(3, 3)
+  def cycle_e2 = cycle_e === bits(2, 3)
+  def cycle_e1 = cycle_e === bits(1, 3)
+  def cycle_e4_div = cycle_e4 & !square_root_pc
+  def cycle_e3_div = cycle_e3 & !square_root_pc
+  def cycle_e2_div = cycle_e2 & !square_root_pc
+  def cycle_e1_div = cycle_e1 & !square_root_pc
+  def cycle_e4_sqrt = cycle_e4 & square_root_pc
+  def cycle_e3_sqrt = cycle_e3 & square_root_pc
+  def cycle_e2_sqrt = cycle_e2 & square_root_pc
+  def cycle_e1_sqrt = cycle_e1 & square_root_pc
+
+  def normal_pa = !nan_pa & !infinite_pa & !zero_pa
+  def normal_pb = !nan_pb & !infinite_pb & !zero_pb
+  def normal_pc = !nan_pc & !infinite_pc & !zero_pc
+  def valid_normal_leaving_pc = cycle_e1
+  def valid_leaving_pc = !normal_pc ||| valid_normal_leaving_pc
+  def leaving_pc = valid_pc & valid_leaving_pc
+  def ready_pc = !valid_pc ||| valid_leaving_pc
+  def valid_normal_leaving_pb = cycle_c3
+  def valid_leaving_pb = mux(normal_pb, valid_normal_leaving_pb, ready_pc)
+  def leaving_pb = valid_pb & valid_leaving_pb
+  def ready_pb = !valid_pb ||| valid_leaving_pb
+  def valid_normal_leaving_pa = cycle_b4_div ||| cycle_b7_sqrt
+  def valid_leaving_pa = mux(normal_pa, valid_normal_leaving_pa, ready_pb)
+  def leaving_pa = valid_pa & valid_leaving_pa
+  def ready_pa = !valid_pa ||| valid_leaving_pa
+
+  division_ready <== ready_pa & !cycle_b7_sqrt & !cycle_b6_sqrt & !cycle_b5_sqrt & (
+    !cycle_b4_sqrt & !cycle_b3 & !cycle_b2 & !cycle_b1_sqrt & !cycle_c5 & !cycle_c4
+  )
+  square_root_ready <== ready_pa & !cycle_b6_sqrt & !cycle_b5_sqrt & !cycle_b4_sqrt & (
+    !cycle_b2_div & !cycle_b1_sqrt
+  )
+  def start_division = division_ready & input_valid & !square_root
+  def start_square_root = square_root_ready & input_valid & square_root
+  def start = start_division ||| start_square_root
+  def entering_pa_normal_division = start_division & normal_division
+  def entering_pa_normal_square_root = start_square_root & normal_square_root
+  def entering_pa_normal = entering_pa_normal_division ||| entering_pa_normal_square_root
+
+  def cycle_a7_sqrt = entering_pa_normal_square_root
+  def cycle_a6_sqrt = cycle_a === bits(6, 3)
+  def cycle_a5_sqrt = cycle_a === bits(5, 3)
+  def cycle_a4_sqrt = cycle_a === bits(4, 3)
+  def cycle_a4_div = entering_pa_normal_division
+  def cycle_a4 = cycle_a4_sqrt ||| cycle_a4_div
+  def cycle_a3 = cycle_a === bits(3, 3)
+  def cycle_a2 = cycle_a === bits(2, 3)
+  def cycle_a1 = cycle_a === bits(1, 3)
+  def cycle_a3_div = cycle_a3 & !square_root_pa
+  def cycle_a2_div = cycle_a2 & !square_root_pa
+  def cycle_a1_div = cycle_a1 & !square_root_pa
+  def cycle_a3_sqrt = cycle_a3 & square_root_pa
+  def cycle_a2_sqrt = cycle_a2 & square_root_pa
+  def cycle_a1_sqrt = cycle_a1 & square_root_pa
+
+  when (entering_pa_normal ||| (cycle_a =/= bits(0, 3))):
+    cycle_a <== mux(
+      entering_pa_normal_division,
+      bits(3, 3),
+      mux(entering_pa_normal_square_root, bits(6, 3), cycle_a - bits(1, 3))
+    )
+  when (cycle_a1 ||| (cycle_b =/= bits(0, 4))):
+    cycle_b <== mux(
+      cycle_a1,
+      mux(square_root_pa, bits(10, 4), bits(6, 4)),
+      cycle_b - bits(1, 4)
+    )
+  when (cycle_b1 ||| (cycle_c =/= bits(0, 3))):
+    cycle_c <== mux(
+      cycle_b1,
+      mux(square_root_pb, bits(6, 3), bits(5, 3)),
+      cycle_c - bits(1, 3)
+    )
+  when (cycle_c1 ||| (cycle_e =/= bits(0, 3))):
+    cycle_e <== mux(cycle_c1, bits(4, 3), cycle_e - bits(1, 3))
+
+  def entering_pa = entering_pa_normal ||| (start & (valid_pa ||| !ready_pb))
+  def entering_pb_from_input = start & !normal_input & !valid_pa & (
+    leaving_pb ||| (!valid_pb & !ready_pc)
+  )
+  def entering_pb_normal = valid_pa & normal_pa & valid_normal_leaving_pa
+  def entering_pb = entering_pb_from_input ||| leaving_pa
+  def entering_pc_from_input = start & !normal_input & !valid_pa & !valid_pb & ready_pc
+  def entering_pc_normal = valid_pb & normal_pb & valid_normal_leaving_pb
+  def entering_pc = entering_pc_from_input ||| leaving_pb
+
+  when (entering_pa ||| leaving_pa):
+    valid_pa <== entering_pa
+  when entering_pa:
+    square_root_pa <== square_root
+    major_exception_pa <== input_major_exception
+    nan_pa <== input_nan
+    infinite_pa <== input_infinite
+    zero_pa <== input_zero
+    sign_pa <== input_sign
+  when entering_pa_normal:
+    exponent_pa <== mux(square_root, raw_b.signed_exponent, saturated_quotient_exponent)
+    fraction_b_pa <== extract(raw_b.significand, 51, 0)
+    rounding_mode_pa <== rounding_mode
+  when entering_pa_normal_division:
+    fraction_a_pa <== extract(raw_a.significand, 51, 0)
+
+  when (entering_pb ||| leaving_pb):
+    valid_pb <== entering_pb
+  when entering_pb:
+    square_root_pb <== mux(valid_pa, square_root_pa, square_root)
+    major_exception_pb <== mux(valid_pa, major_exception_pa, input_major_exception)
+    nan_pb <== mux(valid_pa, nan_pa, input_nan)
+    infinite_pb <== mux(valid_pa, infinite_pa, input_infinite)
+    zero_pb <== mux(valid_pa, zero_pa, input_zero)
+    sign_pb <== mux(valid_pa, sign_pa, input_sign)
+  when entering_pb_normal:
+    exponent_pb <== exponent_pa
+    fraction_a_bit_zero_pb <== cast(extract(fraction_a_pa, 0, 0), Bool)
+    fraction_b_pb <== fraction_b_pa
+    rounding_mode_pb <== mux(valid_pa, rounding_mode_pa, rounding_mode)
+
+  when (entering_pc ||| leaving_pc):
+    valid_pc <== entering_pc
+  when entering_pc:
+    square_root_pc <== mux(valid_pb, square_root_pb, square_root)
+    major_exception_pc <== mux(valid_pb, major_exception_pb, input_major_exception)
+    nan_pc <== mux(valid_pb, nan_pb, input_nan)
+    infinite_pc <== mux(valid_pb, infinite_pb, input_infinite)
+    zero_pc <== mux(valid_pb, zero_pb, input_zero)
+    sign_pc <== mux(valid_pb, sign_pb, input_sign)
+  when entering_pc_normal:
+    exponent_pc <== exponent_pb
+    fraction_a_bit_zero_pc <== fraction_a_bit_zero_pb
+    fraction_b_pc <== fraction_b_pb
+    rounding_mode_pc <== mux(valid_pb, rounding_mode_pb, rounding_mode)
+
+  def significand_a_pa = concat(Bool(#true), fraction_a_pa)
+  def significand_b_pa = concat(Bool(#true), fraction_b_pa)
+  def significand_b_pc = concat(Bool(#true), fraction_b_pc)
+
+  def division_piece = extract(raw_b.significand, 51, 49)
+  def division_k1 = mux_lookup(division_piece, ~default: bits(0, 9)):
+    0: bits(0x1c7, 9)
+    1: bits(0x16c, 9)
+    2: bits(0x12a, 9)
+    3: bits(0x0f8, 9)
+    4: bits(0x0d2, 9)
+    5: bits(0x0b4, 9)
+    6: bits(0x09c, 9)
+    7: bits(0x089, 9)
+  def division_complement_k0 = mux_lookup(division_piece, ~default: bits(0, 12)):
+    0: !bits(0xfe3, 12)
+    1: !bits(0xc5d, 12)
+    2: !bits(0x98a, 12)
+    3: !bits(0x739, 12)
+    4: !bits(0x54b, 12)
+    5: !bits(0x3a9, 12)
+    6: !bits(0x242, 12)
+    7: !bits(0x10b, 12)
+  def z_fraction_b_a4_division = mux(
+    cycle_a4_div,
+    extract(raw_b.significand, 51, 0),
+    bits(0, 52)
+  )
+  def z_k1_a4_division = mux(cycle_a4_div, division_k1, bits(0, 9))
+  def z_complement_fraction_k0_a4_division = mux(
+    cycle_a4_div,
+    division_complement_k0,
+    bits(0, 12)
+  )
+
+  def raw_b_exponent_bit_zero = cast(extract(as_bits(raw_b.signed_exponent), 0, 0), Bool)
+  def raw_b_fraction_bit_51 = cast(extract(raw_b.significand, 51, 51), Bool)
+  def square_root_piece = concat(raw_b_exponent_bit_zero, raw_b_fraction_bit_51)
+  def square_root_k2 = mux_lookup(square_root_piece, ~default: bits(0, 9)):
+    0: bits(0x1c8, 9)
+    1: bits(0x0c1, 9)
+    2: bits(0x143, 9)
+    3: bits(0x089, 9)
+  def square_root_complement_k1 = mux_lookup(square_root_piece, ~default: bits(0, 10)):
+    0: !bits(0x3d0, 10)
+    1: !bits(0x220, 10)
+    2: !bits(0x2b2, 10)
+    3: !bits(0x181, 10)
+  def z_fraction_b_a7_sqrt = mux(
+    cycle_a7_sqrt,
+    extract(raw_b.significand, 51, 0),
+    bits(0, 52)
+  )
+  def z_k2_a7_sqrt = mux(cycle_a7_sqrt, square_root_k2, bits(0, 9))
+  def z_complement_k1_a7_sqrt = mux(
+    cycle_a7_sqrt,
+    square_root_complement_k1,
+    bits(0, 10)
+  )
+
+  def pa_exponent_bit_zero = cast(extract(as_bits(exponent_pa), 0, 0), Bool)
+  def pa_significand_b_bit_51 = cast(extract(significand_b_pa, 51, 51), Bool)
+  def pa_square_root_piece = concat(pa_exponent_bit_zero, pa_significand_b_bit_51)
+  def pa_square_root_complement_k0 = mux_lookup(pa_square_root_piece, ~default: bits(0, 13)):
+    0: !bits(0x1fe5, 13)
+    1: !bits(0x1435, 13)
+    2: !bits(0x0d2c, 13)
+    3: !bits(0x04e8, 13)
+  def z_complement_fraction_k0_a6_sqrt = mux(
+    cycle_a6_sqrt,
+    pa_square_root_complement_k0,
+    bits(0, 13)
+  )
+
+  def multiply_9_a = extract(z_fraction_b_a4_division, 48, 40) ||| z_k2_a7_sqrt ||| mux(
+    !start,
+    next_multiply_9_a,
+    bits(0, 9)
+  )
+  def multiply_9_b = z_k1_a4_division ||| extract(z_fraction_b_a7_sqrt, 50, 42) ||| mux(
+    !start,
+    next_multiply_9_b,
+    bits(0, 9)
+  )
+  def multiply_9_c_sqrt7 = zext(
+    concat(z_complement_k1_a7_sqrt, f64_repeat(cycle_a7_sqrt, 10)),
+    25
+  )
+  def multiply_9_c_sqrt6 = zext(
+    concat(cycle_a6_sqrt, z_complement_fraction_k0_a6_sqrt, f64_repeat(cycle_a6_sqrt, 6)),
+    25
+  )
+  def multiply_9_c_division4 = zext(
+    concat(cycle_a4_div, z_complement_fraction_k0_a4_division, f64_repeat(cycle_a4_div, 8)),
+    25
+  )
+  def multiply_9_c_sqrt5 = mux(
+    cycle_a5_sqrt,
+    zext(bits(1 << 18, 19), 25) + (zext(fraction_r0_a, 25) << 10),
+    bits(0, 25)
+  )
+  def high_square_r0_bit_9 = cast(extract(high_square_r0_a, 9, 9), Bool)
+  def multiply_9_c_sqrt4_low = mux(
+    cycle_a4_sqrt & !high_square_r0_bit_9,
+    bits(1 << 10, 25),
+    bits(0, 25)
+  )
+  def multiply_9_c_sqrt4_high_or_division3 = mux(
+    (cycle_a4_sqrt & high_square_r0_bit_9) ||| cycle_a3_div,
+    zext(extract(significand_b_pa, 46, 26), 25) + bits(1 << 10, 25),
+    bits(0, 25)
+  )
+  def multiply_9_c_sigma0 = mux(
+    cycle_a3_sqrt ||| cycle_a2,
+    zext(partial_negative_sigma0_a, 25),
+    bits(0, 25)
+  )
+  def multiply_9_c_sqrt1 = mux(
+    cycle_a1_sqrt,
+    zext(fraction_r0_a, 25) << 16,
+    bits(0, 25)
+  )
+  def multiply_9_c_division1 = mux(
+    cycle_a1_div,
+    zext(fraction_r0_a, 25) << 15,
+    bits(0, 25)
+  )
+  def multiply_9_c = multiply_9_c_sqrt7 ||| multiply_9_c_sqrt6 ||| multiply_9_c_division4 ||| (
+    multiply_9_c_sqrt5 ||| multiply_9_c_sqrt4_low ||| multiply_9_c_sqrt4_high_or_division3
+  ) ||| multiply_9_c_sigma0 ||| multiply_9_c_sqrt1 ||| multiply_9_c_division1
+  def low_multiply_9_out = (multiply_9_a *& multiply_9_b) +& extract(multiply_9_c, 17, 0)
+  def multiply_9_out = concat(
+    mux(
+      cast(extract(low_multiply_9_out, 18, 18), Bool),
+      extract(multiply_9_c, 24, 18) + bits(1, 7),
+      extract(multiply_9_c, 24, 18)
+    ),
+    extract(low_multiply_9_out, 17, 0)
+  )
+
+  def z_fraction_r0_a6_sqrt = mux(
+    cycle_a6_sqrt & cast(extract(multiply_9_out, 19, 19), Bool),
+    !extract(multiply_9_out, 18, 10),
+    bits(0, 9)
+  )
+  def square_r0_a5 = mux(
+    pa_exponent_bit_zero,
+    zext(multiply_9_out, 26) << 1,
+    zext(multiply_9_out, 26)
+  )
+  def z_fraction_r0_a4_division = mux(
+    cycle_a4_div & cast(extract(multiply_9_out, 20, 20), Bool),
+    !extract(multiply_9_out, 19, 11),
+    bits(0, 9)
+  )
+  def z_sigma0_a2 = mux(
+    cycle_a2 & cast(extract(multiply_9_out, 11, 11), Bool),
+    !extract(multiply_9_out, 10, 2),
+    bits(0, 9)
+  )
+  def r1_a1 = bits(1 << 15, 16) ||| mux(
+    square_root_pa,
+    zext(extract(multiply_9_out, 24, 10), 16),
+    extract(multiply_9_out, 24, 9)
+  )
+  def er1_a1 = mux(
+    pa_exponent_bit_zero,
+    zext(r1_a1, 17) << 1,
+    zext(r1_a1, 17)
+  )
+
+  when (cycle_a6_sqrt ||| cycle_a4_div):
+    fraction_r0_a <== z_fraction_r0_a6_sqrt ||| z_fraction_r0_a4_division
+  when cycle_a5_sqrt:
+    high_square_r0_a <== extract(square_r0_a5, 19, 10)
+  when (cycle_a4_sqrt ||| cycle_a3):
+    partial_negative_sigma0_a <== mux(
+      cycle_a4_sqrt,
+      extract(multiply_9_out, 20, 0),
+      zext(extract(multiply_9_out, 24, 9), 21)
+    )
+  when (cycle_a7_sqrt ||| cycle_a6_sqrt ||| cycle_a5_sqrt ||| cycle_a4 ||| cycle_a3 ||| cycle_a2):
+    next_multiply_9_a <== mux(
+      cycle_a7_sqrt,
+      !extract(multiply_9_out, 19, 11),
+      bits(0, 9)
+    ) ||| z_fraction_r0_a6_sqrt ||| mux(
+      cycle_a4_sqrt,
+      extract(significand_b_pa, 43, 35),
+      bits(0, 9)
+    ) ||| extract(z_fraction_b_a4_division, 43, 35) ||| mux(
+      cycle_a5_sqrt ||| cycle_a3,
+      extract(significand_b_pa, 52, 44),
+      bits(0, 9)
+    ) ||| z_sigma0_a2
+  when (cycle_a7_sqrt ||| cycle_a6_sqrt ||| cycle_a5_sqrt ||| cycle_a4 ||| cycle_a2):
+    next_multiply_9_b <== extract(z_fraction_b_a7_sqrt, 50, 42) ||| z_fraction_r0_a6_sqrt ||| mux(
+      cycle_a5_sqrt,
+      extract(square_r0_a5, 9, 1),
+      bits(0, 9)
+    ) ||| z_fraction_r0_a4_division ||| mux(
+      cycle_a4_sqrt,
+      extract(high_square_r0_a, 8, 0),
+      bits(0, 9)
+    ) ||| mux(
+      cycle_a2,
+      concat(Bool(#true), extract(fraction_r0_a, 8, 1)),
+      bits(0, 9)
+    )
+  when cycle_a1_sqrt:
+    er1_b <== er1_a1
+
+  def e_square_r1_b8_sqrt = extract(multiply_add_result, 103, 72)
+  def z_sigma1_b4 = mux(cycle_b4, !extract(multiply_add_result, 90, 45), bits(0, 46))
+  def square_sigma1_b1 = extract(multiply_add_result, 79, 47)
+  def significand_xnu_b3_cx = extract(multiply_add_result, 104, 47)
+  def e_c1_division = !cast(extract(multiply_add_result, 104, 104), Bool)
+  def z_complement_significand_t_c1 = mux(
+    (cycle_c1_div & !e_c1_division) ||| cycle_c1_sqrt,
+    !extract(multiply_add_result, 104, 51),
+    mux(
+      cycle_c1_div & e_c1_division,
+      zext(!extract(multiply_add_result, 102, 50), 54),
+      bits(0, 54)
+    )
+  )
+  def z_complement_significand_t_c1_sqrt = mux(
+    cycle_c1_sqrt,
+    !extract(multiply_add_result, 104, 51),
+    bits(0, 54)
+  )
+  def significand_t_c1 = !z_complement_significand_t_c1
+  def remainder_t_e2 = extract(multiply_add_result, 55, 0)
+
+  latch_multiply_a <== cycle_a1 ||| cycle_b7_sqrt ||| cycle_b6_div ||| cycle_b4 ||| cycle_b3 ||| (
+    cycle_c6_sqrt ||| cycle_c4 ||| cycle_c1
+  )
+  multiply_a <== mux(
+    cycle_a1_sqrt,
+    zext(er1_a1, 54) << 36,
+    bits(0, 54)
+  ) ||| mux(
+    cycle_b7_sqrt ||| cycle_a1_div,
+    zext(significand_b_pa, 54),
+    bits(0, 54)
+  ) ||| mux(
+    cycle_b6_div,
+    zext(significand_a_pa, 54),
+    bits(0, 54)
+  ) ||| zext(extract(z_sigma1_b4, 45, 12), 54) ||| mux(
+    cycle_b3 ||| cycle_c6_sqrt,
+    zext(extract(significand_xnu_b3_cx, 57, 12), 54),
+    bits(0, 54)
+  ) ||| mux(
+    cycle_c4_div,
+    zext(extract(significand_xn_c, 57, 25), 54) << 13,
+    bits(0, 54)
+  ) ||| mux(
+    cycle_c4_sqrt,
+    zext(u_c, 54) << 15,
+    bits(0, 54)
+  ) ||| mux(
+    cycle_c1_div,
+    zext(significand_b_pc, 54),
+    bits(0, 54)
+  ) ||| z_complement_significand_t_c1_sqrt
+
+  latch_multiply_b <== cycle_a1 ||| cycle_b7_sqrt ||| cycle_b6_sqrt ||| cycle_b4 ||| (
+    cycle_c6_sqrt ||| cycle_c4 ||| cycle_c1
+  )
+  multiply_b <== mux(
+    cycle_a1,
+    zext(r1_a1, 54) << 36,
+    bits(0, 54)
+  ) ||| mux(
+    cycle_b7_sqrt,
+    zext(e_square_r1_b, 54) << 19,
+    bits(0, 54)
+  ) ||| mux(
+    cycle_b6_sqrt,
+    zext(er1_b, 54) << 36,
+    bits(0, 54)
+  ) ||| zext(z_sigma1_b4, 54) ||| mux(
+    cycle_c6_sqrt,
+    zext(extract(square_sigma1_c, 30, 1), 54),
+    bits(0, 54)
+  ) ||| mux(
+    cycle_c4,
+    zext(square_sigma1_c, 54),
+    bits(0, 54)
+  ) ||| z_complement_significand_t_c1
+
+  using_multiply_add <== concat(
+    cycle_a4 ||| cycle_a3_div ||| cycle_a1_div ||| cycle_b10_sqrt ||| cycle_b9_sqrt ||| (
+      cycle_b7_sqrt ||| cycle_b6 ||| cycle_b5_sqrt ||| cycle_b3_sqrt ||| cycle_b2_div
+    ) ||| cycle_b1_sqrt ||| cycle_c4,
+    cycle_a3 ||| cycle_a2_div ||| cycle_b9_sqrt ||| cycle_b8_sqrt ||| cycle_b6 ||| cycle_b5 ||| (
+      cycle_b4_sqrt ||| cycle_b2_sqrt ||| cycle_b1_div ||| cycle_c6_sqrt ||| cycle_c3
+    ),
+    cycle_a2 ||| cycle_a1_div ||| cycle_b8_sqrt ||| cycle_b7_sqrt ||| cycle_b5 ||| cycle_b4 ||| (
+      cycle_b3_sqrt ||| cycle_b1_sqrt ||| cycle_c5 ||| cycle_c2
+    ),
+    latch_multiply_a ||| cycle_b6 ||| cycle_b2_sqrt
+  )
+
+  def multiply_c_b1 = mux(
+    cycle_b1,
+    zext(significand_x1_b, 105) << 47,
+    bits(0, 105)
+  )
+  def multiply_c_c6_sqrt = mux(
+    cycle_c6_sqrt,
+    zext(significand_x1_b, 105) << 46,
+    bits(0, 105)
+  )
+  def multiply_c_c4_sqrt_or_c2 = mux(
+    cycle_c4_sqrt ||| cycle_c2,
+    zext(significand_xn_c, 105) << 47,
+    bits(0, 105)
+  )
+  def multiply_c_e3_division = mux(
+    cycle_e3_div & !e_e_division,
+    zext(as_bits(fraction_a_bit_zero_pc), 105) << 53,
+    bits(0, 105)
+  )
+  def exponent_pc_bit_zero = cast(extract(as_bits(exponent_pc), 0, 0), Bool)
+  def fraction_b_pc_bit_zero = cast(extract(fraction_b_pc, 0, 0), Bool)
+  def fraction_b_pc_bit_one = cast(extract(fraction_b_pc, 1, 1), Bool)
+  def significand_t_e_bit_zero = cast(extract(significand_t_e, 0, 0), Bool)
+  def square_root_remainder_term = mux(
+    exponent_pc_bit_zero,
+    concat(fraction_b_pc_bit_zero, Bool(#false)),
+    concat(fraction_b_pc_bit_one ^ fraction_b_pc_bit_zero, fraction_b_pc_bit_zero)
+  ) ^ concat(!significand_t_e_bit_zero, Bool(#false))
+  def multiply_c_e3_sqrt = mux(
+    cycle_e3_sqrt,
+    zext(square_root_remainder_term, 105) << 54,
+    bits(0, 105)
+  )
+  multiply_c <== multiply_c_b1 ||| multiply_c_c6_sqrt ||| multiply_c_c4_sqrt_or_c2 ||| (
+    multiply_c_e3_division ||| multiply_c_e3_sqrt
+  )
+
+  when cycle_b8_sqrt:
+    e_square_r1_b <== e_square_r1_b8_sqrt
+  when cycle_b3:
+    significand_x1_b <== significand_xnu_b3_cx
+  when cycle_b1:
+    square_sigma1_c <== square_sigma1_b1
+  when (cycle_c6_sqrt ||| cycle_c5_div ||| cycle_c3_sqrt):
+    significand_xn_c <== significand_xnu_b3_cx
+  when cycle_c5_sqrt:
+    u_c <== extract(significand_xnu_b3_cx, 56, 26)
+  when cycle_c1:
+    e_e_division <== e_c1_division
+    significand_t_e <== significand_t_c1
+  when cycle_e2:
+    negative_remainder_t_e <== mux(
+      square_root_pc,
+      cast(extract(remainder_t_e2, 55, 55), Bool),
+      cast(extract(remainder_t_e2, 53, 53), Bool)
+    )
+    zero_remainder_t_e <== (extract(remainder_t_e2, 53, 0) === bits(0, 54)) & (
+      !square_root_pc ||| (extract(remainder_t_e2, 55, 54) === bits(0, 2))
+    )
+
+  def true_less_than_x = mux(
+    square_root_pc,
+    !negative_remainder_t_e & !zero_remainder_t_e,
+    negative_remainder_t_e
+  )
+  def true_equal_x = zero_remainder_t_e
+  def exponent_plus_one = exponent_pc + sint(1, 13)
+  def significand_t_plus_one = zext(significand_t_e, 55) + bits(1, 55)
+  def division_exponent = mux(e_e_division, exponent_pc, exponent_plus_one)
+  def square_root_exponent = (exponent_pc >> 1) + sint(1024, 13)
+
+  division_valid <== leaving_pc & !square_root_pc
+  square_root_valid <== leaving_pc & square_root_pc
+  rounding_mode_out <== rounding_mode_pc
+  invalid_exception <== major_exception_pc & nan_pc
+  infinite_exception <== major_exception_pc & !nan_pc
+  raw_out <== RawFloat(11, 55):
+    is_nan: nan_pc
+    is_infinite: infinite_pc
+    is_zero: zero_pc
+    sign: sign_pc
+    signed_exponent: mux(square_root_pc, square_root_exponent, division_exponent)
+    significand: concat(
+      mux(true_less_than_x, zext(significand_t_e, 55), significand_t_plus_one),
+      !true_equal_x
+    )
+
+sync_circuit DivSqrtRecF64MulAddZ31():
+  input input_valid: Bool
+  input square_root: Bool
+  input a: Bits(65)
+  input b: Bits(65)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output division_ready: Bool
+  output square_root_ready: Bool
+  output using_multiply_add: Bits(4)
+  output latch_multiply_a: Bool
+  output multiply_a: Bits(54)
+  output latch_multiply_b: Bool
+  output multiply_b: Bits(54)
+  output multiply_c: Bits(105)
+  input multiply_add_result: Bits(105)
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output out: Bits(65)
+  output exception_flags: ExceptionFlags()
+
+  inst operation(DivSqrtRecF64ToRawMulAddZ31())
+  operation.input_valid <== input_valid
+  operation.square_root <== square_root
+  operation.a <== a
+  operation.b <== b
+  operation.rounding_mode <== rounding_mode
+  division_ready <== operation.division_ready
+  square_root_ready <== operation.square_root_ready
+  using_multiply_add <== operation.using_multiply_add
+  latch_multiply_a <== operation.latch_multiply_a
+  multiply_a <== operation.multiply_a
+  latch_multiply_b <== operation.latch_multiply_b
+  multiply_b <== operation.multiply_b
+  multiply_c <== operation.multiply_c
+  operation.multiply_add_result <== multiply_add_result
+  division_valid <== operation.division_valid
+  square_root_valid <== operation.square_root_valid
+
+  inst round(RoundRawFNToRecFN(
+    FloatFormat.F64,
+    RoundingOptions(#true)
+  ))
+  round.invalid_exception <== operation.invalid_exception
+  round.infinite_exception <== operation.infinite_exception
+  round.raw <== operation.raw_out
+  round.rounding_mode <== operation.rounding_mode_out
+  round.tininess_mode <== tininess_mode
+  out <== round.out
+  exception_flags <== round.exception_flags
+
+sync_circuit HardFloatMultiply54():
+  input valid_stage_zero: Bool
+  input latch_a_stage_zero: Bool
+  input a_stage_zero: Bits(54)
+  input latch_b_stage_zero: Bool
+  input b_stage_zero: Bits(54)
+  input c_stage_two: Bits(105)
+  output result_stage_three: Bits(105)
+
+  reg valid_stage_one(Bool)
+  reg valid_stage_two(Bool)
+  reg a_stage_one(Bits(54))
+  reg b_stage_one(Bits(54))
+  reg a_stage_two(Bits(54))
+  reg b_stage_two(Bits(54))
+  reg result_stage_three_state(Bits(105))
+
+  valid_stage_one <== valid_stage_zero
+  valid_stage_two <== valid_stage_one
+  when valid_stage_zero:
+    when latch_a_stage_zero:
+      a_stage_one <== a_stage_zero
+    when latch_b_stage_zero:
+      b_stage_one <== b_stage_zero
+  when valid_stage_one:
+    a_stage_two <== a_stage_one
+    b_stage_two <== b_stage_one
+  when valid_stage_two:
+    result_stage_three_state <== extract(a_stage_two *& b_stage_two, 104, 0) + c_stage_two
+  result_stage_three <== result_stage_three_state
+
+sync_circuit DivSqrtRecF64():
+  input input_valid: Bool
+  input square_root: Bool
+  input a: Bits(65)
+  input b: Bits(65)
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  output division_ready: Bool
+  output square_root_ready: Bool
+  output division_valid: Bool
+  output square_root_valid: Bool
+  output out: Bits(65)
+  output exception_flags: ExceptionFlags()
+
+  inst operation(DivSqrtRecF64MulAddZ31())
+  operation.input_valid <== input_valid
+  operation.square_root <== square_root
+  operation.a <== a
+  operation.b <== b
+  operation.rounding_mode <== rounding_mode
+  operation.tininess_mode <== tininess_mode
+  division_ready <== operation.division_ready
+  square_root_ready <== operation.square_root_ready
+  division_valid <== operation.division_valid
+  square_root_valid <== operation.square_root_valid
+  out <== operation.out
+  exception_flags <== operation.exception_flags
+
+  inst multiply(HardFloatMultiply54())
+  multiply.valid_stage_zero <== cast(extract(operation.using_multiply_add, 0, 0), Bool)
+  multiply.latch_a_stage_zero <== operation.latch_multiply_a
+  multiply.a_stage_zero <== operation.multiply_a
+  multiply.latch_b_stage_zero <== operation.latch_multiply_b
+  multiply.b_stage_zero <== operation.multiply_b
+  multiply.c_stage_two <== operation.multiply_c
+  operation.multiply_add_result <== multiply.result_stage_three
+
+export:
+  DivSqrtRecF64MulAddZ31
+  DivSqrtRecF64

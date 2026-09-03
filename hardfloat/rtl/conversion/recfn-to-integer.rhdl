@@ -1,0 +1,130 @@
+#lang rhdl
+// Converts Berkeley HardFloat recoded values to signed or unsigned fixed-width integers with IEEE rounding flags.
+// Derived from hardfloat/src/main/scala/RecFNToIN.scala at upstream commit c1105e6.
+// Copyright 2010-2018 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl".raw_float_from_recfn
+
+fun unsigned_equal_host(value :: Hardware.bits, constant :: Nat) :~ Bool:
+  def width = value.type.bit_width()
+  if constant >= (1 << width)
+  | Bool(#false)
+  | value === bits(constant, width)
+
+fun unsigned_at_least_host(value :: Hardware.bits, constant :: Nat) :~ Bool:
+  def width = value.type.bit_width()
+  if constant >= (1 << width)
+  | Bool(#false)
+  | value >= bits(constant, width)
+
+circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
+  unless integer_width >= 3
+  | error(~who: #'RecFNToInteger, "integer width must be at least three")
+  input value: Bits(format.recoded_width)
+  input rounding_mode: RoundingMode
+  input signed_output: Bool
+  output out: Bits(integer_width)
+  output exception_flags: IntegerExceptionFlags()
+
+  def raw = raw_float_from_recfn(format, value)
+  def raw_exponent = as_bits(raw.signed_exponent)
+  def magnitude_at_least_one = cast(extract(raw_exponent, format.exponent_width, format.exponent_width), Bool)
+  def positive_exponent = extract(raw_exponent, format.exponent_width - 1, 0)
+  def magnitude_just_below_one = !magnitude_at_least_one & and_reduce(positive_exponent)
+
+  def near_even = rounding_mode === RoundingMode.NearEven
+  def minimum = rounding_mode === RoundingMode.Minimum
+  def maximum = rounding_mode === RoundingMode.Maximum
+  def near_maximum_magnitude = rounding_mode === RoundingMode.NearMaximumMagnitude
+  def odd = rounding_mode === RoundingMode.Odd
+
+  def exponent_index_width:
+    if (format.exponent_width - 1) < index_width(integer_width)
+    | format.exponent_width - 1
+    | index_width(integer_width)
+  def shift_amount = mux(
+    magnitude_at_least_one,
+    extract(raw_exponent, exponent_index_width - 1, 0),
+    bits(0, exponent_index_width)
+  )
+  def shift_capacity = (1 << exponent_index_width) - 1
+  def shifted_width = format.significand_width + shift_capacity
+  def shift_source = concat(magnitude_at_least_one, extract(raw.significand, format.significand_width - 2, 0))
+  def shifted_significand = zext(shift_source, shifted_width) << shift_amount
+  def aligned_high = extract(shifted_significand, shifted_width - 1, format.significand_width - 2)
+  def aligned_significand = concat(
+    aligned_high,
+    or_reduce(extract(shifted_significand, format.significand_width - 3, 0))
+  )
+  def unrounded_integer = extract(aligned_significand, integer_width + 1, 2)
+  def common_inexact = mux(
+    magnitude_at_least_one,
+    or_reduce(extract(aligned_significand, 1, 0)),
+    !raw.is_zero
+  )
+  def round_increment_near_even = (
+    magnitude_at_least_one & (
+      and_reduce(extract(aligned_significand, 2, 1)) ||| and_reduce(extract(aligned_significand, 1, 0))
+    )
+  ) ||| (magnitude_just_below_one & or_reduce(extract(aligned_significand, 1, 0)))
+  def round_increment_near_maximum = (
+    magnitude_at_least_one & cast(extract(aligned_significand, 1, 1), Bool)
+  ) ||| magnitude_just_below_one
+  def round_increment = (near_even & round_increment_near_even) ||| (
+    near_maximum_magnitude & round_increment_near_maximum
+  ) ||| ((minimum ||| odd) & raw.sign & common_inexact) ||| (maximum & !raw.sign & common_inexact)
+  def complemented_unrounded = mux(raw.sign, !unrounded_integer, unrounded_integer)
+  def rounded_integer = mux(
+    round_increment ^ raw.sign,
+    complemented_unrounded + bits(1, integer_width),
+    complemented_unrounded
+  ) ||| zext(as_bits(odd & common_inexact), integer_width)
+
+  def at_overflow_edge = unsigned_equal_host(positive_exponent, integer_width - 1)
+  def round_carry_but_two = and_reduce(extract(unrounded_integer, integer_width - 3, 0)) & round_increment
+  def signed_negative_overflow = at_overflow_edge & (
+    or_reduce(extract(unrounded_integer, integer_width - 2, 0)) ||| round_increment
+  )
+  def signed_positive_overflow = at_overflow_edge ||| (
+    unsigned_equal_host(positive_exponent, integer_width - 2) & round_carry_but_two
+  )
+  def unsigned_positive_overflow = at_overflow_edge & cast(
+    extract(unrounded_integer, integer_width - 2, integer_width - 2),
+    Bool
+  ) & round_carry_but_two
+  def overflow_at_magnitude = unsigned_at_least_host(positive_exponent, integer_width) ||| mux(
+    signed_output,
+    mux(raw.sign, signed_negative_overflow, signed_positive_overflow),
+    raw.sign ||| unsigned_positive_overflow
+  )
+  def common_overflow = mux(
+    magnitude_at_least_one,
+    overflow_at_magnitude,
+    !signed_output & raw.sign & round_increment
+  )
+
+  def invalid = raw.is_nan ||| raw.is_infinite
+  def overflow = !invalid & common_overflow
+  def inexact = !invalid & !common_overflow & common_inexact
+  def exception_sign = !raw.is_nan & raw.sign
+  def exception_value = mux(
+    signed_output === exception_sign,
+    bits(1 << (integer_width - 1), integer_width),
+    bits(0, integer_width)
+  ) ||| mux(
+    !exception_sign,
+    bits((1 << (integer_width - 1)) - 1, integer_width),
+    bits(0, integer_width)
+  )
+
+  out <== mux(invalid ||| common_overflow, exception_value, rounded_integer)
+  exception_flags <== IntegerExceptionFlags():
+    invalid: invalid
+    overflow: overflow
+    inexact: inexact
+
+export:
+  RecFNToInteger

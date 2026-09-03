@@ -1,0 +1,161 @@
+#lang rhdl
+// Exercises permanent HardFloat representation, conversion, rounding, and arithmetic contracts in F16.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "../main.rhdl" open
+
+circuit HardFloatRepresentation():
+  def format = FloatFormat.F16
+  input a: Bits(format.ieee_width)
+  input b: Bits(format.ieee_width)
+  input signaling: Bool
+  input invalid_exception: Bool
+  input infinite_exception: Bool
+  input rounding_mode: RoundingMode
+  input tininess_mode: TininessMode
+  input rounding_extra: Bits(2)
+  input integer_value: Bits(16)
+  input integer_signed: Bool
+  input integer_output_signed: Bool
+  input wide_ieee: Bits(FloatFormat.F32.ieee_width)
+  input add_subtract: Bool
+  input fma_c: Bits(format.ieee_width)
+  input fma_operation: Bits(2)
+  output recoded_a: Bits(format.recoded_width)
+  output restored_a: Bits(format.ieee_width)
+  output classification: FloatClass
+  output leading_zero_count: Bits(index_width(format.significand_width - 1))
+  output reduced_pairs: Bits((format.ieee_width + 1) div 2)
+  output descending_low_mask: Bits(12)
+  output ascending_low_mask: Bits(12)
+  output lt: Bool
+  output eq: Bool
+  output gt: Bool
+  output exception_flags: ExceptionFlags()
+  output rounded_recoded: Bits(format.recoded_width)
+  output rounded_ieee: Bits(format.ieee_width)
+  output rounding_flags: ExceptionFlags()
+  output integer_as_ieee: Bits(format.ieee_width)
+  output integer_conversion_flags: ExceptionFlags()
+  output ieee_as_integer: Bits(16)
+  output integer_result_flags: IntegerExceptionFlags()
+  output widened_ieee: Bits(FloatFormat.F32.ieee_width)
+  output widened_flags: ExceptionFlags()
+  output narrowed_ieee: Bits(format.ieee_width)
+  output narrowed_flags: ExceptionFlags()
+  output product_ieee: Bits(format.ieee_width)
+  output product_flags: ExceptionFlags()
+  output sum_ieee: Bits(format.ieee_width)
+  output sum_flags: ExceptionFlags()
+  output fma_ieee: Bits(format.ieee_width)
+  output fma_flags: ExceptionFlags()
+
+  def encoded_a = recfn_from_fn(format, a)
+  def encoded_b = recfn_from_fn(format, b)
+  recoded_a <== encoded_a
+  restored_a <== fn_from_recfn(format, encoded_a)
+  classification <== classify_recfn(format, encoded_a)
+  leading_zero_count <== count_leading_zeros(a[0..(format.significand_width - 1)])
+  reduced_pairs <== or_reduce_by_2(a)
+  descending_low_mask <== low_mask(a[0..6], 6, 18)
+  ascending_low_mask <== low_mask(a[0..6], 18, 6)
+
+  inst compare(CompareRecFN(format))
+  compare.a <== encoded_a
+  compare.b <== encoded_b
+  compare.signaling <== signaling
+  lt <== compare.lt
+  eq <== compare.eq
+  gt <== compare.gt
+  exception_flags <== compare.exception_flags
+
+  def expanded_raw = resize_raw_float(
+    format.exponent_width,
+    format.significand_width,
+    format.exponent_width,
+    format.significand_width + 2,
+    raw_float_from_fn(format, a)
+  )
+  def rounding_raw = RawFloat(format.exponent_width, (format.significand_width + 2)):
+    is_nan: expanded_raw.is_nan
+    is_infinite: expanded_raw.is_infinite
+    is_zero: expanded_raw.is_zero
+    sign: expanded_raw.sign
+    signed_exponent: expanded_raw.signed_exponent
+    significand: expanded_raw.significand ||| zext(rounding_extra, format.significand_width + 3)
+  inst round(RoundRawFNToRecFN(format))
+  round.invalid_exception <== invalid_exception
+  round.infinite_exception <== infinite_exception
+  round.raw <== rounding_raw
+  round.rounding_mode <== rounding_mode
+  round.tininess_mode <== tininess_mode
+  rounded_recoded <== round.out
+  rounded_ieee <== fn_from_recfn(format, round.out)
+  rounding_flags <== round.exception_flags
+
+  inst integer_to_float(IntegerToRecFN(16, format))
+  integer_to_float.signed_input <== integer_signed
+  integer_to_float.value <== integer_value
+  integer_to_float.rounding_mode <== rounding_mode
+  integer_to_float.tininess_mode <== tininess_mode
+  integer_as_ieee <== fn_from_recfn(format, integer_to_float.out)
+  integer_conversion_flags <== integer_to_float.exception_flags
+
+  inst float_to_integer(RecFNToInteger(format, 16))
+  float_to_integer.value <== encoded_a
+  float_to_integer.rounding_mode <== rounding_mode
+  float_to_integer.signed_output <== integer_output_signed
+  ieee_as_integer <== float_to_integer.out
+  integer_result_flags <== float_to_integer.exception_flags
+
+  inst widen(RecFNToRecFN(format, FloatFormat.F32))
+  widen.value <== encoded_a
+  widen.rounding_mode <== rounding_mode
+  widen.tininess_mode <== tininess_mode
+  widened_ieee <== fn_from_recfn(FloatFormat.F32, widen.out)
+  widened_flags <== widen.exception_flags
+
+  inst narrow(RecFNToRecFN(FloatFormat.F32, format))
+  narrow.value <== recfn_from_fn(FloatFormat.F32, wide_ieee)
+  narrow.rounding_mode <== rounding_mode
+  narrow.tininess_mode <== tininess_mode
+  narrowed_ieee <== fn_from_recfn(format, narrow.out)
+  narrowed_flags <== narrow.exception_flags
+
+  inst multiply(MulRecFN(format))
+  multiply.a <== encoded_a
+  multiply.b <== encoded_b
+  multiply.rounding_mode <== rounding_mode
+  multiply.tininess_mode <== tininess_mode
+  product_ieee <== fn_from_recfn(format, multiply.out)
+  product_flags <== multiply.exception_flags
+
+  inst add(AddRecFN(format))
+  add.subtract <== add_subtract
+  add.a <== encoded_a
+  add.b <== encoded_b
+  add.rounding_mode <== rounding_mode
+  add.tininess_mode <== tininess_mode
+  sum_ieee <== fn_from_recfn(format, add.out)
+  sum_flags <== add.exception_flags
+
+  inst fused_multiply_add(MulAddRecFN(format))
+  fused_multiply_add.operation <== fma_operation
+  fused_multiply_add.a <== encoded_a
+  fused_multiply_add.b <== encoded_b
+  fused_multiply_add.c <== recfn_from_fn(format, fma_c)
+  fused_multiply_add.rounding_mode <== rounding_mode
+  fused_multiply_add.tininess_mode <== tininess_mode
+  fma_ieee <== fn_from_recfn(format, fused_multiply_add.out)
+  fma_flags <== fused_multiply_add.exception_flags
+
+def design = elaborate(HardFloatRepresentation())
+def minimum_add_design = elaborate(AddRecFN(FloatFormat(3, 3)))
+def minimum_fma_design = elaborate(MulAddRecFN(FloatFormat(3, 3)))
+
+export:
+  HardFloatRepresentation
+  design
+  minimum_add_design
+  minimum_fma_design

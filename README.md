@@ -135,6 +135,7 @@ Detailed documentation lives with the component that owns it:
 | Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
 | Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
 | Pure NoC authoring, validation, planning, and hardware bridge | [`noc/README.md`](noc/README.md) |
+| RHDL port of Berkeley HardFloat recoded floating-point hardware | [`hardfloat/README.md`](hardfloat/README.md) |
 | AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
 | CHI platform devices and register blocks | [`devices/README.md`](devices/README.md) |
 | CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |

@@ -1,0 +1,38 @@
+#lang rhdl
+// Normalizes a signed or unsigned fixed-width integer into Berkeley HardFloat's raw representation.
+// Derived from hardfloat/src/main/scala/rawFloatFromIN.scala at upstream commit c1105e6.
+// Copyright 2010-2017 The Regents of the University of California.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../primitives.rhdl".count_leading_zeros
+
+fun raw_float_from_integer(signed_input :: Bool,
+                           input :: Hardware.bits) :~ RawFloat(index_width(input.type.bit_width()) + 1, input.type.bit_width()):
+  def integer_width = input.type.bit_width()
+  unless integer_width >= 2
+  | error(~who: #'raw_float_from_integer, "integer width must be at least two")
+  def exponent_width = index_width(integer_width) + 1
+  def extended_integer_width = 1 << (exponent_width - 1)
+  def sign = signed_input & cast(extract(input, integer_width - 1, integer_width - 1), Bool)
+  def magnitude = mux(sign, -input, input)
+  def extended_magnitude:
+    if integer_width == extended_integer_width
+    | magnitude
+    | zext(magnitude, extended_integer_width)
+  def normalization_distance = count_leading_zeros(extended_magnitude)
+  def normalized = extended_magnitude << normalization_distance
+  def significand = extract(normalized, extended_integer_width - 1, extended_integer_width - integer_width)
+  def exponent_bits = concat(bits(2, 2), !extract(normalization_distance, exponent_width - 2, 0))
+
+  RawFloat(exponent_width, integer_width):
+    is_nan: Bool(#false)
+    is_infinite: Bool(#false)
+    is_zero: !cast(extract(significand, integer_width - 1, integer_width - 1), Bool)
+    sign: sign
+    signed_exponent: cast(zext(exponent_bits, exponent_width + 2), SInt(exponent_width + 2))
+    significand: zext(significand, integer_width + 1)
+
+export:
+  raw_float_from_integer
