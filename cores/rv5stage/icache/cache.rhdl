@@ -29,11 +29,15 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def width = xlen.width
   def p = config.flit
   check_l1i_geometry(width, sets)
-  def beats = RV5StageCacheLineBytes / 8
+  def word_bytes = width / 8
+  def words_per_line = RV5StageCacheLineBytes / word_bytes
+  def data_depth = sets * words_per_line
   def offset_width = alignment_bits(RV5StageCacheLineBytes)
+  def word_offset_width = alignment_bits(word_bytes)
   def set_width = alignment_bits(sets)
   def tag_width = width - offset_width - set_width
-  def beat_width = index_width(beats)
+  def word_index_width = index_width(words_per_line)
+  def data_address_width = index_width(data_depth)
   def outstanding_width = index_width(3)
 
   input node_id: Bits(p.node_id_width)
@@ -42,7 +46,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
 
   inst tags(SyncRam1RW(sets, Bits(tag_width), 1))
   inst states(SyncRam1RW(sets, CHIResponseState, 1))
-  inst lines(SyncRam1RW(sets, Bits(64), beats))
+  inst lines(SyncRam1RW(data_depth, Bits(8), word_bytes))
   inst refill(RV5StageLineRefill(Bits(width), width, config))
   inst snoop(RV5StageCleanSnoop(width, config))
   refill.node_id <== node_id
@@ -56,6 +60,8 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   reg valid_lines(~init: bits(0, sets).as_vec(Bool))
   reg refill_live(~init: Bool(#false))
   reg refill_installable(~init: Bool(#false))
+  reg refill_installing(~init: Bool(#false))
+  reg refill_install_index(~init: bits(0, word_index_width))
   reg outstanding(~init: bits(0, outstanding_width))
 
   core.response.valid <== responses.egress.valid & !cache_flush
@@ -80,7 +86,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   // A queued refill does not make its line resident. Let snoops inspect the
   // current cache while that transaction waits, and hold installation until
   // the snoop completes so the shared SRAM ports remain single-owner.
-  snoop.cache_ready <== !lookup.egress.valid & !cache_flush
+  snoop.cache_ready <== !lookup.egress.valid & !refill_installing & !cache_flush
   def snoop_lookup_start = snoop.lookup.valid
   def snoop_address = snoop.address
   def snoop_set = snoop_address[offset_width..(offset_width + set_width)]
@@ -93,35 +99,32 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def snoop_pending = snoop.pending
   def response_fire = fire(core.response)
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
+  def request_data_address = core.request.bits.address[word_offset_width..(offset_width + set_width)]
   def lookup_address = lookup.egress.bits
   def lookup_set = lookup_address[offset_width..(offset_width + set_width)]
   def lookup_tag = lookup_address[(offset_width + set_width)..width]
-  def lookup_beat:
-    if beats == 1
-    | bits(0, beat_width)
-    | lookup_address[3..offset_width]
   def line_hit = valid_lines[lookup_set] & (tags.port.response.bits[0] === lookup_tag)
   def lookup_miss = lookup.egress.valid & tags.port.response.valid & !line_hit
-  def cached_beat:
-    if beats == 1
-    | lines.port.response.bits[0]
-    | lines.port.response.bits[lookup_beat]
+  def cached_word = lines.port.response.bits.as_bits()
+  def cached_instruction:
+    if width == 32
+    | cached_word
+    | mux(lookup_address[2].into(Bool), cached_word[32..64], cached_word[0..32])
   def completion_address = refill.completion.bits.context.as_bits()
   def completion_set = completion_address[offset_width..(offset_width + set_width)]
   def completion_tag = completion_address[(offset_width + set_width)..width]
-  def completion_beat:
-    if beats == 1
-    | bits(0, beat_width)
-    | completion_address[3..offset_width]
-  def completed_beat:
-    if beats == 1
-    | refill.completion.bits.line[0]
-    | refill.completion.bits.line[completion_beat]
-  def completion_instruction = mux(
-    completion_address[2].into(Bool),
-    completed_beat[32..64],
-    completed_beat[0..32]
-  )
+  def completion_word_index = completion_address[word_offset_width..offset_width]
+  def completion_words = refill.completion.bits.line.as_bits().as_vec(Bits(width))
+  def completed_word = completion_words[completion_word_index]
+  def completion_instruction:
+    if width == 32
+    | completed_word
+    | mux(completion_address[2].into(Bool), completed_word[32..64], completed_word[0..32])
+  def refill_completion_discard = !refill_installable ||| core.invalidate_all
+  def refill_install_start = refill.completion.valid & !refill_completion_discard & !snoop_pending & !refill_installing
+  def refill_install_final = refill_install_index === bits(words_per_line - 1, word_index_width)
+  def refill_install_word = refill_installing & !core.invalidate_all
+  def refill_completion_may_finish = refill_completion_discard ||| (refill_installing & refill_install_final)
   def response_capacity = (outstanding < bits(2, outstanding_width)) ||| response_fire
   assert(outstanding <= bits(2, outstanding_width), "l1i_outstanding_in_range")
   when response_fire:
@@ -155,7 +158,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def hit_responses = (
     hit_path
       |> map_flow(address => RV5StageInstructionResp()):
-        instruction: mux(address[2].into(Bool), cached_beat[32..64], cached_beat[0..32])
+        instruction: cached_instruction
         page_fault: Bool(#false)
   )
   hit_responses |> response_arbiter.ingress[0]
@@ -163,8 +166,8 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def refill_results = RV5StageLineRefillResult(Bits(width), width)
   def refill_responses = (
     refill.completion
-      |> gate_flow(!snoop_pending)
-      |> filter_flow(result => refill_live)
+      |> gate_flow(refill_completion_may_finish & (refill_installing ||| !snoop_pending))
+      |> filter_flow(result => refill_live & !cache_flush)
       |> map_flow(result => RV5StageInstructionResp()):
         instruction: completion_instruction
         page_fault: Bool(#false)
@@ -176,7 +179,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
 
   def refill_start = fire(refill.command)
   def refill_complete = fire(refill.completion)
-  def install = refill_complete & refill_installable & !core.invalidate_all
+  def install = refill_complete & refill_installing & !refill_completion_discard
   when refill_complete:
     assert(refill.completion.bits.state.is_one_of(CHIResponseState.SharedClean,
                                                   CHIResponseState.Unique),
@@ -205,12 +208,14 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
     write: install ||| update_snoop_state
     data: vec(mux(update_snoop_state, snoop.update.bits.state, refill.completion.bits.state))
     mask: Mask(1)(1)
-  lines.port.request.valid <== request_fire ||| install
-  lines.port.request.bits <== ReadWriteRequest(set_width, Bits(64), beats):
-    address: mux(install, completion_set, request_set_value)
-    write: install
-    data: refill.completion.bits.line
-    mask: (!bits(0, beats)).into(Mask(beats))
+  lines.port.request.valid <== request_fire ||| refill_install_word
+  lines.port.request.bits <== ReadWriteRequest(data_address_width, Bits(8), word_bytes):
+    address: mux(refill_install_word,
+                 concat(completion_set, refill_install_index),
+                 request_data_address)
+    write: refill_install_word
+    data: completion_words[refill_install_index].as_vec(Bits(8))
+    mask: (!bits(0, word_bytes)).into(Mask(word_bytes))
 
   when (core.invalidate_all):
     valid_lines <== bits(0, sets).as_vec(Bool)
@@ -221,6 +226,18 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
     )
   elsewhen install:
     valid_lines <== valid_lines.updated(completion_set, Bool(#true))
+
+  when (core.invalidate_all):
+    refill_installing <== Bool(#false)
+    refill_install_index <== bits(0, word_index_width)
+  elsewhen refill_install_start:
+    refill_installing <== Bool(#true)
+    refill_install_index <== bits(0, word_index_width)
+  elsewhen refill_complete:
+    refill_installing <== Bool(#false)
+    refill_install_index <== bits(0, word_index_width)
+  elsewhen (refill_install_word & !refill_install_final):
+    refill_install_index <== refill_install_index + bits(1, word_index_width)
 
   def next_outstanding = mux(
     request_fire,

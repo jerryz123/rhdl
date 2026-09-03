@@ -28,29 +28,38 @@ precise quiescence boundary without creating a separate fence transaction.
 `cache.rhdl` implements a direct-mapped, blocking write-back/write-allocate
 cache. A one-stage `Pipe` carries lookup
 context alongside the synchronous SRAM access and advances on consecutive
-hits. Load misses request `ReadClean`; store misses and stores to SharedClean
+hits. Its data array has `sets * (64 / (XLEN / 8))` byte-masked rows of exactly
+`XLEN` bits; tags and coherence state remain indexed once per 64-byte line.
+Aligned scalar loads, stores, LR/SC, and AMOs therefore touch one SRAM word,
+while line transfers are serialized by the cache controller. Load misses
+request `ReadClean`; store misses and stores to SharedClean
 lines request `ReadUnique`. AMOs and successful SCs use the same unique-owner
 path, then update the cached word or doubleword and leave the line UniqueDirty.
 AMOs return the pre-update value; RV64 word results are sign extended. The
 common `../refill.rhdl` engine owns the aligned
 line address, complete client context, retry, `CompData`, and `CompAck`. A
-completed store acquisition merges the store bytes into the returned line and
-installs it as UniqueDirty. Stores that hit UniqueClean or UniqueDirty update
+completed store acquisition merges the store bytes into the affected returned
+word and installs the line one word per cycle as UniqueDirty. The tag becomes
+valid only with the final word. Stores that hit UniqueClean or UniqueDirty update
 the data SRAM and dirty state locally without producing REQ or DAT traffic.
 A mandatory non-backpressurable
 `ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
 aligning an EX request's hit response with WB. An acquisition or miss blocks
 new cache requests until it completes. Before replacing a dirty direct-mapped
-victim, `../writeback.rhdl` captures the entire line and drains its eight
+victim, the cache gathers its XLEN words into a line buffer;
+`../writeback.rhdl` then captures that line and drains its eight
 64-bit beats through the currently supported retryable `WriteUniquePtl`
 transaction engine; only then can the replacement refill begin.
 
-Incoming snoops serialize behind any lookup, refill, or store. The shared
+Incoming snoops serialize behind an active lookup or SRAM line transfer but
+may run while a refill or writeback transaction is otherwise waiting on CHI.
+The shared
 `../snoop.rhdl` engine owns request lifetime, DVM pairing, lookup-result capture,
 and response stability. Clean lines use `SnpResp` and the requested
-invalidate-or-downgrade transition. Dirty lines return all line packets as
-`SnpRespData` with `PassDirty`, then invalidate locally so Home receives the
-authoritative copy. Each two-packet `SnpDVMOp` receives one response. Reset
+invalidate-or-downgrade transition. A dirty hit first gathers all XLEN words,
+then returns the reconstructed line as `SnpRespData` with `PassDirty` and
+invalidates locally so Home receives the authoritative copy. Each two-packet
+`SnpDVMOp` receives one response. Reset
 clears lookup, acquisition, writeback, snoop, valid, and reservation state.
 
 LR records one exact address and scalar width in a cache-local reservation.

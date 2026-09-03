@@ -1,4 +1,4 @@
-# Builds a minimal RHDL leaf through CIRCT, LibreLane, and OpenFrame integration.
+# Builds RHDL smoke designs and mapped SimpleSoC artifacts through CIRCT and LibreLane.
 
 .DELETE_ON_ERROR:
 
@@ -22,6 +22,7 @@ MEMORY_SITE_PASS_DIR := $(SRAM_ROOT)/circt
 MEMORY_SITE_PLUGIN := $(SRAM_ROOT)/build/circt/rhdl-memory-sites.so
 SIMPLE_SOC_MEMORY_POLICY := $(VLSI_ROOT)/designs/simple-soc/sky130/sram-map.yaml
 SIMPLE_SOC_BUILD_DIR := $(BUILD_DIR)/simple-soc
+SIMPLE_SOC_RHDL_SOURCES := $(addprefix $(RHDL_ROOT)/,$(shell git -C $(RHDL_ROOT) ls-files '*.rhdl'))
 SIMPLE_SOC_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.mlir
 SIMPLE_SOC_FIRRTL_MEM_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc-firmem.mlir
 SIMPLE_SOC_MEMORY_SITE_INVENTORY := $(SIMPLE_SOC_BUILD_DIR)/memory-sites.json
@@ -29,6 +30,11 @@ SIMPLE_SOC_MEMORY_SITE_STAMP := $(SIMPLE_SOC_BUILD_DIR)/memory-sites.stamp
 SIMPLE_SOC_RTL := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.sv
 SIMPLE_SOC_MEMORY_WRAPPERS := $(SIMPLE_SOC_BUILD_DIR)/memory-wrappers.sv
 SIMPLE_SOC_MEMORY_MANIFEST := $(SIMPLE_SOC_BUILD_DIR)/memory-manifest.json
+SIMPLE_SOC_SYNTH_CONFIG := $(VLSI_ROOT)/openlane/simple_soc/config.yaml
+SIMPLE_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHDL_SLANG_CHECK
+SIMPLE_SOC_SLANG_NETLIST := $(SIMPLE_SOC_SLANG_RUN_DIR)/final/nl/SimpleSoC.nl.v
+SIMPLE_SOC_SYNTH_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHDL_SLANG_SYNTH
+SIMPLE_SOC_SYNTH_NETLIST := $(SIMPLE_SOC_SYNTH_RUN_DIR)/final/nl/SimpleSoC.nl.v
 SKY130_SRAM_MODEL = $(PDK_ROOT)/$(PDK)/libs.ref/sky130_sram_macros/verilog/sky130_sram_2kbyte_1rw1r_32x512_8.v
 
 RACKET ?= racket
@@ -46,7 +52,9 @@ LIBRELANE := librelane --pdk-root $(PDK_ROOT) --pdk $(PDK)
 export PDK_ROOT PDK
 
 .PHONY: all setup-circt rtl contract-check rtl-check lvs-smoke-rtl-check memory-site-plugin memory-map-test \
-	simple-soc-memory-map simple-soc-macro-rtl simple-soc-macro-rtl-check enable-pdk \
+	simple-soc-memory-map simple-soc-macro-rtl simple-soc-macro-rtl-check \
+	simple-soc-slang-check simple-soc-slang-check-native \
+	simple-soc-synth simple-soc-synth-native enable-pdk \
 	harden harden-native lvs-smoke lvs-smoke-native integrate integrate-native gds clean
 
 all: rtl-check
@@ -108,7 +116,7 @@ memory-map-test:
 $(SIMPLE_SOC_BUILD_DIR):
 	mkdir -p $@
 
-$(SIMPLE_SOC_MLIR): tools/emit-simple-soc.rhm ../socs/simple-soc.rhdl | $(SIMPLE_SOC_BUILD_DIR)
+$(SIMPLE_SOC_MLIR): tools/emit-simple-soc.rhm $(SIMPLE_SOC_RHDL_SOURCES) | $(SIMPLE_SOC_BUILD_DIR)
 	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled PLTCOLLECTS=$(RHDL_ROOT): \
 		$(RACKET) -S $(RHDL_ROOT) tools/emit-simple-soc.rhm > $@
 
@@ -135,6 +143,11 @@ simple-soc-memory-map: \
 		--output-manifest $(SIMPLE_SOC_MEMORY_MANIFEST)
 	@test -s $(SIMPLE_SOC_MEMORY_WRAPPERS)
 	@test -s $(SIMPLE_SOC_MEMORY_MANIFEST)
+	@test "$$(grep -c '\"source_module\": \"rv5stage/l1_512x64\"' $(SIMPLE_SOC_MEMORY_SITE_INVENTORY))" -eq 2
+	@if grep -q '64x512' $(SIMPLE_SOC_MEMORY_SITE_INVENTORY); then \
+		echo "SimpleSoC inventory contains a line-wide cache data memory" >&2; \
+		exit 1; \
+	fi
 
 $(SIMPLE_SOC_RTL): $(SIMPLE_SOC_MEMORY_SITE_STAMP)
 	$(CIRCT_OPT) \
@@ -159,6 +172,47 @@ simple-soc-macro-rtl-check: simple-soc-macro-rtl
 	$(VERILATOR) --lint-only --timing --top-module SimpleSoC \
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT \
 		$(SIMPLE_SOC_RTL) $(SIMPLE_SOC_MEMORY_WRAPPERS) $(SKY130_SRAM_MODEL)
+
+simple-soc-slang-check: simple-soc-macro-rtl
+	@if command -v librelane >/dev/null 2>&1; then \
+		$(MAKE) simple-soc-slang-check-native; \
+	elif command -v $(NIX) >/dev/null 2>&1; then \
+		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) simple-soc-slang-check-native; \
+	else \
+		echo "simple-soc-slang-check requires either LibreLane or Nix; see vlsi/README.md" >&2; \
+		exit 1; \
+	fi
+
+simple-soc-slang-check-native: simple-soc-macro-rtl
+	command -v librelane >/dev/null
+	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHDL_SLANG_CHECK --overwrite \
+		--override-config SYNTH_ELABORATE_ONLY=true --only Yosys.Synthesis \
+		--condensed --hide-progress-bar
+	test -s $(SIMPLE_SOC_SLANG_NETLIST)
+	grep -q "use_slang" $(SIMPLE_SOC_SLANG_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(SIMPLE_SOC_SLANG_NETLIST))" -eq 32
+	@if grep -Eq 'struct[[:space:]]+packed|typedef[[:space:]]+struct' $(SIMPLE_SOC_SLANG_NETLIST); then \
+		echo "Slang elaboration left packed structs in $(SIMPLE_SOC_SLANG_NETLIST)" >&2; \
+		exit 1; \
+	fi
+
+simple-soc-synth: simple-soc-macro-rtl
+	@if command -v librelane >/dev/null 2>&1; then \
+		$(MAKE) simple-soc-synth-native; \
+	elif command -v $(NIX) >/dev/null 2>&1; then \
+		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) simple-soc-synth-native; \
+	else \
+		echo "simple-soc-synth requires either LibreLane or Nix; see vlsi/README.md" >&2; \
+		exit 1; \
+	fi
+
+simple-soc-synth-native: simple-soc-macro-rtl
+	command -v librelane >/dev/null
+	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHDL_SLANG_SYNTH --overwrite \
+		--only Yosys.Synthesis --condensed --hide-progress-bar
+	test -s $(SIMPLE_SOC_SYNTH_NETLIST)
+	grep -q "use_slang" $(SIMPLE_SOC_SYNTH_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(SIMPLE_SOC_SYNTH_NETLIST))" -eq 32
 
 enable-pdk:
 	@if command -v ciel >/dev/null 2>&1; then \

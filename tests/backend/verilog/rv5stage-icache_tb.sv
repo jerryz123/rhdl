@@ -255,6 +255,7 @@ module rv5stage_icache_tb;
 
   localparam logic [63:0] ADDRESS = 64'h00000001_00000000;
   localparam logic [63:0] SECOND_ADDRESS = 64'h00000001_00000040;
+  localparam logic [63:0] THIRD_ADDRESS = 64'h00000001_00000080;
   localparam logic [511:0] LINE = {
     64'hffffffff_eeeeeeee,
     64'hdddddddd_cccccccc,
@@ -283,6 +284,10 @@ module rv5stage_icache_tb;
 
     send_core_request(ADDRESS + 64'd4);
     expect_instruction(32'h22222222);
+    send_core_request(ADDRESS + 64'd8);
+    expect_instruction(32'h33333333);
+    send_core_request(ADDRESS + 64'd12);
+    expect_instruction(32'h44444444);
 
     // SnpQuery reports the precise clean state without changing residency.
     grant_rsp_credit();
@@ -362,6 +367,25 @@ module rv5stage_icache_tb;
     accept_read_request(SECOND_ADDRESS);
     return_line(SECOND_ADDRESS, LINE);
     accept_comp_ack();
+    expect_instruction(32'h11111111);
+
+    // A speculative flush drops the requester token but may retain the line
+    // installed by the already-issued coherent transaction.
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(THIRD_ADDRESS);
+    accept_read_request(THIRD_ADDRESS);
+    core_in.flush = 1'b1;
+    tick();
+    core_in.flush = 1'b0;
+    return_line(THIRD_ADDRESS, LINE);
+    accept_comp_ack();
+    repeat (12) begin
+      tick();
+      assert (!core_out.response.valid)
+        else $fatal(1, "flushed refill returned an instruction");
+    end
+    send_core_request(THIRD_ADDRESS);
     expect_instruction(32'h11111111);
 
     $display("RV5Stage instruction-cache ready-valid RN-F simulation passed");

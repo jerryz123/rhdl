@@ -1,5 +1,5 @@
 #lang rhdl
-// Generates XLEN load values and byte-lane stores within a 64-bit memory beat.
+// Generates XLEN load values and byte-lane stores within configurable memory beats.
 
 import:
   "../riscv/isa/xlen.rhm" open
@@ -24,21 +24,25 @@ hardware_enum MemoryWidth:
       ]
     )
 
-// Selects one scalar from a returned eight-byte beat and extends it to XLEN.
-circuit LoadGen(xlen :: XLen):
+// Selects one scalar from a returned beat and extends it to XLEN.
+circuit LoadGen(xlen :: XLen,
+                beat_bytes :: Pow2Int = 8):
   def xlen_bits = xlen.width
+  def beat_bits = beat_bytes * 8
+  unless beat_bits >= xlen_bits
+  | error(~who: #'LoadGen, "memory beat must contain one complete XLEN word")
 
   input address: Bits(xlen_bits)
-  input data: Bits(64)
+  input data: Bits(beat_bits)
   input width: MemoryWidth
   input unsigned_load: Bool
   output value: Bits(xlen_bits)
 
-  def shifted :: Bits(64) = data >> concat(address[0..3], bits(0, 3))
+  def shifted :: Bits(beat_bits) = data >> concat(address[0..alignment_bits(beat_bytes)], bits(0, 3))
   def byte = shifted[0..8]
   def half = shifted[0..16]
   def word = shifted[0..32]
-  def double_value = if xlen == XLen.X64 | data | data[0..32]
+  def double_value = shifted[0..xlen_bits]
   def signed_word = if xlen == XLen.X64 | sext(word.into(SInt(32)), 64).as_bits() | word
   def unsigned_word = if xlen == XLen.X64 | zext(word, 64) | word
   def signed_value :: Bits(xlen_bits) = mux_lookup(
@@ -61,30 +65,37 @@ circuit LoadGen(xlen :: XLen):
   )
   value <== mux(unsigned_load, unsigned_value, signed_value)
 
-// Places one scalar into an eight-byte beat and marks exactly its byte lanes.
-circuit StoreGen(xlen :: XLen):
+// Places one scalar into a beat and marks exactly its byte lanes.
+circuit StoreGen(xlen :: XLen,
+                 beat_bytes :: Pow2Int = 8):
   def xlen_bits = xlen.width
+  def beat_bits = beat_bytes * 8
+  unless beat_bits >= xlen_bits
+  | error(~who: #'StoreGen, "memory beat must contain one complete XLEN word")
 
   input address: Bits(xlen_bits)
   input value: Bits(xlen_bits)
   input width: MemoryWidth
-  output data: Bits(64)
-  output mask: Mask(8)
+  output data: Bits(beat_bits)
+  output mask: Mask(beat_bytes)
 
-  def offset = address[0..3]
+  def offset = address[0..alignment_bits(beat_bytes)]
   def shift = concat(offset, bits(0, 3))
   def base_mask = mux_lookup(
     width,
-    ~default: !bits(0, 8),
+    ~default: !bits(0, beat_bytes),
     [
-      [MemoryWidth.Byte, bits(0x01, 8)],
-      [MemoryWidth.Half, bits(0x03, 8)],
-      [MemoryWidth.Word, bits(0x0f, 8)]
+      [MemoryWidth.Byte, bits(0x01, beat_bytes)],
+      [MemoryWidth.Half, bits(0x03, beat_bytes)],
+      [MemoryWidth.Word, bits(0x0f, beat_bytes)]
     ]
   )
-  def beat_value = if xlen == XLen.X64 | value | zext(value, 64)
+  def beat_value:
+    if beat_bits == xlen_bits
+    | value
+    | zext(value, beat_bits)
   data <== beat_value << shift
-  mask <== (base_mask << offset).into(Mask(8))
+  mask <== (base_mask << offset).into(Mask(beat_bytes))
 
 export:
   MemoryWidth

@@ -45,22 +45,44 @@ owns the SimpleSoC/Sky130 site policy at
 `designs/simple-soc/sky130/sram-map.yaml`.
 
 The policy maps only the 4096 by 128-bit shared CHI RAM onto 32 installed
-512 by 32-bit Sky130 SRAMs. All six shallow cache arrays continue through
-CIRCT's inferred-memory lowering. A JSON manifest records all seven decisions
-and carries selected macro instances and physical collateral into later
-floorplanning, PDN, and LVS work.
+512 by 32-bit Sky130 SRAMs. All six cache arrays continue through CIRCT's
+inferred-memory lowering; the two RV64 data arrays are organized as 512 by
+64-bit XLEN words, ready for a later site-policy decision. A JSON manifest
+records all seven decisions and carries selected macro instances and physical
+collateral into later floorplanning, PDN, and LVS work.
 
 ```sh
 make -C sram test
 make -C vlsi simple-soc-memory-map
 make -C vlsi simple-soc-macro-rtl-check
+make -C vlsi simple-soc-slang-check
+make -C vlsi simple-soc-synth
 ```
 
 The first target proves scoped and direct elaboration tops produce identical
 policy-relative wrapper identities, checks unknown-site rejection, functionally
 tests banking, width slicing and byte masking, and rejects unsupported port
-contracts. The latter targets inventory SimpleSoC and lint the mixed
-macro/inferred RTL against the generated wrapper and installed PDK SRAM model.
+contracts. The SimpleSoC inventory also requires both L1 data arrays to remain
+512 by 64-bit RV64-word memories and rejects the former line-wide shape. The
+remaining targets lint the mixed
+macro/inferred RTL against the generated wrapper and installed PDK SRAM model,
+prove LibreLane can elaborate it through Slang, then run full Sky130 synthesis.
+Both LibreLane targets require all 32 SRAM instances to survive. The fast check
+uses LibreLane's elaborate-only synthesis mode and also rejects packed structs
+in its emitted Yosys netlist; the full target checks the technology-mapped
+netlist. The configuration also registers the macro's LEF, GDS, liberty,
+Verilog, and SPICE views so later floorplanning and physical-verification work
+can use the same definition.
+
+Slang is the synthesis boundary rather than an RTL rewrite: CIRCT's packed
+structs remain in `build/simple-soc/simple-soc.sv`, and LibreLane lowers them
+directly while reading the generated RTL. The focused target stops after
+`Yosys.Synthesis`; macro placement, power-grid hookup, routing, and signoff are
+still separate work. Until the other six memory sites are mapped, full
+synthesis is slow because Yosys implements the two 512 by 64-bit cache data
+arrays and four smaller cache arrays as standard-cell flops and muxes. Use
+`simple-soc-slang-check` for the quick frontend regression and
+`simple-soc-synth` when a complete mapped netlist is needed.
 
 Cycle-level validation of the same policy is owned by [`sim/`](sim/README.md):
 

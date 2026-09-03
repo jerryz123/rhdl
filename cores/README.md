@@ -109,10 +109,12 @@ execute-stage acceptance, or redirects.
 ## Load and store generators
 
 [`load-store.rhdl`](load-store.rhdl) owns the shared `MemoryWidth` control and
-two stateless XLEN-parameterized datapath components. `LoadGen` selects a byte,
-halfword, word, or doubleword from an eight-byte returned beat and extends it to
-32 or 64 bits. `StoreGen` shifts an XLEN scalar source into its addressed byte
-lane and generates the corresponding `Mask(8)` write-lane set.
+two stateless XLEN-parameterized datapath components. Their optional
+`beat_bytes` parameter defaults to eight and must contain at least one XLEN
+word. `LoadGen` selects a byte, halfword, word, or doubleword from that returned
+beat and extends it to XLEN. `StoreGen` shifts an XLEN scalar source into its
+addressed byte lane and generates the corresponding `Mask(beat_bytes)`
+write-lane set.
 
 `MemoryWidth.is_aligned(address)` checks the same size contract independently. The
 generators deliberately know nothing about instruction encodings, memory

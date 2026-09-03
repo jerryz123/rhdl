@@ -251,8 +251,10 @@ of being flattened into the same graph.
 `RV5Stage(xlen, ~cache_sets: 64, ~chi: ...)`. `xlen` is an
 `XLen` enum value. Architectural addresses and cache tags use
 `xlen.width` internally. Both private L1 caches use the architectural
-64-byte line size from [`cache.rhdl`](cache.rhdl); line geometry is not a
-top-level generator option. The required `~chi:` parameter is integration
+64-byte line size from [`cache.rhdl`](cache.rhdl), while each data SRAM row and
+core lookup is exactly `xlen.width` bits. Tags and coherence state remain
+line-indexed. Line geometry is not a top-level generator option. The required
+`~chi:` parameter is integration
 policy: the containing SoC supplies RV5Stage's RN-F NodeIDs, physical flit
 parameters, and Home map. RV5Stage has no implicit standalone fabric. The RN-F
 boundary uses the explicit CHI request
@@ -278,10 +280,13 @@ external ports intentionally remain separate RN-F Request Nodes. Home Node,
 fabric, and SoC integration remain outside the core. RV5Stage uses CHI's minimum
 128-bit DAT width; each fixed 64-byte cache-line refill therefore completes
 from four ordinary, unelided DAT packets before the cache returns `CompAck`.
-Both L1s continue accepting snoops while a refill or writeback transaction is
-queued. A pending snoop takes priority over refill installation at the shared
-SRAM ports, which lets a serialized Home complete its snoop before accepting
-the cache's waiting request without creating a protocol dependency cycle.
+The retained refill line is installed through the XLEN-wide SRAM port over
+eight RV64 cycles or sixteen RV32 cycles; the tag becomes valid only with the
+final word. Dirty L1D replacement and snoop intervention gather the same words
+before passing a complete line to the existing CHI transaction engines. Both
+L1s continue accepting snoops while a refill or writeback transaction is
+queued. A snoop already waiting takes priority before refill installation
+starts; an active line transfer retains the SRAM port until it completes.
 
 ## Verification
 

@@ -146,7 +146,7 @@ def verilog_reference = @str|<<{
     struct packed {logic [5:0] address; logic write; logic [0:0][1:0] data; logic mask; }
     ReadWriteRequest_1;
   typedef
-    struct packed {logic [5:0] address; logic write; logic [7:0][63:0] data; logic [7:0] mask; }
+    struct packed {logic [8:0] address; logic write; logic [7:0][7:0] data; logic [7:0] mask; }
     ReadWriteRequest_2;
   typedef struct packed {logic allow_retry; logic [3:0] pcrd_type; } CHIRequestAttempt;
   typedef
@@ -171,9 +171,6 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [5:0] address; logic write; logic [0:0][2:0] data; logic mask; }
     ReadWriteRequest_3;
-  typedef
-    struct packed {logic [5:0] address; logic write; logic [63:0][7:0] data; logic [63:0] mask; }
-    ReadWriteRequest_4;
   typedef
     struct packed {logic [63:0] address; logic [1:0] width; logic [63:0] data; logic [7:0] mask; RV5StageDataReq context_0; }
     RV5StageWriteUniqueCommand;
@@ -5178,7 +5175,7 @@ module RV5StageL1ICache(
   wire struct packed {logic valid; CHIRspFlit bits; } _refill_acknowledgements_out;
   wire struct packed {logic ready; }  _refill_responses_out;
   wire struct packed {logic ready; }  _refill_response_data_out;
-  wire struct packed {struct packed {logic valid; logic [7:0][63:0] bits; } response; }
+  wire struct packed {struct packed {logic valid; logic [7:0][7:0] bits; } response; }
     _lines_port_out;
   wire struct packed {struct packed {logic valid; logic [0:0][1:0] bits; } response; }
     _states_port_out;
@@ -5278,6 +5275,8 @@ module RV5StageL1ICache(
   reg  [63:0]                         valid_lines;
   reg                                 refill_live;
   reg                                 refill_installable;
+  reg                                 refill_installing;
+  reg  [2:0]                          refill_install_index;
   reg  [1:0]                          outstanding;
   wire                                _GEN_7 = _responses_egress_out.valid & ~_GEN_6;
   wire RV5StageCleanSnoopLookupResult _GEN_8 =
@@ -5292,28 +5291,35 @@ module RV5StageL1ICache(
   wire                                _GEN_11 =
     _lookup_egress_out.valid & _tags_port_out.response.valid & ~_GEN_10;
   wire [63:0]                         _GEN_12 =
-    _lines_port_out.response.bits[_lookup_egress_out.bits[5:3]];
+    /*cast(bit[63:0])*/_lines_port_out.response.bits;
   wire [63:0]                         _GEN_13 =
     _refill_completion_out.bits.line[_refill_completion_out.bits.context_0[5:3]];
+  wire                                _GEN_14 =
+    ~refill_installable | core_in.invalidate_all;
+  wire                                _GEN_15 =
+    _refill_completion_out.valid & ~_GEN_14 & ~_snoop_pending & ~refill_installing;
+  wire                                _GEN_16 = &refill_install_index;
+  wire                                _GEN_17 =
+    refill_installing & ~core_in.invalidate_all;
   `ifndef SYNTHESIS
     l1i_outstanding_in_range:
       assert property (@(posedge clock) disable iff (reset) outstanding != 2'h3);
   `endif // not def SYNTHESIS
-  wire                                _GEN_14 = ~(_GEN_9 & ~reset);
+  wire                                _GEN_18 = ~(_GEN_9 & ~reset);
   `ifndef SYNTHESIS
     l1i_response_has_request:
-      assert property (@(posedge clock) disable iff (_GEN_14) |outstanding);
+      assert property (@(posedge clock) disable iff (_GEN_18) |outstanding);
   `endif // not def SYNTHESIS
-  wire                                _GEN_15 =
+  wire                                _GEN_19 =
     ~_GEN_6 & ~_snoop_pending & _refill_command_out.ready & ~_GEN_11
     & (~(outstanding[1]) | _GEN_9);
-  wire                                _GEN_16 = _lookup_ingress_out.ready & _GEN_15;
-  wire                                _GEN_17 = core_in.request.valid & _GEN_16;
-  wire                                _GEN_18 = _tags_port_out.response.valid & ~_GEN_6;
-  wire                                _GEN_19 = _lookup_egress_out.valid & _GEN_18;
-  wire                                _GEN_20 = _GEN_19 & ~_GEN_10;
+  wire                                _GEN_20 = _lookup_ingress_out.ready & _GEN_19;
+  wire                                _GEN_21 = core_in.request.valid & _GEN_20;
+  wire                                _GEN_22 = _tags_port_out.response.valid & ~_GEN_6;
+  wire                                _GEN_23 = _lookup_egress_out.valid & _GEN_22;
+  wire                                _GEN_24 = _GEN_23 & ~_GEN_10;
   assign _GEN_3 = |({{_GEN_10 & _GEN_1}, {~_GEN_10 & _GEN_2}});
-  wire RV5StageLineRefillCommand      _GEN_21 =
+  wire RV5StageLineRefillCommand      _GEN_25 =
     '{line_address: {_lookup_egress_out.bits[63:6], 6'h0},
       opcode: (7'h2),
       context_0: _lookup_egress_out.bits};
@@ -5323,73 +5329,77 @@ module RV5StageL1ICache(
       assert property (@(posedge clock) disable iff (reset)
                          ~_GEN_11 | _GEN_6 | _refill_command_out.ready);
   `endif // not def SYNTHESIS
-  wire RV5StageInstructionResp        _GEN_22 =
+  wire RV5StageInstructionResp        _GEN_26 =
     '{instruction: (_lookup_egress_out.bits[2] ? _GEN_12[63:32] : _GEN_12[31:0]),
       page_fault: (1'h0)};
   assign _GEN_1 = _response_arbiter_ingress_0_out.ready;
-  wire                                _GEN_23 = _GEN_0 & ~_snoop_pending;
-  assign _GEN_0 = ~refill_live | _GEN;
-  wire RV5StageInstructionResp        _GEN_24 =
+  wire                                _GEN_27 =
+    (_GEN_14 | refill_installing & _GEN_16) & (refill_installing | ~_snoop_pending);
+  wire                                _GEN_28 = _GEN_0 & _GEN_27;
+  wire                                _GEN_29 = refill_live & ~_GEN_6;
+  assign _GEN_0 = ~_GEN_29 | _GEN;
+  wire RV5StageInstructionResp        _GEN_30 =
     '{instruction:
         (_refill_completion_out.bits.context_0[2] ? _GEN_13[63:32] : _GEN_13[31:0]),
       page_fault: (1'h0)};
   assign _GEN = _response_arbiter_ingress_1_out.ready;
-  wire                                _GEN_25 =
+  wire                                _GEN_31 =
     ~(_response_arbiter_egress_out.valid & ~reset);
   `ifndef SYNTHESIS
     l1i_response_slot_reserved:
-      assert property (@(posedge clock) disable iff (_GEN_25)
+      assert property (@(posedge clock) disable iff (_GEN_31)
                          _responses_ingress_out.ready);
   `endif // not def SYNTHESIS
-  wire                                _GEN_26 = _GEN_20 & _refill_command_out.ready;
-  wire                                _GEN_27 = _refill_completion_out.valid & _GEN_23;
-  wire                                _GEN_28 =
-    _GEN_27 & refill_installable & ~core_in.invalidate_all;
-  wire                                _GEN_29 = _GEN_27 & ~reset;
-  wire                                _GEN_30 = ~_GEN_29;
+  wire                                _GEN_32 = _GEN_24 & _refill_command_out.ready;
+  wire                                _GEN_33 = _refill_completion_out.valid & _GEN_28;
+  wire                                _GEN_34 = _GEN_33 & refill_installing & ~_GEN_14;
+  wire                                _GEN_35 = _GEN_33 & ~reset;
+  wire                                _GEN_36 = ~_GEN_35;
   `ifndef SYNTHESIS
     l1i_refill_state_clean:
-      assert property (@(posedge clock) disable iff (_GEN_30)
+      assert property (@(posedge clock) disable iff (_GEN_36)
                          |{_refill_completion_out.bits.state == 2'h1,
                            _refill_completion_out.bits.state == 2'h2});
   `endif // not def SYNTHESIS
-  wire                                _GEN_31 = ~_GEN_29;
+  wire                                _GEN_37 = ~_GEN_35;
   `ifndef SYNTHESIS
     l1i_refill_not_dirty:
-      assert property (@(posedge clock) disable iff (_GEN_31)
+      assert property (@(posedge clock) disable iff (_GEN_37)
                          ~_refill_completion_out.bits.pass_dirty);
   `endif // not def SYNTHESIS
-  wire ReadWriteRequest               _GEN_32 =
+  wire ReadWriteRequest               _GEN_38 =
     '{address:
-        (_GEN_28
+        (_GEN_34
            ? _refill_completion_out.bits.context_0[11:6]
            : _snoop_lookup_out.valid
                ? _snoop_address[11:6]
                : core_in.request.bits.address[11:6]),
-      write: _GEN_28,
+      write: _GEN_34,
       data: ({1{_refill_completion_out.bits.context_0[63:12]}}),
       mask: (1'h1)};
-  wire                                _GEN_33 =
+  wire                                _GEN_39 =
     _snoop_update_out.valid & ~_snoop_update_out.bits.invalidate;
-  wire ReadWriteRequest_1             _GEN_34 =
+  wire ReadWriteRequest_1             _GEN_40 =
     '{address:
-        (_GEN_28
+        (_GEN_34
            ? _refill_completion_out.bits.context_0[11:6]
-           : _GEN_33 ? _snoop_address[11:6] : _snoop_update_out.bits.address[11:6]),
-      write: (_GEN_28 | _GEN_33),
+           : _GEN_39 ? _snoop_address[11:6] : _snoop_update_out.bits.address[11:6]),
+      write: (_GEN_34 | _GEN_39),
       data:
-        ({1{_GEN_33 ? _snoop_update_out.bits.state : _refill_completion_out.bits.state}}),
+        ({1{_GEN_39 ? _snoop_update_out.bits.state : _refill_completion_out.bits.state}}),
       mask: (1'h1)};
-  wire ReadWriteRequest_2             _GEN_35 =
+  wire [7:0][7:0]                     _GEN_41 =
+    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[refill_install_index];
+  wire ReadWriteRequest_2             _GEN_42 =
     '{address:
-        (_GEN_28
-           ? _refill_completion_out.bits.context_0[11:6]
-           : core_in.request.bits.address[11:6]),
-      write: _GEN_28,
-      data: _refill_completion_out.bits.line,
+        (_GEN_17
+           ? {_refill_completion_out.bits.context_0[11:6], refill_install_index}
+           : core_in.request.bits.address[11:3]),
+      write: _GEN_17,
+      data: _GEN_41,
       mask: (8'hFF)};
-  wire [63:0]                         _GEN_36 =
-    _GEN_28
+  wire [63:0]                         _GEN_43 =
+    _GEN_34
       ? {{(&(_refill_completion_out.bits.context_0[11:6])) | valid_lines[6'h3F]},
          {_refill_completion_out.bits.context_0[11:6] == 6'h3E | valid_lines[6'h3E]},
          {_refill_completion_out.bits.context_0[11:6] == 6'h3D | valid_lines[6'h3D]},
@@ -5455,7 +5465,7 @@ module RV5StageL1ICache(
          {_refill_completion_out.bits.context_0[11:6] == 6'h1 | valid_lines[6'h1]},
          {_refill_completion_out.bits.context_0[11:6] == 6'h0 | valid_lines[6'h0]}}
       : valid_lines;
-  wire [63:0]                         _GEN_37 =
+  wire [63:0]                         _GEN_44 =
     _snoop_update_out.valid & _snoop_update_out.bits.invalidate
       ? {{_snoop_update_out.bits.address[11:6] != 6'h3F & valid_lines[6'h3F]},
          {_snoop_update_out.bits.address[11:6] != 6'h3E & valid_lines[6'h3E]},
@@ -5521,66 +5531,65 @@ module RV5StageL1ICache(
          {_snoop_update_out.bits.address[11:6] != 6'h2 & valid_lines[6'h2]},
          {_snoop_update_out.bits.address[11:6] != 6'h1 & valid_lines[6'h1]},
          {(|(_snoop_update_out.bits.address[11:6])) & valid_lines[6'h0]}}
-      : _GEN_36;
-  wire                                _GEN_38 = _GEN_17 ^ _GEN_9;
-  wire                                _GEN_39 = _GEN_26 | _GEN_27 | _GEN_38;
-  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_40 =
-    '{valid: (_refill_completion_out.valid & ~_snoop_pending & refill_live),
-      bits: _GEN_24};
-  wire struct packed {logic ready; }  _GEN_41 = '{ready: _GEN_23};
-  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_42 =
-    '{valid: (_GEN_19 & _GEN_10), bits: _GEN_22};
-  wire struct packed {logic valid; RV5StageLineRefillCommand bits; } _GEN_43 =
-    '{valid: _GEN_20, bits: _GEN_21};
-  wire struct packed {logic ready; }  _GEN_44 = '{ready: (~_GEN_18 | _GEN_3)};
-  wire struct packed {logic ready; }  _GEN_45 =
+      : _GEN_43;
+  wire                                _GEN_45 = _GEN_21 ^ _GEN_9;
+  wire                                _GEN_46 = _GEN_32 | _GEN_33 | _GEN_45;
+  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_47 =
+    '{valid: (_refill_completion_out.valid & _GEN_27 & _GEN_29), bits: _GEN_30};
+  wire struct packed {logic ready; }  _GEN_48 = '{ready: _GEN_28};
+  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_49 =
+    '{valid: (_GEN_23 & _GEN_10), bits: _GEN_26};
+  wire struct packed {logic valid; RV5StageLineRefillCommand bits; } _GEN_50 =
+    '{valid: _GEN_24, bits: _GEN_25};
+  wire struct packed {logic ready; }  _GEN_51 = '{ready: (~_GEN_22 | _GEN_3)};
+  wire struct packed {logic ready; }  _GEN_52 =
     '{ready: (core_in.response.ready & ~_GEN_6)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_46 =
-    '{valid: (core_in.request.valid & _GEN_15), bits: core_in.request.bits.address};
-  wire struct packed {logic valid; RV5StageCleanSnoopLookupResult bits; } _GEN_47 =
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_53 =
+    '{valid: (core_in.request.valid & _GEN_19), bits: core_in.request.bits.address};
+  wire struct packed {logic valid; RV5StageCleanSnoopLookupResult bits; } _GEN_54 =
     '{valid: (_tags_port_out.response.valid & _states_port_out.response.valid),
       bits: _GEN_8};
-  wire struct packed {logic valid; ReadWriteRequest_2 bits; } _GEN_48 =
-    '{valid: (_GEN_17 | _GEN_28), bits: _GEN_35};
+  wire struct packed {logic valid; ReadWriteRequest_2 bits; } _GEN_55 =
+    '{valid: (_GEN_21 | _GEN_17), bits: _GEN_42};
   wire struct packed {struct packed {logic valid; ReadWriteRequest_2 bits; } request; }
-    _GEN_49 = '{request: _GEN_48};
-  wire struct packed {logic valid; ReadWriteRequest_1 bits; } _GEN_50 =
-    '{valid: (_GEN_28 | _snoop_lookup_out.valid | _GEN_33), bits: _GEN_34};
+    _GEN_56 = '{request: _GEN_55};
+  wire struct packed {logic valid; ReadWriteRequest_1 bits; } _GEN_57 =
+    '{valid: (_GEN_34 | _snoop_lookup_out.valid | _GEN_39), bits: _GEN_40};
   wire struct packed {struct packed {logic valid; ReadWriteRequest_1 bits; } request; }
-    _GEN_51 = '{request: _GEN_50};
-  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_52 =
-    '{valid: (_GEN_17 | _GEN_28 | _snoop_lookup_out.valid), bits: _GEN_32};
+    _GEN_58 = '{request: _GEN_57};
+  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_59 =
+    '{valid: (_GEN_21 | _GEN_34 | _snoop_lookup_out.valid), bits: _GEN_38};
   wire struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }
-    _GEN_53 = '{request: _GEN_52};
-  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_54 =
+    _GEN_60 = '{request: _GEN_59};
+  wire struct packed {logic valid; CHIDatFlit bits; } _GEN_61 =
     '{valid: (1'h0), bits: _GEN_4};
-  wire struct packed {logic ready; }  _GEN_55 = '{ready: _GEN_16};
-  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_56 =
+  wire struct packed {logic ready; }  _GEN_62 = '{ready: _GEN_20};
+  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_63 =
     '{valid: _GEN_7, bits: _responses_egress_out.bits};
   SyncRam1RW tags (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_53),
+    .port_in  (_GEN_60),
     .port_out (_tags_port_out)
   );
   SyncRam1RW_1 states (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_51),
+    .port_in  (_GEN_58),
     .port_out (_states_port_out)
   );
   SyncRam1RW_2 lines (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_49),
+    .port_in  (_GEN_56),
     .port_out (_lines_port_out)
   );
   RV5StageLineRefill refill (
     .clock                (clock),
     .reset                (reset),
     .node_id              (node_id),
-    .command_in           (_GEN_43),
-    .completion_in        (_GEN_41),
+    .command_in           (_GEN_50),
+    .completion_in        (_GEN_48),
     .requests_in          (chi_in.requests),
     .acknowledgements_in  (_protocol_responses_ingress_0_out),
     .responses_in         (chi_in.responses),
@@ -5596,10 +5605,10 @@ module RV5StageL1ICache(
     .clock            (clock),
     .reset            (reset),
     .node_id          (node_id),
-    .cache_ready      (~_lookup_egress_out.valid & ~_GEN_6),
+    .cache_ready      (~_lookup_egress_out.valid & ~refill_installing & ~_GEN_6),
     .snoops_in        (chi_in.snoops),
     .responses_in     (_protocol_responses_ingress_1_out),
-    .lookup_result_in (_GEN_47),
+    .lookup_result_in (_GEN_54),
     .pending          (_snoop_pending),
     .address          (_snoop_address),
     .snoops_out       (_snoop_snoops_out),
@@ -5610,14 +5619,14 @@ module RV5StageL1ICache(
   Pipe_2 lookup (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_46),
-    .egress_in   (_GEN_44),
+    .ingress_in  (_GEN_53),
+    .egress_in   (_GEN_51),
     .ingress_out (_lookup_ingress_out),
     .egress_out  (_lookup_egress_out)
   );
   Arbiter_1 response_arbiter (
-    .ingress_0_in  (_GEN_42),
-    .ingress_1_in  (_GEN_40),
+    .ingress_0_in  (_GEN_49),
+    .ingress_1_in  (_GEN_47),
     .egress_in     (_responses_ingress_out),
     .ingress_0_out (_response_arbiter_ingress_0_out),
     .ingress_1_out (_response_arbiter_ingress_1_out),
@@ -5628,7 +5637,7 @@ module RV5StageL1ICache(
     .clock       (clock),
     .reset       (reset | _GEN_6),
     .ingress_in  (_response_arbiter_egress_out),
-    .egress_in   (_GEN_45),
+    .egress_in   (_GEN_52),
     .ingress_out (_responses_ingress_out),
     .egress_out  (_responses_egress_out),
     .count       (/* unused */)
@@ -5647,26 +5656,34 @@ module RV5StageL1ICache(
       valid_lines <= _GEN_5;
       refill_live <= 1'h0;
       refill_installable <= 1'h0;
+      refill_installing <= 1'h0;
+      refill_install_index <= 3'h0;
       outstanding <= 2'h0;
     end
     else begin
-      valid_lines <= core_in.invalidate_all ? _GEN_5 : _GEN_37;
-      refill_live <= ~_GEN_6 & (_GEN_39 ? _GEN_26 | ~_GEN_27 & refill_live : refill_live);
+      valid_lines <= core_in.invalidate_all ? _GEN_5 : _GEN_44;
+      refill_live <= ~_GEN_6 & (_GEN_46 ? _GEN_32 | ~_GEN_33 & refill_live : refill_live);
       refill_installable <=
-        ~core_in.invalidate_all & (_GEN_26 | ~_GEN_27 & refill_installable);
+        ~core_in.invalidate_all & (_GEN_32 | ~_GEN_33 & refill_installable);
+      refill_installing <=
+        ~core_in.invalidate_all & (_GEN_15 | ~_GEN_33 & refill_installing);
+      refill_install_index <=
+        core_in.invalidate_all | _GEN_15 | _GEN_33
+          ? 3'h0
+          : _GEN_17 & ~_GEN_16 ? refill_install_index + 3'h1 : refill_install_index;
       outstanding <=
         _GEN_6
           ? 2'h0
-          : _GEN_39 & _GEN_38
-              ? (_GEN_17 ? outstanding + 2'h1 : outstanding - 2'h1)
+          : _GEN_46 & _GEN_45
+              ? (_GEN_21 ? outstanding + 2'h1 : outstanding - 2'h1)
               : outstanding;
     end
   end // always @(posedge)
-  assign core_out = '{request: _GEN_55, response: _GEN_56};
+  assign core_out = '{request: _GEN_62, response: _GEN_63};
   assign chi_out =
     '{requests: _refill_requests_out,
       requester_responses: _protocol_responses_egress_out,
-      request_data: _GEN_54,
+      request_data: _GEN_61,
       responses: _refill_responses_out,
       response_data: _refill_response_data_out,
       snoops: _snoop_snoops_out};
@@ -5804,58 +5821,58 @@ module SyncRam1RW_1(
   assign port_out = '{response: _GEN_5};
 endmodule
 
-module storage_64x512(
-  input  [5:0]   RW0_addr,
-  input          RW0_en,
-                 RW0_clk,
-                 RW0_wmode,
-  input  [511:0] RW0_wdata,
-  output [511:0] RW0_rdata,
-  input  [7:0]   RW0_wmask
+module storage_512x64(
+  input  [8:0]  RW0_addr,
+  input         RW0_en,
+                RW0_clk,
+                RW0_wmode,
+  input  [63:0] RW0_wdata,
+  output [63:0] RW0_rdata,
+  input  [7:0]  RW0_wmask
 );
 
-  reg  [511:0] Memory[0:63];
-  reg  [5:0]   _RW0_raddr_d0;
-  reg          _RW0_ren_d0;
-  reg          _RW0_rmode_d0;
+  reg  [63:0] Memory[0:511];
+  reg  [8:0]  _RW0_raddr_d0;
+  reg         _RW0_ren_d0;
+  reg         _RW0_rmode_d0;
   always @(posedge RW0_clk) begin
     _RW0_raddr_d0 <= RW0_addr;
     _RW0_ren_d0 <= RW0_en;
     _RW0_rmode_d0 <= RW0_wmode;
   end // always @(posedge)
-  wire [511:0] _GEN;
-  assign _GEN = _RW0_ren_d0 & _RW0_rmode_d0 == 1'h0 ? Memory[_RW0_raddr_d0] : 512'bx;
+  wire [63:0] _GEN;
+  assign _GEN = _RW0_ren_d0 & _RW0_rmode_d0 == 1'h0 ? Memory[_RW0_raddr_d0] : 64'bx;
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[0] & RW0_wmode)
-      Memory[RW0_addr][32'h0 +: 64] <= RW0_wdata[63:0];
+      Memory[RW0_addr][32'h0 +: 8] <= RW0_wdata[7:0];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[1] & RW0_wmode)
-      Memory[RW0_addr][32'h40 +: 64] <= RW0_wdata[127:64];
+      Memory[RW0_addr][32'h8 +: 8] <= RW0_wdata[15:8];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[2] & RW0_wmode)
-      Memory[RW0_addr][32'h80 +: 64] <= RW0_wdata[191:128];
+      Memory[RW0_addr][32'h10 +: 8] <= RW0_wdata[23:16];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[3] & RW0_wmode)
-      Memory[RW0_addr][32'hC0 +: 64] <= RW0_wdata[255:192];
+      Memory[RW0_addr][32'h18 +: 8] <= RW0_wdata[31:24];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[4] & RW0_wmode)
-      Memory[RW0_addr][32'h100 +: 64] <= RW0_wdata[319:256];
+      Memory[RW0_addr][32'h20 +: 8] <= RW0_wdata[39:32];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[5] & RW0_wmode)
-      Memory[RW0_addr][32'h140 +: 64] <= RW0_wdata[383:320];
+      Memory[RW0_addr][32'h28 +: 8] <= RW0_wdata[47:40];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[6] & RW0_wmode)
-      Memory[RW0_addr][32'h180 +: 64] <= RW0_wdata[447:384];
+      Memory[RW0_addr][32'h30 +: 8] <= RW0_wdata[55:48];
   end // always @(posedge)
   always @(posedge RW0_clk) begin
     if (RW0_en & RW0_wmask[7] & RW0_wmode)
-      Memory[RW0_addr][32'h1C0 +: 64] <= RW0_wdata[511:448];
+      Memory[RW0_addr][32'h38 +: 8] <= RW0_wdata[63:56];
   end // always @(posedge)
   assign RW0_rdata = _GEN;
 endmodule
@@ -5864,17 +5881,17 @@ module SyncRam1RW_2(
   input                                                                                   clock,
                                                                                           reset,
   input  struct packed {struct packed {logic valid; ReadWriteRequest_2 bits; } request; } port_in,
-  output struct packed {struct packed {logic valid; logic [7:0][63:0] bits; } response; } port_out
+  output struct packed {struct packed {logic valid; logic [7:0][7:0] bits; } response; }  port_out
 );
 
-  wire [7:0]       _GEN;
-  wire [7:0][63:0] _GEN_0;
-  wire             _GEN_1;
-  wire             _GEN_2;
-  wire [5:0]       _GEN_3;
-  wire [511:0]     _GEN_4;
-  wire [511:0]     _storage_ext_RW0_rdata;
-  storage_64x512 storage_ext (
+  wire [7:0]      _GEN;
+  wire [7:0][7:0] _GEN_0;
+  wire            _GEN_1;
+  wire            _GEN_2;
+  wire [8:0]      _GEN_3;
+  wire [63:0]     _GEN_4;
+  wire [63:0]     _storage_ext_RW0_rdata;
+  storage_512x64 storage_ext (
     .RW0_addr  (_GEN_3),
     .RW0_en    (_GEN_2),
     .RW0_clk   (clock),
@@ -5883,15 +5900,15 @@ module SyncRam1RW_2(
     .RW0_rdata (_storage_ext_RW0_rdata),
     .RW0_wmask (_GEN)
   );
-  assign _GEN_4 = /*cast(bit[511:0])*/_GEN_0;
-  wire [7:0][63:0] _GEN_5 = /*cast(bit[7:0][63:0])*/_storage_ext_RW0_rdata;
-  reg              response_valid;
+  assign _GEN_4 = /*cast(bit[63:0])*/_GEN_0;
+  wire [7:0][7:0] _GEN_5 = /*cast(bit[7:0][7:0])*/_storage_ext_RW0_rdata;
+  reg             response_valid;
   assign _GEN_3 = port_in.request.bits.address;
   assign _GEN_2 = port_in.request.valid;
   assign _GEN_1 = port_in.request.bits.write;
   assign _GEN_0 = port_in.request.bits.data;
   assign _GEN = port_in.request.bits.mask;
-  wire struct packed {logic valid; logic [7:0][63:0] bits; } _GEN_6 =
+  wire struct packed {logic valid; logic [7:0][7:0] bits; } _GEN_6 =
     '{valid: response_valid, bits: _GEN_5};
   always @(posedge clock) begin
     if (reset)
@@ -6546,7 +6563,6 @@ module RV5StageL1DCache(
   wire                               _GEN;
   wire                               _GEN_0;
   wire                               _GEN_1;
-  wire                               _GEN_2;
   wire struct packed {logic ready; } _refill_commands_ingress_0_out;
   wire struct packed {logic ready; } _refill_commands_ingress_1_out;
   wire struct packed {logic valid; RV5StageLineRefillCommand_1 bits; }
@@ -6587,7 +6603,7 @@ module RV5StageL1DCache(
   wire [63:0]                        _store_gen_data;
   wire [7:0]                         _store_gen_mask;
   wire [63:0]                        _load_gen_value;
-  wire struct packed {struct packed {logic valid; logic [63:0][7:0] bits; } response; }
+  wire struct packed {struct packed {logic valid; logic [7:0][7:0] bits; } response; }
     _lines_port_out;
   wire struct packed {struct packed {logic valid; logic [0:0][2:0] bits; } response; }
     _states_port_out;
@@ -6597,58 +6613,77 @@ module RV5StageL1DCache(
   reg                                reservation_valid;
   reg  [63:0]                        reservation_address;
   reg  [1:0]                         reservation_width;
-  wire                               _GEN_3 =
+  reg                                refill_installing;
+  reg  [2:0]                         refill_install_index;
+  reg  [2:0]                         gather_state;
+  reg  [2:0]                         gather_issue_index;
+  reg                                gather_response_pending;
+  reg  [2:0]                         gather_response_index;
+  reg                                gather_last_issued;
+  reg  [511:0]                       gathered_line;
+  reg  [5:0]                         gather_set;
+  reg  [63:0]                        eviction_line_address;
+  RV5StageDataReq                    eviction_context;
+  reg  [2:0]                         gathered_snoop_state;
+  reg                                snoop_metadata_pending;
+  wire                               _GEN_2 =
     valid_lines[_lookup_egress_out.bits.address[11:6]];
+  wire                               _GEN_3 =
+    _GEN_2 & _tags_port_out.response.bits[1'h0] == _lookup_egress_out.bits.address[63:12];
   wire                               _GEN_4 =
-    _GEN_3 & _tags_port_out.response.bits[1'h0] == _lookup_egress_out.bits.address[63:12];
-  assign _GEN_2 = _lookup_egress_out.valid;
-  wire                               _GEN_5 =
-    _GEN_2 & _tags_port_out.response.valid & _states_port_out.response.valid;
-  wire                               _GEN_6 = _lookup_egress_out.bits.access == 3'h3;
-  wire                               _GEN_7 =
-    _GEN_5 & (|{_lookup_egress_out.bits.access == 3'h1, _GEN_6});
-  wire                               _GEN_8 = _lookup_egress_out.bits.access == 3'h2;
-  wire                               _GEN_9 = _GEN_5 & _GEN_8;
-  wire                               _GEN_10 = _lookup_egress_out.bits.access == 3'h5;
-  wire                               _GEN_11 = _GEN_5 & _GEN_10;
-  wire                               _GEN_12 = _lookup_egress_out.bits.access == 3'h4;
-  wire                               _GEN_13 = _GEN_5 & _GEN_12;
-  wire                               _GEN_14 =
+    _lookup_egress_out.valid & _tags_port_out.response.valid
+    & _states_port_out.response.valid;
+  wire                               _GEN_5 = _lookup_egress_out.bits.access == 3'h3;
+  wire                               _GEN_6 =
+    _GEN_4 & (|{_lookup_egress_out.bits.access == 3'h1, _GEN_5});
+  wire                               _GEN_7 = _lookup_egress_out.bits.access == 3'h2;
+  wire                               _GEN_8 = _GEN_4 & _GEN_7;
+  wire                               _GEN_9 = _lookup_egress_out.bits.access == 3'h5;
+  wire                               _GEN_10 = _GEN_4 & _GEN_9;
+  wire                               _GEN_11 = _lookup_egress_out.bits.access == 3'h4;
+  wire                               _GEN_12 = _GEN_4 & _GEN_11;
+  wire                               _GEN_13 =
     reservation_valid & reservation_address == _lookup_egress_out.bits.address
     & reservation_width == _lookup_egress_out.bits.width;
-  wire                               _GEN_15 = _GEN_9 | _GEN_11 | _GEN_13 & _GEN_14;
-  wire                               _GEN_16 =
+  wire                               _GEN_14 = _GEN_8 | _GEN_10 | _GEN_12 & _GEN_13;
+  wire                               _GEN_15 =
     _states_port_out.response.bits[1'h0] == 3'h4;
-  wire                               _GEN_17 =
+  wire                               _GEN_16 =
     _states_port_out.response.bits[1'h0] == 3'h6;
-  wire                               _GEN_18 =
-    _GEN_15 & _GEN_4
+  wire                               _GEN_17 =
+    _GEN_14 & _GEN_3
     & (|{_states_port_out.response.bits[1'h0] == 3'h2,
-         _GEN_16,
+         _GEN_15,
          _states_port_out.response.bits[1'h0] == 3'h5,
-         _GEN_17});
-  wire                               _GEN_19 = _GEN_7 & ~_GEN_4 | _GEN_15 & ~_GEN_18;
-  wire                               _GEN_20 =
-    _GEN_19 & ~_GEN_4 & _GEN_3
-    & (|{_states_port_out.response.bits[1'h0] == 3'h3, _GEN_16, _GEN_17});
-  wire [7:0][63:0]                   _GEN_21 =
-    /*cast(bit[7:0][63:0])*/_lines_port_out.response.bits;
-  wire                               _GEN_22 = _GEN_2 & _GEN_19;
-  wire                               _GEN_23 = |({{_GEN_19 & _GEN_1}, {~_GEN_19}});
-  wire                               _GEN_24 = _GEN_22 & _GEN_20;
+         _GEN_16});
+  wire                               _GEN_18 = _GEN_6 & ~_GEN_3 | _GEN_14 & ~_GEN_17;
+  wire                               _GEN_19 =
+    |{_states_port_out.response.bits[1'h0] == 3'h3, _GEN_15, _GEN_16};
+  wire                               _GEN_20 = _GEN_18 & ~_GEN_3 & _GEN_2 & _GEN_19;
+  wire [63:0]                        _GEN_21 =
+    /*cast(bit[63:0])*/_lines_port_out.response.bits;
+  wire                               _GEN_22 = gather_state == 3'h0;
+  wire                               _GEN_23 = gather_state == 3'h1;
+  wire                               _GEN_24 = |{_GEN_23, gather_state == 3'h3};
+  wire                               _GEN_25 = _GEN_24 & ~gather_last_issued;
+  wire                               _GEN_26 = &gather_issue_index;
+  wire                               _GEN_27 = &gather_response_index;
+  wire                               _GEN_28 = _lookup_egress_out.valid & _GEN_18;
+  wire                               _GEN_29 = |({{_GEN_18 & _GEN_1}, {~_GEN_18}});
   assign _GEN_1 = |({{_GEN_20 & _GEN}, {~_GEN_20 & _GEN_0}});
-  wire RV5StageLineRefillCommand_1   _GEN_25 =
+  wire RV5StageLineRefillCommand_1   _GEN_30 =
     '{line_address: {_lookup_egress_out.bits.address[63:6], 6'h0},
-      opcode: ((|{_GEN_8, _GEN_12, _GEN_10}) ? 7'h7 : 7'h2),
+      opcode: ((|{_GEN_7, _GEN_11, _GEN_9}) ? 7'h7 : 7'h2),
       context_0: _lookup_egress_out.bits};
   assign _GEN_0 = _refill_commands_ingress_0_out.ready;
-  wire RV5StageLineWritebackCommand  _GEN_26 =
-    '{line_address:
-        {_tags_port_out.response.bits[1'h0], _lookup_egress_out.bits.address[11:6], 6'h0},
-      line: _GEN_21,
-      context_0: _lookup_egress_out.bits};
-  assign _GEN = _writeback_command_out.ready;
-  wire RV5StageLineRefillCommand_1   _GEN_27 =
+  assign _GEN = _GEN_22 & ~refill_installing;
+  wire                               _GEN_31 = _GEN_28 & _GEN_20 & _GEN;
+  wire                               _GEN_32 = gather_state == 3'h2;
+  wire [7:0][63:0]                   _GEN_33 = /*cast(bit[7:0][63:0])*/gathered_line;
+  wire RV5StageLineWritebackCommand  _GEN_34 =
+    '{line_address: eviction_line_address, line: _GEN_33, context_0: eviction_context};
+  wire                               _GEN_35 = _GEN_32 & _writeback_command_out.ready;
+  wire RV5StageLineRefillCommand_1   _GEN_36 =
     '{line_address: {_writeback_completion_out.bits.context_0.address[63:6], 6'h0},
       opcode:
         ((|{_writeback_completion_out.bits.context_0.access == 3'h2,
@@ -6657,183 +6692,153 @@ module RV5StageL1DCache(
            ? 7'h7
            : 7'h2),
       context_0: _writeback_completion_out.bits.context_0};
-  wire                               _GEN_28 =
-    _refill_completion_out.valid & ~_snoop_pending;
-  wire                               _GEN_29 = ~(_GEN_28 & ~reset);
+  wire                               _GEN_37 =
+    _refill_completion_out.valid & ~_snoop_pending & _GEN_22 & ~refill_installing;
+  wire                               _GEN_38 = &refill_install_index;
+  wire                               _GEN_39 = refill_installing & _GEN_38;
+  wire                               _GEN_40 = _refill_completion_out.valid & _GEN_39;
+  wire                               _GEN_41 = ~(_GEN_40 & ~reset);
   `ifndef SYNTHESIS
     l1d_refill_not_dirty:
-      assert property (@(posedge clock) disable iff (_GEN_29)
+      assert property (@(posedge clock) disable iff (_GEN_41)
                          ~_refill_completion_out.bits.pass_dirty);
   `endif // not def SYNTHESIS
-  wire [63:0]                        _GEN_30 =
-    _GEN_28
-      ? _refill_completion_out.bits.context_0.address
-      : _lookup_egress_out.bits.address;
-  wire [1:0]                         _GEN_31 =
-    _GEN_28 ? _refill_completion_out.bits.context_0.width : _lookup_egress_out.bits.width;
-  wire [2:0]                         _GEN_32 =
-    _GEN_28
+  wire [2:0]                         _GEN_42 =
+    _GEN_40
       ? _refill_completion_out.bits.context_0.access
       : _lookup_egress_out.bits.access;
-  wire                               _GEN_33 = _GEN_32 == 3'h1;
-  wire                               _GEN_34 =
-    _GEN_28
-    & (|{_refill_completion_out.bits.context_0.access == 3'h2,
-         _refill_completion_out.bits.context_0.access == 3'h4,
-         _refill_completion_out.bits.context_0.access == 3'h5});
-  wire [63:0]                        _GEN_35 =
-    _GEN_34
-      ? _refill_completion_out.bits.context_0.address
-      : _lookup_egress_out.bits.address;
-  wire [63:0]                        _GEN_36 =
-    _GEN_34 ? _refill_completion_out.bits.context_0.data : _lookup_egress_out.bits.data;
-  wire [1:0]                         _GEN_37 =
-    _GEN_34 ? _refill_completion_out.bits.context_0.width : _lookup_egress_out.bits.width;
-  wire [63:0][7:0]                   _GEN_38 =
-    /*cast(bit[63:0][7:0])*/{448'h0, _store_gen_data} << {503'h0, _GEN_35[5:3], 6'h0};
-  wire [63:0]                        _GEN_39 =
-    {56'h0, _store_gen_mask} << {58'h0, _GEN_35[5:3], 3'h0};
-  wire [63:0]                        _GEN_40 = _GEN_39;
-  wire [63:0][7:0]                   _GEN_41 =
-    /*cast(bit[63:0][7:0])*/_refill_completion_out.bits.line;
-  wire [63:0][7:0]                   _GEN_42 =
-    {{_GEN_40[6'h3F] ? _GEN_38[6'h3F] : _GEN_41[6'h3F]},
-     {_GEN_40[6'h3E] ? _GEN_38[6'h3E] : _GEN_41[6'h3E]},
-     {_GEN_40[6'h3D] ? _GEN_38[6'h3D] : _GEN_41[6'h3D]},
-     {_GEN_40[6'h3C] ? _GEN_38[6'h3C] : _GEN_41[6'h3C]},
-     {_GEN_40[6'h3B] ? _GEN_38[6'h3B] : _GEN_41[6'h3B]},
-     {_GEN_40[6'h3A] ? _GEN_38[6'h3A] : _GEN_41[6'h3A]},
-     {_GEN_40[6'h39] ? _GEN_38[6'h39] : _GEN_41[6'h39]},
-     {_GEN_40[6'h38] ? _GEN_38[6'h38] : _GEN_41[6'h38]},
-     {_GEN_40[6'h37] ? _GEN_38[6'h37] : _GEN_41[6'h37]},
-     {_GEN_40[6'h36] ? _GEN_38[6'h36] : _GEN_41[6'h36]},
-     {_GEN_40[6'h35] ? _GEN_38[6'h35] : _GEN_41[6'h35]},
-     {_GEN_40[6'h34] ? _GEN_38[6'h34] : _GEN_41[6'h34]},
-     {_GEN_40[6'h33] ? _GEN_38[6'h33] : _GEN_41[6'h33]},
-     {_GEN_40[6'h32] ? _GEN_38[6'h32] : _GEN_41[6'h32]},
-     {_GEN_40[6'h31] ? _GEN_38[6'h31] : _GEN_41[6'h31]},
-     {_GEN_40[6'h30] ? _GEN_38[6'h30] : _GEN_41[6'h30]},
-     {_GEN_40[6'h2F] ? _GEN_38[6'h2F] : _GEN_41[6'h2F]},
-     {_GEN_40[6'h2E] ? _GEN_38[6'h2E] : _GEN_41[6'h2E]},
-     {_GEN_40[6'h2D] ? _GEN_38[6'h2D] : _GEN_41[6'h2D]},
-     {_GEN_40[6'h2C] ? _GEN_38[6'h2C] : _GEN_41[6'h2C]},
-     {_GEN_40[6'h2B] ? _GEN_38[6'h2B] : _GEN_41[6'h2B]},
-     {_GEN_40[6'h2A] ? _GEN_38[6'h2A] : _GEN_41[6'h2A]},
-     {_GEN_40[6'h29] ? _GEN_38[6'h29] : _GEN_41[6'h29]},
-     {_GEN_40[6'h28] ? _GEN_38[6'h28] : _GEN_41[6'h28]},
-     {_GEN_40[6'h27] ? _GEN_38[6'h27] : _GEN_41[6'h27]},
-     {_GEN_40[6'h26] ? _GEN_38[6'h26] : _GEN_41[6'h26]},
-     {_GEN_40[6'h25] ? _GEN_38[6'h25] : _GEN_41[6'h25]},
-     {_GEN_40[6'h24] ? _GEN_38[6'h24] : _GEN_41[6'h24]},
-     {_GEN_40[6'h23] ? _GEN_38[6'h23] : _GEN_41[6'h23]},
-     {_GEN_40[6'h22] ? _GEN_38[6'h22] : _GEN_41[6'h22]},
-     {_GEN_40[6'h21] ? _GEN_38[6'h21] : _GEN_41[6'h21]},
-     {_GEN_40[6'h20] ? _GEN_38[6'h20] : _GEN_41[6'h20]},
-     {_GEN_40[6'h1F] ? _GEN_38[6'h1F] : _GEN_41[6'h1F]},
-     {_GEN_40[6'h1E] ? _GEN_38[6'h1E] : _GEN_41[6'h1E]},
-     {_GEN_40[6'h1D] ? _GEN_38[6'h1D] : _GEN_41[6'h1D]},
-     {_GEN_40[6'h1C] ? _GEN_38[6'h1C] : _GEN_41[6'h1C]},
-     {_GEN_40[6'h1B] ? _GEN_38[6'h1B] : _GEN_41[6'h1B]},
-     {_GEN_40[6'h1A] ? _GEN_38[6'h1A] : _GEN_41[6'h1A]},
-     {_GEN_40[6'h19] ? _GEN_38[6'h19] : _GEN_41[6'h19]},
-     {_GEN_40[6'h18] ? _GEN_38[6'h18] : _GEN_41[6'h18]},
-     {_GEN_40[6'h17] ? _GEN_38[6'h17] : _GEN_41[6'h17]},
-     {_GEN_40[6'h16] ? _GEN_38[6'h16] : _GEN_41[6'h16]},
-     {_GEN_40[6'h15] ? _GEN_38[6'h15] : _GEN_41[6'h15]},
-     {_GEN_40[6'h14] ? _GEN_38[6'h14] : _GEN_41[6'h14]},
-     {_GEN_40[6'h13] ? _GEN_38[6'h13] : _GEN_41[6'h13]},
-     {_GEN_40[6'h12] ? _GEN_38[6'h12] : _GEN_41[6'h12]},
-     {_GEN_40[6'h11] ? _GEN_38[6'h11] : _GEN_41[6'h11]},
-     {_GEN_40[6'h10] ? _GEN_38[6'h10] : _GEN_41[6'h10]},
-     {_GEN_40[6'hF] ? _GEN_38[6'hF] : _GEN_41[6'hF]},
-     {_GEN_40[6'hE] ? _GEN_38[6'hE] : _GEN_41[6'hE]},
-     {_GEN_40[6'hD] ? _GEN_38[6'hD] : _GEN_41[6'hD]},
-     {_GEN_40[6'hC] ? _GEN_38[6'hC] : _GEN_41[6'hC]},
-     {_GEN_40[6'hB] ? _GEN_38[6'hB] : _GEN_41[6'hB]},
-     {_GEN_40[6'hA] ? _GEN_38[6'hA] : _GEN_41[6'hA]},
-     {_GEN_40[6'h9] ? _GEN_38[6'h9] : _GEN_41[6'h9]},
-     {_GEN_40[6'h8] ? _GEN_38[6'h8] : _GEN_41[6'h8]},
-     {_GEN_40[6'h7] ? _GEN_38[6'h7] : _GEN_41[6'h7]},
-     {_GEN_40[6'h6] ? _GEN_38[6'h6] : _GEN_41[6'h6]},
-     {_GEN_40[6'h5] ? _GEN_38[6'h5] : _GEN_41[6'h5]},
-     {_GEN_40[6'h4] ? _GEN_38[6'h4] : _GEN_41[6'h4]},
-     {_GEN_40[6'h3] ? _GEN_38[6'h3] : _GEN_41[6'h3]},
-     {_GEN_40[6'h2] ? _GEN_38[6'h2] : _GEN_41[6'h2]},
-     {_GEN_40[6'h1] ? _GEN_38[6'h1] : _GEN_41[6'h1]},
-     {_GEN_40[6'h0] ? _GEN_38[6'h0] : _GEN_41[6'h0]}};
-  wire                               _GEN_43 = _GEN_28 | _GEN_18;
+  wire                               _GEN_43 = _GEN_42 == 3'h1;
+  wire                               _GEN_44 =
+    |{_refill_completion_out.bits.context_0.access == 3'h2,
+      _refill_completion_out.bits.context_0.access == 3'h4,
+      _refill_completion_out.bits.context_0.access == 3'h5};
+  wire                               _GEN_45 = _refill_completion_out.valid & _GEN_44;
+  wire [63:0]                        _GEN_46 =
+    _GEN_45 ? _refill_completion_out.bits.context_0.data : _lookup_egress_out.bits.data;
+  wire [1:0]                         _GEN_47 =
+    _GEN_45 ? _refill_completion_out.bits.context_0.width : _lookup_egress_out.bits.width;
+  wire [7:0][7:0]                    _GEN_48 = /*cast(bit[7:0][7:0])*/_store_gen_data;
+  wire [7:0]                         _GEN_49 = _store_gen_mask;
+  wire [7:0][7:0]                    _GEN_50 =
+    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[refill_install_index];
+  wire                               _GEN_51 = refill_installing | _GEN_17;
   `ifndef SYNTHESIS
     l1d_backing_owner_exclusive:
       assert property (@(posedge clock) disable iff (reset)
                          _refill_command_out.ready | _writeback_command_out.ready);
   `endif // not def SYNTHESIS
-  wire RV5StageDataSnoopLookupResult _GEN_44 =
-    '{hit:
-        (valid_lines[_snoop_address[11:6]]
-         & _tags_port_out.response.bits[1'h0] == _snoop_address[63:12]),
-      state: _states_port_out.response.bits[1'h0],
-      line: _GEN_21};
-  wire                               _GEN_45 =
-    _refill_command_out.ready & _writeback_command_out.ready & ~_snoop_pending & ~_GEN_19
-    & ~_GEN_18;
-  wire                               _GEN_46 = _lookup_ingress_out.ready & _GEN_45;
-  wire                               _GEN_47 = core_in.request.valid & _GEN_46;
-  wire                               _GEN_48 = _GEN_7 & _GEN_4;
-  wire                               _GEN_49 = _GEN_13 & ~_GEN_14;
-  wire RV5StageDataResp              _GEN_50 =
+  wire                               _GEN_52 =
+    valid_lines[_snoop_address[11:6]]
+    & _tags_port_out.response.bits[1'h0] == _snoop_address[63:12];
+  wire                               _GEN_53 =
+    snoop_metadata_pending & _tags_port_out.response.valid
+    & _states_port_out.response.valid;
+  wire                               _GEN_54 = _GEN_52 & _GEN_19;
+  wire                               _GEN_55 = _GEN_53 & _GEN_54;
+  wire                               _GEN_56 = gather_state == 3'h4;
+  wire [7:0][63:0]                   _GEN_57 =
+    /*cast(bit[7:0][63:0])*/_GEN_56 ? gathered_line : 512'h0;
+  wire RV5StageDataSnoopLookupResult _GEN_58 =
+    '{hit: (_GEN_56 | _GEN_52),
+      state: (_GEN_56 ? gathered_snoop_state : _states_port_out.response.bits[1'h0]),
+      line: _GEN_57};
+  wire                               _GEN_59 =
+    _refill_command_out.ready & _writeback_command_out.ready & _GEN_22
+    & ~refill_installing & ~_snoop_pending & ~_GEN_18 & ~_GEN_17;
+  wire                               _GEN_60 = _lookup_ingress_out.ready & _GEN_59;
+  wire                               _GEN_61 = core_in.request.valid & _GEN_60;
+  wire                               _GEN_62 = _GEN_6 & _GEN_3;
+  wire                               _GEN_63 = _GEN_12 & ~_GEN_13;
+  wire RV5StageDataResp              _GEN_64 =
     '{data:
-        ((|{_GEN_33, _GEN_32 == 3'h3, _GEN_32 == 3'h5})
+        ((|{_GEN_43, _GEN_42 == 3'h3, _GEN_42 == 3'h5})
            ? _load_gen_value
-           : {63'h0, _GEN_32 == 3'h4 & _GEN_49}),
+           : {63'h0, _GEN_42 == 3'h4 & _GEN_63}),
       tag:
-        (_GEN_28
+        (_GEN_40
            ? _refill_completion_out.bits.context_0.tag
            : _lookup_egress_out.bits.tag)};
-  wire [5:0]                         _GEN_51 =
-    _snoop_lookup_out.valid ? _snoop_address[11:6] : core_in.request.bits.address[11:6];
-  wire ReadWriteRequest              _GEN_52 =
-    '{address: (_GEN_28 ? _refill_completion_out.bits.context_0.address[11:6] : _GEN_51),
-      write: _GEN_28,
+  wire ReadWriteRequest              _GEN_65 =
+    '{address:
+        (_GEN_40
+           ? _refill_completion_out.bits.context_0.address[11:6]
+           : _snoop_lookup_out.valid
+               ? _snoop_address[11:6]
+               : core_in.request.bits.address[11:6]),
+      write: _GEN_40,
       data:
-        ({1{_GEN_28
+        ({1{_GEN_40
               ? _refill_completion_out.bits.context_0.address[63:12]
               : _lookup_egress_out.bits.address[63:12]}}),
       mask: (1'h1)};
-  wire                               _GEN_53 =
+  wire                               _GEN_66 =
     _snoop_update_out.valid & ~_snoop_update_out.bits.invalidate;
-  wire ReadWriteRequest_3            _GEN_54 =
+  wire ReadWriteRequest_3            _GEN_67 =
     '{address:
-        (_GEN_28
+        (_GEN_40
            ? _refill_completion_out.bits.context_0.address[11:6]
-           : _GEN_18
+           : _GEN_17
                ? _lookup_egress_out.bits.address[11:6]
                : _snoop_lookup_out.valid
                    ? _snoop_address[11:6]
-                   : _GEN_53
+                   : _GEN_66
                        ? _snoop_update_out.bits.address[11:6]
                        : core_in.request.bits.address[11:6]),
-      write: (_GEN_28 | _GEN_18 | _GEN_53),
+      write: (_GEN_40 | _GEN_17 | _GEN_66),
       data:
-        ({1{_GEN_34 | _GEN_18
+        ({1{_GEN_40 & _GEN_44 | _GEN_17
               ? 3'h4
-              : _GEN_53
+              : _GEN_66
                   ? _snoop_update_out.bits.state
                   : _refill_completion_out.bits.state == 2'h2 ? 3'h2 : 3'h1}}),
       mask: (1'h1)};
-  wire ReadWriteRequest_4            _GEN_55 =
+  wire ReadWriteRequest_2            _GEN_68 =
     '{address:
-        (_GEN_43
-           ? (_GEN_18
-                ? _lookup_egress_out.bits.address[11:6]
-                : _refill_completion_out.bits.context_0.address[11:6])
-           : _GEN_51),
-      write: _GEN_43,
-      data: (_GEN_18 ? _GEN_38 : _GEN_34 ? _GEN_42 : _GEN_41),
-      mask: (_GEN_18 ? _GEN_39 : 64'hFFFFFFFFFFFFFFFF)};
-  wire                               _GEN_56 =
-    _GEN_48 & _GEN_6 | _GEN_28 & _refill_completion_out.bits.context_0.access == 3'h3;
-  wire [63:0]                        _GEN_57 =
-    _GEN_28
+        (_GEN_51
+           ? (_GEN_17
+                ? _lookup_egress_out.bits.address[11:3]
+                : {_refill_completion_out.bits.context_0.address[11:6],
+                   refill_install_index})
+           : _GEN_25
+               ? {gather_set, gather_issue_index}
+               : core_in.request.bits.address[11:3]),
+      write: _GEN_51,
+      data:
+        (_GEN_17
+           ? _GEN_48
+           : _GEN_45
+             & refill_install_index == _refill_completion_out.bits.context_0.address[5:3]
+               ? {{_GEN_49[3'h7] ? _GEN_48[3'h7] : _GEN_50[3'h7]},
+                  {_GEN_49[3'h6] ? _GEN_48[3'h6] : _GEN_50[3'h6]},
+                  {_GEN_49[3'h5] ? _GEN_48[3'h5] : _GEN_50[3'h5]},
+                  {_GEN_49[3'h4] ? _GEN_48[3'h4] : _GEN_50[3'h4]},
+                  {_GEN_49[3'h3] ? _GEN_48[3'h3] : _GEN_50[3'h3]},
+                  {_GEN_49[3'h2] ? _GEN_48[3'h2] : _GEN_50[3'h2]},
+                  {_GEN_49[3'h1] ? _GEN_48[3'h1] : _GEN_50[3'h1]},
+                  {_GEN_49[3'h0] ? _GEN_48[3'h0] : _GEN_50[3'h0]}}
+               : _GEN_50),
+      mask: (_GEN_17 ? _store_gen_mask : 8'hFF)};
+  wire [511:0]                       _GEN_69 =
+    /*cast(bit[511:0])*/{{_GEN_27 ? _GEN_21 : _GEN_33[3'h7]},
+                         {gather_response_index == 3'h6 ? _GEN_21 : _GEN_33[3'h6]},
+                         {gather_response_index == 3'h5 ? _GEN_21 : _GEN_33[3'h5]},
+                         {gather_response_index == 3'h4 ? _GEN_21 : _GEN_33[3'h4]},
+                         {gather_response_index == 3'h3 ? _GEN_21 : _GEN_33[3'h3]},
+                         {gather_response_index == 3'h2 ? _GEN_21 : _GEN_33[3'h2]},
+                         {gather_response_index == 3'h1 ? _GEN_21 : _GEN_33[3'h1]},
+                         {gather_response_index == 3'h0 ? _GEN_21 : _GEN_33[3'h0]}};
+  wire                               _GEN_70 =
+    ~(gather_response_pending & ~_GEN_31 & ~_GEN_55 & _GEN_24 & ~reset);
+  `ifndef SYNTHESIS
+    l1d_gather_read_response_valid:
+      assert property (@(posedge clock) disable iff (_GEN_70)
+                         _lines_port_out.response.valid);
+  `endif // not def SYNTHESIS
+  wire                               _GEN_71 = _GEN_31 | _GEN_55;
+  wire                               _GEN_72 =
+    _GEN_62 & _GEN_5 | _GEN_40 & _refill_completion_out.bits.context_0.access == 3'h3;
+  wire [63:0]                        _GEN_73 =
+    _GEN_40
       ? {{(&(_refill_completion_out.bits.context_0.address[11:6])) | valid_lines[6'h3F]},
          {_refill_completion_out.bits.context_0.address[11:6] == 6'h3E
             | valid_lines[6'h3E]},
@@ -6962,74 +6967,74 @@ module RV5StageL1DCache(
          {_refill_completion_out.bits.context_0.address[11:6] == 6'h0
             | valid_lines[6'h0]}}
       : valid_lines;
-  wire [63:0]                        _GEN_58 =
-    _GEN_24 & _writeback_command_out.ready
-      ? {{_lookup_egress_out.bits.address[11:6] != 6'h3F & valid_lines[6'h3F]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3E & valid_lines[6'h3E]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3D & valid_lines[6'h3D]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3C & valid_lines[6'h3C]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3B & valid_lines[6'h3B]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3A & valid_lines[6'h3A]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h39 & valid_lines[6'h39]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h38 & valid_lines[6'h38]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h37 & valid_lines[6'h37]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h36 & valid_lines[6'h36]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h35 & valid_lines[6'h35]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h34 & valid_lines[6'h34]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h33 & valid_lines[6'h33]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h32 & valid_lines[6'h32]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h31 & valid_lines[6'h31]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h30 & valid_lines[6'h30]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2F & valid_lines[6'h2F]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2E & valid_lines[6'h2E]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2D & valid_lines[6'h2D]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2C & valid_lines[6'h2C]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2B & valid_lines[6'h2B]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2A & valid_lines[6'h2A]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h29 & valid_lines[6'h29]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h28 & valid_lines[6'h28]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h27 & valid_lines[6'h27]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h26 & valid_lines[6'h26]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h25 & valid_lines[6'h25]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h24 & valid_lines[6'h24]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h23 & valid_lines[6'h23]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h22 & valid_lines[6'h22]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h21 & valid_lines[6'h21]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h20 & valid_lines[6'h20]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1F & valid_lines[6'h1F]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1E & valid_lines[6'h1E]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1D & valid_lines[6'h1D]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1C & valid_lines[6'h1C]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1B & valid_lines[6'h1B]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1A & valid_lines[6'h1A]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h19 & valid_lines[6'h19]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h18 & valid_lines[6'h18]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h17 & valid_lines[6'h17]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h16 & valid_lines[6'h16]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h15 & valid_lines[6'h15]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h14 & valid_lines[6'h14]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h13 & valid_lines[6'h13]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h12 & valid_lines[6'h12]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h11 & valid_lines[6'h11]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h10 & valid_lines[6'h10]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hF & valid_lines[6'hF]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hE & valid_lines[6'hE]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hD & valid_lines[6'hD]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hC & valid_lines[6'hC]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hB & valid_lines[6'hB]},
-         {_lookup_egress_out.bits.address[11:6] != 6'hA & valid_lines[6'hA]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h9 & valid_lines[6'h9]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h8 & valid_lines[6'h8]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h7 & valid_lines[6'h7]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h6 & valid_lines[6'h6]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h5 & valid_lines[6'h5]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h4 & valid_lines[6'h4]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h3 & valid_lines[6'h3]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h2 & valid_lines[6'h2]},
-         {_lookup_egress_out.bits.address[11:6] != 6'h1 & valid_lines[6'h1]},
-         {(|(_lookup_egress_out.bits.address[11:6])) & valid_lines[6'h0]}}
-      : _GEN_57;
-  wire [63:0]                        _GEN_59 =
+  wire [63:0]                        _GEN_74 =
+    _GEN_35
+      ? {{gather_set != 6'h3F & valid_lines[6'h3F]},
+         {gather_set != 6'h3E & valid_lines[6'h3E]},
+         {gather_set != 6'h3D & valid_lines[6'h3D]},
+         {gather_set != 6'h3C & valid_lines[6'h3C]},
+         {gather_set != 6'h3B & valid_lines[6'h3B]},
+         {gather_set != 6'h3A & valid_lines[6'h3A]},
+         {gather_set != 6'h39 & valid_lines[6'h39]},
+         {gather_set != 6'h38 & valid_lines[6'h38]},
+         {gather_set != 6'h37 & valid_lines[6'h37]},
+         {gather_set != 6'h36 & valid_lines[6'h36]},
+         {gather_set != 6'h35 & valid_lines[6'h35]},
+         {gather_set != 6'h34 & valid_lines[6'h34]},
+         {gather_set != 6'h33 & valid_lines[6'h33]},
+         {gather_set != 6'h32 & valid_lines[6'h32]},
+         {gather_set != 6'h31 & valid_lines[6'h31]},
+         {gather_set != 6'h30 & valid_lines[6'h30]},
+         {gather_set != 6'h2F & valid_lines[6'h2F]},
+         {gather_set != 6'h2E & valid_lines[6'h2E]},
+         {gather_set != 6'h2D & valid_lines[6'h2D]},
+         {gather_set != 6'h2C & valid_lines[6'h2C]},
+         {gather_set != 6'h2B & valid_lines[6'h2B]},
+         {gather_set != 6'h2A & valid_lines[6'h2A]},
+         {gather_set != 6'h29 & valid_lines[6'h29]},
+         {gather_set != 6'h28 & valid_lines[6'h28]},
+         {gather_set != 6'h27 & valid_lines[6'h27]},
+         {gather_set != 6'h26 & valid_lines[6'h26]},
+         {gather_set != 6'h25 & valid_lines[6'h25]},
+         {gather_set != 6'h24 & valid_lines[6'h24]},
+         {gather_set != 6'h23 & valid_lines[6'h23]},
+         {gather_set != 6'h22 & valid_lines[6'h22]},
+         {gather_set != 6'h21 & valid_lines[6'h21]},
+         {gather_set != 6'h20 & valid_lines[6'h20]},
+         {gather_set != 6'h1F & valid_lines[6'h1F]},
+         {gather_set != 6'h1E & valid_lines[6'h1E]},
+         {gather_set != 6'h1D & valid_lines[6'h1D]},
+         {gather_set != 6'h1C & valid_lines[6'h1C]},
+         {gather_set != 6'h1B & valid_lines[6'h1B]},
+         {gather_set != 6'h1A & valid_lines[6'h1A]},
+         {gather_set != 6'h19 & valid_lines[6'h19]},
+         {gather_set != 6'h18 & valid_lines[6'h18]},
+         {gather_set != 6'h17 & valid_lines[6'h17]},
+         {gather_set != 6'h16 & valid_lines[6'h16]},
+         {gather_set != 6'h15 & valid_lines[6'h15]},
+         {gather_set != 6'h14 & valid_lines[6'h14]},
+         {gather_set != 6'h13 & valid_lines[6'h13]},
+         {gather_set != 6'h12 & valid_lines[6'h12]},
+         {gather_set != 6'h11 & valid_lines[6'h11]},
+         {gather_set != 6'h10 & valid_lines[6'h10]},
+         {gather_set != 6'hF & valid_lines[6'hF]},
+         {gather_set != 6'hE & valid_lines[6'hE]},
+         {gather_set != 6'hD & valid_lines[6'hD]},
+         {gather_set != 6'hC & valid_lines[6'hC]},
+         {gather_set != 6'hB & valid_lines[6'hB]},
+         {gather_set != 6'hA & valid_lines[6'hA]},
+         {gather_set != 6'h9 & valid_lines[6'h9]},
+         {gather_set != 6'h8 & valid_lines[6'h8]},
+         {gather_set != 6'h7 & valid_lines[6'h7]},
+         {gather_set != 6'h6 & valid_lines[6'h6]},
+         {gather_set != 6'h5 & valid_lines[6'h5]},
+         {gather_set != 6'h4 & valid_lines[6'h4]},
+         {gather_set != 6'h3 & valid_lines[6'h3]},
+         {gather_set != 6'h2 & valid_lines[6'h2]},
+         {gather_set != 6'h1 & valid_lines[6'h1]},
+         {(|gather_set) & valid_lines[6'h0]}}
+      : _GEN_73;
+  wire [63:0]                        _GEN_75 =
     _snoop_update_out.valid & _snoop_update_out.bits.invalidate
       ? {{_snoop_update_out.bits.address[11:6] != 6'h3F & valid_lines[6'h3F]},
          {_snoop_update_out.bits.address[11:6] != 6'h3E & valid_lines[6'h3E]},
@@ -7095,97 +7100,105 @@ module RV5StageL1DCache(
          {_snoop_update_out.bits.address[11:6] != 6'h2 & valid_lines[6'h2]},
          {_snoop_update_out.bits.address[11:6] != 6'h1 & valid_lines[6'h1]},
          {(|(_snoop_update_out.bits.address[11:6])) & valid_lines[6'h0]}}
-      : _GEN_58;
-  wire struct packed {logic valid; RV5StageLineRefillCommand_1 bits; } _GEN_60 =
-    '{valid: _writeback_completion_out.valid, bits: _GEN_27};
-  wire struct packed {logic valid; RV5StageLineWritebackCommand bits; } _GEN_61 =
-    '{valid: _GEN_24, bits: _GEN_26};
-  wire struct packed {logic valid; RV5StageLineRefillCommand_1 bits; } _GEN_62 =
-    '{valid: (_GEN_22 & ~_GEN_20), bits: _GEN_25};
-  wire struct packed {logic ready; } _GEN_63 = '{ready: _GEN_23};
-  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_64 =
-    '{valid: (_GEN_48 | _GEN_18 | _GEN_49 | _GEN_28), bits: _GEN_50};
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_65 =
-    '{valid: (core_in.request.valid & _GEN_45), bits: core_in.request.bits};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_66 =
+      : _GEN_74;
+  wire struct packed {logic valid; RV5StageLineRefillCommand_1 bits; } _GEN_76 =
+    '{valid: _writeback_completion_out.valid, bits: _GEN_36};
+  wire struct packed {logic valid; RV5StageLineRefillCommand_1 bits; } _GEN_77 =
+    '{valid: (_GEN_28 & ~_GEN_20), bits: _GEN_30};
+  wire struct packed {logic ready; } _GEN_78 = '{ready: _GEN_29};
+  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_79 =
+    '{valid: (_GEN_62 | _GEN_17 | _GEN_63 | _GEN_40), bits: _GEN_64};
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_80 =
+    '{valid: (core_in.request.valid & _GEN_59), bits: core_in.request.bits};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_81 =
     '{valid: (chi_in.responses.valid & ~_writeback_command_out.ready),
       bits: chi_in.responses.bits};
-  wire struct packed {logic valid; RV5StageDataSnoopLookupResult bits; } _GEN_67 =
-    '{valid: (_tags_port_out.response.valid & _states_port_out.response.valid),
-      bits: _GEN_44};
-  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_68 =
+  wire struct packed {logic valid; RV5StageLineWritebackCommand bits; } _GEN_82 =
+    '{valid: _GEN_32, bits: _GEN_34};
+  wire struct packed {logic valid; RV5StageDataSnoopLookupResult bits; } _GEN_83 =
+    '{valid: (_GEN_53 & ~_GEN_54 | _GEN_56), bits: _GEN_58};
+  wire struct packed {logic valid; CHIRspFlit bits; } _GEN_84 =
     '{valid: (chi_in.responses.valid & _writeback_command_out.ready),
       bits: chi_in.responses.bits};
-  wire struct packed {logic ready; } _GEN_69 = '{ready: (~_snoop_pending)};
-  wire struct packed {logic valid; ReadWriteRequest_4 bits; } _GEN_70 =
-    '{valid: (_GEN_47 | _GEN_43 | _snoop_lookup_out.valid), bits: _GEN_55};
-  wire struct packed {struct packed {logic valid; ReadWriteRequest_4 bits; } request; }
-    _GEN_71 = '{request: _GEN_70};
-  wire struct packed {logic valid; ReadWriteRequest_3 bits; } _GEN_72 =
-    '{valid: (_GEN_47 | _GEN_28 | _GEN_18 | _snoop_lookup_out.valid | _GEN_53),
-      bits: _GEN_54};
+  wire struct packed {logic ready; } _GEN_85 = '{ready: _GEN_39};
+  wire struct packed {logic valid; ReadWriteRequest_2 bits; } _GEN_86 =
+    '{valid: (_GEN_61 | _GEN_51 | _GEN_25), bits: _GEN_68};
+  wire struct packed {struct packed {logic valid; ReadWriteRequest_2 bits; } request; }
+    _GEN_87 = '{request: _GEN_86};
+  wire struct packed {logic valid; ReadWriteRequest_3 bits; } _GEN_88 =
+    '{valid: (_GEN_61 | _GEN_40 | _GEN_17 | _snoop_lookup_out.valid | _GEN_66),
+      bits: _GEN_67};
   wire struct packed {struct packed {logic valid; ReadWriteRequest_3 bits; } request; }
-    _GEN_73 = '{request: _GEN_72};
-  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_74 =
-    '{valid: (_GEN_47 | _GEN_28 | _snoop_lookup_out.valid), bits: _GEN_52};
+    _GEN_89 = '{request: _GEN_88};
+  wire struct packed {logic valid; ReadWriteRequest bits; } _GEN_90 =
+    '{valid: (_GEN_61 | _GEN_40 | _snoop_lookup_out.valid), bits: _GEN_65};
   wire struct packed {struct packed {logic valid; ReadWriteRequest bits; } request; }
-    _GEN_75 = '{request: _GEN_74};
-  wire struct packed {logic ready; } _GEN_76 =
+    _GEN_91 = '{request: _GEN_90};
+  wire struct packed {logic ready; } _GEN_92 =
     '{ready:
         (~_writeback_command_out.ready
            ? _writeback_responses_out.ready
            : _refill_responses_out.ready)};
-  wire struct packed {logic ready; } _GEN_77 = '{ready: _GEN_46};
+  wire struct packed {logic ready; } _GEN_93 = '{ready: _GEN_60};
   SyncRam1RW tags (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_75),
+    .port_in  (_GEN_91),
     .port_out (_tags_port_out)
   );
   SyncRam1RW_3 states (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_73),
+    .port_in  (_GEN_89),
     .port_out (_states_port_out)
   );
-  SyncRam1RW_4 lines (
+  SyncRam1RW_2 lines (
     .clock    (clock),
     .reset    (reset),
-    .port_in  (_GEN_71),
+    .port_in  (_GEN_87),
     .port_out (_lines_port_out)
   );
   LoadGen load_gen (
-    .address       (_GEN_30),
+    .address
+      (_refill_completion_out.valid
+         ? _refill_completion_out.bits.context_0.address
+         : _lookup_egress_out.bits.address),
     .data
-      (_GEN_28
+      (_refill_completion_out.valid
          ? _refill_completion_out.bits.line[_refill_completion_out.bits.context_0.address[5:3]]
-         : _GEN_21[_lookup_egress_out.bits.address[5:3]]),
-    .width         (_GEN_31),
+         : _GEN_21),
+    .width
+      (_refill_completion_out.valid
+         ? _refill_completion_out.bits.context_0.width
+         : _lookup_egress_out.bits.width),
     .unsigned_load
-      (_GEN_33
-       & (_GEN_28
+      (_GEN_43
+       & (_GEN_40
             ? _refill_completion_out.bits.context_0.unsigned_0
             : _lookup_egress_out.bits.unsigned_0)),
     .value         (_load_gen_value)
   );
   StoreGen store_gen (
-    .address (_GEN_35),
+    .address
+      (_GEN_45
+         ? _refill_completion_out.bits.context_0.address
+         : _lookup_egress_out.bits.address),
     .value
-      ((_GEN_34
+      ((_GEN_45
           ? _refill_completion_out.bits.context_0.access
           : _lookup_egress_out.bits.access) == 3'h5
          ? _atomic_alu_value
-         : _GEN_36),
-    .width   (_GEN_37),
+         : _GEN_46),
+    .width   (_GEN_47),
     .data    (_store_gen_data),
     .mask    (_store_gen_mask)
   );
   RV5StageAtomicALU atomic_alu (
     .old_value    (_load_gen_value),
-    .operand      (_GEN_36),
-    .memory_width (_GEN_37),
+    .operand      (_GEN_46),
+    .memory_width (_GEN_47),
     .operation
-      (_GEN_34
+      (_GEN_45
          ? _refill_completion_out.bits.context_0.atomic
          : _lookup_egress_out.bits.atomic),
     .value        (_atomic_alu_value)
@@ -7195,10 +7208,10 @@ module RV5StageL1DCache(
     .reset                (reset),
     .node_id              (node_id),
     .command_in           (_refill_commands_egress_out),
-    .completion_in        (_GEN_69),
+    .completion_in        (_GEN_85),
     .requests_in          (_protocol_requests_ingress_0_out),
     .acknowledgements_in  (_protocol_responses_ingress_0_out),
-    .responses_in         (_GEN_68),
+    .responses_in         (_GEN_84),
     .response_data_in     (chi_in.response_data),
     .command_out          (_refill_command_out),
     .completion_out       (_refill_completion_out),
@@ -7211,11 +7224,11 @@ module RV5StageL1DCache(
     .clock            (clock),
     .reset            (reset),
     .node_id          (node_id),
-    .cache_ready      (~_GEN_2),
+    .cache_ready      (~_lookup_egress_out.valid & _GEN_22 & ~refill_installing),
     .snoops_in        (chi_in.snoops),
     .responses_in     (_protocol_responses_ingress_1_out),
     .data_in          (_protocol_data_ingress_1_out),
-    .lookup_result_in (_GEN_67),
+    .lookup_result_in (_GEN_83),
     .pending          (_snoop_pending),
     .address          (_snoop_address),
     .snoops_out       (_snoop_snoops_out),
@@ -7228,11 +7241,11 @@ module RV5StageL1DCache(
     .clock          (clock),
     .reset          (reset),
     .node_id        (node_id),
-    .command_in     (_GEN_61),
+    .command_in     (_GEN_82),
     .completion_in  (_refill_commands_ingress_1_out),
     .requests_in    (_protocol_requests_ingress_1_out),
     .data_in        (_protocol_data_ingress_0_out),
-    .responses_in   (_GEN_66),
+    .responses_in   (_GEN_81),
     .command_out    (_writeback_command_out),
     .completion_out (_writeback_completion_out),
     .requests_out   (_writeback_requests_out),
@@ -7242,15 +7255,15 @@ module RV5StageL1DCache(
   Pipe_3 lookup (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_65),
-    .egress_in   (_GEN_63),
+    .ingress_in  (_GEN_80),
+    .egress_in   (_GEN_78),
     .ingress_out (_lookup_ingress_out),
     .egress_out  (_lookup_egress_out)
   );
   ValidPipe_2 responses (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_64),
+    .ingress_in (_GEN_79),
     .egress_out (_responses_egress_out)
   );
   Arbiter_3 protocol_requests (
@@ -7281,8 +7294,8 @@ module RV5StageL1DCache(
     .chosen        (/* unused */)
   );
   Arbiter_5 refill_commands (
-    .ingress_0_in  (_GEN_62),
-    .ingress_1_in  (_GEN_60),
+    .ingress_0_in  (_GEN_77),
+    .ingress_1_in  (_GEN_76),
     .egress_in     (_refill_command_out),
     .ingress_0_out (_refill_commands_ingress_0_out),
     .ingress_1_out (_refill_commands_ingress_1_out),
@@ -7359,37 +7372,105 @@ module RV5StageL1DCache(
       reservation_valid <= 1'h0;
       reservation_address <= 64'h0;
       reservation_width <= 2'h2;
+      refill_installing <= 1'h0;
+      refill_install_index <= 3'h0;
+      gather_state <= 3'h0;
+      gather_issue_index <= 3'h0;
+      gather_response_pending <= 1'h0;
+      gather_response_index <= 3'h0;
+      gather_last_issued <= 1'h0;
+      gathered_line <= 512'h0;
+      gathered_snoop_state <= 3'h0;
+      snoop_metadata_pending <= 1'h0;
     end
     else begin
-      valid_lines <= _GEN_59;
+      valid_lines <= _GEN_75;
       reservation_valid <=
-        _GEN_56
+        _GEN_72
         | ~(reservation_valid
-            & (_GEN_2 & _GEN_23
-               & (_GEN_13 | (_GEN_9 | _GEN_11)
+            & (_lookup_egress_out.valid & _GEN_29
+               & (_GEN_12 | (_GEN_8 | _GEN_10)
                   & _lookup_egress_out.bits.address[63:6] == reservation_address[63:6])
                | _snoop_update_out.valid & _snoop_update_out.bits.invalidate
                & _snoop_update_out.bits.address[63:6] == reservation_address[63:6]
-               | _GEN_2 & _GEN_23 & _GEN_19 & ~_GEN_4 & _GEN_3
+               | _lookup_egress_out.valid & _GEN_29 & _GEN_18 & ~_GEN_3 & _GEN_2
                & {_tags_port_out.response.bits[1'h0],
                   _lookup_egress_out.bits.address[11:6]} == reservation_address[63:6]))
         & reservation_valid;
-      reservation_address <= _GEN_56 ? _GEN_30 : reservation_address;
-      reservation_width <= _GEN_56 ? _GEN_31 : reservation_width;
+      reservation_address <=
+        _GEN_72
+          ? (_GEN_40
+               ? _refill_completion_out.bits.context_0.address
+               : _lookup_egress_out.bits.address)
+          : reservation_address;
+      reservation_width <=
+        _GEN_72
+          ? (_GEN_40
+               ? _refill_completion_out.bits.context_0.width
+               : _lookup_egress_out.bits.width)
+          : reservation_width;
+      refill_installing <= _GEN_37 | ~_GEN_40 & refill_installing;
+      refill_install_index <=
+        _GEN_37 | _GEN_40
+          ? 3'h0
+          : refill_installing & ~_GEN_38
+              ? refill_install_index + 3'h1
+              : refill_install_index;
+      gather_state <=
+        _GEN_31
+          ? 3'h1
+          : _GEN_55
+              ? 3'h3
+              : _GEN_24
+                  ? (gather_response_pending & _GEN_27
+                       ? (_GEN_23 ? 3'h2 : 3'h4)
+                       : gather_state)
+                  : _GEN_35 | _GEN_56 ? 3'h0 : gather_state;
+      gather_issue_index <=
+        _GEN_71
+          ? 3'h0
+          : ~_GEN_24 | ~_GEN_25 | _GEN_26
+              ? gather_issue_index
+              : gather_issue_index + 3'h1;
+      gather_response_pending <=
+        ~_GEN_31 & ~_GEN_55 & (_GEN_24 ? _GEN_25 : gather_response_pending);
+      gather_response_index <=
+        _GEN_31 | _GEN_55 | ~_GEN_25 ? gather_response_index : gather_issue_index;
+      gather_last_issued <=
+        ~_GEN_31 & ~_GEN_55 & (_GEN_25 ? _GEN_26 : gather_last_issued);
+      gathered_line <=
+        _GEN_71 ? 512'h0 : _GEN_24 & gather_response_pending ? _GEN_69 : gathered_line;
+      gathered_snoop_state <=
+        _GEN_31 | ~_GEN_55 ? gathered_snoop_state : _states_port_out.response.bits[1'h0];
+      snoop_metadata_pending <= _snoop_lookup_out.valid;
     end
   end // always @(posedge)
+  always @(posedge clock) begin
+    gather_set <=
+      _GEN_31
+        ? _lookup_egress_out.bits.address[11:6]
+        : _GEN_55 ? _snoop_address[11:6] : gather_set;
+    eviction_line_address <=
+      _GEN_31
+        ? {_tags_port_out.response.bits[1'h0],
+           _lookup_egress_out.bits.address[11:6],
+           6'h0}
+        : eviction_line_address;
+    eviction_context <= _GEN_31 ? _lookup_egress_out.bits : eviction_context;
+  end // always @(posedge)
   assign core_out =
-    '{request: _GEN_77,
+    '{request: _GEN_93,
       request_fault: (1'h0),
       request_access_fault: (1'h0),
       response: _responses_egress_out,
       drained:
-        (~_GEN_47 & ~_GEN_2 & _refill_command_out.ready & _writeback_command_out.ready)};
+        (~_GEN_61 & ~_lookup_egress_out.valid & _refill_command_out.ready
+         & _writeback_command_out.ready & _GEN_22 & ~refill_installing)};
   assign chi_out =
     '{requests: _protocol_requests_egress_out,
       requester_responses: _protocol_responses_egress_out,
       request_data: _protocol_data_egress_out,
-      responses: _GEN_76,
+      responses: _GEN_92,
       response_data: _refill_response_data_out,
       snoops: _snoop_snoops_out};
 endmodule
@@ -7460,328 +7541,6 @@ module SyncRam1RW_3(
   assign port_out = '{response: _GEN_5};
 endmodule
 
-module storage_64x512_0(
-  input  [5:0]   RW0_addr,
-  input          RW0_en,
-                 RW0_clk,
-                 RW0_wmode,
-  input  [511:0] RW0_wdata,
-  output [511:0] RW0_rdata,
-  input  [63:0]  RW0_wmask
-);
-
-  reg  [511:0] Memory[0:63];
-  reg  [5:0]   _RW0_raddr_d0;
-  reg          _RW0_ren_d0;
-  reg          _RW0_rmode_d0;
-  always @(posedge RW0_clk) begin
-    _RW0_raddr_d0 <= RW0_addr;
-    _RW0_ren_d0 <= RW0_en;
-    _RW0_rmode_d0 <= RW0_wmode;
-  end // always @(posedge)
-  wire [511:0] _GEN;
-  assign _GEN = _RW0_ren_d0 & _RW0_rmode_d0 == 1'h0 ? Memory[_RW0_raddr_d0] : 512'bx;
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[0] & RW0_wmode)
-      Memory[RW0_addr][32'h0 +: 8] <= RW0_wdata[7:0];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[1] & RW0_wmode)
-      Memory[RW0_addr][32'h8 +: 8] <= RW0_wdata[15:8];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[2] & RW0_wmode)
-      Memory[RW0_addr][32'h10 +: 8] <= RW0_wdata[23:16];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[3] & RW0_wmode)
-      Memory[RW0_addr][32'h18 +: 8] <= RW0_wdata[31:24];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[4] & RW0_wmode)
-      Memory[RW0_addr][32'h20 +: 8] <= RW0_wdata[39:32];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[5] & RW0_wmode)
-      Memory[RW0_addr][32'h28 +: 8] <= RW0_wdata[47:40];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[6] & RW0_wmode)
-      Memory[RW0_addr][32'h30 +: 8] <= RW0_wdata[55:48];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[7] & RW0_wmode)
-      Memory[RW0_addr][32'h38 +: 8] <= RW0_wdata[63:56];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[8] & RW0_wmode)
-      Memory[RW0_addr][32'h40 +: 8] <= RW0_wdata[71:64];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[9] & RW0_wmode)
-      Memory[RW0_addr][32'h48 +: 8] <= RW0_wdata[79:72];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[10] & RW0_wmode)
-      Memory[RW0_addr][32'h50 +: 8] <= RW0_wdata[87:80];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[11] & RW0_wmode)
-      Memory[RW0_addr][32'h58 +: 8] <= RW0_wdata[95:88];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[12] & RW0_wmode)
-      Memory[RW0_addr][32'h60 +: 8] <= RW0_wdata[103:96];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[13] & RW0_wmode)
-      Memory[RW0_addr][32'h68 +: 8] <= RW0_wdata[111:104];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[14] & RW0_wmode)
-      Memory[RW0_addr][32'h70 +: 8] <= RW0_wdata[119:112];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[15] & RW0_wmode)
-      Memory[RW0_addr][32'h78 +: 8] <= RW0_wdata[127:120];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[16] & RW0_wmode)
-      Memory[RW0_addr][32'h80 +: 8] <= RW0_wdata[135:128];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[17] & RW0_wmode)
-      Memory[RW0_addr][32'h88 +: 8] <= RW0_wdata[143:136];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[18] & RW0_wmode)
-      Memory[RW0_addr][32'h90 +: 8] <= RW0_wdata[151:144];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[19] & RW0_wmode)
-      Memory[RW0_addr][32'h98 +: 8] <= RW0_wdata[159:152];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[20] & RW0_wmode)
-      Memory[RW0_addr][32'hA0 +: 8] <= RW0_wdata[167:160];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[21] & RW0_wmode)
-      Memory[RW0_addr][32'hA8 +: 8] <= RW0_wdata[175:168];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[22] & RW0_wmode)
-      Memory[RW0_addr][32'hB0 +: 8] <= RW0_wdata[183:176];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[23] & RW0_wmode)
-      Memory[RW0_addr][32'hB8 +: 8] <= RW0_wdata[191:184];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[24] & RW0_wmode)
-      Memory[RW0_addr][32'hC0 +: 8] <= RW0_wdata[199:192];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[25] & RW0_wmode)
-      Memory[RW0_addr][32'hC8 +: 8] <= RW0_wdata[207:200];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[26] & RW0_wmode)
-      Memory[RW0_addr][32'hD0 +: 8] <= RW0_wdata[215:208];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[27] & RW0_wmode)
-      Memory[RW0_addr][32'hD8 +: 8] <= RW0_wdata[223:216];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[28] & RW0_wmode)
-      Memory[RW0_addr][32'hE0 +: 8] <= RW0_wdata[231:224];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[29] & RW0_wmode)
-      Memory[RW0_addr][32'hE8 +: 8] <= RW0_wdata[239:232];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[30] & RW0_wmode)
-      Memory[RW0_addr][32'hF0 +: 8] <= RW0_wdata[247:240];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[31] & RW0_wmode)
-      Memory[RW0_addr][32'hF8 +: 8] <= RW0_wdata[255:248];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[32] & RW0_wmode)
-      Memory[RW0_addr][32'h100 +: 8] <= RW0_wdata[263:256];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[33] & RW0_wmode)
-      Memory[RW0_addr][32'h108 +: 8] <= RW0_wdata[271:264];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[34] & RW0_wmode)
-      Memory[RW0_addr][32'h110 +: 8] <= RW0_wdata[279:272];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[35] & RW0_wmode)
-      Memory[RW0_addr][32'h118 +: 8] <= RW0_wdata[287:280];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[36] & RW0_wmode)
-      Memory[RW0_addr][32'h120 +: 8] <= RW0_wdata[295:288];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[37] & RW0_wmode)
-      Memory[RW0_addr][32'h128 +: 8] <= RW0_wdata[303:296];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[38] & RW0_wmode)
-      Memory[RW0_addr][32'h130 +: 8] <= RW0_wdata[311:304];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[39] & RW0_wmode)
-      Memory[RW0_addr][32'h138 +: 8] <= RW0_wdata[319:312];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[40] & RW0_wmode)
-      Memory[RW0_addr][32'h140 +: 8] <= RW0_wdata[327:320];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[41] & RW0_wmode)
-      Memory[RW0_addr][32'h148 +: 8] <= RW0_wdata[335:328];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[42] & RW0_wmode)
-      Memory[RW0_addr][32'h150 +: 8] <= RW0_wdata[343:336];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[43] & RW0_wmode)
-      Memory[RW0_addr][32'h158 +: 8] <= RW0_wdata[351:344];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[44] & RW0_wmode)
-      Memory[RW0_addr][32'h160 +: 8] <= RW0_wdata[359:352];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[45] & RW0_wmode)
-      Memory[RW0_addr][32'h168 +: 8] <= RW0_wdata[367:360];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[46] & RW0_wmode)
-      Memory[RW0_addr][32'h170 +: 8] <= RW0_wdata[375:368];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[47] & RW0_wmode)
-      Memory[RW0_addr][32'h178 +: 8] <= RW0_wdata[383:376];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[48] & RW0_wmode)
-      Memory[RW0_addr][32'h180 +: 8] <= RW0_wdata[391:384];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[49] & RW0_wmode)
-      Memory[RW0_addr][32'h188 +: 8] <= RW0_wdata[399:392];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[50] & RW0_wmode)
-      Memory[RW0_addr][32'h190 +: 8] <= RW0_wdata[407:400];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[51] & RW0_wmode)
-      Memory[RW0_addr][32'h198 +: 8] <= RW0_wdata[415:408];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[52] & RW0_wmode)
-      Memory[RW0_addr][32'h1A0 +: 8] <= RW0_wdata[423:416];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[53] & RW0_wmode)
-      Memory[RW0_addr][32'h1A8 +: 8] <= RW0_wdata[431:424];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[54] & RW0_wmode)
-      Memory[RW0_addr][32'h1B0 +: 8] <= RW0_wdata[439:432];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[55] & RW0_wmode)
-      Memory[RW0_addr][32'h1B8 +: 8] <= RW0_wdata[447:440];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[56] & RW0_wmode)
-      Memory[RW0_addr][32'h1C0 +: 8] <= RW0_wdata[455:448];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[57] & RW0_wmode)
-      Memory[RW0_addr][32'h1C8 +: 8] <= RW0_wdata[463:456];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[58] & RW0_wmode)
-      Memory[RW0_addr][32'h1D0 +: 8] <= RW0_wdata[471:464];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[59] & RW0_wmode)
-      Memory[RW0_addr][32'h1D8 +: 8] <= RW0_wdata[479:472];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[60] & RW0_wmode)
-      Memory[RW0_addr][32'h1E0 +: 8] <= RW0_wdata[487:480];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[61] & RW0_wmode)
-      Memory[RW0_addr][32'h1E8 +: 8] <= RW0_wdata[495:488];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[62] & RW0_wmode)
-      Memory[RW0_addr][32'h1F0 +: 8] <= RW0_wdata[503:496];
-  end // always @(posedge)
-  always @(posedge RW0_clk) begin
-    if (RW0_en & RW0_wmask[63] & RW0_wmode)
-      Memory[RW0_addr][32'h1F8 +: 8] <= RW0_wdata[511:504];
-  end // always @(posedge)
-  assign RW0_rdata = _GEN;
-endmodule
-
-module SyncRam1RW_4(
-  input                                                                                   clock,
-                                                                                          reset,
-  input  struct packed {struct packed {logic valid; ReadWriteRequest_4 bits; } request; } port_in,
-  output struct packed {struct packed {logic valid; logic [63:0][7:0] bits; } response; } port_out
-);
-
-  wire [63:0]      _GEN;
-  wire [63:0][7:0] _GEN_0;
-  wire             _GEN_1;
-  wire             _GEN_2;
-  wire [5:0]       _GEN_3;
-  wire [511:0]     _GEN_4;
-  wire [511:0]     _storage_ext_RW0_rdata;
-  storage_64x512_0 storage_ext (
-    .RW0_addr  (_GEN_3),
-    .RW0_en    (_GEN_2),
-    .RW0_clk   (clock),
-    .RW0_wmode (_GEN_1),
-    .RW0_wdata (_GEN_4),
-    .RW0_rdata (_storage_ext_RW0_rdata),
-    .RW0_wmask (_GEN)
-  );
-  assign _GEN_4 = /*cast(bit[511:0])*/_GEN_0;
-  wire [63:0][7:0] _GEN_5 = /*cast(bit[63:0][7:0])*/_storage_ext_RW0_rdata;
-  reg              response_valid;
-  assign _GEN_3 = port_in.request.bits.address;
-  assign _GEN_2 = port_in.request.valid;
-  assign _GEN_1 = port_in.request.bits.write;
-  assign _GEN_0 = port_in.request.bits.data;
-  assign _GEN = port_in.request.bits.mask;
-  wire struct packed {logic valid; logic [63:0][7:0] bits; } _GEN_6 =
-    '{valid: response_valid, bits: _GEN_5};
-  always @(posedge clock) begin
-    if (reset)
-      response_valid <= 1'h0;
-    else
-      response_valid <= _GEN_2 & ~_GEN_1;
-  end // always @(posedge)
-  assign port_out = '{response: _GEN_6};
-endmodule
-
 module LoadGen(
   input  [63:0] address,
                 data,
@@ -7792,12 +7551,12 @@ module LoadGen(
 
   wire [63:0]      _GEN = data >> {58'h0, address[2:0], 3'h0};
   wire [3:0][63:0] _GEN_0 =
-    {{data},
+    {{_GEN},
      {{{32{_GEN[31]}}, _GEN[31:0]}},
      {{{48{_GEN[15]}}, _GEN[15:0]}},
      {{{56{_GEN[7]}}, _GEN[7:0]}}};
   wire [3:0][63:0] _GEN_1 =
-    {{data}, {{32'h0, _GEN[31:0]}}, {{48'h0, _GEN[15:0]}}, {{56'h0, _GEN[7:0]}}};
+    {{_GEN}, {{32'h0, _GEN[31:0]}}, {{48'h0, _GEN[15:0]}}, {{56'h0, _GEN[7:0]}}};
   assign value = unsigned_load ? _GEN_1[width] : _GEN_0[width];
 endmodule
 
@@ -9025,12 +8784,12 @@ module LoadGen_1(
 
   wire [63:0]      _GEN = data >> {58'h0, address[2:0], 3'h0};
   wire [3:0][63:0] _GEN_0 =
-    {{data},
+    {{_GEN},
      {{{32{_GEN[31]}}, _GEN[31:0]}},
      {{{48{_GEN[15]}}, _GEN[15:0]}},
      {{{56{_GEN[7]}}, _GEN[7:0]}}};
   wire [3:0][63:0] _GEN_1 =
-    {{data}, {{32'h0, _GEN[31:0]}}, {{48'h0, _GEN[15:0]}}, {{56'h0, _GEN[7:0]}}};
+    {{_GEN}, {{32'h0, _GEN[31:0]}}, {{48'h0, _GEN[15:0]}}, {{56'h0, _GEN[7:0]}}};
   assign value = unsigned_load ? _GEN_1[width] : _GEN_0[width];
 endmodule
 

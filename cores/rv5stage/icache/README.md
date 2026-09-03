@@ -18,9 +18,16 @@ one-stage `Pipe` carries each address beside
 the synchronous tag/data lookup, so consecutive hits accept and return one
 ordered instruction every cycle. A hit maps directly into a response flow; a
 miss is filtered and mapped into the shared `../refill.rhdl` transaction engine.
+The data array is word-organized: it has
+`sets * (64 / (XLEN / 8))` rows of `XLEN` bits with byte write lanes, while the
+tag and CHI state arrays remain indexed by set. The byte address therefore
+selects both a line and an XLEN word; RV64 fetches select one 32-bit instruction
+from the returned word, while RV32 fetches consume the word directly.
 The engine owns the address context, retry and protocol-credit exchange,
 returned `CompData`, and `CompAck`, then returns the address with the completed
-clean line and its CHI state. Hit and
+clean line and its CHI state. Installation writes that retained line through
+the data-array port one XLEN word per cycle and publishes its tag, state, and
+valid bit only with the final word. Hit and
 live-refill responses merge before a two-entry queue that preserves results
 under fetch backpressure. A flush clears buffered hits and kills the active
 lookup. A wrong-path refill still drains and installs its line but its completion
