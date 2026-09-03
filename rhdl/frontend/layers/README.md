@@ -15,7 +15,7 @@ dependency inventory is in [`../../README.md`](../../README.md).
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Nominal `Bool`, non-numeric `Mask`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, typed membership, enum validity, ordering, and binary `mux` |
+| [`bool.rhm`](bool.rhm) | Non-numeric `Mask`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
 | [`tagged-union.rhm`](tagged-union.rhm) | Nominal tagged unions with shared enum tags, typed payload construction, and dot-based tag tests and guarded views |
 | [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and selector-owned exact selection |
@@ -173,7 +173,7 @@ ready <== Bool(#true)
 equal <== a === b
 different <== a =/= b
 less <== a < b
-active <== is_one_of(state, State.Refill, State.Respond)
+active <== state.is_one_of(State.Refill, State.Respond)
 encoding_valid <== enum_valid(state)
 nonzero <== or_reduce(value)
 all_set <== and_reduce(value)
@@ -185,9 +185,10 @@ first_mask <== priority_encoder_oh(value)
 `Bool(#true)` lowers to a one-bit constant plus an explicit cast. Equality
 and inequality work on exactly equal flat types and return `Bool`; `=/=` is
 the Boolean complement of `===` and lowers to equality followed by negation.
-`is_one_of(value, alternative, ...)` accepts alternatives of the same exact
-flat type either variadically or as one host list and lowers to typed
-equalities joined by hardware OR. Membership in an empty host list is false.
+`value.is_one_of(alternative, ...)` accepts alternatives of the same exact flat
+type either variadically or as one host list and lowers to typed equalities
+joined by hardware OR. Membership in an empty host list is false. Membership is
+receiver-only; there is no parallel free-function form.
 `enum_valid(value)` derives the complete runtime membership test from a
 hardware enum's declared encodings. This matters at ports and cast boundaries:
 the enum type prevents unrelated typed operations, but its physical wire can
@@ -284,9 +285,9 @@ hardware_enum CacheState:
   SharedDirty
   UniqueClean
   method is_shared(state) :: Bool:
-    is_one_of(state, CacheState.SharedClean, CacheState.SharedDirty)
+    state.is_one_of(CacheState.SharedClean, CacheState.SharedDirty)
   method is_invalid(state) :: Bool:
-    is_one_of(state, CacheState.Invalid)
+    state.is_one_of(CacheState.Invalid)
 
 input state: CacheState
 output shared: Bool

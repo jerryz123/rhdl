@@ -296,7 +296,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
       read: state.satp
       write value:
         def satp_replacement = as_bits(value)
-        when (if xlen == XLen.X32 | Bool(#false) | is_one_of(satp_replacement[60..64], bits(0, 4), bits(8, 4))):
+        when (if xlen == XLen.X32 | Bool(#false) | satp_replacement[60..64].is_one_of(bits(0, 4), bits(8, 4))):
           state.satp <== if xlen == XLen.X32 | zero | concat(satp_replacement[60..64], bits(0, 16), satp_replacement[0..44])
     read CsrId.Cycle: cycle_value
     read CsrId.Time: time_value
@@ -350,8 +350,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     read CsrId.Mimpid: zero
     read CsrId.Mhartid: hart_id
   def rv32_counter_halves = if xlen == XLen.X32 | Bool(#true) | Bool(#false)
-  def high_counter_unavailable = !rv32_counter_halves & is_one_of(
-    csr,
+  def high_counter_unavailable = !rv32_counter_halves & csr.is_one_of(
     csr_bits(CsrId.Cycleh), csr_bits(CsrId.Timeh), csr_bits(CsrId.Instreth),
     csr_bits(CsrId.Mcycleh), csr_bits(CsrId.Minstreth)
   )
@@ -361,9 +360,9 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   def csr_read_only = csr[10..12] === bits(3, 2)
   def required_privilege = csr[8..10]
   def privilege_bits = cast(privilege_state, Bits(2))
-  def cycle_csr = is_one_of(csr, csr_bits(CsrId.Cycle), csr_bits(CsrId.Cycleh))
-  def time_csr = is_one_of(csr, csr_bits(CsrId.Time), csr_bits(CsrId.Timeh))
-  def instret_csr = is_one_of(csr, csr_bits(CsrId.Instret), csr_bits(CsrId.Instreth))
+  def cycle_csr = csr.is_one_of(csr_bits(CsrId.Cycle), csr_bits(CsrId.Cycleh))
+  def time_csr = csr.is_one_of(csr_bits(CsrId.Time), csr_bits(CsrId.Timeh))
+  def instret_csr = csr.is_one_of(csr_bits(CsrId.Instret), csr_bits(CsrId.Instreth))
   def counter_csr = cycle_csr ||| time_csr ||| instret_csr
   def satp_restricted = (csr === csr_bits(CsrId.Satp)) & (
     privilege_state === PrivilegeMode.Supervisor
@@ -425,11 +424,10 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   translation_flush <== (sfence_vma_commit & !synchronous_trap.valid) ||| (
     csr_write & (csr === csr_bits(CsrId.Satp))
   )
-  def machine_counter_csr = is_one_of(csr,
-                                      csr_bits(CsrId.Mcycle),
-                                      csr_bits(CsrId.Minstret),
-                                      csr_bits(CsrId.Mcycleh),
-                                      csr_bits(CsrId.Minstreth))
+  def machine_counter_csr = csr.is_one_of(csr_bits(CsrId.Mcycle),
+                                          csr_bits(CsrId.Minstret),
+                                          csr_bits(CsrId.Mcycleh),
+                                          csr_bits(CsrId.Minstreth))
   counters.retire <== commit.valid & !synchronous_trap.valid
   counters.machine_write.valid <== csr_write & machine_counter_csr
   counters.machine_write.bits <== RiscvCounterWrite(xlen):

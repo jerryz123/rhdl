@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Defines Bool, lane masks, optional-one-hot values, reductions, encoders, comparisons, and selection.
+// Defines lane masks, optional-one-hot values, reductions, encoders, comparisons, and selection.
 
 import:
   rhombus.bits.(<<) as <<
@@ -11,6 +11,8 @@ import:
   "../support/finite-enum.rhm" as finite_enum_support
   "../support/fields.rhm".HardwareFields
   "../support/fields.rhm".HardwareIntoFunction
+  "../support/fields.rhm".Bool
+  "../support/fields.rhm".bool_type
   "../support/fields.rhm".hardware_as_bits
   "../support/fields.rhm".hardware_into
   "../support/fields.rhm".hardware_value_type
@@ -34,7 +36,6 @@ export:
   popcount
   priority_encoder
   priority_encoder_oh
-  is_one_of
   enum_valid
   unsigned_lt
   signed_lt
@@ -48,24 +49,6 @@ export:
   >
   <=
   >=
-
-class _BoolType():
-  implements BitwiseType
-  implements Callable
-  override method describe(): "bool"
-  override method type_equal(other :: HardwareType): bool_type(other)
-  override method bit_width(): 1
-  override method packed_width(): 1
-  override method call(value :: Boolean) :~ HardwareFields:
-    packed_literal(this, if value | 1 | 0)
-
-def Bool = _BoolType()
-
-annot.macro 'Bool':
-  'HardwareFields.of(Bool)'
-
-fun bool_type(type :: HardwareType):
-  type is_a _BoolType
 
 // Represents an arbitrary set of fixed lanes. Every packed encoding is legal,
 // so bitwise set operations preserve the type while arithmetic and shifting do not.
@@ -124,14 +107,20 @@ fun mask_index(value :: HardwareEntity, index :: Nat) :~ HardwareFields:
   kernel.cast(kernel.index(packed, index), Bool)
 
 annot.macro 'MaskValue':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields'
   let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_base_predicate, base_infos) = annot_meta.unpack_predicate(base)
   def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
-  annot_meta.pack_predicate(
-    'fun (value): value is_a HardwareEntity && hardware_has_mask_type(value)',
+  def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), mask_value_dot),
       ($(statinfo_meta.index_get_key), mask_index),
       ($(statinfo_meta.index_result_key),
-       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+       $(statinfo_meta.pack_index_result(bool_infos, []))))',
+    base_infos
+  )
+  annot_meta.pack_predicate(
+    'fun (value): value is_a HardwareEntity && hardware_has_mask_type(value)',
+    result_infos
   )
 
 annot.macro 'MaskTypeDescriptor':
@@ -140,14 +129,20 @@ annot.macro 'MaskTypeDescriptor':
   )
 
 annot.macro 'Mask($width)':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields.of(build_mask_type($width))'
   let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
   def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
-  annot_meta.pack_predicate(
-    'fun (value): value is_a HardwareEntity && type_equal(hardware_value_type(value), build_mask_type($width))',
+  def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), mask_value_dot),
       ($(statinfo_meta.index_get_key), mask_index),
       ($(statinfo_meta.index_result_key),
-       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+       $(statinfo_meta.pack_index_result(bool_infos, []))))',
+    base_infos
+  )
+  annot_meta.pack_predicate(
+    predicate,
+    result_infos
   )
 
 expr.macro 'Mask($(width :: expr_meta.Parsed))':
@@ -259,14 +254,20 @@ fun maybe_one_hot_index(value :: HardwareEntity,
   kernel.cast(kernel.index(selector_bits, index), Bool)
 
 annot.macro 'MaybeOneHotValue':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields'
   let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (_base_predicate, base_infos) = annot_meta.unpack_predicate(base)
   def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
-  annot_meta.pack_predicate(
-    'fun (value): value is_a HardwareEntity && hardware_has_maybe_one_hot_type(value)',
+  def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), maybe_one_hot_value_dot),
       ($(statinfo_meta.index_get_key), maybe_one_hot_index),
       ($(statinfo_meta.index_result_key),
-       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+       $(statinfo_meta.pack_index_result(bool_infos, []))))',
+    base_infos
+  )
+  annot_meta.pack_predicate(
+    'fun (value): value is_a HardwareEntity && hardware_has_maybe_one_hot_type(value)',
+    result_infos
   )
 
 annot.macro 'MaybeOneHotTypeDescriptor':
@@ -275,14 +276,20 @@ annot.macro 'MaybeOneHotTypeDescriptor':
   )
 
 annot.macro 'MaybeOneHot($width)':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareFields.of(build_maybe_one_hot_type($width))'
   let '$(bool_fields :: annot_meta.Parsed)' = 'HardwareFields.of(Bool)'
+  def (predicate, base_infos) = annot_meta.unpack_predicate(base)
   def (_bool_predicate, bool_infos) = annot_meta.unpack_predicate(bool_fields)
-  annot_meta.pack_predicate(
-    'fun (value): value is_a HardwareEntity && type_equal(hardware_value_type(value), build_maybe_one_hot_type($width))',
+  def result_infos = statinfo_meta.and(
     '(($(statinfo_meta.dot_provider_key), maybe_one_hot_value_dot),
       ($(statinfo_meta.index_get_key), maybe_one_hot_index),
       ($(statinfo_meta.index_result_key),
-       $(statinfo_meta.pack_index_result(bool_infos, []))))'
+       $(statinfo_meta.pack_index_result(bool_infos, []))))',
+    base_infos
+  )
+  annot_meta.pack_predicate(
+    predicate,
+    result_infos
   )
 
 expr.macro 'MaybeOneHot($(width :: expr_meta.Parsed))':
@@ -705,41 +712,13 @@ operator (left =/= right):
   ~same_as: ===
   bool_ne(left, right)
 
-// Avoids adding a second equality for the singleton case while routing every
-// actual disjunction through the common packed reduction implementation.
+// Avoids an extra reduction comparison for a single Boolean predicate.
 fun reduce_boolean_comparisons(comparisons :: NonemptyList.of(HardwareEntity),
                                name :: False || String,
                                location :: Location):
   if comparisons.length() == 1
   | kernel.cast(comparisons[0], Bool, name, location)
   | or_reduce(comparisons, name, location)
-
-// Compares one hardware value against a host-authored set of typed choices.
-// The equality results use the common packed Boolean reduction path.
-fun is_one_of(value :: HardwareEntity,
-              candidate :: HardwareEntity || List.of(HardwareEntity), ...) :~ HardwareFields:
-  def location = Location()
-  def value_read = kernel.read(value, location)
-  unless flat_data_type(value_read.type)
-  | error(~who: #'is_one_of,
-          location.describe() ++ ": is_one_of subject must have a FlatDataType")
-  def supplied = [candidate, ...]
-  def candidates:
-    if supplied.length() == 1 && supplied[0] is_a List
-    | supplied[0]
-    | supplied
-  if candidates.length() == 0
-  | reduction_identity(0, #false, location)
-  | block:
-      def comparisons = candidates.map(
-        fun (alternative):
-          equality_bits(value_read,
-                        alternative,
-                        #'is_one_of,
-                        "is_one_of",
-                        location)
-      )
-      reduce_boolean_comparisons(comparisons, #false, location)
 
 // Generates a runtime membership predicate from the enum type's declared
 // encodings, keeping sparse wire encodings distinct from host type safety.
