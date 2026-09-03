@@ -85,7 +85,7 @@ support, as in upstream HardFloat.
 Their packed widths are `format.ieee_width` and `format.recoded_width`, so they
 lower to ordinary integer signals while connection checking prevents mixing
 IEEE and recoded images or equal-width formats such as binary16 and bfloat16.
-Use `as_bits` only where representation-level manipulation or an untyped
+Use `.as_bits()` only where representation-level manipulation or an untyped
 external boundary explicitly requires it. `RawFloat` is a bundle whose signed
 exponent and extended significand expose the internal HardFloat algorithm.
 `MulAddOperation`, `RoundingMode`, `TininessMode`, `ExceptionFlags`, and

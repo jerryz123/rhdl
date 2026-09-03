@@ -30,8 +30,8 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
   output exception_flags: IntegerExceptionFlags()
 
   def raw = raw_float_from_recfn(format, value)
-  def raw_exponent = as_bits(raw.signed_exponent)
-  def magnitude_at_least_one = cast(extract(raw_exponent, format.exponent_width, format.exponent_width), Bool)
+  def raw_exponent = raw.signed_exponent.as_bits()
+  def magnitude_at_least_one = extract(raw_exponent, format.exponent_width, format.exponent_width).into(Bool)
   def positive_exponent = extract(raw_exponent, format.exponent_width - 1, 0)
   def magnitude_just_below_one = !magnitude_at_least_one & and_reduce(positive_exponent)
 
@@ -71,7 +71,7 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
     )
   ) ||| (magnitude_just_below_one & or_reduce(extract(aligned_significand, 1, 0)))
   def round_increment_near_maximum = (
-    magnitude_at_least_one & cast(extract(aligned_significand, 1, 1), Bool)
+    magnitude_at_least_one & extract(aligned_significand, 1, 1).into(Bool)
   ) ||| magnitude_just_below_one
   def round_increment = (near_even & round_increment_near_even) ||| (
     near_maximum_magnitude & round_increment_near_maximum
@@ -81,7 +81,7 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
     round_increment ^ raw.sign,
     complemented_unrounded + bits(1, integer_width),
     complemented_unrounded
-  ) ||| zext(as_bits(odd & common_inexact), integer_width)
+  ) ||| zext((odd & common_inexact).as_bits(), integer_width)
 
   def at_overflow_edge = unsigned_equal_host(positive_exponent, integer_width - 1)
   def round_carry_but_two = and_reduce(extract(unrounded_integer, integer_width - 3, 0)) & round_increment
@@ -91,10 +91,9 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
   def signed_positive_overflow = at_overflow_edge ||| (
     unsigned_equal_host(positive_exponent, integer_width - 2) & round_carry_but_two
   )
-  def unsigned_positive_overflow = at_overflow_edge & cast(
-    extract(unrounded_integer, integer_width - 2, integer_width - 2),
-    Bool
-  ) & round_carry_but_two
+  def unsigned_positive_overflow = (
+    at_overflow_edge & extract(unrounded_integer, integer_width - 2, integer_width - 2).into(Bool) & round_carry_but_two
+  )
   def overflow_at_magnitude = unsigned_at_least_host(positive_exponent, integer_width) ||| mux(
     signed_output,
     mux(raw.sign, signed_negative_overflow, signed_positive_overflow),

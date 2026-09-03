@@ -85,29 +85,23 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
   def normal_input = mux(square_root, normal_square_root, normal_division)
 
   def quotient_exponent_width = exponent_width + 3
-  def negated_b_exponent = cast(
-    concat(
-      extract(as_bits(b.signed_exponent), exponent_width, exponent_width),
-      !extract(as_bits(b.signed_exponent), exponent_width - 1, 0)
-    ),
-    SInt(exponent_width + 1)
-  )
+  def negated_b_exponent = concat(
+      extract(b.signed_exponent.as_bits(), exponent_width, exponent_width),
+      !extract(b.signed_exponent.as_bits(), exponent_width - 1, 0)
+    ).into(SInt(exponent_width + 1))
   def quotient_exponent = sext(a.signed_exponent, quotient_exponent_width) + sext(
     negated_b_exponent,
     quotient_exponent_width
   )
-  def saturated_quotient_exponent = cast(
-    concat(
+  def saturated_quotient_exponent = concat(
       mux(
         sint(7 << (exponent_width - 2), quotient_exponent_width) <= quotient_exponent,
         bits(6, 4),
-        extract(as_bits(quotient_exponent), exponent_width + 1, exponent_width - 2)
+        extract(quotient_exponent.as_bits(), exponent_width + 1, exponent_width - 2)
       ),
-      extract(as_bits(quotient_exponent), exponent_width - 3, 0)
-    ),
-    SInt(exponent_width + 2)
-  )
-  def exponent_is_odd = cast(extract(as_bits(a.signed_exponent), 0, 0), Bool)
+      extract(quotient_exponent.as_bits(), exponent_width - 3, 0)
+    ).into(SInt(exponent_width + 2))
+  def exponent_is_odd = extract(a.signed_exponent.as_bits(), 0, 0).into(Bool)
   def even_square_root = square_root & !exponent_is_odd
   def odd_square_root = square_root & exponent_is_odd
 
@@ -121,10 +115,7 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
   def skip_second_cycle:
     if options.two_bits_per_cycle
     | Bool(#false)
-    | (cycle_number === bits(3, cycle_width)) & cast(
-        extract(significand_state, significand_width + 1, significand_width + 1),
-        Bool
-      )
+    | (cycle_number === bits(3, cycle_width)) & extract(significand_state, significand_width + 1, significand_width + 1).into(Bool)
   def decrement = mux(process_two_bits, bits(2, cycle_width), bits(1, cycle_width))
   def normal_initial_cycle = mux(
     square_root,
@@ -212,13 +203,13 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
     ),
     busy_trial
   )
-  def signed_remainder = cast(zext(remainder, trial_width), SInt(trial_width))
-  def signed_trial_term = cast(zext(trial_term, trial_width), SInt(trial_width))
+  def signed_remainder = zext(remainder, trial_width).into(SInt(trial_width))
+  def signed_trial_term = zext(trial_term, trial_width).into(SInt(trial_width))
   def trial_remainder = signed_remainder - signed_trial_term
   def new_bit = sint(0, trial_width) <= trial_remainder
   def next_remainder = mux(
     new_bit,
-    extract(as_bits(trial_remainder), significand_width + 1, 0),
+    extract(trial_remainder.as_bits(), significand_width + 1, 0),
     extract(remainder, significand_width + 1, 0)
   )
 
@@ -250,13 +241,10 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
   def selected_second_remainder = mux(
     new_bit,
     second_positive_remainder,
-    cast(second_unsubtracted_remainder, SInt(second_trial_width))
+    second_unsubtracted_remainder.into(SInt(second_trial_width))
   )
   def selected_second_trial = mux(new_bit, second_trial_with_new_bit, second_trial_base)
-  def second_trial_remainder = selected_second_remainder - cast(
-    zext(selected_second_trial, second_trial_width),
-    SInt(second_trial_width)
-  )
+  def second_trial_remainder = selected_second_remainder - zext(selected_second_trial, second_trial_width).into(SInt(second_trial_width))
   def second_new_bit = sint(0, second_trial_width) <= second_trial_remainder
   def next_nonzero_remainder = mux(
     ready_state ||| new_bit,
@@ -273,15 +261,15 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
     process_two_bits,
     mux(
       second_new_bit,
-      extract(as_bits(second_trial_remainder), significand_width + 1, 0),
+      extract(second_trial_remainder.as_bits(), significand_width + 1, 0),
       extract(doubled_next_remainder, significand_width + 1, 0)
     ),
     next_remainder
   )
 
-  def initial_division_significand = zext(as_bits(new_bit), remainder_width) << (significand_width + 1)
+  def initial_division_significand = zext(new_bit.as_bits(), remainder_width) << (significand_width + 1)
   def initial_root_significand = bits(1 << significand_width, remainder_width)
-  def initial_odd_root_bit = zext(as_bits(new_bit), remainder_width) << (significand_width - 1)
+  def initial_odd_root_bit = zext(new_bit.as_bits(), remainder_width) << (significand_width - 1)
   def continued_significand = significand_state ||| mux(
     new_bit,
     zext(bit_mask, remainder_width),
@@ -322,7 +310,7 @@ sync_circuit DivSqrtRawFN(format :: FloatFormat,
     sign: sign_state
     signed_exponent: exponent_state
     significand: (zext(significand_state, significand_width + 3) << 1) ||| zext(
-      as_bits(nonzero_remainder_state),
+      nonzero_remainder_state.as_bits(),
       significand_width + 3
     )
 

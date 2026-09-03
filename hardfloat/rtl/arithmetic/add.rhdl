@@ -32,11 +32,11 @@ circuit AddRawFN(format :: FloatFormat):
     b.signed_exponent - a.signed_exponent,
     exponent_difference
   )
-  def modular_alignment_distance = extract(as_bits(absolute_exponent_difference), align_distance_width - 1, 0)
+  def modular_alignment_distance = extract(absolute_exponent_difference.as_bits(), align_distance_width - 1, 0)
   def shifted_exponent_difference = exponent_difference >> align_distance_width
   def maximum_alignment = (shifted_exponent_difference =/= sint(0, exponent_width + 2)) & (
     (shifted_exponent_difference =/= sint(-1, exponent_width + 2)) ||| (
-      extract(as_bits(exponent_difference), align_distance_width - 1, 0) === bits(0, align_distance_width)
+      extract(exponent_difference.as_bits(), align_distance_width - 1, 0) === bits(0, align_distance_width)
     )
   )
   def alignment_distance = mux(
@@ -50,11 +50,11 @@ circuit AddRawFN(format :: FloatFormat):
 
   def close_width = significand_width + 3
   def aligned_a = mux(
-    !negative_exponent_difference & cast(extract(as_bits(exponent_difference), 0, 0), Bool),
+    !negative_exponent_difference & extract(exponent_difference.as_bits(), 0, 0).into(Bool),
     zext(a.significand, close_width) << 2,
     bits(0, close_width)
   ) ||| mux(
-    !negative_exponent_difference & !cast(extract(as_bits(exponent_difference), 0, 0), Bool),
+    !negative_exponent_difference & !extract(exponent_difference.as_bits(), 0, 0).into(Bool),
     zext(a.significand, close_width) << 1,
     bits(0, close_width)
   ) ||| mux(
@@ -63,19 +63,20 @@ circuit AddRawFN(format :: FloatFormat):
     bits(0, close_width)
   )
   def shifted_b = zext(b.significand, close_width) << 1
-  def signed_close_sum = cast(aligned_a, SInt(close_width)) - cast(shifted_b, SInt(close_width))
+  def signed_close_sum = aligned_a.into(SInt(close_width)) - shifted_b.into(SInt(close_width))
   def absolute_close_sum = mux(
     signed_close_sum < sint(0, close_width),
     -signed_close_sum,
     signed_close_sum
   )
-  def close_sum = extract(as_bits(absolute_close_sum), significand_width + 1, 0)
+  def close_sum = extract(absolute_close_sum.as_bits(), significand_width + 1, 0)
   def close_adjusted_sum:
     if (significand_width mod 2) == 1
     | zext(close_sum, significand_width + 3) << 1
     | close_sum
-  def close_groups = as_vec(close_adjusted_sum, Bits(2))
-  def close_reduced_sum = as_bits(close_groups.map(group => group =/= bits(0, 2)))
+  def close_groups = close_adjusted_sum.as_vec(Bits(2))
+  def close_reduced_groups = close_groups.map(fun (group): group =/= bits(0, 2))
+  def close_reduced_sum = close_reduced_groups.as_bits()
   def close_normalization_reduced = count_leading_zeros(close_reduced_sum)
   def close_normalization_distance:
     if close_normalization_reduced.type.bit_width() == align_distance_width
@@ -103,8 +104,9 @@ circuit AddRawFN(format :: FloatFormat):
   def far_main_aligned = (zext(far_smaller, significand_width + 5) << 5) >> alignment_distance
   def far_mask_width = (significand_width + 5) div 4
   def far_reduced_source = zext(far_smaller, far_mask_width * 4) << 2
-  def far_groups = as_vec(far_reduced_source, Bits(4))
-  def far_reduced = as_bits(far_groups.map(group => group =/= bits(0, 4)))
+  def far_groups = far_reduced_source.as_vec(Bits(4))
+  def far_reduced_groups = far_groups.map(fun (group): group =/= bits(0, 4))
+  def far_reduced = far_reduced_groups.as_bits()
   def far_round_extra_mask:
     if align_distance_width <= 2
     | bits(0, far_mask_width)
@@ -121,7 +123,7 @@ circuit AddRawFN(format :: FloatFormat):
     concat(Bool(#false), far_aligned_smaller)
   )
   def far_larger_shifted = zext(far_larger, significand_width + 4) << 3
-  def far_sum = (far_larger_shifted + far_negative_smaller) + zext(as_bits(far_subtract), significand_width + 4)
+  def far_sum = (far_larger_shifted + far_negative_smaller) + zext(far_subtract.as_bits(), significand_width + 4)
   def far_added_significand = extract(far_sum, significand_width + 3, 1) ||| zext(
     extract(far_sum, 0, 0),
     significand_width + 3
@@ -150,12 +152,9 @@ circuit AddRawFN(format :: FloatFormat):
   def exponent_adjustment_bits = mux(
     close_subtraction,
     close_normalization_distance,
-    zext(as_bits(far_subtract), align_distance_width)
+    zext(far_subtract.as_bits(), align_distance_width)
   )
-  def exponent_adjustment = cast(
-    zext(exponent_adjustment_bits, exponent_width + 2),
-    SInt(exponent_width + 2)
-  )
+  def exponent_adjustment = zext(exponent_adjustment_bits, exponent_width + 2).into(SInt(exponent_width + 2))
   def exponent_out = selected_exponent - exponent_adjustment
 
   invalid_exception <== is_signaling_nan(format, a) ||| is_signaling_nan(format, b) ||| invalid_non_nan

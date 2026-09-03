@@ -9,7 +9,7 @@ import:
   "primitives.rhdl".low_mask
 
 fun repeat_bool(value :: Bool, count :: PosInt) :~ Bits(count):
-  as_bits(vec(for List (_index in 0..count): value))
+  vec(for List (_index in 0..count): value).as_bits()
 
 circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
                              in_significand_width :: PosInt,
@@ -53,20 +53,20 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
           extract(raw.significand, in_significand_width, (in_significand_width - out_significand_width) - 1),
           or_reduce(extract(raw.significand, (in_significand_width - out_significand_width) - 2, 0))
         )
-  def shift_significand_down = if options.significand_msb_always_zero | Bool(#false) | cast(
-    extract(adjusted_significand, out_significand_width + 2, out_significand_width + 2),
-    Bool
-  )
+  def shift_significand_down:
+    if options.significand_msb_always_zero
+    | Bool(#false)
+    | extract(adjusted_significand, out_significand_width + 2, out_significand_width + 2).into(Bool)
 
   def round_mask :: Bits(out_significand_width + 3):
     if never_underflows
     | concat(bits(0, out_significand_width), shift_significand_down, bits(3, 2))
     | concat(
         low_mask(
-          extract(as_bits(adjusted_exponent), out_exponent_width, 0),
+          extract(adjusted_exponent.as_bits(), out_exponent_width, 0),
           (out_minimum_normal_exponent - out_significand_width) - 1,
           out_minimum_normal_exponent
-        ) ||| zext(as_bits(shift_significand_down), out_significand_width + 1),
+        ) ||| zext(shift_significand_down.as_bits(), out_significand_width + 1),
         bits(3, 2)
       )
   def shifted_round_mask = concat(bits(0, 1), extract(round_mask, out_significand_width + 2, 1))
@@ -92,12 +92,14 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   )
   def rounded_significand = mux(round_increment, incremented_significand, truncated_significand)
   def rounded_exponent_width = exponent_work_width + 1
-  def rounded_exponent :: SInt(rounded_exponent_width) = sext(adjusted_exponent, rounded_exponent_width) + cast(
-    zext(extract(rounded_significand, out_significand_width + 1, out_significand_width), rounded_exponent_width),
-    SInt(rounded_exponent_width)
+  def rounded_exponent :: SInt(rounded_exponent_width) = (
+    sext(adjusted_exponent, rounded_exponent_width) + zext(
+      extract(rounded_significand, out_significand_width + 1, out_significand_width),
+      rounded_exponent_width
+    ).into(SInt(rounded_exponent_width))
   )
 
-  def common_exponent = extract(as_bits(rounded_exponent), out_exponent_width, 0)
+  def common_exponent = extract(rounded_exponent.as_bits(), out_exponent_width, 0)
   def common_fraction = mux(
     shift_significand_down,
     extract(rounded_significand, out_significand_width - 1, 1),
@@ -113,10 +115,10 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   )
   def unbounded_round_position_bit = mux(
     shift_significand_down,
-    cast(extract(adjusted_significand, 2, 2), Bool),
-    cast(extract(adjusted_significand, 1, 1), Bool)
+    extract(adjusted_significand, 2, 2).into(Bool),
+    extract(adjusted_significand, 1, 1).into(Bool)
   )
-  def unbounded_any_round = (shift_significand_down & cast(extract(adjusted_significand, 2, 2), Bool)) ||| or_reduce(
+  def unbounded_any_round = (shift_significand_down & extract(adjusted_significand, 2, 2).into(Bool)) ||| or_reduce(
     extract(adjusted_significand, 1, 0)
   )
   def unbounded_round_increment = ((near_even ||| near_maximum_magnitude) & unbounded_round_position_bit) ||| (
@@ -124,8 +126,8 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   )
   def round_carry = mux(
     shift_significand_down,
-    cast(extract(rounded_significand, out_significand_width + 1, out_significand_width + 1), Bool),
-    cast(extract(rounded_significand, out_significand_width, out_significand_width), Bool)
+    extract(rounded_significand, out_significand_width + 1, out_significand_width + 1).into(Bool),
+    extract(rounded_significand, out_significand_width, out_significand_width).into(Bool)
   )
   def common_underflow:
     if never_underflows
@@ -133,13 +135,13 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
     | common_total_underflow ||| (
         any_round & ((adjusted_exponent >> out_exponent_width) <= sint(0, exponent_work_width)) & mux(
           shift_significand_down,
-          cast(extract(round_mask, 3, 3), Bool),
-          cast(extract(round_mask, 2, 2), Bool)
+          extract(round_mask, 3, 3).into(Bool),
+          extract(round_mask, 2, 2).into(Bool)
         ) & !(
           (tininess_mode === TininessMode.AfterRounding) & !mux(
             shift_significand_down,
-            cast(extract(round_mask, 4, 4), Bool),
-            cast(extract(round_mask, 3, 3), Bool)
+            extract(round_mask, 4, 4).into(Bool),
+            extract(round_mask, 3, 3).into(Bool)
           ) & round_carry & round_position_bit & unbounded_round_increment
         )
       )
@@ -191,10 +193,7 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
     common_fraction
   ) ||| repeat_bool(peg_maximum_finite, out_significand_width - 1)
 
-  out <== cast(
-    concat(sign_out, exponent_out, fraction_out),
-    RecFloat(FloatFormat(out_exponent_width, out_significand_width))
-  )
+  out <== concat(sign_out, exponent_out, fraction_out).into(RecFloat(FloatFormat(out_exponent_width, out_significand_width)))
   exception_flags <== ExceptionFlags():
     invalid: invalid_exception
     infinite: infinite_exception

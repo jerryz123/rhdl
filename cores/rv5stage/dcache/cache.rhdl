@@ -66,7 +66,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   inst protocol_data(Arbiter(CHIDatFlit(p), 2))
   inst refill_commands(Arbiter(RV5StageLineRefillCommand(RV5StageDataReq(xlen), width), 2))
 
-  reg valid_lines(~init: as_vec(bits(0, sets), Bool))
+  reg valid_lines(~init: bits(0, sets).as_vec(Bool))
   reg reservation_valid(~init: Bool(#false))
   reg reservation_address(~init: bits(0, width))
   reg reservation_width(~init: MemoryWidth.Word)
@@ -108,7 +108,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
     | lookup_request.address[3..offset_width]
   def line_valid = valid_lines[lookup_set]
   def line_hit = line_valid & (tags.port.response.bits[0] === lookup_tag)
-  def lookup_state = cast(states.port.response.bits[0], CHICacheState)
+  def lookup_state = states.port.response.bits[0].into(CHICacheState)
   def lookup_access :: MemoryOperation = lookup_request.access
   def lookup_ready = lookup.egress.valid & tags.port.response.valid & states.port.response.valid
   def lookup_load = lookup_ready & lookup_access.is_load()
@@ -120,24 +120,24 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   def mutation_has_ownership = lookup_mutation & line_hit & lookup_state.is_unique()
   def lookup_needs_refill = lookup_load & !line_hit ||| lookup_mutation & !mutation_has_ownership
   def dirty_victim = lookup_needs_refill & !line_hit & line_valid & lookup_state.is_dirty()
-  def cached_line = as_vec(lines.port.response.bits, Bits(64))
+  def cached_line = lines.port.response.bits.as_vec(Bits(64))
   def cached_beat:
     if beats == 1
     | cached_line[0]
     | cached_line[lookup_beat]
 
   def Array(hit_path, transaction_path) = (
-    lookup.egress |> demux_flow(2, _request => as_bits(lookup_needs_refill))
+    lookup.egress |> demux_flow(2, _request => lookup_needs_refill.as_bits())
   )
   def Array(direct_refill_path, eviction_path) = (
-    transaction_path |> demux_flow(2, _request => as_bits(dirty_victim))
+    transaction_path |> demux_flow(2, _request => dirty_victim.as_bits())
   )
   hit_path.ready <== Bool(#true)
   def direct_refill_commands = (
     direct_refill_path
       |> map_flow(request => RV5StageLineRefillCommand(RV5StageDataReq(xlen), width)):
-      line_address: align_down(as_bits(request.address), RV5StageCacheLineBytes)
-      opcode: mux(cast(request.access, MemoryOperation).needs_unique(), CHIReqOpcode.ReadUnique, CHIReqOpcode.ReadClean)
+      line_address: align_down(request.address.as_bits(), RV5StageCacheLineBytes)
+      opcode: mux(request.access.into(MemoryOperation).needs_unique(), CHIReqOpcode.ReadUnique, CHIReqOpcode.ReadClean)
       context: request
   )
   direct_refill_commands |> refill_commands.ingress[0]
@@ -146,19 +146,18 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
     eviction_path
       |> map_flow(request => RV5StageLineWritebackCommand(RV5StageDataReq(xlen), width)):
         line_address: victim_address
-        line: as_vec(lines.port.response.bits, Bits(64))
+        line: lines.port.response.bits.as_vec(Bits(64))
         context: request
   )
   eviction_commands |> writeback.command
   def post_eviction_refills = (
     writeback.completion
       |> map_flow(result => RV5StageLineRefillCommand(RV5StageDataReq(xlen), width)):
-        line_address: align_down(as_bits(cast(result.context, RV5StageDataReq(xlen)).address), RV5StageCacheLineBytes)
-        opcode: mux(cast(cast(result.context, RV5StageDataReq(xlen)).access,
-                         MemoryOperation).needs_unique(),
+        line_address: align_down(result.context.into(RV5StageDataReq(xlen)).address.as_bits(), RV5StageCacheLineBytes)
+        opcode: mux(result.context.into(RV5StageDataReq(xlen)).access.into(MemoryOperation).needs_unique(),
                     CHIReqOpcode.ReadUnique,
                     CHIReqOpcode.ReadClean)
-        context: cast(result.context, RV5StageDataReq(xlen))
+        context: result.context.into(RV5StageDataReq(xlen))
   )
   post_eviction_refills |> refill_commands.ingress[1]
   refill_commands.egress |> refill.command
@@ -169,7 +168,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   def install_refill = fire(refill.completion)
   when install_refill:
     assert(!refill.completion.bits.pass_dirty, "l1d_refill_not_dirty")
-  def completion_request = cast(refill.completion.bits.context, RV5StageDataReq(xlen))
+  def completion_request = refill.completion.bits.context.into(RV5StageDataReq(xlen))
   def completion_access :: MemoryOperation = completion_request.access
   def completion_set = completion_request.address[offset_width..(offset_width + set_width)]
   def completion_tag = completion_request.address[(offset_width + set_width)..width]
@@ -208,13 +207,10 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   store_gen.value <== mux(mutation_access.is_atomic(), atomic_alu.value, mutation_data)
   store_gen.width <== mutation_width
   def store_beat = mutation_address[3..offset_width]
-  def store_line_data = as_vec(
-    zext(store_gen.data, RV5StageCacheLineBytes * 8) << concat(store_beat, bits(0, 6)),
-    Bits(8)
-  )
+  def store_line_data = (zext(store_gen.data, RV5StageCacheLineBytes * 8) << concat(store_beat, bits(0, 6))).as_vec(Bits(8))
   def store_line_mask = zext(store_gen.mask.into(Bits(8)), RV5StageCacheLineBytes) << concat(store_beat, bits(0, 3))
-  def store_byte_mask = as_vec(store_line_mask, Bool)
-  def refill_line_bytes = as_vec(refill.completion.bits.line, Bits(8))
+  def store_byte_mask = store_line_mask.as_vec(Bool)
+  def refill_line_bytes = refill.completion.bits.line.as_vec(Bits(8))
   def merged_refill_line = vec(
     for List (byte_index in 0..RV5StageCacheLineBytes):
       mux(store_byte_mask[byte_index],
@@ -244,7 +240,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   snoop.lookup_result.bits <== RV5StageDataSnoopLookupResult():
     hit: snoop_line_hit
     state: states.port.response.bits[0]
-    line: as_vec(lines.port.response.bits, Bits(64))
+    line: lines.port.response.bits.as_vec(Bits(64))
   def snoop_pending = snoop.pending
 
   def lookup_accepts_input = refill.command.ready & writeback.command.ready & !snoop_pending & !lookup_needs_refill & !local_mutation

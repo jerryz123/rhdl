@@ -11,7 +11,6 @@ dependency inventory is in [`../../README.md`](../../README.md).
 
 | Layer | Authoring feature |
 |---|---|
-| [`cast.rhm`](cast.rhm) | Equal-width representation casts plus inferred packing to `Bits` and splitting into uniform vectors |
 | [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
 | [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
@@ -358,7 +357,7 @@ next_grant <== current.mux([
 
 `one_hot(index)` converts a hardware `Bits(n)` index to `OneHot(2^n)`. Inferring
 the result width makes the conversion total: every index encoding selects
-exactly one lane. Use `as_bits(one_hot(index))` when subsequent mask operations
+exactly one lane. Use `one_hot(index).as_bits()` when subsequent mask operations
 may produce zero or multiple asserted bits.
 
 One-hot values deliberately do not implement `BitwiseType`, because bitwise
@@ -394,13 +393,13 @@ their environment could physically drive a multi-hot encoding.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
 - Explicit `extract(value, high, low)` uses inclusive host indices.
 - `zext(bits_value, target_width)` adds most-significant zeroes to `Bits` and
-  returns wider `Bits`; use `as_bits` to expose other packable data first.
+  returns wider `Bits`; use `.as_bits()` to expose other packable data first.
 - `trunc` retains low bits.
-- `.into(TargetType)` and `cast(value, TargetType)` preserve packed width and
-  bit pattern while changing the hardware type.
-- `as_bits(value)` exposes any packable data value as
+- `value.into(TargetType)` preserves packed width and bit pattern while
+  changing the hardware type.
+- `value.as_bits()` exposes any packable data value as
   `Bits(value.type.packed_width())`; an existing `Bits` value is unchanged.
-- `as_vec(value, ElementType)` splits any packable data representation into a
+- `value.as_vec(ElementType)` splits any packable data representation into a
   `Vec` whose inferred length exactly covers the source width. Element zero
   receives the least-significant element-width chunk, and an existing vector
   of the inferred type is unchanged.

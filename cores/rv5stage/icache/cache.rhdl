@@ -53,7 +53,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   inst responses(Queue(RV5StageInstructionResp(), 2, ~pipe: #true, ~flow: #true), ~reset_when: cache_flush)
   inst protocol_responses(Arbiter(CHIRspFlit(p), 2))
 
-  reg valid_lines(~init: as_vec(bits(0, sets), Bool))
+  reg valid_lines(~init: bits(0, sets).as_vec(Bool))
   reg refill_live(~init: Bool(#false))
   reg refill_installable(~init: Bool(#false))
   reg outstanding(~init: bits(0, outstanding_width))
@@ -106,7 +106,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
     if beats == 1
     | lines.port.response.bits[0]
     | lines.port.response.bits[lookup_beat]
-  def completion_address = as_bits(refill.completion.bits.context)
+  def completion_address = refill.completion.bits.context.as_bits()
   def completion_set = completion_address[offset_width..(offset_width + set_width)]
   def completion_tag = completion_address[(offset_width + set_width)..width]
   def completion_beat:
@@ -118,7 +118,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
     | refill.completion.bits.line[0]
     | refill.completion.bits.line[completion_beat]
   def completion_instruction = mux(
-    cast(completion_address[2], Bool),
+    completion_address[2].into(Bool),
     completed_beat[32..64],
     completed_beat[0..32]
   )
@@ -139,7 +139,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def Array(miss_path, hit_path) = (
     lookup.egress
       |> filter_flow(address => tags.port.response.valid & !cache_flush)
-      |> demux_flow(2, address => as_bits(line_hit))
+      |> demux_flow(2, address => line_hit.as_bits())
   )
   def refill_commands = (
     miss_path
@@ -155,7 +155,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def hit_responses = (
     hit_path
       |> map_flow(address => RV5StageInstructionResp()):
-        instruction: mux(cast(address[2], Bool), cached_beat[32..64], cached_beat[0..32])
+        instruction: mux(address[2].into(Bool), cached_beat[32..64], cached_beat[0..32])
         page_fault: Bool(#false)
   )
   hit_responses |> response_arbiter.ingress[0]
@@ -213,7 +213,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
     mask: (!bits(0, beats)).into(Mask(beats))
 
   when (core.invalidate_all):
-    valid_lines <== as_vec(bits(0, sets), Bool)
+    valid_lines <== bits(0, sets).as_vec(Bool)
   elsewhen (snoop.update.valid & snoop.update.bits.invalidate):
     valid_lines <== valid_lines.updated(
       snoop.update.bits.address[offset_width..(offset_width + set_width)],
