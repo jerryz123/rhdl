@@ -35,6 +35,32 @@ The CIRCT setup is only needed when the repository-local tool is absent.
 The check regenerates the leaf RTL, verifies the wrapper header and pin-template
 contract against the submodule, and lints the complete wrapper with Verilator.
 
+## Prototype SRAM mapping at the CIRCT boundary
+
+The SimpleSoC experiment keeps physical-memory knowledge outside RHDL. A
+loadable CIRCT pass selects `SimpleSoC` as the only root, gives every memory a
+canonical hierarchical site path, and applies `memory-map/simple-soc-policy.yaml`.
+The checked-in policy maps only the 4096 by 128-bit shared CHI RAM; all six
+shallow cache arrays continue through CIRCT's inferred-memory lowering.
+`memory-map/map-memories.py` validates the selected site's logical contract and
+tiles it onto 32 installed 512 by 32-bit Sky130 SRAMs. A JSON manifest records
+all seven site decisions and carries the selected macro instances and physical
+collateral into later floorplanning, PDN, and LVS work.
+
+```sh
+make -C vlsi memory-map-test
+make -C vlsi simple-soc-memory-map
+make -C vlsi simple-soc-macro-rtl-check
+```
+
+The first target also proves that two equal-shaped memory occurrences can take
+different decisions, checks unknown-site rejection, functionally tests banking,
+width slicing and byte masking, and rejects unsupported port contracts. The
+latter targets inventory SimpleSoC and lint the mixed macro/inferred RTL against
+the generated wrapper and installed SRAM model. See
+[`memory-map/README.md`](memory-map/README.md) for the policy and current flat
+hierarchy boundary.
+
 ## Run the focused LVS proof
 
 The full OpenFrame wrapper contains roughly 32 mm2 of standard-cell rows. Filling

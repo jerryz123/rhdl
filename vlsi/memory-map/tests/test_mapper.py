@@ -1,0 +1,263 @@
+# Exercises SRAM mapper metadata, contract rejection, and generated-wrapper behavior.
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+
+TEST_DIR = Path(__file__).resolve().parent
+MAPPER_DIR = TEST_DIR.parent
+MAPPER = MAPPER_DIR / "map-memories.py"
+CATALOG = MAPPER_DIR / "sky130-sram.ini"
+FIXTURES = TEST_DIR / "fixtures"
+CIRCT_OPT = Path(os.environ.get("CIRCT_OPT", "circt-opt"))
+MEMORY_SITE_PLUGIN = Path(os.environ.get("MEMORY_SITE_PLUGIN", "rhdl-memory-sites.so"))
+
+
+class MapperTest(unittest.TestCase):
+    def invoke_mapper(
+        self,
+        fixture,
+        output_dir: Path,
+        expect_success: bool = True,
+        site_inventory: Path = None,
+    ):
+        verilog = output_dir / "wrappers.sv"
+        manifest = output_dir / "manifest.json"
+        input_mlir = fixture if isinstance(fixture, Path) else FIXTURES / fixture
+        command = [
+            os.environ.get("PYTHON", "python3"),
+            str(MAPPER),
+            str(input_mlir),
+            "--catalog",
+            str(CATALOG),
+            "--output-verilog",
+            str(verilog),
+            "--output-manifest",
+            str(manifest),
+        ]
+        if site_inventory is not None:
+            command.extend(["--site-inventory", str(site_inventory)])
+        result = subprocess.run(command, text=True, capture_output=True)
+        if expect_success:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result, verilog, manifest
+
+    def invoke_site_pass(
+        self, policy: Path, output_dir: Path, expect_success: bool = True
+    ):
+        selected_mlir = output_dir / "selected.mlir"
+        inventory = output_dir / "site-inventory.json"
+        pipeline = (
+            "builtin.module("
+            "rhdl-select-hw-top{top=Top},"
+            "hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},"
+            "symbol-dce,"
+            f"rhdl-map-memory-sites{{policy={policy} inventory={inventory}}},"
+            "symbol-dce)"
+        )
+        result = subprocess.run(
+            [
+                str(CIRCT_OPT),
+                f"--load-pass-plugin={MEMORY_SITE_PLUGIN}",
+                f"--pass-pipeline={pipeline}",
+                str(FIXTURES / "site-selective.mlir"),
+                "-o",
+                str(selected_mlir),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        if expect_success:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result, selected_mlir, inventory
+
+    def test_manifest_and_wrapper_shape(self):
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+            result, verilog, manifest_path = self.invoke_mapper(
+                "banked-width-masked.mlir", Path(temporary)
+            )
+            self.assertIn(
+                "mapped 1 FIRRTLMem definitions to 4 macro instances", result.stdout
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            mapping = manifest["memories"][0]["mapping"]
+            self.assertEqual(mapping["depth_banks"], 2)
+            self.assertEqual(mapping["width_slices"], 2)
+            self.assertEqual(mapping["instances_per_definition"], 4)
+            self.assertEqual(mapping["logical_bits"], 40960)
+            self.assertEqual(mapping["allocated_bits"], 65536)
+            wrapper = verilog.read_text(encoding="utf-8")
+            self.assertIn("module storage_1024x40(", wrapper)
+            self.assertIn("current_bank = RW0_addr[9:9]", wrapper)
+            self.assertIn("macro_dout_d1_w1[7:0]", wrapper)
+            self.assertIn("RW0_wmask[4]", wrapper)
+
+    def test_unsupported_port_topology_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+            result, _, _ = self.invoke_mapper(
+                "unsupported-two-rw.mlir", Path(temporary), expect_success=False
+            )
+            self.assertIn("exactly one read-write port is required", result.stderr)
+
+    def test_generated_wrapper_behavior(self):
+        verilator_setting = os.environ.get("VERILATOR", "verilator")
+        verilator = (
+            shutil.which(verilator_setting)
+            if "/" not in verilator_setting
+            else verilator_setting
+        )
+        self.assertTrue(
+            verilator and Path(verilator).is_file(),
+            f"Verilator not found: {verilator_setting}",
+        )
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+            output_dir = Path(temporary)
+            _, wrapper, _ = self.invoke_mapper("banked-width-masked.mlir", output_dir)
+            object_dir = output_dir / "obj"
+            compile_result = subprocess.run(
+                [
+                    str(verilator),
+                    "--binary",
+                    "--timing",
+                    "--top-module",
+                    "mapper_tb",
+                    "-Wno-fatal",
+                    "-Wno-DECLFILENAME",
+                    "--Mdir",
+                    str(object_dir),
+                    str(wrapper),
+                    str(FIXTURES / "sky130-sram-model.sv"),
+                    str(FIXTURES / "mapper-tb.sv"),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            simulation = subprocess.run(
+                [str(object_dir / "Vmapper_tb")], text=True, capture_output=True
+            )
+            self.assertEqual(simulation.returncode, 0, simulation.stderr)
+            self.assertIn("mapper functional test PASS", simulation.stdout)
+
+    def test_site_selective_mapping_preserves_inferred_equal_shape(self):
+        self.assertTrue(CIRCT_OPT.is_file(), f"circt-opt not found: {CIRCT_OPT}")
+        self.assertTrue(
+            MEMORY_SITE_PLUGIN.is_file(),
+            f"memory-site plugin not found: {MEMORY_SITE_PLUGIN}",
+        )
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-sites-") as temporary:
+            output_dir = Path(temporary)
+            _, selected_mlir, inventory_path = self.invoke_site_pass(
+                FIXTURES / "site-selective-policy.yaml", output_dir
+            )
+            inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [(site["path"], site["decision"]) for site in inventory["sites"]],
+                [
+                    ("leaf/left/storage", "macro"),
+                    ("leaf/right/storage", "infer"),
+                ],
+            )
+            selected = selected_mlir.read_text(encoding="utf-8")
+            self.assertIn(
+                'hw.instance "leaf/left/storage_ext" @rhdl_sram_leaf_left_storage_',
+                selected,
+            )
+            self.assertIn(
+                'hw.instance "leaf/right/storage_ext" @storage_64x52', selected
+            )
+            self.assertIn("hw.module.generated private @storage_64x52", selected)
+            self.assertNotIn("hw.module @Leaf", selected)
+
+            result, wrappers, manifest_path = self.invoke_mapper(
+                selected_mlir, output_dir, site_inventory=inventory_path
+            )
+            self.assertIn("mapped 1 of 2 memory sites to 2 macro instances", result.stdout)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            totals = manifest["totals"]
+            self.assertEqual(totals["memory_sites"], 2)
+            self.assertEqual(totals["mapped_sites"], 1)
+            self.assertEqual(totals["inferred_sites"], 1)
+            self.assertEqual(totals["macro_instances"], 2)
+
+            rtl_result = subprocess.run(
+                [
+                    str(CIRCT_OPT),
+                    "--lower-seq-to-sv=disable-mem-randomization=true disable-reg-randomization=true",
+                    "--hw-memory-sim=disable-mem-randomization=true disable-reg-randomization=true read-enable-mode=undefined",
+                    "--symbol-dce",
+                    "--export-verilog",
+                    str(selected_mlir),
+                    "-o",
+                    "/dev/null",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(rtl_result.returncode, 0, rtl_result.stderr)
+            self.assertIn("module storage_64x52", rtl_result.stdout)
+            self.assertIn("rhdl_sram_leaf_left_storage_", rtl_result.stdout)
+            rtl = output_dir / "site-selective.sv"
+            rtl.write_text(rtl_result.stdout, encoding="utf-8")
+
+            verilator_setting = os.environ.get("VERILATOR", "verilator")
+            verilator = (
+                shutil.which(verilator_setting)
+                if "/" not in verilator_setting
+                else verilator_setting
+            )
+            self.assertTrue(
+                verilator and Path(verilator).is_file(),
+                f"Verilator not found: {verilator_setting}",
+            )
+            lint = subprocess.run(
+                [
+                    str(verilator),
+                    "--lint-only",
+                    "--timing",
+                    "--top-module",
+                    "Top",
+                    "-Wno-fatal",
+                    "-Wno-DECLFILENAME",
+                    "-Wno-UNUSEDSIGNAL",
+                    "-Wno-PINCONNECTEMPTY",
+                    str(rtl),
+                    str(wrappers),
+                    str(FIXTURES / "sky130-sram-model.sv"),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(lint.returncode, 0, lint.stderr)
+
+    def test_unknown_memory_site_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-sites-") as temporary:
+            output_dir = Path(temporary)
+            policy = output_dir / "unknown-site.yaml"
+            policy.write_text(
+                "# Exercises rejection of a misspelled memory site.\n\n"
+                "schema_version: 1\n"
+                "top: Top\n"
+                "default: infer\n"
+                "sites:\n"
+                "  leaf/missing/storage: sky130_sram_2kbyte_1rw1r_32x512_8\n",
+                encoding="utf-8",
+            )
+            result, _, _ = self.invoke_site_pass(
+                policy, output_dir, expect_success=False
+            )
+            self.assertIn("unknown site: leaf/missing/storage", result.stderr)
+            self.assertIn("available sites: leaf/left/storage, leaf/right/storage", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
