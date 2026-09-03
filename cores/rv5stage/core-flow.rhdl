@@ -22,7 +22,6 @@ import:
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm" open
-  "../../riscv/isa/csr.rhm" open
   "../../riscv/isa/trap.rhm" open
   "../../riscv/rhdl/trap.rhdl" open
   "../../riscv/model/formats.rhm" as riscv_fields
@@ -102,21 +101,15 @@ sync_circuit RV5StageCore(xlen :: XLen):
   scoreboard_set_link.right |> scoreboard.set
   scoreboard_clear_link.right |> scoreboard.clear
   def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
-  def sfence_vma_commit = commit.valid & commit.bits.fence.is_address_translation_fence()
-  def satp_write_requested = csr_write_requested(commit.bits.system.csr, commit.bits.instruction[15..20])
-  def satp_write_commit = commit.valid & !commit.bits.exception_valid & (
-    commit.bits.csr_address === bits(csr_address(CsrId.Satp), 12)
-  ) & satp_write_requested
-  def translation_restart_commit = sfence_vma_commit ||| satp_write_commit
-  translation_flush <== translation_restart_commit
-  def fence_i_resume_pc = commit.bits.pc + bits(4, width)
-  def fence_commit = fence_i_commit ||| translation_restart_commit
+  translation_flush <== csrs.translation_flush
+  def fence_resume_pc = commit.bits.pc + bits(4, width)
+  def fence_commit = fence_i_commit ||| csrs.translation_flush
   def commit_redirect = csrs.redirect.valid ||| fence_commit
   redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
     csrs.redirect.bits,
-    mux(fence_commit, fence_i_resume_pc, execute_redirect_link.right.bits)
+    mux(fence_commit, fence_resume_pc, execute_redirect_link.right.bits)
   )
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
@@ -273,7 +266,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
       writeback_source: control.writeback.source
       system: control.system
       fence: control.fence
-      illegal: !decoder.valid ||| (control.fence.is_address_translation_fence() & (csrs.privilege === PrivilegeMode.User))
+      illegal: !decoder.valid
       instruction_page_fault: fetch_token.instruction_page_fault
       immediate: decoded_immediate
       rs1: rs1
@@ -522,10 +515,10 @@ sync_circuit RV5StageCore(xlen :: XLen):
         pc: operation.pc
         instruction: operation.instruction
         rd: operation.rd
-        csr_operation: operation.system.csr
+        system: operation.system
+        fence: operation.fence
         csr_address: operation.csr_address
         csr_source: operation.csr_source
-        system_operation: operation.system.action
         exception_valid: operation.exception_valid
         exception_cause: operation.exception_cause
         exception_value: operation.exception_value

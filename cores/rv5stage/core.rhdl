@@ -22,7 +22,6 @@ import:
   "icache/protocol.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm" open
-  "../../riscv/isa/csr.rhm" open
   "../../riscv/isa/trap.rhm" open
   "../../riscv/rhdl/trap.rhdl" open
   "../../riscv/model/formats.rhm" as riscv_fields
@@ -105,21 +104,15 @@ sync_circuit RV5StageCore(xlen :: XLen):
   scoreboard.clear.valid <== scoreboard_clear_link.right.valid
   scoreboard.clear.bits <== scoreboard_clear_link.right.bits
   def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
-  def sfence_vma_commit = commit.valid & commit.bits.fence.is_address_translation_fence()
-  def satp_write_requested = csr_write_requested(commit.bits.system.csr, commit.bits.instruction[15..20])
-  def satp_write_commit = commit.valid & !commit.bits.exception_valid & (
-    commit.bits.csr_address === bits(csr_address(CsrId.Satp), 12)
-  ) & satp_write_requested
-  def translation_restart_commit = sfence_vma_commit ||| satp_write_commit
-  translation_flush <== translation_restart_commit
-  def fence_i_resume_pc = commit.bits.pc + bits(4, width)
-  def fence_commit = fence_i_commit ||| translation_restart_commit
+  translation_flush <== csrs.translation_flush
+  def fence_resume_pc = commit.bits.pc + bits(4, width)
+  def fence_commit = fence_i_commit ||| csrs.translation_flush
   def commit_redirect = csrs.redirect.valid ||| fence_commit
   redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
     csrs.redirect.bits,
-    mux(fence_commit, fence_i_resume_pc, execute_redirect_link.right.bits)
+    mux(fence_commit, fence_resume_pc, execute_redirect_link.right.bits)
   )
 
   // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
@@ -273,7 +266,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
     writeback_source: control.writeback.source
     system: control.system
     fence: control.fence
-    illegal: !decoder.valid ||| (control.fence.is_address_translation_fence() & (csrs.privilege === PrivilegeMode.User))
+    illegal: !decoder.valid
     instruction_page_fault: if_id_pipe.egress.bits.instruction_page_fault
     immediate: decoded_immediate
     rs1: rs1
@@ -488,10 +481,10 @@ sync_circuit RV5StageCore(xlen :: XLen):
     pc: commit.bits.pc
     instruction: commit.bits.instruction
     rd: commit.bits.rd
-    csr_operation: commit.bits.system.csr
+    system: commit.bits.system
+    fence: commit.bits.fence
     csr_address: commit.bits.csr_address
     csr_source: commit.bits.csr_source
-    system_operation: commit.bits.system.action
     exception_valid: commit.bits.exception_valid
     exception_cause: commit.bits.exception_cause
     exception_value: commit.bits.exception_value

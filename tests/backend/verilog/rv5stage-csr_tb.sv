@@ -9,13 +9,21 @@ module rv5stage_csr_tb;
     logic machine_external;
   } interrupts_t;
   typedef struct packed {
+    logic [1:0] csr;
+    logic immediate;
+    logic [2:0] action;
+  } system_control_t;
+  typedef struct packed {
+    logic [1:0] action;
+  } fence_control_t;
+  typedef struct packed {
     logic [63:0] pc;
     logic [31:0] instruction;
     logic [4:0] rd;
-    logic [1:0] csr_operation;
+    system_control_t system;
+    fence_control_t fence;
     logic [11:0] csr_address;
     logic [63:0] csr_source;
-    logic [2:0] system_operation;
     logic exception_valid;
     logic [63:0] exception_cause;
     logic [63:0] exception_value;
@@ -33,6 +41,7 @@ module rv5stage_csr_tb;
   localparam logic [11:0] CSR_SEPC = 12'h141;
   localparam logic [11:0] CSR_SCAUSE = 12'h142;
   localparam logic [11:0] CSR_SIP = 12'h144;
+  localparam logic [11:0] CSR_SATP = 12'h180;
   localparam logic [11:0] CSR_MSTATUS = 12'h300;
   localparam logic [11:0] CSR_MEDELEG = 12'h302;
   localparam logic [11:0] CSR_MIDELEG = 12'h303;
@@ -55,11 +64,18 @@ module rv5stage_csr_tb;
   localparam logic [2:0] SYSTEM_EBREAK = 3'd2;
   localparam logic [2:0] SYSTEM_MRET = 3'd3;
   localparam logic [2:0] SYSTEM_SRET = 3'd4;
+  localparam logic [2:0] SYSTEM_WFI = 3'd5;
+  localparam logic [1:0] FENCE_NONE = 2'd0;
+  localparam logic [1:0] FENCE_ADDRESS_TRANSLATION = 2'd3;
   localparam logic [1:0] PRIVILEGE_U = 2'd0;
   localparam logic [1:0] PRIVILEGE_S = 2'd1;
   localparam logic [1:0] PRIVILEGE_M = 2'd3;
   localparam logic [63:0] RV64_MSTATUS_FIXED = 64'h0000000a_00000000;
   localparam logic [63:0] RV64_SSTATUS_FIXED = 64'h00000002_00000000;
+  localparam logic [63:0] MSTATUS_MPP_S = 64'h00000000_00000800;
+  localparam logic [63:0] MSTATUS_TVM = 64'h00000000_00100000;
+  localparam logic [63:0] MSTATUS_TW = 64'h00000000_00200000;
+  localparam logic [63:0] MSTATUS_TSR = 64'h00000000_00400000;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -76,6 +92,7 @@ module rv5stage_csr_tb;
   logic [1:0] privilege;
   logic [63:0] mstatus;
   logic [63:0] satp;
+  logic translation_flush;
 
   RV5StageCsrFile dut (.*);
   always #5 clock = ~clock;
@@ -83,6 +100,18 @@ module rv5stage_csr_tb;
   task automatic clear_commit;
     commit_in = '0;
     interrupt_boundary = 1'b0;
+  endtask
+
+  task automatic reset_dut;
+    reset = 1'b1;
+    interrupts = '0;
+    interrupt_pc = '0;
+    clear_commit();
+    repeat (2) @(posedge clock);
+    #1;
+    reset = 1'b0;
+    assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED)
+      else $fatal(1, "CSR file did not reset into M mode with bare translation");
   endtask
 
   task automatic take_interrupt(
@@ -115,7 +144,7 @@ module rv5stage_csr_tb;
     clear_commit();
     commit_in.valid = 1'b1;
     commit_in.bits.rd = 5'd1;
-    commit_in.bits.csr_operation = operation;
+    commit_in.bits.system.csr = operation;
     commit_in.bits.csr_address = address;
     commit_in.bits.csr_source = source;
     if ((operation == CSR_SET || operation == CSR_CLEAR) && source != 0)
@@ -124,7 +153,7 @@ module rv5stage_csr_tb;
     assert (writeback_valid && writeback_value == expected_old)
       else $fatal(1, "CSR %03h returned %016h instead of %016h",
                   address, writeback_value, expected_old);
-    assert (!redirect_out.valid)
+    assert (!redirect_out.valid && !translation_flush)
       else $fatal(1, "legal CSR access unexpectedly redirected");
     @(posedge clock);
     #1;
@@ -136,10 +165,10 @@ module rv5stage_csr_tb;
     clear_commit();
     commit_in.valid = 1'b1;
     commit_in.bits.rd = 5'd1;
-    commit_in.bits.csr_operation = CSR_SET;
+    commit_in.bits.system.csr = CSR_SET;
     commit_in.bits.csr_address = address;
     #1;
-    assert (writeback_valid && !redirect_out.valid)
+    assert (writeback_valid && !redirect_out.valid && !translation_flush)
       else $fatal(1, "legal CSR %03h read trapped", address);
     @(posedge clock);
     #1;
@@ -155,7 +184,7 @@ module rv5stage_csr_tb;
     clear_commit();
     commit_in.valid = 1'b1;
     commit_in.bits.rd = 5'd1;
-    commit_in.bits.csr_operation = operation;
+    commit_in.bits.system.csr = operation;
     commit_in.bits.csr_address = address;
     commit_in.bits.instruction[19:15] = source_specifier;
     #1;
@@ -175,8 +204,14 @@ module rv5stage_csr_tb;
     clear_commit();
     commit_in.valid = 1'b1;
     commit_in.bits.pc = pc;
-    commit_in.bits.instruction = operation == SYSTEM_EBREAK ? 32'h00100073 : 32'h00000073;
-    commit_in.bits.system_operation = operation;
+    case (operation)
+      SYSTEM_EBREAK: commit_in.bits.instruction = 32'h00100073;
+      SYSTEM_MRET: commit_in.bits.instruction = 32'h30200073;
+      SYSTEM_SRET: commit_in.bits.instruction = 32'h10200073;
+      SYSTEM_WFI: commit_in.bits.instruction = 32'h10500073;
+      default: commit_in.bits.instruction = 32'h00000073;
+    endcase
+    commit_in.bits.system.action = operation;
     #1;
     assert (redirect_out.valid && redirect_out.bits == expected_target)
       else $fatal(1, "system operation selected the wrong trap or return target");
@@ -185,15 +220,79 @@ module rv5stage_csr_tb;
     clear_commit();
   endtask
 
-  initial begin
-    interrupts = '0;
-    interrupt_pc = '0;
+  task automatic privileged_action(
+    input logic [2:0] system_operation,
+    input logic [1:0] fence_operation,
+    input logic [63:0] pc,
+    input logic [31:0] instruction,
+    input logic expect_trap,
+    input logic expect_flush
+  );
+    @(negedge clock);
     clear_commit();
-    repeat (2) @(posedge clock);
+    commit_in.valid = 1'b1;
+    commit_in.bits.pc = pc;
+    commit_in.bits.instruction = instruction;
+    commit_in.bits.system.action = system_operation;
+    commit_in.bits.fence.action = fence_operation;
     #1;
-    reset = 1'b0;
-    assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED)
-      else $fatal(1, "CSR file did not reset into M mode with bare translation");
+    assert (redirect_out.valid == expect_trap)
+      else $fatal(1, "privileged operation trap decision was incorrect");
+    if (expect_trap)
+      assert (redirect_out.bits == 64'h100)
+        else $fatal(1, "illegal privileged operation selected the wrong trap target");
+    assert (translation_flush == expect_flush)
+      else $fatal(1, "privileged operation translation-flush decision was incorrect");
+    @(posedge clock);
+    #1;
+    clear_commit();
+  endtask
+
+  task automatic illegal_csr_read(
+    input logic [11:0] address,
+    input logic [63:0] pc,
+    input logic [31:0] instruction
+  );
+    @(negedge clock);
+    clear_commit();
+    commit_in.valid = 1'b1;
+    commit_in.bits.pc = pc;
+    commit_in.bits.instruction = instruction;
+    commit_in.bits.rd = 5'd1;
+    commit_in.bits.system.csr = CSR_SET;
+    commit_in.bits.csr_address = address;
+    #1;
+    assert (!writeback_valid && redirect_out.valid && redirect_out.bits == 64'h100)
+      else $fatal(1, "restricted CSR %03h read did not trap", address);
+    assert (!translation_flush)
+      else $fatal(1, "restricted CSR %03h read caused a translation flush", address);
+    @(posedge clock);
+    #1;
+    clear_commit();
+  endtask
+
+  task automatic enter_supervisor(input logic [63:0] mstatus_flags);
+    csr_access(CSR_WRITE, CSR_MTVEC, 64'h100, 64'h0);
+    csr_access(CSR_WRITE, CSR_MSTATUS, mstatus_flags | MSTATUS_MPP_S, RV64_MSTATUS_FIXED);
+    csr_access(CSR_WRITE, CSR_MEPC, 64'h200, 64'h0);
+    system_action(SYSTEM_MRET, 64'h0, 64'h200);
+    assert (privilege == PRIVILEGE_S)
+      else $fatal(1, "MRET did not enter S mode for privileged-operation test");
+  endtask
+
+  task automatic check_illegal_trap(
+    input logic [63:0] pc,
+    input logic [31:0] instruction
+  );
+    assert (privilege == PRIVILEGE_M)
+      else $fatal(1, "illegal privileged operation did not enter M mode");
+    csr_access(CSR_SET, CSR_MCAUSE, 64'h0, 64'h2);
+    csr_access(CSR_SET, CSR_MEPC, 64'h0, pc);
+    csr_access(CSR_SET, CSR_MTVAL, 64'h0, {32'h0, instruction});
+  endtask
+
+  initial begin
+    reset_dut();
 
     csr_access(CSR_WRITE, CSR_MCYCLE, 64'h100, 64'h0);
     csr_access(CSR_SET, CSR_CYCLE, 64'h0, 64'h100);
@@ -284,6 +383,35 @@ module rv5stage_csr_tb;
     // CSRRS with a nonzero source register is a write attempt even when that
     // register's runtime value is zero, so the read-only cycle view must trap.
     csr_write_intent_traps(CSR_SET, CSR_CYCLE, 5'd1);
+
+    // TVM, TW, and TSR are writable M-mode controls. Their legality checks
+    // happen at commit, where the current privilege and complete operation are
+    // available and rejected operations cannot trigger translation effects.
+    reset_dut();
+    enter_supervisor(64'h0);
+    csr_read_legal(CSR_SATP);
+    privileged_action(SYSTEM_NONE, FENCE_ADDRESS_TRANSLATION, 64'h204, 32'h12000073, 1'b0, 1'b1);
+    privileged_action(SYSTEM_WFI, FENCE_NONE, 64'h208, 32'h10500073, 1'b0, 1'b0);
+
+    reset_dut();
+    enter_supervisor(MSTATUS_TVM);
+    privileged_action(SYSTEM_NONE, FENCE_ADDRESS_TRANSLATION, 64'h20c, 32'h12000073, 1'b1, 1'b0);
+    check_illegal_trap(64'h20c, 32'h12000073);
+
+    reset_dut();
+    enter_supervisor(MSTATUS_TVM);
+    illegal_csr_read(CSR_SATP, 64'h210, 32'h180020f3);
+    check_illegal_trap(64'h210, 32'h180020f3);
+
+    reset_dut();
+    enter_supervisor(MSTATUS_TSR);
+    privileged_action(SYSTEM_SRET, FENCE_NONE, 64'h214, 32'h10200073, 1'b1, 1'b0);
+    check_illegal_trap(64'h214, 32'h10200073);
+
+    reset_dut();
+    enter_supervisor(MSTATUS_TW);
+    privileged_action(SYSTEM_WFI, FENCE_NONE, 64'h218, 32'h10500073, 1'b1, 1'b0);
+    check_illegal_trap(64'h218, 32'h10500073);
 
     $display("RV5Stage CSR and privilege transitions passed");
     $finish;
