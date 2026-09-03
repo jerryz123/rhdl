@@ -71,6 +71,12 @@ stores the passing value into a dirty L1D line, and succeeds only after the
 coherent FESVR requester observes that write. It uses the same `run` path as an
 external target binary.
 
+These simulators always use CIRCT-inferred memories. To validate a
+design-and-technology SRAM mapping while reusing this harness, driver, FESVR
+transport, and smoke payload, run `make -C vlsi/sim smoke`; see the
+[`vlsi/sim` guide](../vlsi/sim/README.md). Keeping mapped simulation there
+prevents technology policy from entering this package or the SoCs.
+
 `DirectMemoryHtif` presents FESVR's abstract memory chunks as one-outstanding,
 aligned 32-bit transactions. Target XLEN may be 32 or 64; addresses and entry
 points remain 64-bit. `FesvrRequester` is a non-caching RN-F: it converts those

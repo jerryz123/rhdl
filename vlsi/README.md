@@ -37,29 +37,41 @@ contract against the submodule, and lints the complete wrapper with Verilator.
 
 ## Prototype SRAM mapping at the CIRCT boundary
 
-The SimpleSoC experiment keeps physical-memory knowledge outside RHDL. A
-loadable CIRCT pass selects `SimpleSoC` as the only root, gives every memory a
-canonical hierarchical site path, and applies `memory-map/simple-soc-policy.yaml`.
-The checked-in policy maps only the 4096 by 128-bit shared CHI RAM; all six
-shallow cache arrays continue through CIRCT's inferred-memory lowering.
-`memory-map/map-memories.py` validates the selected site's logical contract and
-tiles it onto 32 installed 512 by 32-bit Sky130 SRAMs. A JSON manifest records
-all seven site decisions and carries the selected macro instances and physical
-collateral into later floorplanning, PDN, and LVS work.
+The SimpleSoC experiment keeps physical-memory knowledge outside RHDL and the
+SoC. Reusable occurrence selection, contract validation, tiling, and wrapper
+generation live in the top-level [`sram/`](../sram/README.md) package. Sky130
+macro data and models live in `sram/sky130/`, while this physical-design layer
+owns the SimpleSoC/Sky130 site policy at
+`designs/simple-soc/sky130/sram-map.yaml`.
+
+The policy maps only the 4096 by 128-bit shared CHI RAM onto 32 installed
+512 by 32-bit Sky130 SRAMs. All six shallow cache arrays continue through
+CIRCT's inferred-memory lowering. A JSON manifest records all seven decisions
+and carries selected macro instances and physical collateral into later
+floorplanning, PDN, and LVS work.
 
 ```sh
-make -C vlsi memory-map-test
+make -C sram test
 make -C vlsi simple-soc-memory-map
 make -C vlsi simple-soc-macro-rtl-check
 ```
 
-The first target also proves that two equal-shaped memory occurrences can take
-different decisions, checks unknown-site rejection, functionally tests banking,
-width slicing and byte masking, and rejects unsupported port contracts. The
-latter targets inventory SimpleSoC and lint the mixed macro/inferred RTL against
-the generated wrapper and installed SRAM model. See
-[`memory-map/README.md`](memory-map/README.md) for the policy and current flat
-hierarchy boundary.
+The first target proves scoped and direct elaboration tops produce identical
+policy-relative wrapper identities, checks unknown-site rejection, functionally
+tests banking, width slicing and byte masking, and rejects unsupported port
+contracts. The latter targets inventory SimpleSoC and lint the mixed
+macro/inferred RTL against the generated wrapper and installed PDK SRAM model.
+
+Cycle-level validation of the same policy is owned by [`sim/`](sim/README.md):
+
+```sh
+make -C vlsi/sim smoke
+```
+
+That target reuses the technology-independent `sims/` SoCHarness and FESVR
+stack, scopes the policy through the harness's `soc` instance, and runs the
+existing SimpleSoC smoke payload against the checked-in Sky130 functional SRAM
+model.
 
 ## Run the focused LVS proof
 

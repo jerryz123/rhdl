@@ -1,4 +1,4 @@
-# Builds the out-of-tree CIRCT pass that applies occurrence-specific SRAM policy.
+# Builds the technology-independent CIRCT pass that applies occurrence-specific SRAM policy.
 
 cmake_minimum_required(VERSION 3.20)
 project(RHDLMemorySites LANGUAGES C CXX)

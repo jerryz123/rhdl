@@ -23,6 +23,8 @@ std/* -------------------------> public #lang rhdl authoring surface
 chi/* -------------------------> public #lang rhdl and generic std/* libraries
 socs/* ------------------------> public #lang rhdl and domain libraries
 sims/* ------------------------> public SoC and backend surfaces
+sram/* ------------------------> CIRCT HW/Seq MLIR and technology catalogs
+vlsi/sim/* --------------------> sims/* + sram/* + design/technology policy
 riscv/rhdl --------------------> public #lang rhdl authoring surface
 hardfloat/* -------------------> public #lang rhdl authoring surface
 user designs ------------------> optional std/* and domain libraries
@@ -69,9 +71,10 @@ internal module implementing its shared frontend forms is called the
 | [`../chi/`](../chi/README.md) | AMBA CHI parameters, exact flits, credited node-role links, monitors, fabric metadata, and initial non-coherent endpoints | Public `#lang rhdl`; protocol-neutral `std/` libraries |
 | [`../socs/`](../socs/README.md) | Concrete system composition and end-to-end integration | Public domain-library and core surfaces only |
 | [`../sims/`](../sims/README.md) | Executable SoC harnesses, FESVR host model, target payloads, and simulator bindings | Public SoC and RHDL surfaces; backend emission; external C++ libraries |
+| [`../sram/`](../sram/README.md) | Technology-independent post-CIRCT memory-site selection, macro-interface adaptation, tiling, and manifests | CIRCT/MLIR libraries; technology catalogs beneath `sram/` |
 | [`../riscv/rhdl/`](../riscv/rhdl/README.md) | Converts RISC-V instruction encodings into generic typed decode patterns | Pure RISC-V model; public `#lang rhdl` libraries |
 | [`../hardfloat/`](../hardfloat/README.md) | RHDL port of Berkeley HardFloat representations and floating-point units | Public `#lang rhdl` authoring surface only |
-| [`../vlsi/`](../vlsi/README.md) | Physical-design integration fixtures and backend tool flows | Public `#lang rhdl` authoring surface; backend emission tools; external VLSI tools and harnesses |
+| [`../vlsi/`](../vlsi/README.md) | Physical-design integration, design/technology policy, and mapped simulation | Public authoring/backend surfaces; `sram/`; `sims/`; external VLSI tools and harnesses |
 
 The import direction is one-way. Core never imports analysis, frontend, or
 backend code. Analysis imports core but not authoring or lowering packages.
@@ -87,7 +90,10 @@ core, analysis, frontend, and backend modules never import RFPL.
 The diagram package is similarly downstream and read-only; its dependency on
 interface metadata does not make visualization part of frontend elaboration.
 SoCs expose hardware host interfaces and never import `sims/`; simulation
-harnesses depend inward on public SoC and backend surfaces.
+harnesses depend inward on public SoC and backend surfaces. SRAM mapping is a
+post-CIRCT consumer: no RHDL package, core, or SoC imports `sram/`. Generic
+mapping code owns no foundry policy; `vlsi/` selects a design-specific policy
+and may combine `sram/` output with reusable `sims/` infrastructure.
 HardFloat is an external domain library over the public language: RHDL
 implementation packages never depend on it, while its tests may consume the
 backend to validate ordinary lowering.

@@ -145,6 +145,8 @@ Detailed documentation lives with the component that owns it:
 | Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
 | CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
 | Executable SoC simulation harnesses | [`sims/README.md`](sims/README.md) |
+| Technology-independent SRAM mapping and adapters | [`sram/README.md`](sram/README.md) |
+| OpenFrame physical flow and mapped VLSI simulation | [`vlsi/README.md`](vlsi/README.md) |
 | RISC-V instruction model, RV32I/RV64I catalogs, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
 | Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
 | Hardware SoC composition | [`socs/README.md`](socs/README.md) |

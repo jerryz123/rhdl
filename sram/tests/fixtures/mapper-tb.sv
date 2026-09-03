@@ -1,4 +1,4 @@
-// Checks that generated wrappers preserve banking, width slicing, and byte-write semantics.
+// Checks that generated OpenRAM wrappers preserve banking, width slicing, and byte-write semantics.
 module mapper_tb;
   reg clk = 1'b0;
   reg [9:0] address = 10'b0;

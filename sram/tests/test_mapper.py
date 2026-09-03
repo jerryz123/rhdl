@@ -1,8 +1,9 @@
-# Exercises SRAM mapper metadata, contract rejection, and generated-wrapper behavior.
+# Exercises generic SRAM mapping, scoped site selection, and generated-wrapper behavior.
 
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,9 +11,15 @@ import unittest
 
 
 TEST_DIR = Path(__file__).resolve().parent
-MAPPER_DIR = TEST_DIR.parent
-MAPPER = MAPPER_DIR / "map-memories.py"
-CATALOG = MAPPER_DIR / "sky130-sram.ini"
+SRAM_DIR = TEST_DIR.parent
+SKY130_DIR = SRAM_DIR / "sky130"
+MAPPER = SRAM_DIR / "map-memories.py"
+CATALOG = SKY130_DIR / "macros.ini"
+FUNCTIONAL_MODEL = (
+    SKY130_DIR
+    / "models"
+    / "sky130_sram_2kbyte_1rw1r_32x512_8.functional.sv"
+)
 FIXTURES = TEST_DIR / "fixtures"
 CIRCT_OPT = Path(os.environ.get("CIRCT_OPT", "circt-opt"))
 MEMORY_SITE_PLUGIN = Path(os.environ.get("MEMORY_SITE_PLUGIN", "rhdl-memory-sites.so"))
@@ -50,16 +57,25 @@ class MapperTest(unittest.TestCase):
         return result, verilog, manifest
 
     def invoke_site_pass(
-        self, policy: Path, output_dir: Path, expect_success: bool = True
+        self,
+        policy: Path,
+        output_dir: Path,
+        expect_success: bool = True,
+        actual_top: str = "Top",
+        scope_prefix: str = "leaf",
     ):
+        output_dir.mkdir(parents=True, exist_ok=True)
         selected_mlir = output_dir / "selected.mlir"
         inventory = output_dir / "site-inventory.json"
+        mapping_options = f"policy={policy} inventory={inventory} top={actual_top}"
+        if scope_prefix:
+            mapping_options += f" scope-prefix={scope_prefix}"
         pipeline = (
             "builtin.module("
-            "rhdl-select-hw-top{top=Top},"
+            f"rhdl-select-hw-top{{top={actual_top}}},"
             "hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},"
             "symbol-dce,"
-            f"rhdl-map-memory-sites{{policy={policy} inventory={inventory}}},"
+            f"rhdl-map-memory-sites{{{mapping_options}}},"
             "symbol-dce)"
         )
         result = subprocess.run(
@@ -90,11 +106,16 @@ class MapperTest(unittest.TestCase):
             )
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             mapping = manifest["memories"][0]["mapping"]
+            self.assertEqual(mapping["interface"], "openram_1rw1r")
             self.assertEqual(mapping["depth_banks"], 2)
             self.assertEqual(mapping["width_slices"], 2)
             self.assertEqual(mapping["instances_per_definition"], 4)
             self.assertEqual(mapping["logical_bits"], 40960)
             self.assertEqual(mapping["allocated_bits"], 65536)
+            self.assertEqual(
+                manifest["memories"][0]["functional_verilog"],
+                str(FUNCTIONAL_MODEL.resolve()),
+            )
             wrapper = verilog.read_text(encoding="utf-8")
             self.assertIn("module storage_1024x40(", wrapper)
             self.assertIn("current_bank = RW0_addr[9:9]", wrapper)
@@ -135,7 +156,7 @@ class MapperTest(unittest.TestCase):
                     "--Mdir",
                     str(object_dir),
                     str(wrapper),
-                    str(FIXTURES / "sky130-sram-model.sv"),
+                    str(FUNCTIONAL_MODEL),
                     str(FIXTURES / "mapper-tb.sv"),
                 ],
                 text=True,
@@ -160,16 +181,22 @@ class MapperTest(unittest.TestCase):
                 FIXTURES / "site-selective-policy.yaml", output_dir
             )
             inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+            self.assertEqual(inventory["top"], "Top")
+            self.assertEqual(inventory["policy_top"], "Leaf")
+            self.assertEqual(inventory["scope_prefix"], "leaf")
             self.assertEqual(
-                [(site["path"], site["decision"]) for site in inventory["sites"]],
                 [
-                    ("leaf/left/storage", "macro"),
-                    ("leaf/right/storage", "infer"),
+                    (site["path"], site["instance_path"], site["decision"])
+                    for site in inventory["sites"]
+                ],
+                [
+                    ("left/storage", "leaf/left/storage", "macro"),
+                    ("right/storage", "leaf/right/storage", "infer"),
                 ],
             )
             selected = selected_mlir.read_text(encoding="utf-8")
             self.assertIn(
-                'hw.instance "leaf/left/storage_ext" @rhdl_sram_leaf_left_storage_',
+                'hw.instance "leaf/left/storage_ext" @rhdl_sram_left_storage_',
                 selected,
             )
             self.assertIn(
@@ -205,7 +232,7 @@ class MapperTest(unittest.TestCase):
             )
             self.assertEqual(rtl_result.returncode, 0, rtl_result.stderr)
             self.assertIn("module storage_64x52", rtl_result.stdout)
-            self.assertIn("rhdl_sram_leaf_left_storage_", rtl_result.stdout)
+            self.assertIn("rhdl_sram_left_storage_", rtl_result.stdout)
             rtl = output_dir / "site-selective.sv"
             rtl.write_text(rtl_result.stdout, encoding="utf-8")
 
@@ -232,7 +259,7 @@ class MapperTest(unittest.TestCase):
                     "-Wno-PINCONNECTEMPTY",
                     str(rtl),
                     str(wrappers),
-                    str(FIXTURES / "sky130-sram-model.sv"),
+                    str(FUNCTIONAL_MODEL),
                 ],
                 text=True,
                 capture_output=True,
@@ -246,17 +273,45 @@ class MapperTest(unittest.TestCase):
             policy.write_text(
                 "# Exercises rejection of a misspelled memory site.\n\n"
                 "schema_version: 1\n"
-                "top: Top\n"
+                "top: Leaf\n"
                 "default: infer\n"
                 "sites:\n"
-                "  leaf/missing/storage: sky130_sram_2kbyte_1rw1r_32x512_8\n",
+                "  missing/storage: sky130_sram_2kbyte_1rw1r_32x512_8\n",
                 encoding="utf-8",
             )
             result, _, _ = self.invoke_site_pass(
                 policy, output_dir, expect_success=False
             )
-            self.assertIn("unknown site: leaf/missing/storage", result.stderr)
-            self.assertIn("available sites: leaf/left/storage, leaf/right/storage", result.stderr)
+            self.assertIn("unknown site: missing/storage", result.stderr)
+            self.assertIn("available sites: left/storage, right/storage", result.stderr)
+
+    def test_scope_prefix_preserves_policy_relative_wrapper_identity(self):
+        with tempfile.TemporaryDirectory(prefix="rhdl-memory-scope-") as temporary:
+            output_dir = Path(temporary)
+            _, scoped_mlir, _ = self.invoke_site_pass(
+                FIXTURES / "site-selective-policy.yaml", output_dir / "scoped"
+            )
+            _, direct_mlir, direct_inventory_path = self.invoke_site_pass(
+                FIXTURES / "site-selective-policy.yaml",
+                output_dir / "direct",
+                actual_top="Leaf",
+                scope_prefix="",
+            )
+            wrapper_pattern = re.compile(r"@(?P<name>rhdl_sram_left_storage_[0-9a-f]+)")
+            scoped_wrapper = wrapper_pattern.search(
+                scoped_mlir.read_text(encoding="utf-8")
+            )
+            direct_wrapper = wrapper_pattern.search(
+                direct_mlir.read_text(encoding="utf-8")
+            )
+            self.assertIsNotNone(scoped_wrapper)
+            self.assertIsNotNone(direct_wrapper)
+            self.assertEqual(scoped_wrapper.group("name"), direct_wrapper.group("name"))
+            direct_inventory = json.loads(
+                direct_inventory_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(direct_inventory["top"], "Leaf")
+            self.assertEqual(direct_inventory["scope_prefix"], "")
 
 
 if __name__ == "__main__":

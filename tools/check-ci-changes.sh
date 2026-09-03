@@ -58,6 +58,8 @@ check_no_jobs() {
 
 check_no_jobs README.md
 check_no_jobs tests/backend/README.md
+check_no_jobs sram/README.md
+check_no_jobs vlsi/sim/README.md
 check_no_jobs tools/emacs/rhdl-mode.el
 check_matrix_entry vlsi/src/rhdl-top.rhdl host_matrix ci-host-hygiene-test
 
@@ -122,6 +124,10 @@ check_field tests/backend/verilog/adder_tb.sv circt true
 check_field sims/fesvr/direct_mem_htif.cc simulation true
 check_field sims/TestDriver.v simulation true
 check_field sims/soc-harness.rhdl simulation true
+check_field sram/map-memories.py simulation true
+check_field sram/circt/MemorySitePass.cpp simulation true
+check_field vlsi/sim/Makefile simulation true
+check_field vlsi/designs/simple-soc/sky130/sram-map.yaml simulation true
 check_field socs/tests/simple-soc-test.rhm simulation true
 check_matrix_entry socs/tests/simple-soc-test.rhm host_matrix ci-host-socs-test
 check_field socs/simple-soc.rhdl host true
@@ -144,9 +150,20 @@ fi
 
 while IFS= read -r path; do
   case "$path" in
-    tests/emacs/*|tools/emacs/*|vlsi/*)
+    tests/emacs/*|tools/emacs/*)
       continue
       ;;
+    vlsi/*)
+      case "$path" in
+        vlsi/sim/*|vlsi/designs/simple-soc/sky130/*)
+          ;;
+        *)
+          continue
+          ;;
+      esac
+      ;;
+  esac
+  case "$path" in
     Makefile|*.rhm|*.rhdl|*.rkt|*.rktd|*.sh|*.sv|*.cc|*.cpp|*.h|*.S|*.ld|*.rfpl|*.yml|*.yaml)
       output="$(classification_for "$path")"
       if [[ "$(field_value "$output" host)" != true \

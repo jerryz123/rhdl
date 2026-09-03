@@ -1,4 +1,4 @@
-// Provides a zero-delay functional stand-in for the catalogued Sky130 SRAM during mapper tests.
+// Provides a zero-delay functional Sky130 SRAM model for mapping tests and mapped simulation.
 module sky130_sram_2kbyte_1rw1r_32x512_8(
   input wire clk0,
   input wire csb0,

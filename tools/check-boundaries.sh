@@ -67,6 +67,10 @@ fail_matches "devices must not import simulation harnesses" \
   '^[[:space:]]+.*sims/' devices
 fail_matches "SoCs must expose hardware boundaries instead of importing simulation harnesses" \
   '^[[:space:]]+.*sims/' socs
+for package in rhdl chi cores devices socs sims; do
+  fail_matches "$package must not import post-CIRCT SRAM or VLSI policy" \
+    '^[[:space:]]+.*(sram/|vlsi/)' "$package"
+done
 fail_matches "standard language assembly must not import analysis, core, backend, or formal modules" \
   '^[[:space:]]+"[^"]*(analysis|core|backend|formal)/' rhdl/language.rhm
 fail_matches "base language assembly must not import analysis, core, backend, or formal modules" \

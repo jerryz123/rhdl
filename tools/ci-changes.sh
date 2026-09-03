@@ -175,6 +175,9 @@ classify_path() {
     *.md|LICENSE|LICENSE.*|AGENTS.md|.gitignore|.gitattributes)
       # Documentation and repository metadata cannot affect executable behavior.
       ;;
+    sram/*|vlsi/sim/*|vlsi/designs/simple-soc/sky130/*)
+      simulation=true
+      ;;
     tests/emacs/*|tools/emacs/*|vlsi/*)
       # Optional integrations have no functional CI; Rhombus files still run
       # repository-wide source hygiene through the classification above.

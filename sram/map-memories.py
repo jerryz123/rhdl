@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Plans selected CIRCT memory sites onto catalogued SRAM macros and emits exact-name wrappers.
+# Plans selected CIRCT memory sites onto interface-described SRAM macros and emits exact-name wrappers.
 
 import argparse
 import configparser
@@ -49,6 +49,7 @@ class Memory:
 @dataclass(frozen=True)
 class Macro:
     name: str
+    interface: str
     depth: int
     width: int
     write_granularity: int
@@ -59,6 +60,7 @@ class Macro:
     height_um: float
     collateral: Dict[str, str]
     power_pins: Tuple[str, ...]
+    functional_verilog: Optional[Path]
 
     @property
     def mask_width(self) -> int:
@@ -296,6 +298,7 @@ def load_catalog(path: Path) -> List[Macro]:
             }
             macro = Macro(
                 name=values["name"],
+                interface=values["interface"],
                 depth=values.getint("depth"),
                 width=values.getint("width"),
                 write_granularity=values.getint("write_granularity"),
@@ -310,6 +313,11 @@ def load_catalog(path: Path) -> List[Macro]:
                     for pin in values.get("power_pins", "").split(",")
                     if pin.strip()
                 ),
+                functional_verilog=(
+                    (path.parent / values["functional_verilog"]).resolve()
+                    if values.get("functional_verilog", "").strip()
+                    else None
+                ),
             )
         except (KeyError, ValueError, configparser.Error) as error:
             raise MappingError(f"invalid macro catalog section [{section}]: {error}") from error
@@ -317,8 +325,22 @@ def load_catalog(path: Path) -> List[Macro]:
             raise MappingError(f"{macro.name}: macro depth must match its address width")
         if macro.width <= 0 or macro.write_granularity <= 0 or macro.width % macro.write_granularity:
             raise MappingError(f"{macro.name}: macro width must be divisible by write granularity")
+        if macro.interface != "openram_1rw1r":
+            raise MappingError(
+                f"{macro.name}: unsupported macro interface {macro.interface}"
+            )
         if macro.read_ports != 1 or macro.read_write_ports != 1:
-            raise MappingError(f"{macro.name}: the prototype requires the OpenRAM 1RW1R port convention")
+            raise MappingError(
+                f"{macro.name}: openram_1rw1r requires one read and one read-write port"
+            )
+        if (
+            macro.functional_verilog is not None
+            and not macro.functional_verilog.is_file()
+        ):
+            raise MappingError(
+                f"{macro.name}: functional Verilog model does not exist: "
+                f"{macro.functional_verilog}"
+            )
         macros.append(macro)
     if not macros:
         raise MappingError(f"macro catalog {path} contains no [macro:*] sections")
@@ -395,6 +417,14 @@ def load_site_inventory(path: Path) -> Dict[str, object]:
         raise MappingError(f"site inventory {path} must use schema_version 1")
     if not isinstance(inventory.get("top"), str) or not inventory["top"]:
         raise MappingError(f"site inventory {path} has no top module")
+    policy_top = inventory.get("policy_top", inventory["top"])
+    if not isinstance(policy_top, str) or not policy_top:
+        raise MappingError(f"site inventory {path} has no logical policy top")
+    scope_prefix = inventory.get("scope_prefix", "")
+    if not isinstance(scope_prefix, str):
+        raise MappingError(f"site inventory {path} has an invalid scope prefix")
+    inventory["policy_top"] = policy_top
+    inventory["scope_prefix"] = scope_prefix
     if inventory.get("default") != "infer":
         raise MappingError(f"site inventory {path} must use the infer default")
     sites = inventory.get("sites")
@@ -410,6 +440,12 @@ def load_site_inventory(path: Path) -> Dict[str, object]:
         if site_path in seen:
             raise MappingError(f"site inventory {path} repeats site {site_path}")
         seen.add(site_path)
+        instance_path = site.get("instance_path", site_path)
+        if not isinstance(instance_path, str) or not instance_path:
+            raise MappingError(
+                f"site inventory {path} has an invalid instance path for {site_path}"
+            )
+        site["instance_path"] = instance_path
         if not isinstance(site.get("source_module"), str) or not site["source_module"]:
             raise MappingError(f"site inventory {path} has no source module for {site_path}")
         decision = site.get("decision")
@@ -463,7 +499,7 @@ def data_slice(signal: str, offset: int, width: int) -> str:
     return f"{signal}[{offset + width - 1}:{offset}]"
 
 
-def render_wrapper(plan: Plan) -> str:
+def render_openram_1rw1r_wrapper(plan: Plan) -> str:
     memory = plan.memory
     macro = plan.macro
     address_width = memory.port_map["RW0_addr"].width
@@ -587,6 +623,14 @@ def render_wrapper(plan: Plan) -> str:
     return "\n".join(lines)
 
 
+def render_wrapper(plan: Plan) -> str:
+    if plan.macro.interface == "openram_1rw1r":
+        return render_openram_1rw1r_wrapper(plan)
+    raise MappingError(
+        f"{plan.macro.name}: no wrapper renderer for interface {plan.macro.interface}"
+    )
+
+
 def render_verilog(plans: Sequence[Plan], source: Path) -> str:
     lines = [
         "// Implements selected CIRCT memory sites using catalogued physical SRAM macros.",
@@ -637,6 +681,7 @@ def plan_manifest(
             },
             "mapping": {
                 "macro": macro.name,
+                "interface": macro.interface,
                 "depth_banks": plan.depth_banks,
                 "width_slices": plan.width_slices,
                 "instances": instances,
@@ -647,6 +692,11 @@ def plan_manifest(
             },
             "collateral": macro.collateral,
             "power_pins": list(macro.power_pins),
+            "functional_verilog": (
+                None
+                if macro.functional_verilog is None
+                else str(macro.functional_verilog)
+            ),
         }
         if memory.site is None:
             memory_entry["mapping"]["instances_per_definition"] = plan.instance_count
@@ -700,6 +750,7 @@ def plan_manifest(
             site["mapping"] = mapped["mapping"]
             site["collateral"] = mapped["collateral"]
             site["power_pins"] = mapped["power_pins"]
+            site["functional_verilog"] = mapped["functional_verilog"]
         sites.append(site)
     mapped_sites = len(memories)
     manifest.update(
@@ -711,8 +762,18 @@ def plan_manifest(
             "selection_policy": {
                 "default": site_inventory["default"],
                 "top": site_inventory["top"],
+                "policy_top": site_inventory["policy_top"],
+                "scope_prefix": site_inventory["scope_prefix"],
             },
-            "scope": f"logical memory occurrences reachable from {site_inventory['top']}",
+            "scope": (
+                f"{site_inventory['policy_top']}-relative logical memory occurrences "
+                f"selected from {site_inventory['top']}"
+                + (
+                    f" under {site_inventory['scope_prefix']}"
+                    if site_inventory["scope_prefix"]
+                    else ""
+                )
+            ),
             "sites": sites,
             "totals": {
                 "memory_sites": len(inventory_sites),

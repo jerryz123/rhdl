@@ -15,13 +15,12 @@ LVS_CONFIG := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/config.yaml
 LVS_WRAPPER := $(VLSI_ROOT)/verilog/rtl/rhdl_lvs_smoke.v
 LVS_TOP_NAME := rhdl_lvs_smoke
 LVS_RUN_DIR := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/runs/RHDL_LVS
-MEMORY_MAP_DIR := $(VLSI_ROOT)/memory-map
-MEMORY_MAP_CATALOG := $(MEMORY_MAP_DIR)/sky130-sram.ini
-MEMORY_MAPPER := $(MEMORY_MAP_DIR)/map-memories.py
-MEMORY_SITE_PASS_DIR := $(MEMORY_MAP_DIR)/circt
-MEMORY_SITE_PLUGIN_BUILD_DIR := $(BUILD_DIR)/memory-site-plugin
-MEMORY_SITE_PLUGIN := $(MEMORY_SITE_PLUGIN_BUILD_DIR)/rhdl-memory-sites.so
-SIMPLE_SOC_MEMORY_POLICY := $(MEMORY_MAP_DIR)/simple-soc-policy.yaml
+SRAM_ROOT := $(RHDL_ROOT)/sram
+MEMORY_MAP_CATALOG := $(SRAM_ROOT)/sky130/macros.ini
+MEMORY_MAPPER := $(SRAM_ROOT)/map-memories.py
+MEMORY_SITE_PASS_DIR := $(SRAM_ROOT)/circt
+MEMORY_SITE_PLUGIN := $(SRAM_ROOT)/build/circt/rhdl-memory-sites.so
+SIMPLE_SOC_MEMORY_POLICY := $(VLSI_ROOT)/designs/simple-soc/sky130/sram-map.yaml
 SIMPLE_SOC_BUILD_DIR := $(BUILD_DIR)/simple-soc
 SIMPLE_SOC_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.mlir
 SIMPLE_SOC_FIRRTL_MEM_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc-firmem.mlir
@@ -35,10 +34,8 @@ SKY130_SRAM_MODEL = $(PDK_ROOT)/$(PDK)/libs.ref/sky130_sram_macros/verilog/sky13
 RACKET ?= racket
 CIRCT_OPT ?= $(RHDL_ROOT)/.tools/firtool-1.155.0/bin/circt-opt
 CIRCT_ROOT ?= $(abspath $(dir $(CIRCT_OPT))/..)
-CIRCT_CMAKE_DIR ?= $(CIRCT_ROOT)/lib/cmake/circt
 VERILATOR ?= verilator
 PYTHON ?= python3
-CMAKE ?= cmake
 NIX_SYSTEM := /nix/var/nix/profiles/default/bin/nix
 NIX ?= $(if $(wildcard $(NIX_SYSTEM)),$(NIX_SYSTEM),nix)
 NIX_FLAGS ?= --extra-experimental-features 'nix-command flakes' --accept-flake-config
@@ -98,22 +95,15 @@ lvs-smoke-rtl-check: rtl
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
 		$(BUILD_DIR)/rhdl-top.sv $(LVS_WRAPPER)
 
-$(MEMORY_SITE_PLUGIN): $(MEMORY_SITE_PASS_DIR)/CMakeLists.txt $(MEMORY_SITE_PASS_DIR)/MemorySitePass.cpp | $(BUILD_DIR)
-	@test -f $(CIRCT_CMAKE_DIR)/CIRCTConfig.cmake || { \
-		echo "CIRCT CMake package not found at $(CIRCT_CMAKE_DIR); run 'make setup-circt' or set CIRCT_ROOT" >&2; \
-		exit 1; \
-	}
-	$(CMAKE) -S $(MEMORY_SITE_PASS_DIR) -B $(MEMORY_SITE_PLUGIN_BUILD_DIR) \
-		-DCIRCT_DIR=$(CIRCT_CMAKE_DIR) -DCMAKE_BUILD_TYPE=Release
-	$(CMAKE) --build $(MEMORY_SITE_PLUGIN_BUILD_DIR) --parallel
+$(MEMORY_SITE_PLUGIN): $(MEMORY_SITE_PASS_DIR)/CMakeLists.txt $(MEMORY_SITE_PASS_DIR)/MemorySitePass.cpp
+	$(MAKE) -C $(SRAM_ROOT) plugin CIRCT_OPT=$(CIRCT_OPT) CIRCT_ROOT=$(CIRCT_ROOT)
 	@test -s $@
 
 memory-site-plugin: $(MEMORY_SITE_PLUGIN)
 
-memory-map-test: $(MEMORY_SITE_PLUGIN)
-	env PYTHON=$(PYTHON) VERILATOR=$(VERILATOR) CIRCT_OPT=$(CIRCT_OPT) \
-		MEMORY_SITE_PLUGIN=$(MEMORY_SITE_PLUGIN) \
-		$(PYTHON) -m unittest discover -s memory-map/tests -p 'test_*.py'
+memory-map-test:
+	$(MAKE) -C $(SRAM_ROOT) test CIRCT_OPT=$(CIRCT_OPT) CIRCT_ROOT=$(CIRCT_ROOT) \
+		PYTHON=$(PYTHON) VERILATOR=$(VERILATOR)
 
 $(SIMPLE_SOC_BUILD_DIR):
 	mkdir -p $@
@@ -129,7 +119,7 @@ $(SIMPLE_SOC_MEMORY_SITE_STAMP): $(SIMPLE_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(SIMP
 	}
 	$(CIRCT_OPT) \
 		--load-pass-plugin=$(MEMORY_SITE_PLUGIN) \
-		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhdl-select-hw-top{top=SimpleSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhdl-map-memory-sites{policy=$(SIMPLE_SOC_MEMORY_POLICY) inventory=$(SIMPLE_SOC_MEMORY_SITE_INVENTORY)},symbol-dce)" \
+		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhdl-select-hw-top{top=SimpleSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhdl-map-memory-sites{policy=$(SIMPLE_SOC_MEMORY_POLICY) inventory=$(SIMPLE_SOC_MEMORY_SITE_INVENTORY) top=SimpleSoC},symbol-dce)" \
 		$(SIMPLE_SOC_MLIR) -o $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
 	@test -s $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
 	@test -s $(SIMPLE_SOC_MEMORY_SITE_INVENTORY)

@@ -1,4 +1,4 @@
-// Selects one HW top and retargets policy-selected FIRRTLMem occurrences to SRAM externs.
+// Selects a scoped HW hierarchy and retargets policy-selected FIRRTLMem occurrences to SRAM externs.
 
 #include "circt/Dialect/HW/HWOps.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -39,6 +39,7 @@ struct MemoryPolicy {
 
 struct MemorySite {
   std::string path;
+  std::string instancePath;
   std::string decision;
   std::string sourceModule;
   std::string wrapperModule;
@@ -164,6 +165,7 @@ memoryAttributes(hw::HWModuleGeneratedOp generator, StringRef site,
 }
 
 static LogicalResult writeInventory(StringRef path, const MemoryPolicy &policy,
+                                    StringRef top, StringRef scopePrefix,
                                     ArrayRef<MemorySite> sites,
                                     Operation *anchor) {
   if (path.empty()) {
@@ -191,6 +193,7 @@ static LogicalResult writeInventory(StringRef path, const MemoryPolicy &policy,
   for (const MemorySite &site : sites) {
     llvm::json::Object value{
         {"path", site.path},
+        {"instance_path", site.instancePath},
         {"decision", site.decision == kInferDecision ? "infer" : "macro"},
         {"source_module", site.sourceModule},
     };
@@ -202,7 +205,9 @@ static LogicalResult writeInventory(StringRef path, const MemoryPolicy &policy,
   }
   llvm::json::Object inventory{
       {"schema_version", 1},
-      {"top", policy.top},
+      {"top", top},
+      {"policy_top", policy.top},
+      {"scope_prefix", scopePrefix},
       {"default", policy.defaultDecision},
       {"sites", std::move(siteValues)},
   };
@@ -257,6 +262,8 @@ struct MapMemorySitesPass
   MapMemorySitesPass(const MapMemorySitesPass &other) : PassWrapper(other) {
     policyPath = other.policyPath;
     inventoryPath = other.inventoryPath;
+    top = other.top;
+    scopePrefix = other.scopePrefix;
   }
 
   Option<std::string> policyPath{
@@ -264,6 +271,14 @@ struct MapMemorySitesPass
       llvm::cl::init("")};
   Option<std::string> inventoryPath{
       *this, "inventory", llvm::cl::desc("JSON occurrence inventory output"),
+      llvm::cl::init("")};
+  Option<std::string> top{
+      *this, "top",
+      llvm::cl::desc("actual HW top; defaults to the policy's logical top"),
+      llvm::cl::init("")};
+  Option<std::string> scopePrefix{
+      *this, "scope-prefix",
+      llvm::cl::desc("flattened instance prefix stripped before policy lookup"),
       llvm::cl::init("")};
 
   StringRef getArgument() const final { return "rhdl-map-memory-sites"; }
@@ -282,10 +297,18 @@ struct MapMemorySitesPass
       return signalPassFailure();
     MemoryPolicy policy = std::move(*policyResult);
 
+    if (StringRef(scopePrefix).starts_with("/") ||
+        StringRef(scopePrefix).ends_with("/")) {
+      module.emitError()
+          << "rhdl-map-memory-sites scope-prefix must not start or end with '/'";
+      return signalPassFailure();
+    }
+    StringRef actualTop = top.empty() ? StringRef(policy.top) : StringRef(top);
+
     SymbolTable symbols(module);
-    auto topModule = symbols.lookup<hw::HWModuleOp>(policy.top);
+    auto topModule = symbols.lookup<hw::HWModuleOp>(actualTop);
     if (!topModule) {
-      module.emitError() << "cannot find policy top module '" << policy.top
+      module.emitError() << "cannot find mapping top module '" << actualTop
                          << "' after hierarchy preparation";
       return signalPassFailure();
     }
@@ -298,7 +321,15 @@ struct MapMemorySitesPass
           instance.getReferencedModuleName());
       if (!generator || generator.getGeneratorKind() != kFIRRTLMemSchema)
         return;
-      std::string path = canonicalSitePath(instance.getInstanceName());
+      std::string instancePath = canonicalSitePath(instance.getInstanceName());
+      StringRef scopedPath(instancePath);
+      if (!scopePrefix.empty()) {
+        StringRef prefix(scopePrefix);
+        if (!scopedPath.consume_front(prefix) ||
+            !scopedPath.consume_front("/") || scopedPath.empty())
+          return;
+      }
+      std::string path = scopedPath.str();
       if (!seenPaths.insert(path).second) {
         instance.emitError() << "duplicate canonical memory site '" << path
                              << "' after flattening";
@@ -309,8 +340,8 @@ struct MapMemorySitesPass
       std::string action = decision == policy.sites.end()
                                ? policy.defaultDecision
                                : decision->second;
-      sites.push_back({path, action, generator.getName().str(), "", instance,
-                       generator});
+      sites.push_back({path, instancePath, action, generator.getName().str(),
+                       "", instance, generator});
     });
 
     if (duplicatePath) {
@@ -370,7 +401,8 @@ struct MapMemorySitesPass
       site.instance->setAttr(kSiteAttr, builder.getStringAttr(site.path));
     }
 
-    if (failed(writeInventory(inventoryPath, policy, sites, module)))
+    if (failed(writeInventory(inventoryPath, policy, actualTop, scopePrefix,
+                              sites, module)))
       signalPassFailure();
   }
 };

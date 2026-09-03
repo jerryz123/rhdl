@@ -190,7 +190,7 @@ jobs:
     needs: [changes, compile-racket]
     if: needs.changes.outputs.simulation == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out RHDL
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -212,6 +212,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes \
             build-essential \
+            cmake \
             device-tree-compiler \
             gcc-riscv64-unknown-elf \
             verilator \
@@ -220,7 +221,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools/fesvr-*
-          key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('sims/fesvr/install.sh', 'sims/Makefile') }}"
+          key: "${{ runner.os }}-${{ runner.arch }}-fesvr-${{ hashFiles('sims/fesvr/install.sh', 'sims/Makefile', 'vlsi/sim/Makefile') }}"
       - name: Build pinned FESVR
         run: make -C sims setup
       - name: Cache CIRCT
@@ -230,6 +231,8 @@ jobs:
           key: "${{ runner.os }}-${{ runner.arch }}-circt-${{ hashFiles('tools/install-circt.sh') }}"
       - name: Install CIRCT
         run: make setup-circt
+      - name: Verify SRAM mapping package
+        run: make -C sram test
       - name: Compile Verilator DPI adapter
         run: |
           verilator_root="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
@@ -245,3 +248,5 @@ jobs:
         run: |
           make -C sims smoke SOC=simple
           make -C sims smoke SOC=tiled
+      - name: Execute mapped SimpleSoC through standard FESVR flow
+        run: make -C vlsi/sim smoke
