@@ -25,7 +25,8 @@ The implemented foundation provides:
 - nominal IEEE and recoded floating-point values, typed hardware rounding and
   fused-operation modes, tininess modes, exception flags, raw floating-point
   records, multiplier-pipeline occupancy, and one-hot classification results;
-- the HardFloat leading-zero and grouped-reduction primitives;
+- the standard RHDL leading-zero utility plus HardFloat-specific mask and
+  grouped-reduction helpers;
 - IEEE-to-raw, IEEE-to-recoded, recoded-to-raw, and recoded-to-IEEE helpers;
 - raw-format resizing with exponent saturation and significand sticky-bit
   preservation;
@@ -51,7 +52,7 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 |---|---|
 | [`main.rhdl`](main.rhdl) | Public package facade |
 | [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal packed representations, and typed hardware records/enums |
-| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | Representation-independent bit helpers used by the port |
+| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat-specific variable masks and grouped OR reductions |
 | [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
 | [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky-bit preservation |
 | [`rtl/round.rhdl`](rtl/round.rhdl) | Shared raw-to-recoded rounding and exception generation |
@@ -65,10 +66,10 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 | [`rtl/arithmetic/divide-sqrt-f64.rhdl`](rtl/arithmetic/divide-sqrt-f64.rhdl) | Four-operation binary64 pipeline and its three-cycle 54x54+105 multiplier contract |
 | [`tests/`](tests/) | Elaboration, structural, CIRCT, and simulation validation |
 
-Production files depend only on the public `#lang rhdl` authoring surface and
-other files in this package. They must not import RHDL implementation layers,
-backends, tests, processor cores, or RISC-V definitions. Backend tooling is a
-test-only consumer.
+Production files depend only on the public `#lang rhdl` authoring surface,
+`rhdl/std/bits.rhdl`, and other files in this package. They must not import RHDL
+implementation layers, backends, tests, processor cores, or RISC-V definitions.
+Backend tooling is a test-only consumer.
 
 ## Types and representation
 

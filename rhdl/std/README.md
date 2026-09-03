@@ -356,10 +356,10 @@ sets and returns false for an empty list. `allocate_id_ranges` assigns exact con
 global ranges to a nonempty list of local ranges and returns reversible
 `IdRangeMap` records without requiring the local ranges to begin at zero.
 
-## Bit-vector alignment
+## Bit-vector utilities
 
-[`bits.rhdl`](bits.rhdl) provides reusable alignment operations over hardware
-`Bits` values:
+[`bits.rhdl`](bits.rhdl) provides reusable ordering, layout, and alignment
+operations over hardware `Bits` values:
 
 ```rhombus
 import:
@@ -367,6 +367,8 @@ import:
 
 def aligned = is_aligned(address, 8)
 def base = align_down(address, 8)
+def reversed = reverse_bits(address)
+def leading_zeros = count_leading_zeros(address)
 
 fun bank_index_width(bank_count :: Pow2Int):
   alignment_bits(bank_count)
@@ -381,6 +383,10 @@ it returns false for non-integers, zero, negative integers, and other
 non-power-of-two values.
 `unsigned_value_count(width)` returns the number of distinct values represented
 by a nonnegative unsigned width, including one value for width zero.
+`reverse_bits(value)` reverses the positions of a nonempty `Bits` value while
+preserving its width. `count_leading_zeros(value)` returns
+`Bits(index_width(width + 1))`; its result ranges from zero through the operand
+width, with an all-zero operand returning the operand width.
 The alignment is a positive power-of-two host parameter and must fit the
 value's width. `is_aligned` checks that the corresponding low bits are zero;
 `align_down` clears them while preserving the input width. Alignment to one is

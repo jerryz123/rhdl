@@ -125,7 +125,7 @@ import one primitive without loading unrelated generators.
 | `std/reduction.rhdl` | Generic ordered balanced reduction with a caller-supplied binary function | None |
 | `std/cdc/level.rhdl` | Resetless two-stage stable one-bit `SyncLevel` synchronizer | None |
 | `std/cdc.rhdl` | Public CDC circuit facade | `std/cdc/level.rhdl` |
-| `std/bits.rhdl` | Host `Pow2Int` refinement plus alignment, transfer-byte-mask, and masked-merge operations for `Bits` | None |
+| `std/bits.rhdl` | Host `Pow2Int` refinement plus bit reversal, leading-zero count, alignment, transfer-byte-mask, and masked-merge operations for `Bits` | None |
 | `std/scoreboard.rhdl` | Positive-sized single-set, single-clear registered occupancy `Scoreboard` plus total indexed lookup | `std/bits.rhdl`, `std/ready-valid.rhdl` |
 | `std/interconnect.rhdl` | Protocol-neutral host-side ID ranges, masked address sets, and transfer-size sets | `std/bits.rhdl` |
 | `std/decode/pattern.rhdl` | Typed host-side `Pattern` cubes and disjoint `PatternSet` algebra, exact-literal normalization, partial records, and recursive aggregate construction | None |
