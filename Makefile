@@ -1,6 +1,6 @@
 # Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
 
-.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
+.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test soc-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-socs-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -14,6 +14,7 @@ NOC_TESTS := $(sort $(shell find noc/tests -type f -name '*-test.rhm'))
 RISCV_TESTS := $(sort $(wildcard riscv/tests/*-test.rhm))
 DEVICE_TESTS := $(sort $(wildcard devices/tests/*-test.rhm))
 CHI_TESTS := $(sort $(wildcard chi/tests/*-test.rhm))
+SOC_TESTS := $(sort $(wildcard socs/tests/*-test.rhm))
 RV5STAGE_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/rv5stage/tests/*-test.rhm))
 RV5STAGE_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/rv5stage-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
@@ -33,9 +34,9 @@ EXAMPLES := $(sort $(shell find examples -path examples/formal -prune -o -type f
 RACKET_COMPILE_SOURCES := $(sort \
   $(SUPPORT_ANNOTATION_TESTS) $(CORE_TESTS) $(ANALYSIS_TESTS) $(FRONTEND_TESTS) \
   $(BACKEND_TESTS) $(RFPL_TESTS) $(NOC_TESTS) $(RISCV_TESTS) \
-  $(DEVICE_TESTS) $(CHI_TESTS) $(RV5STAGE_TESTS) $(EXAMPLES) \
+  $(DEVICE_TESTS) $(CHI_TESTS) $(SOC_TESTS) $(RV5STAGE_TESTS) $(EXAMPLES) \
   $(wildcard tests/backend/emit-*.rhm) \
-  $(wildcard socs/tests/*.rhm) $(wildcard sims/tests/*.rhm) \
+  $(wildcard sims/tests/*.rhm) \
   $(wildcard sims/emit-*.rhm) \
   tests/backend/load-example.rkt tests/support/run-negative.rkt \
   noc/tests/language/run-negative.rkt tools/check-parameter-annotations.rkt)
@@ -121,6 +122,9 @@ chi-test: check-boundaries
 	tools/run-racket-tests.sh $(CHI_TESTS)
 	bash chi/tests/run-negative.sh
 
+soc-test: check-boundaries
+	tools/run-racket-tests.sh $(SOC_TESTS)
+
 emacs-test:
 	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
 
@@ -165,7 +169,7 @@ update-verilog-goldens:
 	bash tools/check-example-verilog.sh --allow-empty
 	bash tests/backend/run-circt.sh --update-goldens
 
-host-checks: check-parameter-annotations support-annotation-test unit-test rfpl-unit-test noc-test riscv-test device-test chi-test rv5stage-host-test
+host-checks: check-parameter-annotations support-annotation-test unit-test rfpl-unit-test noc-test riscv-test device-test chi-test soc-test rv5stage-host-test
 
 ci-host-foundation-test: support-annotation-test frontend-test lop-test
 
@@ -176,6 +180,8 @@ ci-host-models-test: noc-test riscv-test
 ci-host-protocols-test: rfpl-unit-test device-test chi-test
 
 ci-host-cores-test: rv5stage-host-test
+
+ci-host-socs-test: soc-test
 
 ci-host-hygiene-test: check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test
 

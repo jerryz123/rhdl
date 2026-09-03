@@ -88,7 +88,14 @@ transports. `TiledSoC` alone applies the compiled `RouterFamilyLinkConnection`
 manifest and explicitly closes unused edge and corner slots. There is no
 whole-network RTL wrapper under `noc/`.
 
-Run the pure planning and complete hierarchy tests with:
+Run every SoC planning, configuration, tile, and hierarchy test from the
+repository root with:
+
+```sh
+make soc-test
+```
+
+Use the package-local focused targets when iterating on one area:
 
 ```sh
 make -C socs tiled-plan-test

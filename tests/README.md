@@ -48,6 +48,7 @@ make examples-rv5stage        # RV5Stage examples only
 make lop-test               # equivalence across authoring layers
 make riscv-test             # pure RISC-V model and instruction catalogs
 make chi-test               # CHI boundaries, flits, links, and invalid connections
+make soc-test               # SoC planning, configuration, tiles, and complete hierarchy
 make rv5stage-host-test       # RV5Stage core and reusable ALU host checks
 make rv5stage-test            # host checks plus RV5Stage CIRCT and Verilator fixtures
 make frontend-test          # core and frontend tests, including invalid uses
@@ -80,7 +81,9 @@ Pull-request CI classifies changed paths into parallel host, example, and CIRCT
 matrices. Unknown executable paths fail closed by selecting every job; only
 documentation and the explicitly non-CI Emacs and VLSI trees select no job. A
 manual workflow dispatch selects every matrix shard, including comprehensive
-CIRCT fixture groups instead of only the curated local integration spine.
+CIRCT fixture groups instead of only the curated local integration spine. SoC
+tests run in their own host shard for system, core, protocol, NoC, RISC-V, and
+shared standard-library changes.
 
 Use `FIXTURE=name` with `tests/backend/run-circt.sh` to select one external
 backend fixture, or space-separated `FIXTURES` to batch several. Update

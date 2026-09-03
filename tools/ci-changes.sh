@@ -7,6 +7,7 @@ host_backend=false
 host_models=false
 host_protocols=false
 host_cores=false
+host_socs=false
 host_hygiene=false
 circt_language=false
 circt_std=false
@@ -32,6 +33,7 @@ mark_all_host() {
   host_models=true
   host_protocols=true
   host_cores=true
+  host_socs=true
   host_hygiene=true
 }
 
@@ -108,6 +110,10 @@ emit_jobs() {
   if [[ "$host_cores" == true ]]; then
     host=true
     append_matrix_entry host_matrix '{"name":"cores","target":"ci-host-cores-test"}'
+  fi
+  if [[ "$host_socs" == true ]]; then
+    host=true
+    append_matrix_entry host_matrix '{"name":"SoCs","target":"ci-host-socs-test"}'
   fi
   if [[ "$host_hygiene" == true ]]; then
     host=true
@@ -206,6 +212,7 @@ classify_path() {
       host_backend=true
       host_protocols=true
       host_cores=true
+      host_socs=true
       circt_language=true
       circt_std=true
       circt_protocols=true
@@ -285,12 +292,14 @@ classify_path() {
       ;;
     noc/*)
       host_models=true
+      host_socs=true
       circt_protocols=true
       mark_example_noc
       ;;
     riscv/*)
       host_models=true
       host_cores=true
+      host_socs=true
       circt_cores=true
       mark_example_riscv
       mark_example_cores
@@ -298,11 +307,13 @@ classify_path() {
       ;;
     chi/*)
       host_protocols=true
+      host_socs=true
       circt_protocols=true
       mark_example_chi
       ;;
     cores/*)
       host_cores=true
+      host_socs=true
       circt_cores=true
       mark_example_cores
       mark_example_rv5stage
@@ -311,7 +322,7 @@ classify_path() {
       simulation=true
       ;;
     socs/*)
-      host_cores=true
+      host_socs=true
       circt_cores=true
       simulation=true
       ;;

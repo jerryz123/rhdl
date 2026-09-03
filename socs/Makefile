@@ -4,7 +4,7 @@ RACO ?= raco
 
 .PHONY: all rtl-elaboration-test tiled-plan-test tiled-elaboration-test
 
-all: rtl-elaboration-test
+all: rtl-elaboration-test tiled-plan-test tiled-elaboration-test
 
 rtl-elaboration-test:
 	compiled_root="$$(mktemp -d /tmp/rhdl-simple-soc-rtl.XXXXXX)"; \
