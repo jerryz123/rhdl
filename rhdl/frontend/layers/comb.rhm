@@ -10,6 +10,7 @@ import:
   "../kernel.rhm" open:
     except:
       concat
+      extract
       literal
       dont_care
       zext
@@ -18,10 +19,14 @@ import:
       bit_and
       bit_or
       bit_xor
+      hw_add
+      hw_mul
+      hw_sub
       hw_shl
       hw_shru
       hw_shrs
   "../kernel.rhm".concat as kernel_concat
+  "../kernel.rhm".extract as kernel_extract
   "../kernel.rhm".dont_care as kernel_dont_care
   "../kernel.rhm".zext as kernel_zext
   "../kernel.rhm".trunc as kernel_trunc
@@ -29,6 +34,9 @@ import:
   "../kernel.rhm".bit_and as kernel_bit_and
   "../kernel.rhm".bit_or as kernel_bit_or
   "../kernel.rhm".bit_xor as kernel_bit_xor
+  "../kernel.rhm".hw_add as kernel_hw_add
+  "../kernel.rhm".hw_mul as kernel_hw_mul
+  "../kernel.rhm".hw_sub as kernel_hw_sub
   "../kernel.rhm".hw_shl as kernel_hw_shl
   "../kernel.rhm".hw_shru as kernel_hw_shru
   "../kernel.rhm".hw_shrs as kernel_hw_shrs
@@ -152,6 +160,24 @@ fun bit_xor(left :: HardwareEntity,
             location :: Location = Location()) :~ HardwareFields:
   kernel_bit_xor(left, right, name, location)
 
+fun hw_add(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || String = #false,
+           location :: Location = Location()) :~ HardwareFields:
+  kernel_hw_add(left, right, name, location)
+
+fun hw_mul(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || String = #false,
+           location :: Location = Location()) :~ HardwareFields:
+  kernel_hw_mul(left, right, name, location)
+
+fun hw_sub(left :: HardwareEntity,
+           right :: HardwareEntity,
+           name :: False || String = #false,
+           location :: Location = Location()) :~ HardwareFields:
+  kernel_hw_sub(left, right, name, location)
+
 // Like a literal shadow, a typed don't-care is materialized only when a
 // hardware consumer reads it. Core IR carries only its packed Bits image.
 class DontCareValue(type :: DataType,
@@ -193,6 +219,15 @@ fun concat(entity :: HardwareEntity || List.of(HardwareEntity), ...) :~ Hardware
   unless entities.length() >= 2
   | error(~who: #'concat, "concat requires at least two operands")
   kernel_concat(entities.map(concat_operand))
+
+// A bit extraction always returns hardware, even when the selected width is
+// computed from host parameters and cannot be reflected in a static Bits type.
+fun extract(entity :: HardwareEntity,
+            high :: Nat,
+            low :: Nat,
+            name :: False || String = #false,
+            location :: Location = Location()) :~ HardwareFields:
+  kernel_extract(entity, high, low, name, location)
 
 // Zero extension retains the kernel's narrow unsigned bit-vector contract.
 // Other hardware types must cross into Bits explicitly before changing width.
@@ -244,28 +279,46 @@ expr.macro
       default_value
     )
 
-operator (left + right):
+fun add_operator(left :: HardwareEntity || Number,
+                 right :: HardwareEntity || Number):
   if left is_a HardwareEntity || right is_a HardwareEntity
   | hw_add(left, right)
   | left rhombus.(+) right
 
-operator (left * right):
+fun multiply_operator(left :: HardwareEntity || Number,
+                      right :: HardwareEntity || Number):
   if left is_a HardwareEntity || right is_a HardwareEntity
   | hw_mul(left, right)
   | left rhombus.(*) right
 
-operator
-| (left - right):
-    if left is_a HardwareEntity || right is_a HardwareEntity
-    | hw_sub(left, right)
-    | left rhombus.(-) right
-| (- entity):
+fun subtract_operator(left :: HardwareEntity || Number,
+                      right :: HardwareEntity || Number):
+  if left is_a HardwareEntity || right is_a HardwareEntity
+  | hw_sub(left, right)
+  | left rhombus.(-) right
+
+fun negate_operator(entity :: HardwareEntity || Number):
+  if entity is_a HardwareEntity
+  | block:
+      def value = read(entity)
+      hw_sub(literal(value.type, 0), value)
+  | rhombus.(-) entity
+
+expr.macro '$left + $right':
+  ~order: addition
+  preserve_operand_surface('add_operator($left, $right)', left)
+
+expr.macro '$left * $right':
+  ~order: multiplication
+  preserve_operand_surface('multiply_operator($left, $right)', left)
+
+expr.macro
+| '$left - $right':
+    ~order: addition
+    preserve_operand_surface('subtract_operator($left, $right)', left)
+| '- $entity':
     ~order: multiplication
-    if entity is_a HardwareEntity
-    | block:
-        def value = read(entity)
-        hw_sub(literal(value.type, 0), value)
-    | rhombus.(-) entity
+    preserve_operand_surface('negate_operator($entity)', entity)
 
 fun shift_left_operator(left :: HardwareEntity || Int,
                         right :: HardwareEntity || Int):

@@ -1,0 +1,81 @@
+#lang rhombus/and_meta
+// Generates a complete scalar hardware descriptor and its exact value annotation.
+
+import:
+  rhombus/meta open
+  "../../core/types.rhm".HardwareType
+  "fields.rhm".HardwareFields
+  "generator-parameters.rhm".GeneratorParameter
+
+export:
+  hardware_type
+
+// Owns the hidden descriptor class so an extension declares each scalar type
+// once. Nominal family plus the host equality key define hardware type equality.
+defn.macro 'hardware_type $(name :: Identifier)($(parameter :: GeneratorParameter), ...): $clause; ...':
+  def hidden_type = Syntax.make_id(
+    name.to_source_string() ++ "_hardware_type",
+    name
+  )
+  def constructor_name = Syntax.make_id(
+    "make_" ++ name.to_source_string() ++ "_hardware_type",
+    name
+  )
+  let [parameter_binding, ...] = [parameter.binding, ...]
+  def mutable implemented_type = #false
+  def mutable width = #false
+  def mutable equality_key = '[$parameter_binding, ...]'
+  def mutable description = #false
+  for (item in [clause, ...]):
+    match item
+    | 'implements $candidate':
+        when implemented_type
+        | syntax_meta.error("hardware_type accepts exactly one implements clause", item)
+        implemented_type := candidate
+    | 'width: $value':
+        when width
+        | syntax_meta.error("hardware_type accepts exactly one width clause", item)
+        width := value
+    | 'type_key: $value':
+        equality_key := value
+    | 'describe: $value':
+        when description
+        | syntax_meta.error("hardware_type accepts exactly one describe clause", item)
+        description := value
+    | ~else:
+        syntax_meta.error(
+          "expected implements, width, optional type_key, or describe",
+          item
+        )
+  unless implemented_type
+  | syntax_meta.error("hardware_type requires an implements clause", name)
+  unless width
+  | syntax_meta.error("hardware_type requires a width clause", name)
+  unless description
+  | syntax_meta.error("hardware_type requires a describe clause", name)
+  '«
+     class $hidden_type($parameter, ...):
+       implements $implemented_type
+       property hardware_type_equality_key:
+         $equality_key
+       override method describe():
+         $description
+       override method type_equal(other :: HardwareType):
+         other is_a $hidden_type && hardware_type_equality_key == other.hardware_type_equality_key
+       override method bit_width():
+         $width
+       override method packed_width():
+         $width
+     fun $constructor_name($parameter, ...) :: HardwareType:
+       $hidden_type($parameter_binding, ...)
+     expr.macro '$name($('$')$parameter_binding, ...)':
+       '(block:
+          def $parameter_binding = $('$')$parameter_binding
+          ...
+          $constructor_name($parameter_binding, ...)) :: HardwareFields.describes(
+            HardwareType,
+            HardwareFields.of($constructor_name($parameter_binding, ...))
+          )'
+     annot.macro '$name($('$')$parameter_binding, ...)':
+       'HardwareFields.of($constructor_name($('$')$parameter_binding, ...))'
+   »'

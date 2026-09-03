@@ -36,6 +36,26 @@ dependency inventory is in [`../../README.md`](../../README.md).
 crossing evidence is durable core IR. A `#lang rhdl/base` program can still
 import only the layers it needs.
 
+Extension libraries can define a scalar descriptor and its hardware annotation
+with one declaration:
+
+```rhombus
+hardware_type Token(width :: PosInt):
+  implements FlatDataType
+  width: width
+  describe: "token<" ++ to_string(width) ++ ">"
+
+fun pass(value :: Token(8)) :~ Token(8):
+  value
+```
+
+The generated descriptor is nominal by declaration. Its parameters form the
+default equality key; `type_key:` can instead provide a canonical host value
+when parameter objects need semantic rather than identity equality.
+`Hardware.of(type_expression)` remains available when the descriptor itself is
+dynamic or generic, but a named extension type should normally expose its own
+annotation through `hardware_type`.
+
 ## Clocking environments and CDC enforcement
 
 Import `clocking.rhm` explicitly and use `elaborate_with_clocking` when a
