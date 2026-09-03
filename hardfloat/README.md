@@ -22,8 +22,9 @@ The implemented foundation provides:
 
 - stable host-side `FloatFormat` values for arbitrary supported formats and
   predefined binary16, bfloat16, binary32, and binary64 formats;
-- typed hardware rounding modes, tininess modes, exception flags, raw
-  floating-point records, and one-hot classification results;
+- nominal IEEE and recoded floating-point values, typed hardware rounding and
+  fused-operation modes, tininess modes, exception flags, raw floating-point
+  records, multiplier-pipeline occupancy, and one-hot classification results;
 - the HardFloat leading-zero and grouped-reduction primitives;
 - IEEE-to-raw, IEEE-to-recoded, recoded-to-raw, and recoded-to-IEEE helpers;
 - raw-format resizing with exponent saturation and significand sticky-bit
@@ -49,7 +50,7 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 | Path | Responsibility |
 |---|---|
 | [`main.rhdl`](main.rhdl) | Public package facade |
-| [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters and typed hardware records/enums |
+| [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal packed representations, and typed hardware records/enums |
 | [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | Representation-independent bit helpers used by the port |
 | [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
 | [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky-bit preservation |
@@ -79,14 +80,19 @@ three and `significand_width <= 2^(exponent_width - 2) + 3`, matching
 HardFloat's supported parameter domain. BF16 retains IEEE-style subnormal
 support, as in upstream HardFloat.
 
-IEEE and recoded operands remain `Bits` so they interoperate directly with
-packed architectural state and external interfaces. `RawFloat` is a bundle
-whose signed exponent and extended significand expose the internal HardFloat
-algorithm. `RoundingMode`, `TininessMode`, `ExceptionFlags`, and `FloatClass`
-give names to otherwise positional control and result bits without changing
-their packed encodings. `RoundingOptions` is a stable host parameter for the
-four compile-time invariants used by specialized upstream rounding clients;
-it does not add hardware control ports.
+`IEEEFloat(format)` and `RecFloat(format)` are distinct nominal scalar types.
+Their packed widths are `format.ieee_width` and `format.recoded_width`, so they
+lower to ordinary integer signals while connection checking prevents mixing
+IEEE and recoded images or equal-width formats such as binary16 and bfloat16.
+Use `as_bits` only where representation-level manipulation or an untyped
+external boundary explicitly requires it. `RawFloat` is a bundle whose signed
+exponent and extended significand expose the internal HardFloat algorithm.
+`MulAddOperation`, `RoundingMode`, `TininessMode`, `ExceptionFlags`, and
+`FloatClass` name otherwise positional control and result bits without changing
+their packed encodings. `MultiplyAddPipelineUsage` names four independently
+occupied multiplier stages and is not one-hot. `RoundingOptions` is a stable
+host parameter for the four compile-time invariants used by specialized
+upstream rounding clients; it does not add hardware control ports.
 
 The predefined formats are:
 
@@ -106,8 +112,8 @@ import:
   lib("hardfloat/main.rhdl") open
 
 circuit CompareF32():
-  input a: Bits(FloatFormat.F32.recoded_width)
-  input b: Bits(FloatFormat.F32.recoded_width)
+  input a: RecFloat(FloatFormat.F32)
+  input b: RecFloat(FloatFormat.F32)
   input signaling: Bool
   output less: Bool
 

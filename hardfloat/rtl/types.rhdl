@@ -34,6 +34,39 @@ namespace ~extend FloatFormat:
     F32
     F64
 
+// These nominal packed types distinguish an architectural IEEE image from
+// HardFloat's recoded representation and retain the exact format in connection
+// checking. Both lower as ordinary scalar integers through the core IR.
+class IEEEFloat(format :: FloatFormat):
+  implements FlatDataType
+
+  override method describe():
+    "ieee-float<" ++ to_string(format.exponent_width) ++ "," ++ to_string(format.significand_width) ++ ">"
+
+  override method type_equal(other :: HardwareType):
+    other is_a IEEEFloat && format.exponent_width == other.format.exponent_width && format.significand_width == other.format.significand_width
+
+  override method bit_width():
+    format.ieee_width
+
+  override method packed_width():
+    format.ieee_width
+
+class RecFloat(format :: FloatFormat):
+  implements FlatDataType
+
+  override method describe():
+    "rec-float<" ++ to_string(format.exponent_width) ++ "," ++ to_string(format.significand_width) ++ ">"
+
+  override method type_equal(other :: HardwareType):
+    other is_a RecFloat && format.exponent_width == other.format.exponent_width && format.significand_width == other.format.significand_width
+
+  override method bit_width():
+    format.recoded_width
+
+  override method packed_width():
+    format.recoded_width
+
 class RoundingOptions(significand_msb_always_zero :: Boolean = #false,
                       subnormals_always_exact :: Boolean = #false,
                       never_underflows :: Boolean = #false,
@@ -67,6 +100,12 @@ hardware_enum TininessMode(~width: 1):
   BeforeRounding = 0
   AfterRounding = 1
 
+hardware_enum MulAddOperation(~width: 2):
+  MultiplyAdd = 0
+  MultiplySubtract = 1
+  NegatedMultiplyAdd = 2
+  NegatedMultiplySubtract = 3
+
 hardware_enum FloatClass(~encoding: one_hot):
   NegativeInfinity
   NegativeNormal
@@ -91,6 +130,14 @@ bundle IntegerExceptionFlags():
   overflow: Bool
   inexact: Bool
 
+// Names the four consecutive multiplier pipeline stages. More than one stage
+// can be occupied concurrently, so this is deliberately not a one-hot type.
+bundle MultiplyAddPipelineUsage():
+  stage_three: Bool
+  stage_two: Bool
+  stage_one: Bool
+  stage_zero: Bool
+
 bundle RawFloat(exponent_width :: PosInt, significand_width :: PosInt):
   is_nan: Bool
   is_infinite: Bool
@@ -109,11 +156,15 @@ fun no_exception_flags() :~ ExceptionFlags():
 
 export:
   FloatFormat
+  IEEEFloat
+  RecFloat
   RoundingOptions
   RoundingMode
   TininessMode
+  MulAddOperation
   FloatClass
   ExceptionFlags
   IntegerExceptionFlags
+  MultiplyAddPipelineUsage
   RawFloat
   no_exception_flags
