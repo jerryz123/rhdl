@@ -5,8 +5,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 test_dir="$repo_dir/hardfloat/tests"
 tmp_dir="$(mktemp -d /tmp/rhdl-hardfloat-circt.XXXXXX)"
-compiled_root="$(mktemp -d /tmp/rhdl-hardfloat-compiled.XXXXXX)"
-trap 'rm -rf "$tmp_dir" "$compiled_root"' EXIT
+trap 'rm -rf "$tmp_dir"' EXIT
 
 circt_opt="${CIRCT_OPT:-$repo_dir/.tools/firtool-1.155.0/bin/circt-opt}"
 if [[ ! -x "$circt_opt" ]]; then
@@ -20,8 +19,7 @@ fi
 lower_fixture() {
   local emitter="$1"
   local stem="$2"
-  PLTCOMPILEDROOTS="$compiled_root" tools/run-racket.sh -S "$repo_dir" \
-    "$emitter" > "$tmp_dir/$stem.mlir"
+  tools/run-racket.sh -S "$repo_dir" "$emitter" > "$tmp_dir/$stem.mlir"
   "$circt_opt" --canonicalize --cse \
     --lower-sim-to-sv --lower-verif-to-sv \
     --lower-seq-to-sv='disable-mem-randomization=true disable-reg-randomization=true' \
