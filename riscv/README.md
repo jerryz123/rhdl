@@ -139,6 +139,11 @@ catalogs without including Zbc or cryptography-oriented subsets. Fixed-operand
 unary encodings use `UnaryFormat`, so their architectural operand list contains
 only `rd` and `rs1` even when fixed instruction bits occupy the `rs2` field.
 
+[`isa/zicond.rhm`](isa/zicond.rhm) defines the XLEN-independent
+`CZERO.EQZ` and `CZERO.NEZ` register encodings as the ratified Zicond 1.0.0
+extension. The catalog describes the architectural dependency on both source
+registers; its conditional-mask implementation remains a core datapath choice.
+
 [`isa/zicsr.rhm`](isa/zicsr.rhm) describes the six register and immediate CSR
 read/modify/write encodings independently of any core's CSR implementation.
 [`isa/zifencei.rhm`](isa/zifencei.rhm) describes the XLEN-independent
@@ -179,3 +184,5 @@ and A follows the ratified
 [atomic extension](https://docs.riscv.org/reference/isa/unpriv/a-st-ext.html).
 B follows the ratified
 [bit-manipulation extension](https://docs.riscv.org/reference/isa/unpriv/b-st-ext.html).
+Zicond follows the ratified
+[integer conditional-operations extension](https://docs.riscv.org/reference/isa/unpriv/zicond.html).

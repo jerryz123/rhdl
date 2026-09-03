@@ -15,7 +15,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 
 | Path | Owner |
 |---|---|
-| [`alu.rhdl`](alu.rhdl) | Width-parameterized RV32/RV64 integer and standard-B ALU |
+| [`alu.rhdl`](alu.rhdl) | Width-parameterized RV32/RV64 integer, standard-B, and Zicond ALU |
 | [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
 | [`load-store.rhdl`](load-store.rhdl) | XLEN scalar-access width, alignment, load extraction, and store lane generation |
 | [`multiplier.rhdl`](multiplier.rhdl) | Width-generic iterative signed and unsigned multiplication |
@@ -25,7 +25,7 @@ architectural state, and integrated tests in `cores/<name>/`.
 | [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
 | [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
 | [`tests/divider-test.rhm`](tests/divider-test.rhm) | Direct structural tests for the iterative divider |
-| [`rv5stage/`](rv5stage/README.md) | RV5Stage's RV32/RV64 IMAB decode, five-stage pipeline, CSR/privilege state, caches, and tests |
+| [`rv5stage/`](rv5stage/README.md) | RV5Stage's RV32/RV64 IMAB+Zicond decode, five-stage pipeline, CSR/privilege state, caches, and tests |
 
 The dependency direction is one way:
 
@@ -81,7 +81,7 @@ their orthogonal modifiers: result, logic, count, and unary selectors plus
 adder, shifter, comparison, bit-mask, and RV64 word controls. Its data inputs
 are already-selected `Bits(xlen.width)` operands. It owns modular arithmetic,
 bitwise operations, XLEN-sized shifts, signed and unsigned comparisons, and
-the standard Zba, Zbb, and Zbs operations.
+the standard Zba, Zbb, and Zbs operations plus Zicond conditional-zero operations.
 The 64-bit specialization additionally supports
 32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;
 `word` is inert in the 32-bit specialization.
@@ -89,7 +89,7 @@ The 64-bit specialization additionally supports
 Instruction decode drives those controls directly; the ALU contains no second
 instruction-operation decoder. ADD, SUB, comparisons, MIN/MAX, and Zba use
 one adder and comparison path. Base and negated logic plus Zbs single-bit
-operations use one prepared-right AND/OR/XOR path. SLL, SRL, SRA, SLLI.UW,
+operations and Zicond conditional masks use one prepared-right AND/OR/XOR path. SLL, SRL, SRA, SLLI.UW,
 BEXT, and part of each rotate use one shifter, while word/full and
 leading/trailing selection occurs before the count networks.
 The ALU deliberately knows nothing about instruction encodings, operand

@@ -1,5 +1,5 @@
 #lang rhdl
-// Implements a shared RV32/RV64 integer and standard-B execution datapath.
+// Implements a shared RV32/RV64 integer, B, and Zicond execution datapath.
 
 import:
   "../riscv/isa/xlen.rhm" open
@@ -20,6 +20,11 @@ hardware_enum AluLogicSelect:
   And
   Or
   Xor
+
+hardware_enum AluLogicRightSelect:
+  Operand
+  OneHot
+  ConditionalMask
 
 hardware_enum AluCountSelect:
   Leading
@@ -45,7 +50,7 @@ bundle AluControl():
   arithmetic_shift: Bool
   extract_bit: Bool
   invert_right: Bool
-  one_hot_right: Bool
+  logic_right_select: AluLogicRightSelect
   unsigned_word: Bool
   shift_add_amount: Bits(2)
   word: Bool
@@ -78,11 +83,19 @@ circuit ALU(xlen :: XLen):
   def less = mux(left_sign === right_sign, adder_result[width - 1].into(Bool), mux(control.signed_compare, left_sign, right_sign))
   def minmax_result = mux(less ^ control.maximum, left, right)
 
-  // A one-hot right operand turns the Zbs single-bit operations into ordinary
-  // AND/OR/XOR operations. Optional inversion also provides ANDN/ORN/XNOR.
+  // One-hot and conditional-mask operands turn Zbs and Zicond into ordinary
+  // logic operations. Optional inversion also provides ANDN/ORN/XNOR.
   def bit_index = right[0..shift_width]
   def bit_mask = one_hot(bit_index).into(Bits(width))
-  def logic_right_source = mux(control.one_hot_right, bit_mask, right)
+  def conditional_mask = mux(or_reduce(right), !bits(0, width), bits(0, width))
+  def logic_right_source = mux_lookup(
+    control.logic_right_select,
+    ~default: right,
+    [
+      [AluLogicRightSelect.OneHot, bit_mask],
+      [AluLogicRightSelect.ConditionalMask, conditional_mask]
+    ]
+  )
   def logic_right = mux(control.invert_right, !logic_right_source, logic_right_source)
   def xor_result = left ^ logic_right
   def and_result = left & logic_right
@@ -175,6 +188,7 @@ circuit ALU(xlen :: XLen):
 export:
   AluResultSelect
   AluLogicSelect
+  AluLogicRightSelect
   AluCountSelect
   AluUnarySelect
   AluControl

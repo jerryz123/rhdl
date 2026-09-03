@@ -1,4 +1,4 @@
-// Exercises every standard-B resource-control family in the reusable RV64 ALU.
+// Exercises every standard-B and Zicond resource family in the RV64 ALU.
 module bit_manip_tb;
   logic [63:0] left;
   logic [63:0] right;
@@ -36,7 +36,16 @@ module bit_manip_tb;
     control.result_select = 3'd2;
     control.logic_select = select;
     control.invert_right = invert_right;
-    control.one_hot_right = one_hot_right;
+    control.logic_right_select = one_hot_right ? 2'd1 : 2'd0;
+    apply_and_check(left_value, right_value, expected);
+  endtask
+
+  task automatic check_conditional(input logic invert_right, input logic [63:0] left_value, right_value, expected);
+    control = '0;
+    control.result_select = 3'd2;
+    control.logic_select = 2'd0;
+    control.invert_right = invert_right;
+    control.logic_right_select = 2'd2;
     apply_and_check(left_value, right_value, expected);
   endtask
 
@@ -98,6 +107,10 @@ module bit_manip_tb;
     check_shift(1, 1, 0, 64'h08, 3, 64'h1);
     check_logic(2, 0, 1, 64'h08, 3, 64'h0);
     check_logic(1, 0, 1, 64'h00, 63, 64'h8000_0000_0000_0000);
+    check_conditional(0, 64'h0123_4567_89ab_cdef, 0, 0);
+    check_conditional(0, 64'h0123_4567_89ab_cdef, 1, 64'h0123_4567_89ab_cdef);
+    check_conditional(1, 64'h0123_4567_89ab_cdef, 0, 64'h0123_4567_89ab_cdef);
+    check_conditional(1, 64'h0123_4567_89ab_cdef, 1, 0);
     $display("bit manipulation simulation passed");
     $finish;
   end

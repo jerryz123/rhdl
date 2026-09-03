@@ -1,5 +1,5 @@
 #lang rhdl
-// Maps base integer and standard-B instructions directly onto shared ALU resources.
+// Maps base integer, B, and Zicond instructions onto shared ALU resources.
 
 import:
   "../../alu.rhdl" open
@@ -11,6 +11,7 @@ import:
   "../../../riscv/isa/zba.rhm" as zba
   "../../../riscv/isa/zbb.rhm" as zbb
   "../../../riscv/isa/zbs.rhm" as zbs
+  "../../../riscv/isa/zicond.rhm" as zicond
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
@@ -36,12 +37,12 @@ fun shift_control(right :: Boolean, arithmetic :: Boolean, extract :: Boolean, u
     unsigned_word: Bool(unsigned_word)
     word: Bool(word)
 
-fun logic_control(select :: AluLogicSelect, invert_right :: Boolean, one_hot_right :: Boolean):
+fun logic_control(select :: AluLogicSelect, invert_right :: Boolean, right_select :: AluLogicRightSelect):
   partial_pattern(AluControl()):
     result_select: AluResultSelect.Logic
     logic_select: select
     invert_right: Bool(invert_right)
-    one_hot_right: Bool(one_hot_right)
+    logic_right_select: right_select
     word: Bool(#false)
 
 fun compare_control(signed_mode :: Boolean):
@@ -90,9 +91,9 @@ def shift_right = shift_control(#true, #false, #false, #false, #false)
 def shift_right_arithmetic = shift_control(#true, #true, #false, #false, #false)
 def less_than = compare_control(#true)
 def less_than_unsigned = compare_control(#false)
-def xor = logic_control(AluLogicSelect.Xor, #false, #false)
-def or = logic_control(AluLogicSelect.Or, #false, #false)
-def and = logic_control(AluLogicSelect.And, #false, #false)
+def xor = logic_control(AluLogicSelect.Xor, #false, AluLogicRightSelect.Operand)
+def or = logic_control(AluLogicSelect.Or, #false, AluLogicRightSelect.Operand)
+def and = logic_control(AluLogicSelect.And, #false, AluLogicRightSelect.Operand)
 
 // The shared control relation accepts each catalog's own immediate-shift
 // instructions. All other inputs are common InstructionSpec objects.
@@ -122,9 +123,9 @@ def common_bitmanip_cases = combine_case_groups([
   instruction_cases([zba.SH1ADD], adder_control(#false, #false, 1, #false)),
   instruction_cases([zba.SH2ADD], adder_control(#false, #false, 2, #false)),
   instruction_cases([zba.SH3ADD], adder_control(#false, #false, 3, #false)),
-  instruction_cases([zbb.ANDN], logic_control(AluLogicSelect.And, #true, #false)),
-  instruction_cases([zbb.ORN], logic_control(AluLogicSelect.Or, #true, #false)),
-  instruction_cases([zbb.XNOR], logic_control(AluLogicSelect.Xor, #true, #false)),
+  instruction_cases([zbb.ANDN], logic_control(AluLogicSelect.And, #true, AluLogicRightSelect.Operand)),
+  instruction_cases([zbb.ORN], logic_control(AluLogicSelect.Or, #true, AluLogicRightSelect.Operand)),
+  instruction_cases([zbb.XNOR], logic_control(AluLogicSelect.Xor, #true, AluLogicRightSelect.Operand)),
   instruction_cases([zbb.CLZ], count_control(AluCountSelect.Leading, #false)),
   instruction_cases([zbb.CTZ], count_control(AluCountSelect.Trailing, #false)),
   instruction_cases([zbb.CPOP], count_control(AluCountSelect.Population, #false)),
@@ -137,20 +138,20 @@ def common_bitmanip_cases = combine_case_groups([
   instruction_cases([zbb.ROR], rotate_control(#true, #false)),
   instruction_cases([zbb.SEXT_B], unary_control(AluUnarySelect.SignExtendByte)),
   instruction_cases([zbb.SEXT_H], unary_control(AluUnarySelect.SignExtendHalf)),
-  instruction_cases([zbs.BCLR], logic_control(AluLogicSelect.And, #true, #true)),
+  instruction_cases([zbs.BCLR], logic_control(AluLogicSelect.And, #true, AluLogicRightSelect.OneHot)),
   instruction_cases([zbs.BEXT], shift_control(#true, #false, #true, #false, #false)),
-  instruction_cases([zbs.BINV], logic_control(AluLogicSelect.Xor, #false, #true)),
-  instruction_cases([zbs.BSET], logic_control(AluLogicSelect.Or, #false, #true))
+  instruction_cases([zbs.BINV], logic_control(AluLogicSelect.Xor, #false, AluLogicRightSelect.OneHot)),
+  instruction_cases([zbs.BSET], logic_control(AluLogicSelect.Or, #false, AluLogicRightSelect.OneHot))
 ])
 
 def RV32BAluCases = common_bitmanip_cases ++ combine_case_groups([
   instruction_cases([zbb.RV32_REV8], unary_control(AluUnarySelect.ReverseBytes)),
   instruction_cases([zbb.RV32_RORI], rotate_control(#true, #false)),
   instruction_cases([zbb.RV32_ZEXT_H], unary_control(AluUnarySelect.ZeroExtendHalf)),
-  instruction_cases([zbs.RV32_BCLRI], logic_control(AluLogicSelect.And, #true, #true)),
+  instruction_cases([zbs.RV32_BCLRI], logic_control(AluLogicSelect.And, #true, AluLogicRightSelect.OneHot)),
   instruction_cases([zbs.RV32_BEXTI], shift_control(#true, #false, #true, #false, #false)),
-  instruction_cases([zbs.RV32_BINVI], logic_control(AluLogicSelect.Xor, #false, #true)),
-  instruction_cases([zbs.RV32_BSETI], logic_control(AluLogicSelect.Or, #false, #true))
+  instruction_cases([zbs.RV32_BINVI], logic_control(AluLogicSelect.Xor, #false, AluLogicRightSelect.OneHot)),
+  instruction_cases([zbs.RV32_BSETI], logic_control(AluLogicSelect.Or, #false, AluLogicRightSelect.OneHot))
 ])
 
 def RV64BAluCases = common_bitmanip_cases ++ combine_case_groups([
@@ -168,10 +169,15 @@ def RV64BAluCases = common_bitmanip_cases ++ combine_case_groups([
   instruction_cases([zbb.RORI], rotate_control(#true, #false)),
   instruction_cases([zbb.RORIW], rotate_control(#true, #true)),
   instruction_cases([zbb.ZEXT_H], unary_control(AluUnarySelect.ZeroExtendHalf)),
-  instruction_cases([zbs.BCLRI], logic_control(AluLogicSelect.And, #true, #true)),
+  instruction_cases([zbs.BCLRI], logic_control(AluLogicSelect.And, #true, AluLogicRightSelect.OneHot)),
   instruction_cases([zbs.BEXTI], shift_control(#true, #false, #true, #false, #false)),
-  instruction_cases([zbs.BINVI], logic_control(AluLogicSelect.Xor, #false, #true)),
-  instruction_cases([zbs.BSETI], logic_control(AluLogicSelect.Or, #false, #true))
+  instruction_cases([zbs.BINVI], logic_control(AluLogicSelect.Xor, #false, AluLogicRightSelect.OneHot)),
+  instruction_cases([zbs.BSETI], logic_control(AluLogicSelect.Or, #false, AluLogicRightSelect.OneHot))
+])
+
+def ZicondAluCases = combine_case_groups([
+  instruction_cases([zicond.CZERO_EQZ], logic_control(AluLogicSelect.And, #false, AluLogicRightSelect.ConditionalMask)),
+  instruction_cases([zicond.CZERO_NEZ], logic_control(AluLogicSelect.And, #true, AluLogicRightSelect.ConditionalMask))
 ])
 
 def RV32IAluCases = base_alu_cases(rv32.SLLI, rv32.SRLI, rv32.SRAI)
@@ -196,14 +202,14 @@ def RV32INonArithmeticAluCases = non_arithmetic_alu_cases(shared_address_instruc
 def RV64INonArithmeticAluCases = non_arithmetic_alu_cases(rv64_address_instructions)
 def RV32ICompleteAluCases = RV32IAluCases ++ RV32INonArithmeticAluCases
 def RV64ICompleteAluCases = RV64IAluCases ++ RV64INonArithmeticAluCases
-def RV32RV5StageAluCases = RV32ICompleteAluCases ++ RV32BAluCases ++ instruction_cases(
+def RV32RV5StageAluCases = RV32ICompleteAluCases ++ RV32BAluCases ++ ZicondAluCases ++ instruction_cases(
   RV32AInstructions,
   address_alu
 ) ++ instruction_cases(
   RV32MInstructions ++ ZicsrInstructions ++ ZifenceiInstructions ++ PrivilegedInstructions,
   unused_alu
 )
-def RV64RV5StageAluCases = RV64ICompleteAluCases ++ RV64BAluCases ++ instruction_cases(
+def RV64RV5StageAluCases = RV64ICompleteAluCases ++ RV64BAluCases ++ ZicondAluCases ++ instruction_cases(
   RV64AInstructions,
   address_alu
 ) ++ instruction_cases(
@@ -227,6 +233,7 @@ export:
   RV64IAluCases
   RV32BAluCases
   RV64BAluCases
+  ZicondAluCases
   RV32IAluDecode
   RV64IAluDecode
   RV32INonArithmeticAluCases
