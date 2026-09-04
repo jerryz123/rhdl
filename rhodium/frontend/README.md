@@ -208,7 +208,7 @@ hardware enums provide concise annotation forms. A `hardware_type Token(width)`
 declaration provides both exact `Token(width)` and family-wide `Token`
 annotations; a family-annotated value exposes the concrete descriptor and its
 host parameters through `value.type`. Use `Hardware.of(type)` when the descriptor
-itself is dynamic rather than a named hardware-type family. Use `Hardware.bits`
+itself is dynamic rather than a named hardware-type family. Use `Bits`
 only when a function accepts `Bits` of any width, and `Hardware.packable` only
 when it accepts any packable hardware `DataType`. Bare `Hardware` is reserved
 for operations that genuinely accept arbitrary readable or driveable hardware
