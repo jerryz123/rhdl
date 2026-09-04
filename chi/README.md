@@ -169,22 +169,29 @@ capacity. `CHIHomeServiceParams` describes the operations and address regions
 that an RN routes to a Home Node. `CHIFabricPortParams` pairs each RN or SN ICN
 endpoint with the link parameter class required by its node kind.
 
-`CHIHomeMap` is the single requester-side address map. Its typed
+`CHIHomeMap` is the requester-side address map. Its typed
 `CHIHomeMapEntry` values associate disjoint `AddressSet` regions with
 `CHIHomeParams`, and `CHIHomeMap.lookup` lowers that map to a combinational
 `valid` plus Home NodeID decision. A requester latches that decision when it
 accepts a transaction; NoC compilation independently translates the resulting
 NodeID into a route key.
 
+`CHISubordinateMap` is the corresponding Home-side address map. It derives
+typed entries from `CHISubordinateServiceParams`, validates disjoint regions
+and unique NodeIDs for distinct subordinate endpoints, and lowers an address to
+a combinational `valid` plus subordinate NodeID decision. One endpoint can
+retain multiple disjoint service profiles. The map is transport-independent: a
+Home can send the selected request through the same CHI fabric as its requester
+side or through a separately compiled subordinate fabric.
+
 `CHIFabricParams` accepts a common `CHIFlitParams`, physical ports, Home Nodes,
-home services, and subordinate services. It derives the executable `home_map`
-from the Home services. Subordinate services remain capability and region
-metadata; there is no subordinate-map abstraction yet. A flat RN-to-SN map
-would bypass the Home Node and is not a valid model of CHI topology.
+home services, and subordinate services. It derives executable `home_map` and
+`subordinate_map` decisions from those services. The two maps describe the two
+sides of a Home rather than a flat RN-to-SN path that would bypass it.
 Construction rejects duplicate or width-overflowing NodeIDs, mismatched
 physical flit parameters, absent service targets, out-of-range addresses,
-overlap within the Home map, duplicate service opcodes, and transfer sizes that
-cannot be represented by CHI's Size field.
+overlap within either address map, duplicate service opcodes, and transfer
+sizes that cannot be represented by CHI's Size field.
 
 ## Link-local monitoring
 
@@ -502,7 +509,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`address-projector.rhdl`](address-projector.rhdl) | Cache-line-striped global service metadata and transparent REQ projection into dense local subordinate addresses |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
 | [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean/Unique reads, dirty snoop intervention, conservative invalidation, and non-snooping subordinate translation |
-| [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate validated RN/HN SAM metadata; routing, arbitration, and generated topologies remain planned |
+| [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate executable requester-to-Home and Home-to-subordinate address maps; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
 ## Delivered profile and limits

@@ -1,0 +1,60 @@
+#lang rhodium
+// Elaborates two-region CHI subordinate address selection into combinational hardware.
+
+import:
+  lib("chi/main.rhdl") open
+
+def flit = CHIFlitParams()
+def read_support = CHIRequestSupport(CHIReqOpcode.ReadNoSnp, TransferSizes(1, 64))
+def memory0 = CHIICNPortParams(
+  "memory-0",
+  9,
+  CHINodeKind.SNI,
+  ~emits: CHIChannelCapabilities(~req: [CHIReqOpcode.ReadNoSnp]),
+  ~supports: CHIChannelCapabilities(),
+  ~max_outstanding: 2
+)
+def memory1 = CHIICNPortParams(
+  "memory-1",
+  10,
+  CHINodeKind.SNI,
+  ~emits: CHIChannelCapabilities(~req: [CHIReqOpcode.ReadNoSnp]),
+  ~supports: CHIChannelCapabilities(),
+  ~max_outstanding: 2
+)
+def memory0_service = CHISubordinateServiceParams(
+  memory0,
+  [AddressSet(0x0000, 0x0fff)],
+  [read_support]
+)
+def memory1_service = CHISubordinateServiceParams(
+  memory1,
+  [AddressSet(0x1000, 0x0fff)],
+  [read_support]
+)
+def subordinate_map = CHISubordinateMap(
+  flit,
+  [memory0_service, memory1_service]
+)
+
+circuit CHISubordinateMapFixture():
+  input address: Bits(flit.request_address_width)
+  output valid: Bool
+  output node_id: Bits(flit.node_id_width)
+
+  def lookup = subordinate_map.lookup(address)
+  valid <== lookup.valid
+  node_id <== lookup.node_id
+
+def design = elaborate(CHISubordinateMapFixture())
+
+export:
+  flit
+  read_support
+  memory0
+  memory1
+  memory0_service
+  memory1_service
+  subordinate_map
+  CHISubordinateMapFixture
+  design

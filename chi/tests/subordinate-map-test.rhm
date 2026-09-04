@@ -1,0 +1,85 @@
+#lang rhombus
+// Checks CHI subordinate-map validation, host lookup, and combinational hardware elaboration.
+
+import:
+  rhombus.bits.(<<) as <<
+  "../../rhodium/core/main.rhm" open
+  "../../rhodium/backend/circt.rhm" open
+  "../main.rhdl" as chi
+  "subordinate-map-fixture.rhdl" as fixture
+
+def module_def = fixture.design.modules[0]
+def circt = emit_circt(fixture.design)
+def second_memory0_service = chi.CHISubordinateServiceParams(
+  fixture.memory0,
+  [chi.AddressSet(0x2000, 0x0fff)],
+  [fixture.read_support]
+)
+def repeated_endpoint_map = chi.CHISubordinateMap(
+  fixture.flit,
+  [fixture.memory0_service, second_memory0_service]
+)
+
+check:
+  fixture.subordinate_map.services ~is [fixture.memory0_service, fixture.memory1_service]
+  fixture.subordinate_map.entries.length() ~is 2
+  fixture.subordinate_map.entry(0x0004).service === fixture.memory0_service ~is #true
+  fixture.subordinate_map.entry(0x1ffc).endpoint === fixture.memory1 ~is #true
+  fixture.subordinate_map.entry(0x2000) ~is #false
+  repeated_endpoint_map.entry(0x2004).service === second_memory0_service ~is #true
+  module_def.find_input("address").type.width ~is 44
+  module_def.find_output("valid").type.packed_width() ~is 1
+  module_def.find_output("node_id").type.width ~is 7
+  circt.contains("comb.mux") ~is #true
+  circt.contains("hw.constant 9") ~is #true
+  circt.contains("hw.constant 10") ~is #true
+  verify_design(fixture.design) ~is #void
+
+  chi.CHISubordinateMap(
+    fixture.flit,
+    [fixture.memory0_service,
+     chi.CHISubordinateServiceParams(
+       fixture.memory1,
+       [chi.AddressSet(0x0000, 0x0fff)],
+       [fixture.read_support]
+     )]
+  ) ~throws "must not overlap"
+  chi.CHISubordinateMap(
+    fixture.flit,
+    [fixture.memory0_service,
+     chi.CHISubordinateServiceParams(
+       chi.CHIICNPortParams(
+         "duplicate-memory",
+         fixture.memory0.node_id,
+         chi.CHINodeKind.SNI,
+         ~emits: chi.CHIChannelCapabilities(~req: [chi.CHIReqOpcode.ReadNoSnp]),
+         ~supports: chi.CHIChannelCapabilities(),
+         ~max_outstanding: 2
+       ),
+       [chi.AddressSet(0x2000, 0x0fff)],
+       [fixture.read_support]
+     )]
+  ) ~throws "distinct subordinate endpoints must have unique NodeIDs"
+  chi.CHISubordinateMap(
+    fixture.flit,
+    [chi.CHISubordinateServiceParams(
+       chi.CHIICNPortParams(
+         "wide-memory",
+         128,
+         chi.CHINodeKind.SNI,
+         ~emits: chi.CHIChannelCapabilities(~req: [chi.CHIReqOpcode.ReadNoSnp]),
+         ~supports: chi.CHIChannelCapabilities(),
+         ~max_outstanding: 2
+       ),
+       [chi.AddressSet(0x2000, 0x0fff)],
+       [fixture.read_support]
+     )]
+  ) ~throws "fit the physical NodeID width"
+  chi.CHISubordinateMap(
+    fixture.flit,
+    [chi.CHISubordinateServiceParams(
+       fixture.memory0,
+       [chi.AddressSet(1 << 44, 0x0fff)],
+       [fixture.read_support]
+     )]
+  ) ~throws "fit the request address width"

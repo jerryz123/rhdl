@@ -1,5 +1,5 @@
 #lang rhodium
-// Defines CHI fabric ports, services, and executable Home address selection.
+// Defines CHI fabric ports, services, and executable Home and subordinate address selection.
 
 import:
   rhombus/meta open
@@ -107,6 +107,60 @@ fun require_disjoint_sam(sam :: List, who :: Symbol):
       | error(~who: who, "System Address Map entries must not overlap")
       | #void
 
+class CHISubordinateMapEntry(address_set :: AddressSet,
+                             service :: CHISubordinateServiceParams):
+  implements StableCircuitParam
+
+  property endpoint: service.endpoint
+  property target_node_id: service.endpoint.node_id
+
+bundle CHISubordinateLookup(node_id_width :: PosInt):
+  valid: Bool
+  node_id: Bits(node_id_width)
+
+class CHISubordinateMap(flit :: CHIFlitParams,
+                        services :: NonemptyList.of(CHISubordinateServiceParams),
+                        entries :: NonemptyList.of(CHISubordinateMapEntry)):
+  implements StableCircuitParam
+
+  constructor (flit :: CHIFlitParams,
+               services :: NonemptyList.of(CHISubordinateServiceParams)):
+    for (left_index in 0..services.length()):
+      for (right_index in (left_index + 1)..services.length()):
+        if services[left_index].endpoint.node_id == services[right_index].endpoint.node_id && (
+          services[left_index].endpoint != services[right_index].endpoint
+        )
+        | error(~who: #'CHISubordinateMap,
+                "distinct subordinate endpoints must have unique NodeIDs")
+        | #void
+    def mutable entries = []
+    for (service in services):
+      unless bits.length(service.endpoint.node_id) <= flit.node_id_width
+      | error(~who: #'CHISubordinateMap,
+              "Subordinate map NodeID must fit the physical NodeID width")
+      for (address_set in service.address_sets):
+        unless address_set.fits_unsigned_width(flit.request_address_width)
+        | error(~who: #'CHISubordinateMap,
+                "Subordinate map entry must fit the request address width")
+        entries := entries ++ [CHISubordinateMapEntry(address_set, service)]
+    require_disjoint_sam(entries, #'CHISubordinateMap)
+    super(flit, services, entries)
+
+  method entry(address :: Nat):
+    entries.find(fun (entry): entry.address_set.contains(address))
+
+  method lookup(address :: Bits(flit.request_address_width))
+    :~ CHISubordinateLookup(flit.node_id_width):
+    def mutable valid = Bool(#false)
+    def mutable node_id = bits(0, flit.node_id_width)
+    for (entry in entries):
+      def matches = entry.address_set.matches(address)
+      valid := valid ||| matches
+      node_id := mux(matches, bits(entry.target_node_id, flit.node_id_width), node_id)
+    CHISubordinateLookup(flit.node_id_width):
+      valid: valid
+      node_id: node_id
+
 bundle CHIHomeLookup(node_id_width :: PosInt):
   valid: Bool
   node_id: Bits(node_id_width)
@@ -168,7 +222,8 @@ class CHIFabricParams(flit :: CHIFlitParams,
                       homes :: NonemptyList.of(CHIHomeParams),
                       home_services :: NonemptyList.of(CHIHomeServiceParams),
                       subordinate_services :: NonemptyList.of(CHISubordinateServiceParams),
-                      home_map :: CHIHomeMap):
+                      home_map :: CHIHomeMap,
+                      subordinate_map :: CHISubordinateMap):
   constructor (flit :: CHIFlitParams,
                ports :: NonemptyList.of(CHIFabricPortParams),
                homes :: NonemptyList.of(CHIHomeParams),
@@ -191,21 +246,19 @@ class CHIFabricParams(flit :: CHIFlitParams,
       | error(~who: #'CHIFabricParams,
               "home service must reference a fabric Home Node")
     def home_map = chi_home_map_from_services(flit, home_services)
+    def subordinate_map = CHISubordinateMap(flit, subordinate_services)
     for (service in subordinate_services):
       unless for any (port in ports):
                port.endpoint == service.endpoint
       | error(~who: #'CHIFabricParams,
               "subordinate service endpoint must be a fabric port")
-      for (address_set in service.address_sets):
-        unless address_set.fits_unsigned_width(flit.request_address_width)
-        | error(~who: #'CHIFabricParams,
-                "subordinate service address must fit the request address width")
     super(flit,
           ports,
           homes,
           home_services,
           subordinate_services,
-          home_map)
+          home_map,
+          subordinate_map)
 
 export:
   AddressSet
@@ -215,6 +268,9 @@ export:
   CHIFabricPortParams
   CHIHomeParams
   CHIHomeServiceParams
+  CHISubordinateMapEntry
+  CHISubordinateMap
+  CHISubordinateLookup
   CHIHomeMapEntry
   CHIHomeMap
   CHIHomeLookup
