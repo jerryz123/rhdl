@@ -177,8 +177,13 @@ all memory accesses stronger ordering than the architectural `aq` and `rl`
 annotations require, so those instruction bits do not add a second fence or
 transaction mechanism.
 
-[`csr.rhdl`](csr.rhdl) owns the named machine and supervisor CSRs, current
-privilege mode, trap entry, interrupt selection, and `MRET`/`SRET`. CSR instructions
+[`csr.rhdl`](csr.rhdl) owns the named user, machine, and supervisor CSRs, current
+privilege mode, trap entry, interrupt selection, and `MRET`/`SRET`. Its F/D
+specializations add the aliased `fflags`, `frm`, and `fcsr` views, profile-derived
+`misa` bits, `mstatus.FS` legality and dirty tracking, and the derived `SD` bit.
+Accepted FP state updates accrue exception flags; the eventual core integration
+must serialize explicit FP CSR accesses against the standalone FP pipeline.
+CSR instructions
 atomically return the old value and update state at WB. System instructions
 serialize in Decode and wait for older deferred loads, multiplies, or divides before
 entering the pipeline, so younger instructions cannot create side effects
@@ -244,7 +249,8 @@ destroying useful cache residency. An L1I refill already in flight is allowed
 to drain after invalidation, but cannot install its line or return an
 instruction.
 
-RV5Stage stores implemented CSR data in one aggregate state register. The
+RV5Stage stores general CSR data in one aggregate state register and keeps the
+profile-selected FP aliases and `FS` state in a small CSR-owned child. The
 RISC-V/Rhodium `csr_bank` declaration is the single source for recognized IDs,
 read values, direct storage, aliases, WARL masks, and write dispatch. Trap and
 return updates remain an explicit prioritized transition because they

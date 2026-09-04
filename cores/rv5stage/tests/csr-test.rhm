@@ -4,6 +4,7 @@
 import:
   "../../../rhodium/core/main.rhm" open
   "../../../rhodium/frontend/kernel.rhm" as embedded
+  "../../../riscv/isa/fp-profile.rhm" open
   "../../../riscv/isa/xlen.rhm" open
   "../csr.rhdl" as csr
 
@@ -16,14 +17,16 @@ def rv64_design = embedded.run_elaboration(fun (): csr.RV5StageCsrFile(XLen.X64)
 def rv64 = rv64_design.modules[0]
 def rv32_design = embedded.run_elaboration(fun (): csr.RV5StageCsrFile(XLen.X32))
 def rv32 = rv32_design.modules[0]
+def rv64_f_design = embedded.run_elaboration(fun (): csr.RV5StageCsrFile(XLen.X64, FloatingPointProfile.F))
+def rv64_d_design = embedded.run_elaboration(fun (): csr.RV5StageCsrFile(XLen.X64, FloatingPointProfile.D))
 
 check:
   rv64.inputs.map(fun (port): port.name) ~is [
-    "clock", "reset", "interrupts", "hart_id", "time_counter", "interrupt_boundary", "interrupt_pc", "commit_in"
+    "clock", "reset", "interrupts", "hart_id", "time_counter", "interrupt_boundary", "interrupt_pc", "commit_in", "fp_update_in"
   ]
   rv64.outputs.map(fun (port): port.name) ~is [
     "redirect_out", "interrupt_request", "writeback_valid", "writeback_value",
-    "privilege", "mstatus", "satp", "translation_flush"
+    "privilege", "mstatus", "satp", "frm", "fp_enabled", "translation_flush"
   ]
   rv64.find_input("interrupts").type.field("machine_timer").type.bit_width() ~is 1
   rv64.find_input("commit_in").type.field("bits").type.field("pc").type.width ~is 64
@@ -31,5 +34,10 @@ check:
   rv64.find_output("writeback_value").type.width ~is 64
   rv32.find_output("satp").type.width ~is 32
   state_names(rv64) ~is ["privilege_state", "state"]
+  rv64_design.modules.map(fun (module_def): module_def.name).contains("RV5StageDisabledFpCsrs") ~is #true
+  rv64_f_design.modules.map(fun (module_def): module_def.name).contains("RV5StageFpCsrs") ~is #true
+  rv64_d_design.modules.map(fun (module_def): module_def.name).contains("RV5StageFpCsrs") ~is #true
   verify_design(rv64_design) ~is #void
   verify_design(rv32_design) ~is #void
+  verify_design(rv64_f_design) ~is #void
+  verify_design(rv64_d_design) ~is #void

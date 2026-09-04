@@ -1,4 +1,4 @@
-// Verifies RV5Stage CSR updates, trap delegation, interrupt delivery, and returns.
+// Verifies RV5Stage integer/FP CSR state, traps, interrupts, and privilege returns.
 module rv5stage_csr_tb;
   typedef struct packed {
     logic supervisor_software;
@@ -29,12 +29,16 @@ module rv5stage_csr_tb;
     logic [63:0] exception_value;
   } commit_bits_t;
   typedef struct packed { logic valid; commit_bits_t bits; } commit_in_t;
+  typedef struct packed { logic valid; logic [4:0] bits; } fp_update_in_t;
   typedef struct packed { logic valid; logic [63:0] bits; } redirect_out_t;
 
   localparam logic [1:0] CSR_NONE = 2'd0;
   localparam logic [1:0] CSR_WRITE = 2'd1;
   localparam logic [1:0] CSR_SET = 2'd2;
   localparam logic [1:0] CSR_CLEAR = 2'd3;
+  localparam logic [11:0] CSR_FFLAGS = 12'h001;
+  localparam logic [11:0] CSR_FRM = 12'h002;
+  localparam logic [11:0] CSR_FCSR = 12'h003;
   localparam logic [11:0] CSR_STVEC = 12'h105;
   localparam logic [11:0] CSR_SSTATUS = 12'h100;
   localparam logic [11:0] CSR_SCOUNTEREN = 12'h106;
@@ -43,6 +47,7 @@ module rv5stage_csr_tb;
   localparam logic [11:0] CSR_SIP = 12'h144;
   localparam logic [11:0] CSR_SATP = 12'h180;
   localparam logic [11:0] CSR_MSTATUS = 12'h300;
+  localparam logic [11:0] CSR_MISA = 12'h301;
   localparam logic [11:0] CSR_MEDELEG = 12'h302;
   localparam logic [11:0] CSR_MIDELEG = 12'h303;
   localparam logic [11:0] CSR_MIE = 12'h304;
@@ -72,6 +77,10 @@ module rv5stage_csr_tb;
   localparam logic [1:0] PRIVILEGE_M = 2'd3;
   localparam logic [63:0] RV64_MSTATUS_FIXED = 64'h0000000a_00000000;
   localparam logic [63:0] RV64_SSTATUS_FIXED = 64'h00000002_00000000;
+  localparam logic [63:0] RV64_MISA_D = 64'h80000000_0014012b;
+  localparam logic [63:0] MSTATUS_FS_INITIAL = 64'h00000000_00002000;
+  localparam logic [63:0] MSTATUS_FS_DIRTY = 64'h00000000_00006000;
+  localparam logic [63:0] MSTATUS_SD = 64'h80000000_00000000;
   localparam logic [63:0] MSTATUS_MPP_S = 64'h00000000_00000800;
   localparam logic [63:0] MSTATUS_TVM = 64'h00000000_00100000;
   localparam logic [63:0] MSTATUS_TW = 64'h00000000_00200000;
@@ -85,6 +94,7 @@ module rv5stage_csr_tb;
   logic interrupt_boundary;
   logic [63:0] interrupt_pc;
   commit_in_t commit_in;
+  fp_update_in_t fp_update_in;
   redirect_out_t redirect_out;
   logic interrupt_request;
   logic writeback_valid;
@@ -92,6 +102,8 @@ module rv5stage_csr_tb;
   logic [1:0] privilege;
   logic [63:0] mstatus;
   logic [63:0] satp;
+  logic [2:0] frm;
+  logic fp_enabled;
   logic translation_flush;
 
   RV5StageCsrFile dut (.*);
@@ -99,6 +111,7 @@ module rv5stage_csr_tb;
 
   task automatic clear_commit;
     commit_in = '0;
+    fp_update_in = '0;
     interrupt_boundary = 1'b0;
   endtask
 
@@ -110,8 +123,18 @@ module rv5stage_csr_tb;
     repeat (2) @(posedge clock);
     #1;
     reset = 1'b0;
-    assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED)
+    assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED && !fp_enabled && frm == 0)
       else $fatal(1, "CSR file did not reset into M mode with bare translation");
+  endtask
+
+  task automatic fp_state_update(input logic [4:0] flags);
+    @(negedge clock);
+    clear_commit();
+    fp_update_in.valid = 1'b1;
+    fp_update_in.bits = flags;
+    @(posedge clock);
+    #1;
+    clear_commit();
   endtask
 
   task automatic take_interrupt(
@@ -298,6 +321,7 @@ module rv5stage_csr_tb;
     csr_access(CSR_SET, CSR_CYCLE, 64'h0, 64'h100);
     csr_access(CSR_WRITE, CSR_MINSTRET, 64'h200, 64'h2);
     csr_access(CSR_SET, CSR_INSTRET, 64'h0, 64'h200);
+    csr_access(CSR_SET, CSR_MISA, 64'h0, RV64_MISA_D);
 
     csr_access(CSR_WRITE, CSR_MSCRATCH, 64'h12, 64'h0);
     csr_access(CSR_SET, CSR_MSCRATCH, 64'h1, 64'h12);
@@ -412,6 +436,34 @@ module rv5stage_csr_tb;
     enter_supervisor(MSTATUS_TW);
     privileged_action(SYSTEM_WFI, FENCE_NONE, 64'h218, 32'h10500073, 1'b1, 1'b0);
     check_illegal_trap(64'h218, 32'h10500073);
+
+    // F/D profiles expose the aliased user FP CSRs only while mstatus.FS is
+    // nonzero. FP state updates accrue flags and conservatively mark FS dirty.
+    reset_dut();
+    csr_access(CSR_WRITE, CSR_MTVEC, 64'h100, 64'h0);
+    illegal_csr_read(CSR_FCSR, 64'h220, 32'h003020f3);
+    check_illegal_trap(64'h220, 32'h003020f3);
+    reset_dut();
+    csr_access(CSR_WRITE, CSR_MSTATUS, MSTATUS_FS_INITIAL, RV64_MSTATUS_FIXED);
+    assert (fp_enabled && frm == 0 && mstatus == (RV64_MSTATUS_FIXED | MSTATUS_FS_INITIAL))
+      else $fatal(1, "enabling FP state did not expose the initial FS state");
+    csr_access(CSR_WRITE, CSR_FCSR, 64'h61, 64'h0);
+    assert (frm == 3 && mstatus == (RV64_MSTATUS_FIXED | MSTATUS_FS_DIRTY | MSTATUS_SD))
+      else $fatal(1, "FP CSR write did not update frm and dirty mstatus.FS");
+    csr_access(CSR_SET, CSR_SSTATUS, 64'h0, RV64_SSTATUS_FIXED | MSTATUS_FS_DIRTY | MSTATUS_SD);
+    csr_access(CSR_WRITE, CSR_SSTATUS, MSTATUS_FS_INITIAL, RV64_SSTATUS_FIXED | MSTATUS_FS_DIRTY | MSTATUS_SD);
+    assert (fp_enabled && frm == 3 && mstatus == (RV64_MSTATUS_FIXED | MSTATUS_FS_INITIAL))
+      else $fatal(1, "sstatus did not expose and update the aliased FS state");
+    csr_access(CSR_SET, CSR_FCSR, 64'h0, 64'h61);
+    fp_state_update(5'h14);
+    csr_access(CSR_SET, CSR_FFLAGS, 64'h0, 64'h15);
+    csr_access(CSR_SET, CSR_FCSR, 64'h0, 64'h75);
+    csr_access(CSR_WRITE, CSR_FRM, 64'h4, 64'h3);
+    assert (frm == 4)
+      else $fatal(1, "frm alias did not update the dynamic rounding mode");
+    csr_access(CSR_SET, CSR_FCSR, 64'h0, 64'h95);
+    csr_access(CSR_WRITE, CSR_FFLAGS, 64'h2, 64'h15);
+    csr_access(CSR_SET, CSR_FCSR, 64'h0, 64'h82);
 
     $display("RV5Stage CSR and privilege transitions passed");
     $finish;

@@ -6,6 +6,7 @@ import:
   "decode/system-ctrl.rhdl" open
   "interrupt.rhdl" open
   "../../riscv/isa/csr.rhm" open
+  "../../riscv/isa/fp-profile.rhm" open
   "../../riscv/isa/interrupt.rhm" open
   "../../riscv/isa/trap.rhm" open
   "../../riscv/isa/xlen.rhm" open
@@ -63,6 +64,10 @@ bundle RV5StageInterruptDecision(xlen :: XLen):
   valid: Bool
   cause: Bits(xlen.width)
   to_supervisor: Bool
+
+bundle RV5StageFpCsrWrite():
+  address: Bits(12)
+  value: Bits(8)
 
 def RV5StageDelegatableExceptions = [
   ExceptionCause.InstructionAddressMisaligned,
@@ -208,7 +213,56 @@ fun resolve_rv5stage_interrupt(xlen :: XLen,
     cause: cause
     to_supervisor: valid & to_supervisor
 
-sync_circuit RV5StageCsrFile(xlen :: XLen):
+sync_circuit RV5StageDisabledFpCsrs():
+  interface write(Valid(RV5StageFpCsrWrite()), ~role: consumer)
+  interface update(Valid(Bits(5)), ~role: consumer)
+  interface status_write(Valid(Bits(2)), ~role: consumer)
+  output fflags: Bits(5)
+  output frm: Bits(3)
+  output status: Bits(2)
+
+  fflags <== bits(0, 5)
+  frm <== bits(0, 3)
+  status <== bits(0, 2)
+
+sync_circuit RV5StageFpCsrs():
+  interface write(Valid(RV5StageFpCsrWrite()), ~role: consumer)
+  interface update(Valid(Bits(5)), ~role: consumer)
+  interface status_write(Valid(Bits(2)), ~role: consumer)
+  output fflags: Bits(5)
+  output frm: Bits(3)
+  output status: Bits(2)
+
+  reg fflags_state(~init: bits(0, 5))
+  reg frm_state(~init: bits(0, 3))
+  reg status_state(~init: bits(0, 2))
+  def write_fflags = write.valid & (write.bits.address === csr_bits(CsrId.Fflags))
+  def write_frm = write.valid & (write.bits.address === csr_bits(CsrId.Frm))
+  def write_fcsr = write.valid & (write.bits.address === csr_bits(CsrId.Fcsr))
+
+  when write_fcsr:
+    fflags_state <== write.bits.value[0..5]
+  elsewhen write_fflags:
+    fflags_state <== write.bits.value[0..5]
+  elsewhen (update.valid):
+    fflags_state <== fflags_state ||| update.bits
+
+  when write_fcsr:
+    frm_state <== write.bits.value[5..8]
+  elsewhen write_frm:
+    frm_state <== write.bits.value[0..3]
+
+  when (status_write.valid):
+    status_state <== status_write.bits
+  elsewhen (write.valid ||| update.valid):
+    status_state <== bits(3, 2)
+
+  fflags <== fflags_state
+  frm <== frm_state
+  status <== status_state
+
+sync_circuit RV5StageCsrFile(xlen :: XLen,
+                             profile :: FloatingPointProfile = DefaultFloatingPointProfile):
   def width = xlen.width
   def zero = bits(0, width)
   def mstatus_write_mask = bits(0x7e19bb, width)
@@ -223,7 +277,10 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   def tvec_mask = !bits(0x3, width)
   def epc_mask = !bits(0x3, width)
   def mpp_mask = bits(0x1800, width)
-  def misa_value = if xlen == XLen.X32 | bits(0x40140103, width) | bits(0x8000000000140103, width)
+  def misa_base = if xlen == XLen.X32 | bits(0x40140103, width) | bits(0x8000000000140103, width)
+  def misa_f = if floating_point_supports_f(profile) | bits(1 << 5, width) | zero
+  def misa_d = if floating_point_supports_d(profile) | bits(1 << 3, width) | zero
+  def misa_value = misa_base ||| misa_f ||| misa_d
 
   input interrupts: RV5StageInterrupts()
   input hart_id: Bits(width)
@@ -231,6 +288,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   input interrupt_boundary: Bool
   input interrupt_pc: Bits(width)
   interface commit(Valid(RV5StageCsrCommit(xlen)), ~role: consumer)
+  interface fp_update(Valid(Bits(5)), ~role: consumer)
   interface redirect(Valid(Bits(width)), ~role: producer)
   output interrupt_request: Bool
   output writeback_valid: Bool
@@ -238,19 +296,27 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   output privilege: PrivilegeMode
   output mstatus: Bits(width)
   output satp: Bits(width)
+  output frm: Bits(3)
+  output fp_enabled: Bool
   output translation_flush: Bool
 
   reg privilege_state(PrivilegeMode, ~init: PrivilegeMode.Machine)
   reg state(RV5StageCsrState(xlen), ~init: literal(RV5StageCsrState(xlen), 0))
   inst counters(RiscvBaseCounters(xlen))
+  def FpCsrModule = if floating_point_supports_f(profile) | RV5StageFpCsrs() | RV5StageDisabledFpCsrs()
+  inst fp_csrs(FpCsrModule)
+  fp_update |> fp_csrs.update
 
   fun flag_value(original :: Bits(width),
                  mask :: Bits(width),
                  enabled :: Bool):
     mux(enabled, original ||| mask, original & !mask)
 
-  def mstatus_value = state.mstatus ||| mstatus_fixed
-  def sstatus_value = (state.mstatus & sstatus_write_mask) ||| sstatus_fixed
+  def fp_status_value = fp_csrs.status.zext(width) << 13
+  def fp_status_dirty = fp_csrs.status === bits(3, 2)
+  def status_dirty_value = mux(fp_status_dirty, bits(1 << (width - 1), width), zero)
+  def mstatus_value = state.mstatus ||| mstatus_fixed ||| fp_status_value ||| status_dirty_value
+  def sstatus_value = (state.mstatus & sstatus_write_mask) ||| sstatus_fixed ||| fp_status_value ||| status_dirty_value
   def cycle_value = if xlen == XLen.X32 | counters.cycle[0..32] | counters.cycle
   def cycleh_value = if xlen == XLen.X32 | counters.cycle[32..64] | zero
   def time_value = if xlen == XLen.X32 | time_counter[0..32] | time_counter
@@ -260,6 +326,9 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   def interrupt_pending = rv5stage_interrupt_pending(xlen, interrupts) ||| state.mip
   def csr = commit.bits.csr_address
   def bank = csr_bank(csr, ~default: zero):
+    read CsrId.Fflags: fp_csrs.fflags.zext(width)
+    read CsrId.Frm: fp_csrs.frm.zext(width)
+    read CsrId.Fcsr: concat(fp_csrs.frm, fp_csrs.fflags).zext(width)
     csr CsrId.Sstatus:
       read: sstatus_value
       write value:
@@ -354,7 +423,10 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     csr_bits(CsrId.Cycleh), csr_bits(CsrId.Timeh), csr_bits(CsrId.Instreth),
     csr_bits(CsrId.Mcycleh), csr_bits(CsrId.Minstreth)
   )
-  def csr_recognized = bank.recognized & !high_counter_unavailable
+  def fp_csr = csr.is_one_of(csr_bits(CsrId.Fflags), csr_bits(CsrId.Frm), csr_bits(CsrId.Fcsr))
+  def fp_access_enabled = Bool(floating_point_supports_f(profile)) & or_reduce(fp_csrs.status)
+  assert(!fp_update.valid ||| fp_access_enabled, "rv5stage_fp_update_enabled")
+  def csr_recognized = bank.recognized & !high_counter_unavailable & (!fp_csr ||| fp_access_enabled)
   def csr_read_value = bank.read_value
   def write_requested = csr_write_requested(commit.bits.system.csr, commit.bits.instruction[15..20])
   def csr_read_only = csr[10..12] === bits(3, 2)
@@ -410,7 +482,7 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     )
   def trap_pc = mux(interrupt_take, interrupt_pc, commit.bits.pc)
 
-  def csr_replacement = mux_lookup(
+  def csr_replacement :: Bits(width) = mux_lookup(
     commit.bits.system.csr,
     ~default: csr_read_value,
     [
@@ -420,6 +492,13 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
     ]
   )
   def csr_write = csr_commit & csr_access_legal & write_requested
+  def fp_csr_write = csr_write & fp_csr
+  fp_csrs.write.valid <== fp_csr_write
+  fp_csrs.write.bits <== RV5StageFpCsrWrite():
+    address: csr
+    value: csr_replacement[0..8]
+  fp_csrs.status_write.valid <== csr_write & csr.is_one_of(csr_bits(CsrId.Mstatus), csr_bits(CsrId.Sstatus))
+  fp_csrs.status_write.bits <== csr_replacement[13..15]
   def sfence_vma_commit = commit.valid & (commit.bits.fence.action === FenceOperation.AddressTranslation)
   translation_flush <== (sfence_vma_commit & !synchronous_trap.valid) ||| (
     csr_write & (csr === csr_bits(CsrId.Satp))
@@ -493,6 +572,8 @@ sync_circuit RV5StageCsrFile(xlen :: XLen):
   privilege <== privilege_state
   mstatus <== mstatus_value
   satp <== state.satp
+  frm <== fp_csrs.frm
+  fp_enabled <== fp_access_enabled
   redirect.valid <== trap.valid ||| mret ||| sret
   redirect.bits <== mux(
     trap.valid,

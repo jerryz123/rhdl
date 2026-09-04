@@ -151,7 +151,8 @@ read/modify/write encodings independently of any core's CSR implementation.
 `FENCE.I` encoding as the separate ratified Zifencei extension; microarchitectural
 cache invalidation and pipeline serialization remain core policy.
 [`isa/csr.rhm`](isa/csr.rhm) owns the closed `CsrId` host enum and its canonical
-12-bit architectural address mapping. Hardware must cross through
+12-bit architectural address mapping, including the aliased `fflags`, `frm`,
+and `fcsr` floating-point state views. Hardware must cross through
 [`rtl/csr.rhdl`](rtl/csr.rhdl) when it needs a typed instruction-field value,
 so sparse architectural identifiers do not become a core-specific hardware
 enum or a collection of numeric literals.
