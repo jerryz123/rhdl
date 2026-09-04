@@ -13,7 +13,7 @@ SimpleSoC
 │   └── Device RN-I (NodeID 4)
 ├── SimpleRouter × 4 (REQ, RSP, SNP, and DAT)
 ├── Memory CHIHNF (NodeID 5)
-│   └── CHITransferFragmenter → CHIRam SN-F (NodeID 9)
+│   └── CHIRam SN-F (NodeID 9)
 └── Device CHIHNI (NodeID 6)
     └── ACLINT SN-I (NodeID 10)
 ```
@@ -39,10 +39,10 @@ the permitted protocol paths instead of an all-node cross product.
 
 RV5Stage exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
 boundary, so the SoC connects both cache endpoints to the NoC without creating
-internal credited links. The serialized HN-F translates coherent RV5Stage traffic
-and authoritative dirty snoop packets into non-coherent subordinate
-transactions, and the fragmenter expands 64-byte cache-line reads into the
-RAM's one-DAT-beat transactions.
+internal credited links. The serialized HN-F translates coherent RV5Stage
+traffic and authoritative dirty snoop packets into non-coherent subordinate
+transactions. The CHIRam is configured for native 64-byte reads and writes, so
+this direct path needs no fragmenter.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
 HN-I, and terminate directly at the CHI-native ACLINT SN-I.
 Both paths are derived from one physical-region table. Each region pairs
@@ -57,13 +57,13 @@ The FESVR implementation and generated executable harness remain owned by
 
 `SimpleSoCFabric` factors the processor, Homes, NoC, and ACLINT from the final
 memory termination. `SimpleSoC` preserves the self-contained composition by
-connecting that native `CHISNChannels` boundary through the transfer fragmenter
-to `CHIRam`.
+connecting the native `CHISNChannels` boundary directly to a line-capable
+`CHIRam`.
 
-[`dram-soc.rhdl`](dram-soc.rhdl) defines `DramSoC`, which retains the
-fragmenter and exports `CHISNChannels` for SN-F NodeID 9. It contains no RAM or
-simulator binding; an external subordinate owns the memory contents and
-response timing.
+[`dram-soc.rhdl`](dram-soc.rhdl) defines `DramSoC`, which exports a line-capable
+`CHISNChannels` memory boundary for SN-F NodeID 9. It contains no RAM,
+fragmenter, or simulator binding; an external subordinate owns the memory
+contents and response timing.
 The simulation harness may attach a memory model to that boundary, but
 `DramSoC` itself does not provide one.
 

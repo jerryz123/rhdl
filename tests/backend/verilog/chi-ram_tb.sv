@@ -68,6 +68,7 @@ module chi_ram_tb;
     input logic [6:0] opcode,
     input logic [11:0] txn_id,
     input logic [43:0] address,
+    input logic [5:0] size,
     input logic [11:0] return_txn_id
   );
     begin
@@ -77,7 +78,7 @@ module chi_ram_tb;
       requests_in.bits.tgt_id = RAM_ID;
       requests_in.bits.txn_id = txn_id;
       requests_in.bits.address = address;
-      requests_in.bits.size_or_num_req = 6'd4;
+      requests_in.bits.size_or_num_req = size;
       requests_in.bits.return_nid_or_stash_nid_or_data_target = REQUESTER_ID;
       requests_in.bits.return_txn_id_or_stash_lpid = return_txn_id;
       requests_in.valid = 1'b1;
@@ -91,6 +92,7 @@ module chi_ram_tb;
 
   task automatic issue_write_data(
     input logic [11:0] dbid,
+    input logic [1:0] data_id,
     input logic [15:0] byte_enable,
     input logic [127:0] data
   );
@@ -100,6 +102,7 @@ module chi_ram_tb;
       request_data_in.bits.src_id = REQUESTER_ID;
       request_data_in.bits.tgt_id = RAM_ID;
       request_data_in.bits.txn_id = dbid;
+      request_data_in.bits.data_id = data_id;
       request_data_in.bits.byte_enable = byte_enable;
       request_data_in.bits.data = data;
       request_data_in.valid = 1'b1;
@@ -177,6 +180,7 @@ module chi_ram_tb;
 
   task automatic accept_read(
     input logic [11:0] return_txn_id,
+    input logic [1:0] data_id,
     input logic [15:0] byte_enable,
     input logic [127:0] data
   );
@@ -191,6 +195,8 @@ module chi_ram_tb;
         else $fatal(1, "CompData carried incorrect routing metadata");
       assert (response_data_out.bits.byte_enable == byte_enable)
         else $fatal(1, "CompData carried incorrect byte enable");
+      assert (response_data_out.bits.data_id == data_id)
+        else $fatal(1, "CompData carried incorrect DataID");
       assert (response_data_out.bits.data == data)
         else $fatal(1, "CompData %h, expected %h", response_data_out.bits.data, data);
       tick();
@@ -212,32 +218,46 @@ module chi_ram_tb;
       else $fatal(1, "reset did not clear the CHIRam response paths");
     reset = 1'b0;
 
-    issue_request(READ_NO_SNP, 12'h101, 44'h080000000, 12'h501);
-    accept_read(12'h501, 16'hffff, 128'b0);
+    issue_request(READ_NO_SNP, 12'h101, 44'h080000000, 6'd4, 12'h501);
+    accept_read(12'h501, 2'd0, 16'hffff, 128'b0);
 
-    issue_request(WRITE_NO_SNP_FULL, 12'h102, 44'h080000000, 12'b0);
+    issue_request(WRITE_NO_SNP_FULL, 12'h102, 44'h080000000, 6'd4, 12'b0);
     accept_dbid(12'h102, dbid_a);
-    issue_write_data(dbid_a, 16'hffff, 128'h00112233445566778899aabbccddeeff);
+    issue_write_data(dbid_a, 2'd0, 16'hffff, 128'h00112233445566778899aabbccddeeff);
     accept_comp(12'h102, dbid_a);
 
-    issue_request(WRITE_NO_SNP_PTL, 12'h103, 44'h080000000, 12'b0);
+    issue_request(WRITE_NO_SNP_PTL, 12'h103, 44'h080000000, 6'd4, 12'b0);
     accept_dbid(12'h103, dbid_a);
-    issue_write_data(dbid_a, 16'h00ff, 128'hffeeddccbbaa99887766554433221100);
+    issue_write_data(dbid_a, 2'd0, 16'h00ff, 128'hffeeddccbbaa99887766554433221100);
     accept_comp(12'h103, dbid_a);
 
-    issue_request(READ_NO_SNP, 12'h104, 44'h080000000, 12'h504);
-    accept_read(12'h504, 16'hffff, 128'h00112233445566777766554433221100);
+    issue_request(READ_NO_SNP, 12'h104, 44'h080000000, 6'd4, 12'h504);
+    accept_read(12'h504, 2'd0, 16'hffff, 128'h00112233445566777766554433221100);
+
+    issue_request(WRITE_NO_SNP_FULL, 12'h105, 44'h080000000, 6'd6, 12'b0);
+    accept_dbid(12'h105, dbid_a);
+    issue_write_data(dbid_a, 2'd2, 16'hffff, 128'h22222222222222222222222222222222);
+    issue_write_data(dbid_a, 2'd0, 16'hffff, 128'h00000000000000000000000000000000);
+    issue_write_data(dbid_a, 2'd3, 16'hffff, 128'h33333333333333333333333333333333);
+    issue_write_data(dbid_a, 2'd1, 16'hffff, 128'h11111111111111111111111111111111);
+    accept_comp(12'h105, dbid_a);
+
+    issue_request(READ_NO_SNP, 12'h106, 44'h080000000, 6'd6, 12'h506);
+    accept_read(12'h506, 2'd0, 16'hffff, 128'h00000000000000000000000000000000);
+    accept_read(12'h506, 2'd1, 16'hffff, 128'h11111111111111111111111111111111);
+    accept_read(12'h506, 2'd2, 16'hffff, 128'h22222222222222222222222222222222);
+    accept_read(12'h506, 2'd3, 16'hffff, 128'h33333333333333333333333333333333);
 
     // Hold RSP back while both transaction slots allocate distinct live DBIDs.
-    issue_request(WRITE_NO_SNP_FULL, 12'h201, 44'h080000010, 12'b0);
-    issue_request(WRITE_NO_SNP_FULL, 12'h202, 44'h080000020, 12'b0);
+    issue_request(WRITE_NO_SNP_FULL, 12'h201, 44'h080000010, 6'd4, 12'b0);
+    issue_request(WRITE_NO_SNP_FULL, 12'h202, 44'h080000020, 6'd4, 12'b0);
     accept_dbid(12'h201, dbid_a);
     accept_dbid(12'h202, dbid_b);
     assert (dbid_a != dbid_b)
       else $fatal(1, "concurrent CHIRam writes reused a live DBID");
 
-    issue_write_data(dbid_a, 16'hffff, 128'h11111111222222223333333344444444);
-    issue_write_data(dbid_b, 16'hffff, 128'haaaaaaaabbbbbbbbccccccccdddddddd);
+    issue_write_data(dbid_a, 2'd0, 16'hffff, 128'h11111111222222223333333344444444);
+    issue_write_data(dbid_b, 2'd0, 16'hffff, 128'haaaaaaaabbbbbbbbccccccccdddddddd);
     accept_comp(12'h201, dbid_a);
     accept_comp(12'h202, dbid_b);
 

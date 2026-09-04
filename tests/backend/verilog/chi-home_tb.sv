@@ -118,6 +118,7 @@ module chi_home_tb;
 
   task automatic translate_request(
     input logic [6:0] opcode,
+    input logic [5:0] size,
     input logic [11:0] txn_id,
     input logic [11:0] return_txn_id,
     output logic [11:0] slot
@@ -129,7 +130,7 @@ module chi_home_tb;
       upstream_requests_in.bits.tgt_id = HOME_ID;
       upstream_requests_in.bits.txn_id = txn_id;
       upstream_requests_in.bits.address = 44'h080000000;
-      upstream_requests_in.bits.size_or_num_req = 6'd4;
+      upstream_requests_in.bits.size_or_num_req = size;
       upstream_requests_in.bits.return_nid_or_stash_nid_or_data_target = REQUESTER_ID;
       upstream_requests_in.bits.return_txn_id_or_stash_lpid = return_txn_id;
       upstream_requests_in.valid = 1'b1;
@@ -159,6 +160,7 @@ module chi_home_tb;
   task automatic translate_subordinate_data(
     input logic [11:0] slot,
     input logic [11:0] return_txn_id,
+    input logic [1:0] data_id,
     input logic [127:0] data
   );
     begin
@@ -167,6 +169,7 @@ module chi_home_tb;
       downstream_response_data_in.bits.src_id = SUBORDINATE_ID;
       downstream_response_data_in.bits.tgt_id = HOME_ID;
       downstream_response_data_in.bits.txn_id = slot;
+      downstream_response_data_in.bits.data_id = data_id;
       downstream_response_data_in.bits.byte_enable = 16'hffff;
       downstream_response_data_in.bits.data = data;
       downstream_response_data_in.valid = 1'b1;
@@ -177,7 +180,8 @@ module chi_home_tb;
       assert (upstream_response_data_out.bits.opcode == COMP_DATA &&
               upstream_response_data_out.bits.src_id == HOME_ID &&
               upstream_response_data_out.bits.tgt_id == REQUESTER_ID &&
-              upstream_response_data_out.bits.txn_id == return_txn_id)
+              upstream_response_data_out.bits.txn_id == return_txn_id &&
+              upstream_response_data_out.bits.data_id == data_id)
         else $fatal(1, "translated CompData carried incorrect transaction metadata");
       assert (upstream_response_data_out.bits.data == data)
         else $fatal(1, "translated CompData carried incorrect payload");
@@ -221,6 +225,7 @@ module chi_home_tb;
   task automatic translate_write_data(
     input logic [11:0] home_dbid,
     input logic [11:0] subordinate_dbid,
+    input logic [1:0] data_id,
     input logic [127:0] data
   );
     begin
@@ -229,6 +234,7 @@ module chi_home_tb;
       upstream_request_data_in.bits.src_id = REQUESTER_ID;
       upstream_request_data_in.bits.tgt_id = HOME_ID;
       upstream_request_data_in.bits.txn_id = home_dbid;
+      upstream_request_data_in.bits.data_id = data_id;
       upstream_request_data_in.bits.byte_enable = 16'hffff;
       upstream_request_data_in.bits.data = data;
       upstream_request_data_in.valid = 1'b1;
@@ -239,7 +245,8 @@ module chi_home_tb;
       assert (downstream_request_data_out.bits.opcode == NON_COPY_BACK_WRITE_DATA &&
               downstream_request_data_out.bits.src_id == HOME_ID &&
               downstream_request_data_out.bits.tgt_id == SUBORDINATE_ID &&
-              downstream_request_data_out.bits.txn_id == subordinate_dbid)
+              downstream_request_data_out.bits.txn_id == subordinate_dbid &&
+              downstream_request_data_out.bits.data_id == data_id)
         else $fatal(1, "translated write DAT carried incorrect transaction metadata");
       assert (downstream_request_data_out.bits.data == data)
         else $fatal(1, "translated write DAT carried incorrect payload");
@@ -266,16 +273,22 @@ module chi_home_tb;
     tick();
     reset = 1'b0;
 
-    translate_request(READ_NO_SNP, 12'h101, 12'h501, slot);
-    translate_subordinate_data(slot, 12'h501, READ_DATA);
+    translate_request(READ_NO_SNP, 6'd6, 12'h101, 12'h501, slot);
+    translate_subordinate_data(slot, 12'h501, 2'd2, READ_DATA + 2);
+    translate_subordinate_data(slot, 12'h501, 2'd0, READ_DATA + 0);
+    translate_subordinate_data(slot, 12'h501, 2'd3, READ_DATA + 3);
+    translate_subordinate_data(slot, 12'h501, 2'd1, READ_DATA + 1);
 
-    translate_request(WRITE_NO_SNP_FULL, 12'h102, 12'h000, slot);
+    translate_request(WRITE_NO_SNP_FULL, 6'd6, 12'h102, 12'h000, slot);
     translate_subordinate_response(DBID_RESP,
                                    slot,
                                    SUBORDINATE_DBID,
                                    12'h102,
                                    home_dbid);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, WRITE_DATA);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd2, WRITE_DATA + 2);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd0, WRITE_DATA + 0);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd3, WRITE_DATA + 3);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd1, WRITE_DATA + 1);
     translate_subordinate_response(COMP,
                                    slot,
                                    SUBORDINATE_DBID,

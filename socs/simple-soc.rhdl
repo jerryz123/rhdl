@@ -53,8 +53,6 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   )
 
 def simple_soc_host_port = requester_icn_endpoint(simple_soc_host_node)
-def simple_soc_fragmenter_config = CHITransferFragmenterConfig(simple_soc_flit,
-                                                               ~max_read_bytes: 64)
 def simple_soc_aclint_config = AclintConfig(simple_soc_flit, 1)
 def simple_soc_aclint_params = AclintParams("simple-aclint",
                                             10,
@@ -97,7 +95,10 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
   property device_port:
     requester_icn_endpoint(rv5stage_params.device_node)
   property ram_config:
-    CHIRamConfig(flit, memory_bytes, ~max_outstanding: 2)
+    CHIRamConfig(flit,
+                 memory_bytes,
+                 ~max_outstanding: 2,
+                 ~max_transfer_bytes: 64)
   property ram_params:
     CHIRamParams(memory_name,
                  9,
@@ -109,21 +110,18 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
   property memory_node: ram_params.node
   property memory_port: ram_params.icn_port
   property memory_service: ram_params.service
-  property fragmenter_config: simple_soc_fragmenter_config
-  property fragmenter_params:
-    CHITransferFragmenterParams(fragmenter_config, memory_service)
   property home_config:
     CHIHNFConfig(
       flit,
       [simple_soc_host_port, instruction_port, data_port],
       memory_bytes - 1,
-      fragmenter_config.upstream_requests(memory_requests)
+      memory_requests
     )
   property home_params:
     CHIHNFParams(simple_soc_home,
                  home_config,
                  memory_port,
-                 fragmenter_params.upstream_service)
+                 memory_service)
   property device_home_params:
     CHIHNIParams(simple_soc_device_home,
                  flit,
@@ -152,7 +150,6 @@ def simple_soc_memory_service = CHISubordinateServiceParams(
   [AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1)],
   simple_soc_memory_requests
 )
-def simple_soc_fragmenter_params = simple_soc_fabric_params.fragmenter_params
 def simple_soc_home_config = simple_soc_fabric_params.home_config
 def simple_soc_home_params = simple_soc_fabric_params.home_params
 def simple_soc_device_home_params = simple_soc_fabric_params.device_home_params
@@ -302,12 +299,10 @@ sync_circuit SimpleSoC(params :: SimpleSoCFabricParams = simple_soc_fabric_param
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
 
   inst fabric(SimpleSoCFabric(params))
-  inst fragmenter(CHITransferFragmenter(params.fragmenter_config))
   inst ram(CHIRam(params.ram_config))
 
   host <=> fabric.host
-  fabric.memory <=> fragmenter.upstream
-  fragmenter.downstream <=> ram.port
+  fabric.memory <=> ram.port
   ram.identity <== CHIRamIdentity(simple_soc_flit):
     node_id: bits(params.memory_node.node_id, simple_soc_flit.node_id_width)
     base_address: bits(params.memory_base, simple_soc_flit.request_address_width)
@@ -336,8 +331,6 @@ export:
   simple_soc_memory_node
   simple_soc_memory_port
   simple_soc_memory_service
-  simple_soc_fragmenter_config
-  simple_soc_fragmenter_params
   simple_soc_home_config
   simple_soc_home_params
   simple_soc_aclint_config

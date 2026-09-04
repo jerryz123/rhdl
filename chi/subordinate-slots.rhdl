@@ -7,6 +7,7 @@ import:
   lib("rhodium/std/scoreboard.rhdl").Scoreboard
   lib("chi/params.rhdl").CHIFlitParams
   lib("chi/flits.rhdl") open
+  lib("chi/protocol.rhdl") open
 
 bundle CHISNTransactionAllocation(p :: CHIFlitParams):
   write: Bool
@@ -21,6 +22,7 @@ bundle CHISNMatchedWrite(p :: CHIFlitParams, slot_width :: PosInt):
   slot: Bits(slot_width)
   request: CHIReqFlit(p)
   data: CHIDatFlit(p)
+  last: Bool
 
 fun chi_sn_dbid_response(p :: CHIFlitParams,
                          node_id :: Bits(p.node_id_width),
@@ -65,6 +67,7 @@ fun chi_sn_write_completion(p :: CHIFlitParams,
 fun chi_sn_read_completion(p :: CHIFlitParams,
                            node_id :: Bits(p.node_id_width),
                            request :: CHIReqFlit(p),
+                           data_id :: Bits(2),
                            data :: Bits(p.data_width)) :~ CHIDatFlit(p):
   wire response: CHIDatFlit(p)
   if p.poison_width > 0
@@ -74,11 +77,12 @@ fun chi_sn_read_completion(p :: CHIFlitParams,
   | response.data_check <== bits(0, p.data_check_width)
   | #void
   response.data <== data
-  response.byte_enable <== transfer_byte_mask(
-    request.address,
-    request.size_or_num_req[0..3],
-    p.data_bytes
-  ).into(Bits(p.data_bytes))
+  def multi_packet = chi_data_beats_minus_one(chi_req_size(p, request), p) =/= bits(0, 2)
+  response.byte_enable <== mux(
+    multi_packet,
+    bits((1 << p.data_bytes) - 1, p.data_bytes),
+    transfer_byte_mask(request.address, request.size_or_num_req[0..3], p.data_bytes).into(Bits(p.data_bytes))
+  )
   if p.dat_rsvdc_width > 0
   | response.rsvdc <== bits(0, p.dat_rsvdc_width)
   | #void
@@ -90,7 +94,7 @@ fun chi_sn_read_completion(p :: CHIFlitParams,
   response.tag <== bits(0, p.tag_width)
   response.tag_op <== CHITagOp.Invalid
   response.cache_line_id <== bits(0, 6)
-  response.data_id <== bits(0, 2)
+  response.data_id <== data_id
   response.ccid <== bits(0, 2)
   response.dbid_or_mecid <== bits(0, 16)
   response.c_busy <== bits(0, 3)
@@ -122,6 +126,7 @@ sync_circuit CHISNTransactionSlots(p :: CHIFlitParams, limit :: PosInt):
   inst awaiting_write_data(Scoreboard(limit))
   def occupied = occupancy.busy.into(Vec(limit, Bool))
   def awaiting_write_data_slots = awaiting_write_data.busy.into(Vec(limit, Bool))
+  reg received_write_data_ids(~init: vec(for List (_index in 0..limit): bits(0, 4)))
   mem write_requests(limit, CHIReqFlit(p))
 
   def free_slots = vec(for List (index in 0..limit): !occupied[index])
@@ -139,15 +144,23 @@ sync_circuit CHISNTransactionSlots(p :: CHIFlitParams, limit :: PosInt):
   def data_slot = incoming_data.txn_id[0..slot_width]
   def data_slot_valid = incoming_data.txn_id < bits(limit, 12)
   def selected_request = write_requests[data_slot]
+  def incoming_data_id = one_hot(incoming_data.data_id).as_bits()
+  def expected_data_ids = chi_transfer_data_ids(chi_req_size(p, selected_request), p)
+  def received_data_ids = received_write_data_ids[data_slot]
+  def data_id_expected = or_reduce(expected_data_ids & incoming_data_id)
+  def data_id_new = !or_reduce(received_data_ids & incoming_data_id)
+  def next_received_data_ids = received_data_ids ||| incoming_data_id
+  def final_data = next_received_data_ids === expected_data_ids
   def data_match = data_slot_valid & occupied[data_slot] & (
     awaiting_write_data_slots[data_slot]
-  ) & (incoming_data.src_id === selected_request.src_id)
+  ) & (incoming_data.src_id === selected_request.src_id) & data_id_expected & data_id_new
 
   matched_write.valid <== write_data.valid & ordinary_data & data_match
   matched_write.bits <== CHISNMatchedWrite(p, slot_width):
     slot: data_slot
     request: selected_request
     data: incoming_data
+    last: final_data
   write_data.ready <== !ordinary_data ||| !data_match ||| matched_write.ready
   when (write_data.valid & ordinary_data):
     assert(data_match,
@@ -161,8 +174,23 @@ sync_circuit CHISNTransactionSlots(p :: CHIFlitParams, limit :: PosInt):
   occupancy.clear <=> completed
 
   awaiting_write_data.set <=> dbid_sent
-  awaiting_write_data.clear.valid <== accept_write_data
+  awaiting_write_data.clear.valid <== accept_write_data & matched_write.bits.last
   awaiting_write_data.clear.bits <== data_slot
+
+  def next_received_write_data_ids = vec(
+    for List (index in 0..limit):
+      block:
+        def index_bits = bits(index, slot_width)
+        def allocate_here = allocate & allocated.bits.write & (allocated.bits.slot === index_bits)
+        def data_here = accept_write_data & (data_slot === index_bits)
+        mux(allocate_here,
+            bits(0, 4),
+            mux(data_here,
+                next_received_data_ids,
+                received_write_data_ids[index]))
+  )
+  when (allocate ||| accept_write_data):
+    received_write_data_ids <== next_received_write_data_ids
 
   write_requests.write(allocated.bits.slot,
                        allocated.bits.request,

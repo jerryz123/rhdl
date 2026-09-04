@@ -91,6 +91,8 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   def writes_waiting_dbid = write_await_dbid.busy.into(Vec(limit, Bool))
   def writes_waiting_data = write_await_data.busy.into(Vec(limit, Bool))
   def writes_waiting_comp = write_await_comp.busy.into(Vec(limit, Bool))
+  reg received_write_data_ids(~init: vec(for List (_index in 0..limit): bits(0, 4)))
+  reg received_read_data_ids(~init: vec(for List (_index in 0..limit): bits(0, 4)))
   mem requests(limit, CHIReqFlit(p))
   mem subordinate_dbids(limit, Bits(12))
 
@@ -183,8 +185,15 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   def write_data_slot = upstream_write_data.txn_id[0..slot_width]
   def write_data_slot_valid = upstream_write_data.txn_id < bits(limit, 12)
   def write_data_request = requests[write_data_slot]
+  def write_data_id = one_hot(upstream_write_data.data_id).as_bits()
+  def write_data_expected_ids = chi_transfer_data_ids(chi_req_size(p, write_data_request), p)
+  def write_data_received_ids = received_write_data_ids[write_data_slot]
+  def next_write_data_ids = write_data_received_ids ||| write_data_id
+  def final_write_data = next_write_data_ids === write_data_expected_ids
   def write_data_match = write_data_slot_valid & writes_waiting_data[write_data_slot] & (
     upstream_write_data.src_id === write_data_request.src_id
+  ) & or_reduce(write_data_expected_ids & write_data_id) & (
+    !or_reduce(write_data_received_ids & write_data_id)
   )
   requester.dat.request.ready <== !write_data_ordinary ||| !write_data_match ||| (
     subordinate.dat.request.ready
@@ -195,6 +204,7 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   subordinate.dat.request.bits <== chi_hni_downstream_write_data(
     p,
     upstream_write_data,
+    upstream_write_data.data_id,
     write_data_request.qos,
     bits(home.node_id, p.node_id_width),
     bits(subordinate_endpoint.node_id, p.node_id_width),
@@ -205,9 +215,9 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   when (requester.dat.request.valid & write_data_ordinary):
     assert(write_data_match, "chi_hni_write_data_has_dbid")
 
-  write_await_data.clear.valid <== write_data_transfer
+  write_await_data.clear.valid <== write_data_transfer & final_write_data
   write_await_data.clear.bits <== write_data_slot
-  write_await_comp.set.valid <== write_data_transfer
+  write_await_comp.set.valid <== write_data_transfer & final_write_data
   write_await_comp.set.bits <== write_data_slot
   write_await_comp.clear.valid <== write_completion
   write_await_comp.clear.bits <== response_slot
@@ -217,7 +227,14 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   def read_data_slot = downstream_read_data.txn_id[0..slot_width]
   def read_data_slot_valid = downstream_read_data.txn_id < bits(limit, 12)
   def read_data_request = requests[read_data_slot]
-  def read_data_match = read_data_slot_valid & reads[read_data_slot]
+  def read_data_id = one_hot(downstream_read_data.data_id).as_bits()
+  def read_data_expected_ids = chi_transfer_data_ids(chi_req_size(p, read_data_request), p)
+  def read_data_received_ids = received_read_data_ids[read_data_slot]
+  def next_read_data_ids = read_data_received_ids ||| read_data_id
+  def final_read_data = next_read_data_ids === read_data_expected_ids
+  def read_data_match = read_data_slot_valid & reads[read_data_slot] & (
+    or_reduce(read_data_expected_ids & read_data_id)
+  ) & !or_reduce(read_data_received_ids & read_data_id)
   def write_completion_now = write_completion
   requester.dat.response.valid <== subordinate.dat.response.valid & (
     read_data_ordinary & read_data_match & !write_completion_now
@@ -238,12 +255,38 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   when (subordinate.dat.response.valid & read_data_ordinary):
     assert(read_data_match, "chi_hni_read_data_has_transaction")
 
-  read_pending.clear.valid <== read_completion
+  read_pending.clear.valid <== read_completion & final_read_data
   read_pending.clear.bits <== read_data_slot
-  occupancy.clear.valid <== write_completion ||| read_completion
+  occupancy.clear.valid <== write_completion ||| (read_completion & final_read_data)
   occupancy.clear.bits <== mux(write_completion,
                                response_slot,
                                read_data_slot)
+
+  def next_received_write_data_ids = vec(
+    for List (index in 0..limit):
+      block:
+        def index_bits = bits(index, slot_width)
+        def allocate_here = allocate_write & (allocation_slot === index_bits)
+        def data_here = write_data_transfer & (write_data_slot === index_bits)
+        mux(allocate_here,
+            bits(0, 4),
+            mux(data_here, next_write_data_ids, received_write_data_ids[index]))
+  )
+  when (allocate_write ||| write_data_transfer):
+    received_write_data_ids <== next_received_write_data_ids
+
+  def next_received_read_data_ids = vec(
+    for List (index in 0..limit):
+      block:
+        def index_bits = bits(index, slot_width)
+        def allocate_here = allocate_read & (allocation_slot === index_bits)
+        def data_here = read_completion & (read_data_slot === index_bits)
+        mux(allocate_here,
+            bits(0, 4),
+            mux(data_here, next_read_data_ids, received_read_data_ids[index]))
+  )
+  when (allocate_read ||| read_completion):
+    received_read_data_ids <== next_received_read_data_ids
 
   requester.rsp.requester.ready <== Bool(#true)
 

@@ -1,4 +1,4 @@
-// Simulates single-beat writes followed by a fragmented 64-byte CHI RAM read.
+// Simulates fragmented 64-byte CHI RAM writes and reads.
 module chi_transfer_fragmenter_tb;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic valid; CHIReqFlit bits; } req_t;
@@ -122,6 +122,56 @@ module chi_transfer_fragmenter_tb;
     end
   endtask
 
+  task automatic send_write_beat(
+    input logic [11:0] dbid,
+    input logic [1:0] data_id,
+    input logic [127:0] data
+  );
+    begin
+      request_data_in.bits = '0;
+      request_data_in.bits.opcode = NON_COPY_BACK_WRITE_DATA;
+      request_data_in.bits.src_id = HOME_ID;
+      request_data_in.bits.tgt_id = RAM_ID;
+      request_data_in.bits.txn_id = dbid;
+      request_data_in.bits.data_id = data_id;
+      request_data_in.bits.byte_enable = 16'hffff;
+      request_data_in.bits.data = data;
+      request_data_in.valid = 1'b1;
+      while (!port_out.dat.request.ready)
+        tick();
+      tick();
+      request_data_in = '0;
+    end
+  endtask
+
+  task automatic write_line;
+    logic [11:0] dbid;
+    begin
+      issue_request(WRITE_NO_SNP_FULL, 12'h100, 44'h080000000, 6'd6, 12'b0);
+      responses_in.ready = 1'b1;
+      wait_rsp();
+      assert (port_out.rsp.response.bits.opcode == DBID_RESP)
+        else $fatal(1, "fragmented write did not receive parent DBID");
+      dbid = port_out.rsp.response.bits.dbid_or_group_id;
+      tick();
+      responses_in.ready = 1'b0;
+
+      send_write_beat(dbid, 2'd2, 128'h22222222222222222222222222222222);
+      send_write_beat(dbid, 2'd0, 128'h00000000000000000000000000000000);
+      send_write_beat(dbid, 2'd3, 128'h33333333333333333333333333333333);
+      send_write_beat(dbid, 2'd1, 128'h11111111111111111111111111111111);
+
+      responses_in.ready = 1'b1;
+      wait_rsp();
+      assert (port_out.rsp.response.bits.opcode == COMP &&
+              port_out.rsp.response.bits.txn_id == 12'h100 &&
+              port_out.rsp.response.bits.dbid_or_group_id == dbid)
+        else $fatal(1, "fragmented write completion metadata was incorrect");
+      tick();
+      responses_in.ready = 1'b0;
+    end
+  endtask
+
   task automatic accept_read_beat(
     input logic [1:0] data_id,
     input logic [127:0] data
@@ -155,10 +205,7 @@ module chi_transfer_fragmenter_tb;
     tick();
     reset = 1'b0;
 
-    write_word(44'h080000000, 12'h100, 128'h00000000000000000000000000000000);
-    write_word(44'h080000010, 12'h101, 128'h11111111111111111111111111111111);
-    write_word(44'h080000020, 12'h102, 128'h22222222222222222222222222222222);
-    write_word(44'h080000030, 12'h103, 128'h33333333333333333333333333333333);
+    write_line();
 
     issue_request(READ_NO_SNP, 12'h200, 44'h080000000, 6'd6, 12'h700);
     accept_read_beat(2'd0, 128'h00000000000000000000000000000000);

@@ -198,7 +198,7 @@ module chi_coherent_home_tb;
       #1;
       assert (port_out.subordinate.dat.request.valid &&
               port_out.subordinate.dat.request.bits.opcode == NON_COPY_BACK_WRITE_DATA &&
-              port_out.subordinate.dat.request.bits.data_id == packet_id &&
+              port_out.subordinate.dat.request.bits.data_id == 2'd0 &&
               port_out.subordinate.dat.request.bits.data == {120'h0, 6'h0, packet_id})
         else $fatal(1, "HN-F did not translate dirty snoop data");
       tick();
@@ -247,6 +247,40 @@ module chi_coherent_home_tb;
       tick();
       subordinate_data_in = '0;
       response_data_ready_in = '0;
+    end
+  endtask
+
+  task automatic send_requester_write_packet(input logic [1:0] packet_id);
+    begin
+      request_data_in.bits = '0;
+      request_data_in.bits.opcode = NON_COPY_BACK_WRITE_DATA;
+      request_data_in.bits.src_id = HTIF_ID;
+      request_data_in.bits.tgt_id = HOME_ID;
+      request_data_in.bits.txn_id = 12'h000;
+      request_data_in.bits.data_id = packet_id;
+      request_data_in.bits.byte_enable = 16'hffff;
+      request_data_in.bits.data = {120'h0, 6'h0, packet_id};
+      request_data_in.valid = 1'b1;
+      #1;
+      assert (port_out.requester.request_data.ready)
+        else $fatal(1, "HN-F did not collect a requester write packet");
+      tick();
+      request_data_in = '0;
+    end
+  endtask
+
+  task automatic accept_subordinate_write_packet(input logic [1:0] packet_id);
+    begin
+      subordinate_data_ready_in.ready = 1'b1;
+      #1;
+      assert (port_out.subordinate.dat.request.valid &&
+              port_out.subordinate.dat.request.bits.opcode == NON_COPY_BACK_WRITE_DATA &&
+              port_out.subordinate.dat.request.bits.txn_id == MEMORY_DBID &&
+              port_out.subordinate.dat.request.bits.data_id == packet_id &&
+              port_out.subordinate.dat.request.bits.data == {120'h0, 6'h0, packet_id})
+        else $fatal(1, "HN-F did not forward the expected write packet");
+      tick();
+      subordinate_data_ready_in = '0;
     end
   endtask
 
@@ -388,6 +422,63 @@ module chi_coherent_home_tb;
     tick();
     assert (port_out.requester.requests.ready)
       else $fatal(1, "HN-F did not retire the write");
+    requester_responses_ready_in = '0;
+
+    send_request(HTIF_ID, WRITE_NO_SNP_FULL, 6'd6, 1'b0);
+    requester_responses_ready_in.ready = 1'b1;
+    #1;
+    assert (port_out.requester.responses.valid &&
+            port_out.requester.responses.bits.opcode == DBID_RESP)
+      else $fatal(1, "HN-F did not allocate the line-write requester DBID");
+    tick();
+    requester_responses_ready_in = '0;
+
+    send_requester_write_packet(2'd2);
+    send_requester_write_packet(2'd0);
+    send_requester_write_packet(2'd3);
+    send_requester_write_packet(2'd1);
+    tick();
+    accept_subordinate_request(WRITE_NO_SNP_FULL);
+
+    subordinate_responses_in.bits = '0;
+    subordinate_responses_in.bits.opcode = DBID_RESP;
+    subordinate_responses_in.bits.src_id = MEMORY_ID;
+    subordinate_responses_in.bits.tgt_id = HOME_ID;
+    subordinate_responses_in.bits.txn_id = 12'h000;
+    subordinate_responses_in.bits.dbid_or_group_id = MEMORY_DBID;
+    subordinate_responses_in.valid = 1'b1;
+    #1;
+    assert (port_out.subordinate.rsp.ready)
+      else $fatal(1, "HN-F did not accept the line-write subordinate DBID");
+    tick();
+    subordinate_responses_in = '0;
+
+    accept_subordinate_write_packet(2'd0);
+    accept_subordinate_write_packet(2'd1);
+    accept_subordinate_write_packet(2'd2);
+    accept_subordinate_write_packet(2'd3);
+
+    subordinate_responses_in.bits = '0;
+    subordinate_responses_in.bits.opcode = COMP;
+    subordinate_responses_in.bits.src_id = MEMORY_ID;
+    subordinate_responses_in.bits.tgt_id = HOME_ID;
+    subordinate_responses_in.bits.txn_id = 12'h000;
+    subordinate_responses_in.bits.dbid_or_group_id = MEMORY_DBID;
+    subordinate_responses_in.valid = 1'b1;
+    #1;
+    assert (port_out.subordinate.rsp.ready)
+      else $fatal(1, "HN-F did not accept the line-write completion");
+    tick();
+    subordinate_responses_in = '0;
+
+    requester_responses_ready_in.ready = 1'b1;
+    #1;
+    assert (port_out.requester.responses.valid &&
+            port_out.requester.responses.bits.opcode == COMP)
+      else $fatal(1, "HN-F did not complete the line write");
+    tick();
+    assert (port_out.requester.requests.ready)
+      else $fatal(1, "HN-F did not retire the line write");
 
     $display("CHI serialized HN-F simulation passed");
     $finish;

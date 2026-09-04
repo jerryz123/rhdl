@@ -16,11 +16,11 @@ protocol and coherence classifiers, node capabilities, credited node-role
 links, link-local monitors, bounded initial non-coherent and RN-F transaction
 checking, declarative retryable requester control, separate requester-side and
 home-side SAM metadata, an initial HN-I bridge, a serialized dirty-capable HN-F
-manager, and a non-coherent backing RAM.
+manager, and a configurable multi-beat non-coherent backing RAM.
 Its first NoC integration maps CHI
 NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
-SNP, and DAT transports. Multibeat subordinate memory beyond the fragmenter
-profile and HN-F directory optimization are outside the current contract.
+SNP, and DAT transports. HN-F caching, concurrency, and directory optimization
+remain outside the current contract.
 
 ## Architectural boundary
 
@@ -385,8 +385,8 @@ The initial implementation has these explicit limits:
 
 - One power-of-two, naturally aligned address region containing at least two
   physical data beats and backed by `SyncRam1RW`.
-- All supported physical data widths, restricted to transfers that fit in one
-  DAT flit.
+- All supported physical data widths. `max_transfer_bytes` selects native
+  support from one physical DAT beat through a 64-byte cache line.
 - A reusable subordinate transaction-slot module bounds outstanding reads and
   writes. Allocation and matched write DAT use ready-valid flows; DBID-sent and
   completion notifications are valid-only events because they cannot be
@@ -402,20 +402,21 @@ The initial implementation has these explicit limits:
   capabilities and checked by the selected endpoint monitor; they are not silently
   treated as ordinary reads or writes.
 
-Later non-coherent milestones can add multi-flit data, ordering and
-`ReadReceipt`, request retry and Protocol Credits, atomics, exclusives, write
+Later non-coherent milestones can add ordering and `ReadReceipt`, request retry
+and Protocol Credits, atomics, exclusives, write
 zero, cache maintenance, and optional CHI features without changing the
 meaning of the initial subset. Coherent RN-F/HN-F behavior is a separate
 milestone layered above this backing-memory endpoint.
 
-[`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) keeps that RAM contract
-small while allowing an upstream Home to request a full cache line. The
-serialized `CHITransferFragmenter` presents a widened `ReadNoSnp` service,
-issues one downstream request per physical DAT beat, offsets each child
-address, and restores the parent transaction's DataID sequence. Requests that
-already fit one DAT beat pass through unchanged, including the initial write
-profile. Multibeat writes remain explicitly unsupported until both the Home
-and adapter can collect and complete the whole parent write transaction.
+[`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) remains available when a
+subordinate is intentionally configured for narrower transactions. The
+serialized `CHITransferFragmenter` widens the advertised initial read and write
+sizes, issues one downstream request per physical DAT beat, offsets each child
+address, restores the parent read DataID sequence, and translates the parent
+write DBID and completion around the child transactions. Parent write DAT may
+arrive in any legal DataID order and is buffered before the serialized child
+writes. A line-capable `CHIRam` or external memory connects directly and does
+not require this adapter.
 
 [`address-projector.rhdl`](address-projector.rhdl) composes above the
 fragmenter when multiple Homes stripe one global memory region. Its service
@@ -499,15 +500,15 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT destination selection plus typed wrappers around protocol-neutral routed-flow stages; family adapters compile every `(site key, target NodeID)` relation into one decode table before RTL elaboration |
 | [`noc-router.rhdl`](noc-router.rhdl) | A four-plane CHI router shell over independent generic router families, a shared topology-only physical-link manifest, and precompiled local attachment plans |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
-| [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and single-flit completeness checks; general ordering remains planned |
+| [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and complete physical DataID-set checks; general ordering remains planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean`/`ReadUnique` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
 | [`retryable-transaction.rhdl`](retryable-transaction.rhdl) | Declarative response-to-milestone profiles and reusable requester-side RetryAck/PCrdGrant association, request-attempt, and progress state |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
-| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
+| [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` with configurable native transfers through 64 bytes |
 | [`dpi-memory.rhdl`](dpi-memory.rhdl) | Optional native-CHI `CHIDPIMemory` backed by the sparse C++ DPI model in [`dpi/`](dpi/) |
-| [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read fragmentation into single-DAT-beat subordinate transactions while passing through the initial single-beat write profile |
+| [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read and write fragmentation into single-DAT-beat subordinate transactions |
 | [`address-projector.rhdl`](address-projector.rhdl) | Cache-line-striped global service metadata and transparent REQ projection into dense local subordinate addresses |
-| [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |
+| [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial non-coherent profile, including complete multi-beat read and write DataID sets |
 | [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean/Unique reads, dirty snoop intervention, conservative invalidation, and non-snooping subordinate translation |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate executable requester-to-Home and Home-to-subordinate address maps; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
@@ -531,14 +532,14 @@ RN-I, RN-F, mixed RN-F/RN-I, HN-I, HN-F, and transit-only sites without adding
 snoop paths to non-coherent endpoints. Tile modules own router instances,
 while the SoC parent owns inter-tile links. Cache-line-striped Home
 services project sparse global addresses into dense local CHIRam spaces before
-fragmentation.
+optional fragmentation.
 
-The coherent home intentionally has one global transaction slot and no sharer
+The coherent Home intentionally has one global transaction slot and no sharer
 directory. It conservatively broadcasts snoops, accepts dirty intervention,
 and supports the documented SharedClean and Unique acquisition subset. General
-ordering, retry use across broader transaction families,
-multibeat subordinate traffic beyond the fragmenter profile, and a parallel
-directory-based home remain outside the implemented contract.
+ordering, retry use across broader transaction families, Home-side caching, a
+parallel Home, and a precise directory remain outside the implemented
+contract.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run

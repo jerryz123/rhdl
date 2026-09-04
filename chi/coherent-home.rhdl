@@ -206,7 +206,13 @@ fun chi_hnf_response(p :: CHIFlitParams,
 
 fun chi_hnf_snoop(p :: CHIFlitParams,
                   home_node_id :: Bits(p.node_id_width),
-                  request :: CHIReqFlit(p)) :~ CHISnpFlit(p):
+                  request :: CHIReqFlit(p),
+                  ~address: address :: Bits(p.request_address_width) = request.address,
+                  ~opcode: opcode :: CHISnpOpcode = mux(
+                    request.opcode === CHIReqOpcode.ReadClean,
+                    CHISnpOpcode.SnpCleanShared,
+                    CHISnpOpcode.SnpMakeInvalid
+                  )) :~ CHISnpFlit(p):
   wire snoop: CHISnpFlit(p)
   if p.mecid_width > 0
   | snoop.mecid <== bits(0, p.mecid_width)
@@ -218,10 +224,8 @@ fun chi_hnf_snoop(p :: CHIFlitParams,
   snoop.ret_to_src <== Bool(#false)
   snoop.do_not_go_to_sd <== Bool(#false)
   snoop.pas <== request.pas
-  snoop.address <== request.address[3..(3 + p.snoop_address_width)]
-  snoop.opcode <== mux(request.opcode === CHIReqOpcode.ReadClean,
-                       CHISnpOpcode.SnpCleanShared,
-                       CHISnpOpcode.SnpMakeInvalid)
+  snoop.address <== address[3..(3 + p.snoop_address_width)]
+  snoop.opcode <== opcode
   snoop.fwd_txn_id_or_stash_lpid_or_vmid_ext <== bits(0, 12)
   snoop.fwd_nid_or_pbha <== bits(0, p.node_id_width)
   snoop.txn_id <== bits(0, 12)
@@ -232,7 +236,10 @@ fun chi_hnf_snoop(p :: CHIFlitParams,
 fun chi_hnf_downstream_request(p :: CHIFlitParams,
                                home_node_id :: Bits(p.node_id_width),
                                subordinate_node_id :: Bits(p.node_id_width),
-                               request :: CHIReqFlit(p)) :~ CHIReqFlit(p):
+                               request :: CHIReqFlit(p),
+                               ~address: address :: Bits(p.request_address_width) = request.address,
+                               ~size: size :: Bits(6) = request.size_or_num_req,
+                               ~opcode: opcode :: CHIReqOpcode = chi_hnf_subordinate_opcode(request.opcode)) :~ CHIReqFlit(p):
   wire downstream: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
   | downstream.rsvdc <== request.rsvdc
@@ -261,10 +268,10 @@ fun chi_hnf_downstream_request(p :: CHIFlitParams,
   downstream.allow_retry <== Bool(#false)
   downstream.likely_shared <== request.likely_shared
   downstream.pas <== request.pas
-  downstream.address <== request.address
-  downstream.size_or_num_req <== request.size_or_num_req
+  downstream.address <== address
+  downstream.size_or_num_req <== size
   downstream.multi_req <== Bool(#false)
-  downstream.opcode <== chi_hnf_subordinate_opcode(request.opcode)
+  downstream.opcode <== opcode
   downstream.return_txn_id_or_stash_lpid <== bits(0, 12)
   downstream.stash_nid_valid_endian_deep_prefetch_tgt_hint <== Bool(#false)
   downstream.return_nid_or_stash_nid_or_data_target <== home_node_id
@@ -347,7 +354,7 @@ fun chi_hnf_snoop_write_data(p :: CHIFlitParams,
   snoop_write_data.tag <== data.tag
   snoop_write_data.tag_op <== data.tag_op
   snoop_write_data.cache_line_id <== data.cache_line_id
-  snoop_write_data.data_id <== data.data_id
+  snoop_write_data.data_id <== bits(0, 2)
   snoop_write_data.ccid <== data.ccid
   snoop_write_data.dbid_or_mecid <== subordinate_dbid.zext(16)
   snoop_write_data.c_busy <== bits(0, 3)
@@ -431,7 +438,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   reg phase(~init: CHIHNFPhase.Idle)
   reg request(CHIReqFlit(p))
   reg requester_is_rnf(~init: Bool(#false))
-  reg write_data(CHIDatFlit(p))
+  reg write_data(Vec(4, CHIDatFlit(p)))
   reg snoop_data(CHIDatFlit(p))
   reg subordinate_dbid(~init: bits(0, 12))
   reg pending_snoops(~init: empty_snoops)
@@ -476,6 +483,14 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   def requester_data_fire = requester.request_data.fire()
   def write_data_fire = requester_data_fire & receiving_write_data
   def snoop_data_fire = requester_data_fire & receiving_snoop_data
+  def incoming_write_data_id = one_hot(requester.request_data.bits.data_id).as_bits()
+  def expected_write_data_ids = mux(
+    requester_is_rnf,
+    coherent_read_data_ids(request.address, chi_req_size(p, request), p),
+    chi_transfer_data_ids(chi_req_size(p, request), p)
+  )
+  def next_write_data_ids = received_data_ids ||| incoming_write_data_id
+  def final_write_data = next_write_data_ids === expected_write_data_ids
   // A multi-packet snoop response keeps valid asserted while the Home writes
   // each accepted packet downstream. Validate a packet when this phase accepts
   // it; valid is allowed to remain asserted while ready is low between packets.
@@ -498,6 +513,11 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
            "chi_hnf_requester_data_targets_home")
     assert(requester.request_data.bits.txn_id === bits(0, 12),
            "chi_hnf_requester_data_txn")
+  when write_data_fire:
+    assert(or_reduce(expected_write_data_ids & incoming_write_data_id),
+           "chi_hnf_write_data_id_expected")
+    assert(!or_reduce(received_data_ids & incoming_write_data_id),
+           "chi_hnf_write_data_id_unique")
   def snoop_data_id = one_hot(requester.request_data.bits.data_id).as_bits()
   def next_snoop_data_ids = received_snoop_data_ids ||| snoop_data_id
   def expected_snoop_data_ids = coherent_read_data_ids(
@@ -585,13 +605,30 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
 
   def send_subordinate_data = phase === CHIHNFPhase.SendSubordinateData
   def send_snoop_write_data = phase === CHIHNFPhase.SendSnoopWriteData
+  def selected_write_data_id = priority_encoder(received_data_ids.as_vec(Bool))
+  def sent_write_data_id = one_hot(selected_write_data_id).as_bits()
+  def remaining_write_data_ids = received_data_ids & !sent_write_data_id
+  def coherent_base_data_id = mux(
+    chi_req_size(p, request).as_bits() <= bits(4, 3),
+    request.address[4..6],
+    chi_line_data_id(request.address, p)
+  )
+  def downstream_write_data_id = mux(
+    requester_is_rnf,
+    chi_transfer_data_id(
+      chi_transfer_beat(selected_write_data_id - coherent_base_data_id, p),
+      p
+    ),
+    selected_write_data_id
+  )
   subordinate.dat.request.valid <== send_subordinate_data ||| send_snoop_write_data
   subordinate.dat.request.bits <== mux(
     send_snoop_write_data,
     chi_hnf_snoop_write_data(p, home_id, subordinate_id, subordinate_dbid, snoop_data),
     chi_hni_downstream_write_data(
       p,
-      write_data,
+      write_data[selected_write_data_id],
+      downstream_write_data_id,
       request.qos,
       home_id,
       subordinate_id,
@@ -648,8 +685,11 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   elsewhen (requester_response_fire & send_requester_dbid):
     phase <== CHIHNFPhase.ReceiveWriteData
   elsewhen write_data_fire:
-    write_data <== requester.request_data.bits
-    phase <== CHIHNFPhase.SendSnoop
+    write_data <== write_data.updated(requester.request_data.bits.data_id,
+                                      requester.request_data.bits)
+    received_data_ids <== next_write_data_ids
+    when final_write_data:
+      phase <== CHIHNFPhase.SendSnoop
   elsewhen ((phase === CHIHNFPhase.SendSnoop) & !snoops_remaining):
     phase <== CHIHNFPhase.SendSubordinateRequest
   elsewhen snoop_fire:
@@ -675,9 +715,12 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
                   CHIHNFPhase.SendSnoopWriteData,
                   CHIHNFPhase.SendSubordinateData)
   elsewhen subordinate_data_fire:
-    phase <== mux(send_snoop_write_data,
-                  CHIHNFPhase.AwaitSnoopWriteCompletion,
-                  CHIHNFPhase.AwaitSubordinateCompletion)
+    when send_snoop_write_data:
+      phase <== CHIHNFPhase.AwaitSnoopWriteCompletion
+    otherwise:
+      received_data_ids <== remaining_write_data_ids
+      when (or_reduce(remaining_write_data_ids) === Bool(#false)):
+        phase <== CHIHNFPhase.AwaitSubordinateCompletion
   elsewhen (subordinate_response_fire & awaiting_any_subordinate_completion):
     phase <== mux(awaiting_snoop_write_completion,
                   mux(received_snoop_data_ids === expected_snoop_data_ids,
@@ -699,4 +742,11 @@ export:
   CHIHNFConfig
   CHIHNFParams
   CHIHNFIdentity
+  chi_hnf_source_known
+  chi_hnf_source_is_rnf
+  chi_hnf_request_supported
+  chi_hnf_service_supported
+  chi_hnf_response
+  chi_hnf_snoop
+  chi_hnf_downstream_request
   CHIHNF
