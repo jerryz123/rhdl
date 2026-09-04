@@ -5,6 +5,7 @@ import:
   lib("chi/main.rhdl") open
   lib("noc/rtl/router.rhdl") open
   lib("cores/rv5stage/chi.rhdl") open
+  lib("riscv/rtl/pma.rhdl") open
   lib("devices/aclint.rhdl") open
   "rv5stage-tile.rhdl" open
   "memory-tile.rhdl" open
@@ -63,21 +64,28 @@ def tiled_soc_aclint_home = CHIHomeParams("tiled-aclint-home",
                                           CHINodeKind.HNI,
                                           ~max_outstanding: 1)
 
-def tiled_soc_home_map = CHIHomeMap(
+def tiled_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
+def tiled_soc_device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
+def tiled_soc_rv5stage_config = RV5StageCHIConfig(
   tiled_soc_flit,
   (for List (placement in plan.tiled_soc_memories,
              home in tiled_soc_homes):
-     CHIHomeMapEntry(
-       tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
-                                              placement.bank_index),
+     RV5StageCHIRegion(
+       RiscvPhysicalMemoryRegion(
+         tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
+                                                placement.bank_index),
+         tiled_soc_memory_attributes
+       ),
        home
-     )) ++ [CHIHomeMapEntry(AddressSet(tiled_soc_aclint_base,
-                                       AclintWindowBytes - 1),
-                            tiled_soc_aclint_home)]
+     )) ++ [RV5StageCHIRegion(
+              RiscvPhysicalMemoryRegion(
+                AddressSet(tiled_soc_aclint_base, AclintWindowBytes - 1),
+                tiled_soc_device_attributes
+              ),
+              tiled_soc_aclint_home
+            )]
 )
-
-def tiled_soc_rv5stage_config = RV5StageCHIConfig(tiled_soc_flit,
-                                                  tiled_soc_home_map)
+def tiled_soc_home_map :: CHIHomeMap = tiled_soc_rv5stage_config.home_map
 
 def tiled_soc_rv5stage_params:
   for List (placement in plan.tiled_soc_rv5stages):

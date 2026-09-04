@@ -1,0 +1,93 @@
+#lang rhodium
+// Defines transport-independent RISC-V physical-memory regions and hardware access lookup.
+
+import:
+  lib("rhodium/std/bits.rhdl") open
+  lib("rhodium/std/interconnect.rhdl") open
+
+class RiscvPhysicalMemoryAttributes(readable :: Boolean,
+                                    writable :: Boolean,
+                                    executable :: Boolean,
+                                    cacheable :: Boolean,
+                                    atomic :: Boolean):
+  implements StableCircuitParam
+
+class RiscvPhysicalMemoryRegion(address_set :: AddressSet,
+                                attributes :: RiscvPhysicalMemoryAttributes):
+  implements StableCircuitParam
+
+bundle RiscvPhysicalMemoryLookup():
+  mapped: Bool
+  readable: Bool
+  writable: Bool
+  executable: Bool
+  cacheable: Bool
+  atomic: Bool
+
+class RiscvPhysicalMemoryMap(address_width :: PosInt,
+                             regions :: NonemptyList.of(RiscvPhysicalMemoryRegion)):
+  implements StableCircuitParam
+
+  constructor (address_width :: PosInt,
+               regions :: NonemptyList.of(RiscvPhysicalMemoryRegion)):
+    for (region in regions):
+      unless region.address_set.fits_unsigned_width(address_width)
+      | error(~who: #'RiscvPhysicalMemoryMap,
+              "physical-memory region must fit the address width")
+    for (left_index in 0..regions.length()):
+      for (right_index in (left_index + 1)..regions.length()):
+        if regions[left_index].address_set.overlaps(regions[right_index].address_set)
+        | error(~who: #'RiscvPhysicalMemoryMap,
+                "physical-memory regions must not overlap")
+        | #void
+    super(address_width, regions)
+
+  method lookup(raw_address :: Hardware.bits,
+                raw_last_address :: Hardware.bits = raw_address) :~ RiscvPhysicalMemoryLookup():
+    def raw_width = raw_address.type.bit_width()
+    def raw_last_width = raw_last_address.type.bit_width()
+    def address:
+      cond
+      | raw_width < address_width: zext(raw_address, address_width)
+      | raw_width == address_width: raw_address
+      | ~else: raw_address[0..address_width]
+    def last_address:
+      cond
+      | raw_last_width < address_width: zext(raw_last_address, address_width)
+      | raw_last_width == address_width: raw_last_address
+      | ~else: raw_last_address[0..address_width]
+    def fits:
+      if raw_width <= address_width
+      | Bool(#true)
+      | !or_reduce(raw_address[address_width..raw_width])
+    def last_fits:
+      if raw_last_width <= address_width
+      | Bool(#true)
+      | !or_reduce(raw_last_address[address_width..raw_last_width])
+    def mutable mapped = Bool(#false)
+    def mutable readable = Bool(#false)
+    def mutable writable = Bool(#false)
+    def mutable executable = Bool(#false)
+    def mutable cacheable = Bool(#false)
+    def mutable atomic = Bool(#false)
+    for (region in regions):
+      def matches = region.address_set.matches(address) & region.address_set.matches(last_address)
+      mapped := mapped ||| matches
+      readable := mux(matches, Bool(region.attributes.readable), readable)
+      writable := mux(matches, Bool(region.attributes.writable), writable)
+      executable := mux(matches, Bool(region.attributes.executable), executable)
+      cacheable := mux(matches, Bool(region.attributes.cacheable), cacheable)
+      atomic := mux(matches, Bool(region.attributes.atomic), atomic)
+    RiscvPhysicalMemoryLookup():
+      mapped: fits & last_fits & mapped
+      readable: fits & last_fits & mapped & readable
+      writable: fits & last_fits & mapped & writable
+      executable: fits & last_fits & mapped & executable
+      cacheable: fits & last_fits & mapped & cacheable
+      atomic: fits & last_fits & mapped & atomic
+
+export:
+  RiscvPhysicalMemoryAttributes
+  RiscvPhysicalMemoryRegion
+  RiscvPhysicalMemoryLookup
+  RiscvPhysicalMemoryMap

@@ -163,6 +163,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
     pc: fetch_pcs.egress.bits
     instruction: instruction_access.response.bits.instruction
     instruction_page_fault: instruction_access.response.bits.page_fault
+    instruction_access_fault: instruction_access.response.bits.access_fault
   def decode_valid = if_id_pipe.egress.valid & !squash
   def decode_bits = if_id_pipe.egress.bits
 
@@ -268,6 +269,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
     fence: control.fence
     illegal: !decoder.valid
     instruction_page_fault: if_id_pipe.egress.bits.instruction_page_fault
+    instruction_access_fault: if_id_pipe.egress.bits.instruction_access_fault
     immediate: decoded_immediate
     rs1: rs1
     rs2: rs2
@@ -314,7 +316,7 @@ sync_circuit RV5StageCore(xlen :: XLen):
   def memory_aligned = id_ex.bits.memory_width.is_aligned(alu.result)
   def execute_memory_operation :: MemoryOperation = id_ex.bits.memory_operation
   def execute_is_memory = execute_memory_operation.is_memory()
-  def execute_request_fault = id_ex.bits.instruction_page_fault ||| id_ex.bits.illegal ||| (
+  def execute_request_fault = id_ex.bits.instruction_page_fault ||| id_ex.bits.instruction_access_fault ||| id_ex.bits.illegal ||| (
     execute_is_memory & !memory_aligned
   )
   def data_page_fault = execute_is_memory & data_access.request_fault
@@ -333,7 +335,9 @@ sync_circuit RV5StageCore(xlen :: XLen):
                  exception_cause_bits(load_cause, width))
       value: alu.result
   wire execute_exception: RV5StageException(xlen)
-  when (id_ex.bits.instruction_page_fault):
+  when (id_ex.bits.instruction_access_fault):
+    execute_exception <== exception(ExceptionCause.InstructionAccessFault, id_ex.bits.pc)
+  elsewhen (id_ex.bits.instruction_page_fault):
     execute_exception <== exception(ExceptionCause.InstructionPageFault, id_ex.bits.pc)
   elsewhen (id_ex.bits.illegal):
     execute_exception <== exception(ExceptionCause.IllegalInstruction,

@@ -20,6 +20,14 @@ concatenations, and signed or unsigned extension. Architectural bit placement
 therefore remains defined once in `riscv/model`; concrete cores only select
 which described layout their datapath consumes.
 
+[`pma.rhdl`](pma.rhdl) defines transport-independent physical-memory regions,
+their read, write, execute, cacheability, and atomic attributes, and the
+hardware lookup used before a processor issues a physical request. A platform
+authors this map once; a concrete interconnect integration may derive routing
+metadata from the same regions, but interconnect topology and Home ownership do
+not enter this adapter. Range lookup requires the first and last byte of one
+access to belong to the same region, so a transfer cannot straddle attributes.
+
 [`csr.rhdl`](csr.rhdl) converts a pure `CsrId` enum member to the corresponding
 typed `Bits(12)` instruction field. Its `csr_bank` form defines each
 implemented CSR once and derives recognition, read selection, and one exact-key

@@ -2,8 +2,10 @@
 // Defines RV5Stage's native RN-F endpoint parameters and conservative CHI flit constructors.
 
 import:
+  "cache.rhdl".RV5StageCacheLineBytes
   lib("rhodium/std/bits.rhdl") open
   lib("chi/main.rhdl") open
+  "../../riscv/rtl/pma.rhdl" open
 
 def RV5StageRefillResponses = response_profile("rv5stage_refill"):
   retryable
@@ -19,30 +21,60 @@ def RV5StageWriteUniqueResponses = response_profile("rv5stage_write_unique"):
   response [CHIRspOpcode.CompDBIDResp]:
     completes [dbid, completion]
 
+class RV5StageCHIRegion(physical :: RiscvPhysicalMemoryRegion,
+                        home :: CHIHomeParams):
+  implements StableCircuitParam
+
 class RV5StageCHIConfig(flit :: CHIFlitParams,
-                        home_map :: CHIHomeMap):
+                        regions :: NonemptyList.of(RV5StageCHIRegion),
+                        home_map :: CHIHomeMap,
+                        physical_map :: RiscvPhysicalMemoryMap):
   implements StableCircuitParam
 
   property normal_address_sets:
-    home_map.entries.filter(
-      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNF
-    ).map(fun (entry): entry.address_set)
+    regions.filter(
+      ~keep: fun (region): region.physical.attributes.cacheable
+    ).map(fun (region): region.physical.address_set)
   property device_address_sets:
-    home_map.entries.filter(
-      ~keep: fun (entry): entry.home.kind == CHINodeKind.HNI
-    ).map(fun (entry): entry.address_set)
+    regions.filter(
+      ~keep: fun (region): !region.physical.attributes.cacheable
+    ).map(fun (region): region.physical.address_set)
   property has_devices: device_address_sets.length() > 0
 
   constructor (flit :: CHIFlitParams,
-               home_map :: CHIHomeMap):
-    unless home_map.flit == flit
+               regions :: NonemptyList.of(RV5StageCHIRegion)):
+    unless for any (region in regions): region.physical.attributes.cacheable
     | error(~who: #'RV5StageCHIConfig,
-            "Home map must use RV5Stage's CHI flit parameters")
-    unless for any (entry in home_map.entries):
-      entry.home.kind == CHINodeKind.HNF
-    | error(~who: #'RV5StageCHIConfig,
-            "RV5Stage Home map must contain at least one HN-F normal-memory range")
-    super(flit, home_map)
+            "RV5Stage map must contain at least one cacheable normal-memory range")
+    for (region in regions):
+      def attributes = region.physical.attributes
+      unless attributes.readable || attributes.writable || attributes.executable
+      | error(~who: #'RV5StageCHIConfig,
+              "RV5Stage physical-memory region must permit at least one access")
+      unless (!attributes.atomic) || (attributes.readable && attributes.writable)
+      | error(~who: #'RV5StageCHIConfig,
+              "atomic RV5Stage physical memory must be readable and writable")
+      unless attributes.cacheable == (region.home.kind == CHINodeKind.HNF)
+      | error(~who: #'RV5StageCHIConfig,
+              "cacheable RV5Stage regions require HN-F Homes and uncached regions require HN-I Homes")
+      unless (!attributes.cacheable) || (
+        (region.physical.address_set.mask bits.and (RV5StageCacheLineBytes - 1)) == (
+          RV5StageCacheLineBytes - 1
+        )
+      )
+      | error(~who: #'RV5StageCHIConfig,
+              "cacheable RV5Stage regions must contain complete cache lines")
+    super(
+      flit,
+      regions,
+      CHIHomeMap(
+        flit,
+        regions.map(fun (region): CHIHomeMapEntry(region.physical.address_set,
+                                                  region.home))
+      ),
+      RiscvPhysicalMemoryMap(flit.request_address_width,
+                             regions.map(fun (region): region.physical))
+    )
 
 class RV5StageCHIParams(config :: RV5StageCHIConfig,
                         instruction_node_id :: Nat,
@@ -315,6 +347,7 @@ fun rv5stage_chi_write_data(p :: CHIFlitParams,
 export:
   RV5StageRefillResponses
   RV5StageWriteUniqueResponses
+  RV5StageCHIRegion
   RV5StageCHIConfig
   RV5StageCHIParams
   RV5StageCHIIdentity

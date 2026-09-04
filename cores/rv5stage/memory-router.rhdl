@@ -2,38 +2,57 @@
 // Routes translated RV5Stage data accesses between normal L1D and uncached device paths.
 
 import:
-  "chi.rhdl".RV5StageCHIConfig
+  "../load-store.rhdl".MemoryWidth
+  "memory.rhdl" open
   "dcache/protocol.rhdl" open
   "../../riscv/isa/xlen.rhm".XLen
-  lib("rhodium/std/interconnect.rhdl").address_sets_match
+  "../../riscv/rtl/pma.rhdl" open
 
 sync_circuit RV5StageMemoryRouter(xlen :: XLen,
-                                  config :: RV5StageCHIConfig):
+                                  physical_map :: RiscvPhysicalMemoryMap):
   interface core(RV5StageDataAccess(xlen), ~role: responder)
   interface cache(RV5StageDataAccess(xlen), ~role: requester)
   interface device(RV5StageDataAccess(xlen), ~role: requester)
 
-  def request_is_device = address_sets_match(
-    core.request.bits.address,
-    config.device_address_sets
+  def request :: RV5StageDataReq(xlen) = core.request.bits
+  def operation :: MemoryOperation = request.access
+  def last_byte_offset :: Bits(xlen.width) = mux_lookup(
+    request.width,
+    ~default: bits(7, xlen.width),
+    [[MemoryWidth.Byte, bits(0, xlen.width)],
+     [MemoryWidth.Half, bits(1, xlen.width)],
+     [MemoryWidth.Word, bits(3, xlen.width)]]
   )
+  def physical = physical_map.lookup(request.address, request.address +& last_byte_offset)
+  def request_reads = operation.is_load() ||| operation.is_atomic()
+  def request_writes = operation.needs_unique()
+  def request_is_atomic = operation.is_one_of(MemoryOperation.LoadReserved,
+                                              MemoryOperation.StoreConditional,
+                                              MemoryOperation.Atomic)
+  def request_permitted = physical.mapped & (!request_reads ||| physical.readable) & (
+    !request_writes ||| physical.writable
+  ) & (!request_is_atomic ||| physical.atomic)
+  def request_is_device = !physical.cacheable
   def cache_available = device.drained
   def device_available = cache.drained
-  cache.request.valid <== core.request.valid & !request_is_device & cache_available
-  cache.request.bits <== core.request.bits
-  device.request.valid <== core.request.valid & request_is_device & device_available
-  device.request.bits <== core.request.bits
-  core.request.ready <== mux(
+  cache.request.valid <== core.request.valid & request_permitted & !request_is_device & cache_available
+  cache.request.bits <== request
+  device.request.valid <== core.request.valid & request_permitted & request_is_device & device_available
+  device.request.bits <== request
+  def selected_ready = mux(request_is_device,
+                           device_available & device.request.ready,
+                           cache_available & cache.request.ready)
+  core.request.ready <== !request_permitted ||| selected_ready
+  core.request_fault <== core.request.valid & request_permitted & mux(
     request_is_device,
-    device_available & device.request.ready,
-    cache_available & cache.request.ready
+    device.request_fault,
+    cache.request_fault
   )
-  core.request_fault <== mux(request_is_device,
-                             device.request_fault,
-                             cache.request_fault)
-  core.request_access_fault <== mux(request_is_device,
-                                    device.request_access_fault,
-                                    cache.request_access_fault)
+  core.request_access_fault <== core.request.valid & (!request_permitted ||| mux(
+    request_is_device,
+    device.request_access_fault,
+    cache.request_access_fault
+  ))
   core.response.valid <== cache.response.valid ||| device.response.valid
   core.response.bits <== mux(device.response.valid,
                              device.response.bits,

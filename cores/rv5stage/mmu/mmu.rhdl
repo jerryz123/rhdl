@@ -11,11 +11,14 @@ import:
   "../dcache/protocol.rhdl" open
   "../../load-store.rhdl" open
   "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/rtl/pma.rhdl" open
   "../../../riscv/rtl/sv39.rhdl" open
   lib("rhodium/std/bits.rhdl") open
   lib("rhodium/std/flow.rhdl") open
 
-sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
+sync_circuit RV5StageMmu(xlen :: XLen,
+                         physical_map :: RiscvPhysicalMemoryMap,
+                         tlb_entries :: Pow2Int = 8):
   def width = xlen.width
   interface instruction(RV5StageInstructionAccess(xlen), ~role: responder)
   interface data(RV5StageDataAccess(xlen), ~role: responder)
@@ -29,7 +32,7 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
   inst itlb(RV5StageTlb(tlb_entries))
   inst dtlb(RV5StageTlb(tlb_entries))
   inst walker(RV5StagePageTableWalker())
-  inst instruction_owners(Queue(Bool, 2), ~reset_when: instruction.flush)
+  inst instruction_owners(Queue(RV5StageInstructionFault(), 2), ~reset_when: instruction.flush)
 
   def satp_sv39 = if xlen == XLen.X32 | Bool(#false) | satp[60..64] === bits(8, 4)
   def root_ppn = if xlen == XLen.X32 | bits(0, 44) | satp[0..44]
@@ -71,6 +74,7 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
   reg walk_is_data(~init: Bool(#false))
   reg fault_valid(~init: Bool(#false))
   reg fault_is_data(~init: Bool(#false))
+  reg fault_is_access(~init: Bool(#false))
   reg fault_address(Bits(64))
   reg walker_data_quiet_previous(~init: Bool(#false))
   reg walker_data_quiet_twice(~init: Bool(#false))
@@ -96,51 +100,71 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
 
   walker.completion.ready <== !fault_valid
   def walker_completion_fire = fire(walker.completion)
-  itlb.fill.valid <== walker_completion_fire & !walk_is_data
+  itlb.fill.valid <== walker_completion_fire & !walk_is_data & !walker.completion.bits.access_fault
   itlb.fill.bits <== walker.completion.bits
-  dtlb.fill.valid <== walker_completion_fire & walk_is_data
+  dtlb.fill.valid <== walker_completion_fire & walk_is_data & !walker.completion.bits.access_fault
   dtlb.fill.bits <== walker.completion.bits
 
   def latched_instruction_fault = fault_valid & !fault_is_data & (fault_address === instruction_virtual_address)
   def latched_data_fault = fault_valid & fault_is_data & (fault_address === data_virtual_address)
-  def instruction_fault = instruction_translation_enabled & (
-    (itlb.hit & itlb.fault) ||| latched_instruction_fault
+  def instruction_page_fault = instruction_translation_enabled & (
+    (itlb.hit & itlb.fault) ||| (latched_instruction_fault & !fault_is_access)
   )
-  def data_fault = data_translation_enabled & ((dtlb.hit & dtlb.fault) ||| latched_data_fault)
-
-  // Every accepted fetch records whether its response comes from L1I or is a
-  // locally generated page fault, preserving response order across both paths.
-  def instruction_ready_source = mux(
-    instruction_fault,
-    Bool(#true),
-    instruction_memory.request.ready
+  def data_page_fault = data_translation_enabled & (
+    (dtlb.hit & dtlb.fault) ||| (latched_data_fault & !fault_is_access)
   )
+  def instruction_walk_access_fault = instruction_translation_enabled & latched_instruction_fault & fault_is_access
+  def data_walk_access_fault = data_translation_enabled & latched_data_fault & fault_is_access
   def instruction_lookup_ready = !instruction_translation_enabled ||| itlb.hit ||| latched_instruction_fault
-  instruction.request.ready <== instruction_lookup_ready & instruction_owners.ingress.ready & instruction_ready_source
-  instruction_memory.request.valid <== instruction.request.valid & instruction_lookup_ready & !instruction_fault & instruction_owners.ingress.ready
-  instruction_memory.request.bits.address <== if xlen == XLen.X32 | instruction.request.bits.address | mux(
+  def instruction_physical_address = if xlen == XLen.X32 | instruction.request.bits.address | mux(
     instruction_translation_enabled,
     zext(itlb.physical_address, 64),
     instruction.request.bits.address
   )
+  def instruction_physical = physical_map.lookup(
+    instruction_physical_address,
+    instruction_physical_address +& bits(3, width)
+  )
+  def instruction_has_physical_address = !instruction_translation_enabled ||| itlb.hit
+  def instruction_access_fault = instruction_walk_access_fault ||| (
+    instruction_has_physical_address & !instruction_page_fault & !(
+      instruction_physical.executable & instruction_physical.cacheable
+    )
+  )
+  def instruction_local_fault = instruction_page_fault ||| instruction_access_fault
+
+  // Every accepted fetch records whether its response comes from L1I or is a
+  // locally generated architectural fault, preserving response order.
+  def instruction_ready_source = mux(
+    instruction_local_fault,
+    Bool(#true),
+    instruction_memory.request.ready
+  )
+  instruction.request.ready <== instruction_lookup_ready & instruction_owners.ingress.ready & instruction_ready_source
+  instruction_memory.request.valid <== instruction.request.valid & instruction_lookup_ready & !instruction_local_fault & instruction_owners.ingress.ready
+  instruction_memory.request.bits.address <== instruction_physical_address
   instruction_owners.ingress.valid <== fire(instruction.request)
-  instruction_owners.ingress.bits <== instruction_fault
+  instruction_owners.ingress.bits <== RV5StageInstructionFault():
+    page: instruction_page_fault
+    access: instruction_access_fault
   instruction_memory.flush <== instruction.flush
   instruction_memory.invalidate_all <== instruction.invalidate_all
 
   def oldest_instruction_fault = instruction_owners.egress.bits
+  def oldest_instruction_local_fault = oldest_instruction_fault.page ||| oldest_instruction_fault.access
   instruction.response.valid <== instruction_owners.egress.valid & (
-    oldest_instruction_fault ||| instruction_memory.response.valid
+    oldest_instruction_local_fault ||| instruction_memory.response.valid
   )
   instruction.response.bits <== mux(
-    oldest_instruction_fault,
+    oldest_instruction_local_fault,
     RV5StageInstructionResp():
       instruction: bits(0, 32)
-      page_fault: Bool(#true),
+      page_fault: oldest_instruction_fault.page
+      access_fault: oldest_instruction_fault.access,
     instruction_memory.response.bits
   )
   instruction_owners.egress.ready <== instruction.response.ready & instruction.response.valid
-  instruction_memory.response.ready <== instruction.response.ready & instruction_owners.egress.valid & !oldest_instruction_fault
+  instruction_memory.response.ready <== instruction.response.ready & instruction_owners.egress.valid & !oldest_instruction_local_fault
 
   // The walker owns L1D exclusively. Its PTE request waits for two quiescent
   // observations, which drain the cache's nonbackpressured response stage.
@@ -148,16 +172,20 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
   def walk_uses_data_memory = walk_active & walker_data_quiet_twice & walker_memory_request.valid
   def data_forwarding_enabled = !walk_active
   data.request.ready <== mux(
-    data_fault,
+    data_page_fault ||| data_walk_access_fault,
     Bool(#true),
     data_forwarding_enabled & (!data_translation_enabled ||| dtlb.hit) & data_memory.request.ready
   )
-  data.request_fault <== data.request.valid & data_fault
-  data.request_access_fault <== data.request.valid & !data_fault & data_memory.request_access_fault
+  data.request_fault <== data.request.valid & data_page_fault
+  data.request_access_fault <== data.request.valid & !data_page_fault & (
+    data_walk_access_fault ||| (data_forwarding_enabled & data_memory.request_access_fault)
+  )
   data_memory.request.valid <== mux(
     walk_uses_data_memory,
     walker_memory_request.valid,
-    data.request.valid & data_forwarding_enabled & (!data_translation_enabled ||| dtlb.hit) & !data_fault
+    data.request.valid & data_forwarding_enabled & (!data_translation_enabled ||| dtlb.hit) & !(
+      data_page_fault ||| data_walk_access_fault
+    )
   )
   data_memory.request.bits <== mux(
     walk_uses_data_memory,
@@ -183,6 +211,7 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
       tag: data_request.tag
   )
   walker_memory_request.ready <== walk_active & walker_data_quiet_twice & data_memory.request.ready
+  walker.memory.request_access_fault <== data_memory.request_access_fault
   def walker_memory_request_fire = fire(walker_memory_request)
   walker.memory.response.valid <== data_memory.response.valid & walker_memory_outstanding
   walker.memory.response.bits <== if xlen == XLen.X32 | zext(data_memory.response.bits.data, 64) | data_memory.response.bits.data
@@ -190,8 +219,8 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
   data.response.bits <== data_memory.response.bits
   data.drained <== !walk_active & !fault_valid & data_memory.drained
 
-  def instruction_fault_accepted = fire(instruction.request) & instruction_fault
-  def data_fault_accepted = fire(data.request) & data_fault
+  def instruction_fault_accepted = fire(instruction.request) & instruction_local_fault
+  def data_fault_accepted = fire(data.request) & (data_page_fault ||| data_walk_access_fault)
   when (invalidate_all ||| cancel_instruction_walk):
     walk_active <== Bool(#false)
   elsewhen walker_request_fire:
@@ -204,9 +233,12 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
     fault_valid <== Bool(#false)
   elsewhen (instruction_fault_accepted ||| data_fault_accepted):
     fault_valid <== Bool(#false)
-  elsewhen (walker_completion_fire & walker.completion.bits.fault):
+  elsewhen (walker_completion_fire & (
+    walker.completion.bits.fault ||| walker.completion.bits.access_fault
+  )):
     fault_valid <== Bool(#true)
     fault_is_data <== walk_is_data
+    fault_is_access <== walker.completion.bits.access_fault
     fault_address <== walker.completion.bits.virtual_address
 
   when walker_request_fire:
@@ -217,7 +249,7 @@ sync_circuit RV5StageMmu(xlen :: XLen, tlb_entries :: Pow2Int = 8):
     walker_data_quiet_twice <== data_quiet & walker_data_quiet_previous
   when (invalidate_all ||| cancel_instruction_walk):
     walker_memory_outstanding <== Bool(#false)
-  elsewhen walker_memory_request_fire:
+  elsewhen (walker_memory_request_fire & !walker.memory.request_access_fault):
     walker_memory_outstanding <== Bool(#true)
   elsewhen (data_memory.response.valid & walker_memory_outstanding):
     walker_memory_outstanding <== Bool(#false)

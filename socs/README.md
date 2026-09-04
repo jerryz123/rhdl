@@ -45,6 +45,10 @@ transactions, and the fragmenter expands 64-byte cache-line reads into the
 RAM's one-DAT-beat transactions.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
 HN-I, and terminate directly at the CHI-native ACLINT SN-I.
+Both paths are derived from one physical-region table. Each region pairs
+RISC-V read, write, execute, cacheability, and atomic attributes with its CHI
+Home; the SoC derives the `CHIHomeMap` from those same entries. Requests outside
+the table therefore trap in RV5Stage instead of entering CHI without a Home.
 
 The FESVR implementation and generated executable harness remain owned by
 [`sims/`](../sims/README.md).
@@ -61,8 +65,8 @@ uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, and
 one ACLINT SN-I.
 
 Four 8 KiB banks cover `0x80000000` through `0x80007fff` with 64-byte
-cache-line striping. One shared `CHIHomeMap` maps successive lines to successive
-HN-Fs. Each memory tile projects its sparse global bank addresses into a dense
+cache-line striping. One shared physical-region table maps successive lines to
+successive HN-Fs and derives the CHI Home map. Each memory tile projects its sparse global bank addresses into a dense
 local RAM address space before fragmentation. The 16 coherent requester
 endpoints plus the host RN-F connect to all four HN-Fs, while the eight uncached
 requester endpoints connect to the ACLINT HN-I. Together they compile 76 REQ,

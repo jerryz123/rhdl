@@ -22,7 +22,8 @@ core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   `--> ../../rhodium/std/scoreboard.rhdl
 rv5stage.rhdl                         composition selects core-flow.rhdl
   |--> mmu/{mmu,tlb,walker}.rhdl    Sv39 translation before physical L1s
-  |--> memory-router.rhdl            device-region split after translation
+  |     `--> ../../riscv/rtl/pma.rhdl
+  |--> memory-router.rhdl            physical permission and device split
   |--> uncached.rhdl                 one-outstanding RN-I device transaction
   |--> cache.rhdl                   fixed 64-byte private-L1 line geometry
   |--> chi.rhdl                     RN-F parameters and flit construction
@@ -45,9 +46,12 @@ controller while retaining their transaction-specific payload and completion
 state. The wrapper composes the core, MMU, and caches into
 two ready-valid RN-F channel bundles; physical credited links belong to system
 integration when the channels actually cross a CHI link boundary.
-`RV5StageCHIConfig` supplies the structural flit shape and one shared
-`CHIHomeMap`; each cache transaction decodes its address once and retains the
-selected HN-F NodeID through retries, data, and completion acknowledgement.
+`RV5StageCHIConfig` supplies the structural flit shape and one list of physical
+regions paired with their CHI Homes. It derives both the transport-independent
+RISC-V physical-memory map and the `CHIHomeMap`, so permissions, cacheability,
+and CHI routing cannot describe different address ranges. Each cache
+transaction decodes its address once and retains the selected HN-F NodeID
+through retries, data, and completion acknowledgement.
 `RV5StageCHIParams` is host-only placement metadata for the instruction and data
 RN-F NodeIDs plus the optional device RN-I NodeID, while `RV5StageCHIIdentity`
 carries those IDs into an occurrence as hardware inputs. Consequently one
@@ -203,7 +207,10 @@ required dirty bit is clear rather than modifying page tables in hardware.
 Instruction, load, and store page faults carry the original virtual address
 through the ordinary precise WB trap path. M-mode instruction accesses remain
 Bare; data accesses honor `MPRV`, while `SUM` and `MXR` affect permission
-checks. `SFENCE.VMA` is a serializing operation and currently performs a full
+checks. Physical fetches are also checked for a mapped, executable, cacheable region, data
+accesses are checked for the required read, write, and atomic attributes, and
+PTE-read rejection becomes an access fault on the original access. These
+locally rejected requests never enter CHI. `SFENCE.VMA` is a serializing operation and currently performs a full
 ITLB/DTLB flush regardless of its operands. A `satp` write conservatively does
 the same. Sv48/Sv57, nonzero ASIDs, hardware A/D updates, PBMT, NAPOT, PMP,
 multi-hart shootdown, and speculative walks remain outside this slice.
@@ -256,17 +263,18 @@ core lookup is exactly `xlen.width` bits. Tags and coherence state remain
 line-indexed. Line geometry is not a top-level generator option. The required
 `~chi:` parameter is integration
 policy: the containing SoC supplies RV5Stage's RN-F NodeIDs, physical flit
-parameters, and Home map. RV5Stage has no implicit standalone fabric. The RN-F
-boundary uses the explicit CHI request
-address width and asserts that a wider accepted address fits before narrowing.
+parameters, and physical regions paired with Homes. RV5Stage has no implicit
+standalone fabric. The core rejects requests whose high address bits do not fit
+the configured physical width before the narrower CHI boundary.
 The core exposes an `Irrevocable(Bits(xlen.width))` start consumer, a
 packed `RV5StageInterrupts` input independent of any ACLINT, PLIC, or AIA block,
 a platform `hart_id`, a 64-bit platform `time_counter`, separate instruction
 and data RN-F channel ports, a device RN-I channel port, and a sticky `fault`
 output for a rejected misaligned external start address. Physical addresses in configured device
 sets bypass L1D through a one-outstanding uncached engine; cacheable addresses
-retain the coherent L1D path. Device LR, SC, and AMO requests raise load or
-store access faults instead of being weakened into ordinary MMIO. Architectural
+retain the coherent L1D path. Unmapped requests and accesses denied by their
+region attributes raise instruction, load, or store access faults. Device LR,
+SC, and AMO requests likewise fault instead of being weakened into ordinary MMIO. Architectural
 instruction exceptions enter the CSR trap machinery. L1I hits have one-cycle latency and
 one-request-per-cycle throughput. In both caches, a one-stage lookup flow
 carries request context beside the SRAM access; a miss is filtered and mapped

@@ -6,14 +6,21 @@ import:
   lib("cores/rv5stage/chi.rhdl") open
   lib("chi/main.rhdl") open
   lib("riscv/isa/xlen.rhm") open
+  lib("riscv/rtl/pma.rhdl") open
 
 def example_flit = CHIFlitParams()
 def example_home = CHIHomeParams("example-home", 1, CHINodeKind.HNF, ~max_outstanding: 2)
-def example_home_map = CHIHomeMap(
+def example_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
+def example_chi_config = RV5StageCHIConfig(
   example_flit,
-  [CHIHomeMapEntry(AddressSet(0, (1 << example_flit.request_address_width) - 1), example_home)]
+  [RV5StageCHIRegion(
+     RiscvPhysicalMemoryRegion(
+       AddressSet(0, (1 << example_flit.request_address_width) - 1),
+       example_memory_attributes
+     ),
+     example_home
+   )]
 )
-def example_chi_config = RV5StageCHIConfig(example_flit, example_home_map)
 def design = elaborate(RV5Stage(XLen.X64, ~chi: example_chi_config))
 
 def verilog_reference = @str|<<{
@@ -38,7 +45,7 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [63:0] address; logic [2:0] access; logic [3:0] atomic; logic [1:0] width; logic unsigned_0; logic [63:0] data; logic [4:0] tag; }
     RV5StageDataReq;
-  typedef struct packed {logic [31:0] instruction; logic page_fault; }
+  typedef struct packed {logic [31:0] instruction; logic page_fault; logic access_fault; }
     RV5StageInstructionResp;
   typedef struct packed {logic [63:0] data; logic [4:0] tag; } RV5StageDataResp;
   typedef
@@ -62,7 +69,7 @@ def verilog_reference = @str|<<{
     SystemControl;
   typedef struct packed {logic [1:0] action; } FenceControl;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [2:0] memory_operation; logic [3:0] memory_atomic; logic [1:0] memory_width; logic memory_unsigned; RV5StageMultiplyControl multiply_control; RV5StageDivideControl divide_control; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; FenceControl fence; logic illegal; logic instruction_page_fault; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [2:0] memory_operation; logic [3:0] memory_atomic; logic [1:0] memory_width; logic memory_unsigned; RV5StageMultiplyControl multiply_control; RV5StageDivideControl divide_control; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; FenceControl fence; logic illegal; logic instruction_page_fault; logic instruction_access_fault; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; }
     DecodeExecute;
   typedef
     struct packed {logic [63:0] left; logic [63:0] right; RV5StageMultiplyControl control; logic [4:0] rd; }
@@ -91,7 +98,7 @@ def verilog_reference = @str|<<{
   typedef struct packed {logic taken; } BranchResult;
   typedef struct packed {logic [4:0] rd; logic [63:0] value; } RV5StageMultiplyCompletion;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; logic instruction_page_fault; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic instruction_page_fault; logic instruction_access_fault; }
     FetchDecode;
   typedef struct packed {logic valid; logic [63:0] cause; logic [63:0] value; }
     RV5StageException;
@@ -119,11 +126,15 @@ def verilog_reference = @str|<<{
   typedef struct packed {logic [11:0] address; logic [63:0] value; } RiscvCounterWrite;
   typedef struct packed {logic all; logic [4:0] except; } AndExclusionReduction;
   typedef
-    struct packed {logic [63:0] virtual_address; logic [55:0] physical_address; logic [43:0] ppn; logic [1:0] level; logic user; logic read; logic write; logic execute; logic global_mapping; logic accessed; logic dirty; logic fault; }
+    struct packed {logic [63:0] virtual_address; logic [55:0] physical_address; logic [43:0] ppn; logic [1:0] level; logic user; logic read; logic write; logic execute; logic global_mapping; logic accessed; logic dirty; logic fault; logic access_fault; }
     RV5StageTranslationResult;
+  typedef struct packed {logic page; logic access; } RV5StageInstructionFault;
   typedef
     struct packed {logic [63:0] virtual_address; logic [43:0] root_ppn; logic [1:0] access; logic [1:0] privilege; logic sum; logic mxr; }
     RV5StageTranslationRequest;
+  typedef
+    struct packed {logic mapped; logic readable; logic writable; logic executable; logic cacheable; logic atomic; }
+    RiscvPhysicalMemoryLookup;
   typedef
     struct packed {logic valid; logic [26:0] vpn; logic [43:0] ppn; logic [1:0] level; logic user; logic read; logic write; logic execute; logic global_mapping; logic accessed; logic dirty; }
     RV5StageTlbEntry;
@@ -403,7 +414,8 @@ module RV5StageCore(
   wire FetchDecode                   _GEN_31 =
     '{pc: _fetch_pcs_egress_out.bits,
       instruction: instruction_access_in.response.bits.instruction,
-      instruction_page_fault: instruction_access_in.response.bits.page_fault};
+      instruction_page_fault: instruction_access_in.response.bits.page_fault,
+      instruction_access_fault: instruction_access_in.response.bits.access_fault};
   assign _GEN_16 = _GEN_24 | _pipe_stage_ingress_out.ready;
   wire                               _GEN_32 = _pipe_stage_egress_out.valid & ~_GEN_24;
   wire [63:0]                        _GEN_33 =
@@ -528,6 +540,7 @@ module RV5StageCore(
       fence: _decoder_control.fence,
       illegal: (~_decoder_valid),
       instruction_page_fault: _pipe_stage_egress_out.bits.instruction_page_fault,
+      instruction_access_fault: _pipe_stage_egress_out.bits.instruction_access_fault,
       immediate: _GEN_35[_decoder_control.operand.immediate],
       rs1: (_pipe_stage_egress_out.bits.instruction[19:15]),
       rs2: (_pipe_stage_egress_out.bits.instruction[24:20]),
@@ -562,67 +575,72 @@ module RV5StageCore(
                  ? _alu_result[1:0] == 2'h0
                  : _alu_result[2:0] == 3'h0));
   wire RV5StageException             _GEN_60 =
-    '{valid: (1'h1), cause: (64'hC), value: _id_ex_pipe_egress_out.bits.pc};
+    '{valid: (1'h1), cause: (64'h1), value: _id_ex_pipe_egress_out.bits.pc};
   wire RV5StageException             _GEN_61 =
+    '{valid: (1'h1), cause: (64'hC), value: _id_ex_pipe_egress_out.bits.pc};
+  wire RV5StageException             _GEN_62 =
     '{valid: (1'h1),
       cause: (64'h2),
       value: {32'h0, _id_ex_pipe_egress_out.bits.instruction}};
-  wire RV5StageException             _GEN_62 =
+  wire RV5StageException             _GEN_63 =
     '{valid: (1'h1), cause: (64'h0), value: _GEN_13};
-  wire                               _GEN_63 =
-    _id_ex_pipe_egress_out.bits.memory_operation == 3'h4;
   wire                               _GEN_64 =
-    _id_ex_pipe_egress_out.bits.memory_operation == 3'h5;
+    _id_ex_pipe_egress_out.bits.memory_operation == 3'h4;
   wire                               _GEN_65 =
-    |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h2, _GEN_63, _GEN_64};
-  wire RV5StageException             _GEN_66 =
-    '{valid: (1'h1), cause: {62'h3, _GEN_65, 1'h1}, value: _alu_result};
+    _id_ex_pipe_egress_out.bits.memory_operation == 3'h5;
+  wire                               _GEN_66 =
+    |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h2, _GEN_64, _GEN_65};
   wire RV5StageException             _GEN_67 =
-    '{valid: (1'h1), cause: {62'h1, _GEN_65, 1'h1}, value: _alu_result};
+    '{valid: (1'h1), cause: {62'h3, _GEN_66, 1'h1}, value: _alu_result};
   wire RV5StageException             _GEN_68 =
-    '{valid: (1'h1), cause: {62'h1, _GEN_65, 1'h0}, value: _alu_result};
+    '{valid: (1'h1), cause: {62'h1, _GEN_66, 1'h1}, value: _alu_result};
   wire RV5StageException             _GEN_69 =
-    '{valid: (1'h0), cause: (64'bx), value: (64'bx)};
+    '{valid: (1'h1), cause: {62'h1, _GEN_66, 1'h0}, value: _alu_result};
   wire RV5StageException             _GEN_70 =
-    _id_ex_pipe_egress_out.bits.instruction_page_fault
+    '{valid: (1'h0), cause: (64'bx), value: (64'bx)};
+  wire RV5StageException             _GEN_71 =
+    _id_ex_pipe_egress_out.bits.instruction_access_fault
       ? _GEN_60
-      : _id_ex_pipe_egress_out.bits.illegal
+      : _id_ex_pipe_egress_out.bits.instruction_page_fault
           ? _GEN_61
-          : _branch_resolver_result_out.bits.taken & (|(_GEN_13[1:0]))
+          : _id_ex_pipe_egress_out.bits.illegal
               ? _GEN_62
-              : _GEN_58 & data_access_in.request_fault
-                  ? _GEN_66
-                  : _GEN_58 & data_access_in.request_access_fault
+              : _branch_resolver_result_out.bits.taken & (|(_GEN_13[1:0]))
+                  ? _GEN_63
+                  : _GEN_58 & data_access_in.request_fault
                       ? _GEN_67
-                      : _GEN_59 ? _GEN_68 : _GEN_69;
-  wire [63:0]                        _GEN_71 = _id_ex_pipe_egress_out.bits.pc + 64'h4;
-  wire                               _GEN_72 = |_mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_73 =
+                      : _GEN_58 & data_access_in.request_access_fault
+                          ? _GEN_68
+                          : _GEN_59 ? _GEN_69 : _GEN_70;
+  wire [63:0]                        _GEN_72 = _id_ex_pipe_egress_out.bits.pc + 64'h4;
+  wire                               _GEN_73 = |_mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_74 =
     _mem_wb_pipe_egress_out.valid & _GEN_47 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_72;
-  wire RV5StageMultiplyIssue         _GEN_74 =
+    & _GEN_73;
+  wire RV5StageMultiplyIssue         _GEN_75 =
     '{left: _GEN_55,
       right: _GEN_56,
       control: _id_ex_pipe_egress_out.bits.multiply_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_75 =
+  wire                               _GEN_76 =
     _mem_wb_pipe_egress_out.valid & _GEN_48 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_72;
-  wire RV5StageDivideIssue           _GEN_76 =
+    & _GEN_73;
+  wire RV5StageDivideIssue           _GEN_77 =
     '{dividend: _GEN_55,
       divisor: _GEN_56,
       control: _id_ex_pipe_egress_out.bits.divide_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_77 = faulted | _GEN_22 | _GEN_20;
-  wire BranchResolverRequest         _GEN_78 =
+  wire                               _GEN_78 = faulted | _GEN_22 | _GEN_20;
+  wire BranchResolverRequest         _GEN_79 =
     '{left: _GEN_55,
       right: _GEN_56,
       control: _fork_stage_egress_0_out.bits.branch_control};
-  wire                               _GEN_79 =
+  wire                               _GEN_80 =
     _GEN_58
     & ~(_id_ex_pipe_egress_out.bits.instruction_page_fault
+        | _id_ex_pipe_egress_out.bits.instruction_access_fault
         | _id_ex_pipe_egress_out.bits.illegal | _GEN_59);
-  wire RV5StageDataReq               _GEN_80 =
+  wire RV5StageDataReq               _GEN_81 =
     '{address: _alu_result,
       access: _id_ex_pipe_egress_out.bits.memory_operation,
       atomic: _fork_stage_egress_1_out.bits.memory_atomic,
@@ -632,23 +650,23 @@ module RV5StageCore(
       tag:
         ((|{_id_ex_pipe_egress_out.bits.memory_operation == 3'h1,
             _id_ex_pipe_egress_out.bits.memory_operation == 3'h3,
-            _GEN_63,
-            _GEN_64})
+            _GEN_64,
+            _GEN_65})
            ? _fork_stage_egress_1_out.bits.rd
            : 5'h0)};
   assign _GEN_12 = _GEN_11.ready;
   assign _GEN_11 = data_access_in.request;
-  wire ExecuteMemory                 _GEN_81 =
+  wire ExecuteMemory                 _GEN_82 =
     '{pc: _fork_stage_egress_4_out.bits.pc,
-      resume_pc: (_branch_resolver_result_out.bits.taken ? _GEN_13 : _GEN_71),
+      resume_pc: (_branch_resolver_result_out.bits.taken ? _GEN_13 : _GEN_72),
       instruction: _fork_stage_egress_4_out.bits.instruction,
       writeback_source: _fork_stage_egress_4_out.bits.writeback_source,
-      writeback_enable: (_fork_stage_egress_4_out.bits.writeback_enable & ~_GEN_70.valid),
+      writeback_enable: (_fork_stage_egress_4_out.bits.writeback_enable & ~_GEN_71.valid),
       rd: _fork_stage_egress_4_out.bits.rd,
       result:
-        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2 ? _GEN_71 : _alu_result),
-      multiply_issue: _GEN_74,
-      divide_issue: _GEN_76,
+        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2 ? _GEN_72 : _alu_result),
+      multiply_issue: _GEN_75,
+      divide_issue: _GEN_77,
       system: _fork_stage_egress_4_out.bits.system,
       fence: _fork_stage_egress_4_out.bits.fence,
       csr_address: (_fork_stage_egress_4_out.bits.instruction[31:20]),
@@ -656,15 +674,15 @@ module RV5StageCore(
         (_id_ex_pipe_egress_out.bits.system.immediate
            ? {59'h0, _id_ex_pipe_egress_out.bits.instruction[19:15]}
            : _GEN_55),
-      exception_valid: _GEN_70.valid,
-      exception_cause: _GEN_70.cause,
-      exception_value: _GEN_70.value};
-  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_70.valid;
+      exception_valid: _GEN_71.valid,
+      exception_cause: _GEN_71.cause,
+      exception_value: _GEN_71.value};
+  assign _GEN_10 = _branch_resolver_result_out.valid & _GEN_71.valid;
   assign _GEN_9 =
-    _branch_resolver_result_out.valid & ~_GEN_70.valid
+    _branch_resolver_result_out.valid & ~_GEN_71.valid
     & _branch_resolver_result_out.bits.taken;
-  wire                               _GEN_82 = _ex_mem_pipe_egress_out.valid & ~_GEN_20;
-  wire MemoryWriteback               _GEN_83 =
+  wire                               _GEN_83 = _ex_mem_pipe_egress_out.valid & ~_GEN_20;
+  wire MemoryWriteback               _GEN_84 =
     '{pc: _ex_mem_pipe_egress_out.bits.pc,
       resume_pc: _ex_mem_pipe_egress_out.bits.resume_pc,
       instruction: _ex_mem_pipe_egress_out.bits.instruction,
@@ -682,12 +700,12 @@ module RV5StageCore(
       exception_cause: _ex_mem_pipe_egress_out.bits.exception_cause,
       exception_value: _ex_mem_pipe_egress_out.bits.exception_value};
   assign _GEN_8 =
-    _GEN_82 & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_42 == 3'h0
+    _GEN_83 & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_42 == 3'h0
     & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h5 & _GEN_45;
   assign _GEN_7 = _ex_mem_pipe_egress_out.bits.rd;
   assign _GEN_6 = _ex_mem_pipe_egress_out.bits.result;
-  wire                               _GEN_84 = _GEN_49 == 3'h0;
-  wire RV5StageCsrCommit             _GEN_85 =
+  wire                               _GEN_85 = _GEN_49 == 3'h0;
+  wire RV5StageCsrCommit             _GEN_86 =
     '{pc: _mem_wb_pipe_egress_out.bits.pc,
       instruction: _mem_wb_pipe_egress_out.bits.instruction,
       rd: _mem_wb_pipe_egress_out.bits.rd,
@@ -700,117 +718,117 @@ module RV5StageCore(
       exception_value: _mem_wb_pipe_egress_out.bits.exception_value};
   assign _GEN_5 =
     _mem_wb_pipe_egress_out.valid & _GEN_50 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_72;
+    & _GEN_73;
   assign _GEN_4 = _mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_86 =
+  wire                               _GEN_87 =
     _mem_wb_pipe_egress_out.bits.writeback_source != 3'h5;
   assign _GEN_3 =
-    _mem_wb_pipe_egress_out.valid & _GEN_84 & _GEN_86
-    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_72;
+    _mem_wb_pipe_egress_out.valid & _GEN_85 & _GEN_87
+    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_73;
   assign _GEN_2 = _mem_wb_pipe_egress_out.bits.rd;
   assign _GEN_1 = _mem_wb_pipe_egress_out.bits.value;
-  wire RegisterFileWrite             _GEN_87 =
+  wire RegisterFileWrite             _GEN_88 =
     '{address: _mem_wb_pipe_egress_out.bits.rd,
       data:
         (_mem_wb_pipe_egress_out.bits.writeback_source == 3'h5
            ? _csrs_writeback_value
            : _GEN_1)};
-  wire                               _GEN_88 =
+  wire                               _GEN_89 =
     data_access_in.response.valid & (|data_access_in.response.bits.tag);
-  wire RegisterFileWrite             _GEN_89 =
+  wire RegisterFileWrite             _GEN_90 =
     '{address: data_access_in.response.bits.tag, data: data_access_in.response.bits.data};
   `ifndef SYNTHESIS
     assert property (@(posedge clock) disable iff (reset)
-                       ~_GEN_88 | _arbiter_stage_ingress_0_out.ready);
+                       ~_GEN_89 | _arbiter_stage_ingress_0_out.ready);
   `endif // not def SYNTHESIS
-  wire RegisterFileWrite             _GEN_90 =
+  wire RegisterFileWrite             _GEN_91 =
     '{address: _multiplier_completion_out.bits.rd,
       data: _multiplier_completion_out.bits.value};
-  wire RegisterFileWrite             _GEN_91 =
+  wire RegisterFileWrite             _GEN_92 =
     '{address: _divider_completion_out.bits.rd, data: _divider_completion_out.bits.value};
   assign _GEN_0 = _arbiter_stage_egress_out.valid;
   assign _GEN = _arbiter_stage_egress_out.bits.address;
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_92 =
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_93 =
     '{valid: _GEN_0, bits: _GEN};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_93 =
-    '{valid: _divider_completion_out.valid, bits: _GEN_91};
   wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_94 =
-    '{valid: _multiplier_completion_out.valid, bits: _GEN_90};
+    '{valid: _divider_completion_out.valid, bits: _GEN_92};
   wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_95 =
-    '{valid: _GEN_88, bits: _GEN_89};
-  wire struct packed {logic valid; RV5StageDivideIssue bits; } _GEN_96 =
-    '{valid: _GEN_75, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
-  wire struct packed {logic valid; RV5StageMultiplyIssue bits; } _GEN_97 =
-    '{valid: _GEN_73, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_98 =
+    '{valid: _multiplier_completion_out.valid, bits: _GEN_91};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_96 =
+    '{valid: _GEN_89, bits: _GEN_90};
+  wire struct packed {logic valid; RV5StageDivideIssue bits; } _GEN_97 =
+    '{valid: _GEN_76, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
+  wire struct packed {logic valid; RV5StageMultiplyIssue bits; } _GEN_98 =
+    '{valid: _GEN_74, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_99 =
     '{valid:
-        (_mem_wb_pipe_egress_out.valid & _GEN_84
-         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_86 | _csrs_writeback_valid)),
-      bits: _GEN_87};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_99 =
+        (_mem_wb_pipe_egress_out.valid & _GEN_85
+         & _mem_wb_pipe_egress_out.bits.write_enable & (_GEN_87 | _csrs_writeback_valid)),
+      bits: _GEN_88};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_100 =
     '{valid: _GEN_5, bits: _mem_wb_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; RV5StageCsrCommit bits; } _GEN_100 =
-    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_85};
-  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_101 =
-    '{valid: _GEN_82, bits: _GEN_83};
-  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_102 =
-    '{valid: _fork_stage_egress_4_out.valid, bits: _GEN_81};
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_103 =
-    '{valid: (_fork_stage_egress_1_out.valid & _GEN_79), bits: _GEN_80};
-  wire struct packed {logic ready; } _GEN_104 = '{ready: (~_GEN_79 | _GEN_12)};
-  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_105 =
-    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_78};
-  wire struct packed {logic ready; } _GEN_106 =
+  wire struct packed {logic valid; RV5StageCsrCommit bits; } _GEN_101 =
+    '{valid: _mem_wb_pipe_egress_out.valid, bits: _GEN_86};
+  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_102 =
+    '{valid: _GEN_83, bits: _GEN_84};
+  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_103 =
+    '{valid: _fork_stage_egress_4_out.valid, bits: _GEN_82};
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_104 =
+    '{valid: (_fork_stage_egress_1_out.valid & _GEN_80), bits: _GEN_81};
+  wire struct packed {logic ready; } _GEN_105 = '{ready: (~_GEN_80 | _GEN_12)};
+  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_106 =
+    '{valid: _fork_stage_egress_0_out.valid, bits: _GEN_79};
+  wire struct packed {logic ready; } _GEN_107 =
     '{ready:
         (~(_GEN_38 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_44)
          | _divider_available
          & ~(_ex_mem_pipe_egress_out.valid & _GEN_41
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_45) & ~_GEN_75)};
-  wire struct packed {logic ready; } _GEN_107 =
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_45) & ~_GEN_76)};
+  wire struct packed {logic ready; } _GEN_108 =
     '{ready:
         (~(_GEN_37 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_44)
          | _multiplier_available
          & ~(_ex_mem_pipe_egress_out.valid & _GEN_40
-             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_45) & ~_GEN_73)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_108 =
-    '{valid: (_id_ex_pipe_egress_out.valid & ~_GEN_77),
+             & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_45) & ~_GEN_74)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_109 =
+    '{valid: (_id_ex_pipe_egress_out.valid & ~_GEN_78),
       bits: _id_ex_pipe_egress_out.bits};
-  wire struct packed {logic ready; } _GEN_109 =
-    '{ready: (_GEN_77 | _fork_stage_ingress_out.ready)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_110 =
+  wire struct packed {logic ready; } _GEN_110 =
+    '{ready: (_GEN_78 | _fork_stage_ingress_out.ready)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_111 =
     '{valid: (_GEN_32 & ~_GEN_53), bits: _GEN_54};
-  wire struct packed {logic ready; } _GEN_111 = '{ready: (_GEN_24 | _GEN_15)};
-  wire struct packed {logic valid; FetchDecode bits; } _GEN_112 =
+  wire struct packed {logic ready; } _GEN_112 = '{ready: (_GEN_24 | _GEN_15)};
+  wire struct packed {logic valid; FetchDecode bits; } _GEN_113 =
     '{valid:
         (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_24),
       bits: _GEN_31};
-  wire struct packed {logic ready; } _GEN_113 =
-    '{ready: (_GEN_16 & instruction_access_in.response.valid)};
   wire struct packed {logic ready; } _GEN_114 =
+    '{ready: (_GEN_16 & instruction_access_in.response.valid)};
+  wire struct packed {logic ready; } _GEN_115 =
     '{ready: (_GEN_16 & _fetch_pcs_egress_out.valid)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_115 =
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_116 =
     '{valid: (_GEN_29 & instruction_access_in.request.ready), bits: fetch_pc};
-  wire RV5StageInstructionReq        _GEN_116 = '{address: fetch_pc};
-  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_117 =
-    '{valid: _GEN_30, bits: _GEN_116};
+  wire RV5StageInstructionReq        _GEN_117 = '{address: fetch_pc};
+  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_118 =
+    '{valid: _GEN_30, bits: _GEN_117};
   Pipe id_ex_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_110),
-    .egress_in   (_GEN_109),
+    .ingress_in  (_GEN_111),
+    .egress_in   (_GEN_110),
     .ingress_out (_id_ex_pipe_ingress_out),
     .egress_out  (_id_ex_pipe_egress_out)
   );
   ValidPipe ex_mem_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_102),
+    .ingress_in (_GEN_103),
     .egress_out (_ex_mem_pipe_egress_out)
   );
   ValidPipe_1 mem_wb_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_101),
+    .ingress_in (_GEN_102),
     .egress_out (_mem_wb_pipe_egress_out)
   );
   RV5StageInstructionDecoder decoder (
@@ -823,7 +841,7 @@ module RV5StageCore(
     .reset          (reset),
     .read_address_1 (_id_ex_pipe_egress_out.bits.rs1),
     .read_address_2 (_id_ex_pipe_egress_out.bits.rs2),
-    .writes_0_in    (_GEN_98),
+    .writes_0_in    (_GEN_99),
     .writes_1_in    (_arbiter_stage_egress_out),
     .read_data_1    (_registers_read_data_1),
     .read_data_2    (_registers_read_data_2)
@@ -841,13 +859,13 @@ module RV5StageCore(
     .result  (_alu_result)
   );
   BranchResolver branch_resolver (
-    .request_in (_GEN_105),
+    .request_in (_GEN_106),
     .result_out (_branch_resolver_result_out)
   );
   RV5StageMultiplier multiplier (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_97),
+    .issue_in       (_GEN_98),
     .completion_in  (_arbiter_stage_ingress_1_out),
     .completion_out (_multiplier_completion_out),
     .available      (_multiplier_available)
@@ -855,7 +873,7 @@ module RV5StageCore(
   RV5StageDivider divider (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_96),
+    .issue_in       (_GEN_97),
     .completion_in  (_arbiter_stage_ingress_2_out),
     .completion_out (_divider_completion_out),
     .available      (_divider_available)
@@ -863,8 +881,8 @@ module RV5StageCore(
   Scoreboard scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_99),
-    .clear_in (_GEN_92),
+    .set_in   (_GEN_100),
+    .clear_in (_GEN_93),
     .busy     (_scoreboard_busy)
   );
   RV5StageCsrFile csrs (
@@ -876,9 +894,9 @@ module RV5StageCore(
     .interrupt_boundary
       (~_id_ex_pipe_egress_out.valid & ~_ex_mem_pipe_egress_out.valid & ~_GEN_51
        & (~_mem_wb_pipe_egress_out.valid | ~_mem_wb_pipe_egress_out.bits.exception_valid
-          & ~_GEN_46 & _GEN_84)),
+          & ~_GEN_46 & _GEN_85)),
     .interrupt_pc       (_GEN_33),
-    .commit_in          (_GEN_100),
+    .commit_in          (_GEN_101),
     .redirect_out       (_csrs_redirect_out),
     .interrupt_request  (_csrs_interrupt_request),
     .writeback_valid    (_csrs_writeback_valid),
@@ -891,8 +909,8 @@ module RV5StageCore(
   Queue fetch_pcs (
     .clock       (clock),
     .reset       (reset | _GEN_28),
-    .ingress_in  (_GEN_115),
-    .egress_in   (_GEN_113),
+    .ingress_in  (_GEN_116),
+    .egress_in   (_GEN_114),
     .ingress_out (_fetch_pcs_ingress_out),
     .egress_out  (_fetch_pcs_egress_out),
     .count       (/* unused */)
@@ -900,17 +918,17 @@ module RV5StageCore(
   Pipe_1 pipe_stage (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_112),
-    .egress_in   (_GEN_111),
+    .ingress_in  (_GEN_113),
+    .egress_in   (_GEN_112),
     .ingress_out (_pipe_stage_ingress_out),
     .egress_out  (_pipe_stage_egress_out)
   );
   AtomicFork fork_stage (
-    .ingress_in   (_GEN_108),
+    .ingress_in   (_GEN_109),
     .egress_0_in  (_GEN_17),
-    .egress_1_in  (_GEN_104),
-    .egress_2_in  (_GEN_107),
-    .egress_3_in  (_GEN_106),
+    .egress_1_in  (_GEN_105),
+    .egress_2_in  (_GEN_108),
+    .egress_3_in  (_GEN_107),
     .egress_4_in  (_GEN_17),
     .ingress_out  (_fork_stage_ingress_out),
     .egress_0_out (_fork_stage_egress_0_out),
@@ -920,9 +938,9 @@ module RV5StageCore(
     .egress_4_out (_fork_stage_egress_4_out)
   );
   Arbiter arbiter_stage (
-    .ingress_0_in  (_GEN_95),
-    .ingress_1_in  (_GEN_94),
-    .ingress_2_in  (_GEN_93),
+    .ingress_0_in  (_GEN_96),
+    .ingress_1_in  (_GEN_95),
+    .ingress_2_in  (_GEN_94),
     .egress_in     (_GEN_17),
     .ingress_0_out (_arbiter_stage_ingress_0_out),
     .ingress_1_out (_arbiter_stage_ingress_1_out),
@@ -958,8 +976,8 @@ module RV5StageCore(
   end // always @(posedge)
   assign start_out = '{ready: _GEN_25};
   assign instruction_access_out =
-    '{flush: _GEN_28, invalidate_all: _GEN_18, request: _GEN_117, response: _GEN_114};
-  assign data_access_out = '{request: _GEN_103};
+    '{flush: _GEN_28, invalidate_all: _GEN_18, request: _GEN_118, response: _GEN_115};
+  assign data_access_out = '{request: _GEN_104};
   assign fault = faulted;
   assign translation_flush = _csrs_translation_flush;
 endmodule
@@ -4465,7 +4483,8 @@ module RV5StageMmu(
 );
 
   wire struct packed {logic ready; } _instruction_owners_ingress_out;
-  wire struct packed {logic valid; logic bits; } _instruction_owners_egress_out;
+  wire struct packed {logic valid; RV5StageInstructionFault bits; }
+    _instruction_owners_egress_out;
   wire struct packed {logic ready; } _walker_request_out;
   wire struct packed {logic valid; RV5StageTranslationResult bits; }
     _walker_completion_out;
@@ -4478,15 +4497,14 @@ module RV5StageMmu(
   wire                               _itlb_hit;
   wire                               _itlb_fault;
   wire [55:0]                        _itlb_physical_address;
-  wire RV5StageInstructionResp       _GEN = '{instruction: 32'h0, page_fault: 1'h1};
-  wire                               _GEN_0 = satp[63:60] == 4'h8;
-  wire                               _GEN_1 = _GEN_0 & privilege != 2'h3;
-  wire [1:0]                         _GEN_2 =
+  wire                               _GEN = satp[63:60] == 4'h8;
+  wire                               _GEN_0 = _GEN & privilege != 2'h3;
+  wire [1:0]                         _GEN_1 =
     mstatus[12:11] == 2'h0 ? 2'h0 : {mstatus[12:11] != 2'h1, 1'h1};
-  wire                               _GEN_3 = (&privilege) & mstatus[17];
-  wire [1:0]                         _GEN_4 = _GEN_3 ? _GEN_2 : privilege;
-  wire                               _GEN_5 = _GEN_0 & _GEN_4 != 2'h3;
-  wire [1:0]                         _GEN_6 =
+  wire                               _GEN_2 = (&privilege) & mstatus[17];
+  wire [1:0]                         _GEN_3 = _GEN_2 ? _GEN_1 : privilege;
+  wire                               _GEN_4 = _GEN & _GEN_3 != 2'h3;
+  wire [1:0]                         _GEN_5 =
     (|{data_in.request.bits.access == 3'h2,
        data_in.request.bits.access == 3'h4,
        data_in.request.bits.access == 3'h5})
@@ -4496,52 +4514,69 @@ module RV5StageMmu(
   reg                                walk_is_data;
   reg                                fault_valid;
   reg                                fault_is_data;
+  reg                                fault_is_access;
   reg  [63:0]                        fault_address;
   reg                                walker_data_quiet_previous;
   reg                                walker_data_quiet_twice;
   reg                                walker_memory_outstanding;
-  wire                               _GEN_7 =
+  wire                               _GEN_6 =
     data_memory_in.drained & ~data_memory_in.response.valid;
-  wire                               _GEN_8 = ~walk_active & ~fault_valid;
+  wire                               _GEN_7 = ~walk_active & ~fault_valid;
+  wire                               _GEN_8 =
+    instruction_in.request.valid & _GEN_0 & ~_itlb_hit;
   wire                               _GEN_9 =
-    instruction_in.request.valid & _GEN_1 & ~_itlb_hit;
-  wire                               _GEN_10 =
-    _GEN_8 & ~_GEN_9 & data_in.request.valid & _GEN_5 & ~_dtlb_hit;
-  wire                               _GEN_11 = _GEN_8 & _GEN_9 | _GEN_10;
-  wire RV5StageTranslationRequest    _GEN_12 =
+    _GEN_7 & ~_GEN_8 & data_in.request.valid & _GEN_4 & ~_dtlb_hit;
+  wire                               _GEN_10 = _GEN_7 & _GEN_8 | _GEN_9;
+  wire RV5StageTranslationRequest    _GEN_11 =
     '{virtual_address:
-        (_GEN_10 ? data_in.request.bits.address : instruction_in.request.bits.address),
+        (_GEN_9 ? data_in.request.bits.address : instruction_in.request.bits.address),
       root_ppn: (satp[43:0]),
-      access: (_GEN_10 ? _GEN_6 : 2'h0),
-      privilege: (_GEN_10 & _GEN_3 ? _GEN_2 : privilege),
+      access: (_GEN_9 ? _GEN_5 : 2'h0),
+      privilege: (_GEN_9 & _GEN_2 ? _GEN_1 : privilege),
       sum: (mstatus[18]),
       mxr: (mstatus[19])};
-  wire                               _GEN_13 = _GEN_11 & _walker_request_out.ready;
-  wire                               _GEN_14 =
+  wire                               _GEN_12 = _GEN_10 & _walker_request_out.ready;
+  wire                               _GEN_13 =
     invalidate_all | instruction_in.flush & walk_active & ~walk_is_data;
-  wire                               _GEN_15 =
+  wire                               _GEN_14 =
     _walker_completion_out.valid & ~fault_valid;
-  wire                               _GEN_16 =
+  wire                               _GEN_15 =
     fault_valid & ~fault_is_data & fault_address == instruction_in.request.bits.address;
+  wire                               _GEN_16 =
+    fault_valid & fault_is_data & fault_address == data_in.request.bits.address;
   wire                               _GEN_17 =
-    _GEN_1 & (_itlb_hit & _itlb_fault | _GEN_16);
+    _GEN_0 & (_itlb_hit & _itlb_fault | _GEN_15 & ~fault_is_access);
   wire                               _GEN_18 =
-    _GEN_5
-    & (_dtlb_hit & _dtlb_fault | fault_valid & fault_is_data
-       & fault_address == data_in.request.bits.address);
-  wire                               _GEN_19 = ~_GEN_1 | _itlb_hit | _GEN_16;
-  wire                               _GEN_20 =
-    _GEN_19 & _instruction_owners_ingress_out.ready
-    & (_GEN_17 | instruction_memory_in.request.ready);
-  wire                               _GEN_21 =
+    _GEN_4 & (_dtlb_hit & _dtlb_fault | _GEN_16 & ~fault_is_access);
+  wire                               _GEN_19 = _GEN_4 & _GEN_16 & fault_is_access;
+  wire                               _GEN_20 = ~_GEN_0 | _itlb_hit | _GEN_15;
+  wire [63:0]                        _GEN_21 =
+    _GEN_0 ? {8'h0, _itlb_physical_address} : instruction_in.request.bits.address;
+  wire [64:0]                        _GEN_22 = {1'h0, _GEN_21} + 65'h3;
+  wire                               _GEN_23 =
+    _GEN_0 & _GEN_15 & fault_is_access | (~_GEN_0 | _itlb_hit) & ~_GEN_17
+    & ~(_GEN_21[63:44] == 20'h0 & _GEN_22[64:44] == 21'h0);
+  wire                               _GEN_24 = _GEN_17 | _GEN_23;
+  wire                               _GEN_25 =
+    _GEN_20 & _instruction_owners_ingress_out.ready
+    & (_GEN_24 | instruction_memory_in.request.ready);
+  wire RV5StageInstructionFault      _GEN_26 = '{page: _GEN_17, access: _GEN_23};
+  wire                               _GEN_27 =
+    _instruction_owners_egress_out.bits.page | _instruction_owners_egress_out.bits.access;
+  wire                               _GEN_28 =
     _instruction_owners_egress_out.valid
-    & (_instruction_owners_egress_out.bits | instruction_memory_in.response.valid);
-  wire                               _GEN_22 =
+    & (_GEN_27 | instruction_memory_in.response.valid);
+  wire RV5StageInstructionResp       _GEN_29 =
+    '{instruction: (32'h0),
+      page_fault: _instruction_owners_egress_out.bits.page,
+      access_fault: _instruction_owners_egress_out.bits.access};
+  wire                               _GEN_30 =
     walk_active & walker_data_quiet_twice & _walker_memory_out.request.valid;
-  wire                               _GEN_23 = ~_GEN_5 | _dtlb_hit;
-  wire                               _GEN_24 =
-    _GEN_18 | ~walk_active & _GEN_23 & data_memory_in.request.ready;
-  wire RV5StageDataReq               _GEN_25 =
+  wire                               _GEN_31 = ~_GEN_4 | _dtlb_hit;
+  wire                               _GEN_32 =
+    _GEN_18 | _GEN_19 | ~walk_active & _GEN_31 & data_memory_in.request.ready;
+  wire                               _GEN_33 = _GEN_18 | _GEN_19;
+  wire RV5StageDataReq               _GEN_34 =
     '{address: _walker_memory_out.request.bits,
       access: (3'h1),
       atomic: (4'h0),
@@ -4549,70 +4584,70 @@ module RV5StageMmu(
       unsigned_0: (1'h1),
       data: (64'h0),
       tag: (5'h0)};
-  wire RV5StageDataReq               _GEN_26 =
-    '{address: (_GEN_5 ? {8'h0, _dtlb_physical_address} : data_in.request.bits.address),
+  wire RV5StageDataReq               _GEN_35 =
+    '{address: (_GEN_4 ? {8'h0, _dtlb_physical_address} : data_in.request.bits.address),
       access: data_in.request.bits.access,
       atomic: data_in.request.bits.atomic,
       width: data_in.request.bits.width,
       unsigned_0: data_in.request.bits.unsigned_0,
       data: data_in.request.bits.data,
       tag: data_in.request.bits.tag};
-  wire                               _GEN_27 =
+  wire                               _GEN_36 =
     walk_active & walker_data_quiet_twice & data_memory_in.request.ready;
-  wire                               _GEN_28 =
+  wire                               _GEN_37 =
     data_memory_in.response.valid & walker_memory_outstanding;
-  wire                               _GEN_29 =
-    instruction_in.request.valid & _GEN_20 & _GEN_17 | data_in.request.valid & _GEN_24
-    & _GEN_18;
-  wire                               _GEN_30 =
-    _GEN_15 & _walker_completion_out.bits.fault;
-  wire                               _GEN_31 = _GEN_14 | _GEN_29 | ~_GEN_30;
-  wire struct packed {logic ready; } _GEN_32 =
-    '{ready: (instruction_in.response.ready & _GEN_21)};
-  wire struct packed {logic valid; logic bits; } _GEN_33 =
-    '{valid: (instruction_in.request.valid & _GEN_20), bits: _GEN_17};
-  wire struct packed {logic ready; } _GEN_34 = '{ready: _GEN_27};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_35 =
-    '{valid: _GEN_28, bits: data_memory_in.response.bits.data};
+  wire                               _GEN_38 =
+    instruction_in.request.valid & _GEN_25 & _GEN_24 | data_in.request.valid & _GEN_32
+    & _GEN_33;
+  wire                               _GEN_39 =
+    _GEN_14
+    & (_walker_completion_out.bits.fault | _walker_completion_out.bits.access_fault);
+  wire                               _GEN_40 = _GEN_13 | _GEN_38 | ~_GEN_39;
+  wire struct packed {logic ready; } _GEN_41 =
+    '{ready: (instruction_in.response.ready & _GEN_28)};
+  wire struct packed {logic valid; RV5StageInstructionFault bits; } _GEN_42 =
+    '{valid: (instruction_in.request.valid & _GEN_25), bits: _GEN_26};
+  wire struct packed {logic ready; } _GEN_43 = '{ready: _GEN_36};
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_44 =
+    '{valid: _GEN_37, bits: data_memory_in.response.bits.data};
   wire
-    struct packed {struct packed {logic ready; } request; struct packed {logic valid; logic [63:0] bits; } response; }
-    _GEN_36 = '{request: _GEN_34, response: _GEN_35};
-  wire struct packed {logic ready; } _GEN_37 = '{ready: (~fault_valid)};
-  wire struct packed {logic valid; RV5StageTranslationRequest bits; } _GEN_38 =
-    '{valid: _GEN_11, bits: _GEN_12};
-  wire struct packed {logic valid; RV5StageTranslationResult bits; } _GEN_39 =
-    '{valid: (_GEN_15 & walk_is_data), bits: _walker_completion_out.bits};
-  wire struct packed {logic valid; RV5StageTranslationResult bits; } _GEN_40 =
-    '{valid: (_GEN_15 & ~walk_is_data), bits: _walker_completion_out.bits};
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_41 =
+    struct packed {struct packed {logic ready; } request; logic request_access_fault; struct packed {logic valid; logic [63:0] bits; } response; }
+    _GEN_45 =
+    '{request: _GEN_43,
+      request_access_fault: data_memory_in.request_access_fault,
+      response: _GEN_44};
+  wire struct packed {logic ready; } _GEN_46 = '{ready: (~fault_valid)};
+  wire struct packed {logic valid; RV5StageTranslationRequest bits; } _GEN_47 =
+    '{valid: _GEN_10, bits: _GEN_11};
+  wire struct packed {logic valid; RV5StageTranslationResult bits; } _GEN_48 =
+    '{valid: (_GEN_14 & walk_is_data & ~_walker_completion_out.bits.access_fault),
+      bits: _walker_completion_out.bits};
+  wire struct packed {logic valid; RV5StageTranslationResult bits; } _GEN_49 =
+    '{valid: (_GEN_14 & ~walk_is_data & ~_walker_completion_out.bits.access_fault),
+      bits: _walker_completion_out.bits};
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_50 =
     '{valid:
-        (_GEN_22
+        (_GEN_30
            ? _walker_memory_out.request.valid
-           : data_in.request.valid & ~walk_active & _GEN_23 & ~_GEN_18),
-      bits: (_GEN_22 ? _GEN_25 : _GEN_26)};
-  wire RV5StageInstructionReq        _GEN_42 =
-    '{address:
-        (_GEN_1 ? {8'h0, _itlb_physical_address} : instruction_in.request.bits.address)};
-  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_43 =
+           : data_in.request.valid & ~walk_active & _GEN_31 & ~_GEN_33),
+      bits: (_GEN_30 ? _GEN_34 : _GEN_35)};
+  wire RV5StageInstructionReq        _GEN_51 = '{address: _GEN_21};
+  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_52 =
     '{valid:
-        (instruction_in.request.valid & _GEN_19 & ~_GEN_17
+        (instruction_in.request.valid & _GEN_20 & ~_GEN_24
          & _instruction_owners_ingress_out.ready),
-      bits: _GEN_42};
-  wire struct packed {logic ready; } _GEN_44 =
+      bits: _GEN_51};
+  wire struct packed {logic ready; } _GEN_53 =
     '{ready:
         (instruction_in.response.ready & _instruction_owners_egress_out.valid
-         & ~_instruction_owners_egress_out.bits)};
-  wire struct packed {logic ready; } _GEN_45 = '{ready: _GEN_24};
-  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_46 =
+         & ~_GEN_27)};
+  wire struct packed {logic ready; } _GEN_54 = '{ready: _GEN_32};
+  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_55 =
     '{valid: (data_memory_in.response.valid & ~walker_memory_outstanding),
       bits: data_memory_in.response.bits};
-  wire struct packed {logic ready; } _GEN_47 = '{ready: _GEN_20};
-  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_48 =
-    '{valid: _GEN_21,
-      bits:
-        (_instruction_owners_egress_out.bits
-           ? _GEN
-           : instruction_memory_in.response.bits)};
+  wire struct packed {logic ready; } _GEN_56 = '{ready: _GEN_25};
+  wire struct packed {logic valid; RV5StageInstructionResp bits; } _GEN_57 =
+    '{valid: _GEN_28, bits: (_GEN_27 ? _GEN_29 : instruction_memory_in.response.bits)};
   RV5StageTlb itlb (
     .clock            (clock),
     .reset            (reset),
@@ -4621,9 +4656,9 @@ module RV5StageMmu(
     .privilege        (privilege),
     .sum              (mstatus[18]),
     .mxr              (mstatus[19]),
-    .enabled          (_GEN_1),
+    .enabled          (_GEN_0),
     .invalidate_all   (invalidate_all),
-    .fill_in          (_GEN_40),
+    .fill_in          (_GEN_49),
     .hit              (_itlb_hit),
     .fault            (_itlb_fault),
     .physical_address (_itlb_physical_address)
@@ -4632,13 +4667,13 @@ module RV5StageMmu(
     .clock            (clock),
     .reset            (reset),
     .virtual_address  (data_in.request.bits.address),
-    .access           (_GEN_6),
-    .privilege        (_GEN_4),
+    .access           (_GEN_5),
+    .privilege        (_GEN_3),
     .sum              (mstatus[18]),
     .mxr              (mstatus[19]),
-    .enabled          (_GEN_5),
+    .enabled          (_GEN_4),
     .invalidate_all   (invalidate_all),
-    .fill_in          (_GEN_39),
+    .fill_in          (_GEN_48),
     .hit              (_dtlb_hit),
     .fault            (_dtlb_fault),
     .physical_address (_dtlb_physical_address)
@@ -4646,10 +4681,10 @@ module RV5StageMmu(
   RV5StagePageTableWalker walker (
     .clock          (clock),
     .reset          (reset),
-    .request_in     (_GEN_38),
-    .completion_in  (_GEN_37),
-    .memory_in      (_GEN_36),
-    .cancel         (_GEN_14),
+    .request_in     (_GEN_47),
+    .completion_in  (_GEN_46),
+    .memory_in      (_GEN_45),
+    .cancel         (_GEN_13),
     .request_out    (_walker_request_out),
     .completion_out (_walker_completion_out),
     .memory_out     (_walker_memory_out)
@@ -4657,8 +4692,8 @@ module RV5StageMmu(
   Queue_1 instruction_owners (
     .clock       (clock),
     .reset       (reset | instruction_in.flush),
-    .ingress_in  (_GEN_33),
-    .egress_in   (_GEN_32),
+    .ingress_in  (_GEN_42),
+    .egress_in   (_GEN_41),
     .ingress_out (_instruction_owners_ingress_out),
     .egress_out  (_instruction_owners_egress_out),
     .count       (/* unused */)
@@ -4669,43 +4704,47 @@ module RV5StageMmu(
       walk_is_data <= 1'h0;
       fault_valid <= 1'h0;
       fault_is_data <= 1'h0;
+      fault_is_access <= 1'h0;
       walker_data_quiet_previous <= 1'h0;
       walker_data_quiet_twice <= 1'h0;
       walker_memory_outstanding <= 1'h0;
     end
     else begin
-      walk_active <= ~_GEN_14 & (_GEN_13 | ~_GEN_15 & walk_active);
-      walk_is_data <= _GEN_14 | ~_GEN_13 ? walk_is_data : _GEN_10;
-      fault_valid <= ~_GEN_14 & ~_GEN_29 & (_GEN_30 | fault_valid);
-      fault_is_data <= _GEN_31 ? fault_is_data : walk_is_data;
+      walk_active <= ~_GEN_13 & (_GEN_12 | ~_GEN_14 & walk_active);
+      walk_is_data <= _GEN_13 | ~_GEN_12 ? walk_is_data : _GEN_9;
+      fault_valid <= ~_GEN_13 & ~_GEN_38 & (_GEN_39 | fault_valid);
+      fault_is_data <= _GEN_40 ? fault_is_data : walk_is_data;
+      fault_is_access <=
+        _GEN_40 ? fault_is_access : _walker_completion_out.bits.access_fault;
       walker_data_quiet_previous <=
-        ~_GEN_13 & (walk_active ? _GEN_7 : walker_data_quiet_previous);
+        ~_GEN_12 & (walk_active ? _GEN_6 : walker_data_quiet_previous);
       walker_data_quiet_twice <=
-        ~_GEN_13
-        & (walk_active ? _GEN_7 & walker_data_quiet_previous : walker_data_quiet_twice);
+        ~_GEN_12
+        & (walk_active ? _GEN_6 & walker_data_quiet_previous : walker_data_quiet_twice);
       walker_memory_outstanding <=
-        ~_GEN_14
-        & (_walker_memory_out.request.valid & _GEN_27 | ~_GEN_28
-           & walker_memory_outstanding);
+        ~_GEN_13
+        & (_walker_memory_out.request.valid & _GEN_36
+           & ~data_memory_in.request_access_fault | ~_GEN_37 & walker_memory_outstanding);
     end
   end // always @(posedge)
   always @(posedge clock)
     fault_address <=
-      _GEN_31 ? fault_address : _walker_completion_out.bits.virtual_address;
-  assign instruction_out = '{request: _GEN_47, response: _GEN_48};
+      _GEN_40 ? fault_address : _walker_completion_out.bits.virtual_address;
+  assign instruction_out = '{request: _GEN_56, response: _GEN_57};
   assign data_out =
-    '{request: _GEN_45,
+    '{request: _GEN_54,
       request_fault: (data_in.request.valid & _GEN_18),
       request_access_fault:
-        (data_in.request.valid & ~_GEN_18 & data_memory_in.request_access_fault),
-      response: _GEN_46,
+        (data_in.request.valid & ~_GEN_18
+         & (_GEN_19 | ~walk_active & data_memory_in.request_access_fault)),
+      response: _GEN_55,
       drained: (~walk_active & ~fault_valid & data_memory_in.drained)};
   assign instruction_memory_out =
     '{flush: instruction_in.flush,
       invalidate_all: instruction_in.invalidate_all,
-      request: _GEN_43,
-      response: _GEN_44};
-  assign data_memory_out = '{request: _GEN_41};
+      request: _GEN_52,
+      response: _GEN_53};
+  assign data_memory_out = '{request: _GEN_50};
 endmodule
 
 module RV5StageTlb(
@@ -4930,15 +4969,15 @@ module RV5StageTlb(
 endmodule
 
 module RV5StagePageTableWalker(
-  input                                                                                                                     clock,
-                                                                                                                            reset,
-  input  struct packed {logic valid; RV5StageTranslationRequest bits; }                                                     request_in,
-  input  struct packed {logic ready; }                                                                                      completion_in,
-  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; logic [63:0] bits; } response; } memory_in,
-  input                                                                                                                     cancel,
-  output struct packed {logic ready; }                                                                                      request_out,
-  output struct packed {logic valid; RV5StageTranslationResult bits; }                                                      completion_out,
-  output struct packed {struct packed {logic valid; logic [63:0] bits; } request; struct packed {logic ready; } response; } memory_out
+  input                                                                                                                                                 clock,
+                                                                                                                                                        reset,
+  input  struct packed {logic valid; RV5StageTranslationRequest bits; }                                                                                 request_in,
+  input  struct packed {logic ready; }                                                                                                                  completion_in,
+  input  struct packed {struct packed {logic ready; } request; logic request_access_fault; struct packed {logic valid; logic [63:0] bits; } response; } memory_in,
+  input                                                                                                                                                 cancel,
+  output struct packed {logic ready; }                                                                                                                  request_out,
+  output struct packed {logic valid; RV5StageTranslationResult bits; }                                                                                  completion_out,
+  output struct packed {struct packed {logic valid; logic [63:0] bits; } request; struct packed {logic ready; } response; }                             memory_out
 );
 
   reg  [1:0]                         state;
@@ -4969,12 +5008,14 @@ module RV5StagePageTableWalker(
        | memory_in.response.bits[4]);
   wire                               _GEN_9 = _GEN_8 | _GEN_7;
   wire                               _GEN_10 = &state;
-  wire [24:0]                        _GEN_11 = {25{request_in.bits.virtual_address[38]}};
-  wire                               _GEN_12 =
-    request_in.bits.virtual_address[63:39] == _GEN_11;
-  wire                               _GEN_13 =
-    request_in.bits.virtual_address[63:39] != _GEN_11;
-  wire RV5StageTranslationResult     _GEN_14 =
+  wire                               _GEN_11 = _GEN_4 & memory_in.request_access_fault;
+  wire                               _GEN_12 = _GEN_4 & ~memory_in.request_access_fault;
+  wire [24:0]                        _GEN_13 = {25{request_in.bits.virtual_address[38]}};
+  wire                               _GEN_14 =
+    request_in.bits.virtual_address[63:39] == _GEN_13;
+  wire                               _GEN_15 =
+    request_in.bits.virtual_address[63:39] != _GEN_13;
+  wire RV5StageTranslationResult     _GEN_16 =
     '{virtual_address: request_in.bits.virtual_address,
       physical_address: (56'h0),
       ppn: (44'h0),
@@ -4986,8 +5027,23 @@ module RV5StagePageTableWalker(
       global_mapping: (1'h0),
       accessed: (1'h0),
       dirty: (1'h0),
-      fault: (1'h1)};
-  wire RV5StageTranslationResult     _GEN_15 =
+      fault: (1'h1),
+      access_fault: (1'h0)};
+  wire RV5StageTranslationResult     _GEN_17 =
+    '{virtual_address: operation.virtual_address,
+      physical_address: (56'h0),
+      ppn: (44'h0),
+      level: level,
+      user: (1'h0),
+      read: (1'h0),
+      write: (1'h0),
+      execute: (1'h0),
+      global_mapping: (1'h0),
+      accessed: (1'h0),
+      dirty: (1'h0),
+      fault: (1'h0),
+      access_fault: (1'h1)};
+  wire RV5StageTranslationResult     _GEN_18 =
     '{virtual_address: operation.virtual_address,
       physical_address:
         (_GEN_2
@@ -5016,9 +5072,10 @@ module RV5StagePageTableWalker(
                       ? memory_in.response.bits[1] | operation.mxr
                         & memory_in.response.bits[3]
                       : memory_in.response.bits[2] & memory_in.response.bits[7])
-             & memory_in.response.bits[6]))};
-  wire                               _GEN_16 = _GEN_4 | ~_GEN_6 | _GEN_9;
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_17 =
+             & memory_in.response.bits[6])),
+      access_fault: (1'h0)};
+  wire                               _GEN_19 = _GEN_11 | _GEN_12 | ~_GEN_6 | _GEN_9;
+  wire struct packed {logic valid; logic [63:0] bits; } _GEN_20 =
     '{valid: _GEN_3,
       bits:
         ({8'h0, table_ppn, 12'h0}
@@ -5029,7 +5086,7 @@ module RV5StagePageTableWalker(
                   ? operation.virtual_address[29:21]
                   : operation.virtual_address[38:30],
             3'h0})};
-  wire struct packed {logic ready; } _GEN_18 = '{ready: _GEN_5};
+  wire struct packed {logic ready; } _GEN_21 = '{ready: _GEN_5};
   always @(posedge clock) begin
     if (reset) begin
       state <= 2'h0;
@@ -5041,19 +5098,21 @@ module RV5StagePageTableWalker(
         cancel
           ? 2'h0
           : _GEN_0
-              ? (_GEN_12 ? 2'h1 : _GEN_13 ? 2'h3 : state)
-              : _GEN_4
-                  ? 2'h2
-                  : _GEN_6
-                      ? (_GEN_9 ? 2'h3 : ~_GEN_9 ? 2'h1 : state)
-                      : _GEN_10 & completion_in.ready ? 2'h0 : state;
-      level <= cancel ? level : _GEN_0 ? 2'h2 : _GEN_16 ? level : level - 2'h1;
+              ? (_GEN_14 ? 2'h1 : _GEN_15 ? 2'h3 : state)
+              : _GEN_11
+                  ? 2'h3
+                  : _GEN_12
+                      ? 2'h2
+                      : _GEN_6
+                          ? (_GEN_9 ? 2'h3 : ~_GEN_9 ? 2'h1 : state)
+                          : _GEN_10 & completion_in.ready ? 2'h0 : state;
+      level <= cancel ? level : _GEN_0 ? 2'h2 : _GEN_19 ? level : level - 2'h1;
       global_mapping <=
         cancel
           ? global_mapping
           : ~_GEN_0
-            & (~_GEN_4 & _GEN_6 & ~_GEN_9 & ~_GEN_9 & memory_in.response.bits[5]
-               | global_mapping);
+            & (~_GEN_11 & ~_GEN_12 & _GEN_6 & ~_GEN_9 & ~_GEN_9
+               & memory_in.response.bits[5] | global_mapping);
     end
   end // always @(posedge)
   always @(posedge clock) begin
@@ -5063,35 +5122,35 @@ module RV5StagePageTableWalker(
         ? table_ppn
         : _GEN_0
             ? request_in.bits.root_ppn
-            : _GEN_16 ? table_ppn : memory_in.response.bits[53:10];
+            : _GEN_19 ? table_ppn : memory_in.response.bits[53:10];
     result <=
       cancel
         ? result
         : _GEN_0
-            ? (_GEN_12 | ~_GEN_13 ? result : _GEN_14)
-            : _GEN_4 | ~(_GEN_6 & _GEN_9) ? result : _GEN_15;
+            ? (_GEN_14 | ~_GEN_15 ? result : _GEN_16)
+            : _GEN_11 ? _GEN_17 : _GEN_12 | ~(_GEN_6 & _GEN_9) ? result : _GEN_18;
   end // always @(posedge)
   assign request_out = '{ready: _GEN};
   assign completion_out = '{valid: _GEN_10, bits: result};
-  assign memory_out = '{request: _GEN_17, response: _GEN_18};
+  assign memory_out = '{request: _GEN_20, response: _GEN_21};
 endmodule
 
 module Queue_1(
-  input                                            clock,
-                                                   reset,
-  input  struct packed {logic valid; logic bits; } ingress_in,
-  input  struct packed {logic ready; }             egress_in,
-  output struct packed {logic ready; }             ingress_out,
-  output struct packed {logic valid; logic bits; } egress_out,
-  output [1:0]                                     count
+  input                                                               clock,
+                                                                      reset,
+  input  struct packed {logic valid; RV5StageInstructionFault bits; } ingress_in,
+  input  struct packed {logic ready; }                                egress_in,
+  output struct packed {logic ready; }                                ingress_out,
+  output struct packed {logic valid; RV5StageInstructionFault bits; } egress_out,
+  output [1:0]                                                        count
 );
 
-  wire       _GEN;
-  wire       _GEN_0;
-  wire       _write_pointer_value;
-  wire       _read_pointer_value;
-  wire       _GEN_1 = 1'h0;
-  reg        storage[0:1];
+  wire RV5StageInstructionFault _GEN;
+  wire                          _GEN_0;
+  wire                          _write_pointer_value;
+  wire                          _read_pointer_value;
+  wire                          _GEN_1 = 1'h0;
+  RV5StageInstructionFault      storage[0:1];
   always_ff @(posedge clock) begin
     if (_GEN_1) begin
     end
@@ -5100,15 +5159,15 @@ module Queue_1(
         storage[_write_pointer_value] <= _GEN;
     end
   end // always_ff @(posedge)
-  reg  [1:0] occupancy;
-  wire       _GEN_2 = occupancy == 2'h0;
+  reg  [1:0]                    occupancy;
+  wire                          _GEN_2 = occupancy == 2'h0;
   `ifndef SYNTHESIS
     queue_occupancy_in_range:
       assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
   `endif // not def SYNTHESIS
-  wire       _GEN_3 = occupancy != 2'h2;
+  wire                          _GEN_3 = occupancy != 2'h2;
   assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire       _GEN_4 = ~_GEN_2 & egress_in.ready;
+  wire                          _GEN_4 = ~_GEN_2 & egress_in.ready;
   assign _GEN = ingress_in.bits;
   Counter read_pointer (
     .clock  (clock),
@@ -5331,7 +5390,8 @@ module RV5StageL1ICache(
   `endif // not def SYNTHESIS
   wire RV5StageInstructionResp        _GEN_26 =
     '{instruction: (_lookup_egress_out.bits[2] ? _GEN_12[63:32] : _GEN_12[31:0]),
-      page_fault: (1'h0)};
+      page_fault: (1'h0),
+      access_fault: (1'h0)};
   assign _GEN_1 = _response_arbiter_ingress_0_out.ready;
   wire                                _GEN_27 =
     (_GEN_14 | refill_installing & _GEN_16) & (refill_installing | ~_snoop_pending);
@@ -5341,7 +5401,8 @@ module RV5StageL1ICache(
   wire RV5StageInstructionResp        _GEN_30 =
     '{instruction:
         (_refill_completion_out.bits.context_0[2] ? _GEN_13[63:32] : _GEN_13[31:0]),
-      page_fault: (1'h0)};
+      page_fault: (1'h0),
+      access_fault: (1'h0)};
   assign _GEN = _response_arbiter_ingress_1_out.ready;
   wire                                _GEN_31 =
     ~(_response_arbiter_egress_out.valid & ~reset);
@@ -6454,11 +6515,11 @@ module Arbiter_1(
 
   wire [1:0]                   _GEN = {{ingress_1_in.valid}, {ingress_0_in.valid}};
   wire [1:0]                   _GEN_0 = _GEN & {~(_GEN[0]), 1'h1};
-  wire [32:0]                  _GEN_1 = /*cast(bit[32:0])*/ingress_0_in.bits;
-  wire [32:0]                  _GEN_2 = /*cast(bit[32:0])*/ingress_1_in.bits;
+  wire [33:0]                  _GEN_1 = /*cast(bit[33:0])*/ingress_0_in.bits;
+  wire [33:0]                  _GEN_2 = /*cast(bit[33:0])*/ingress_1_in.bits;
   wire RV5StageInstructionResp _GEN_3 =
-    /*cast(bit)*/_GEN_1 & {33{_GEN_0[0]}} | _GEN_2 & {33{_GEN_0[1]}} | _GEN_1
-    & {33{_GEN_0 == 2'h0}};
+    /*cast(bit)*/_GEN_1 & {34{_GEN_0[0]}} | _GEN_2 & {34{_GEN_0[1]}} | _GEN_1
+    & {34{_GEN_0 == 2'h0}};
   assign ingress_0_out = '{ready: (egress_in.ready & _GEN_0[0])};
   assign ingress_1_out = '{ready: (egress_in.ready & _GEN_0[1])};
   assign egress_out = '{valid: (|_GEN_0), bits: _GEN_3};
@@ -8526,29 +8587,62 @@ module RV5StageMemoryRouter(
                                                                                                                                                                                                 device_out
 );
 
+  wire [64:0]                        _GEN =
+    {1'h0, core_in.request.bits.address}
+    + {1'h0,
+       core_in.request.bits.width == 2'h0
+         ? 64'h0
+         : core_in.request.bits.width == 2'h1
+             ? 64'h1
+             : {61'h0, core_in.request.bits.width != 2'h2, 2'h3}};
+  wire                               _GEN_0 =
+    core_in.request.bits.address[63:44] == 20'h0;
+  wire                               _GEN_1 = _GEN[64:44] == 21'h0;
+  wire                               _GEN_2 = _GEN_0 & _GEN_1;
+  wire                               _GEN_3 = core_in.request.bits.access == 3'h3;
+  wire                               _GEN_4 = core_in.request.bits.access == 3'h5;
+  wire                               _GEN_5 = core_in.request.bits.access == 3'h4;
+  wire                               _GEN_6 =
+    _GEN_0 & _GEN_1
+    & (~((|{core_in.request.bits.access == 3'h1, _GEN_3}) | _GEN_4) | _GEN_2)
+    & ({core_in.request.bits.access == 3'h2, _GEN_5, _GEN_4} == 3'h0 | _GEN_2)
+    & ({_GEN_3, _GEN_5, _GEN_4} == 3'h0 | _GEN_2);
   `ifndef SYNTHESIS
     rv5stage_memory_response_paths_exclusive:
       assert property (@(posedge clock) disable iff (reset)
                          ~(cache_in.response.valid & device_in.response.valid));
   `endif // not def SYNTHESIS
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN =
-    '{valid: (1'h0), bits: core_in.request.bits};
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_0 =
-    '{valid: (core_in.request.valid & device_in.drained), bits: core_in.request.bits};
-  wire struct packed {logic ready; } _GEN_1 =
-    '{ready: (device_in.drained & cache_in.request.ready)};
-  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_2 =
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_7 =
+    '{valid: (core_in.request.valid & _GEN_6 & ~_GEN_2 & cache_in.drained),
+      bits: core_in.request.bits};
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_8 =
+    '{valid: (core_in.request.valid & _GEN_6 & _GEN_2 & device_in.drained),
+      bits: core_in.request.bits};
+  wire struct packed {logic ready; } _GEN_9 =
+    '{ready:
+        (~_GEN_6
+         | (~_GEN_2
+              ? cache_in.drained & device_in.request.ready
+              : device_in.drained & cache_in.request.ready))};
+  wire struct packed {logic valid; RV5StageDataResp bits; } _GEN_10 =
     '{valid: (cache_in.response.valid | device_in.response.valid),
       bits:
         (device_in.response.valid ? device_in.response.bits : cache_in.response.bits)};
   assign core_out =
-    '{request: _GEN_1,
-      request_fault: cache_in.request_fault,
-      request_access_fault: cache_in.request_access_fault,
-      response: _GEN_2,
+    '{request: _GEN_9,
+      request_fault:
+        (core_in.request.valid & _GEN_6
+         & (~_GEN_2 ? device_in.request_fault : cache_in.request_fault)),
+      request_access_fault:
+        (core_in.request.valid
+         & (~_GEN_6
+            | (~_GEN_2
+                 ? device_in.request_access_fault
+                 : cache_in.request_access_fault))),
+      response: _GEN_10,
       drained: (cache_in.drained & device_in.drained)};
-  assign cache_out = '{request: _GEN_0};
-  assign device_out = '{request: _GEN};
+  assign cache_out = '{request: _GEN_8};
+  assign device_out = '{request: _GEN_7};
 endmodule
 
 module RV5StageUncached(

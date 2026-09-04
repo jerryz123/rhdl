@@ -9,11 +9,15 @@ whose PTE-memory protocol is independent of L1D. The composition module owns
 arbitration onto L1D, response ownership, TLB refill, and fault correlation.
 
 Instruction requests record whether their ordered response comes from L1I or
-from a local page fault. Data requests remain held in Execute until a TLB hit
-or completed walk determines either a physical request or a page fault, so a
+from a local page or access fault. The MMU checks the translated physical fetch
+address against the shared physical-memory map and never issues an unmapped,
+non-executable, or non-cacheable request to L1I. Data requests remain held in Execute until a TLB hit
+or completed walk determines either a physical request or a fault, so a
 faulting store cannot retire. The shared walk can claim a miss immediately,
 but its PTE read begins only after two consecutive quiescent L1D observations;
-it then owns that port until the load returns.
+it then owns that port until the load returns. A rejected physical PTE read is
+reported as an access fault on the original instruction, load, or store rather
+than being reclassified as a page fault.
 
 The first implementation uses eight entries per TLB, ASID zero, complete
 `SFENCE.VMA` invalidation, a single outstanding walk, and Svade fault behavior.
