@@ -252,8 +252,10 @@ of being flattened into the same graph.
 `XLen` enum value. Architectural addresses and cache tags use
 `xlen.width` internally. Both private L1 caches use the architectural
 64-byte line size from [`cache.rhdl`](cache.rhdl), while each data SRAM row and
-core lookup is exactly `xlen.width` bits. Tags and coherence state remain
-line-indexed. Line geometry is not a top-level generator option. The required
+core lookup is exactly `xlen.width` bits per way. The shared cache configuration
+records set and way geometry; the standalone L1I supports multiple ways, while
+the current RV5Stage composition preserves one-way L1I and L1D behavior behind
+its existing `~cache_sets:` parameter. Line size is not a top-level generator option. The required
 `~chi:` parameter is integration
 policy: the containing SoC supplies RV5Stage's RN-F NodeIDs, physical flit
 parameters, and physical regions paired with Homes. RV5Stage has no implicit

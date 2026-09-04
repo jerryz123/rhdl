@@ -1,10 +1,49 @@
 #lang rhodium
-// Defines architectural constants shared by RV5Stage's private L1 caches.
+// Defines shared geometry and replacement helpers for RV5Stage's private L1 caches.
 
 import:
-  lib("rhodium/std/bits.rhdl").Pow2Int
+  lib("rhodium/std/bits.rhdl") open
 
 def RV5StageCacheLineBytes :: Pow2Int = 64
 
+class RV5StageCacheConfig(sets :: Pow2Int, ways :: PosInt):
+  implements StableCircuitParam
+
+  constructor (sets :: Pow2Int, ways :: PosInt):
+    unless sets >= 2
+    | error(~who: #'RV5StageCacheConfig,
+            "set count must be a power of two of at least two")
+    super(sets, ways)
+
+  property set_width :: PosInt: alignment_bits(sets)
+  property way_width :: PosInt: index_width(ways)
+  property line_count :: PosInt: sets * ways
+  property capacity_bytes :: PosInt: line_count * RV5StageCacheLineBytes
+
+fun rv5stage_cache_way_mask(config :: RV5StageCacheConfig,
+                            way :: Bits(config.way_width)) :: Mask(config.ways):
+  vec(
+    for List (index in 0..config.ways):
+      way === bits(index, config.way_width)
+  ).into(Mask(config.ways))
+
+// Prefer an invalid way before falling back to the set's round-robin pointer.
+fun rv5stage_cache_replacement_way(config :: RV5StageCacheConfig,
+                                   valid :: Vec(config.ways, Bool),
+                                   replacement :: Bits(config.way_width)) :: Bits(config.way_width):
+  def invalid = vec(for List (index in 0..config.ways): !valid[index])
+  def first_invalid = priority_encoder_oh(invalid)
+  mux(first_invalid.valid, first_invalid.index, replacement)
+
+fun rv5stage_cache_next_way(config :: RV5StageCacheConfig,
+                            way :: Bits(config.way_width)) :: Bits(config.way_width):
+  mux(way === bits(config.ways - 1, config.way_width),
+      bits(0, config.way_width),
+      way + bits(1, config.way_width))
+
 export:
   RV5StageCacheLineBytes
+  RV5StageCacheConfig
+  rv5stage_cache_way_mask
+  rv5stage_cache_replacement_way
+  rv5stage_cache_next_way

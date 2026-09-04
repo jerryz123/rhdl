@@ -11,23 +11,26 @@ pipeline checks architectural alignment; the cache translates a miss into one
 ownership. The line size is an architectural RV5Stage constant, not a cache
 generator parameter.
 
-`cache.rhdl` implements a direct-mapped read-only cache with host-configured
-power-of-two set and line counts. Its required `~chi:` parameter supplies the
+`cache.rhdl` implements a set-associative read-only cache with a host-configured
+power-of-two set count and positive way count. Its required `~chi:` parameter supplies the
 RN-F identity, flit geometry, and Home map from the containing integration. A
 one-stage `Pipe` carries each address beside
 the synchronous tag/data lookup, so consecutive hits accept and return one
 ordered instruction every cycle. A hit maps directly into a response flow; a
 miss is filtered and mapped into the shared `../refill.rhdl` transaction engine.
 The data array is word-organized: it has
-`sets * (64 / (XLEN / 8))` rows of `XLEN` bits with byte write lanes, while the
-tag and CHI state arrays remain indexed by set. The byte address therefore
+`sets * (64 / (XLEN / 8))` rows containing one `XLEN` word per way with byte
+write lanes, while the tag and CHI state arrays hold one entry per way at each
+set. Parallel tag comparisons feed a priority-selected hit result; an assertion
+rejects duplicate valid tags. The byte address therefore
 selects both a line and an XLEN word; RV64 fetches select one 32-bit instruction
 from the returned word, while RV32 fetches consume the word directly.
 The engine owns the address context, retry and protocol-credit exchange,
 returned `CompData`, and `CompAck`, then returns the address with the completed
 clean line and its CHI state. Installation writes that retained line through
 the data-array port one XLEN word per cycle and publishes its tag, state, and
-valid bit only with the final word. Hit and
+valid bit only with the final word. Allocation prefers the lowest invalid way,
+then uses a per-set round-robin replacement pointer. Hit and
 live-refill responses merge before a two-entry queue that preserves results
 under fetch backpressure. A flush clears buffered hits and kills the active
 lookup. A wrong-path refill still drains and installs its line but its completion
@@ -46,8 +49,7 @@ Forwarding snoops silently evict a clean match and report Invalid, allowing
 Home to source the line elsewhere without a snoop-data path. Any non-forward
 snoop with `RetToSrc` uses the same silent-eviction path. `SnpQuery` reports the
 precise stored state without changing it, and a paired `SnpDVMOp` produces one
-response after both packets. The first cut
-still has no associativity, prefetching, or selective core-initiated
-invalidation. RV5Stage implements `FENCE.I` by waiting for L1D quiescence and
+response after both packets. The cache still has no prefetching or selective
+core-initiated invalidation. RV5Stage implements `FENCE.I` by waiting for L1D quiescence and
 then issuing the local invalidate-all operation; coherent agents may
 independently invalidate the cache through snoops.

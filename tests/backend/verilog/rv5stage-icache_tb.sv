@@ -267,6 +267,11 @@ module rv5stage_icache_tb;
     64'h44444444_33333333,
     64'h22222222_11111111
   };
+  // These lines collide in set zero when the fixture uses four sets.
+  localparam logic [63:0] COLLIDE_B_ADDRESS = ADDRESS + 64'h100;
+  localparam logic [63:0] COLLIDE_C_ADDRESS = ADDRESS + 64'h200;
+  localparam logic [511:0] LINE_B = {LINE[511:32], 32'hb1b1b1b1};
+  localparam logic [511:0] LINE_C = {LINE[511:32], 32'hc1c1c1c1};
 
   initial begin
     core_in = '0;
@@ -387,6 +392,61 @@ module rv5stage_icache_tb;
         else $fatal(1, "flushed refill returned an instruction");
     end
     send_core_request(THIRD_ADDRESS);
+    expect_instruction(32'h11111111);
+
+    // Two colliding lines coexist, and snoop lookup and invalidation select
+    // the matching way without disturbing the other resident line.
+    core_in.invalidate_all = 1'b1;
+    tick();
+    core_in.invalidate_all = 1'b0;
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(ADDRESS);
+    accept_read_request(ADDRESS);
+    return_line(ADDRESS, LINE);
+    accept_comp_ack();
+    expect_instruction(32'h11111111);
+    send_core_request(COLLIDE_B_ADDRESS);
+    accept_read_request(COLLIDE_B_ADDRESS);
+    return_line(COLLIDE_B_ADDRESS, LINE_B);
+    accept_comp_ack();
+    expect_instruction(32'hb1b1b1b1);
+    send_core_request(ADDRESS);
+    expect_instruction(32'h11111111);
+    send_core_request(COLLIDE_B_ADDRESS);
+    expect_instruction(32'hb1b1b1b1);
+    grant_rsp_credit();
+    send_snoop(COLLIDE_B_ADDRESS, SNP_QUERY, 12'h088, 1'b0);
+    expect_snoop_response(12'h088, 3'd1);
+    grant_rsp_credit();
+    invalidate_cache(COLLIDE_B_ADDRESS);
+    send_core_request(ADDRESS);
+    expect_instruction(32'h11111111);
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(COLLIDE_B_ADDRESS);
+    accept_read_request(COLLIDE_B_ADDRESS);
+    return_line(COLLIDE_B_ADDRESS, LINE_B);
+    accept_comp_ack();
+    expect_instruction(32'hb1b1b1b1);
+
+    // With both ways occupied, the round-robin pointer replaces the first
+    // way. The second colliding line remains a hit while the original misses.
+    send_core_request(COLLIDE_C_ADDRESS);
+    accept_read_request(COLLIDE_C_ADDRESS);
+    return_line(COLLIDE_C_ADDRESS, LINE_C);
+    accept_comp_ack();
+    expect_instruction(32'hc1c1c1c1);
+    send_core_request(COLLIDE_B_ADDRESS);
+    expect_instruction(32'hb1b1b1b1);
+    send_core_request(COLLIDE_C_ADDRESS);
+    expect_instruction(32'hc1c1c1c1);
+    grant_req_credit();
+    grant_rsp_credit();
+    send_core_request(ADDRESS);
+    accept_read_request(ADDRESS);
+    return_line(ADDRESS, LINE);
+    accept_comp_ack();
     expect_instruction(32'h11111111);
 
     $display("RV5Stage instruction-cache ready-valid RN-F simulation passed");
