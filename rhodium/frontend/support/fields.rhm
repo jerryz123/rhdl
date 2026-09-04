@@ -658,23 +658,30 @@ dot.macro 'hardware_method_dot $left $dot $right':
 // receiver-owned, surface-specific, and universal method provider declines.
 dot.macro 'hardware_field_dot $left $dot $right':
   ~tail: '$tail ...'
-  def reserved = [
-    "id", "name", "module_def", "module_id", "design",
-    "defining_op_id", "users", "ref", "owner_op_id", "driver",
-    "operation", "literal_type", "packed_value", "literal_name",
-    "literal_width", "current"
-  ].contains(right.to_source_string())
-  def expansion:
-    match right
-    | 'type': 'hardware_value_type($left) :: HardwareType'
-    | 'next': 'hardware_next($left) :: HardwareFields'
-    | 'tag': 'hardware_variant_tag_or_project($left) :: HardwareFields'
-    | ~else: #false
-  if expansion
-  | values(expansion, '$tail ...')
-  | if reserved
-    | #false
-    | values(
-        'kernel.project($left, $(right.to_source_string())) :: HardwareFields',
-        '$tail ...'
-      )
+  // Static-information composition can reorder providers, so structural
+  // projection must independently decline syntax that belongs to methods.
+  match '$right $tail ...'
+  | 'lookup($(selector :: expr_meta.Parsed),
+            ~default: $(default_value :: expr_meta.Parsed)) $rest ...': #false
+  | '$(method :: Identifier)($(argument :: expr_meta.Parsed), ...) $rest ...': #false
+  | ~else:
+      def reserved = [
+        "id", "name", "module_def", "module_id", "design",
+        "defining_op_id", "users", "ref", "owner_op_id", "driver",
+        "operation", "literal_type", "packed_value", "literal_name",
+        "literal_width", "current"
+      ].contains(right.to_source_string())
+      def expansion:
+        match right
+        | 'type': 'hardware_value_type($left) :: HardwareType'
+        | 'next': 'hardware_next($left) :: HardwareFields'
+        | 'tag': 'hardware_variant_tag_or_project($left) :: HardwareFields'
+        | ~else: #false
+      if expansion
+      | values(expansion, '$tail ...')
+      | if reserved
+        | #false
+        | values(
+            'kernel.project($left, $(right.to_source_string())) :: HardwareFields',
+            '$tail ...'
+          )
