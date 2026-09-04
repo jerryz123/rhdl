@@ -445,6 +445,7 @@ fixture_specs=(
   'width-ops|width_ops_tb|examples/rhdl/width-ops.rhdl|design|verilog_reference'
   'vector|vector_tb|examples/rhdl/vector.rhdl|design|verilog_reference'
   'vector-carry||examples/rhdl/vector.rhdl|carry_design|carry_verilog_reference'
+  'vector-map||examples/rhdl/vector.rhdl|map_design|map_verilog_reference'
   'vector-update|vector_update_tb|examples/rhdl/vector-update.rhdl|design|verilog_reference'
   'vector-register-update|vector_register_update_tb|examples/rhdl/vector-update.rhdl|register_design|register_verilog_reference'
   'vec-shift-register|vec_shift_register_tb|examples/rhdl/vec-shift-register.rhdl|design|verilog_reference'

@@ -5,10 +5,19 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 
-forbidden_imports="$(
-  rg -n '^[[:space:]]+.*(rhdl/(core|analysis|frontend|backend|formal)|riscv/|cores/|sims/|tests/|examples/)' \
-    hardfloat/rtl hardfloat/main.rhdl --glob '*.rhdl' || true
-)"
+search_sources() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" "$@" --glob '*.rhdl'
+  else
+    find "$@" -type f -name '*.rhdl' -exec grep -nHE "$pattern" {} +
+  fi
+}
+
+forbidden_imports="$(search_sources \
+  '^[[:space:]]+.*(rhdl/(core|analysis|frontend|backend|formal)|riscv/|cores/|sims/|tests/|examples/)' \
+  hardfloat/rtl hardfloat/main.rhdl || true)"
 if [[ -n "$forbidden_imports" ]]; then
   echo "HardFloat production code may import only public RHDL libraries and its own package" >&2
   echo "$forbidden_imports" >&2
