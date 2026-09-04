@@ -1,5 +1,5 @@
 #lang rhodium
-// Composes a host-facing RV5Stage, coherent RAM, and ACLINT over one CHI NoC.
+// Composes a host-facing RV5Stage, coherent on-chip RAM, and ACLINT over one CHI NoC.
 
 import:
   lib("chi/main.rhdl") open
@@ -86,22 +86,57 @@ def simple_soc_ram_params = CHIRamParams(
   ~base_address: simple_soc_memory_base,
   ~kind: CHINodeKind.SNF
 )
+def simple_soc_memory_transfers = TransferSizes(1, simple_soc_flit.data_bytes)
+def simple_soc_memory_requests = [
+  CHIRequestSupport(CHIReqOpcode.ReadNoSnp, simple_soc_memory_transfers),
+  CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, simple_soc_memory_transfers),
+  CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, simple_soc_memory_transfers)
+]
+def simple_soc_memory_node = CHINodeParams(
+  "simple-memory",
+  9,
+  CHINodeKind.SNF,
+  ~emits: CHIChannelCapabilities(
+    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+    ~dat: [CHIDatOpcode.CompData]
+  ),
+  ~supports: CHIChannelCapabilities(
+    ~req: [CHIReqOpcode.ReadNoSnp,
+           CHIReqOpcode.WriteNoSnpFull,
+           CHIReqOpcode.WriteNoSnpPtl],
+    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+  ),
+  ~max_outstanding: 2
+)
+def simple_soc_memory_port = CHIICNPortParams(
+  "simple-memory-icn",
+  simple_soc_memory_node.node_id,
+  simple_soc_memory_node.kind,
+  ~emits: simple_soc_memory_node.supports,
+  ~supports: simple_soc_memory_node.emits,
+  ~max_outstanding: simple_soc_memory_node.max_outstanding
+)
+def simple_soc_memory_service = CHISubordinateServiceParams(
+  simple_soc_memory_port,
+  [AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1)],
+  simple_soc_memory_requests
+)
 def simple_soc_fragmenter_config = CHITransferFragmenterConfig(simple_soc_flit,
                                                                ~max_read_bytes: 64)
 def simple_soc_fragmenter_params = CHITransferFragmenterParams(
   simple_soc_fragmenter_config,
-  simple_soc_ram_params.service
+  simple_soc_memory_service
 )
 def simple_soc_home_config = CHIHNFConfig(
   simple_soc_flit,
   [simple_soc_host_port, simple_soc_instruction_port, simple_soc_data_port],
-  simple_soc_ram_config.size_bytes - 1,
-  simple_soc_fragmenter_config.upstream_requests(simple_soc_ram_config.requests)
+  simple_soc_memory_bytes - 1,
+  simple_soc_fragmenter_config.upstream_requests(simple_soc_memory_requests)
 )
 def simple_soc_home_params = CHIHNFParams(
   simple_soc_home,
   simple_soc_home_config,
-  simple_soc_ram_params.icn_port,
+  simple_soc_memory_port,
   simple_soc_fragmenter_params.upstream_service
 )
 def simple_soc_aclint_config = AclintConfig(simple_soc_flit, 1)
@@ -170,13 +205,12 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
   simple_soc_compilations.dat.network.router_plan(simple_soc_router)
 )
 
-sync_circuit SimpleSoC():
+sync_circuit SimpleSoCFabric():
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
+  interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
   inst rv5stage(RV5Stage(XLen.X64, ~chi: simple_soc_rv5stage_config))
   inst home(CHIHNF(simple_soc_home_config))
-  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
-  inst ram(CHIRam(simple_soc_ram_config))
   inst device_home(CHIHNI(simple_soc_device_home_params))
   inst aclint(Aclint(simple_soc_aclint_config))
   inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
@@ -192,9 +226,6 @@ sync_circuit SimpleSoC():
     home_node_id: bits(simple_soc_home_params.home.node_id, simple_soc_flit.node_id_width)
     subordinate_node_id: bits(simple_soc_home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
     service_base: bits(simple_soc_memory_base, simple_soc_flit.request_address_width)
-  ram.identity <== CHIRamIdentity(simple_soc_flit):
-    node_id: bits(simple_soc_ram_params.node_id, simple_soc_flit.node_id_width)
-    base_address: bits(simple_soc_ram_params.base_address, simple_soc_flit.request_address_width)
   aclint.identity <== AclintIdentity(simple_soc_flit):
     node_id: bits(simple_soc_aclint_params.node.node_id, simple_soc_flit.node_id_width)
     base_address: bits(simple_soc_aclint_params.base_address, simple_soc_flit.request_address_width)
@@ -246,8 +277,7 @@ sync_circuit SimpleSoC():
                             ~dat_ingress: dat_router.ingress,
                             ~dat_targets: dat_router.target,
                             ~adapters: simple_soc_adapter_plans)
-  home.port.subordinate <=> fragmenter.upstream
-  fragmenter.downstream <=> ram.port
+  home.port.subordinate <=> memory
   device_home.port.subordinate <=> aclint.port
   aclint.tick <== Bool(#true)
   host.start |> rv5stage.start
@@ -260,6 +290,22 @@ sync_circuit SimpleSoC():
     machine_external: Bool(#false)
   rv5stage.hart_id <== bits(0, 64)
   rv5stage.time_counter <== aclint.time_counter
+
+// Preserves the original self-contained implementation by terminating the
+// fabric's native subordinate channels in the fixed-latency on-chip CHIRam.
+sync_circuit SimpleSoC():
+  interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
+
+  inst fabric(SimpleSoCFabric())
+  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
+  inst ram(CHIRam(simple_soc_ram_config))
+
+  host <=> fabric.host
+  fabric.memory <=> fragmenter.upstream
+  fragmenter.downstream <=> ram.port
+  ram.identity <== CHIRamIdentity(simple_soc_flit):
+    node_id: bits(simple_soc_memory_node.node_id, simple_soc_flit.node_id_width)
+    base_address: bits(simple_soc_memory_base, simple_soc_flit.request_address_width)
 
 def design = elaborate(SimpleSoC())
 
@@ -278,6 +324,11 @@ export:
   simple_soc_device_port
   simple_soc_ram_config
   simple_soc_ram_params
+  simple_soc_memory_transfers
+  simple_soc_memory_requests
+  simple_soc_memory_node
+  simple_soc_memory_port
+  simple_soc_memory_service
   simple_soc_fragmenter_config
   simple_soc_fragmenter_params
   simple_soc_home_config
@@ -301,5 +352,6 @@ export:
   simple_soc_rsp_router_config
   simple_soc_snp_router_config
   simple_soc_dat_router_config
+  SimpleSoCFabric
   SimpleSoC
   design

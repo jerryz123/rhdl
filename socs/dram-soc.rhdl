@@ -1,0 +1,26 @@
+#lang rhodium
+// Defines the SimpleSoC-derived variant with an external CHI DRAM channel boundary.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("socs/simple-soc.rhdl") as simple
+  lib("socs/host-interface.rhdl").SoCHostInterface
+
+// Retains transfer fragmentation while leaving storage and response timing to
+// the external SN-F implementation.
+sync_circuit DramSoC():
+  interface host(SoCHostInterface(simple.simple_soc_flit), ~role: soc)
+  interface dram(CHISNChannels(simple.simple_soc_flit), ~role: icn)
+
+  inst fabric(simple.SimpleSoCFabric())
+  inst fragmenter(CHITransferFragmenter(simple.simple_soc_fragmenter_config))
+
+  host <=> fabric.host
+  fabric.memory <=> fragmenter.upstream
+  fragmenter.downstream <=> dram
+
+def design = elaborate(DramSoC())
+
+export:
+  DramSoC
+  design

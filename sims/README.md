@@ -5,46 +5,53 @@
 The executable simulation stack follows a Chipyard-like ownership boundary:
 
 ```text
-TestDriver.v -> soc-harness.rhdl -> SimpleSoC or TiledSoC
-                    |
-                    +-> FESVR host model
+TestDriver.v -> <soc>-soc-harness.rhdl -> one SoC variant
+                         |
+                         +-> FESVR host model
 ```
 
 `TestDriver.v` only generates clock and reset and observes the harness exit
-status. `soc-harness.rhdl` specializes at elaboration time for one SoC,
-instantiates the FESVR requester, and connects it to that SoC's common
-`SoCHostInterface`. The SoCs contain no DPI calls or simulator dependencies.
+status. Each SoC has a separate parameterless harness that instantiates the
+FESVR requester and connects it to that SoC's common `SoCHostInterface`. The
+SoCs contain no DPI calls or simulator dependencies.
 
 The directory owns:
 
 - `fesvr/`: the simulator-independent direct-memory FESVR transport and its
   Rhodium CHI requester.
 - `verilator/`: the Verilator VPI/DPI binding.
-- `tests/`: structural checks for both harness specializations.
+- `tests/`: independent structural checks for FESVR and each SoC harness.
 
-Install the pinned FESVR dependency and build either reusable simulator with:
+Install the pinned FESVR dependency and build a reusable simulator with:
 
 ```sh
 make -C sims setup
 make -C sims simulator SOC=simple
+make -C sims simulator SOC=dram
 make -C sims simulator SOC=tiled
 ```
 
-`SOC` accepts `simple` or `tiled` and defaults to `simple`. Each specialization
-has an independent artifact at `/tmp/rhodium-sims/<soc>/obj/VTestDriver`, so
+`SOC` accepts `simple`, `dram`, or `tiled` and defaults to `simple`. The DRAM
+harness attaches the repository's `CHIRam` to `DramSoC`'s exposed ready-valid
+SN-F channels as a simulation-only memory model. Each harness has an
+independent artifact at
+`/tmp/rhodium-sims/<soc>/obj/VTestDriver`, so
 switching configurations cannot reuse generated RTL for the other SoC. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
 does not require or embed a target program.
 
-The Makefile passes `SOC` unchanged to the single `emit-soc-harness.rhm`
-entrypoint. `soc-harness.rhdl` owns the `SimulationSoC` host enum, validates
-the name, and elaborates only the selected SoC and its matching FESVR wiring.
+The Makefile maps `SOC` to its harness module. A shared emitter dynamically
+loads only that module's exported `design`, so unrelated SoCs are not imported
+or elaborated. Every harness emits the same `SoCHarness` Verilog top contract,
+so `TestDriver.v` remains shared; there is no Rhodium variant enum or conditional
+harness circuit.
 
 Run any FESVR-compatible target binary through the already-built simulator
 with:
 
 ```sh
 make -C sims run SOC=simple BINARY=/absolute/path/to/program.elf
+make -C sims run SOC=dram BINARY=/absolute/path/to/program.elf
 make -C sims run SOC=tiled BINARY=/absolute/path/to/program.elf
 ```
 
@@ -59,6 +66,7 @@ with:
 
 ```sh
 make -C sims smoke SOC=simple
+make -C sims smoke SOC=dram
 make -C sims smoke SOC=tiled
 make -C sims dpi-compile-check \
   VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"

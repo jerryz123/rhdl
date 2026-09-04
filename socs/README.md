@@ -19,15 +19,15 @@ SimpleSoC
 ```
 
 The external host loads and observes memory through its non-caching RN-F
-endpoint and hands a 64-bit boot entry directly to RV5Stage. Both concrete SoCs
-expose this memory/start contract through `SoCHostInterface`; neither contains
-DPI calls or simulator behavior. Host `ReadClean` and `WriteUniquePtl`
+endpoint and hands a 64-bit boot entry directly to RV5Stage. All SoC variants
+expose this memory/start contract through `SoCHostInterface`; none contains DPI
+calls or simulator behavior. Host `ReadClean` and `WriteUniquePtl`
 transactions snoop the private caches, so simulator mailboxes may reside in
 ordinary coherent memory.
 The ACLINT window occupies `0x02000000..0x0200ffff`. Its `mtime` counter drives
 RV5Stage's `time` CSR, while hart 0's MTIP and MSIP levels drive the corresponding
 machine interrupt inputs. The platform currently advances `mtime` once per SoC
-clock; a later clock-rate adapter can replace that explicit tick policy. Both
+clock; a later clock-rate adapter can replace that explicit tick policy. These
 SoCs currently expose no external interrupt-controller input: supervisor and
 external interrupt lines remain low until a platform interrupt device exists.
 
@@ -52,6 +52,20 @@ the table therefore trap in RV5Stage instead of entering CHI without a Home.
 
 The FESVR implementation and generated executable harness remain owned by
 [`sims/`](../sims/README.md).
+
+## DramSoC
+
+`SimpleSoCFabric` factors the processor, Homes, NoC, and ACLINT from the final
+memory termination. `SimpleSoC` preserves the self-contained composition by
+connecting that native `CHISNChannels` boundary through the transfer fragmenter
+to `CHIRam`.
+
+[`dram-soc.rhdl`](dram-soc.rhdl) defines `DramSoC`, which retains the
+fragmenter and exports `CHISNChannels` for SN-F NodeID 9. It contains no RAM or
+simulator binding; an external subordinate owns the memory contents and
+response timing.
+The simulation harness may attach a memory model to that boundary, but
+`DramSoC` itself does not provide one.
 
 ## TiledSoC
 
@@ -111,5 +125,8 @@ Run the focused elaboration test with:
 ```sh
 make -C socs rtl-elaboration-test
 ```
+
+The focused SimpleSoC and DramSoC elaboration tests cover the internal-memory
+and external-channel variants.
 
 Executable harness workflows are documented under [`sims/`](../sims/README.md).

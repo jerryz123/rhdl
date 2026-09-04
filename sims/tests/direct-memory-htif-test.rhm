@@ -1,0 +1,40 @@
+#lang rhombus
+// Checks the FESVR DPI transport independently of any SoC harness.
+
+import:
+  "../../rhodium/core/main.rhm" open
+  "../../rhodium/frontend/kernel.rhm" as embedded
+  "../../riscv/isa/xlen.rhm".XLen
+  "../fesvr/direct-memory-htif.rhdl" as fesvr
+
+def fesvr_import = fesvr.design.dpi_imports[0]
+def fesvr_module = fesvr.design.modules.find(
+  fun (module_def): module_def.name == "DirectMemoryHTIF"
+)
+def fesvr_rv32_design = embedded.run_elaboration(
+  fun (): fesvr.DirectMemoryHTIF(XLen.X32)
+)
+def fesvr_register = fesvr_module.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def result_names = ["request_valid",
+                    "request_write",
+                    "request_address",
+                    "request_data",
+                    "response_ready",
+                    "start_valid",
+                    "start_entry",
+                    "exit"]
+
+check:
+  fesvr_import.name ~is "rhodium_htif_tick"
+  fesvr_import.input_names ~is [
+    "reset", "target_xlen", "request_ready", "response_valid",
+    "response_data", "start_ready"
+  ]
+  fesvr_import.results.map(fun (result): result.name) ~is result_names
+  type_equal(fesvr_import.results[2].type, Bits(64)) ~is #true
+  type_equal(fesvr_import.results[6].type, Bits(64)) ~is #true
+  fesvr_register.results.length() ~is 8
+  verify_design(fesvr.design) ~is #void
+  verify_design(fesvr_rv32_design) ~is #void

@@ -13,6 +13,12 @@ RACO ?= raco
 VERILATOR ?= verilator
 CIRCT_OPT ?= $(REPO_DIR)/.tools/firtool-1.155.0/bin/circt-opt
 
+HARNESS_SOURCE_simple := sims/simple-soc-harness.rhdl
+HARNESS_SOURCE_dram := sims/dram-soc-harness.rhdl
+HARNESS_SOURCE_tiled := sims/tiled-soc-harness.rhdl
+HARNESS_SOURCE := $(HARNESS_SOURCE_$(SOC))
+HARNESS_EMITTER := $(REPO_DIR)/sims/emit-soc-harness.rhm
+
 CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR)
 CXXFLAGS += -std=c++20 -Wall -Wextra -Werror
 FESVR_LIBRARY := $(FESVR_PREFIX)/lib/libfesvr.a
@@ -56,7 +62,11 @@ elaboration-test:
 	compiled_root="$$(mktemp -d /tmp/rhodium-sims-elaboration.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test sims/tests/soc-harness-test.rhm
+	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
+	  sims/tests/direct-memory-htif-test.rhm \
+	  sims/tests/simple-soc-harness-test.rhm \
+	  sims/tests/dram-soc-harness-test.rhm \
+	  sims/tests/tiled-soc-harness-test.rhm
 
 tiled-lowering-test: | $(TILED_LOWERING_DIR)
 	@test -x "$(CIRCT_OPT)" || \
@@ -64,7 +74,7 @@ tiled-lowering-test: | $(TILED_LOWERING_DIR)
 	compiled_root="$$(mktemp -d /tmp/rhodium-sims-tiled.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  $(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm tiled > $(TILED_LOWERING_DIR)/soc_harness.mlir
+	  $(RACKET) -y -S $(REPO_DIR) $(HARNESS_EMITTER) $(HARNESS_SOURCE_tiled) > $(TILED_LOWERING_DIR)/soc_harness.mlir
 	$(CIRCT_OPT) --canonicalize --cse $(TILED_LOWERING_DIR)/soc_harness.mlir -o /dev/null
 
 $(FESVR_LIBRARY):
@@ -74,11 +84,13 @@ $(FESVR_LIBRARY):
 $(SOC_BUILD_DIR) $(DPI_BUILD_DIR) $(TILED_LOWERING_DIR):
 	mkdir -p $@
 
-$(SOC_MLIR): $(SIMULATOR_SOURCES) | $(SOC_BUILD_DIR)
+$(SOC_MLIR): $(SIMULATOR_SOURCES) $(HARNESS_EMITTER) | $(SOC_BUILD_DIR)
+	@test -n "$(HARNESS_SOURCE)" || \
+	  (echo "unsupported SOC '$(SOC)'; expected simple, dram, or tiled" >&2; exit 2)
 	compiled_root="$$(mktemp -d /tmp/rhodium-sims-verilator.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  $(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm $(SOC) > $(SOC_MLIR)
+	  $(RACKET) -y -S $(REPO_DIR) $(HARNESS_EMITTER) $(HARNESS_SOURCE) > $(SOC_MLIR)
 
 $(SOC_VERILOG): $(SOC_MLIR)
 	@test -x "$(CIRCT_OPT)" || \
