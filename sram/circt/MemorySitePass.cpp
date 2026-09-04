@@ -68,9 +68,9 @@ namespace {
 
 constexpr llvm::StringLiteral kInferDecision = "infer";
 constexpr llvm::StringLiteral kFIRRTLMemSchema = "FIRRTLMem";
-constexpr llvm::StringLiteral kSiteAttr = "rhdl.memory.site";
-constexpr llvm::StringLiteral kMacroAttr = "rhdl.memory.macro";
-constexpr llvm::StringLiteral kSourceAttr = "rhdl.memory.source";
+constexpr llvm::StringLiteral kSiteAttr = "rhodium.memory.site";
+constexpr llvm::StringLiteral kMacroAttr = "rhodium.memory.macro";
+constexpr llvm::StringLiteral kSourceAttr = "rhodium.memory.source";
 
 static FailureOr<MemoryPolicy> readPolicy(StringRef path, Operation *anchor) {
   auto buffer = llvm::MemoryBuffer::getFile(path);
@@ -131,7 +131,7 @@ static uint32_t fnv1a(StringRef text) {
 }
 
 static std::string wrapperName(StringRef site) {
-  std::string result = "rhdl_sram_";
+  std::string result = "rhodium_sram_";
   for (char character : site.take_back(72)) {
     unsigned char byte = static_cast<unsigned char>(character);
     result.push_back(std::isalnum(byte) ? character : '_');
@@ -169,7 +169,7 @@ static LogicalResult writeInventory(StringRef path, const MemoryPolicy &policy,
                                     ArrayRef<MemorySite> sites,
                                     Operation *anchor) {
   if (path.empty()) {
-    anchor->emitError() << "rhdl-map-memory-sites requires an inventory path";
+    anchor->emitError() << "rhodium-map-memory-sites requires an inventory path";
     return failure();
   }
   llvm::SmallString<256> parent(path);
@@ -228,7 +228,7 @@ struct SelectHWTopPass
                           llvm::cl::desc("HW module to retain as the public top"),
                           llvm::cl::init("")};
 
-  StringRef getArgument() const final { return "rhdl-select-hw-top"; }
+  StringRef getArgument() const final { return "rhodium-select-hw-top"; }
   StringRef getDescription() const final {
     return "Make one HW module public and other HW definitions private";
   }
@@ -236,7 +236,7 @@ struct SelectHWTopPass
   void runOnOperation() override {
     ModuleOp module = getOperation();
     if (top.empty()) {
-      module.emitError() << "rhdl-select-hw-top requires top=<module>";
+      module.emitError() << "rhodium-select-hw-top requires top=<module>";
       return signalPassFailure();
     }
     bool found = false;
@@ -281,7 +281,7 @@ struct MapMemorySitesPass
       llvm::cl::desc("flattened instance prefix stripped before policy lookup"),
       llvm::cl::init("")};
 
-  StringRef getArgument() const final { return "rhdl-map-memory-sites"; }
+  StringRef getArgument() const final { return "rhodium-map-memory-sites"; }
   StringRef getDescription() const final {
     return "Retarget selected FIRRTLMem occurrences to site-specific externs";
   }
@@ -289,7 +289,7 @@ struct MapMemorySitesPass
   void runOnOperation() override {
     ModuleOp module = getOperation();
     if (policyPath.empty()) {
-      module.emitError() << "rhdl-map-memory-sites requires policy=<file>";
+      module.emitError() << "rhodium-map-memory-sites requires policy=<file>";
       return signalPassFailure();
     }
     FailureOr<MemoryPolicy> policyResult = readPolicy(policyPath, module);
@@ -300,7 +300,7 @@ struct MapMemorySitesPass
     if (StringRef(scopePrefix).starts_with("/") ||
         StringRef(scopePrefix).ends_with("/")) {
       module.emitError()
-          << "rhdl-map-memory-sites scope-prefix must not start or end with '/'";
+          << "rhodium-map-memory-sites scope-prefix must not start or end with '/'";
       return signalPassFailure();
     }
     StringRef actualTop = top.empty() ? StringRef(policy.top) : StringRef(top);
@@ -416,6 +416,6 @@ static void registerPasses() {
 
 extern "C" LLVM_ATTRIBUTE_WEAK mlir::PassPluginLibraryInfo
 mlirGetPassPluginInfo() {
-  return {MLIR_PLUGIN_API_VERSION, "RHDLMemorySites", "1",
+  return {MLIR_PLUGIN_API_VERSION, "RhodiumMemorySites", "1",
           []() { registerPasses(); }};
 }

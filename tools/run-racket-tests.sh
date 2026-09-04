@@ -6,7 +6,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compiled_root="${PLTCOMPILEDROOTS:-}"
 
 if [[ -z "$compiled_root" ]]; then
-  compiled_root="$(mktemp -d /tmp/rhdl-test-compiled.XXXXXX)"
+  compiled_root="$(mktemp -d /tmp/rhodium-test-compiled.XXXXXX)"
   trap 'rm -rf "$compiled_root"' EXIT
 fi
 

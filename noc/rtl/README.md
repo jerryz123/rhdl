@@ -1,9 +1,9 @@
-<!-- Defines the dependency and behavioral contract for NoC-specific RHDL hardware. -->
+<!-- Defines the dependency and behavioral contract for NoC-specific Rhodium hardware. -->
 
 # NoC RTL
 
 This directory contains the hardware consumers of the pure NoC model. It may
-depend on public `#lang rhdl` facilities and reusable RHDL standard-library
+depend on public `#lang rhodium` facilities and reusable Rhodium standard-library
 primitives, but the pure `noc/model`, `analysis`, `authoring`, `language`,
 `plan`, and `std` directories never depend on this package.
 
@@ -89,7 +89,7 @@ route families. It rejects a channel family whose per-site physical ingress,
 egress, or link ordering differs, while leaving each channel's routes, route
 keys, and local terminal slots independent.
 
-Router runtime collections are RHDL `Vec` values, not host lists of hardware
+Router runtime collections are Rhodium `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
 ordinary field projection and indexing instead of explicit packed extraction.
 
@@ -146,7 +146,7 @@ availability.
 
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar
-mechanisms come from `rhdl/std`.
+mechanisms come from `rhodium/std`.
 
 [`examples/noc/wormhole-router-diagram.rhdl`](../../examples/noc/wormhole-router-diagram.rhdl)
 projects the checked-in phased-XY routing relation onto a corner router and

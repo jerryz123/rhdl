@@ -1,8 +1,8 @@
-<!-- Documents the provenance, architecture, supported surface, and validation of the RHDL HardFloat port. -->
+<!-- Documents the provenance, architecture, supported surface, and validation of the Rhodium HardFloat port. -->
 
-# HardFloat for RHDL
+# HardFloat for Rhodium
 
-This directory is an RHDL port of the
+This directory is an Rhodium port of the
 [Berkeley HardFloat](https://github.com/ucb-bar/berkeley-hardfloat) Chisel
 source. The translation is pinned to upstream commit
 [`c1105e6ac6a0dd90fc80893efc4830ab609005d3`](https://github.com/ucb-bar/berkeley-hardfloat/commit/c1105e6ac6a0dd90fc80893efc4830ab609005d3).
@@ -11,8 +11,8 @@ the derived algorithms. See [`LICENSE.md`](LICENSE.md) for the applicable
 upstream BSD-style licenses. This project is not endorsed by the University
 of California, SiFive, or the upstream contributors.
 
-The port is ordinary RHDL. It elaborates into the same public core IR as any
-other RHDL library and lowers through the existing CIRCT backend. It does not
+The port is ordinary Rhodium. It elaborates into the same public core IR as any
+other Rhodium library and lowers through the existing CIRCT backend. It does not
 add floating-point operations to core, import Chisel, or wrap generated
 Verilog.
 
@@ -25,7 +25,7 @@ The implemented foundation provides:
 - nominal IEEE and recoded floating-point values, typed hardware rounding and
   fused-operation modes, tininess modes, exception flags, raw floating-point
   records, multiplier-pipeline occupancy, and one-hot classification results;
-- the standard RHDL leading-zero utility plus HardFloat-specific variable
+- the standard Rhodium leading-zero utility plus HardFloat-specific variable
   masks;
 - IEEE-to-raw, IEEE-to-recoded, recoded-to-raw, and recoded-to-IEEE helpers;
 - raw-format resizing with exponent saturation and significand sticky-bit
@@ -66,8 +66,8 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 | [`rtl/arithmetic/divide-sqrt-f64.rhdl`](rtl/arithmetic/divide-sqrt-f64.rhdl) | Four-operation binary64 pipeline and its three-cycle 54x54+105 multiplier contract |
 | [`tests/`](tests/) | Elaboration, structural, CIRCT, and simulation validation |
 
-Production files depend only on the public `#lang rhdl` authoring surface,
-`rhdl/std/bits.rhdl`, and other files in this package. They must not import RHDL
+Production files depend only on the public `#lang rhodium` authoring surface,
+`rhodium/std/bits.rhdl`, and other files in this package. They must not import Rhodium
 implementation layers, backends, tests, processor cores, or RISC-V definitions.
 Backend tooling is a test-only consumer.
 
@@ -107,7 +107,7 @@ The predefined formats are:
 ## Public use
 
 ```rhombus
-#lang rhdl
+#lang rhodium
 
 import:
   lib("hardfloat/main.rhdl") open
@@ -141,9 +141,9 @@ that resource instead of instantiating the integrated multiplier.
 
 ## Translation policy
 
-Each derived RHDL source names its corresponding upstream Scala source and
-the pinned commit. Chisel width inference is translated into explicit RHDL
-widths. Pure combinational Scala objects become RHDL functions; a meaningful
+Each derived Rhodium source names its corresponding upstream Scala source and
+the pinned commit. Chisel width inference is translated into explicit Rhodium
+widths. Pure combinational Scala objects become Rhodium functions; a meaningful
 upstream module boundary remains a circuit. Internal hierarchy and temporary
 names are not compatibility promises, but packed values, special-case
 behavior, exception flags, and public sequential protocols are.

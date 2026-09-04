@@ -16,10 +16,10 @@ search_sources() {
 }
 
 forbidden_imports="$(search_sources \
-  '^[[:space:]]+.*(rhdl/(core|analysis|frontend|backend|formal)|riscv/|cores/|sims/|tests/|examples/)' \
+  '^[[:space:]]+.*(rhodium/(core|analysis|frontend|backend|formal)|riscv/|cores/|sims/|tests/|examples/)' \
   hardfloat/rtl hardfloat/main.rhdl || true)"
 if [[ -n "$forbidden_imports" ]]; then
-  echo "HardFloat production code may import only public RHDL libraries and its own package" >&2
+  echo "HardFloat production code may import only public Rhodium libraries and its own package" >&2
   echo "$forbidden_imports" >&2
   exit 1
 fi

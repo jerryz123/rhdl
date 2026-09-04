@@ -16,9 +16,9 @@ search_sources() {
   fi
 }
 
-forbidden_imports="$(search_sources '^[[:space:]]+\"[^\"]*(rhdl/|circt)' noc/model noc/authoring noc/analysis noc/language noc/plan noc/std || true)"
+forbidden_imports="$(search_sources '^[[:space:]]+\"[^\"]*(rhodium/|circt)' noc/model noc/authoring noc/analysis noc/language noc/plan noc/std || true)"
 if [[ -n "$forbidden_imports" ]]; then
-  echo "pure NoC model, authoring, language, standard definitions, analysis, and plan must not import RHDL or CIRCT modules" >&2
+  echo "pure NoC model, authoring, language, standard definitions, analysis, and plan must not import Rhodium or CIRCT modules" >&2
   echo "$forbidden_imports" >&2
   exit 1
 fi
@@ -30,16 +30,16 @@ if [[ -n "$forbidden_std_imports" ]]; then
   exit 1
 fi
 
-forbidden_rtl_imports="$(search_sources '^[[:space:]]+.*(rhdl/core/|rhdl/backend/|rhdl/frontend/|circt)' noc/rtl || true)"
+forbidden_rtl_imports="$(search_sources '^[[:space:]]+.*(rhodium/core/|rhodium/backend/|rhodium/frontend/|circt)' noc/rtl || true)"
 if [[ -n "$forbidden_rtl_imports" ]]; then
-  echo "NoC RTL must use public RHDL language and standard-library APIs, not implementation or backend modules" >&2
+  echo "NoC RTL must use public Rhodium language and standard-library APIs, not implementation or backend modules" >&2
   echo "$forbidden_rtl_imports" >&2
   exit 1
 fi
 
-unexpected_rhdl="$(find noc -type f -name '*.rhdl' ! -path 'noc/rtl/*' -print)"
-if [[ -n "$unexpected_rhdl" ]]; then
+unexpected_rtl_sources="$(find noc -type f -name '*.rhdl' ! -path 'noc/rtl/*' -print)"
+if [[ -n "$unexpected_rtl_sources" ]]; then
   echo "NoC .rhdl files may appear only in noc/rtl; pure sources and tests use #lang rhombus" >&2
-  echo "$unexpected_rhdl" >&2
+  echo "$unexpected_rtl_sources" >&2
   exit 1
 fi

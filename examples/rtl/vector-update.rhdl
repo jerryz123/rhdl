@@ -1,0 +1,76 @@
+#lang rhodium
+// Demonstrates functional vector replacement and dynamic vector-register writes.
+
+circuit VectorUpdate():
+  input source: Vec(3, Bits(4))
+  input selector: Bits(2)
+  input replacement: Bits(4)
+  output result: Vec(3, Bits(4))
+
+  result <== source.updated(selector, replacement)
+
+sync_circuit IndexedVectorRegister():
+  input write_enable: Bool
+  input selector: Bits(2)
+  input replacement: Bits(4)
+  output result: Vec(3, Bits(4))
+
+  reg state(~init: vec(bits(0, 4), bits(0, 4), bits(0, 4)))
+
+  when write_enable:
+    state[selector] <== replacement
+
+  result <== state
+
+def design = elaborate(VectorUpdate())
+def register_design = elaborate(IndexedVectorRegister())
+
+def verilog_reference = @str|<<{
+module VectorUpdate(
+  input  [2:0][3:0] source,
+  input  [1:0]      selector,
+  input  [3:0]      replacement,
+  output [2:0][3:0] result
+);
+
+  assign result =
+    {{selector == 2'h2 ? replacement : source[2'h2]},
+     {selector == 2'h1 ? replacement : source[2'h1]},
+     {selector == 2'h0 ? replacement : source[2'h0]}};
+endmodule
+}>>|
+
+def register_verilog_reference = @str|<<{
+module IndexedVectorRegister(
+  input             clock,
+                    reset,
+                    write_enable,
+  input  [1:0]      selector,
+  input  [3:0]      replacement,
+  output [2:0][3:0] result
+);
+
+  reg  [2:0][3:0] state;
+  wire [3:0]      _GEN = write_enable & selector == 2'h0 ? replacement : state[2'h0];
+  wire [3:0]      _GEN_0 = write_enable & selector == 2'h1 ? replacement : state[2'h1];
+  wire [3:0]      _GEN_1 = write_enable & selector == 2'h2 ? replacement : state[2'h2];
+  always @(posedge clock) begin
+    if (reset)
+      state <= '{4'h0, 4'h0, 4'h0};
+    else begin
+      state[2'h2] <= _GEN_1;
+      state[2'h1] <= _GEN_0;
+      state[2'h0] <= _GEN;
+    end
+  end // always @(posedge)
+  assign result = state;
+endmodule
+}>>|
+
+export:
+  VectorUpdate
+  IndexedVectorRegister
+  design
+  register_design
+  verilog_reference
+  register_verilog_reference

@@ -1,4 +1,4 @@
-<!-- Preserves the upstream Berkeley HardFloat license for this derived RHDL port. -->
+<!-- Preserves the upstream Berkeley HardFloat license for this derived Rhodium port. -->
 
 Copyright (c) 2010-2015, The Regents of the University of California
 (Regents).  All Rights Reserved.

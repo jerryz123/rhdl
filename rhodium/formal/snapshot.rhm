@@ -1,0 +1,157 @@
+#lang rhombus
+// Converts verified public Rhodium IR into immutable plain data for the Rosette engine.
+
+import:
+  "../core/main.rhm" open
+  lib("racket/base.rkt") as rkt
+
+export:
+  formal_subject_top
+  formal_snapshot
+
+fun to_pair_list(elements :: List):
+  PairList[& elements]
+
+fun formal_subject_top(subject :: DesignElaboration || Module || Design):
+  cond
+  | subject is_a DesignElaboration:
+      subject.top
+  | subject is_a Module:
+      unless subject.finished && subject.design.modules.find(fun (candidate): candidate === subject)
+      | error(~who: #'formal_snapshot,
+              "formal subject must be a completed module owned by its design")
+      subject
+  | subject is_a Design:
+      error(~who: #'formal_snapshot,
+            "formal subject must identify an explicit top module; use DesignElaboration or Module")
+  | ~else:
+      error(~who: #'formal_snapshot,
+            "formal subject must be a DesignElaboration or completed Module")
+
+fun type_snapshot(type :: HardwareType):
+  cond
+  | flat_data_type(type):
+      rkt.hash("kind", "flat",
+               "text", type.describe(),
+               "width", data_width(type))
+  | record_type(type):
+      rkt.hash(
+        "kind", "record",
+        "text", type.describe(),
+        "width", type.packed_width(),
+        "fields", to_pair_list(
+          type.fields.map(
+            fun (field):
+              rkt.hash("name", field.name,
+                       "type", type_snapshot(field.type))
+          )
+        )
+      )
+  | vector_type(type):
+      rkt.hash("kind", "vector",
+               "text", type.describe(),
+               "width", type.packed_width(),
+               "length", type.length,
+               "element_type", type_snapshot(type.element_type))
+  | clock_type(type):
+      rkt.hash("kind", "clock", "text", type.describe(), "width", 1)
+  | reset_type(type):
+      rkt.hash("kind", "reset", "text", type.describe(), "width", 1)
+  | ~else:
+      rkt.hash("kind", "unsupported",
+               "text", type.describe(),
+               "width", type.packed_width())
+
+fun value_snapshot(value :: Value):
+  rkt.hash("id", value.id,
+           "name", value.name,
+           "type", type_snapshot(value.type),
+           "defining_operation", value.defining_op_id)
+
+fun place_snapshot(place :: Place):
+  rkt.hash("id", place.id,
+           "name", place.name,
+           "type", type_snapshot(place.type),
+           "owner_operation", place.owner_op_id,
+           "driver", if place.driver | place.driver.id | #false)
+
+fun port_snapshot(port :: Port):
+  rkt.hash("name", port.name,
+           "direction", port.direction,
+           "type", type_snapshot(port.type),
+           "value", if port.value | port.value.id | #false,
+           "place", if port.place | port.place.id | #false,
+           "driver", if port.place && port.place.driver | port.place.driver.id | #false)
+
+fun operation_attributes_snapshot(operation :: Operation):
+  match operation.opcode
+  | "rtl.constant":
+      rkt.hash("value", operation.attribute("value"))
+  | "rtl.mux_lookup":
+      rkt.hash("keys", to_pair_list(operation.attribute("keys")))
+  | "rtl.decode":
+      rkt.hash(
+        "cases", to_pair_list(
+          operation.attribute("cases").map(fun (row): to_pair_list(row))
+        ),
+        "default_value", operation.attribute("default_value"),
+        "default_care", operation.attribute("default_care")
+      )
+  | "rtl.extract":
+      rkt.hash("high", operation.attribute("high"),
+               "low", operation.attribute("low"))
+  | "rtl.zext" || "rtl.sext" || "rtl.trunc":
+      rkt.hash("target_width", operation.attribute("target_width"))
+  | "rtl.record_create":
+      rkt.hash("fields", to_pair_list(operation.attribute("fields")))
+  | "rtl.record_get":
+      rkt.hash("field", operation.attribute("field"))
+  | "rtl.vector_get":
+      rkt.hash("index", operation.attribute("index"))
+  | "rtl.instance":
+      def child = operation.attribute("module")
+      rkt.hash("name", operation.attribute("name"),
+               "child_module", child.id)
+  | ~else:
+      rkt.hash()
+
+fun operation_snapshot(operation :: Operation):
+  rkt.hash(
+    "id", operation.id,
+    "opcode", operation.opcode,
+    "operands", to_pair_list(operation.operands.map(fun (value): value.id)),
+    "results", to_pair_list(operation.results.map(fun (value): value.id)),
+    "places", to_pair_list(operation.places.map(fun (place): place.id)),
+    "attributes", operation_attributes_snapshot(operation),
+    "location", operation.location.describe(),
+    "origin", operation.origin.describe()
+  )
+
+fun module_snapshot(module_def :: Module):
+  rkt.hash(
+    "id", module_def.id,
+    "name", module_def.name,
+    "inputs", to_pair_list(module_def.inputs.map(port_snapshot)),
+    "outputs", to_pair_list(module_def.outputs.map(port_snapshot)),
+    "values", to_pair_list(module_def.values.map(value_snapshot)),
+    "places", to_pair_list(module_def.places.map(place_snapshot)),
+    "operations", to_pair_list(module_def.operations.map(operation_snapshot))
+  )
+
+fun reachable_modules(top :: Module):
+  def mutable modules = []
+  fun visit(module_def :: Module):
+    unless modules.find(fun (candidate): candidate === module_def)
+    | modules := modules ++ [module_def]
+      for (operation in module_def.operations):
+        when operation.opcode == "rtl.instance"
+        | visit(operation.attribute("module"))
+  visit(top)
+  modules
+
+fun formal_snapshot(subject :: DesignElaboration || Module || Design):
+  def top = formal_subject_top(subject)
+  verify_design(top.design)
+  rkt.hash("version", 1,
+           "top", top.id,
+           "modules", to_pair_list(reachable_modules(top).map(module_snapshot)))

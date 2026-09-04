@@ -1,29 +1,29 @@
-<!-- Defines RFPL as physical annotation over an existing RHDL circuit hierarchy. -->
+<!-- Defines RFPL as physical annotation over an existing Rhodium circuit hierarchy. -->
 
 # RFPL physical-annotation plan
 
 ## Status
 
 RFPL's initial annotation vertical slice is implemented. `#lang rfpl` consumes
-an already elaborated RHDL design, classifies selected circuits as hard macros
+an already elaborated Rhodium design, classifies selected circuits as hard macros
 or composite floorplans, assigns exact rectangular dimensions, and attaches a
 coordinate to every direct instance in a composite floorplan.
 
 RFPL no longer authors ports, instances, wiring, or modules. Those are written
-once in RHDL. RFPL verifies the physical interpretation of that existing
+once in Rhodium. RFPL verifies the physical interpretation of that existing
 logical hierarchy and retains it as backend-independent metadata.
 
 Strap-pin physical specialization remains the next milestone.
 
 ## Decision
 
-RFPL is a physical-view language over RHDL, not a second hardware-description
-language. Its input is an explicit RHDL `DesignElaboration` containing a
+RFPL is a physical-view language over Rhodium, not a second hardware-description
+language. Its input is an explicit Rhodium `DesignElaboration` containing a
 verified `Design` and stable top `Module`. Its output is a `FloorplanDesign`
 that references the same logical modules and instance operations.
 
-RFPL never creates an RHDL `Module` or `rtl.instance` operation. Consequently,
-annotating a design does not change its RHDL IR, CIRCT MLIR, or generated
+RFPL never creates an Rhodium `Module` or `rtl.instance` operation. Consequently,
+annotating a design does not change its Rhodium IR, CIRCT MLIR, or generated
 Verilog.
 
 ## Physical roles
@@ -35,9 +35,9 @@ role in the initial cut.
 
 A `HardMacro` is a physical leaf:
 
-- It references one finished RHDL `Module`.
+- It references one finished Rhodium `Module`.
 - It has one exact rectangular outline.
-- Its logical body may contain any operation legal in RHDL.
+- Its logical body may contain any operation legal in Rhodium.
 - RFPL does not traverse or place its logical descendants.
 
 Hard-macro status means physical opacity, not absence of logic. A synthesized
@@ -48,7 +48,7 @@ all be treated as one physical leaf.
 
 A `CompositeFloorplan` is a transparent physical assembly:
 
-- It references one finished RHDL `Module`.
+- It references one finished Rhodium `Module`.
 - It has one exact rectangular outline.
 - Its module body contains only ports, instances, and wiring.
 - Every direct logical instance has exactly one physical placement.
@@ -56,11 +56,11 @@ A `CompositeFloorplan` is a transparent physical assembly:
 
 A composite floorplan cannot contain constants, operators, registers,
 memories, assertions, simulation effects, or other logic. Logic belongs in an
-RHDL circuit annotated as a hard macro.
+Rhodium circuit annotated as a hard macro.
 
 ### Ordinary circuit
 
-An ordinary RHDL circuit has no RFPL view. It may exist outside the selected
+An ordinary Rhodium circuit has no RFPL view. It may exist outside the selected
 physical tree or below a physically opaque hard macro. It cannot be a direct
 child of a composite floorplan, because every direct child of a composite must
 have a placement and physical view.
@@ -93,9 +93,9 @@ The initial cut permits only one physical-view object for a given logical
 module in one `FloorplanDesign`. Explicit variants arrive with strap-pin
 specialization.
 
-## RHDL elaboration and inspection
+## Rhodium elaboration and inspection
 
-RHDL provides two elaboration forms:
+Rhodium provides two elaboration forms:
 
 - `elaborate(top)` retains the established result of a bare `Design`.
 - `elaborate_with_top(top)` returns `DesignElaboration(design, top)`.
@@ -104,8 +104,8 @@ RFPL requires the latter. It never guesses the top from module ordering.
 `Module.find_instance(name)` and RFPL's checked `child_instance(module, name)`
 return the stable `rtl.instance` operation used as a placement identity.
 
-The RHDL core, frontend, and backend do not import RFPL. RFPL depends only on
-the backend-independent public RHDL IR.
+The Rhodium core, frontend, and backend do not import RFPL. RFPL depends only on
+the backend-independent public Rhodium IR.
 
 ## Initial authoring surface
 
@@ -119,14 +119,14 @@ the backend-independent public RHDL IR.
 - `annotate(logical_elaboration, top_view)`
 - The physical metadata classes and `nm`/`um` constructors
 
-It does not export RHDL circuit, port, instance-construction, connection, or
+It does not export Rhodium circuit, port, instance-construction, connection, or
 logic forms.
 
 The intended split is:
 
 ```rhombus
 // blocks.rhdl
-#lang rhdl
+#lang rhodium
 
 circuit Adder(width):
   input(a, b): Bits(width)
@@ -193,7 +193,7 @@ RFPL validates the following invariants:
 - Every coordinate is exact, unit-bearing, and nonnegative.
 - Every child rectangle fits completely inside its parent rectangle.
 
-RHDL verification remains authoritative for types, ownership, complete
+Rhodium verification remains authoritative for types, ownership, complete
 driving, hierarchy cycles, combinational cycles, and all logical semantics.
 RFPL verifies only the additional physical-view contract.
 
@@ -202,7 +202,7 @@ placement remain deferred.
 
 ## CIRCT and Verilog contract
 
-Both hard macros and composite floorplans already have ordinary RHDL modules.
+Both hard macros and composite floorplans already have ordinary Rhodium modules.
 The existing CIRCT backend therefore emits their existing `hw.module` and
 `hw.instance` operations without RFPL-specific lowering.
 
@@ -215,7 +215,7 @@ consumer establishes that contract.
 ## Strap pins
 
 A strap pin is a static physical specialization input. It de-uniquifies a
-stamped sub-floorplan; it is not an RHDL runtime port and is unrelated to
+stamped sub-floorplan; it is not an Rhodium runtime port and is unrelated to
 power-grid straps.
 
 The annotation model makes the intended specialization key explicit:
@@ -228,10 +228,10 @@ Equal bindings may reuse one physical variant. Different bindings select
 distinct physical variants with their own dimensions or descendant placement
 metadata while continuing to reference the same logical module when possible.
 If a downstream backend requires distinct module symbols, RFPL may create
-aliases or clones during physical export rather than changing RHDL authorship.
+aliases or clones during physical export rather than changing Rhodium authorship.
 
 Straps must not alter logical wiring or behavior. A value that changes logic
-is an RHDL generator parameter, not an RFPL strap.
+is an Rhodium generator parameter, not an RFPL strap.
 
 ## Repository shape
 

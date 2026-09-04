@@ -1,0 +1,133 @@
+#lang rhodium
+// Resolves ready-valid protocol families for standard flow-stage implementations.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+
+// A flow stage can be specialized by a payload type, a complete protocol, an
+// endpoint to connect immediately, or a handle to extend compositionally.
+annot.macro 'FlowSource':
+  'DataType || InterfaceType || Endpoint || Handle'
+
+// Public stage functions admit hardware literals only far enough to issue the
+// stage-owned diagnostic; literals are not valid flow topology sources.
+annot.macro 'FlowSourceArgument':
+  'FlowSource || HardwareLiteral'
+
+// Resolves an endpoint, handle, ready-valid protocol, or shorthand payload
+// type to the exact protocol expected at a new flow stage's input.
+fun flow_protocol_type(source_or_type :~ FlowSource):
+  unless source_or_type is_a FlowSource
+  | error(~who: #'flow_protocol_type,
+          "flow stage requires a payload DataType, ready-valid InterfaceType, Endpoint, or Handle")
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'flow_protocol_type,
+                "ready-valid handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        Decoupled(source_or_type)
+  def normalized = decoupled_protocol_type(protocol)
+  unless normalized
+  | if source_or_type is_a Endpoint || source_or_type is_a Handle
+    | error(~who: #'flow_protocol_type,
+            "flow-control chaining requires a Decoupled or Irrevocable endpoint")
+    | error(~who: #'flow_protocol_type,
+            "flow-control chaining requires a Decoupled or Irrevocable protocol")
+  normalized
+
+fun flow_payload_type(source_or_type :~ FlowSource):
+  def protocol = flow_protocol_type(source_or_type)
+  protocol.members.find(
+    fun (member :: InterfaceMember): member.name == "bits"
+  ).type
+
+// Resolves the non-backpressured Valid family independently so ready-valid
+// stages cannot accidentally accept a protocol with no readiness signal.
+fun valid_flow_protocol_type(source_or_type :~ FlowSource):
+  unless source_or_type is_a FlowSource
+  | error(~who: #'valid_flow_protocol_type,
+          "Valid stage requires a payload DataType, Valid InterfaceType, Endpoint, or Handle")
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'valid_flow_protocol_type,
+                "Valid handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        Valid(source_or_type)
+  def normalized = valid_protocol_type(protocol)
+  unless normalized
+  | if source_or_type is_a Endpoint || source_or_type is_a Handle
+    | error(~who: #'valid_flow_protocol_type,
+            "Valid-flow chaining requires a Valid endpoint")
+    | error(~who: #'valid_flow_protocol_type,
+            "Valid-flow chaining requires a Valid protocol")
+  normalized
+
+fun valid_flow_payload_type(source_or_type :~ FlowSource):
+  def protocol = valid_flow_protocol_type(source_or_type)
+  protocol.members.find(
+    fun (member :: InterfaceMember): member.name == "bits"
+  ).type
+
+// Resolves the payloadless ready-valid family for configured Ctrl stages.
+// Detached topology must start from DecoupledCtrl() or IrrevocableCtrl().
+fun ctrl_flow_protocol_type(source_or_type :~ FlowSource):
+  def protocol:
+    cond
+    | source_or_type is_a Endpoint:
+        source_or_type.type
+    | source_or_type is_a Handle:
+        unless source_or_type.right is_a Endpoint
+        | error(~who: #'ctrl_flow_protocol_type,
+                "control-flow handle output must be one interface endpoint")
+        source_or_type.right.type
+    | source_or_type is_a InterfaceType:
+        source_or_type
+    | ~else:
+        error(~who: #'ctrl_flow_protocol_type,
+              "control flow stage requires a DecoupledCtrl or IrrevocableCtrl InterfaceType, Endpoint, or Handle")
+  def control_contract = DecoupledCtrl()
+  unless interface_type_supports(protocol, control_contract) && (
+    protocol.members.length() == control_contract.members.length()
+  )
+  | error(~who: #'ctrl_flow_protocol_type,
+          "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint or protocol")
+  protocol
+
+// Replaces a protocol's payload without weakening its behavioral contract.
+fun flow_protocol_with_payload(protocol :: InterfaceType,
+                               payload_type :: DataType):
+  def normalized = decoupled_protocol_type(protocol)
+  unless normalized
+  | error(~who: #'flow_protocol_with_payload,
+          "flow protocol must nominally support Decoupled or Irrevocable")
+  def current_payload_type = normalized.members.find(
+    fun (member :: InterfaceMember): member.name == "bits"
+  ).type
+  if interface_type_supports(normalized, Irrevocable(current_payload_type))
+  | Irrevocable(payload_type)
+  | Decoupled(payload_type)
+
+export:
+  FlowSource
+  FlowSourceArgument
+  flow_protocol_type
+  flow_payload_type
+  valid_flow_protocol_type
+  valid_flow_payload_type
+  ctrl_flow_protocol_type
+  flow_protocol_with_payload

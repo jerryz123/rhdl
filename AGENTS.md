@@ -1,6 +1,6 @@
-<!-- Repository-local instructions for agents working on RHDL. -->
+<!-- Repository-local instructions for agents working on Rhodium. -->
 
-# RHDL agent instructions
+# Rhodium agent instructions
 
 ## File headers
 
@@ -62,23 +62,23 @@
 
 ## Package boundaries
 
-- Treat `rhdl/README.md` as the authoritative package and frontend-layer
+- Treat `rhodium/README.md` as the authoritative package and frontend-layer
   dependency contract. Update its dependency table when adding a layer or
-  changing a layer's direct RHDL imports.
+  changing a layer's direct Rhodium imports.
 
 - Keep frontend-independent IR, Builder, verification, and printing code under
-  `rhdl/core/`; core modules must not import the frontend or backend.
-- Keep elaboration and language macros under `rhdl/frontend/`; frontend modules
+  `rhodium/core/`; core modules must not import the frontend or backend.
+- Keep elaboration and language macros under `rhodium/frontend/`; frontend modules
   must not import backends.
-- Put the shared public authoring surface in `rhdl/frontend/foundation.rhm`,
-  independently selectable features in `rhdl/frontend/layers/`, and non-profile
-  macro/static-information machinery in `rhdl/frontend/support/`.
+- Put the shared public authoring surface in `rhodium/frontend/foundation.rhm`,
+  independently selectable features in `rhodium/frontend/layers/`, and non-profile
+  macro/static-information machinery in `rhodium/frontend/support/`.
 - Frontend layers must not import sibling layers; move genuinely shared
-  machinery into `rhdl/frontend/support/`.
-- Keep CIRCT lowering under `rhdl/backend/`; backend modules must not import
+  machinery into `rhodium/frontend/support/`.
+- Keep CIRCT lowering under `rhodium/backend/`; backend modules must not import
   frontend syntax or elaboration.
-- Use `rhdl/language.rhm` as the composition layer and reserve `rhdl/main.rkt`
-  for the `#lang rhdl` reader shim.
+- Use `rhodium/language.rhm` as the composition layer and reserve `rhodium/main.rkt`
+  for the `#lang rhodium` reader shim.
 - Preserve the mirrored `tests/core/`, `tests/frontend/`, and `tests/backend/`
   organization. Run `make check-boundaries` after moving or adding modules.
 - Keep processor components reusable across named cores directly under `cores/`.
@@ -89,7 +89,7 @@
 
 - Keep the root `README.md` focused on project orientation, quick start,
   navigation, concise status, and deferred work.
-- Put implementation architecture in `rhdl/README.md` and detailed component
+- Put implementation architecture in `rhodium/README.md` and detailed component
   contracts in the nearest component directory's `README.md`.
 - Keep the executable language walkthrough and example catalog in
   `examples/README.md`; keep test workflows under `tests/`.

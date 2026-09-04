@@ -1,31 +1,31 @@
-<!-- Compares RHDL's exact synchronous construction with Filament's timeline-typed pipeline language. -->
+<!-- Compares Rhodium's exact synchronous construction with Filament's timeline-typed pipeline language. -->
 
-# RHDL and Filament: explicit cycles versus timeline-typed composition
+# Rhodium and Filament: explicit cycles versus timeline-typed composition
 
 ## Scope and thesis
 
 *Snapshot: 2026-08-17.*
 
-RHDL and Filament are both structurally minded languages: neither treats a
+Rhodium and Filament are both structurally minded languages: neither treats a
 software procedure as an unconstrained request for HLS. Their source programs
-nevertheless state different structures. RHDL constructs concrete operations,
+nevertheless state different structures. Rhodium constructs concrete operations,
 registers, memories, and connections. Filament constructs component instances
 and invokes them at symbolic events, with types saying when every port is
 available and how frequently a resource may be reused.
 
 Filament's timeline types are a genuine increase in language expressivity.
-RHDL can build a balanced pipeline or a resource-sharing controller, but it
+Rhodium can build a balanced pipeline or a resource-sharing controller, but it
 cannot state their latency, initiation interval, or legal use windows as
 compositional source contracts. Filament gains that power by specializing its
-language around statically timed pipelines. RHDL remains more direct for
+language around statically timed pipelines. Rhodium remains more direct for
 general synchronous RTL and dynamically stalled protocols. In particular,
-RHDL's standard flow layer is a compact language for constructing exact
+Rhodium's standard flow layer is a compact language for constructing exact
 runtime-backpressured topologies rather than merely wiring ready and valid
 signals by hand.
 
 ## Summary
 
-| Question | RHDL | Filament |
+| Question | Rhodium | Filament |
 |---|---|---|
 | Source denotes | One exact graph of operations, state, resources, and instances | A statically timed network of component instances and event-indexed invocations |
 | Core composition unit | Explicit definition/binding connection | Component invocation at a symbolic event |
@@ -39,8 +39,8 @@ signals by hand.
 
 ## Denotation and staging
 
-RHDL executes a Rhombus generator to construct the
-[public hardware IR](../../rhdl/core/README.md). A register is a concrete
+Rhodium executes a Rhombus generator to construct the
+[public hardware IR](../../rhodium/core/README.md). A register is a concrete
 state element, a connection is a concrete driver relation, and module
 instantiation creates a chosen structural boundary. If a result must arrive
 two cycles later, the author builds the state and control that make that true.
@@ -57,12 +57,12 @@ The source therefore contains a schedule, but not as a flat list of absolute
 cycles. Event expressions describe relative time and component signatures
 abstract over a caller's start event. The compiler checks and realizes that
 schedule; it is not free to choose arbitrary operation latency or register
-placement. RHDL fixes time by explicit graph construction, while Filament fixes
+placement. Rhodium fixes time by explicit graph construction, while Filament fixes
 time by a checked symbolic contract that later determines graph control.
 
 ## Core composition unit and syntax
 
-RHDL syntax names hardware ownership directly. `output out: Bits(32)` creates
+Rhodium syntax names hardware ownership directly. `output out: Bits(32)` creates
 a destination, `out <== value` supplies its one binding, and `reg state(...)`
 introduces a state element. `when` and `switch` describe runtime selection that
 lowers to muxes and enables. Composition is uniform because all of these forms
@@ -78,13 +78,13 @@ invocation result brings its valid time into subsequent composition.
 This separation is syntactically economical precisely when hardware is reused
 over time. A second invocation communicates sharing without manually exposing
 the mux, enable, and controller at every use site, while the event argument
-makes the scheduling decision visible. RHDL requires those implementation
+makes the scheduling decision visible. Rhodium requires those implementation
 objects to be constructed explicitly. Filament writes less control structure,
 but its source is less literal about the final registers and controller states.
 
 ## Elastic flow composition
 
-RHDL's standard flow layer gives exact elastic hardware a higher-level syntax
+Rhodium's standard flow layer gives exact elastic hardware a higher-level syntax
 without changing what the circuit denotes. A configured flow stage is an
 ordinary unary elaboration-time function, so `|>` expresses serial topology.
 The same model covers parallel branches, arbitration and joins, atomic or
@@ -108,15 +108,15 @@ unbounded, runtime-dependent number of cycles by downstream readiness. Such a
 network can be implemented as explicit component logic, but it falls outside
 the central timeline abstraction.
 
-RHDL's advantage here should not be mistaken for temporal proof. Flow types do
+Rhodium's advantage here should not be mistaken for temporal proof. Flow types do
 not state latency, initiation interval, throughput, liveness, or deadlock
 freedom, and `Irrevocable` stability is not automatically asserted. Filament
 is therefore much stronger for static time and resource safety even though
-RHDL is more expressive for dynamically elastic topology.
+Rhodium is more expressive for dynamically elastic topology.
 
 ## Time, state, and concurrency
 
-RHDL has conventional synchronous semantics. Registers advance on explicit
+Rhodium has conventional synchronous semantics. Registers advance on explicit
 clocks, combinational logic relates current values within a cycle, and guarded
 next-state drives determine holds and updates. Parallel operations are simply
 parallel regions of the graph. There is no language-level latency associated
@@ -132,7 +132,7 @@ structural resource hazards as composition errors.
 This is not the same abstraction as dynamic backpressure. A timeline contract
 says at which relative cycles a value exists and when new work may begin. A
 ready/valid protocol decides at runtime whether a transfer occurs and may stall
-for an unbounded, data-dependent number of cycles. RHDL directly expresses the
+for an unbounded, data-dependent number of cycles. Rhodium directly expresses the
 latter through signal and state equations; Filament's most elegant core model
 addresses the former. Treating one as a weaker version of the other obscures
 their different denotations.
@@ -152,16 +152,16 @@ constraints, generative `if`/`for`, and index-dependent
 relationships be expressed symbolically. The language checks allowed
 parameterizations with arithmetic constraints rather than merely testing one
 expanded circuit. This is a family-level timing guarantee that unrestricted
-RHDL host generation does not attempt.
+Rhodium host generation does not attempt.
 
-RHDL's type system records a different set of facts: exact packed and
+Rhodium's type system records a different set of facts: exact packed and
 aggregate structure, semantic distinctions such as signed, enum, and one-hot
 values, operation capabilities, and binding legality. The verifier checks those
 facts plus single-binding ownership and combinational acyclicity in the
 realized design. Its types do not carry temporal intervals, and module
 signatures do not promise latency or initiation interval.
 
-The representational boundary is important. RHDL can implement the same
+The representational boundary is important. Rhodium can implement the same
 pipeline and even generate host-side checks for a particular instance, but the
 public language cannot quantify over a symbolic event or require callers to
 respect a time-indexed port contract. Filament's advantage is not a more
@@ -169,13 +169,13 @@ convenient register helper; it is a different static proposition.
 
 ## Typed literals, patterns, and relational decode
 
-RHDL's finite-relation vocabulary composes exact types along an axis that is
+Rhodium's finite-relation vocabulary composes exact types along an axis that is
 orthogonal to time. `HardwareLiteral` supplies exact values for scalar,
 aggregate, and extension-defined types. A recursive `Pattern` can constrain
 selected record or vector parts while leaving others free, and it serves both
 as an input region and as a partially specified output value.
 
-An RHDL `DecodeTable` requires exact common types and pairwise nonoverlapping
+An Rhodium `DecodeTable` requires exact common types and pairwise nonoverlapping
 inputs, making its rows an unordered relation rather than a priority-ordered
 case statement. Tables can be extended by list concatenation subject to
 overlap validation, lifted into a wider input domain, and zipped across
@@ -190,7 +190,7 @@ partial-output decode relation. A user can generate repeated comparisons or
 encapsulate them in a component, but the timeline type does not preserve
 decoder cubes as a composable authoring object.
 
-RHDL is consequently more expressive and concise specifically for structured
+Rhodium is consequently more expressive and concise specifically for structured
 control decoding, while Filament is far more expressive for stating when the
 decoder's inputs and outputs may be used. Giving downstream synthesis the
 complete sparse relation may produce better logic than naive compare-and-mux
@@ -211,7 +211,7 @@ state that are not named in the source. Constraint errors may also involve
 symbolic interval relationships spanning several calls. The schedule is still
 author-visible, but the mechanism implementing it is compiler-derived.
 
-RHDL has the inverse locality. Registers, muxes, and enables are easy to locate
+Rhodium has the inverse locality. Registers, muxes, and enables are easy to locate
 and their connectivity is predictable, but latency is an emergent path property
 that does not survive as an interface contract. A module can be structurally
 transparent yet temporally opaque to its caller.
@@ -225,21 +225,21 @@ the same event expression explains value availability and legal resource reuse.
 That orthogonality gives a small syntax unusually high leverage for static
 pipelines.
 
-RHDL's construction language is more general and more literal. Its explicit
+Rhodium's construction language is more general and more literal. Its explicit
 bindings, state boundaries, and control accommodate elastic protocols,
 arbitrary state machines, memories, and ordinary datapaths without translating
 them into a timeline. The cost is that timing intent above the register level
 is not expressible as a checked contract.
 
-The right comparison is therefore not which language has “more timing.” RHDL
+The right comparison is therefore not which language has “more timing.” Rhodium
 owns exact cycle implementation; Filament owns symbolic timing composition.
 Filament is more expressive and concise where a design admits a static
-schedule. RHDL is more predictable where runtime control, not a timeline, is
+schedule. Rhodium is more predictable where runtime control, not a timeline, is
 the natural specification.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
-1. If RHDL adds fixed-latency contracts, base them on composable symbolic events
+1. If Rhodium adds fixed-latency contracts, base them on composable symbolic events
    or equivalent relations, not disconnected integer annotations.
 2. Distinguish physical instantiation from logical invocation when a language
    layer intentionally shares resources. The distinction exposes reuse without
@@ -249,18 +249,18 @@ the natural specification.
 4. Keep statically timed and elastic interfaces as distinct regimes. A
    fixed-latency event contract and a dynamically stalled transfer protocol
    make different promises.
-5. Preserve exact RHDL IR beneath any timeline layer. Inferring control from
+5. Preserve exact Rhodium IR beneath any timeline layer. Inferring control from
    events should be a named elaboration step, not a silent change to ordinary
    connection semantics.
 
 ## Sources
 
-- RHDL [core semantics](../../rhdl/core/README.md),
-  [frontend model](../../rhdl/frontend/README.md), and
-  [frontend layers](../../rhdl/frontend/layers/README.md), plus the
-  [standard flow composition model](../../rhdl/std/README.md#flow-control-circuits)
-- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
-  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)
+- Rhodium [core semantics](../../rhodium/core/README.md),
+  [frontend model](../../rhodium/frontend/README.md), and
+  [frontend layers](../../rhodium/frontend/layers/README.md), plus the
+  [standard flow composition model](../../rhodium/std/README.md#flow-control-circuits)
+- Rhodium [typed decode patterns](../../rhodium/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhodium/std/README.md#typed-decode-generation)
 - [Filament language overview](https://filamenthdl.com/)
 - [Filament language tutorial](https://filamenthdl.com/docs/lang/tutorial.html)
 - [Filament loops and timed bundles](https://filamenthdl.com/docs/meta/loops-and-bundles.html)

@@ -1,0 +1,228 @@
+#lang rhodium
+// Demonstrates fixed and elaboration-conditional bundles over core record semantics.
+
+bundle Pair(T :: DataType):
+  left: T
+  right: T
+
+bundle Envelope(T :: DataType):
+  payload: Pair(T)
+  tag: Bits(2)
+
+bundle TaggedPayload(T :: DataType, include_tag :: Boolean):
+  payload: T
+  if include_tag:
+    tag: Bits(4)
+
+circuit Swap(width :: PosInt):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  result.left <== source.right
+  result.right <== source.left
+
+circuit NestedSwap(width :: PosInt):
+  input source: Envelope(Bits(width))
+  output result: Envelope(Bits(width))
+
+  result.payload.left <== source.payload.right
+  result.payload.right <== source.payload.left
+  result.tag <== source.tag
+
+circuit BundleHierarchy(width :: PosInt):
+  input source: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  inst swap(Swap(width))
+  swap.source <== source
+  result <== swap.result
+
+circuit BundleCast(width :: PosInt):
+  input source: Pair(Bits(width))
+  output bits_out: Bits(width + width)
+  output restored: Pair(Bits(width))
+
+  def raw = source.as_bits()
+  bits_out <== raw
+  restored <== raw.into(Pair(Bits(width)))
+
+circuit BundleSpecializations():
+  input narrow: Pair(Bits(8))
+  input wide: Pair(Bits(16))
+  output narrow_result: Pair(Bits(8))
+  output wide_result: Pair(Bits(16))
+
+  narrow_result <== narrow
+  wide_result <== wide
+
+circuit ConditionalBundleSpecializations():
+  input plain: TaggedPayload(Bits(8), #false)
+  input tagged: TaggedPayload(Bits(8), #true)
+  output plain_result: TaggedPayload(Bits(8), #false)
+  output tagged_result: TaggedPayload(Bits(8), #true)
+
+  plain_result <== plain
+  tagged_result <== tagged
+
+circuit BundlePipeline(width :: PosInt):
+  input clk: Clock
+  input reset: Reset
+  input select: Bool
+  input direct: Pair(Bits(width))
+  input alternate: Pair(Bits(width))
+  output result: Pair(Bits(width))
+
+  def zero_pair = Pair(Bits(width)):
+    left: bits(0, width)
+    right: bits(0, width)
+  def selected = mux(select, direct, alternate)
+  reg state(Pair(Bits(width)), ~clock: clk, ~reset: reset, ~init: zero_pair)
+  state <== selected
+  result <== state
+
+def design = elaborate(BundlePipeline(8))
+def cast_design = elaborate(BundleCast(8))
+def specialization_design = elaborate(BundleSpecializations())
+def conditional_specialization_design = elaborate(ConditionalBundleSpecializations())
+def nested_swap_design = elaborate(NestedSwap(8))
+def hierarchy_design = elaborate(BundleHierarchy(8))
+
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhodium_types
+module BundlePipeline(
+  input       clk,
+              reset,
+              select,
+  input  Pair direct,
+              alternate,
+  output Pair result
+);
+
+  Pair state;
+  always @(posedge clk) begin
+    if (reset)
+      state <= '{left: 8'h0, right: 8'h0};
+    else
+      state <= select ? direct : alternate;
+  end // always @(posedge)
+  assign result = state;
+endmodule
+}>>|
+def cast_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhodium_types
+module BundleCast(
+  input  Pair   source,
+  output [15:0] bits_out,
+  output Pair   restored
+);
+
+  assign bits_out = /*cast(bit[15:0])*/source;
+  assign restored = source;
+endmodule
+}>>|
+
+def specialization_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+  typedef struct packed {logic [15:0] left; logic [15:0] right; } Pair_1;
+`endif // _TYPESCOPE_rhodium_types
+module BundleSpecializations(
+  input  Pair   narrow,
+  input  Pair_1 wide,
+  output Pair   narrow_result,
+  output Pair_1 wide_result
+);
+
+  assign narrow_result = narrow;
+  assign wide_result = wide;
+endmodule
+}>>|
+
+def conditional_specialization_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] payload; } TaggedPayload;
+  typedef struct packed {logic [7:0] payload; logic [3:0] tag; } TaggedPayload_1;
+`endif // _TYPESCOPE_rhodium_types
+module ConditionalBundleSpecializations(
+  input  TaggedPayload   plain,
+  input  TaggedPayload_1 tagged_0,
+  output TaggedPayload   plain_result,
+  output TaggedPayload_1 tagged_result
+);
+
+  assign plain_result = plain;
+  assign tagged_result = tagged_0;
+endmodule
+}>>|
+
+def nested_swap_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+  typedef struct packed {Pair payload; logic [1:0] tag; } Envelope;
+`endif // _TYPESCOPE_rhodium_types
+module NestedSwap(
+  input  Envelope source,
+  output Envelope result
+);
+
+  wire Pair _GEN = '{left: source.payload.right, right: source.payload.left};
+  assign result = '{payload: _GEN, tag: source.tag};
+endmodule
+}>>|
+def hierarchy_verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] left; logic [7:0] right; } Pair;
+`endif // _TYPESCOPE_rhodium_types
+module BundleHierarchy(
+  input  Pair source,
+  output Pair result
+);
+
+  Swap swap (
+    .source (source),
+    .result (result)
+  );
+endmodule
+
+module Swap(
+  input  Pair source,
+  output Pair result
+);
+
+  assign result = '{left: source.right, right: source.left};
+endmodule
+}>>|
+
+export:
+  Pair
+  Envelope
+  TaggedPayload
+  Swap
+  NestedSwap
+  BundleHierarchy
+  BundleCast
+  BundleSpecializations
+  ConditionalBundleSpecializations
+  BundlePipeline
+  design
+  cast_design
+  specialization_design
+  conditional_specialization_design
+  nested_swap_design
+  hierarchy_design
+  verilog_reference
+  cast_verilog_reference
+  specialization_verilog_reference
+  conditional_specialization_verilog_reference
+  nested_swap_verilog_reference
+  hierarchy_verilog_reference

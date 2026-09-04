@@ -1,8 +1,8 @@
-# Builds RHDL smoke designs and mapped SimpleSoC artifacts through CIRCT and LibreLane.
+# Builds Rhodium smoke designs and mapped SimpleSoC artifacts through CIRCT and LibreLane.
 
 .DELETE_ON_ERROR:
 
-RHDL_ROOT := $(abspath ..)
+RHODIUM_ROOT := $(abspath ..)
 VLSI_ROOT := $(CURDIR)
 HARNESS_DIR := $(VLSI_ROOT)/double_wide_openframe
 BUILD_DIR := $(VLSI_ROOT)/build
@@ -11,18 +11,18 @@ WRAPPER := $(VLSI_ROOT)/verilog/rtl/double_wide_openframe_project_wrapper.v
 HARNESS_WRAPPER := $(HARNESS_DIR)/verilog/rtl/double_wide_openframe_project_wrapper.v
 PIN_TEMPLATE := $(HARNESS_DIR)/librelane/wrapper/pin_template.def
 TOP_NAME := double_wide_openframe_project_wrapper
-LVS_CONFIG := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/config.yaml
-LVS_WRAPPER := $(VLSI_ROOT)/verilog/rtl/rhdl_lvs_smoke.v
-LVS_TOP_NAME := rhdl_lvs_smoke
-LVS_RUN_DIR := $(VLSI_ROOT)/openlane/rhdl_lvs_smoke/runs/RHDL_LVS
-SRAM_ROOT := $(RHDL_ROOT)/sram
+LVS_CONFIG := $(VLSI_ROOT)/openlane/rhodium_lvs_smoke/config.yaml
+LVS_WRAPPER := $(VLSI_ROOT)/verilog/rtl/rhodium_lvs_smoke.v
+LVS_TOP_NAME := rhodium_lvs_smoke
+LVS_RUN_DIR := $(VLSI_ROOT)/openlane/rhodium_lvs_smoke/runs/RHODIUM_LVS
+SRAM_ROOT := $(RHODIUM_ROOT)/sram
 MEMORY_MAP_CATALOG := $(SRAM_ROOT)/sky130/macros.ini
 MEMORY_MAPPER := $(SRAM_ROOT)/map-memories.py
 MEMORY_SITE_PASS_DIR := $(SRAM_ROOT)/circt
-MEMORY_SITE_PLUGIN := $(SRAM_ROOT)/build/circt/rhdl-memory-sites.so
+MEMORY_SITE_PLUGIN := $(SRAM_ROOT)/build/circt/rhodium-memory-sites.so
 SIMPLE_SOC_MEMORY_POLICY := $(VLSI_ROOT)/designs/simple-soc/sky130/sram-map.yaml
 SIMPLE_SOC_BUILD_DIR := $(BUILD_DIR)/simple-soc
-SIMPLE_SOC_RHDL_SOURCES := $(addprefix $(RHDL_ROOT)/,$(shell git -C $(RHDL_ROOT) ls-files '*.rhdl'))
+SIMPLE_SOC_RHODIUM_SOURCES := $(addprefix $(RHODIUM_ROOT)/,$(shell git -C $(RHODIUM_ROOT) ls-files '*.rhdl'))
 SIMPLE_SOC_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.mlir
 SIMPLE_SOC_FIRRTL_MEM_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc-firmem.mlir
 SIMPLE_SOC_MEMORY_SITE_INVENTORY := $(SIMPLE_SOC_BUILD_DIR)/memory-sites.json
@@ -31,14 +31,14 @@ SIMPLE_SOC_RTL := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.sv
 SIMPLE_SOC_MEMORY_WRAPPERS := $(SIMPLE_SOC_BUILD_DIR)/memory-wrappers.sv
 SIMPLE_SOC_MEMORY_MANIFEST := $(SIMPLE_SOC_BUILD_DIR)/memory-manifest.json
 SIMPLE_SOC_SYNTH_CONFIG := $(VLSI_ROOT)/openlane/simple_soc/config.yaml
-SIMPLE_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHDL_SLANG_CHECK
+SIMPLE_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHODIUM_SLANG_CHECK
 SIMPLE_SOC_SLANG_NETLIST := $(SIMPLE_SOC_SLANG_RUN_DIR)/final/nl/SimpleSoC.nl.v
-SIMPLE_SOC_SYNTH_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHDL_SLANG_SYNTH
+SIMPLE_SOC_SYNTH_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHODIUM_SLANG_SYNTH
 SIMPLE_SOC_SYNTH_NETLIST := $(SIMPLE_SOC_SYNTH_RUN_DIR)/final/nl/SimpleSoC.nl.v
 SKY130_SRAM_MODEL = $(PDK_ROOT)/$(PDK)/libs.ref/sky130_sram_macros/verilog/sky130_sram_2kbyte_1rw1r_32x512_8.v
 
 RACKET ?= racket
-CIRCT_OPT ?= $(RHDL_ROOT)/.tools/firtool-1.155.0/bin/circt-opt
+CIRCT_OPT ?= $(RHODIUM_ROOT)/.tools/firtool-1.155.0/bin/circt-opt
 CIRCT_ROOT ?= $(abspath $(dir $(CIRCT_OPT))/..)
 VERILATOR ?= verilator
 PYTHON ?= python3
@@ -63,12 +63,12 @@ $(BUILD_DIR):
 	mkdir -p $@
 
 setup-circt:
-	$(MAKE) -C $(RHDL_ROOT) setup-circt
+	$(MAKE) -C $(RHODIUM_ROOT) setup-circt
 
-$(BUILD_DIR)/rhdl-top.mlir: src/rhdl-top.rhdl tools/emit-top.rhm | $(BUILD_DIR)
-	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled $(RACKET) -S $(RHDL_ROOT) tools/emit-top.rhm > $@
+$(BUILD_DIR)/rhodium-top.mlir: src/rhodium-top.rhdl tools/emit-top.rhm | $(BUILD_DIR)
+	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled $(RACKET) -S $(RHODIUM_ROOT) tools/emit-top.rhm > $@
 
-$(BUILD_DIR)/rhdl-top.sv: $(BUILD_DIR)/rhdl-top.mlir
+$(BUILD_DIR)/rhodium-top.sv: $(BUILD_DIR)/rhodium-top.mlir
 	@test -x $(CIRCT_OPT) || { \
 		echo "circt-opt not found at $(CIRCT_OPT); run 'make setup-circt' or set CIRCT_OPT" >&2; \
 		exit 1; \
@@ -85,7 +85,7 @@ $(BUILD_DIR)/rhdl-top.sv: $(BUILD_DIR)/rhdl-top.mlir
 		--export-verilog \
 		$< -o /dev/null > $@
 
-rtl: $(BUILD_DIR)/rhdl-top.sv
+rtl: $(BUILD_DIR)/rhodium-top.sv
 
 contract-check:
 	$(PYTHON) tools/check-openframe-contract.py \
@@ -96,12 +96,12 @@ contract-check:
 rtl-check: rtl contract-check
 	$(VERILATOR) --lint-only --top-module $(TOP_NAME) -DUSE_POWER_PINS \
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
-		$(BUILD_DIR)/rhdl-top.sv $(WRAPPER)
+		$(BUILD_DIR)/rhodium-top.sv $(WRAPPER)
 
 lvs-smoke-rtl-check: rtl
 	$(VERILATOR) --lint-only --top-module $(LVS_TOP_NAME) -DUSE_POWER_PINS \
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY \
-		$(BUILD_DIR)/rhdl-top.sv $(LVS_WRAPPER)
+		$(BUILD_DIR)/rhodium-top.sv $(LVS_WRAPPER)
 
 $(MEMORY_SITE_PLUGIN): $(MEMORY_SITE_PASS_DIR)/CMakeLists.txt $(MEMORY_SITE_PASS_DIR)/MemorySitePass.cpp
 	$(MAKE) -C $(SRAM_ROOT) plugin CIRCT_OPT=$(CIRCT_OPT) CIRCT_ROOT=$(CIRCT_ROOT)
@@ -116,9 +116,9 @@ memory-map-test:
 $(SIMPLE_SOC_BUILD_DIR):
 	mkdir -p $@
 
-$(SIMPLE_SOC_MLIR): tools/emit-simple-soc.rhm $(SIMPLE_SOC_RHDL_SOURCES) | $(SIMPLE_SOC_BUILD_DIR)
-	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled PLTCOLLECTS=$(RHDL_ROOT): \
-		$(RACKET) -S $(RHDL_ROOT) tools/emit-simple-soc.rhm > $@
+$(SIMPLE_SOC_MLIR): tools/emit-simple-soc.rhm $(SIMPLE_SOC_RHODIUM_SOURCES) | $(SIMPLE_SOC_BUILD_DIR)
+	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled PLTCOLLECTS=$(RHODIUM_ROOT): \
+		$(RACKET) -S $(RHODIUM_ROOT) tools/emit-simple-soc.rhm > $@
 
 $(SIMPLE_SOC_MEMORY_SITE_STAMP): $(SIMPLE_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(SIMPLE_SOC_MEMORY_POLICY)
 	@test -x $(CIRCT_OPT) || { \
@@ -127,7 +127,7 @@ $(SIMPLE_SOC_MEMORY_SITE_STAMP): $(SIMPLE_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(SIMP
 	}
 	$(CIRCT_OPT) \
 		--load-pass-plugin=$(MEMORY_SITE_PLUGIN) \
-		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhdl-select-hw-top{top=SimpleSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhdl-map-memory-sites{policy=$(SIMPLE_SOC_MEMORY_POLICY) inventory=$(SIMPLE_SOC_MEMORY_SITE_INVENTORY) top=SimpleSoC},symbol-dce)" \
+		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhodium-select-hw-top{top=SimpleSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhodium-map-memory-sites{policy=$(SIMPLE_SOC_MEMORY_POLICY) inventory=$(SIMPLE_SOC_MEMORY_SITE_INVENTORY) top=SimpleSoC},symbol-dce)" \
 		$(SIMPLE_SOC_MLIR) -o $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
 	@test -s $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
 	@test -s $(SIMPLE_SOC_MEMORY_SITE_INVENTORY)
@@ -185,7 +185,7 @@ simple-soc-slang-check: simple-soc-macro-rtl
 
 simple-soc-slang-check-native: simple-soc-macro-rtl
 	command -v librelane >/dev/null
-	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHDL_SLANG_CHECK --overwrite \
+	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_CHECK --overwrite \
 		--override-config SYNTH_ELABORATE_ONLY=true --only Yosys.Synthesis \
 		--condensed --hide-progress-bar
 	test -s $(SIMPLE_SOC_SLANG_NETLIST)
@@ -208,7 +208,7 @@ simple-soc-synth: simple-soc-macro-rtl
 
 simple-soc-synth-native: simple-soc-macro-rtl
 	command -v librelane >/dev/null
-	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHDL_SLANG_SYNTH --overwrite \
+	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_SYNTH --overwrite \
 		--only Yosys.Synthesis --condensed --hide-progress-bar
 	test -s $(SIMPLE_SOC_SYNTH_NETLIST)
 	grep -q "use_slang" $(SIMPLE_SOC_SYNTH_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
@@ -251,7 +251,7 @@ lvs-smoke: rtl-check lvs-smoke-rtl-check
 
 lvs-smoke-native: rtl lvs-smoke-rtl-check
 	command -v librelane >/dev/null
-	$(LIBRELANE) $(LVS_CONFIG) --run-tag RHDL_LVS --overwrite --condensed \
+	$(LIBRELANE) $(LVS_CONFIG) --run-tag RHODIUM_LVS --overwrite --condensed \
 		--hide-progress-bar --save-views-to $(BUILD_DIR)/lvs-views
 	test -s $(BUILD_DIR)/lvs-views/gds/$(LVS_TOP_NAME).gds
 	grep -Eq "^Final result: (Circuits|Netlists) match" \
@@ -282,4 +282,4 @@ gds: integrate
 
 clean:
 	rm -rf $(BUILD_DIR) openlane/double_wide_openframe_project_wrapper/runs \
-		openlane/rhdl_lvs_smoke/runs
+		openlane/rhodium_lvs_smoke/runs

@@ -1,0 +1,74 @@
+#lang rhodium
+// Demonstrates a synchronous memory with one shared read-write physical port.
+
+sync_circuit SyncMemory1RWExample(depth :: PosInt, width :: PosInt):
+  input address: Bits(index_width(depth))
+  input enable: Bits(1)
+  input write: Bits(1)
+  input write_data: Bits(width)
+  output read_data: Bits(width)
+
+  sync_mem storage(depth, Bits(width)):
+    read_write
+
+  storage.read_write.address <== address
+  storage.read_write.enable <== enable
+  storage.read_write.write <== write
+  storage.read_write.write_data <== write_data
+  read_data <== storage.read_write.read_data
+
+def design = elaborate(SyncMemory1RWExample(4, 8))
+
+def verilog_reference = @str|<<{
+module storage_4x8(
+  input  [1:0] RW0_addr,
+  input        RW0_en,
+               RW0_clk,
+               RW0_wmode,
+  input  [7:0] RW0_wdata,
+  output [7:0] RW0_rdata
+);
+
+  reg  [7:0] Memory[0:3];
+  reg  [1:0] _RW0_raddr_d0;
+  reg        _RW0_ren_d0;
+  reg        _RW0_rmode_d0;
+  always @(posedge RW0_clk) begin
+    _RW0_raddr_d0 <= RW0_addr;
+    _RW0_ren_d0 <= RW0_en;
+    _RW0_rmode_d0 <= RW0_wmode;
+  end // always @(posedge)
+  wire [7:0] _GEN;
+  assign _GEN = _RW0_ren_d0 & _RW0_rmode_d0 == 1'h0 ? Memory[_RW0_raddr_d0] : 8'bx;
+  always @(posedge RW0_clk) begin
+    if (RW0_en & RW0_wmode)
+      Memory[RW0_addr] <= RW0_wdata;
+  end // always @(posedge)
+  assign RW0_rdata = _GEN;
+endmodule
+
+module SyncMemory1RWExample(
+  input        clock,
+               reset,
+  input  [1:0] address,
+  input        enable,
+               write,
+  input  [7:0] write_data,
+  output [7:0] read_data
+);
+
+  storage_4x8 storage_ext (
+    .RW0_addr  (address),
+    .RW0_en    (enable),
+    .RW0_clk   (clock),
+    .RW0_wmode (write),
+    .RW0_wdata (write_data),
+    .RW0_rdata (read_data)
+  );
+endmodule
+}>>|
+
+export:
+  SyncMemory1RWExample
+  design
+  verilog_reference

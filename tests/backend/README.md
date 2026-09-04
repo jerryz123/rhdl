@@ -2,12 +2,12 @@
 
 # Backend tests
 
-Backend unit tests exercise RHDL-to-CIRCT lowering, including native sparse
+Backend unit tests exercise Rhodium-to-CIRCT lowering, including native sparse
 CaseZ decode relations. [`run-circt.sh`](run-circt.sh) owns the external pipeline:
 
 ```text
 example design
-    -> RHDL CIRCT MLIR
+    -> Rhodium CIRCT MLIR
     -> circt-opt verification and lowering
     -> ExportVerilog
     -> exact golden comparison

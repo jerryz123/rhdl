@@ -1,7 +1,7 @@
-# Build and test entry points for RHDL's Rhombus and CIRCT-based toolchain.
+# Build and test entry points for Rhodium's Rhombus and CIRCT-based toolchain.
 
 .PHONY: sram-test
-.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test soc-test hardfloat-test hardfloat-host-test hardfloat-circt-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-socs-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhdl examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
+.PHONY: test host-test host-checks support-annotation-test check-boundaries check-example-verilog check-parameter-annotations parameter-annotation-test install-git-hooks analysis-test frontend-test diagram-test backend-test formal-test formal-differential-test unit-test lop-test rfpl-test rfpl-unit-test rfpl-circt-test noc-test riscv-test device-test chi-test soc-test hardfloat-test hardfloat-host-test hardfloat-circt-test rv5stage-host-test rv5stage-test emacs-test circt-test circt-verify-test verilator-test circt-full-test verilog-golden-test update-verilog-goldens setup-circt print-racket-compile-sources ci-host-foundation-test ci-host-backend-test ci-host-models-test ci-host-protocols-test ci-host-cores-test ci-host-socs-test ci-host-hygiene-test ci-circt-language-test ci-circt-std-test ci-circt-protocols-test ci-circt-cores-test examples examples-rhodium examples-clocking examples-std examples-noc examples-lop examples-rfpl examples-riscv examples-chi examples-cores examples-formal examples-rv5stage
 
 CORE_TESTS := $(sort $(wildcard tests/core/*-test.rhm))
 ANALYSIS_TESTS := $(sort $(wildcard tests/analysis/*-test.rhm))
@@ -21,7 +21,7 @@ RV5STAGE_TESTS := $(sort $(wildcard cores/tests/*-test.rhm) $(wildcard cores/rv5
 RV5STAGE_BACKEND_TESTS := tests/backend/rv64i-alu-decode-test.rhm tests/backend/rv5stage-cache-test.rhm
 RFPL_TESTS := $(sort $(wildcard rfpl/tests/*-test.rhm))
 RFPL_EXAMPLES := $(sort $(wildcard examples/rfpl/*.rfpl))
-RHDL_EXAMPLES := $(sort $(shell find examples/rhdl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
+RHODIUM_EXAMPLES := $(sort $(shell find examples/rtl -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 CLOCKING_EXAMPLES := $(sort $(shell find examples/clocking -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 STD_EXAMPLES := $(sort $(shell find examples/std -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
 NOC_EXAMPLES := $(sort $(shell find examples/noc -type f \( -name '*.rhm' -o -name '*.rhdl' \)))
@@ -86,7 +86,7 @@ formal-test: check-boundaries
 	@formal_compiled_root="$$(mktemp -d)"; \
 	trap 'rm -rf "$$formal_compiled_root"' EXIT; \
 	if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''formal-test "Rosette solver probe failed"))'; then \
-		echo 'formal-test requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; \
+		echo 'formal-test requires Rosette 4.0 and its Z3 4.8.8 solver; see rhodium/formal/README.md' >&2; \
 		exit 1; \
 	fi; \
 	env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_TESTS)
@@ -137,7 +137,7 @@ hardfloat-circt-test: check-boundaries
 hardfloat-test: hardfloat-host-test hardfloat-circt-test
 
 emacs-test:
-	emacs -Q --batch -L tools/emacs -l tests/emacs/rhdl-mode-test.el -f ert-run-tests-batch-and-exit
+	emacs -Q --batch -L tools/emacs -l tests/emacs/rhodium-mode-test.el -f ert-run-tests-batch-and-exit
 
 rv5stage-host-test: check-boundaries
 	tools/run-racket-tests.sh $(RV5STAGE_TESTS) $(RV5STAGE_BACKEND_TESTS)
@@ -158,7 +158,7 @@ circt-full-test: check-example-verilog
 	bash tests/backend/run-circt.sh --full
 
 ci-circt-language-test:
-	bash tools/check-example-verilog.sh examples/rhdl examples/lop
+	bash tools/check-example-verilog.sh examples/rtl examples/lop
 	bash tests/backend/run-circt.sh --group language
 
 ci-circt-std-test:
@@ -210,9 +210,9 @@ sram-test:
 examples: check-example-verilog
 	tools/run-racket-tests.sh $(EXAMPLES)
 
-examples-rhdl:
-	bash tools/check-example-verilog.sh examples/rhdl
-	tools/run-racket-tests.sh $(RHDL_EXAMPLES)
+examples-rhodium:
+	bash tools/check-example-verilog.sh examples/rtl
+	tools/run-racket-tests.sh $(RHODIUM_EXAMPLES)
 
 examples-clocking:
 	bash tools/check-example-verilog.sh examples/clocking
@@ -247,7 +247,7 @@ examples-cores:
 	tools/run-racket-tests.sh $(CORE_EXAMPLES)
 
 examples-formal: check-boundaries
-	@formal_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$formal_compiled_root"' EXIT; if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''examples-formal "Rosette solver probe failed"))'; then echo 'examples-formal requires Rosette 4.0 and its Z3 4.8.8 solver; see rhdl/formal/README.md' >&2; exit 1; fi; env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_EXAMPLES)
+	@formal_compiled_root="$$(mktemp -d)"; trap 'rm -rf "$$formal_compiled_root"' EXIT; if ! env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): racket -y -e '(require rosette) (unless (sat? (solve (assert #t))) (error '\''examples-formal "Rosette solver probe failed"))'; then echo 'examples-formal requires Rosette 4.0 and its Z3 4.8.8 solver; see rhodium/formal/README.md' >&2; exit 1; fi; env PLTCOMPILEDROOTS="$$formal_compiled_root" PLTCOLLECTS=$(CURDIR): raco test --direct $(FORMAL_EXAMPLES)
 
 examples-rv5stage:
 	bash tools/check-example-verilog.sh examples/rv5stage

@@ -1,0 +1,61 @@
+#lang rhodium
+// Demonstrates ordinary host functions that accept, construct, and return hardware objects.
+
+fun wrap_around(n :: Hardware.bits,
+                max :: Hardware.bits) :: Bits(n.type.width):
+  def width = n.type.width
+  def comparable_max:
+    if (max.type.width == width) | max | zext(max, width)
+  mux(n > comparable_max, bits(0, width), n)
+
+// This is an ordinary host function, but calling it during elaboration creates
+// a register and returns its readable hardware value.
+fun counter(max :: Hardware.bits,
+            en :: Bool,
+            amt :: Hardware.bits) :: Bits(max.type.width):
+  def width = max.type.width
+  reg x(~init: bits(0, width))
+
+  when en:
+    // Preserve the carry so the hardware comparison can detect crossing max,
+    // then return the selected result to the register's declared width.
+    x <== wrap_around(x +& amt, max)[0..width]
+
+  x
+
+sync_circuit Counter():
+  input inc: Bool
+  input amt: Bits(4)
+  output tot: Bits(8)
+
+  tot <== counter(bits(255, 8), inc, amt)
+
+def design = elaborate(Counter())
+
+def verilog_reference = @str|<<{
+module Counter(
+  input        clock,
+               reset,
+               inc,
+  input  [3:0] amt,
+  output [7:0] tot
+);
+
+  reg  [7:0] x;
+  wire [8:0] _GEN = {1'h0, x} + {5'h0, amt};
+  always @(posedge clock) begin
+    if (reset)
+      x <= 8'h0;
+    else
+      x <= inc ? (_GEN[8] ? 8'h0 : _GEN[7:0]) : x;
+  end // always @(posedge)
+  assign tot = x;
+endmodule
+}>>|
+
+export:
+  wrap_around
+  counter
+  Counter
+  design
+  verilog_reference

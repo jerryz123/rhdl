@@ -1,0 +1,244 @@
+#lang rhombus
+// Defines Rhodium's canonical hardware-type abstraction and structural predicates.
+
+import:
+  "../../support/annotations.rhm" open
+
+export:
+  HardwareType
+  DataType
+  FlatDataType
+  BitwiseType
+  ArithmeticType
+  SignedArithmeticType
+  Bits
+  Clock
+  Reset
+  RecordField
+  RecordType
+  VectorType
+  hardware_type
+  data_type
+  flat_data_type
+  bitwise_type
+  arithmetic_type
+  signed_arithmetic_type
+  data_width
+  packable_type
+  cast_compatible
+  type_well_formed
+  type_equal
+  bits_type
+  clock_type
+  reset_type
+  record_type
+  vector_type
+  mux_selector_type
+  selector_width
+  count_index_width
+  bits_text
+
+interface HardwareType:
+  method describe()
+  method type_equal(other :: HardwareType)
+  method packed_width()
+
+interface DataType:
+  extends HardwareType
+
+interface FlatDataType:
+  extends DataType
+  method bit_width()
+
+interface BitwiseType:
+  extends FlatDataType
+
+// Marks fixed-width integer-like values whose modular arithmetic preserves
+// their nominal type. Width-changing operations use with_bit_width so core
+// can retain an extension-defined type without importing its frontend layer.
+interface ArithmeticType:
+  extends BitwiseType
+  method with_bit_width(width :: PosInt)
+
+interface SignedArithmeticType:
+  extends ArithmeticType
+
+class Bits(width :: PosInt):
+  implements ArithmeticType
+
+  override method describe():
+    bits_text(this)
+
+  override method type_equal(other :: HardwareType):
+    bits_type(other) && width == other.width
+
+  override method bit_width():
+    width
+
+  override method with_bit_width(new_width :: PosInt):
+    Bits(new_width)
+
+  override method packed_width():
+    width
+
+class _ClockType():
+  implements HardwareType
+  override method describe(): "clock"
+  override method type_equal(other :: HardwareType): clock_type(other)
+  override method packed_width(): 1
+
+class _ResetType():
+  implements HardwareType
+  override method describe(): "reset"
+  override method type_equal(other :: HardwareType): reset_type(other)
+  override method packed_width(): 1
+
+def Clock = _ClockType()
+def Reset = _ResetType()
+
+class RecordField(name :: AsciiIdentifier, type :: DataType)
+
+class RecordType(fields :: NonemptyList.of(RecordField),
+                 preferred_name :: False || AsciiIdentifier = #false):
+  implements DataType
+  nonfinal
+  constructor (fields :: NonemptyList.of(RecordField),
+               preferred_name :~ False || AsciiIdentifier = #false):
+    unless preferred_name == #false || preferred_name is_a AsciiIdentifier
+    | error(~who: #'RecordType,
+            "preferred name must be an ASCII identifier or #false")
+    for (field in fields):
+      when fields.filter(
+        ~keep: fun (candidate): candidate.name == field.name
+      ).length() != 1
+      | error(~who: #'RecordType,
+              "record field names must be unique")
+    super(fields, preferred_name)
+
+  method field(name :: AsciiIdentifier):
+    fields.find(fun (candidate): candidate.name == name)
+
+  override method describe():
+    "record<" ++ String.join(
+      fields.map(
+        fun (field): field.name ++ ": " ++ field.type.describe()
+      ),
+      ", "
+    ) ++ ">"
+
+  override method type_equal(other :: HardwareType):
+    if !record_type(other) || fields.length() != other.fields.length()
+    | #false
+    | for all (left_field in fields,
+               right_field in other.fields):
+        left_field.name == right_field.name && left_field.type.type_equal(right_field.type) && right_field.type.type_equal(left_field.type)
+
+  override method packed_width():
+    def mutable width = 0
+    def mutable packable = #true
+    for (field in fields):
+      def field_width = field.type.packed_width()
+      if field_width == #false
+      | packable := #false
+      | width := width + field_width
+    if packable | width | #false
+
+// Models a fixed-length packed hardware vector. Logical element zero occupies
+// the least-significant element-width bits of the canonical representation.
+class VectorType(length :: PosInt, element_type :: DataType):
+  implements DataType
+
+  override method describe():
+    "vector<" ++ to_string(length) ++ " x " ++ element_type.describe() ++ ">"
+
+  override method type_equal(other :: HardwareType):
+    vector_type(other) && length == other.length && element_type.type_equal(other.element_type) && other.element_type.type_equal(element_type)
+
+  override method packed_width():
+    def element_width = element_type.packed_width()
+    if element_width == #false | #false | length * element_width
+
+fun hardware_type(type :~ matching(_)):
+  type is_a HardwareType
+
+fun data_type(type :~ matching(_)):
+  type is_a DataType
+
+fun flat_data_type(type :~ matching(_)):
+  type is_a FlatDataType
+
+fun bitwise_type(type :~ matching(_)):
+  type is_a BitwiseType
+
+fun arithmetic_type(type :~ matching(_)):
+  type is_a ArithmeticType
+
+fun signed_arithmetic_type(type :~ matching(_)):
+  type is_a SignedArithmeticType
+
+fun data_width(type :~ matching(_)):
+  if flat_data_type(type)
+  | block:
+      def width = type.bit_width()
+      if width is_a PosInt | width | #false
+  | #false
+
+fun packable_type(type :~ matching(_)):
+  hardware_type(type) && type.packed_width() != #false
+
+fun cast_compatible(source_type :~ matching(_),
+                    target_type :~ matching(_)):
+  def source_width:
+    if hardware_type(source_type) | source_type.packed_width() | #false
+  def target_width:
+    if hardware_type(target_type) | target_type.packed_width() | #false
+  source_width != #false && target_width != #false && source_width == target_width
+
+fun bits_type(type :~ matching(_)):
+  type is_a Bits
+
+fun clock_type(type :~ matching(_)):
+  type is_a _ClockType
+
+fun reset_type(type :~ matching(_)):
+  type is_a _ResetType
+
+fun record_type(type :~ matching(_)):
+  type is_a RecordType
+
+fun vector_type(type :~ matching(_)):
+  type is_a VectorType
+
+fun mux_selector_type(type :~ matching(_)):
+  bits_type(type)
+
+fun selector_width(type :~ matching(_)):
+  if bits_type(type) | type.width | #false
+
+// Returns the minimum nonzero Bits width that can encode every member of a
+// positive host-known collection size.
+fun count_index_width(count :: PosInt) :: PosInt:
+  fun loop(capacity :: PosInt, width :: Nat):
+    if capacity >= count
+    | block:
+        if width == 0 | 1 | width
+    | loop(capacity * 2, width + 1)
+  loop(1, 0)
+
+fun record_fields_well_formed(fields :: NonemptyList.of(RecordField)):
+  for all (field in fields): type_well_formed(field.type)
+
+fun type_well_formed(type :~ matching(_)):
+  cond
+  | !hardware_type(type): #false
+  | flat_data_type(type): data_width(type) != #false
+  | record_type(type): record_fields_well_formed(type.fields)
+  | vector_type(type):
+      type_well_formed(type.element_type)
+  | ~else: #true
+
+fun type_equal(left :~ matching(_), right :~ matching(_)):
+  hardware_type(left) && hardware_type(right) && left.type_equal(right) && right.type_equal(left)
+
+fun bits_text(type :: Bits):
+  "bits<" ++ to_string(type.width) ++ ">"

@@ -1,6 +1,6 @@
-<!-- Documents RHDL's mirrored test organization and focused verification commands. -->
+<!-- Documents Rhodium's mirrored test organization and focused verification commands. -->
 
-# RHDL tests
+# Rhodium tests
 
 Tests mirror the implementation boundaries:
 
@@ -11,7 +11,7 @@ Tests mirror the implementation boundaries:
 | [`frontend/`](frontend/) | Language profiles, layers, elaboration, examples, and invalid frontend uses |
 | [`backend/`](backend/README.md) | CIRCT text, ExportVerilog goldens, and Verilator simulations |
 | [`formal/`](formal/) | Optional Rosette semantics, equivalence, output reachability, combinational properties, witnesses, and unsupported cases |
-| [`emacs/`](emacs/) | Project-aware `rhdl-mode` dispatch and Racket back-end configuration |
+| [`emacs/`](emacs/) | Project-aware `rhodium-mode` dispatch and Racket back-end configuration |
 
 Domain-library tests live with their owning packages, including
 [`../chi/tests/`](../chi/tests/). SoC integration tests similarly live under
@@ -34,7 +34,7 @@ Run the minimum target that covers a change:
 make check-boundaries       # package, dependency, and file-type rules
 make analysis-test          # optional analyses over completed core IR
 make examples               # all canonical example modules
-make examples-rhdl          # built-in language examples only
+make examples-rhodium          # built-in language examples only
 make examples-clocking      # optional clocking-analysis examples only
 make examples-std           # standard-library examples only
 make examples-noc           # NoC hardware examples only

@@ -7,19 +7,19 @@ RACO ?= raco
 all: rtl-elaboration-test tiled-plan-test tiled-elaboration-test
 
 rtl-elaboration-test:
-	compiled_root="$$(mktemp -d /tmp/rhdl-simple-soc-rtl.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-simple-soc-rtl.XXXXXX)"; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test socs/tests/simple-soc-test.rhm
 
 tiled-plan-test:
-	compiled_root="$$(mktemp -d /tmp/rhdl-tiled-soc-plan.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-tiled-soc-plan.XXXXXX)"; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
 	  socs/tests/tiled-soc-plan-test.rhm \
 	  socs/tests/tiled-soc-config-test.rhm
 
 tiled-elaboration-test:
-	compiled_root="$$(mktemp -d /tmp/rhdl-tiled-soc-rtl.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-tiled-soc-rtl.XXXXXX)"; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
 	  socs/tests/tiled-tiles-test.rhm \

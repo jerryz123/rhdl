@@ -1,0 +1,50 @@
+#lang rhodium
+// Demonstrates element-wise conditional updates to one aggregate vector register.
+
+sync_circuit VecShiftRegister():
+  input ins: Vec(4, Bits(4))
+  input load: Bool
+  input shift: Bool
+  output out: Bits(4)
+
+  reg delays(Vec(4, Bits(4)))
+
+  when load:
+    delays[0] <== ins[0]
+    delays[1] <== ins[1]
+    delays[2] <== ins[2]
+    delays[3] <== ins[3]
+  elsewhen shift:
+    delays[0] <== ins[0]
+    delays[1] <== delays[0]
+    delays[2] <== delays[1]
+    delays[3] <== delays[2]
+
+  out <== delays[3]
+
+def design = elaborate(VecShiftRegister())
+
+def verilog_reference = @str|<<{
+module VecShiftRegister(
+  input             clock,
+                    reset,
+  input  [3:0][3:0] ins,
+  input             load,
+                    shift,
+  output [3:0]      out
+);
+
+  reg [3:0][3:0] delays;
+  always @(posedge clock)
+    delays <=
+      load
+        ? ins
+        : shift ? {{delays[2'h2]}, {delays[2'h1]}, {delays[2'h0]}, {ins[2'h0]}} : delays;
+  assign out = delays[2'h3];
+endmodule
+}>>|
+
+export:
+  VecShiftRegister
+  design
+  verilog_reference

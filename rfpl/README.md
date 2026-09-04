@@ -2,19 +2,19 @@
 
 # RFPL physical views
 
-RFPL annotates an already elaborated RHDL design with rectangular physical
+RFPL annotates an already elaborated Rhodium design with rectangular physical
 views. It does not construct hardware, mutate the logical IR, or affect CIRCT
 and SystemVerilog output. A physical design retains the original
 `DesignElaboration` and adds one validated view per reachable module.
 
 Use `#lang rfpl` for annotation modules. The language combines ordinary
-Rhombus with the RFPL forms below; logical circuits remain ordinary RHDL
+Rhombus with the RFPL forms below; logical circuits remain ordinary Rhodium
 modules imported by the annotation.
 
 ## Views and placement
 
 - `hard_macro(module, width: ..., height: ...)` treats a finished module as an
-  opaque physical block. The module may contain arbitrary RHDL logic.
+  opaque physical block. The module may contain arbitrary Rhodium logic.
 - `floorplan(module, width: ..., height: ..., placements: [...])` describes a
   wiring-only hierarchical module. Every direct child instance must appear
   exactly once and the module may contain only ports, wires, drives, and
@@ -32,12 +32,12 @@ must be positive.
 
 The canonical executable example is
 [`../examples/rfpl/circuit-pair.rfpl`](../examples/rfpl/circuit-pair.rfpl). It
-uses `child_instance` and `instance_target` to select the finished RHDL
+uses `child_instance` and `instance_target` to select the finished Rhodium
 hierarchy rather than duplicating its structure.
 
 ## Boundaries and verification
 
-RFPL depends only on the public completed RHDL core IR. RHDL core, frontend,
+RFPL depends only on the public completed Rhodium core IR. Rhodium core, frontend,
 standard-library, and backend packages do not import RFPL. Physical metadata
 does not appear in emitted CIRCT; the structural test verifies that annotating
 a design leaves its generated hardware unchanged.

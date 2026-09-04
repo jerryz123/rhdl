@@ -1,0 +1,120 @@
+#lang rhodium
+// Showcases first-class vectors, static and dynamic indexing, packing, and state.
+
+circuit CarryEndpoints(n :: PosInt):
+  input carries: Vec(n + 1, Bool)
+  output(first, last): Bool
+
+  first <== carries[0]
+  last <== carries[n]
+
+circuit VectorMap():
+  input lanes: Vec(3, Bits(4))
+  output occupied: Vec(3, Bool)
+
+  occupied <== lanes.map(lane => lane =/= bits(0, 4))
+
+circuit VectorDatapath():
+  input clk: Clock
+  input reset: Reset
+  input selector: Bits(2)
+  input(a, b, c): Bits(4)
+  input alternate: Vec(3, Bits(4))
+  output assembled: Vec(3, Bits(4))
+  output selected: Vec(3, Bits(4))
+  output chosen: Bits(4)
+  output packed: Bits(12)
+  output restored: Vec(3, Bits(4))
+  output reversed: Vec(3, Bits(4))
+  output state_out: Vec(3, Bits(4))
+
+  def initial = vec(a, b, c)
+  assembled <== initial
+  selected <== mux_lookup(selector, ~default: initial):
+    1: alternate
+  chosen <== initial[selector]
+
+  packed <== initial.as_bits()
+  restored <== packed.as_vec(Bits(4))
+
+  reversed[0] <== initial[2]
+  reversed[1] <== initial[1]
+  reversed[2] <== initial[0]
+
+  reg state(Vec(3, Bits(4)), ~clock: clk, ~reset: reset, ~init: initial)
+  state <== selected
+  state_out <== state
+
+def design = elaborate(VectorDatapath())
+def carry_design = elaborate(CarryEndpoints(4))
+def map_design = elaborate(VectorMap())
+
+def verilog_reference = @str|<<{
+module VectorDatapath(
+  input             clk,
+                    reset,
+  input  [1:0]      selector,
+  input  [3:0]      a,
+                    b,
+                    c,
+  input  [2:0][3:0] alternate,
+  output [2:0][3:0] assembled,
+                    selected,
+  output [3:0]      chosen,
+  output [11:0]     packed_0,
+  output [2:0][3:0] restored,
+                    reversed,
+                    state_out
+);
+
+  wire [2:0][3:0] _GEN = {{c}, {b}, {a}};
+  wire [2:0][3:0] _GEN_0 = selector == 2'h1 ? alternate : _GEN;
+  reg  [2:0][3:0] state;
+  always @(posedge clk) begin
+    if (reset)
+      state <= _GEN;
+    else
+      state <= _GEN_0;
+  end // always @(posedge)
+  assign assembled = _GEN;
+  assign selected = _GEN_0;
+  assign chosen = _GEN[selector];
+  assign packed_0 = /*cast(bit[11:0])*/_GEN;
+  assign restored = _GEN;
+  assign reversed = {{a}, {b}, {c}};
+  assign state_out = state;
+endmodule
+}>>|
+
+def carry_verilog_reference = @str|<<{
+module CarryEndpoints(
+  input  [4:0] carries,
+  output       first,
+               last
+);
+
+  assign first = carries[3'h0];
+  assign last = carries[3'h4];
+endmodule
+}>>|
+
+def map_verilog_reference = @str|<<{
+module VectorMap(
+  input  [2:0][3:0] lanes,
+  output [2:0]      occupied
+);
+
+  assign occupied = {{|lanes[2'h2]}, {|lanes[2'h1]}, {|lanes[2'h0]}};
+endmodule
+}>>|
+
+export:
+  CarryEndpoints
+  VectorMap
+  VectorDatapath
+  design
+  carry_design
+  map_design
+  verilog_reference
+  carry_verilog_reference
+  map_verilog_reference

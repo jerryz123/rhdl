@@ -1,0 +1,121 @@
+#lang rhodium
+// Defines payload-bearing and control-only selected demultiplexers.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+
+// Select is interpreted as part of the current Decoupled offer and may change
+// while stalled. Encodings outside 0 through n - 1 select no output and block
+// the input instead of silently discarding it.
+circuit Demux(T :: DataType, n :: PosInt):
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  input select: Bits(index_width(n))
+  interface egress[n](Decoupled(T), ~role: producer)
+
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..n):
+      def selected = select === bits(index, index_width(n))
+      egress[index].valid <== ingress.valid & selected
+      egress[index].bits <== ingress.bits
+      selected & egress[index].ready
+  ))
+
+  ingress.ready <== selected_ready
+
+// Routes a payloadless token to exactly the selected output. Invalid selector
+// encodings block the token rather than consuming it.
+circuit CtrlDemux(n :: PosInt):
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  input select: Bits(index_width(n))
+  interface egress[n](DecoupledCtrl(), ~role: producer)
+
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..n):
+      def selected = select === bits(index, index_width(n))
+      egress[index].valid <== ingress.valid & selected
+      selected & egress[index].ready
+  ))
+
+  ingress.ready <== selected_ready
+
+// Builds an inline payload-selected routing handle. The caller selects whether
+// the output retains an Irrevocable input contract; ordinary mappings weaken
+// to Decoupled because the selector body may capture changing hardware.
+fun finish_demux_flow_handle(input_link :: Handle,
+                             output_links :: Array,
+                             selector :: Hardware.packable):
+  def count = output_links.length()
+  def select_width = index_width(count)
+  def selector_bits = selector.as_bits()
+  def input_endpoint = input_link.right
+  def selected_ready = or_reduce(vec(
+    for List (index in 0..count):
+      def output_endpoint = output_links[index].left
+      def selected = selector_bits === bits(index, select_width)
+      output_endpoint.field("valid") <== input_endpoint.field("valid") & selected
+      output_endpoint.field("bits") <== input_endpoint.field("bits")
+      selected & output_endpoint.field("ready")
+  ))
+  input_endpoint.field("ready") <== selected_ready
+  describe_interface_transform(
+    interface_transform(input_link, output_links),
+    "demux",
+    {"outputs": count}
+  )
+
+// A payload type defaults to Decoupled, while an explicit ready-valid
+// InterfaceType retains that exact contract. Configuration produces a unary
+// cardinality-changing stage for ordinary pipeline composition.
+expr.macro
+| 'demux_flow($count,
+              ~stable: #true,
+              $(payload :: Identifier) => $selector ...)':
+    'demux_flow($count, ~stable: #true, $payload): $selector ...'
+| 'demux_flow($count,
+              ~stable: #true,
+              $(payload :: Identifier)): $selector':
+    'demux_flow_impl($count, #true, $payload): $selector'
+| 'demux_flow($count,
+              $(payload :: Identifier) => $selector ...)':
+    'demux_flow($count, $payload): $selector ...'
+| 'demux_flow($count, $(payload :: Identifier)): $selector':
+    'demux_flow_impl($count, #false, $payload): $selector'
+
+expr.macro
+| 'demux_flow_impl($count, $stable, $(payload :: Identifier)): $selector':
+    'fun (demux_flow_source :: FlowSource) :~ InterfaceTransformResult(demux_flow_source, InterfaceArrayFields):
+       def demux_flow_count = $count
+       unless demux_flow_count is_a PosInt
+       | error(~who: #'demux_flow,
+               "output count must be PosInt")
+       def demux_flow_protocol = flow_protocol_type(demux_flow_source)
+       def demux_flow_output_protocol = if $stable | demux_flow_protocol | Decoupled(flow_payload_type(demux_flow_source))
+       def demux_flow_input_link = interface_link(
+         demux_flow_protocol,
+         "demux_input"
+       )
+       def demux_flow_input :: Endpoint = demux_flow_input_link.right
+       def $payload = demux_flow_input.bits
+       fun compute_demux_selector(): $selector
+       def demux_flow_selector = compute_demux_selector()
+       def demux_flow_output_links = Array.make(demux_flow_count)
+       for (index in 0..demux_flow_count):
+         demux_flow_output_links[index] := interface_link(
+           demux_flow_output_protocol,
+           "demux_output"
+         )
+       def demux_flow_handle = finish_demux_flow_handle(
+         demux_flow_input_link,
+         demux_flow_output_links,
+         demux_flow_selector
+       )
+       finish_interface_transform(demux_flow_source, demux_flow_handle)'
+
+export:
+  Demux
+  demux_flow
+  CtrlDemux

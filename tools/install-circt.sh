@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the pinned official CIRCT toolchain used by RHDL backend tests.
+# Installs the pinned official CIRCT toolchain used by Rhodium backend tests.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +30,7 @@ if [[ -x "$install_dir/bin/circt-opt" ]]; then
   exit 0
 fi
 
-download_dir="$(mktemp -d /tmp/rhdl-circt-download.XXXXXX)"
+download_dir="$(mktemp -d /tmp/rhodium-circt-download.XXXXXX)"
 trap 'rm -rf "$download_dir"' EXIT
 archive_path="$download_dir/$archive_name"
 

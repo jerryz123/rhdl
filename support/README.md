@@ -2,7 +2,7 @@
 
 # Shared Rhombus refinements
 
-`annotations.rhm` defines dependency-neutral annotations that carry no RHDL,
+`annotations.rhm` defines dependency-neutral annotations that carry no Rhodium,
 NoC, RISC-V, CHI, or RFPL dependency. Domain packages may depend on this module
 without reversing their dependency direction.
 

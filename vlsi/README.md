@@ -1,19 +1,19 @@
-<!-- Documents the reproducible RHDL-to-GDS smoke flow for Double-Wide OpenFrame. -->
+<!-- Documents the reproducible Rhodium-to-GDS smoke flow for Double-Wide OpenFrame. -->
 
-# RHDL Double-Wide OpenFrame prototype
+# Rhodium Double-Wide OpenFrame prototype
 
 This directory exercises the smallest useful physical-design path: GPIO 0 enters
-an RHDL combinational leaf, the leaf inverts it, and GPIO 1 drives the result.
+an Rhodium combinational leaf, the leaf inverts it, and GPIO 1 drives the result.
 The other pads remain input-only. An inverter is used instead of a truly empty
-module so synthesis and place-and-route must preserve a real RHDL-derived cell.
+module so synthesis and place-and-route must preserve a real Rhodium-derived cell.
 
 The pinned `double_wide_openframe` submodule owns the padframe, wrapper footprint,
 1216-pin DEF template, LibreLane/Nix tool versions, and final Magic cell-swap
-script. This directory owns only the RHDL leaf and its user-wrapper implementation.
+script. This directory owns only the Rhodium leaf and its user-wrapper implementation.
 
 ```text
-src/rhdl-top.rhdl
-  -> RHDL CIRCT MLIR
+src/rhodium-top.rhdl
+  -> Rhodium CIRCT MLIR
   -> synthesizable SystemVerilog leaf
   -> double_wide_openframe_project_wrapper
   -> LibreLane wrapper GDS
@@ -37,7 +37,7 @@ contract against the submodule, and lints the complete wrapper with Verilator.
 
 ## Prototype SRAM mapping at the CIRCT boundary
 
-The SimpleSoC experiment keeps physical-memory knowledge outside RHDL and the
+The SimpleSoC experiment keeps physical-memory knowledge outside Rhodium and the
 SoC. Reusable occurrence selection, contract validation, tiling, and wrapper
 generation live in the top-level [`sram/`](../sram/README.md) package. Sky130
 macro data and models live in `sram/sky130/`, while this physical-design layer
@@ -100,7 +100,7 @@ model.
 The full OpenFrame wrapper contains roughly 32 mm2 of standard-cell rows. Filling
 that area around a one-cell design would create millions of physical-only cells,
 so the fast integration profile intentionally leaves tap, filler, and LVS steps
-disabled. A separate 100 um by 100 um fixture hardens the same RHDL-generated
+disabled. A separate 100 um by 100 um fixture hardens the same Rhodium-generated
 inverter with normal SKY130 well taps and fillers, then requires Netgen LVS to
 match:
 
@@ -109,8 +109,8 @@ make -C vlsi lvs-smoke
 ```
 
 The target fails unless LibreLane runs LVS and Netgen reports a matching final
-result. Its exported GDS is written to `build/lvs-views/gds/rhdl_lvs_smoke.gds`.
-This gives the RHDL-to-standard-cell flow a cheap physical-connectivity
+result. Its exported GDS is written to `build/lvs-views/gds/rhodium_lvs_smoke.gds`.
+This gives the Rhodium-to-standard-cell flow a cheap physical-connectivity
 regression without pretending that the sparse full-size wrapper is signoff
 ready.
 

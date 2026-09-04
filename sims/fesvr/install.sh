@@ -19,7 +19,7 @@ for tool in git make dtc; do
 done
 
 build_jobs="${FESVR_BUILD_JOBS:-4}"
-work_dir="$(mktemp -d /tmp/rhdl-fesvr.XXXXXX)"
+work_dir="$(mktemp -d /tmp/rhodium-fesvr.XXXXXX)"
 source_dir="$work_dir/source"
 build_dir="$work_dir/build"
 trap 'rm -rf "$work_dir"' EXIT

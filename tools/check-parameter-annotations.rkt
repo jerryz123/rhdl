@@ -424,12 +424,12 @@ SOURCE
 
   (check-equal?
    (scope-lines->paths
-    '("# Strict source scope" "" "  rhdl/std  " "rhdl/core/ops.rhm"))
-   '("rhdl/std" "rhdl/core/ops.rhm"))
+    '("# Strict source scope" "" "  rhodium/std  " "rhodium/core/ops.rhm"))
+   '("rhodium/std" "rhodium/core/ops.rhm"))
 
   (check-true (tests-path? (build-path "noc" "tests" "model-test.rhm")))
   (check-true (tests-path? (build-path "cores" "ricket" "tests" "core-test.rhm")))
-  (check-false (tests-path? (build-path "rhdl" "core" "types.rhm")))
+  (check-false (tests-path? (build-path "rhodium" "core" "types.rhm")))
 
   (define broad-annotation-source
     #<<SOURCE

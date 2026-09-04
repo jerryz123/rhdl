@@ -1,7 +1,7 @@
 // Declares the stable C ABI between generated simulation RTL and Verilator.
 #pragma once
 
-extern "C" int rhdl_htif_tick(unsigned char reset,
+extern "C" int rhodium_htif_tick(unsigned char reset,
                               unsigned char target_xlen,
                               unsigned char request_ready,
                               unsigned char response_valid,

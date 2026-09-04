@@ -15,11 +15,11 @@ caches live here. Reusable execution components remain directly under
 ```text
 core.rhdl / core-flow.rhdl          explicit / flow-oriented IF/ID/EX/MEM/WB
   |--> bundles + decode + memory + register-file + csr
-  |     `--> ../../riscv/rhdl/counters.rhdl
+  |     `--> ../../riscv/rtl/counters.rhdl
   |--> ../{alu,branch-resolver,load-store,multiplier,divider}.rhdl
   |--> icache/protocol.rhdl
   |--> dcache/protocol.rhdl
-  `--> ../../rhdl/std/scoreboard.rhdl
+  `--> ../../rhodium/std/scoreboard.rhdl
 rv5stage.rhdl                         composition selects core-flow.rhdl
   |--> mmu/{mmu,tlb,walker}.rhdl    Sv39 translation before physical L1s
   |--> memory-router.rhdl            device-region split after translation
@@ -54,7 +54,7 @@ carries those IDs into an occurrence as hardware inputs. Consequently one
 RV5Stage specialization can be stamped at multiple placements without inheriting
 a representative tile's NodeIDs.
 
-RV5Stage may consume RHDL, the pure RISC-V model, and reusable components from
+RV5Stage may consume Rhodium, the pure RISC-V model, and reusable components from
 `cores/`. It must not import another named core, a backend, examples, or test
 implementations. See [`icache/README.md`](icache/README.md) and
 [`dcache/README.md`](dcache/README.md) for their separate protocol and cache
@@ -221,7 +221,7 @@ to drain after invalidation, but cannot install its line or return an
 instruction.
 
 RV5Stage stores implemented CSR data in one aggregate state register. The
-RISC-V/RHDL `csr_bank` declaration is the single source for recognized IDs,
+RISC-V/Rhodium `csr_bank` declaration is the single source for recognized IDs,
 read values, direct storage, aliases, WARL masks, and write dispatch. Trap and
 return updates remain an explicit prioritized transition because they
 atomically affect privilege state and several CSRs instead of representing an

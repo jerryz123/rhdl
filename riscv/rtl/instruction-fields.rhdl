@@ -1,0 +1,46 @@
+#lang rhodium
+// Generates hardware field and immediate extraction from pure RISC-V descriptors.
+
+import:
+  "../model/fields.rhm" open
+  "../model/formats.rhm" open
+
+fun instruction_field(field :: BitField,
+                      instruction :: Bits(32)) :~ Bits(field.width):
+  unless field.high < 32
+  | error(~who: #'instruction_field,
+          "instruction field must fit the 32-bit instruction word")
+  instruction[field.low..(field.high + 1)]
+
+fun immediate_bits(layout :: ImmediateLayout,
+                   instruction :: Bits(32)) :~ Bits(layout.width):
+  def piece_fragments = for List (piece in layout.pieces):
+    [piece.output_high,
+     instruction_field(piece.source, instruction)]
+  def zero_fragments = for List (bit in layout.zero_bits):
+    [bit, bits(0, 1)]
+  def fragments = (piece_fragments ++ zero_fragments).sort(
+    fun (left, right): left[0] > right[0]
+  )
+  def fragment_values = fragments.map(fun (fragment): fragment[1])
+  if fragment_values.length() == 1
+  | fragment_values[0]
+  | concat(fragment_values)
+
+fun instruction_immediate(layout :: ImmediateLayout,
+                          instruction :: Bits(32),
+                          output_width :: PosInt) :~ Bits(output_width):
+  unless output_width >= layout.width
+  | error(~who: #'instruction_immediate,
+          "immediate output width must cover the architectural immediate")
+  def value = immediate_bits(layout, instruction)
+  if output_width == layout.width
+  | value
+  | if layout.signed
+    | sext(value.into(SInt(layout.width)), output_width).as_bits()
+    | zext(value, output_width)
+
+export:
+  instruction_field
+  immediate_bits
+  instruction_immediate

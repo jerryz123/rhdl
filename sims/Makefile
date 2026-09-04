@@ -5,7 +5,7 @@ VERILATOR_DIR := $(CURDIR)/verilator
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
 FESVR_PREFIX ?= $(REPO_DIR)/.tools/fesvr-$(FESVR_REVISION)
 SOC ?= simple
-BUILD_ROOT ?= /tmp/rhdl-sims
+BUILD_ROOT ?= /tmp/rhodium-sims
 CXX ?= c++
 RISCV_CC ?= riscv64-unknown-elf-gcc
 RACKET ?= racket
@@ -53,7 +53,7 @@ dpi-compile-check: $(FESVR_LIBRARY) | $(DPI_BUILD_DIR)
 	  -c $(VERILATOR_DIR)/direct_mem_htif_dpi.cc -o $(DPI_BUILD_DIR)/direct_mem_htif_dpi.o
 
 elaboration-test:
-	compiled_root="$$(mktemp -d /tmp/rhdl-sims-elaboration.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-sims-elaboration.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test sims/tests/soc-harness-test.rhm
@@ -61,7 +61,7 @@ elaboration-test:
 tiled-lowering-test: | $(TILED_LOWERING_DIR)
 	@test -x "$(CIRCT_OPT)" || \
 	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
-	compiled_root="$$(mktemp -d /tmp/rhdl-sims-tiled.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-sims-tiled.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  $(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm tiled > $(TILED_LOWERING_DIR)/soc_harness.mlir
@@ -75,7 +75,7 @@ $(SOC_BUILD_DIR) $(DPI_BUILD_DIR) $(TILED_LOWERING_DIR):
 	mkdir -p $@
 
 $(SOC_MLIR): $(SIMULATOR_SOURCES) | $(SOC_BUILD_DIR)
-	compiled_root="$$(mktemp -d /tmp/rhdl-sims-verilator.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-sims-verilator.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 	  $(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm $(SOC) > $(SOC_MLIR)

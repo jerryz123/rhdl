@@ -1,0 +1,201 @@
+#lang rhodium
+// Demonstrates recursively nested bidirectional interfaces, field access, and hierarchy reconstruction.
+
+import:
+  lib("rhodium/std/ready-valid.rhdl") open
+
+interface ControlPlane(T :: DataType):
+  role manager
+  role device
+  provider manager
+
+  manager -> device:
+    command: Decoupled(T)
+    enable: Bool
+
+  device -> manager:
+    response: Decoupled(T)
+    status: T
+
+interface SystemPlane(T :: DataType):
+  role host
+  role peripheral
+  provider host
+
+  host -> peripheral:
+    control: ControlPlane(T)
+
+  peripheral -> host:
+    interrupt: Bool
+
+circuit NestedInterfaceAdapter(width :: PosInt):
+  interface ingress(ControlPlane(Bits(width)), ~role: device)
+  interface egress(ControlPlane(Bits(width)), ~role: manager)
+  ingress |> egress
+
+circuit NestedMemberAdapter(width :: PosInt):
+  interface ingress(ControlPlane(Bits(width)), ~role: device)
+  interface egress(ControlPlane(Bits(width)), ~role: manager)
+
+  ingress.command |> egress.command
+  ingress.response |> egress.response
+  egress.enable <== ingress.enable
+  ingress.status <== egress.status
+
+circuit DeepNestedAdapter(width :: PosInt):
+  interface peripheral(SystemPlane(Bits(width)), ~role: peripheral)
+  interface host(SystemPlane(Bits(width)), ~role: host)
+  peripheral |> host
+
+circuit NestedInterfaceSource(width :: PosInt):
+  input valid: Bool
+  input bits_in: Bits(width)
+  input enable: Bool
+  input response_ready: Bool
+  output accepted: Bool
+  output response_valid: Bool
+  output response_bits: Bits(width)
+  output status: Bits(width)
+  interface bus(ControlPlane(Bits(width)), ~role: manager)
+
+  bus.command.valid <== valid
+  bus.command.bits <== bits_in
+  bus.enable <== enable
+  bus.response.ready <== response_ready
+  accepted <== bus.command.ready
+  response_valid <== bus.response.valid
+  response_bits <== bus.response.bits
+  status <== bus.status
+
+circuit NestedInterfaceHierarchy(width :: PosInt):
+  input valid: Bool
+  input bits_in: Bits(width)
+  input enable: Bool
+  input response_ready: Bool
+  output accepted: Bool
+  output response_valid: Bool
+  output response_bits: Bits(width)
+  output status: Bits(width)
+  interface bus(ControlPlane(Bits(width)), ~role: manager)
+
+  inst source(NestedInterfaceSource(width))
+  source.valid <== valid
+  source.bits_in <== bits_in
+  source.enable <== enable
+  source.response_ready <== response_ready
+  accepted <== source.accepted
+  response_valid <== source.response_valid
+  response_bits <== source.response_bits
+  status <== source.status
+  source.bus |> bus
+
+def design = elaborate(NestedInterfaceAdapter(8))
+def member_design = elaborate(NestedMemberAdapter(8))
+def deep_design = elaborate(DeepNestedAdapter(8))
+def hierarchy_design = elaborate(NestedInterfaceHierarchy(8))
+
+def verilog_reference = @str|<<{
+module NestedInterfaceAdapter(
+  input  struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       ingress_in,
+  input  struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } egress_in,
+  output struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } ingress_out,
+  output struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       egress_out
+);
+
+  assign ingress_out = egress_in;
+  assign egress_out = ingress_in;
+endmodule
+}>>|
+
+def member_verilog_reference = @str|<<{
+module NestedMemberAdapter(
+  input  struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       ingress_in,
+  input  struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } egress_in,
+  output struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } ingress_out,
+  output struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       egress_out
+);
+
+  assign ingress_out = egress_in;
+  assign egress_out = ingress_in;
+endmodule
+}>>|
+def deep_verilog_reference = @str|<<{
+module DeepNestedAdapter(
+  input  struct packed {struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; } control; }                        peripheral_in,
+  input  struct packed {struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } control; logic interrupt; } host_in,
+  output struct packed {struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } control; logic interrupt; } peripheral_out,
+  output struct packed {struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; } control; }                        host_out
+);
+
+  assign peripheral_out = host_in;
+  assign host_out = peripheral_in;
+endmodule
+}>>|
+def hierarchy_verilog_reference = @str|<<{
+module NestedInterfaceHierarchy(
+  input                                                                                                                                        valid,
+  input  [7:0]                                                                                                                                 bits_in,
+  input                                                                                                                                        enable,
+                                                                                                                                               response_ready,
+  input  struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } bus_in,
+  output                                                                                                                                       accepted,
+                                                                                                                                               response_valid,
+  output [7:0]                                                                                                                                 response_bits,
+                                                                                                                                               status,
+  output struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       bus_out
+);
+
+  NestedInterfaceSource source (
+    .valid          (valid),
+    .bits_in        (bits_in),
+    .enable         (enable),
+    .response_ready (response_ready),
+    .bus_in         (bus_in),
+    .accepted       (accepted),
+    .response_valid (response_valid),
+    .response_bits  (response_bits),
+    .status         (status),
+    .bus_out        (bus_out)
+  );
+endmodule
+
+module NestedInterfaceSource(
+  input                                                                                                                                        valid,
+  input  [7:0]                                                                                                                                 bits_in,
+  input                                                                                                                                        enable,
+                                                                                                                                               response_ready,
+  input  struct packed {struct packed {logic ready; } command; struct packed {logic valid; logic [7:0] bits; } response; logic [7:0] status; } bus_in,
+  output                                                                                                                                       accepted,
+                                                                                                                                               response_valid,
+  output [7:0]                                                                                                                                 response_bits,
+                                                                                                                                               status,
+  output struct packed {struct packed {logic valid; logic [7:0] bits; } command; logic enable; struct packed {logic ready; } response; }       bus_out
+);
+
+  wire struct packed {logic valid; logic [7:0] bits; } _GEN =
+    '{valid: valid, bits: bits_in};
+  wire struct packed {logic ready; } _GEN_0 = '{ready: response_ready};
+  assign accepted = bus_in.command.ready;
+  assign response_valid = bus_in.response.valid;
+  assign response_bits = bus_in.response.bits;
+  assign status = bus_in.status;
+  assign bus_out = '{command: _GEN, enable: enable, response: _GEN_0};
+endmodule
+}>>|
+
+export:
+  ControlPlane
+  SystemPlane
+  NestedInterfaceAdapter
+  NestedMemberAdapter
+  DeepNestedAdapter
+  NestedInterfaceSource
+  NestedInterfaceHierarchy
+  design
+  member_design
+  deep_design
+  hierarchy_design
+  verilog_reference
+  member_verilog_reference
+  deep_verilog_reference
+  hierarchy_verilog_reference

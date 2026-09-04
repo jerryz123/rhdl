@@ -1,15 +1,15 @@
-<!-- Indexes RHDL's language and compiler comparisons and defines the common rubric used by the suite. -->
+<!-- Indexes Rhodium's language and compiler comparisons and defines the common rubric used by the suite. -->
 
-# RHDL comparison guide
+# Rhodium comparison guide
 
-This directory compares the current RHDL implementation with hardware
+This directory compares the current Rhodium implementation with hardware
 languages, embedded construction libraries, research languages, and compiler
 IRs that make materially different design choices. The goal is not to produce
 a feature-count leaderboard. Each comparison starts from what a source program
 denotes, then asks how time, state, concurrency, types, and reusable
 abstractions compose—and how clearly the syntax exposes those semantics.
 
-The comparisons describe the repository as of **2026-08-17**. RHDL and the
+The comparisons describe the repository as of **2026-08-17**. Rhodium and the
 other projects are evolving, so capability claims should be read as
 snapshot-specific.
 
@@ -18,7 +18,7 @@ snapshot-specific.
 These are semantic comparisons rebuilt from the current supported models. For
 each system, the analysis proceeds in this order:
 
-1. Establish RHDL's current behavior from the live core, frontend language,
+1. Establish Rhodium's current behavior from the live core, frontend language,
    verifier, and lowering contract.
 2. Establish the other system's model from its official manual, reference,
    papers, and primary repository.
@@ -31,9 +31,9 @@ each system, the analysis proceeds in this order:
 The conclusions are about supported public models, not whether either system
 could be modified until it implements the other.
 
-## Current RHDL baseline
+## Current Rhodium baseline
 
-The individual documents compare against the same RHDL model:
+The individual documents compare against the same Rhodium model:
 
 - Rhombus host computation elaborates hardware into one public,
   backend-independent IR.
@@ -62,10 +62,10 @@ The individual documents compare against the same RHDL model:
   identities in the type system.
 
 The implementation architecture is documented in
-[`rhdl/README.md`](../../rhdl/README.md), detailed core semantics in
-[`rhdl/core/README.md`](../../rhdl/core/README.md), frontend behavior in
-[`rhdl/frontend/README.md`](../../rhdl/frontend/README.md), and reusable
-protocols in [`rhdl/std/README.md`](../../rhdl/std/README.md).
+[`rhodium/README.md`](../../rhodium/README.md), detailed core semantics in
+[`rhodium/core/README.md`](../../rhodium/core/README.md), frontend behavior in
+[`rhodium/frontend/README.md`](../../rhodium/frontend/README.md), and reusable
+protocols in [`rhodium/std/README.md`](../../rhodium/std/README.md).
 
 ## What this guide means by expressivity
 
@@ -102,11 +102,11 @@ or have checked.
 
 ## Overall judgment
 
-RHDL's strongest language idea is its exact-construction discipline: exact
+Rhodium's strongest language idea is its exact-construction discipline: exact
 semantic types, one explicit effective driver per destination, priority stated
 as selection or guarding, explicit current/next-state relationships, and
 intentional module boundaries, all preserved in one verified IR. Among direct
-RTL construction languages, that gives RHDL unusually local and reconstructable
+RTL construction languages, that gives Rhodium unusually local and reconstructable
 meaning. Its price is real: explicit adaptation and selection take more syntax
 than inferred widths, procedural update blocks, or default-then-override
 assignment.
@@ -114,9 +114,9 @@ assignment.
 The core `Value`/`Place` split is a clean representation of that discipline,
 not an independent expressivity advantage. A capability-aware unified signal
 object can enforce the same read, bind, ownership, type, and exactly-one-driver
-rules. RHDL's own frontend already moves in that direction: outputs, wires, and
+rules. Rhodium's own frontend already moves in that direction: outputs, wires, and
 registers use a common authoring surface whose read or drive interpretation
-depends on context. The comparison therefore credits RHDL for explicit binding
+depends on context. The comparison therefore credits Rhodium for explicit binding
 and priority semantics, not for having two IR classes.
 
 Several comparison systems have a genuinely stronger abstraction in a narrower
@@ -125,21 +125,21 @@ signal graph. Clash states dimensions and clock domains in a powerful static
 type system. Bluespec composes guarded atomic actions before choosing their
 schedule. HazardFlow makes transfer and backpressure one interface algebra.
 Filament makes relative time and resource reuse compositional types. Calyx,
-DSLX/XLS, and PyMTL3 each retain a useful semantic level that RHDL deliberately
+DSLX/XLS, and PyMTL3 each retain a useful semantic level that Rhodium deliberately
 does not model.
 
 Those are not mere conveniences. Each would add a new proposition—about
 interpretation, generic types, atomicity, transfer, timing, scheduling, or
 modeling level—that needs its own semantics and a named lowering into exact
-RHDL hardware. At the direct-construction level, Chisel, Amaranth, SpinalHDL,
+Rhodium hardware. At the direct-construction level, Chisel, Amaranth, SpinalHDL,
 Hardcaml, and disciplined SystemVerilog expose the more immediate design trade:
-RHDL usually gains locality and loses syntactic economy.
+Rhodium usually gains locality and loses syntactic economy.
 
 ## Flow composition across the comparison set
 
-Flow composition is an important exception to the claim that RHDL generally
+Flow composition is an important exception to the claim that Rhodium generally
 trades concision for locality. The current
-[`std/flow`](../../rhdl/std/README.md#flow-control-circuits) surface is itself a
+[`std/flow`](../../rhodium/std/README.md#flow-control-circuits) surface is itself a
 compact topology language. A configured stage is an ordinary unary host
 function, so the same `|>` notation composes concrete endpoints and detached
 paths. The result may change cardinality, split into independent parallel
@@ -149,30 +149,30 @@ direct wiring, while stateful or structurally meaningful stages remain visible
 instances rather than hidden scheduling.
 
 This abstraction is intentionally implemented by the generic frontend
-[`InterfaceHandle`](../../rhdl/frontend/layers/interface.rhm), not by a second
+[`InterfaceHandle`](../../rhodium/frontend/layers/interface.rhm), not by a second
 flow graph or new core operations. It is evidence for the project's layering
 claim: a minimal exact IR can support a substantially richer composition
 language that elaborates away.
 
 | Comparison system | Flow-composition judgment |
 |---|---|
-| Chisel | Standard ready-valid interfaces and components do not form one comparably uniform topology algebra; RHDL makes nontrivial transport graphs more direct. |
-| SpinalHDL | The closest direct peer: `Stream` composition is at least as fluent and more mature in timing control, while RHDL makes protocol strength and single-use topology ownership more explicit. |
-| Amaranth | Its deliberately minimal stream contract is stricter than `Decoupled`, but RHDL provides a much broader closed composition surface. |
-| Hardcaml | `hardcaml_handshake` has the purer host-typed reusable arrow; RHDL's nominal endpoints and flow stages express much richer ready-valid meaning while topology materialization remains one-shot. |
+| Chisel | Standard ready-valid interfaces and components do not form one comparably uniform topology algebra; Rhodium makes nontrivial transport graphs more direct. |
+| SpinalHDL | The closest direct peer: `Stream` composition is at least as fluent and more mature in timing control, while Rhodium makes protocol strength and single-use topology ownership more explicit. |
+| Amaranth | Its deliberately minimal stream contract is stricter than `Decoupled`, but Rhodium provides a much broader closed composition surface. |
+| Hardcaml | `hardcaml_handshake` has the purer host-typed reusable arrow; Rhodium's nominal endpoints and flow stages express much richer ready-valid meaning while topology materialization remains one-shot. |
 | PyMTL3 | Ready-valid interfaces connect cleanly, but larger paths remain explicit component wiring rather than first-class transformations. |
-| HazardFlow | Its payload/resolver/transfer abstraction and generic FSM form the more general handshake algebra; RHDL instead verifies the complete realized combinational graph. |
-| Clash Protocols | `Circuit` is the more general reusable typed circuit algebra; RHDL gives buffering, readiness paths, ownership, and module boundaries more source-visible structure. |
-| Bluespec | Guarded atomic rules compose multi-resource transactions and let the compiler schedule conflicts; RHDL is more predictable for author-controlled elastic microarchitecture. |
-| Filament | Timeline and initiation-interval types provide stronger fixed-schedule guarantees; RHDL handles runtime stalls and backpressure that are outside Filament's design center. |
+| HazardFlow | Its payload/resolver/transfer abstraction and generic FSM form the more general handshake algebra; Rhodium instead verifies the complete realized combinational graph. |
+| Clash Protocols | `Circuit` is the more general reusable typed circuit algebra; Rhodium gives buffering, readiness paths, ownership, and module boundaries more source-visible structure. |
+| Bluespec | Guarded atomic rules compose multi-resource transactions and let the compiler schedule conflicts; Rhodium is more predictable for author-controlled elastic microarchitecture. |
+| Filament | Timeline and initiation-interval types provide stronger fixed-schedule guarantees; Rhodium handles runtime stalls and backpressure that are outside Filament's design center. |
 | Calyx | Calyx composes multi-cycle actions and control schedules rather than continuously active token paths. |
-| DSLX/XLS | Proc channels default to a higher-level behavioral network; metadata and code-generation policy can constrain buffering during lowering, while RHDL exposes the exact transport topology in source. |
+| DSLX/XLS | Proc channels default to a higher-level behavioral network; metadata and code-generation policy can constrain buffering during lowering, while Rhodium exposes the exact transport topology in source. |
 | SystemVerilog | Interfaces and assertions can encode and check any chosen convention, but the language defines no standard first-class ready-valid composition algebra. |
 
 The current weakness is semantic enforcement rather than structural reach.
 `Irrevocable` stability is documented but not backed by generated assertions.
-[`map_flow`](../../rhdl/std/flow/map.rhdl) and
-[`demux_flow`](../../rhdl/std/flow/demux.rhdl) conservatively weaken to
+[`map_flow`](../../rhodium/std/flow/map.rhdl) and
+[`demux_flow`](../../rhodium/std/flow/demux.rhdl) conservatively weaken to
 `Decoupled` because their bodies may capture changing ambient hardware; an
 explicit `~stable: #true` assertion preserves an irrevocable input contract
 when the author knows the transformation remains stable while stalled. The
@@ -188,18 +188,18 @@ interface subsystem.
 
 ## Decode, patterns, and literals across the comparison set
 
-Decode is one area where RHDL gains both locality and syntactic economy. The
+Decode is one area where Rhodium gains both locality and syntactic economy. The
 abstraction is a sequence of three ordinary, separately meaningful layers:
 
-1. [`HardwareLiteral`](../../rhdl/frontend/support/hardware-literal.rhm) is an
+1. [`HardwareLiteral`](../../rhodium/frontend/support/hardware-literal.rhm) is an
    open host protocol for one exact packed image of a semantic hardware type.
    Built-in scalars, enums, records, vectors, and extension-defined packable
    types use the same protocol.
-2. [`Pattern`](../../rhdl/std/decode/pattern.rhdl) is a host-side typed bit cube,
+2. [`Pattern`](../../rhodium/std/decode/pattern.rhdl) is a host-side typed bit cube,
    deliberately not a connectable hardware value. Exact literals constrain all
    bits; `_` leaves a field or element unconstrained; nested patterns preserve
    partial care; and `partial_pattern` gives sparse named record syntax.
-3. [`DecodeTable`](../../rhdl/std/decode/table.rhdl) turns input and output
+3. [`DecodeTable`](../../rhodium/std/decode/table.rhdl) turns input and output
    patterns into an unordered relation with exact common types, an explicit
    default, and pairwise-disjoint input cubes. Rows concatenate as lists,
    `lift_decode_inputs` changes the input domain, and `zip_decode_cases` forms an
@@ -208,7 +208,7 @@ abstraction is a sequence of three ordinary, separately meaningful layers:
 The individual mechanisms are established ideas. Typed literals, masked bit
 patterns, truth tables, output don't-cares, and wildcard case lowering all exist
 elsewhere. Exact aggregate constants in particular are routine in several
-comparison systems; RHDL's literal-level distinction is the open protocol that
+comparison systems; Rhodium's literal-level distinction is the open protocol that
 lets built-in and extension-defined semantic types feed the same recursive
 pattern machinery. Its broader contribution is their integration as one typed
 relation abstraction: the same pattern vocabulary describes named aggregate
@@ -218,22 +218,22 @@ validity and every output field.
 
 | Comparison system | Decode-relation judgment |
 |---|---|
-| Chisel | The closest peer. [`BitPat`, `TruthTable`, and `DecodeTable`](https://www.chisel-lang.org/docs/explanations/decoder) also support partial inputs and outputs, typed result fields, multi-output Espresso, and QMC fallback. RHDL adds recursive semantic aggregate patterns, exact input/output type identity, explicit relation lifting/zipping, and uniform overlap rejection; Chisel's `BitSet` algebra and column-oriented `DecodeField` model are stronger in other directions. |
-| SpinalHDL | [`MaskedLiteral`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html) and [`DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html) provide flat masked selectors and Boolean minimization. RHDL's recursively typed aggregate relation and structured partial outputs are more general. |
+| Chisel | The closest peer. [`BitPat`, `TruthTable`, and `DecodeTable`](https://www.chisel-lang.org/docs/explanations/decoder) also support partial inputs and outputs, typed result fields, multi-output Espresso, and QMC fallback. Rhodium adds recursive semantic aggregate patterns, exact input/output type identity, explicit relation lifting/zipping, and uniform overlap rejection; Chisel's `BitSet` algebra and column-oriented `DecodeField` model are stronger in other directions. |
+| SpinalHDL | [`MaskedLiteral`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Data%20types/bits.html) and [`DecodingSpec`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/utils.html) provide flat masked selectors and Boolean minimization. Rhodium's recursively typed aggregate relation and structured partial outputs are more general. |
 | Amaranth | [`Value.matches` and `Switch`/`Case`](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-flow) give concise flat masked matching and ordered choice. They do not form a standard typed partial-output relation or multi-output decoder generator. |
 | SystemVerilog | `casez`, `case inside`, packed aggregates, and `unique`/`priority` cover a broader range of local decisions. They remain control-flow syntax rather than one reusable relation value with composition and backend preservation. |
-| Bluespec | Nested typed patterns, wildcard bit literals, bindings, and guards make one match expression more general than `DecodeGen`. RHDL is narrower but makes the complete finite relation first-class, unordered, and directly optimizable. |
-| Clash | Haskell patterns and [`bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html) support algebraic matching and bit capture. Clash has no standard equivalent to RHDL's typed partial-output table algebra. |
-| DSLX/XLS | DSLX [`match`](https://google.github.io/xls/dslx_reference/#match) supports nested patterns, bindings, alternatives, and ranges, while XLS performs general multi-level optimization. RHDL's matching language is less general but its decoder-specific input and output care is more explicit. |
+| Bluespec | Nested typed patterns, wildcard bit literals, bindings, and guards make one match expression more general than `DecodeGen`. Rhodium is narrower but makes the complete finite relation first-class, unordered, and directly optimizable. |
+| Clash | Haskell patterns and [`bitPattern`](https://hackage-content.haskell.org/package/clash-prelude-1.8.2/docs/Clash-Sized-BitVector.html) support algebraic matching and bit capture. Clash has no standard equivalent to Rhodium's typed partial-output table algebra. |
+| DSLX/XLS | DSLX [`match`](https://google.github.io/xls/dslx_reference/#match) supports nested patterns, bindings, alternatives, and ranges, while XLS performs general multi-level optimization. Rhodium's matching language is less general but its decoder-specific input and output care is more explicit. |
 | Hardcaml and PyMTL3 | Both have typed aggregate constants and can generate comparisons and muxes through host code, but neither standard authoring model provides a recursively masked aggregate relation with partial-output synthesis freedom. |
 | HazardFlow, Calyx, and Filament | Their central abstractions concern transfer hazards, scheduled actions, and timeline types. Equivalent decoder hardware can be constructed, but these languages expose no comparable standard decode-relation abstraction. |
 
 This specialization is a real source-language advantage, not greater Boolean
-expressivity. RHDL directly states finite constant relations; it does not bind
+expressivity. Rhodium directly states finite constant relations; it does not bind
 wildcarded fields, attach arbitrary guards, compute row results from captures,
 express ranges as primitives, or represent ordered priority between overlapping
 rows. Bluespec, Clash, DSLX, and SystemVerilog are more expressive for those
-general matching tasks. RHDL's restriction is what makes global validation and
+general matching tasks. Rhodium's restriction is what makes global validation and
 sparse backend preservation straightforward.
 
 The hardware-quality claim is similarly bounded. `DecodeGen` preserves output
@@ -242,7 +242,7 @@ sparse `casez`, carries uncared output positions as X, and leaves product
 sharing, multi-level factoring, and target mapping to downstream synthesis.
 Validity and payload remain one semantic table and one synthesis problem. This
 does not establish universal PPA superiority: final quality depends on the
-downstream optimizer and target library, while RHDL deliberately avoids
+downstream optimizer and target library, while Rhodium deliberately avoids
 committing the relation to an early target-independent cover.
 
 The current seams are important. `PatternSet` provides host-side set algebra,
@@ -251,20 +251,20 @@ instead of refining compatible cubes. The low-level `Pattern(~value, ~care)`
 constructor also requires the care mask to have the value's semantic type even
 though care is representation-level information. Emitted gate structure and
 quality are intentionally synthesis-tool dependent instead of deterministic at
-the RHDL backend boundary.
+the Rhodium backend boundary.
 
 The principled next step is partition-refining relation products. Keeping the
 semantic relation and output freedom intact through CIRCT already preserves
-RHDL's strongest part: one concise typed specification without pretending that
+Rhodium's strongest part: one concise typed specification without pretending that
 an early two-level cover is always the best target-specific hardware.
 
 ## Comparison map
 
-| Comparison | Kind | Primary question for RHDL |
+| Comparison | Kind | Primary question for Rhodium |
 |---|---|---|
 | [Chisel](chisel.md) | Scala construction language | Which model makes widths, connection priority, hierarchy, and parameterized structure more direct and predictable? |
 | [Amaranth](amaranth.md) | Python construction language | How do assignment, shape, domain, and structural abstractions compare while both languages remain transparent RTL construction systems? |
-| [SpinalHDL](spinalhdl.md) | Scala construction language | How do its data objects, assignment rules, direction inference, and clock-domain scopes compare with RHDL's explicit destinations and roles? |
+| [SpinalHDL](spinalhdl.md) | Scala construction language | How do its data objects, assignment rules, direction inference, and clock-domain scopes compare with Rhodium's explicit destinations and roles? |
 | [Bluespec](bluespec.md) | Rule-based hardware language | Should state conflicts remain explicit in wiring, or become guarded atomic actions scheduled by the compiler? |
 | [Clash](clash.md) | Functional synthesizing language | Which invariants should live in a powerful static type system rather than an explicit construction IR? |
 | [Hardcaml](hardcaml.md) | OCaml construction library | Can derived host-language interfaces and a direct signal graph offer a simpler compositional API? |
@@ -273,7 +273,7 @@ an early two-level cover is always the best target-specific hardware.
 | [Calyx](calyx.md) | Accelerator compiler IR | Does the `cells` / `wires` / `control` split express scheduled actions more cleanly than constructing their controller RTL directly? |
 | [DSLX and XLS](dslx.md) | Functional dataflow language and HLS compiler | When should scheduling and pipelining be compiler decisions rather than exact source-visible structure? |
 | [PyMTL3](pymtl3.md) | Multi-level Python modeling framework | Can update blocks and method interfaces unify functional, cycle-level, and RTL models without obscuring which model denotes hardware? |
-| [SystemVerilog](systemverilog.md) | Standard hardware language | Does RHDL's smaller expression-and-place model improve compositional reasoning over continuous assignments, procedural blocks, nets, and variables? |
+| [SystemVerilog](systemverilog.md) | Standard hardware language | Does Rhodium's smaller expression-and-place model improve compositional reasoning over continuous assignments, procedural blocks, nets, and variables? |
 
 ## Highest-value reading paths
 
@@ -288,7 +288,7 @@ the closest direct peer, then [SpinalHDL](spinalhdl.md) and
 [Amaranth](amaranth.md) for masked RTL matching, and [Bluespec](bluespec.md),
 [Clash](clash.md), and [DSLX/XLS](dslx.md) for more general pattern languages.
 
-For the closest tests of RHDL's current construction model, start with
+For the closest tests of Rhodium's current construction model, start with
 [Amaranth](amaranth.md), [SpinalHDL](spinalhdl.md), and
 [Hardcaml](hardcaml.md).
 
@@ -299,11 +299,11 @@ protocol hazards, or time should become first-class static abstractions.
 
 For different abstraction levels and scheduling semantics, read
 [Calyx](calyx.md), [DSLX/XLS](dslx.md), and [PyMTL3](pymtl3.md). They evaluate
-RHDL's commitment to exact construction and one public RTL-oriented denotation.
+Rhodium's commitment to exact construction and one public RTL-oriented denotation.
 
 [SystemVerilog](systemverilog.md) is the conventional-language baseline. Its
 mixture of continuous, procedural, event-driven, net, and variable semantics
-makes it a useful test of whether RHDL's smaller core is genuinely clearer or
+makes it a useful test of whether Rhodium's smaller core is genuinely clearer or
 merely less expressive.
 
 ## Common evaluation rubric
@@ -325,14 +325,14 @@ Every comparison covers the following questions:
   methods, rules, streams, or typed transformations?
 - How local is the meaning of a line of code? Which surrounding scopes,
   scheduling rules, or inference passes can change it?
-- Where does RHDL need fewer concepts or make hardware structure and contracts
+- Where does Rhodium need fewer concepts or make hardware structure and contracts
   more direct, and where is its syntax merely more verbose?
 - What core behaviors, abstractions, or static relationships can the comparison
-  system state that RHDL cannot?
-- Which ideas fit RHDL's exact-construction model, and which would change that
+  system state that Rhodium cannot?
+- Which ideas fit Rhodium's exact-construction model, and which would change that
   model rather than extend it?
 
 The documents cite official language manuals, project documentation, standards
-pages, or primary project repositories. Conclusions about RHDL are grounded in
+pages, or primary project repositories. Conclusions about Rhodium are grounded in
 the current repository rather than inferred from its project description
 alone.

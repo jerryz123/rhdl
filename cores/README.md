@@ -4,7 +4,7 @@
 
 The top-level `cores/` package holds both reusable processor components and
 named processor implementations. It is distinct from
-[`rhdl/core/`](../rhdl/core/README.md), which owns the language's
+[`rhodium/core/`](../rhodium/core/README.md), which owns the language's
 frontend-independent hardware IR.
 
 Only components intended for reuse across processors belong directly under
@@ -31,13 +31,13 @@ The dependency direction is one way:
 
 ```text
 cores/rv5stage/ --> cores/{alu,branch-resolver,load-store,multiplier,divider}.rhdl
-       |-------> riscv/isa + riscv/rhdl
-       `-------> rhdl/std
+       |-------> riscv/isa + riscv/rtl
+       `-------> rhodium/std
 
-cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhdl + rhdl/std
-cores/branch-resolver.rhdl --> #lang rhdl only
-cores/multiplier.rhdl --> #lang rhdl + rhdl/std
-cores/divider.rhdl --> #lang rhdl + rhdl/std
+cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhodium + rhodium/std
+cores/branch-resolver.rhdl --> #lang rhodium only
+cores/multiplier.rhdl --> #lang rhodium + rhodium/std
+cores/divider.rhdl --> #lang rhodium + rhodium/std
 ```
 
 Neither reusable components nor named cores may import the optional CIRCT

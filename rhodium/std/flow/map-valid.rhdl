@@ -1,0 +1,52 @@
+#lang rhodium
+// Defines inline payload transformation for non-backpressured Valid flows.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+
+fun finish_map_valid_handle(input_link :: Handle,
+                            output_link :: Handle,
+                            mapped_bits :: Hardware.packable):
+  output_link.left.field("valid") <== input_link.right.field("valid")
+  output_link.left.field("bits") <== mapped_bits
+  describe_interface_transform(
+    interface_transform(input_link, output_link),
+    "map-valid"
+  )
+
+// Mapping is purely combinational because Valid has no readiness path or
+// pending-offer contract. Configuration produces a unary flow operation.
+expr.macro
+| 'map_valid($(payload :: Identifier) => $body_head ...):
+    $(body_tail :: Block)':
+    'map_valid($payload):
+       $body_head ... $body_tail'
+| 'map_valid($(payload :: Identifier) => $body ...)':
+    'map_valid($payload): $body ...'
+| 'map_valid($(payload :: Identifier)): $body':
+    'fun (map_valid_source :: FlowSource) :~ InterfaceTransformResult(map_valid_source, Endpoint):
+       def map_valid_input_protocol = valid_flow_protocol_type(map_valid_source)
+       def map_valid_input_link = interface_link(
+         map_valid_input_protocol,
+         "map_valid_input"
+       )
+       def map_valid_input :: Endpoint = map_valid_input_link.right
+       def map_valid_payload_type = valid_flow_payload_type(map_valid_source)
+       def $payload :: Hardware.of(map_valid_payload_type) = map_valid_input.bits
+       fun compute_mapped_bits(): $body
+       def mapped_bits = compute_mapped_bits()
+       def map_valid_output_link = interface_link(
+         Valid(hardware_value_type(mapped_bits)),
+         "map_valid_output"
+       )
+       def map_valid_handle = finish_map_valid_handle(
+         map_valid_input_link,
+         map_valid_output_link,
+         mapped_bits
+       )
+       finish_interface_transform(map_valid_source, map_valid_handle)'
+
+export:
+  map_valid

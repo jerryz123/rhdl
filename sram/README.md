@@ -2,12 +2,12 @@
 
 # SRAM mapping
 
-This package maps selected synchronous memories after RHDL has emitted CIRCT
-HW/Seq MLIR. RHDL, processor cores, and SoCs remain technology-independent:
+This package maps selected synchronous memories after Rhodium has emitted CIRCT
+HW/Seq MLIR. Rhodium, processor cores, and SoCs remain technology-independent:
 they expose ordinary synchronous memories and do not name physical macros.
 
 ```text
-RHDL HW/Seq MLIR
+Rhodium HW/Seq MLIR
   -> select and flatten an elaboration top
   -> lower seq.firmem to FIRRTLMem instances
   -> scope instance paths to a logical design top
@@ -38,7 +38,7 @@ sites:
   ram/storage/storage: sky130_sram_2kbyte_1rw1r_32x512_8
 ```
 
-By default `rhdl-map-memory-sites` uses `policy.top` as the actual elaboration
+By default `rhodium-map-memory-sites` uses `policy.top` as the actual elaboration
 top. `top=<module>` overrides that top and `scope-prefix=<path>` strips a
 flattened instance prefix before policy lookup. Thus the same SimpleSoC-relative
 policy applies directly to `SimpleSoC` and to `SoCHarness` with

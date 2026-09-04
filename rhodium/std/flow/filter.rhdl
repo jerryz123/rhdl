@@ -1,0 +1,51 @@
+#lang rhodium
+// Defines inline ready-valid filtering that consumes rejected payloads.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+
+// Filtering may depend on live sideband state, so its output is conservatively
+// Decoupled even when its input is Irrevocable. A rejected token is consumed
+// without waiting for downstream readiness.
+fun finish_filter_flow_handle(input_link :: Handle,
+                              output_link :: Handle,
+                              keep :: Bool):
+  def input_endpoint = input_link.right
+  def output_endpoint = output_link.left
+  output_endpoint.field("valid") <== input_endpoint.field("valid") & keep
+  output_endpoint.field("bits") <== input_endpoint.field("bits")
+  input_endpoint.field("ready") <== !keep ||| output_endpoint.field("ready")
+  describe_interface_transform(
+    interface_transform(input_link, output_link),
+    "filter"
+  )
+
+expr.macro
+| 'filter_flow($(payload :: Identifier) => $predicate ...)':
+    'filter_flow($payload): $predicate ...'
+| 'filter_flow($(payload :: Identifier)): $predicate':
+    'fun (filter_flow_source :: FlowSource) :~ InterfaceTransformResult(filter_flow_source, Endpoint):
+       def filter_flow_protocol = flow_protocol_type(filter_flow_source)
+       def filter_flow_input_link = interface_link(
+         filter_flow_protocol,
+         "filter_input"
+       )
+       def filter_flow_input :: Endpoint = filter_flow_input_link.right
+       def $payload = filter_flow_input.bits
+       fun compute_filter_predicate(): $predicate
+       def filter_flow_keep :: Bool = compute_filter_predicate()
+       def filter_flow_output_link = interface_link(
+         Decoupled(flow_payload_type(filter_flow_source)),
+         "filter_output"
+       )
+       def filter_flow_handle = finish_filter_flow_handle(
+         filter_flow_input_link,
+         filter_flow_output_link,
+         filter_flow_keep
+       )
+       finish_interface_transform(filter_flow_source, filter_flow_handle)'
+
+export:
+  filter_flow

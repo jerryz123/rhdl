@@ -7,7 +7,7 @@
 #include <fesvr/context.h>
 #include <fesvr/htif.h>
 
-namespace rhdl::fesvr {
+namespace rhodium::fesvr {
 
 struct DirectMemoryRequest {
   bool write;
@@ -62,4 +62,4 @@ class DirectMemoryHtif final : public htif_t {
   std::uint64_t start_entry_ = 0;
 };
 
-}  // namespace rhdl::fesvr
+}  // namespace rhodium::fesvr

@@ -185,7 +185,7 @@ def parse_memories(mlir: str, selected_only: bool = False) -> List[Memory]:
     generated_memories: List[Memory] = []
     selected_memories: List[Memory] = []
     for line_number, line in enumerate(mlir.splitlines(), 1):
-        selected = "hw.module.extern" in line and "rhdl.memory.site" in line
+        selected = "hw.module.extern" in line and "rhodium.memory.site" in line
         generated = "hw.module.generated" in line and "@FIRRTLMem" in line
         if selected_only and not selected:
             continue
@@ -198,9 +198,9 @@ def parse_memories(mlir: str, selected_only: bool = False) -> List[Memory]:
             )
         ports = tuple(parse_port(item) for item in split_top_level(match.group("ports")))
         attributes = parse_attributes(match.group("attributes"))
-        site = string_attribute(attributes, "rhdl.memory.site") if selected else None
-        requested_macro = string_attribute(attributes, "rhdl.memory.macro") if selected else None
-        source_module = string_attribute(attributes, "rhdl.memory.source") if selected else None
+        site = string_attribute(attributes, "rhodium.memory.site") if selected else None
+        requested_macro = string_attribute(attributes, "rhodium.memory.macro") if selected else None
+        source_module = string_attribute(attributes, "rhodium.memory.source") if selected else None
         memory = Memory(
             module=decode_symbol(match.group("module")),
             ports=ports,

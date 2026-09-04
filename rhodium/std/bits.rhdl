@@ -1,0 +1,142 @@
+#lang rhodium
+// Defines bit ordering, layout, alignment, byte-mask, and masked-merge utilities for Bits.
+
+import:
+  rhombus/meta open
+
+fun power_of_two(value :~ matching(_)):
+  value is_a PosInt && (value bits.and (value - 1)) == 0
+
+annot.macro 'Pow2Int':
+  'PosInt && satisfying(power_of_two)'
+
+fun unsigned_value_count(width :: Nat):
+  1 << width
+
+fun reverse_bits(value :: Hardware.bits) :~ Bits(value.type.bit_width()):
+  def width = value.type.bit_width()
+  if width == 1
+  | value
+  | concat(for List (index in 0..width): value[index])
+
+// The leading sentinel makes the result total: an all-zero input selects the
+// sentinel at index width and therefore returns the operand width.
+fun count_leading_zeros(value :: Hardware.bits) :~ Bits(index_width(value.type.bit_width() + 1)):
+  priority_encoder(concat(Bool(#true), reverse_bits(value)))
+
+fun normalized_pack_field(field :: List):
+  unless field.length() == 2 && field[0] is_a Nat
+  | error(~who: #'pack_fields,
+          "fields must be [offset, packable hardware value] pairs")
+  def value :: Hardware.packable = field[1]
+  def packed = value.as_bits()
+  [field[0], packed, hardware_value_type(packed).bit_width()]
+
+// Packs host-positioned hardware values into one Bits value, filling every
+// unspecified bit with zero. Layout errors remain host elaboration errors.
+fun pack_fields(width :: PosInt, fields :: List) :~ Bits(width):
+  def ordered = fields.map(normalized_pack_field).sort(
+    fun (left, right): left[0] < right[0]
+  )
+  def mutable next_offset = 0
+  def mutable fragments = []
+  for (field in ordered):
+    def offset = field[0]
+    def value = field[1]
+    def field_width = field[2]
+    unless offset >= next_offset
+    | error(~who: #'pack_fields, "fields must not overlap")
+    unless (offset + field_width) <= width
+    | error(~who: #'pack_fields, "field must fit the result width")
+    if offset > next_offset
+    | fragments := [bits(0, offset - next_offset)] ++ fragments
+    | #void
+    fragments := [value] ++ fragments
+    next_offset := offset + field_width
+  if next_offset < width
+  | fragments := [bits(0, width - next_offset)] ++ fragments
+  | #void
+  if fragments.length() == 1
+  | fragments[0]
+  | concat(fragments)
+
+fun unchecked_alignment_bits(alignment :: PosInt):
+  fun loop(value :: PosInt, bits :: Nat):
+    if value == 1
+    | bits
+    | loop(value / 2, bits + 1)
+  loop(alignment, 0)
+
+fun alignment_bits(alignment :: Pow2Int):
+  unchecked_alignment_bits(alignment)
+
+fun checked_alignment_width(value :: Hardware.bits,
+                            alignment :: Pow2Int,
+                            who :: Symbol):
+  def width = hardware_value_type(value).bit_width()
+  def low_width = unchecked_alignment_bits(alignment)
+  unless low_width <= width
+  | error(~who: who, "alignment must fit the Bits width")
+  values(width, low_width)
+
+fun is_aligned(value :: Hardware.bits, alignment :: Pow2Int) :~ Bool:
+  def (_width, low_width) = checked_alignment_width(
+    value,
+    alignment,
+    #'is_aligned
+  )
+  if low_width == 0
+  | Bool(#true)
+  | !or_reduce(value[0..low_width])
+
+fun align_down(value :: Hardware.bits,
+               alignment :: Pow2Int) :~ Bits(value.type.bit_width()):
+  def (width, _low_width) = checked_alignment_width(
+    value,
+    alignment,
+    #'align_down
+  )
+  if alignment == 1
+  | value
+  | value & bits((1 << width) - alignment, width)
+
+fun masked_merge(original :: Hardware.bits,
+                 replacement :: Hardware.bits,
+                 mask :: Hardware.bits) :~ Bits(hardware_value_type(original).bit_width()):
+  (original & !mask) ||| (replacement & mask)
+
+// Produces one enable bit per byte of a power-of-two beat. Size is the
+// log2(bytes) transfer encoding used by byte-addressed bus protocols.
+// Transfers wider than the beat produce the all-zero mask.
+fun transfer_byte_mask(address :: Hardware.bits,
+                       size :: Hardware.bits,
+                       beat_bytes :: Pow2Int) :~ Mask(beat_bytes):
+  def (_width, lane_width) = checked_alignment_width(
+    address,
+    beat_bytes,
+    #'transfer_byte_mask
+  )
+  def max_size = alignment_bits(beat_bytes)
+  def base_mask = mux_lookup(
+    size,
+    ~default: bits(0, beat_bytes),
+    for List (encoded_size in 0..(max_size + 1)):
+      [encoded_size,
+       bits((1 << (1 << encoded_size)) - 1, beat_bytes)]
+  )
+  def lane_offset:
+    if lane_width == 0 | bits(0, 1) | address[0..lane_width]
+  (base_mask << lane_offset).into(Mask(beat_bytes))
+
+export:
+  Pow2Int
+  power_of_two
+  unsigned_value_count
+  reverse_bits
+  count_leading_zeros
+  pack_fields
+  alignment_bits
+  is_aligned
+  align_down
+  masked_merge
+  transfer_byte_mask

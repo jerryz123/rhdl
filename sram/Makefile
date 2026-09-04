@@ -5,7 +5,7 @@
 REPO_DIR := $(abspath ..)
 BUILD_DIR ?= $(CURDIR)/build
 PLUGIN_BUILD_DIR := $(BUILD_DIR)/circt
-PLUGIN := $(PLUGIN_BUILD_DIR)/rhdl-memory-sites.so
+PLUGIN := $(PLUGIN_BUILD_DIR)/rhodium-memory-sites.so
 CIRCT_PASS_DIR := $(CURDIR)/circt
 
 CIRCT_OPT ?= $(REPO_DIR)/.tools/firtool-1.155.0/bin/circt-opt

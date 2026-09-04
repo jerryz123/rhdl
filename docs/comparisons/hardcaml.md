@@ -1,6 +1,6 @@
-<!-- Compares the core denotation and authoring semantics of RHDL and Hardcaml. -->
+<!-- Compares the core denotation and authoring semantics of Rhodium and Hardcaml. -->
 
-# RHDL and Hardcaml
+# Rhodium and Hardcaml
 
 ## Scope and thesis
 
@@ -10,19 +10,19 @@ This comparison uses the current Hardcaml manual and
 [Hardcaml 0.17.1 API](https://ocaml.org/p/hardcaml/latest/hardcaml/Hardcaml/index.html).
 It focuses on the language's structural RTL semantics.
 
-Hardcaml and RHDL are unusually close architectural comparisons. Both execute
+Hardcaml and Rhodium are unusually close architectural comparisons. Both execute
 a functional host language to build an explicit graph, expose that graph for
 inspection, use exact vector widths for primitive operations, and avoid an
 implicit hardware scheduler. Hardcaml's most elegant abstraction is a shared
 combinational signature implemented by both concrete `Bits.t` values and deep
-`Signal.t` expressions. RHDL's frontend is also broadly uniform, while its core
+`Signal.t` expressions. Rhodium's frontend is also broadly uniform, while its core
 factors readable `Value` from driveable `Place`. That factoring usefully names
-sources and sinks, but the stronger distinction is RHDL's complete semantic
+sources and sinks, but the stronger distinction is Rhodium's complete semantic
 types, one final binding, explicit priority, and current/next-state semantics.
 
 ## Summary
 
-| Concern | RHDL | Hardcaml |
+| Concern | Rhodium | Hardcaml |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | OCaml evaluation constructs a `Signal.t` graph; a `Circuit.t` is traced from outputs |
 | Expression model | Common frontend hardware surface; core factors typed `Value` nodes from `Place` destinations | Deep `Signal.t` expressions sharing `Comb.S` with shallow `Bits.t` values |
@@ -55,14 +55,14 @@ The finished signal graph denotes concurrent hardware. OCaml evaluation order
 constructs dependencies; it becomes circuit priority only inside an explicitly
 ordered abstraction such as `Always`.
 
-RHDL has the same broad staging model. Rhombus computation chooses structure,
+Rhodium has the same broad staging model. Rhombus computation chooses structure,
 while hardware forms create operations inside an active circuit. Its completed
-denotation is a module-owned [core IR](../../rhdl/core/README.md) containing
+denotation is a module-owned [core IR](../../rhodium/core/README.md) containing
 ports, values, places, operations, registers, memories, instances, and effects.
 The verifier checks that graph before any later interpretation consumes it.
 
 Hardcaml's graph is naturally expression-rooted: `Circuit.create_exn` discovers
-what is reachable from outputs. RHDL's builder records the whole module as it
+what is reachable from outputs. Rhodium's builder records the whole module as it
 is constructed, including driveable destinations and effects. The former is a
 compact denotation for pure dataflow; the latter makes ownership and effectful
 hardware part of the first-class structure.
@@ -90,14 +90,14 @@ wrap that policy and support mixed-width arithmetic with growing results. This
 keeps the core vector type uniform, but the meaning of a comparison or resize
 must be recovered from the selected operation or module.
 
-RHDL attaches a complete semantic type to every value. Raw `Bits`, `SInt`,
+Rhodium attaches a complete semantic type to every value. Raw `Bits`, `SInt`,
 `Bool`, enums, one-hot controls, records, and vectors remain distinct. Core
 capability interfaces determine whether a type supports packing, bitwise
 operations, modular arithmetic, or signed arithmetic. Width-changing and
 representation-changing operations remain explicit.
 
 Both languages therefore make primitive datapath widths predictable.
-Hardcaml's uniform vectors maximize reuse through `Comb.S`; RHDL's nominal and
+Hardcaml's uniform vectors maximize reuse through `Comb.S`; Rhodium's nominal and
 structural hardware types maximize preservation of author intent after the
 host abstraction has disappeared.
 
@@ -111,7 +111,7 @@ It does not provide a standard object equivalent to a masked, multi-output
 decode relation that preserves partial output specifications for later
 minimization.
 
-RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+Rhodium's [typed decode layer](../../rhodium/std/README.md#typed-decode-patterns)
 makes exact typed literals and recursive aggregate cubes reusable host data.
 A nonoverlapping relation can be assembled from independently authored rows or
 output fragments, then passed once to `DecodeGen`. This is more concise for a
@@ -119,9 +119,9 @@ large control decoder whose meaningful outputs vary per instruction; Hardcaml's
 ordinary functional composition is more general for a decoder interleaved with
 arbitrary Boolean or arithmetic computation.
 
-RHDL preserves the combined sparse relation and its output don't-cares for
+Rhodium preserves the combined sparse relation and its output don't-cares for
 downstream synthesis instead of constructing separate mux and comparison
-trees. RHDL does not run a Boolean minimizer itself. Hardcaml's graph and a
+trees. Rhodium does not run a Boolean minimizer itself. Hardcaml's graph and a
 downstream synthesizer can realize the same function differently, and
 target-specific optimization decides the final PPA.
 
@@ -144,7 +144,7 @@ and registers. Within that procedural description, the last assignment
 executed determines the next value. Priority is therefore local to the ordered
 `Always` program rather than to ordinary signal wiring.
 
-RHDL uses one assignment model for both straightforward and conditional
+Rhodium uses one assignment model for both straightforward and conditional
 construction. Every destination has one final binding. `when` and `switch`
 capture alternatives and emit one selected drive; a missing register branch
 means hold, while combinational destinations require full coverage. This is
@@ -154,11 +154,11 @@ represented by a separate object class.
 
 Hardcaml state is configured by `Reg_spec`, which groups clock, edge, reset,
 clear, enable, and associated values. `Signal.reg` consumes a spec and a data
-input. RHDL gives a register an explicit `Clock`, distinct current- and
+input. Rhodium gives a register an explicit `Clock`, distinct current- and
 next-state semantics, and an optional synchronous reset value; core represents
 current as a value and next as a place, while its `sync_circuit` layer supplies
 ambient convenience. Hardcaml centralizes state policy in a reusable record;
-RHDL makes the temporal direction directly inspectable in the graph.
+Rhodium makes the temporal direction directly inspectable in the graph.
 
 ## Hierarchy, interfaces, and composition
 
@@ -171,7 +171,7 @@ instantiation. The
 therefore treats hierarchy as a selectable interpretation of the same
 component function.
 
-RHDL separates those choices at the authoring boundary. A pure function over
+Rhodium separates those choices at the authoring boundary. A pure function over
 values is inline by construction. A `circuit` call creates a module definition,
 and an explicit instance creates hierarchy; binding can reuse a definition.
 This is less interchangeable than Hardcaml's scope-controlled interpretation,
@@ -186,11 +186,11 @@ concise, statically typed component signature. The official
 shows how the same record shape is reused across construction and circuit
 access.
 
-RHDL interfaces describe directional protocols rather than only port records.
+Rhodium interfaces describe directional protocols rather than only port records.
 They have nominal identity, two named roles, nested members, refinement, and
 declared support relations. Linear handles can restrict topology values to one
 consumption. Hardcaml's record functors are more general for uniform host
-operations over fields; RHDL's interface semantics carry more information
+operations over fields; Rhodium's interface semantics carry more information
 about compatibility and direction between endpoints.
 
 ## Ready-valid flow composition
@@ -202,9 +202,9 @@ handshake circuit is a typed reusable arrow; pure lifting with `arr` and serial
 composition with `>>>` obey an ordinary functional shape. Unlike a mutable
 connected endpoint, the arrow value can be named, reused, and composed before
 it is interpreted as signals. On this narrow axis, its abstraction is purer
-than RHDL's linear topology handle.
+than Rhodium's linear topology handle.
 
-RHDL's flow language carries considerably more hardware semantics in the
+Rhodium's flow language carries considerably more hardware semantics in the
 composed value. Configured unary stages apply through `|>` to either concrete
 endpoints or detached protocol seeds. `parallel` forms products, and arbiters,
 demultiplexers, forks, joins, and zips change cardinality while preserving the
@@ -213,15 +213,15 @@ same notation and dependent endpoint shape. The resulting
 that creates it is reusable. This trades the equational reuse of a pure arrow
 for explicit ownership of a physical topology.
 
-RHDL also tracks `Valid`, `Decoupled`, `Irrevocable`, and credited protocols,
+Rhodium also tracks `Valid`, `Decoupled`, `Irrevocable`, and credited protocols,
 keeps pure transformations inline and stateful stages as modules, and checks
 the realized graph for combinational cycles across hierarchy. None of this
 requires flow-specific core IR; the abstraction erases through generic
-interfaces. The Hardcaml arrow is the more elegant skeleton, while RHDL is the
+interfaces. The Hardcaml arrow is the more elegant skeleton, while Rhodium is the
 more complete language for actual elastic topology and protocol-strength
 changes.
 
-RHDL's richer protocol description is not itself a temporal proof:
+Rhodium's richer protocol description is not itself a temporal proof:
 `Irrevocable` currently lacks generated stability assertions. A pure typed
 arrow gives composition laws about shape rather than temporal correctness too,
 but Hardcaml's design is a useful reminder to distinguish algebraic structure
@@ -242,7 +242,7 @@ or record abstraction rather than in each graph node's base type. Those
 abstractions are strong while present in OCaml, but some distinctions are
 erased in the underlying signal graph.
 
-RHDL uses Rhombus functions, classes, macros, and language layers, and presents
+Rhodium uses Rhombus functions, classes, macros, and language layers, and presents
 readable and driveable hardware through a common frontend surface. Core's
 source/sink factoring helps verification. More consequentially, a complete
 semantic type remains attached to each core value, and nominal interface
@@ -256,13 +256,13 @@ Hardcaml has the more elegant expression-level abstraction: the same
 combinational program can run shallowly over `Bits.t` or elaborate deeply over
 `Signal.t`, and its unified signal vocabulary still supports disciplined
 one-driver wires. Its handshake arrow is also the purer reusable serial
-composition value. RHDL is cleaner after elaboration where complete semantic
+composition value. Rhodium is cleaner after elaboration where complete semantic
 types, one final binding, explicit priority, current/next state, modules, and
 the ownership and strength of an elastic topology should remain directly
-inspectable. Hardcaml optimizes reuse across interpretations; RHDL optimizes
+inspectable. Hardcaml optimizes reuse across interpretations; Rhodium optimizes
 preservation of hardware intent through interpretation.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
 1. Preserve semantic types and one-final-binding semantics. Keep `Value` and
    `Place` as an internal factoring while useful, but learn from Hardcaml's
@@ -289,8 +289,8 @@ preservation of hardware intent through interpretation.
 - [Hardcaml module hierarchy](https://docs.hardcaml.org/hardcaml-docs/using-interfaces/module_hierarchies/)
 - [Hardcaml Handshake interface](https://github.com/janestreet/hardcaml_handshake/blob/master/src/handshake.mli)
 - [Hardcaml API](https://ocaml.org/p/hardcaml/latest/hardcaml/Hardcaml/index.html)
-- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
-- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
-- [RHDL core semantics](../../rhdl/core/README.md)
-- [RHDL frontend semantics](../../rhdl/frontend/README.md)
-- [RHDL frontend layers](../../rhdl/frontend/layers/README.md)
+- [Rhodium standard flow composition](../../rhodium/std/README.md#flow-control-circuits)
+- [Rhodium typed decode patterns](../../rhodium/std/README.md#typed-decode-patterns)
+- [Rhodium core semantics](../../rhodium/core/README.md)
+- [Rhodium frontend semantics](../../rhodium/frontend/README.md)
+- [Rhodium frontend layers](../../rhodium/frontend/layers/README.md)

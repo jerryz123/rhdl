@@ -33,7 +33,7 @@ VERILATOR ?= verilator
 RISCV_CC ?= riscv64-unknown-elf-gcc
 PYTHON ?= python3
 
-MEMORY_SITE_PLUGIN := $(SRAM_DIR)/build/circt/rhdl-memory-sites.so
+MEMORY_SITE_PLUGIN := $(SRAM_DIR)/build/circt/rhodium-memory-sites.so
 MEMORY_MAPPER := $(SRAM_DIR)/map-memories.py
 MEMORY_CATALOG := $(SRAM_DIR)/$(TECH)/macros.ini
 MEMORY_POLICY := $(VLSI_DIR)/designs/simple-soc/$(TECH)/sram-map.yaml
@@ -87,7 +87,7 @@ $(MEMORY_SITE_PLUGIN): $(SRAM_DIR)/circt/CMakeLists.txt $(SRAM_DIR)/circt/Memory
 	@test -s $@
 
 $(SOC_MLIR): $(SIMULATOR_SOURCES) | $(BUILD_DIR)
-	compiled_root="$$(mktemp -d /tmp/rhdl-vlsi-sim.XXXXXX)"; \
+	compiled_root="$$(mktemp -d /tmp/rhodium-vlsi-sim.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
 		$(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm $(SOC) > $@
@@ -99,7 +99,7 @@ $(MAPPING_SELECTION_STAMP): $(SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(MEMORY_POLICY)
 	}
 	$(CIRCT_OPT) \
 		--load-pass-plugin=$(MEMORY_SITE_PLUGIN) \
-		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhdl-select-hw-top{top=SoCHarness},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhdl-map-memory-sites{policy=$(MEMORY_POLICY) inventory=$(MAPPING_INVENTORY) top=SoCHarness scope-prefix=soc},symbol-dce)" \
+		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhodium-select-hw-top{top=SoCHarness},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhodium-map-memory-sites{policy=$(MEMORY_POLICY) inventory=$(MAPPING_INVENTORY) top=SoCHarness scope-prefix=soc},symbol-dce)" \
 		$(SOC_MLIR) -o $(MAPPED_MLIR)
 	@test -s $(MAPPED_MLIR)
 	@test -s $(MAPPING_INVENTORY)

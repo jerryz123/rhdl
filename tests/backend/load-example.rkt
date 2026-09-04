@@ -7,7 +7,7 @@
 (match (vector->list (current-command-line-arguments))
   [(list* "materialize" output-directory specifications)
    (define emit-circt
-     (dynamic-require "rhdl/backend/circt.rhm" 'emit_circt))
+     (dynamic-require "rhodium/backend/circt.rhm" 'emit_circt))
    (make-directory* output-directory)
    (let loop ([remaining specifications])
      (match remaining

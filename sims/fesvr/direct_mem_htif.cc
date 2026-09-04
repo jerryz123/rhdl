@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-namespace rhdl::fesvr {
+namespace rhodium::fesvr {
 namespace {
 
 constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
@@ -166,4 +166,4 @@ void DirectMemoryHtif::switch_to_target() {
   target_context_->switch_to();
 }
 
-}  // namespace rhdl::fesvr
+}  // namespace rhodium::fesvr

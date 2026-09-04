@@ -1,4 +1,4 @@
-// Simulates a vector assembled through an internal RHDL wire after CIRCT export.
+// Simulates a vector assembled through an internal Rhodium wire after CIRCT export.
 module wire_tb;
     logic [3:0] left;
     logic [3:0] right;

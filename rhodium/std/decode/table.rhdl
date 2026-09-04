@@ -1,0 +1,202 @@
+#lang rhodium
+// Defines validated, unordered host-side decode relations over typed Patterns.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/decode/pattern.rhdl") open
+
+export:
+  DecodeCase
+  DecodeTable
+  decode_cases
+  decode_groups
+  lift_decode_inputs
+  zip_decode_cases
+
+fun exact_type_equal(left :: DataType, right :: DataType):
+  left.type_equal(right) && right.type_equal(left)
+
+fun require_pattern(value :: Pattern, role :: String, who :: Symbol):
+  value
+
+class DecodeCase(input :: Pattern, output :: Pattern)
+
+fun require_decode_cases(cases :: NonemptyList.of(DecodeCase),
+                         role :: String,
+                         who :: Symbol):
+  cases
+
+fun exact_pattern_equal(left :: Pattern, right :: Pattern):
+  exact_type_equal(left.type, right.type) && left.width == right.width && left.value_bits == right.value_bits && left.care_bits == right.care_bits
+
+// Explicitly embeds every input cube into a new domain while preserving each
+// output cube. DecodeTable remains responsible for type and overlap checks.
+fun lift_decode_inputs(cases :: NonemptyList.of(DecodeCase),
+                       lift :: Function.of_arity(1)):
+  def checked_cases = require_decode_cases(
+    cases,
+    "lifted decode cases",
+    #'lift_decode_inputs
+  )
+  for List (case in checked_cases):
+    DecodeCase(as_pattern(lift(case.input)), case.output)
+
+// Forms an output product from two relations with exactly the same input
+// cubes. Row order is irrelevant; missing or duplicate counterparts are errors.
+fun zip_decode_cases(left_cases :: NonemptyList.of(DecodeCase),
+                     right_cases :: NonemptyList.of(DecodeCase),
+                     combine :: Function.of_arity(2)):
+  def left = require_decode_cases(
+    left_cases,
+    "left decode cases",
+    #'zip_decode_cases
+  )
+  def right = require_decode_cases(
+    right_cases,
+    "right decode cases",
+    #'zip_decode_cases
+  )
+  unless left.length() == right.length()
+  | error(~who: #'zip_decode_cases,
+          "zipped decode relations must have the same number of input cubes")
+  for (case in left):
+    unless right.filter(
+      ~keep: fun (candidate :: DecodeCase): exact_pattern_equal(case.input, candidate.input)
+    ).length() == 1
+    | error(~who: #'zip_decode_cases,
+            "each left input cube must have exactly one right counterpart")
+  for (case in right):
+    unless left.filter(
+      ~keep: fun (candidate :: DecodeCase): exact_pattern_equal(case.input, candidate.input)
+    ).length() == 1
+    | error(~who: #'zip_decode_cases,
+            "each right input cube must have exactly one left counterpart")
+  for List (left_case in left):
+    def right_case = right.find(
+      fun (candidate :: DecodeCase): exact_pattern_equal(left_case.input, candidate.input)
+    )
+    DecodeCase(
+      left_case.input,
+      as_pattern(combine(left_case.output, right_case.output))
+    )
+
+// The input domain is deliberately supplied by input_pattern, so this helper
+// cannot constrain it before applying that caller-owned normalization.
+fun build_decode_group(inputs :~ matching(_),
+                       output :: Pattern,
+                       input_pattern :: Function.of_arity(1)):
+  def supplied:
+    if inputs is_a List | inputs | [inputs]
+  def mutable cases = []
+  for (input in supplied):
+    def input_set = as_pattern_set(input_pattern(input))
+    for (term in input_set.terms):
+      cases := cases ++ [DecodeCase(term, output)]
+  cases
+
+// Expands Pattern and PatternSet inputs into the single-cube rows consumed by
+// DecodeTable and the core rtl.decode operation.
+fun decode_cases(inputs :: HardwareLiteral || Pattern || PatternSet || List.of(HardwareLiteral || Pattern || PatternSet),
+                 output :: HardwareLiteral || Pattern):
+  def supplied:
+    if inputs is_a List | inputs | [inputs]
+  build_decode_group(inputs, as_pattern(output), as_pattern_set)
+
+fun flatten_decode_groups(groups :: List):
+  def mutable cases = []
+  for (group in groups):
+    cases := cases ++ group
+  cases
+
+// Constructs ordinary DecodeCase values from grouped input descriptions and
+// sparse record output patterns. The optional adapter remains ordinary host
+// code and lets domain libraries translate their descriptors into Patterns.
+meta:
+  syntax_class SparseDecodeGroup:
+    kind: ~group
+  | '[$input, ...]:
+       $(field_name :: Identifier): $field_value
+       ...':
+      field expand:
+        fun (output_type :: Syntax, input_pattern :: Symbol || Syntax):
+          'build_decode_group(
+             [$input, ...],
+             (partial_pattern($output_type):
+                $field_name: $field_value
+                ...),
+             $input_pattern
+           )'
+  | 'group $(inputs :: expr_meta.Parsed):
+       $(field_name :: Identifier): $field_value
+       ...':
+      field expand:
+        fun (output_type :: Syntax, input_pattern :: Symbol || Syntax):
+          'build_decode_group(
+             $inputs,
+             (partial_pattern($output_type):
+                $field_name: $field_value
+                ...),
+             $input_pattern
+           )'
+
+expr.macro
+| 'decode_groups($output_type):
+     $(row :: SparseDecodeGroup)
+     ...':
+    let [group, ...] = [row.expand(output_type, #'as_pattern_set), ...]
+    'flatten_decode_groups([$group, ...])'
+| 'decode_groups($output_type, ~input: $input_pattern):
+     $(row :: SparseDecodeGroup)
+     ...':
+    let [group, ...] = [row.expand(output_type, input_pattern), ...]
+    'flatten_decode_groups([$group, ...])'
+
+class DecodeTable(cases :: NonemptyList.of(DecodeCase),
+                  default :: Pattern,
+                  input_type :: DataType,
+                  output_type :: DataType,
+                  input_width :: PosInt,
+                  output_width :: PosInt,
+                  packed_cases :: List):
+  constructor (supplied_cases :: NonemptyList.of(DecodeCase),
+               ~default: supplied_default :: Pattern):
+    def default = require_pattern(supplied_default,
+                                  "decode default",
+                                  #'DecodeTable)
+    def first = supplied_cases[0]
+    def input_type = first.input.type
+    def output_type = default.type
+    for (case in supplied_cases, index in 0..supplied_cases.length()):
+      def input_matches = exact_type_equal(case.input.type, input_type) && case.input.width == first.input.width
+      unless input_matches
+      | error(~who: #'DecodeTable,
+              String.append("decode case ", to_string(index),
+                            " input must have exactly the table input type"))
+      def output_matches = exact_type_equal(case.output.type, output_type) && case.output.width == default.width
+      unless output_matches
+      | error(~who: #'DecodeTable,
+              String.append("decode case ", to_string(index),
+                            " output must have exactly the default output type"))
+    for (left_index in 0..supplied_cases.length()):
+      for (right_index in (left_index + 1)..supplied_cases.length()):
+        def overlap = supplied_cases[left_index].input.overlaps(supplied_cases[right_index].input)
+        if overlap
+        | error(~who: #'DecodeTable,
+                String.append("decode cases ", to_string(left_index), " and ",
+                              to_string(right_index), " overlap"))
+        | #void
+    def packed_cases:
+      supplied_cases.map(
+        fun (case :: DecodeCase):
+          [case.input.value_bits,
+           case.input.care_bits,
+           case.output.value_bits,
+           case.output.care_bits]
+      )
+    super(supplied_cases,
+          default,
+          input_type,
+          output_type,
+          first.input.width,
+          default.width,
+          packed_cases)

@@ -1,0 +1,276 @@
+#lang rhombus
+// Prints deterministic, human-readable text for the public Rhodium hardware IR.
+
+import:
+  "types.rhm" open
+  "ir.rhm" open
+  "ops.rhm" open
+
+export:
+  dump_ir
+  dump_module_ir
+
+fun value_refs(value_list :: List.of(Value)):
+  String.join(value_list.map(fun (value): value.ref()), ", ")
+
+fun place_refs(place_list :: List.of(Place)):
+  String.join(place_list.map(fun (place): place.ref()), ", ")
+
+fun print_dpi_import(dpi_import :: DpiImport):
+  def inputs:
+    for List (name in dpi_import.input_names, type in dpi_import.input_types):
+      "input " ++ name ++ ": " ++ type.describe()
+  def results:
+    dpi_import.results.map(
+      fun (result): result.direction ++ " " ++ result.name ++ ": " ++ result.type.describe()
+    )
+  def result_text:
+    if results == []
+    | ""
+    | if results.length() == 1
+      | " -> " ++ results[0]
+      | " -> (" ++ String.join(results, ", ") ++ ")"
+  String.append("sim.dpi_import ", dpi_import.ref(), "(",
+                String.join(inputs, ", "), ")", result_text, "\n")
+
+fun print_operation(operation :: Operation):
+  def schema = schema_for(operation.opcode)
+  match schema && schema.print_form
+  | "input_port":
+      String.append("    ", operation.results[0].ref(), " = rtl.input ",
+                    operation.results[0].type.describe())
+  | "output_port":
+      String.append("    ", operation.places[0].ref(), " = rtl.output ",
+                    operation.places[0].type.describe())
+  | "wire":
+      String.append("    ", operation.results[0].ref(), ", ",
+                    operation.places[0].ref(), " = rtl.wire ",
+                    operation.places[0].type.describe())
+  | "constant":
+      String.append("    ", operation.results[0].ref(), " = rtl.constant ",
+                    to_string(operation.attribute("value")), " : ",
+                    operation.results[0].type.describe())
+  | "dont_care":
+      String.append("    ", operation.results[0].ref(), " = rtl.dont_care : ",
+                    operation.results[0].type.describe())
+  | "decode":
+      def cases:
+        operation.attribute("cases").map(
+          fun (case):
+            String.append(to_string(case[0]), "/", to_string(case[1]), " -> ",
+                          to_string(case[2]), "/", to_string(case[3]))
+        )
+      String.append("    ", operation.results[0].ref(), " = rtl.decode ",
+                    operation.operands[0].ref(), " [", String.join(cases, ", "),
+                    "] default ", to_string(operation.attribute("default_value")), "/",
+                    to_string(operation.attribute("default_care")), " : ",
+                    operation.results[0].type.describe())
+  | "value":
+      String.append("    ", operation.results[0].ref(), " = ", operation.opcode, " ",
+                    value_refs(operation.operands), " : ",
+                    operation.results[0].type.describe())
+  | "mux_lookup":
+      def cases:
+        for List (key in operation.attribute("keys"),
+                  value in operation.operands.drop(2)):
+          to_string(key) ++ ": " ++ value.ref()
+      String.append("    ", operation.results[0].ref(), " = rtl.mux_lookup ",
+                    operation.operands[0].ref(), " [", String.join(cases, ", "),
+                    "] default ", operation.operands[1].ref(), " : ",
+                    operation.results[0].type.describe())
+  | "onehot_mux":
+      String.append("    ", operation.results[0].ref(), " = rtl.onehot_mux ",
+                    operation.operands[0].ref(), " [",
+                    value_refs(operation.operands.drop(1)), "] : ",
+                    operation.results[0].type.describe())
+  | "extract":
+      String.append("    ", operation.results[0].ref(), " = rtl.extract ",
+                    operation.operands[0].ref(), " ",
+                    to_string(operation.attribute("high")), ":",
+                    to_string(operation.attribute("low")), " : ",
+                    operation.results[0].type.describe())
+  | "resize":
+      String.append("    ", operation.results[0].ref(), " = ", operation.opcode, " ",
+                    operation.operands[0].ref(), " to ",
+                    operation.results[0].type.describe())
+  | "cast":
+      String.append("    ", operation.results[0].ref(), " = rtl.cast ",
+                    operation.operands[0].ref(), " to ",
+                    operation.results[0].type.describe())
+  | "record_create":
+      def fields:
+        for List (field_name in operation.attribute("fields"),
+                  operand in operation.operands):
+          field_name ++ ": " ++ operand.ref()
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.record_create {", String.join(fields, ", "),
+                    "} : ", operation.results[0].type.describe())
+  | "record_get":
+      String.append("    ", operation.results[0].ref(), " = rtl.record_get ",
+                    operation.operands[0].ref(), ".",
+                    operation.attribute("field"), " : ",
+                    operation.results[0].type.describe())
+  | "vector_create":
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.vector_create [", value_refs(operation.operands),
+                    "] : ", operation.results[0].type.describe())
+  | "vector_get":
+      String.append("    ", operation.results[0].ref(), " = rtl.vector_get ",
+                    operation.operands[0].ref(), "[",
+                    to_string(operation.attribute("index")), "] : ",
+                    operation.results[0].type.describe())
+  | "vector_index":
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.vector_index ", operation.operands[0].ref(), "[",
+                    operation.operands[1].ref(), "] : ",
+                    operation.results[0].type.describe())
+  | "vector_inject":
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.vector_inject ", operation.operands[0].ref(), "[",
+                    operation.operands[1].ref(), "] = ",
+                    operation.operands[2].ref(), " : ",
+                    operation.results[0].type.describe())
+  | "vector_write_set":
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.vector_write_set ", operation.operands[0].ref(),
+                    " enables ", operation.operands[1].ref(),
+                    " indices ", operation.operands[2].ref(),
+                    " elements ", operation.operands[3].ref(), " : ",
+                    operation.results[0].type.describe())
+  | "memory":
+      def memory = operation.attribute("memory")
+      String.append("    ", memory.ref(), " = rtl.memory depth ",
+                    to_string(memory.depth), " : ",
+                    memory.element_type.describe())
+  | "memory_read_async":
+      def memory = operation.attribute("memory")
+      String.append("    ", operation.results[0].ref(),
+                    " = rtl.memory_read_async ", memory.ref(), "[",
+                    operation.operands[0].ref(), "] : ",
+                    operation.results[0].type.describe())
+  | "memory_write":
+      def memory = operation.attribute("memory")
+      String.append("    rtl.memory_write ", memory.ref(), "[",
+                    operation.operands[0].ref(), "] = ",
+                    operation.operands[1].ref(), " clock ",
+                    operation.operands[2].ref(), " enable ",
+                    operation.operands[3].ref())
+  | "sync_memory":
+      def has_read = operation.attribute("has_read")
+      def has_write = operation.attribute("has_write")
+      def has_read_write = operation.attribute("has_read_write")
+      def mask_granularity = operation.attribute("mask_granularity", #false)
+      def has_mask = mask_granularity != #false
+      def mutable place_index = 0
+      def mutable result_index = 0
+      def read_text:
+        if has_read
+        | block:
+            def text = String.append(" read(address ",
+                                     operation.places[place_index].ref(),
+                                     ", enable ",
+                                     operation.places[place_index + 1].ref(),
+                                     ") -> ", operation.results[result_index].ref())
+            place_index := place_index + 2
+            result_index := result_index + 1
+            text
+        | ""
+      def write_text:
+        if has_write
+        | block:
+            def text = String.append(" write(address ",
+                                     operation.places[place_index].ref(),
+                                     ", data ", operation.places[place_index + 1].ref(),
+                                     ", enable ", operation.places[place_index + 2].ref(),
+                                     if has_mask
+                                     | ", mask " ++ operation.places[place_index + 3].ref()
+                                     | "",
+                                     ")")
+            place_index := place_index + 3 + (if has_mask | 1 | 0)
+            text
+        | ""
+      def read_write_text:
+        if has_read_write
+        | String.append(" read_write(address ",
+                        operation.places[place_index].ref(),
+                        ", enable ", operation.places[place_index + 1].ref(),
+                        ", write ", operation.places[place_index + 2].ref(),
+                        ", write_data ", operation.places[place_index + 3].ref(),
+                        if has_mask
+                        | ", write_mask " ++ operation.places[place_index + 4].ref()
+                        | "",
+                        ") -> ", operation.results[result_index].ref())
+        | ""
+      String.append("    rtl.sync_memory @", operation.attribute("name"),
+                    " depth ", to_string(operation.attribute("depth")),
+                    if has_mask
+                    | " mask_granularity " ++ to_string(mask_granularity)
+                    | "",
+                    " clock ", operation.operands[0].ref(),
+                    read_text, write_text, read_write_text, " : ",
+                    operation.attribute("element_type").describe())
+  | "assert":
+      String.append("    verif.assert ", operation.operands[0].ref(),
+                    " clock ", operation.operands[1].ref(),
+                    " reset ", operation.operands[2].ref(),
+                    " guard ", operation.operands[3].ref(),
+                    if operation.attribute("label", #false)
+                    | " label " ++ operation.attribute("label")
+                    | "")
+  | "dpi_call":
+      def dpi_import = operation.attribute("dpi_import")
+      String.append("    sim.dpi_call ", dpi_import.ref(), "(",
+                    value_refs(operation.operands.drop(2)), ") clock ",
+                    operation.operands[0].ref(), " enable ",
+                    operation.operands[1].ref())
+  | "dpi_register":
+      def dpi_import = operation.attribute("dpi_import")
+      def result_types = operation.results.map(fun (result): result.type.describe())
+      String.append("    ", value_refs(operation.results),
+                    " = sim.dpi_register ", dpi_import.ref(), "(",
+                    value_refs(operation.operands.drop(2)), ") clock ",
+                    operation.operands[0].ref(), " enable ",
+                    operation.operands[1].ref(), " : ",
+                    String.join(result_types, ", "))
+  | "register":
+      String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
+                    " = rtl.register clock ", operation.operands[0].ref(),
+                    " : ", operation.results[0].type.describe())
+  | "register_reset":
+      String.append("    ", operation.results[0].ref(), ", ", operation.places[0].ref(),
+                    " = rtl.register clock ", operation.operands[0].ref(),
+                    " reset ", operation.operands[1].ref(),
+                    " to ", operation.operands[2].ref(),
+                    " : ", operation.results[0].type.describe())
+  | "sync_level":
+      String.append("    cdc.sync_level ", operation.operands[0].ref(),
+                    " to ", operation.operands[1].ref(), " stages [",
+                    value_refs(operation.operands.drop(2)),
+                    "] promise stable_level")
+  | "instance":
+      def child = operation.attribute("module")
+      def results = if operation.results == [] | "" | value_refs(operation.results) ++ " = "
+      def inputs = if operation.places == [] | "" | " inputs " ++ place_refs(operation.places)
+      String.append("    ", results, "rtl.instance @", child.name,
+                    " as ", operation.attribute("name"), inputs)
+  | "drive":
+      String.append("    rtl.drive ", operation.places[0].ref(),
+                    ", ", operation.operands[0].ref())
+  | ~else:
+      "    \"" ++ operation.opcode ++ "\""
+
+fun dump_module_ir(module_def :: Module):
+  def ports:
+    module_def.inputs.map(
+      fun (port): "in " ++ port.value.ref() ++ ": " ++ port.type.describe()
+    ) ++ module_def.outputs.map(
+      fun (port): "out " ++ port.place.ref() ++ ": " ++ port.type.describe()
+    )
+  def body = String.join(module_def.operations.map(print_operation), "\n")
+  String.append("rhodium.module @", module_def.name, "(",
+                String.join(ports, ", "), ") {\n",
+                body, "\n}\n")
+
+fun dump_ir(design :: Design):
+  def imports = String.join(design.dpi_imports.map(print_dpi_import), "")
+  imports ++ (if imports == "" | "" | "\n") ++ String.join(design.modules.map(dump_module_ir), "\n")

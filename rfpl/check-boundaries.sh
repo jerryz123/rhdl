@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforces RFPL's read-only dependency on the public RHDL core IR.
+# Enforces RFPL's read-only dependency on the public Rhodium core IR.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,13 +16,13 @@ search_sources() {
   fi
 }
 
-if search_sources '^[[:space:]]+"[^\"]*rfpl/' rhdl; then
-  echo "RHDL must not import RFPL" >&2
+if search_sources '^[[:space:]]+"[^\"]*rfpl/' rhodium; then
+  echo "Rhodium must not import RFPL" >&2
   exit 1
 fi
 
-if search_sources 'rhdl/frontend/' rfpl/frontend; then
-  echo "RFPL annotation code must not import the RHDL frontend" >&2
+if search_sources 'rhodium/frontend/' rfpl/frontend; then
+  echo "RFPL annotation code must not import the Rhodium frontend" >&2
   exit 1
 fi
 

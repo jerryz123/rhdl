@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs isolated #lang rhdl programs and checks their required frontend diagnostics.
+# Runs isolated #lang rhodium programs and checks their required frontend diagnostics.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"

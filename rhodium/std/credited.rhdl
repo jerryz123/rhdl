@@ -1,0 +1,104 @@
+#lang rhodium
+// Defines protocol-neutral credited transport and explicit endpoint monitoring.
+
+fun checked_credited_payload(T :: DataType, credit_limit :: PosInt):
+  T
+
+// Checks one cycle against explicitly owned balance state. A credit granted on
+// the current edge is not available to authorize a transfer on that same edge.
+fun check_credited(valid :: Bool,
+                   credit :: Bool,
+                   credit_limit :: PosInt,
+                   credit_balance :: Bits(index_width(credit_limit + 1))):
+  def count_width = index_width(credit_limit + 1)
+  def transfer = valid
+  def grant = credit
+  def empty = credit_balance === bits(0, count_width)
+  def full = credit_balance === bits(credit_limit, count_width)
+
+  assert(!transfer ||| !empty, "credited_transfer_has_credit")
+  assert(!grant ||| transfer ||| !full, "credited_grant_within_limit")
+  assert(credit_balance <= bits(credit_limit, count_width),
+         "credited_balance_in_range")
+
+  when (grant ^ transfer):
+    credit_balance <== mux(
+      grant,
+      credit_balance + bits(1, count_width),
+      credit_balance - bits(1, count_width)
+    )
+
+  credit_balance
+
+fun credited_connection_legal(provided :: List, required :: List):
+  provided.length() == 2 && required.length() == 2 && (
+    provided[1] == required[1]
+  )
+
+// Every asserted valid cycle transfers one payload and consumes one credit
+// that the receiver granted on an earlier edge. Credit is a one-credit pulse.
+interface Credited(T :: DataType, credit_limit :: PosInt):
+  role transmitter
+  role receiver
+  provider transmitter
+  connection_compatible transmitter (provided :: List, required :: List):
+    credited_connection_legal(provided, required)
+
+  transmitter -> receiver:
+    valid: Bool
+    bits: checked_credited_payload(T, credit_limit)
+
+  receiver -> transmitter:
+    credit: Bool
+
+// Finds the canonical specialization beneath a nominal refinement without
+// accepting an unrelated declaration that reuses the same member names.
+fun credited_base_protocol(protocol :: InterfaceType):
+  def arguments = protocol.specialization_arguments
+  def local_base:
+    if arguments.length() == 2 && data_type(arguments[0]) && (
+      arguments[1] is_a PosInt
+    )
+    | block:
+        def canonical = Credited(arguments[0], arguments[1])
+        if interface_type_supports(protocol, canonical) | canonical | #false
+    | #false
+  if local_base
+  | local_base
+  | block:
+      if protocol.parent
+      | credited_base_protocol(protocol.parent)
+      | #false
+
+// Normalizes the canonical interface and its refinements.
+fun credited_protocol_type(protocol :: InterfaceType):
+  def canonical = credited_base_protocol(protocol)
+  if canonical && interface_type_supports(protocol, canonical)
+  | canonical
+  | #false
+
+fun credited_payload_type(endpoint :: Endpoint):
+  def protocol = credited_protocol_type(endpoint.type)
+  unless protocol
+  | error(~who: #'credited_payload_type,
+          "credited-flow chaining requires a Credited endpoint")
+  protocol.members.find(fun (member :: InterfaceMember): member.name == "bits").type
+
+// Explicitly instruments one credited endpoint without giving the monitor
+// authority to drive either direction of the interface.
+fun monitor_credited(endpoint :: Endpoint):
+  def protocol = credited_protocol_type(endpoint.type)
+  unless protocol
+  | error(~who: #'monitor_credited,
+          "credited monitoring requires a Credited endpoint")
+  def credit_limit = protocol.specialization_arguments[1]
+  def link :: Observation = endpoint.observe()
+  reg credit_balance(~init: bits(0, index_width(credit_limit + 1)))
+  check_credited(link.valid, link.credit, credit_limit, credit_balance)
+
+export:
+  Credited
+  check_credited
+  monitor_credited
+  credited_protocol_type
+  credited_payload_type

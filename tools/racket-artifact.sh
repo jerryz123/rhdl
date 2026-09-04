@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Writes and verifies the exact-environment manifest for precompiled RHDL bytecode.
+# Writes and verifies the exact-environment manifest for precompiled Rhodium bytecode.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compiled_root="${PLTCOMPILEDROOTS:-}"
-manifest_name="rhdl-bytecode-manifest"
+manifest_name="rhodium-bytecode-manifest"
 
 if [[ -z "$compiled_root" || "$compiled_root" == *:* ]]; then
   echo "racket bytecode artifacts require exactly one compiled root" >&2
@@ -25,7 +25,7 @@ verify_value() {
   local actual
   actual="$(manifest_value "$key")"
   if [[ "$actual" != "$expected" ]]; then
-    echo "RHDL bytecode manifest mismatch for $key: expected $expected, got $actual" >&2
+    echo "Rhodium bytecode manifest mismatch for $key: expected $expected, got $actual" >&2
     exit 1
   fi
 }
@@ -54,7 +54,7 @@ EOF
     ;;
   verify)
     if [[ ! -f "$manifest" ]]; then
-      echo "missing RHDL bytecode manifest: $manifest" >&2
+      echo "missing Rhodium bytecode manifest: $manifest" >&2
       exit 1
     fi
     expected_commit="${GITHUB_SHA:-$(git -C "$repo_dir" rev-parse HEAD)}"

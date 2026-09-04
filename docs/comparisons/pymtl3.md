@@ -1,16 +1,16 @@
-<!-- Compares RHDL with PyMTL3 across embedded RTL syntax and multi-level modeling semantics. -->
+<!-- Compares Rhodium with PyMTL3 across embedded RTL syntax and multi-level modeling semantics. -->
 
-# RHDL and PyMTL3
+# Rhodium and PyMTL3
 
 ## Scope and thesis
 
-Snapshot: 2026-08-17. This comparison uses the checked-in RHDL implementation
+Snapshot: 2026-08-17. This comparison uses the checked-in Rhodium implementation
 and PyMTL3's current official documentation and primary repository.
 
-At the synthesizable RTL level, RHDL and PyMTL3 are close peers: both execute a
+At the synthesizable RTL level, Rhodium and PyMTL3 are close peers: both execute a
 host language to elaborate hierarchy and both describe cycle-accurate hardware
 rather than asking an HLS scheduler to invent a pipeline. Their semantic
-centers differ. RHDL elaborates into one explicit hardware graph with exact
+centers differ. Rhodium elaborates into one explicit hardware graph with exact
 types, final connectivity, and explicit state boundaries. PyMTL3 elaborates an
 executable Python component model whose concurrent update blocks are scheduled
 for simulation and translated from a defined Python RTL subset.
@@ -19,12 +19,12 @@ PyMTL3 also supports functional-level and cycle-level models. That wider
 modeling vocabulary matters for composition and syntax, but it should not be
 mistaken for automatic refinement: an FL or CL component is a different model,
 not a high-level program that PyMTL3 necessarily synthesizes into an RTL
-component. RHDL is narrower and more explicit; PyMTL3 is more uniform across
+component. Rhodium is narrower and more explicit; PyMTL3 is more uniform across
 executable modeling levels.
 
 ## Summary
 
-| Concern | RHDL | PyMTL3 |
+| Concern | Rhodium | PyMTL3 |
 |---|---|---|
 | Semantic unit | Static hardware module in a verified dataflow IR | Executable Python `Component` with connectivity and update blocks |
 | Staging | Host forms generate structure; hardware forms construct graph nodes | `construct` elaborates; decorated blocks describe model behavior |
@@ -39,9 +39,9 @@ executable modeling levels.
 
 ## Denotation and staging
 
-RHDL is a deep embedding in Rhombus. Ordinary Rhombus values decide widths,
+Rhodium is a deep embedding in Rhombus. Ordinary Rhombus values decide widths,
 module structure, and generator control. Circuit expressions and connections
-build the same [core IR](../../rhdl/core/README.md) from every frontend profile.
+build the same [core IR](../../rhodium/core/README.md) from every frontend profile.
 Within that IR, `Value` and `Place` factor computed results from destinations
 that receive bindings.
 
@@ -57,19 +57,19 @@ Translation introduces a second boundary. Only the documented
 [translatable RTL subset](https://pymtl3.readthedocs.io/en/latest/ref/passes-translation-intro.html)
 of Python types, expressions, statements, loops, helper calls, and update
 blocks denotes synthesizable RTL. A model can be valid Python and executable in
-PyMTL3 without belonging to that subset. RHDL's dedicated circuit forms map
+PyMTL3 without belonging to that subset. Rhodium's dedicated circuit forms map
 directly to graph construction, while PyMTL3's executable Python surface is
 broader and its synthesizability more contextual.
 
 PyMTL3's functional and cycle-level models use the same component framework to
 express less structural behavior, including method-level transactions. Their
 relationship to an RTL implementation is supplied by the designer and tests,
-not by an automatic FL-to-RTL or CL-to-RTL lowering. RHDL currently standardizes
+not by an automatic FL-to-RTL or CL-to-RTL lowering. Rhodium currently standardizes
 only the exact RTL denotation.
 
 ## Types and intrinsic guarantees
 
-RHDL requires exact hardware types at operations and connections. `Bits`,
+Rhodium requires exact hardware types at operations and connections. `Bits`,
 `Bool`, `SInt`, enums, `OneHot`, clocks, resets, records, and vectors can remain
 distinct despite equal packed widths. Extension, truncation, and
 representation casts are explicit. Its core `Value` and `Place` classes make
@@ -84,14 +84,14 @@ some Python-integer or narrower-value contexts are inferred or zero-extended.
 cover concatenation, extension, and truncation.
 
 PyMTL3 gains syntactic continuity from using the same concrete values during
-execution, message construction, and RTL modeling. RHDL represents circuit
+execution, message construction, and RTL modeling. Rhodium represents circuit
 expressions as graph-owned symbolic values. Its nominal protocol identity also
 lives outside the packed data type, while a PyMTL3 interface is primarily a
 Python composition object containing signals or methods.
 
 ## Typed literals, patterns, and relational decode
 
-RHDL applies one typed abstraction across exact constants and decoder tables.
+Rhodium applies one typed abstraction across exact constants and decoder tables.
 A `HardwareLiteral` is the exact packed image of any supported packable type,
 including records, vectors, and extension-defined types. A `Pattern` adds a
 recursive care mask: named aggregate fields can be constrained, partially
@@ -112,13 +112,13 @@ synthesizable vocabulary has no corresponding typed partial-pattern and
 decode-relation abstraction. A decoder is normally written as Python
 comparisons, conditions, and assignments in an update block, or generated from
 Python data. That is more general for computed predicates and explicitly
-prioritized behavior; RHDL is more concise and analyzable for an unordered
+prioritized behavior; Rhodium is more concise and analyzable for an unordered
 finite relation.
 
 Both can generate equivalent Boolean logic, and a downstream synthesis tool
-may optimize either form well. RHDL's advantage is that the complete relation
+may optimize either form well. Rhodium's advantage is that the complete relation
 and its don't-care freedom remain explicit inputs to downstream optimization
-rather than facts a translator must recover from procedural RTL. RHDL itself
+rather than facts a translator must recover from procedural RTL. Rhodium itself
 does not choose a cover, so this is not a universal area, timing, or power
 advantage.
 
@@ -136,7 +136,7 @@ explicit scheduling constraints, determine a valid order. The schedule is an
 execution technique for a cycle-accurate model; it does not authorize the RTL
 translator to move logic across an `@update_ff` boundary.
 
-RHDL removes procedural block scheduling from its hardware denotation.
+Rhodium removes procedural block scheduling from its hardware denotation.
 Combinational operations form a dataflow graph, operation listing order has no
 runtime meaning, and pure combinational cycles are rejected. A register has an
 explicit current value and next-state binding. Conditional assignments are
@@ -145,7 +145,7 @@ receive explicit guards.
 
 Thus both RTL languages preserve author-chosen cycles, but they make
 combinational intent differently local. PyMTL3 presents a process body that is
-convenient for algorithms and direct execution. RHDL presents use/definition
+convenient for algorithms and direct execution. Rhodium presents use/definition
 and destination ownership relationships that are convenient for inspecting
 the constructed circuit.
 
@@ -157,7 +157,7 @@ structural connections. At higher modeling levels, method ports and
 method-based interfaces can represent transactions without committing to an
 RTL handshake bundle.
 
-RHDL separates hierarchy from protocol description. Modules own physical
+Rhodium separates hierarchy from protocol description. Modules own physical
 ports and instances. A frontend interface descriptor adds nominal identity,
 two complementary named roles, nested directions, refinement, supported
 contracts, and parameter compatibility. Its endpoint lowers to ordinary
@@ -165,7 +165,7 @@ records and ports; linear handles can additionally require a ready-valid
 topology value to be consumed once during elaboration.
 
 PyMTL3's structural interface objects make it easy to keep a recognizable
-component shape across FL, CL, and RTL models. RHDL's nominal descriptors make
+component shape across FL, CL, and RTL models. Rhodium's nominal descriptors make
 same-shaped but semantically different RTL protocols noninterchangeable. The
 former favors model substitution by convention; the latter favors static
 protocol identity after physical signals have been chosen.
@@ -181,7 +181,7 @@ uniform serial, parallel, or branching topology value. PyMTL3's method-level
 interfaces provide a higher-level transaction abstraction for CL models, but
 that is a different denotation rather than a ready-valid RTL algebra.
 
-RHDL makes the RTL topology itself composable. A configured stage is an
+Rhodium makes the RTL topology itself composable. A configured stage is an
 ordinary unary function used with `|>`; starting with a payload or protocol
 type creates a detached `InterfaceHandle`, while starting with an endpoint
 connects immediately. `parallel` composes independent branches and the same
@@ -193,10 +193,10 @@ them remain reusable.
 The abstraction preserves physical intent. Pure transformations are inline,
 storage remains in explicit module instances, and everything lowers through
 the generic interface subsystem into the ordinary core IR. Whole-design
-verification checks the realized combinational graph across instances. RHDL
+verification checks the realized combinational graph across instances. Rhodium
 also distinguishes `Valid`, `Decoupled`, `Irrevocable`, and credited transport,
 where PyMTL3's common ready-valid shape leaves stability meaning to the
-component contract. RHDL therefore has the stronger language-level abstraction
+component contract. Rhodium therefore has the stronger language-level abstraction
 for exact elastic RTL; PyMTL3 instead offers explicit wiring plus the separate
 advantage of substitutable FL, CL, and RTL models.
 
@@ -215,7 +215,7 @@ construct is translatable depends on the enclosing block and accepted subset.
 Understanding drive ownership or block ordering can also require examining the
 whole component schedule rather than only one assignment.
 
-RHDL uses less familiar graph-construction forms. Runtime alternatives use
+Rhodium uses less familiar graph-construction forms. Runtime alternatives use
 dedicated selection forms, conversions are explicit, and a source-level
 connection immediately constructs an IR edge contributing to one final
 binding for its destination. The
@@ -232,27 +232,27 @@ for related equations. That reuse is powerful, but it is context-sensitive:
 the enclosing phase and accepted subset determine what otherwise ordinary
 Python denotes.
 
-RHDL is more orthogonal as an exact RTL construction language. Exact types,
+Rhodium is more orthogonal as an exact RTL construction language. Exact types,
 one final binding per destination, explicit conditional priority, and visible
 state boundaries determine connectivity without consulting a simulator
 schedule or translation subset. Its standard flow topology syntax is also more
 compositional than PyMTL3's explicit ready-valid component wiring. PyMTL3's
-wider modeling continuum is genuine abstraction expressivity, however; RHDL's
+wider modeling continuum is genuine abstraction expressivity, however; Rhodium's
 smaller core does not replace the ability to state useful non-RTL models in the
 same component vocabulary.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
 1. PyMTL3 demonstrates that executable FL, CL, and RTL models can share a
    component vocabulary without claiming that the higher levels synthesize to
-   the lower one. RHDL could adopt such models as separate denotations.
+   the lower one. Rhodium could adopt such models as separate denotations.
 2. Update-block syntax is economical for behavioral combinational logic, but a
-   compatible RHDL form should still lower immediately to an exact graph with
+   compatible Rhodium form should still lower immediately to an exact graph with
    final bindings, muxes, and guarded effects.
 3. Concrete executable bit values improve examples, testing, and direct
    interpretation; they can coexist with graph-owned symbolic values.
 4. Structural model substitution and nominal protocol compatibility solve
-   different composition problems. RHDL should preserve the latter even if it
+   different composition problems. Rhodium should preserve the latter even if it
    adds higher-level executable models.
 5. Keep flow composition independent of hierarchy: inline transformation and
    deliberate stateful module boundaries should remain visible after the
@@ -267,9 +267,9 @@ same component vocabulary.
 - PyMTL3 [primary repository](https://github.com/pymtl/pymtl3)
 - PyMTL3 [standard stream interfaces](https://github.com/pymtl/pymtl3/blob/master/pymtl3/stdlib/stream/ifcs.py)
 - PyMTL3 [multi-level modeling paper](https://www.csl.cornell.edu/~cbatten/pdfs/batten-pymtl3-nvidia2023.pdf)
-- RHDL [standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
-- RHDL [typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
-  and [decode generation](../../rhdl/std/README.md#typed-decode-generation)
-- RHDL [architecture](../../rhdl/README.md), [core semantics](../../rhdl/core/README.md),
-  [frontend staging](../../rhdl/frontend/README.md), and
-  [interface layer](../../rhdl/frontend/layers/README.md#interfaces)
+- Rhodium [standard flow composition](../../rhodium/std/README.md#flow-control-circuits)
+- Rhodium [typed decode patterns](../../rhodium/std/README.md#typed-decode-patterns)
+  and [decode generation](../../rhodium/std/README.md#typed-decode-generation)
+- Rhodium [architecture](../../rhodium/README.md), [core semantics](../../rhodium/core/README.md),
+  [frontend staging](../../rhodium/frontend/README.md), and
+  [interface layer](../../rhodium/frontend/layers/README.md#interfaces)

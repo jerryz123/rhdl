@@ -1,0 +1,39 @@
+#lang rhodium
+// Selects one request from a hardware-supplied circular starting priority.
+
+bundle CircularPriorityChoice(n :: PosInt, index_width :: PosInt):
+  valid: Bool
+  grant: MaybeOneHot(n)
+  index: Bits(index_width)
+
+// The start index must be in range. Selection first considers requests at or
+// above start, then wraps to the ordinary lower-index-first priority result.
+// Both paths are built once; this avoids constructing one complete arbiter for
+// every possible start value.
+fun circular_priority_onehot(requests :: Hardware.packable,
+                             start :: Hardware.bits) :~ Hardware.packable:
+  def request_type = hardware_value_type(requests)
+  unless request_type is_a VectorType && bool_type(request_type.element_type)
+  | error(~who: #'circular_priority_onehot,
+          "requests must be a nonempty Vec of Bool")
+  def n = request_type.length
+  def width = index_width(n)
+  unless hardware_value_type(start).bit_width() == width
+  | error(~who: #'circular_priority_onehot,
+          "start width must equal the request index width")
+  def eligible = vec(
+    for List (index in 0..n):
+      requests[index] & (start <= bits(index, width))
+  )
+  def eligible_grant = priority_encoder_oh(eligible)
+  def wrapped_grant = priority_encoder_oh(requests)
+  def use_eligible = or_reduce(eligible)
+  def grant = mux(use_eligible, eligible_grant, wrapped_grant)
+  CircularPriorityChoice(n, width):
+    valid: grant.valid
+    grant: grant
+    index: grant.index
+
+export:
+  CircularPriorityChoice
+  circular_priority_onehot

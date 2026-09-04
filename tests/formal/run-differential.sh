@@ -3,15 +3,15 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-compiled_root="$(mktemp -d /tmp/rhdl-formal-differential-compiled.XXXXXX)"
-model_file="$(mktemp /tmp/rhdl-formal-models.XXXXXX)"
+compiled_root="$(mktemp -d /tmp/rhodium-formal-differential-compiled.XXXXXX)"
+model_file="$(mktemp /tmp/rhodium-formal-models.XXXXXX)"
 trap 'rm -rf "$compiled_root" "$model_file"' EXIT
 
 cd "$repo_dir"
 
 if ! env PLTCOMPILEDROOTS="$compiled_root" PLTCOLLECTS="$repo_dir": \
     racket -y -S "$repo_dir" tests/formal/replay-models.rhm > "$model_file"; then
-  echo 'formal-differential-test requires Rosette 4.0 and Z3 4.8.8; see rhdl/formal/README.md' >&2
+  echo 'formal-differential-test requires Rosette 4.0 and Z3 4.8.8; see rhodium/formal/README.md' >&2
   exit 1
 fi
 

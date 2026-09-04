@@ -1,0 +1,155 @@
+#lang rhodium
+// Defines registered pipelines for Valid and ready-valid protocol families.
+
+import:
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/shift-register.rhdl").shift_register
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+
+// Each stage stores one item, contributes one cycle of unloaded latency, and
+// propagates readiness combinationally backward. Stored payloads remain stable
+// under backpressure.
+sync_circuit Pipe(T :: DataType, stages :: PosInt):
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress(Irrevocable(T), ~role: producer)
+
+  def initial_valid = vec(
+    for List (_ in 0..stages): Bool(#false)
+  )
+  reg stage_valid(~init: initial_valid)
+  reg stage_bits(Vec(stages, T))
+
+  def valid_sources = [ingress.valid] ++ (
+    for List (index in 0..(stages - 1)): stage_valid[index]
+  )
+  def bits_sources = [ingress.bits] ++ (
+    for List (index in 0..(stages - 1)): stage_bits[index]
+  )
+
+  def mutable ready = [egress.ready]
+  for (offset in 0..stages):
+    def index = stages - offset - 1
+    ready := [!stage_valid[index] ||| ready[0]] ++ ready
+
+  ingress.ready <== ready[0]
+  egress.valid <== stage_valid[stages - 1]
+  egress.bits <== stage_bits[stages - 1]
+
+  for (index in 0..stages):
+    when (ready[index]):
+      stage_valid[index] <== valid_sources[index]
+      when (valid_sources[index]):
+        stage_bits[index] <== bits_sources[index]
+
+// Valid has no backpressure: every stage advances on every clock, and each
+// asserted input cycle emerges after exactly `stages` cycles.
+sync_circuit ValidPipe(T :: DataType, stages :: PosInt):
+
+  interface ingress(Valid(T), ~role: consumer)
+  interface egress(Valid(T), ~role: producer)
+
+  shift_register stage_valid(ingress.valid, stages, ~init: Bool(#false))
+  reg stage_bits(Vec(stages, T))
+
+  def valid_sources = [ingress.valid] ++ (
+    for List (index in 0..(stages - 1)): stage_valid[index]
+  )
+  def bits_sources = [ingress.bits] ++ (
+    for List (index in 0..(stages - 1)): stage_bits[index]
+  )
+
+  egress.valid <== stage_valid[stages - 1]
+  egress.bits <== stage_bits[stages - 1]
+
+  for (index in 0..stages):
+    when (valid_sources[index]):
+      stage_bits[index] <== bits_sources[index]
+
+// The control-only specialization stores just the validity of each token.
+// Its output is irrevocable because an occupied stage cannot withdraw while
+// its downstream endpoint is stalled.
+sync_circuit CtrlPipe(stages :: PosInt):
+
+  interface ingress(DecoupledCtrl(), ~role: consumer)
+  interface egress(IrrevocableCtrl(), ~role: producer)
+
+  def initial_valid = vec(
+    for List (_ in 0..stages): Bool(#false)
+  )
+  reg stage_valid(~init: initial_valid)
+  def valid_sources = [ingress.valid] ++ (
+    for List (index in 0..(stages - 1)): stage_valid[index]
+  )
+
+  def mutable ready = [egress.ready]
+  for (offset in 0..stages):
+    def index = stages - offset - 1
+    ready := [!stage_valid[index] ||| ready[0]] ++ ready
+
+  ingress.ready <== ready[0]
+  egress.valid <== stage_valid[stages - 1]
+
+  for (index in 0..stages):
+    when (ready[index]):
+      stage_valid[index] <== valid_sources[index]
+
+// Configuration produces a unary flow operation. A payload type constructs
+// an unconnected handle; an endpoint connects immediately and exposes the far
+// endpoint; an earlier handle remains an unconnected composed handle.
+fun pipe(stages :: PosInt)
+  :: ((source :: FlowSourceArgument) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source :~ FlowSource) :~ InterfaceTransformResult(source, Endpoint):
+    def T = flow_payload_type(source)
+    def PipeModule = Pipe(T, stages)
+    inst pipe_stage(PipeModule)
+    finish_interface_transform(
+      source,
+      describe_interface_transform(
+        InterfaceHandle(pipe_stage.ingress, pipe_stage.egress),
+        "pipe",
+        {"stages": stages},
+        pipe_stage
+      )
+    )
+
+fun valid_pipe(stages :: PosInt)
+  :: ((source :: FlowSourceArgument) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source :~ FlowSource) :~ InterfaceTransformResult(source, Endpoint):
+    def T = valid_flow_payload_type(source)
+    def ValidPipeModule = ValidPipe(T, stages)
+    inst valid_pipe_stage(ValidPipeModule)
+    finish_interface_transform(
+      source,
+      describe_interface_transform(
+        InterfaceHandle(valid_pipe_stage.ingress, valid_pipe_stage.egress),
+        "valid-pipe",
+        {"stages": stages},
+        valid_pipe_stage
+      )
+    )
+
+// Control-only chaining uses the same configured unary topology rule without
+// introducing a dummy payload field.
+fun ctrl_pipe(stages :: PosInt)
+  :: ((source :: FlowSourceArgument) -> InterfaceTransformResult(source, Endpoint)):
+  fun (source :~ FlowSource) :~ InterfaceTransformResult(source, Endpoint):
+    ctrl_flow_protocol_type(source)
+    inst ctrl_pipe_stage(CtrlPipe(stages))
+    finish_interface_transform(
+      source,
+      describe_interface_transform(
+        InterfaceHandle(ctrl_pipe_stage.ingress, ctrl_pipe_stage.egress),
+        "ctrl-pipe",
+        {"stages": stages},
+        ctrl_pipe_stage
+      )
+    )
+
+export:
+  Pipe
+  pipe
+  ValidPipe
+  valid_pipe
+  CtrlPipe
+  ctrl_pipe

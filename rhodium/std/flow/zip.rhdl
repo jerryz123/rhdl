@@ -1,0 +1,74 @@
+#lang rhodium
+// Defines an inline heterogeneous ready-valid join as an interface handle.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+
+fun finish_zip_flow_handle(left_link :: Handle,
+                           right_link :: Handle,
+                           output_link :: Handle,
+                           mapped_bits :: Hardware.packable):
+  output_link.left.field("valid") <== (
+    left_link.right.field("valid") & right_link.right.field("valid")
+  )
+  output_link.left.field("bits") <== mapped_bits
+  left_link.right.field("ready") <== (
+    output_link.left.field("ready") & right_link.right.field("valid")
+  )
+  right_link.right.field("ready") <== (
+    output_link.left.field("ready") & left_link.right.field("valid")
+  )
+  describe_interface_transform(
+    interface_transform(Array(left_link, right_link), output_link),
+    "zip",
+    {"inputs": 2}
+  )
+
+// The source is a two-element Array of payload/protocol types or endpoints.
+// Configuration produces a unary heterogeneous join stage.
+expr.macro
+| 'zip_flow($(left_payload :: Identifier),
+            $(right_payload :: Identifier) => $body ...)':
+    'zip_flow($left_payload, $right_payload): $body ...'
+| 'zip_flow($(left_payload :: Identifier),
+            $(right_payload :: Identifier)): $body':
+    'fun (zip_flow_source :: FlowSource || Array) :~ InterfaceTransformResult(zip_flow_source, Endpoint):
+       def zip_inputs:
+         if zip_flow_source is_a Handle
+         | zip_flow_source.right
+         | zip_flow_source
+       unless zip_inputs is_a Array && zip_inputs.length() == 2
+       | error(~who: #'zip_flow,
+               "zip_flow source must contain exactly two inputs")
+       def zip_left_argument = zip_inputs[0]
+       def zip_right_argument = zip_inputs[1]
+       def zip_left_link = interface_link(
+         flow_protocol_type(zip_left_argument),
+         "zip_left"
+       )
+       def zip_right_link = interface_link(
+         flow_protocol_type(zip_right_argument),
+         "zip_right"
+       )
+       def zip_left_endpoint :: Endpoint = zip_left_link.right
+       def zip_right_endpoint :: Endpoint = zip_right_link.right
+       def $left_payload = zip_left_endpoint.bits
+       def $right_payload = zip_right_endpoint.bits
+       fun compute_zipped_bits(): $body
+       def zipped_bits = compute_zipped_bits()
+       def zip_output_link = interface_link(
+         Decoupled(hardware_value_type(zipped_bits)),
+         "zip_output"
+       )
+       def zip_handle = finish_zip_flow_handle(
+         zip_left_link,
+         zip_right_link,
+         zip_output_link,
+         zipped_bits
+       )
+       finish_interface_transform(zip_flow_source, zip_handle)'
+
+export:
+  zip_flow

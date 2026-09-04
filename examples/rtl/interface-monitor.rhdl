@@ -1,0 +1,50 @@
+#lang rhodium
+// Demonstrates explicit endpoint monitors over read-only interface observations.
+
+interface MonitoredWordStream(width :: PosInt):
+  role producer
+  role consumer
+  producer -> consumer:
+    valid: Bool
+    bits: Bits(width)
+  consumer -> producer:
+    ready: Bool
+
+fun monitor_word_stream(link :: Observation, endpoint_role :: String):
+  def label:
+    if endpoint_role == "producer"
+    | "producer_ready_requires_valid"
+    | "consumer_ready_requires_valid"
+  assert(!(link.ready & !link.valid), label)
+
+sync_circuit MonitoredProducer():
+  interface stream(MonitoredWordStream(8), ~role: producer)
+
+  stream.valid <== Bool(#false)
+  stream.bits <== bits(0, 8)
+  monitor_word_stream(stream.observe(), "producer")
+
+def design = elaborate(MonitoredProducer())
+
+def verilog_reference = @str|<<{
+module MonitoredProducer(
+  input                                                  clock,
+                                                         reset,
+  input  struct packed {logic ready; }                   stream_in,
+  output struct packed {logic valid; logic [7:0] bits; } stream_out
+);
+
+  `ifndef SYNTHESIS
+    producer_ready_requires_valid:
+      assert property (@(posedge clock) disable iff (reset) ~stream_in.ready);
+  `endif // not def SYNTHESIS
+  assign stream_out = '{valid: 1'h0, bits: 8'h0};
+endmodule
+}>>|
+
+export:
+  MonitoredWordStream
+  monitor_word_stream
+  MonitoredProducer
+  design
+  verilog_reference

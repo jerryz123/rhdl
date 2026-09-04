@@ -1,11 +1,11 @@
-<!-- Defines the pure host-side NoC model and analysis contract and their separation from RHDL. -->
+<!-- Defines the pure host-side NoC model and analysis contract and their separation from Rhodium. -->
 
 # Pure NoC model and analysis
 
 This package defines the host-side graph vocabulary used for routing-relation
 materialization, virtual-channel dependency validation, route-table generation,
 and validated hardware plans. Its pure model is intentionally independent of
-RHDL hardware construction and CIRCT.
+Rhodium hardware construction and CIRCT.
 
 ## Current scope
 
@@ -77,34 +77,34 @@ The current implementation provides:
   validated artifact.
 - Deterministic whole-network plans assigning router indices, external
   injection and ejection ports, and every physical VC's source-target and
-  destination-input indices without importing RHDL.
+  destination-input indices without importing Rhodium.
 - A generic network compiler that joins peer topology, terminal-placement,
   route-class, and routing-policy inputs only at validation and planning time.
 
 Parallel physical links and self-loops are legal. Topology construction rejects
 duplicate identities, missing link endpoints, and nonpositive VC counts.
 
-The pure packages do not lower route tables into RHDL or generate router RTL.
+The pure packages do not lower route tables into Rhodium or generate router RTL.
 The separate [`rtl/`](rtl/README.md) package accepts only `RouterPlan` values
 derived from `ValidatedRouting`. It lowers finite local rows into combinational
 route computers and, for whole-graph-acyclic routing, simple buffered routers
 for single-beat packets. User-owned hierarchy uses pure `NetworkPlan` mappings
 to place those routers in independent subsystems and connect their physical VC
 boundaries.
-No RHDL dependency flows back into the pure layers.
+No Rhodium dependency flows back into the pure layers.
 
 ## Dependency boundary
 
 Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, `noc/language/`,
 `noc/plan/`, and `noc/std/` use only `#lang rhombus` and other modules in the pure NoC package.
-They must not import RHDL core, frontend, backend, standard-library hardware
+They must not import Rhodium core, frontend, backend, standard-library hardware
 modules, or CIRCT integration. Core model, authoring, analysis, and planning
 modules must not import `noc/std`; reusable topology and routing definitions
 depend on the core abstractions, never the reverse.
 
-Files under `noc/rtl/` may import the public `#lang rhdl` language and reusable
-RHDL standard primitives, plus the pure NoC model and plan. They must not
-import RHDL core, frontend implementation, backend, or CIRCT modules.
+Files under `noc/rtl/` may import the public `#lang rhodium` language and reusable
+Rhodium standard primitives, plus the pure NoC model and plan. They must not
+import Rhodium core, frontend implementation, backend, or CIRCT modules.
 
 The hardware bridge is tested separately by focused route-computer,
 simple-router, and hierarchical-assembly frontend, CIRCT, and Verilator

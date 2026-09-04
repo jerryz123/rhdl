@@ -22,7 +22,7 @@ FUNCTIONAL_MODEL = (
 )
 FIXTURES = TEST_DIR / "fixtures"
 CIRCT_OPT = Path(os.environ.get("CIRCT_OPT", "circt-opt"))
-MEMORY_SITE_PLUGIN = Path(os.environ.get("MEMORY_SITE_PLUGIN", "rhdl-memory-sites.so"))
+MEMORY_SITE_PLUGIN = Path(os.environ.get("MEMORY_SITE_PLUGIN", "rhodium-memory-sites.so"))
 
 
 class MapperTest(unittest.TestCase):
@@ -72,10 +72,10 @@ class MapperTest(unittest.TestCase):
             mapping_options += f" scope-prefix={scope_prefix}"
         pipeline = (
             "builtin.module("
-            f"rhdl-select-hw-top{{top={actual_top}}},"
+            f"rhodium-select-hw-top{{top={actual_top}}},"
             "hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},"
             "symbol-dce,"
-            f"rhdl-map-memory-sites{{{mapping_options}}},"
+            f"rhodium-map-memory-sites{{{mapping_options}}},"
             "symbol-dce)"
         )
         result = subprocess.run(
@@ -97,7 +97,7 @@ class MapperTest(unittest.TestCase):
         return result, selected_mlir, inventory
 
     def test_manifest_and_wrapper_shape(self):
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-map-") as temporary:
             result, verilog, manifest_path = self.invoke_mapper(
                 "banked-width-masked.mlir", Path(temporary)
             )
@@ -123,7 +123,7 @@ class MapperTest(unittest.TestCase):
             self.assertIn("RW0_wmask[4]", wrapper)
 
     def test_unsupported_port_topology_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-map-") as temporary:
             result, _, _ = self.invoke_mapper(
                 "unsupported-two-rw.mlir", Path(temporary), expect_success=False
             )
@@ -140,7 +140,7 @@ class MapperTest(unittest.TestCase):
             verilator and Path(verilator).is_file(),
             f"Verilator not found: {verilator_setting}",
         )
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-map-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-map-") as temporary:
             output_dir = Path(temporary)
             _, wrapper, _ = self.invoke_mapper("banked-width-masked.mlir", output_dir)
             object_dir = output_dir / "obj"
@@ -175,7 +175,7 @@ class MapperTest(unittest.TestCase):
             MEMORY_SITE_PLUGIN.is_file(),
             f"memory-site plugin not found: {MEMORY_SITE_PLUGIN}",
         )
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-sites-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-sites-") as temporary:
             output_dir = Path(temporary)
             _, selected_mlir, inventory_path = self.invoke_site_pass(
                 FIXTURES / "site-selective-policy.yaml", output_dir
@@ -196,7 +196,7 @@ class MapperTest(unittest.TestCase):
             )
             selected = selected_mlir.read_text(encoding="utf-8")
             self.assertIn(
-                'hw.instance "leaf/left/storage_ext" @rhdl_sram_left_storage_',
+                'hw.instance "leaf/left/storage_ext" @rhodium_sram_left_storage_',
                 selected,
             )
             self.assertIn(
@@ -232,7 +232,7 @@ class MapperTest(unittest.TestCase):
             )
             self.assertEqual(rtl_result.returncode, 0, rtl_result.stderr)
             self.assertIn("module storage_64x52", rtl_result.stdout)
-            self.assertIn("rhdl_sram_left_storage_", rtl_result.stdout)
+            self.assertIn("rhodium_sram_left_storage_", rtl_result.stdout)
             rtl = output_dir / "site-selective.sv"
             rtl.write_text(rtl_result.stdout, encoding="utf-8")
 
@@ -267,7 +267,7 @@ class MapperTest(unittest.TestCase):
             self.assertEqual(lint.returncode, 0, lint.stderr)
 
     def test_unknown_memory_site_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-sites-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-sites-") as temporary:
             output_dir = Path(temporary)
             policy = output_dir / "unknown-site.yaml"
             policy.write_text(
@@ -286,7 +286,7 @@ class MapperTest(unittest.TestCase):
             self.assertIn("available sites: left/storage, right/storage", result.stderr)
 
     def test_scope_prefix_preserves_policy_relative_wrapper_identity(self):
-        with tempfile.TemporaryDirectory(prefix="rhdl-memory-scope-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="rhodium-memory-scope-") as temporary:
             output_dir = Path(temporary)
             _, scoped_mlir, _ = self.invoke_site_pass(
                 FIXTURES / "site-selective-policy.yaml", output_dir / "scoped"
@@ -297,7 +297,7 @@ class MapperTest(unittest.TestCase):
                 actual_top="Leaf",
                 scope_prefix="",
             )
-            wrapper_pattern = re.compile(r"@(?P<name>rhdl_sram_left_storage_[0-9a-f]+)")
+            wrapper_pattern = re.compile(r"@(?P<name>rhodium_sram_left_storage_[0-9a-f]+)")
             scoped_wrapper = wrapper_pattern.search(
                 scoped_mlir.read_text(encoding="utf-8")
             )

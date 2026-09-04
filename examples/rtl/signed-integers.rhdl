@@ -1,0 +1,77 @@
+#lang rhodium
+// Demonstrates explicit-width signed arithmetic, ordering, shifts, and resizing.
+
+circuit SignedIntegers():
+  input(a, b): SInt(8)
+  input amount: Bits(3)
+  input wide_amount: Bits(12)
+  output(sum, difference, product): SInt(8)
+  output(left, right, right_wide): SInt(8)
+  output widened: SInt(12)
+  output narrowed: SInt(4)
+  output(lt, gt, le, ge, eq): Bool
+  output negative_one: SInt(8)
+
+  sum <== a + b
+  difference <== a - b
+  product <== a * b
+  left <== a << amount
+  right <== a >> amount
+  right_wide <== a >> wide_amount
+  widened <== sext(a, 12)
+  narrowed <== strunc(a, 4)
+  lt <== (a < b)
+  gt <== (a > b)
+  le <== (a <= b)
+  ge <== (a >= b)
+  eq <== (a === b)
+  negative_one <== sint(-1, 8)
+
+def design = elaborate(SignedIntegers())
+
+def verilog_reference = @str|<<{
+module SignedIntegers(
+  input  [7:0]  a,
+                b,
+  input  [2:0]  amount,
+  input  [11:0] wide_amount,
+  output [7:0]  sum,
+                difference,
+                product,
+                left,
+                right,
+                right_wide,
+  output [11:0] widened,
+  output [3:0]  narrowed,
+  output        lt,
+                gt,
+                le,
+                ge,
+                eq,
+  output [7:0]  negative_one
+);
+
+  wire [7:0]  _GEN = {5'h0, amount};
+  wire [11:0] _GEN_0 = {{4{a[7]}}, a};
+  wire [11:0] _GEN_1 = $unsigned($signed($signed(_GEN_0) >>> wide_amount));
+  assign sum = a + b;
+  assign difference = a - b;
+  assign product = a * b;
+  assign left = a << _GEN;
+  assign right = $unsigned($signed($signed(a) >>> _GEN));
+  assign right_wide = _GEN_1[7:0];
+  assign widened = _GEN_0;
+  assign narrowed = a[3:0];
+  assign lt = $signed(a) < $signed(b);
+  assign gt = $signed(b) < $signed(a);
+  assign le = $signed(b) >= $signed(a);
+  assign ge = $signed(a) >= $signed(b);
+  assign eq = a == b;
+  assign negative_one = 8'hFF;
+endmodule
+}>>|
+
+export:
+  SignedIntegers
+  design
+  verilog_reference

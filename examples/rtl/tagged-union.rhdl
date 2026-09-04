@@ -1,0 +1,85 @@
+#lang rhodium
+// Demonstrates payload-bearing and nullary variants sharing nominal enum tags.
+
+bundle WritePayload():
+  address: Bits(8)
+  data: Bits(8)
+
+tagged_union Request:
+  Idle
+  Read(Bits(8))
+  Write(WritePayload())
+
+tagged_union ExplicitRequest(~width: 4):
+  Idle = 3
+  Read(Bits(8)) = 9
+
+tagged_union OneHotRequest(~encoding: one_hot):
+  Idle
+  Data(Bits(8))
+
+tagged_union Option(T :: DataType):
+  None
+  Some(T)
+
+def idle_request = Request.Idle
+def read_request = Request.Read(bits(0x5A, 8))
+
+circuit TaggedUnionRouter():
+  input request: Request
+  input write_payload: WritePayload()
+  output request_tag: Request.tag_type
+  output is_idle: Bits(1)
+  output is_read: Bits(1)
+  output read_payload: Bits(8)
+  output write_address: Bits(8)
+  output rebuilt_write: Request
+
+  def read = request.view(Request.Read)
+  def write = request.view(Request.Write)
+  request_tag <== request.tag
+  is_idle <== request.is(Request.Idle)
+  is_read <== read.valid
+  read_payload <== read.payload
+  write_address <== write.payload.address
+  rebuilt_write <== Request.Write(write_payload)
+
+def design = elaborate(TaggedUnionRouter())
+
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic [7:0] address; logic [7:0] data; } WritePayload;
+`endif // _TYPESCOPE_rhodium_types
+module TaggedUnionRouter(
+  input  [17:0]       request,
+  input  WritePayload write_payload,
+  output [1:0]        request_tag,
+  output              is_idle,
+                      is_read,
+  output [7:0]        read_payload,
+                      write_address,
+  output [17:0]       rebuilt_write
+);
+
+  wire WritePayload _GEN = /*cast(bit)*/request[15:0];
+  assign request_tag = request[17:16];
+  assign is_idle = request[17:16] == 2'h0;
+  assign is_read = request[17:16] == 2'h1;
+  assign read_payload = request[7:0];
+  assign write_address = _GEN.address;
+  assign rebuilt_write = {2'h2, /*cast(bit[15:0])*/write_payload};
+endmodule
+}>>|
+
+export:
+  WritePayload
+  Request
+  ExplicitRequest
+  OneHotRequest
+  Option
+  idle_request
+  read_request
+  TaggedUnionRouter
+  design
+  verilog_reference

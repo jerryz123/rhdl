@@ -1,0 +1,103 @@
+#lang rhodium
+// Demonstrates declaration-owned compatibility between parameterized interface specializations.
+
+interface CapacityLink(capacity :: PosInt, width :: PosInt):
+  role producer
+  role consumer
+  provider producer
+  connection_compatible producer (provided, required):
+    // The first argument is semantic capacity; width remains physical shape.
+    provided[0] >= required[0]
+
+  producer -> consumer:
+    payload: Bits(width)
+
+interface CapacityEnvelope(capacity :: PosInt, width :: PosInt):
+  role producer
+  role consumer
+
+  producer -> consumer:
+    link: CapacityLink(capacity, width)
+
+circuit CapacityBridge():
+  // The represented provider offers four units to a peer requiring two.
+  interface provided(CapacityLink(4, 8), ~role: consumer)
+  interface required(CapacityLink(2, 8), ~role: producer)
+  provided <=> required
+
+circuit ReversedCapacityBridge():
+  interface provided(CapacityLink(4, 8), ~role: consumer)
+  interface required(CapacityLink(2, 8), ~role: producer)
+  // Operand order does not change provider-to-peer compatibility.
+  required <=> provided
+
+circuit NestedCapacityBridge():
+  interface provided(CapacityEnvelope(4, 8), ~role: consumer)
+  interface required(CapacityEnvelope(2, 8), ~role: producer)
+  // Nested interface members apply their own compatibility rule recursively.
+  provided <=> required
+
+circuit CapacityWidthAdapter():
+  interface narrow(CapacityLink(4, 8), ~role: consumer)
+  interface wide(CapacityLink(2, 16), ~role: producer)
+  // Different physical widths cannot bulk-connect, even though capacity is
+  // compatible. The explicit adapter owns the widening policy.
+  wide.payload <== zext(narrow.payload, 16)
+
+def design = elaborate(CapacityBridge())
+def reversed_design = elaborate(ReversedCapacityBridge())
+def nested_design = elaborate(NestedCapacityBridge())
+def width_adapter_design = elaborate(CapacityWidthAdapter())
+
+def verilog_reference = @str|<<{
+module CapacityBridge(
+  input  struct packed {logic [7:0] payload; } provided_in,
+  output struct packed {logic [7:0] payload; } required_out
+);
+
+  assign required_out = provided_in;
+endmodule
+}>>|
+def reversed_verilog_reference = @str|<<{
+module ReversedCapacityBridge(
+  input  struct packed {logic [7:0] payload; } provided_in,
+  output struct packed {logic [7:0] payload; } required_out
+);
+
+  assign required_out = provided_in;
+endmodule
+}>>|
+def nested_verilog_reference = @str|<<{
+module NestedCapacityBridge(
+  input  struct packed {struct packed {logic [7:0] payload; } link; } provided_in,
+  output struct packed {struct packed {logic [7:0] payload; } link; } required_out
+);
+
+  assign required_out = provided_in;
+endmodule
+}>>|
+def width_adapter_verilog_reference = @str|<<{
+module CapacityWidthAdapter(
+  input  struct packed {logic [7:0] payload; }  narrow_in,
+  output struct packed {logic [15:0] payload; } wide_out
+);
+
+  assign wide_out = '{payload: {8'h0, narrow_in.payload}};
+endmodule
+}>>|
+
+export:
+  CapacityLink
+  CapacityEnvelope
+  CapacityBridge
+  ReversedCapacityBridge
+  NestedCapacityBridge
+  CapacityWidthAdapter
+  design
+  reversed_design
+  nested_design
+  width_adapter_design
+  verilog_reference
+  reversed_verilog_reference
+  nested_verilog_reference
+  width_adapter_verilog_reference

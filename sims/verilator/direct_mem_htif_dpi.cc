@@ -9,7 +9,7 @@
 
 namespace {
 
-rhdl::fesvr::DirectMemoryHtif* transport = nullptr;
+rhodium::fesvr::DirectMemoryHtif* transport = nullptr;
 
 void clear_outputs(unsigned char* request_valid,
                    unsigned char* request_write,
@@ -29,7 +29,7 @@ void clear_outputs(unsigned char* request_valid,
 
 }  // namespace
 
-int rhdl_htif_tick(unsigned char reset,
+int rhodium_htif_tick(unsigned char reset,
                    unsigned char target_xlen,
                    unsigned char request_ready,
                    unsigned char response_valid,
@@ -58,7 +58,7 @@ int rhdl_htif_tick(unsigned char reset,
     if (!vpi_get_vlog_info(&info)) {
       std::abort();
     }
-    transport = new rhdl::fesvr::DirectMemoryHtif(info.argc, info.argv, target_xlen);
+    transport = new rhodium::fesvr::DirectMemoryHtif(info.argc, info.argv, target_xlen);
   }
 
   transport->tick(request_ready != 0,

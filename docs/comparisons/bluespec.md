@@ -1,13 +1,13 @@
-<!-- Compares RHDL's exact-construction semantics with Bluespec's guarded atomic rules as language abstractions. -->
+<!-- Compares Rhodium's exact-construction semantics with Bluespec's guarded atomic rules as language abstractions. -->
 
-# RHDL and Bluespec: construction graphs versus guarded atomic actions
+# Rhodium and Bluespec: construction graphs versus guarded atomic actions
 
 ## Scope and thesis
 
 *Snapshot: 2026-08-17.*
 
-RHDL and Bluespec SystemVerilog (BSV) give source code different denotations.
-An RHDL circuit generator elaborates into one particular graph of values,
+Rhodium and Bluespec SystemVerilog (BSV) give source code different denotations.
+An Rhodium circuit generator elaborates into one particular graph of values,
 destinations, operations, state elements, and module instances. A BSV module
 elaborates into state, methods, and guarded atomic rules; the compiler then
 chooses hardware that may execute compatible rules concurrently while
@@ -15,12 +15,12 @@ preserving a legal sequential ordering.
 
 That difference is the comparison. It is not that one language can ultimately
 form gates the other cannot. Bluespec makes an atomic state transition the
-unit of composition and derives arbitration from it. RHDL makes the selected
+unit of composition and derives arbitration from it. Rhodium makes the selected
 datapath, enables, and arbitration the unit of construction. Bluespec is more
 expressive when transactions should compose before their schedule is known;
-RHDL is more local when the authored structure is itself the contract.
+Rhodium is more local when the authored structure is itself the contract.
 
-RHDL's standard flow layer adds a strong middle ground for elastic hardware:
+Rhodium's standard flow layer adds a strong middle ground for elastic hardware:
 serial, parallel, fan-in, fanout, and routing stages compose as one explicitly
 owned topology. It reduces wiring ceremony without acquiring Bluespec's
 transaction scheduler. Bluespec remains more powerful when one atomic action
@@ -28,7 +28,7 @@ must coordinate several independently guarded resources.
 
 ## Summary
 
-| Question | RHDL | Bluespec |
+| Question | Rhodium | Bluespec |
 |---|---|---|
 | Source denotes | One deterministic, verified hardware graph | A statically elaborated system of guarded rules, methods, and state |
 | Core composition unit | Explicit definition/binding edges and circuit instances | Atomic rules calling guarded interface methods |
@@ -42,9 +42,9 @@ must coordinate several independently guarded resources.
 
 ## Denotation and staging
 
-RHDL is a deep Rhombus embedding. Calling a `circuit` generator during
+Rhodium is a deep Rhombus embedding. Calling a `circuit` generator during
 `elaborate` executes host computation and constructs the
-[public core IR](../../rhdl/core/README.md). Host loops and parameters choose
+[public core IR](../../rhodium/core/README.md). Host loops and parameters choose
 structure. Hardware operators, `when`, `switch`, registers, and connections
 create nodes in the resulting circuit. The order in which those nodes were
 emitted is not a runtime execution order.
@@ -61,13 +61,13 @@ fully chosen schedule.
 The BSV compiler may implement several rules in one clock when their net effect
 matches some legal sequential execution. Compiler scheduling is therefore not
 an optimization hidden below an otherwise fixed circuit: it completes the
-source program's concurrency semantics. RHDL has no corresponding semantic
+source program's concurrency semantics. Rhodium has no corresponding semantic
 step. Once elaboration has produced a verified graph, concurrency is already
 the ordinary concurrency of that graph.
 
 ## Core composition unit and syntax
 
-RHDL's small syntactic vocabulary mirrors its graph model. A declaration such
+Rhodium's small syntactic vocabulary mirrors its graph model. A declaration such
 as `output sum: Bits(width)` introduces a driveable destination, and
 `sum <== a + b` supplies its one driver. `reg state(...)` introduces explicit
 state, while `when` and `switch` collect alternatives into mux or enable logic.
@@ -84,12 +84,12 @@ expose an operation without requiring each client to reproduce its enable
 logic. BSV and Bluespec Haskell provide different surface syntaxes for this
 same model; the semantic economy comes from the rule, not from punctuation.
 
-The contrast is sharp around a shared resource. In RHDL, clients, arbitration,
+The contrast is sharp around a shared resource. In Rhodium, clients, arbitration,
 priority, muxes, and enables are ordinary constructed hardware. In BSV,
 clients can state independent rules and let method conflicts participate in a
 derived schedule. Bluespec removes repeated control plumbing, but the meaning
 of a call now includes facts declared by the callee and decisions made by the
-whole-module scheduler. RHDL writes more source in that case, while keeping the
+whole-module scheduler. Rhodium writes more source in that case, while keeping the
 composition result visible at the use site.
 
 ## Typed literals, patterns, and relational decode
@@ -97,10 +97,10 @@ composition result visible at the use site.
 BSV's tagged unions, enums, and `case` forms make a semantic value the natural
 subject of a decision. A case can distinguish constructors, destructure a
 payload, bind its fields, and compute an arbitrary result or action. That is a
-more expressive pattern language than RHDL's finite bit cubes: RHDL patterns
+more expressive pattern language than Rhodium's finite bit cubes: Rhodium patterns
 cannot bind payloads, express guards, or describe an open-ended decision tree.
 
-RHDL instead makes a decoder a particular finite relation. `HardwareLiteral`
+Rhodium instead makes a decoder a particular finite relation. `HardwareLiteral`
 preserves the exact semantic type of a scalar, aggregate, or extension value;
 `Pattern` adds recursive field-level care without becoming a hardware value.
 `DecodeTable` requires exact input and output types and rejects every pair of
@@ -112,16 +112,16 @@ than silently refining or prioritizing them.
 
 This restriction has useful leverage for an instruction or control decoder:
 the complete, unordered relation can be checked before it becomes hardware and
-may be compiled as a shared multi-output PLA. It does not make RHDL universally
+may be compiled as a shared multi-output PLA. It does not make Rhodium universally
 more expressive or guarantee a better implementation. A BSV decision can
 encode the same Boolean function, and the final quality still depends on the
-selected logic form and downstream synthesis. RHDL's advantage is a concise,
+selected logic form and downstream synthesis. Rhodium's advantage is a concise,
 analyzable representation for the narrower finite-relation problem; BSV's is
 the more general typed decision embedded in atomic actions.
 
 ## Flow composition
 
-RHDL's standard flow layer packages explicit handshake topology without hiding
+Rhodium's standard flow layer packages explicit handshake topology without hiding
 its microarchitecture. Configured stages are ordinary unary functions joined by
 `|>`; their input can be a concrete endpoint or a disconnected, one-shot
 `InterfaceHandle`. Serial stages, `parallel` branches, arbitration, joins,
@@ -142,11 +142,11 @@ on several FIFOs, memories, or services, and each method's implicit readiness
 joins the rule guard. The compiler then reconciles method conflicts and chooses
 which compatible transactions share a cycle. That is strictly more powerful
 for multi-resource transactions whose arbitration should follow from atomic
-intent. RHDL requires the arbitration, buffering, and enable paths to be
+intent. Rhodium requires the arbitration, buffering, and enable paths to be
 chosen explicitly, but consequently makes their latency and priority visible
 where the topology is written.
 
-RHDL's protocol-strength transitions remain nominal: `Irrevocable` stability
+Rhodium's protocol-strength transitions remain nominal: `Irrevocable` stability
 is documented rather than automatically asserted. Bluespec's guarded atomic
 semantics prevents a different class of partial transaction, but it likewise
 does not imply fairness or liveness. The comparison is exact topology versus
@@ -154,7 +154,7 @@ atomic transaction composition with a compiler-selected schedule.
 
 ## Time, state, and concurrency
 
-RHDL state is structurally explicit. A register has a current readable value
+Rhodium state is structurally explicit. A register has a current readable value
 and a next-state destination; an omitted guarded update means hold. Every
 destination has one effective driver after conditional alternatives are
 canonicalized. Combinational cycles are rejected across the elaborated design.
@@ -172,13 +172,13 @@ The guarantee has a precise boundary. Bluespec guarantees that the chosen
 parallel hardware behavior is consistent with legal rule orderings and method
 schedules. It does not, merely from atomicity, guarantee fairness, liveness, or
 the throughput an author intended. Those properties still require examining
-guards, conflicts, annotations, and the compiler's reported schedule. RHDL
+guards, conflicts, annotations, and the compiler's reported schedule. Rhodium
 offers less scheduling abstraction but makes the implemented priority and
 throughput paths ordinary circuit structure.
 
 ## Types and intrinsic guarantees
 
-RHDL stores positive, elaboration-known widths in hardware type objects.
+Rhodium stores positive, elaboration-known widths in hardware type objects.
 Connections require exact types; extension, truncation, and representation
 casts are explicit. Its open capability hierarchy lets records, vectors,
 signed values, enums, and one-hot selectors opt into appropriate operations.
@@ -193,7 +193,7 @@ selected one instance. Actions, rules, modules, and interfaces also participate
 in the static language, making hardware fragments first-class elaboration
 objects.
 
-These guarantees operate at different layers. RHDL intrinsically guarantees
+These guarantees operate at different layers. Rhodium intrinsically guarantees
 the ownership and connectivity of the concrete circuit it built. Bluespec
 intrinsically guarantees the static consistency of a richer generic program
 and the atomic interpretation of its scheduled effects. Neither guarantee
@@ -201,7 +201,7 @@ substitutes for a functional proof of the design.
 
 ## Locality and predictability
 
-RHDL has strong structural locality. Following a destination's single binding
+Rhodium has strong structural locality. Following a destination's single binding
 reveals the selected expression or state enable, and unrelated operations do
 not silently acquire a shared scheduling relationship. The cost is that a
 resource policy is repeated as graph structure unless the author packages it
@@ -217,7 +217,7 @@ therefore part of understanding the generated design, not merely diagnostic
 noise.
 
 This is a principled exchange, not a cleanliness defect in either language.
-RHDL makes spatial structure predictable and asks the author to own scheduling.
+Rhodium makes spatial structure predictable and asks the author to own scheduling.
 Bluespec makes atomic intent predictable and asks the compiler to reconcile
 global concurrency.
 
@@ -229,24 +229,24 @@ commit form one coherent model, so rules and guarded methods compose with high
 leverage. The abstraction is especially elegant for control-dominated designs
 whose natural specification is a set of possible transactions.
 
-RHDL's exact-construction policy is smaller and more literal than Bluespec's
+Rhodium's exact-construction policy is smaller and more literal than Bluespec's
 rule semantics. It requires final bindings, priority, and state boundaries to
 be explicit rather than deriving arbitration from method calls. Its flow layer
 makes exact elastic pipelines substantially more compositional without
 changing that policy. Datapaths, buffering, readiness paths, and local priority
-remain easy to audit, but RHDL offers no language-level way to postpone a
+remain easy to audit, but Rhodium offers no language-level way to postpone a
 scheduling choice while retaining an atomic specification.
 
-The crucial distinction is representational. RHDL can construct the circuit
+The crucial distinction is representational. Rhodium can construct the circuit
 produced by a Bluespec schedule, but its current language cannot state a set of
 atomic rules and require a compiler to choose a serializable implementation.
 That is a missing semantic layer, not a missing mux primitive.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
-1. Keep atomic actions distinct from connection semantics. If RHDL adopts
+1. Keep atomic actions distinct from connection semantics. If Rhodium adopts
    rules, they should elaborate through an explicitly named scheduling layer
-   into ordinary verified RHDL IR.
+   into ordinary verified Rhodium IR.
 2. Preserve a compact, verified definition/binding normal form for exact
    construction regardless of the authoring surface or any transaction layer
    above it.
@@ -261,10 +261,10 @@ That is a missing semantic layer, not a missing mux primitive.
 
 ## Sources
 
-- RHDL [core semantics](../../rhdl/core/README.md),
-  [frontend model](../../rhdl/frontend/README.md), and
-  [typed decode relations](../../rhdl/std/README.md#typed-decode-patterns), plus
-  [standard interfaces and flow composition](../../rhdl/std/README.md)
+- Rhodium [core semantics](../../rhodium/core/README.md),
+  [frontend model](../../rhodium/frontend/README.md), and
+  [typed decode relations](../../rhodium/std/README.md#typed-decode-patterns), plus
+  [standard interfaces and flow composition](../../rhodium/std/README.md)
 - [Bluespec Compiler project](https://github.com/B-Lang-org/bsc)
 - [BSV Language Reference Guide](https://github.com/B-Lang-org/bsc/releases/latest/download/BSV_lang_ref_guide.pdf)
 - [Official Bluespec language materials](https://github.com/BSVLang/Main)

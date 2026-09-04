@@ -1,4 +1,4 @@
-// Connects the minimal RHDL leaf to the pinned Double-Wide OpenFrame pad contract.
+// Connects the minimal Rhodium leaf to the pinned Double-Wide OpenFrame pad contract.
 
 `default_nettype none
 
@@ -35,12 +35,12 @@ module double_wide_openframe_project_wrapper (
     inout  [62:0] analog_noesd_io
 );
 
-    wire rhdl_out;
+    wire rhodium_out;
 
-    RhdlTop rhdl_top (.in_bit(gpio_in[0]), .out_bit(rhdl_out));
+    RhodiumTop rhodium_top (.in_bit(gpio_in[0]), .out_bit(rhodium_out));
 
     // GPIO 0 is the input and GPIO 1 drives its inverse; every other pad is input-only.
-    assign gpio_out = {61'b0, rhdl_out, 1'b0};
+    assign gpio_out = {61'b0, rhodium_out, 1'b0};
     assign gpio_oeb = {{61{1'b1}}, 1'b0, 1'b1};
     assign gpio_inp_dis = 63'b0;
     assign gpio_ib_mode_sel = 63'b0;

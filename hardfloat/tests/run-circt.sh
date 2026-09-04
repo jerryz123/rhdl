@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 test_dir="$repo_dir/hardfloat/tests"
-tmp_dir="$(mktemp -d /tmp/rhdl-hardfloat-circt.XXXXXX)"
+tmp_dir="$(mktemp -d /tmp/rhodium-hardfloat-circt.XXXXXX)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 circt_opt="${CIRCT_OPT:-$repo_dir/.tools/firtool-1.155.0/bin/circt-opt}"

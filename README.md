@@ -1,10 +1,10 @@
-<!-- Introduces RHDL, provides a first circuit, and routes readers to component-owned documentation. -->
+<!-- Introduces Rhodium, provides a first circuit, and routes readers to component-owned documentation. -->
 
-# RHDL
+# Rhodium
 
 > Yes, all the code here was written by a LLM. The only text not produced by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
 
-RHDL is an experimental Rhombus-hosted hardware description language. Ordinary
+Rhodium is an experimental Rhombus-hosted hardware description language. Ordinary
 Rhombus computation elaborates and verifies a public hardware IR. Optional
 consumers can inspect that IR or lower it through CIRCT to SystemVerilog.
 
@@ -14,13 +14,13 @@ The same circuit can be written explicitly against the IR, through a
 construction kernel, through selected language layers, or with concise
 standard syntax without creating competing hardware semantics.
 
-RHDL does not emit SystemVerilog itself. CIRCT owns RTL generation.
+Rhodium does not emit SystemVerilog itself. CIRCT owns RTL generation.
 
 Dependency-neutral Rhombus refinements shared by the pure model and hardware
 packages live under [`support/`](support/README.md).
 
-RFPL is the physical-annotation language above RHDL. It classifies existing
-RHDL circuits as opaque hard macros or wiring-only composite floorplans, adds
+RFPL is the physical-annotation language above Rhodium. It classifies existing
+Rhodium circuits as opaque hard macros or wiring-only composite floorplans, adds
 exact rectangular dimensions and child-instance coordinates, and leaves the
 logical IR and generated RTL unchanged. See the
 [RFPL guide](rfpl/README.md).
@@ -28,8 +28,8 @@ logical IR and generated RTL unchanged. See the
 ## Architecture
 
 ```text
-#lang rhdl ------> standard ------> foundation + curated layers
-#lang rhdl/base ------------------> foundation + selected layers
+#lang rhodium ------> standard ------> foundation + curated layers
+#lang rhodium/base ------------------> foundation + selected layers
                                              |
                                              v
                                     elaboration kernel
@@ -50,10 +50,10 @@ preserve. Notation, organization, and policy over existing semantics belong in
 frontend layers or ordinary libraries.
 
 The authoritative package graph and dependency contract are in
-[`rhdl/README.md`](rhdl/README.md).
+[`rhodium/README.md`](rhodium/README.md).
 
 > **Design perspectives:** the
-> [RHDL comparison guide](docs/comparisons/README.md) contrasts RHDL with
+> [Rhodium comparison guide](docs/comparisons/README.md) contrasts Rhodium with
 > construction languages, rule-based and functional HDLs, timing-typed
 > research languages, compiler IRs, multi-level modeling systems, and
 > SystemVerilog. It focuses on core semantics, abstraction expressivity,
@@ -88,7 +88,7 @@ of `circt-opt` when running backend integration tests.
 ### First circuit
 
 ```rhombus
-#lang rhdl
+#lang rhodium
 
 circuit Adder(width :: PosInt):
   input(a, b): Bits(width)
@@ -125,21 +125,21 @@ Detailed documentation lives with the component that owns it:
 | Topic | Document |
 |---|---|
 | Shared dependency-neutral Rhombus refinements | [`support/README.md`](support/README.md) |
-| Package graph and dependency rules | [`rhdl/README.md`](rhdl/README.md) |
+| Package graph and dependency rules | [`rhodium/README.md`](rhodium/README.md) |
 | RFPL physical-view language and validation | [`rfpl/README.md`](rfpl/README.md) |
 | Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
-| Core semantics, IR, Builder, and verification | [`rhdl/core/README.md`](rhdl/core/README.md) |
-| Clock/reset inventory and temporal provenance analysis | [`rhdl/analysis/README.md`](rhdl/analysis/README.md) |
-| Logical block, hierarchy, interface, and flow diagrams | [`rhdl/diagram/README.md`](rhdl/diagram/README.md) |
-| Elaboration, profiles, and extension boundaries | [`rhdl/frontend/README.md`](rhdl/frontend/README.md) |
-| Frontend feature and syntax guide | [`rhdl/frontend/layers/README.md`](rhdl/frontend/layers/README.md) |
-| Host utilities, protocols, and reusable circuit generators | [`rhdl/std/README.md`](rhdl/std/README.md) |
+| Core semantics, IR, Builder, and verification | [`rhodium/core/README.md`](rhodium/core/README.md) |
+| Clock/reset inventory and temporal provenance analysis | [`rhodium/analysis/README.md`](rhodium/analysis/README.md) |
+| Logical block, hierarchy, interface, and flow diagrams | [`rhodium/diagram/README.md`](rhodium/diagram/README.md) |
+| Elaboration, profiles, and extension boundaries | [`rhodium/frontend/README.md`](rhodium/frontend/README.md) |
+| Frontend feature and syntax guide | [`rhodium/frontend/layers/README.md`](rhodium/frontend/layers/README.md) |
+| Host utilities, protocols, and reusable circuit generators | [`rhodium/std/README.md`](rhodium/std/README.md) |
 | Pure NoC authoring, validation, planning, and hardware bridge | [`noc/README.md`](noc/README.md) |
-| RHDL port of Berkeley HardFloat recoded floating-point hardware | [`hardfloat/README.md`](hardfloat/README.md) |
+| Rhodium port of Berkeley HardFloat recoded floating-point hardware | [`hardfloat/README.md`](hardfloat/README.md) |
 | AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
 | CHI platform devices and register blocks | [`devices/README.md`](devices/README.md) |
-| CIRCT lowering and SystemVerilog generation | [`rhdl/backend/README.md`](rhdl/backend/README.md) |
-| Rosette equivalence, counterexamples, reachability, and output properties | [`rhdl/formal/README.md`](rhdl/formal/README.md) |
+| CIRCT lowering and SystemVerilog generation | [`rhodium/backend/README.md`](rhodium/backend/README.md) |
+| Rosette equivalence, counterexamples, reachability, and output properties | [`rhodium/formal/README.md`](rhodium/formal/README.md) |
 | Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
 | Test organization and focused commands | [`tests/README.md`](tests/README.md) |
 | Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
@@ -147,7 +147,7 @@ Detailed documentation lives with the component that owns it:
 | Executable SoC simulation harnesses | [`sims/README.md`](sims/README.md) |
 | Technology-independent SRAM mapping and adapters | [`sram/README.md`](sram/README.md) |
 | OpenFrame physical flow and mapped VLSI simulation | [`vlsi/README.md`](vlsi/README.md) |
-| RISC-V instruction model, integer-extension catalogs, and RHDL adapter | [`riscv/README.md`](riscv/README.md) |
+| RISC-V instruction model, integer-extension catalogs, and Rhodium adapter | [`riscv/README.md`](riscv/README.md) |
 | Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
 | Hardware SoC composition | [`socs/README.md`](socs/README.md) |
 
@@ -156,7 +156,7 @@ Detailed documentation lives with the component that owns it:
 The current vertical slice includes:
 
 - An RFPL physical-annotation language whose hard macros may contain arbitrary
-  RHDL logic and whose composite floorplans classify existing wiring-only
+  Rhodium logic and whose composite floorplans classify existing wiring-only
   circuits, with exact dimensions and contained child-instance coordinates.
 - A public, inspectable, backend-independent IR with explicit-width types,
   structural aggregates, primitive state and memories, clocked assertions, DPI

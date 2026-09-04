@@ -3,7 +3,7 @@
 
 (require rackunit
          racket/list
-         "../../rhdl/formal/engine.rkt")
+         "../../rhodium/formal/engine.rkt")
 
 (define (flat-type width [text #f])
   (hash "kind" "flat"

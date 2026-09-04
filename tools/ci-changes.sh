@@ -16,7 +16,7 @@ circt_cores=false
 circt_rfpl=false
 simulation=false
 examples=false
-example_rhdl=false
+example_rtl=false
 example_clocking=false
 example_std=false
 example_noc=false
@@ -45,7 +45,7 @@ mark_all_circt() {
   circt_rfpl=true
 }
 
-mark_example_rhdl() { examples=true; example_rhdl=true; }
+mark_example_rtl() { examples=true; example_rtl=true; }
 mark_example_clocking() { examples=true; example_clocking=true; }
 mark_example_std() { examples=true; example_std=true; }
 mark_example_noc() { examples=true; example_noc=true; }
@@ -57,7 +57,7 @@ mark_example_cores() { examples=true; example_cores=true; }
 mark_example_rv5stage() { examples=true; example_rv5stage=true; }
 
 mark_all_examples() {
-  mark_example_rhdl
+  mark_example_rtl
   mark_example_clocking
   mark_example_std
   mark_example_noc
@@ -141,7 +141,7 @@ emit_jobs() {
     append_matrix_entry circt_matrix '{"name":"RFPL","target":"rfpl-circt-test"}'
   fi
 
-  [[ "$example_rhdl" == true ]] && append_matrix_entry example_matrix '{"name":"RHDL","target":"examples-rhdl"}'
+  [[ "$example_rtl" == true ]] && append_matrix_entry example_matrix '{"name":"Rhodium","target":"examples-rhodium"}'
   [[ "$example_clocking" == true ]] && append_matrix_entry example_matrix '{"name":"clocking analysis","target":"examples-clocking"}'
   [[ "$example_std" == true ]] && append_matrix_entry example_matrix '{"name":"standard library","target":"examples-std"}'
   [[ "$example_noc" == true ]] && append_matrix_entry example_matrix '{"name":"NoC","target":"examples-noc"}'
@@ -206,10 +206,10 @@ classify_path() {
     .githooks/pre-commit|tools/check-parameter-annotations.rkt|tools/parameter-annotation-scope.txt|tools/check-boundaries.sh|rfpl/check-boundaries.sh|noc/check-boundaries.sh|riscv/check-boundaries.sh|chi/check-boundaries.sh|cores/check-boundaries.sh)
       host_hygiene=true
       ;;
-    rhdl/core/*|rhdl/analysis/*|rhdl/frontend/*|rhdl/base/*|rhdl/language.rhm|rhdl/main.rkt)
+    rhodium/core/*|rhodium/analysis/*|rhodium/frontend/*|rhodium/base/*|rhodium/language.rhm|rhodium/main.rkt)
       mark_all
       ;;
-    rhdl/std/*)
+    rhodium/std/*)
       host_hygiene=true
       host_foundation=true
       host_backend=true
@@ -221,7 +221,7 @@ classify_path() {
       circt_protocols=true
       circt_cores=true
       simulation=true
-      mark_example_rhdl
+      mark_example_rtl
       mark_example_clocking
       mark_example_std
       mark_example_noc
@@ -230,7 +230,7 @@ classify_path() {
       mark_example_cores
       mark_example_rv5stage
       ;;
-    rhdl/backend/*)
+    rhodium/backend/*)
       host_backend=true
       mark_all_circt
       simulation=true
@@ -242,8 +242,8 @@ classify_path() {
       host_backend=true
       mark_all_circt
       ;;
-    examples/rhdl/*)
-      mark_example_rhdl
+    examples/rtl/*)
+      mark_example_rtl
       circt_language=true
       ;;
     examples/clocking/*)

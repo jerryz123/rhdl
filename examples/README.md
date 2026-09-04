@@ -1,19 +1,19 @@
-<!-- Presents the executable RHDL and RFPL walkthroughs and canonical feature examples. -->
+<!-- Presents the executable Rhodium and RFPL walkthroughs and canonical feature examples. -->
 
-# RHDL and RFPL examples
+# Rhodium and RFPL examples
 
 The examples demonstrate that progressively richer authoring layers construct
 one public hardware IR. Language and component details live in the
-[`rhdl/`](../rhdl/README.md) documentation; this guide owns the executable
+[`rhodium/`](../rhodium/README.md) documentation; this guide owns the executable
 walkthrough and example index.
 
 Examples are grouped by the API or domain that owns their primary lesson:
 
 | Directory | Contents |
 |---|---|
-| [`rhdl/`](rhdl/) | Built-in `#lang rhdl` syntax, elaboration, and hardware semantics |
-| [`clocking/`](clocking/) | Frontend timing declarations and backend-independent temporal-provenance analysis over completed RHDL IR |
-| [`std/`](std/) | Reusable protocols and components imported from `rhdl/std` |
+| [`rtl/`](rtl/) | Built-in `#lang rhodium` syntax, elaboration, and hardware semantics |
+| [`clocking/`](clocking/) | Frontend timing declarations and backend-independent temporal-provenance analysis over completed Rhodium IR |
+| [`std/`](std/) | Reusable protocols and components imported from `rhodium/std` |
 | [`noc/`](noc/) | Hardware examples owned by the graph-validated NoC domain library |
 | [`riscv/`](riscv/) | RISC-V descriptor adapters and field extraction |
 | [`chi/`](chi/) | AMBA CHI endpoints and finite components |
@@ -31,11 +31,11 @@ Start with four versions of the same 8-bit adder:
 |---|---|---|
 | Public core | [`lop/adder-core.rhm`](lop/adder-core.rhm) | Explicit `Design`, `Builder`, and verification APIs |
 | Elaboration kernel | [`lop/adder-kernel.rhm`](lop/adder-kernel.rhm) | Active-context construction functions |
-| Composed language | [`lop/adder-composed.rhdl`](lop/adder-composed.rhdl) | `#lang rhdl/base` plus an explicit combinational layer |
-| Standard profile | [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl) | Curated `#lang rhdl` syntax |
+| Composed language | [`lop/adder-composed.rhdl`](lop/adder-composed.rhdl) | `#lang rhodium/base` plus an explicit combinational layer |
+| Standard profile | [`lop/adder-standard.rhdl`](lop/adder-standard.rhdl) | Curated `#lang rhodium` syntax |
 
 The sources become progressively shorter while constructing identical printed
-RHDL IR and CIRCT MLIR:
+Rhodium IR and CIRCT MLIR:
 
 ```sh
 make lop-test
@@ -47,7 +47,7 @@ direct Builder     elaboration kernel     base + comb     standard profile
         +-----------------+--------------------+----------------+
                                   |
                                   v
-                          public RHDL IR
+                          public Rhodium IR
                                   |
                                   v
                              CIRCT MLIR
@@ -59,27 +59,27 @@ The aggregate equivalence examples make the same boundary executable:
   [`lop/bundle-standard.rhdl`](lop/bundle-standard.rhdl) compare explicit
   record construction with bundle syntax.
 - [`lop/interface-records.rhdl`](lop/interface-records.rhdl) and
-  [`rhdl/interface.rhdl`](rhdl/interface.rhdl) compare directional records with
+  [`rtl/interface.rhdl`](rtl/interface.rhdl) compare directional records with
   role-based interfaces.
 - [`lop/width-ops-kernel.rhm`](lop/width-ops-kernel.rhm) and
-  [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) compare explicit kernel operations with
+  [`rtl/width-ops.rhdl`](rtl/width-ops.rhdl) compare explicit kernel operations with
   concise indexing and width syntax.
 - [`lop/counter-composed.rhdl`](lop/counter-composed.rhdl) and
-  [`rhdl/sync-counter.rhdl`](rhdl/sync-counter.rhdl) show that explicitly selected
+  [`rtl/sync-counter.rhdl`](rtl/sync-counter.rhdl) show that explicitly selected
   sequential layers and the standard profile construct the same clocked IR.
 
-The [frontend guide](../rhdl/frontend/README.md) explains the profiles, and
-the [layer guide](../rhdl/frontend/layers/README.md) documents their features.
+The [frontend guide](../rhodium/frontend/README.md) explains the profiles, and
+the [layer guide](../rhodium/frontend/layers/README.md) documents their features.
 
 ## Clocking-analysis examples
 
 The examples under [`clocking/`](clocking/) use the clocking frontend layer or
-import `rhdl/analysis/clocking.rhm` directly. Environment and report objects
+import `rhodium/analysis/clocking.rhm` directly. Environment and report objects
 remain outside core IR; explicit crossing evidence can now affect CDC
 verification and backend register attributes.
 
 - [`clocking/frontend-environment.rhdl`](clocking/frontend-environment.rhdl)
-  uses `#lang rhdl/base` with the selectable clocking layer to declare local,
+  uses `#lang rhodium/base` with the selectable clocking layer to declare local,
   asynchronous-clock, and asynchronous-pin input timing at the root circuit
   and obtain the resolved report as part of elaboration.
 - [`clocking/sync-level.rhdl`](clocking/sync-level.rhdl) uses strict
@@ -111,7 +111,7 @@ make examples-clocking
 
 ## Structural floorplanning
 
-[`rfpl/circuit-pair.rhdl`](rfpl/circuit-pair.rhdl) defines an ordinary RHDL
+[`rfpl/circuit-pair.rhdl`](rfpl/circuit-pair.rhdl) defines an ordinary Rhodium
 hierarchy. [`rfpl/circuit-pair.rfpl`](rfpl/circuit-pair.rfpl) annotates its
 logic-bearing `Adder` as a hard macro and its wiring-only `AdderShell` and
 `AdderPair` circuits as composite floorplans. Every physical view has an exact
@@ -119,64 +119,64 @@ rectangle and every direct composite child has a contained coordinate. The
 colocated `verilog_reference` confirms that annotation adds no modules, ports,
 instances, or logic to the generated RTL.
 
-## RHDL language examples
+## Rhodium language examples
 
 | Example | Primary lesson |
 |---|---|
-| [`rhdl/full-adder.rhdl`](rhdl/full-adder.rhdl) | Nominal Boolean ports and carry logic |
-| [`rhdl/adder4.rhdl`](rhdl/adder4.rhdl) | Ripple-carry hierarchy and pack-aware concatenation |
-| [`rhdl/generated-adder.rhdl`](rhdl/generated-adder.rhdl) | Host `InstanceArray` generation plus runtime vector wiring |
-| [`rhdl/alu.rhdl`](rhdl/alu.rhdl) | Boolean, bitwise, arithmetic, equality, and N-way selection |
-| [`rhdl/unsigned-comparisons.rhdl`](rhdl/unsigned-comparisons.rhdl) | Unsigned ordering derived from one core comparison |
-| [`rhdl/signed-integers.rhdl`](rhdl/signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
-| [`rhdl/enum-state.rhdl`](rhdl/enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
-| [`rhdl/tagged-union.rhdl`](rhdl/tagged-union.rhdl) | Nullary and payload variants with `.tag`, `.is(...)`, and `.view(...)` inspection |
-| [`rhdl/nested-tagged-union.rhdl`](rhdl/nested-tagged-union.rhdl) | Nested tagged-union literals, chained payload views, and runtime reconstruction |
-| [`rhdl/one-hot.rhdl`](rhdl/one-hot.rhdl) | One-hot literals, selector-owned selection, equality, and representation casts |
-| [`rhdl/one-hot-enum.rhdl`](rhdl/one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
-| [`rhdl/masks.rhdl`](rhdl/masks.rhdl) | Non-numeric lane sets, bitwise set operations, and explicit selector widening |
-| [`rhdl/shifts.rhdl`](rhdl/shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |
-| [`rhdl/multiply.rhdl`](rhdl/multiply.rhdl) | Modular same-width unsigned multiplication |
-| [`rhdl/expanding-arithmetic.rhdl`](rhdl/expanding-arithmetic.rhdl) | Lossless unsigned addition plus signed and unsigned multiplication |
-| [`rhdl/fir-filter.rhdl`](rhdl/fir-filter.rhdl) | Signed direct-form FIR filtering with generated taps, explicit widths, and balanced summation |
-| [`rhdl/counter.rhdl`](rhdl/counter.rhdl) | Host helper functions accepting and returning hardware |
-| [`rhdl/sync-counter.rhdl`](rhdl/sync-counter.rhdl) | Ambient clock/reset policy and explicit override |
-| [`rhdl/enable-shift-register.rhdl`](rhdl/enable-shift-register.rhdl) | Hardware conditionals, register hold, and synchronous reset |
-| [`rhdl/reset-shift-register.rhdl`](rhdl/reset-shift-register.rhdl) | Generic enabled shift register with ambient synchronous reset |
-| [`rhdl/hierarchy.rhdl`](rhdl/hierarchy.rhdl) | Reused module definitions and child-port access |
-| [`rhdl/nested-circuit.rhdl`](rhdl/nested-circuit.rhdl) | Lexically private child generators with explicit hardware boundaries |
-| [`rhdl/layered-adder.rhdl`](rhdl/layered-adder.rhdl) | Ordinary imported library plus generated structure |
-| [`rhdl/fresh-generators.rhdl`](rhdl/fresh-generators.rhdl) | Automatic reuse of equivalent module specializations |
-| [`rhdl/host-parameters.rhdl`](rhdl/host-parameters.rhdl) | `StableCircuitParam` reuse and hardware-type parameters |
-| [`rhdl/generator-parameters.rhdl`](rhdl/generator-parameters.rhdl) | Positional, keyword, typed, defaulted, and synchronous generator parameters |
-| [`rhdl/register-forms.rhdl`](rhdl/register-forms.rhdl) | Inferred register types, immediate next values, reset values, and direct drives |
-| [`rhdl/tiny-simd.rhdl`](rhdl/tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |
-| [`rhdl/stack.rhdl`](rhdl/stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
-| [`rhdl/async-read-memory.rhdl`](rhdl/async-read-memory.rhdl) | Asynchronous reads and synchronous writes |
-| [`rhdl/sync-memory.rhdl`](rhdl/sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
-| [`rhdl/sync-memory-1rw.rhdl`](rhdl/sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
-| [`rhdl/sync-memory-masked.rhdl`](rhdl/sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
-| [`rhdl/multi-write-memory.rhdl`](rhdl/multi-write-memory.rhdl) | Independent same-clock physical write ports |
-| [`rhdl/clocked-dpi.rhdl`](rhdl/clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
-| [`rhdl/assertions.rhdl`](rhdl/assertions.rhdl) | Reset-suppressed assertions with branch-derived activation guards |
-| [`rhdl/width-ops.rhdl`](rhdl/width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
-| [`rhdl/bundle.rhdl`](rhdl/bundle.rhdl) | Type-named fixed and elaboration-conditional bundles, recursive literal shadows, muxes, casts, and state |
-| [`rhdl/vector.rhdl`](rhdl/vector.rhdl) | Fixed vectors, elaboration-time mapping, selection, `.as_bits()`/`.as_vec(...)` representation changes, aggregate drives, and state |
-| [`rhdl/vector-update.rhdl`](rhdl/vector-update.rhdl) | Functional replacement and dynamic vector-register writes |
-| [`rhdl/table.rhdl`](rhdl/table.rhdl) | Host-generated combinational vector table |
-| [`rhdl/vec-search.rhdl`](rhdl/vec-search.rhdl) | Registered traversal of a host-defined vector pattern |
-| [`rhdl/vec-shift-register.rhdl`](rhdl/vec-shift-register.rhdl) | Priority aggregate load and shift updates |
-| [`rhdl/vec-shift-register-param.rhdl`](rhdl/vec-shift-register-param.rhdl) | Host-parameterized vector pipeline |
-| [`rhdl/predicate-filter.rhdl`](rhdl/predicate-filter.rhdl) | Stable predicate policies elaborated inline through a `Valid` interface |
-| [`rhdl/wire.rhdl`](rhdl/wire.rhdl) | Forward-readable aggregate wire driven later by element |
-| [`rhdl/interface.rhdl`](rhdl/interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
-| [`rhdl/interface-specialization.rhdl`](rhdl/interface-specialization.rhdl) | Directional parameter compatibility, nested rules, operand reversal, and explicit width adaptation |
-| [`rhdl/interface-array.rhdl`](rhdl/interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
-| [`rhdl/nested-interface.rhdl`](rhdl/nested-interface.rhdl) | Recursive interface composition and orientation |
-| [`rhdl/interface-monitor.rhdl`](rhdl/interface-monitor.rhdl) | Read-only endpoint observations and explicit protocol assertions |
-| [`rhdl/interface-transform.rhdl`](rhdl/interface-transform.rhdl) | Typed custom interface transforms, fanout, and detached terminals |
-| [`rhdl/priority-encoder.rhdl`](rhdl/priority-encoder.rhdl) | Lower-index-first binary and native `MaybeOneHot` selection over packed and aggregate inputs |
-| [`rhdl/bit-utilities.rhdl`](rhdl/bit-utilities.rhdl) | Negation, reductions, membership predicates, and enum validity |
+| [`rtl/full-adder.rhdl`](rtl/full-adder.rhdl) | Nominal Boolean ports and carry logic |
+| [`rtl/adder4.rhdl`](rtl/adder4.rhdl) | Ripple-carry hierarchy and pack-aware concatenation |
+| [`rtl/generated-adder.rhdl`](rtl/generated-adder.rhdl) | Host `InstanceArray` generation plus runtime vector wiring |
+| [`rtl/alu.rhdl`](rtl/alu.rhdl) | Boolean, bitwise, arithmetic, equality, and N-way selection |
+| [`rtl/unsigned-comparisons.rhdl`](rtl/unsigned-comparisons.rhdl) | Unsigned ordering derived from one core comparison |
+| [`rtl/signed-integers.rhdl`](rtl/signed-integers.rhdl) | Explicit-width signed arithmetic, ordering, shifts, and resizing |
+| [`rtl/enum-state.rhdl`](rtl/enum-state.rhdl) | Equivalent enum mux/switch forms, explicit encodings, and invalid recovery |
+| [`rtl/tagged-union.rhdl`](rtl/tagged-union.rhdl) | Nullary and payload variants with `.tag`, `.is(...)`, and `.view(...)` inspection |
+| [`rtl/nested-tagged-union.rhdl`](rtl/nested-tagged-union.rhdl) | Nested tagged-union literals, chained payload views, and runtime reconstruction |
+| [`rtl/one-hot.rhdl`](rtl/one-hot.rhdl) | One-hot literals, selector-owned selection, equality, and representation casts |
+| [`rtl/one-hot-enum.rhdl`](rtl/one-hot-enum.rhdl) | Nominal one-hot enums selecting named datapath result families |
+| [`rtl/masks.rhdl`](rtl/masks.rhdl) | Non-numeric lane sets, bitwise set operations, and explicit selector widening |
+| [`rtl/shifts.rhdl`](rtl/shifts.rhdl) | Logical shifts with host constants and independent hardware amount widths |
+| [`rtl/multiply.rhdl`](rtl/multiply.rhdl) | Modular same-width unsigned multiplication |
+| [`rtl/expanding-arithmetic.rhdl`](rtl/expanding-arithmetic.rhdl) | Lossless unsigned addition plus signed and unsigned multiplication |
+| [`rtl/fir-filter.rhdl`](rtl/fir-filter.rhdl) | Signed direct-form FIR filtering with generated taps, explicit widths, and balanced summation |
+| [`rtl/counter.rhdl`](rtl/counter.rhdl) | Host helper functions accepting and returning hardware |
+| [`rtl/sync-counter.rhdl`](rtl/sync-counter.rhdl) | Ambient clock/reset policy and explicit override |
+| [`rtl/enable-shift-register.rhdl`](rtl/enable-shift-register.rhdl) | Hardware conditionals, register hold, and synchronous reset |
+| [`rtl/reset-shift-register.rhdl`](rtl/reset-shift-register.rhdl) | Generic enabled shift register with ambient synchronous reset |
+| [`rtl/hierarchy.rhdl`](rtl/hierarchy.rhdl) | Reused module definitions and child-port access |
+| [`rtl/nested-circuit.rhdl`](rtl/nested-circuit.rhdl) | Lexically private child generators with explicit hardware boundaries |
+| [`rtl/layered-adder.rhdl`](rtl/layered-adder.rhdl) | Ordinary imported library plus generated structure |
+| [`rtl/fresh-generators.rhdl`](rtl/fresh-generators.rhdl) | Automatic reuse of equivalent module specializations |
+| [`rtl/host-parameters.rhdl`](rtl/host-parameters.rhdl) | `StableCircuitParam` reuse and hardware-type parameters |
+| [`rtl/generator-parameters.rhdl`](rtl/generator-parameters.rhdl) | Positional, keyword, typed, defaulted, and synchronous generator parameters |
+| [`rtl/register-forms.rhdl`](rtl/register-forms.rhdl) | Inferred register types, immediate next values, reset values, and direct drives |
+| [`rtl/tiny-simd.rhdl`](rtl/tiny-simd.rhdl) | Integrated host-specialized SIMD, bundles, enums, memory, vectors, and state |
+| [`rtl/stack.rhdl`](rtl/stack.rhdl) | Memory, guarded writes, nested hardware control, and bounds checks |
+| [`rtl/async-read-memory.rhdl`](rtl/async-read-memory.rhdl) | Asynchronous reads and synchronous writes |
+| [`rtl/sync-memory.rhdl`](rtl/sync-memory.rhdl) | Circuit-shaped synchronous memory with explicit read and write ports |
+| [`rtl/sync-memory-1rw.rhdl`](rtl/sync-memory-1rw.rhdl) | One shared synchronous read-write physical port |
+| [`rtl/sync-memory-masked.rhdl`](rtl/sync-memory-masked.rhdl) | Byte-masked writes through a shared synchronous memory port |
+| [`rtl/multi-write-memory.rhdl`](rtl/multi-write-memory.rhdl) | Independent same-clock physical write ports |
+| [`rtl/clocked-dpi.rhdl`](rtl/clocked-dpi.rhdl) | DPI procedure effects plus single- and multi-result DPI register state |
+| [`rtl/assertions.rhdl`](rtl/assertions.rhdl) | Reset-suppressed assertions with branch-derived activation guards |
+| [`rtl/width-ops.rhdl`](rtl/width-ops.rhdl) | Concatenation, slicing, and explicit width changes |
+| [`rtl/bundle.rhdl`](rtl/bundle.rhdl) | Type-named fixed and elaboration-conditional bundles, recursive literal shadows, muxes, casts, and state |
+| [`rtl/vector.rhdl`](rtl/vector.rhdl) | Fixed vectors, elaboration-time mapping, selection, `.as_bits()`/`.as_vec(...)` representation changes, aggregate drives, and state |
+| [`rtl/vector-update.rhdl`](rtl/vector-update.rhdl) | Functional replacement and dynamic vector-register writes |
+| [`rtl/table.rhdl`](rtl/table.rhdl) | Host-generated combinational vector table |
+| [`rtl/vec-search.rhdl`](rtl/vec-search.rhdl) | Registered traversal of a host-defined vector pattern |
+| [`rtl/vec-shift-register.rhdl`](rtl/vec-shift-register.rhdl) | Priority aggregate load and shift updates |
+| [`rtl/vec-shift-register-param.rhdl`](rtl/vec-shift-register-param.rhdl) | Host-parameterized vector pipeline |
+| [`rtl/predicate-filter.rhdl`](rtl/predicate-filter.rhdl) | Stable predicate policies elaborated inline through a `Valid` interface |
+| [`rtl/wire.rhdl`](rtl/wire.rhdl) | Forward-readable aggregate wire driven later by element |
+| [`rtl/interface.rhdl`](rtl/interface.rhdl) | Ready-valid fields, bulk connection, and instance reconstruction |
+| [`rtl/interface-specialization.rhdl`](rtl/interface-specialization.rhdl) | Directional parameter compatibility, nested rules, operand reversal, and explicit width adaptation |
+| [`rtl/interface-array.rhdl`](rtl/interface-array.rhdl) | Endpoint arrays, positional sequences, generic interface links, handles, and terminated sinks |
+| [`rtl/nested-interface.rhdl`](rtl/nested-interface.rhdl) | Recursive interface composition and orientation |
+| [`rtl/interface-monitor.rhdl`](rtl/interface-monitor.rhdl) | Read-only endpoint observations and explicit protocol assertions |
+| [`rtl/interface-transform.rhdl`](rtl/interface-transform.rhdl) | Typed custom interface transforms, fanout, and detached terminals |
+| [`rtl/priority-encoder.rhdl`](rtl/priority-encoder.rhdl) | Lower-index-first binary and native `MaybeOneHot` selection over packed and aggregate inputs |
+| [`rtl/bit-utilities.rhdl`](rtl/bit-utilities.rhdl) | Negation, reductions, membership predicates, and enum validity |
 
 ## Standard-library examples
 
@@ -220,7 +220,7 @@ instances, or logic to the generated RTL.
 [`formal/equivalence.rhm`](formal/equivalence.rhm) asks the optional Rosette
 engine to prove that standard-profile and explicitly composed adders are
 behaviorally equivalent. It is excluded from the default example suite so
-ordinary RHDL use does not require Rosette:
+ordinary Rhodium use does not require Rosette:
 
 ```sh
 make examples-formal
@@ -228,14 +228,14 @@ make examples-formal
 
 ## Interface topology composition
 
-[`rhdl/interface-array.rhdl`](rhdl/interface-array.rhdl) separates the generic interface
+[`rtl/interface-array.rhdl`](rtl/interface-array.rhdl) separates the generic interface
 model from ready-valid flow control. It demonstrates direct endpoint bulk
 connection with `<=>`, serial composition of two `interface_link` handles, and
 parallel composition into array-shaped handle or sink ends. Handles and sinks
 work for any directional interface, including the bidirectional `ByteExchange`
 protocol.
 
-[`rhdl/interface-specialization.rhdl`](rhdl/interface-specialization.rhdl) demonstrates
+[`rtl/interface-specialization.rhdl`](rtl/interface-specialization.rhdl) demonstrates
 declaration-owned compatibility between specializations of one nominal
 interface. A provider with greater semantic capacity can satisfy a smaller
 requirement in either `<=>` operand order, including through a nested interface
@@ -265,8 +265,8 @@ for multiline transformations. Pure maps and zips elaborate as local wiring;
 pipes, queues, arbiters, and forks remain explicit circuit instances where
 they represent state or a meaningful structural boundary.
 
-[`rhdl/add-pair.rhm`](rhdl/add-pair.rhm) is intentionally an ordinary Rhombus library,
-showing that useful RHDL composition need not modify a reader or define a
+[`rtl/add-pair.rhm`](rtl/add-pair.rhm) is intentionally an ordinary Rhombus library,
+showing that useful Rhodium composition need not modify a reader or define a
 macro. [`lop/inspect-ir.rhm`](lop/inspect-ir.rhm) is an intentionally non-CIRCT
 consumer that walks the public IR.
 
@@ -276,12 +276,12 @@ Run every example with:
 make examples
 ```
 
-The directory-specific targets `examples-rhdl`, `examples-clocking`,
+The directory-specific targets `examples-rhodium`, `examples-clocking`,
 `examples-std`, `examples-noc`, `examples-lop`,
 `examples-rfpl`, `examples-riscv`, `examples-chi`, and
 `examples-cores` run one ownership group. CI selects only groups affected by
 the changed implementation layer: core and frontend changes reach every group,
-standard-library changes reach every group that imports `rhdl/std`, and domain
+standard-library changes reach every group that imports `rhodium/std`, and domain
 changes remain local to their group.
 
 ## Generated Verilog

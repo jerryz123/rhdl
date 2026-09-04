@@ -1,0 +1,177 @@
+#lang rhodium
+// Demonstrates arithmetic negation, reductions, membership tests, and enum validity.
+
+hardware_enum MembershipState:
+  Idle
+  Refill
+  Respond
+
+hardware_enum SparseOpcode(~width: 3):
+  First = 0
+  Middle = 3
+  Last = 7
+
+hardware_enum DenseState:
+  Zero
+  One
+  Two
+  Three
+
+hardware_enum OneHotChoice(~encoding: one_hot):
+  Left
+  Right
+
+circuit ArithmeticNegation():
+  input unsigned_value: Bits(8)
+  input signed_value: SInt(8)
+  output unsigned_result: Bits(8)
+  output signed_result: SInt(8)
+
+  unsigned_result <== -unsigned_value
+  signed_result <== -signed_value
+
+circuit Reductions():
+  input bits_value: Bits(8)
+  input flags: Vec(4, Bool)
+  output any_bits: Bool
+  output any_flags: Bool
+  output all_bits: Bool
+  output all_flags: Bool
+  output any_list: Bool
+  output all_list: Bool
+  output any_empty: Bool
+  output all_empty: Bool
+
+  any_bits <== or_reduce(bits_value)
+  any_flags <== or_reduce(flags)
+  all_bits <== and_reduce(bits_value)
+  all_flags <== and_reduce(flags)
+  any_list <== or_reduce([flags[0], flags[1], flags[2], flags[3]])
+  all_list <== and_reduce([flags[0], flags[1], flags[2], flags[3]])
+  any_empty <== or_reduce([])
+  all_empty <== and_reduce([])
+
+circuit Membership():
+  input state: MembershipState
+  input value: Bits(4)
+  output active: Bool
+  output small: Bool
+  output exact: Bool
+  output listed: Bool
+  output never: Bool
+
+  active <== state.is_one_of(MembershipState.Refill, MembershipState.Respond)
+  small <== value.is_one_of(bits(1, 4), bits(2, 4), bits(3, 4))
+  exact <== value.is_one_of(bits(7, 4))
+  listed <== value.is_one_of([bits(4, 4), bits(5, 4)])
+  never <== value.is_one_of([])
+
+circuit EnumValidity():
+  input sparse: SparseOpcode
+  input dense: DenseState
+  input one_hot: OneHotChoice
+  output sparse_valid: Bool
+  output dense_valid: Bool
+  output one_hot_valid: Bool
+
+  sparse_valid <== enum_valid(sparse)
+  dense_valid <== enum_valid(dense)
+  one_hot_valid <== enum_valid(one_hot)
+
+def negation_design = elaborate(ArithmeticNegation())
+def reduction_design = elaborate(Reductions())
+def membership_design = elaborate(Membership())
+def enum_validity_design = elaborate(EnumValidity())
+
+def negation_verilog_reference = @str|<<{
+module ArithmeticNegation(
+  input  [7:0] unsigned_value,
+               signed_value,
+  output [7:0] unsigned_result,
+               signed_result
+);
+
+  assign unsigned_result = 8'h0 - unsigned_value;
+  assign signed_result = 8'h0 - signed_value;
+endmodule
+}>>|
+
+def reduction_verilog_reference = @str|<<{
+module Reductions(
+  input  [7:0] bits_value,
+  input  [3:0] flags,
+  output       any_bits,
+               any_flags,
+               all_bits,
+               all_flags,
+               any_list,
+               all_list,
+               any_empty,
+               all_empty
+);
+
+  wire [3:0] _GEN = flags;
+  wire [3:0] _GEN_0 = {flags[2'h0], flags[2'h1], flags[2'h2], flags[2'h3]};
+  assign any_bits = |bits_value;
+  assign any_flags = |_GEN;
+  assign all_bits = &bits_value;
+  assign all_flags = &_GEN;
+  assign any_list = |_GEN_0;
+  assign all_list = &_GEN_0;
+  assign any_empty = 1'h0;
+  assign all_empty = 1'h1;
+endmodule
+}>>|
+
+def membership_verilog_reference = @str|<<{
+module Membership(
+  input  [1:0] state,
+  input  [3:0] value,
+  output       active,
+               small_0,
+               exact,
+               listed,
+               never
+);
+
+  assign active = |{state == 2'h1, state == 2'h2};
+  assign small_0 = |{value == 4'h1, value == 4'h2, value == 4'h3};
+  assign exact = value == 4'h7;
+  assign listed = |{value == 4'h4, value == 4'h5};
+  assign never = 1'h0;
+endmodule
+}>>|
+
+def enum_validity_verilog_reference = @str|<<{
+module EnumValidity(
+  input  [2:0] sparse,
+  input  [1:0] dense,
+               one_hot,
+  output       sparse_valid,
+               dense_valid,
+               one_hot_valid
+);
+
+  assign sparse_valid = |{sparse == 3'h0, sparse == 3'h3, &sparse};
+  assign dense_valid = |{dense == 2'h0, dense == 2'h1, dense == 2'h2, &dense};
+  assign one_hot_valid = |{one_hot == 2'h1, one_hot == 2'h2};
+endmodule
+}>>|
+
+export:
+  MembershipState
+  SparseOpcode
+  DenseState
+  OneHotChoice
+  ArithmeticNegation
+  Reductions
+  Membership
+  EnumValidity
+  negation_design
+  reduction_design
+  membership_design
+  enum_validity_design
+  negation_verilog_reference
+  reduction_verilog_reference
+  membership_verilog_reference
+  enum_validity_verilog_reference

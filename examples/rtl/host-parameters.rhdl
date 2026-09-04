@@ -1,0 +1,61 @@
+#lang rhodium
+// Demonstrates StableCircuitParam reuse and hardware-type circuit parameters.
+
+class HostConfig(use_configured_width :: Boolean,
+                 width :: PosInt,
+                 labels :: List):
+  implements StableCircuitParam
+
+fun select_type(fallback_type :: DataType, config :: HostConfig):
+  unless config.labels.length() == 2
+  | error(~who: #'HostParameterized, "expected input and output labels")
+  if config.use_configured_width
+  | Bits(config.width)
+  | fallback_type
+
+circuit HostParameterized(fallback_type :: DataType, config :: HostConfig):
+  def T = select_type(fallback_type, config)
+  input x: T
+  output y: T
+  y <== x
+
+circuit HostWrapper(config :: HostConfig):
+  def T = select_type(Bits(16), config)
+  input x: T
+  output y: T
+  inst u(HostParameterized(Bits(16), config))
+  u.x <== x
+  y <== u.y
+
+fun top():
+  HostWrapper(HostConfig(#true, 8, ["input", "output"]))
+
+def design = elaborate(top())
+
+def verilog_reference = @str|<<{
+module HostWrapper(
+  input  [7:0] x,
+  output [7:0] y
+);
+
+  HostParameterized u (
+    .x (x),
+    .y (y)
+  );
+endmodule
+
+module HostParameterized(
+  input  [7:0] x,
+  output [7:0] y
+);
+
+  assign y = x;
+endmodule
+}>>|
+
+export:
+  HostConfig
+  HostParameterized
+  HostWrapper
+  design
+  verilog_reference

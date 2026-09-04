@@ -1,0 +1,128 @@
+#lang rhodium
+// Defines Rhodium's canonical valid-only and ready-valid protocol interfaces.
+
+// Every cycle with valid asserted carries one payload; there is no
+// backpressure signal or pending-transfer state.
+interface Valid(T :: DataType):
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    valid: Bool
+    bits: T
+
+// The ready-valid family has independent payload and stability axes:
+//
+// DecoupledCtrl ---- add payload ----> Decoupled(T)
+//       |                                  |
+//  strengthen                         strengthen
+//       v                                  v
+// IrrevocableCtrl -- add payload --> Irrevocable(T)
+//
+// Horizontal refinement adds `bits`; vertical strengthening promises that an
+// offered transaction cannot be withdrawn before it is accepted.
+
+// Defines the reusable offer/accept control plane. Transfer occurs whenever
+// valid and ready are both asserted in the same cycle.
+interface DecoupledCtrl():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    valid: Bool
+
+  consumer -> producer:
+    ready: Bool
+
+// Once valid is asserted, the indicated offer cannot be withdrawn until a
+// transfer. What the offer denotes is defined by the refining protocol.
+interface IrrevocableCtrl() refines DecoupledCtrl()
+
+// Adds an unconstrained payload to the decoupled control plane. Before a
+// transfer, the producer may withdraw valid or change bits.
+interface Decoupled(T :: DataType) refines DecoupledCtrl():
+  producer -> consumer:
+    bits: T
+
+// Adds an explicit payload to the persistent-offer control plane. It also
+// supports the weaker Decoupled payload contract for producer-side connection.
+// While valid is waiting for ready, both valid and bits remain asserted and
+// stable.
+interface Irrevocable(T :: DataType) refines IrrevocableCtrl():
+  supports producer: Decoupled(T)
+  producer -> consumer:
+    bits: T
+
+// Normalizes any nominal payload-bearing refinement to the canonical contract
+// that its provider promises. Display names deliberately play no role.
+fun decoupled_protocol_type(protocol :: InterfaceType):
+  def payload_member = protocol.members.find(
+    fun (member :: InterfaceMember): member.name == "bits" && data_type(member.type)
+  )
+  if !payload_member
+  | #false
+  | block:
+      def payload_type = payload_member.type
+      cond
+      | interface_type_supports(protocol, Irrevocable(payload_type)):
+          Irrevocable(payload_type)
+      | interface_type_supports(protocol, Decoupled(payload_type)):
+          Decoupled(payload_type)
+      | ~else: #false
+
+// Valid-only refinements similarly normalize by nominal support instead of by
+// the declaration's diagnostic name.
+fun valid_protocol_type(protocol :: InterfaceType):
+  def payload_member = protocol.members.find(
+    fun (member :: InterfaceMember): member.name == "bits" && data_type(member.type)
+  )
+  if payload_member && interface_type_supports(
+    protocol,
+    Valid(payload_member.type)
+  )
+  | Valid(payload_member.type)
+  | #false
+
+// Reports the transfer event for any endpoint that nominally refines the
+// decoupled control contract.
+fun fire(
+  endpoint :: Endpoint.supports(DecoupledCtrl())
+) :~ Bool:
+  endpoint.valid & endpoint.ready
+
+// Extracts the payload type used by flow-control helpers. Both payload-bearing
+// ready-valid contracts are accepted; the subsequent bulk connection still
+// performs the complete nominal type and direction check.
+fun decoupled_payload_type(endpoint :: Endpoint):
+  def protocol = decoupled_protocol_type(endpoint.type)
+  unless protocol
+  | error(~who: #'decoupled_payload_type,
+          "flow-control chaining requires a Decoupled or Irrevocable endpoint")
+  protocol.members.find(
+    fun (member :: InterfaceMember): member.name == "bits"
+  ).type
+
+// Validates the payloadless ready-valid family for Ctrl flow helpers while
+// retaining the endpoint itself and its static interface information.
+fun ctrl_endpoint(endpoint :: Endpoint) :~ Endpoint:
+  def control_contract = DecoupledCtrl()
+  unless interface_type_supports(endpoint.type, control_contract) && (
+    endpoint.type.members.length() == control_contract.members.length()
+  )
+  | error(~who: #'ctrl_endpoint,
+          "control-flow chaining requires a DecoupledCtrl or IrrevocableCtrl endpoint")
+  endpoint
+
+export:
+  Valid
+  DecoupledCtrl
+  IrrevocableCtrl
+  Decoupled
+  Irrevocable
+  fire
+  decoupled_protocol_type
+  valid_protocol_type
+  decoupled_payload_type
+  ctrl_endpoint

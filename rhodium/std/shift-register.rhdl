@@ -1,0 +1,85 @@
+#lang rhodium
+// Defines a named generic shift register over arbitrary data with optional reset and enable.
+
+import:
+  rhombus/meta open
+
+fun shift_register_data_type(value :: Hardware):
+  def T = hardware_value_type(value)
+  unless data_type(T)
+  | error(~who: #'shift_register, "input must have a DataType")
+  T
+
+fun shift_register_initial(T :: DataType,
+                           stages :: PosInt,
+                           init :~ HardwareLiteral):
+  unless init is_a HardwareLiteral
+  | error(~who: #'shift_register,
+          "initial value must be a hardware literal")
+  def init_type = hardware_value_type(init)
+  cond
+  | T.type_equal(init_type) && init_type.type_equal(T):
+      vec(for List (_ in 0..stages): init)
+  | Vec(stages, T).type_equal(init_type) && init_type.type_equal(Vec(stages, T)):
+      init
+  | ~else:
+      error(
+        ~who: #'shift_register,
+        "initial value must have the element type or the full stage-vector type"
+      )
+
+fun shift_register_enable(enable :: Hardware):
+  unless Bool.type_equal(hardware_value_type(enable))
+  | error(~who: #'shift_register, "enable must have Bool hardware type")
+  enable
+
+fun shift_register_next(value :: Hardware,
+                        stages :: PosInt,
+                        state :: Vec(stages, hardware_value_type(value)))
+  :: Vec(stages, hardware_value_type(value)):
+  vec([value] ++ (for List (index in 0..(stages - 1)): state[index]))
+
+defn.macro
+| 'shift_register $(name :: Identifier)($value, $stages)':
+    '«
+       def shift_register_value = $value
+       def shift_register_stages = $stages
+       def shift_register_type = shift_register_data_type(shift_register_value)
+       reg $name(Vec(shift_register_stages, shift_register_type))
+       $name <== shift_register_next(shift_register_value, shift_register_stages, $name)
+     »'
+| 'shift_register $(name :: Identifier)($value, $stages, ~init: $init)':
+    '«
+       def shift_register_value = $value
+       def shift_register_stages = $stages
+       def shift_register_type = shift_register_data_type(shift_register_value)
+       def shift_register_init = shift_register_initial(shift_register_type, shift_register_stages, $init)
+       reg $name(Vec(shift_register_stages, shift_register_type), ~init: shift_register_init)
+       $name <== shift_register_next(shift_register_value, shift_register_stages, $name)
+     »'
+| 'shift_register $(name :: Identifier)($value, $stages, ~enable: $enable)':
+    '«
+       def shift_register_value = $value
+       def shift_register_stages = $stages
+       def shift_register_type = shift_register_data_type(shift_register_value)
+       def shift_register_guard = shift_register_enable($enable)
+       reg $name(Vec(shift_register_stages, shift_register_type))
+       when shift_register_guard:
+         $name <== shift_register_next(shift_register_value, shift_register_stages, $name)
+     »'
+| 'shift_register $(name :: Identifier)($value, $stages, ~init: $init, ~enable: $enable)':
+    '«
+       def shift_register_value = $value
+       def shift_register_stages = $stages
+       def shift_register_type = shift_register_data_type(shift_register_value)
+       def shift_register_init = shift_register_initial(shift_register_type, shift_register_stages, $init)
+       def shift_register_guard = shift_register_enable($enable)
+       reg $name(Vec(shift_register_stages, shift_register_type), ~init: shift_register_init)
+       when shift_register_guard:
+         $name <== shift_register_next(shift_register_value, shift_register_stages, $name)
+     »'
+| 'shift_register $(name :: Identifier)($value, $stages, ~enable: $enable, ~init: $init)':
+    'shift_register $name($value, $stages, ~init: $init, ~enable: $enable)'
+
+export:
+  shift_register

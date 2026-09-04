@@ -2,8 +2,8 @@
 
 # AMBA CHI domain library
 
-`chi/` is the standalone AMBA CHI domain library. It belongs beside RHDL
-rather than under `rhdl/std`: CHI parameters, flits, node roles, transaction
+`chi/` is the standalone AMBA CHI domain library. It belongs beside Rhodium
+rather than under `rhodium/std`: CHI parameters, flits, node roles, transaction
 rules, monitors, and components are protocol-specific. Only reusable transport
 mechanisms belong in the generic standard library.
 
@@ -32,19 +32,19 @@ preserves those boundaries:
   protocol monitoring.
 - `devices/` consumes this public CHI surface and owns endpoint-specific
   register maps and device behavior; CHI does not import platform devices.
-- `rhdl/std` owns only protocol-neutral credited transport, buffering, ID and
+- `rhodium/std` owns only protocol-neutral credited transport, buffering, ID and
   address sets, storage, and ordinary hardware utilities.
 - `noc/` remains pure host-side topology and routing analysis. CHI consumes
   validated, materialized routing artifacts through its pure channel
-  compilations and RTL endpoint adapters, but CHI RTL does not pull RHDL
+  compilations and RTL endpoint adapters, but CHI RTL does not pull Rhodium
   construction into the NoC model.
-- RHDL core and frontend need no CHI-specific operations. Bundles, parameterized
+- Rhodium core and frontend need no CHI-specific operations. Bundles, parameterized
   interfaces, connection compatibility, registers, memories, and assertions
   can express the initial implementation.
 
 The public facade is [`main.rhdl`](main.rhdl). Package modules may import the
-public `#lang rhdl` surface, protocol-neutral modules under `rhdl/std`, and
-other `chi/` modules. They must not import RHDL core, frontend, or backend
+public `#lang rhodium` surface, protocol-neutral modules under `rhodium/std`, and
+other `chi/` modules. They must not import Rhodium core, frontend, or backend
 implementation modules.
 
 ## Wire foundation
@@ -81,7 +81,7 @@ Early Write Acknowledge bits. This preserves the exact packed flits while
 preventing unrelated same-width values from being connected accidentally.
 
 CHI assigns several semantic names to the same physical bits depending on the
-opcode. The RHDL records expose one deliberately explicit field for each such
+opcode. The Rhodium records expose one deliberately explicit field for each such
 physical location, including `snp_attr_or_do_dwt`,
 `return_nid_or_stash_nid_or_data_target`, `dbid_or_group_id`, and
 `dbid_or_mecid`. Protocol helpers and monitors interpret the aliases;

@@ -1,6 +1,6 @@
-<!-- Compares the core denotation and authoring semantics of RHDL and Amaranth. -->
+<!-- Compares the core denotation and authoring semantics of Rhodium and Amaranth. -->
 
-# RHDL and Amaranth
+# Rhodium and Amaranth
 
 ## Scope and thesis
 
@@ -10,18 +10,18 @@ This comparison uses the current
 [Amaranth documentation](https://amaranth-lang.org/docs/amaranth/latest/intro.html)
 and focuses on language semantics and authoring syntax.
 
-Amaranth and RHDL are close in scale and intent. Both execute a host-language
+Amaranth and Rhodium are close in scale and intent. Both execute a host-language
 program to construct explicit RTL. Amaranth centers its model on Python
-`Value` expressions, assignable `Signal`s, and named control domains. RHDL
+`Value` expressions, assignable `Signal`s, and named control domains. Rhodium
 presents one broad frontend `Hardware` surface, then factors readable `Value`s
 from driveable `Place`s in its verified core IR. The substantive contrast is
-between Amaranth's growing shapes and ordered assignments and RHDL's exact
+between Amaranth's growing shapes and ordered assignments and Rhodium's exact
 types, one final binding, explicit priority, and separate current/next-state
 semantics.
 
 ## Summary
 
-| Concern | RHDL | Amaranth |
+| Concern | Rhodium | Amaranth |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | Python evaluation constructs `Value` expressions and module fragments |
 | Hardware object | Common frontend `Hardware`; core IR factors readable `Value` from driveable `Place` | A `Signal` is both a readable value and an assignment target |
@@ -44,7 +44,7 @@ draws this boundary explicitly: Python `if` and loops choose generated
 structure, while `m.If`, `m.Switch`, and value operators describe circuit-time
 behavior.
 
-RHDL uses the same two phases. Ordinary Rhombus computation chooses generated
+Rhodium uses the same two phases. Ordinary Rhombus computation chooses generated
 structure; `when`, `switch`, and hardware operators create runtime logic.
 
 The completed assignments in both systems denote concurrent logic. Python or
@@ -54,10 +54,10 @@ conditional rules.
 
 An Amaranth `Elaboratable` returns a `Module`, `Instance`, or another
 elaboratable, and recursive preparation turns these fragments into a complete
-design. RHDL executes a circuit generator inside one active design builder and
+design. Rhodium executes a circuit generator inside one active design builder and
 immediately creates a module definition. All frontend forms converge on the
-same [core representation](../../rhdl/core/README.md). Amaranth's fragment
-protocol favors Python object composition; RHDL's explicit design ownership
+same [core representation](../../rhodium/core/README.md). Amaranth's fragment
+protocol favors Python object composition; Rhodium's explicit design ownership
 makes the completed semantic object easier to name and inspect.
 
 ## Expressions, types, and widths
@@ -78,7 +78,7 @@ intermediate overflow, but the stored width is not determined by the expression
 alone. The official guide documents these
 [shape and value rules](https://amaranth-lang.org/docs/amaranth/latest/guide.html#shapes).
 
-RHDL requires positive, elaboration-known widths. Ordinary arithmetic is
+Rhodium requires positive, elaboration-known widths. Ordinary arithmetic is
 fixed-width and modular; expanding arithmetic, extension, truncation, and casts
 are different operations. Connections require complete type equality, not
 only a compatible width. `Bits(8)`, `SInt(8)`, `Bool`, enums, one-hot controls,
@@ -86,10 +86,10 @@ records, and vectors therefore retain their semantic distinction through the
 IR.
 
 Amaranth's approach is elegant when the expression should follow mathematical
-range rules. RHDL's approach is elegant when each operation should expose the
+range rules. Rhodium's approach is elegant when each operation should expose the
 implemented datapath width without consulting its eventual destination. Both
 allow semantic types to be layered above bit vectors; Amaranth does so through
-castable Python protocols, while RHDL uses hardware-type objects with explicit
+castable Python protocols, while Rhodium uses hardware-type objects with explicit
 operation capabilities.
 
 ## Typed literals, patterns, and relational decode
@@ -102,7 +102,7 @@ and `ValueCastable` objects can add semantic data views, but the masked pattern
 itself is a flat value-level comparison rather than a recursively typed
 aggregate relation.
 
-RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+Rhodium's [typed decode layer](../../rhodium/std/README.md#typed-decode-patterns)
 instead represents exact typed literals and recursive aggregate `Pattern` cubes
 as host data. `DecodeTable` validates an unordered, nonoverlapping relation;
 sparse output patterns preserve which fields are free, and `DecodeGen` carries
@@ -111,9 +111,9 @@ when several control fields or independently authored decoder fragments must
 remain one relation. Amaranth remains more general for arbitrary
 Python-generated tests and ordered conditional behavior.
 
-The resulting RHDL decoder leaves downstream synthesis free to share Boolean
+The resulting Rhodium decoder leaves downstream synthesis free to share Boolean
 work across outputs and use output don't-cares that a naive sequence of
-comparisons might lose. RHDL does not run a minimizer itself. An Amaranth
+comparisons might lose. Rhodium does not run a minimizer itself. An Amaranth
 design can state the same Boolean function and a downstream synthesis tool may
 recover the same or better implementation.
 
@@ -131,7 +131,7 @@ to its initial value, which makes the combinational network total rather than
 inferring a latch. These rules are described in the guide's
 [assignment and control-domain sections](https://amaranth-lang.org/docs/amaranth/latest/guide.html#control-domains).
 
-RHDL gives every destination one final binding. Hardware conditionals collect
+Rhodium gives every destination one final binding. Hardware conditionals collect
 branch assignments and produce a mux or enable followed by one drive. Priority
 is visible in the conditional chain, but ordinary connection order is not a
 priority mechanism. Read and drive contexts select a register's current and
@@ -141,10 +141,10 @@ be fully covered.
 
 The practical difference is syntactic. Amaranth's ordered assignments make
 default-then-override control compact and allow separate helpers to contribute
-updates to one signal. RHDL requires those alternatives to meet at one
+updates to one signal. Rhodium requires those alternatives to meet at one
 selection boundary, which is more explicit but can require more structure.
 Amaranth also attaches state to named clock domains, including domain edge and
-reset policy. RHDL attaches a clock directly to each register and offers an
+reset policy. Rhodium attaches a clock directly to each register and offers an
 ambient synchronous-circuit convention; domain identity is not a general
 property of every signal.
 
@@ -157,7 +157,7 @@ signature to that pattern. This is a natural fit for Python classes: a reusable
 object can expose configuration and methods before or independently of its RTL
 implementation.
 
-RHDL circuit calls create definitions, and explicit instances connect those
+Rhodium circuit calls create definitions, and explicit instances connect those
 definitions inside parents. Hardware crosses hierarchy through ports. Pure
 functions over current-circuit values stay inline; stateful or intentionally
 structural abstractions use circuits. That distinction makes hierarchy a
@@ -174,10 +174,10 @@ Base signatures compare structurally; signature subclasses compare by identity
 unless they override equality, which lets an abstraction define nominal or
 domain-specific compatibility.
 
-RHDL interfaces begin from nominal protocol identity. They name two roles,
+Rhodium interfaces begin from nominal protocol identity. They name two roles,
 orient members by role, and can refine or declare support for other nominal
 contracts. Linear handles add single-consumption semantics for composed
-topologies. Amaranth offers the more general structural wiring object; RHDL
+topologies. Amaranth offers the more general structural wiring object; Rhodium
 puts protocol meaning and topology consumption directly into connection
 semantics.
 
@@ -191,7 +191,7 @@ transfer, and the producer may not make `valid` combinationally depend on
 the signature. Components and FIFOs then compose through ordinary
 `wiring.connect` calls and explicit submodule construction.
 
-RHDL's standard flow layer provides a substantially broader composition
+Rhodium's standard flow layer provides a substantially broader composition
 abstraction without adding flow nodes to its core IR. A configured stage is an
 ordinary unary host function, so `source |> queue(4) |> pipe(2)` constructs a
 serial path. Starting from a payload or protocol type constructs a detached
@@ -201,11 +201,11 @@ expression language. Pure transformations stay inline and stateful stages
 remain explicit module instances. The completed ordinary graph is then checked
 for combinational cycles, including paths through instances.
 
-RHDL also distinguishes weak `Decoupled` offers from stable `Irrevocable`
+Rhodium also distinguishes weak `Decoupled` offers from stable `Irrevocable`
 offers, and separately models nonbackpressured `Valid` and credited transport.
 That is more expressive than Amaranth's single strong stream contract when a
 network intentionally permits a stalled offer to change. It is not currently
-a stronger guarantee because RHDL emits no general stability assertions.
+a stronger guarantee because Rhodium emits no general stability assertions.
 Amaranth's stream API is much less of a topology algebra, but the behavioral
 rule it does state is simpler and more uniform.
 
@@ -223,7 +223,7 @@ inference or the assignment target; priority may depend on assignment order;
 implementation may depend on the domain that owns the signal. These rules are
 regular and documented, but they are not always visible in one expression.
 
-RHDL uses Rhombus functions, classes, macros, and language layers through a
+Rhodium uses Rhombus functions, classes, macros, and language layers through a
 common frontend hardware annotation. Core later records readable sources and
 driveable destinations separately. That representation helps state the
 invariants, but the important author-facing rules are explicit type adaptation,
@@ -236,15 +236,15 @@ surrounding statements.
 Amaranth is cleaner when a design benefits from lightweight Python objects,
 mathematically growing expressions, named domains, and concise ordered
 assignment. Its unified `Signal` is a coherent abstraction, not a semantic
-defect. RHDL is cleaner when implementation width, semantic type, final
+defect. Rhodium is cleaner when implementation width, semantic type, final
 binding, and the point of priority should be apparent at the operation itself.
-For ready-valid networks, RHDL additionally supplies the more expressive and
+For ready-valid networks, Rhodium additionally supplies the more expressive and
 uniform topology syntax, while Amaranth supplies a deliberately smaller and
 more categorical stream contract. Amaranth optimizes low-friction
-construction; RHDL optimizes local reconstruction and explicit composition of
+construction; Rhodium optimizes local reconstruction and explicit composition of
 the elaborated circuit.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
 1. Keep exact connection types, while learning from Amaranth's concise and
    consistently documented shape rules.
@@ -263,8 +263,8 @@ the elaborated circuit.
 - [Amaranth pattern matching](https://amaranth-lang.org/docs/amaranth/latest/guide.html#match-operator)
 - [Amaranth interfaces and connections](https://amaranth-lang.org/docs/amaranth/latest/stdlib/wiring.html)
 - [Amaranth data streams](https://amaranth-lang.org/docs/amaranth/latest/stdlib/stream.html)
-- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
-- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
-- [RHDL core semantics](../../rhdl/core/README.md)
-- [RHDL frontend semantics](../../rhdl/frontend/README.md)
-- [RHDL frontend layers](../../rhdl/frontend/layers/README.md)
+- [Rhodium standard flow composition](../../rhodium/std/README.md#flow-control-circuits)
+- [Rhodium typed decode patterns](../../rhodium/std/README.md#typed-decode-patterns)
+- [Rhodium core semantics](../../rhodium/core/README.md)
+- [Rhodium frontend semantics](../../rhodium/frontend/README.md)
+- [Rhodium frontend layers](../../rhodium/frontend/layers/README.md)

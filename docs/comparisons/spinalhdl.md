@@ -1,6 +1,6 @@
-<!-- Compares the core denotation and authoring semantics of RHDL and SpinalHDL. -->
+<!-- Compares the core denotation and authoring semantics of Rhodium and SpinalHDL. -->
 
-# RHDL and SpinalHDL
+# Rhodium and SpinalHDL
 
 ## Scope and thesis
 
@@ -10,17 +10,17 @@ This comparison uses the current
 [SpinalHDL documentation](https://spinalhdl.github.io/SpinalDoc-RTD/master/index.html)
 and concentrates on the language's ordinary RTL model.
 
-SpinalHDL and RHDL both aim to make constructed hardware predictable rather
+SpinalHDL and Rhodium both aim to make constructed hardware predictable rather
 than emulate an event-driven HDL. SpinalHDL builds a mutable netlist through a
-fluent Scala API and checks many structural mistakes after elaboration. RHDL's
+fluent Scala API and checks many structural mistakes after elaboration. Rhodium's
 frontend presents a common hardware surface, while core factors readable
-`Value`s from driveable `Place`s. SpinalHDL is syntactically economical; RHDL
+`Value`s from driveable `Place`s. SpinalHDL is syntactically economical; Rhodium
 is more explicit about exact types, one final binding, conditional priority,
 and current/next-state semantics.
 
 ## Summary
 
-| Concern | RHDL | SpinalHDL |
+| Concern | Rhodium | SpinalHDL |
 |---|---|---|
 | Source denotation | Rhombus evaluation constructs one public core IR | Scala evaluation constructs an in-memory netlist that later passes transform/check phases |
 | Hardware object | Common frontend hardware surface; core factors readable `Value` from driveable `Place` | Mutable-reference-like `Data` objects denote signals and destinations |
@@ -52,8 +52,8 @@ The resulting graph denotes concurrent hardware. Scala execution order builds
 that graph; it is not a cycle-by-cycle schedule, except where ordered
 assignments deliberately encode mux priority.
 
-RHDL also runs its host program to construct hardware, but its completed
-denotation is a documented [core IR](../../rhdl/core/README.md). Frontend
+Rhodium also runs its host program to construct hardware, but its completed
+denotation is a documented [core IR](../../rhodium/core/README.md). Frontend
 profiles and language layers present a common hardware vocabulary and all
 produce that representation. Core then uses `Value` for a readable result and
 `Place` for a destination. This makes ownership and direction explicit in the
@@ -62,7 +62,7 @@ enforce the same policy.
 
 Both systems are deterministic construction languages in the ordinary case.
 SpinalHDL exposes more of elaboration as mutation of shared graph references;
-RHDL exposes more of the result as creation of typed values and final drives.
+Rhodium exposes more of the result as creation of typed values and final drives.
 
 ## Expressions, types, and widths
 
@@ -82,7 +82,7 @@ for the target width. These rules are documented in the
 and
 [assignment semantics](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Semantic/assignments.html).
 
-RHDL requires every width to be a positive host integer at construction.
+Rhodium requires every width to be a positive host integer at construction.
 Connections and ordinary operators require complete type equality; extension,
 truncation, and representation casts are separate expressions. Its packed
 types may expose bitwise, arithmetic, or signed-arithmetic capabilities while
@@ -92,7 +92,7 @@ match.
 
 SpinalHDL occupies a middle ground between pervasive inference and strict
 explicitness: most mismatches are errors, yet declarations and contextual
-`.resized` expressions can leave size to surrounding statements. RHDL makes
+`.resized` expressions can leave size to surrounding statements. Rhodium makes
 the implemented width more local, while SpinalHDL saves repetition when the
 destination is already the clearest size specification.
 
@@ -106,17 +106,17 @@ builds decode tables from masked inputs and outputs, applies
 Quine–McCluskey-style simplification, and supports an explicit default. This is
 a genuine decoder generator, not merely syntax around a `switch`.
 
-RHDL's [typed decode layer](../../rhdl/std/README.md#typed-decode-patterns)
+Rhodium's [typed decode layer](../../rhodium/std/README.md#typed-decode-patterns)
 uses semantic literals and recursive aggregate cubes to validate one unordered
 decode relation before materializing it. Its sparse output patterns expose
 don't-care freedom, and independently authored rows or output relations can be
 combined before `DecodeGen` preserves them in one sparse backend operation.
-RHDL's distinction is therefore recursive semantic aggregate structure and
+Rhodium's distinction is therefore recursive semantic aggregate structure and
 explicit relation composition, not the existence of masked tables or
 minimization. SpinalHDL remains terser for a local `switch` and competitive
 for a flat decode table.
 
-RHDL leaves output don't-cares and the complete relation available to
+Rhodium leaves output don't-cares and the complete relation available to
 downstream synthesis, but it does not run a Boolean minimizer itself. It does
 not guarantee better PPA than SpinalHDL's decoder minimization plus synthesis:
 target mapping and the surrounding logic determine the eventual result.
@@ -138,7 +138,7 @@ default-then-override and priority logic. The separate `\=` operator updates a
 combinational graph reference immediately for deliberately imperative
 construction.
 
-RHDL instead gives each destination one final binding. `when` and `switch`
+Rhodium instead gives each destination one final binding. `when` and `switch`
 capture branch alternatives and lower them to one selected value or guarded
 effect. Read and drive contexts select a register's current and next state;
 core records those as a value and a place. A conditionally uncovered next state
@@ -146,10 +146,10 @@ holds. This removes connection order as an ambient source of priority, but
 requires alternatives from separate helpers to be brought together explicitly.
 
 SpinalHDL's `ClockDomain` makes clock, reset, edge, polarity, and enable policy
-an ambient construction context, and `ClockingArea` scopes it. RHDL registers
+an ambient construction context, and `ClockingArea` scopes it. Rhodium registers
 carry an explicit clock in core and may use the `sync_circuit` convention for
 an ambient clock/reset pair. SpinalHDL's domain context is more expressive and
-compact for groups of state; RHDL's operand-level clock is simpler to recover
+compact for groups of state; Rhodium's operand-level clock is simpler to recover
 from an individual register node.
 
 ## Hierarchy, interfaces, and composition
@@ -162,7 +162,7 @@ and inline organization. The
 [component guide](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/components_hierarchy.html)
 also defines which parent and child ports may be read.
 
-RHDL makes a similar distinction through functions and circuits. Pure helpers
+Rhodium makes a similar distinction through functions and circuits. Pure helpers
 over values add operations directly to the containing circuit. Calling a
 `circuit` generator creates a definition, and an explicit instance creates the
 hierarchical relationship. Hardware crosses through ports; host parameters
@@ -173,24 +173,24 @@ members, `IMasterSlave` can assign complementary directions for a reusable
 interface, and `<>` infers how matching members should connect. This is a
 structural and directional model built from Scala classes and signal metadata.
 
-RHDL interfaces are nominal protocol descriptions. They define two named
+Rhodium interfaces are nominal protocol descriptions. They define two named
 roles, orient members by role, and may refine or support other protocol
 identities. Linear handles can make a topology object single-use. SpinalHDL's
 approach is lightweight and lets ordinary bundle methods become a fluent
-interface API. RHDL's approach carries more compatibility meaning than field
+interface API. Rhodium's approach carries more compatibility meaning than field
 shape and direction alone.
 
 ## Ready-valid flow composition
 
 SpinalHDL's [`Stream`](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/stream.html)
-is the closest direct comparison to RHDL's flow syntax. Methods such as
+is the closest direct comparison to Rhodium's flow syntax. Methods such as
 `queue`, `stage`, `m2sPipe`, `s2mPipe`, `haltWhen`, `throwWhen`, and `map`
 return another connected stream, while dedicated operators insert particular
 timing cuts during connection. Fork, join, arbitration, mux, and demux
 utilities extend that fluent model to branching topologies. It is a coherent
 stream language rather than merely a ready-valid bundle convention.
 
-RHDL moves one step further toward treating the entire topology as a value.
+Rhodium moves one step further toward treating the entire topology as a value.
 The same `|>` application accepts a concrete endpoint or a disconnected
 payload/protocol seed, and the result may be an endpoint, endpoint array, or
 linear `InterfaceHandle`. `parallel` combines independent or heterogeneous
@@ -200,20 +200,20 @@ handle is deliberately consumed once so topology ownership is unambiguous.
 
 The two systems expose ready-valid meaning differently, and their contracts do
 not form a simple precision ordering. SpinalHDL's `Stream` keeps `valid`
-asserted until acceptance but permits a stalled payload to change. RHDL's
+asserted until acceptance but permits a stalled payload to change. Rhodium's
 `Decoupled` makes a weaker pre-transfer promise, while `Irrevocable` requires
-both the offer and payload to remain stable; RHDL has no exact payload-bearing
+both the offer and payload to remain stable; Rhodium has no exact payload-bearing
 name for SpinalHDL's intermediate contract. SpinalHDL also separately provides
-nonbackpressured `Flow`; RHDL separately models nonbackpressured `Valid` and
-credited transport. RHDL stages can make their chosen nominal strengthening or
+nonbackpressured `Flow`; Rhodium separately models nonbackpressured `Valid` and
+credited transport. Rhodium stages can make their chosen nominal strengthening or
 weakening visible. It also keeps pure adapters inline, stateful stages as
 module instances, and lowers both through generic interfaces rather than a
 flow-specific core IR; its whole-design verifier checks the resulting
 combinational graph across instance boundaries.
 
-RHDL's additional nominal contract is not backed by generated protocol
+Rhodium's additional nominal contract is not backed by generated protocol
 assertions today. Overall SpinalHDL remains at least as fluent for connected
-streams and offers finer ready/valid timing-cut operators; RHDL is cleaner for
+streams and offers finer ready/valid timing-cut operators; Rhodium is cleaner for
 detached topology construction, linear ownership, and explicit—though partly
 author-enforced—protocol strength.
 
@@ -233,7 +233,7 @@ combinational loops, latches, undriven signals, and width mismatch; see
 The language is therefore not merely permissive mutation: it accepts concise
 construction idioms, then validates global graph properties.
 
-RHDL's frontend largely presents one hardware category, with driveability
+Rhodium's frontend largely presents one hardware category, with driveability
 checked when `<==` is elaborated. Core's source/sink factoring then gives the
 verifier direct categories for ownership and direction. The stronger
 language-level policies are that connection adaptation is explicit, each
@@ -246,15 +246,15 @@ construction patterns more verbose.
 SpinalHDL is the strongest compromise between terse embedded-HDL syntax and
 predictable RTL among these Scala-style designs. Its overlap checks, width
 checks, `Component`/`Area` distinction, and explicit resize forms show that a
-unified `Data` surface can be disciplined. RHDL is cleaner where exact type,
+unified `Data` surface can be disciplined. Rhodium is cleaner where exact type,
 one final binding, explicit conditional priority, and current/next state should
 be recoverable without replaying assignment order. Their stream surfaces are
-close: SpinalHDL is exceptionally fluent over concrete streams, while RHDL's
+close: SpinalHDL is exceptionally fluent over concrete streams, while Rhodium's
 topology values make serial, parallel, detached, and cardinality-changing
-composition more uniform. SpinalHDL wins syntactic economy; RHDL wins locality
+composition more uniform. SpinalHDL wins syntactic economy; Rhodium wins locality
 of denotation and explicit protocol-strength tracking.
 
-## Lessons for RHDL
+## Lessons for Rhodium
 
 1. Retain one effective driver, but keep conditional authoring concise enough
    that explicit priority does not become ceremony.
@@ -280,8 +280,8 @@ of denotation and explicit protocol-strength tracking.
 - [SpinalHDL clock domains](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Structuring/clock_domain.html)
 - [SpinalHDL design checks](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Design%20errors/index.html)
 - [SpinalHDL streams](https://spinalhdl.github.io/SpinalDoc-RTD/master/SpinalHDL/Libraries/stream.html)
-- [RHDL standard flow composition](../../rhdl/std/README.md#flow-control-circuits)
-- [RHDL typed decode patterns](../../rhdl/std/README.md#typed-decode-patterns)
-- [RHDL core semantics](../../rhdl/core/README.md)
-- [RHDL frontend semantics](../../rhdl/frontend/README.md)
-- [RHDL frontend layers](../../rhdl/frontend/layers/README.md)
+- [Rhodium standard flow composition](../../rhodium/std/README.md#flow-control-circuits)
+- [Rhodium typed decode patterns](../../rhodium/std/README.md#typed-decode-patterns)
+- [Rhodium core semantics](../../rhodium/core/README.md)
+- [Rhodium frontend semantics](../../rhodium/frontend/README.md)
+- [Rhodium frontend layers](../../rhodium/frontend/layers/README.md)

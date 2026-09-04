@@ -18,7 +18,7 @@ instantiates the FESVR requester, and connects it to that SoC's common
 The directory owns:
 
 - `fesvr/`: the simulator-independent direct-memory FESVR transport and its
-  RHDL CHI requester.
+  Rhodium CHI requester.
 - `verilator/`: the Verilator VPI/DPI binding.
 - `tests/`: structural checks for both harness specializations.
 
@@ -31,7 +31,7 @@ make -C sims simulator SOC=tiled
 ```
 
 `SOC` accepts `simple` or `tiled` and defaults to `simple`. Each specialization
-has an independent artifact at `/tmp/rhdl-sims/<soc>/obj/VTestDriver`, so
+has an independent artifact at `/tmp/rhodium-sims/<soc>/obj/VTestDriver`, so
 switching configurations cannot reuse generated RTL for the other SoC. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
 does not require or embed a target program.
