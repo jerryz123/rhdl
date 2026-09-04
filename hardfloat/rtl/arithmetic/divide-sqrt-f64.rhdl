@@ -117,14 +117,14 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
   def normal_division = !special_a & !special_b
   def normal_square_root = !special_b & !raw_b.sign
   def normal_input = mux(square_root, normal_square_root, normal_division)
-  def negated_b_exponent = concat(
-    raw_b.signed_exponent.as_bits()[11],
-    !raw_b.signed_exponent.as_bits()[0..=10]
+  def negated_b_exponent = (
+    raw_b.signed_exponent.as_bits()[11]
+      ++ (!raw_b.signed_exponent.as_bits()[0..=10])
   ).into(SInt(12))
   def quotient_exponent = raw_a.signed_exponent.sext(14) + negated_b_exponent.sext(14)
-  def saturated_quotient_exponent = concat(
-      mux(sint(7 << 9, 14) <= quotient_exponent, bits(6, 4), quotient_exponent.as_bits()[9..=12]),
-      quotient_exponent.as_bits()[0..=8]
+  def saturated_quotient_exponent = (
+      mux(sint(7 << 9, 14) <= quotient_exponent, bits(6, 4), quotient_exponent.as_bits()[9..=12])
+        ++ quotient_exponent.as_bits()[0..=8]
     ).into(SInt(13))
 
   def cycle_b10_sqrt = cycle_b === bits(10, 4)
@@ -302,9 +302,9 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
     fraction_b_pc <== fraction_b_pb
     rounding_mode_pc <== mux(valid_pb, rounding_mode_pb, rounding_mode)
 
-  def significand_a_pa = concat(Bool(#true), fraction_a_pa)
-  def significand_b_pa = concat(Bool(#true), fraction_b_pa)
-  def significand_b_pc = concat(Bool(#true), fraction_b_pc)
+  def significand_a_pa = (Bool(#true) ++ fraction_a_pa)
+  def significand_b_pa = (Bool(#true) ++ fraction_b_pa)
+  def significand_b_pc = (Bool(#true) ++ fraction_b_pc)
 
   def division_piece = raw_b.significand[49..=51]
   def division_k1 = mux_lookup(division_piece, ~default: bits(0, 9)):
@@ -339,7 +339,7 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
 
   def raw_b_exponent_bit_zero = raw_b.signed_exponent.as_bits()[0].into(Bool)
   def raw_b_fraction_bit_51 = raw_b.significand[51].into(Bool)
-  def square_root_piece = concat(raw_b_exponent_bit_zero, raw_b_fraction_bit_51)
+  def square_root_piece = (raw_b_exponent_bit_zero ++ raw_b_fraction_bit_51)
   def square_root_k2 = mux_lookup(square_root_piece, ~default: bits(0, 9)):
     0: bits(0x1c8, 9)
     1: bits(0x0c1, 9)
@@ -364,7 +364,7 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
 
   def pa_exponent_bit_zero = exponent_pa.as_bits()[0].into(Bool)
   def pa_significand_b_bit_51 = significand_b_pa[51].into(Bool)
-  def pa_square_root_piece = concat(pa_exponent_bit_zero, pa_significand_b_bit_51)
+  def pa_square_root_piece = (pa_exponent_bit_zero ++ pa_significand_b_bit_51)
   def pa_square_root_complement_k0 = mux_lookup(pa_square_root_piece, ~default: bits(0, 13)):
     0: !bits(0x1fe5, 13)
     1: !bits(0x1435, 13)
@@ -386,7 +386,7 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
     next_multiply_9_b,
     bits(0, 9)
   )
-  def multiply_9_c_sqrt7 = concat(z_complement_k1_a7_sqrt, f64_repeat(cycle_a7_sqrt, 10)).zext(25)
+  def multiply_9_c_sqrt7 = (z_complement_k1_a7_sqrt ++ f64_repeat(cycle_a7_sqrt, 10)).zext(25)
   def multiply_9_c_sqrt6 = concat(
     cycle_a6_sqrt,
     z_complement_fraction_k0_a6_sqrt,
@@ -432,13 +432,13 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
     multiply_9_c_sqrt5 ||| multiply_9_c_sqrt4_low ||| multiply_9_c_sqrt4_high_or_division3
   ) ||| multiply_9_c_sigma0 ||| multiply_9_c_sqrt1 ||| multiply_9_c_division1
   def low_multiply_9_out = (multiply_9_a *& multiply_9_b) +& multiply_9_c[0..=17]
-  def multiply_9_out = concat(
+  def multiply_9_out = (
     mux(
       low_multiply_9_out[18].into(Bool),
       multiply_9_c[18..=24] + bits(1, 7),
       multiply_9_c[18..=24]
-    ),
-    low_multiply_9_out[0..=17]
+    )
+      ++ low_multiply_9_out[0..=17]
   )
 
   def z_fraction_r0_a6_sqrt = mux(
@@ -507,7 +507,7 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
       bits(0, 9)
     ) ||| mux(
       cycle_a2,
-      concat(Bool(#true), fraction_r0_a[1..=8]),
+      (Bool(#true) ++ fraction_r0_a[1..=8]),
       bits(0, 9)
     )
   when cycle_a1_sqrt:
@@ -631,9 +631,9 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
   def significand_t_e_bit_zero = significand_t_e[0].into(Bool)
   def square_root_remainder_term = mux(
     exponent_pc_bit_zero,
-    concat(fraction_b_pc_bit_zero, Bool(#false)),
-    concat(fraction_b_pc_bit_one ^ fraction_b_pc_bit_zero, fraction_b_pc_bit_zero)
-  ) ^ concat(!significand_t_e_bit_zero, Bool(#false))
+    (fraction_b_pc_bit_zero ++ Bool(#false)),
+    ((fraction_b_pc_bit_one ^ fraction_b_pc_bit_zero) ++ fraction_b_pc_bit_zero)
+  ) ^ ((!significand_t_e_bit_zero) ++ Bool(#false))
   def multiply_c_e3_sqrt = mux(
     cycle_e3_sqrt,
     square_root_remainder_term.zext(105) << 54,
@@ -688,9 +688,9 @@ sync_circuit DivSqrtRecF64ToRawMulAddZ31():
     is_zero: zero_pc
     sign: sign_pc
     signed_exponent: mux(square_root_pc, square_root_exponent, division_exponent)
-    significand: concat(
-      mux(true_less_than_x, significand_t_e.zext(55), significand_t_plus_one),
-      !true_equal_x
+    significand: (
+      mux(true_less_than_x, significand_t_e.zext(55), significand_t_plus_one)
+        ++ (!true_equal_x)
     )
 
 sync_circuit DivSqrtRecF64MulAddZ31():

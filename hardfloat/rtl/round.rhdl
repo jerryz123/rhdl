@@ -49,9 +49,9 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
     | raw.significand.zext(out_significand_width + 3) << ((out_significand_width - in_significand_width) + 2)
     | if in_significand_width == (out_significand_width + 2)
       | raw.significand
-      | concat(
-          raw.significand[((in_significand_width - out_significand_width) - 1)..=in_significand_width],
-          or_reduce(raw.significand[0..=((in_significand_width - out_significand_width) - 2)])
+      | (
+          raw.significand[((in_significand_width - out_significand_width) - 1)..=in_significand_width]
+            ++ or_reduce(raw.significand[0..=((in_significand_width - out_significand_width) - 2)])
         )
   def shift_significand_down:
     if options.significand_msb_always_zero
@@ -61,15 +61,15 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   def round_mask :: Bits(out_significand_width + 3):
     if never_underflows
     | concat(bits(0, out_significand_width), shift_significand_down, bits(3, 2))
-    | concat(
-        low_mask(
-          adjusted_exponent.as_bits()[0..=out_exponent_width],
-          (out_minimum_normal_exponent - out_significand_width) - 1,
-          out_minimum_normal_exponent
-        ) ||| shift_significand_down.as_bits().zext(out_significand_width + 1),
-        bits(3, 2)
+    | (
+        (low_mask(
+           adjusted_exponent.as_bits()[0..=out_exponent_width],
+           (out_minimum_normal_exponent - out_significand_width) - 1,
+           out_minimum_normal_exponent
+         ) ||| shift_significand_down.as_bits().zext(out_significand_width + 1))
+          ++ bits(3, 2)
       )
-  def shifted_round_mask = concat(bits(0, 1), round_mask[1..=(out_significand_width + 2)])
+  def shifted_round_mask = (bits(0, 1) ++ round_mask[1..=(out_significand_width + 2)])
   def round_position_mask = !shifted_round_mask & round_mask
   def round_position_bit = or_reduce(adjusted_significand & round_position_mask)
   def any_round_extra = or_reduce(adjusted_significand & shifted_round_mask)

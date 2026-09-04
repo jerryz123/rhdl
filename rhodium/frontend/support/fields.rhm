@@ -28,6 +28,7 @@ export:
   bool_type
   hardware_value_type
   hardware_as_bits
+  hardware_append
   hardware_as_vec
   hardware_index
   hardware_into
@@ -144,7 +145,8 @@ class HardwareVariantView(valid :: Value, payload :: False || Value)
 
 annot.macro 'HardwareFields':
   def result_infos = statinfo_meta.and(
-    '(($(statinfo_meta.dot_provider_key), hardware_method_dot))',
+    '(($(statinfo_meta.dot_provider_key), hardware_method_dot),
+      ($(statinfo_meta.append_key), hardware_append))',
     '(($(statinfo_meta.dot_provider_key), hardware_field_dot),
       ($(statinfo_meta.index_get_key), hardware_index))'
   )
@@ -153,12 +155,13 @@ annot.macro 'HardwareFields':
     result_infos
   )
 
-// Supplies the one method provider without claiming hardware field projection.
-// Member-bearing host surfaces reuse this annotation after their own provider.
+// Supplies common hardware method and append dispatch without claiming field
+// projection. Member-bearing surfaces retain these operations after fallback.
 annot.macro 'HardwareMethodFields':
   annot_meta.pack_predicate(
     'fun (value): value is_a HardwareEntity',
-    '(($(statinfo_meta.dot_provider_key), hardware_method_dot))'
+    '(($(statinfo_meta.dot_provider_key), hardware_method_dot),
+      ($(statinfo_meta.append_key), hardware_append))'
   )
 
 // Gives the public bare Bits annotation its existential-width predicate while
@@ -395,6 +398,15 @@ fun hardware_as_bits(value :: HardwareEntity,
   if bits_type(source.type)
   | source
   | kernel.cast(source, Bits(width), name, location)
+
+// Implements Rhombus append for hardware values as binary packed
+// concatenation while preserving ordinary host append dispatch.
+fun hardware_append(left :: HardwareEntity,
+                    right :: HardwareEntity) :~ HardwareFields:
+  kernel.concat(
+    [hardware_as_bits(left, Symbol.from_string("++"), "left operand"),
+     hardware_as_bits(right, Symbol.from_string("++"), "right operand")]
+  )
 
 // Reinterprets one evenly divisible packed value as a uniform vector while
 // inferring the vector length from the requested element representation.

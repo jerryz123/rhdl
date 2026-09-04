@@ -430,8 +430,11 @@ their environment could physically drive a multi-hot encoding.
 
 ## Packing and width operations
 
-- `concat(a, b, ...)` accepts packable data and places the first operand in
-  the most-significant bits; a host-generated list is also accepted.
+- `a ++ b` concatenates packable hardware values and places `a` in the
+  most-significant bits; chains such as `a ++ b ++ c` retain that ordering.
+  Ordinary host strings, lists, maps, and sets keep Rhombus's append behavior.
+- `concat(a, b, ...)` is the variadic form and also accepts a host-generated
+  list, making it suitable when the operands are constructed programmatically.
 - `bits_value[index]` produces `Bits(1)`.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
   Both forms lower to the core's fixed bit-extraction operation.
