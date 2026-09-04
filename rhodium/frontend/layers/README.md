@@ -72,11 +72,12 @@ method, `receiver.operation(arguments...)` resolves directly to
 `operation(receiver, arguments...)`. Bare dot names remain hardware field
 projections. Because the expansion is a direct function call, receiver checks
 and dependent result annotations come from the function declaration, and an
-extension exists only where its function binding is in lexical scope. RHDL
-uses one shared hardware method dispatcher for type-owned methods, built-ins,
-special call syntax, and these compatible receiver-first functions. Specialized
-dot providers resolve fields or syntax unique to a value surface and fall
-through to that dispatcher instead of repeating the common method table.
+extension exists only where its function binding is in lexical scope. Rhodium
+uses an ordered method pipeline: exact receiver-owned annotations anchor their
+provider first, followed by the common resolver for built-ins, special call
+syntax, and compatible receiver-first functions. Both exact and generic
+provider identities call the same common implementation. Specialized field
+providers fall through to that pipeline instead of repeating method tables.
 
 ## Clocking environments and CDC enforcement
 

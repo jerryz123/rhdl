@@ -265,8 +265,9 @@ import:
 The temporal difference is currently documentation rather than generated
 protocol assertions.
 
-`fire(endpoint)` accepts any endpoint supporting `DecoupledCtrl` and
-returns `endpoint.valid and endpoint.ready`.
+`endpoint.fire()` accepts any endpoint supporting `DecoupledCtrl` and returns
+`endpoint.valid and endpoint.ready`. The exported receiver-first `fire`
+function remains available for qualified calls and compatibility.
 
 Ready-valid flow helpers classify protocols through the same nominal
 refinement and `supports` relation used by interface connections. A differently

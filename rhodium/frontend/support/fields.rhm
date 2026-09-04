@@ -9,7 +9,6 @@ import:
   "../kernel.rhm" as kernel
   "hardware-literal.rhm".HardwareLiteral
   "hardware-literal.rhm".packed_literal
-  "hardware-methods.rhm".hardware_method_static_info_key
 
 export:
   HardwareFields
@@ -33,6 +32,19 @@ export:
   hardware_index
   hardware_into
   hardware_lookup
+  hardware_method_dot
+  hardware_method_static_info_key
+  hardware_value_method_dot
+
+// Stores exact receiver-owned methods under one composable key instead of
+// allocating a separate static-information key for every method name.
+statinfo.key hardware_method_static_info_key:
+  ~and:
+    fun (left, right):
+      let '($left_entry, ...)' = left
+      let '($right_entry, ...)' = right
+      '($left_entry, ..., $right_entry, ...)'
+  ~or: fun (_left, right): right
 
 // Associates a circuit definition with the exact static surface of each
 // declared data port. Hierarchy transfers this map to the resulting instance.
@@ -538,32 +550,7 @@ meta:
         )
     | ~else: #false
 
-dot.macro 'hardware_method_dot $left $dot $right':
-  ~tail: '$tail ...'
-  fun declared_method(method :: Syntax):
-    def packed_methods = statinfo_meta.find(
-      statinfo_meta.gather(left),
-      'hardware_method_static_info_key'
-    )
-    if packed_methods
-    | block:
-        let '($method_entry, ...)' = packed_methods
-        def mutable expansion = #false
-        for (entry in [method_entry, ...]):
-          match entry
-          | '($(method_name :: Identifier), $method_function, ($argument, ...), untyped)':
-              when !expansion && method.to_source_string() == method_name.to_source_string()
-              | expansion := 'fun ($argument, ...) :~ HardwareFields:
-                                $method_function($left, $argument, ...)'
-          | '($(method_name :: Identifier), $method_function, ($argument, ...), (typed ($result_type)))':
-              when !expansion && method.to_source_string() == method_name.to_source_string()
-              | expansion := 'fun ($argument, ...) :: $result_type:
-                                $method_function($left, $argument, ...)'
-          | ~else:
-              syntax_meta.error("invalid hardware method static information", entry)
-        expansion
-    | #false
-  fun universal_method(method :: Syntax):
+  fun universal_hardware_method(left :: Syntax, method :: Syntax):
     match method
     | 'zext': hardware_width_method(left, method)
     | 'sext': hardware_width_method(left, method)
@@ -574,10 +561,12 @@ dot.macro 'hardware_method_dot $left $dot $right':
     | 'map': 'fun (transform :: Function.of_arity(1)) :~ HardwareFields: hardware_vector_map($left, transform)'
     | 'updated': 'fun (selector, replacement) :~ HardwareFields: hardware_updated($left, selector, replacement)'
     | ~else: #false
-  def declared = declared_method(right)
-  if declared
-  | declared
-  | match '$right $tail ...'
+
+  fun common_hardware_method(left :: Syntax,
+                             right :: Syntax,
+                             form :: Syntax,
+                             remainder :: Syntax):
+    match form
     | 'is_one_of() $rest ...':
         syntax_meta.error(".is_one_of expects alternatives or one host list", right)
     | 'is_one_of($(candidate :: expr_meta.Parsed), ...) $rest ...':
@@ -607,7 +596,7 @@ dot.macro 'hardware_method_dot $left $dot $right':
           '$rest ...'
         )
     | '$(method :: Identifier)($(argument :: expr_meta.Parsed), ...) $rest ...':
-        def universal = universal_method(method)
+        def universal = universal_hardware_method(left, method)
         if universal
         | values(universal, '($argument, ...) $rest ...')
         | block:
@@ -627,10 +616,43 @@ dot.macro 'hardware_method_dot $left $dot $right':
               // receiver's field or host-object provider resolve the name.
               #false
     | ~else:
-        def expansion = universal_method(right)
+        def expansion = universal_hardware_method(left, right)
         if expansion
-        | values(expansion, '$tail ...')
+        | values(expansion, remainder)
         | #false
+
+// Exact receiver-owned annotations use a distinct provider identity so their
+// full method pipeline precedes conservative surfaces such as observations.
+dot.macro 'hardware_value_method_dot $left $dot $right':
+  ~tail: '$tail ...'
+  def packed_methods = statinfo_meta.find(
+    statinfo_meta.gather(left),
+    'hardware_method_static_info_key'
+  )
+  def mutable expansion = #false
+  when packed_methods
+  | let '($method_entry, ...)' = packed_methods
+    for (entry in [method_entry, ...]):
+      match entry
+      | '($(method_name :: Identifier), $method_function, ($argument, ...), untyped)':
+          when !expansion && right.to_source_string() == method_name.to_source_string()
+          | expansion := 'fun ($argument, ...) :~ HardwareFields:
+                            $method_function($left, $argument, ...)'
+      | '($(method_name :: Identifier), $method_function, ($argument, ...), (typed ($result_type)))':
+          when !expansion && right.to_source_string() == method_name.to_source_string()
+          | expansion := 'fun ($argument, ...) :: $result_type:
+                            $method_function($left, $argument, ...)'
+      | ~else:
+          syntax_meta.error("invalid hardware method static information", entry)
+  if expansion
+  | expansion
+  | common_hardware_method(left, right, '$right $tail ...', '$tail ...')
+
+// Generic hardware-capable surfaces use the same common method implementation
+// after their specialized providers decline the call.
+dot.macro 'hardware_method_dot $left $dot $right':
+  ~tail: '$tail ...'
+  common_hardware_method(left, right, '$right $tail ...', '$tail ...')
 
 // Resolves hardware properties and structural projection only after every
 // receiver-owned, surface-specific, and universal method provider declines.

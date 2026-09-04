@@ -168,13 +168,13 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   direct_refill_commands |> refill_commands.ingress[0]
   def victim_address = concat(tags.port.response.bits[0], lookup_set, bits(0, offset_width))
   eviction_path.ready <== gather_idle & !refill_installing
-  def eviction_gather_start = fire(eviction_path)
+  def eviction_gather_start = eviction_path.fire()
   writeback.command.valid <== gather_state === RV5StageDataGatherState.EvictionReady
   writeback.command.bits <== RV5StageLineWritebackCommand(RV5StageDataReq(xlen), width):
     line_address: eviction_line_address
     line: gathered_line.as_vec(Bits(64))
     context: eviction_context
-  def writeback_command_fire = fire(writeback.command)
+  def writeback_command_fire = writeback.command.fire()
   def post_eviction_refills = (
     writeback.completion
       |> map_flow(result => RV5StageLineRefillCommand(RV5StageDataReq(xlen), width)):
@@ -193,7 +193,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   def refill_install_final = refill_install_index === bits(words_per_line - 1, word_index_width)
   def refill_install_word = refill_installing
   refill.completion.ready <== refill_installing & refill_install_final
-  def install_refill = fire(refill.completion)
+  def install_refill = refill.completion.fire()
   when install_refill:
     assert(!refill.completion.bits.pass_dirty, "l1d_refill_not_dirty")
   def completion_request = refill.completion.bits.context.into(RV5StageDataReq(xlen))
@@ -275,7 +275,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   core.request.ready <== lookup.ingress.ready & lookup_accepts_input
   lookup.ingress.valid <== core.request.valid & lookup_accepts_input
   lookup.ingress.bits <== core.request.bits
-  def request_fire = fire(core.request)
+  def request_fire = core.request.fire()
   // A fence observes accepted lookup work, active refills, and the backing
   // store buffer. Same-cycle acceptance is included so no request can cross
   // the reported quiescent boundary.
@@ -394,13 +394,13 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   def completing_lr = produces_load_hit & (lookup_access === MemoryOperation.LoadReserved) ||| (
     install_refill & (completion_access === MemoryOperation.LoadReserved)
   )
-  def local_reservation_clear = fire(lookup.egress) & (
+  def local_reservation_clear = lookup.egress.fire() & (
     lookup_sc ||| ((lookup_store ||| lookup_atomic) & (lookup_line_address === reservation_line_address))
   )
   def snoop_reservation_clear = snoop.update.valid & snoop.update.bits.invalidate & (
     align_down(snoop.update.bits.address, RV5StageCacheLineBytes) === reservation_line_address
   )
-  def replacement_reservation_clear = fire(lookup.egress) & lookup_needs_refill & !line_hit & line_valid & (
+  def replacement_reservation_clear = lookup.egress.fire() & lookup_needs_refill & !line_hit & line_valid & (
     victim_address === reservation_line_address
   )
   when completing_lr:

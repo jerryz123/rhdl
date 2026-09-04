@@ -94,12 +94,12 @@ sync_circuit RV5StageMmu(xlen :: XLen,
     privilege: mux(start_data_walk, data_privilege, privilege)
     sum: sum
     mxr: mxr
-  def walker_request_fire = fire(walker.request)
+  def walker_request_fire = walker.request.fire()
   def cancel_instruction_walk = instruction.flush & walk_active & !walk_is_data
   walker.cancel <== invalidate_all ||| cancel_instruction_walk
 
   walker.completion.ready <== !fault_valid
-  def walker_completion_fire = fire(walker.completion)
+  def walker_completion_fire = walker.completion.fire()
   itlb.fill.valid <== walker_completion_fire & !walk_is_data & !walker.completion.bits.access_fault
   itlb.fill.bits <== walker.completion.bits
   dtlb.fill.valid <== walker_completion_fire & walk_is_data & !walker.completion.bits.access_fault
@@ -143,7 +143,7 @@ sync_circuit RV5StageMmu(xlen :: XLen,
   instruction.request.ready <== instruction_lookup_ready & instruction_owners.ingress.ready & instruction_ready_source
   instruction_memory.request.valid <== instruction.request.valid & instruction_lookup_ready & !instruction_local_fault & instruction_owners.ingress.ready
   instruction_memory.request.bits.address <== instruction_physical_address
-  instruction_owners.ingress.valid <== fire(instruction.request)
+  instruction_owners.ingress.valid <== instruction.request.fire()
   instruction_owners.ingress.bits <== RV5StageInstructionFault():
     page: instruction_page_fault
     access: instruction_access_fault
@@ -212,15 +212,15 @@ sync_circuit RV5StageMmu(xlen :: XLen,
   )
   walker_memory_request.ready <== walk_active & walker_data_quiet_twice & data_memory.request.ready
   walker.memory.request_access_fault <== data_memory.request_access_fault
-  def walker_memory_request_fire = fire(walker_memory_request)
+  def walker_memory_request_fire = walker_memory_request.fire()
   walker.memory.response.valid <== data_memory.response.valid & walker_memory_outstanding
   walker.memory.response.bits <== if xlen == XLen.X32 | data_memory.response.bits.data.zext(64) | data_memory.response.bits.data
   data.response.valid <== data_memory.response.valid & !walker_memory_outstanding
   data.response.bits <== data_memory.response.bits
   data.drained <== !walk_active & !fault_valid & data_memory.drained
 
-  def instruction_fault_accepted = fire(instruction.request) & instruction_local_fault
-  def data_fault_accepted = fire(data.request) & (data_page_fault ||| data_walk_access_fault)
+  def instruction_fault_accepted = instruction.request.fire() & instruction_local_fault
+  def data_fault_accepted = data.request.fire() & (data_page_fault ||| data_walk_access_fault)
   when (invalidate_all ||| cancel_instruction_walk):
     walk_active <== Bool(#false)
   elsewhen walker_request_fire:

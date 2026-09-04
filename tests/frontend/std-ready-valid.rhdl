@@ -20,6 +20,22 @@ interface Alternate8() refines DecoupledCtrl():
   producer -> consumer:
     bits: Bits(8)
 
+interface NestedReadyValid():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    channel: Decoupled(Bits(8))
+
+interface DeepReadyValid():
+  role producer
+  role consumer
+  provider producer
+
+  producer -> consumer:
+    group: NestedReadyValid()
+
 circuit ValidAdapter():
   interface ingress(Valid(Bits(8)), ~role: consumer)
   interface egress(Valid(Bits(8)), ~role: producer)
@@ -68,7 +84,7 @@ circuit DecoupledFire():
   output transferred: Bool
 
   ingress.ready <== accept
-  transferred <== fire(ingress)
+  transferred <== ingress.fire()
 
 // Exercises transitive refinement through IrrevocableCtrl.
 circuit IrrevocableFire():
@@ -77,7 +93,17 @@ circuit IrrevocableFire():
   output transferred: Bool
 
   ingress.ready <== accept
-  transferred <== fire(ingress)
+  transferred <== ingress.fire()
+
+// Exercises extension-method dispatch after a precise nested interface member.
+circuit NestedFire():
+  input accept: Bool
+  interface ingress(DeepReadyValid(), ~role: consumer)
+  output transferred: Bool
+
+  def group = ingress.group
+  group.channel.ready <== accept
+  transferred <== group.channel.fire()
 
 circuit ReversedCompatibleSpelling():
   interface ingress(Irrevocable(Bits(8)), ~role: consumer)
@@ -106,7 +132,7 @@ circuit MismatchedAdapter():
 
 circuit UnsupportedFire():
   interface ingress(Valid(Bits(8)), ~role: consumer)
-  fire(ingress)
+  ingress.fire()
 
 circuit RefinedIsNotExact():
   interface ingress(Decoupled(Bits(8)), ~role: consumer)
@@ -166,6 +192,7 @@ export:
   PayloadIsNotCtrl
   DecoupledFire
   IrrevocableFire
+  NestedFire
   ReversedCompatibleSpelling
   IrrevocableCtrlToDecoupledCtrl
   TransitiveCtrlCompatibility

@@ -206,12 +206,13 @@ language profiles:
 - `hardware-literal.rhm` validates reusable packed host images, exposes their
   hardware type and packed width to ordinary libraries, and materializes them
   as a `Bits` constant followed by an explicit equal-width cast.
-- `hardware-methods.rhm` carries exact receiver-owned method declarations as
-  composable static information without installing competing dot providers.
-- `fields.rhm` owns `Bool`, the single shared hardware method dispatcher,
-  receiver-owned flat-data membership and width extension, extension-method
-  resolution, exact hardware annotations, public hardware-value type discovery,
-  shared canonical packing, and readable and driveable field static information.
+- `hardware-methods.rhm` attaches exact receiver-owned method declarations and
+  anchors their dispatch ahead of conservative value surfaces.
+- `fields.rhm` owns `Bool`, the shared implementation behind exact and generic
+  hardware method providers, receiver-owned flat-data membership and width extension,
+  extension-method resolution, exact hardware annotations, public
+  hardware-value type discovery, shared canonical packing, and readable and
+  driveable field static information.
 - `instance-members.rhm` lets layers contribute virtual instance members
   without creating sibling-layer dependencies.
 - `clocking.rhm` expands frontend sync policy into explicit ports, register

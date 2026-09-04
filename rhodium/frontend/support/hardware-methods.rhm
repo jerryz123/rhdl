@@ -1,29 +1,22 @@
 #lang rhombus/and_meta
-// Carries receiver-owned hardware method declarations as composable static information.
+// Attaches receiver-owned method metadata and its exact-dispatch precedence.
 
 import:
   rhombus/meta open
+  "fields.rhm".HardwareFields
+  "fields.rhm".hardware_method_static_info_key
+  "fields.rhm".hardware_value_method_dot
 
 export:
   HardwareMethods
-  hardware_method_static_info_key
 
-// Stores all methods for one exact hardware value surface under a single key,
-// avoiding a new static-information key for every declared method.
-statinfo.key hardware_method_static_info_key:
-  ~and:
-    fun (left, right):
-      let '($left_entry, ...)' = left
-      let '($right_entry, ...)' = right
-      '($left_entry, ..., $right_entry, ...)'
-  ~or: fun (_left, right): right
-
-// Decorates a complete value annotation without installing another dot
-// provider. The canonical hardware-value provider consumes the method table.
+// Re-anchors exact receiver-owned dispatch ahead of conservative surfaces;
+// built-ins and lexical extensions remain in the shared fallback provider.
 annot.macro 'HardwareMethods($(base :: annot_meta.Parsed), $method_entry, ...)':
   def (predicate, base_infos) = annot_meta.unpack_predicate(base)
   def result_infos = statinfo_meta.and(
-    '((hardware_method_static_info_key, ($method_entry, ...)))',
+    '(($(statinfo_meta.dot_provider_key), hardware_value_method_dot),
+      (hardware_method_static_info_key, ($method_entry, ...)))',
     base_infos
   )
   annot_meta.pack_predicate(

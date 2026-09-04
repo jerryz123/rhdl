@@ -445,7 +445,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   def incoming_write = incoming_subordinate_opcode.is_initial_write()
   def incoming_coherent = chi_hnf_source_is_rnf(p, checked, incoming_request)
   requester.requests.ready <== idle
-  def request_fire = fire(requester.requests)
+  def request_fire = requester.requests.fire()
   when (requester.requests.valid & idle):
     assert(chi_hnf_source_known(p, checked, incoming_request),
            "chi_hnf_request_source_known")
@@ -468,12 +468,12 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
     request,
     mux(send_requester_dbid, CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp)
   )
-  def requester_response_fire = fire(requester.responses)
+  def requester_response_fire = requester.responses.fire()
 
   def receiving_write_data = phase === CHIHNFPhase.ReceiveWriteData
   def receiving_snoop_data = phase === CHIHNFPhase.AwaitSnoop
   requester.request_data.ready <== receiving_write_data ||| receiving_snoop_data
-  def requester_data_fire = fire(requester.request_data)
+  def requester_data_fire = requester.request_data.fire()
   def write_data_fire = requester_data_fire & receiving_write_data
   def snoop_data_fire = requester_data_fire & receiving_snoop_data
   // A multi-packet snoop response keeps valid asserted while the Home writes
@@ -518,13 +518,13 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   requester.snoops.bits <== CHISnoopDispatch(p):
     target_id: next_snoop_node
     flit: chi_hnf_snoop(p, home_id, request)
-  def snoop_fire = fire(requester.snoops)
+  def snoop_fire = requester.snoops.fire()
 
   def awaiting_snoop = phase === CHIHNFPhase.AwaitSnoop
   def awaiting_comp_ack = phase === CHIHNFPhase.AwaitCompAck
   requester.requester_responses.ready <== awaiting_snoop ||| awaiting_comp_ack
   def incoming_requester_response = requester.requester_responses.bits
-  def requester_control_fire = fire(requester.requester_responses)
+  def requester_control_fire = requester.requester_responses.fire()
   when (requester.requester_responses.valid):
     assert(awaiting_snoop ||| awaiting_comp_ack,
            "chi_hnf_requester_response_expected")
@@ -556,7 +556,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
     chi_hnf_snoop_write_request(p, home_id, subordinate_id, request, snoop_data),
     chi_hnf_downstream_request(p, home_id, subordinate_id, request)
   )
-  def subordinate_request_fire = fire(subordinate.req)
+  def subordinate_request_fire = subordinate.req.fire()
 
   def awaiting_subordinate_dbid = phase === CHIHNFPhase.AwaitSubordinateDBID
   def awaiting_subordinate_completion = phase === CHIHNFPhase.AwaitSubordinateCompletion
@@ -566,7 +566,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   def awaiting_any_subordinate_completion = awaiting_subordinate_completion ||| awaiting_snoop_write_completion
   subordinate.rsp.ready <== awaiting_any_subordinate_dbid ||| awaiting_any_subordinate_completion
   def incoming_subordinate_response = subordinate.rsp.bits
-  def subordinate_response_fire = fire(subordinate.rsp)
+  def subordinate_response_fire = subordinate.rsp.fire()
   when (subordinate.rsp.valid):
     assert(awaiting_any_subordinate_dbid ||| awaiting_any_subordinate_completion,
            "chi_hnf_subordinate_response_expected")
@@ -598,7 +598,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
       subordinate_dbid
     )
   )
-  def subordinate_data_fire = fire(subordinate.dat.request)
+  def subordinate_data_fire = subordinate.dat.request.fire()
 
   def forwarding_read = phase === CHIHNFPhase.ForwardReadData
   requester.response_data.valid <== forwarding_read & subordinate.dat.response.valid
@@ -610,7 +610,7 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
     subordinate.dat.response.bits
   )
   subordinate.dat.response.ready <== forwarding_read & requester.response_data.ready
-  def read_data_fire = fire(subordinate.dat.response)
+  def read_data_fire = subordinate.dat.response.fire()
   def read_data_id = one_hot(subordinate.dat.response.bits.data_id).as_bits()
   def next_received_data_ids = received_data_ids ||| read_data_id
   def expected_data_ids = coherent_read_data_ids(request.address,
