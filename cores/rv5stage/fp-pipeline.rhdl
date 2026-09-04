@@ -1,0 +1,241 @@
+#lang rhodium
+// Implements RV5Stage's standalone parallel floating-point execution pipeline.
+
+import:
+  "fp-bundles.rhdl" open
+  "fp-datapath.rhdl" open
+  "fp-div-sqrt.rhdl" open
+  "fp-register-file.rhdl" open
+  "decode/fp-ctrl.rhdl" open
+  "../../riscv/isa/fp-profile.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rtl/floating-point.rhdl" open
+  lib("hardfloat/main.rhdl") open
+  lib("rhodium/std/bits.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/scoreboard.rhdl") open
+  lib("rhodium/std/flow/arbiter.rhdl").Arbiter
+  lib("rhodium/std/flow/completion-queue.rhdl").CompletionQueue
+  lib("rhodium/std/flow/pipe.rhdl").ValidPipe
+  lib("rhodium/std/flow/pipe.rhdl").Pipe
+  lib("rhodium/std/flow/queue.rhdl").Queue
+
+fun fp_load_value(profile :: FloatingPointProfile,
+                  precision :: RV5StageFloatPrecision,
+                  data :: Bits(64)) :~ Bits(floating_point_register_width(profile)):
+  def single = riscv_nan_box(
+    FloatFormat.F32,
+    data[0..32].into(IEEEFloat(FloatFormat.F32)),
+    floating_point_register_width(profile)
+  )
+  if profile == FloatingPointProfile.F
+  | single
+  | mux(precision === RV5StageFloatPrecision.Single, single, data)
+
+fun fp_store_value(profile :: FloatingPointProfile,
+                   precision :: RV5StageFloatPrecision,
+                   data :: Bits(floating_point_register_width(profile))) :~ Bits(64):
+  if profile == FloatingPointProfile.F
+  | data.zext(64)
+  | mux(precision === RV5StageFloatPrecision.Single,
+        data[0..32].zext(64),
+        data)
+
+sync_circuit RV5StageFpPipeline(xlen :: XLen, profile :: FloatingPointProfile, Context :: DataType):
+  unless floating_point_supports_f(profile)
+  | error(~who: #'RV5StageFpPipeline,
+          "the standalone FP pipeline requires an F or D profile")
+  def register_count = 32
+  def flen = floating_point_register_width(profile)
+  def Issue = RV5StageFpIssue(xlen, profile, Context)
+  def ExecutionRequest = RV5StageFpExecutionRequest(xlen, profile, Context)
+  def Completion = RV5StageFpCompletion(xlen, profile, Context)
+
+  interface issue(Decoupled(Issue), ~role: consumer)
+  interface completion(Irrevocable(Completion), ~role: producer)
+  interface load_reserve(Decoupled(RV5StageFpLoadReservation(Context)), ~role: consumer)
+  interface load_completion(Valid(RV5StageFpLoadCompletion(Context)), ~role: consumer)
+  interface store_request(Decoupled(RV5StageFpStoreRequest(Context)), ~role: consumer)
+  interface store_response(Irrevocable(RV5StageFpStoreResponse(Context)), ~role: producer)
+  output busy: Mask(register_count)
+  output drained: Bool
+
+  inst registers(RV5StageFloatingPointRegisterFile(profile))
+  def Array(load_write :: Endpoint, execution_write :: Endpoint) = registers.writes
+  reg busy_state(~init: Mask(register_count)(0))
+  reg outstanding(~init: bits(0, 4))
+  fun register_bit(index :: Bits(5)) :~ Mask(register_count):
+    one_hot(index).into(Mask(register_count))
+
+  def FixedModule = if profile == FloatingPointProfile.F | RV5StageFpFixedF(xlen, Context) | RV5StageFpFixedD(xlen, Context)
+  def DivSqrtModule = if profile == FloatingPointProfile.F | RV5StageFpDivSqrtF(xlen, Context) | RV5StageFpDivSqrtD(xlen, Context)
+  inst fixed(FixedModule)
+  inst div_sqrt(DivSqrtModule)
+  inst fixed_responses(CompletionQueue(ExecutionRequest, Completion, 4))
+  inst fixed_latency(ValidPipe(Completion, 2))
+  fixed_latency.ingress.valid <== fixed_responses.issue.valid
+  fixed.request <== fixed_responses.issue.bits
+  fixed_latency.ingress.bits <== fixed.completion
+  fixed_responses.completion.valid <== fixed_latency.egress.valid
+  fixed_responses.completion.bits <== fixed_latency.egress.bits
+
+  inst completion_merge(Arbiter(Completion, 2))
+  fixed_responses.response |> completion_merge.ingress[0]
+  div_sqrt.completion |> completion_merge.ingress[1]
+  inst completed(Queue(Completion, 2, ~pipe: #true))
+  completion_merge.egress |> completed.ingress
+  completed.egress |> completion
+
+  def execution_completion = completion.bits
+  def execution_write_valid = completion.fire() & (
+    execution_completion.destination === RV5StageFloatDestination.FloatingPoint
+  )
+  execution_write.valid <== execution_write_valid
+  execution_write.bits <== FloatingPointRegisterWrite(profile):
+    address: execution_completion.rd
+    data: execution_completion.fp_value
+
+  load_write.valid <== load_completion.valid
+  load_write.bits <== FloatingPointRegisterWrite(profile):
+    address: load_completion.bits.rd
+    data: fp_load_value(
+      profile,
+      load_completion.bits.precision,
+      load_completion.bits.data
+    )
+  when (load_completion.valid):
+    assert(Bool(profile == FloatingPointProfile.D) ||| (
+      load_completion.bits.precision === RV5StageFloatPrecision.Single
+    ), "rv5stage_fp_load_precision_supported")
+
+  def execution_clear = execution_write_valid
+  def load_clear = load_completion.valid
+  def execution_clear_bit = register_bit(execution_completion.rd)
+  def load_clear_bit = register_bit(load_completion.bits.rd)
+  def clear_mask = mux(execution_clear,
+                       execution_clear_bit,
+                       Mask(register_count)(0)) ||| mux(
+    load_clear,
+    load_clear_bit,
+    Mask(register_count)(0)
+  )
+  def currently_busy = busy_state & !clear_mask
+
+  fun register_busy(index :: Bits(5)) :~ Bool:
+    scoreboard_busy(register_count, currently_busy, index)
+  def control :: RV5StageFloatingPointControl() = issue.bits.control
+  def source_hazard = (
+    control.registers.uses_frs1 & register_busy(issue.bits.frs1)
+  ) ||| (
+    control.registers.uses_frs2 & register_busy(issue.bits.frs2)
+  ) ||| (
+    control.registers.uses_frs3 & register_busy(issue.bits.frs3)
+  )
+  def fp_destination = control.registers.destination === RV5StageFloatDestination.FloatingPoint
+  def destination_hazard = fp_destination & register_busy(issue.bits.frd)
+  def issue_hazard = source_hazard ||| destination_hazard
+  def divide_request = control.execution.unit === RV5StageFloatUnit.DivideSquareRoot
+  def memory_request = control.execution.unit === RV5StageFloatUnit.Memory
+  def selected_ready = mux(divide_request,
+                           div_sqrt.request.ready,
+                           fixed_responses.request.ready)
+  issue.ready <== !issue_hazard & !memory_request & selected_ready
+  def issue_fire = issue.fire()
+
+  // The register file is read only for a transferred instruction. Its third
+  // port is shared with the serialized store-data bridge below.
+  def store_source_free = !register_busy(store_request.bits.rs)
+  inst stores(Pipe(RV5StageFpStoreResponse(Context), 1))
+  stores.egress |> store_response
+  store_request.ready <== !issue.valid & store_source_free & stores.ingress.ready
+  stores.ingress.valid <== store_request.valid & !issue.valid & store_source_free
+  stores.ingress.bits <== RV5StageFpStoreResponse(Context):
+    context: store_request.bits.context
+    data: fp_store_value(
+      profile,
+      store_request.bits.precision,
+      registers.read_data_3
+    )
+  registers.read_address_1 <== issue.bits.frs1
+  registers.read_address_2 <== issue.bits.frs2
+  registers.read_address_3 <== mux(
+    store_request.valid & !issue.valid,
+    store_request.bits.rs,
+    issue.bits.frs3
+  )
+  when (store_request.fire()):
+    assert(Bool(profile == FloatingPointProfile.D) ||| (
+      store_request.bits.precision === RV5StageFloatPrecision.Single
+    ), "rv5stage_fp_store_precision_supported")
+
+  def execution_request = RV5StageFpExecutionRequest(xlen, profile, Context):
+    context: issue.bits.context
+    control: issue.bits.control
+    left: registers.read_data_1
+    right: registers.read_data_2
+    third: registers.read_data_3
+    integer_operand: issue.bits.integer_operand
+    rounding_mode: issue.bits.rounding_mode
+    rd: issue.bits.frd
+  fixed_responses.request.valid <== issue.valid & !issue_hazard & !memory_request & !divide_request
+  fixed_responses.request.bits <== execution_request
+  div_sqrt.request.valid <== issue.valid & !issue_hazard & !memory_request & divide_request
+  div_sqrt.request.bits <== execution_request
+
+  load_reserve.ready <== !register_busy(load_reserve.bits.rd) & !(
+    issue_fire & fp_destination & (issue.bits.frd === load_reserve.bits.rd)
+  )
+  def load_reserve_fire = load_reserve.fire()
+  def execution_set = issue_fire & fp_destination
+  def execution_set_bit = register_bit(issue.bits.frd)
+  def load_set_bit = register_bit(load_reserve.bits.rd)
+  def set_mask = mux(execution_set,
+                     execution_set_bit,
+                     Mask(register_count)(0)) ||| mux(
+    load_reserve_fire,
+    load_set_bit,
+    Mask(register_count)(0)
+  )
+  when execution_set:
+    assert(!scoreboard_busy(register_count, currently_busy, issue.bits.frd),
+           "rv5stage_fp_execution_destination_free")
+  when load_reserve_fire:
+    assert(!scoreboard_busy(register_count, currently_busy, load_reserve.bits.rd),
+           "rv5stage_fp_load_destination_free")
+  when (execution_set & load_reserve_fire):
+    assert(issue.bits.frd =/= load_reserve.bits.rd,
+           "rv5stage_fp_reservations_distinct")
+  when execution_clear:
+    assert(scoreboard_busy(register_count, busy_state, execution_completion.rd),
+           "rv5stage_fp_execution_destination_reserved")
+  when load_clear:
+    assert(scoreboard_busy(register_count, busy_state, load_completion.bits.rd) ||| (
+      load_reserve_fire & (load_reserve.bits.rd === load_completion.bits.rd)
+    ), "rv5stage_fp_load_destination_reserved")
+  when (execution_clear & load_clear):
+    assert(execution_completion.rd =/= load_completion.bits.rd,
+           "rv5stage_fp_completions_distinct")
+
+  // A same-cycle completion may feed and release a replacement for the same
+  // register. Apply clears to the old state before reserving the new writer.
+  def next_busy = (busy_state & !clear_mask) ||| set_mask
+  when (or_reduce(set_mask) ||| or_reduce(clear_mask)):
+    busy_state <== next_busy
+  busy <== busy_state
+
+  def completion_fire = completion.fire()
+  def next_outstanding = mux(
+    issue_fire,
+    outstanding + bits(1, 4),
+    outstanding - bits(1, 4)
+  )
+  when (issue_fire ^ completion_fire):
+    outstanding <== next_outstanding
+  when completion_fire:
+    assert(or_reduce(outstanding) ||| issue_fire,
+           "rv5stage_fp_completion_has_issue")
+  assert(outstanding <= bits(8, 4), "rv5stage_fp_outstanding_in_range")
+  drained <== !or_reduce(outstanding) & !or_reduce(busy_state) & !store_response.valid
+
+export:
+  RV5StageFpPipeline

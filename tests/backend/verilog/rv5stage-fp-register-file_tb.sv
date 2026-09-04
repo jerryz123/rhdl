@@ -1,5 +1,5 @@
 // Verifies two-write forwarding, retention, all three reads, and writable f0.
-module rv5stage_floating_point_register_file_tb;
+module rv5stage_fp_register_file_tb;
   typedef struct packed {
     logic [4:0] address;
     logic [63:0] data;

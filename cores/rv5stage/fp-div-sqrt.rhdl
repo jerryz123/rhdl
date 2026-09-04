@@ -1,0 +1,126 @@
+#lang rhodium
+// Wraps HardFloat division and square root as buffered RV5Stage FP pipeline lanes.
+
+import:
+  "fp-bundles.rhdl" open
+  "decode/fp-ctrl.rhdl" open
+  "../../riscv/isa/fp-profile.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rtl/floating-point.rhdl" open
+  lib("hardfloat/main.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/arbiter.rhdl").Arbiter
+  lib("rhodium/std/flow/completion-queue.rhdl").CompletionQueue
+  lib("rhodium/std/flow/demux.rhdl").demux_flow
+  lib("rhodium/std/flow/queue.rhdl").Queue
+
+sync_circuit RV5StageFpDivSqrtLane(xlen :: XLen, profile :: FloatingPointProfile, format :: FloatFormat, Context :: DataType):
+  def flen = floating_point_register_width(profile)
+  unless flen >= format.ieee_width
+  | error(~who: #'RV5StageFpDivSqrtLane,
+          "floating-point register width must cover the selected format")
+
+  interface request(Decoupled(RV5StageFpExecutionRequest(
+    xlen,
+    profile,
+    Context
+  )), ~role: consumer)
+  interface completion(Irrevocable(RV5StageFpCompletion(
+    xlen,
+    profile,
+    Context
+  )), ~role: producer)
+
+  def Request = RV5StageFpExecutionRequest(xlen, profile, Context)
+  def Completion = RV5StageFpCompletion(xlen, profile, Context)
+  inst bridge(CompletionQueue(Request, Completion, 1))
+  bridge.response |> completion
+  inst operation(DivSqrtRecFN(format))
+
+  bridge.request.valid <== request.valid & operation.input_ready
+  bridge.request.bits <== request.bits
+  request.ready <== bridge.request.ready & operation.input_ready
+  operation.input_valid <== bridge.issue.valid
+  operation.square_root <== bridge.issue.bits.control.execution.divide_operation === RV5StageFloatDivideOperation.SquareRoot
+  operation.a <== riscv_unbox(format, flen, bridge.issue.bits.left).to_recoded()
+  operation.b <== riscv_unbox(format, flen, bridge.issue.bits.right).to_recoded()
+  operation.rounding_mode <== bridge.issue.bits.rounding_mode
+  operation.tininess_mode <== TininessMode.AfterRounding
+  assert(!bridge.issue.valid ||| operation.input_ready,
+         "rv5stage_fp_div_sqrt_issue_available")
+
+  reg context(Context)
+  reg destination(Bits(5))
+  when (bridge.issue.valid):
+    context <== bridge.issue.bits.context
+    destination <== bridge.issue.bits.rd
+
+  def result_valid = operation.division_valid ||| operation.square_root_valid
+  def result = riscv_canonicalize_nan(format, operation.out.to_ieee())
+  bridge.completion.valid <== result_valid
+  bridge.completion.bits <== RV5StageFpCompletion(xlen, profile, Context):
+    context: context
+    destination: RV5StageFloatDestination.FloatingPoint
+    rd: destination
+    integer_value: bits(0, xlen.width)
+    fp_value: riscv_nan_box(format, result, flen)
+    exception_flags: riscv_exception_flags(operation.exception_flags)
+    exception_flags_valid: Bool(#true)
+
+sync_circuit RV5StageFpDivSqrtF(xlen :: XLen, Context :: DataType):
+  interface request(Decoupled(RV5StageFpExecutionRequest(
+    xlen,
+    FloatingPointProfile.F,
+    Context
+  )), ~role: consumer)
+  interface completion(Irrevocable(RV5StageFpCompletion(
+    xlen,
+    FloatingPointProfile.F,
+    Context
+  )), ~role: producer)
+
+  inst lane(RV5StageFpDivSqrtLane(
+    xlen,
+    FloatingPointProfile.F,
+    FloatFormat.F32,
+    Context
+  ))
+  request |> lane.request
+  lane.completion |> completion
+
+sync_circuit RV5StageFpDivSqrtD(xlen :: XLen, Context :: DataType):
+  def Request = RV5StageFpExecutionRequest(xlen, FloatingPointProfile.D, Context)
+  def Completion = RV5StageFpCompletion(xlen, FloatingPointProfile.D, Context)
+  interface request(Decoupled(Request), ~role: consumer)
+  interface completion(Irrevocable(Completion), ~role: producer)
+
+  inst single(RV5StageFpDivSqrtLane(
+    xlen,
+    FloatingPointProfile.D,
+    FloatFormat.F32,
+    Context
+  ))
+  inst double(RV5StageFpDivSqrtLane(
+    xlen,
+    FloatingPointProfile.D,
+    FloatFormat.F64,
+    Context
+  ))
+  def Array(double_request, single_request) = request |> demux_flow(
+    2,
+    issued => issued.control.execution.source_precision === RV5StageFloatPrecision.Single
+  )
+  single_request |> single.request
+  double_request |> double.request
+
+  inst merge(Arbiter(Completion, 2))
+  single.completion |> merge.ingress[0]
+  double.completion |> merge.ingress[1]
+  inst buffered(Queue(Completion, 2, ~pipe: #true))
+  merge.egress |> buffered.ingress
+  buffered.egress |> completion
+
+export:
+  RV5StageFpDivSqrtLane
+  RV5StageFpDivSqrtF
+  RV5StageFpDivSqrtD

@@ -75,17 +75,29 @@ of mechanically recreating flow transformations with helper instances.
 [`rv5stage.rhdl`](rv5stage.rhdl) instantiates this implementation in the
 integrated MMU and cache hierarchy.
 
-The first isolated floating-point core components are not yet instantiated by
-`RV5StageCore`. [`floating-point-register-file.rhdl`](floating-point-register-file.rhdl)
-defines a 32-entry, three-read, two-write bank whose 32- or 64-bit FLEN follows
-the selected F or D host profile. Unlike the integer bank, `f0` is an ordinary
+The standalone floating-point hierarchy is not yet instantiated by
+`RV5StageCore`. [`fp-register-file.rhdl`](fp-register-file.rhdl) defines a
+32-entry, three-read, two-write bank whose 32- or 64-bit FLEN follows the
+selected F or D host profile. Unlike the integer bank, `f0` is an ordinary
 writable register, and the bank has no architectural reset value.
-[`decode/floating-point-ctrl.rhdl`](decode/floating-point-ctrl.rhdl)
-selects RV32F, RV64F, RV32FD, or RV64FD at elaboration and emits one sparse
-decode table of register-bank and direct execution-unit controls. The `None`
-profile emits no decode table and requires no floating-point register file.
-Pipeline state, hazards, CSR state, execution units, and retirement remain
-unchanged until the later integration step.
+[`decode/fp-ctrl.rhdl`](decode/fp-ctrl.rhdl) selects RV32F, RV64F, RV32FD, or
+RV64FD at elaboration and emits one sparse decode table of register-bank and
+direct execution-unit controls. The `None` profile emits no decode table.
+
+[`fp-pipeline.rhdl`](fp-pipeline.rhdl) is the core-specific parallel execution
+submodule for enabled profiles. It owns the FP register bank, FP RAW/WAW
+scoreboarding, operand reads, two-cycle fixed execution path, buffered
+iterative divide/square-root paths, and completion arbitration. Its decoded
+ready-valid issue contract is non-speculative: every accepted request must
+eventually complete. Completions may emerge out of issue order and return an
+opaque caller context, integer or FP result metadata, and RISC-V exception
+flags. The submodule writes FP destinations internally only when its completion
+is accepted. Separate load-reservation/load-completion and store-data flows let
+the eventual central LSU retain address generation, translation, faults, and
+cache ordering. CSR state, architectural retirement, and integer scoreboarding
+remain outside this submodule. [`fp-bundles.rhdl`](fp-bundles.rhdl) owns these
+boundary payloads; [`fp-datapath.rhdl`](fp-datapath.rhdl) and
+[`fp-div-sqrt.rhdl`](fp-div-sqrt.rhdl) own the internal execution lanes.
 
 ## Pipeline
 

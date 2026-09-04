@@ -1,0 +1,286 @@
+#lang rhodium
+// Implements RV5Stage's combinational fixed-latency floating-point execution datapaths.
+
+import:
+  "fp-bundles.rhdl" open
+  "decode/fp-ctrl.rhdl" open
+  "../../riscv/isa/fp-profile.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rtl/floating-point.rhdl" open
+  lib("hardfloat/main.rhdl") open
+  lib("rhodium/std/bits.rhdl") open
+
+fun fp_move_to_integer(xlen :: XLen,
+                       format :: FloatFormat,
+                       value :: IEEEFloat(format)) :~ Bits(xlen.width):
+  if format.ieee_width <= xlen.width
+  | riscv_float_to_integer_move(xlen, format, value)
+  | bits(0, xlen.width)
+
+fun integer_move_to_fp(xlen :: XLen,
+                       format :: FloatFormat,
+                       value :: Bits(xlen.width)) :~ IEEEFloat(format):
+  if xlen.width >= format.ieee_width
+  | riscv_integer_to_float_move(format, xlen.width, value)
+  | bits(0, format.ieee_width).into(IEEEFloat(format))
+
+fun fp_integer_word_input(xlen :: XLen,
+                          value :: Bits(xlen.width),
+                          unsigned :: Bool) :~ Bits(xlen.width):
+  if xlen == XLen.X32
+  | value
+  | mux(unsigned,
+        value[0..32].zext(64),
+        value[0..32].into(SInt(32)).sext(64).as_bits())
+
+fun fp_integer_word_result(xlen :: XLen,
+                           value :: Bits(32)) :~ Bits(xlen.width):
+  if xlen == XLen.X32
+  | value
+  | value.into(SInt(32)).sext(64).as_bits()
+
+circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, format :: FloatFormat, Context :: DataType):
+  def width = xlen.width
+  def flen = floating_point_register_width(profile)
+  unless flen >= format.ieee_width
+  | error(~who: #'RV5StageFpFormatDatapath,
+          "floating-point register width must cover the selected format")
+
+  input request: RV5StageFpExecutionRequest(xlen, profile, Context)
+  output completion: RV5StageFpCompletion(xlen, profile, Context)
+
+  def control :: RV5StageFloatExecutionControl() = request.control.execution
+  def left = riscv_unbox(format, flen, request.left)
+  def right = riscv_unbox(format, flen, request.right)
+  def third = riscv_unbox(format, flen, request.third)
+  def left_recoded = left.to_recoded()
+  def right_recoded = right.to_recoded()
+  def third_recoded = third.to_recoded()
+
+  inst add(AddRecFN(format))
+  add.subtract <== control.add_operation === RV5StageFloatAddOperation.Subtract
+  add.a <== left_recoded
+  add.b <== right_recoded
+  add.rounding_mode <== request.rounding_mode
+  add.tininess_mode <== TininessMode.AfterRounding
+
+  inst multiply(MulRecFN(format))
+  multiply.a <== left_recoded
+  multiply.b <== right_recoded
+  multiply.rounding_mode <== request.rounding_mode
+  multiply.tininess_mode <== TininessMode.AfterRounding
+
+  inst fused(MulAddRecFN(format))
+  fused.operation <== control.fused_operation
+  fused.a <== left_recoded
+  fused.b <== right_recoded
+  fused.c <== third_recoded
+  fused.rounding_mode <== request.rounding_mode
+  fused.tininess_mode <== TininessMode.AfterRounding
+
+  inst compare(CompareRecFN(format))
+  compare.a <== left_recoded
+  compare.b <== right_recoded
+  compare.signaling <== control.comparison =/= RV5StageFloatComparison.Equal
+  def comparison_value = mux_lookup(
+    control.comparison,
+    ~default: compare.eq,
+    [
+      [RV5StageFloatComparison.Less, compare.lt],
+      [RV5StageFloatComparison.LessEqual, compare.lt ||| compare.eq]
+    ]
+  )
+
+  inst minmax(RiscvFloatMinMax(format))
+  minmax.left <== left
+  minmax.right <== right
+  minmax.maximum <== control.minmax_operation === RV5StageFloatMinMaxOperation.Maximum
+
+  def normalized_word = fp_integer_word_input(
+    xlen,
+    request.integer_operand,
+    control.integer_unsigned
+  )
+  def normalized_integer = mux(
+    control.integer_width === RV5StageFloatIntegerWidth.Word,
+    normalized_word,
+    request.integer_operand
+  )
+  inst integer_to_fp(IntegerToRecFN(width, format))
+  integer_to_fp.signed_input <== !control.integer_unsigned
+  integer_to_fp.value <== normalized_integer
+  integer_to_fp.rounding_mode <== request.rounding_mode
+  integer_to_fp.tininess_mode <== TininessMode.AfterRounding
+
+  inst fp_to_word(RecFNToInteger(format, 32))
+  fp_to_word.value <== left_recoded
+  fp_to_word.rounding_mode <== request.rounding_mode
+  fp_to_word.signed_output <== !control.integer_unsigned
+  inst fp_to_integer(RecFNToInteger(format, width))
+  fp_to_integer.value <== left_recoded
+  fp_to_integer.rounding_mode <== request.rounding_mode
+  fp_to_integer.signed_output <== !control.integer_unsigned
+  def converted_word = fp_integer_word_result(xlen, fp_to_word.out)
+  def converted_integer = mux(
+    control.integer_width === RV5StageFloatIntegerWidth.Word,
+    converted_word,
+    fp_to_integer.out
+  )
+  def conversion_flags = mux(
+    control.integer_width === RV5StageFloatIntegerWidth.Word,
+    riscv_integer_exception_flags(fp_to_word.exception_flags),
+    riscv_integer_exception_flags(fp_to_integer.exception_flags)
+  )
+
+  def sign_value = riscv_sign_inject(format, left, right, control.sign_operation)
+  def integer_move_value = fp_move_to_integer(xlen, format, left)
+  def fp_move_value = integer_move_to_fp(xlen, format, request.integer_operand)
+  def class_value = riscv_classify(format, left).zext(width)
+  def fp_destination = request.control.registers.destination === RV5StageFloatDestination.FloatingPoint
+  def converted_fp = riscv_canonicalize_nan(format, integer_to_fp.out.to_ieee())
+  def arithmetic_fp = mux_lookup(
+    control.unit,
+    ~default: riscv_canonical_nan(format),
+    [
+      [RV5StageFloatUnit.FusedMultiplyAdd,
+       riscv_canonicalize_nan(format, fused.out.to_ieee())],
+      [RV5StageFloatUnit.Add,
+       riscv_canonicalize_nan(format, add.out.to_ieee())],
+      [RV5StageFloatUnit.Multiply,
+       riscv_canonicalize_nan(format, multiply.out.to_ieee())],
+      [RV5StageFloatUnit.SignInject, sign_value],
+      [RV5StageFloatUnit.MinMax, minmax.out],
+      [RV5StageFloatUnit.Convert, converted_fp],
+      [RV5StageFloatUnit.Move, fp_move_value]
+    ]
+  )
+  def integer_value = mux_lookup(
+    control.unit,
+    ~default: bits(0, width),
+    [
+      [RV5StageFloatUnit.Compare, comparison_value.as_bits().zext(width)],
+      [RV5StageFloatUnit.Convert, converted_integer],
+      [RV5StageFloatUnit.Move, integer_move_value],
+      [RV5StageFloatUnit.Classify, class_value]
+    ]
+  )
+  def exception_flags = mux_lookup(
+    control.unit,
+    ~default: bits(0, 5),
+    [
+      [RV5StageFloatUnit.FusedMultiplyAdd,
+       riscv_exception_flags(fused.exception_flags)],
+      [RV5StageFloatUnit.Add, riscv_exception_flags(add.exception_flags)],
+      [RV5StageFloatUnit.Multiply,
+       riscv_exception_flags(multiply.exception_flags)],
+      [RV5StageFloatUnit.MinMax, minmax.exception_flags],
+      [RV5StageFloatUnit.Compare,
+       riscv_exception_flags(compare.exception_flags)],
+      [RV5StageFloatUnit.Convert,
+       mux(fp_destination,
+           riscv_exception_flags(integer_to_fp.exception_flags),
+           conversion_flags)]
+    ]
+  )
+  def exception_flags_valid = control.unit.is_one_of(
+    RV5StageFloatUnit.FusedMultiplyAdd,
+    RV5StageFloatUnit.Add,
+    RV5StageFloatUnit.Multiply,
+    RV5StageFloatUnit.MinMax,
+    RV5StageFloatUnit.Compare,
+    RV5StageFloatUnit.Convert
+  )
+
+  completion <== RV5StageFpCompletion(xlen, profile, Context):
+    context: request.context
+    destination: request.control.registers.destination
+    rd: request.rd
+    integer_value: integer_value
+    fp_value: riscv_nan_box(format, arithmetic_fp, flen)
+    exception_flags: exception_flags
+    exception_flags_valid: exception_flags_valid
+
+circuit RV5StageFpFixedF(xlen :: XLen, Context :: DataType):
+  input request: RV5StageFpExecutionRequest(xlen, FloatingPointProfile.F, Context)
+  output completion: RV5StageFpCompletion(xlen, FloatingPointProfile.F, Context)
+
+  inst single(RV5StageFpFormatDatapath(
+    xlen,
+    FloatingPointProfile.F,
+    FloatFormat.F32,
+    Context
+  ))
+  single.request <== request
+  completion <== single.completion
+
+circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
+  input request: RV5StageFpExecutionRequest(xlen, FloatingPointProfile.D, Context)
+  output completion: RV5StageFpCompletion(xlen, FloatingPointProfile.D, Context)
+
+  inst single(RV5StageFpFormatDatapath(
+    xlen,
+    FloatingPointProfile.D,
+    FloatFormat.F32,
+    Context
+  ))
+  inst double(RV5StageFpFormatDatapath(
+    xlen,
+    FloatingPointProfile.D,
+    FloatFormat.F64,
+    Context
+  ))
+  single.request <== request
+  double.request <== request
+
+  def control :: RV5StageFloatExecutionControl() = request.control.execution
+  def source_single = control.source_precision === RV5StageFloatPrecision.Single
+  def cross_precision = (control.unit === RV5StageFloatUnit.Convert) & (
+    control.source_precision =/= control.destination_precision
+  )
+  def single_source = riscv_unbox(FloatFormat.F32, 64, request.left)
+  def double_source = request.left.into(IEEEFloat(FloatFormat.F64))
+  inst single_to_double(RecFNToRecFN(FloatFormat.F32, FloatFormat.F64))
+  single_to_double.value <== single_source.to_recoded()
+  single_to_double.rounding_mode <== request.rounding_mode
+  single_to_double.tininess_mode <== TininessMode.AfterRounding
+  inst double_to_single(RecFNToRecFN(FloatFormat.F64, FloatFormat.F32))
+  double_to_single.value <== double_source.to_recoded()
+  double_to_single.rounding_mode <== request.rounding_mode
+  double_to_single.tininess_mode <== TininessMode.AfterRounding
+
+  def ordinary = mux(source_single, single.completion, double.completion)
+  def converted_value = mux(
+    source_single,
+    riscv_nan_box(
+      FloatFormat.F64,
+      riscv_canonicalize_nan(FloatFormat.F64,
+                             single_to_double.out.to_ieee()),
+      64
+    ),
+    riscv_nan_box(
+      FloatFormat.F32,
+      riscv_canonicalize_nan(FloatFormat.F32,
+                             double_to_single.out.to_ieee()),
+      64
+    )
+  )
+  def converted_flags = mux(
+    source_single,
+    riscv_exception_flags(single_to_double.exception_flags),
+    riscv_exception_flags(double_to_single.exception_flags)
+  )
+  completion <== RV5StageFpCompletion(xlen, FloatingPointProfile.D, Context):
+    context: ordinary.context
+    destination: ordinary.destination
+    rd: ordinary.rd
+    integer_value: ordinary.integer_value
+    fp_value: mux(cross_precision, converted_value, ordinary.fp_value)
+    exception_flags: mux(cross_precision,
+                         converted_flags,
+                         ordinary.exception_flags)
+    exception_flags_valid: ordinary.exception_flags_valid
+
+export:
+  RV5StageFpFormatDatapath
+  RV5StageFpFixedF
+  RV5StageFpFixedD
