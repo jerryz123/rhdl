@@ -125,9 +125,12 @@ circuit CompareF32():
   less <== compare.lt
 ```
 
-Use `recfn_from_fn` and `fn_from_recfn` at IEEE boundaries. Raw representations
-are public so later arithmetic stages and specialized implementations can
-share them, but they are not an architectural storage format.
+Use `recfn_from_fn(ieee_value)` and `fn_from_recfn(recoded_value)` at IEEE
+boundaries. Conversion and classification helpers derive `FloatFormat` from
+the nominal input descriptor, so callers do not repeat a format already carried
+by the hardware value. Raw representations are public so later arithmetic
+stages and specialized implementations can share them, but they are not an
+architectural storage format.
 
 `DivSqrtRecF64` preserves the upstream specialized protocol: division computes
 `a / b`, while square root consumes `b`; the two operation classes have

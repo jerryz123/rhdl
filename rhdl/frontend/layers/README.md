@@ -47,11 +47,16 @@ hardware_type Token(width :: PosInt):
 
 fun pass(value :: Token(8)) :~ Token(8):
   value
+
+fun pass_any_width(value :: Token) :~ Token(value.type.width):
+  value
 ```
 
 The generated descriptor is nominal by declaration. Its parameters form the
 default equality key; `type_key:` can instead provide a canonical host value
-when parameter objects need semantic rather than identity equality.
+when parameter objects need semantic rather than identity equality. The bare
+type name annotates any member of the nominal family, while `value.type`
+projects the concrete descriptor and its original host parameters.
 `Hardware.of(type_expression)` remains available when the descriptor itself is
 dynamic or generic, but a named extension type should normally expose its own
 annotation through `hardware_type`.

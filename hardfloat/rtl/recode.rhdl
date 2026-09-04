@@ -9,8 +9,8 @@ import:
   "types.rhdl" open
   lib("rhdl/std/bits.rhdl").count_leading_zeros
 
-fun raw_float_from_fn(format :: FloatFormat,
-                      value :: IEEEFloat(format)) :~ RawFloat(format.exponent_width, format.significand_width):
+fun raw_float_from_fn(value :: IEEEFloat) :~ RawFloat(value.type.format.exponent_width, value.type.format.significand_width):
+  def format :: FloatFormat = value.type.format
   def exponent_width = format.exponent_width
   def significand_width = format.significand_width
   def packed_value = value.as_bits()
@@ -49,9 +49,9 @@ fun raw_float_from_fn(format :: FloatFormat,
     signed_exponent: zext(adjusted_exponent, exponent_width + 2).into(SInt(exponent_width + 2))
     significand: concat(bits(0, 1), !zero, mux(zero_exponent, subnormal_fraction, fraction))
 
-fun recfn_from_fn(format :: FloatFormat,
-                  value :: IEEEFloat(format)) :~ RecFloat(format):
-  def raw = raw_float_from_fn(format, value)
+fun recfn_from_fn(value :: IEEEFloat) :~ RecFloat(value.type.format):
+  def format :: FloatFormat = value.type.format
+  def raw = raw_float_from_fn(value)
   def exponent = raw.signed_exponent.as_bits()
   def recoded_top = mux(
     raw.is_zero,
@@ -65,8 +65,8 @@ fun recfn_from_fn(format :: FloatFormat,
       extract(raw.significand, format.significand_width - 2, 0)
     ).into(RecFloat(format))
 
-fun raw_float_from_recfn(format :: FloatFormat,
-                         value :: RecFloat(format)) :~ RawFloat(format.exponent_width, format.significand_width):
+fun raw_float_from_recfn(value :: RecFloat) :~ RawFloat(value.type.format.exponent_width, value.type.format.significand_width):
+  def format :: FloatFormat = value.type.format
   def exponent_width = format.exponent_width
   def significand_width = format.significand_width
   def packed_value = value.as_bits()
@@ -83,11 +83,11 @@ fun raw_float_from_recfn(format :: FloatFormat,
     signed_exponent: zext(exponent, exponent_width + 2).into(SInt(exponent_width + 2))
     significand: concat(bits(0, 1), !zero, extract(packed_value, significand_width - 2, 0))
 
-fun fn_from_recfn(format :: FloatFormat,
-                  value :: RecFloat(format)) :~ IEEEFloat(format):
+fun fn_from_recfn(value :: RecFloat) :~ IEEEFloat(value.type.format):
+  def format :: FloatFormat = value.type.format
   def exponent_width = format.exponent_width
   def significand_width = format.significand_width
-  def raw = raw_float_from_recfn(format, value)
+  def raw = raw_float_from_recfn(value)
   def raw_exponent = raw.signed_exponent.as_bits()
   def minimum_normal_exponent = (1 << (exponent_width - 1)) + 2
   def subnormal = raw.signed_exponent < sint(minimum_normal_exponent, exponent_width + 2)
@@ -111,12 +111,12 @@ fun fn_from_recfn(format :: FloatFormat,
   )
   concat(raw.sign, exponent, fraction).into(IEEEFloat(format))
 
-fun is_signaling_nan(format :: FloatFormat,
-                     raw :: RawFloat(format.exponent_width, format.significand_width)) :~ Bool:
+fun is_signaling_nan(raw :: Hardware.packable) :~ Bool:
+  def significand_width = raw.significand.type.bit_width() - 1
   raw.is_nan & !extract(
     raw.significand,
-    format.significand_width - 2,
-    format.significand_width - 2
+    significand_width - 2,
+    significand_width - 2
   ).into(Bool)
 
 export:
