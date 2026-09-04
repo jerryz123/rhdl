@@ -7,6 +7,7 @@ import:
   "fields.rhm" open
 
 export:
+  RegisterBank
   RegisterOperand
   ImmediatePiece
   ImmediateLayout
@@ -16,6 +17,9 @@ export:
   funct3
   rs1
   rs2
+  rs3
+  fmt
+  rm
   funct7
   funct6
   funct5
@@ -38,6 +42,19 @@ export:
   SystemFormat
   AtomicFormat
   LoadReservedFormat
+  FloatingLoadFormat
+  FloatingStoreFormat
+  FloatingBinaryFormat
+  FloatingBinaryRoundingFormat
+  FloatingUnaryFormat
+  FloatingUnaryRoundingFormat
+  FloatingCompareFormat
+  FloatingToIntegerFormat
+  FloatingToIntegerRoundingFormat
+  IntegerToFloatingFormat
+  IntegerToFloatingRoundingFormat
+  FloatingConvertFormat
+  FloatingR4RoundingFormat
   IImmediate
   SImmediate
   BImmediate
@@ -46,15 +63,19 @@ export:
   Shift64Immediate
   Shift32Immediate
 
-class RegisterOperand(name :: NonemptyString, field :: BitField, role :: String):
-  constructor (name :: NonemptyString, field :: BitField, role :: String):
+enum RegisterBank
+| Integer
+| FloatingPoint
+
+class RegisterOperand(name :: NonemptyString, field :: BitField, role :: String, bank :: RegisterBank):
+  constructor (name :: NonemptyString, field :: BitField, role :: String, bank :: RegisterBank = RegisterBank.Integer):
     unless field.width == 5
     | error(~who: #'RegisterOperand,
             "register operand field must be a five-bit BitField")
     unless role == "source" || role == "destination"
     | error(~who: #'RegisterOperand,
             "register operand role must be source or destination")
-    super(name, field, role)
+    super(name, field, role, bank)
 
 class ImmediatePiece(source :: BitField, output_high :: Nat, output_low :: Nat):
   constructor (source :: BitField, output_high :: Nat, output_low :: Nat):
@@ -150,6 +171,9 @@ def rd = BitField("rd", 11, 7)
 def funct3 = BitField("funct3", 14, 12)
 def rs1 = BitField("rs1", 19, 15)
 def rs2 = BitField("rs2", 24, 20)
+def rs3 = BitField("rs3", 31, 27)
+def fmt = BitField("fmt", 26, 25)
+def rm = BitField("rm", 14, 12)
 def funct7 = BitField("funct7", 31, 25)
 def funct6 = BitField("funct6", 31, 26)
 def funct5 = BitField("funct5", 31, 27)
@@ -163,6 +187,10 @@ def successor = BitField("succ", 23, 20)
 def rd_operand = RegisterOperand("rd", rd, "destination")
 def rs1_operand = RegisterOperand("rs1", rs1, "source")
 def rs2_operand = RegisterOperand("rs2", rs2, "source")
+def frd_operand = RegisterOperand("frd", rd, "destination", RegisterBank.FloatingPoint)
+def frs1_operand = RegisterOperand("frs1", rs1, "source", RegisterBank.FloatingPoint)
+def frs2_operand = RegisterOperand("frs2", rs2, "source", RegisterBank.FloatingPoint)
+def frs3_operand = RegisterOperand("frs3", rs3, "source", RegisterBank.FloatingPoint)
 
 def s_immediate_high = BitField("simm[11:5]", 31, 25)
 def s_immediate_low = BitField("simm[4:0]", 11, 7)
@@ -293,3 +321,16 @@ def FenceFormat = InstructionFormat(
   [fm, predecessor, successor, rs1, rd]
 )
 def SystemFormat = InstructionFormat("SYSTEM", [])
+def FloatingLoadFormat = InstructionFormat("floating-load", [frd_operand, rs1_operand], IImmediate)
+def FloatingStoreFormat = InstructionFormat("floating-store", [rs1_operand, frs2_operand], SImmediate)
+def FloatingBinaryFormat = InstructionFormat("floating-binary", [frd_operand, frs1_operand, frs2_operand])
+def FloatingBinaryRoundingFormat = InstructionFormat("floating-binary-rounding", [frd_operand, frs1_operand, frs2_operand], #false, [rm])
+def FloatingUnaryFormat = InstructionFormat("floating-unary", [frd_operand, frs1_operand])
+def FloatingUnaryRoundingFormat = InstructionFormat("floating-unary-rounding", [frd_operand, frs1_operand], #false, [rm])
+def FloatingCompareFormat = InstructionFormat("floating-compare", [rd_operand, frs1_operand, frs2_operand])
+def FloatingToIntegerFormat = InstructionFormat("floating-to-integer", [rd_operand, frs1_operand])
+def FloatingToIntegerRoundingFormat = InstructionFormat("floating-to-integer-rounding", [rd_operand, frs1_operand], #false, [rm])
+def IntegerToFloatingFormat = InstructionFormat("integer-to-floating", [frd_operand, rs1_operand])
+def IntegerToFloatingRoundingFormat = InstructionFormat("integer-to-floating-rounding", [frd_operand, rs1_operand], #false, [rm])
+def FloatingConvertFormat = InstructionFormat("floating-convert", [frd_operand, frs1_operand], #false, [rm])
+def FloatingR4RoundingFormat = InstructionFormat("floating-R4-rounding", [frd_operand, frs1_operand, frs2_operand, frs3_operand], #false, [rm])

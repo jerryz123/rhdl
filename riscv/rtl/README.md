@@ -3,7 +3,8 @@
 # RISC-V/Rhodium adapter
 
 This package is the only bridge from the pure host-side RISC-V model to Rhodium.
-It may import `riscv/model`, `riscv/isa`, and public `#lang rhodium` libraries. It
+It may import `riscv/model`, `riscv/isa`, public `#lang rhodium` libraries, and
+the public HardFloat package. It
 must not depend on Rhodium implementation modules, concrete processors, CIRCT, or
 tests.
 
@@ -51,3 +52,10 @@ processor while the cause-number namespace remains shared.
 [`interrupt.rhdl`](interrupt.rhdl) converts an architectural `InterruptCause`
 into a width-specialized `xcause` value with the interrupt bit set. Pending
 sources, interrupt selection, and privilege transitions remain core policy.
+
+[`floating-point.rhdl`](floating-point.rhdl) translates between HardFloat's
+typed values and RISC-V architectural conventions. It validates and removes
+NaN boxes, resolves static and dynamic rounding modes, maps exception flags,
+and implements the non-arithmetic sign, move, classification, and min/max
+rules. It contains no register file, CSR, decode, pipeline, or execution-unit
+scheduling policy.

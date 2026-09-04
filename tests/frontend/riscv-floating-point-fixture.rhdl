@@ -1,0 +1,76 @@
+#lang rhodium
+// Exercises reusable RISC-V floating-point policy over single-precision values.
+
+import:
+  lib("hardfloat/main.rhdl") open
+  lib("riscv/isa/xlen.rhm") open
+  lib("riscv/rtl/floating-point.rhdl") open
+
+circuit RiscvFloatingPointFixture():
+  input value: Bits(32)
+  input other: Bits(32)
+  input container: Bits(64)
+  input integer_value: Bits(64)
+  input instruction_mode: Bits(3)
+  input dynamic_mode: Bits(3)
+  input sign_operation: FloatSignOperation
+  input maximum: Bool
+  input invalid: Bool
+  input infinite: Bool
+  input overflow: Bool
+  input underflow: Bool
+  input inexact: Bool
+  output boxed: Bits(64)
+  output box_valid: Bool
+  output unboxed: Bits(32)
+  output canonical_nan: Bits(32)
+  output canonicalized: Bits(32)
+  output rounding_valid: Bool
+  output rounding_mode: Bits(3)
+  output flags: Bits(5)
+  output integer_flags: Bits(5)
+  output sign_result: Bits(32)
+  output integer_move: Bits(64)
+  output float_move: Bits(32)
+  output classification: Bits(10)
+  output minmax_result: Bits(32)
+  output minmax_flags: Bits(5)
+
+  def ieee = value.into(IEEEFloat(FloatFormat.F32))
+  def other_ieee = other.into(IEEEFloat(FloatFormat.F32))
+  def resolved = riscv_rounding_mode(instruction_mode, dynamic_mode)
+  def hardfloat_flags = ExceptionFlags():
+    invalid: invalid
+    infinite: infinite
+    overflow: overflow
+    underflow: underflow
+    inexact: inexact
+  def conversion_flags = IntegerExceptionFlags():
+    invalid: invalid
+    overflow: overflow
+    inexact: inexact
+  boxed <== riscv_nan_box(FloatFormat.F32, ieee, 64)
+  box_valid <== riscv_nan_box_valid(FloatFormat.F32, 64, container)
+  unboxed <== riscv_unbox(FloatFormat.F32, 64, container).as_bits()
+  canonical_nan <== riscv_canonical_nan(FloatFormat.F32).as_bits()
+  canonicalized <== riscv_canonicalize_nan(FloatFormat.F32, ieee).as_bits()
+  rounding_valid <== resolved.valid
+  rounding_mode <== resolved.mode.as_bits()
+  flags <== riscv_exception_flags(hardfloat_flags)
+  integer_flags <== riscv_integer_exception_flags(conversion_flags)
+  sign_result <== riscv_sign_inject(FloatFormat.F32, ieee, other_ieee, sign_operation).as_bits()
+  integer_move <== riscv_float_to_integer_move(XLen.X64, FloatFormat.F32, ieee)
+  float_move <== riscv_integer_to_float_move(FloatFormat.F32, 64, integer_value).as_bits()
+  classification <== riscv_classify(FloatFormat.F32, ieee)
+  inst minmax(RiscvFloatMinMax(FloatFormat.F32))
+  minmax.left <== ieee
+  minmax.right <== other_ieee
+  minmax.maximum <== maximum
+  minmax_result <== minmax.out.as_bits()
+  minmax_flags <== minmax.exception_flags
+
+def design = elaborate(RiscvFloatingPointFixture())
+
+export:
+  RiscvFloatingPointFixture
+  design

@@ -1,4 +1,4 @@
-<!-- Defines the pure RISC-V host model, integer-extension catalogs, and Rhodium adapter boundary. -->
+<!-- Defines the pure RISC-V host model, ISA catalogs, and Rhodium adapter boundary. -->
 
 # RISC-V instruction model
 
@@ -16,7 +16,7 @@ pure packages:
 riscv/isa ---------> riscv/model --> Rhombus
        |
        v
-riscv/rtl --------> public Rhodium standard libraries
+riscv/rtl --------> public Rhodium and HardFloat libraries
 ```
 
 Run the focused package checks from the repository root:
@@ -48,8 +48,9 @@ canonical `value` and `care` images. Construction rejects out-of-range and
 conflicting constraints; encodings support host-side matching, overlap, and
 subsumption relations.
 
-[`model/formats.rhm`](model/formats.rhm) defines register operands, scattered
-immediate layouts, and the R/I/S/B/U/J formats. Five-bit 32-bit-operation shift
+[`model/formats.rhm`](model/formats.rhm) defines typed integer and floating-point
+register operands, scattered immediate layouts, and the standard integer and
+floating-point instruction formats. Five-bit 32-bit-operation shift
 amounts and six-bit 64-bit-operation shift amounts are distinct. A layout maps
 named instruction fields into immediate result bits and explicitly records
 implicit zero bits.
@@ -172,6 +173,27 @@ address helpers, while [`rtl/sv39.rhdl`](rtl/sv39.rhdl) provides typed PTE,
 permission, superpage, and physical-address combinational operations.
 Keeping these catalogs separate lets a core select the mechanisms it actually
 implements without adding them to the RV32I or RV64I base catalogs.
+
+## Floating-point catalogs
+
+[`isa/fp-profile.rhm`](isa/fp-profile.rhm) defines the closed host-side
+`FloatingPointProfile` specialization. `None` is the default, `F` selects
+single precision, and `D` implies both single- and double-precision support.
+This configuration is deliberately a host value so absent FP hardware can be
+specialized away rather than represented by run-time control.
+
+[`isa/f.rhm`](isa/f.rhm) and [`isa/d.rhm`](isa/d.rhm) define the standard F and
+D instruction encodings for RV32 and RV64. D catalogs contain the D-specific
+instructions; a D-profile core composes them with the corresponding F catalog.
+The shared formats distinguish integer and floating-point register banks and
+model `rs3`, `fmt`, and `rm` as ordinary architectural fields.
+
+[`rtl/floating-point.rhdl`](rtl/floating-point.rhdl) owns reusable RISC-V policy
+around HardFloat values: NaN boxing, canonical NaNs, architectural rounding
+mode and exception-flag mapping, raw moves, classification, sign injection,
+and the specified floating min/max NaN and signed-zero behavior. HardFloat
+continues to own arithmetic implementation; concrete cores own register files,
+CSR state, decode, scheduling, and retirement.
 
 The catalogs were checked against the RISC-V International
 [RV32I specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html),
