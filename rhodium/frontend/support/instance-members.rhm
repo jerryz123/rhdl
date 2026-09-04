@@ -6,13 +6,8 @@ import:
   "../../core/ir.rhm" open
   "../kernel.rhm" as kernel
   "fields.rhm".HardwareFields
+  "fields.rhm".HardwareMethodFields
   "fields.rhm".hardware_index
-  "fields.rhm".hardware_as_bits
-  "fields.rhm".hardware_as_vec
-  "fields.rhm".hardware_into
-  "fields.rhm".HardwareIntoFunction
-  "fields.rhm".hardware_lookup
-  "fields.rhm".hardware_membership_dot
 
 export:
   InstanceMembers
@@ -63,10 +58,12 @@ fun hardware_member(value :: HardwareEntity || Array, name :: String):
       if resolved | resolved | kernel.project(value, name)
 
 annot.macro 'InstanceMembers':
+  let '$(base :: annot_meta.Parsed)' = 'HardwareMethodFields'
+  def (_base_predicate, base_infos) = annot_meta.unpack_predicate(base)
   def result_infos = statinfo_meta.and(
-    '(($(statinfo_meta.dot_provider_key), hardware_membership_dot))',
     '(($(statinfo_meta.dot_provider_key), instance_member_dot),
-      ($(statinfo_meta.index_get_key), instance_member_index))'
+      ($(statinfo_meta.index_get_key), instance_member_index))',
+    base_infos
   )
   annot_meta.pack_predicate(
     'fun (value): value is_a HardwareEntity || value is_a Array',
@@ -86,19 +83,10 @@ fun instance_member_index(value :: HardwareEntity || Array,
 
 dot.macro 'instance_member_dot $left $dot $right':
   ~tail: '$tail ...'
-  fun builtin_method(method :: Syntax):
-    match method
-    | 'as_bits': 'fun () :~ HardwareFields: hardware_as_bits($left, #'as_bits, "value")'
-    | 'as_vec': 'fun (element_type :: DataType) :~ HardwareFields: hardware_as_vec($left, element_type)'
-    | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'
-    | 'lookup': 'fun (selector, ~default: default_value) :~ InstanceMembers: hardware_lookup($left, selector, ~default: default_value)'
-    | ~else: #false
   match '$right $tail ...'
-  | '$(method :: Identifier)($(argument :: expr_meta.Parsed), ...) $rest ...':
-      def builtin = builtin_method(method)
-      if builtin
-      | values(builtin, '($argument, ...) $rest ...')
-      | values('$method($left, $argument, ...)', '$rest ...')
+  | 'lookup($(selector :: expr_meta.Parsed),
+            ~default: $(default_value :: expr_meta.Parsed)) $rest ...': #false
+  | '$(method :: Identifier)($(argument :: expr_meta.Parsed), ...) $rest ...': #false
   | ~else:
       def expansion:
         match right
@@ -119,7 +107,7 @@ dot.macro 'instance_member_dot $left $dot $right':
         | 'operation': #false
         | 'current': #false
         | 'next': #false
-        | ~else: builtin_method(right) || 'hardware_member($left, $(right.to_source_string())) :: InstanceMembers'
+        | ~else: 'hardware_member($left, $(right.to_source_string())) :: InstanceMembers'
       if expansion
       | values(expansion, '$tail ...')
       | #false
