@@ -247,13 +247,16 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
                              snoop.update.bits.state,
                              refill.completion.bits.state)
   def refill_word_bytes = completion_words[refill_install_index].as_vec(Bits(8))
+  def line_write_mask = rv5stage_cache_lane_mask(
+    cache,
+    completion_way,
+    word_bytes,
+    (!bits(0, word_bytes)).into(Mask(word_bytes))
+  )
   def mutable line_write_bytes = []
-  def mutable line_write_mask_bits = []
-  for (way in 0..ways):
-    def selected_way = completion_way === bits(way, way_width)
+  for (_way in 0..ways):
     for (byte in 0..word_bytes):
       line_write_bytes := line_write_bytes ++ [refill_word_bytes[byte]]
-      line_write_mask_bits := line_write_mask_bits ++ [selected_way]
 
   tags.port.request.valid <== request_fire ||| install ||| snoop_lookup_start
   tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), ways):
@@ -280,7 +283,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
                  request_data_address)
     write: refill_install_word
     data: vec(line_write_bytes)
-    mask: vec(line_write_mask_bits).into(Mask(data_lanes))
+    mask: line_write_mask
 
   when (core.invalidate_all):
     valid_lines <== vec(

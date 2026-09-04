@@ -5,13 +5,22 @@ import:
   "../../../rhodium/core/main.rhm" open
   "../../../rhodium/frontend/kernel.rhm" as embedded
   "../../../riscv/isa/xlen.rhm" open
+  "../cache.rhdl" open
   "../dcache/cache.rhdl" as l1d
   "../dcache/protocol.rhdl" as protocol
   "params.rhdl" as test_params
 
 def config = test_params.test_rv5stage_chi_config
-def design = embedded.run_elaboration(fun (): l1d.RV5StageL1DCache(XLen.X64, 8, ~chi: config))
+def cache_config = RV5StageCacheConfig(8, 1)
+def associative_cache_config = RV5StageCacheConfig(8, 2)
+def design = embedded.run_elaboration(fun (): l1d.RV5StageL1DCache(XLen.X64, cache_config, ~chi: config))
 def cache = design.modules.find(fun (module_def): module_def.name == "RV5StageL1DCache")
+def associative_design = embedded.run_elaboration(
+  fun (): l1d.RV5StageL1DCache(XLen.X64, associative_cache_config, ~chi: config)
+)
+def associative_cache = associative_design.modules.find(
+  fun (module_def): module_def.name == "RV5StageL1DCache"
+)
 def data_access_type = protocol.RV5StageDataAccess(XLen.X64)
 def data_request_member = data_access_type.members.find(
   fun (member): member.name == "request"
@@ -23,7 +32,7 @@ def writeback = design.modules.find(fun (module_def): module_def.name == "RV5Sta
 def transaction_controls = design.modules.filter(
   ~keep: fun (module_def): module_def.name.starts_with("CHIRetryableTransactionControl")
 )
-def rv32_design = embedded.run_elaboration(fun (): l1d.RV5StageL1DCache(XLen.X32, 8, ~chi: config))
+def rv32_design = embedded.run_elaboration(fun (): l1d.RV5StageL1DCache(XLen.X32, cache_config, ~chi: config))
 def rv32_cache = rv32_design.modules.find(fun (module_def): module_def.name == "RV5StageL1DCache")
 fun register_names(module_def):
   module_def.operations.filter(
@@ -49,6 +58,9 @@ check:
   rv32_cache.find_output("core_out").type.field("response").type.field("bits").type.field("data").type.width ~is 32
   rv32_cache.find_output("chi_out").type.field("requests").type.field("bits").type.field("address").type.width ~is 44
   register_names(cache).contains("valid_lines") ~is #true
+  register_names(associative_cache).contains("replacement_ways") ~is #true
+  register_names(associative_cache).contains("snoop_way") ~is #true
+  register_names(associative_cache).contains("gather_way") ~is #true
   register_names(cache).contains("reservation_valid") ~is #true
   register_names(cache).contains("reservation_address") ~is #true
   register_names(cache).contains("reservation_width") ~is #true
@@ -113,6 +125,7 @@ check:
   ]
   verify_design(design) ~is #void
   verify_design(rv32_design) ~is #void
+  verify_design(associative_design) ~is #void
   embedded.run_elaboration(
-    fun (): l1d.RV5StageL1DCache(64, 8, ~chi: config)
+    fun (): l1d.RV5StageL1DCache(64, cache_config, ~chi: config)
   ) ~throws "XLen"

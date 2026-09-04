@@ -395,6 +395,7 @@ module rv5stage_dcache_tb;
   localparam logic [63:0] STORE_DATA = 64'hdeadbeef_cafef00d;
   localparam logic [63:0] STORE_DATA_2 = 64'h01234567_89abcdef;
   localparam logic [63:0] EVICT_ADDRESS = ADDRESS + 64'h200;
+  localparam logic [63:0] THIRD_ADDRESS = ADDRESS + 64'h400;
   localparam logic [511:0] EVICT_LINE = {
     64'h17161514_13121110,
     64'h0f0e0d0c_0b0a0908,
@@ -405,6 +406,7 @@ module rv5stage_dcache_tb;
     64'h07060504_03020100,
     64'h37363534_33323130
   };
+  localparam logic [511:0] THIRD_LINE = {EVICT_LINE[511:64], 64'habcdef01_23456789};
   logic [511:0] dirty_line;
   logic [511:0] evict_dirty_line;
   integer beat;
@@ -475,8 +477,9 @@ module rv5stage_dcache_tb;
     send_core_request(ADDRESS + 64'h28, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd11);
     expect_core_response(STORE_DATA, 5'd11);
 
-    // Replacing the direct-mapped dirty line drains all eight 64-bit beats
-    // before issuing the new line's ReadClean.
+    // A second colliding line occupies the invalid way without evicting the
+    // dirty first line. A third collision then selects that round-robin victim
+    // and drains all eight 64-bit beats before issuing its ReadClean.
     dirty_line = LINE;
     dirty_line[3 * 64 +: 64] = 64'hffeeddcc_bbaa9989;
     dirty_line[5 * 64 +: 64] = STORE_DATA;
@@ -486,6 +489,16 @@ module rv5stage_dcache_tb;
     grant_rsp_credit();
     grant_dat_credit();
     send_core_request(EVICT_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd5);
+    accept_request(READ_CLEAN, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
+    return_line(EVICT_ADDRESS, EVICT_LINE, 3'b001);
+    accept_comp_ack();
+    expect_core_response(64'h37363534_33323130, 5'd5);
+    // Filling an invalid colliding way does not replace the reserved line.
+    send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA, 5'd16);
+    expect_core_response(64'd0, 5'd16);
+    send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd19);
+    expect_core_response(STORE_DATA, 5'd19);
+    send_core_request(THIRD_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd17);
     for (beat = 0; beat < 8; beat = beat + 1) begin
       accept_request(WRITE_UNIQUE_PTL,
                      ADDRESS + beat * 8,
@@ -498,10 +511,10 @@ module rv5stage_dcache_tb;
                         beat / 2,
                         (beat & 1) != 0);
     end
-    accept_request(READ_CLEAN, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
-    return_line(EVICT_ADDRESS, EVICT_LINE, 3'b001);
+    accept_request(READ_CLEAN, THIRD_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
+    return_line(THIRD_ADDRESS, THIRD_LINE, 3'b001);
     accept_comp_ack();
-    expect_core_response(64'h37363534_33323130, 5'd5);
+    expect_core_response(64'habcdef01_23456789, 5'd17);
     send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd15);
     expect_core_response(64'd1, 5'd15);
 
@@ -528,6 +541,8 @@ module rv5stage_dcache_tb;
       else $fatal(1, "snoop-invalidated SC unexpectedly reached CHI");
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after dirty snoop response");
+    send_core_request(THIRD_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd18);
+    expect_core_response(64'habcdef01_23456789, 5'd18);
 
     $display("RV5Stage write-back data-cache simulation passed");
     $finish;

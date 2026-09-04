@@ -25,11 +25,13 @@ only when no request is accepted that cycle and no lookup, acquisition, or
 dirty-line writeback remains active, giving architectural fences a
 precise quiescence boundary without creating a separate fence transaction.
 
-`cache.rhdl` implements a direct-mapped, blocking write-back/write-allocate
-cache. A one-stage `Pipe` carries lookup
+`cache.rhdl` implements a set-associative, blocking write-back/write-allocate
+cache with a power-of-two set count and positive way count. A one-stage `Pipe` carries lookup
 context alongside the synchronous SRAM access and advances on consecutive
-hits. Its data array has `sets * (64 / (XLEN / 8))` byte-masked rows of exactly
-`XLEN` bits; tags and coherence state remain indexed once per 64-byte line.
+hits. Its data array has `sets * (64 / (XLEN / 8))` byte-masked rows containing
+one `XLEN` word per way; tags and coherence state hold one entry per way at
+each set. Parallel tag comparisons select the hit way, and duplicate valid tags
+are rejected by an assertion.
 Aligned scalar loads, stores, LR/SC, and AMOs therefore touch one SRAM word,
 while line transfers are serialized by the cache controller. Load misses
 request `ReadClean`; store misses and stores to SharedClean
@@ -45,8 +47,8 @@ the data SRAM and dirty state locally without producing REQ or DAT traffic.
 A mandatory non-backpressurable
 `ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
 aligning an EX request's hit response with WB. An acquisition or miss blocks
-new cache requests until it completes. Before replacing a dirty direct-mapped
-victim, the cache gathers its XLEN words into a line buffer;
+new cache requests until it completes. Before replacing a dirty victim, the
+cache gathers the selected way's XLEN words into a line buffer;
 `../writeback.rhdl` then captures that line and drains its eight
 64-bit beats through the currently supported retryable `WriteUniquePtl`
 transaction engine; only then can the replacement refill begin.
@@ -69,7 +71,9 @@ reservation. Same-line local writes, invalidating snoops, and replacement of
 the reserved line also clear it. A failed SC returns one without issuing CHI
 traffic; a successful SC returns zero.
 
-The cache has no associativity, hit-under-miss, prefetching, background
-writeback, or direct coherence connection to the instruction cache. Dirty
+Allocation prefers the lowest invalid way, then uses a per-set round-robin
+pointer. Ownership acquisition for an existing shared line retains its current
+way and does not advance replacement state. The cache has no hit-under-miss,
+prefetching, background writeback, or direct coherence connection to the instruction cache. Dirty
 replacement currently decomposes a line into supported partial writes rather
 than using CHI's `WriteBackFull` transaction family.
