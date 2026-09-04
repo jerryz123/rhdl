@@ -1,9 +1,9 @@
-<!-- Describes reusable CHI platform devices and their integration contracts. -->
+<!-- Describes reusable platform devices and their hardware and simulation contracts. -->
 
 # Platform devices
 
-This package contains reusable CHI hardware devices that are independent of
-any processor core or SoC address map.
+This package contains reusable hardware devices that are independent of any
+processor core or SoC address map, plus device-specific simulation models.
 
 - [`aclint.rhdl`](aclint.rhdl) implements ACLINT MTIMER and MSWI for a
   parameterized number of harts. Its register layout uses offsets within a
@@ -39,9 +39,29 @@ The UART supports FIFO depths from one through sixteen, divisor-driven
 clears, overrun status, framing status, and stable CHI responses under
 backpressure. `Uart16550Params` owns the SN-I capabilities and address window;
 `Uart16550Identity` supplies occurrence-specific NodeID and base-address wires.
-The synthesizable device exposes only `rx`, `tx`, and `interrupt`; simulator
-console policy belongs under `sims/`.
+The synthesizable device exposes only `rx`, `tx`, and `interrupt`.
+
+[`uart-dpi.rhdl`](uart-dpi.rhdl) provides a PTY-backed simulation model for
+those serial pins. `UartDPI` uses the same 8-N-1 engines to deserialize
+`uart_tx` and serialize bytes onto `uart_rx`, while
+[`dpi/uart_dpi.cc`](dpi/uart_dpi.cc) creates one nonblocking raw
+pseudo-terminal per model ID. It prints the slave path when the model is first
+used; `rhodium_uart_pty_path` also returns that path so a simulator or test can
+open it directly. A terminal program connected to the slave sees bytes sent by
+the simulated UART and can write bytes that the model sends back over its
+serial output.
+
+The model buffers PTY input across hardware reset but suppresses serial
+transfers while reset is active. A decoded byte with a framing error is still
+written to the PTY because a PTY has no framing-error sideband; the C++ model
+logs and counts the error for diagnostics. The elaboration-time oversample
+divisor must match the divisor programmed into the connected UART.
+
+No SoC harness instantiates `UartDPI` yet. A future harness can connect
+`model.uart_tx` from the device's `tx` and the device's `rx` from
+`model.uart_rx`.
 
 Run the package host test with `make device-test`. The `aclint` and `uart16550`
 CIRCT fixtures also simulate register, interrupt, and external-pin behavior
-through Verilator.
+through Verilator. Run the standalone DPI serial model with
+`FIXTURE=uart-dpi bash tests/backend/run-circt.sh --simulate-only`.

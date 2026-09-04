@@ -120,6 +120,7 @@ riscv-test:
 
 device-test: check-boundaries
 	tools/run-racket-tests.sh $(DEVICE_TESTS)
+	bash devices/tests/run-uart-dpi-cpp.sh
 
 chi-test: check-boundaries
 	tools/run-racket-tests.sh $(CHI_TESTS)

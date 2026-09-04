@@ -1,0 +1,60 @@
+#lang rhodium
+// Implements a PTY-backed DPI model for device-level UART simulation.
+
+import:
+  lib("devices/uart.rhdl") open
+
+dpi_import function rhodium_uart_pty_tick(
+  model_id: Bits(32),
+  reset: Bool,
+  uart_to_pty_valid: Bool,
+  uart_to_pty_byte: Bits(8),
+  uart_to_pty_framing_error: Bool,
+  pty_to_uart_ready: Bool
+) -> (
+  out pty_to_uart_valid: Bool,
+  out pty_to_uart_byte: Bits(8),
+  return status: Bits(8)
+)
+
+// Connect uart_tx from a device's tx pin and uart_rx to that device's rx pin.
+// The oversample divisor must match the divisor programmed into the device.
+sync_circuit UartDPI(
+    model_id :: Int.in(0 ..= 0xffffffff),
+    oversample_divisor :: Int.in(1 ..= 0xffff)):
+  input uart_tx: Bits(1)
+  output uart_rx: Bits(1)
+
+  reg baud_counter(~init: bits(0, 16))
+  def oversample_tick = baud_counter >= bits(oversample_divisor - 1, 16)
+  when oversample_tick:
+    baud_counter <== bits(0, 16)
+  otherwise:
+    baud_counter <== baud_counter + bits(1, 16)
+
+  inst transmitter(Uart8N1Transmitter())
+  inst receiver(Uart8N1Receiver())
+  transmitter.oversample_tick <== oversample_tick
+  receiver.oversample_tick <== oversample_tick
+  receiver.rx <== uart_tx
+  uart_rx <== transmitter.tx
+
+  def reset = reset_active().into(Bool)
+  dpi_reg (pty_to_uart_valid,
+           pty_to_uart_byte,
+           status) = rhodium_uart_pty_tick(
+    bits(model_id, 32),
+    reset,
+    receiver.received.valid & !reset,
+    receiver.received.bits,
+    receiver.framing_error,
+    transmitter.bytes.ready & !reset
+  )
+
+  transmitter.bytes.valid <== pty_to_uart_valid & !reset
+  transmitter.bytes.bits <== pty_to_uart_byte
+  when (!reset):
+    assert(status === bits(0, 8), "uart_dpi_pty_tick_succeeded")
+
+export:
+  UartDPI
