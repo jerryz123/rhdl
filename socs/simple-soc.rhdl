@@ -2,6 +2,8 @@
 // Composes a host-facing RV5Stage, coherent on-chip RAM, and ACLINT over one CHI NoC.
 
 import:
+  lib("support/annotations.rhm") open
+  lib("rhodium/std/bits.rhdl") open
   lib("chi/main.rhdl") open
   lib("noc/authoring/main.rhm") open
   lib("noc/language/main.rhm").topology
@@ -23,24 +25,6 @@ def simple_soc_aclint_base = 0x02000000
 def simple_soc_aclint_bytes = 0x10000
 def simple_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
 def simple_soc_device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
-def simple_soc_rv5stage_config = RV5StageCHIConfig(
-  simple_soc_flit,
-  [RV5StageCHIRegion(
-     RiscvPhysicalMemoryRegion(
-       AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1),
-       simple_soc_memory_attributes
-     ),
-     simple_soc_home
-   ),
-   RV5StageCHIRegion(
-     RiscvPhysicalMemoryRegion(
-       AddressSet(simple_soc_aclint_base, simple_soc_aclint_bytes - 1),
-       simple_soc_device_attributes
-     ),
-     simple_soc_device_home
-   )]
-)
-def simple_soc_home_map :: CHIHomeMap = simple_soc_rv5stage_config.home_map
 def simple_soc_host_node = CHINodeParams(
   "host",
   1,
@@ -57,10 +41,6 @@ def simple_soc_host_node = CHINodeParams(
   ),
   ~max_outstanding: 1
 )
-def simple_soc_rv5stage_params = RV5StageCHIParams(simple_soc_rv5stage_config,
-                                                   2,
-                                                   3,
-                                                   ~device_node_id: 4)
 
 fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   CHIICNPortParams(
@@ -73,84 +53,109 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   )
 
 def simple_soc_host_port = requester_icn_endpoint(simple_soc_host_node)
-def simple_soc_instruction_port = requester_icn_endpoint(simple_soc_rv5stage_params.instruction_node)
-def simple_soc_data_port = requester_icn_endpoint(simple_soc_rv5stage_params.data_node)
-def simple_soc_device_port = requester_icn_endpoint(simple_soc_rv5stage_params.device_node)
-def simple_soc_ram_config = CHIRamConfig(simple_soc_flit,
-                                         simple_soc_memory_bytes,
-                                         ~max_outstanding: 2)
-def simple_soc_ram_params = CHIRamParams(
-  "simple-ram",
-  9,
-  simple_soc_ram_config,
-  ~base_address: simple_soc_memory_base,
-  ~kind: CHINodeKind.SNF
-)
-def simple_soc_memory_transfers = TransferSizes(1, simple_soc_flit.data_bytes)
-def simple_soc_memory_requests = [
-  CHIRequestSupport(CHIReqOpcode.ReadNoSnp, simple_soc_memory_transfers),
-  CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, simple_soc_memory_transfers),
-  CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, simple_soc_memory_transfers)
-]
-def simple_soc_memory_node = CHINodeParams(
-  "simple-memory",
-  9,
-  CHINodeKind.SNF,
-  ~emits: CHIChannelCapabilities(
-    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
-    ~dat: [CHIDatOpcode.CompData]
-  ),
-  ~supports: CHIChannelCapabilities(
-    ~req: [CHIReqOpcode.ReadNoSnp,
-           CHIReqOpcode.WriteNoSnpFull,
-           CHIReqOpcode.WriteNoSnpPtl],
-    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
-  ),
-  ~max_outstanding: 2
-)
-def simple_soc_memory_port = CHIICNPortParams(
-  "simple-memory-icn",
-  simple_soc_memory_node.node_id,
-  simple_soc_memory_node.kind,
-  ~emits: simple_soc_memory_node.supports,
-  ~supports: simple_soc_memory_node.emits,
-  ~max_outstanding: simple_soc_memory_node.max_outstanding
-)
-def simple_soc_memory_service = CHISubordinateServiceParams(
-  simple_soc_memory_port,
-  [AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1)],
-  simple_soc_memory_requests
-)
 def simple_soc_fragmenter_config = CHITransferFragmenterConfig(simple_soc_flit,
                                                                ~max_read_bytes: 64)
-def simple_soc_fragmenter_params = CHITransferFragmenterParams(
-  simple_soc_fragmenter_config,
-  simple_soc_memory_service
-)
-def simple_soc_home_config = CHIHNFConfig(
-  simple_soc_flit,
-  [simple_soc_host_port, simple_soc_instruction_port, simple_soc_data_port],
-  simple_soc_memory_bytes - 1,
-  simple_soc_fragmenter_config.upstream_requests(simple_soc_memory_requests)
-)
-def simple_soc_home_params = CHIHNFParams(
-  simple_soc_home,
-  simple_soc_home_config,
-  simple_soc_memory_port,
-  simple_soc_fragmenter_params.upstream_service
-)
 def simple_soc_aclint_config = AclintConfig(simple_soc_flit, 1)
 def simple_soc_aclint_params = AclintParams("simple-aclint",
                                             10,
                                             simple_soc_aclint_config,
                                             simple_soc_aclint_base)
-def simple_soc_device_home_params = CHIHNIParams(
-  simple_soc_device_home,
-  simple_soc_flit,
-  [simple_soc_device_port],
-  simple_soc_aclint_params.icn_port,
-  simple_soc_aclint_params.service
+
+// Collects every fabric parameter that changes with the normal-memory range
+// so on-chip and external-memory SoCs can configure that range independently.
+class SimpleSoCFabricParams(memory_name :: NonemptyString,
+                            memory_base :: Nat,
+                            memory_bytes :: Pow2Int):
+  implements StableCircuitParam
+
+  property flit: simple_soc_flit
+  property rv5stage_config:
+    RV5StageCHIConfig(
+      flit,
+      [RV5StageCHIRegion(
+         RiscvPhysicalMemoryRegion(
+           AddressSet(memory_base, memory_bytes - 1),
+           simple_soc_memory_attributes
+         ),
+         simple_soc_home
+       ),
+       RV5StageCHIRegion(
+         RiscvPhysicalMemoryRegion(
+           AddressSet(simple_soc_aclint_base, simple_soc_aclint_bytes - 1),
+           simple_soc_device_attributes
+         ),
+         simple_soc_device_home
+       )]
+    )
+  property home_map: rv5stage_config.home_map
+  property rv5stage_params:
+    RV5StageCHIParams(rv5stage_config, 2, 3, ~device_node_id: 4)
+  property instruction_port:
+    requester_icn_endpoint(rv5stage_params.instruction_node)
+  property data_port:
+    requester_icn_endpoint(rv5stage_params.data_node)
+  property device_port:
+    requester_icn_endpoint(rv5stage_params.device_node)
+  property ram_config:
+    CHIRamConfig(flit, memory_bytes, ~max_outstanding: 2)
+  property ram_params:
+    CHIRamParams(memory_name,
+                 9,
+                 ram_config,
+                 ~base_address: memory_base,
+                 ~kind: CHINodeKind.SNF)
+  property memory_transfers: ram_config.transfers
+  property memory_requests: ram_config.requests
+  property memory_node: ram_params.node
+  property memory_port: ram_params.icn_port
+  property memory_service: ram_params.service
+  property fragmenter_config: simple_soc_fragmenter_config
+  property fragmenter_params:
+    CHITransferFragmenterParams(fragmenter_config, memory_service)
+  property home_config:
+    CHIHNFConfig(
+      flit,
+      [simple_soc_host_port, instruction_port, data_port],
+      memory_bytes - 1,
+      fragmenter_config.upstream_requests(memory_requests)
+    )
+  property home_params:
+    CHIHNFParams(simple_soc_home,
+                 home_config,
+                 memory_port,
+                 fragmenter_params.upstream_service)
+  property device_home_params:
+    CHIHNIParams(simple_soc_device_home,
+                 flit,
+                 [device_port],
+                 simple_soc_aclint_params.icn_port,
+                 simple_soc_aclint_params.service)
+
+def simple_soc_fabric_params:
+  SimpleSoCFabricParams("simple-memory",
+                        simple_soc_memory_base,
+                        simple_soc_memory_bytes)
+def simple_soc_rv5stage_config = simple_soc_fabric_params.rv5stage_config
+def simple_soc_home_map :: CHIHomeMap = simple_soc_fabric_params.home_map
+def simple_soc_rv5stage_params = simple_soc_fabric_params.rv5stage_params
+def simple_soc_instruction_port = simple_soc_fabric_params.instruction_port
+def simple_soc_data_port = simple_soc_fabric_params.data_port
+def simple_soc_device_port = simple_soc_fabric_params.device_port
+def simple_soc_ram_config = simple_soc_fabric_params.ram_config
+def simple_soc_ram_params = simple_soc_fabric_params.ram_params
+def simple_soc_memory_transfers = simple_soc_fabric_params.memory_transfers
+def simple_soc_memory_requests = simple_soc_fabric_params.memory_requests
+def simple_soc_memory_node = simple_soc_fabric_params.memory_node
+def simple_soc_memory_port = simple_soc_fabric_params.memory_port
+def simple_soc_memory_service = CHISubordinateServiceParams(
+  simple_soc_memory_port,
+  [AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1)],
+  simple_soc_memory_requests
 )
+def simple_soc_fragmenter_params = simple_soc_fabric_params.fragmenter_params
+def simple_soc_home_config = simple_soc_fabric_params.home_config
+def simple_soc_home_params = simple_soc_fabric_params.home_params
+def simple_soc_device_home_params = simple_soc_fabric_params.device_home_params
 
 // The logical RN-I/RN-F relationships compile independently onto the four
 // transport planes while sharing one physical single-router topology.
@@ -205,13 +210,13 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
   simple_soc_compilations.dat.network.router_plan(simple_soc_router)
 )
 
-sync_circuit SimpleSoCFabric():
+sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_fabric_params):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
-  inst rv5stage(RV5Stage(XLen.X64, ~chi: simple_soc_rv5stage_config))
-  inst home(CHIHNF(simple_soc_home_config))
-  inst device_home(CHIHNI(simple_soc_device_home_params))
+  inst rv5stage(RV5Stage(XLen.X64, ~chi: params.rv5stage_config))
+  inst home(CHIHNF(params.home_config))
+  inst device_home(CHIHNI(params.device_home_params))
   inst aclint(Aclint(simple_soc_aclint_config))
   inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
   inst rsp_router(SimpleRouter(CHIRspFlit(simple_soc_flit), simple_soc_rsp_router_config))
@@ -219,13 +224,13 @@ sync_circuit SimpleSoCFabric():
   inst dat_router(SimpleRouter(CHIDatFlit(simple_soc_flit), simple_soc_dat_router_config))
 
   rv5stage.chi_identity <== RV5StageCHIIdentity(simple_soc_flit):
-    instruction_node_id: bits(simple_soc_rv5stage_params.instruction_node_id, simple_soc_flit.node_id_width)
-    data_node_id: bits(simple_soc_rv5stage_params.data_node_id, simple_soc_flit.node_id_width)
-    device_node_id: bits(simple_soc_rv5stage_params.device_node_id, simple_soc_flit.node_id_width)
+    instruction_node_id: bits(params.rv5stage_params.instruction_node_id, simple_soc_flit.node_id_width)
+    data_node_id: bits(params.rv5stage_params.data_node_id, simple_soc_flit.node_id_width)
+    device_node_id: bits(params.rv5stage_params.device_node_id, simple_soc_flit.node_id_width)
   home.identity <== CHIHNFIdentity(simple_soc_flit):
-    home_node_id: bits(simple_soc_home_params.home.node_id, simple_soc_flit.node_id_width)
-    subordinate_node_id: bits(simple_soc_home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
-    service_base: bits(simple_soc_memory_base, simple_soc_flit.request_address_width)
+    home_node_id: bits(params.home_params.home.node_id, simple_soc_flit.node_id_width)
+    subordinate_node_id: bits(params.home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
+    service_base: bits(params.memory_base, simple_soc_flit.request_address_width)
   aclint.identity <== AclintIdentity(simple_soc_flit):
     node_id: bits(simple_soc_aclint_params.node.node_id, simple_soc_flit.node_id_width)
     base_address: bits(simple_soc_aclint_params.base_address, simple_soc_flit.request_address_width)
@@ -293,19 +298,19 @@ sync_circuit SimpleSoCFabric():
 
 // Preserves the original self-contained implementation by terminating the
 // fabric's native subordinate channels in the fixed-latency on-chip CHIRam.
-sync_circuit SimpleSoC():
+sync_circuit SimpleSoC(params :: SimpleSoCFabricParams = simple_soc_fabric_params):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
 
-  inst fabric(SimpleSoCFabric())
-  inst fragmenter(CHITransferFragmenter(simple_soc_fragmenter_config))
-  inst ram(CHIRam(simple_soc_ram_config))
+  inst fabric(SimpleSoCFabric(params))
+  inst fragmenter(CHITransferFragmenter(params.fragmenter_config))
+  inst ram(CHIRam(params.ram_config))
 
   host <=> fabric.host
   fabric.memory <=> fragmenter.upstream
   fragmenter.downstream <=> ram.port
   ram.identity <== CHIRamIdentity(simple_soc_flit):
-    node_id: bits(simple_soc_memory_node.node_id, simple_soc_flit.node_id_width)
-    base_address: bits(simple_soc_memory_base, simple_soc_flit.request_address_width)
+    node_id: bits(params.memory_node.node_id, simple_soc_flit.node_id_width)
+    base_address: bits(params.memory_base, simple_soc_flit.request_address_width)
 
 def design = elaborate(SimpleSoC())
 
@@ -315,6 +320,8 @@ export:
   simple_soc_device_home
   simple_soc_home_map
   simple_soc_host_node
+  SimpleSoCFabricParams
+  simple_soc_fabric_params
   simple_soc_rv5stage_config
   simple_soc_rv5stage_params
   requester_icn_endpoint

@@ -19,6 +19,10 @@ HARNESS_SOURCE_dram := sims/dram-soc-harness.rhdl
 HARNESS_SOURCE_tiled := sims/tiled-soc-harness.rhdl
 HARNESS_SOURCE := $(HARNESS_SOURCE_$(SOC))
 HARNESS_EMITTER := $(REPO_DIR)/sims/emit-soc-harness.rhm
+SOC_DPI_SOURCE_dram := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.cc
+SOC_DPI_SOURCE := $(SOC_DPI_SOURCE_$(SOC))
+SOC_DPI_HEADER_dram := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.h
+SOC_DPI_HEADER := $(SOC_DPI_HEADER_$(SOC))
 
 CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR) -I$(CHI_DPI_DIR)
 CXXFLAGS += -std=c++20 -Wall -Wextra -Werror
@@ -120,11 +124,14 @@ $(SIMULATOR_BINARY): $(SOC_VERILOG) $(CURDIR)/TestDriver.v \
                      $(FESVR_DIR)/direct_mem_htif.h \
                      $(VERILATOR_DIR)/direct_mem_htif_dpi.cc \
                      $(VERILATOR_DIR)/direct_mem_htif_dpi.h \
+                     $(SOC_DPI_SOURCE) \
+                     $(SOC_DPI_HEADER) \
                      $(FESVR_LIBRARY)
 	$(VERILATOR) --binary --timing --vpi --assert --Wno-UNOPTFLAT --build-jobs 0 \
 	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \
 	  $(SOC_VERILOG) $(CURDIR)/TestDriver.v \
 	  $(FESVR_DIR)/direct_mem_htif.cc $(VERILATOR_DIR)/direct_mem_htif_dpi.cc \
+	  $(SOC_DPI_SOURCE) \
 	  -CFLAGS "-I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR) -std=c++20" \
 	  -LDFLAGS "$(FESVR_LIBRARY) -pthread"
 
