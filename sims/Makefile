@@ -2,6 +2,7 @@
 REPO_DIR := $(abspath ..)
 FESVR_DIR := $(CURDIR)/fesvr
 VERILATOR_DIR := $(CURDIR)/verilator
+CHI_DPI_DIR := $(REPO_DIR)/chi/dpi
 FESVR_REVISION := e1fa113cfb6d55d878a3c1ea3befa8d9c13ce154
 FESVR_PREFIX ?= $(REPO_DIR)/.tools/fesvr-$(FESVR_REVISION)
 SOC ?= simple
@@ -19,7 +20,7 @@ HARNESS_SOURCE_tiled := sims/tiled-soc-harness.rhdl
 HARNESS_SOURCE := $(HARNESS_SOURCE_$(SOC))
 HARNESS_EMITTER := $(REPO_DIR)/sims/emit-soc-harness.rhm
 
-CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR)
+CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR) -I$(CHI_DPI_DIR)
 CXXFLAGS += -std=c++20 -Wall -Wextra -Werror
 FESVR_LIBRARY := $(FESVR_PREFIX)/lib/libfesvr.a
 SOC_BUILD_DIR := $(BUILD_ROOT)/$(SOC)
@@ -32,7 +33,7 @@ SIMULATOR_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 SMOKE_BINARY := $(SOC_BUILD_DIR)/rv5stage_smoke.elf
 SIMULATOR_SOURCES := $(addprefix $(REPO_DIR)/,$(shell cd $(REPO_DIR) && rg --files -g '*.rhdl' -g '*.rhm'))
 
-.PHONY: all setup simulator run smoke dpi-compile-check elaboration-test tiled-lowering-test
+.PHONY: all setup simulator run smoke dpi-compile-check chi-dpi-memory-test elaboration-test tiled-lowering-test
 
 all: simulator
 
@@ -57,6 +58,17 @@ dpi-compile-check: $(FESVR_LIBRARY) | $(DPI_BUILD_DIR)
 	  (echo "set VERILATOR_ROOT to the Verilator share directory" >&2; exit 1)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I$(VERILATOR_ROOT)/include/vltstd \
 	  -c $(VERILATOR_DIR)/direct_mem_htif_dpi.cc -o $(DPI_BUILD_DIR)/direct_mem_htif_dpi.o
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I$(VERILATOR_ROOT)/include/vltstd \
+	  -c $(CHI_DPI_DIR)/chi_dpi_memory_dpi.cc -o $(DPI_BUILD_DIR)/chi_dpi_memory_dpi.o
+
+chi-dpi-memory-test: | $(DPI_BUILD_DIR)
+	@test -n "$(VERILATOR_ROOT)" || \
+	  (echo "set VERILATOR_ROOT to the Verilator share directory" >&2; exit 1)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I$(VERILATOR_ROOT)/include/vltstd \
+	  $(CHI_DPI_DIR)/chi_dpi_memory_dpi.cc \
+	  $(REPO_DIR)/chi/tests/chi_dpi_memory_dpi_test.cc \
+	  -o $(DPI_BUILD_DIR)/chi_dpi_memory_dpi_test
+	$(DPI_BUILD_DIR)/chi_dpi_memory_dpi_test
 
 elaboration-test:
 	compiled_root="$$(mktemp -d /tmp/rhodium-sims-elaboration.XXXXXX)"; \

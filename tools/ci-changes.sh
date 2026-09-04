@@ -313,6 +313,13 @@ classify_path() {
       circt_cores=true
       simulation=true
       ;;
+    chi/dpi-memory.rhdl|chi/dpi/*|chi/tests/dpi-memory-*|chi/tests/chi_dpi_memory_*)
+      host_protocols=true
+      host_socs=true
+      circt_protocols=true
+      simulation=true
+      mark_example_chi
+      ;;
     chi/*)
       host_protocols=true
       host_socs=true

@@ -202,20 +202,19 @@ circuit CHIRamCompletionRouter(p :: CHIFlitParams,
   completed.valid <== ingress.fire()
   completed.bits <== operation.slot
 
-sync_circuit CHIRam(config :: CHIRamConfig):
-  def checked = checked_chi_ram_config(config)
-  def p = checked.flit
-  def limit = checked.max_outstanding
+// Builds the CHI transaction machinery around a caller-supplied memory
+// backend without introducing another hardware protocol at the component
+// boundary.
+fun build_chi_ram_controller(config :: CHIRamConfig,
+                             identity :: CHIRamIdentity(config.flit),
+                             port :: Endpoint.of(CHISNChannels(config.flit)),
+                             backend :: Function.of_arity(0)):
+  def p = config.flit
+  def limit = config.max_outstanding
   def slot_width = index_width(limit)
-  def depth = checked.size_bytes / p.data_bytes
-  def word_address_width = index_width(depth)
-  def low_width = alignment_bits(p.data_bytes)
-  def Data = Vec(p.data_bytes, Bits(8))
   def MemoryOperation = CHIRamMemoryOperation(p, slot_width)
   def MemoryCompletion = CHIRamMemoryCompletion(p, slot_width)
 
-  input identity: CHIRamIdentity(p)
-  interface port(CHISNChannels(p), ~role: node)
   inst dbid_responses(Queue(CHIRspFlit(p), limit, ~pipe: #true))
   inst read_operations(Queue(MemoryOperation, limit, ~pipe: #true))
   inst write_operations(Queue(MemoryOperation, limit, ~pipe: #true))
@@ -223,7 +222,7 @@ sync_circuit CHIRam(config :: CHIRamConfig):
   inst memory_operations(CompletionQueue(MemoryOperation,
                                          MemoryCompletion,
                                          limit))
-  inst storage(SyncRam1RW(depth, Bits(8), p.data_bytes))
+  def connect_backend :: Function.of_arity(2) = backend()
   inst completion_router(CHIRamCompletionRouter(p, slot_width))
   completion_router.node_id <== identity.node_id
   inst response_arbiter(RRArbiter(CHIRspFlit(p), 2))
@@ -275,26 +274,7 @@ sync_circuit CHIRam(config :: CHIRamConfig):
   read_operations.egress <=> operation_arbiter.ingress[0]
   write_operations.egress <=> operation_arbiter.ingress[1]
   operation_arbiter.egress <=> memory_operations.request
-  (
-    memory_operations.issue |> map_valid(operation):
-      def relative_address :: Bits(p.request_address_width) = (
-        operation.request.address - identity.base_address
-      )
-      def word_address = relative_address[low_width..(low_width + word_address_width)]
-      ReadWriteRequest(word_address_width, Bits(8), p.data_bytes):
-        address: word_address
-        write: operation.write
-        data: operation.data.into(Data)
-        mask: operation.mask
-  ) <=> storage.port.request
-  (
-    memory_operations.issue |> valid_pipe(1) |> map_valid(operation):
-      CHIRamMemoryCompletion(p, slot_width):
-        memory_operation: operation
-        data: mux(operation.write,
-                  bits(0, p.data_width),
-                  storage.port.response.bits.as_bits())
-  ) <=> memory_operations.completion
+  connect_backend(memory_operations.issue, memory_operations.completion)
 
   memory_operations.response <=> completion_router.ingress
   def dbid_response_paths = dbid_responses.egress |> atomic_fork(2)
@@ -308,14 +288,57 @@ sync_circuit CHIRam(config :: CHIRamConfig):
   completion_router.read_response <=> port.dat.response
   completion_router.completed <=> transaction_slots.completed
 
-  monitor_chi_ram_request(checked, identity.base_address, port.req.valid, port.req.bits)
+  monitor_chi_ram_request(config, identity.base_address, port.req.valid, port.req.bits)
   monitor_chi_ram_write_data(p,
                              transaction_slots.matched_write.valid,
                              transaction_slots.matched_write.bits.data,
                              transaction_slots.matched_write.bits.request)
 
+sync_circuit CHIRam(config :: CHIRamConfig):
+  def checked = checked_chi_ram_config(config)
+  def p = checked.flit
+  def limit = checked.max_outstanding
+  def slot_width = index_width(limit)
+  def depth = checked.size_bytes / p.data_bytes
+  def word_address_width = index_width(depth)
+  def low_width = alignment_bits(p.data_bytes)
+  def Data = Vec(p.data_bytes, Bits(8))
+
+  input identity: CHIRamIdentity(p)
+  interface port(CHISNChannels(p), ~role: node)
+
+  fun backend():
+    inst storage(SyncRam1RW(depth, Bits(8), p.data_bytes))
+    fun connect(issue :: Endpoint, completion :: Endpoint):
+      (
+        issue |> map_valid(operation):
+          def relative_address :: Bits(p.request_address_width) = (
+            operation.request.address - identity.base_address
+          )
+          def word_address = relative_address[low_width..(low_width + word_address_width)]
+          ReadWriteRequest(word_address_width, Bits(8), p.data_bytes):
+            address: word_address
+            write: operation.write
+            data: operation.data.into(Data)
+            mask: operation.mask
+      ) <=> storage.port.request
+      (
+        issue |> valid_pipe(1) |> map_valid(operation):
+          CHIRamMemoryCompletion(p, slot_width):
+            memory_operation: operation
+            data: mux(operation.write,
+                      bits(0, p.data_width),
+                      storage.port.response.bits.as_bits())
+      ) <=> completion
+    connect
+
+  build_chi_ram_controller(checked, identity, port, backend)
+
 export:
+  CHIRamMemoryOperation
+  CHIRamMemoryCompletion
   CHIRamConfig
   CHIRamParams
   CHIRamIdentity
+  build_chi_ram_controller
   CHIRam

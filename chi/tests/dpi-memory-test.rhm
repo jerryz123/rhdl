@@ -1,0 +1,37 @@
+#lang rhombus
+// Checks the CHI DPI memory's hardware boundary and imported ABI.
+
+import:
+  "../../rhodium/core/main.rhm" open
+  "dpi-memory-fixture.rhdl" as fixture
+
+def design = fixture.design
+def top = design.modules.find(fun (module_def): module_def.name == "CHIDPIMemory")
+def module_names = design.modules.map(fun (module_def): module_def.name)
+def memory_import = design.dpi_imports.find(
+  fun (dpi): dpi.name == "rhodium_chi_memory_access"
+)
+def memory_register = top.operations.find(
+  fun (operation): operation.opcode == "sim.dpi_register"
+)
+def assertion_labels = top.operations.filter(
+  ~keep: fun (operation): operation.opcode == "verif.assert"
+).map(fun (operation): operation.attribute("label"))
+
+check:
+  top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "identity", "port_in"]
+  top.outputs.map(fun (output): output.name) ~is ["port_out"]
+  memory_import.input_names ~is [
+    "model_id", "beat_bytes", "write", "address", "write_data", "write_mask"
+  ]
+  memory_import.results.map(fun (result): result.name) ~is ["read_data", "status"]
+  type_equal(memory_import.input_types[4], Bits(512)) ~is #true
+  type_equal(memory_import.input_types[5], Bits(64)) ~is #true
+  type_equal(memory_import.results[0].type, Bits(512)) ~is #true
+  memory_register.results.length() ~is 2
+  assertion_labels.contains("chi_dpi_memory_access_succeeded") ~is #true
+  assertion_labels.contains("chi_ram_request_address_supported") ~is #true
+  module_names.contains("SyncRam1RW") ~is #false
+  module_names.contains("CHISNTransactionSlots") ~is #true
+  verify_design(design) ~is #void
+  verify_design(fixture.wide_design) ~is #void

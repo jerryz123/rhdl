@@ -315,6 +315,14 @@ state. It is not a Home Node and does not implement coherence. A Home Node
 performs any required ordering and coherence work before issuing a
 non-snoopable transaction to it.
 
+[`dpi-memory.rhdl`](dpi-memory.rhdl) implements `CHIDPIMemory` with the same
+native `CHISNChannels` contract and transaction behavior, replacing inferred
+storage with the sparse 64-byte-block DPI-C store under [`dpi/`](dpi/). One
+fixed 512-bit ABI covers every 128-, 256-, and 512-bit CHI data width; narrower
+payloads and byte enables occupy the low bits. Stores are isolated by the
+endpoint's NodeID. This simulation endpoint is standalone and is not currently
+instantiated by any SoC or harness.
+
 [`home.rhdl`](home.rhdl) implements the first bounded HN-I as
 `CHIHNI`. It operates through a `CHIHNIChannels` interface containing
 ready-valid requester- and subordinate-side channel interfaces, allocates a
@@ -489,6 +497,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`retryable-transaction.rhdl`](retryable-transaction.rhdl) | Declarative response-to-milestone profiles and reusable requester-side RetryAck/PCrdGrant association, request-attempt, and progress state |
 | [`subordinate-slots.rhdl`](subordinate-slots.rhdl) | Bounded subordinate transaction request/result allocation and write-DAT association over ready-valid flows |
 | [`ram.rhdl`](ram.rhdl) | Implemented non-snooping SN-F/SN-I `CHIRam` backing-memory transaction engine |
+| [`dpi-memory.rhdl`](dpi-memory.rhdl) | Optional native-CHI `CHIDPIMemory` backed by the sparse C++ DPI model in [`dpi/`](dpi/) |
 | [`transfer-fragmenter.rhdl`](transfer-fragmenter.rhdl) | Implemented serialized cache-line read fragmentation into single-DAT-beat subordinate transactions while passing through the initial single-beat write profile |
 | [`address-projector.rhdl`](address-projector.rhdl) | Cache-line-striped global service metadata and transparent REQ projection into dense local subordinate addresses |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial single-flit non-coherent profile |

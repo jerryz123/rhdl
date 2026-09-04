@@ -70,6 +70,8 @@ make -C sims smoke SOC=dram
 make -C sims smoke SOC=tiled
 make -C sims dpi-compile-check \
   VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
+make -C sims chi-dpi-memory-test \
+  VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
 make -C sims elaboration-test
 make -C sims tiled-lowering-test
 ```
@@ -92,3 +94,7 @@ private ready-valid DPI signals into coherent CHI `ReadClean` and
 `WriteUniquePtl` transactions and reports Invalid for every snoop. Consequently
 ELF loading and `tohost`/`fromhost` polling observe dirty RV5Stage cache lines
 without reserving a special mailbox address range.
+
+The `chi-dpi-memory-test` convenience target compiles and exercises the
+CHI-owned DPI model documented in the [`chi/` package](../chi/README.md); no
+SoC harness instantiates that model yet.
