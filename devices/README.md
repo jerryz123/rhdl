@@ -21,5 +21,27 @@ platform.
 `AclintParams` owns the SN-I endpoint capabilities and service window;
 `AclintIdentity` supplies occurrence-specific NodeID and base-address wires.
 
-Run the package host test with `make device-test`. The `aclint` CIRCT fixture
-also simulates register and interrupt behavior through Verilator.
+[`uart.rhdl`](uart.rhdl) provides reusable fixed-format 8-N-1 transmitter and
+receiver engines. They consume a 16-times oversampling tick, expose byte-level
+flow interfaces, and keep asynchronous receive synchronization inside the
+receiver.
+
+[`uart16550.rhdl`](uart16550.rhdl) wraps those engines in a one-outstanding CHI
+SN-I endpoint with an eight-byte, byte-accessed 16550-style register window.
+It implements RBR/THR and divisor-latch aliases, IER, IIR/FCR, LCR, MCR, LSR,
+MSR, and SCR. The implemented serial format is deliberately limited to 8-N-1;
+unsupported LCR formats raise a hardware assertion instead of silently
+claiming compatibility. MCR is retained for software readback, while modem
+status and modem-control pins are not implemented.
+
+The UART supports FIFO depths from one through sixteen, divisor-driven
+16-times oversampling, receive-data and transmitter-empty interrupts, FIFO
+clears, overrun status, framing status, and stable CHI responses under
+backpressure. `Uart16550Params` owns the SN-I capabilities and address window;
+`Uart16550Identity` supplies occurrence-specific NodeID and base-address wires.
+The synthesizable device exposes only `rx`, `tx`, and `interrupt`; simulator
+console policy belongs under `sims/`.
+
+Run the package host test with `make device-test`. The `aclint` and `uart16550`
+CIRCT fixtures also simulate register, interrupt, and external-pin behavior
+through Verilator.

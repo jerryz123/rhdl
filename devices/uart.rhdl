@@ -1,0 +1,132 @@
+#lang rhodium
+// Implements reusable fixed-format 8-N-1 UART transmit and receive engines.
+
+import:
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/cdc.rhdl").SyncLevel
+
+def UartOversampleCount = 16
+
+sync_circuit Uart8N1Transmitter():
+  input oversample_tick: Bool
+  interface bytes(Decoupled(Bits(8)), ~role: consumer)
+  output tx: Bits(1)
+  output busy: Bool
+
+  reg active(~init: Bool(#false))
+  reg data(Bits(8))
+  reg phase(~init: bits(0, 4))
+  reg subtick(~init: bits(0, 4))
+
+  bytes.ready <== !active
+  def accept = fire(bytes)
+  def data_phase = (phase >= bits(1, 4)) & (phase <= bits(8, 4))
+  def data_index = phase - bits(1, 4)
+  def serial_bit = mux(
+    !active,
+    Bool(#true),
+    mux(phase === bits(0, 4),
+        Bool(#false),
+        mux(data_phase, (data >> data_index)[0].into(Bool), Bool(#true)))
+  )
+
+  tx <== serial_bit.as_bits()
+  busy <== active
+
+  def phase_boundary = subtick === bits(UartOversampleCount - 1, 4)
+  when accept:
+    active <== Bool(#true)
+  elsewhen (active & oversample_tick & phase_boundary & (phase === bits(9, 4))):
+    active <== Bool(#false)
+  when accept:
+    data <== bytes.bits
+  when accept:
+    phase <== bits(0, 4)
+  elsewhen (active & oversample_tick & phase_boundary & (phase =/= bits(9, 4))):
+    phase <== phase + bits(1, 4)
+  when accept:
+    subtick <== bits(0, 4)
+  elsewhen (active & oversample_tick):
+    subtick <== mux(phase_boundary,
+                    bits(0, 4),
+                    subtick + bits(1, 4))
+
+hardware_enum UartReceiverState:
+  Idle
+  Start
+  Data
+  Stop
+  WaitIdle
+
+sync_circuit Uart8N1Receiver():
+  input oversample_tick: Bool
+  input rx: Bits(1)
+  interface received(Valid(Bits(8)), ~role: producer)
+  output framing_error: Bool
+  output busy: Bool
+
+  inst synchronizer(SyncLevel())
+  synchronizer.level <== rx
+  def serial_bit = synchronizer.synchronized.into(Bool)
+
+  reg state(~init: UartReceiverState.Idle)
+  reg data(Bits(8))
+  reg bit_index(~init: bits(0, 3))
+  reg subtick(~init: bits(0, 4))
+
+  def midpoint = subtick === bits((UartOversampleCount / 2) - 1, 4)
+  def boundary = subtick === bits(UartOversampleCount - 1, 4)
+  def complete = (state === UartReceiverState.Stop) & oversample_tick & boundary
+  def data_mask = bits(1, 8) << bit_index
+
+  received.valid <== complete
+  received.bits <== data
+  framing_error <== complete & !serial_bit
+  busy <== state =/= UartReceiverState.Idle
+
+  def detect_start = (state === UartReceiverState.Idle) & !serial_bit
+  def validate_start = (state === UartReceiverState.Start) & oversample_tick & midpoint
+  def sample_data = (state === UartReceiverState.Data) & oversample_tick & boundary
+  def sample_stop = (state === UartReceiverState.Stop) & oversample_tick & boundary
+  def wait_for_idle = state === UartReceiverState.WaitIdle
+  def timing_active = (state === UartReceiverState.Start) ||| (
+    state === UartReceiverState.Data
+  ) ||| (state === UartReceiverState.Stop)
+
+  when detect_start:
+    state <== UartReceiverState.Start
+  elsewhen (validate_start & serial_bit):
+    state <== UartReceiverState.Idle
+  elsewhen (validate_start & !serial_bit):
+    state <== UartReceiverState.Data
+  elsewhen (sample_data & (bit_index === bits(7, 3))):
+    state <== UartReceiverState.Stop
+  elsewhen (sample_stop & serial_bit):
+    state <== UartReceiverState.Idle
+  elsewhen (sample_stop & !serial_bit):
+    state <== UartReceiverState.WaitIdle
+  elsewhen (wait_for_idle & serial_bit):
+    state <== UartReceiverState.Idle
+
+  when detect_start:
+    subtick <== bits(0, 4)
+  elsewhen (oversample_tick & timing_active):
+    subtick <== mux(
+      validate_start ||| sample_data ||| sample_stop,
+      bits(0, 4),
+      subtick + bits(1, 4)
+    )
+
+  when (validate_start & !serial_bit):
+    bit_index <== bits(0, 3)
+  elsewhen (sample_data & (bit_index =/= bits(7, 3))):
+    bit_index <== bit_index + bits(1, 3)
+
+  when sample_data:
+    data <== mux(serial_bit, data ||| data_mask, data & !data_mask)
+
+export:
+  UartOversampleCount
+  Uart8N1Transmitter
+  UartReceiverState
+  Uart8N1Receiver

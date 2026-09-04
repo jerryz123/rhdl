@@ -1,0 +1,397 @@
+#lang rhodium
+// Implements a CHI-native 16550-style UART with 8-N-1 serial engines and FIFOs.
+
+import:
+  lib("support/annotations.rhm").NonemptyString
+  lib("rhodium/std/bits.rhdl") open
+  lib("rhodium/std/flow/queue.rhdl").Queue
+  lib("rhodium/std/interconnect.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl").fire
+  lib("chi/main.rhdl") open
+  "uart.rhdl" open
+
+def Uart16550AddressWidth = 3
+def Uart16550WindowBytes = 8
+def Uart16550MaximumFifoDepth = 16
+
+def Uart16550RbrThrDllOffset = 0
+def Uart16550IerDlmOffset = 1
+def Uart16550IirFcrOffset = 2
+def Uart16550LcrOffset = 3
+def Uart16550McrOffset = 4
+def Uart16550LsrOffset = 5
+def Uart16550MsrOffset = 6
+def Uart16550ScrOffset = 7
+
+class Uart16550Config(flit :: CHIFlitParams,
+                      fifo_depth :: Int.in(1 ..= Uart16550MaximumFifoDepth)):
+  implements StableCircuitParam
+
+  property data_bytes: flit.data_bytes
+  property transfers: TransferSizes(1, 1)
+  property requests:
+    [CHIRequestSupport(CHIReqOpcode.ReadNoSnp, transfers),
+     CHIRequestSupport(CHIReqOpcode.WriteNoSnpFull, transfers),
+     CHIRequestSupport(CHIReqOpcode.WriteNoSnpPtl, transfers)]
+
+class Uart16550Params(name :: NonemptyString,
+                      node_id :: Nat,
+                      config :: Uart16550Config,
+                      base_address :: Nat):
+
+  property node:
+    CHINodeParams(
+      name,
+      node_id,
+      CHINodeKind.SNI,
+      ~emits: CHIChannelCapabilities(
+        ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+        ~dat: [CHIDatOpcode.CompData]
+      ),
+      ~supports: CHIChannelCapabilities(
+        ~req: [CHIReqOpcode.ReadNoSnp,
+               CHIReqOpcode.WriteNoSnpFull,
+               CHIReqOpcode.WriteNoSnpPtl],
+        ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+      ),
+      ~max_outstanding: 1
+    )
+  property icn_port:
+    CHIICNPortParams(
+      name ++ "-icn",
+      node_id,
+      CHINodeKind.SNI,
+      ~emits: node.supports,
+      ~supports: node.emits,
+      ~max_outstanding: 1
+    )
+  property service:
+    CHISubordinateServiceParams(
+      icn_port,
+      [AddressSet(base_address, Uart16550WindowBytes - 1)],
+      config.requests
+    )
+
+  constructor (name :: NonemptyString,
+               node_id :: Nat,
+               config :: Uart16550Config,
+               base_address :: Nat):
+    unless base_address mod Uart16550WindowBytes == 0
+    | error(~who: #'Uart16550Params,
+            "base address must be aligned to the UART register window")
+    unless bits.length((base_address + Uart16550WindowBytes) - 1) <= config.flit.request_address_width
+    | error(~who: #'Uart16550Params,
+            "UART register window must fit in the CHI request address width")
+    unless bits.length(node_id) <= config.flit.node_id_width
+    | error(~who: #'Uart16550Params,
+            "NodeID must fit in the physical NodeID width")
+    super(name, node_id, config, base_address)
+
+bundle Uart16550Identity(p :: CHIFlitParams):
+  node_id: Bits(p.node_id_width)
+  base_address: Bits(p.request_address_width)
+
+hardware_enum Uart16550State:
+  Idle
+  ReadResponse
+  WriteDBID
+  WriteData
+  WriteResponse
+
+sync_circuit Uart16550(config :: Uart16550Config):
+  def p = config.flit
+  def fifo_depth = config.fifo_depth
+  def fifo_count_width = index_width(fifo_depth + 1)
+  def lane_width = alignment_bits(p.data_bytes)
+
+  input identity: Uart16550Identity(p)
+  input rx: Bits(1)
+  output tx: Bits(1)
+  output interrupt: Bool
+  interface port(CHISNChannels(p), ~role: node)
+
+  reg state(~init: Uart16550State.Idle)
+  reg request(CHIReqFlit(p))
+  reg read_response_data(Bits(p.data_width))
+
+  reg divisor_latch_low(~init: bits(1, 8))
+  reg divisor_latch_high(~init: bits(0, 8))
+  reg interrupt_enable(~init: bits(0, 8))
+  reg line_control(~init: bits(3, 8))
+  reg modem_control(~init: bits(0, 8))
+  reg scratch(~init: bits(0, 8))
+  reg fifo_enabled(~init: Bool(#false))
+  reg overrun_error(~init: Bool(#false))
+  reg framing_error(~init: Bool(#false))
+  reg baud_counter(~init: bits(0, 16))
+
+  // The software-visible FCR clear bits become scoped synchronous resets for
+  // the reusable queues. Their storage need not be erased once count is zero.
+  wire clear_tx_fifo: Bool
+  wire clear_rx_fifo: Bool
+  inst tx_fifo(Queue(Bits(8), fifo_depth, ~pipe: #true), ~reset_when: clear_tx_fifo)
+  inst rx_fifo(Queue(Bits(8), fifo_depth, ~pipe: #true), ~reset_when: clear_rx_fifo)
+
+  def divisor = concat(divisor_latch_high, divisor_latch_low)
+  def effective_divisor = mux(divisor === bits(0, 16), bits(1, 16), divisor)
+  def oversample_tick = baud_counter >= (effective_divisor - bits(1, 16))
+  when oversample_tick:
+    baud_counter <== bits(0, 16)
+  otherwise:
+    baud_counter <== baud_counter + bits(1, 16)
+
+  inst transmitter(Uart8N1Transmitter())
+  inst receiver(Uart8N1Receiver())
+  transmitter.oversample_tick <== oversample_tick
+  receiver.oversample_tick <== oversample_tick
+  receiver.rx <== rx
+  tx <== transmitter.tx
+
+  def tx_count = tx_fifo.count
+  def tx_empty = !tx_fifo.egress.valid
+  def tx_full_limit = mux(fifo_enabled,
+                          bits(fifo_depth, fifo_count_width),
+                          bits(1, fifo_count_width))
+
+  def rx_count = rx_fifo.count
+  def rx_empty = !rx_fifo.egress.valid
+  def rx_full_limit = mux(fifo_enabled,
+                          bits(fifo_depth, fifo_count_width),
+                          bits(1, fifo_count_width))
+  def rx_head = rx_fifo.egress.bits
+
+  def idle = state === Uart16550State.Idle
+  def incoming = port.req.bits
+  def incoming_opcode :: CHIReqOpcode = incoming.opcode
+  def ordinary_request = incoming_opcode =/= CHIReqOpcode.ReqLCrdReturn
+  def incoming_write = (incoming_opcode === CHIReqOpcode.WriteNoSnpFull) ||| (
+    incoming_opcode === CHIReqOpcode.WriteNoSnpPtl
+  )
+  def incoming_relative_full :: Bits(p.request_address_width) = incoming.address - identity.base_address
+  def incoming_in_window = (incoming.address >= identity.base_address) & !or_reduce(
+    incoming_relative_full[Uart16550AddressWidth..p.request_address_width]
+  )
+  def incoming_supported = (
+    (incoming_opcode === CHIReqOpcode.ReadNoSnp) ||| (
+      incoming_opcode === CHIReqOpcode.WriteNoSnpFull
+    ) ||| (incoming_opcode === CHIReqOpcode.WriteNoSnpPtl)
+  ) & incoming_in_window & (
+    incoming.size_or_num_req[0..3] === bits(0, 3)
+  ) & (incoming.tgt_id === identity.node_id)
+  port.req.ready <== !ordinary_request ||| (idle & incoming_supported)
+  def request_fire = fire(port.req) & ordinary_request
+
+  def incoming_relative :: Bits(Uart16550AddressWidth) = incoming_relative_full[0..Uart16550AddressWidth]
+  def request_relative_full :: Bits(p.request_address_width) = request.address - identity.base_address
+  def request_relative :: Bits(Uart16550AddressWidth) = request_relative_full[0..Uart16550AddressWidth]
+  def active_offset :: Bits(Uart16550AddressWidth) = mux(
+    request_fire & !incoming_write,
+    incoming_relative,
+    request_relative
+  )
+  def active_address :: Bits(p.request_address_width) = mux(
+    request_fire & !incoming_write,
+    incoming.address,
+    request.address
+  )
+  def register_lane = active_address[0..lane_width]
+  def register_shift = concat(register_lane, bits(0, 3))
+  def dlab = line_control[7].into(Bool)
+
+  def receiver_data_available = !rx_empty
+  def transmitter_holding_empty = tx_empty
+  def transmitter_empty = tx_empty & !transmitter.busy
+  def line_status = concat(
+    Bool(#false),
+    transmitter_empty,
+    transmitter_holding_empty,
+    Bool(#false),
+    framing_error,
+    Bool(#false),
+    overrun_error,
+    receiver_data_available
+  )
+  def receive_interrupt = interrupt_enable[0].into(Bool) & receiver_data_available
+  def transmit_interrupt = interrupt_enable[1].into(Bool) & transmitter_holding_empty
+  def interrupt_identification = (
+    mux(receive_interrupt,
+        bits(0x04, 8),
+        mux(transmit_interrupt, bits(0x02, 8), bits(0x01, 8)))
+  ) ||| mux(fifo_enabled, bits(0xc0, 8), bits(0, 8))
+  interrupt <== receive_interrupt ||| transmit_interrupt
+
+  def selected_read_byte :: Bits(8) = mux_lookup(
+    active_offset,
+    ~default: bits(0, 8),
+    [[Uart16550RbrThrDllOffset, mux(dlab, divisor_latch_low, mux(rx_empty, bits(0, 8), rx_head))],
+     [Uart16550IerDlmOffset, mux(dlab, divisor_latch_high, interrupt_enable)],
+     [Uart16550IirFcrOffset, interrupt_identification],
+     [Uart16550LcrOffset, line_control],
+     [Uart16550McrOffset, modem_control],
+     [Uart16550LsrOffset, line_status],
+     [Uart16550MsrOffset, bits(0, 8)],
+     [Uart16550ScrOffset, scratch]]
+  )
+  def register_read_data = selected_read_byte.zext(p.data_width) << register_shift
+  def read_rbr = request_fire & !incoming_write & !dlab & (
+    incoming_relative === bits(Uart16550RbrThrDllOffset, Uart16550AddressWidth)
+  ) & !rx_empty
+  def read_lsr = request_fire & !incoming_write & (
+    incoming_relative === bits(Uart16550LsrOffset, Uart16550AddressWidth)
+  )
+
+  def incoming_data = port.dat.request.bits
+  def ordinary_data = incoming_data.opcode =/= CHIDatOpcode.DataLCrdReturn
+  def write_data_expected = state === Uart16550State.WriteData
+  def register_data :: Bits(p.data_width) = incoming_data.data >> register_shift
+  def register_mask :: Bits(p.data_bytes) = incoming_data.byte_enable >> register_lane
+  def write_byte = register_data[0..8]
+  def write_enabled = register_mask[0].into(Bool)
+  def write_thr_target = write_data_expected & !dlab & (
+    request_relative === bits(Uart16550RbrThrDllOffset, Uart16550AddressWidth)
+  ) & write_enabled
+  def tx_has_space = (tx_count < tx_full_limit) ||| transmitter.bytes.ready
+  def write_data_supported = (incoming_data.opcode === CHIDatOpcode.NonCopyBackWriteData) & (
+    incoming_data.txn_id === bits(0, 12)
+  ) & (incoming_data.src_id === request.src_id) & (incoming_data.tgt_id === identity.node_id)
+  port.dat.request.ready <== !ordinary_data ||| (
+    write_data_expected & write_data_supported & (!write_thr_target ||| tx_has_space)
+  )
+  def write_data_fire = fire(port.dat.request) & ordinary_data
+
+  def write_thr = write_data_fire & write_thr_target
+  def write_dll = write_data_fire & write_enabled & dlab & (
+    request_relative === bits(Uart16550RbrThrDllOffset, Uart16550AddressWidth)
+  )
+  def write_ier = write_data_fire & write_enabled & !dlab & (
+    request_relative === bits(Uart16550IerDlmOffset, Uart16550AddressWidth)
+  )
+  def write_dlm = write_data_fire & write_enabled & dlab & (
+    request_relative === bits(Uart16550IerDlmOffset, Uart16550AddressWidth)
+  )
+  def write_fcr = write_data_fire & write_enabled & (
+    request_relative === bits(Uart16550IirFcrOffset, Uart16550AddressWidth)
+  )
+  def write_lcr = write_data_fire & write_enabled & (
+    request_relative === bits(Uart16550LcrOffset, Uart16550AddressWidth)
+  )
+  def write_mcr = write_data_fire & write_enabled & (
+    request_relative === bits(Uart16550McrOffset, Uart16550AddressWidth)
+  )
+  def write_scr = write_data_fire & write_enabled & (
+    request_relative === bits(Uart16550ScrOffset, Uart16550AddressWidth)
+  )
+  def next_fifo_enabled = write_byte[0].into(Bool)
+  def fifo_mode_change = write_fcr & (next_fifo_enabled =/= fifo_enabled)
+  clear_rx_fifo <== write_fcr & (write_byte[1].into(Bool) ||| fifo_mode_change)
+  clear_tx_fifo <== write_fcr & (write_byte[2].into(Bool) ||| fifo_mode_change)
+
+  // A scoped reset takes effect on the edge, so mask both sides while clear is
+  // asserted to prevent a stale TX byte from entering the serial shifter.
+  tx_fifo.ingress.valid <== write_thr & !clear_tx_fifo
+  tx_fifo.ingress.bits <== write_byte
+  transmitter.bytes.valid <== tx_fifo.egress.valid & !clear_tx_fifo
+  transmitter.bytes.bits <== tx_fifo.egress.bits
+  tx_fifo.egress.ready <== transmitter.bytes.ready & !clear_tx_fifo
+
+  def expected_write_mask = transfer_byte_mask(
+    request.address,
+    request.size_or_num_req[0..3],
+    p.data_bytes
+  ).into(Bits(p.data_bytes))
+  def supplied_write_mask = incoming_data.byte_enable
+  def partial_write = request.opcode === CHIReqOpcode.WriteNoSnpPtl
+  def write_mask_supported = mux(
+    partial_write,
+    (supplied_write_mask & expected_write_mask) === supplied_write_mask,
+    supplied_write_mask === expected_write_mask
+  )
+
+  def receive_byte = receiver.received.valid
+  def rx_has_space = (rx_count < rx_full_limit) ||| read_rbr
+  def rx_enqueue = receive_byte & rx_has_space
+  rx_fifo.ingress.valid <== rx_enqueue & !clear_rx_fifo
+  rx_fifo.ingress.bits <== receiver.received.bits
+  rx_fifo.egress.ready <== read_rbr & !clear_rx_fifo
+
+  when receive_byte:
+    when (!rx_has_space):
+      overrun_error <== Bool(#true)
+    when (receiver.framing_error):
+      framing_error <== Bool(#true)
+  elsewhen read_lsr:
+    overrun_error <== Bool(#false)
+    framing_error <== Bool(#false)
+
+  when write_dll:
+    divisor_latch_low <== write_byte
+  when write_dlm:
+    divisor_latch_high <== write_byte
+  when write_ier:
+    interrupt_enable <== write_byte & bits(0x03, 8)
+  when write_lcr:
+    line_control <== write_byte
+    assert((write_byte & bits(0x7f, 8)) === bits(0x03, 8),
+           "uart16550_line_control_is_8n1")
+  when write_mcr:
+    modem_control <== write_byte
+  when write_scr:
+    scratch <== write_byte
+  when write_fcr:
+    fifo_enabled <== next_fifo_enabled
+
+  def dbid_response = chi_sn_dbid_response(p, identity.node_id, request, bits(0, 1))
+  def write_completion = chi_sn_write_completion(p, identity.node_id, request, bits(0, 1))
+  port.rsp.valid <== (state === Uart16550State.WriteDBID) ||| (
+    state === Uart16550State.WriteResponse
+  )
+  port.rsp.bits <== mux(state === Uart16550State.WriteDBID,
+                        dbid_response,
+                        write_completion)
+  def response_fire = fire(port.rsp)
+  def dbid_fire = response_fire & (state === Uart16550State.WriteDBID)
+  def write_response_fire = response_fire & (state === Uart16550State.WriteResponse)
+
+  port.dat.response.valid <== state === Uart16550State.ReadResponse
+  port.dat.response.bits <== chi_sn_read_completion(p,
+                                                    identity.node_id,
+                                                    request,
+                                                    read_response_data)
+  def read_response_fire = fire(port.dat.response)
+
+  when request_fire:
+    request <== incoming
+    state <== mux(incoming_write, Uart16550State.WriteDBID, Uart16550State.ReadResponse)
+    when (!incoming_write):
+      read_response_data <== register_read_data
+  elsewhen dbid_fire:
+    state <== Uart16550State.WriteData
+  elsewhen write_data_fire:
+    state <== Uart16550State.WriteResponse
+  elsewhen (read_response_fire ||| write_response_fire):
+    state <== Uart16550State.Idle
+
+  when (port.req.valid & ordinary_request):
+    assert(incoming_supported, "uart16550_request_supported")
+  when (port.dat.request.valid & ordinary_data):
+    assert(write_data_expected, "uart16550_write_data_expected")
+    assert(write_data_supported, "uart16550_write_data_supported")
+    assert(write_mask_supported, "uart16550_write_mask_supported")
+
+export:
+  Uart16550AddressWidth
+  Uart16550WindowBytes
+  Uart16550MaximumFifoDepth
+  Uart16550RbrThrDllOffset
+  Uart16550IerDlmOffset
+  Uart16550IirFcrOffset
+  Uart16550LcrOffset
+  Uart16550McrOffset
+  Uart16550LsrOffset
+  Uart16550MsrOffset
+  Uart16550ScrOffset
+  Uart16550Config
+  Uart16550Params
+  Uart16550Identity
+  Uart16550State
+  Uart16550

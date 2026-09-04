@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated load-store-rv32-word bit-manip bit-manip-rv32
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  aclint chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
+  aclint uart16550 chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-snp-noc chi-family-noc chi-transfer-fragmenter
   rv5stage-core rv5stage-multiply rv5stage-dcache
 )
 
@@ -180,7 +180,7 @@ fixture_in_group() {
     std:round-robin-matcher|std:credited-flow|std:credited-monitor|std:credited-monitor-overgrant)
       return 0
       ;;
-    protocols:aclint|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
+    protocols:aclint|protocols:uart16550|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
     cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:load-store-rv32-word|cores:bit-manip*|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:riscv-floating-point|cores:scoreboard|cores:rv5stage-*)
@@ -595,6 +595,7 @@ fixture_specs=(
 
 direct_fixture_specs=(
   'aclint|aclint_tb'
+  'uart16550|uart16550_tb'
   'nested-bundle|'
   'aggregate-memory|'
   'one-hot-aggregate|'
