@@ -50,6 +50,11 @@ fun pass(value :: Token(8)) :~ Token(8):
 
 fun pass_any_width(value :: Token) :~ Token(value.type.width):
   value
+
+circuit TokenPass():
+  input source: Token(8)
+  output result: Token(8)
+  result <== source.pass_any_width()
 ```
 
 The generated descriptor is nominal by declaration. Its parameters form the
@@ -60,6 +65,14 @@ projects the concrete descriptor and its original host parameters.
 `Hardware.of(type_expression)` remains available when the descriptor itself is
 dynamic or generic, but a named extension type should normally expose its own
 annotation through `hardware_type`.
+
+An ordinary visible function can be called as an import-scoped hardware
+extension method. When a hardware dot call is not a built-in or a type-owned
+method, `receiver.operation(arguments...)` resolves directly to
+`operation(receiver, arguments...)`. Bare dot names remain hardware field
+projections. Because the expansion is a direct function call, receiver checks
+and dependent result annotations come from the function declaration, and an
+extension exists only where its function binding is in lexical scope.
 
 ## Clocking environments and CDC enforcement
 
