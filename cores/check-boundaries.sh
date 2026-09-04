@@ -64,7 +64,7 @@ if [[ -n "$component_control_imports" ]]; then
 fi
 
 pipeline_transport_imports="$(search_sources 'simple-memory' \
-  cores/rv5stage/core.rhdl cores/rv5stage/core-flow.rhdl || true)"
+  cores/rv5stage/core.rhdl || true)"
 if [[ -n "$pipeline_transport_imports" ]]; then
   echo "RV5Stage pipeline must depend on its cache protocol, not SimpleMemory" >&2
   echo "$pipeline_transport_imports" >&2
@@ -74,7 +74,7 @@ fi
 explicit_flow_syntax="$(search_sources '\|>|(map|filter|gate|zip)_flow\(|(map|filter|fork)_valid\(|atomic_fork\(|valid_arbiter\(|to_valid\(|OfferRegister\(|ValidArbiter\(|AtomicFork\(' \
   cores/rv5stage/core.rhdl || true)"
 if [[ -n "$explicit_flow_syntax" ]]; then
-  echo "the explicit RV5Stage core must use direct state and interface wiring" >&2
+  echo "the RV5Stage core must use direct state and interface wiring" >&2
   echo "$explicit_flow_syntax" >&2
   exit 1
 fi

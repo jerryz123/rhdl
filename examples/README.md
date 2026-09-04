@@ -213,7 +213,7 @@ instances, or logic to the generated RTL.
 | [`cores/decoded-alu.rhdl`](cores/decoded-alu.rhdl) | RV64I decode connected directly to the reusable integer ALU |
 | [`cores/rv5stage.rhdl`](cores/rv5stage.rhdl) | Complete RV64 RV5Stage core with private instruction and data caches |
 | [`noc/wormhole-router-diagram.rhdl`](noc/wormhole-router-diagram.rhdl) | Flow-aware diagram of a packet-retaining phased-XY router with five inputs and five targets |
-| [`rv5stage/core-diagram.rhdl`](rv5stage/core-diagram.rhdl) | Flow-aware logical diagram extraction for the flow-oriented RV5Stage core |
+| [`rv5stage/core-diagram.rhdl`](rv5stage/core-diagram.rhdl) | Logical diagram extraction for the RV5Stage core's blocks and interface channels |
 
 ## Formal example
 
