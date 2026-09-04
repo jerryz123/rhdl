@@ -41,6 +41,8 @@
  ("bad-enum-inequality.rhdl" "=/= operands must have exactly the same FlatDataType")
  ("bad-is-one-of-bundle.rhdl" ".is_one_of subject must have a FlatDataType")
  ("bad-is-one-of.rhdl" ".is_one_of operands must have exactly the same FlatDataType")
+ ("bad-zext-receiver.rhdl" ".zext receiver must have a Bits type")
+ ("bad-sext-receiver.rhdl" ".sext receiver must have a SignedArithmeticType")
  ("bad-or-reduce-type.rhdl" "or_reduce operand must have a packable DataType")
  ("bad-or-reduce-list-type.rhdl" "or_reduce list elements must have packable DataTypes")
  ("bad-and-reduce-type.rhdl" "and_reduce operand must have a packable DataType")

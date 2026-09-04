@@ -11,8 +11,8 @@ dependency inventory is in [`../../README.md`](../../README.md).
 
 | Layer | Authoring feature |
 |---|---|
-| [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, and width operations |
-| [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, and resizing |
+| [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, extraction, and truncation |
+| [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, operators, and signed truncation |
 | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
 | [`bool.rhm`](bool.rhm) | Non-numeric `Mask`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, enum validity, ordering, and binary `mux` |
 | [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
@@ -294,12 +294,12 @@ preserves the signed type. Dynamic shift amounts remain unsigned `Bits`;
 constant amounts may be nonnegative host `Int` values. Mixed widths and mixed
 `Bits`/`SInt` arithmetic are rejected rather than coerced.
 
-`sext(value, target_width)` explicitly sign-extends. `strunc(value,
-target_width)` explicitly retains the low bits and returns the same signed type
-at the narrower width. Equal-width representation changes between `Bits` and
-`SInt` continue to use `cast` or `.into`. Signed expanding multiplication uses
-`*&`; expanding signed addition, division, remainder, and implicit width
-inference are not part of this layer.
+`value.sext(target_width)` explicitly sign-extends and preserves the receiver's
+signed arithmetic type family. `strunc(value, target_width)` explicitly retains
+the low bits and returns the same signed type at the narrower width. Equal-width
+representation changes between `Bits` and `SInt` continue to use `cast` or
+`.into`. Signed expanding multiplication uses `*&`; expanding signed addition,
+division, remainder, and implicit width inference are not part of this layer.
 
 See [`../../../examples/rtl/signed-integers.rhdl`](../../../examples/rtl/signed-integers.rhdl).
 
@@ -434,8 +434,10 @@ their environment could physically drive a multi-hot encoding.
 - `bits_value[index]` produces `Bits(1)`.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
   Both forms lower to the core's fixed bit-extraction operation.
-- `zext(bits_value, target_width)` adds most-significant zeroes to `Bits` and
-  returns wider `Bits`; use `.as_bits()` to expose other packable data first.
+- `bits_value.zext(target_width)` adds most-significant zeroes and returns wider
+  `Bits`; use `.as_bits()` to expose other packable data first.
+- `signed_value.sext(target_width)` sign-extends any `SignedArithmeticType` and
+  returns the same nominal signed type family at the wider width.
 - `trunc` retains low bits.
 - `value.into(TargetType)` preserves packed width and bit pattern while
   changing the hardware type.
@@ -447,7 +449,8 @@ their environment could physically drive a multi-hot encoding.
   of the inferred type is unchanged.
 
 Indices and ranges are host values known during elaboration. Width changes are
-always explicit.
+always explicit. Width extension is receiver-only; there are no parallel
+author-facing `zext(value, width)` or `sext(value, width)` free functions.
 
 ## Registers and synchronous circuits
 

@@ -1,5 +1,5 @@
 #lang rhombus/and_meta
-// Provides shared field, cast, lookup, indexing, and membership syntax for hardware entities.
+// Provides shared field, cast, lookup, indexing, membership, and width syntax for hardware entities.
 
 import:
   rhombus/meta open
@@ -431,6 +431,30 @@ fun hardware_vector_map(value :: HardwareEntity,
   | error(~who: #'map, "map results must have a DataType")
   kernel.vector_create(VectorType(source.type.length, first.type), transformed)
 
+// Extends a Bits receiver with zeroes while keeping its static method surface
+// available to subsequent receiver-owned operations.
+fun hardware_zero_extend(value :: HardwareEntity,
+                         target_width :: PosInt,
+                         name :: False || AsciiIdentifier = #false,
+                         location :: Location = Location()) :~ HardwareFields:
+  def source = kernel.read(value, location)
+  unless bits_type(source.type)
+  | error(~who: #'zext,
+          location.describe() ++ ": .zext receiver must have a Bits type")
+  kernel.zext(source, target_width, name, location)
+
+// Extends a signed receiver through its width-preserving nominal type family
+// while keeping the receiver's static method surface.
+fun hardware_sign_extend(value :: HardwareEntity,
+                         target_width :: PosInt,
+                         name :: False || AsciiIdentifier = #false,
+                         location :: Location = Location()) :~ HardwareFields:
+  def source = kernel.read(value, location)
+  unless signed_arithmetic_type(source.type)
+  | error(~who: #'sext,
+          location.describe() ++ ": .sext receiver must have a SignedArithmeticType")
+  kernel.sext(source, target_width, name, location)
+
 // Implements receiver-owned membership without exposing a parallel free
 // function. Each alternative must retain the receiver's exact flat type.
 fun build_membership_predicate(value :: HardwareEntity,
@@ -484,6 +508,34 @@ fun build_membership_predicate(value :: HardwareEntity,
           )
           kernel.bit_not(equal_zero, #false, location)
 
+meta:
+  fun preserve_width_receiver_surface(function :: Syntax, receiver :: Syntax):
+    def call_result = statinfo_meta.pack_call_result(
+      [[-1, statinfo_meta.gather(receiver)]]
+    )
+    statinfo_meta.wrap(
+      function,
+      '(($(statinfo_meta.call_result_key), $call_result))'
+    )
+
+  fun hardware_width_method(left :: Syntax, right :: Syntax):
+    match right
+    | 'zext':
+        preserve_width_receiver_surface(
+          'fun (target_width :: PosInt,
+                name :: False || AsciiIdentifier = #false) :~ HardwareFields:
+             hardware_zero_extend($left, target_width, name)',
+          left
+        )
+    | 'sext':
+        preserve_width_receiver_surface(
+          'fun (target_width :: PosInt,
+                name :: False || AsciiIdentifier = #false) :~ HardwareFields:
+             hardware_sign_extend($left, target_width, name)',
+          left
+        )
+    | ~else: #false
+
 dot.macro 'hardware_method_dot $left $dot $right':
   ~tail: '$tail ...'
   fun declared_method(method :: Syntax):
@@ -511,6 +563,8 @@ dot.macro 'hardware_method_dot $left $dot $right':
     | #false
   fun universal_method(method :: Syntax):
     match method
+    | 'zext': hardware_width_method(left, method)
+    | 'sext': hardware_width_method(left, method)
     | 'as_bits': 'fun () :~ HardwareFields: hardware_as_bits($left, #'as_bits, "value")'
     | 'as_vec': 'fun (element_type :: DataType) :~ HardwareFields: hardware_as_vec($left, element_type)'
     | 'into': '(fun (target_type): hardware_into($left, target_type)) :: HardwareIntoFunction'

@@ -59,7 +59,7 @@ internal module implementing its shared frontend forms is called the
 | [`analysis/`](analysis/README.md) | Optional certification, provenance, and diagnostic passes over completed public IR | Core and other analysis modules |
 | [`frontend/kernel.rhm`](frontend/kernel.rhm) | Context-sensitive elaboration and deferred frontend hardware values over the public core | Core |
 | [`frontend/support/`](frontend/support/) | Shared cross-layer protocols, macros, static-information machinery, and policy certification; not a language profile | Kernel, approved core APIs, approved analyses, other support modules |
-| [`frontend/foundation.rhm`](frontend/foundation.rhm) | Circuits, ports, connections, elaboration, basic types including `Bool`, extension-defined hardware type declarations and protocols, receiver-owned flat-data membership, selection, and representation methods | Kernel, support, approved core type APIs |
+| [`frontend/foundation.rhm`](frontend/foundation.rhm) | Circuits, ports, connections, elaboration, basic types including `Bool`, extension-defined hardware type declarations and protocols, receiver-owned flat-data membership and width extension, selection, and representation methods | Kernel, support, approved core type APIs |
 | [`frontend/layers/`](frontend/layers/README.md) | Independently selectable notation and abstractions over existing semantics | Kernel, support, approved core APIs and analyses |
 | [`frontend/standard.rhm`](frontend/standard.rhm) | Aggregation only; defines no feature behavior | Foundation and all standard layers |
 | [`language.rhm`](language.rhm), [`base/language.rhm`](base/language.rhm) | Compose ordinary Rhombus host control with one public Rhodium profile | Standard or foundation |
@@ -177,8 +177,8 @@ it when adding, removing, or changing a layer's direct dependencies.
 
 | Layer | Provides | Direct Rhodium dependencies |
 |---|---|---|
-| `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, bit-vector zero extension, and width operations | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
-| `signed.rhm` | Explicit-width `SInt`, two's-complement literals, sign extension, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
+| `comb.rhm` | Static packed literals, typed synthesis don't-cares, decode relations, modular arithmetic, bitwise operations, muxes, extraction, and bit-vector truncation | core types and IR, kernel, field support, hardware-literal support, mux-lookup support |
+| `signed.rhm` | Explicit-width `SInt`, two's-complement literals, signed truncation, and signed operator participation | core types and IR, kernel, field support, hardware-literal support |
 | `expanding-arithmetic.rhm` | Lossless unsigned addition plus signed and unsigned multiplication with `+&` and `*&` sugar | core types, kernel, field support |
 | `bool.rhm` | Non-numeric lane `Mask`, compact `MaybeOneHot`, packed reductions, lower-index-first priority encoders, total optional-one-hot selection, equality, enum validity, signed and unsigned ordering, and binary `mux` | core types and IR, kernel, finite-enum support, field support, hardware-literal support, mask-type support, one-hot-selection support |
 | `enum.rhm` | Nominal sequential, explicit, and one-hot encoded hardware enums plus member literals and typed-key one-hot selection | kernel, field support, hardware-method support, variant-schema support, one-hot-selection support |
@@ -209,9 +209,9 @@ language profiles:
 - `hardware-methods.rhm` carries exact receiver-owned method declarations as
   composable static information without installing competing dot providers.
 - `fields.rhm` owns `Bool`, the single shared hardware method dispatcher,
-  receiver-owned flat-data membership, extension-method resolution, exact
-  hardware annotations, public hardware-value type discovery, shared canonical
-  packing, and readable and driveable field static information.
+  receiver-owned flat-data membership and width extension, extension-method
+  resolution, exact hardware annotations, public hardware-value type discovery,
+  shared canonical packing, and readable and driveable field static information.
 - `instance-members.rhm` lets layers contribute virtual instance members
   without creating sibling-layer dependencies.
 - `clocking.rhm` expands frontend sync policy into explicit ports, register

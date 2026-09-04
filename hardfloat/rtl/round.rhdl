@@ -40,13 +40,13 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   def round_magnitude_up = (minimum & raw.sign) ||| (maximum & !raw.sign)
 
   def exponent_work_width = (if in_exponent_width > out_exponent_width | in_exponent_width | out_exponent_width) + 3
-  def adjusted_exponent :: SInt(exponent_work_width) = sext(raw.signed_exponent, exponent_work_width) + sint(
+  def adjusted_exponent :: SInt(exponent_work_width) = raw.signed_exponent.sext(exponent_work_width) + sint(
     (1 << out_exponent_width) - (1 << in_exponent_width),
     exponent_work_width
   )
   def adjusted_significand :: Bits(out_significand_width + 3):
     if in_significand_width < (out_significand_width + 2)
-    | zext(raw.significand, out_significand_width + 3) << ((out_significand_width - in_significand_width) + 2)
+    | raw.significand.zext(out_significand_width + 3) << ((out_significand_width - in_significand_width) + 2)
     | if in_significand_width == (out_significand_width + 2)
       | raw.significand
       | concat(
@@ -66,7 +66,7 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
           adjusted_exponent.as_bits()[0..=out_exponent_width],
           (out_minimum_normal_exponent - out_significand_width) - 1,
           out_minimum_normal_exponent
-        ) ||| zext(shift_significand_down.as_bits(), out_significand_width + 1),
+        ) ||| shift_significand_down.as_bits().zext(out_significand_width + 1),
         bits(3, 2)
       )
   def shifted_round_mask = concat(bits(0, 1), round_mask[1..=(out_significand_width + 2)])
@@ -76,19 +76,13 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   def any_round = round_position_bit ||| any_round_extra
   def round_increment = ((near_even ||| near_maximum_magnitude) & round_position_bit) ||| (round_magnitude_up & any_round)
   def incremented_significand = (
-    zext(
-      (adjusted_significand ||| round_mask)[2..=(out_significand_width + 2)],
-      out_significand_width + 2
-    ) + bits(1, out_significand_width + 2)
+    (adjusted_significand ||| round_mask)[2..=(out_significand_width + 2)].zext(out_significand_width + 2) + bits(1, out_significand_width + 2)
   ) & !mux(
     near_even & round_position_bit & !any_round_extra,
     round_mask[1..=(out_significand_width + 2)],
     bits(0, out_significand_width + 2)
   )
-  def truncated_significand = zext(
-    (adjusted_significand & !round_mask)[2..=(out_significand_width + 2)],
-    out_significand_width + 2
-  ) ||| mux(
+  def truncated_significand = (adjusted_significand & !round_mask)[2..=(out_significand_width + 2)].zext(out_significand_width + 2) ||| mux(
     odd & any_round,
     round_position_mask[1..=(out_significand_width + 2)],
     bits(0, out_significand_width + 2)
@@ -96,10 +90,9 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   def rounded_significand = mux(round_increment, incremented_significand, truncated_significand)
   def rounded_exponent_width = exponent_work_width + 1
   def rounded_exponent :: SInt(rounded_exponent_width) = (
-    sext(adjusted_exponent, rounded_exponent_width) + zext(
-      rounded_significand[out_significand_width..=(out_significand_width + 1)],
-      rounded_exponent_width
-    ).into(SInt(rounded_exponent_width))
+    adjusted_exponent.sext(rounded_exponent_width) + rounded_significand[
+      out_significand_width..=(out_significand_width + 1)
+    ].zext(rounded_exponent_width).into(SInt(rounded_exponent_width))
   )
 
   def common_exponent = rounded_exponent.as_bits()[0..=out_exponent_width]
