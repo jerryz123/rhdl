@@ -32,11 +32,11 @@ circuit AddRawFN(format :: FloatFormat):
     b.signed_exponent - a.signed_exponent,
     exponent_difference
   )
-  def modular_alignment_distance = extract(absolute_exponent_difference.as_bits(), align_distance_width - 1, 0)
+  def modular_alignment_distance = absolute_exponent_difference.as_bits()[0..align_distance_width]
   def shifted_exponent_difference = exponent_difference >> align_distance_width
   def maximum_alignment = (shifted_exponent_difference =/= sint(0, exponent_width + 2)) & (
     (shifted_exponent_difference =/= sint(-1, exponent_width + 2)) ||| (
-      extract(exponent_difference.as_bits(), align_distance_width - 1, 0) === bits(0, align_distance_width)
+      exponent_difference.as_bits()[0..align_distance_width] === bits(0, align_distance_width)
     )
   )
   def alignment_distance = mux(
@@ -50,11 +50,11 @@ circuit AddRawFN(format :: FloatFormat):
 
   def close_width = significand_width + 3
   def aligned_a = mux(
-    !negative_exponent_difference & extract(exponent_difference.as_bits(), 0, 0).into(Bool),
+    !negative_exponent_difference & exponent_difference.as_bits()[0].into(Bool),
     zext(a.significand, close_width) << 2,
     bits(0, close_width)
   ) ||| mux(
-    !negative_exponent_difference & !extract(exponent_difference.as_bits(), 0, 0).into(Bool),
+    !negative_exponent_difference & !exponent_difference.as_bits()[0].into(Bool),
     zext(a.significand, close_width) << 1,
     bits(0, close_width)
   ) ||| mux(
@@ -69,7 +69,7 @@ circuit AddRawFN(format :: FloatFormat):
     -signed_close_sum,
     signed_close_sum
   )
-  def close_sum = extract(absolute_close_sum.as_bits(), significand_width + 1, 0)
+  def close_sum = absolute_close_sum.as_bits()[0..=(significand_width + 1)]
   def close_adjusted_sum:
     if (significand_width mod 2) == 1
     | zext(close_sum, significand_width + 3) << 1
@@ -86,21 +86,13 @@ circuit AddRawFN(format :: FloatFormat):
     zext(close_sum, significand_width + 3) << close_normalization_distance
   ) << 1
   def close_total_cancellation = !or_reduce(
-    extract(close_significand, significand_width + 2, significand_width + 1)
+    close_significand[(significand_width + 1)..=(significand_width + 2)]
   )
   def close_sign = a.sign ^ (signed_close_sum < sint(0, close_width))
 
   def far_sign = mux(negative_exponent_difference, effective_sign_b, a.sign)
-  def far_larger = extract(
-    mux(negative_exponent_difference, b.significand, a.significand),
-    significand_width - 1,
-    0
-  )
-  def far_smaller = extract(
-    mux(negative_exponent_difference, a.significand, b.significand),
-    significand_width - 1,
-    0
-  )
+  def far_larger = mux(negative_exponent_difference, b.significand, a.significand)[0..significand_width]
+  def far_smaller = mux(negative_exponent_difference, a.significand, b.significand)[0..significand_width]
   def far_main_aligned = (zext(far_smaller, significand_width + 5) << 5) >> alignment_distance
   def far_mask_width = (significand_width + 5) div 4
   def far_reduced_source = zext(far_smaller, far_mask_width * 4) << 2
@@ -110,10 +102,10 @@ circuit AddRawFN(format :: FloatFormat):
   def far_round_extra_mask:
     if align_distance_width <= 2
     | bits(0, far_mask_width)
-    | low_mask(extract(alignment_distance, align_distance_width - 1, 2), far_mask_width, 0)
-  def far_sticky = or_reduce(extract(far_main_aligned, 2, 0)) ||| or_reduce(far_reduced & far_round_extra_mask)
+    | low_mask(alignment_distance[2..align_distance_width], far_mask_width, 0)
+  def far_sticky = or_reduce(far_main_aligned[0..=2]) ||| or_reduce(far_reduced & far_round_extra_mask)
   def far_aligned_smaller = concat(
-    extract(far_main_aligned, significand_width + 4, 3),
+    far_main_aligned[3..=(significand_width + 4)],
     far_sticky
   )
   def far_subtract = !equal_signs
@@ -124,13 +116,13 @@ circuit AddRawFN(format :: FloatFormat):
   )
   def far_larger_shifted = zext(far_larger, significand_width + 4) << 3
   def far_sum = (far_larger_shifted + far_negative_smaller) + zext(far_subtract.as_bits(), significand_width + 4)
-  def far_added_significand = extract(far_sum, significand_width + 3, 1) ||| zext(
-    extract(far_sum, 0, 0),
+  def far_added_significand = far_sum[1..=(significand_width + 3)] ||| zext(
+    far_sum[0],
     significand_width + 3
   )
   def far_significand = mux(
     far_subtract,
-    extract(far_sum, significand_width + 2, 0),
+    far_sum[0..=(significand_width + 2)],
     far_added_significand
   )
 

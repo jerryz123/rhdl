@@ -429,7 +429,7 @@ their environment could physically drive a multi-hot encoding.
   the most-significant bits; a host-generated list is also accepted.
 - `bits_value[index]` produces `Bits(1)`.
 - `value[low..high]` uses a half-open host range; `low..=high` is inclusive.
-- Explicit `extract(value, high, low)` uses inclusive host indices.
+  Both forms lower to the core's fixed bit-extraction operation.
 - `zext(bits_value, target_width)` adds most-significant zeroes to `Bits` and
   returns wider `Bits`; use `.as_bits()` to expose other packable data first.
 - `trunc` retains low bits.

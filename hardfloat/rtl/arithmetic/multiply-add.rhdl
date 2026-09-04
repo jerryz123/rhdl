@@ -54,15 +54,15 @@ circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
   def raw_b = b.to_raw()
   def raw_c = c.to_raw()
   def operation_bits = operation.as_bits()
-  def product_sign = raw_a.sign ^ raw_b.sign ^ extract(operation_bits, 1, 1).into(Bool)
+  def product_sign = raw_a.sign ^ raw_b.sign ^ operation_bits[1].into(Bool)
   def exponent_sum_width = exponent_width + 3
   def aligned_product_exponent = (
     sext(raw_a.signed_exponent, exponent_sum_width) + sext(raw_b.signed_exponent, exponent_sum_width)
   ) + sint((((-(1 << exponent_width)) + significand_width) + 3), exponent_sum_width)
-  def subtract_magnitudes = product_sign ^ raw_c.sign ^ extract(operation_bits, 0, 0).into(Bool)
+  def subtract_magnitudes = product_sign ^ raw_c.sign ^ operation_bits[0].into(Bool)
 
   def natural_c_alignment = aligned_product_exponent - sext(raw_c.signed_exponent, exponent_sum_width)
-  def positive_c_alignment = extract(natural_c_alignment.as_bits(), exponent_width + 1, 0)
+  def positive_c_alignment = natural_c_alignment.as_bits()[0..=(exponent_width + 1)]
   def minimum_c_alignment = raw_a.is_zero ||| raw_b.is_zero ||| (
     natural_c_alignment < sint(0, exponent_sum_width)
   )
@@ -75,7 +75,7 @@ circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
     bits(0, full_alignment_width),
     mux(
       positive_c_alignment < bits(significand_sum_width - 1, exponent_width + 2),
-      extract(positive_c_alignment, full_alignment_width - 1, 0),
+      positive_c_alignment[0..full_alignment_width],
       bits(significand_sum_width - 1, full_alignment_width)
     )
   )
@@ -98,32 +98,32 @@ circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
     | Bool(#false)
     | block:
         def mask = low_mask(
-          extract(c_alignment, full_alignment_width - 1, 2),
+          c_alignment[2..full_alignment_width],
           c_extra_mask_top,
           c_extra_mask_bottom
         )
         or_reduce(reduced_c_extra & fma_extend(mask, reduced_c_extra.type.bit_width()))
-  def aligned_c_tail = extract(main_aligned_c.as_bits(), 2, 0)
+  def aligned_c_tail = main_aligned_c.as_bits()[0..=2]
   def aligned_c_sticky = mux(
     subtract_magnitudes,
     and_reduce(aligned_c_tail) & !reduced_c_extra_bit,
     or_reduce(aligned_c_tail) ||| reduced_c_extra_bit
   )
   def aligned_c = concat(
-    extract(main_aligned_c.as_bits(), significand_sum_width + 2, 3),
+    main_aligned_c.as_bits()[3..=(significand_sum_width + 2)],
     aligned_c_sticky
   )
   def non_dominant_exponent = aligned_product_exponent - sint(significand_width, exponent_sum_width)
   def output_exponent = mux(
     c_dominant,
     raw_c.signed_exponent,
-    extract(non_dominant_exponent.as_bits(), exponent_width + 1, 0).into(SInt(exponent_width + 2))
+    non_dominant_exponent.as_bits()[0..=(exponent_width + 1)].into(SInt(exponent_width + 2))
   )
   def post_alignment_width = index_width(significand_width + 1)
 
-  multiply_a <== extract(raw_a.significand, significand_width - 1, 0)
-  multiply_b <== extract(raw_b.significand, significand_width - 1, 0)
-  multiply_c <== extract(aligned_c, significand_width * 2, 1)
+  multiply_a <== raw_a.significand[0..significand_width]
+  multiply_b <== raw_b.significand[0..significand_width]
+  multiply_c <== aligned_c[1..=(significand_width * 2)]
   intermediate <== MulAddIntermediate(exponent_width, significand_width):
     signaling_nan: raw_a.is_signaling_nan() ||| raw_b.is_signaling_nan() ||| raw_c.is_signaling_nan()
     nan_a_or_b: raw_a.is_nan ||| raw_b.is_nan
@@ -138,9 +138,9 @@ circuit MulAddRecFNToRawPreMultiply(format :: FloatFormat):
     exponent_sum: output_exponent
     subtract_magnitudes: subtract_magnitudes
     c_dominant: c_dominant
-    c_alignment_distance: extract(c_alignment, post_alignment_width - 1, 0)
-    high_aligned_c: extract(aligned_c, significand_sum_width - 1, (significand_width * 2) + 1)
-    aligned_c_bit_zero: extract(aligned_c, 0, 0).into(Bool)
+    c_alignment_distance: c_alignment[0..post_alignment_width]
+    high_aligned_c: aligned_c[((significand_width * 2) + 1)..significand_sum_width]
+    aligned_c_bit_zero: aligned_c[0].into(Bool)
 
 circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   input intermediate: MulAddIntermediate(format.exponent_width, format.significand_width)
@@ -155,13 +155,13 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   def minimum_rounding = rounding_mode === RoundingMode.Minimum
   def operation_sign_c = intermediate.product_sign ^ intermediate.subtract_magnitudes
   def high_sum = mux(
-    extract(multiply_add_result, significand_width * 2, significand_width * 2).into(Bool),
+    multiply_add_result[significand_width * 2].into(Bool),
     intermediate.high_aligned_c + bits(1, significand_width + 2),
     intermediate.high_aligned_c
   )
   def significand_sum = concat(
     high_sum,
-    extract(multiply_add_result, (significand_width * 2) - 1, 0),
+    multiply_add_result[0..(significand_width * 2)],
     intermediate.aligned_c_bit_zero
   )
 
@@ -170,27 +170,26 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   def c_dominant_exponent = intermediate.exponent_sum - subtract_adjustment
   def c_dominant_absolute_sum = mux(
     intermediate.subtract_magnitudes,
-    !extract(significand_sum, significand_sum_width - 1, significand_width + 1),
+    !significand_sum[(significand_width + 1)..significand_sum_width],
     concat(
       bits(0, 1),
-      extract(intermediate.high_aligned_c, significand_width + 1, significand_width),
-      extract(significand_sum, significand_sum_width - 3, significand_width + 2)
+      intermediate.high_aligned_c[significand_width..=(significand_width + 1)],
+      significand_sum[(significand_width + 2)..=(significand_sum_width - 3)]
     )
   )
   def c_dominant_extra = mux(
     intermediate.subtract_magnitudes,
-    or_reduce(!extract(significand_sum, significand_width, 1)),
-    or_reduce(extract(significand_sum, significand_width + 1, 1))
+    or_reduce(!significand_sum[1..=significand_width]),
+    or_reduce(significand_sum[1..=(significand_width + 1)])
   )
-  def c_dominant_main = extract(
-    c_dominant_absolute_sum << intermediate.c_alignment_distance,
-    (significand_width * 2) + 1,
-    significand_width - 3
-  )
+  def c_dominant_main:
+    (c_dominant_absolute_sum << intermediate.c_alignment_distance)[
+      (significand_width - 3)..=((significand_width * 2) + 1)
+    ]
   def c_dominant_extra_shift = 3 - (significand_width mod 4)
   def c_dominant_group_count = (significand_width + c_dominant_extra_shift + 3) div 4
   def c_dominant_source = fma_extend(
-    extract(c_dominant_absolute_sum, significand_width - 1, 0),
+    c_dominant_absolute_sum[0..significand_width],
     c_dominant_group_count * 4
   ) << c_dominant_extra_shift
   def c_dominant_groups = c_dominant_source.as_vec(Bits(4))
@@ -202,19 +201,19 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
     | Bool(#false)
     | block:
         def alignment_width = intermediate.c_alignment_distance.type.bit_width()
-        def alignment_quarters = extract(intermediate.c_alignment_distance, alignment_width - 1, 2)
+        def alignment_quarters = intermediate.c_alignment_distance[2..alignment_width]
         def mask = low_mask(alignment_quarters, 0, c_dominant_mask_width)
         or_reduce(c_dominant_reduced & fma_extend(mask, c_dominant_reduced.type.bit_width()))
   def c_dominant_significand = concat(
-    extract(c_dominant_main, significand_width + 4, 3),
-    or_reduce(extract(c_dominant_main, 2, 0)) ||| c_dominant_reduced_extra ||| c_dominant_extra
+    c_dominant_main[3..=(significand_width + 4)],
+    or_reduce(c_dominant_main[0..=2]) ||| c_dominant_reduced_extra ||| c_dominant_extra
   )
 
-  def non_dominant_sum_sign = extract(significand_sum, (significand_width * 2) + 3, (significand_width * 2) + 3).into(Bool)
+  def non_dominant_sum_sign = significand_sum[(significand_width * 2) + 3].into(Bool)
   def non_dominant_absolute_sum = mux(
     non_dominant_sum_sign,
-    !extract(significand_sum, (significand_width * 2) + 2, 0),
-    extract(significand_sum, (significand_width * 2) + 2, 0) + zext(
+    !significand_sum[0..=((significand_width * 2) + 2)],
+    significand_sum[0..=((significand_width * 2) + 2)] + zext(
       intermediate.subtract_magnitudes.as_bits(),
       (significand_width * 2) + 3
     )
@@ -231,12 +230,11 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   def non_dominant_exponent_adjustment = zext(non_dominant_normalization_distance, exponent_width + 2).into(SInt(exponent_width + 2))
   def non_dominant_exponent = intermediate.exponent_sum - non_dominant_exponent_adjustment
   def non_dominant_main_source = zext(non_dominant_absolute_sum, (significand_width * 2) + 4)
-  def non_dominant_main = extract(
-    non_dominant_main_source << non_dominant_normalization_distance,
-    (significand_width * 2) + 3,
-    significand_width - 1
-  )
-  def non_dominant_reduced_slice = extract(non_dominant_reduced, significand_width div 2, 0)
+  def non_dominant_main:
+    (non_dominant_main_source << non_dominant_normalization_distance)[
+      (significand_width - 1)..=((significand_width * 2) + 3)
+    ]
+  def non_dominant_reduced_slice = non_dominant_reduced[0..=(significand_width div 2)]
   def non_dominant_reduced_shift = (significand_width div 2) mod 2
   def non_dominant_reduced_again_width = non_dominant_reduced_slice.type.bit_width() + non_dominant_reduced_shift + 1
   def non_dominant_reduced_again_source = fma_extend(
@@ -247,21 +245,18 @@ circuit MulAddRecFNToRawPostMultiply(format :: FloatFormat):
   def non_dominant_reduced_groups_again = non_dominant_groups_again.map(fun (group): group =/= bits(0, 2))
   def non_dominant_reduced_again = non_dominant_reduced_groups_again.as_bits()
   def normalization_width = non_dominant_normalization_reduced.type.bit_width()
-  def normalization_halves = extract(non_dominant_normalization_reduced, normalization_width - 1, 1)
+  def normalization_halves = non_dominant_normalization_reduced[1..normalization_width]
   def non_dominant_mask_width = (significand_width + 2) div 4
   def non_dominant_mask = low_mask(normalization_halves, 0, non_dominant_mask_width)
   def non_dominant_reduced_extra = or_reduce(
     non_dominant_reduced_again & fma_extend(non_dominant_mask, non_dominant_reduced_again.type.bit_width())
   )
   def non_dominant_significand = concat(
-    extract(non_dominant_main, significand_width + 4, 3),
-    or_reduce(extract(non_dominant_main, 2, 0)) ||| non_dominant_reduced_extra
+    non_dominant_main[3..=(significand_width + 4)],
+    or_reduce(non_dominant_main[0..=2]) ||| non_dominant_reduced_extra
   )
-  def non_dominant_cancellation = extract(
-    non_dominant_significand,
-    significand_width + 2,
-    significand_width + 1
-  ) === bits(0, 2)
+  def non_dominant_cancellation:
+    non_dominant_significand[(significand_width + 1)..=(significand_width + 2)] === bits(0, 2)
   def non_dominant_sign = mux(
     non_dominant_cancellation,
     minimum_rounding,

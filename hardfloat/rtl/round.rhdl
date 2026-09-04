@@ -50,60 +50,63 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
     | if in_significand_width == (out_significand_width + 2)
       | raw.significand
       | concat(
-          extract(raw.significand, in_significand_width, (in_significand_width - out_significand_width) - 1),
-          or_reduce(extract(raw.significand, (in_significand_width - out_significand_width) - 2, 0))
+          raw.significand[((in_significand_width - out_significand_width) - 1)..=in_significand_width],
+          or_reduce(raw.significand[0..=((in_significand_width - out_significand_width) - 2)])
         )
   def shift_significand_down:
     if options.significand_msb_always_zero
     | Bool(#false)
-    | extract(adjusted_significand, out_significand_width + 2, out_significand_width + 2).into(Bool)
+    | adjusted_significand[out_significand_width + 2].into(Bool)
 
   def round_mask :: Bits(out_significand_width + 3):
     if never_underflows
     | concat(bits(0, out_significand_width), shift_significand_down, bits(3, 2))
     | concat(
         low_mask(
-          extract(adjusted_exponent.as_bits(), out_exponent_width, 0),
+          adjusted_exponent.as_bits()[0..=out_exponent_width],
           (out_minimum_normal_exponent - out_significand_width) - 1,
           out_minimum_normal_exponent
         ) ||| zext(shift_significand_down.as_bits(), out_significand_width + 1),
         bits(3, 2)
       )
-  def shifted_round_mask = concat(bits(0, 1), extract(round_mask, out_significand_width + 2, 1))
+  def shifted_round_mask = concat(bits(0, 1), round_mask[1..=(out_significand_width + 2)])
   def round_position_mask = !shifted_round_mask & round_mask
   def round_position_bit = or_reduce(adjusted_significand & round_position_mask)
   def any_round_extra = or_reduce(adjusted_significand & shifted_round_mask)
   def any_round = round_position_bit ||| any_round_extra
   def round_increment = ((near_even ||| near_maximum_magnitude) & round_position_bit) ||| (round_magnitude_up & any_round)
   def incremented_significand = (
-    zext(extract(adjusted_significand ||| round_mask, out_significand_width + 2, 2), out_significand_width + 2) + bits(1, out_significand_width + 2)
+    zext(
+      (adjusted_significand ||| round_mask)[2..=(out_significand_width + 2)],
+      out_significand_width + 2
+    ) + bits(1, out_significand_width + 2)
   ) & !mux(
     near_even & round_position_bit & !any_round_extra,
-    extract(round_mask, out_significand_width + 2, 1),
+    round_mask[1..=(out_significand_width + 2)],
     bits(0, out_significand_width + 2)
   )
   def truncated_significand = zext(
-    extract(adjusted_significand & !round_mask, out_significand_width + 2, 2),
+    (adjusted_significand & !round_mask)[2..=(out_significand_width + 2)],
     out_significand_width + 2
   ) ||| mux(
     odd & any_round,
-    extract(round_position_mask, out_significand_width + 2, 1),
+    round_position_mask[1..=(out_significand_width + 2)],
     bits(0, out_significand_width + 2)
   )
   def rounded_significand = mux(round_increment, incremented_significand, truncated_significand)
   def rounded_exponent_width = exponent_work_width + 1
   def rounded_exponent :: SInt(rounded_exponent_width) = (
     sext(adjusted_exponent, rounded_exponent_width) + zext(
-      extract(rounded_significand, out_significand_width + 1, out_significand_width),
+      rounded_significand[out_significand_width..=(out_significand_width + 1)],
       rounded_exponent_width
     ).into(SInt(rounded_exponent_width))
   )
 
-  def common_exponent = extract(rounded_exponent.as_bits(), out_exponent_width, 0)
+  def common_exponent = rounded_exponent.as_bits()[0..=out_exponent_width]
   def common_fraction = mux(
     shift_significand_down,
-    extract(rounded_significand, out_significand_width - 1, 1),
-    extract(rounded_significand, out_significand_width - 2, 0)
+    rounded_significand[1..out_significand_width],
+    rounded_significand[0..=(out_significand_width - 2)]
   )
   def common_overflow = if never_overflows | Bool(#false) | rounded_exponent >= sint(
     3 << (out_exponent_width - 1),
@@ -115,19 +118,19 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
   )
   def unbounded_round_position_bit = mux(
     shift_significand_down,
-    extract(adjusted_significand, 2, 2).into(Bool),
-    extract(adjusted_significand, 1, 1).into(Bool)
+    adjusted_significand[2].into(Bool),
+    adjusted_significand[1].into(Bool)
   )
-  def unbounded_any_round = (shift_significand_down & extract(adjusted_significand, 2, 2).into(Bool)) ||| or_reduce(
-    extract(adjusted_significand, 1, 0)
+  def unbounded_any_round = (shift_significand_down & adjusted_significand[2].into(Bool)) ||| or_reduce(
+    adjusted_significand[0..=1]
   )
   def unbounded_round_increment = ((near_even ||| near_maximum_magnitude) & unbounded_round_position_bit) ||| (
     round_magnitude_up & unbounded_any_round
   )
   def round_carry = mux(
     shift_significand_down,
-    extract(rounded_significand, out_significand_width + 1, out_significand_width + 1).into(Bool),
-    extract(rounded_significand, out_significand_width, out_significand_width).into(Bool)
+    rounded_significand[out_significand_width + 1].into(Bool),
+    rounded_significand[out_significand_width].into(Bool)
   )
   def common_underflow:
     if never_underflows
@@ -135,13 +138,13 @@ circuit RoundAnyRawFNToRecFN(in_exponent_width :: PosInt,
     | common_total_underflow ||| (
         any_round & ((adjusted_exponent >> out_exponent_width) <= sint(0, exponent_work_width)) & mux(
           shift_significand_down,
-          extract(round_mask, 3, 3).into(Bool),
-          extract(round_mask, 2, 2).into(Bool)
+          round_mask[3].into(Bool),
+          round_mask[2].into(Bool)
         ) & !(
           (tininess_mode === TininessMode.AfterRounding) & !mux(
             shift_significand_down,
-            extract(round_mask, 4, 4).into(Bool),
-            extract(round_mask, 3, 3).into(Bool)
+            round_mask[4].into(Bool),
+            round_mask[3].into(Bool)
           ) & round_carry & round_position_bit & unbounded_round_increment
         )
       )
