@@ -1,0 +1,50 @@
+#lang rhodium
+// Implements RV5Stage's three-read, two-write floating-point register file.
+
+import:
+  "../../riscv/isa/fp-profile.rhm" open
+  lib("rhodium/std/ready-valid.rhdl") open
+
+bundle FloatingPointRegisterWrite(profile :: FloatingPointProfile):
+  address: Bits(5)
+  data: Bits(floating_point_register_width(profile))
+
+sync_circuit RV5StageFloatingPointRegisterFile(profile :: FloatingPointProfile):
+  def width = floating_point_register_width(profile)
+
+  input read_address_1: Bits(5)
+  input read_address_2: Bits(5)
+  input read_address_3: Bits(5)
+  interface writes[2](Valid(FloatingPointRegisterWrite(profile)), ~role: consumer)
+  output read_data_1: Bits(width)
+  output read_data_2: Bits(width)
+  output read_data_3: Bits(width)
+
+  // Architectural floating-point registers have no reset value.
+  reg registers(Vec(32, Bits(width)))
+
+  def Array(first_write, second_write) = writes
+  when (first_write.valid):
+    registers[first_write.bits.address] <== first_write.bits.data
+  when (second_write.valid):
+    registers[second_write.bits.address] <== second_write.bits.data
+
+  // Completion scheduling keeps simultaneous destinations distinct. The
+  // second port has forwarding priority if that invariant is violated.
+  fun read_value(address :: Bits(5)) :~ Bits(width):
+    mux(
+      second_write.valid & (second_write.bits.address === address),
+      second_write.bits.data,
+      mux(
+        first_write.valid & (first_write.bits.address === address),
+        first_write.bits.data,
+        registers[address]
+      )
+    )
+  read_data_1 <== read_value(read_address_1)
+  read_data_2 <== read_value(read_address_2)
+  read_data_3 <== read_value(read_address_3)
+
+export:
+  FloatingPointRegisterWrite
+  RV5StageFloatingPointRegisterFile

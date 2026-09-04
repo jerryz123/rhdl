@@ -18,6 +18,7 @@ authored control columns.
 | [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Architectural write enable and result source |
 | [`system-ctrl.rhdl`](system-ctrl.rhdl) | Zicsr operations, ECALL/EBREAK, and MRET/SRET |
 | [`fence-ctrl.rhdl`](fence-ctrl.rhdl) | FENCE, FENCE.I, and SFENCE.VMA serialization and translation-fence controls |
+| [`floating-point-ctrl.rhdl`](floating-point-ctrl.rhdl) | Profile-selected F/D register-bank use and direct floating-point execution-unit controls |
 | [`decode-support.rhdl`](decode-support.rhdl) | Instruction-pattern adaptation, relation composition, and instruction-family helpers |
 | [`core-ctrl.rhdl`](core-ctrl.rhdl) | Host-side column composition and the XLEN-selected integrated decoder circuit |
 
@@ -54,6 +55,15 @@ and word-result controls. `system-ctrl.rhdl` adds the six Zicsr operations and
 the initial privileged returns. `fence-ctrl.rhdl` owns architectural
 serialization and translation fences. `core-ctrl.rhdl` composes these columns
 with the base ISA columns into the same selected decode table.
+
+`floating-point-ctrl.rhdl` is currently an independent decoder, deliberately
+not a column of `RV5StageControl` yet. It derives integer/FPR source use and the
+destination register bank from each `InstructionSpec` operand list instead of
+duplicating that metadata. Its sparse execution relation selects memory, FMA,
+add, multiply, divide/square-root, sign, min/max, comparison, conversion, move,
+or classification controls. A D profile combines the F and D catalogs in host
+code before constructing a single `ValidDecodeGen`; it does not instantiate
+parallel F and D decoders.
 
 `core-ctrl.rhdl` is a composition facade, not another source of controls. Its
 selected `ValidDecodeGen` preserves every nested care mask and emits one

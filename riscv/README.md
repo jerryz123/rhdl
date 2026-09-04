@@ -180,7 +180,10 @@ implements without adding them to the RV32I or RV64I base catalogs.
 `FloatingPointProfile` specialization. `None` is the default, `F` selects
 single precision, and `D` implies both single- and double-precision support.
 This configuration is deliberately a host value so absent FP hardware can be
-specialized away rather than represented by run-time control.
+specialized away rather than represented by run-time control. The same module
+also maps enabled profiles to their architectural 32- or 64-bit floating-point
+register width; asking for a register width under `None` is invalid because
+that specialization has no floating-point bank.
 
 [`isa/f.rhm`](isa/f.rhm) and [`isa/d.rhm`](isa/d.rhm) define the standard F and
 D instruction encodings for RV32 and RV64. D catalogs contain the D-specific

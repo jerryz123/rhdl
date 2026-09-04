@@ -1,0 +1,93 @@
+#lang rhombus
+// Checks RV5Stage's F/D control domains, operand metadata, and single-table decode.
+
+import:
+  rhombus.bits.(<<) as <<
+  rhombus.bits.(>>) as >>
+  "../../../rhodium/core/main.rhm" open
+  "../../../rhodium/frontend/kernel.rhm" as embedded
+  "../../../rhodium/frontend/layers/bool.rhm" as bool
+  "../../../rhodium/frontend/support/hardware-literal.rhm".PackedLiteral
+  "../../../riscv/isa/fp-profile.rhm" open
+  "../../../riscv/isa/xlen.rhm" open
+  "../../../riscv/isa/f.rhm" as f
+  "../../../riscv/isa/d.rhm" as d
+  "../../../riscv/rtl/instruction-pattern.rhdl" open
+  "../decode/floating-point-ctrl.rhdl" as controls
+  lib("rhodium/std/decode.rhdl") open
+
+fun exact_pattern_equal(left, right):
+  left.type.type_equal(right.type) && right.type.type_equal(left.type) && left.width == right.width && left.value_bits == right.value_bits && left.care_bits == right.care_bits
+
+fun has_domain(cases, instructions):
+  def domain = instructions.map(instruction_pattern)
+  cases.length() == domain.length() && (
+    for all (expected in domain):
+      cases.filter(~keep: fun (candidate): exact_pattern_equal(candidate.input, expected)).length() == 1
+  )
+
+fun control_for(cases, instruction):
+  cases.find(fun (candidate): exact_pattern_equal(candidate.input, instruction_pattern(instruction))).output
+
+fun field_pattern(cube, name):
+  def mutable field = #false
+  def mutable lower_width = 0
+  for (declared in cube.type.fields):
+    cond
+    | field: lower_width := lower_width + declared.type.packed_width()
+    | declared.name == name: field := declared
+    | ~else: #void
+  unless field
+  | error(~who: #'field_pattern, "unknown record field")
+  def width = field.type.packed_width()
+  def mask = (1 << width) - 1
+  Pattern(
+    ~value: PackedLiteral(field.type, (cube.value_bits >> lower_width) bits.and mask),
+    ~care: PackedLiteral(field.type, (cube.care_bits >> lower_width) bits.and mask)
+  )
+
+fun decode_count(design):
+  design.modules[0].operations.filter(~keep: fun (operation): operation.opcode == "rtl.decode").length()
+
+def fmadd = control_for(controls.RV64FDFloatingPointControlCases, f.FMADD_S)
+def fmadd_registers = field_pattern(fmadd, "registers")
+def fmadd_execution = field_pattern(fmadd, "execution")
+def store_registers = field_pattern(control_for(controls.RV64FDFloatingPointControlCases, d.FSD), "registers")
+def compare_registers = field_pattern(control_for(controls.RV64FDFloatingPointControlCases, d.FEQ_D), "registers")
+def convert_execution = field_pattern(control_for(controls.RV64FDFloatingPointControlCases, d.FCVT_S_D), "execution")
+def f_design = embedded.run_elaboration(fun (): controls.RV5StageFloatingPointInstructionDecoder(XLen.X32, FloatingPointProfile.F))
+def d_design = embedded.run_elaboration(fun (): controls.RV5StageFloatingPointInstructionDecoder(XLen.X64, FloatingPointProfile.D))
+def none_design = embedded.run_elaboration(fun (): controls.RV5StageFloatingPointInstructionDecoder(XLen.X64, FloatingPointProfile.None))
+
+check:
+  controls.SingleExecutionCases.length() ~is 26
+  controls.RV64SingleExecutionCases.length() ~is 30
+  controls.DoubleExecutionCases.length() ~is 26
+  controls.RV64DoubleExecutionCases.length() ~is 32
+  has_domain(controls.RV32FFloatingPointControlCases, controls.RV32FFloatingPointInstructions) ~is #true
+  has_domain(controls.RV64FFloatingPointControlCases, controls.RV64FFloatingPointInstructions) ~is #true
+  has_domain(controls.RV32FDFloatingPointControlCases, controls.RV32FDFloatingPointInstructions) ~is #true
+  has_domain(controls.RV64FDFloatingPointControlCases, controls.RV64FDFloatingPointInstructions) ~is #true
+  controls.RV32FFloatingPointControlCases.length() ~is 26
+  controls.RV64FFloatingPointControlCases.length() ~is 30
+  controls.RV32FDFloatingPointControlCases.length() ~is 52
+  controls.RV64FDFloatingPointControlCases.length() ~is 62
+  field_pattern(fmadd_registers, "uses_integer_rs1").matches(bool.Bool(#false)) ~is #true
+  field_pattern(fmadd_registers, "uses_frs1").matches(bool.Bool(#true)) ~is #true
+  field_pattern(fmadd_registers, "uses_frs2").matches(bool.Bool(#true)) ~is #true
+  field_pattern(fmadd_registers, "uses_frs3").matches(bool.Bool(#true)) ~is #true
+  field_pattern(fmadd_registers, "destination").matches(controls.RV5StageFloatDestination.FloatingPoint) ~is #true
+  field_pattern(fmadd_execution, "unit").matches(controls.RV5StageFloatUnit.FusedMultiplyAdd) ~is #true
+  field_pattern(fmadd_execution, "uses_rounding_mode").matches(bool.Bool(#true)) ~is #true
+  field_pattern(store_registers, "uses_integer_rs1").matches(bool.Bool(#true)) ~is #true
+  field_pattern(store_registers, "uses_frs2").matches(bool.Bool(#true)) ~is #true
+  field_pattern(store_registers, "destination").matches(controls.RV5StageFloatDestination.None) ~is #true
+  field_pattern(compare_registers, "destination").matches(controls.RV5StageFloatDestination.Integer) ~is #true
+  field_pattern(convert_execution, "source_precision").matches(controls.RV5StageFloatPrecision.Double) ~is #true
+  field_pattern(convert_execution, "destination_precision").matches(controls.RV5StageFloatPrecision.Single) ~is #true
+  decode_count(f_design) ~is 1
+  decode_count(d_design) ~is 1
+  decode_count(none_design) ~is 0
+  verify_design(f_design) ~is #void
+  verify_design(d_design) ~is #void
+  verify_design(none_design) ~is #void

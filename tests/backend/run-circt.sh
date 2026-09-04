@@ -628,6 +628,8 @@ direct_fixture_specs=(
   'iterative-divider|iterative_divider_tb'
   'riscv-counters-rv32|riscv_counters_rv32_tb'
   'riscv-floating-point|riscv_floating_point_tb'
+  'rv5stage-floating-point-decoder|'
+  'rv5stage-floating-point-register-file|rv5stage_floating_point_register_file_tb'
   'rv5stage-register-file|rv5stage_register_file_tb'
   'rv5stage-csr|rv5stage_csr_tb'
   'rv5stage-atomic|rv5stage_atomic_tb'

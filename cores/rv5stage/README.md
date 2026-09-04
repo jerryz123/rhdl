@@ -15,7 +15,7 @@ caches live here. Reusable execution components remain directly under
 ```text
 rv5stage.rhdl                       core, MMU, and private-cache composition
   |--> core.rhdl                    IF/ID/EX/MEM/WB pipeline
-  |     |--> bundles + decode + memory + register-file + csr
+  |     |--> bundles + integer decode + memory + register-file + csr
   |     |     `--> ../../riscv/rtl/counters.rhdl
   |     |--> ../{alu,branch-resolver,load-store,multiplier,divider}.rhdl
   |     |--> icache/protocol.rhdl
@@ -74,6 +74,18 @@ of mechanically recreating flow transformations with helper instances.
 
 [`rv5stage.rhdl`](rv5stage.rhdl) instantiates this implementation in the
 integrated MMU and cache hierarchy.
+
+The first isolated floating-point core components are not yet instantiated by
+`RV5StageCore`. [`floating-point-register-file.rhdl`](floating-point-register-file.rhdl)
+defines a 32-entry, three-read, two-write bank whose 32- or 64-bit FLEN follows
+the selected F or D host profile. Unlike the integer bank, `f0` is an ordinary
+writable register, and the bank has no architectural reset value.
+[`decode/floating-point-ctrl.rhdl`](decode/floating-point-ctrl.rhdl)
+selects RV32F, RV64F, RV32FD, or RV64FD at elaboration and emits one sparse
+decode table of register-bank and direct execution-unit controls. The `None`
+profile emits no decode table and requires no floating-point register file.
+Pipeline state, hazards, CSR state, execution units, and retirement remain
+unchanged until the later integration step.
 
 ## Pipeline
 
