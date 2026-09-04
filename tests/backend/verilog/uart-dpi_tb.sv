@@ -1,10 +1,10 @@
 // Verifies serial transfers through the production UART model's slave PTY.
 module uart_dpi_tb;
-  import "DPI-C" function int rhodium_uart_test_connect(input int model_id);
-  import "DPI-C" function int rhodium_uart_test_write(input int model_id,
-                                                       input int value);
-  import "DPI-C" function int rhodium_uart_test_read(input int model_id);
-  import "DPI-C" function int rhodium_uart_pty_framing_errors(
+  import "DPI-C" function int uart_test_connect(input int model_id);
+  import "DPI-C" function int uart_test_write(input int model_id,
+                                               input int value);
+  import "DPI-C" function int uart_test_read(input int model_id);
+  import "DPI-C" function int uart_pty_framing_errors(
       input int model_id);
 
   localparam int MODEL_ID = 7;
@@ -65,9 +65,9 @@ module uart_dpi_tb;
 
   initial begin
     repeat (4) cycle();
-    assert (rhodium_uart_test_connect(MODEL_ID) == 0)
+    assert (uart_test_connect(MODEL_ID) == 0)
       else $fatal(1, "UART DPI test could not open the slave PTY");
-    assert (rhodium_uart_test_write(MODEL_ID, 32'ha5) == 0)
+    assert (uart_test_write(MODEL_ID, 32'ha5) == 0)
       else $fatal(1, "UART DPI test could not write the slave PTY");
     repeat (2) cycle();
     assert (uart_rx == 1'b1)
@@ -76,21 +76,21 @@ module uart_dpi_tb;
 
     expect_uart_rx_byte(8'ha5);
     send_uart_tx_byte(8'ha6, 1'b1);
-    received = rhodium_uart_test_read(MODEL_ID);
+    received = uart_test_read(MODEL_ID);
     assert (received == 32'ha6)
       else $fatal(1,
                   "UART DPI slave PTY received 0x%02x instead of 0xa6",
                   received);
 
     send_uart_tx_byte(8'h55, 1'b0);
-    received = rhodium_uart_test_read(MODEL_ID);
+    received = uart_test_read(MODEL_ID);
     assert (received == 32'h55)
       else $fatal(1,
                   "UART DPI slave PTY received 0x%02x instead of 0x55",
                   received);
-    assert (rhodium_uart_pty_framing_errors(MODEL_ID) == 1)
+    assert (uart_pty_framing_errors(MODEL_ID) == 1)
       else $fatal(1, "UART DPI did not count the framing error");
-    assert (rhodium_uart_test_read(MODEL_ID) == -1)
+    assert (uart_test_read(MODEL_ID) == -1)
       else $fatal(1, "UART DPI produced an unexpected extra PTY byte");
 
     $display("UART DPI PTY and serial behavior passed");

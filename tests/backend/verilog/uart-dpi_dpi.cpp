@@ -19,11 +19,11 @@ int descriptor(int model_id) {
 
 }  // namespace
 
-extern "C" int rhodium_uart_test_connect(int model_id) {
+extern "C" int uart_test_connect(int model_id) {
   if (descriptor(model_id) >= 0) {
     return 0;
   }
-  const char* path = rhodium_uart_pty_path(model_id);
+  const char* path = uart_pty_path(model_id);
   if (path == nullptr) {
     return 1;
   }
@@ -35,7 +35,7 @@ extern "C" int rhodium_uart_test_connect(int model_id) {
   return 0;
 }
 
-extern "C" int rhodium_uart_test_write(int model_id, int value) {
+extern "C" int uart_test_write(int model_id, int value) {
   const int opened = descriptor(model_id);
   if (opened < 0 || value < 0 || value > 0xff) {
     return 1;
@@ -48,7 +48,7 @@ extern "C" int rhodium_uart_test_write(int model_id, int value) {
   return count == 1 ? 0 : 1;
 }
 
-extern "C" int rhodium_uart_test_read(int model_id) {
+extern "C" int uart_test_read(int model_id) {
   const int opened = descriptor(model_id);
   if (opened < 0) {
     return -2;

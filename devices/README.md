@@ -46,7 +46,7 @@ those serial pins. `UartDPI` uses the same 8-N-1 engines to deserialize
 `uart_tx` and serialize bytes onto `uart_rx`, while
 [`dpi/uart_dpi.cc`](dpi/uart_dpi.cc) creates one nonblocking raw
 pseudo-terminal per model ID. It prints the slave path when the model is first
-used; `rhodium_uart_pty_path` also returns that path so a simulator or test can
+used; `uart_pty_path` also returns that path so a simulator or test can
 open it directly. A terminal program connected to the slave sees bytes sent by
 the simulated UART and can write bytes that the model sends back over its
 serial output.

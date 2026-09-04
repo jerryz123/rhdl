@@ -164,14 +164,14 @@ UartModel& model(int model_id) {
 
 }  // namespace
 
-char rhodium_uart_pty_tick(int model_id,
-                           unsigned char reset,
-                           unsigned char uart_to_pty_valid,
-                           char uart_to_pty_byte,
-                           unsigned char uart_to_pty_framing_error,
-                           unsigned char pty_to_uart_ready,
-                           unsigned char* pty_to_uart_valid,
-                           char* pty_to_uart_byte) {
+char uart_pty_tick(int model_id,
+                   unsigned char reset,
+                   unsigned char uart_to_pty_valid,
+                   char uart_to_pty_byte,
+                   unsigned char uart_to_pty_framing_error,
+                   unsigned char pty_to_uart_ready,
+                   unsigned char* pty_to_uart_valid,
+                   char* pty_to_uart_byte) {
   if (pty_to_uart_valid == nullptr || pty_to_uart_byte == nullptr) {
     return 1;
   }
@@ -212,7 +212,7 @@ char rhodium_uart_pty_tick(int model_id,
   return 0;
 }
 
-const char* rhodium_uart_pty_path(int model_id) {
+const char* uart_pty_path(int model_id) {
   auto& uart = model(model_id);
   if (uart.open_pty() != 0) {
     return nullptr;
@@ -220,6 +220,6 @@ const char* rhodium_uart_pty_path(int model_id) {
   return uart.slave_path.c_str();
 }
 
-int rhodium_uart_pty_framing_errors(int model_id) {
+int uart_pty_framing_errors(int model_id) {
   return static_cast<int>(model(model_id).framing_errors);
 }

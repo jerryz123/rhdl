@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-build_dir="$(mktemp -d /tmp/rhodium-uart-dpi-cpp.XXXXXX)"
+build_dir="$(mktemp -d /tmp/uart-dpi-cpp.XXXXXX)"
 trap 'rm -rf "$build_dir"' EXIT
 
 "${CXX:-c++}" -std=c++20 -Wall -Wextra -Werror \

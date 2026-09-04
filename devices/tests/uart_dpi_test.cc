@@ -13,7 +13,7 @@
 namespace {
 
 int open_slave(int model_id) {
-  const char* path = rhodium_uart_pty_path(model_id);
+  const char* path = uart_pty_path(model_id);
   assert(path != nullptr);
   const int descriptor = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
   assert(descriptor >= 0);
@@ -66,14 +66,14 @@ int tick(int model_id,
          bool pty_to_uart_ready,
          unsigned char* pty_to_uart_valid,
          char* pty_to_uart_byte) {
-  return rhodium_uart_pty_tick(model_id,
-                               reset ? 1 : 0,
-                               uart_to_pty_valid ? 1 : 0,
-                               static_cast<char>(uart_to_pty_byte),
-                               framing_error ? 1 : 0,
-                               pty_to_uart_ready ? 1 : 0,
-                               pty_to_uart_valid,
-                               pty_to_uart_byte);
+  return uart_pty_tick(model_id,
+                       reset ? 1 : 0,
+                       uart_to_pty_valid ? 1 : 0,
+                       static_cast<char>(uart_to_pty_byte),
+                       framing_error ? 1 : 0,
+                       pty_to_uart_ready ? 1 : 0,
+                       pty_to_uart_valid,
+                       pty_to_uart_byte);
 }
 
 }  // namespace
@@ -81,8 +81,8 @@ int tick(int model_id,
 int main() {
   constexpr int kFirstModel = 7001;
   constexpr int kSecondModel = 7002;
-  const std::string first_path = rhodium_uart_pty_path(kFirstModel);
-  const std::string second_path = rhodium_uart_pty_path(kSecondModel);
+  const std::string first_path = uart_pty_path(kFirstModel);
+  const std::string second_path = uart_pty_path(kSecondModel);
   assert(first_path != second_path);
 
   const int first_slave = open_slave(kFirstModel);
@@ -113,18 +113,18 @@ int main() {
 
   assert(tick(kFirstModel, false, true, 0x55, true, false, &valid, &value) == 0);
   assert(read_byte(first_slave) == 0x55);
-  assert(rhodium_uart_pty_framing_errors(kFirstModel) == 1);
-  assert(rhodium_uart_pty_framing_errors(kSecondModel) == 0);
-  assert(first_path == rhodium_uart_pty_path(kFirstModel));
+  assert(uart_pty_framing_errors(kFirstModel) == 1);
+  assert(uart_pty_framing_errors(kSecondModel) == 0);
+  assert(first_path == uart_pty_path(kFirstModel));
 
-  assert(rhodium_uart_pty_tick(kFirstModel,
-                               0,
-                               0,
-                               0,
-                               0,
-                               0,
-                               nullptr,
-                               &value) == 1);
+  assert(uart_pty_tick(kFirstModel,
+                       0,
+                       0,
+                       0,
+                       0,
+                       0,
+                       nullptr,
+                       &value) == 1);
   close(first_slave);
   close(second_slave);
 }
