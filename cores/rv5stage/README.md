@@ -4,9 +4,9 @@
 
 RV5Stage is a single-issue, in-order, five-stage RISC-V processor implemented
 as direct Rhodium RTL. A required `xlen :: XLen` host parameter selects RV32 or
-RV64 without admitting arbitrary integer widths. Optional floating-point
-and compressed-instruction profiles specialize the same scalar pipeline with a
-parallel FP execution backend and variable-length Fetch.
+RV64 without admitting arbitrary integer widths. Optional floating-point,
+half-precision, and compressed-instruction parameters specialize the same
+scalar pipeline with a parallel FP execution engine and variable-length Fetch.
 
 Core-specific decode, architectural state, pipeline policy, MMU, and private L1
 caches live here. Reusable execution components remain directly under
@@ -26,17 +26,21 @@ caches live here. Reusable execution components remain directly under
 | Private caches | Separate configurable L1I and blocking write-back L1D; fixed 64-byte lines |
 | External memory | Separate instruction and data CHI RN-F channels plus a device RN-I channel |
 
-Implemented instruction families include RV32I/RV64I, C, A, B, M, Zfhmin,
-Zfh, Zicond, Zicsr, Zicntr, and Zifencei. The privileged control plane
-implements an initial M/S/U slice. RV32D and an RV64F-only specialization are
+The integer decode includes RV32I/RV64I, A, B, M, Zicond, Zicsr, Zifencei, and
+the supported privileged instructions. Optional C expansion follows the
+selected XLEN and FP profile; RV32F or RV64F and RV64D rows, plus optional
+Zfhmin/Zfh rows, are added only by their matching FP specialization. Zicntr
+views come from the CSR block rather than instruction rows. The
+[`decode guide`](decode/README.md#select-a-decode-specialization) owns the exact
+specialization matrix and catalog composition. RV32D and an RV64F-only core are
 deliberately rejected.
 
 ## Microarchitecture
 
 The five logical stages are regions of one [`RV5StageCore`](core.rhdl) circuit,
-not module boundaries. Instructions issue and commit in order, while selected
-register-producing operations may complete later through explicit scoreboards
-and a completion arbiter.
+not module boundaries. Scalar tokens issue and reach WB in order, while
+selected register-producing operations may complete later through explicit
+scoreboards and a completion arbiter.
 
 ```mermaid
 flowchart LR
@@ -77,8 +81,10 @@ flowchart LR
     WB -. "bypass" .-> EX
 
     SCORE["Integer and FP scoreboards"] -. "RAW / WAW stalls" .-> ID
-    WB -->|"reserve deferred destination"| SCORE
-    COMPLETE -->|"release destination"| SCORE
+    EX -->|"reserve FP compute / load destination"| SCORE
+    WB -->|"reserve scalar deferred destination"| SCORE
+    COMPLETE -->|"release GPR destination"| SCORE
+    FP -->|"release FPR destination"| SCORE
 
     WB <--> CSR["CSR, trap, and interrupt state"]
     CSR -->|"redirect / flush"| IF
@@ -91,14 +97,15 @@ flowchart LR
 |---|---|---:|---|
 | Fetch | Five-entry `Queue`, then IF/ID `Pipe` | Yes | Producer-owned PC generation, L1I request correlation, and redirect flushing |
 | Decode | ID/EX `Pipe` | Yes | Structured decode, serialization, and RAW/WAW hazard checks |
-| Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, and synchronous-fault classification |
+| Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, synchronous-fault classification, and accepted FP dispatch |
 | Memory | MEM/WB `ValidPipe` | No | Registered branch and exception recovery, feed-forward metadata, bypass, and cache-response alignment |
-| Writeback | Ordered commit | At defined architectural waits | Register and CSR effects, traps, fences, and deferred-destination reservation |
+| Writeback | Ordered commit | At defined architectural waits | Scalar register and CSR effects, traps, fences, and scalar deferred-destination reservation |
 
-Fetch retains accepted PCs in a two-entry flushable metadata queue so the
-pipelined L1I can accept and return one hit per cycle. Redirects flush the PC
-queue, active lookup result, and buffered responses. A wrong-path refill may
-finish internally but cannot return an instruction to Fetch.
+Fetch retains up to two ordered, aligned L1I words in a flushable window so the
+pipelined L1I can accept and return one hit per cycle. Redirects clear that
+window and flush the MMU/L1I owner, lookup, and buffered-response state. A
+wrong-path refill may finish internally but cannot return an instruction to
+Fetch.
 
 Decode holds an instruction before Execute until its operands are available and
 the required execution or cache resource can accept it. ID/EX stores register
@@ -113,30 +120,32 @@ outcome is registered in EX/MEM, and Memory redirects or flushes Fetch while
 squashing younger work on the following cycle. L1D's registered SRAM result is
 aligned with the instruction at WB.
 
-WB is the sole ordered architectural commit point. A deferred instruction may
-reserve its destination and release the scalar pipeline before its value
-returns. Younger independent instructions can then complete first, but they
-still issue through the ordered scalar pipeline. This is in-order issue and
-commit with out-of-order register completion, not out-of-order execution.
+WB is the ordered scalar commit point. Scalar loads, atomics, multiply, and
+divide reserve a GPR destination there; FP compute and FP-load destinations are
+reserved when their non-speculative EX-side request is accepted. A deferred
+instruction can release the scalar pipeline before its value returns. Younger
+independent instructions may then complete first, but they still issue through
+the ordered scalar pipeline. This is in-order issue and scalar commit with
+out-of-order register completion, not out-of-order instruction issue.
 
 ## Execution and completion
 
 | Result class | Dispatch point | Completion path |
 |---|---|---|
 | Integer ALU, branch link, immediate, and ordinary CSR result | Scalar pipeline | Ordinary WB register-file port |
-| Load or atomic result | Memory request accepted in EX | L1D/uncached response to deferred completion arbiter |
-| Multiply or divide | Reserved in EX; issued only at WB | Deferred completion arbiter |
-| FP result targeting an integer register | FP request accepted from EX | FP completion to deferred completion arbiter |
-| FP result targeting an FP register | FP request accepted from EX | FP pipeline's internal FP register-file port |
-| FP load | Memory request accepted in EX | Memory response to FP pipeline's load port |
+| Load or atomic result | Memory request accepted in EX; GPR reserved at WB | L1D response, or uncached response for a device load, to the deferred completion arbiter |
+| Multiply or divide | Execution resource claimed in EX; GPR reserved and request issued at WB | Deferred completion arbiter |
+| FP result targeting an integer register | FP request and GPR reservation accepted from EX | FP completion to deferred completion arbiter |
+| FP result targeting an FP register | FP request and FPR reservation accepted from EX | FP pipeline's internal FP register-file port |
+| FP load | Memory request and FPR reservation accepted in EX | Memory response to FP pipeline's load port |
 
-The fixed-priority deferred arbiter gives loads priority because their response
-cannot be backpressured. Multiplier, divider, and FP integer responses remain
-stable until selected. Its output drives the second integer register-file write
-port and clears the corresponding scoreboard entry. The ordinary WB result uses
-the other write port. WAW gating prevents both ports from targeting the same
-register in one cycle, and a WB-aligned cache hit can set and clear a destination
-without an extra busy cycle.
+The fixed-priority deferred arbiter gives integer memory responses priority
+because they cannot be backpressured. Multiplier, divider, and FP integer
+responses remain stable until selected. Its output drives the second integer
+register-file write port and clears the corresponding scoreboard entry. The
+ordinary WB result uses the other write port. WAW gating prevents both ports
+from targeting the same register in one cycle, and a WB-aligned cache hit can
+set and clear a destination without an extra busy cycle.
 
 [`fetch.rhdl`](fetch.rhdl) keeps a two-entry window of ordered, aligned L1I
 words and a five-entry flow-through queue of assembled instructions. Fetch
@@ -148,8 +157,8 @@ instructions before the ordinary decoder. It retains the original 16-bit word
 for illegal-instruction trap values, reports second-word faults precisely, and
 flushes retained, queued, or outstanding wrong-path data on redirects.
 
-The optional [`fp-pipeline.rhdl`](fp-pipeline.rhdl) backend owns the FP register
-file, FP RAW/WAW scoreboard, operand reads, a two-cycle fixed-latency path,
+The optional [`fp-pipeline.rhdl`](fp-pipeline.rhdl) engine owns the FP register
+file, FPR RAW/WAW scoreboard, operand reads, a two-cycle fixed-latency path,
 buffered divide/square-root paths, and completion arbitration. FP compute
 requests dispatch irrevocably from EX while their scalar tokens continue to WB.
 Accepted requests are non-speculative and must eventually complete. FP state
@@ -189,14 +198,14 @@ instructions serialize in Decode and wait for older deferred work before
 entering the pipeline. Execute-detected exceptions cross EX/MEM before Memory
 squashes younger work and carries the faulting instruction to WB, where CSR
 state records EPC, cause, and trap value. Eligible interrupts stop Fetch and
-Decode, drain accepted scalar and deferred work, and enter the trap after the
-last retired instruction. A legal
-`WFI` retires at that same serialization boundary and then holds Fetch and
-Decode until an individually enabled interrupt becomes pending. WFI wakeup
-ignores global interrupt-enable and delegation state; an eligible interrupt
-enters its handler with EPC equal to the instruction after `WFI`, while a
-globally masked wake resumes that instruction directly. U-mode `WFI` and
-S-mode `WFI` with `mstatus.TW` set raise an illegal-instruction exception.
+Decode, drain accepted scalar and register-producing deferred work, and enter
+the trap after the last retired instruction. A legal `WFI` retires at that same
+serialization boundary and then
+holds Fetch and Decode until an individually enabled interrupt becomes pending.
+WFI wakeup ignores global interrupt-enable and delegation state; an eligible
+interrupt enters its handler with EPC equal to the instruction after `WFI`,
+while a globally masked wake resumes that instruction directly. U-mode `WFI`
+and S-mode `WFI` with `mstatus.TW` set raise an illegal-instruction exception.
 
 `FENCE`, `FENCE.I`, and `SFENCE.VMA` share the serialization boundary. Decode
 waits for older deferred completions and L1D quiescence, then prevents younger
@@ -212,6 +221,9 @@ physical-region routing, private caches, and CHI transaction boundaries:
 ```mermaid
 flowchart LR
     START["start, interrupts,<br/>hart_id, time_counter"] --> CORE["RV5StageCore"]
+    IDENTITY["chi_identity<br/>RN NodeIDs"] --> L1I
+    IDENTITY --> L1D
+    IDENTITY --> UNCACHED
 
     CORE -->|"virtual instruction access"| MMU["MMU<br/>ITLB, DTLB, Sv39 walker"]
     CORE -->|"virtual data access"| MMU
@@ -253,16 +265,19 @@ specialized core definition to be stamped at multiple placements.
 | `~dcache` | L1D set and way geometry; defaults independently to `RV5StageCacheConfig(64, 1)` |
 | `~chi` | Required physical flit, address-region, and Home-routing policy |
 
-Cache line size is fixed at 64 bytes and is not a generator parameter. Each
-cache SRAM row and core lookup is XLEN-wide. RV5Stage uses CHI's minimum 128-bit
-DAT width, so a line refill contains four DAT packets and installs over eight
-RV64 or sixteen RV32 SRAM writes.
+Cache line size is fixed at 64 bytes and is not a generator parameter. Each way
+contributes one XLEN-wide word to a data-array row, and a core lookup selects one
+such word, so installation takes eight RV64 or sixteen RV32 SRAM writes. A
+refill contains four, two, or one DAT packet for a supplied 128-, 256-, or
+512-bit CHI data width, respectively; the default `CHIFlitParams()` width is 128
+bits.
 
 ### Top-level ports
 
 | Port | Contract |
 |---|---|
-| `start` | `Irrevocable(Bits(xlen.width))` reset PC consumer |
+| `chi_identity` | Placement-specific instruction RN-F, data RN-F, and device RN-I NodeIDs |
+| `start` | One-shot `Irrevocable(Bits(xlen.width))` initial-PC consumer; four-byte aligned, or two-byte aligned with C |
 | `interrupts` | Controller-independent supervisor and machine software, timer, and external interrupt levels |
 | `hart_id` | Platform hart identity exposed through `mhartid` |
 | `time_counter` | Platform 64-bit time source exposed through `time` and RV32 `timeh` |
@@ -280,7 +295,8 @@ RV64 supports Bare and Sv39 translation ahead of physically indexed,
 physically tagged L1 caches; RV32 remains Bare. Separate eight-entry fully
 associative ITLB and DTLB instances retain PTE permissions and recheck current
 privilege, `SUM`, and `MXR`. A single non-speculative walker services one miss at
-a time through the physical L1D path after older cache work drains. See the
+a time through the shared physical data path after older cache or uncached work
+drains; cacheable PTE reads then use L1D. See the
 [`MMU contract`](mmu/README.md) for translation, permission, and fault ownership.
 
 L1I is a clean-only, one-hit-per-cycle instruction cache with flushable lookup
@@ -308,6 +324,12 @@ the aliased `fflags`, `frm`, and `fcsr` views, `mstatus.FS` state, and derived
 `SD`. The `csr_bank` declaration is the single source for recognized IDs, read
 values, storage, aliases, WARL masks, and ordinary write dispatch.
 
+The integer register file has 32 XLEN-wide registers with `x0` hardwired to
+zero. An FP profile adds 32 raw FLEN-wide registers (32 bits for F, 64 bits for
+D), but FP instructions and FP CSRs remain illegal while `mstatus.FS` is Off.
+Accepted FP state changes mark FS Dirty, and `misa` reports the selected C, F,
+and D features.
+
 The core consumes controller-independent interrupt levels defined by
 [`interrupt.rhdl`](interrupt.rhdl). CSR state combines them with writable
 pending bits and applies enables, delegation, privilege, and architectural
@@ -322,12 +344,14 @@ exception.
 | [`rv5stage.rhdl`](rv5stage.rhdl) | Core, MMU, cache, uncached, and CHI composition |
 | [`core.rhdl`](core.rhdl) | Scalar pipeline, forwarding, hazards, commit, and deferred completion |
 | [`bundles.rhdl`](bundles.rhdl) | Scalar pipeline payloads |
+| [`fetch.rhdl`](fetch.rhdl) | Aligned-word window, C expansion, instruction queue, and redirect flushing |
 | [`decode/`](decode/README.md) | Structured integer and FP control generation |
 | [`register-file.rhdl`](register-file.rhdl) | Two-read, two-write integer register bank |
 | [`fp-pipeline.rhdl`](fp-pipeline.rhdl) | FP register state, execution lanes, and completion |
 | [`csr.rhdl`](csr.rhdl), [`interrupt.rhdl`](interrupt.rhdl) | Privileged state, traps, counters, and interrupts |
 | [`mmu/`](mmu/README.md) | TLBs, translation, and page-table walking |
 | [`memory-router.rhdl`](memory-router.rhdl), [`uncached.rhdl`](uncached.rhdl) | Physical-region routing and device transactions |
+| [`cache.rhdl`](cache.rhdl), [`chi.rhdl`](chi.rhdl) | Shared cache geometry, physical-region/Home policy, and RN identity parameters |
 | [`icache/`](icache/README.md), [`dcache/`](dcache/README.md) | Private cache protocols, arrays, policy, and CHI routing |
 | Transaction engines | Refill, ownership acquisition, retry, dirty drain, and snoop handling |
 
@@ -370,10 +394,21 @@ tools/run-racket-tests.sh \
   cores/rv5stage/tests/rv5stage-test.rhm
 ```
 
-`make rv5stage-test` additionally runs the applicable decode, ALU,
-bit-manipulation, conditional-zero, pipeline, cache, load/store, CIRCT, and
-Verilator fixtures. The SimpleSoC simulator also passes all 40 upstream RV64
-Zba, Zbb, and Zbs physical architectural tests.
+`tools/run-racket-tests.sh` creates and removes a fresh compiled root when the
+caller does not supply `PLTCOMPILEDROOTS`.
+
+`make rv5stage-test` runs those host checks plus the selected RV5Stage CIRCT and
+Verilator fixture batch named in the `Makefile`. To exercise the dedicated WFI
+control-flow simulation, run:
+
+```sh
+FIXTURE=rv5stage-wfi bash tests/backend/run-circt.sh
+```
+
+The [backend test guide](../../tests/backend/README.md) owns fixture selection,
+tool discovery, generated-output, and simulation details. SoC-level
+architectural and FESVR simulation belongs to the
+[simulation guide](../../sims/README.md).
 
 ## Deliberate limits
 

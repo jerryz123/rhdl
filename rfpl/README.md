@@ -2,53 +2,214 @@
 
 # RFPL physical views
 
-RFPL annotates an already elaborated Rhodium design with rectangular physical
-views. It does not construct hardware, mutate the logical IR, or affect CIRCT
-and SystemVerilog output. A physical design retains the original
-`DesignElaboration` and adds one validated view per reachable module.
+RFPL adds rectangular physical views to an already elaborated Rhodium design.
+It reads finished modules and existing instance operations; it does not author
+hardware, mutate the logical IR, or participate in CIRCT lowering. The result is
+a `FloorplanDesign` that retains the original `DesignElaboration` alongside a
+validated physical-view tree.
 
-Use `#lang rfpl` for annotation modules. The language combines ordinary
-Rhombus with the RFPL forms below; logical circuits remain ordinary Rhodium
-modules imported by the annotation.
+Use `#lang rfpl` for the annotation file. The language provides ordinary
+Rhombus plus the RFPL forms documented here. Define the logical hierarchy in
+`#lang rhodium`, finish it with `elaborate_with_top`, and import that result into
+the annotation.
 
-## Views and placement
+## Follow the annotation workflow
 
-- `hard_macro(module, width: ..., height: ...)` treats a finished module as an
-  opaque physical block. The module may contain arbitrary Rhodium logic.
-- `floorplan(module, width: ..., height: ..., placements: [...])` describes a
-  wiring-only hierarchical module. Every direct child instance must appear
-  exactly once and the module may contain only ports, wires, drives, and
-  instances.
-- `place(instance, child_view, at: (x, y))` places a direct child at an exact
-  nonnegative coordinate. The child view must target the instance's module and
-  its rectangle must fit within the parent outline.
-- `annotate(logical, top_view)` validates the reachable view hierarchy and
-  returns a `FloorplanDesign`. The view's module must be the logical design's
-  top, and one logical module cannot acquire conflicting physical views.
+```mermaid
+flowchart TD
+  subgraph Logical["Logical design - Rhodium owns structure and behavior"]
+    Source["#lang rhodium circuits"] --> Elaborate["elaborate_with_top"]
+    Elaborate --> Design["DesignElaboration<br/>verified Design and explicit top Module"]
+    Design --> Hierarchy["finished Modules<br/>existing rtl.instance operations"]
+  end
 
-Lengths are exact integer picometers. `nm(n)` and `um(n)` construct nanometer
-and micrometer lengths without floating-point conversion. Widths and heights
-must be positive.
+  subgraph Physical["Physical view - RFPL owns outlines and coordinates"]
+    Hierarchy --> Inspect["child_instance and instance_target"]
+    Inspect --> Choice{"Choose a view for each<br/>physically traversed Module"}
+    Choice --> Macro["hard_macro<br/>opaque physical leaf"]
+    Choice --> Composite["floorplan<br/>transparent physical assembly"]
+    Composite --> Placement["place every direct instance<br/>at an exact coordinate"]
+    Placement --> Children["matching child views"]
+    Children --> Macro
+    Children --> Composite
+    Macro --> Tree["complete physical-view tree"]
+    Composite --> Tree
+    Tree --> Annotate["annotate logical top_view"]
+    Annotate --> Result["FloorplanDesign<br/>same logical Design plus validated views"]
+  end
 
-The canonical executable example is
-[`../examples/rfpl/circuit-pair.rfpl`](../examples/rfpl/circuit-pair.rfpl). It
-uses `child_instance` and `instance_target` to select the finished Rhodium
-hierarchy rather than duplicating its structure.
+  Result -. "logical Design only" .-> CIRCT["Rhodium CIRCT backend"]
+```
 
-## Boundaries and verification
+1. Elaborate the logical top with `elaborate_with_top`, which supplies the
+   verified `Design` and explicit top `Module` required by RFPL.
+2. Select existing direct instances with `child_instance(module, name)` and
+   inspect their target modules with `instance_target(instance)`. RFPL never
+   reconstructs the logical hierarchy from names or module-list order.
+3. Give each physically traversed module either an opaque `hard_macro` view or
+   a transparent `floorplan` view. A floorplan places all of its direct
+   instances, so this choice repeats for each child view.
+4. Call `annotate(logical, top_view)` to validate the physical tree against the
+   logical design.
 
-RFPL depends only on the public completed Rhodium core IR. Rhodium core, frontend,
-standard-library, and backend packages do not import RFPL. Physical metadata
-does not appear in emitted CIRCT; the structural test verifies that annotating
-a design leaves its generated hardware unchanged.
+The executable
+[`circuit-pair.rfpl`](../examples/rfpl/circuit-pair.rfpl) annotation and its
+separate [`circuit-pair.rhdl`](../examples/rfpl/circuit-pair.rhdl) logical
+design show the complete split.
 
-Run the focused checks from the repository root:
+## Choose and compose views
+
+### Treat logic as an opaque hard macro
+
+`hard_macro(module, width: ..., height: ...)` gives a finished module a
+positive rectangular outline and ends physical traversal at that module. The
+module may contain arbitrary valid Rhodium logic and logical descendants; none
+of those descendants needs a separate RFPL view below this physical leaf.
+Physical opacity does not turn the module into an RTL black box or change its
+logical contents.
+
+### Describe a transparent floorplan
+
+`floorplan(module, width: ..., height: ..., placements: [...])` describes a
+wiring-only hierarchical assembly. Its finished module may contain only
+`rtl.input_port`, `rtl.output_port`, `rtl.instance`, `rtl.drive`, and `rtl.wire`
+operations. Every direct `rtl.instance` must appear in exactly one placement.
+Use a hard macro instead when the module itself contains an operator, register,
+memory, assertion, simulation effect, or other logic.
+
+A `CompositeFloorplan` is a view of a module definition, not one occurrence.
+Reusing the same view for multiple instances of that module stamps the same
+internal arrangement at each occurrence; each occurrence still receives its
+own coordinate in its parent.
+
+### Place existing child instances
+
+`place(instance, child_view, at: (x, y))` binds one existing direct
+`rtl.instance` to the physical view of its actual target module. The placement
+records the parent module, child view, instance identity, and coordinate; it
+does not create or reconnect an instance. The child rectangle must fit within
+the parent outline at that coordinate.
+
+Coordinates and dimensions are `Length` values stored as exact integer
+picometers. `nm(n)` multiplies a nonnegative integer by 1,000 and `um(n)` by
+1,000,000, without floating-point conversion. Widths and heights must be
+positive. Placement coordinates may be zero but cannot be negative, and raw
+unitless integers are rejected where a `Length` is required. The `(x, y)` pair
+is the child rectangle's origin in its parent; containment checks its right and
+top edges against the parent outline.
+
+RFPL currently checks containment, not sibling overlap. Two individually
+contained child rectangles may overlap without an RFPL error.
+
+### Validate and retain the physical tree
+
+`annotate(logical, top_view)` requires a `DesignElaboration` and a physical
+view of its exact top module. It recursively validates only views reached from
+that top through composite placements, requires every reached module to belong
+to the same logical `Design`, and returns a `FloorplanDesign` with:
+
+- `logical`: the original `DesignElaboration`;
+- `design`: the same logical `Design` reference;
+- `top` and `top_module`: the physical root and its module; and
+- flattened `views` and `placements` lists for the validated physical tree.
+
+Within one result, a logical module may have only one physical-view object.
+Multiple placements may reuse that same object, but two distinct views of the
+same module are rejected even if their outlines match.
+
+The authoring forms above are the checked construction path. Their exported
+objects make the result inspectable without introducing a second logical IR:
+
+| Object | Meaning |
+|---|---|
+| `Length` | Exact nonnegative distance stored in picometers |
+| `RectOutline` | Positive width and height for one view |
+| `Coordinate` | Nonnegative `x` and `y` lengths for one placement |
+| `PhysicalView` | Common validated-view interface |
+| `HardMacro` | Opaque leaf view of a finished module |
+| `CompositeFloorplan` | Transparent module view with direct-child placements |
+| `FloorplanPlacement` | Existing parent-local instance, matching child view, and coordinate |
+| `FloorplanDesign` | Original logical elaboration plus the validated physical tree |
+
+## Understand hierarchy completeness
+
+Completeness is defined by physical transparency:
+
+- At a composite floorplan, every direct logical instance has exactly one
+  placement and a matching child view.
+- At a hard macro, physical traversal stops. Its logical descendants remain
+  part of Rhodium's design but do not require RFPL views.
+- A view constructed separately but not reached from the annotated top is not
+  included in the returned `FloorplanDesign`.
+
+This makes the selected top the only physical root and prevents an unplaced
+direct child inside a transparent assembly, without claiming that every module
+owned by the logical `Design` is physically expanded.
+
+## Know which layer rejects an error
+
+Rhodium remains authoritative for logical types, ownership, complete driving,
+instance hierarchy, combinational cycles, and all hardware behavior. See the
+[`rhodium/core`](../rhodium/core/README.md) contract rather than treating RFPL
+as a second logical verifier.
+
+RFPL rejects local physical errors while views and placements are constructed:
+unfinished modules, nonpositive outlines, non-instance placement targets,
+child-view target mismatches, invalid composite contents, missing or duplicate
+direct-instance placements, wrong-parent placements, invalid coordinates, and
+out-of-bounds rectangles. `annotate` then checks the cross-view boundary: top
+identity, common logical-design ownership, repeated validation, and conflicting
+views of one module.
+
+RFPL deliberately does not verify orientation, halos, placement grids, sibling
+overlap, routing, congestion, timing, power delivery, DRC/LVS, GDS assembly, or
+automatic placement. It also has no physical exporter or place-and-route
+backend, and the current public surface has no view variants or strap-pin
+specialization. Deferred RFPL design belongs in [`PLAN.md`](PLAN.md).
+Repository physical-flow experiments and their proof limits are owned by the
+[`vlsi`](../vlsi/README.md) guide; CIRCT lowering is owned by the
+[`rhodium/backend`](../rhodium/backend/README.md) guide.
+
+## Package and CIRCT boundary
+
+Production RFPL annotation code imports only the backend-independent public
+Rhodium core IR. Rhodium core, frontend, libraries, and backend do not import
+RFPL. The authoritative package dependency table is in
+[`rhodium/README.md`](../rhodium/README.md#package-responsibilities).
+
+`FloorplanDesign.design` is the original logical design, so the existing CIRCT
+backend sees no RFPL objects. RFPL outlines, coordinates, and view choices do
+not become ports, constants, operations, attributes, or SystemVerilog. The
+structural test emits that retained design and checks both stable logical
+hierarchy and the absence of RFPL metadata in CIRCT text.
+
+## Find the implementation
+
+| Concern | Owner |
+|---|---|
+| `#lang rfpl` reader shim | [`main.rkt`](main.rkt) |
+| Ordinary Rhombus plus RFPL export composition | [`language.rhm`](language.rhm) |
+| Public classes, unit constructors, lookup helpers, view construction, placement, and annotation traversal | [`frontend/foundation.rhm`](frontend/foundation.rhm) |
+| Wiring-only composite-module validation | [`frontend/verify.rhm`](frontend/verify.rhm) |
+| RFPL dependency and file-extension policy | [`check-boundaries.sh`](check-boundaries.sh) |
+| Implemented status and deferred design direction | [`PLAN.md`](PLAN.md) |
+| View data, hierarchy reuse, coordinates, and CIRCT-isolation checks | [`tests/structural-test.rhm`](tests/structural-test.rhm) |
+| Rejected authoring cases and required diagnostics | [`tests/invalid/`](tests/invalid/) and [`tests/run-negative-cases.rktd`](tests/run-negative-cases.rktd) |
+| Canonical logical and physical authoring pair | [`../examples/rfpl/`](../examples/rfpl/) |
+
+## Run focused validation
+
+From the repository root, run:
 
 ```sh
 make rfpl-test
 make rfpl-circt-test
 ```
 
-The first target checks RFPL package boundaries, structural validation,
-invalid uses, and examples. The second runs the RFPL-owned CIRCT fixture and
-its example-owned Verilog reference.
+`make rfpl-test` runs the RFPL boundary checker, the structural test, all
+intentional-invalid fixtures, and the RFPL examples. `make rfpl-circt-test`
+runs the separately owned external CIRCT check for the RFPL example's logical
+design and compares its example-owned normalized Verilog reference. The latter
+requires `circt-opt`; run `make setup-circt` or set `CIRCT_OPT` if it is not
+available. The repository test wrappers create a fresh `PLTCOMPILEDROOTS` when
+the caller has not already supplied one.
