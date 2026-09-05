@@ -110,10 +110,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   // Backward-traveling observations use local Valid interface links. Their
   // producers remain in their pipeline stages below, despite earlier stages
-  // consuming their values. The payloadless fault event remains a Bool wire.
-  wire execute_exception_event: Bool
+  // consuming their values.
   def redirect_link :: Handle = interface_link(Valid(Bits(width)))
-  def execute_redirect_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RV5StageBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RV5StageBypass(xlen)))
   def scoreboard_set_link :: Handle = interface_link(Valid(Bits(5)))
@@ -127,31 +125,32 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def fence_resume_pc = commit.bits.resume_pc
   def fence_commit = fence_i_commit ||| csrs.translation_flush
   def commit_redirect = csrs.redirect.valid ||| fence_commit
-  redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
+  def memory_stage_valid = memory.valid & !commit_redirect
+  def memory_exception_event = memory_stage_valid & memory.bits.exception_valid
+  def memory_redirect = memory_stage_valid & memory.bits.redirect_valid & !memory.bits.exception_valid
+  redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| memory_redirect
   redirect_link.left.bits <== mux(
     csrs.redirect.valid,
     csrs.redirect.bits,
-    mux(fence_commit, fence_resume_pc, execute_redirect_link.right.bits)
+    mux(fence_commit, fence_resume_pc, memory.bits.resume_pc)
   )
 
   // Fetch (IF) assembles variable-length instructions from aligned cache words.
   // Redirects and faults discard both partially assembled and outstanding data.
-  def exception_in_flight = pending_exception_valid ||| (memory.valid & memory.bits.exception_valid) ||| (
+  def exception_in_flight = pending_exception_valid ||| memory_exception_event ||| (
     commit.valid & commit.bits.exception_valid
   )
-  def squash = faulted ||| execute_exception_event ||| exception_in_flight ||| (
-    redirect_link.right.valid
-  )
+  def squash = faulted ||| exception_in_flight ||| redirect_link.right.valid
   reg started(~init: Bool(#false))
   reg waiting_for_interrupt(~init: Bool(#false))
   reg architectural_pc(~init: zero)
-  start.ready <== !started & !(faulted ||| execute_exception_event)
+  start.ready <== !started & !(faulted ||| memory_exception_event)
   def start_fire = start.fire()
   def instruction_alignment = if compressed_enabled | 2 | 4
   def start_fault = start_fire & !is_aligned(start.bits, instruction_alignment)
   def fetch_valid = started & !squash & !csrs.interrupt_request & !waiting_for_interrupt
   fetch.active <== fetch_valid
-  fetch.flush <== start_fault ||| execute_exception_event
+  fetch.flush <== start_fault ||| memory_exception_event
   fetch.restart_valid <== redirect_link.right.valid ||| (start_fire & !start_fault)
   fetch.restart_pc <== mux(redirect_link.right.valid, redirect_link.right.bits, start.bits)
   fetch.invalidate_all <== fence_i_commit
@@ -288,9 +287,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def fence_waits_for_data = control.fence.is_fence_operation() & !data_access.drained
   def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
     scoreboard_waw_hazard ||| fp_source_hazard ||| fp_destination_hazard
-  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| waiting_for_interrupt ||| csrs.interrupt_request ||| exception_in_flight ||| (
-    execute_exception_event
-  )
+  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| waiting_for_interrupt ||| csrs.interrupt_request ||| exception_in_flight
   if_id_pipe.egress.ready <== squash ||| (id_ex_pipe.ingress.ready & !pipeline_hazard)
   id_ex_pipe.ingress.valid <== decode_valid & !pipeline_hazard
   id_ex_pipe.ingress.bits <== DecodeExecute(xlen):
@@ -451,7 +448,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
     divisor: forwarded_rs2
     control: id_ex.bits.divide_control
     rd: id_ex.bits.rd
-  def older_pipeline_squash = faulted ||| (memory.valid & memory.bits.exception_valid) ||| commit_redirect
+  def older_pipeline_squash = faulted ||| memory_exception_event ||| memory_redirect ||| commit_redirect
 
   fp.issue.bits <== RV5StageFpIssue(xlen, effective_fp_profile, Bits(width)):
     context: id_ex.bits.pc
@@ -532,6 +529,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   ex_mem_pipe.ingress.bits <== ExecuteMemory(xlen):
     pc: id_ex.bits.pc
     resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.sequential_pc)
+    redirect_valid: redirect_requested & !execute_exception.valid
     instruction: id_ex.bits.instruction
     writeback_source: id_ex.bits.writeback_source
     writeback_enable: id_ex.bits.writeback_enable & !execute_exception.valid
@@ -547,13 +545,9 @@ sync_circuit RV5StageCore(xlen :: XLen,
     exception_cause: execute_exception.cause
     exception_value: execute_exception.value
 
-  execute_exception_event <== execute_transfer & execute_exception.valid
-  execute_redirect_link.left.valid <== execute_transfer & !execute_exception.valid & redirect_requested
-  execute_redirect_link.left.bits <== computed_redirect_target
-
   // Memory advances every instruction into WB; exception payloads have their
   // ordinary side effects disabled. No instruction commits at this boundary.
-  mem_wb_pipe.ingress.valid <== memory.valid & !commit_redirect
+  mem_wb_pipe.ingress.valid <== memory_stage_valid
   mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
     pc: memory.bits.pc
     resume_pc: memory.bits.resume_pc

@@ -1,4 +1,4 @@
-// Verifies that an instruction access fault traps precisely with mcause and mtval set.
+// Verifies an instruction access fault traps precisely and squashes younger execution.
 module rv5stage_access_fault_tb;
   typedef struct packed {
     logic supervisor_software;
@@ -84,6 +84,7 @@ module rv5stage_access_fault_tb;
       64'h4: instruction_at = 32'h00103023; // sd x1, 0(x0)
       64'h8: instruction_at = 32'h34302173; // csrr x2, mtval
       64'hc: instruction_at = 32'h00203423; // sd x2, 8(x0)
+      64'h104: instruction_at = 32'h02003023; // sd x0, 32(x0), must be squashed
       default: instruction_at = 32'h00000013;
     endcase
   endfunction
@@ -121,6 +122,8 @@ module rv5stage_access_fault_tb;
       if (data_access_out.request.valid && data_access_in.request.ready) begin
         assert (data_access_out.request.bits.access == MEMORY_STORE)
           else $fatal(1, "fault handler issued a non-store data request");
+        assert (data_access_out.request.bits.address != 64'd32)
+          else $fatal(1, "instruction after a fault executed before MEM recovery");
         if (stores_seen == 0) begin
           assert (data_access_out.request.bits.address == 0 &&
                   data_access_out.request.bits.data == 64'd1)

@@ -1,4 +1,4 @@
-// Verifies RV5StageCore ordered commit, scoreboard hazards, and FENCE.I refetch control.
+// Verifies RV5StageCore redirects, ordered commit, scoreboard hazards, and FENCE.I refetch control.
 module rv5stage_core_tb;
   typedef struct packed {
     logic supervisor_software;
@@ -72,8 +72,10 @@ module rv5stage_core_tb;
   logic [1:0] stores_seen;
   logic saw_fetch_flush;
   logic saw_redirect;
+  logic saw_jal_redirect;
   logic saw_fence_i_invalidate;
   logic saw_fence_i_refetch;
+  logic [2:0] fetch_flushes;
   localparam logic [2:0] MEMORY_LOAD = 3'd1;
   localparam logic [1:0] DATA_DESTINATION_NONE = 2'd0;
   localparam logic [1:0] DATA_DESTINATION_INTEGER = 2'd1;
@@ -88,11 +90,15 @@ module rv5stage_core_tb;
       64'h00000001_00000008: instruction_at = 32'h01003403;  // ld x8, 16(x0)
       64'h00000001_0000000c: instruction_at = 32'h00100313; // addi x6, x0, 1
       64'h00000001_00000010: instruction_at = 32'h02031863; // bne x6, x0, +48
+      64'h00000001_00000014: instruction_at = 32'h02603023; // sd x6, 32(x0), must be squashed
       64'h00000001_00000040: instruction_at = 32'h006503b3; // add x7, x10, x6
       64'h00000001_00000044: instruction_at = 32'h00900413; // addi x8, x0, 9
       64'h00000001_00000048: instruction_at = 32'h0000100f; // fence.i
-      64'h00000001_0000004c: instruction_at = 32'h00703423; // sd x7, 8(x0)
-      64'h00000001_00000050: instruction_at = 32'h00803823; // sd x8, 16(x0)
+      64'h00000001_0000004c: instruction_at = 32'h008004ef; // jal x9, +8
+      64'h00000001_00000050: instruction_at = 32'h02603023; // sd x6, 32(x0), must be squashed
+      64'h00000001_00000054: instruction_at = 32'h00703423; // sd x7, 8(x0)
+      64'h00000001_00000058: instruction_at = 32'h00803823; // sd x8, 16(x0)
+      64'h00000001_0000005c: instruction_at = 32'h00903c23; // sd x9, 24(x0)
       default: instruction_at = 32'h00000013;
     endcase
   endfunction
@@ -129,12 +135,15 @@ module rv5stage_core_tb;
       stores_seen <= '0;
       saw_fetch_flush <= 1'b0;
       saw_redirect <= 1'b0;
+      saw_jal_redirect <= 1'b0;
       saw_fence_i_invalidate <= 1'b0;
       saw_fence_i_refetch <= 1'b0;
+      fetch_flushes <= '0;
     end else begin
       if (instruction_access_out.flush) begin
         instruction_response_valid <= 1'b0;
         saw_fetch_flush <= 1'b1;
+        fetch_flushes <= fetch_flushes + 1'b1;
         if (instruction_access_out.invalidate_all)
           saw_fence_i_invalidate <= 1'b1;
       end else begin
@@ -148,11 +157,19 @@ module rv5stage_core_tb;
               else $fatal(1, "branch target fetched without flushing wrong-path requests");
             assert (first_response_sent && !second_response_sent)
               else $fatal(1, "branch redirect did not pass only the deferred load");
+            assert (fetch_flushes >= 1)
+              else $fatal(1, "branch target was requested before MEM redirected Fetch");
             saw_redirect <= 1'b1;
           end
           if (instruction_access_out.request.bits.address == 64'h00000001_0000004c &&
               saw_fence_i_invalidate)
             saw_fence_i_refetch <= 1'b1;
+          if (instruction_access_out.request.bits.address == 64'h00000001_00000054 &&
+              fetch_flushes >= 3) begin
+            assert (saw_fence_i_refetch && fetch_flushes >= 3)
+              else $fatal(1, "JAL target was requested without branch, fence, and JAL flushes");
+            saw_jal_redirect <= 1'b1;
+          end
         end
       end
 
@@ -203,6 +220,8 @@ module rv5stage_core_tb;
             first_response_delay <= 2'd1;
           load_requests <= load_requests + 1'b1;
         end else begin
+          assert (data_access_out.request.bits.address != 64'd32)
+            else $fatal(1, "a wrong-path store executed after a MEM-stage redirect");
           assert (second_response_sent)
             else $fatal(1, "a younger store passed a RAW or WAW hazard");
           if (stores_seen == 0) begin
@@ -211,15 +230,24 @@ module rv5stage_core_tb;
                     data_access_out.request.bits.destination == DATA_DESTINATION_NONE)
               else $fatal(1, "RAW-dependent result was incorrect");
             stores_seen <= 1;
-          end else begin
-            assert (stores_seen == 1 &&
+          end else if (stores_seen == 1) begin
+            assert (
                     data_access_out.request.bits.address == 64'd16 &&
                     data_access_out.request.bits.data == 64'd9 &&
                     data_access_out.request.bits.destination == DATA_DESTINATION_NONE)
               else $fatal(1, "WAW ordering was not preserved");
+            stores_seen <= 2;
+          end else begin
+            assert (stores_seen == 2 &&
+                    data_access_out.request.bits.address == 64'd24 &&
+                    data_access_out.request.bits.data == 64'h00000001_00000050 &&
+                    data_access_out.request.bits.destination == DATA_DESTINATION_NONE)
+              else $fatal(1, "JAL link writeback was not preserved through MEM redirect");
             assert (saw_fence_i_invalidate && saw_fence_i_refetch)
               else $fatal(1, "FENCE.I did not invalidate and refetch from pc + 4");
-            $display("RV5Stage out-of-order load completion passed");
+            assert (saw_jal_redirect)
+              else $fatal(1, "JAL did not redirect from MEM");
+            $display("RV5Stage redirect and out-of-order load completion passed");
             $finish;
           end
         end

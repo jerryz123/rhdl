@@ -50,7 +50,7 @@ flowchart LR
         IDEX["ID/EX<br/>elastic Pipe"]
         EX["Execute (EX)<br/>forwarding, branch, AGU"]
         EXMEM["EX/MEM<br/>feed-forward ValidPipe"]
-        MEM["Memory (MEM)<br/>metadata and bypass"]
+        MEM["Memory (MEM)<br/>redirect, metadata, bypass"]
         MEMWB["MEM/WB<br/>feed-forward ValidPipe"]
         WB["Writeback (WB)<br/>ordered commit"]
 
@@ -82,6 +82,7 @@ flowchart LR
 
     WB <--> CSR["CSR, trap, and interrupt state"]
     CSR -->|"redirect / flush"| IF
+    MEM -->|"branch / exception recovery"| IF
 ```
 
 ### Stage contract
@@ -91,7 +92,7 @@ flowchart LR
 | Fetch | Five-entry `Queue`, then IF/ID `Pipe` | Yes | Producer-owned PC generation, L1I request correlation, and redirect flushing |
 | Decode | ID/EX `Pipe` | Yes | Structured decode, serialization, and RAW/WAW hazard checks |
 | Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, and synchronous-fault classification |
-| Memory | MEM/WB `ValidPipe` | No | Feed-forward metadata, bypass, and cache-response alignment |
+| Memory | MEM/WB `ValidPipe` | No | Registered branch and exception recovery, feed-forward metadata, bypass, and cache-response alignment |
 | Writeback | Ordered commit | At defined architectural waits | Register and CSR effects, traps, fences, and deferred-destination reservation |
 
 Fetch retains accepted PCs in a two-entry flushable metadata queue so the
@@ -107,8 +108,10 @@ write after the ordinary forwarding window has passed.
 
 Once Execute transfers an instruction into EX/MEM, no later scalar stage can
 backpressure it. Branch resolution, synchronous-fault classification, and any
-legal memory-request acceptance occur on that transfer. L1D's registered SRAM
-result is aligned with the instruction at WB.
+legal memory-request acceptance occur on that transfer. The branch or exception
+outcome is registered in EX/MEM, and Memory redirects or flushes Fetch while
+squashing younger work on the following cycle. L1D's registered SRAM result is
+aligned with the instruction at WB.
 
 WB is the sole ordered architectural commit point. A deferred instruction may
 reserve its destination and release the scalar pipeline before its value
@@ -183,10 +186,11 @@ same deferred path as loads.
 
 CSR instructions return the old value and update state atomically at WB. System
 instructions serialize in Decode and wait for older deferred work before
-entering the pipeline. Execute-detected exceptions squash younger work and carry
-the faulting instruction to WB, where CSR state records EPC, cause, and trap
-value. Eligible interrupts stop Fetch and Decode, drain accepted scalar and
-deferred work, and enter the trap after the last retired instruction. A legal
+entering the pipeline. Execute-detected exceptions cross EX/MEM before Memory
+squashes younger work and carries the faulting instruction to WB, where CSR
+state records EPC, cause, and trap value. Eligible interrupts stop Fetch and
+Decode, drain accepted scalar and deferred work, and enter the trap after the
+last retired instruction. A legal
 `WFI` retires at that same serialization boundary and then holds Fetch and
 Decode until an individually enabled interrupt becomes pending. WFI wakeup
 ignores global interrupt-enable and delegation state; an eligible interrupt
