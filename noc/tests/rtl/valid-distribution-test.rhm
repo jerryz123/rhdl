@@ -1,0 +1,30 @@
+#lang rhombus
+// Checks the generic aggregate-payload Valid distribution's elaborated structure.
+
+import:
+  "../../../rhodium/core/main.rhm" open
+  "../../../rhodium/backend/circt.rhm".emit_circt
+  "../../rtl/tests/valid-distribution-fixture.rhdl" as fixture
+
+def module_names = fixture.design.modules.map(fun (module_def): module_def.name)
+def network = fixture.design.modules.find(fun (module_def): module_def.name == "ValidDistribution")
+def registers = network.operations.filter(
+  ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
+)
+def circt = emit_circt(fixture.design)
+
+check:
+  fixture.config.site_count ~is 4
+  fixture.config.sink_count ~is 2
+  fixture.compilation.plan.sink_plans.map(fun (sink): sink.natural_latency) ~is [4, 3]
+  fixture.compilation.plan.sink_plans.map(fun (sink): sink.padding) ~is [0, 1]
+  module_names.contains("ValidDistributionFixture") ~is #true
+  module_names.contains("ValidDistribution") ~is #true
+  module_names.contains("ValidPipe") ~is #true
+  registers.map(fun (operation): operation.attribute("name")) ~is ["site_valid", "site_bits"]
+  network.find_input("source_in").type.field("bits").type.packed_width() ~is 9
+  network.find_output("sinks_0_out").type.field("bits").type.packed_width() ~is 9
+  network.find_output("sinks_1_out").type.field("bits").type.packed_width() ~is 9
+  circt.contains("hw.module @ValidDistribution") ~is #true
+  circt.contains("seq.firreg") ~is #true
+  verify_design(fixture.design) ~is #void

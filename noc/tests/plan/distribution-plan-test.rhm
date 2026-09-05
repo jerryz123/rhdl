@@ -1,0 +1,98 @@
+#lang rhombus
+// Checks deterministic multicast-tree planning, pruning, terminal provenance, and latency policies.
+
+import:
+  "../../authoring/main.rhm" open
+  "../../language/main.rhm".topology
+  "../../model/main.rhm" open
+  "../../plan/main.rhm" open
+
+def n0 = NodeId(0)
+def n1 = NodeId(1)
+def n2 = NodeId(2)
+def n3 = NodeId(3)
+def n4 = NodeId(4)
+def n5 = NodeId(5)
+def n6 = NodeId(6)
+
+def graph = ConnectivityGraph(
+  [n6, n5, n4, n3, n2, n1, n0],
+  [ConnectivityEdge(LinkId(5), n3, n5),
+   ConnectivityEdge(LinkId(4), n1, n4),
+   ConnectivityEdge(LinkId(3), n2, n3),
+   ConnectivityEdge(LinkId(2), n1, n3),
+   ConnectivityEdge(LinkId(1), n0, n2),
+   ConnectivityEdge(LinkId(0), n0, n1)]
+)
+def source = InjectionTerminal(InjectionId(0), n0)
+def sink0 = EjectionTerminal(EjectionId(0), n2)
+def sink1 = EjectionTerminal(EjectionId(1), n2)
+def sink2 = EjectionTerminal(EjectionId(2), n5)
+def sink_at_source = EjectionTerminal(EjectionId(3), n0)
+def unreachable_sink = EjectionTerminal(EjectionId(4), n6)
+
+def natural = compile_distribution(graph, source, [sink2, sink1, sink0])
+def equalized = compile_distribution(
+  graph,
+  source,
+  [sink2, sink1, sink0],
+  ~timing: equalized_distribution_timing
+)
+def local = compile_distribution(graph, source, [sink_at_source])
+
+check:
+  graph.nodes.map(fun (node): node.value) ~is [0, 1, 2, 3, 4, 5, 6]
+  graph.edges.map(fun (edge): edge.link_id.value) ~is [0, 1, 2, 3, 4, 5]
+  natural.sites.map(fun (site): site.node.value) ~is [0, 1, 2, 3, 5]
+  natural.selected_edges.map(fun (edge): edge.link_id.value) ~is [0, 1, 2, 5]
+  natural.sink_plans.map(fun (sink): sink.terminal.id.value) ~is [0, 1, 2]
+  natural.sink_plans.map(fun (sink): sink.natural_latency) ~is [2, 2, 4]
+  natural.sink_plans.map(fun (sink): sink.padding) ~is [0, 0, 0]
+  natural.maximum_latency ~is 4
+  natural.site(n3).parent_edge.link_id.value ~is 2
+  natural.site(n1).child_indices ~is [3]
+  natural.site(n2).sink_indices ~is [0, 1]
+  equalized.sink_plans.map(fun (sink): sink.padding) ~is [2, 2, 0]
+  local.sites.map(fun (site): site.node.value) ~is [0]
+  local.sink_plans[0].natural_latency ~is 1
+  compile_distribution(graph, source, [unreachable_sink]) ~throws "unreachable distribution sink e4@n6"
+  compile_distribution(graph, source, [sink0, sink0]) ~throws "duplicate distribution sink e0"
+
+def authored_topology :: TopologySpec = topology:
+  vc_group transport: 1
+  node source_router
+  node branch_router
+  node first_router
+  node second_router
+  directed source_branch:
+    source_router -> branch_router
+    vcs [transport]
+  directed branch_first:
+    branch_router -> first_router
+    vcs [transport]
+  directed branch_second:
+    branch_router -> second_router
+    vcs [transport]
+def source_ref = InjectionRef("updates")
+def first_ref = EjectionRef("first")
+def second_ref = EjectionRef("second")
+def terminals = TerminalPlacement(
+  [InjectionTerminalSpec(source_ref, authored_topology.node("source_router"))],
+  [EjectionTerminalSpec(first_ref, authored_topology.node("first_router")),
+   EjectionTerminalSpec(second_ref, authored_topology.node("second_router"))]
+)
+def compilation = compile_distribution_network(
+  authored_topology,
+  terminals,
+  ~source: source_ref,
+  ~sinks: [second_ref, first_ref],
+  ~timing: equalized_distribution_timing
+)
+
+check:
+  compilation.source_terminal().id.value ~is 0
+  compilation.sink_index(first_ref) ~is 0
+  compilation.sink_index(second_ref) ~is 1
+  compilation.plan.sites.length() ~is 4
+  compilation.plan.selected_edges.length() ~is 3
+  compilation.plan.maximum_latency ~is 3

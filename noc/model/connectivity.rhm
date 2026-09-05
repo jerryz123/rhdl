@@ -1,0 +1,67 @@
+#lang rhombus
+// Defines protocol-neutral directed connectivity projected from a VC-aware topology.
+
+import:
+  "identities.rhm" open
+  "topology.rhm" open
+
+export:
+  ConnectivityEdge
+  ConnectivityGraph
+  topology_connectivity
+
+class ConnectivityEdge(link_id :: LinkId,
+                       source :: NodeId,
+                       destination :: NodeId):
+
+  method describe():
+    String.append(link_id.describe(), ": ", source.describe(), " -> ", destination.describe())
+
+fun connectivity_contains_node(nodes :: List.of(NodeId), node :: NodeId) :: Boolean:
+  nodes.find(fun (candidate): node_id_equal(candidate, node)) != #false
+
+fun connectivity_duplicate_node(nodes :: List.of(NodeId), node :: NodeId) :: Boolean:
+  nodes.filter(~keep: fun (candidate): node_id_equal(candidate, node)).length() > 1
+
+fun connectivity_duplicate_edge(edges :: List.of(ConnectivityEdge), edge :: ConnectivityEdge) :: Boolean:
+  edges.filter(~keep: fun (candidate): link_id_equal(candidate.link_id, edge.link_id)).length() > 1
+
+class ConnectivityGraph(nodes :: NonemptyList.of(NodeId),
+                        edges :: List.of(ConnectivityEdge)):
+  constructor (nodes :: NonemptyList.of(NodeId),
+               edges :: List.of(ConnectivityEdge)):
+    for (node in nodes):
+      when connectivity_duplicate_node(nodes, node)
+      | error(~who: #'ConnectivityGraph, "duplicate connectivity node " ++ node.describe())
+    for (edge in edges):
+      when connectivity_duplicate_edge(edges, edge)
+      | error(~who: #'ConnectivityGraph, "duplicate connectivity edge " ++ edge.link_id.describe())
+      unless connectivity_contains_node(nodes, edge.source)
+      | error(~who: #'ConnectivityGraph, "connectivity edge has unknown source " ++ edge.describe())
+      unless connectivity_contains_node(nodes, edge.destination)
+      | error(~who: #'ConnectivityGraph, "connectivity edge has unknown destination " ++ edge.describe())
+    super(
+      nodes.sort(node_id_less),
+      edges.sort(fun (left, right): link_id_less(left.link_id, right.link_id))
+    )
+
+  method contains_node(node :: NodeId) :: Boolean:
+    connectivity_contains_node(nodes, node)
+
+  method outgoing_edges(node :: NodeId) :: List.of(ConnectivityEdge):
+    unless contains_node(node)
+    | error(~who: #'outgoing_edges, "unknown connectivity node " ++ node.describe())
+    edges.filter(~keep: fun (edge): node_id_equal(edge.source, node))
+
+  method incoming_edges(node :: NodeId) :: List.of(ConnectivityEdge):
+    unless contains_node(node)
+    | error(~who: #'incoming_edges, "unknown connectivity node " ++ node.describe())
+    edges.filter(~keep: fun (edge): node_id_equal(edge.destination, node))
+
+fun topology_connectivity(topology :: Topology) :: ConnectivityGraph:
+  ConnectivityGraph(
+    topology.nodes,
+    topology.links.map(
+      fun (link): ConnectivityEdge(link.id, link.source, link.destination)
+    )
+  )

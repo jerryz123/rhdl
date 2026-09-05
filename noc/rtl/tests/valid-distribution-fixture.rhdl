@@ -1,0 +1,64 @@
+#lang rhodium
+// Elaborates an equalized branched Valid distribution carrying an aggregate payload.
+
+import:
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/plan/main.rhm") open
+  lib("noc/rtl/main.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl").Valid
+
+bundle DistributionUpdate():
+  count: Bits(8)
+  flag: Bool
+
+def physical = topology:
+  vc_group transport: 1
+  node source_router
+  node branch_router
+  node near_router
+  node far_router
+  directed source_branch:
+    source_router -> branch_router
+    vcs [transport]
+  directed branch_near:
+    branch_router -> near_router
+    vcs [transport]
+  directed near_far:
+    near_router -> far_router
+    vcs [transport]
+
+def source_ref = InjectionRef("updates")
+def near_ref = EjectionRef("near")
+def far_ref = EjectionRef("far")
+def terminal_placement = TerminalPlacement(
+  [InjectionTerminalSpec(source_ref, physical.node("source_router"))],
+  [EjectionTerminalSpec(near_ref, physical.node("near_router")),
+   EjectionTerminalSpec(far_ref, physical.node("far_router"))]
+)
+def compilation = compile_distribution_network(
+  physical,
+  terminal_placement,
+  ~source: source_ref,
+  ~sinks: [near_ref, far_ref],
+  ~timing: equalized_distribution_timing
+)
+def config = compile_valid_distribution(compilation.plan)
+
+sync_circuit ValidDistributionFixture():
+  interface source(Valid(DistributionUpdate()), ~role: consumer)
+  interface near(Valid(DistributionUpdate()), ~role: producer)
+  interface far(Valid(DistributionUpdate()), ~role: producer)
+
+  inst network(ValidDistribution(DistributionUpdate(), config))
+  source <=> network.source
+  near <=> network.sinks[compilation.sink_index(near_ref)]
+  far <=> network.sinks[compilation.sink_index(far_ref)]
+
+def design = elaborate(ValidDistributionFixture())
+
+export:
+  DistributionUpdate
+  compilation
+  config
+  design

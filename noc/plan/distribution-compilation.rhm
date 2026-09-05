@@ -1,0 +1,66 @@
+#lang rhombus
+// Compiles symbolic topology terminals directly into one static distribution plan.
+
+import:
+  "../model/main.rhm" open
+  "../authoring/main.rhm" open
+  "distribution-plan.rhm" open
+
+export:
+  DistributionCompilation
+  compile_distribution_network
+
+class DistributionCompilation(topology :: TopologySpec,
+                              terminal_placement :: TerminalPlacement,
+                              source_ref :: InjectionRef,
+                              sink_refs :: NonemptyList.of(EjectionRef),
+                              lowered_topology :: LoweredTopology,
+                              plan :: DistributionPlan):
+  opaque
+  internal _DistributionCompilation
+  constructor ~none
+
+  method router_id(ref :: NodeRef) :: NodeId:
+    lowered_topology.node_id(ref)
+
+  method source_terminal() :: InjectionTerminal:
+    lowered_topology.injection_terminal(source_ref)
+
+  method sink_terminal(ref :: EjectionRef) :: EjectionTerminal:
+    unless sink_refs.find(fun (candidate): ejection_ref_equal(candidate, ref))
+    | error(~who: #'sink_terminal, "ejection terminal is not a sink of this distribution")
+    lowered_topology.ejection_terminal(ref)
+
+  method sink_index(ref :: EjectionRef) :: Nat:
+    plan.sink(sink_terminal(ref).id).index
+
+fun compile_distribution_network(
+      topology :: TopologySpec,
+      terminal_placement :: TerminalPlacement,
+      ~source: source_ref :: InjectionRef,
+      ~sinks: sink_refs :: NonemptyList.of(EjectionRef),
+      ~timing: timing :: DistributionTiming = natural_distribution_timing)
+  :: DistributionCompilation:
+  def attached_topology = attach_terminal_placement(topology, terminal_placement)
+  def lowered_topology = lower_topology(attached_topology)
+  unless lowered_topology.find_injection_binding(source_ref)
+  | error(~who: #'compile_distribution_network, "unknown distribution source " ++ source_ref.describe())
+  for (sink_ref in sink_refs):
+    unless lowered_topology.find_ejection_binding(sink_ref)
+    | error(~who: #'compile_distribution_network, "unknown distribution sink " ++ sink_ref.describe())
+  def source = lowered_topology.injection_terminal(source_ref)
+  def sinks = sink_refs.map(fun (sink_ref): lowered_topology.ejection_terminal(sink_ref))
+  def plan = compile_distribution(
+    topology_connectivity(lowered_topology.topology),
+    source,
+    sinks,
+    ~timing: timing
+  )
+  _DistributionCompilation(
+    topology,
+    terminal_placement,
+    source_ref,
+    sink_refs,
+    lowered_topology,
+    plan
+  )
