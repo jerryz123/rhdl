@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ensures every concretely materialized example design owns and exports a Verilog reference.
+# Validates example manifest coverage and exact references selected for simple fixtures.
 set -euo pipefail
 
 allow_empty=false
@@ -27,12 +27,20 @@ done
 
 status=0
 while IFS= read -r source_file; do
+  source_has_golden=false
   while IFS= read -r design_export; do
-    if [[ "$design_export" == "design" ]]; then
-      reference_export="verilog_reference"
-    else
-      reference_export="${design_export%_design}_verilog_reference"
+    manifest_prefix="|$source_file|$design_export|"
+    manifest_count="$(grep -Fc "$manifest_prefix" tests/backend/run-circt.sh || true)"
+    manifest_entry="$(grep -F "$manifest_prefix" tests/backend/run-circt.sh || true)"
+    if [[ "$manifest_count" != 1 ]]; then
+      echo "$source_file: $design_export requires exactly one backend manifest entry" >&2
+      status=1
+      continue
     fi
+    reference_export="${manifest_entry##*|}"
+    reference_export="${reference_export%\'}"
+    [[ "$reference_export" != - ]] || continue
+    source_has_golden=true
 
     if ! grep -Fq "def $reference_export = @str|<<{" "$source_file"; then
       echo "$source_file: $design_export requires $reference_export" >&2
@@ -51,14 +59,20 @@ while IFS= read -r source_file; do
       status=1
     fi
 
-    manifest_entry="|$source_file|$design_export|$reference_export'"
-    if ! grep -Fq "$manifest_entry" tests/backend/run-circt.sh; then
-      echo "$source_file: $design_export and $reference_export require a backend manifest entry" >&2
-      status=1
-    fi
   done < <(sed -n 's/^def \([A-Za-z0-9_]*design\) = .*/\1/p' "$source_file")
 
-  if [[ "$allow_empty" == false ]]; then
+  while IFS= read -r reference_export; do
+    reference_manifest_count="$(
+      grep -F "|$source_file|" tests/backend/run-circt.sh \
+        | grep -Fc "|$reference_export'" || true
+    )"
+    if [[ "$reference_manifest_count" != 1 ]]; then
+      echo "$source_file: $reference_export requires exactly one golden manifest entry" >&2
+      status=1
+    fi
+  done < <(sed -n 's/^def \([A-Za-z0-9_]*verilog_reference\) = @str|<<{.*/\1/p' "$source_file")
+
+  if [[ "$allow_empty" == false && "$source_has_golden" == true ]]; then
     while IFS= read -r circuit_name; do
       if ! grep -Eq "^module ${circuit_name}([_(]|$)" "$source_file"; then
         echo "$source_file: circuit $circuit_name has no colocated Verilog module" >&2

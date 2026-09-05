@@ -1,5 +1,5 @@
 #lang racket/base
-;; Materializes example references and direct-emitter MLIR for external tests.
+;; Materializes example designs, optional goldens, and direct-emitter MLIR for external tests.
 
 (require racket/file
          racket/match)
@@ -12,7 +12,15 @@
    (let loop ([remaining specifications])
      (match remaining
        ['() (void)]
-       [(list* "example" fixture example-path design-export reference-export rest)
+       [(list* "example" fixture example-path design-export rest)
+        (define design
+          (dynamic-require example-path (string->symbol design-export)))
+        (call-with-output-file
+         (build-path output-directory (string-append fixture ".mlir"))
+         #:exists 'truncate/replace
+         (lambda (out) (display (emit-circt design) out)))
+        (loop rest)]
+       [(list* "golden" fixture example-path design-export reference-export rest)
         (define design
           (dynamic-require example-path (string->symbol design-export)))
         (define reference
@@ -37,8 +45,8 @@
        [_
         (raise-user-error
          'load-example
-         "each fixture must be tagged as example or emitter")]))]
+         "each fixture must be tagged as example, golden, or emitter")]))]
   [_
    (raise-user-error
     'load-example
-    "expected: materialize OUTPUT-DIRECTORY (example FIXTURE EXAMPLE DESIGN-EXPORT REFERENCE-EXPORT | emitter FIXTURE EMITTER) ...")])
+    "expected: materialize OUTPUT-DIRECTORY (example FIXTURE EXAMPLE DESIGN-EXPORT | golden FIXTURE EXAMPLE DESIGN-EXPORT REFERENCE-EXPORT | emitter FIXTURE EMITTER) ...")])

@@ -72,8 +72,8 @@ The main targets differ in scope and stage:
 | `make circt-test` | Curated semantic spine; lower with CIRCT, compare example references when the CIRCT version permits it, and run available simulations |
 | `make circt-verify-test` | Curated spine; materialize and lower only, with no golden comparison or simulation |
 | `make verilator-test` | Curated fixtures that have simulations; lower, build, and run them without golden comparison |
-| `make verilog-golden-test` | Every example-backed fixture; require the pinned CIRCT version and compare every exact reference, with no simulation |
-| `make circt-full-test` | Every declared example and direct emitter; compare all example references with the pinned tool and run every available simulation |
+| `make verilog-golden-test` | Every explicitly golden example fixture; require the pinned CIRCT version and compare each exact reference, with no simulation |
+| `make circt-full-test` | Every declared example and direct emitter; compare selected simple-example references with the pinned tool and run every available simulation |
 
 The default curated spine covers representative external behavior across the
 lowering families while avoiding every frontend and parameter variation.
@@ -89,18 +89,20 @@ bash tests/backend/run-circt.sh --group protocols --simulate-only
 ## Fixture and artifact ownership
 
 Example-backed entries name an example module, a concrete design export, an
-optional Verilator top, and a Verilog-reference export. The ordinary pair is
-`design` and `verilog_reference`; additional designs use the same prefix for
-both exports, such as `cast_design` and `cast_verilog_reference`. The reference
-lives beside the design in the example source, where reviewers can see the
-authoring input and generated result together.
+optional Verilator top, and either a Verilog-reference export or `-`. A named
+reference marks a compact fixture whose readable generated output is part of
+the example; `-` keeps integration-scale fixtures under lowering and behavioral
+coverage without a large exact snapshot. The ordinary golden pair is `design`
+and `verilog_reference`; additional designs use the same prefix for both
+exports, such as `cast_design` and `cast_verilog_reference`.
 
 Direct `emit-*.rhm` fixtures own backend integration shapes that do not belong
 to one canonical example. They print MLIR for CIRCT verification and may name
 a Verilator top, but they do not own example Verilog references.
 Add or rename either kind through the manifest rather than relying on filename
-discovery. `make examples` and `make check-example-verilog` check reference
-exports and manifest coverage without running CIRCT or Verilator.
+discovery. `make examples` and `make check-example-verilog` check every concrete
+design's manifest coverage and validate only declared golden exports without
+running CIRCT or Verilator.
 
 Behavioral benches live in [`verilog/`](verilog/). An example fixture with a
 top uses `verilog/<fixture>_tb.sv`. The runner automatically links a matching
@@ -125,8 +127,8 @@ make setup-circt
 ```
 
 The runner prefers `.tools/firtool-1.155.0/bin/circt-opt`, then a `circt-opt`
-on `PATH`; `CIRCT_OPT` overrides both. References are exact output for CIRCT
-`firtool-1.155.0`. Before comparison, the runner strips temporary debug-path
+on `PATH`; `CIRCT_OPT` overrides both. Selected simple-example references are
+exact output for CIRCT `firtool-1.155.0`. Before comparison, the runner strips temporary debug-path
 suffixes and generated-version noise, applies the repository's fixed lowering
 and prettification passes, and disables register and memory randomization.
 Everything else is compared exactly.
@@ -144,7 +146,7 @@ only the affected reference and review the example-source diff:
 FIXTURE=bundle make update-verilog-goldens
 ```
 
-Without `FIXTURE`, that target rewrites every example-owned reference. The
+Without `FIXTURE`, that target rewrites every declared golden reference. The
 update mode uses whichever `circt-opt` the runner resolves and does not reject
 an alternate version, so use the pinned toolchain unless the version transition
 itself is intentional. Never use golden updates merely to make an unexplained

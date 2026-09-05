@@ -30,8 +30,8 @@ with their owning packages; this guide links to them instead of repeating them.
 
 ## Run the examples
 
-Run every non-formal example and verify that each concrete design has a
-colocated Verilog reference:
+Run every non-formal example and validate the exact Verilog references selected
+for compact lowering examples:
 
 ```sh
 make examples
@@ -301,10 +301,12 @@ for supported properties, solver setup, and limits.
 
 ## Generated Verilog
 
-Concrete example designs colocate their generated-Verilog references. Generic
-circuit generators first need a concrete elaboration before they have one
-specific Verilog form. `make examples` checks reference presence, exports, and
-manifest coverage; it does not run the external CIRCT or Verilator pipeline.
+Compact examples may colocate generated-Verilog references so their readable
+output acts as part of the example. Integration-scale examples instead rely on
+elaboration, CIRCT lowering, and behavioral tests without carrying large exact
+snapshots. `make examples` checks manifest coverage and validates the references
+explicitly selected by the backend fixture manifest; it does not run CIRCT or
+Verilator.
 
 The [backend test guide](../tests/backend/README.md#verilog-references) owns the
 reference naming rules, exact comparison and update commands, CIRCT version

@@ -154,6 +154,18 @@ fixture_selected() {
   return 1
 }
 
+example_fixture_selected() {
+  local fixture="$1"
+  local reference_export="$2"
+
+  fixture_selected "$fixture" || return 1
+  if [[ "$mode" == --golden-only || "$mode" == --update-goldens ]]; then
+    [[ "$reference_export" != - ]]
+    return
+  fi
+  return 0
+}
+
 fixture_in_group() {
   local wanted="$1"
   local group="$2"
@@ -275,6 +287,10 @@ prepare_example() {
           -e '/^\/\/ VCS coverage exclude_file$/d' \
     | perl -0pe 's/\n+\z//' > "$verilog"
 
+  if [[ "$reference_export" == - ]]; then
+    return 0
+  fi
+
   if [[ "$update_goldens" == true ]]; then
     update_reference "$example" "$reference_export" "$verilog"
     return 0
@@ -291,13 +307,13 @@ prepare_example() {
   fi
 }
 
-golden_fixture() {
+lower_example_fixture() {
   local fixture="$1"
   local example="$2"
   local design_export="${3:-design}"
   local reference_export="${4:-verilog_reference}"
 
-  fixture_selected "$fixture" || return 0
+  example_fixture_selected "$fixture" "$reference_export" || return 0
   [[ "$simulation_only" == false ]] || return 0
   prepare_example "$fixture" "$example" "$reference_export"
 }
@@ -313,7 +329,7 @@ run_fixture() {
   local build_log="$test_tmp_dir/$fixture.verilator.log"
   local dpi_source="$repo_dir/tests/backend/verilog/${fixture}_dpi.cpp"
 
-  fixture_selected "$fixture" || return 0
+  example_fixture_selected "$fixture" "$reference_export" || return 0
   prepare_example "$fixture" "$example" "$reference_export"
   [[ "$simulate_fixtures" == true ]] || return 0
 
@@ -575,10 +591,10 @@ fixture_specs=(
   'dont-care||examples/std/dont-care.rhdl|design|verilog_reference'
   'decode|decode_tb|examples/std/decode.rhdl|design|verilog_reference'
   'decode-composition||examples/std/decode-composition.rhdl|design|verilog_reference'
-  'noc-crossbar|noc_crossbar_tb|examples/noc/noc-crossbar.rhdl|design|verilog_reference'
+  'noc-crossbar|noc_crossbar_tb|examples/noc/noc-crossbar.rhdl|design|-'
   'noc-route-computer|noc_route_computer_tb|examples/noc/noc-route-computer.rhdl|design|verilog_reference'
-  'noc-router|noc_router_tb|examples/noc/noc-router.rhdl|design|verilog_reference'
-  'noc-network|noc_network_tb|examples/noc/noc-network.rhdl|design|verilog_reference'
+  'noc-router|noc_router_tb|examples/noc/noc-router.rhdl|design|-'
+  'noc-network|noc_network_tb|examples/noc/noc-network.rhdl|design|-'
   'generator-ordinary-defaults||examples/rtl/generator-parameters.rhdl|ordinary_defaults_design|ordinary_defaults_verilog_reference'
   'generator-ordinary-overrides||examples/rtl/generator-parameters.rhdl|ordinary_overrides_design|ordinary_overrides_verilog_reference'
   'generator-ordinary-typed-defaults||examples/rtl/generator-parameters.rhdl|ordinary_typed_defaults_design|ordinary_typed_defaults_verilog_reference'
@@ -598,10 +614,10 @@ fixture_specs=(
   'valid-pipe|valid_pipe_tb|examples/std/valid-pipe.rhdl|design|verilog_reference'
   'vec-search|vec_search_tb|examples/rtl/vec-search.rhdl|design|verilog_reference'
   'riscv-instruction-fields||examples/riscv/instruction-fields.rhdl|design|verilog_reference'
-  'rv64i-alu-integrated|rv64i_alu_integrated_tb|examples/cores/decoded-alu.rhdl|design|verilog_reference'
-  'chi-ram|chi_ram_tb|examples/chi/ram.rhdl|ram_design|ram_verilog_reference'
-  'chi-home|chi_home_tb|examples/chi/home.rhdl|home_design|home_verilog_reference'
-  'rv5stage||examples/cores/rv5stage.rhdl|design|verilog_reference'
+  'rv64i-alu-integrated|rv64i_alu_integrated_tb|examples/cores/decoded-alu.rhdl|design|-'
+  'chi-ram|chi_ram_tb|examples/chi/ram.rhdl|ram_design|-'
+  'chi-home|chi_home_tb|examples/chi/home.rhdl|home_design|-'
+  'rv5stage||examples/cores/rv5stage.rhdl|design|-'
 )
 
 direct_fixture_specs=(
@@ -679,6 +695,19 @@ fixture_declared() {
   return 1
 }
 
+fixture_has_golden() {
+  local wanted="$1"
+  local spec fixture reference_export
+  for spec in "${fixture_specs[@]}"; do
+    IFS='|' read -r fixture _ _ _ reference_export <<< "$spec"
+    if [[ "$fixture" == "$wanted" ]]; then
+      [[ "$reference_export" != - ]]
+      return
+    fi
+  done
+  return 1
+}
+
 for integration_fixture in "${integration_fixtures[@]}"; do
   if ! fixture_declared "$integration_fixture"; then
     echo "curated CIRCT fixture is not declared: $integration_fixture" >&2
@@ -689,6 +718,11 @@ done
 for requested_fixture in ${FIXTURE:-} ${FIXTURES:-}; do
   if ! fixture_declared "$requested_fixture"; then
     echo "requested CIRCT fixture is not declared: $requested_fixture" >&2
+    exit 1
+  fi
+  if [[ "$mode" == --golden-only || "$mode" == --update-goldens ]] \
+      && ! fixture_has_golden "$requested_fixture"; then
+    echo "requested CIRCT fixture has no Verilog golden: $requested_fixture" >&2
     exit 1
   fi
 done
@@ -722,9 +756,14 @@ done
 materialize_args=()
 for spec in "${fixture_specs[@]}"; do
   IFS='|' read -r fixture top example design_export reference_export <<< "$spec"
-  if fixture_selected "$fixture" \
+  if example_fixture_selected "$fixture" "$reference_export" \
       && [[ "$simulation_only" == false || -n "$top" ]]; then
-    materialize_args+=(example "$fixture" "$example" "$design_export" "$reference_export")
+    if [[ "$reference_export" != - \
+        && ( "$compare_goldens" == true || "$update_goldens" == true ) ]]; then
+      materialize_args+=(golden "$fixture" "$example" "$design_export" "$reference_export")
+    else
+      materialize_args+=(example "$fixture" "$example" "$design_export")
+    fi
   fi
 done
 
@@ -745,7 +784,7 @@ for spec in "${fixture_specs[@]}"; do
   if [[ -n "$top" ]]; then
     run_fixture "$fixture" "$top" "$example" "$design_export" "$reference_export"
   else
-    golden_fixture "$fixture" "$example" "$design_export" "$reference_export"
+    lower_example_fixture "$fixture" "$example" "$design_export" "$reference_export"
   fi
 done
 

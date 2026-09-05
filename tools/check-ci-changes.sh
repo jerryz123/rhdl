@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
-# Verifies dependency classification and audits every tracked executable source path.
+# Verifies CI execution policy, dependency classification, and tracked executable coverage.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 classifier="$repo_dir/tools/ci-changes.sh"
+
+if ! grep -Fq "group: ci-\${{ github.workflow }}-\${{ github.event.pull_request.number || github.run_id }}" \
+    "$repo_dir/.github/workflows/ci.yml"; then
+  echo "non-PR CI runs must use unique concurrency groups" >&2
+  exit 1
+fi
+if ! grep -Fq "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" \
+    "$repo_dir/.github/workflows/ci.yml"; then
+  echo "only superseded PR CI runs may be canceled" >&2
+  exit 1
+fi
 
 classification_for() {
   "$classifier" --paths "$@"
