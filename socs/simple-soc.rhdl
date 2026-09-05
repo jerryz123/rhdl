@@ -153,6 +153,9 @@ def simple_soc_memory_service = CHISubordinateServiceParams(
 def simple_soc_home_config = simple_soc_fabric_params.home_config
 def simple_soc_home_params = simple_soc_fabric_params.home_params
 def simple_soc_device_home_params = simple_soc_fabric_params.device_home_params
+fun make_simple_soc_llc_config(params :: SimpleSoCFabricParams) :: CHIInclusiveHNFConfig:
+  CHIInclusiveHNFConfig(params.home_config, ~sets: 64, ~ways: 4)
+def simple_soc_llc_config = make_simple_soc_llc_config(simple_soc_fabric_params)
 
 // The logical RN-I/RN-F relationships compile independently onto the four
 // transport planes while sharing one physical single-router topology.
@@ -207,12 +210,12 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
   simple_soc_compilations.dat.network.router_plan(simple_soc_router)
 )
 
-sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_fabric_params):
+sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_fabric_params, ~home: home_module = CHIHNF(params.home_config)):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
   inst rv5stage(RV5Stage(XLen.X64, ~chi: params.rv5stage_config))
-  inst home(CHIHNF(params.home_config))
+  inst home(home_module)
   inst device_home(CHIHNI(params.device_home_params))
   inst aclint(Aclint(simple_soc_aclint_config))
   inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
@@ -299,7 +302,8 @@ sync_circuit SimpleSoC(params :: SimpleSoCFabricParams = simple_soc_fabric_param
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
-  inst fabric(SimpleSoCFabric(params))
+  def HomeModule = CHIInclusiveHNF(make_simple_soc_llc_config(params))
+  inst fabric(SimpleSoCFabric(params, ~home: HomeModule))
 
   host <=> fabric.host
   fabric.memory <=> memory
@@ -332,6 +336,7 @@ export:
   simple_soc_memory_service
   simple_soc_home_config
   simple_soc_home_params
+  simple_soc_llc_config
   simple_soc_aclint_config
   simple_soc_aclint_params
   simple_soc_device_home_params

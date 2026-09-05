@@ -12,7 +12,7 @@ SimpleSoC
 │   ├── L1D RN-F (NodeID 3)
 │   └── Device RN-I (NodeID 4)
 ├── SimpleRouter × 4 (REQ, RSP, SNP, and DAT)
-├── Memory CHIHNF (NodeID 5)
+├── Memory CHIInclusiveHNF (NodeID 5)
 │   └── external CHI SN-F (NodeID 9)
 └── Device CHIHNI (NodeID 6)
     └── ACLINT SN-I (NodeID 10)
@@ -39,10 +39,10 @@ the permitted protocol paths instead of an all-node cross product.
 
 RV5Stage exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
 boundary, so the SoC connects both cache endpoints to the NoC without creating
-internal credited links. The serialized HN-F translates coherent RV5Stage
-traffic and authoritative dirty snoop packets into non-coherent subordinate
-transactions. The external SN-F must accept native 64-byte reads and writes,
-so this direct path needs no fragmenter.
+internal credited links. The blocking inclusive HN-F caches subordinate lines,
+snoops coherent requesters before replacing a line, and writes dirty snoop data
+back to the subordinate. The external SN-F must accept native 64-byte reads and
+writes, so this direct path needs no fragmenter.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
 HN-I, and terminate directly at the CHI-native ACLINT SN-I.
 Both paths are derived from one physical-region table. Each region pairs
@@ -55,16 +55,17 @@ The FESVR implementation and generated executable harness remain owned by
 
 ## MiniSoC
 
-`SimpleSoCFabric` factors the processor, Homes, NoC, and ACLINT from the final
-memory termination. `SimpleSoC` exports line-capable `CHISNChannels` for SN-F
-NodeID 9 over the 1 GiB range
-`0x80000000..0xbfffffff`. It contains no RAM or simulator binding; an external
-subordinate owns the memory contents and response timing.
+`SimpleSoCFabric` factors the processor, Home module, NoC, and ACLINT from the
+final memory termination, and accepts that Home as an ordinary host circuit
+parameter. `SimpleSoC` selects a 64-set, four-way blocking inclusive LLC and
+exports line-capable `CHISNChannels` for SN-F NodeID 9 over the 1 GiB range
+`0x80000000..0xbfffffff`. It contains no RAM, fragmenter, or simulator binding;
+an external subordinate owns the memory contents and response timing.
 
 [`mini-soc.rhdl`](mini-soc.rhdl) defines `MiniSoC`, the small self-contained
 variant used for compact RTL and physical-design experiments. It specializes
-the same fabric with a 64 KiB range and terminates the native memory boundary
-directly in an on-chip, line-capable `CHIRam`.
+the same fabric with a 64 KiB range, uses the forwarding `CHIHNF`, and terminates
+the native memory boundary directly in an on-chip, line-capable `CHIRam`.
 
 ## TiledSoC
 

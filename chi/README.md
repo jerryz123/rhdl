@@ -16,11 +16,12 @@ protocol and coherence classifiers, node capabilities, credited node-role
 links, link-local monitors, bounded initial non-coherent and RN-F transaction
 checking, declarative retryable requester control, separate requester-side and
 home-side SAM metadata, an initial HN-I bridge, a serialized dirty-capable HN-F
-manager, and a configurable multi-beat non-coherent backing RAM.
+manager, a blocking inclusive HN-F with a set-associative LLC, and a
+configurable multi-beat non-coherent backing RAM.
 Its first NoC integration maps CHI
 NodeIDs and symbolic protocol terminals onto independently validated REQ, RSP,
-SNP, and DAT transports. HN-F caching, concurrency, and directory optimization
-remain outside the current contract.
+SNP, and DAT transports. HN-F concurrency and directory optimization remain
+outside the current contract.
 
 ## Architectural boundary
 
@@ -359,7 +360,13 @@ write before resuming the original transaction. It then translates coherent
 reads into `ReadNoSnp`, returns SharedClean for `ReadClean` and Unique for
 `ReadUnique`, and waits for the requester's `CompAck`. The broadcast policy
 needs no directory. Concurrent transactions, Home-side caching, and directory
-optimization remain separate milestones.
+optimization remain separate milestones. [`inclusive-home.rhdl`](inclusive-home.rhdl)
+provides the blocking `CHIInclusiveHNF`: it retains filled lines, serves hits
+without subordinate traffic, snoops every RN-F before replacing a resident
+victim, absorbs dirty snoop data, and writes dirty victims back before refill.
+Its set and way counts are static circuit parameters; this initial LLC uses
+`SyncRam1RW` tag/data arrays, invalid-first round-robin replacement, and one
+active transaction.
 
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance
@@ -510,6 +517,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`address-projector.rhdl`](address-projector.rhdl) | Cache-line-striped global service metadata and transparent REQ projection into dense local subordinate addresses |
 | [`home.rhdl`](home.rhdl) | Implemented `CHIHNI` transaction bridge for the initial non-coherent profile, including complete multi-beat read and write DataID sets |
 | [`coherent-home.rhdl`](coherent-home.rhdl) | Implemented globally serialized `CHIHNF` for mixed RN-I/RN-F traffic, SharedClean/Unique reads, dirty snoop intervention, conservative invalidation, and non-snooping subordinate translation |
+| [`inclusive-home.rhdl`](inclusive-home.rhdl) | Implemented blocking set-associative inclusive `CHIInclusiveHNF` with hit service, broadcast victim invalidation, dirty intervention, writeback, and refill |
 | [`fabric.rhdl`](fabric.rhdl) | Implemented fabric ports, Home Nodes, services, and separate executable requester-to-Home and Home-to-subordinate address maps; routing, arbitration, and generated topologies remain planned |
 | [`main.rhdl`](main.rhdl) | Implemented public facade for the available foundation |
 
@@ -534,12 +542,13 @@ while the SoC parent owns inter-tile links. Cache-line-striped Home
 services project sparse global addresses into dense local CHIRam spaces before
 optional fragmentation.
 
-The coherent Home intentionally has one global transaction slot and no sharer
-directory. It conservatively broadcasts snoops, accepts dirty intervention,
-and supports the documented SharedClean and Unique acquisition subset. General
-ordering, retry use across broader transaction families, Home-side caching, a
-parallel Home, and a precise directory remain outside the implemented
-contract.
+Both coherent Homes intentionally have one global transaction slot and no
+sharer directory. They conservatively broadcast snoops, accept dirty
+intervention, and support the documented SharedClean and Unique acquisition
+subset. `CHIInclusiveHNF` adds a blocking inclusive LLC; `CHIHNF` remains the
+uncached forwarding option. General ordering, retry use across broader
+transaction families, a parallel Home, and a precise directory remain outside
+the implemented contract.
 
 Run `make chi-test` for package boundaries, parameters, flit layouts,
 classifiers, link contracts, and invalid connections. Run
