@@ -20,7 +20,7 @@ the facade modules only when a circuit composes several members of that family.
 | Typed sparse decode | [`decode.rhdl`](decode.rhdl) | Patterns, pattern sets, decode tables, and generators |
 | Ready-valid protocol declarations | [`ready-valid.rhdl`](ready-valid.rhdl) | `Valid`, `Decoupled`, `Irrevocable`, and transfer detection |
 | Credit-based transport | [`credited.rhdl`](credited.rhdl), [`flow/credit.rhdl`](flow/credit.rhdl) | Credited endpoints, monitoring, and ready-valid adapters |
-| Packet/flit representation | [`flit.rhdl`](flit.rhdl), [`flow/flit.rhdl`](flow/flit.rhdl) | Flit types and checked framing conversions |
+| Packet/flit representation | [`flit.rhdl`](flit.rhdl), [`flow/flit.rhdl`](flow/flit.rhdl) | Flit types, packet serialization, reassembly, and checked framing conversions |
 | Endpoint address and ID sets | [`interconnect.rhdl`](interconnect.rhdl) | Host-side interconnect parameters and validation |
 | Bit operations and bounded counting | [`bits.rhdl`](bits.rhdl), [`counter.rhdl`](counter.rhdl) | Layout helpers and a synchronous counter |
 | Occupancy and fixed-latency storage | [`scoreboard.rhdl`](scoreboard.rhdl), [`sync-ram.rhdl`](sync-ram.rhdl) | Scoreboarding and a shared 1RW RAM wrapper |
@@ -361,6 +361,11 @@ not a payload field or a count of clock cycles.
 [`flow/flit.rhdl`](flow/flit.rhdl) supplies the safe ready-valid conversion
 graph:
 
+- `Packetizer(T, chunk_width)` serializes any packed `T` into
+  least-significant-chunk-first framed flits, zero-padding the unused high bits
+  of the final flit.
+- `Reassembler(T, chunk_width)` checks those explicit boundaries and holds the
+  reconstructed `T` until it is accepted.
 - `frame_fixed_flits(n)` adds canonical markers to `FixedFlit` traffic.
 - `strip_fixed_framing(n)` checks canonical markers before removing them.
 - `require_fixed_framing(n)` checks variable traffic before strengthening its
@@ -371,9 +376,11 @@ graph:
 Every stateful conversion advances phase only when both `valid` and `ready`
 are asserted. Stalls therefore preserve phase and framing. The conversions
 preserve `Decoupled` versus `Irrevocable` protocol strength and neither add a
-queue nor alter transfer count. Variable-to-fixed conversion is deliberately
-not an unchecked cast: arbitrary packet lengths require either the explicit
-checking operation or a future buffering/repacketization policy.
+queue nor alter transfer count. `Packetizer` and `Reassembler` are the
+width-changing stateful components; the framing conversions remain
+representation-only. Variable-to-fixed conversion is deliberately not an
+unchecked cast because arbitrary packet lengths still require an explicit
+length contract.
 
 ### Generic interconnect parameters
 

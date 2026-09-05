@@ -2,7 +2,7 @@
 // Implements one RV5Stage compute tile around a bundled four-plane CHI router.
 
 import:
-  lib("rhodium/std/ready-valid.rhdl").Irrevocable
+  lib("rhodium/std/ready-valid.rhdl") open
   lib("chi/main.rhdl") open
   lib("cores/rv5stage/chi.rhdl") open
   lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
@@ -10,9 +10,11 @@ import:
   lib("riscv/isa/c.rhm") open
   lib("riscv/isa/xlen.rhm").XLen
   lib("riscv/isa/fp-profile.rhm") open
+  "../time.rhdl" open
 
 class RV5StageTileParams(rv5stage :: RV5StageCHIConfig,
-                         router :: CHIRouterParams):
+                         router :: CHIRouterParams,
+                         hart_count :: PosInt):
   implements StableCircuitParam
 
 bundle RV5StageTileIdentity(p :: CHIFlitParams, site_width :: PosInt):
@@ -33,18 +35,20 @@ sync_circuit RV5StageTile(params :: RV5StageTileParams,
   input identity: RV5StageTileIdentity(p, site_width)
   interface start(Irrevocable(Bits(64)), ~role: consumer)
   input interrupts: RV5StageInterrupts()
-  input time_counter: Bits(64)
+  interface time_beat(Decoupled(TiledTimeBeat(params.hart_count)), ~role: consumer)
   output fault: Bool
   interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
   interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
 
   inst rv5stage(RV5Stage(XLen.X64, ~floating_point: profile, ~half_precision: half_precision, ~zfa: zfa_enabled, ~compressed: compressed_profile, ~chi: params.rv5stage))
+  inst time_receiver(TiledTimeReceiver(params.hart_count))
   inst router(CHIRouter(router_params))
 
   rv5stage.chi_identity <== identity.chi
   rv5stage.interrupts <== interrupts
   rv5stage.hart_id <== identity.hart_id
-  rv5stage.time_counter <== time_counter
+  rv5stage.time_counter <== time_receiver.value
+  time_beat <=> time_receiver.ingress
   router.site_key <== identity.site_key
   start |> rv5stage.start
   fault <== rv5stage.fault

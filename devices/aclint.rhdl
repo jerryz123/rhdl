@@ -1,11 +1,11 @@
 #lang rhodium
-// Implements a reusable CHI SN-I ACLINT with MTIMER and MSWI register state.
+// Implements a CHI SN-I ACLINT with MTIMER/MSWI state and sparse time updates.
 
 import:
   lib("support/annotations.rhm").NonemptyString
   lib("rhodium/std/bits.rhdl") open
   lib("rhodium/std/interconnect.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl").fire
+  lib("rhodium/std/ready-valid.rhdl") open
   lib("chi/main.rhdl") open
 
 def AclintAddressWidth = 16
@@ -110,6 +110,7 @@ sync_circuit Aclint(config :: AclintConfig):
   input identity: AclintIdentity(p)
   input tick: Bool
   interface port(CHISNChannels(p), ~role: node)
+  interface time_update(Valid(Bits(64)), ~role: producer)
   output time_counter: Bits(64)
   output machine_software: Vec(hart_count, Bool)
   output machine_timer: Vec(hart_count, Bool)
@@ -188,6 +189,11 @@ sync_circuit Aclint(config :: AclintConfig):
   ) & (incoming_data.src_id === request.src_id) & (incoming_data.tgt_id === identity.node_id)
   port.dat.request.ready <== !ordinary_data ||| (write_data_expected & write_data_supported)
   def write_data_fire = port.dat.request.fire() & ordinary_data
+  // The update stream carries the state that becomes visible after this edge,
+  // allowing sparse consumers to capture the new timer value without polling.
+  def mtime_write = write_data_fire & mtime_access
+  def written_mtime = masked_merge(mtime, write_value, write_mask)
+  def incremented_mtime = mtime + bits(1, 64)
 
   def dbid_response = chi_sn_dbid_response(p, identity.node_id, request, bits(0, 1))
   def write_completion = chi_sn_write_completion(p, identity.node_id, request, bits(0, 1))
@@ -217,16 +223,18 @@ sync_circuit Aclint(config :: AclintConfig):
   elsewhen (read_response_fire ||| write_response_fire):
     state <== AclintState.Idle
 
-  when (write_data_fire & mtime_access):
-    mtime <== masked_merge(mtime, write_value, write_mask)
+  when mtime_write:
+    mtime <== written_mtime
   elsewhen tick:
-    mtime <== mtime + bits(1, 64)
+    mtime <== incremented_mtime
   when (write_data_fire & mtimecmp_access):
     mtimecmp[mtimecmp_index] <== masked_merge(mtimecmp[mtimecmp_index], write_value, write_mask)
   when (write_data_fire & mswi_access & register_mask[0].into(Bool)):
     msip[mswi_index] <== register_data[0].into(Bool)
 
   time_counter <== mtime
+  time_update.valid <== mtime_write ||| tick
+  time_update.bits <== mux(mtime_write, written_mtime, incremented_mtime)
   machine_software <== msip
   machine_timer <== vec(
     for List (index in 0..hart_count): mtime >= mtimecmp[index]

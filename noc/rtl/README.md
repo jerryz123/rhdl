@@ -8,9 +8,8 @@ primitives, but the pure `noc/model`, `analysis`, `authoring`, `language`,
 `plan`, and `std` directories never depend on this package.
 
 The [pure NoC package](../README.md) owns topology, routing, validation, and
-planning. Routed components start at `RouterPlan` or `RouterFamilyPlan`, while
-static broadcast starts at `DistributionPlan`; this package cannot construct a
-proof or turn an unchecked relation into hardware.
+planning. This package starts at `RouterPlan` or `RouterFamilyPlan`; it cannot
+construct a proof or turn an unchecked relation into hardware.
 
 Contributors changing the hardware realization should read
 [`DEVELOPING.md`](DEVELOPING.md).
@@ -24,24 +23,7 @@ Contributors changing the hardware realization should read
 | `allocator.rhdl` | Match input requests to output targets while realizing fallback obligations |
 | `router.rhdl` | Buffer and switch complete single-beat packets, including uniform router families |
 | `wormhole-router.rhdl` | Reserve a selected target from packet head through tail |
-| `valid-distribution.rhdl` | Realize a compiled one-source `Valid(T)` distribution tree with natural or equalized latency |
 | `main.rhdl` | Export the public NoC RTL surface |
-
-## Valid distribution
-
-`compile_valid_distribution` accepts only a pure `DistributionPlan` and a
-packable payload hardware type. `ValidDistribution` exposes one consumer-side
-`Valid(T)` source and a deterministically ordered array of producer-side
-`Valid(T)` sinks. It registers the event and aggregate payload at the root and
-at every participating tree site, then adds sink-local `ValidPipe` stages when
-the plan requests equalized latency.
-
-The circuit has no ready path, arbitration, dynamic routing, or congestion
-state. A valid event is copied to every sink exactly once after that sink's
-fixed planned latency; payload bits while invalid are intentionally
-irrelevant. This makes the primitive suitable for state-distribution traffic
-such as a periodically updated time value, rather than request/response or
-lossless backpressured transport.
 
 ## Route decoding
 
@@ -189,10 +171,9 @@ resources.
 
 ## Hierarchy and integration ownership
 
-There is intentionally no whole-network circuit or router-instantiating helper
-for the routed transports in this package. Real routers live in independently
-owned tile, switch, or subsystem modules and may be separated by arbitrary
-hierarchy.
+There is intentionally no whole-network circuit or router-instantiating
+network helper in this package. Real routers live in independently owned tile,
+switch, or subsystem modules and may be separated by arbitrary hierarchy.
 Integration code obtains each node's `RouterPlan` from the pure `NetworkPlan`,
 compiles only its selected local router configuration, and exposes the VC or
 physical-link ports appropriate to its own boundary. A user-owned parent
@@ -202,12 +183,6 @@ complete transport. The hierarchical wormhole fixture follows this pattern:
 source, transit, and destination subsystems own their routers and physical-link
 mux/demux logic, while their parent connects link payloads and reverse per-VC
 availability.
-
-`ValidDistribution` is intentionally different: its plan denotes the complete
-fixed broadcast tree, and no site owns an independently arbitrated router or
-retained network resource. The circuit can therefore realize that tree as one
-structural module without weakening the hierarchy ownership rule for routed
-traffic.
 
 ## Executable examples
 

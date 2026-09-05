@@ -170,7 +170,7 @@ import one primitive without loading unrelated generators.
 | `std/flow/reduction.rhdl` | Shared balanced full and all-except-one Boolean reduction helper | `std/reduction.rhdl` |
 | `std/flow/map.rhdl` | Configured inline payload substitution with conservative `Decoupled` output and explicit stable-contract preservation | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/map-valid.rhdl` | Configured inline payload substitution for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
-| `std/flow/flit.rhdl` | Transfer-counted ready-valid conversion among standard flit formats | `std/flit.rhdl`, `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/ready-valid-support.rhdl` |
+| `std/flow/flit.rhdl` | Packet serialization, reassembly, and transfer-counted conversion among standard flit formats | `std/flit.rhdl`, `std/ready-valid.rhdl`, `std/counter.rhdl`, `std/flow/queue.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/fork-valid.rhdl` | Configured inline one-to-many fanout for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/filter-valid.rhdl` | Configured inline predicate filtering for nonbackpressured `Valid` | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |
 | `std/flow/to-valid.rhdl` | Explicit always-ready conversion from ready-valid transfers to `Valid` events | `std/ready-valid.rhdl`, `std/flow/ready-valid-support.rhdl` |

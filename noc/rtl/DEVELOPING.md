@@ -9,8 +9,8 @@ proof, and planning ownership.
 ## Architecture and ownership
 
 This directory is the only NoC layer that may construct hardware. It consumes
-`DistributionPlan`, `RouterPlan`, or `RouterFamilyPlan` values produced by the
-pure stack and may use public `#lang rhodium` and standard-library APIs. It
+`RouterPlan` or `RouterFamilyPlan` values produced by the pure stack and may
+use public `#lang rhodium` and standard-library APIs. It
 must not import Rhodium core, frontend, backend, or CIRCT implementation
 modules, construct proof certificates, or accept unchecked routing relations.
 
@@ -23,7 +23,6 @@ wiring. NoC RTL owns only reusable realization of the supplied plan.
 | Concern | Owner |
 |---|---|
 | Public facade | [`main.rhdl`](main.rhdl) |
-| Valid-only distribution trees | [`valid-distribution.rhdl`](valid-distribution.rhdl) |
 | Validated route decoding | [`route-computer.rhdl`](route-computer.rhdl) |
 | Protocol-neutral metadata boundaries | [`route-adapter.rhdl`](route-adapter.rhdl) |
 | Fallback-aware allocation | [`allocator.rhdl`](allocator.rhdl) |

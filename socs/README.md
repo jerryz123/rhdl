@@ -54,9 +54,10 @@ counter drives RV5Stage's `time` CSR, while each hart's MTIP and MSIP levels
 drive the corresponding machine interrupt inputs. The UART occupies
 `0x10000000..0x10000007`. Its interrupt is exposed but intentionally not wired
 into RV5Stage until an external interrupt controller is present. The platform
-currently advances `mtime` once per SoC clock; a later clock-rate adapter can
-replace that explicit tick policy. Supervisor and external interrupt lines
-therefore remain low.
+owns the explicit ACLINT tick policy: `SimpleSoC` and `MiniSoC` advance once
+per SoC clock, while `TiledSoCConfig.timebase_period_cycles` selects a divided
+synchronous timebase. Supervisor and external interrupt lines therefore
+remain low.
 
 ## SimpleSoC
 
@@ -131,7 +132,7 @@ hardware parameters during elaboration:
 
 ```mermaid
 flowchart LR
-  Config["TiledSoCConfig<br/>layout, NodeIDs, memory, and LLC intent"]
+  Config["TiledSoCConfig<br/>layout, NodeIDs, memory, LLC, and timebase intent"]
   Compile["private compiler<br/>placements, routes, and component parameters"]
   RTL["TiledSoC(config)<br/>structural RTL composition"]
 
@@ -150,7 +151,8 @@ def layout = tile_grid:
 ```
 
 `TiledSoCConfig` combines that immutable `TileGrid` with `TiledNodeIds`,
-`StripedMemory`, `LLCGeometry`, and the CHI flit parameters. The public
+`StripedMemory`, `LLCGeometry`, an explicit number of SoC cycles per timebase
+tick, and the CHI flit parameters. The public
 `TiledSoC(config)` circuit accepts this author value directly. Its private
 compiler derives mesh coordinates, occurrence ordering, endpoint IDs, CHI
 relationships, routes, the shared physical-link manifest, and all component
@@ -161,8 +163,9 @@ focused hierarchy test also elaborates a 2x4 system through the same entrypoint.
 
 The package lives under [`tiled-soc/`](tiled-soc/): `main.rhdl` is the public
 entrypoint, `layout.rhm` owns the immutable configuration and macro-phase
-tile-grid language, `compile.rhdl` owns private derivation, and `tiles/` owns
-the concrete tile implementations.
+tile-grid language, `compile.rhdl` owns private derivation, `time.rhdl` owns
+the rotating platform-time stream, and `tiles/` owns the concrete tile
+implementations.
 
 The default layout places eight `RV5StageTile`s in the lower two rows, four
 service routers in the middle row, and four `LLCTile`s in the upper row.
@@ -200,15 +203,27 @@ RV5Stage's two RN-F ports and its RN-I device port. A
 `LLCTile` attaches one blocking `CHIInclusiveHNF` and keeps its address
 projector, transfer fragmenter, and `CHIRam` on the HN's direct subordinate
 side. The device HN-I is reachable only through the uncached RN-I routes. The
-ACLINT's MSIP and MTIP vectors and shared `mtime` value return directly to
-their corresponding RV5Stage tiles, while the UART tile passes its serial
-boundary to the SoC.
+ACLINT computes the MSIP and MTIP vectors centrally and drives their
+corresponding RV5Stage tiles directly. Its shared `mtime` value instead enters
+a narrow ready-valid stream owned by the tiled platform. The default timebase
+produces one tick every 100 SoC cycles, and ACLINT emits an update only for
+that tick or an `mtime` MMIO write. `TiledTimeSweeper` freezes one snapshot,
+uses the standard `Packetizer` to send its four 16-bit framed flits to each
+hart in index order, and retains only the newest snapshot that arrives while a
+sweep is active. A standard `Demux` selects one hart per beat; each
+`TiledTimeReceiver` uses the standard `Reassembler` and publishes its 64-bit
+value only after the final flit transfers. Harts therefore receive the same
+snapshot with bounded index-ordered skew instead of requiring a global 64-bit
+time bus. This stream is independent of CHI routing. The UART tile passes its
+serial boundary to the SoC.
 
 Every tile exposes the family's uniform maximum of four incoming and four
 outgoing physical links, each bundling the independent REQ/RSP/SNP/DAT
 transports. `TiledSoC` alone applies the compiled
 `RouterFamilyLinkConnection` manifest and explicitly closes unused edge and
-corner slots. There is no whole-network RTL wrapper under `noc/`.
+corner slots. There is no whole-network CHI router wrapper under `noc/rtl`;
+platform-specific time delivery remains ordinary ready-valid composition in
+`tiled-soc/` rather than a second NoC planning path.
 
 ## Focused validation
 

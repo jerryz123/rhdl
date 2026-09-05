@@ -126,6 +126,9 @@ The registers honor byte enables, including RV32-style accesses to either
 half of a 64-bit timer register. A write to `mtime` has priority over `tick`;
 otherwise `mtime` increments only on an asserted `tick`. Clock division and
 the relationship between ticks and real time are deliberately platform-owned.
+The valid-only `time_update` interface emits the resulting next `mtime` value
+exactly when a tick or an `mtime` MMIO write changes the timer; idle cycles
+produce no update event.
 The device provides one MSIP and MTIP level per configured hart; it does not
 provide an external interrupt controller or supervisor interrupt block.
 

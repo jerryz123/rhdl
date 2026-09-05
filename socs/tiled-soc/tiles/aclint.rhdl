@@ -4,6 +4,8 @@
 import:
   lib("chi/main.rhdl") open
   lib("devices/aclint.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl").Irrevocable
+  "../time.rhdl" open
 
 class AclintTileParams(aclint :: AclintConfig,
                        router :: CHIRouterParams):
@@ -21,20 +23,22 @@ sync_circuit AclintTile(params :: AclintTileParams):
 
   input identity: AclintTileIdentity(p, site_width)
   input tick: Bool
-  output time_counter: Bits(64)
+  interface time_beat(Irrevocable(TiledTimeBeat(params.aclint.hart_count)), ~role: producer)
   output machine_software: Vec(params.aclint.hart_count, Bool)
   output machine_timer: Vec(params.aclint.hart_count, Bool)
   interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
   interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
 
   inst aclint(Aclint(params.aclint))
+  inst time_sweeper(TiledTimeSweeper(params.aclint.hart_count))
   inst router(CHIRouter(router_params))
 
   aclint.identity <== identity.aclint
   aclint.tick <== tick
   router.site_key <== identity.site_key
   aclint.port <=> router.sn_local[0]
-  time_counter <== aclint.time_counter
+  aclint.time_update <=> time_sweeper.update
+  time_sweeper.egress <=> time_beat
   machine_software <== aclint.machine_software
   machine_timer <== aclint.machine_timer
   router.incoming_links <=> incoming_links

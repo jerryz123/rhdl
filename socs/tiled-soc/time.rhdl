@@ -1,0 +1,88 @@
+#lang rhodium
+// Defines the narrow rotating stream that distributes ACLINT time snapshots to tiled harts.
+
+import:
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/offer-register.rhdl").OfferRegister
+  lib("rhodium/std/flow/flit.rhdl").Packetizer
+  lib("rhodium/std/flow/flit.rhdl").Reassembler
+  lib("rhodium/std/flit.rhdl").FramedFixedFlit
+
+def TiledTimeChunkWidth = 16
+
+bundle TiledTimeBeat(hart_count :: PosInt):
+  hart: Bits(index_width(hart_count))
+  flit: FramedFixedFlit(Bits(TiledTimeChunkWidth))
+
+// Captures each snapshot once, sends it to every hart in order, and retains
+// only the newest snapshot that arrives while a sweep is active.
+sync_circuit TiledTimeSweeper(hart_count :: PosInt):
+  def hart_width = index_width(hart_count)
+
+  interface update(Valid(Bits(64)), ~role: consumer)
+  interface egress(Irrevocable(TiledTimeBeat(hart_count)), ~role: producer)
+
+  inst pending(OfferRegister(Bits(64)))
+  inst packetizer(Packetizer(Bits(64), TiledTimeChunkWidth))
+  reg active(~init: Bool(#false))
+  reg packet_pending(~init: Bool(#false))
+  reg snapshot(Bits(64))
+  reg hart_index(~init: bits(0, hart_width))
+
+  pending.update.valid <== update.valid
+  pending.update.bits <== update.bits
+  // An update arriving while idle supersedes the stored offer before the next
+  // sweep begins.
+  pending.egress.ready <== !active & !update.valid
+
+  def begin_sweep = pending.egress.fire()
+  def last_hart = hart_index === bits(hart_count - 1, hart_width)
+
+  packetizer.ingress.valid <== active & packet_pending
+  packetizer.ingress.bits <== snapshot
+
+  egress.valid <== packetizer.egress.valid
+  egress.bits.hart <== hart_index
+  egress.bits.flit <== packetizer.egress.bits
+  packetizer.egress.ready <== egress.ready
+  def beat_fire = egress.fire()
+  def packet_fire = beat_fire & egress.bits.flit.last
+
+  when begin_sweep:
+    active <== Bool(#true)
+    packet_pending <== Bool(#true)
+    snapshot <== pending.egress.bits
+    hart_index <== bits(0, hart_width)
+  elsewhen (packet_fire & last_hart):
+    active <== Bool(#false)
+    packet_pending <== Bool(#false)
+    hart_index <== bits(0, hart_width)
+  elsewhen packet_fire:
+    hart_index <== hart_index + bits(1, hart_width)
+    packet_pending <== Bool(#true)
+  elsewhen (packetizer.ingress.fire()):
+    packet_pending <== Bool(#false)
+
+// Accepts one fixed-length packet at a time and exposes a timestamp only after
+// the final chunk transfers, so partial updates are never architecturally visible.
+sync_circuit TiledTimeReceiver(hart_count :: PosInt):
+  interface ingress(Decoupled(TiledTimeBeat(hart_count)), ~role: consumer)
+  output value: Bits(64)
+
+  inst reassembler(Reassembler(Bits(64), TiledTimeChunkWidth))
+  reg time_value(~init: bits(0, 64))
+
+  ingress.ready <== reassembler.ingress.ready
+  reassembler.ingress.valid <== ingress.valid
+  reassembler.ingress.bits <== ingress.bits.flit
+  reassembler.egress.ready <== Bool(#true)
+  value <== mux(reassembler.egress.valid, reassembler.egress.bits, time_value)
+
+  when (reassembler.egress.fire()):
+    time_value <== reassembler.egress.bits
+
+export:
+  TiledTimeChunkWidth
+  TiledTimeBeat
+  TiledTimeSweeper
+  TiledTimeReceiver

@@ -18,5 +18,6 @@ tiled-compile-test:
 
 tiled-elaboration-test:
 	cd $(REPO_DIR) && RACO="$(RACO)" tools/run-racket-tests.sh \
+	  socs/tests/tiled-time-test.rhm \
 	  socs/tests/tiled-tiles-test.rhm \
 	  socs/tests/tiled-soc-test.rhm

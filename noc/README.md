@@ -37,13 +37,9 @@ flowchart LR
   escape --> validated
   validated --> plans["RouteTable + NetworkPlan<br/>RouterPlan + RouterFamilyPlan"]
   plans --> rtl["noc/rtl hardware consumers"]
-  lower --> connectivity["ConnectivityGraph<br/>protocol-neutral links"]
-  terminals --> distribution["DistributionPlan<br/>one source + named sinks"]
-  connectivity --> distribution
-  distribution --> validrtl["ValidDistribution<br/>registered broadcast tree"]
 ```
 
-The implemented surface is organized into seven capabilities:
+The implemented surface is organized into six capabilities:
 
 - **Symbolic authoring.** Hierarchical topology, terminal, link, VC-group, and
   route-class names support deterministic prefixing, composition, lowering,
@@ -66,11 +62,6 @@ The implemented surface is organized into seven capabilities:
 - **Hardware-safe planning.** Only opaque `ValidatedRouting` can produce route
   tables, router-local encodings, whole-network connection assignments, and
   uniform router-family plans.
-- **Static distribution.** A protocol-neutral connectivity projection can
-  compile one source and named sinks into a deterministic, pruned distribution
-  tree with either natural or equalized sink latency. This path needs no VC,
-  routing, or deadlock proof because it has no runtime route choice or retained
-  network resource.
 
 Topology construction rejects duplicate identities, missing link endpoints,
 and nonpositive VC counts. The proof contracts cover routing deadlock under
@@ -87,7 +78,6 @@ starvation freedom, livelock freedom, or protocol correctness.
 | Author traffic classes or routing policy | [Traffic and routing authoring](#traffic-and-routing-authoring) |
 | Understand normalization and proof semantics | [Normalized model and validation](#normalized-model-and-validation) |
 | Generate route tables or router plans | [Validated routing and hardware plans](#validated-routing-and-hardware-plans) |
-| Distribute one valid payload to named sinks | [Static distribution planning](#static-distribution-planning) |
 | Build hardware from a validated plan | [`noc/rtl`](rtl/README.md) |
 
 ## Dependency boundary
@@ -99,10 +89,9 @@ starvation freedom, livelock freedom, or protocol correctness.
 | [`noc/rtl`](rtl/README.md) | Public `#lang rhodium`, reusable Rhodium primitives, and pure NoC model and plans | Rhodium implementation modules or CIRCT integration |
 
 No Rhodium dependency flows back into the pure layers. The pure packages do
-not lower route tables or generate RTL. Routed hardware accepts only
-`RouterPlan` values derived from `ValidatedRouting`; static valid distribution
-accepts only a pure `DistributionPlan`. The system owner uses pure plan
-mappings to place routed components and connect physical VC boundaries.
+not lower route tables or generate RTL. `noc/rtl` accepts only `RouterPlan`
+values derived from `ValidatedRouting`, while the system owner uses pure
+`NetworkPlan` mappings to place routers and connect physical VC boundaries.
 
 Neither hardware path grants hardware code access to unvalidated relations or
 proof construction.
@@ -593,36 +582,6 @@ The escape theorem requires an implementation to let a packet continuously
 request an available escape transition and eventually grant that persistent
 request. It does not claim general arbitration fairness, starvation freedom,
 or livelock freedom.
-
-## Static distribution planning
-
-`topology_connectivity` projects a lowered `Topology` into a
-protocol-neutral `ConnectivityGraph`: normalized nodes and directed physical
-edges, with no VCs, terminals, traffic classes, or routing policy. The graph
-is reusable by simple protocols whose hardware structure is fixed entirely at
-elaboration time.
-
-`compile_distribution` accepts that graph, one source node, a nonempty set of
-named sinks, and a timing policy. It performs a deterministic breadth-first
-search, selects one parent for every reached node, and prunes branches that do
-not lead to a sink. The resulting opaque `DistributionPlan` records only the
-participating sites, selected physical edges, sink attachments, and latencies.
-Parallel routes are resolved by normalized edge order, so declaration order
-cannot change the result. Unknown nodes, duplicate sink identities, and
-unreachable sinks are rejected before hardware construction.
-
-Natural timing registers the source at the root and once at every subsequent
-participating site, making a sink's latency its tree depth plus one. Equalized
-timing adds only sink-local delay needed to match the deepest natural sink.
-The plan deliberately has no ready signal, arbitration, buffering choice, or
-flow-control state: every valid source event advances through every selected
-branch, and downstream logic cannot stall it.
-
-`compile_distribution_network` is the symbolic authoring bridge. It accepts a
-`TopologySpec`, separate `TerminalPlacement`, one injection reference, and
-named ejection references; it then lowers the topology, resolves the terminal
-bindings, projects connectivity, and returns both authored and normalized
-information with the compiled distribution plan.
 
 ## Validated routing and hardware plans
 

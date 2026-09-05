@@ -31,12 +31,12 @@ must consume opaque validated plans rather than unchecked routing relations.
 
 | Layer | Ownership |
 |---|---|
-| [`model/`](model/) | Nominal graph identities, topology, connectivity, and routing relations |
+| [`model/`](model/) | Nominal graph identities, topology, and routing relations |
 | [`authoring/`](authoring/) | Symbolic names, composition, terminal placement, topology and routing lowering |
 | [`language/`](language/) | `topology:` and `routing:` embedded forms |
 | [`std/`](std/) | Reusable topology, traffic, and routing-policy definitions |
 | [`analysis/`](analysis/) | Materialization, reachability, hop distance, dependency graphs, acyclicity, and escape validation |
-| [`plan/`](plan/) | Diagnostics, opaque validated routing, route tables, distribution plans, network plans, and router-family projections |
+| [`plan/`](plan/) | Diagnostics, opaque validated routing, route tables, network plans, and router-family projections |
 | [`rtl/DEVELOPING.md`](rtl/DEVELOPING.md) | Rhodium realization of validated plans |
 | [`tests/`](tests/) | Pure model, authoring, language, proof, plan, example, and equivalence coverage |
 
@@ -58,8 +58,8 @@ must consume opaque validated plans rather than unchecked routing relations.
    supported definitions, or deliberate limits change.
 
 Changes crossing multiple layers should be tested first at the lowest owning
-layer, then through `compile_routing` or `compile_distribution`, and finally
-through the relevant hardware consumer. Preserve the three-way equivalence
+layer, then through `compile_routing`, and finally through the relevant
+hardware consumer. Preserve the three-way equivalence
 tests when ordinary authoring, embedded syntax, and reusable composition are
 intended to denote the same network.
 

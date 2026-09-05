@@ -1,24 +1,96 @@
 #lang rhodium
-// Defines ready-valid conversions among fixed, framed-fixed, and variable flits.
+// Defines ready-valid packet serialization and conversions among standard flit formats.
 
 import:
   lib("rhodium/std/flit.rhdl") open
   lib("rhodium/std/ready-valid.rhdl") open
   lib("rhodium/std/counter.rhdl") open
+  lib("rhodium/std/flow/queue.rhdl").Queue
   lib("rhodium/std/flow/ready-valid-support.rhdl") open
 
-fun flit_phase(flits_per_packet :: PosInt, transfer :: Bool):
+fun flit_phase_state(flits_per_packet :: PosInt, transfer :: Bool):
   inst phase_counter(Counter(flits_per_packet))
   phase_counter.enable <== transfer
   def first = phase_counter.value === bits(0, index_width(flits_per_packet))
   def last = phase_counter.value === bits(flits_per_packet - 1,
                                           index_width(flits_per_packet))
+  [phase_counter.value, first, last]
+
+fun flit_phase(flits_per_packet :: PosInt, transfer :: Bool):
+  def [_phase, first, last] = flit_phase_state(flits_per_packet, transfer)
   [first, last]
 
 fun finish_flit_transform(source :: FlowSource,
                           input_link :: Handle,
                           output_link :: Handle):
   finish_interface_transform(source, interface_transform(input_link, output_link))
+
+fun packet_payload_width(T :: DataType, who :: Symbol) :: PosInt:
+  def payload_width = T.packed_width()
+  unless payload_width is_a PosInt
+  | error(~who: who,
+          "packet payload must have a packable DataType")
+  payload_width
+
+// Serializes the packed representation of one queued payload into
+// least-significant chunk first order.
+sync_circuit Packetizer(T :: DataType, chunk_width :: PosInt):
+  def payload_width = packet_payload_width(T, #'Packetizer)
+  def chunk_count = (payload_width + chunk_width - 1) div chunk_width
+  def padded_width = chunk_count * chunk_width
+
+  interface ingress(Decoupled(T), ~role: consumer)
+  interface egress(Irrevocable(FramedFixedFlit(Bits(chunk_width))), ~role: producer)
+
+  inst payload_queue(Queue(T, 1, ~pipe: #true))
+  ingress <=> payload_queue.ingress
+
+  def transfer = payload_queue.egress.valid & egress.ready
+  def [phase, first, last] = flit_phase_state(chunk_count, transfer)
+  def packed = payload_queue.egress.bits.as_bits()
+  def padded = if padded_width == payload_width | packed | packed.zext(padded_width)
+  def chunks = padded.as_vec(Bits(chunk_width))
+
+  egress.valid <== payload_queue.egress.valid
+  egress.bits <== FramedFixedFlit(Bits(chunk_width)):
+    first: first
+    last: last
+    payload: chunks[phase]
+  payload_queue.egress.ready <== egress.ready & last
+
+// Reassembles explicitly framed fixed-size packets into a completion queue.
+sync_circuit Reassembler(T :: DataType, chunk_width :: PosInt):
+  def payload_width = packet_payload_width(T, #'Reassembler)
+  def chunk_count = (payload_width + chunk_width - 1) div chunk_width
+  def padded_width = chunk_count * chunk_width
+  def initial_chunks = vec(
+    for List (_ in 0..chunk_count): bits(0, chunk_width)
+  )
+
+  interface ingress(Decoupled(FramedFixedFlit(Bits(chunk_width))), ~role: consumer)
+  interface egress(Irrevocable(T), ~role: producer)
+
+  inst completed(Queue(T, 1, ~pipe: #true))
+  reg chunks(~init: initial_chunks)
+
+  ingress.ready <== completed.ingress.ready
+  def input_transfer = ingress.fire()
+  def [phase, first, last] = flit_phase_state(chunk_count, input_transfer)
+  def next_chunks = chunks.updated(phase, ingress.bits.payload)
+  def packed = next_chunks.as_bits()
+  def assembled = if padded_width == payload_width | packed.into(T) | packed[0..payload_width].into(T)
+
+  completed.ingress.valid <== ingress.valid & last
+  completed.ingress.bits <== assembled
+  completed.egress <=> egress
+
+  assert(!input_transfer ||| (ingress.bits.first === first),
+         "reassembler_first_matches_phase")
+  assert(!input_transfer ||| (ingress.bits.last === last),
+         "reassembler_last_matches_phase")
+
+  when input_transfer:
+    chunks <== next_chunks
 
 // Adds canonical head and tail markers from successful-transfer phase. Stalls
 // do not advance phase, so generated framing remains stable under backpressure.
@@ -126,6 +198,8 @@ fun forget_fixed_framing()
     finish_flit_transform(source, input_link, output_link)
 
 export:
+  Packetizer
+  Reassembler
   frame_fixed_flits
   require_fixed_framing
   strip_fixed_framing

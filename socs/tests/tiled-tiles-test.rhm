@@ -14,6 +14,12 @@ def uart_modules = fixture.uart_tile_design.modules.map(fun (module_def): module
 def host_modules = fixture.host_tile_design.modules.map(fun (module_def): module_def.name)
 def rv5stage_tile = fixture.rv5stage_tile_design.modules.find(fun (module_def): module_def.name == "RV5StageTile")
 def llc_tile = fixture.llc_tile_design.modules.find(fun (module_def): module_def.name == "LLCTile")
+def time_receiver = fixture.rv5stage_tile_design.modules.find(
+  fun (module_def): module_def.name == "TiledTimeReceiver"
+)
+def aclint_tile = fixture.aclint_tile_design.modules.find(
+  fun (module_def): module_def.name == "AclintTile"
+)
 
 check:
   router_modules.contains("CHIRouter") ~is #true
@@ -24,6 +30,7 @@ check:
   rv5stage_modules.contains("RV5Stage") ~is #true
   rv5stage_modules.contains("CHIRouter") ~is #true
   rv5stage_modules.contains("SimpleRouterFamily") ~is #true
+  rv5stage_modules.contains("TiledTimeReceiver") ~is #true
   llc_modules.contains("LLCTile") ~is #true
   llc_modules.contains("CHIInclusiveHNF") ~is #true
   llc_modules.contains("CHIAddressProjector") ~is #true
@@ -37,6 +44,8 @@ check:
   aclint_modules.contains("AclintTile") ~is #true
   aclint_modules.contains("Aclint") ~is #true
   aclint_modules.contains("CHIRouter") ~is #true
+  aclint_modules.contains("TiledTimeSweeper") ~is #true
+  aclint_modules.contains("OfferRegister") ~is #true
   uart_modules.contains("UartTile") ~is #true
   uart_modules.contains("Uart16550") ~is #true
   uart_modules.contains("CHIRouter") ~is #true
@@ -44,11 +53,18 @@ check:
   host_modules.contains("CHIRouter") ~is #true
   rv5stage_tile.inputs.map(fun (input): input.name).contains("identity") ~is #true
   rv5stage_tile.inputs.map(fun (input): input.name).contains("interrupts") ~is #true
-  rv5stage_tile.inputs.map(fun (input): input.name).contains("time_counter") ~is #true
+  rv5stage_tile.inputs.map(fun (input): input.name).contains("time_beat_in") ~is #true
+  rv5stage_tile.find_input("time_beat_in").type.field("bits").type.packed_width() ~is 21
+  rv5stage_tile.find_input("time_beat_in").type.field("bits").type.field("flit").type.field("payload").type.width ~is 16
+  time_receiver.find_output("value").type.width ~is 64
+  time_receiver.operations.filter(
+    ~keep: fun (operation): operation.opcode == "rtl.register_reset"
+  ).map(fun (operation): operation.attribute("name")) ~is ["time_value"]
+  aclint_tile.outputs.map(fun (output): output.name).contains("time_beat_out") ~is #true
+  aclint_tile.find_output("time_beat_out").type.field("bits").type.field("flit").type.field("payload").type.width ~is 16
   llc_tile.inputs.map(fun (input): input.name).contains("identity") ~is #true
   rv5stage_tile.inputs.map(fun (input): input.name).contains("tile_key") ~is #false
   llc_tile.inputs.map(fun (input): input.name).contains("tile_key") ~is #false
-  rv5stage_tile.operations.filter(~keep: fun (operation): operation.opcode == "rtl.mux_lookup").length() ~is 0
   llc_tile.operations.filter(~keep: fun (operation): operation.opcode == "rtl.mux_lookup").length() ~is 0
   verify_design(fixture.chi_router_design) ~is #void
   verify_design(fixture.rv5stage_tile_design) ~is #void
