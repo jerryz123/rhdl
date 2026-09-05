@@ -10,9 +10,11 @@ TestDriver.v -> <soc>-soc-harness.rhdl -> one SoC variant
                          +-> FESVR host model
 ```
 
-`TestDriver.v` only generates clock and reset and observes the harness exit
-status. Each SoC has a separate parameterless harness that instantiates the
-FESVR requester and connects it to that SoC's common `SoCHostInterface`. The
+`TestDriver.v` generates clock and reset, holds the UART RX line idle, and
+observes the harness exit status. Each SoC has a separate parameterless harness
+that instantiates the FESVR requester and connects it to that SoC's common
+`SoCHostInterface`. Each harness passes through the synthesizable UART RX, TX,
+and interrupt boundary; it does not instantiate the UART PTY DPI model. The
 SoCs contain no DPI calls or simulator dependencies.
 
 The directory owns:
@@ -36,7 +38,9 @@ SimpleSoC harness attaches `CHIDPIMemory` to the SoC's exposed ready-valid SN-F
 channels as a simulation-only external memory model. MiniSoC instead contains
 its own synthesizable `CHIRam`. Each harness has an independent artifact at
 `/tmp/rhodium-sims/<soc>/obj/VTestDriver`, so
-switching configurations cannot reuse generated RTL for the other SoC. Set
+switching configurations cannot reuse generated RTL for the other SoC. The
+shared Verilator `TestDriver` leaves TX and the UART interrupt observable but
+unused and drives RX high as an idle 8-N-1 serial line. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
 does not require or embed a target program.
 

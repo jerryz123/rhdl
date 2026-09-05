@@ -13,7 +13,9 @@ export:
   TiledRV5StagePlacement
   TiledHostPlacement
   TiledLLCPlacement
+  TiledDeviceHomePlacement
   TiledAclintPlacement
+  TiledUartPlacement
   TiledTransitPlacement
   TiledChannelFamilyPlans
   TiledSoCPlan
@@ -46,13 +48,21 @@ class TiledLLCPlacement(index :: Nat,
                         bank_bytes :: PosInt,
                         home_site :: CHIRNICNSite)
 
+class TiledDeviceHomePlacement(coordinate :: MeshCoordinate,
+                               router :: NodeRef,
+                               node_id :: Nat,
+                               requester_site :: CHIRNICNSite,
+                               subordinate_site :: CHISNICNSite)
+
 class TiledAclintPlacement(coordinate :: MeshCoordinate,
                            router :: NodeRef,
-                           home_node_id :: Nat,
-                           subordinate_node_id :: Nat,
-                           home_requester_site :: CHIRNICNSite,
-                           home_subordinate_site :: CHISNICNSite,
-                           device_site :: CHISNSite)
+                           node_id :: Nat,
+                           site :: CHISNSite)
+
+class TiledUartPlacement(coordinate :: MeshCoordinate,
+                         router :: NodeRef,
+                         node_id :: Nat,
+                         site :: CHISNSite)
 
 class TiledTransitPlacement(index :: Nat,
                             coordinate :: MeshCoordinate,
@@ -69,7 +79,9 @@ class TiledSoCPlan(spec :: TiledSoCSpec,
                    llcs :: NonemptyList.of(TiledLLCPlacement),
                    transits :: List.of(TiledTransitPlacement),
                    host :: TiledHostPlacement,
+                   device_home :: TiledDeviceHomePlacement,
                    aclint :: TiledAclintPlacement,
+                   uart :: TiledUartPlacement,
                    rnf_sites :: NonemptyList.of(CHIRNSite),
                    device_sites :: NonemptyList.of(CHIRNSite),
                    connections :: NonemptyList.of(CHIConnection),
@@ -150,22 +162,37 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
     CHIRNSite(NamePath(["host"]), ids.host, host_router)
   )
 
+  def device_home_cell = layout.device_homes[0]
+  def device_home_router = mesh.node_at(device_home_cell.coordinate.x,
+                                        device_home_cell.coordinate.y)
+  def device_home = TiledDeviceHomePlacement(
+    device_home_cell.coordinate,
+    device_home_router,
+    ids.device_home,
+    CHIRNICNSite(NamePath(["device-home", "requester"]),
+                 ids.device_home,
+                 device_home_router),
+    CHISNICNSite(NamePath(["device-home", "subordinate"]),
+                 ids.device_home,
+                 device_home_router)
+  )
+
   def aclint_cell = layout.aclints[0]
   def aclint_router = mesh.node_at(aclint_cell.coordinate.x, aclint_cell.coordinate.y)
   def aclint = TiledAclintPlacement(
     aclint_cell.coordinate,
     aclint_router,
-    ids.aclint_home,
     ids.aclint_subordinate,
-    CHIRNICNSite(NamePath(["aclint", "home", "requester"]),
-                 ids.aclint_home,
-                 aclint_router),
-    CHISNICNSite(NamePath(["aclint", "home", "subordinate"]),
-                 ids.aclint_home,
-                 aclint_router),
-    CHISNSite(NamePath(["aclint", "device"]),
-              ids.aclint_subordinate,
-              aclint_router)
+    CHISNSite(NamePath(["devices", "aclint"]), ids.aclint_subordinate, aclint_router)
+  )
+
+  def uart_cell = layout.uarts[0]
+  def uart_router = mesh.node_at(uart_cell.coordinate.x, uart_cell.coordinate.y)
+  def uart = TiledUartPlacement(
+    uart_cell.coordinate,
+    uart_router,
+    ids.uart_subordinate,
+    CHISNSite(NamePath(["devices", "uart"]), ids.uart_subordinate, uart_router)
   )
 
   def transits:
@@ -187,9 +214,10 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
     for (llc_placement in llcs):
       connections := connections ++ [CHIRNFConnection(requester, llc_placement.home_site)]
   for (requester in device_sites):
-    connections := connections ++ [CHIRNIConnection(requester, aclint.home_requester_site)]
+    connections := connections ++ [CHIRNIConnection(requester, device_home.requester_site)]
   connections := connections ++ [
-    CHISNConnection(aclint.home_subordinate_site, aclint.device_site)
+    CHISNConnection(device_home.subordinate_site, aclint.site),
+    CHISNConnection(device_home.subordinate_site, uart.site)
   ]
 
   def routing = uniform_chi_routing(
@@ -218,7 +246,7 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
     fun (placement): placement.home_node_id
   ) ++ llcs.map(
     fun (placement): placement.subordinate_node_id
-  ) ++ [host.node_id, aclint.home_node_id, aclint.subordinate_node_id]
+  ) ++ [host.node_id, device_home.node_id, aclint.node_id, uart.node_id]
   require_unique_tiled_node_ids(node_ids)
 
   TiledSoCPlan(spec,
@@ -227,7 +255,9 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
                llcs,
                transits,
                host,
+               device_home,
                aclint,
+               uart,
                rnf_sites,
                device_sites,
                connections,
@@ -239,7 +269,7 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
 
 def tiled_soc_layout = tile_grid:
   row [llc(4)]
-  row [host, aclint, transit(2)]
+  row [host, device_home, aclint, uart]
   row [rv5stage(4)]
   row [rv5stage(4)]
 
@@ -250,9 +280,10 @@ def tiled_soc_spec = TiledSoCSpec(
     ~rv5stage_device_base: 16,
     ~host: 24,
     ~llc_home_base: 32,
-    ~aclint_home: 36,
+    ~device_home: 36,
     ~backing_memory_base: 48,
-    ~aclint_subordinate: 52
+    ~aclint_subordinate: 52,
+    ~uart_subordinate: 53
   ),
   ~memory: StripedMemorySpec(
     ~base: 0x80000000,

@@ -120,7 +120,7 @@ $(SIMULATOR_BINARY): $(SOC_VERILOG) $(CURDIR)/TestDriver.v \
                      $(SOC_DPI_SOURCE) \
                      $(SOC_DPI_HEADER) \
                      $(FESVR_LIBRARY)
-	$(VERILATOR) --binary --timing --vpi --assert --Wno-UNOPTFLAT --build-jobs 0 \
+	$(VERILATOR) --binary --timing --vpi --assert --Wno-UNOPTFLAT --Wno-SYMRSVDWORD --build-jobs 0 \
 	  --top-module TestDriver --Mdir $(SOC_OBJECT_DIR) \
 	  $(SOC_VERILOG) $(CURDIR)/TestDriver.v \
 	  $(FESVR_DIR)/direct_mem_htif.cc $(VERILATOR_DIR)/direct_mem_htif_dpi.cc \

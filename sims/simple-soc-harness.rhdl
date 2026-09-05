@@ -1,14 +1,16 @@
 #lang rhodium
-// Wraps external-memory SimpleSoC with FESVR and a simulation-owned CHI memory.
+// Wraps SimpleSoC with FESVR, simulation memory, and pass-through UART pins.
 
 import:
   lib("riscv/isa/xlen.rhm").XLen
   lib("chi/main.rhdl") as chi
   lib("socs/simple-soc.rhdl") as simple
+  lib("socs/peripherals.rhdl").SoCUartInterface
   "fesvr/direct-memory-htif.rhdl".FesvrRequester
 
 sync_circuit SoCHarness(params :: simple.SimpleSoCParams = simple.simple_soc_params):
   output exit: Bits(32)
+  interface uart(SoCUartInterface(), ~role: soc)
 
   def fabric_params = params.fabric
   inst requester(FesvrRequester(XLen.X64, fabric_params.flit, simple.simple_soc_host_node, fabric_params.home_map))
@@ -17,6 +19,7 @@ sync_circuit SoCHarness(params :: simple.SimpleSoCParams = simple.simple_soc_par
 
   requester.port <=> soc.host.memory
   requester.start |> soc.host.start
+  uart <=> soc.uart
   soc.memory <=> memory.port
   memory.identity <== chi.CHIRamIdentity(fabric_params.flit):
     node_id: bits(fabric_params.ram_params.node_id, fabric_params.flit.node_id_width)

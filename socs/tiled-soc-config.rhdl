@@ -1,12 +1,14 @@
 #lang rhodium
-// Compiles a TiledSoC plan into occurrence-local CHI, router, LLC, and tile parameters.
+// Compiles a TiledSoC plan into occurrence-local CHI, router, LLC, and device parameters.
 
 import:
   lib("chi/main.rhdl") open
   lib("noc/rtl/router.rhdl") open
   lib("cores/rv5stage/chi.rhdl") open
   lib("riscv/rtl/pma.rhdl") open
-  lib("devices/aclint.rhdl") open
+  lib("devices/aclint.rhdl").AclintParams
+  lib("devices/uart16550.rhdl").Uart16550Params
+  "peripherals.rhdl" open
   "tiles/main.rhdl" open
   "tiled-soc-spec.rhm" open
   "tiled-soc-plan.rhm" as planning
@@ -28,11 +30,18 @@ class TiledHostConfig(placement :: planning.TiledHostPlacement,
                       port :: CHIICNPortParams,
                       tile_params :: HostTileParams)
 
+class TiledDeviceHomeConfig(placement :: planning.TiledDeviceHomePlacement,
+                            home :: CHIHomeParams,
+                            home_params :: CHIHNIParams,
+                            tile_params :: DeviceHomeTileParams)
+
 class TiledAclintConfig(placement :: planning.TiledAclintPlacement,
-                        home :: CHIHomeParams,
                         device :: AclintParams,
-                        home_params :: CHIHNIParams,
                         tile_params :: AclintTileParams)
+
+class TiledUartConfig(placement :: planning.TiledUartPlacement,
+                      device :: Uart16550Params,
+                      tile_params :: UartTileParams)
 
 class TiledTransitConfig(placement :: planning.TiledTransitPlacement,
                          tile_params :: TransitTileParams)
@@ -46,13 +55,15 @@ class TiledSoCConfig(plan :: planning.TiledSoCPlan,
                      llc_config :: CHIInclusiveHNFConfig,
                      ram_config :: CHIRamConfig,
                      fragmenter_config :: CHITransferFragmenterConfig,
-                     aclint_config :: AclintConfig,
+                     peripherals :: SoCPeripheralParams,
                      adapter_plans :: CHIChannelAdapterPlans,
                      router_configs :: CHIRouterFamilyConfigs,
                      rv5stages :: NonemptyList.of(TiledRV5StageConfig),
                      llcs :: NonemptyList.of(TiledLLCConfig),
                      host :: TiledHostConfig,
+                     device_home :: TiledDeviceHomeConfig,
                      aclint :: TiledAclintConfig,
+                     uart :: TiledUartConfig,
                      transits :: List.of(TiledTransitConfig)):
   implements StableCircuitParam
 
@@ -108,14 +119,12 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                     placement.home_node_id,
                     CHINodeKind.HNF,
                     ~max_outstanding: 1)
-  def aclint_home = CHIHomeParams("tiled-aclint-home",
-                                  plan.aclint.home_node_id,
+  def device_home = CHIHomeParams("tiled-device-home",
+                                  plan.device_home.node_id,
                                   CHINodeKind.HNI,
                                   ~max_outstanding: 1)
 
   def memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
-  def device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
-  def aclint_base = 0x02000000
   def rv5stage_config = RV5StageCHIConfig(
     flit,
     (for List (placement in plan.llcs,
@@ -126,13 +135,7 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
            memory_attributes
          ),
          home
-       )) ++ [RV5StageCHIRegion(
-                RiscvPhysicalMemoryRegion(
-                  AddressSet(aclint_base, AclintWindowBytes - 1),
-                  device_attributes
-                ),
-                aclint_home
-              )]
+       )) ++ soc_peripheral_regions(device_home)
   )
 
   def rv5stage_chi_params:
@@ -151,16 +154,12 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
     fun (params): tiled_requester_icn_endpoint(params.device_node)
   )
 
-  def aclint_config = AclintConfig(flit, plan.rv5stage_count)
-  def aclint_params = AclintParams("tiled-aclint",
-                                   plan.aclint.subordinate_node_id,
-                                   aclint_config,
-                                   aclint_base)
-  def aclint_home_params = CHIHNIParams(
-    aclint_home,
-    device_ports,
-    CHISubordinateMap(flit, [aclint_params.service])
-  )
+  def peripherals = SoCPeripheralParams(flit,
+                                        plan.rv5stage_count,
+                                        device_home,
+                                        device_ports,
+                                        plan.aclint.node_id,
+                                        plan.uart.node_id)
 
   def ram_config = CHIRamConfig(flit,
                                 plan.bank_bytes,
@@ -250,17 +249,34 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
       )
     )
   )
-  def aclint_router_params = CHIRouterParams(
+  def device_home_router_params = CHIRouterParams(
     flit,
     router_configs,
     compile_chi_router_attachment_plan(
       router_configs,
       adapter_plans,
       CHIRouterAttachments(
-        ~hni_requester_sites: [[plan.aclint.home_requester_site]],
-        ~hn_subordinate_sites: [[plan.aclint.home_subordinate_site]],
-        ~sn_sites: [[plan.aclint.device_site]]
+        ~hni_requester_sites: [[plan.device_home.requester_site]],
+        ~hn_subordinate_sites: [[plan.device_home.subordinate_site]]
       )
+    )
+  )
+  def aclint_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIRouterAttachments(~sn_sites: [[plan.aclint.site]])
+    )
+  )
+  def uart_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIRouterAttachments(~sn_sites: [[plan.uart.site]])
     )
   )
   def host_router_params = CHIRouterParams(
@@ -289,9 +305,9 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                                       fragmenter_config,
                                       ram_config,
                                       llc_router_params)
-  def aclint_tile_params = AclintTileParams(aclint_home_params,
-                                            aclint_config,
-                                            aclint_router_params)
+  def device_home_tile_params = DeviceHomeTileParams(peripherals.home_params, device_home_router_params)
+  def aclint_tile_params = AclintTileParams(peripherals.aclint_config, aclint_router_params)
+  def uart_tile_params = UartTileParams(peripherals.uart_config, uart_router_params)
   def host_tile_params = HostTileParams(host_router_params)
   def transit_tile_params = TransitTileParams(transit_router_params)
 
@@ -316,11 +332,16 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                              host_node,
                              host_port,
                              host_tile_params)
+  def device_home_config = TiledDeviceHomeConfig(plan.device_home,
+                                                 device_home,
+                                                 peripherals.home_params,
+                                                 device_home_tile_params)
   def aclint = TiledAclintConfig(plan.aclint,
-                                 aclint_home,
-                                 aclint_params,
-                                 aclint_home_params,
+                                 peripherals.aclint,
                                  aclint_tile_params)
+  def uart = TiledUartConfig(plan.uart,
+                             peripherals.uart,
+                             uart_tile_params)
   def transits:
     for List (placement in plan.transits):
       TiledTransitConfig(placement, transit_tile_params)
@@ -334,13 +355,15 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                  llc_config,
                  ram_config,
                  fragmenter_config,
-                 aclint_config,
+                 peripherals,
                  adapter_plans,
                  router_configs,
                  rv5stages,
                  llcs,
                  host,
+                 device_home_config,
                  aclint,
+                 uart,
                  transits)
 
 def tiled_soc_config = compile_tiled_soc(planning.tiled_soc_spec)
@@ -349,7 +372,9 @@ export:
   TiledRV5StageConfig
   TiledLLCConfig
   TiledHostConfig
+  TiledDeviceHomeConfig
   TiledAclintConfig
+  TiledUartConfig
   TiledTransitConfig
   TiledSoCConfig
   tiled_requester_icn_endpoint

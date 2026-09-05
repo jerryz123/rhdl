@@ -1,12 +1,15 @@
-// Clocks and resets a generated SoCHarness until FESVR reports target completion.
+// Clocks and resets a generated SoCHarness while holding its UART receive line idle.
 module TestDriver;
   reg clock;
   reg reset;
   wire [31:0] exit;
+  wire [1:0] uart_out;
 
   SoCHarness dut (
     .clock(clock),
     .reset(reset),
+    .uart_in(1'b1),
+    .uart_out(uart_out),
     .exit(exit)
   );
 

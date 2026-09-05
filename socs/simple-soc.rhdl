@@ -1,5 +1,5 @@
 #lang rhodium
-// Composes a host-facing RV5Stage, ACLINT, and an external CHI memory boundary.
+// Composes a host-facing RV5Stage, routed ACLINT/UART devices, and external CHI memory.
 
 import:
   lib("support/annotations.rhm") open
@@ -16,17 +16,16 @@ import:
   lib("riscv/isa/fp-profile.rhm") open
   lib("riscv/rtl/pma.rhdl") open
   lib("devices/aclint.rhdl") open
+  lib("devices/uart16550.rhdl") open
   "host-interface.rhdl".SoCHostInterface
+  "peripherals.rhdl" open
 
 def simple_soc_flit = CHIFlitParams()
 def simple_soc_home = CHIHomeParams("simple-home", 5, CHINodeKind.HNF, ~max_outstanding: 1)
 def simple_soc_device_home = CHIHomeParams("simple-device-home", 6, CHINodeKind.HNI, ~max_outstanding: 1)
 def simple_soc_memory_base = 0x80000000
 def simple_soc_memory_bytes = 0x40000000
-def simple_soc_aclint_base = 0x02000000
-def simple_soc_aclint_bytes = 0x10000
 def simple_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
-def simple_soc_device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
 def simple_soc_host_node = CHINodeParams(
   "host",
   1,
@@ -55,12 +54,6 @@ fun requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   )
 
 def simple_soc_host_port = requester_icn_endpoint(simple_soc_host_node)
-def simple_soc_aclint_config = AclintConfig(simple_soc_flit, 1)
-def simple_soc_aclint_params = AclintParams("simple-aclint",
-                                            10,
-                                            simple_soc_aclint_config,
-                                            simple_soc_aclint_base)
-
 // Collects every fabric parameter that changes with the normal-memory range
 // so on-chip and external-memory SoCs can configure that range independently.
 class SimpleSoCFabricParams(memory_name :: NonemptyString,
@@ -78,14 +71,7 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
            simple_soc_memory_attributes
          ),
          simple_soc_home
-       ),
-       RV5StageCHIRegion(
-         RiscvPhysicalMemoryRegion(
-           AddressSet(simple_soc_aclint_base, simple_soc_aclint_bytes - 1),
-           simple_soc_device_attributes
-         ),
-         simple_soc_device_home
-       )]
+       )] ++ soc_peripheral_regions(simple_soc_device_home)
     )
   property home_map: rv5stage_config.home_map
   property rv5stage_params:
@@ -96,6 +82,13 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
     requester_icn_endpoint(rv5stage_params.data_node)
   property device_port:
     requester_icn_endpoint(rv5stage_params.device_node)
+  property peripherals:
+    SoCPeripheralParams(flit,
+                        1,
+                        simple_soc_device_home,
+                        [device_port],
+                        10,
+                        11)
   property ram_config:
     CHIRamConfig(flit,
                  memory_bytes,
@@ -125,9 +118,7 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
                  memory_port,
                  memory_service)
   property device_home_params:
-    CHIHNIParams(simple_soc_device_home,
-                 [device_port],
-                 CHISubordinateMap(flit, [simple_soc_aclint_params.service]))
+    peripherals.home_params
 
 // Couples the external-memory fabric contract with the inclusive LLC geometry
 // selected by the complete SimpleSoC composition.
@@ -177,6 +168,10 @@ def simple_soc_memory_service = CHISubordinateServiceParams(
 def simple_soc_home_config = simple_soc_params.fabric.home_config
 def simple_soc_home_params = simple_soc_params.fabric.home_params
 def simple_soc_device_home_params = simple_soc_params.fabric.device_home_params
+def simple_soc_aclint_config = simple_soc_params.fabric.peripherals.aclint_config
+def simple_soc_aclint_params = simple_soc_params.fabric.peripherals.aclint
+def simple_soc_uart_config = simple_soc_params.fabric.peripherals.uart_config
+def simple_soc_uart_params = simple_soc_params.fabric.peripherals.uart
 
 // The logical RN-I/RN-F relationships compile independently onto the four
 // transport planes while sharing one physical single-router topology.
@@ -203,12 +198,27 @@ def simple_soc_device_home_requester_site = CHIRNICNSite(
   simple_soc_device_home.node_id,
   simple_soc_router
 )
+def simple_soc_device_home_subordinate_site = CHISNICNSite(
+  NamePath(["device-home", "subordinate"]),
+  simple_soc_device_home.node_id,
+  simple_soc_router
+)
+def simple_soc_aclint_site = CHISNSite(NamePath(["devices", "aclint"]),
+                                       simple_soc_aclint_params.node.node_id,
+                                       simple_soc_router)
+def simple_soc_uart_site = CHISNSite(NamePath(["devices", "uart"]),
+                                     simple_soc_uart_params.node.node_id,
+                                     simple_soc_router)
 def simple_soc_connections = [
   CHIRNFConnection(simple_soc_host_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_instruction_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_data_site, simple_soc_home_requester_site),
   CHIRNIConnection(simple_soc_device_site,
-                   simple_soc_device_home_requester_site)
+                   simple_soc_device_home_requester_site),
+  CHISNConnection(simple_soc_device_home_subordinate_site,
+                  simple_soc_aclint_site),
+  CHISNConnection(simple_soc_device_home_subordinate_site,
+                  simple_soc_uart_site)
 ]
 def simple_soc_compilations = compile_chi_connections(
   simple_soc_topology,
@@ -239,6 +249,7 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
                              ~home: home_module = CHIHNF(params.home_config)):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
+  interface uart(SoCUartInterface(), ~role: soc)
 
   inst rv5stage(RV5Stage(XLen.X64,
                          ~floating_point: profile,
@@ -248,7 +259,8 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
                          ~chi: params.rv5stage_config))
   inst home(home_module)
   inst device_home(CHIHNI(params.device_home_params))
-  inst aclint(Aclint(simple_soc_aclint_config))
+  inst aclint(Aclint(params.peripherals.aclint_config))
+  inst uart_device(Uart16550(params.peripherals.uart_config))
   inst req_router(SimpleRouter(CHIReqFlit(simple_soc_flit), simple_soc_req_router_config))
   inst rsp_router(SimpleRouter(CHIRspFlit(simple_soc_flit), simple_soc_rsp_router_config))
   inst snp_router(SimpleRouter(CHISnpFlit(simple_soc_flit), simple_soc_snp_router_config))
@@ -263,8 +275,11 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
     subordinate_node_id: bits(params.home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
     service_base: bits(params.memory_base, simple_soc_flit.request_address_width)
   aclint.identity <== AclintIdentity(simple_soc_flit):
-    node_id: bits(simple_soc_aclint_params.node.node_id, simple_soc_flit.node_id_width)
-    base_address: bits(simple_soc_aclint_params.base_address, simple_soc_flit.request_address_width)
+    node_id: bits(params.peripherals.aclint.node.node_id, simple_soc_flit.node_id_width)
+    base_address: bits(params.peripherals.aclint.base_address, simple_soc_flit.request_address_width)
+  uart_device.identity <== Uart16550Identity(simple_soc_flit):
+    node_id: bits(params.peripherals.uart.node.node_id, simple_soc_flit.node_id_width)
+    base_address: bits(params.peripherals.uart.base_address, simple_soc_flit.request_address_width)
 
   connect_chi_rnf_node(host.memory,
                        ~node: simple_soc_host_site,
@@ -313,9 +328,32 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
                             ~dat_ingress: dat_router.ingress,
                             ~dat_targets: dat_router.target,
                             ~adapters: simple_soc_adapter_plans)
+  connect_chi_hn_subordinate(device_home.port.subordinate,
+                             ~home: simple_soc_device_home_subordinate_site,
+                             ~req_ingress: req_router.ingress,
+                             ~rsp_targets: rsp_router.target,
+                             ~dat_ingress: dat_router.ingress,
+                             ~dat_targets: dat_router.target,
+                             ~adapters: simple_soc_adapter_plans)
+  connect_chi_sn_node(aclint.port,
+                      ~node: simple_soc_aclint_site,
+                      ~req_targets: req_router.target,
+                      ~rsp_ingress: rsp_router.ingress,
+                      ~dat_targets: dat_router.target,
+                      ~dat_ingress: dat_router.ingress,
+                      ~adapters: simple_soc_adapter_plans)
+  connect_chi_sn_node(uart_device.port,
+                      ~node: simple_soc_uart_site,
+                      ~req_targets: req_router.target,
+                      ~rsp_ingress: rsp_router.ingress,
+                      ~dat_targets: dat_router.target,
+                      ~dat_ingress: dat_router.ingress,
+                      ~adapters: simple_soc_adapter_plans)
   home.port.subordinate <=> memory
-  device_home.port.subordinate <=> aclint.port
   aclint.tick <== Bool(#true)
+  uart_device.rx <== uart.rx
+  uart.tx <== uart_device.tx
+  uart.interrupt <== uart_device.interrupt
   host.start |> rv5stage.start
   rv5stage.interrupts <== RV5StageInterrupts():
     supervisor_software: Bool(#false)
@@ -335,12 +373,14 @@ sync_circuit SimpleSoC(params :: SimpleSoCParams = simple_soc_params,
   def fabric_params = params.fabric
   interface host(SoCHostInterface(fabric_params.flit), ~role: soc)
   interface memory(CHISNChannels(fabric_params.flit), ~role: icn)
+  interface uart(SoCUartInterface(), ~role: soc)
 
   def HomeModule = CHIInclusiveHNF(params.llc_config)
   inst fabric(SimpleSoCFabric(fabric_params, ~floating_point: profile, ~compressed: compressed_enabled, ~home: HomeModule))
 
   host <=> fabric.host
   fabric.memory <=> memory
+  uart <=> fabric.uart
 
 def design = elaborate(SimpleSoC())
 
@@ -373,6 +413,8 @@ export:
   simple_soc_home_params
   simple_soc_aclint_config
   simple_soc_aclint_params
+  simple_soc_uart_config
+  simple_soc_uart_params
   simple_soc_device_home_params
   simple_soc_topology
   simple_soc_router
@@ -382,6 +424,9 @@ export:
   simple_soc_device_site
   simple_soc_home_requester_site
   simple_soc_device_home_requester_site
+  simple_soc_device_home_subordinate_site
+  simple_soc_aclint_site
+  simple_soc_uart_site
   simple_soc_connections
   simple_soc_compilations
   simple_soc_adapter_plans

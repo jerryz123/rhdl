@@ -15,7 +15,8 @@ SimpleSoC
 ├── Memory CHIInclusiveHNF (NodeID 5)
 │   └── external CHI SN-F (NodeID 9)
 └── Device CHIHNI (NodeID 6)
-    └── ACLINT SN-I (NodeID 10)
+    ├── ACLINT SN-I (NodeID 10, 0x02000000..0x0200ffff)
+    └── UART SN-I (NodeID 11, 0x10000000..0x10000007)
 ```
 
 The external host loads and observes memory through its non-caching RN-F
@@ -31,17 +32,23 @@ plus the core's B and Zicond extensions.
 The reusable `SimpleSoCFabric` boundary retains integer-only, non-compressed
 defaults; `MiniSoC` currently inherits those defaults. `TiledSoC` keeps its
 integer-only floating-point default but enables compressed instructions.
-The ACLINT window occupies `0x02000000..0x0200ffff`. Its `mtime` counter drives
+The shared peripheral contract in [`peripherals.rhdl`](peripherals.rhdl)
+defines both device windows, their uncached/non-executable PMA entries, the
+HN-I subordinate map, and the UART pin interface. The ACLINT window occupies
+`0x02000000..0x0200ffff`. Its `mtime` counter drives
 RV5Stage's `time` CSR, while hart 0's MTIP and MSIP levels drive the corresponding
-machine interrupt inputs. The platform currently advances `mtime` once per SoC
-clock; a later clock-rate adapter can replace that explicit tick policy. These
-SoCs currently expose no external interrupt-controller input: supervisor and
-external interrupt lines remain low until a platform interrupt device exists.
+machine interrupt inputs. The UART window occupies
+`0x10000000..0x10000007`; every SoC exposes its RX, TX, and interrupt signals
+through `SoCUartInterface`. The UART interrupt is intentionally not wired into
+RV5Stage until an external interrupt controller is present. The platform
+currently advances `mtime` once per SoC clock; a later clock-rate adapter can
+replace that explicit tick policy. Supervisor and external interrupt lines
+therefore remain low.
 
-The one RN-I and three RN-F relationships reuse one physical single-router topology
+The RN-I, RN-F, and two subordinate relationships reuse one physical single-router topology
 but independently compile validation, route keys, buffering, and allocation for
-the four CHI channel planes. REQ is 4-to-2, RSP and DAT are 6-to-6, and SNP is
-1-to-3 because all three RN-Fs receive snoops. Router arity therefore follows
+the four CHI channel planes. REQ is 5-to-4, RSP is 8-to-7, DAT is 9-to-9, and
+SNP is 1-to-3 because all three RN-Fs receive snoops. Router arity therefore follows
 the permitted protocol paths instead of an all-node cross product.
 
 RV5Stage exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
@@ -52,7 +59,7 @@ back to the subordinate. The external SN-F must accept native 64-byte reads and
 writes, so this direct path needs no fragmenter.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
 HN-I, re-enter the same physical fabric through the Home's subordinate-side
-attachment, and terminate at the CHI-native ACLINT SN-I attachment.
+attachment, and terminate at either the CHI-native ACLINT or UART SN-I attachment.
 Both paths are derived from one physical-region table. Each region pairs
 RISC-V read, write, execute, cacheability, and atomic attributes with its CHI
 Home; the SoC derives the `CHIHomeMap` from those same entries. Requests outside
@@ -63,7 +70,7 @@ The FESVR implementation and generated executable harness remain owned by
 
 ## MiniSoC
 
-`SimpleSoCFabric` factors the processor, Home module, NoC, and ACLINT from the
+`SimpleSoCFabric` factors the processor, Home module, NoC, ACLINT, and UART from the
 final memory termination, and accepts that Home as an ordinary host circuit
 parameter. `SimpleSoCParams` couples that fabric contract to the inclusive LLC
 geometry. The default selects a 64-set, four-way blocking LLC and exports
@@ -96,7 +103,7 @@ compact runs of like tiles:
 ```rhm
 def layout = tile_grid:
   row [llc(4)]
-  row [host, aclint, transit(2)]
+  row [host, device_home, aclint, uart]
   row [rv5stage(4)]
   row [rv5stage(4)]
 ```
@@ -111,18 +118,17 @@ accepts that configuration directly as `TiledSoC(config)`. Tile occurrences
 therefore carry their placement and component parameters together instead of
 depending on parallel global arrays. The default `tiled_soc_config` preserves
 the repository's 4x4 system, while the focused hierarchy test also elaborates a
-2x3 system from the same pipeline.
+2x4 system from the same pipeline.
 
 The default pure plan places eight `RV5StageTile`s in the lower two rows, four
 service routers in the middle row, and four `LLCTile`s in the upper row.
-One service router colocates the shared eight-hart ACLINT with both sides of
-its HN-I, another owns the external host RN-F, and the other two are
-transit-only. The HN requester side, HN subordinate side, and ACLINT SN-I are
-independent local attachments to the same router rather than a direct
-HN-to-device wire. The system
+The middle row contains the external host RN-F, a `DeviceHomeTile` with both
+sides of the shared HN-I, an `AclintTile`, and a `UartTile`. The HN subordinate
+side reaches both device SN-Is through the same CHI mesh rather than direct
+wires. The system
 allocates 16 RN-F NodeIDs for the eight L1I/L1D pairs, eight RN-I NodeIDs for
-uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, and
-one ACLINT SN-I.
+uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, one
+ACLINT SN-I, and one UART SN-I.
 
 Four 8 KiB banks cover `0x80000000` through `0x80007fff` with 64-byte
 cache-line striping. Each LLC tile contains a 16-set, four-way cache, giving
@@ -133,15 +139,15 @@ address while retaining the complete global line address as its tag. Its
 subordinate projector then maps sparse global bank addresses into the dense
 local backing RAM before fragmentation. The 16 coherent requester
 endpoints plus the host RN-F connect to all four HN-Fs, while the eight uncached
-requester endpoints connect to the ACLINT HN-I and its subordinate side
-connects to the ACLINT SN-I. Together they compile 77 REQ, 153 RSP, 68 SNP,
-and 154 DAT routes before any hardware elaborates.
+requester endpoints connect to the device HN-I and its subordinate side
+connects to both SN-Is. Together they compile 78 REQ, 154 RSP, 68 SNP, and 156
+DAT routes before any hardware elaborates.
 
 Each tile owns one `CHIRouter`, which contains the independent REQ/RSP/SNP/DAT
 `SimpleRouterFamily` instances and site-keyed CHI adapters. Every RV5Stage tile
 uses one shared RTL specialization, every LLC tile uses another, and the
-service row adds one `AclintTile`, one `HostTile`, and one transit
-specialization. Their implementations and parameter contracts live under
+service row adds one `DeviceHomeTile`, one `AclintTile`, one `UartTile`, and
+one `HostTile` specialization. Their implementations and parameter contracts live under
 [`tiles/`](tiles/). The parent drives one constant identity bundle per occurrence
 containing its router site, hart ID, endpoint NodeIDs, striped service base, and
 local RAM base; tiles
@@ -149,9 +155,9 @@ contain no system-wide identity table or runtime routing-mode selector. A
 `RV5StageTile` attaches one RV5Stage's two RN-F ports and its RN-I device port. A
 `LLCTile` attaches one blocking `CHIInclusiveHNF` and keeps its address
 projector, transfer fragmenter, and CHIRam on the HN's direct subordinate side.
-The ACLINT HN-I is reachable only through the uncached RN-I routes; its MSIP and
-MTIP vectors and shared `mtime` value return directly to their corresponding
-RV5Stage tiles.
+The device HN-I is reachable only through the uncached RN-I routes. The ACLINT's MSIP and MTIP
+vectors and shared `mtime` value return directly to their corresponding
+RV5Stage tiles, while the UART tile passes its serial boundary to the SoC.
 
 Every tile exposes the family's uniform maximum of four incoming and four
 outgoing physical links, each bundling the independent REQ/RSP/SNP/DAT

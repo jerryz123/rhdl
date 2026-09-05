@@ -1,11 +1,12 @@
 #lang rhodium
-// Defines the small self-contained SoC with a coherent on-chip CHI RAM.
+// Defines the small self-contained SoC with on-chip RAM and shared ACLINT/UART devices.
 
 import:
   lib("chi/main.rhdl") open
   lib("cores/rv5stage/cache.rhdl").RV5StageCacheConfig
   lib("socs/simple-soc.rhdl") as simple
   lib("socs/host-interface.rhdl").SoCHostInterface
+  lib("socs/peripherals.rhdl").SoCUartInterface
 
 def mini_soc_memory_base = 0x80000000
 def mini_soc_memory_bytes = 0x10000
@@ -24,6 +25,7 @@ sync_circuit MiniSoC(params :: simple.SimpleSoCFabricParams = mini_soc_fabric_pa
                      ~icache: instruction_cache :: RV5StageCacheConfig = mini_soc_l1_cache_config,
                      ~dcache: data_cache :: RV5StageCacheConfig = mini_soc_l1_cache_config):
   interface host(SoCHostInterface(params.flit), ~role: soc)
+  interface uart(SoCUartInterface(), ~role: soc)
 
   inst fabric(simple.SimpleSoCFabric(params,
                                      ~icache: instruction_cache,
@@ -31,6 +33,7 @@ sync_circuit MiniSoC(params :: simple.SimpleSoCFabricParams = mini_soc_fabric_pa
   inst ram(CHIRam(params.ram_config))
 
   host <=> fabric.host
+  uart <=> fabric.uart
   fabric.memory <=> ram.port
   ram.identity <== CHIRamIdentity(params.flit):
     node_id: bits(params.memory_node.node_id, params.flit.node_id_width)

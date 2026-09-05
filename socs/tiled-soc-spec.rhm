@@ -9,7 +9,9 @@ export:
   RV5StageTileSpec
   LLCTileSpec
   HostTileSpec
+  DeviceHomeTileSpec
   AclintTileSpec
+  UartTileSpec
   TransitTileSpec
   TiledTileSpec
   TiledTileCell
@@ -21,7 +23,9 @@ export:
   rv5stage_tile
   llc_tile
   host_tile
+  device_home_tile
   aclint_tile
+  uart_tile
   transit_tile
   repeat_tiled_tile
   tile_grid
@@ -29,16 +33,20 @@ export:
 class RV5StageTileSpec()
 class LLCTileSpec()
 class HostTileSpec()
+class DeviceHomeTileSpec()
 class AclintTileSpec()
+class UartTileSpec()
 class TransitTileSpec()
 
 annot.macro 'TiledTileSpec':
-  'RV5StageTileSpec || LLCTileSpec || HostTileSpec || AclintTileSpec || TransitTileSpec'
+  'RV5StageTileSpec || LLCTileSpec || HostTileSpec || DeviceHomeTileSpec || AclintTileSpec || UartTileSpec || TransitTileSpec'
 
 def rv5stage_tile = RV5StageTileSpec()
 def llc_tile = LLCTileSpec()
 def host_tile = HostTileSpec()
+def device_home_tile = DeviceHomeTileSpec()
 def aclint_tile = AclintTileSpec()
+def uart_tile = UartTileSpec()
 def transit_tile = TransitTileSpec()
 
 fun repeat_tiled_tile(tile :: TiledTileSpec,
@@ -69,8 +77,12 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
     cells.filter(~keep: fun (cell): cell.tile is_a LLCTileSpec)
   property hosts:
     cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec)
+  property device_homes:
+    cells.filter(~keep: fun (cell): cell.tile is_a DeviceHomeTileSpec)
   property aclints:
     cells.filter(~keep: fun (cell): cell.tile is_a AclintTileSpec)
+  property uarts:
+    cells.filter(~keep: fun (cell): cell.tile is_a UartTileSpec)
   property transits:
     cells.filter(~keep: fun (cell): cell.tile is_a TransitTileSpec)
 
@@ -86,15 +98,21 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
     def rv5stage_count = cells.filter(~keep: fun (cell): cell.tile is_a RV5StageTileSpec).length()
     def llc_count = cells.filter(~keep: fun (cell): cell.tile is_a LLCTileSpec).length()
     def host_count = cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec).length()
+    def device_home_count = cells.filter(~keep: fun (cell): cell.tile is_a DeviceHomeTileSpec).length()
     def aclint_count = cells.filter(~keep: fun (cell): cell.tile is_a AclintTileSpec).length()
+    def uart_count = cells.filter(~keep: fun (cell): cell.tile is_a UartTileSpec).length()
     unless rv5stage_count > 0
     | error(~who: #'TileGrid, "tile grid requires at least one RV5Stage tile")
     unless llc_count > 0
     | error(~who: #'TileGrid, "tile grid requires at least one LLC tile")
     unless host_count == 1
     | error(~who: #'TileGrid, "tile grid requires exactly one host tile")
+    unless device_home_count == 1
+    | error(~who: #'TileGrid, "tile grid requires exactly one device Home tile")
     unless aclint_count == 1
     | error(~who: #'TileGrid, "tile grid requires exactly one ACLINT tile")
+    unless uart_count == 1
+    | error(~who: #'TileGrid, "tile grid requires exactly one UART tile")
     super(rows)
 
   method tile_at(x :: Nat, y :: Nat) :: TiledTileSpec:
@@ -106,23 +124,26 @@ class TiledNodeIdPlan(rv5stage_coherent_base :: Nat,
                       rv5stage_device_base :: Nat,
                       host :: Nat,
                       llc_home_base :: Nat,
-                      aclint_home :: Nat,
+                      device_home :: Nat,
                       backing_memory_base :: Nat,
-                      aclint_subordinate :: Nat):
+                      aclint_subordinate :: Nat,
+                      uart_subordinate :: Nat):
   constructor (~rv5stage_coherent_base: rv5stage_coherent_base :: Nat,
                ~rv5stage_device_base: rv5stage_device_base :: Nat,
                ~host: host :: Nat,
                ~llc_home_base: llc_home_base :: Nat,
-               ~aclint_home: aclint_home :: Nat,
+               ~device_home: device_home :: Nat,
                ~backing_memory_base: backing_memory_base :: Nat,
-               ~aclint_subordinate: aclint_subordinate :: Nat):
+               ~aclint_subordinate: aclint_subordinate :: Nat,
+               ~uart_subordinate: uart_subordinate :: Nat):
     super(rv5stage_coherent_base,
           rv5stage_device_base,
           host,
           llc_home_base,
-          aclint_home,
+          device_home,
           backing_memory_base,
-          aclint_subordinate)
+          aclint_subordinate,
+          uart_subordinate)
 
 class StripedMemorySpec(base :: Nat,
                         bank_bytes :: PosInt,
@@ -171,13 +192,17 @@ meta:
     | 'llc($count)': 'repeat_tiled_tile(llc_tile, $count)'
     | 'host': '[host_tile]'
     | 'host($count)': 'repeat_tiled_tile(host_tile, $count)'
+    | 'device_home': '[device_home_tile]'
+    | 'device_home($count)': 'repeat_tiled_tile(device_home_tile, $count)'
     | 'aclint': '[aclint_tile]'
     | 'aclint($count)': 'repeat_tiled_tile(aclint_tile, $count)'
+    | 'uart': '[uart_tile]'
+    | 'uart($count)': 'repeat_tiled_tile(uart_tile, $count)'
     | 'transit': '[transit_tile]'
     | 'transit($count)': 'repeat_tiled_tile(transit_tile, $count)'
     | ~else:
         syntax_meta.error(
-          "expected rv5stage, llc, host, aclint, or transit tile",
+          "expected rv5stage, llc, host, device_home, aclint, uart, or transit tile",
           entry
         )
 

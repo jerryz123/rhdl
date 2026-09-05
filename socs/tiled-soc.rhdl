@@ -1,15 +1,17 @@
 #lang rhodium
-// Composes a compiled TiledSoC configuration into a structural CHI mesh.
+// Composes a compiled TiledSoC with split device-home, ACLINT, and UART mesh tiles.
 
 import:
   lib("chi/main.rhdl") open
   lib("cores/rv5stage/chi.rhdl").RV5StageCHIIdentity
   lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
   lib("devices/aclint.rhdl").AclintIdentity
+  lib("devices/uart16550.rhdl").Uart16550Identity
   lib("riscv/isa/fp-profile.rhm") open
   "tiled-soc-config.rhdl" as configuration
   "tiles/main.rhdl" open
   "host-interface.rhdl".SoCHostInterface
+  "peripherals.rhdl".SoCUartInterface
 
 sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.tiled_soc_config,
                       ~floating_point: profile :: FloatingPointProfile = DefaultFloatingPointProfile,
@@ -18,6 +20,7 @@ sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.til
   def p = config.flit
   def site_width = config.router_configs.req.route_decoder.site_width
   interface host(SoCHostInterface(p), ~role: soc)
+  interface uart(SoCUartInterface(), ~role: soc)
   output faults: Vec(config.rv5stages.length(), Bool)
 
   def rv5stages = for InstanceArray (entry in config.rv5stages):
@@ -27,7 +30,9 @@ sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.til
   def transits = for InstanceArray (entry in config.transits):
     inst transit(TransitTile(entry.tile_params))
   inst host_tile(HostTile(config.host.tile_params))
+  inst device_home(DeviceHomeTile(config.device_home.tile_params))
   inst aclint(AclintTile(config.aclint.tile_params))
+  inst uart_device(UartTile(config.uart.tile_params))
 
   for (index in 0..config.rv5stages.length()):
     def entry = config.rv5stages[index]
@@ -71,12 +76,19 @@ sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.til
     transits[index].site_key <== bits(plan.site_key(entry.placement.router), site_width)
   host_tile.site_key <== bits(plan.site_key(config.host.placement.router), site_width)
   host.memory <=> host_tile.host
+  device_home.site_key <== bits(plan.site_key(config.device_home.placement.router), site_width)
   aclint.identity <== AclintTileIdentity(p, site_width):
     site_key: bits(plan.site_key(config.aclint.placement.router), site_width)
     aclint: (AclintIdentity(p):
                node_id: bits(config.aclint.device.node.node_id, p.node_id_width)
                base_address: bits(config.aclint.device.base_address, p.request_address_width))
   aclint.tick <== Bool(#true)
+  uart_device.identity <== UartTileIdentity(p, site_width):
+    site_key: bits(plan.site_key(config.uart.placement.router), site_width)
+    uart: (Uart16550Identity(p):
+             node_id: bits(config.uart.device.node.node_id, p.node_id_width)
+             base_address: bits(config.uart.device.base_address, p.request_address_width))
+  uart <=> uart_device.uart
   faults <== vec(for List (index in 0..config.rv5stages.length()): rv5stages[index].fault)
 
   def tiles = (
@@ -93,9 +105,15 @@ sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.til
     CHIRouterEndpoints(plan.site_key(config.host.placement.router),
                        host_tile.incoming_links,
                        host_tile.outgoing_links),
+    CHIRouterEndpoints(plan.site_key(config.device_home.placement.router),
+                       device_home.incoming_links,
+                       device_home.outgoing_links),
     CHIRouterEndpoints(plan.site_key(config.aclint.placement.router),
                        aclint.incoming_links,
-                       aclint.outgoing_links)
+                       aclint.outgoing_links),
+    CHIRouterEndpoints(plan.site_key(config.uart.placement.router),
+                       uart_device.incoming_links,
+                       uart_device.outgoing_links)
   ] ++ (
     for List (index in 0..config.llcs.length()):
       CHIRouterEndpoints(plan.site_key(config.llcs[index].placement.router),

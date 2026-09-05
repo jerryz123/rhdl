@@ -1,20 +1,23 @@
 #lang rhodium
-// Wraps TiledSoC with the FESVR requester used by executable simulations.
+// Wraps TiledSoC with FESVR while passing its synthesizable UART pins through.
 
 import:
   lib("riscv/isa/xlen.rhm").XLen
   lib("socs/tiled-soc.rhdl") as tiled
   lib("socs/tiled-soc-config.rhdl") as config
+  lib("socs/peripherals.rhdl").SoCUartInterface
   "fesvr/direct-memory-htif.rhdl".FesvrRequester
 
 sync_circuit SoCHarness(soc_config :: config.TiledSoCConfig = config.tiled_soc_config):
   output exit: Bits(32)
+  interface uart(SoCUartInterface(), ~role: soc)
 
   inst requester(FesvrRequester(XLen.X64, soc_config.flit, soc_config.host.node, soc_config.home_map))
   inst soc(tiled.TiledSoC(soc_config))
 
   requester.port <=> soc.host.memory
   requester.start |> soc.host.start
+  uart <=> soc.uart
   exit <== requester.exit
 
 def design = elaborate(SoCHarness())

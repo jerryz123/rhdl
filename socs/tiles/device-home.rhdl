@@ -1,0 +1,32 @@
+#lang rhodium
+// Attaches both sides of the shared device HN-I to one CHI service-row router.
+
+import:
+  lib("chi/main.rhdl") open
+
+class DeviceHomeTileParams(home :: CHIHNIParams,
+                           router :: CHIRouterParams):
+  implements StableCircuitParam
+
+sync_circuit DeviceHomeTile(params :: DeviceHomeTileParams):
+  def router_params = params.router
+  def p = params.home.flit
+  def site_width = router_params.routers.req.route_decoder.site_width
+  def Link = chi_noc_link_type(router_params)
+
+  input site_key: Bits(site_width)
+  interface incoming_links[router_params.routers.physical.ingress_count](Link, ~role: destination)
+  interface outgoing_links[router_params.routers.physical.egress_count](Link, ~role: source)
+
+  inst home(CHIHNI(params.home))
+  inst router(CHIRouter(router_params))
+
+  router.site_key <== site_key
+  home.port.requester <=> router.hni_requester_local[0]
+  home.port.subordinate <=> router.hn_subordinate_local[0]
+  router.incoming_links <=> incoming_links
+  router.outgoing_links <=> outgoing_links
+
+export:
+  DeviceHomeTileParams
+  DeviceHomeTile
