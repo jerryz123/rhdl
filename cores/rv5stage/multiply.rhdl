@@ -5,7 +5,7 @@ import:
   "../multiplier.rhdl" open
   "decode/multiply-ctrl.rhdl" open
   "../../riscv/isa/xlen.rhm" open
-  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow.rhdl") open
 
 bundle RV5StageMultiplyIssue(xlen :: XLen):
   left: Bits(xlen.width)
@@ -31,13 +31,14 @@ sync_circuit RV5StageMultiplier(xlen :: XLen):
   reg word_result(Bool)
 
   available <== multiplier.request.ready
-  multiplier.request.valid <== issue.valid
-  multiplier.request.bits <== MultiplierRequest(width):
-    left: issue.bits.left
-    right: issue.bits.right
-    mode: issue.bits.control.mode
+  (
+    issue |> to_decoupled() |> map_flow(issued):
+      MultiplierRequest(width):
+        left: issued.left
+        right: issued.right
+        mode: issued.control.mode
+  ) |> multiplier.request
 
-  assert(!issue.valid ||| available, "rv5stage_multiplier_issue_available")
   def issue_fire = issue.valid
   when issue_fire:
     destination <== issue.bits.rd
@@ -49,11 +50,12 @@ sync_circuit RV5StageMultiplier(xlen :: XLen):
   def word_result_value = product[0..32].into(SInt(32)).sext(64).as_bits()
   def selected_result = if xlen == XLen.X64 | mux(word_result, word_result_value, full_result) | full_result
 
-  completion.valid <== multiplier.response.valid
-  completion.bits <== RV5StageMultiplyCompletion(xlen):
-    rd: destination
-    value: selected_result
-  multiplier.response.ready <== completion.ready
+  (
+    multiplier.response |> map_flow(~stable: #true, _product):
+      RV5StageMultiplyCompletion(xlen):
+        rd: destination
+        value: selected_result
+  ) |> completion
 
 export:
   RV5StageMultiplyIssue

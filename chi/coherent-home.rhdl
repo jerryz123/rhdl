@@ -3,7 +3,7 @@
 
 import:
   lib("rhodium/std/bits.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow.rhdl") open
   lib("chi/params.rhdl") open
   lib("chi/flits.rhdl") open
   lib("chi/protocol.rhdl") open
@@ -638,15 +638,17 @@ sync_circuit CHIHNF(config :: CHIHNFConfig):
   def subordinate_data_fire = subordinate.dat.request.fire()
 
   def forwarding_read = phase === CHIHNFPhase.ForwardReadData
-  requester.response_data.valid <== forwarding_read & subordinate.dat.response.valid
-  requester.response_data.bits <== chi_hnf_upstream_read_data(
-    p,
-    home_id,
-    request,
-    requester_is_rnf,
-    subordinate.dat.response.bits
-  )
-  subordinate.dat.response.ready <== forwarding_read & requester.response_data.ready
+  (
+    subordinate.dat.response
+      |> gate_flow(forwarding_read)
+      |> map_flow(data => chi_hnf_upstream_read_data(
+          p,
+          home_id,
+          request,
+          requester_is_rnf,
+          data
+        ))
+  ) |> requester.response_data
   def read_data_fire = subordinate.dat.response.fire()
   def read_data_id = one_hot(subordinate.dat.response.bits.data_id).as_bits()
   def next_received_data_ids = received_data_ids ||| read_data_id

@@ -8,6 +8,7 @@ import:
   "uncached-protocol.rhdl" open
   "../../riscv/isa/xlen.rhm".XLen
   "../../riscv/rtl/pma.rhdl" open
+  lib("rhodium/std/flow.rhdl") open
 
 sync_circuit RV5StageMemoryRouter(xlen :: XLen,
                                   physical_map :: RiscvPhysicalMemoryMap):
@@ -36,16 +37,19 @@ sync_circuit RV5StageMemoryRouter(xlen :: XLen,
   def request_is_uncached = !physical.cacheable
   def cache_available = uncached.drained
   def uncached_available = cache.drained
-  cache.request.valid <== core.request.valid & request_permitted & !request_is_uncached & cache_available
-  cache.request.bits <== request
-  uncached.request.valid <== core.request.valid & request_permitted & request_is_uncached & uncached_available
-  uncached.request.bits <== RV5StageUncachedDataReq(xlen):
-    request: request
-    device: physical.device
-  def selected_ready = mux(request_is_uncached,
-                           uncached_available & uncached.request.ready,
-                           cache_available & cache.request.ready)
-  core.request.ready <== !request_permitted ||| selected_ready
+  def Array(cache_requests, uncached_requests) = (
+    core.request
+      |> filter_flow(_request => request_permitted)
+      |> demux_flow(2, _request => request_is_uncached.as_bits())
+  )
+  cache_requests |> gate_flow(cache_available) |> cache.request
+  (
+    uncached_requests
+      |> gate_flow(uncached_available)
+      |> map_flow(request => RV5StageUncachedDataReq(xlen)):
+          request: request
+          device: physical.device
+  ) |> uncached.request
   core.request_fault <== core.request.valid & request_permitted & mux(
     request_is_uncached,
     uncached.request_fault,

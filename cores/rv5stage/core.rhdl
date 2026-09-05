@@ -1,5 +1,5 @@
 #lang rhodium
-// Implements RV5Stage's five-stage core with explicit ready-valid wiring.
+// Implements RV5Stage's five-stage core with composable flows and explicit state logic.
 
 import:
   "../alu.rhdl" open
@@ -33,10 +33,7 @@ import:
   "../../riscv/rtl/instruction-fields.rhdl" open
   "../../riscv/rtl/floating-point.rhdl" open
   lib("rhodium/std/bits.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl") open
-  lib("rhodium/std/flow/arbiter.rhdl") open
-  lib("rhodium/std/flow/pipe.rhdl") open
-  lib("rhodium/std/flow/queue.rhdl") open
+  lib("rhodium/std/flow.rhdl") open
   lib("rhodium/std/scoreboard.rhdl") open
 
 sync_circuit RV5StageCore(xlen :: XLen,
@@ -95,7 +92,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   csrs.interrupts <== interrupts
   csrs.hart_id <== hart_id
   csrs.time_counter <== time_counter
-  fp.state_update <=> csrs.fp_update
+  fp.state_update |> csrs.fp_update
 
   // Name the pipeline boundaries once so later sections can be presented in
   // stage order while still observing downstream occupancy and results.
@@ -117,10 +114,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def writeback_bypass_link :: Handle = interface_link(Valid(RV5StageBypass(xlen)))
   def scoreboard_set_link :: Handle = interface_link(Valid(Bits(5)))
   def scoreboard_clear_link :: Handle = interface_link(Valid(Bits(5)))
-  scoreboard.set.valid <== scoreboard_set_link.right.valid
-  scoreboard.set.bits <== scoreboard_set_link.right.bits
-  scoreboard.clear.valid <== scoreboard_clear_link.right.valid
-  scoreboard.clear.bits <== scoreboard_clear_link.right.bits
+  scoreboard_set_link.right |> scoreboard.set
+  scoreboard_clear_link.right |> scoreboard.clear
   def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
   translation_flush <== csrs.translation_flush
   def fence_resume_pc = commit.bits.resume_pc
@@ -129,12 +124,22 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def memory_stage_valid = memory.valid & !commit_redirect
   def memory_exception_event = memory_stage_valid & memory.bits.exception_valid
   def memory_redirect = memory_stage_valid & memory.bits.redirect_valid & !memory.bits.exception_valid
-  redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| memory_redirect
-  redirect_link.left.bits <== mux(
-    csrs.redirect.valid,
-    csrs.redirect.bits,
-    mux(fence_commit, fence_resume_pc, memory.bits.resume_pc)
+  def fence_redirect = inject_flow(
+    Valid(Bits(width)),
+    ~valid: fence_commit,
+    ~bits: fence_resume_pc
   )
+  def memory_redirect_flow = inject_flow(
+    Valid(Bits(width)),
+    ~valid: memory_redirect,
+    ~bits: memory.bits.resume_pc
+  )
+  def redirect_sources = Array(
+    csrs.redirect,
+    fence_redirect,
+    memory_redirect_flow
+  )
+  redirect_sources |> valid_arbiter() |> redirect_link.left
 
   // Fetch (IF) assembles variable-length instructions from aligned cache words.
   // Redirects and faults discard both partially assembled and outstanding data.
@@ -145,24 +150,28 @@ sync_circuit RV5StageCore(xlen :: XLen,
   reg started(~init: Bool(#false))
   reg waiting_for_interrupt(~init: Bool(#false))
   reg architectural_pc(~init: zero)
-  start.ready <== !started & !(faulted ||| memory_exception_event)
-  def start_fire = start.fire()
+  def accepted_start = (
+    start
+      |> gate_flow(!started & !(faulted ||| memory_exception_event))
+      |> to_valid()
+  )
+  def start_fire = accepted_start.valid
   def instruction_alignment = if compressed_enabled | 2 | 4
-  def start_fault = start_fire & !is_aligned(start.bits, instruction_alignment)
+  def start_fault = start_fire & !is_aligned(accepted_start.bits, instruction_alignment)
   def fetch_valid = started & !squash & !csrs.interrupt_request & !waiting_for_interrupt
   fetch.active <== fetch_valid
   fetch.flush <== start_fault ||| memory_exception_event
   fetch.restart_valid <== redirect_link.right.valid ||| (start_fire & !start_fault)
-  fetch.restart_pc <== mux(redirect_link.right.valid, redirect_link.right.bits, start.bits)
+  fetch.restart_pc <== mux(redirect_link.right.valid, redirect_link.right.bits, accepted_start.bits)
   fetch.invalidate_all <== fence_i_commit
   fetch.memory <=> instruction_access
-  fetch.fetched <=> if_id_pipe.ingress
+  fetch.fetched |> if_id_pipe.ingress
   when start_fire:
     started <== Bool(#true)
   when (csrs.redirect.valid):
     architectural_pc <== csrs.redirect.bits
   elsewhen start_fire:
-    architectural_pc <== start.bits
+    architectural_pc <== accepted_start.bits
   elsewhen (commit.valid & !commit.bits.exception_valid):
     architectural_pc <== commit.bits.resume_pc
 
@@ -289,47 +298,50 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
     scoreboard_waw_hazard ||| fp_source_hazard ||| fp_destination_hazard
   ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| waiting_for_interrupt ||| csrs.interrupt_request ||| exception_in_flight
-  if_id_pipe.egress.ready <== squash ||| (id_ex_pipe.ingress.ready & !pipeline_hazard)
-  id_ex_pipe.ingress.valid <== decode_valid & !pipeline_hazard
-  id_ex_pipe.ingress.bits <== DecodeExecute(xlen):
-    pc: decode_bits.pc
-    instruction: decode_bits.instruction
-    raw_instruction: decode_bits.raw_instruction
-    sequential_pc: decode_bits.sequential_pc
-    alu_control: control.alu
-    operand_left: control.operand.left
-    operand_right: control.operand.right
-    branch_control: control.branch.resolver
-    target_from_rs1: control.branch.target_from_rs1
-    memory_operation: control.memory.access
-    memory_atomic: control.memory.atomic
-    memory_width: control.memory.width
-    memory_unsigned: control.memory.unsigned
-    multiply_control: control.multiply
-    divide_control: control.divide
-    floating_point_valid: control.floating_point_valid
-    floating_point_control: control.floating_point
-    floating_point_rounding_mode_valid: fp_rounding.valid
-    floating_point_rounding_mode: fp_rounding.mode
-    writeback_enable: control.writeback.enable
-    writeback_source: control.writeback.source
-    system: control.system
-    fence: control.fence
-    illegal: decode_bits.compressed_illegal ||| !decoder.valid ||| (
-      control.floating_point_valid & (
-        !csrs.fp_enabled ||| (
-          control.floating_point.execution.uses_rounding_mode & !fp_rounding.valid
-        )
-      )
-    )
-    instruction_page_fault: if_id_pipe.egress.bits.instruction_page_fault
-    instruction_access_fault: if_id_pipe.egress.bits.instruction_access_fault
-    instruction_fault_address: if_id_pipe.egress.bits.instruction_fault_address
-    immediate: decoded_immediate
-    rs1: rs1
-    rs2: rs2
-    rd: rd
-    frs3: frs3
+  (
+    if_id_pipe.egress
+      |> filter_flow(_fetched => !squash)
+      |> gate_flow(!pipeline_hazard)
+      |> map_flow(fetched => DecodeExecute(xlen)):
+          pc: fetched.pc
+          instruction: fetched.instruction
+          raw_instruction: fetched.raw_instruction
+          sequential_pc: fetched.sequential_pc
+          alu_control: control.alu
+          operand_left: control.operand.left
+          operand_right: control.operand.right
+          branch_control: control.branch.resolver
+          target_from_rs1: control.branch.target_from_rs1
+          memory_operation: control.memory.access
+          memory_atomic: control.memory.atomic
+          memory_width: control.memory.width
+          memory_unsigned: control.memory.unsigned
+          multiply_control: control.multiply
+          divide_control: control.divide
+          floating_point_valid: control.floating_point_valid
+          floating_point_control: control.floating_point
+          floating_point_rounding_mode_valid: fp_rounding.valid
+          floating_point_rounding_mode: fp_rounding.mode
+          writeback_enable: control.writeback.enable
+          writeback_source: control.writeback.source
+          system: control.system
+          fence: control.fence
+          illegal: fetched.compressed_illegal ||| !decoder.valid ||| (
+            control.floating_point_valid & (
+              !csrs.fp_enabled ||| (
+                control.floating_point.execution.uses_rounding_mode & !fp_rounding.valid
+              )
+            )
+          )
+          instruction_page_fault: fetched.instruction_page_fault
+          instruction_access_fault: fetched.instruction_access_fault
+          instruction_fault_address: fetched.instruction_fault_address
+          immediate: decoded_immediate
+          rs1: rs1
+          rs2: rs2
+          rd: rd
+          frs3: frs3
+  ) |> id_ex_pipe.ingress
 
   // Execute (EX) consumes the registered ID/EX token. Forwarding is live and
   // sampled together with the other effects when Execute transfers.
@@ -548,31 +560,37 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   // Memory advances every instruction into WB; exception payloads have their
   // ordinary side effects disabled. No instruction commits at this boundary.
-  mem_wb_pipe.ingress.valid <== memory_stage_valid
-  mem_wb_pipe.ingress.bits <== MemoryWriteback(xlen):
-    pc: memory.bits.pc
-    resume_pc: memory.bits.resume_pc
-    instruction: memory.bits.instruction
-    writeback_source: memory.bits.writeback_source
-    write_enable: memory.bits.writeback_enable
-    rd: memory.bits.rd
-    value: memory.bits.result
-    multiply_issue: memory.bits.multiply_issue
-    divide_issue: memory.bits.divide_issue
-    system: memory.bits.system
-    fence: memory.bits.fence
-    csr_address: memory.bits.csr_address
-    csr_source: memory.bits.csr_source
-    exception_valid: memory.bits.exception_valid
-    exception_cause: memory.bits.exception_cause
-    exception_value: memory.bits.exception_value
+  (
+    memory
+      |> filter_valid(_memory => !commit_redirect)
+      |> map_valid(memory_bits => MemoryWriteback(xlen)):
+          pc: memory_bits.pc
+          resume_pc: memory_bits.resume_pc
+          instruction: memory_bits.instruction
+          writeback_source: memory_bits.writeback_source
+          write_enable: memory_bits.writeback_enable
+          rd: memory_bits.rd
+          value: memory_bits.result
+          multiply_issue: memory_bits.multiply_issue
+          divide_issue: memory_bits.divide_issue
+          system: memory_bits.system
+          fence: memory_bits.fence
+          csr_address: memory_bits.csr_address
+          csr_source: memory_bits.csr_source
+          exception_valid: memory_bits.exception_valid
+          exception_cause: memory_bits.exception_cause
+          exception_value: memory_bits.exception_value
+  ) |> mem_wb_pipe.ingress
 
-  memory_bypass_link.left.valid <== memory.valid & memory.bits.writeback_enable & !deferred_writeback(
-    memory.bits.writeback_source
-  ) & (memory.bits.writeback_source =/= WritebackSelect.Csr) & or_reduce(memory.bits.rd)
-  memory_bypass_link.left.bits <== RV5StageBypass(xlen):
-    rd: memory.bits.rd
-    value: memory.bits.result
+  (
+    memory
+      |> filter_valid(memory_bits => memory_bits.writeback_enable & !deferred_writeback(
+          memory_bits.writeback_source
+        ) & (memory_bits.writeback_source =/= WritebackSelect.Csr) & or_reduce(memory_bits.rd))
+      |> map_valid(memory_bits => RV5StageBypass(xlen)):
+          rd: memory_bits.rd
+          value: memory_bits.result
+  ) |> memory_bypass_link.left
 
   // Writeback (WB) is the ordered commit point. Deferred loads and arithmetic
   // mark their destinations busy here; immediate and CSR results update the
@@ -602,39 +620,52 @@ sync_circuit RV5StageCore(xlen :: XLen,
   elsewhen (pending_exception_valid & csrs.redirect.valid):
     pending_exception_valid <== Bool(#false)
 
-  scoreboard_set_link.left.valid <== commit.valid & deferred_writeback(
-    commit.bits.writeback_source
-  ) & commit.bits.write_enable & or_reduce(commit.bits.rd)
-  scoreboard_set_link.left.bits <== commit.bits.rd
+  (
+    commit
+      |> filter_valid(committed => deferred_writeback(committed.writeback_source) & (
+          committed.write_enable
+        ) & or_reduce(committed.rd))
+      |> map_valid(committed => committed.rd)
+  ) |> scoreboard_set_link.left
 
-  writeback_bypass_link.left.valid <== commit.valid & !deferred_writeback(
-    commit.bits.writeback_source
-  ) & (commit.bits.writeback_source =/= WritebackSelect.Csr) & commit.bits.write_enable & or_reduce(commit.bits.rd)
-  writeback_bypass_link.left.bits <== RV5StageBypass(xlen):
-    rd: commit.bits.rd
-    value: commit.bits.value
+  (
+    commit
+      |> filter_valid(committed => !deferred_writeback(committed.writeback_source) & (
+          committed.writeback_source =/= WritebackSelect.Csr
+        ) & committed.write_enable & or_reduce(committed.rd))
+      |> map_valid(committed => RV5StageBypass(xlen)):
+          rd: committed.rd
+          value: committed.value
+  ) |> writeback_bypass_link.left
 
-  commit_write.valid <== commit.valid & !deferred_writeback(
-    commit.bits.writeback_source
-  ) & commit.bits.write_enable & (
-    (commit.bits.writeback_source =/= WritebackSelect.Csr) ||| csrs.writeback_valid
-  )
-  commit_write.bits <== RegisterFileWrite(xlen):
-    address: commit.bits.rd
-    data: mux(
-      commit.bits.writeback_source === WritebackSelect.Csr,
-      csrs.writeback_value,
-      commit.bits.value
-    )
+  (
+    commit
+      |> filter_valid(committed => !deferred_writeback(committed.writeback_source) & (
+          committed.write_enable
+        ) & ((committed.writeback_source =/= WritebackSelect.Csr) ||| csrs.writeback_valid))
+      |> map_valid(committed => RegisterFileWrite(xlen)):
+          address: committed.rd
+          data: mux(
+            committed.writeback_source === WritebackSelect.Csr,
+            csrs.writeback_value,
+            committed.value
+          )
+  ) |> commit_write
 
-  multiplier.issue.valid <== commit.valid & (
-    commit.bits.writeback_source === WritebackSelect.Multiply
-  ) & commit.bits.write_enable & or_reduce(commit.bits.rd)
-  multiplier.issue.bits <== commit.bits.multiply_issue
-  divider.issue.valid <== commit.valid & (
-    commit.bits.writeback_source === WritebackSelect.Divide
-  ) & commit.bits.write_enable & or_reduce(commit.bits.rd)
-  divider.issue.bits <== commit.bits.divide_issue
+  (
+    commit
+      |> filter_valid(committed => (
+          committed.writeback_source === WritebackSelect.Multiply
+        ) & committed.write_enable & or_reduce(committed.rd))
+      |> map_valid(committed => committed.multiply_issue)
+  ) |> multiplier.issue
+  (
+    commit
+      |> filter_valid(committed => (
+          committed.writeback_source === WritebackSelect.Divide
+        ) & committed.write_enable & or_reduce(committed.rd))
+      |> map_valid(committed => committed.divide_issue)
+  ) |> divider.issue
 
   fp_integer_scoreboard.set.valid <== fp.issue.fire() & (
     fp.issue.bits.control.registers.destination === RV5StageFloatDestination.Integer
@@ -645,46 +676,63 @@ sync_circuit RV5StageCore(xlen :: XLen,
   // fixed-priority arbiter lets nonbackpressured L1D responses win while the
   // arithmetic units hold their irrevocable results.
   inst deferred_completion_arbiter(Arbiter(RegisterFileWrite(xlen), 4))
-  deferred_completion_arbiter.ingress[0].valid <== data_access.response.valid & (
-    data_access.response.bits.destination === RV5StageDataDestination.Integer
-  ) & or_reduce(data_access.response.bits.rd)
-  deferred_completion_arbiter.ingress[0].bits <== RegisterFileWrite(xlen):
-    address: data_access.response.bits.rd
-    data: data_access.response.bits.data
-  deferred_completion_arbiter.ingress[1].valid <== multiplier.completion.valid
-  deferred_completion_arbiter.ingress[1].bits <== RegisterFileWrite(xlen):
-    address: multiplier.completion.bits.rd
-    data: multiplier.completion.bits.value
-  multiplier.completion.ready <== deferred_completion_arbiter.ingress[1].ready
-  deferred_completion_arbiter.ingress[2].valid <== divider.completion.valid
-  deferred_completion_arbiter.ingress[2].bits <== RegisterFileWrite(xlen):
-    address: divider.completion.bits.rd
-    data: divider.completion.bits.value
-  divider.completion.ready <== deferred_completion_arbiter.ingress[2].ready
-  def fp_integer_completion = fp.completion.bits.destination === RV5StageFloatDestination.Integer
-  def fp_integer_write = fp_integer_completion & or_reduce(fp.completion.bits.rd)
-  deferred_completion_arbiter.ingress[3].valid <== fp.completion.valid & fp_integer_write
-  deferred_completion_arbiter.ingress[3].bits <== RegisterFileWrite(xlen):
-    address: fp.completion.bits.rd
-    data: fp.completion.bits.integer_value
-  fp.completion.ready <== !fp_integer_write ||| deferred_completion_arbiter.ingress[3].ready
-  deferred_completion_arbiter.egress.ready <== Bool(#true)
-
-  fp_integer_scoreboard.clear.valid <== fp.completion.fire() & fp_integer_write
-  fp_integer_scoreboard.clear.bits <== fp.completion.bits.rd
-  fp.load_completion.valid <== data_access.response.valid & (
-    data_access.response.bits.destination === RV5StageDataDestination.FloatingPoint
+  def integer_load_completion = (
+    data_access.response
+      |> filter_valid(response => (
+          response.destination === RV5StageDataDestination.Integer
+        ) & or_reduce(response.rd))
+      |> map_valid(response => RegisterFileWrite(xlen)):
+          address: response.rd
+          data: response.data
   )
-  fp.load_completion.bits <== RV5StageFpLoadCompletion(Bits(width)):
-    context: bits(0, width)
-    precision: data_access.response.bits.floating_point_precision
-    rd: data_access.response.bits.rd
-    data: if xlen == XLen.X32 | data_access.response.bits.data.zext(64) | data_access.response.bits.data
+  integer_load_completion |> to_decoupled() |> deferred_completion_arbiter.ingress[0]
+  (
+    multiplier.completion
+      |> map_flow(~stable: #true, completion => RegisterFileWrite(xlen)):
+          address: completion.rd
+          data: completion.value
+  ) |> deferred_completion_arbiter.ingress[1]
+  (
+    divider.completion
+      |> map_flow(~stable: #true, completion => RegisterFileWrite(xlen)):
+          address: completion.rd
+          data: completion.value
+  ) |> deferred_completion_arbiter.ingress[2]
+  (
+    fp.completion
+      |> filter_flow(completion => (
+          completion.destination === RV5StageFloatDestination.Integer
+        ) & or_reduce(completion.rd))
+      |> map_flow(completion => RegisterFileWrite(xlen)):
+          address: completion.rd
+          data: completion.integer_value
+  ) |> deferred_completion_arbiter.ingress[3]
+  def Array(
+    completed_register_write,
+    completed_integer_scoreboard_clear,
+    completed_fp_integer_scoreboard_clear
+  ) = deferred_completion_arbiter.egress |> to_valid() |> fork_valid(3)
+  completed_register_write |> deferred_completion_write
+  (
+    completed_integer_scoreboard_clear
+      |> filter_valid(_write => deferred_completion_arbiter.chosen =/= bits(3, 2))
+      |> map_valid(write => write.address)
+  ) |> scoreboard_clear_link.left
+  (
+    completed_fp_integer_scoreboard_clear
+      |> filter_valid(_write => deferred_completion_arbiter.chosen === bits(3, 2))
+      |> map_valid(write => write.address)
+  ) |> fp_integer_scoreboard.clear
 
-  scoreboard_clear_link.left.valid <== deferred_completion_arbiter.egress.valid & !(fp.completion.fire() & fp_integer_write)
-  scoreboard_clear_link.left.bits <== deferred_completion_arbiter.egress.bits.address
-  deferred_completion_write.valid <== deferred_completion_arbiter.egress.valid
-  deferred_completion_write.bits <== deferred_completion_arbiter.egress.bits
+  (
+    data_access.response
+      |> filter_valid(response => response.destination === RV5StageDataDestination.FloatingPoint)
+      |> map_valid(response => RV5StageFpLoadCompletion(Bits(width))):
+          context: bits(0, width)
+          precision: response.floating_point_precision
+          rd: response.rd
+          data: if xlen == XLen.X32 | response.data.zext(64) | response.data
+  ) |> fp.load_completion
 
 export:
   RV5StageCore

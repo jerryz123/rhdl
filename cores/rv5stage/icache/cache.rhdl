@@ -10,7 +10,6 @@ import:
   "../../../riscv/isa/xlen.rhm" open
   lib("rhodium/std/bits.rhdl") open
   lib("rhodium/std/read-write.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl") open
   lib("rhodium/std/sync-ram.rhdl") open
   lib("rhodium/std/flow.rhdl") open
   lib("chi/main.rhdl") open
@@ -76,9 +75,7 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   reg refill_install_index(~init: bits(0, word_index_width))
   reg outstanding(~init: bits(0, outstanding_width))
 
-  core.response.valid <== responses.egress.valid & !cache_flush
-  core.response.bits <== responses.egress.bits
-  responses.egress.ready <== core.response.ready & !cache_flush
+  responses.egress |> gate_flow(!cache_flush) |> core.response
   def outgoing_requests = chi.requests
   def outgoing_responses = chi.requester_responses
   def outgoing_data = chi.request_data
@@ -179,9 +176,11 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   // combinational request-admission path. A miss transfers its address into
   // the refill engine and blocks new requests until that transaction completes.
   def lookup_accepts_input = !cache_flush & !snoop_pending & refill.command.ready & !lookup_miss & response_capacity
-  core.request.ready <== lookup.ingress.ready & lookup_accepts_input
-  lookup.ingress.valid <== core.request.valid & lookup_accepts_input
-  lookup.ingress.bits <== core.request.bits.address
+  (
+    core.request
+      |> gate_flow(lookup_accepts_input)
+      |> map_flow(request => request.address)
+  ) |> lookup.ingress
   def request_fire = core.request.fire()
 
   def Array(miss_path, hit_path) = (

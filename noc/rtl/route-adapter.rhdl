@@ -2,7 +2,7 @@
 // Implements protocol-neutral ready-valid attachment and removal of NoC route metadata.
 
 import:
-  lib("rhodium/std/ready-valid.rhdl").Decoupled
+  lib("rhodium/std/flow.rhdl") open
   "router.rhdl".RoutedBeat
 
 export:
@@ -18,15 +18,15 @@ circuit RoutedFlowInjector(Input :: DataType,
   interface ingress(Decoupled(Input), ~role: consumer)
   interface egress(Decoupled(RoutedBeat(Payload, route_width)), ~role: producer)
 
-  ingress.ready <== route_valid & egress.ready
-  egress.valid <== ingress.valid & route_valid
-  egress.bits.route_key <== route_key
-  egress.bits.payload <== payload
+  (
+    ingress |> gate_flow(route_valid) |> map_flow(_input):
+      RoutedBeat(Payload, route_width):
+        route_key: route_key
+        payload: payload
+  ) |> egress
 
 circuit RoutedFlowEjector(Payload :: DataType, route_width :: PosInt):
   interface ingress(Decoupled(RoutedBeat(Payload, route_width)), ~role: consumer)
   interface egress(Decoupled(Payload), ~role: producer)
 
-  ingress.ready <== egress.ready
-  egress.valid <== ingress.valid
-  egress.bits <== ingress.bits.payload
+  ingress |> map_flow(routed => routed.payload) |> egress

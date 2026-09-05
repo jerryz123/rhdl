@@ -12,13 +12,8 @@ import:
   "../../riscv/rtl/floating-point.rhdl" open
   lib("hardfloat/main.rhdl") open
   lib("rhodium/std/bits.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow.rhdl") open
   lib("rhodium/std/scoreboard.rhdl") open
-  lib("rhodium/std/flow/arbiter.rhdl").Arbiter
-  lib("rhodium/std/flow/completion-queue.rhdl").CompletionQueue
-  lib("rhodium/std/flow/pipe.rhdl").ValidPipe
-  lib("rhodium/std/flow/pipe.rhdl").Pipe
-  lib("rhodium/std/flow/queue.rhdl").Queue
 
 fun fp_load_value(profile :: FloatingPointProfile,
                   precision :: RV5StageFloatPrecision,
@@ -132,12 +127,10 @@ sync_circuit RV5StageFpPipeline(
   inst fixed(FixedModule)
   inst div_sqrt(DivSqrtModule)
   inst fixed_responses(CompletionQueue(ExecutionRequest, Completion, 4))
-  inst fixed_latency(ValidPipe(Completion, 2))
-  fixed_latency.ingress.valid <== fixed_responses.issue.valid
   fixed.request <== fixed_responses.issue.bits
-  fixed_latency.ingress.bits <== fixed.completion
-  fixed_responses.completion.valid <== fixed_latency.egress.valid
-  fixed_responses.completion.bits <== fixed_latency.egress.bits
+  fixed_responses.issue |> map_valid(_request => fixed.completion)
+    |> valid_pipe(2)
+    |> fixed_responses.completion
 
   inst completion_merge(Arbiter(Completion, 2))
   fixed_responses.response |> completion_merge.ingress[0]
@@ -155,14 +148,12 @@ sync_circuit RV5StageFpPipeline(
     address: execution_completion.rd
     data: execution_completion.fp_value
 
-  load_write.valid <== load_completion.valid
-  load_write.bits <== FloatingPointRegisterWrite(profile):
-    address: load_completion.bits.rd
-    data: fp_load_value(
-      profile,
-      load_completion.bits.precision,
-      load_completion.bits.data
-    )
+  (
+    load_completion |> map_valid(completed_load):
+      FloatingPointRegisterWrite(profile):
+        address: completed_load.rd
+        data: fp_load_value(profile, completed_load.precision, completed_load.data)
+  ) |> load_write
   when (load_completion.valid):
     assert((load_completion.bits.precision =/= RV5StageFloatPrecision.Double) ||| Bool(profile == FloatingPointProfile.D), "rv5stage_fp_load_precision_supported")
     assert((load_completion.bits.precision =/= RV5StageFloatPrecision.Half) ||| Bool(half_precision_supports_zfhmin(half_precision)), "rv5stage_fp_half_load_supported")
@@ -195,10 +186,24 @@ sync_circuit RV5StageFpPipeline(
   def issue_hazard = source_hazard ||| destination_hazard
   def divide_request = control.execution.unit === RV5StageFloatUnit.DivideSquareRoot
   def memory_request = control.execution.unit === RV5StageFloatUnit.Memory
-  def selected_ready = mux(divide_request,
-                           div_sqrt.request.ready,
-                           fixed_responses.request.ready)
-  issue.ready <== !issue_hazard & !memory_request & selected_ready
+  def execution_requests = (
+    issue |> gate_flow(!issue_hazard & !memory_request) |> map_flow(issued):
+      RV5StageFpExecutionRequest(xlen, profile, Context):
+        context: issued.context
+        control: issued.control
+        left: registers.read_data_1
+        right: registers.read_data_2
+        third: registers.read_data_3
+        integer_operand: issued.integer_operand
+        immediate_index: issued.frs1
+        rounding_mode: issued.rounding_mode
+        rd: issued.frd
+  )
+  def Array(fixed_request, division_request) = (
+    execution_requests |> demux_flow(2, _request => divide_request.as_bits())
+  )
+  fixed_request |> fixed_responses.request
+  division_request |> div_sqrt.request
   def issue_fire = issue.fire()
 
   // The register file is read only for a transferred instruction. Its third
@@ -206,15 +211,12 @@ sync_circuit RV5StageFpPipeline(
   def store_source_free = !register_busy(store_request.bits.rs)
   inst stores(Pipe(RV5StageFpStoreResponse(Context), 1))
   stores.egress |> store_response
-  store_request.ready <== !issue.valid & store_source_free & stores.ingress.ready
-  stores.ingress.valid <== store_request.valid & !issue.valid & store_source_free
-  stores.ingress.bits <== RV5StageFpStoreResponse(Context):
-    context: store_request.bits.context
-    data: fp_store_value(
-      profile,
-      store_request.bits.precision,
-      registers.read_data_3
-    )
+  (
+    store_request |> gate_flow(!issue.valid & store_source_free) |> map_flow(request):
+      RV5StageFpStoreResponse(Context):
+        context: request.context
+        data: fp_store_value(profile, request.precision, registers.read_data_3)
+  ) |> stores.ingress
   registers.read_address_1 <== issue.bits.frs1
   registers.read_address_2 <== issue.bits.frs2
   registers.read_address_3 <== mux(
@@ -225,21 +227,6 @@ sync_circuit RV5StageFpPipeline(
   when (store_request.fire()):
     assert((store_request.bits.precision =/= RV5StageFloatPrecision.Double) ||| Bool(profile == FloatingPointProfile.D), "rv5stage_fp_store_precision_supported")
     assert((store_request.bits.precision =/= RV5StageFloatPrecision.Half) ||| Bool(half_precision_supports_zfhmin(half_precision)), "rv5stage_fp_half_store_supported")
-
-  def execution_request = RV5StageFpExecutionRequest(xlen, profile, Context):
-    context: issue.bits.context
-    control: issue.bits.control
-    left: registers.read_data_1
-    right: registers.read_data_2
-    third: registers.read_data_3
-    integer_operand: issue.bits.integer_operand
-    immediate_index: issue.bits.frs1
-    rounding_mode: issue.bits.rounding_mode
-    rd: issue.bits.frd
-  fixed_responses.request.valid <== issue.valid & !issue_hazard & !memory_request & !divide_request
-  fixed_responses.request.bits <== execution_request
-  div_sqrt.request.valid <== issue.valid & !issue_hazard & !memory_request & divide_request
-  div_sqrt.request.bits <== execution_request
 
   load_reserve.ready <== !register_busy(load_reserve.bits.rd)
   def load_reserve_fire = load_reserve.fire()

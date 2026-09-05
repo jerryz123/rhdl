@@ -40,7 +40,7 @@ requires XLEN to leave at least one tag bit above the line offset and set index.
 | Fetch → cache | `request: Decoupled(RV5StageInstructionReq)` | XLEN-wide physical byte address |
 | Fetch → cache | `flush` | Discard speculative lookup and buffered-response state |
 | Fetch → cache | `invalidate_all` | Perform the flush behavior and invalidate every resident line |
-| Cache → Fetch | `response: Irrevocable(RV5StageInstructionResp)` | Ordered 32-bit instruction plus page- and access-fault flags |
+| Cache → Fetch | `response: Decoupled(RV5StageInstructionResp)` | Ordered 32-bit instruction plus page- and access-fault flags; a flush may withdraw a stalled response |
 
 The cache itself returns both fault flags false; the MMU and parent fetch path
 own translation and access faults. Fetch supplies aligned word addresses. The

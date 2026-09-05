@@ -71,14 +71,6 @@ if [[ -n "$pipeline_transport_imports" ]]; then
   exit 1
 fi
 
-explicit_flow_syntax="$(search_sources '\|>|(map|filter|gate|zip)_flow\(|(map|filter|fork)_valid\(|atomic_fork\(|valid_arbiter\(|to_valid\(|OfferRegister\(|ValidArbiter\(|AtomicFork\(' \
-  cores/rv5stage/core.rhdl || true)"
-if [[ -n "$explicit_flow_syntax" ]]; then
-  echo "the RV5Stage core must use direct state and interface wiring" >&2
-  echo "$explicit_flow_syntax" >&2
-  exit 1
-fi
-
 cache_cross_imports="$(search_sources '^[[:space:]]+"[^" ]*(icache|dcache)/' \
   cores/rv5stage/icache cores/rv5stage/dcache \
   || true)"

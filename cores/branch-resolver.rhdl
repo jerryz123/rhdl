@@ -2,7 +2,7 @@
 // Resolves conditional and unconditional control transfers from orthogonal controls.
 
 import:
-  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow.rhdl") open
 
 bundle BranchResolverControl():
   enable: Bool
@@ -23,26 +23,22 @@ circuit BranchResolver(width :: PosInt):
   interface request(Valid(BranchResolverRequest(width)), ~role: consumer)
   interface result(Valid(BranchResult()), ~role: producer)
 
-  def request_bits = request.bits
-  def left = request_bits.left
-  def right = request_bits.right
-  def control = request_bits.control
-
-  def equal = left === right
-  def unsigned_less = left < right
-  def left_sign = left[width - 1].into(Bool)
-  def right_sign = right[width - 1].into(Bool)
-  def sign_diff = left_sign ^ right_sign
-  def less = mux(
-    control.signed_mode & sign_diff,
-    left_sign,
-    unsigned_less
-  )
-  def comparison = mux(control.compare_equal, equal, less)
-  def condition = control.unconditional ||| (comparison ^ control.invert)
-  result.valid <== request.valid
-  result.bits <== BranchResult():
-    taken: control.enable & condition
+  (
+    request |> map_valid(request_bits):
+      def left = request_bits.left
+      def right = request_bits.right
+      def control = request_bits.control
+      def equal = left === right
+      def unsigned_less = left < right
+      def left_sign = left[width - 1].into(Bool)
+      def right_sign = right[width - 1].into(Bool)
+      def sign_diff = left_sign ^ right_sign
+      def less = mux(control.signed_mode & sign_diff, left_sign, unsigned_less)
+      def comparison = mux(control.compare_equal, equal, less)
+      def condition = control.unconditional ||| (comparison ^ control.invert)
+      BranchResult():
+        taken: control.enable & condition
+  ) |> result
 
 export:
   BranchResolverControl

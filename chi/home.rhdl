@@ -135,20 +135,19 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     subordinate_map.services
   )
   def request_routable = subordinate_lookup.valid & request_service_supported
-  def request_discard = !request_ordinary ||| !request_supported ||| !request_routable
-  requester.req.ready <== request_discard ||| (
-    allocation_available & subordinate.req.ready
-  )
-  subordinate.req.valid <== requester.req.valid & (
-    request_ordinary & request_supported & request_routable & allocation_available
-  )
-  subordinate.req.bits <== chi_hni_downstream_request(
-    p,
-    upstream_request,
-    home.node_id,
-    subordinate_lookup.node_id,
-    allocation_slot
-  )
+  def request_accepted = request_ordinary & request_supported & request_routable
+  (
+    requester.req
+      |> filter_flow(_request => request_accepted)
+      |> gate_flow(allocation_available)
+      |> map_flow(request => chi_hni_downstream_request(
+          p,
+          request,
+          home.node_id,
+          subordinate_lookup.node_id,
+          allocation_slot
+        ))
+  ) |> subordinate.req
   def allocate = subordinate.req.fire()
   def allocate_write = allocate & upstream_request_opcode.is_initial_write()
   def allocate_read = allocate & !upstream_request_opcode.is_initial_write()
@@ -187,21 +186,19 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     downstream_response.src_id === response_subordinate_id
   ) & (downstream_response.tgt_id === bits(home.node_id, p.node_id_width))
   def response_match = response_slot_valid & response_phase_match & response_identity_match
-  requester.rsp.response.valid <== subordinate.rsp.valid & (
-    response_ordinary & response_match
-  )
-  requester.rsp.response.bits <== chi_hni_upstream_response(
-    p,
-    downstream_response,
-    response_request.txn_id,
-    response_request.src_id,
-    response_request.qos,
-    home.node_id,
-    response_slot
-  )
-  subordinate.rsp.ready <== !response_ordinary ||| !response_match ||| (
-    requester.rsp.response.ready
-  )
+  (
+    subordinate.rsp
+      |> filter_flow(_response => response_ordinary & response_match)
+      |> map_flow(response => chi_hni_upstream_response(
+          p,
+          response,
+          response_request.txn_id,
+          response_request.src_id,
+          response_request.qos,
+          home.node_id,
+          response_slot
+        ))
+  ) |> requester.rsp.response
   def response_transfer = requester.rsp.response.fire()
   def dbid_transfer = response_transfer & response_dbid
   def write_completion = response_transfer & response_comp
@@ -238,21 +235,19 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
   ) & or_reduce(write_data_expected_ids & write_data_id) & (
     !or_reduce(write_data_received_ids & write_data_id)
   )
-  requester.dat.request.ready <== !write_data_ordinary ||| !write_data_match ||| (
-    subordinate.dat.request.ready
-  )
-  subordinate.dat.request.valid <== requester.dat.request.valid & (
-    write_data_ordinary & write_data_match
-  )
-  subordinate.dat.request.bits <== chi_hni_downstream_write_data(
-    p,
-    upstream_write_data,
-    upstream_write_data.data_id,
-    write_data_request.qos,
-    bits(home.node_id, p.node_id_width),
-    subordinate_ids[write_data_slot],
-    subordinate_dbids[write_data_slot]
-  )
+  (
+    requester.dat.request
+      |> filter_flow(_data => write_data_ordinary & write_data_match)
+      |> map_flow(data => chi_hni_downstream_write_data(
+          p,
+          data,
+          data.data_id,
+          write_data_request.qos,
+          bits(home.node_id, p.node_id_width),
+          subordinate_ids[write_data_slot],
+          subordinate_dbids[write_data_slot]
+        ))
+  ) |> subordinate.dat.request
   def write_data_transfer = subordinate.dat.request.fire()
 
   when (requester.dat.request.valid & write_data_ordinary):
@@ -284,20 +279,19 @@ sync_circuit CHIHNI(params :: CHIHNIParams):
     or_reduce(read_data_expected_ids & read_data_id)
   ) & !or_reduce(read_data_received_ids & read_data_id)
   def write_completion_now = write_completion
-  requester.dat.response.valid <== subordinate.dat.response.valid & (
-    read_data_ordinary & read_data_match & !write_completion_now
-  )
-  requester.dat.response.bits <== chi_hni_upstream_read_data(
-    p,
-    downstream_read_data,
-    read_data_request.return_txn_id_or_stash_lpid,
-    read_data_request.return_nid_or_stash_nid_or_data_target,
-    read_data_request.qos,
-    home.node_id
-  )
-  subordinate.dat.response.ready <== !read_data_ordinary ||| !read_data_match ||| (
-    !write_completion_now & requester.dat.response.ready
-  )
+  (
+    subordinate.dat.response
+      |> filter_flow(_data => read_data_ordinary & read_data_match)
+      |> gate_flow(!write_completion_now)
+      |> map_flow(data => chi_hni_upstream_read_data(
+          p,
+          data,
+          read_data_request.return_txn_id_or_stash_lpid,
+          read_data_request.return_nid_or_stash_nid_or_data_target,
+          read_data_request.qos,
+          home.node_id
+        ))
+  ) |> requester.dat.response
   def read_completion = requester.dat.response.fire()
 
   when (subordinate.dat.response.valid & read_data_ordinary):

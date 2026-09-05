@@ -13,7 +13,6 @@ import:
   "../../../riscv/isa/xlen.rhm" open
   lib("rhodium/std/bits.rhdl") open
   lib("rhodium/std/read-write.rhdl") open
-  lib("rhodium/std/ready-valid.rhdl") open
   lib("rhodium/std/sync-ram.rhdl") open
   lib("rhodium/std/flow.rhdl") open
   lib("chi/main.rhdl") open
@@ -109,8 +108,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   reg gathered_snoop_state(~init: CHICacheState.Invalid)
   reg snoop_metadata_pending(~init: Bool(#false))
 
-  core.response.valid <== responses.egress.valid
-  core.response.bits <== responses.egress.bits
+  responses.egress |> core.response
   core.request_fault <== Bool(#false)
   core.request_access_fault <== Bool(#false)
 
@@ -133,11 +131,11 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
   incoming_snoops |> snoop.snoops
   def snoop_pending = snoop.pending
   def writeback_active = !writeback.command.ready
-  refill.responses.valid <== incoming_responses.valid & !writeback_active
-  refill.responses.bits <== incoming_responses.bits
-  writeback.responses.valid <== incoming_responses.valid & writeback_active
-  writeback.responses.bits <== incoming_responses.bits
-  incoming_responses.ready <== mux(writeback_active, writeback.responses.ready, refill.responses.ready)
+  def Array(refill_response, writeback_response) = (
+    incoming_responses |> demux_flow(2, _response => writeback_active.as_bits())
+  )
+  refill_response |> refill.responses
+  writeback_response |> writeback.responses
   def request_set_value = core.request.bits.address[offset_width..(offset_width + set_width)]
   def request_data_address = core.request.bits.address[word_offset_width..(offset_width + set_width)]
   def lookup_request :: RV5StageDataReq(xlen) = lookup.egress.bits
@@ -333,9 +331,7 @@ sync_circuit RV5StageL1DCache(xlen :: XLen,
               bits(0, RV5StageCacheLineBytes * 8)).as_vec(Bits(64))
 
   def lookup_accepts_input = refill.command.ready & writeback.command.ready & gather_idle & !refill_installing & !snoop_pending & !lookup_needs_refill & !local_mutation
-  core.request.ready <== lookup.ingress.ready & lookup_accepts_input
-  lookup.ingress.valid <== core.request.valid & lookup_accepts_input
-  lookup.ingress.bits <== core.request.bits
+  core.request |> gate_flow(lookup_accepts_input) |> lookup.ingress
   def request_fire = core.request.fire()
   // A fence observes accepted lookup work, active refills, and the backing
   // store buffer. Same-cycle acceptance is included so no request can cross
