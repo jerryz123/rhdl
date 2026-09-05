@@ -46,6 +46,7 @@ MAPPING_INVENTORY := $(BUILD_DIR)/memory-sites.json
 MAPPING_SELECTION_STAMP := $(BUILD_DIR)/memory-sites.stamp
 MEMORY_WRAPPERS := $(BUILD_DIR)/memory-wrappers.sv
 MEMORY_MANIFEST := $(BUILD_DIR)/memory-manifest.json
+MEMORY_MANIFEST_CHECK := $(VLSI_DIR)/tools/check-mini-soc-memory-map.py
 MAPPING_STAMP := $(BUILD_DIR)/memory-map.stamp
 SOC_VERILOG := $(BUILD_DIR)/SoCHarness.sv
 SOC_OBJECT_DIR := $(BUILD_DIR)/obj
@@ -104,7 +105,7 @@ $(MAPPING_SELECTION_STAMP): $(SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(MEMORY_POLICY)
 	@test -s $(MAPPING_INVENTORY)
 	touch $@
 
-$(MAPPING_STAMP): $(MAPPING_SELECTION_STAMP) $(MEMORY_MAPPER) $(MEMORY_CATALOG) $(FUNCTIONAL_MODELS) check-manifest.py
+$(MAPPING_STAMP): $(MAPPING_SELECTION_STAMP) $(MEMORY_MAPPER) $(MEMORY_CATALOG) $(FUNCTIONAL_MODELS) $(MEMORY_MANIFEST_CHECK)
 	@test -n "$(FUNCTIONAL_MODELS)" || { \
 		echo "no functional SRAM model found under $(SRAM_DIR)/$(TECH)/models" >&2; \
 		exit 1; \
@@ -114,8 +115,8 @@ $(MAPPING_STAMP): $(MAPPING_SELECTION_STAMP) $(MEMORY_MAPPER) $(MEMORY_CATALOG) 
 		--site-inventory $(MAPPING_INVENTORY) \
 		--output-verilog $(MEMORY_WRAPPERS) \
 		--output-manifest $(MEMORY_MANIFEST)
-	$(PYTHON) check-manifest.py $(MEMORY_MANIFEST) \
-		--top SoCHarness --policy-top MiniSoC --scope-prefix soc
+	$(PYTHON) $(MEMORY_MANIFEST_CHECK) $(MEMORY_MANIFEST) \
+		--top SoCHarness --scope-prefix soc
 	@test -s $(MEMORY_WRAPPERS)
 	touch $@
 

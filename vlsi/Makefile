@@ -30,6 +30,7 @@ MINI_SOC_MEMORY_SITE_STAMP := $(MINI_SOC_BUILD_DIR)/memory-sites.stamp
 MINI_SOC_RTL := $(MINI_SOC_BUILD_DIR)/mini-soc.sv
 MINI_SOC_MEMORY_WRAPPERS := $(MINI_SOC_BUILD_DIR)/memory-wrappers.sv
 MINI_SOC_MEMORY_MANIFEST := $(MINI_SOC_BUILD_DIR)/memory-manifest.json
+MINI_SOC_MEMORY_CHECK := $(VLSI_ROOT)/tools/check-mini-soc-memory-map.py
 MINI_SOC_SYNTH_CONFIG := $(VLSI_ROOT)/openlane/mini_soc/config.yaml
 MINI_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/mini_soc/runs/RHODIUM_SLANG_CHECK
 MINI_SOC_SLANG_NETLIST := $(MINI_SOC_SLANG_RUN_DIR)/final/nl/MiniSoC.nl.v
@@ -134,7 +135,7 @@ $(MINI_SOC_MEMORY_SITE_STAMP): $(MINI_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(MINI_SOC
 	touch $@
 
 mini-soc-memory-map: \
-		$(MINI_SOC_MEMORY_SITE_STAMP) $(MEMORY_MAPPER) $(MEMORY_MAP_CATALOG)
+		$(MINI_SOC_MEMORY_SITE_STAMP) $(MEMORY_MAPPER) $(MEMORY_MAP_CATALOG) $(MINI_SOC_MEMORY_CHECK)
 	$(PYTHON) $(MEMORY_MAPPER) $(MINI_SOC_FIRRTL_MEM_MLIR) \
 		--catalog $(MEMORY_MAP_CATALOG) \
 		--site-inventory $(MINI_SOC_MEMORY_SITE_INVENTORY) \
@@ -143,11 +144,7 @@ mini-soc-memory-map: \
 		--output-manifest $(MINI_SOC_MEMORY_MANIFEST)
 	@test -s $(MINI_SOC_MEMORY_WRAPPERS)
 	@test -s $(MINI_SOC_MEMORY_MANIFEST)
-	@test "$$(grep -c '\"source_module\": \"fabric/rv5stage/l1_512x64\"' $(MINI_SOC_MEMORY_SITE_INVENTORY))" -eq 2
-	@if grep -q '64x512' $(MINI_SOC_MEMORY_SITE_INVENTORY); then \
-		echo "MiniSoC inventory contains a line-wide cache data memory" >&2; \
-		exit 1; \
-	fi
+	$(PYTHON) $(MINI_SOC_MEMORY_CHECK) $(MINI_SOC_MEMORY_MANIFEST) --top MiniSoC
 
 $(MINI_SOC_RTL): $(MINI_SOC_MEMORY_SITE_STAMP)
 	$(CIRCT_OPT) \
@@ -190,7 +187,7 @@ mini-soc-slang-check-native: mini-soc-macro-rtl
 		--condensed --hide-progress-bar
 	test -s $(MINI_SOC_SLANG_NETLIST)
 	grep -q "use_slang" $(MINI_SOC_SLANG_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
-	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SLANG_NETLIST))" -eq 32
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SLANG_NETLIST))" -eq 36
 	@if grep -Eq 'struct[[:space:]]+packed|typedef[[:space:]]+struct' $(MINI_SOC_SLANG_NETLIST); then \
 		echo "Slang elaboration left packed structs in $(MINI_SOC_SLANG_NETLIST)" >&2; \
 		exit 1; \
@@ -212,7 +209,7 @@ mini-soc-synth-native: mini-soc-macro-rtl
 		--only Yosys.Synthesis --condensed --hide-progress-bar
 	test -s $(MINI_SOC_SYNTH_NETLIST)
 	grep -q "use_slang" $(MINI_SOC_SYNTH_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
-	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SYNTH_NETLIST))" -eq 32
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SYNTH_NETLIST))" -eq 36
 
 enable-pdk:
 	@if command -v ciel >/dev/null 2>&1; then \

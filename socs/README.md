@@ -72,7 +72,10 @@ binding; an external subordinate owns the memory contents and response timing.
 [`mini-soc.rhdl`](mini-soc.rhdl) defines `MiniSoC`, the small self-contained
 variant used for compact RTL and physical-design experiments. It specializes
 the same fabric with a 64 KiB range, uses the forwarding `CHIHNF`, and terminates
-the native memory boundary directly in an on-chip, line-capable `CHIRam`.
+the native memory boundary directly in an on-chip, line-capable `CHIRam`. Its
+RV64 instruction and data caches are each explicitly 32-set, one-way
+direct-mapped caches with 2 KiB of line storage; `SimpleSoC` retains RV5Stage's
+default 64-set cache geometry.
 
 ## TiledSoC
 

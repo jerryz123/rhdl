@@ -23,6 +23,10 @@ layer. The MiniSoC/Sky130 policy lives at
 `../designs/mini-soc/sky130/sram-map.yaml`, because site selection belongs to
 that design-and-technology pairing. Generic mapping mechanics live in
 `../../sram/`, and Sky130 catalog/model data live in `../../sram/sky130/`.
+The manifest check requires the RV64 shared RAM and both private 2 KiB,
+direct-mapped cache data arrays to map onto exactly 36 macros while the four
+shallow metadata arrays remain inferred. Each cache needs two 32-bit macro
+slices and uses half of their 512-entry depth.
 
 Install the shared FESVR dependency once, then build or exercise the mapped
 simulator:
