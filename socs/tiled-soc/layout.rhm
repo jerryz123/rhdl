@@ -1,9 +1,11 @@
 #lang rhombus/and_meta
-// Defines the immutable author-facing tile layout and TiledSoC configuration intent.
+// Defines the author-facing TiledSoC layout language and immutable configuration.
 
 import:
   rhombus/meta open
-  "../noc/std/topology/rectangular-mesh.rhm".MeshCoordinate
+  "../../noc/std/topology/rectangular-mesh.rhm".MeshCoordinate
+  "../../chi/params.rhdl".CHIFlitParams
+  "../../rhodium/frontend/foundation.rhm".StableCircuitParam
 
 export:
   RV5StageTileSpec
@@ -16,10 +18,10 @@ export:
   TiledTileSpec
   TiledTileCell
   TileGrid
-  TiledNodeIdPlan
-  StripedMemorySpec
-  TiledLLCSpec
-  TiledSoCSpec
+  TiledNodeIds
+  StripedMemory
+  LLCGeometry
+  TiledSoCConfig
   rv5stage_tile
   llc_tile
   host_tile
@@ -120,14 +122,14 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
     | error(~who: #'TileGrid, "tile coordinate is outside the grid")
     rows[height - y - 1][x]
 
-class TiledNodeIdPlan(rv5stage_coherent_base :: Nat,
-                      rv5stage_device_base :: Nat,
-                      host :: Nat,
-                      llc_home_base :: Nat,
-                      device_home :: Nat,
-                      backing_memory_base :: Nat,
-                      aclint_subordinate :: Nat,
-                      uart_subordinate :: Nat):
+class TiledNodeIds(rv5stage_coherent_base :: Nat,
+                   rv5stage_device_base :: Nat,
+                   host :: Nat,
+                   llc_home_base :: Nat,
+                   device_home :: Nat,
+                   backing_memory_base :: Nat,
+                   aclint_subordinate :: Nat,
+                   uart_subordinate :: Nat):
   constructor (~rv5stage_coherent_base: rv5stage_coherent_base :: Nat,
                ~rv5stage_device_base: rv5stage_device_base :: Nat,
                ~host: host :: Nat,
@@ -145,9 +147,9 @@ class TiledNodeIdPlan(rv5stage_coherent_base :: Nat,
           aclint_subordinate,
           uart_subordinate)
 
-class StripedMemorySpec(base :: Nat,
-                        bank_bytes :: PosInt,
-                        stripe_bytes :: PosInt):
+class StripedMemory(base :: Nat,
+                    bank_bytes :: PosInt,
+                    stripe_bytes :: PosInt):
   constructor (~base: base :: Nat,
                ~bank_bytes: bank_bytes :: PosInt,
                ~stripe_bytes: stripe_bytes :: PosInt):
@@ -156,32 +158,36 @@ class StripedMemorySpec(base :: Nat,
 fun tiled_power_of_two(value :: PosInt) :: Boolean:
   value == 1 || (value mod 2 == 0 && tiled_power_of_two(value / 2))
 
-class TiledLLCSpec(sets :: PosInt,
-                   ways :: PosInt):
+class LLCGeometry(sets :: PosInt,
+                  ways :: PosInt):
   property capacity_bytes :: PosInt: sets * ways * 64
 
   constructor (~sets: sets :: PosInt,
                ~ways: ways :: PosInt):
     unless sets >= 2 && tiled_power_of_two(sets)
-    | error(~who: #'TiledLLCSpec,
+    | error(~who: #'LLCGeometry,
             "LLC set count must be a power of two of at least two")
     super(sets, ways)
 
-class TiledSoCSpec(layout :: TileGrid,
-                   node_ids :: TiledNodeIdPlan,
-                   memory :: StripedMemorySpec,
-                   llc :: TiledLLCSpec):
+class TiledSoCConfig(layout :: TileGrid,
+                     node_ids :: TiledNodeIds,
+                     memory :: StripedMemory,
+                     llc :: LLCGeometry,
+                     flit :: CHIFlitParams):
+  implements StableCircuitParam
+
   constructor (~layout: layout :: TileGrid,
-               ~node_ids: node_ids :: TiledNodeIdPlan,
-               ~memory: memory :: StripedMemorySpec,
-               ~llc: llc :: TiledLLCSpec):
+               ~node_ids: node_ids :: TiledNodeIds,
+               ~memory: memory :: StripedMemory,
+               ~llc: llc :: LLCGeometry,
+               ~flit: flit :: CHIFlitParams = CHIFlitParams()):
     unless memory.stripe_bytes >= 64
-    | error(~who: #'TiledSoCSpec,
+    | error(~who: #'TiledSoCConfig,
             "striped-memory stripes must contain a complete LLC line")
     unless llc.capacity_bytes <= memory.bank_bytes
-    | error(~who: #'TiledSoCSpec,
+    | error(~who: #'TiledSoCConfig,
             "each LLC must fit within its backing-memory bank")
-    super(layout, node_ids, memory, llc)
+    super(layout, node_ids, memory, llc, flit)
 
 meta:
   fun tile_run(entry :: Syntax):

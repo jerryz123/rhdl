@@ -120,16 +120,16 @@ RV5Stage's default 64-set cache geometry.
 
 ## TiledSoC
 
-TiledSoC separates author intent from derived network and hardware parameters:
+TiledSoC exposes one author configuration and privately derives its network and
+hardware parameters during elaboration:
 
 ```mermaid
 flowchart LR
-  Spec["TiledSoCSpec<br/>layout, NodeIDs, memory, and LLC intent"]
-  Plan["compile_tiled_soc_plan<br/>placements, relationships, routes, and links"]
-  Config["compile_tiled_soc<br/>CHI, router, LLC, RAM, and tile parameters"]
+  Config["TiledSoCConfig<br/>layout, NodeIDs, memory, and LLC intent"]
+  Compile["private compiler<br/>placements, routes, and component parameters"]
   RTL["TiledSoC(config)<br/>structural RTL composition"]
 
-  Spec --> Plan --> Config --> RTL
+  Config --> Compile --> RTL
 ```
 
 The author-facing layout uses rows in visual north-to-south order and supports
@@ -143,19 +143,22 @@ def layout = tile_grid:
   row [rv5stage(4)]
 ```
 
-`TiledSoCSpec` combines that immutable `TileGrid` with a `TiledNodeIdPlan` and
-separate `StripedMemorySpec` and `TiledLLCSpec` geometries.
-`compile_tiled_soc_plan` is pure host code: it derives mesh coordinates,
-occurrence ordering, endpoint IDs, CHI relationships, routes, and the shared
-physical-link manifest. `compile_tiled_soc` then derives the CHI, router, LLC,
-backing-memory, and tile parameters and returns one `TiledSoCConfig`. The RTL
-accepts that configuration directly as `TiledSoC(config)`. Tile occurrences
-therefore carry placement and component parameters together instead of
-depending on parallel global arrays. The default `tiled_soc_config` preserves
-the repository's 4x4 system, while the focused hierarchy test also elaborates a
-2x4 system from the same pipeline.
+`TiledSoCConfig` combines that immutable `TileGrid` with `TiledNodeIds`,
+`StripedMemory`, `LLCGeometry`, and the CHI flit parameters. The public
+`TiledSoC(config)` circuit accepts this author value directly. Its private
+compiler derives mesh coordinates, occurrence ordering, endpoint IDs, CHI
+relationships, routes, the shared physical-link manifest, and all component
+parameters in one pass. There is no public intermediate TiledSoC plan or
+second compiled configuration for authors to manage. The default
+`default_tiled_soc_config` preserves the repository's 4x4 system, while the
+focused hierarchy test also elaborates a 2x4 system through the same entrypoint.
 
-The default pure plan places eight `RV5StageTile`s in the lower two rows, four
+The package lives under [`tiled-soc/`](tiled-soc/): `main.rhdl` is the public
+entrypoint, `layout.rhm` owns the immutable configuration and macro-phase
+tile-grid language, `compile.rhdl` owns private derivation, and `tiles/` owns
+the concrete tile implementations.
+
+The default layout places eight `RV5StageTile`s in the lower two rows, four
 service routers in the middle row, and four `LLCTile`s in the upper row.
 The middle row contains the external host RN-F, a `DeviceHomeTile` with both
 sides of the shared HN-I, an `AclintTile`, and a `UartTile`. The HN subordinate
@@ -183,11 +186,11 @@ Each tile owns one `CHIRouter`, containing independent REQ/RSP/SNP/DAT
 uses one shared RTL specialization, every LLC tile uses another, and the
 service row adds one `DeviceHomeTile`, one `AclintTile`, one `UartTile`, and
 one `HostTile` specialization. Their implementations and parameter contracts
-live under [`tiles/`](tiles/). The parent drives one constant identity bundle
-per occurrence containing its router site, hart ID, endpoint NodeIDs, striped
-service base, and local RAM base; tiles contain no system-wide identity table
-or runtime routing-mode selector. A `RV5StageTile` attaches one RV5Stage's two
-RN-F ports and its RN-I device port. A
+live under [`tiled-soc/tiles/`](tiled-soc/tiles/). The parent drives one constant
+identity bundle per occurrence containing its router site, hart ID, endpoint
+NodeIDs, striped service base, and local RAM base; tiles contain no system-wide
+identity table or runtime routing-mode selector. A `RV5StageTile` attaches one
+RV5Stage's two RN-F ports and its RN-I device port. A
 `LLCTile` attaches one blocking `CHIInclusiveHNF` and keeps its address
 projector, transfer fragmenter, and `CHIRam` on the HN's direct subordinate
 side. The device HN-I is reachable only through the uncached RN-I routes. The
@@ -203,7 +206,7 @@ corner slots. There is no whole-network RTL wrapper under `noc/`.
 
 ## Focused validation
 
-Run every SoC planning, configuration, tile, and hierarchy test from the
+Run every SoC configuration-compilation, tile, and hierarchy test from the
 repository root with:
 
 ```sh
@@ -214,12 +217,11 @@ Use package-local targets when iterating on one area:
 
 ```sh
 make -C socs rtl-elaboration-test
-make -C socs tiled-plan-test
+make -C socs tiled-compile-test
 make -C socs tiled-elaboration-test
 ```
 
 The focused SimpleSoC and MiniSoC elaboration tests cover the external-channel
-and internal-memory variants. The tiled targets cover pure specification and
-planning, derived configuration, tile structure, and complete hierarchy
-elaboration. Executable build, run, smoke, and lowering workflows belong to
-the [`sims/` guide](../sims/README.md).
+and internal-memory variants. The tiled targets cover configuration compilation,
+tile structure, and complete hierarchy elaboration. Executable build, run,
+smoke, and lowering workflows belong to the [`sims/` guide](../sims/README.md).
