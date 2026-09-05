@@ -20,6 +20,7 @@ import:
   "../../../riscv/isa/rv64i.rhm" open
   "../../../riscv/isa/f.rhm" as f
   "../../../riscv/isa/d.rhm" as d
+  "../../../riscv/isa/zfhmin.rhm" as zfhmin
   "../../../riscv/isa/fp-profile.rhm" open
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/m.rhm" open
@@ -82,8 +83,9 @@ fun floating_point_core_control_cases(instructions :: List.of(InstructionSpec),
   for List (instruction in instructions):
     block:
       def input = instruction_pattern(instruction)
-      def load = [f.FLW, d.FLD].contains(instruction)
-      def store = [f.FSW, d.FSD].contains(instruction)
+      def half_load = [zfhmin.FLH].contains(instruction)
+      def load = [f.FLW, d.FLD, zfhmin.FLH].contains(instruction)
+      def store = [f.FSW, d.FSD, zfhmin.FSH].contains(instruction)
       def memory = load || store
       def double = [d.FLD, d.FSD].contains(instruction)
       def integer_sources = instruction.operands.filter(
@@ -97,7 +99,10 @@ fun floating_point_core_control_cases(instructions :: List.of(InstructionSpec),
       | load: MemoryOperation.Load
       | store: MemoryOperation.Store
       | ~else: MemoryOperation.None
-      def memory_width = if double | MemoryWidth.Double | MemoryWidth.Word
+      def memory_width = cond
+      | double: MemoryWidth.Double
+      | half_load || [zfhmin.FSH].contains(instruction): MemoryWidth.Half
+      | ~else: MemoryWidth.Word
       def alu_control = partial_pattern(AluControl()):
         result_select: AluResultSelect.Adder
         subtract: Bool(#false)
@@ -210,9 +215,12 @@ def RV64RV5StageControlDecode = ValidDecodeGen(RV64RV5StageControlCases)
 def RV32FCoreControlDecode = ValidDecodeGen(RV32FCoreControlCases)
 def RV64DCoreControlDecode = ValidDecodeGen(RV64DCoreControlCases)
 
-circuit RV5StageInstructionDecoder(xlen :: XLen,
-                                   profile :: FloatingPointProfile = DefaultFloatingPointProfile):
-  check_rv5stage_floating_point_profile(xlen, profile)
+circuit RV5StageInstructionDecoder(
+  xlen :: XLen,
+  profile :: FloatingPointProfile = DefaultFloatingPointProfile,
+  half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile
+):
+  check_rv5stage_floating_point_profile(xlen, profile, half_precision)
   input instruction: Bits(32)
   output valid: Bool
   output control: RV5StageControl()
@@ -221,8 +229,13 @@ circuit RV5StageInstructionDecoder(xlen :: XLen,
     cond
     | profile == FloatingPointProfile.None:
         if xlen == XLen.X32 | RV32RV5StageControlDecode(instruction) | RV64RV5StageControlDecode(instruction)
-    | xlen == XLen.X32: RV32FCoreControlDecode(instruction)
-    | ~else: RV64DCoreControlDecode(instruction)
+    | ~else:
+        ValidDecodeGen(
+          (if xlen == XLen.X32 | RV32RV5StageControlCases | RV64RV5StageControlCases) ++ floating_point_core_control_cases(
+            rv5stage_floating_point_instructions(xlen, profile, half_precision),
+            rv5stage_floating_point_control_cases(xlen, profile, half_precision)
+          )
+        )(instruction)
   valid <== decoded.valid
   control <== decoded.value
 

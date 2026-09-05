@@ -30,14 +30,14 @@ module rv5stage_core_tb;
     logic [63:0] data;
     logic [1:0] destination;
     logic [4:0] rd;
-    logic floating_point_double;
+    logic [1:0] floating_point_precision;
   } data_req_bits_t;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
   typedef struct packed {
     logic [63:0] data;
     logic [1:0] destination;
     logic [4:0] rd;
-    logic floating_point_double;
+    logic [1:0] floating_point_precision;
   } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
   typedef struct packed { ready_t request; logic request_fault; logic request_access_fault; data_resp_t response; logic drained; } data_in_t;
@@ -110,7 +110,7 @@ module rv5stage_core_tb;
     data_access_in.response.bits.data = data_response_bits;
     data_access_in.response.bits.destination = DATA_DESTINATION_INTEGER;
     data_access_in.response.bits.rd = data_response_rd;
-    data_access_in.response.bits.floating_point_double = 1'b0;
+    data_access_in.response.bits.floating_point_precision = 2'b01;
     data_access_in.drained = 1'b1;
   end
 

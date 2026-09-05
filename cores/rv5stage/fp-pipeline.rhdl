@@ -23,23 +23,38 @@ import:
 fun fp_load_value(profile :: FloatingPointProfile,
                   precision :: RV5StageFloatPrecision,
                   data :: Bits(64)) :~ Bits(floating_point_register_width(profile)):
+  def half = riscv_nan_box(
+    FloatFormat.F16,
+    data[0..16].into(IEEEFloat(FloatFormat.F16)),
+    floating_point_register_width(profile)
+  )
   def single = riscv_nan_box(
     FloatFormat.F32,
     data[0..32].into(IEEEFloat(FloatFormat.F32)),
     floating_point_register_width(profile)
   )
   if profile == FloatingPointProfile.F
-  | single
-  | mux(precision === RV5StageFloatPrecision.Single, single, data)
+  | mux(precision === RV5StageFloatPrecision.Half, half, single)
+  | mux_lookup(
+      precision,
+      ~default: data,
+      [[RV5StageFloatPrecision.Half, half],
+       [RV5StageFloatPrecision.Single, single]]
+    )
 
 fun fp_store_value(profile :: FloatingPointProfile,
                    precision :: RV5StageFloatPrecision,
                    data :: Bits(floating_point_register_width(profile))) :~ Bits(64):
   if profile == FloatingPointProfile.F
-  | data.zext(64)
-  | mux(precision === RV5StageFloatPrecision.Single,
-        data[0..32].zext(64),
-        data)
+  | mux(precision === RV5StageFloatPrecision.Half,
+        data[0..16].zext(64),
+        data.zext(64))
+  | mux_lookup(
+      precision,
+      ~default: data,
+      [[RV5StageFloatPrecision.Half, data[0..16].zext(64)],
+       [RV5StageFloatPrecision.Single, data[0..32].zext(64)]]
+    )
 
 sync_circuit RV5StageDisabledFpPipeline(xlen :: XLen,
                                         profile :: FloatingPointProfile,
@@ -69,8 +84,13 @@ sync_circuit RV5StageDisabledFpPipeline(xlen :: XLen,
   busy <== Mask(register_count)(0)
   drained <== Bool(#true)
 
-sync_circuit RV5StageFpPipeline(xlen :: XLen, profile :: FloatingPointProfile, Context :: DataType):
-  check_rv5stage_floating_point_profile(xlen, profile)
+sync_circuit RV5StageFpPipeline(
+  xlen :: XLen,
+  profile :: FloatingPointProfile,
+  Context :: DataType,
+  ~half_precision: half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile
+):
+  check_rv5stage_floating_point_profile(xlen, profile, half_precision)
   unless floating_point_supports_f(profile)
   | error(~who: #'RV5StageFpPipeline, "the standalone FP pipeline requires RV32F or RV64D")
   def register_count = 32
@@ -96,8 +116,18 @@ sync_circuit RV5StageFpPipeline(xlen :: XLen, profile :: FloatingPointProfile, C
   fun register_bit(index :: Bits(5)) :~ Mask(register_count):
     one_hot(index).into(Mask(register_count))
 
-  def FixedModule = if profile == FloatingPointProfile.F | RV5StageFpFixedF(xlen, Context) | RV5StageFpFixedD(xlen, Context)
-  def DivSqrtModule = if profile == FloatingPointProfile.F | RV5StageFpDivSqrtF(xlen, Context) | RV5StageFpDivSqrtD(xlen, Context)
+  def FixedModule = cond
+  | !half_precision_supports_zfhmin(half_precision):
+      if profile == FloatingPointProfile.F | RV5StageFpFixedF(xlen, Context) | RV5StageFpFixedD(xlen, Context)
+  | profile == FloatingPointProfile.F:
+      RV5StageFpFixedFHalf(xlen, Context, ~arithmetic: half_precision_supports_zfh(half_precision))
+  | ~else:
+      RV5StageFpFixedDHalf(xlen, Context, ~arithmetic: half_precision_supports_zfh(half_precision))
+  def DivSqrtModule = cond
+  | !half_precision_supports_zfh(half_precision):
+      if profile == FloatingPointProfile.F | RV5StageFpDivSqrtF(xlen, Context) | RV5StageFpDivSqrtD(xlen, Context)
+  | profile == FloatingPointProfile.F: RV5StageFpDivSqrtFHalf(xlen, Context)
+  | ~else: RV5StageFpDivSqrtDHalf(xlen, Context)
   inst fixed(FixedModule)
   inst div_sqrt(DivSqrtModule)
   inst fixed_responses(CompletionQueue(ExecutionRequest, Completion, 4))
@@ -133,9 +163,8 @@ sync_circuit RV5StageFpPipeline(xlen :: XLen, profile :: FloatingPointProfile, C
       load_completion.bits.data
     )
   when (load_completion.valid):
-    assert(Bool(profile == FloatingPointProfile.D) ||| (
-      load_completion.bits.precision === RV5StageFloatPrecision.Single
-    ), "rv5stage_fp_load_precision_supported")
+    assert((load_completion.bits.precision =/= RV5StageFloatPrecision.Double) ||| Bool(profile == FloatingPointProfile.D), "rv5stage_fp_load_precision_supported")
+    assert((load_completion.bits.precision =/= RV5StageFloatPrecision.Half) ||| Bool(half_precision_supports_zfhmin(half_precision)), "rv5stage_fp_half_load_supported")
 
   def execution_clear = execution_write_valid
   def load_clear = load_completion.valid
@@ -193,9 +222,8 @@ sync_circuit RV5StageFpPipeline(xlen :: XLen, profile :: FloatingPointProfile, C
     issue.bits.frs3
   )
   when (store_request.fire()):
-    assert(Bool(profile == FloatingPointProfile.D) ||| (
-      store_request.bits.precision === RV5StageFloatPrecision.Single
-    ), "rv5stage_fp_store_precision_supported")
+    assert((store_request.bits.precision =/= RV5StageFloatPrecision.Double) ||| Bool(profile == FloatingPointProfile.D), "rv5stage_fp_store_precision_supported")
+    assert((store_request.bits.precision =/= RV5StageFloatPrecision.Half) ||| Bool(half_precision_supports_zfhmin(half_precision)), "rv5stage_fp_half_store_supported")
 
   def execution_request = RV5StageFpExecutionRequest(xlen, profile, Context):
     context: issue.bits.context

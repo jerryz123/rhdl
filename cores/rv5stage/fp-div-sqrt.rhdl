@@ -120,7 +120,53 @@ sync_circuit RV5StageFpDivSqrtD(xlen :: XLen, Context :: DataType):
   merge.egress |> buffered.ingress
   buffered.egress |> completion
 
+sync_circuit RV5StageFpDivSqrtFHalf(xlen :: XLen, Context :: DataType):
+  def profile = FloatingPointProfile.F
+  def Request = RV5StageFpExecutionRequest(xlen, profile, Context)
+  def Completion = RV5StageFpCompletion(xlen, profile, Context)
+  interface request(Decoupled(Request), ~role: consumer)
+  interface completion(Irrevocable(Completion), ~role: producer)
+
+  inst half(RV5StageFpDivSqrtLane(xlen, profile, FloatFormat.F16, Context))
+  inst base(RV5StageFpDivSqrtF(xlen, Context))
+  def Array(base_request, half_request) = request |> demux_flow(
+    2,
+    issued => issued.control.execution.source_precision === RV5StageFloatPrecision.Half
+  )
+  half_request |> half.request
+  base_request |> base.request
+  inst merge(Arbiter(Completion, 2))
+  half.completion |> merge.ingress[0]
+  base.completion |> merge.ingress[1]
+  inst buffered(Queue(Completion, 2, ~pipe: #true))
+  merge.egress |> buffered.ingress
+  buffered.egress |> completion
+
+sync_circuit RV5StageFpDivSqrtDHalf(xlen :: XLen, Context :: DataType):
+  def profile = FloatingPointProfile.D
+  def Request = RV5StageFpExecutionRequest(xlen, profile, Context)
+  def Completion = RV5StageFpCompletion(xlen, profile, Context)
+  interface request(Decoupled(Request), ~role: consumer)
+  interface completion(Irrevocable(Completion), ~role: producer)
+
+  inst half(RV5StageFpDivSqrtLane(xlen, profile, FloatFormat.F16, Context))
+  inst base(RV5StageFpDivSqrtD(xlen, Context))
+  def Array(base_request, half_request) = request |> demux_flow(
+    2,
+    issued => issued.control.execution.source_precision === RV5StageFloatPrecision.Half
+  )
+  half_request |> half.request
+  base_request |> base.request
+  inst merge(Arbiter(Completion, 2))
+  half.completion |> merge.ingress[0]
+  base.completion |> merge.ingress[1]
+  inst buffered(Queue(Completion, 2, ~pipe: #true))
+  merge.egress |> buffered.ingress
+  buffered.egress |> completion
+
 export:
   RV5StageFpDivSqrtLane
   RV5StageFpDivSqrtF
   RV5StageFpDivSqrtD
+  RV5StageFpDivSqrtFHalf
+  RV5StageFpDivSqrtDHalf

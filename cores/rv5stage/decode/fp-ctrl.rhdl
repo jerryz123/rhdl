@@ -3,18 +3,17 @@
 
 import:
   "decode-support.rhdl" open
+  "../fp-types.rhdl" open
   "../../../riscv/isa/fp-profile.rhm" open
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/f.rhm" as f
   "../../../riscv/isa/d.rhm" as d
+  "../../../riscv/isa/zfhmin.rhm" as zfhmin
+  "../../../riscv/isa/zfh.rhm" as zfh
   "../../../riscv/model/main.rhm" open
   "../../../riscv/rtl/floating-point.rhdl".FloatSignOperation
   lib("hardfloat/main.rhdl").MulAddOperation
   lib("rhodium/std/decode.rhdl") open
-
-hardware_enum RV5StageFloatPrecision:
-  Single
-  Double
 
 hardware_enum RV5StageFloatUnit:
   Memory
@@ -55,17 +54,21 @@ hardware_enum RV5StageFloatIntegerWidth:
   Word
   Long
 
-fun rv5stage_floating_point_profile_supported(xlen :: XLen, profile :: FloatingPointProfile):
-  (profile == FloatingPointProfile.None) || (
+fun rv5stage_floating_point_profile_supported(xlen :: XLen,
+                                              profile :: FloatingPointProfile,
+                                              half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile):
+  ((profile == FloatingPointProfile.None) || (
     (xlen == XLen.X32) && (profile == FloatingPointProfile.F)
   ) || (
     (xlen == XLen.X64) && (profile == FloatingPointProfile.D)
-  )
+  )) && !(profile == FloatingPointProfile.None && half_precision != HalfPrecisionProfile.None)
 
-fun check_rv5stage_floating_point_profile(xlen :: XLen, profile :: FloatingPointProfile):
-  unless rv5stage_floating_point_profile_supported(xlen, profile)
+fun check_rv5stage_floating_point_profile(xlen :: XLen,
+                                          profile :: FloatingPointProfile,
+                                          half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile):
+  unless rv5stage_floating_point_profile_supported(xlen, profile, half_precision)
   | error(~who: #'check_rv5stage_floating_point_profile,
-          "RV5Stage supports only disabled FP, RV32F, or RV64D")
+          "RV5Stage supports only disabled FP, RV32F, or RV64D, with optional Zfhmin or Zfh")
 
 bundle RV5StageFloatRegisterControl():
   uses_integer_rs1: Bool
@@ -506,6 +509,211 @@ def RV64DoubleExecutionCases = DoubleExecutionCases ++ decode_groups(
     unit: RV5StageFloatUnit.Move
     destination_precision: RV5StageFloatPrecision.Double
 
+def HalfMinimalExecutionCases = decode_groups(
+  RV5StageFloatExecutionControl(),
+  ~input: instruction_pattern
+):
+  [zfhmin.FLH]:
+    unit: RV5StageFloatUnit.Memory
+    destination_precision: RV5StageFloatPrecision.Half
+    memory_write: Bool(#false)
+
+  [zfhmin.FSH]:
+    unit: RV5StageFloatUnit.Memory
+    source_precision: RV5StageFloatPrecision.Half
+    memory_write: Bool(#true)
+
+  [zfhmin.FMV_X_H]:
+    unit: RV5StageFloatUnit.Move
+    source_precision: RV5StageFloatPrecision.Half
+
+  [zfhmin.FMV_H_X]:
+    unit: RV5StageFloatUnit.Move
+    destination_precision: RV5StageFloatPrecision.Half
+
+  [zfhmin.FCVT_S_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Single
+    uses_rounding_mode: Bool(#true)
+
+  [zfhmin.FCVT_H_S]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Single
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+
+def HalfDoubleExecutionCases = decode_groups(
+  RV5StageFloatExecutionControl(),
+  ~input: instruction_pattern
+):
+  [zfhmin.FCVT_D_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Double
+    uses_rounding_mode: Bool(#true)
+
+  [zfhmin.FCVT_H_D]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Double
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+
+def HalfExecutionCases = decode_groups(
+  RV5StageFloatExecutionControl(),
+  ~input: instruction_pattern
+):
+  [zfh.FMADD_H]:
+    unit: RV5StageFloatUnit.FusedMultiplyAdd
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    fused_operation: MulAddOperation.MultiplyAdd
+
+  [zfh.FMSUB_H]:
+    unit: RV5StageFloatUnit.FusedMultiplyAdd
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    fused_operation: MulAddOperation.MultiplySubtract
+
+  [zfh.FNMSUB_H]:
+    unit: RV5StageFloatUnit.FusedMultiplyAdd
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    fused_operation: MulAddOperation.NegatedMultiplyAdd
+
+  [zfh.FNMADD_H]:
+    unit: RV5StageFloatUnit.FusedMultiplyAdd
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    fused_operation: MulAddOperation.NegatedMultiplySubtract
+
+  [zfh.FADD_H]:
+    unit: RV5StageFloatUnit.Add
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+  [zfh.FSUB_H]:
+    unit: RV5StageFloatUnit.Add
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    add_operation: RV5StageFloatAddOperation.Subtract
+
+  [zfh.FMUL_H]:
+    unit: RV5StageFloatUnit.Multiply
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+
+  [zfh.FDIV_H]:
+    unit: RV5StageFloatUnit.DivideSquareRoot
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+  [zfh.FSQRT_H]:
+    unit: RV5StageFloatUnit.DivideSquareRoot
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    divide_operation: RV5StageFloatDivideOperation.SquareRoot
+
+  [zfh.FSGNJ_H]:
+    unit: RV5StageFloatUnit.SignInject
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+  [zfh.FSGNJN_H]:
+    unit: RV5StageFloatUnit.SignInject
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    sign_operation: FloatSignOperation.Negate
+  [zfh.FSGNJX_H]:
+    unit: RV5StageFloatUnit.SignInject
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    sign_operation: FloatSignOperation.Xor
+
+  [zfh.FMIN_H]:
+    unit: RV5StageFloatUnit.MinMax
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+  [zfh.FMAX_H]:
+    unit: RV5StageFloatUnit.MinMax
+    source_precision: RV5StageFloatPrecision.Half
+    destination_precision: RV5StageFloatPrecision.Half
+    minmax_operation: RV5StageFloatMinMaxOperation.Maximum
+
+  [zfh.FEQ_H]:
+    unit: RV5StageFloatUnit.Compare
+    source_precision: RV5StageFloatPrecision.Half
+  [zfh.FLT_H]:
+    unit: RV5StageFloatUnit.Compare
+    source_precision: RV5StageFloatPrecision.Half
+    comparison: RV5StageFloatComparison.Less
+  [zfh.FLE_H]:
+    unit: RV5StageFloatUnit.Compare
+    source_precision: RV5StageFloatPrecision.Half
+    comparison: RV5StageFloatComparison.LessEqual
+
+  [zfh.FCLASS_H]:
+    unit: RV5StageFloatUnit.Classify
+    source_precision: RV5StageFloatPrecision.Half
+
+  [zfh.FCVT_W_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Word
+  [zfh.FCVT_WU_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Word
+    integer_unsigned: Bool(#true)
+
+  [zfh.FCVT_H_W]:
+    unit: RV5StageFloatUnit.Convert
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Word
+  [zfh.FCVT_H_WU]:
+    unit: RV5StageFloatUnit.Convert
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Word
+    integer_unsigned: Bool(#true)
+
+def RV64HalfExecutionCases = HalfExecutionCases ++ decode_groups(
+  RV5StageFloatExecutionControl(),
+  ~input: instruction_pattern
+):
+  [zfh.FCVT_L_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Long
+  [zfh.FCVT_LU_H]:
+    unit: RV5StageFloatUnit.Convert
+    source_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Long
+    integer_unsigned: Bool(#true)
+
+  [zfh.FCVT_H_L]:
+    unit: RV5StageFloatUnit.Convert
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Long
+  [zfh.FCVT_H_LU]:
+    unit: RV5StageFloatUnit.Convert
+    destination_precision: RV5StageFloatPrecision.Half
+    uses_rounding_mode: Bool(#true)
+    integer_width: RV5StageFloatIntegerWidth.Long
+    integer_unsigned: Bool(#true)
+
 fun compose_floating_point_control_cases(instructions :: List.of(InstructionSpec), execution_cases :: List.of(DecodeCase)):
   for List (instruction in instructions):
     block:
@@ -530,8 +738,50 @@ def RV64FFloatingPointDecode = ValidDecodeGen(RV64FFloatingPointControlCases)
 def RV32FDFloatingPointDecode = ValidDecodeGen(RV32FDFloatingPointControlCases)
 def RV64FDFloatingPointDecode = ValidDecodeGen(RV64FDFloatingPointControlCases)
 
-circuit RV5StageFloatingPointInstructionDecoder(xlen :: XLen, profile :: FloatingPointProfile):
-  check_rv5stage_floating_point_profile(xlen, profile)
+fun rv5stage_half_instructions(xlen :: XLen, profile :: FloatingPointProfile, half_precision :: HalfPrecisionProfile) :: List.of(InstructionSpec):
+  cond
+  | half_precision == HalfPrecisionProfile.None: []
+  | half_precision == HalfPrecisionProfile.Zfhmin:
+      zfhmin.ZfhminInstructions ++ if profile == FloatingPointProfile.D | zfhmin.ZfhminDInstructions | []
+  | ~else:
+      (if xlen == XLen.X32 | zfh.RV32ZfhInstructions | zfh.RV64ZfhInstructions) ++ (
+        if profile == FloatingPointProfile.D | zfhmin.ZfhminDInstructions | []
+      )
+
+fun rv5stage_half_execution_cases(xlen :: XLen, profile :: FloatingPointProfile, half_precision :: HalfPrecisionProfile) :: List.of(DecodeCase):
+  cond
+  | half_precision == HalfPrecisionProfile.None: []
+  | half_precision == HalfPrecisionProfile.Zfhmin:
+      HalfMinimalExecutionCases ++ if profile == FloatingPointProfile.D | HalfDoubleExecutionCases | []
+  | ~else:
+      HalfMinimalExecutionCases ++ (
+        if xlen == XLen.X32 | HalfExecutionCases | RV64HalfExecutionCases
+      ) ++ if profile == FloatingPointProfile.D | HalfDoubleExecutionCases | []
+
+fun rv5stage_floating_point_instructions(xlen :: XLen, profile :: FloatingPointProfile, half_precision :: HalfPrecisionProfile) :: List.of(InstructionSpec):
+  def base = cond
+  | profile == FloatingPointProfile.None: []
+  | xlen == XLen.X32: RV32FFloatingPointInstructions
+  | ~else: RV64FDFloatingPointInstructions
+  base ++ rv5stage_half_instructions(xlen, profile, half_precision)
+
+fun rv5stage_floating_point_control_cases(xlen :: XLen, profile :: FloatingPointProfile, half_precision :: HalfPrecisionProfile) :: List.of(DecodeCase):
+  def base_execution = cond
+  | profile == FloatingPointProfile.None: []
+  | xlen == XLen.X32: SingleExecutionCases
+  | ~else: RV64SingleExecutionCases ++ RV64DoubleExecutionCases
+  def execution = base_execution ++ rv5stage_half_execution_cases(xlen, profile, half_precision)
+  compose_floating_point_control_cases(
+    rv5stage_floating_point_instructions(xlen, profile, half_precision),
+    execution
+  )
+
+circuit RV5StageFloatingPointInstructionDecoder(
+  xlen :: XLen,
+  profile :: FloatingPointProfile,
+  half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile
+):
+  check_rv5stage_floating_point_profile(xlen, profile, half_precision)
   input instruction: Bits(32)
   output valid: Bool
   output control: RV5StageFloatingPointControl()
@@ -540,10 +790,11 @@ circuit RV5StageFloatingPointInstructionDecoder(xlen :: XLen, profile :: Floatin
     valid: Bool(#false)
     value: dont_care(RV5StageFloatingPointControl())
   def decoded :: DecodeResult(RV5StageFloatingPointControl()):
-    cond
-    | profile == FloatingPointProfile.None: disabled
-    | xlen == XLen.X32: RV32FFloatingPointDecode(instruction)
-    | ~else: RV64FDFloatingPointDecode(instruction)
+    if profile == FloatingPointProfile.None
+    | disabled
+    | ValidDecodeGen(
+        rv5stage_floating_point_control_cases(xlen, profile, half_precision)
+      )(instruction)
   valid <== decoded.valid
   control <== decoded.value
 
@@ -565,6 +816,10 @@ export:
   RV64SingleExecutionCases
   DoubleExecutionCases
   RV64DoubleExecutionCases
+  HalfMinimalExecutionCases
+  HalfDoubleExecutionCases
+  HalfExecutionCases
+  RV64HalfExecutionCases
   compose_floating_point_control_cases
   RV32FFloatingPointInstructions
   RV64FFloatingPointInstructions
@@ -578,4 +833,8 @@ export:
   RV64FFloatingPointDecode
   RV32FDFloatingPointDecode
   RV64FDFloatingPointDecode
+  rv5stage_half_instructions
+  rv5stage_half_execution_cases
+  rv5stage_floating_point_instructions
+  rv5stage_floating_point_control_cases
   RV5StageFloatingPointInstructionDecoder

@@ -141,11 +141,15 @@ the pure descriptor and hardware materialization path.
 | Module | Public catalog or configuration | Coverage |
 |---|---|---|
 | [`isa/fp-profile.rhm`](isa/fp-profile.rhm) | `FloatingPointProfile.None`, `.F`, `.D` | Host specialization; D implies F and selects a 64-bit FP register width |
+| [`isa/fp-profile.rhm`](isa/fp-profile.rhm) | `HalfPrecisionProfile.None`, `.Zfhmin`, `.Zfh` | Orthogonal half-precision specialization; Zfh implies Zfhmin and requires F or D |
 | [`isa/f.rhm`](isa/f.rhm) | `RV32F`, `RV64F` | Standard F 2.2 instruction encodings |
 | [`isa/d.rhm`](isa/d.rhm) | `RV32D`, `RV64D` | D-specific 2.2 instruction encodings, composed with F by a D-profile consumer |
+| [`isa/zfhmin.rhm`](isa/zfhmin.rhm) | `RV32Zfhmin`, `RV64Zfhmin` plus D-dependent catalogs | Zfhmin 1.0 move, load/store, and widening/narrowing conversions |
+| [`isa/zfh.rhm`](isa/zfh.rhm) | `RV32Zfh`, `RV64Zfh` plus D-dependent catalogs | Full Zfh 1.0 binary16 arithmetic, fused, comparison, classification, and conversion operations |
 
-The profile is host data so unsupported hardware specializes away rather than
-becoming runtime control. `None` has no floating-point register width.
+The profiles are host data so unsupported hardware specializes away rather than
+becoming runtime control. The half-precision profile leaves FLEN under the base
+F/D profile, and its `None` default adds no half-precision operations.
 
 ### Privileged and address-space descriptions
 
@@ -219,7 +223,7 @@ Executable pattern and field-extraction examples live in
 
 ## Architectural references
 
-The base catalogs were checked against the RISC-V International
+The catalogs were checked against the RISC-V International
 [RV32I specification](https://docs.riscv.org/reference/isa/unpriv/rv32.html),
 [RV64I specification](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
 and canonical [`rv_i`](https://github.com/riscv/riscv-opcodes/blob/master/extensions/rv_i)
@@ -234,3 +238,5 @@ Zicond follows the ratified
 [integer conditional-operations extension](https://docs.riscv.org/reference/isa/unpriv/zicond.html),
 and C follows the ratified
 [compressed-instruction extension](https://docs.riscv.org/reference/isa/unpriv/c-st-ext.html).
+Zfhmin and Zfh follow the ratified
+[half-precision floating-point extension](https://github.com/riscv/riscv-isa-manual/blob/main/src/unpriv/zfh.adoc).

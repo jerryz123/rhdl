@@ -1,4 +1,4 @@
-// Verifies the standalone FP pipeline's LSU bridge, hazards, backpressure, and F/D execution paths.
+// Verifies the standalone FP pipeline's LSU bridge, hazards, backpressure, and F/D/Zfh execution paths.
 module rv5stage_fp_pipeline_tb;
   typedef struct packed {
     logic valid;
@@ -38,19 +38,20 @@ module rv5stage_fp_pipeline_tb;
   always #5 clock = ~clock;
 
   task automatic load_register(input logic [4:0] rd,
-                               input logic [63:0] data);
+                               input logic [63:0] data,
+                               input logic [1:0] precision);
     begin
       @(negedge clock);
       load_reserve_in.valid = 1'b1;
       load_reserve_in.bits.context_0 = {3'b0, rd};
-      load_reserve_in.bits.precision = 1'b1;
+      load_reserve_in.bits.precision = precision;
       load_reserve_in.bits.rd = rd;
       do @(posedge clock); while (!load_reserve_out.ready);
       @(negedge clock);
       load_reserve_in.valid = 1'b0;
       load_completion_in.valid = 1'b1;
       load_completion_in.bits.context_0 = {3'b0, rd};
-      load_completion_in.bits.precision = 1'b1;
+      load_completion_in.bits.precision = precision;
       load_completion_in.bits.rd = rd;
       load_completion_in.bits.data = data;
       #1;
@@ -82,15 +83,15 @@ module rv5stage_fp_pipeline_tb;
     #1;
     reset = 1'b0;
 
-    load_register(5'd1, 64'h3ff0000000000000);
-    load_register(5'd2, 64'h0000000000000001);
+    load_register(5'd1, 64'h3ff0000000000000, 2'd2);
+    load_register(5'd2, 64'h0000000000000001, 2'd2);
     assert (busy == 32'b0);
 
     // A reserved load destination blocks a dependent arithmetic request.
     @(negedge clock);
     load_reserve_in.valid = 1'b1;
     load_reserve_in.bits.context_0 = 8'h44;
-    load_reserve_in.bits.precision = 1'b1;
+    load_reserve_in.bits.precision = 2'd2;
     load_reserve_in.bits.rd = 5'd4;
     @(posedge clock);
     @(negedge clock);
@@ -100,8 +101,8 @@ module rv5stage_fp_pipeline_tb;
     issue_in.bits.control.registers.uses_frs1 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd2;
     issue_in.bits.control.execution.unit = 4'd2;
-    issue_in.bits.control.execution.source_precision = 1'b1;
-    issue_in.bits.control.execution.destination_precision = 1'b1;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
     issue_in.bits.frs1 = 5'd4;
     issue_in.bits.frs2 = 5'd2;
     issue_in.bits.frd = 5'd5;
@@ -110,7 +111,7 @@ module rv5stage_fp_pipeline_tb;
     issue_in.valid = 1'b0;
     load_completion_in.valid = 1'b1;
     load_completion_in.bits.context_0 = 8'h44;
-    load_completion_in.bits.precision = 1'b1;
+    load_completion_in.bits.precision = 2'd2;
     load_completion_in.bits.rd = 5'd4;
     load_completion_in.bits.data = 64'h4010000000000000;
     @(posedge clock);
@@ -125,8 +126,8 @@ module rv5stage_fp_pipeline_tb;
     issue_in.bits.control.registers.uses_frs2 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd2;
     issue_in.bits.control.execution.unit = 4'd2;
-    issue_in.bits.control.execution.source_precision = 1'b1;
-    issue_in.bits.control.execution.destination_precision = 1'b1;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
     issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
     issue_in.bits.frs1 = 5'd1;
     issue_in.bits.frs2 = 5'd2;
@@ -153,7 +154,7 @@ module rv5stage_fp_pipeline_tb;
     assert (!busy[3]);
 
     // A later FP load dirties FP state but must not replay stale arithmetic flags.
-    load_register(5'd2, 64'h4000000000000000);
+    load_register(5'd2, 64'h4000000000000000, 2'd2);
 
     // The variable-latency divide lane uses the same buffered completion path.
     issue_in.valid = 1'b1;
@@ -163,8 +164,8 @@ module rv5stage_fp_pipeline_tb;
     issue_in.bits.control.registers.uses_frs2 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd2;
     issue_in.bits.control.execution.unit = 4'd4;
-    issue_in.bits.control.execution.source_precision = 1'b1;
-    issue_in.bits.control.execution.destination_precision = 1'b1;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
     issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
     issue_in.bits.control.execution.divide_operation = 1'b0;
     issue_in.bits.frs1 = 5'd4;
@@ -187,7 +188,7 @@ module rv5stage_fp_pipeline_tb;
     // The LSU store bridge observes the value written by the FP completion.
     store_request_in.valid = 1'b1;
     store_request_in.bits.context_0 = 8'h3c;
-    store_request_in.bits.precision = 1'b1;
+    store_request_in.bits.precision = 2'd2;
     store_request_in.bits.rs = 5'd3;
     do @(posedge clock); while (!store_request_out.ready);
     @(negedge clock);
@@ -210,7 +211,7 @@ module rv5stage_fp_pipeline_tb;
     issue_in.bits.control.registers.uses_integer_rs1 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd2;
     issue_in.bits.control.execution.unit = 4'd8;
-    issue_in.bits.control.execution.destination_precision = 1'b1;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
     issue_in.bits.control.execution.integer_width = 1'b0;
     issue_in.bits.integer_operand = 64'd2;
     issue_in.bits.frd = 5'd7;
@@ -231,7 +232,7 @@ module rv5stage_fp_pipeline_tb;
     issue_in.bits.control.registers.uses_integer_rs1 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd2;
     issue_in.bits.control.execution.unit = 4'd9;
-    issue_in.bits.control.execution.destination_precision = 1'b1;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
     issue_in.bits.integer_operand = 64'h3ff0000000000000;
     issue_in.bits.frd = 5'd8;
     do @(posedge clock); while (!issue_out.ready);
@@ -245,14 +246,14 @@ module rv5stage_fp_pipeline_tb;
     consume_completion();
 
     // FP-to-integer conversion retains the selected source lane and its flags.
-    load_register(5'd9, 64'hc1e65a0bc0000000);
+    load_register(5'd9, 64'hc1e65a0bc0000000, 2'd2);
     issue_in.valid = 1'b1;
     issue_in.bits = '0;
     issue_in.bits.context_0 = 8'hc3;
     issue_in.bits.control.registers.uses_frs1 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd1;
     issue_in.bits.control.execution.unit = 4'd8;
-    issue_in.bits.control.execution.source_precision = 1'b1;
+    issue_in.bits.control.execution.source_precision = 2'd2;
     issue_in.bits.control.execution.integer_width = 1'b0;
     issue_in.bits.frs1 = 5'd9;
     issue_in.bits.frd = 5'd10;
@@ -275,14 +276,14 @@ module rv5stage_fp_pipeline_tb;
     completion_in.ready = 1'b0;
 
     // FP-to-integer moves copy raw low bits rather than applying NaN unboxing.
-    load_register(5'd10, 64'h7fffffff11111111);
+    load_register(5'd10, 64'h7fffffff11111111, 2'd2);
     issue_in.valid = 1'b1;
     issue_in.bits = '0;
     issue_in.bits.context_0 = 8'hc4;
     issue_in.bits.control.registers.uses_frs1 = 1'b1;
     issue_in.bits.control.registers.destination = 2'd1;
     issue_in.bits.control.execution.unit = 4'd9;
-    issue_in.bits.control.execution.source_precision = 1'b0;
+    issue_in.bits.control.execution.source_precision = 2'd1;
     issue_in.bits.frs1 = 5'd10;
     issue_in.bits.frd = 5'd11;
     do @(posedge clock); while (!issue_out.ready);
@@ -294,6 +295,72 @@ module rv5stage_fp_pipeline_tb;
     assert (completion_out.bits.integer_value == 64'h0000000011111111);
     assert (!completion_out.bits.exception_flags_valid);
     consume_completion();
+
+    // Zfh arithmetic consumes and produces NaN-boxed binary16 values.
+    load_register(5'd12, 64'h0000000000003c00, 2'd0);
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'h16;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.uses_frs2 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd2;
+    issue_in.bits.control.execution.source_precision = 2'd0;
+    issue_in.bits.control.execution.destination_precision = 2'd0;
+    issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
+    issue_in.bits.frs1 = 5'd12;
+    issue_in.bits.frs2 = 5'd12;
+    issue_in.bits.frd = 5'd13;
+    issue_in.bits.rounding_mode = 3'd0;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.context_0 == 8'h16);
+    assert (completion_out.bits.fp_value == 64'hffffffffffff4000);
+    assert (completion_out.bits.exception_flags == 5'b0);
+    consume_completion();
+
+    // Zfhmin H-to-D conversion reuses the cross-format conversion path.
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'h17;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd8;
+    issue_in.bits.control.execution.source_precision = 2'd0;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
+    issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
+    issue_in.bits.frs1 = 5'd12;
+    issue_in.bits.frd = 5'd14;
+    issue_in.bits.rounding_mode = 3'd0;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.context_0 == 8'h17);
+    assert (completion_out.bits.fp_value == 64'h3ff0000000000000);
+    assert (completion_out.bits.exception_flags == 5'b0);
+    consume_completion();
+
+    // A half-precision store exposes only the architectural low 16 bits.
+    store_request_in.valid = 1'b1;
+    store_request_in.bits.context_0 = 8'h18;
+    store_request_in.bits.precision = 2'd0;
+    store_request_in.bits.rs = 5'd13;
+    do @(posedge clock); while (!store_request_out.ready);
+    @(negedge clock);
+    store_request_in.valid = 1'b0;
+    wait (store_response_out.valid);
+    #1;
+    assert (store_response_out.bits.context_0 == 8'h18);
+    assert (store_response_out.bits.data == 64'h0000000000004000);
+    store_response_in.ready = 1'b1;
+    @(posedge clock);
+    @(negedge clock);
+    store_response_in.ready = 1'b0;
     #1;
     assert (drained);
 

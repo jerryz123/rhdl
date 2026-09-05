@@ -21,14 +21,15 @@ caches live here. Reusable execution components remain directly under
 | Pipeline boundaries | Elastic IF/ID and ID/EX; feed-forward EX/MEM and MEM/WB |
 | Deferred work | Loads, atomics, multiply, divide, and FP results may complete after their scalar token retires |
 | Integer widths | RV32 and RV64 selected by `XLen.X32` or `XLen.X64` |
-| Floating point | Disabled by default; RV32F or RV64D, with D including RV64F |
+| Floating point | Disabled by default; RV32F or RV64D, with optional Zfhmin or Zfh |
 | Address translation | Bare for RV32; Bare or Sv39 for RV64 |
 | Private caches | Separate configurable L1I and blocking write-back L1D; fixed 64-byte lines |
 | External memory | Separate instruction and data CHI RN-F channels plus a device RN-I channel |
 
-Implemented instruction families include RV32I/RV64I, C, A, B, M, Zicond,
-Zicsr, Zicntr, and Zifencei. The privileged control plane implements an initial
-M/S/U slice. RV32D and an RV64F-only specialization are deliberately rejected.
+Implemented instruction families include RV32I/RV64I, C, A, B, M, Zfhmin,
+Zfh, Zicond, Zicsr, Zicntr, and Zifencei. The privileged control plane
+implements an initial M/S/U slice. RV32D and an RV64F-only specialization are
+deliberately rejected.
 
 ## Microarchitecture
 
@@ -151,8 +152,10 @@ FP loads and stores share the scalar address generator, MMU, PMA checks, ordered
 L1D, and uncached path. An FP load reserves its destination when the legal memory
 request is accepted. An FP store holds EX for the FP register file's one-cycle
 store-data response before issuing the ordinary memory request. The cache data
-path remains XLEN-wide because supported RV32 FP accesses are single precision
-and RV64D uses a 64-bit XLEN.
+path remains XLEN-wide: half and single stores occupy its low 16 or 32 bits,
+and half and single loads are NaN-boxed into the selected 32- or 64-bit FP
+register width. Exact precision metadata follows a load through the MMU and
+cache response path.
 
 ## Control, hazards, and ordering
 
@@ -162,11 +165,11 @@ instructions may proceed while a load, multiply, divide, or FP result remains
 outstanding. D-cache responses are ordered, and a blocking miss prevents younger
 memory requests from entering the cache even when non-memory work can pass it.
 
-The structured decoder selects the integer-only, RV32F, or RV64D control catalog
-at host elaboration and emits component control bundles through one hardware
-decode relation. It does not introduce an instruction-kind enum or parallel
-runtime decoders. Unused controls remain synthesis don't-cares behind a separate
-valid bit.
+The structured decoder selects the integer-only, RV32F, or RV64D base catalog
+and optionally composes Zfhmin or Zfh at host elaboration. It emits component
+control bundles through one hardware decode relation, without an
+instruction-kind enum or parallel runtime decoders. Unused controls remain
+synthesis don't-cares behind a separate valid bit.
 
 Standard B and Zicond operations reuse the shared combinational
 [`ALU`](../alu.rhdl). Zba, Zbb, Zbs, and Zicond add no second decoder, execution
@@ -231,6 +234,7 @@ specialized core definition to be stamped at multiple placements.
 |---|---|
 | `xlen` | Required `XLen.X32` or `XLen.X64` architectural width |
 | `~floating_point` | `None`, RV32F, or RV64D-compatible FP profile |
+| `~half_precision` | `None`, `Zfhmin`, or `Zfh`; requires an enabled F/D profile |
 | `~compressed` | Enables C-extension fetch, expansion, two-byte sequencing, and matching CSR alignment behavior |
 | `~icache` | L1I set and way geometry; defaults to `RV5StageCacheConfig(64, 1)` |
 | `~dcache` | L1D set and way geometry; defaults independently to `RV5StageCacheConfig(64, 1)` |

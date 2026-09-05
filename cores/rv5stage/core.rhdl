@@ -41,8 +41,9 @@ import:
 
 sync_circuit RV5StageCore(xlen :: XLen,
                           profile :: FloatingPointProfile = DefaultFloatingPointProfile,
+                          ~half_precision: half_precision :: HalfPrecisionProfile = DefaultHalfPrecisionProfile,
                           ~compressed: compressed_enabled :: Boolean = #false):
-  check_rv5stage_floating_point_profile(xlen, profile)
+  check_rv5stage_floating_point_profile(xlen, profile, half_precision)
   def width = xlen.width
   def register_count = 32
   def effective_fp_profile = if xlen == XLen.X32 | FloatingPointProfile.F | FloatingPointProfile.D
@@ -78,7 +79,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   inst ex_mem_pipe(ValidPipe(ExecuteMemory(xlen), 1))
   inst mem_wb_pipe(ValidPipe(MemoryWriteback(xlen), 1))
 
-  inst decoder(RV5StageInstructionDecoder(xlen, profile))
+  inst decoder(RV5StageInstructionDecoder(xlen, profile, half_precision))
   inst registers(RV5StageRegisterFile(xlen))
   inst alu(ALU(xlen))
   inst branch_resolver(BranchResolver(width))
@@ -86,7 +87,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   inst divider(RV5StageDivider(xlen))
   inst scoreboard(Scoreboard(register_count))
   inst fp_integer_scoreboard(Scoreboard(register_count))
-  def FpModule = if floating_point_supports_f(profile) | RV5StageFpPipeline(xlen, effective_fp_profile, Bits(width)) | RV5StageDisabledFpPipeline(xlen, effective_fp_profile, Bits(width))
+  def FpModule = if floating_point_supports_f(profile) | RV5StageFpPipeline(xlen, effective_fp_profile, Bits(width), ~half_precision: half_precision) | RV5StageDisabledFpPipeline(xlen, effective_fp_profile, Bits(width))
   inst fp(FpModule)
   inst csrs(RV5StageCsrFile(xlen, profile, ~compressed: compressed_enabled))
   inst fetch(RV5StageInstructionFetch(xlen, profile, ~compressed: compressed_enabled))
@@ -508,9 +509,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
           RV5StageDataDestination.None)
     )
     rd: id_ex.bits.rd
-    floating_point_double: execute_fp_load & (
-      fp_execution_control.destination_precision === RV5StageFloatPrecision.Double
-    )
+    floating_point_precision: fp_execution_control.destination_precision
 
   fp.load_reserve.valid <== data_access.request.fire() & execute_fp_load & !data_page_fault & !data_access_fault
   fp.load_reserve.bits <== RV5StageFpLoadReservation(Bits(width)):
@@ -677,9 +676,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   )
   fp.load_completion.bits <== RV5StageFpLoadCompletion(Bits(width)):
     context: bits(0, width)
-    precision: mux(data_access.response.bits.floating_point_double,
-                   RV5StageFloatPrecision.Double,
-                   RV5StageFloatPrecision.Single)
+    precision: data_access.response.bits.floating_point_precision
     rd: data_access.response.bits.rd
     data: if xlen == XLen.X32 | data_access.response.bits.data.zext(64) | data_access.response.bits.data
 

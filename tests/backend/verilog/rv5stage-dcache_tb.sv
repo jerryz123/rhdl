@@ -9,7 +9,7 @@ module rv5stage_dcache_tb;
     logic [63:0] data;
     logic [1:0] destination;
     logic [4:0] rd;
-    logic floating_point_double;
+    logic [1:0] floating_point_precision;
   } core_req_bits_t;
   typedef struct packed { logic valid; core_req_bits_t bits; } core_req_t;
   typedef struct packed { logic ready; } ready_t;
@@ -17,7 +17,7 @@ module rv5stage_dcache_tb;
     logic [63:0] data;
     logic [1:0] destination;
     logic [4:0] rd;
-    logic floating_point_double;
+    logic [1:0] floating_point_precision;
   } core_resp_bits_t;
   typedef struct packed { logic valid; core_resp_bits_t bits; } core_resp_t;
   typedef struct packed { core_req_t request; } core_in_t;
@@ -173,7 +173,7 @@ module rv5stage_dcache_tb;
                                data: data,
                                destination: access == MEMORY_STORE ? DATA_DESTINATION_NONE : DATA_DESTINATION_INTEGER,
                                rd: rd,
-                               floating_point_double: 1'b0};
+                               floating_point_precision: 2'b01};
       core_in.request.valid = 1'b1;
       tick();
       core_in.request.valid = 1'b0;
@@ -274,7 +274,7 @@ module rv5stage_dcache_tb;
               core_out.response.bits.data == data &&
               core_out.response.bits.destination == destination &&
               core_out.response.bits.rd == rd &&
-              !core_out.response.bits.floating_point_double)
+              core_out.response.bits.floating_point_precision == 2'b01)
         else $fatal(1,
                     "L1D response mismatch: valid=%0d data=%h expected=%h destination=%0d expected_destination=%0d rd=%0d expected_rd=%0d",
                     core_out.response.valid,

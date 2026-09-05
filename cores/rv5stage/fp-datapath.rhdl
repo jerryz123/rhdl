@@ -201,6 +201,24 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
     exception_flags: exception_flags
     exception_flags_valid: exception_flags_valid
 
+circuit RV5StageFpHalfMinimalDatapath(xlen :: XLen, profile :: FloatingPointProfile, Context :: DataType):
+  def flen = floating_point_register_width(profile)
+  input request: RV5StageFpExecutionRequest(xlen, profile, Context)
+  output completion: RV5StageFpCompletion(xlen, profile, Context)
+
+  def format = FloatFormat.F16
+  def source = request.left[0..format.ieee_width].into(IEEEFloat(format))
+  completion <== RV5StageFpCompletion(xlen, profile, Context):
+    context: request.context
+    destination: request.control.registers.destination
+    rd: request.rd
+    integer_value: fp_move_to_integer(xlen, format, source)
+    fp_value: riscv_nan_box(format,
+                            integer_move_to_fp(xlen, format, request.integer_operand),
+                            flen)
+    exception_flags: bits(0, 5)
+    exception_flags_valid: Bool(#false)
+
 circuit RV5StageFpFixedF(xlen :: XLen, Context :: DataType):
   input request: RV5StageFpExecutionRequest(xlen, FloatingPointProfile.F, Context)
   output completion: RV5StageFpCompletion(xlen, FloatingPointProfile.F, Context)
@@ -285,7 +303,136 @@ circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
                          ordinary.exception_flags)
     exception_flags_valid: ordinary.exception_flags_valid
 
+circuit RV5StageFpFixedFHalf(xlen :: XLen,
+                             Context :: DataType,
+                             ~arithmetic: arithmetic_enabled :: Boolean):
+  def profile = FloatingPointProfile.F
+  input request: RV5StageFpExecutionRequest(xlen, profile, Context)
+  output completion: RV5StageFpCompletion(xlen, profile, Context)
+
+  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
+  inst half(HalfModule)
+  inst single(RV5StageFpFixedF(xlen, Context))
+  half.request <== request
+  single.request <== request
+
+  def control :: RV5StageFloatExecutionControl() = request.control.execution
+  def fp_destination = request.control.registers.destination === RV5StageFloatDestination.FloatingPoint
+  def ordinary_half = mux(fp_destination,
+                          control.destination_precision === RV5StageFloatPrecision.Half,
+                          control.source_precision === RV5StageFloatPrecision.Half)
+  def cross_precision = fp_destination & request.control.registers.uses_frs1 & (control.unit === RV5StageFloatUnit.Convert) & (
+    control.source_precision =/= control.destination_precision
+  )
+  def half_source = riscv_unbox(FloatFormat.F16, 32, request.left)
+  def single_source = riscv_unbox(FloatFormat.F32, 32, request.left)
+  inst half_to_single(RecFNToRecFN(FloatFormat.F16, FloatFormat.F32))
+  half_to_single.value <== half_source.to_recoded()
+  half_to_single.rounding_mode <== request.rounding_mode
+  half_to_single.tininess_mode <== TininessMode.AfterRounding
+  inst single_to_half(RecFNToRecFN(FloatFormat.F32, FloatFormat.F16))
+  single_to_half.value <== single_source.to_recoded()
+  single_to_half.rounding_mode <== request.rounding_mode
+  single_to_half.tininess_mode <== TininessMode.AfterRounding
+
+  def ordinary = mux(ordinary_half, half.completion, single.completion)
+  def source_half = control.source_precision === RV5StageFloatPrecision.Half
+  def converted_value = mux(
+    source_half,
+    riscv_nan_box(FloatFormat.F32, riscv_canonicalize_nan(FloatFormat.F32, half_to_single.out.to_ieee()), 32),
+    riscv_nan_box(FloatFormat.F16, riscv_canonicalize_nan(FloatFormat.F16, single_to_half.out.to_ieee()), 32)
+  )
+  def converted_flags = mux(source_half,
+                            riscv_exception_flags(half_to_single.exception_flags),
+                            riscv_exception_flags(single_to_half.exception_flags))
+  completion <== RV5StageFpCompletion(xlen, profile, Context):
+    context: ordinary.context
+    destination: ordinary.destination
+    rd: ordinary.rd
+    integer_value: ordinary.integer_value
+    fp_value: mux(cross_precision, converted_value, ordinary.fp_value)
+    exception_flags: mux(cross_precision, converted_flags, ordinary.exception_flags)
+    exception_flags_valid: ordinary.exception_flags_valid
+
+circuit RV5StageFpFixedDHalf(xlen :: XLen,
+                             Context :: DataType,
+                             ~arithmetic: arithmetic_enabled :: Boolean):
+  def profile = FloatingPointProfile.D
+  input request: RV5StageFpExecutionRequest(xlen, profile, Context)
+  output completion: RV5StageFpCompletion(xlen, profile, Context)
+
+  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
+  inst half(HalfModule)
+  inst base(RV5StageFpFixedD(xlen, Context))
+  half.request <== request
+  base.request <== request
+
+  def control :: RV5StageFloatExecutionControl() = request.control.execution
+  def fp_destination = request.control.registers.destination === RV5StageFloatDestination.FloatingPoint
+  def ordinary_half = mux(fp_destination,
+                          control.destination_precision === RV5StageFloatPrecision.Half,
+                          control.source_precision === RV5StageFloatPrecision.Half)
+  def half_cross = fp_destination & request.control.registers.uses_frs1 & (control.unit === RV5StageFloatUnit.Convert) & (
+    (control.source_precision === RV5StageFloatPrecision.Half) ||| (
+      control.destination_precision === RV5StageFloatPrecision.Half
+    )
+  )
+  def half_source = riscv_unbox(FloatFormat.F16, 64, request.left)
+  def single_source = riscv_unbox(FloatFormat.F32, 64, request.left)
+  def double_source = request.left.into(IEEEFloat(FloatFormat.F64))
+  inst half_to_single(RecFNToRecFN(FloatFormat.F16, FloatFormat.F32))
+  inst single_to_half(RecFNToRecFN(FloatFormat.F32, FloatFormat.F16))
+  inst half_to_double(RecFNToRecFN(FloatFormat.F16, FloatFormat.F64))
+  inst double_to_half(RecFNToRecFN(FloatFormat.F64, FloatFormat.F16))
+  half_to_single.value <== half_source.to_recoded()
+  single_to_half.value <== single_source.to_recoded()
+  half_to_double.value <== half_source.to_recoded()
+  double_to_half.value <== double_source.to_recoded()
+  half_to_single.rounding_mode <== request.rounding_mode
+  single_to_half.rounding_mode <== request.rounding_mode
+  half_to_double.rounding_mode <== request.rounding_mode
+  double_to_half.rounding_mode <== request.rounding_mode
+  half_to_single.tininess_mode <== TininessMode.AfterRounding
+  single_to_half.tininess_mode <== TininessMode.AfterRounding
+  half_to_double.tininess_mode <== TininessMode.AfterRounding
+  double_to_half.tininess_mode <== TininessMode.AfterRounding
+
+  def ordinary = mux(ordinary_half, half.completion, base.completion)
+  def source_half = control.source_precision === RV5StageFloatPrecision.Half
+  def other_single = mux(source_half,
+                         control.destination_precision === RV5StageFloatPrecision.Single,
+                         control.source_precision === RV5StageFloatPrecision.Single)
+  def converted_value = mux(
+    source_half,
+    mux(other_single,
+        riscv_nan_box(FloatFormat.F32, riscv_canonicalize_nan(FloatFormat.F32, half_to_single.out.to_ieee()), 64),
+        riscv_nan_box(FloatFormat.F64, riscv_canonicalize_nan(FloatFormat.F64, half_to_double.out.to_ieee()), 64)),
+    mux(other_single,
+        riscv_nan_box(FloatFormat.F16, riscv_canonicalize_nan(FloatFormat.F16, single_to_half.out.to_ieee()), 64),
+        riscv_nan_box(FloatFormat.F16, riscv_canonicalize_nan(FloatFormat.F16, double_to_half.out.to_ieee()), 64))
+  )
+  def converted_flags = mux(
+    source_half,
+    mux(other_single,
+        riscv_exception_flags(half_to_single.exception_flags),
+        riscv_exception_flags(half_to_double.exception_flags)),
+    mux(other_single,
+        riscv_exception_flags(single_to_half.exception_flags),
+        riscv_exception_flags(double_to_half.exception_flags))
+  )
+  completion <== RV5StageFpCompletion(xlen, profile, Context):
+    context: ordinary.context
+    destination: ordinary.destination
+    rd: ordinary.rd
+    integer_value: ordinary.integer_value
+    fp_value: mux(half_cross, converted_value, ordinary.fp_value)
+    exception_flags: mux(half_cross, converted_flags, ordinary.exception_flags)
+    exception_flags_valid: ordinary.exception_flags_valid
+
 export:
   RV5StageFpFormatDatapath
+  RV5StageFpHalfMinimalDatapath
   RV5StageFpFixedF
   RV5StageFpFixedD
+  RV5StageFpFixedFHalf
+  RV5StageFpFixedDHalf
