@@ -49,7 +49,8 @@ snoops coherent requesters before replacing a line, and writes dirty snoop data
 back to the subordinate. The external SN-F must accept native 64-byte reads and
 writes, so this direct path needs no fragmenter.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
-HN-I, and terminate directly at the CHI-native ACLINT SN-I.
+HN-I, re-enter the same physical fabric through the Home's subordinate-side
+attachment, and terminate at the CHI-native ACLINT SN-I attachment.
 Both paths are derived from one physical-region table. Each region pairs
 RISC-V read, write, execute, cacheability, and atomic attributes with its CHI
 Home; the SoC derives the `CHIHomeMap` from those same entries. Requests outside
@@ -108,8 +109,11 @@ the repository's 4x4 system, while the focused hierarchy test also elaborates a
 
 The default pure plan places eight `RV5StageTile`s in the lower two rows, four
 service routers in the middle row, and four `MemoryTile`s in the upper row.
-One service router owns the shared eight-hart ACLINT behind an HN-I, another
-owns the external host RN-F, and the other two are transit-only. The system
+One service router colocates the shared eight-hart ACLINT with both sides of
+its HN-I, another owns the external host RN-F, and the other two are
+transit-only. The HN requester side, HN subordinate side, and ACLINT SN-I are
+independent local attachments to the same router rather than a direct
+HN-to-device wire. The system
 allocates 16 RN-F NodeIDs for the eight L1I/L1D pairs, eight RN-I NodeIDs for
 uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, and
 one ACLINT SN-I.
@@ -119,8 +123,9 @@ cache-line striping. One shared physical-region table maps successive lines to
 successive HN-Fs and derives the CHI Home map. Each memory tile projects its sparse global bank addresses into a dense
 local RAM address space before fragmentation. The 16 coherent requester
 endpoints plus the host RN-F connect to all four HN-Fs, while the eight uncached
-requester endpoints connect to the ACLINT HN-I. Together they compile 76 REQ,
-152 RSP, 68 SNP, and 152 DAT routes before any hardware elaborates.
+requester endpoints connect to the ACLINT HN-I and its subordinate side
+connects to the ACLINT SN-I. Together they compile 77 REQ, 153 RSP, 68 SNP,
+and 154 DAT routes before any hardware elaborates.
 
 Each tile owns one `CHIRouter`, which contains the independent REQ/RSP/SNP/DAT
 `SimpleRouterFamily` instances and site-keyed CHI adapters. Every RV5Stage tile
