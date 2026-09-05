@@ -1,4 +1,4 @@
-# Builds Rhodium smoke designs and mapped SimpleSoC artifacts through CIRCT and LibreLane.
+# Builds Rhodium smoke designs and mapped MiniSoC artifacts through CIRCT and LibreLane.
 
 .DELETE_ON_ERROR:
 
@@ -20,21 +20,21 @@ MEMORY_MAP_CATALOG := $(SRAM_ROOT)/sky130/macros.ini
 MEMORY_MAPPER := $(SRAM_ROOT)/map-memories.py
 MEMORY_SITE_PASS_DIR := $(SRAM_ROOT)/circt
 MEMORY_SITE_PLUGIN := $(SRAM_ROOT)/build/circt/rhodium-memory-sites.so
-SIMPLE_SOC_MEMORY_POLICY := $(VLSI_ROOT)/designs/simple-soc/sky130/sram-map.yaml
-SIMPLE_SOC_BUILD_DIR := $(BUILD_DIR)/simple-soc
-SIMPLE_SOC_RHODIUM_SOURCES := $(addprefix $(RHODIUM_ROOT)/,$(shell git -C $(RHODIUM_ROOT) ls-files '*.rhdl'))
-SIMPLE_SOC_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.mlir
-SIMPLE_SOC_FIRRTL_MEM_MLIR := $(SIMPLE_SOC_BUILD_DIR)/simple-soc-firmem.mlir
-SIMPLE_SOC_MEMORY_SITE_INVENTORY := $(SIMPLE_SOC_BUILD_DIR)/memory-sites.json
-SIMPLE_SOC_MEMORY_SITE_STAMP := $(SIMPLE_SOC_BUILD_DIR)/memory-sites.stamp
-SIMPLE_SOC_RTL := $(SIMPLE_SOC_BUILD_DIR)/simple-soc.sv
-SIMPLE_SOC_MEMORY_WRAPPERS := $(SIMPLE_SOC_BUILD_DIR)/memory-wrappers.sv
-SIMPLE_SOC_MEMORY_MANIFEST := $(SIMPLE_SOC_BUILD_DIR)/memory-manifest.json
-SIMPLE_SOC_SYNTH_CONFIG := $(VLSI_ROOT)/openlane/simple_soc/config.yaml
-SIMPLE_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHODIUM_SLANG_CHECK
-SIMPLE_SOC_SLANG_NETLIST := $(SIMPLE_SOC_SLANG_RUN_DIR)/final/nl/SimpleSoC.nl.v
-SIMPLE_SOC_SYNTH_RUN_DIR := $(VLSI_ROOT)/openlane/simple_soc/runs/RHODIUM_SLANG_SYNTH
-SIMPLE_SOC_SYNTH_NETLIST := $(SIMPLE_SOC_SYNTH_RUN_DIR)/final/nl/SimpleSoC.nl.v
+MINI_SOC_MEMORY_POLICY := $(VLSI_ROOT)/designs/mini-soc/sky130/sram-map.yaml
+MINI_SOC_BUILD_DIR := $(BUILD_DIR)/mini-soc
+MINI_SOC_RHODIUM_SOURCES := $(addprefix $(RHODIUM_ROOT)/,$(shell cd $(RHODIUM_ROOT) && rg --files -g '*.rhdl'))
+MINI_SOC_MLIR := $(MINI_SOC_BUILD_DIR)/mini-soc.mlir
+MINI_SOC_FIRRTL_MEM_MLIR := $(MINI_SOC_BUILD_DIR)/mini-soc-firmem.mlir
+MINI_SOC_MEMORY_SITE_INVENTORY := $(MINI_SOC_BUILD_DIR)/memory-sites.json
+MINI_SOC_MEMORY_SITE_STAMP := $(MINI_SOC_BUILD_DIR)/memory-sites.stamp
+MINI_SOC_RTL := $(MINI_SOC_BUILD_DIR)/mini-soc.sv
+MINI_SOC_MEMORY_WRAPPERS := $(MINI_SOC_BUILD_DIR)/memory-wrappers.sv
+MINI_SOC_MEMORY_MANIFEST := $(MINI_SOC_BUILD_DIR)/memory-manifest.json
+MINI_SOC_SYNTH_CONFIG := $(VLSI_ROOT)/openlane/mini_soc/config.yaml
+MINI_SOC_SLANG_RUN_DIR := $(VLSI_ROOT)/openlane/mini_soc/runs/RHODIUM_SLANG_CHECK
+MINI_SOC_SLANG_NETLIST := $(MINI_SOC_SLANG_RUN_DIR)/final/nl/MiniSoC.nl.v
+MINI_SOC_SYNTH_RUN_DIR := $(VLSI_ROOT)/openlane/mini_soc/runs/RHODIUM_SLANG_SYNTH
+MINI_SOC_SYNTH_NETLIST := $(MINI_SOC_SYNTH_RUN_DIR)/final/nl/MiniSoC.nl.v
 SKY130_SRAM_MODEL = $(PDK_ROOT)/$(PDK)/libs.ref/sky130_sram_macros/verilog/sky130_sram_2kbyte_1rw1r_32x512_8.v
 
 RACKET ?= racket
@@ -52,9 +52,9 @@ LIBRELANE := librelane --pdk-root $(PDK_ROOT) --pdk $(PDK)
 export PDK_ROOT PDK
 
 .PHONY: all setup-circt rtl contract-check rtl-check lvs-smoke-rtl-check memory-site-plugin memory-map-test \
-	simple-soc-memory-map simple-soc-macro-rtl simple-soc-macro-rtl-check \
-	simple-soc-slang-check simple-soc-slang-check-native \
-	simple-soc-synth simple-soc-synth-native enable-pdk \
+	mini-soc-memory-map mini-soc-macro-rtl mini-soc-macro-rtl-check \
+	mini-soc-slang-check mini-soc-slang-check-native \
+	mini-soc-synth mini-soc-synth-native enable-pdk \
 	harden harden-native lvs-smoke lvs-smoke-native integrate integrate-native gds clean
 
 all: rtl-check
@@ -113,43 +113,43 @@ memory-map-test:
 	$(MAKE) -C $(SRAM_ROOT) test CIRCT_OPT=$(CIRCT_OPT) CIRCT_ROOT=$(CIRCT_ROOT) \
 		PYTHON=$(PYTHON) VERILATOR=$(VERILATOR)
 
-$(SIMPLE_SOC_BUILD_DIR):
+$(MINI_SOC_BUILD_DIR):
 	mkdir -p $@
 
-$(SIMPLE_SOC_MLIR): tools/emit-simple-soc.rhm $(SIMPLE_SOC_RHODIUM_SOURCES) | $(SIMPLE_SOC_BUILD_DIR)
+$(MINI_SOC_MLIR): tools/emit-mini-soc.rhm $(MINI_SOC_RHODIUM_SOURCES) | $(MINI_SOC_BUILD_DIR)
 	env PLTCOMPILEDROOTS=$(BUILD_DIR)/compiled PLTCOLLECTS=$(RHODIUM_ROOT): \
-		$(RACKET) -S $(RHODIUM_ROOT) tools/emit-simple-soc.rhm > $@
+		$(RACKET) -S $(RHODIUM_ROOT) tools/emit-mini-soc.rhm > $@
 
-$(SIMPLE_SOC_MEMORY_SITE_STAMP): $(SIMPLE_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(SIMPLE_SOC_MEMORY_POLICY)
+$(MINI_SOC_MEMORY_SITE_STAMP): $(MINI_SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(MINI_SOC_MEMORY_POLICY)
 	@test -x $(CIRCT_OPT) || { \
 		echo "circt-opt not found at $(CIRCT_OPT); run 'make setup-circt' or set CIRCT_OPT" >&2; \
 		exit 1; \
 	}
 	$(CIRCT_OPT) \
 		--load-pass-plugin=$(MEMORY_SITE_PLUGIN) \
-		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhodium-select-hw-top{top=SimpleSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhodium-map-memory-sites{policy=$(SIMPLE_SOC_MEMORY_POLICY) inventory=$(SIMPLE_SOC_MEMORY_SITE_INVENTORY) top=SimpleSoC},symbol-dce)" \
-		$(SIMPLE_SOC_MLIR) -o $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
-	@test -s $(SIMPLE_SOC_FIRRTL_MEM_MLIR)
-	@test -s $(SIMPLE_SOC_MEMORY_SITE_INVENTORY)
+		--pass-pipeline="builtin.module(strip-debuginfo-with-pred{drop-suffix=.mlir},canonicalize,cse,rhodium-select-hw-top{top=MiniSoC},hw-flatten-modules{hw-inline-all=true hw-inline-with-state=true},symbol-dce,lower-seq-firmem,rhodium-map-memory-sites{policy=$(MINI_SOC_MEMORY_POLICY) inventory=$(MINI_SOC_MEMORY_SITE_INVENTORY) top=MiniSoC},symbol-dce)" \
+		$(MINI_SOC_MLIR) -o $(MINI_SOC_FIRRTL_MEM_MLIR)
+	@test -s $(MINI_SOC_FIRRTL_MEM_MLIR)
+	@test -s $(MINI_SOC_MEMORY_SITE_INVENTORY)
 	touch $@
 
-simple-soc-memory-map: \
-		$(SIMPLE_SOC_MEMORY_SITE_STAMP) $(MEMORY_MAPPER) $(MEMORY_MAP_CATALOG)
-	$(PYTHON) $(MEMORY_MAPPER) $(SIMPLE_SOC_FIRRTL_MEM_MLIR) \
+mini-soc-memory-map: \
+		$(MINI_SOC_MEMORY_SITE_STAMP) $(MEMORY_MAPPER) $(MEMORY_MAP_CATALOG)
+	$(PYTHON) $(MEMORY_MAPPER) $(MINI_SOC_FIRRTL_MEM_MLIR) \
 		--catalog $(MEMORY_MAP_CATALOG) \
-		--site-inventory $(SIMPLE_SOC_MEMORY_SITE_INVENTORY) \
+		--site-inventory $(MINI_SOC_MEMORY_SITE_INVENTORY) \
 		--pdk-root $(PDK_ROOT)/$(PDK) \
-		--output-verilog $(SIMPLE_SOC_MEMORY_WRAPPERS) \
-		--output-manifest $(SIMPLE_SOC_MEMORY_MANIFEST)
-	@test -s $(SIMPLE_SOC_MEMORY_WRAPPERS)
-	@test -s $(SIMPLE_SOC_MEMORY_MANIFEST)
-	@test "$$(grep -c '\"source_module\": \"rv5stage/l1_512x64\"' $(SIMPLE_SOC_MEMORY_SITE_INVENTORY))" -eq 2
-	@if grep -q '64x512' $(SIMPLE_SOC_MEMORY_SITE_INVENTORY); then \
-		echo "SimpleSoC inventory contains a line-wide cache data memory" >&2; \
+		--output-verilog $(MINI_SOC_MEMORY_WRAPPERS) \
+		--output-manifest $(MINI_SOC_MEMORY_MANIFEST)
+	@test -s $(MINI_SOC_MEMORY_WRAPPERS)
+	@test -s $(MINI_SOC_MEMORY_MANIFEST)
+	@test "$$(grep -c '\"source_module\": \"fabric/rv5stage/l1_512x64\"' $(MINI_SOC_MEMORY_SITE_INVENTORY))" -eq 2
+	@if grep -q '64x512' $(MINI_SOC_MEMORY_SITE_INVENTORY); then \
+		echo "MiniSoC inventory contains a line-wide cache data memory" >&2; \
 		exit 1; \
 	fi
 
-$(SIMPLE_SOC_RTL): $(SIMPLE_SOC_MEMORY_SITE_STAMP)
+$(MINI_SOC_RTL): $(MINI_SOC_MEMORY_SITE_STAMP)
 	$(CIRCT_OPT) \
 		--lower-seq-hlmem \
 		--prettify-verilog \
@@ -160,59 +160,59 @@ $(SIMPLE_SOC_RTL): $(SIMPLE_SOC_MEMORY_SITE_STAMP)
 		--symbol-dce \
 		--sv-mask-non-synthesizable='mode=ifdef macro=SYNTHESIS' \
 		--export-verilog \
-		$(SIMPLE_SOC_FIRRTL_MEM_MLIR) -o /dev/null > $@
+		$(MINI_SOC_FIRRTL_MEM_MLIR) -o /dev/null > $@
 
-simple-soc-macro-rtl: $(SIMPLE_SOC_RTL) simple-soc-memory-map
+mini-soc-macro-rtl: $(MINI_SOC_RTL) mini-soc-memory-map
 
-simple-soc-macro-rtl-check: simple-soc-macro-rtl
+mini-soc-macro-rtl-check: mini-soc-macro-rtl
 	@test -f $(SKY130_SRAM_MODEL) || { \
 		echo "Sky130 SRAM model not found at $(SKY130_SRAM_MODEL); run 'make enable-pdk'" >&2; \
 		exit 1; \
 	}
-	$(VERILATOR) --lint-only --timing --top-module SimpleSoC \
+	$(VERILATOR) --lint-only --timing --top-module MiniSoC \
 		-Wno-fatal -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT \
-		$(SIMPLE_SOC_RTL) $(SIMPLE_SOC_MEMORY_WRAPPERS) $(SKY130_SRAM_MODEL)
+		$(MINI_SOC_RTL) $(MINI_SOC_MEMORY_WRAPPERS) $(SKY130_SRAM_MODEL)
 
-simple-soc-slang-check: simple-soc-macro-rtl
+mini-soc-slang-check: mini-soc-macro-rtl
 	@if command -v librelane >/dev/null 2>&1; then \
-		$(MAKE) simple-soc-slang-check-native; \
+		$(MAKE) mini-soc-slang-check-native; \
 	elif command -v $(NIX) >/dev/null 2>&1; then \
-		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) simple-soc-slang-check-native; \
+		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) mini-soc-slang-check-native; \
 	else \
-		echo "simple-soc-slang-check requires either LibreLane or Nix; see vlsi/README.md" >&2; \
+		echo "mini-soc-slang-check requires either LibreLane or Nix; see vlsi/README.md" >&2; \
 		exit 1; \
 	fi
 
-simple-soc-slang-check-native: simple-soc-macro-rtl
+mini-soc-slang-check-native: mini-soc-macro-rtl
 	command -v librelane >/dev/null
-	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_CHECK --overwrite \
+	$(LIBRELANE) $(MINI_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_CHECK --overwrite \
 		--override-config SYNTH_ELABORATE_ONLY=true --only Yosys.Synthesis \
 		--condensed --hide-progress-bar
-	test -s $(SIMPLE_SOC_SLANG_NETLIST)
-	grep -q "use_slang" $(SIMPLE_SOC_SLANG_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
-	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(SIMPLE_SOC_SLANG_NETLIST))" -eq 32
-	@if grep -Eq 'struct[[:space:]]+packed|typedef[[:space:]]+struct' $(SIMPLE_SOC_SLANG_NETLIST); then \
-		echo "Slang elaboration left packed structs in $(SIMPLE_SOC_SLANG_NETLIST)" >&2; \
+	test -s $(MINI_SOC_SLANG_NETLIST)
+	grep -q "use_slang" $(MINI_SOC_SLANG_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SLANG_NETLIST))" -eq 32
+	@if grep -Eq 'struct[[:space:]]+packed|typedef[[:space:]]+struct' $(MINI_SOC_SLANG_NETLIST); then \
+		echo "Slang elaboration left packed structs in $(MINI_SOC_SLANG_NETLIST)" >&2; \
 		exit 1; \
 	fi
 
-simple-soc-synth: simple-soc-macro-rtl
+mini-soc-synth: mini-soc-macro-rtl
 	@if command -v librelane >/dev/null 2>&1; then \
-		$(MAKE) simple-soc-synth-native; \
+		$(MAKE) mini-soc-synth-native; \
 	elif command -v $(NIX) >/dev/null 2>&1; then \
-		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) simple-soc-synth-native; \
+		$(NIX) $(NIX_FLAGS) develop $(HARNESS_DIR) --command $(MAKE) mini-soc-synth-native; \
 	else \
-		echo "simple-soc-synth requires either LibreLane or Nix; see vlsi/README.md" >&2; \
+		echo "mini-soc-synth requires either LibreLane or Nix; see vlsi/README.md" >&2; \
 		exit 1; \
 	fi
 
-simple-soc-synth-native: simple-soc-macro-rtl
+mini-soc-synth-native: mini-soc-macro-rtl
 	command -v librelane >/dev/null
-	$(LIBRELANE) $(SIMPLE_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_SYNTH --overwrite \
+	$(LIBRELANE) $(MINI_SOC_SYNTH_CONFIG) --run-tag RHODIUM_SLANG_SYNTH --overwrite \
 		--only Yosys.Synthesis --condensed --hide-progress-bar
-	test -s $(SIMPLE_SOC_SYNTH_NETLIST)
-	grep -q "use_slang" $(SIMPLE_SOC_SYNTH_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
-	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(SIMPLE_SOC_SYNTH_NETLIST))" -eq 32
+	test -s $(MINI_SOC_SYNTH_NETLIST)
+	grep -q "use_slang" $(MINI_SOC_SYNTH_RUN_DIR)/*-yosys-synthesis/yosys-synthesis.log
+	test "$$(grep -c 'sky130_sram_2kbyte_1rw1r_32x512_8 ' $(MINI_SOC_SYNTH_NETLIST))" -eq 32
 
 enable-pdk:
 	@if command -v ciel >/dev/null 2>&1; then \

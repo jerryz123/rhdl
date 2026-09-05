@@ -37,12 +37,12 @@ contract against the submodule, and lints the complete wrapper with Verilator.
 
 ## Prototype SRAM mapping at the CIRCT boundary
 
-The SimpleSoC experiment keeps physical-memory knowledge outside Rhodium and the
+The MiniSoC experiment keeps physical-memory knowledge outside Rhodium and the
 SoC. Reusable occurrence selection, contract validation, tiling, and wrapper
 generation live in the top-level [`sram/`](../sram/README.md) package. Sky130
 macro data and models live in `sram/sky130/`, while this physical-design layer
-owns the SimpleSoC/Sky130 site policy at
-`designs/simple-soc/sky130/sram-map.yaml`.
+owns the MiniSoC/Sky130 site policy at
+`designs/mini-soc/sky130/sram-map.yaml`.
 
 The policy maps only the 4096 by 128-bit shared CHI RAM onto 32 installed
 512 by 32-bit Sky130 SRAMs. All six cache arrays continue through CIRCT's
@@ -53,16 +53,16 @@ collateral into later floorplanning, PDN, and LVS work.
 
 ```sh
 make -C sram test
-make -C vlsi simple-soc-memory-map
-make -C vlsi simple-soc-macro-rtl-check
-make -C vlsi simple-soc-slang-check
-make -C vlsi simple-soc-synth
+make -C vlsi mini-soc-memory-map
+make -C vlsi mini-soc-macro-rtl-check
+make -C vlsi mini-soc-slang-check
+make -C vlsi mini-soc-synth
 ```
 
 The first target proves scoped and direct elaboration tops produce identical
 policy-relative wrapper identities, checks unknown-site rejection, functionally
 tests banking, width slicing and byte masking, and rejects unsupported port
-contracts. The SimpleSoC inventory also requires both L1 data arrays to remain
+contracts. The MiniSoC inventory also requires both L1 data arrays to remain
 512 by 64-bit RV64-word memories and rejects the former line-wide shape. The
 remaining targets lint the mixed
 macro/inferred RTL against the generated wrapper and installed PDK SRAM model,
@@ -75,14 +75,14 @@ Verilog, and SPICE views so later floorplanning and physical-verification work
 can use the same definition.
 
 Slang is the synthesis boundary rather than an RTL rewrite: CIRCT's packed
-structs remain in `build/simple-soc/simple-soc.sv`, and LibreLane lowers them
+structs remain in `build/mini-soc/mini-soc.sv`, and LibreLane lowers them
 directly while reading the generated RTL. The focused target stops after
 `Yosys.Synthesis`; macro placement, power-grid hookup, routing, and signoff are
 still separate work. Until the other six memory sites are mapped, full
 synthesis is slow because Yosys implements the two 512 by 64-bit cache data
 arrays and four smaller cache arrays as standard-cell flops and muxes. Use
-`simple-soc-slang-check` for the quick frontend regression and
-`simple-soc-synth` when a complete mapped netlist is needed.
+`mini-soc-slang-check` for the quick frontend regression and
+`mini-soc-synth` when a complete mapped netlist is needed.
 
 Cycle-level validation of the same policy is owned by [`sim/`](sim/README.md):
 
@@ -92,7 +92,7 @@ make -C vlsi/sim smoke
 
 That target reuses the technology-independent `sims/` SoCHarness and FESVR
 stack, scopes the policy through the harness's `soc` instance, and runs the
-existing SimpleSoC smoke payload against the checked-in Sky130 functional SRAM
+existing MiniSoC smoke payload against the checked-in Sky130 functional SRAM
 model.
 
 ## Run the focused LVS proof

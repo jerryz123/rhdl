@@ -1,4 +1,4 @@
-# Builds and runs a SimpleSoC simulator after site-specific SRAM macro mapping.
+# Builds and runs a MiniSoC simulator after site-specific SRAM macro mapping.
 
 .DELETE_ON_ERROR:
 
@@ -6,14 +6,14 @@ REPO_DIR := $(abspath ../..)
 VLSI_DIR := $(abspath ..)
 SIMS_DIR := $(REPO_DIR)/sims
 SRAM_DIR := $(REPO_DIR)/sram
-SOC ?= simple
+SOC ?= mini
 TECH ?= sky130
 BUILD_ROOT ?= $(VLSI_DIR)/build/sim
 BUILD_DIR := $(BUILD_ROOT)/$(SOC)/$(TECH)
 
-ifeq ($(SOC),simple)
+ifeq ($(SOC),mini)
 else
-$(error mapped simulation currently supports SOC=simple, not SOC=$(SOC))
+$(error mapped simulation currently supports SOC=mini, not SOC=$(SOC))
 endif
 ifeq ($(TECH),sky130)
 else
@@ -36,7 +36,7 @@ PYTHON ?= python3
 MEMORY_SITE_PLUGIN := $(SRAM_DIR)/build/circt/rhodium-memory-sites.so
 MEMORY_MAPPER := $(SRAM_DIR)/map-memories.py
 MEMORY_CATALOG := $(SRAM_DIR)/$(TECH)/macros.ini
-MEMORY_POLICY := $(VLSI_DIR)/designs/simple-soc/$(TECH)/sram-map.yaml
+MEMORY_POLICY := $(VLSI_DIR)/designs/mini-soc/$(TECH)/sram-map.yaml
 FUNCTIONAL_MODELS := $(wildcard $(SRAM_DIR)/$(TECH)/models/*.functional.sv)
 
 SOC_MLIR := $(BUILD_DIR)/soc-harness.mlir
@@ -116,7 +116,7 @@ $(MAPPING_STAMP): $(MAPPING_SELECTION_STAMP) $(MEMORY_MAPPER) $(MEMORY_CATALOG) 
 		--output-verilog $(MEMORY_WRAPPERS) \
 		--output-manifest $(MEMORY_MANIFEST)
 	$(PYTHON) check-manifest.py $(MEMORY_MANIFEST) \
-		--top SoCHarness --policy-top SimpleSoC --scope-prefix soc
+		--top SoCHarness --policy-top MiniSoC --scope-prefix soc
 	@test -s $(MEMORY_WRAPPERS)
 	touch $@
 

@@ -27,14 +27,14 @@ Install the pinned FESVR dependency and build a reusable simulator with:
 ```sh
 make -C sims setup
 make -C sims simulator SOC=simple
-make -C sims simulator SOC=dram
+make -C sims simulator SOC=mini
 make -C sims simulator SOC=tiled
 ```
 
-`SOC` accepts `simple`, `dram`, or `tiled` and defaults to `simple`. The DRAM
-harness attaches the repository's `CHIRam` to `DramSoC`'s exposed ready-valid
-SN-F channels as a simulation-only memory model. Each harness has an
-independent artifact at
+`SOC` accepts `simple`, `mini`, or `tiled` and defaults to `simple`. The
+SimpleSoC harness attaches `CHIDPIMemory` to the SoC's exposed ready-valid SN-F
+channels as a simulation-only external memory model. MiniSoC instead contains
+its own synthesizable `CHIRam`. Each harness has an independent artifact at
 `/tmp/rhodium-sims/<soc>/obj/VTestDriver`, so
 switching configurations cannot reuse generated RTL for the other SoC. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
@@ -51,7 +51,7 @@ with:
 
 ```sh
 make -C sims run SOC=simple BINARY=/absolute/path/to/program.elf
-make -C sims run SOC=dram BINARY=/absolute/path/to/program.elf
+make -C sims run SOC=mini BINARY=/absolute/path/to/program.elf
 make -C sims run SOC=tiled BINARY=/absolute/path/to/program.elf
 ```
 
@@ -66,7 +66,7 @@ with:
 
 ```sh
 make -C sims smoke SOC=simple
-make -C sims smoke SOC=dram
+make -C sims smoke SOC=mini
 make -C sims smoke SOC=tiled
 make -C sims dpi-compile-check \
   VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
@@ -95,6 +95,7 @@ private ready-valid DPI signals into coherent CHI `ReadClean` and
 ELF loading and `tohost`/`fromhost` polling observe dirty RV5Stage cache lines
 without reserving a special mailbox address range.
 
-The `chi-dpi-memory-test` convenience target compiles and exercises the
-CHI-owned DPI model documented in the [`chi/` package](../chi/README.md); no
-SoC harness instantiates that model yet.
+The `chi-dpi-memory-test` convenience target independently compiles and
+exercises the CHI-owned DPI model documented in the
+[`chi/` package](../chi/README.md). The SimpleSoC harness instantiates that same
+model behind the SoC's external memory boundary.

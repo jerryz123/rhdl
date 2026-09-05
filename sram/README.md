@@ -32,7 +32,7 @@ and every explicitly named path must exist in the selected scope:
 ```yaml
 # Maps one logical site while leaving every unlisted site inferred.
 schema_version: 1
-top: SimpleSoC
+top: MiniSoC
 default: infer
 sites:
   ram/storage/storage: sky130_sram_2kbyte_1rw1r_32x512_8
@@ -40,8 +40,8 @@ sites:
 
 By default `rhodium-map-memory-sites` uses `policy.top` as the actual elaboration
 top. `top=<module>` overrides that top and `scope-prefix=<path>` strips a
-flattened instance prefix before policy lookup. Thus the same SimpleSoC-relative
-policy applies directly to `SimpleSoC` and to `SoCHarness` with
+flattened instance prefix before policy lookup. Thus the same MiniSoC-relative
+policy applies directly to `MiniSoC` and to `SoCHarness` with
 `top=SoCHarness scope-prefix=soc`. Wrapper names derive from the policy-relative
 path, so both contexts instantiate identical adapters.
 
@@ -72,6 +72,6 @@ make -C sram test
 ```
 
 Physical-flow policy belongs to the design and technology combination, for
-example `vlsi/designs/simple-soc/sky130/sram-map.yaml`. The same policy is
-consumed by `make -C vlsi simple-soc-memory-map` and by the mapped simulator in
+example `vlsi/designs/mini-soc/sky130/sram-map.yaml`. The same policy is
+consumed by `make -C vlsi mini-soc-memory-map` and by the mapped simulator in
 `vlsi/sim/`. Generated mapper artifacts stay outside version control.

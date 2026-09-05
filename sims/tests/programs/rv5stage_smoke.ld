@@ -1,4 +1,4 @@
-/* Places the executing RV5Stage smoke and its HTIF mailboxes in SimpleSoC RAM. */
+/* Places the executing RV5Stage smoke and its HTIF mailboxes in SoC memory. */
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 

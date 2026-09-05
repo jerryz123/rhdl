@@ -2,7 +2,7 @@
 
 # Example systems
 
-`simple-soc.rhdl` composes the repository's initial coherent system:
+`simple-soc.rhdl` composes the repository's primary single-core coherent system:
 
 ```text
 SimpleSoC
@@ -13,7 +13,7 @@ SimpleSoC
 │   └── Device RN-I (NodeID 4)
 ├── SimpleRouter × 4 (REQ, RSP, SNP, and DAT)
 ├── Memory CHIHNF (NodeID 5)
-│   └── CHIRam SN-F (NodeID 9)
+│   └── external CHI SN-F (NodeID 9)
 └── Device CHIHNI (NodeID 6)
     └── ACLINT SN-I (NodeID 10)
 ```
@@ -41,8 +41,8 @@ RV5Stage exposes ready-valid `CHIRNChannels` bundles directly at its hierarchy
 boundary, so the SoC connects both cache endpoints to the NoC without creating
 internal credited links. The serialized HN-F translates coherent RV5Stage
 traffic and authoritative dirty snoop packets into non-coherent subordinate
-transactions. The CHIRam is configured for native 64-byte reads and writes, so
-this direct path needs no fragmenter.
+transactions. The external SN-F must accept native 64-byte reads and writes,
+so this direct path needs no fragmenter.
 Device addresses instead leave RV5Stage through its uncached RN-I, cross the
 HN-I, and terminate directly at the CHI-native ACLINT SN-I.
 Both paths are derived from one physical-region table. Each region pairs
@@ -53,19 +53,18 @@ the table therefore trap in RV5Stage instead of entering CHI without a Home.
 The FESVR implementation and generated executable harness remain owned by
 [`sims/`](../sims/README.md).
 
-## DramSoC
+## MiniSoC
 
 `SimpleSoCFabric` factors the processor, Homes, NoC, and ACLINT from the final
-memory termination. `SimpleSoC` preserves the self-contained composition by
-connecting the native `CHISNChannels` boundary directly to a line-capable
-`CHIRam`.
+memory termination. `SimpleSoC` exports line-capable `CHISNChannels` for SN-F
+NodeID 9 over the 1 GiB range
+`0x80000000..0xbfffffff`. It contains no RAM or simulator binding; an external
+subordinate owns the memory contents and response timing.
 
-[`dram-soc.rhdl`](dram-soc.rhdl) defines `DramSoC`, which exports a line-capable
-`CHISNChannels` memory boundary for SN-F NodeID 9. It contains no RAM,
-fragmenter, or simulator binding; an external subordinate owns the memory
-contents and response timing.
-The simulation harness may attach a memory model to that boundary, but
-`DramSoC` itself does not provide one.
+[`mini-soc.rhdl`](mini-soc.rhdl) defines `MiniSoC`, the small self-contained
+variant used for compact RTL and physical-design experiments. It specializes
+the same fabric with a 64 KiB range and terminates the native memory boundary
+directly in an on-chip, line-capable `CHIRam`.
 
 ## TiledSoC
 
@@ -126,7 +125,7 @@ Run the focused elaboration test with:
 make -C socs rtl-elaboration-test
 ```
 
-The focused SimpleSoC and DramSoC elaboration tests cover the internal-memory
-and external-channel variants.
+The focused SimpleSoC and MiniSoC elaboration tests cover the external-channel
+and internal-memory variants.
 
 Executable harness workflows are documented under [`sims/`](../sims/README.md).

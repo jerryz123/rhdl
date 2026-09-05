@@ -1,0 +1,45 @@
+#lang rhodium
+// Defines the small self-contained SoC with a coherent on-chip CHI RAM.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("socs/simple-soc.rhdl") as simple
+  lib("socs/host-interface.rhdl").SoCHostInterface
+
+def mini_soc_memory_base = 0x80000000
+def mini_soc_memory_bytes = 0x10000
+def mini_soc_fabric_params:
+  simple.SimpleSoCFabricParams("mini-memory",
+                               mini_soc_memory_base,
+                               mini_soc_memory_bytes)
+def mini_soc_flit = mini_soc_fabric_params.flit
+def mini_soc_home_map = mini_soc_fabric_params.home_map
+def mini_soc_host_node = simple.simple_soc_host_node
+def mini_soc_ram_config = mini_soc_fabric_params.ram_config
+def mini_soc_ram_params = mini_soc_fabric_params.ram_params
+
+sync_circuit MiniSoC(params :: simple.SimpleSoCFabricParams = mini_soc_fabric_params):
+  interface host(SoCHostInterface(params.flit), ~role: soc)
+
+  inst fabric(simple.SimpleSoCFabric(params))
+  inst ram(CHIRam(params.ram_config))
+
+  host <=> fabric.host
+  fabric.memory <=> ram.port
+  ram.identity <== CHIRamIdentity(params.flit):
+    node_id: bits(params.memory_node.node_id, params.flit.node_id_width)
+    base_address: bits(params.memory_base, params.flit.request_address_width)
+
+def design = elaborate(MiniSoC())
+
+export:
+  mini_soc_memory_base
+  mini_soc_memory_bytes
+  mini_soc_fabric_params
+  mini_soc_flit
+  mini_soc_home_map
+  mini_soc_host_node
+  mini_soc_ram_config
+  mini_soc_ram_params
+  MiniSoC
+  design

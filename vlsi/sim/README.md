@@ -8,10 +8,10 @@ mapped-only: the technology-independent inferred-memory simulator remains in
 [`../../sims/`](../../sims/README.md).
 
 ```text
-socs/simple-soc.rhdl
+socs/mini-soc.rhdl
   -> sims/soc-harness.rhdl and the existing FESVR requester
   -> CIRCT flattening under SoCHarness
-  -> SimpleSoC-relative policy, scoped through instance `soc`
+  -> MiniSoC-relative policy, scoped through instance `soc`
   -> mixed mapped/inferred RTL
   -> generated SRAM adapters plus Sky130 functional model
   -> existing sims/TestDriver.v and FESVR Verilator bridge
@@ -19,8 +19,8 @@ socs/simple-soc.rhdl
 
 The flow reuses the SoC harness, test driver, host transport, Verilator bridge,
 and smoke payload from `sims/`; it does not copy simulator logic into the VLSI
-layer. The SimpleSoC/Sky130 policy lives at
-`../designs/simple-soc/sky130/sram-map.yaml`, because site selection belongs to
+layer. The MiniSoC/Sky130 policy lives at
+`../designs/mini-soc/sky130/sram-map.yaml`, because site selection belongs to
 that design-and-technology pairing. Generic mapping mechanics live in
 `../../sram/`, and Sky130 catalog/model data live in `../../sram/sky130/`.
 
@@ -35,8 +35,8 @@ make -C vlsi/sim smoke
 make -C vlsi/sim run BINARY=/absolute/path/to/program.elf
 ```
 
-`SOC=simple` and `TECH=sky130` are the only supported pair today; other values
+`SOC=mini` and `TECH=sky130` are the only supported pair today; other values
 fail explicitly. Generated MLIR, RTL, manifests, and Verilator objects live
-under `vlsi/build/sim/simple/sky130/`. The mapped simulation uses checked-in
+under `vlsi/build/sim/mini/sky130/`. The mapped simulation uses checked-in
 zero-delay functional SRAM models. Those models establish logical cycle
 behavior only and are not substitutes for PDK timing or signoff views.

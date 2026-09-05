@@ -15,13 +15,13 @@ VERILATOR ?= verilator
 CIRCT_OPT ?= $(REPO_DIR)/.tools/firtool-1.155.0/bin/circt-opt
 
 HARNESS_SOURCE_simple := sims/simple-soc-harness.rhdl
-HARNESS_SOURCE_dram := sims/dram-soc-harness.rhdl
+HARNESS_SOURCE_mini := sims/mini-soc-harness.rhdl
 HARNESS_SOURCE_tiled := sims/tiled-soc-harness.rhdl
 HARNESS_SOURCE := $(HARNESS_SOURCE_$(SOC))
 HARNESS_EMITTER := $(REPO_DIR)/sims/emit-soc-harness.rhm
-SOC_DPI_SOURCE_dram := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.cc
+SOC_DPI_SOURCE_simple := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.cc
 SOC_DPI_SOURCE := $(SOC_DPI_SOURCE_$(SOC))
-SOC_DPI_HEADER_dram := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.h
+SOC_DPI_HEADER_simple := $(CHI_DPI_DIR)/chi_dpi_memory_dpi.h
 SOC_DPI_HEADER := $(SOC_DPI_HEADER_$(SOC))
 
 CPPFLAGS += -I$(FESVR_PREFIX)/include -I$(FESVR_DIR) -I$(VERILATOR_DIR) -I$(CHI_DPI_DIR)
@@ -81,7 +81,7 @@ elaboration-test:
 	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
 	  sims/tests/direct-memory-htif-test.rhm \
 	  sims/tests/simple-soc-harness-test.rhm \
-	  sims/tests/dram-soc-harness-test.rhm \
+	  sims/tests/mini-soc-harness-test.rhm \
 	  sims/tests/tiled-soc-harness-test.rhm
 
 tiled-lowering-test: | $(TILED_LOWERING_DIR)
@@ -102,7 +102,7 @@ $(SOC_BUILD_DIR) $(DPI_BUILD_DIR) $(TILED_LOWERING_DIR):
 
 $(SOC_MLIR): $(SIMULATOR_SOURCES) $(HARNESS_EMITTER) | $(SOC_BUILD_DIR)
 	@test -n "$(HARNESS_SOURCE)" || \
-	  (echo "unsupported SOC '$(SOC)'; expected simple, dram, or tiled" >&2; exit 2)
+	  (echo "unsupported SOC '$(SOC)'; expected simple, mini, or tiled" >&2; exit 2)
 	compiled_root="$$(mktemp -d /tmp/rhodium-sims-verilator.XXXXXX)"; \
 	trap 'rm -rf "$$compiled_root"' EXIT; \
 	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \

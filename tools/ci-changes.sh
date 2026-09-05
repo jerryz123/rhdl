@@ -175,7 +175,7 @@ classify_path() {
     *.md|LICENSE|LICENSE.*|AGENTS.md|.gitignore|.gitattributes)
       # Documentation and repository metadata cannot affect executable behavior.
       ;;
-    sram/*|vlsi/sim/*|vlsi/designs/simple-soc/sky130/*)
+    sram/*|vlsi/sim/*|vlsi/designs/mini-soc/sky130/*)
       simulation=true
       ;;
     tests/emacs/*|tools/emacs/*|vlsi/*)
