@@ -1,0 +1,97 @@
+#lang rhodium
+// Elaborates one HN subordinate attachment routed to two independent SN nodes.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/rtl/router.rhdl") open
+
+def sn_noc_flit = CHIFlitParams()
+def sn_noc_topology = topology:
+  node xbar
+def sn_noc_router = sn_noc_topology.node("xbar")
+def sn_noc_home = CHISNICNSite(
+  NamePath(["home", "subordinate"]),
+  5,
+  sn_noc_router
+)
+def sn_noc_first = CHISNSite(
+  NamePath(["subordinates", "first"]),
+  9,
+  sn_noc_router
+)
+def sn_noc_second = CHISNSite(
+  NamePath(["subordinates", "second"]),
+  10,
+  sn_noc_router
+)
+def sn_noc_connections = [
+  CHISNConnection(sn_noc_home, sn_noc_first),
+  CHISNConnection(sn_noc_home, sn_noc_second)
+]
+def sn_noc_compilations = compile_chi_connections(
+  sn_noc_topology,
+  sn_noc_connections,
+  uniform_chi_routing(deny_all)
+)
+def sn_noc_adapters = compile_chi_channel_adapter_plans(sn_noc_compilations,
+                                                        sn_noc_flit)
+def sn_noc_req_router_config :: SimpleRouterConfig = compile_simple_router(
+  sn_noc_compilations.req.network.router_plan(sn_noc_router)
+)
+def sn_noc_rsp_router_config :: SimpleRouterConfig = compile_simple_router(
+  sn_noc_compilations.rsp.network.router_plan(sn_noc_router)
+)
+def sn_noc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
+  sn_noc_compilations.dat.network.router_plan(sn_noc_router)
+)
+
+sync_circuit CHISNNoCFixture():
+  interface home(CHISNChannels(sn_noc_flit), ~role: node)
+  interface first(CHISNChannels(sn_noc_flit), ~role: icn)
+  interface second(CHISNChannels(sn_noc_flit), ~role: icn)
+
+  inst req_router(SimpleRouter(CHIReqFlit(sn_noc_flit), sn_noc_req_router_config))
+  inst rsp_router(SimpleRouter(CHIRspFlit(sn_noc_flit), sn_noc_rsp_router_config))
+  inst dat_router(SimpleRouter(CHIDatFlit(sn_noc_flit), sn_noc_dat_router_config))
+
+  connect_chi_hn_subordinate(home,
+                             ~home: sn_noc_home,
+                             ~req_ingress: req_router.ingress,
+                             ~rsp_targets: rsp_router.target,
+                             ~dat_ingress: dat_router.ingress,
+                             ~dat_targets: dat_router.target,
+                             ~adapters: sn_noc_adapters)
+  connect_chi_sn_node(first,
+                      ~node: sn_noc_first,
+                      ~req_targets: req_router.target,
+                      ~rsp_ingress: rsp_router.ingress,
+                      ~dat_targets: dat_router.target,
+                      ~dat_ingress: dat_router.ingress,
+                      ~adapters: sn_noc_adapters)
+  connect_chi_sn_node(second,
+                      ~node: sn_noc_second,
+                      ~req_targets: req_router.target,
+                      ~rsp_ingress: rsp_router.ingress,
+                      ~dat_targets: dat_router.target,
+                      ~dat_ingress: dat_router.ingress,
+                      ~adapters: sn_noc_adapters)
+
+def sn_noc_design = elaborate(CHISNNoCFixture())
+
+export:
+  sn_noc_flit
+  sn_noc_topology
+  sn_noc_router
+  sn_noc_home
+  sn_noc_first
+  sn_noc_second
+  sn_noc_connections
+  sn_noc_compilations
+  sn_noc_adapters
+  sn_noc_req_router_config
+  sn_noc_rsp_router_config
+  sn_noc_dat_router_config
+  CHISNNoCFixture
+  sn_noc_design
