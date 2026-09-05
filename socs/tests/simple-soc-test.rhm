@@ -3,6 +3,7 @@
 
 import:
   "../../rhodium/core/main.rhm" open
+  "../../rhodium/frontend/kernel.rhm" as embedded
   "../../chi/main.rhdl" as chi
   "../../socs/simple-soc.rhdl" as soc
 
@@ -12,6 +13,14 @@ def soc_top = soc_design.modules.find(
 )
 def module_names = soc_design.modules.map(fun (module_def): module_def.name)
 def snp_adapters :: chi.CHIChannelAdapterPlan = soc.simple_soc_adapter_plans.snp
+def compact_soc_params = soc.SimpleSoCParams(
+  soc.simple_soc_params.fabric,
+  ~llc_sets: 16,
+  ~llc_ways: 2
+)
+def compact_soc_design = embedded.run_elaboration(
+  fun (): soc.SimpleSoC(compact_soc_params)
+)
 
 check:
   soc_design.dpi_imports ~is []
@@ -46,8 +55,12 @@ check:
   soc.simple_soc_host_node.supports.snp ~is chi.chi_rnf_snoop_opcodes
   soc.simple_soc_memory_node.kind ~is chi.CHINodeKind.SNF
   soc.simple_soc_memory_node.node_id ~is 9
-  soc.simple_soc_llc_config.sets ~is 64
-  soc.simple_soc_llc_config.ways ~is 4
+  soc.simple_soc_params.llc_config.sets ~is 64
+  soc.simple_soc_params.llc_config.ways ~is 4
+  soc.simple_soc_params.llc_config.capacity_bytes ~is 16384
+  compact_soc_params.llc_config.sets ~is 16
+  compact_soc_params.llc_config.ways ~is 2
+  compact_soc_params.llc_config.capacity_bytes ~is 2048
   soc.simple_soc_memory_service.endpoint === soc.simple_soc_memory_port ~is #true
   soc.simple_soc_memory_service.supports(chi.CHIReqOpcode.ReadNoSnp, 16) ~is #true
   soc.simple_soc_memory_service.supports(chi.CHIReqOpcode.ReadNoSnp, 64) ~is #true
@@ -88,3 +101,4 @@ check:
   ]
   soc_top.outputs.map(fun (port): port.name) ~is ["host_out", "memory_out"]
   verify_design(soc_design) ~is #void
+  verify_design(compact_soc_design) ~is #void

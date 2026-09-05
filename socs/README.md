@@ -57,10 +57,11 @@ The FESVR implementation and generated executable harness remain owned by
 
 `SimpleSoCFabric` factors the processor, Home module, NoC, and ACLINT from the
 final memory termination, and accepts that Home as an ordinary host circuit
-parameter. `SimpleSoC` selects a 64-set, four-way blocking inclusive LLC and
-exports line-capable `CHISNChannels` for SN-F NodeID 9 over the 1 GiB range
-`0x80000000..0xbfffffff`. It contains no RAM, fragmenter, or simulator binding;
-an external subordinate owns the memory contents and response timing.
+parameter. `SimpleSoCParams` couples that fabric contract to the inclusive LLC
+geometry. The default selects a 64-set, four-way blocking LLC and exports
+line-capable `CHISNChannels` for SN-F NodeID 9 over the 1 GiB range
+`0x80000000..0xbfffffff`. The SoC contains no RAM, fragmenter, or simulator
+binding; an external subordinate owns the memory contents and response timing.
 
 [`mini-soc.rhdl`](mini-soc.rhdl) defines `MiniSoC`, the small self-contained
 variant used for compact RTL and physical-design experiments. It specializes

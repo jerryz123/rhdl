@@ -127,33 +127,50 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
                  [device_port],
                  CHISubordinateMap(flit, [simple_soc_aclint_params.service]))
 
-def simple_soc_fabric_params:
+// Couples the external-memory fabric contract with the inclusive LLC geometry
+// selected by the complete SimpleSoC composition.
+class SimpleSoCParams(fabric :: SimpleSoCFabricParams,
+                      llc_sets :: Pow2Int,
+                      llc_ways :: PosInt):
+  implements StableCircuitParam
+
+  property llc_config:
+    CHIInclusiveHNFConfig(fabric.home_config,
+                          ~sets: llc_sets,
+                          ~ways: llc_ways)
+
+  constructor (fabric :: SimpleSoCFabricParams,
+               ~llc_sets: llc_sets :: Pow2Int,
+               ~llc_ways: llc_ways :: PosInt):
+    super(fabric, llc_sets, llc_ways)
+
+def simple_soc_params = SimpleSoCParams(
   SimpleSoCFabricParams("simple-memory",
                         simple_soc_memory_base,
-                        simple_soc_memory_bytes)
-def simple_soc_rv5stage_config = simple_soc_fabric_params.rv5stage_config
-def simple_soc_home_map :: CHIHomeMap = simple_soc_fabric_params.home_map
-def simple_soc_rv5stage_params = simple_soc_fabric_params.rv5stage_params
-def simple_soc_instruction_port = simple_soc_fabric_params.instruction_port
-def simple_soc_data_port = simple_soc_fabric_params.data_port
-def simple_soc_device_port = simple_soc_fabric_params.device_port
-def simple_soc_ram_config = simple_soc_fabric_params.ram_config
-def simple_soc_ram_params = simple_soc_fabric_params.ram_params
-def simple_soc_memory_transfers = simple_soc_fabric_params.memory_transfers
-def simple_soc_memory_requests = simple_soc_fabric_params.memory_requests
-def simple_soc_memory_node = simple_soc_fabric_params.memory_node
-def simple_soc_memory_port = simple_soc_fabric_params.memory_port
+                        simple_soc_memory_bytes),
+  ~llc_sets: 64,
+  ~llc_ways: 4
+)
+def simple_soc_rv5stage_config = simple_soc_params.fabric.rv5stage_config
+def simple_soc_home_map :: CHIHomeMap = simple_soc_params.fabric.home_map
+def simple_soc_rv5stage_params = simple_soc_params.fabric.rv5stage_params
+def simple_soc_instruction_port = simple_soc_params.fabric.instruction_port
+def simple_soc_data_port = simple_soc_params.fabric.data_port
+def simple_soc_device_port = simple_soc_params.fabric.device_port
+def simple_soc_ram_config = simple_soc_params.fabric.ram_config
+def simple_soc_ram_params = simple_soc_params.fabric.ram_params
+def simple_soc_memory_transfers = simple_soc_params.fabric.memory_transfers
+def simple_soc_memory_requests = simple_soc_params.fabric.memory_requests
+def simple_soc_memory_node = simple_soc_params.fabric.memory_node
+def simple_soc_memory_port = simple_soc_params.fabric.memory_port
 def simple_soc_memory_service = CHISubordinateServiceParams(
   simple_soc_memory_port,
   [AddressSet(simple_soc_memory_base, simple_soc_memory_bytes - 1)],
   simple_soc_memory_requests
 )
-def simple_soc_home_config = simple_soc_fabric_params.home_config
-def simple_soc_home_params = simple_soc_fabric_params.home_params
-def simple_soc_device_home_params = simple_soc_fabric_params.device_home_params
-fun make_simple_soc_llc_config(params :: SimpleSoCFabricParams) :: CHIInclusiveHNFConfig:
-  CHIInclusiveHNFConfig(params.home_config, ~sets: 64, ~ways: 4)
-def simple_soc_llc_config = make_simple_soc_llc_config(simple_soc_fabric_params)
+def simple_soc_home_config = simple_soc_params.fabric.home_config
+def simple_soc_home_params = simple_soc_params.fabric.home_params
+def simple_soc_device_home_params = simple_soc_params.fabric.device_home_params
 
 // The logical RN-I/RN-F relationships compile independently onto the four
 // transport planes while sharing one physical single-router topology.
@@ -208,7 +225,7 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
   simple_soc_compilations.dat.network.router_plan(simple_soc_router)
 )
 
-sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_fabric_params, ~home: home_module = CHIHNF(params.home_config)):
+sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params.fabric, ~home: home_module = CHIHNF(params.home_config)):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
@@ -296,12 +313,13 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_fabric
 
 // Exposes the fabric's line-capable subordinate channels while leaving storage
 // and response timing to the external SN-F implementation.
-sync_circuit SimpleSoC(params :: SimpleSoCFabricParams = simple_soc_fabric_params):
-  interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
-  interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
+sync_circuit SimpleSoC(params :: SimpleSoCParams = simple_soc_params):
+  def fabric_params = params.fabric
+  interface host(SoCHostInterface(fabric_params.flit), ~role: soc)
+  interface memory(CHISNChannels(fabric_params.flit), ~role: icn)
 
-  def HomeModule = CHIInclusiveHNF(make_simple_soc_llc_config(params))
-  inst fabric(SimpleSoCFabric(params, ~home: HomeModule))
+  def HomeModule = CHIInclusiveHNF(params.llc_config)
+  inst fabric(SimpleSoCFabric(fabric_params, ~home: HomeModule))
 
   host <=> fabric.host
   fabric.memory <=> memory
@@ -317,7 +335,8 @@ export:
   simple_soc_home_map
   simple_soc_host_node
   SimpleSoCFabricParams
-  simple_soc_fabric_params
+  SimpleSoCParams
+  simple_soc_params
   simple_soc_rv5stage_config
   simple_soc_rv5stage_params
   requester_icn_endpoint
@@ -334,7 +353,6 @@ export:
   simple_soc_memory_service
   simple_soc_home_config
   simple_soc_home_params
-  simple_soc_llc_config
   simple_soc_aclint_config
   simple_soc_aclint_params
   simple_soc_device_home_params
