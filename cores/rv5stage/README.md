@@ -3,10 +3,11 @@
 # RV5Stage
 
 RV5Stage is a single-issue, in-order, five-stage RISC-V processor implemented
-as direct Rhodium RTL. A required `xlen :: XLen` host parameter selects RV32 or
-RV64 without admitting arbitrary integer widths. Optional floating-point,
-half-precision, and compressed-instruction parameters specialize the same
-scalar pipeline with a parallel FP execution engine and variable-length Fetch.
+as one authoritative Rhodium RTL circuit. A required `xlen :: XLen` host
+parameter selects RV32 or RV64 without admitting arbitrary integer widths.
+Optional floating-point, half-precision, and compressed-instruction parameters
+specialize the same scalar pipeline with a parallel FP execution engine and
+variable-length Fetch.
 
 Core-specific decode, architectural state, pipeline policy, MMU, and private L1
 caches live here. Reusable execution components remain directly under
@@ -57,14 +58,14 @@ flowchart LR
         IDEX["ID/EX<br/>elastic Pipe"]
         EX["Execute (EX)<br/>forwarding, branch, AGU"]
         EXMEM["EX/MEM<br/>feed-forward ValidPipe"]
-        MEM["Memory (MEM)<br/>redirect, metadata, bypass"]
+        MEM["Memory (MEM)<br/>DTLB, request, redirect, replay"]
         MEMWB["MEM/WB<br/>feed-forward ValidPipe"]
         WB["Writeback (WB)<br/>ordered commit"]
 
         IF --> FQ --> IFID --> ID --> IDEX --> EX --> EXMEM --> MEM --> MEMWB --> WB
     end
 
-    EX -->|"load / store / AMO"| LSU["DTLB + PMA<br/>L1D or uncached path"]
+    MEM -->|"load / store / AMO"| LSU["DTLB + PMA<br/>L1D or uncached path"]
     LSU -->|"integer load / AMO result"| COMPLETE["Deferred GPR<br/>completion arbiter"]
 
     WB -->|"issue at WB"| MUL["Multiplier"]
@@ -90,8 +91,9 @@ flowchart LR
     FP -->|"release FPR destination"| SCORE
 
     WB <--> CSR["CSR, trap, and interrupt state"]
-    CSR -->|"redirect / flush"| IF
-    MEM -->|"branch / exception recovery"| IF
+    CSR -->|"trap / fence redirect"| IF
+    MEM -->|"branch or fault squash"| IF
+    WB -->|"memory replay refetch"| IF
 ```
 
 ### Stage contract
@@ -100,9 +102,15 @@ flowchart LR
 |---|---|---:|---|
 | Fetch | Five-entry `Queue`, then IF/ID `Pipe` | Yes | Producer-owned PC generation, L1I request correlation, and redirect flushing |
 | Decode | ID/EX `Pipe` | Yes | Structured decode, serialization, and RAW/WAW hazard checks |
-| Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, synchronous-fault classification, and accepted FP dispatch |
-| Memory | MEM/WB `ValidPipe` | No | Registered branch and exception recovery, feed-forward metadata, bypass, and cache-response alignment |
+| Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, local synchronous-fault classification, and accepted FP compute dispatch |
+| Memory | MEM/WB `ValidPipe` | No | DTLB lookup, PMA/cache request, data-fault classification, branch recovery, replay generation, and bypass |
 | Writeback | Ordered commit | At defined architectural waits | Scalar register and CSR effects, traps, fences, and scalar deferred-destination reservation |
+
+Within MEM, the nonbackpressured pipeline token uses `Valid` flow transforms
+for fanout, filtering, and payload mapping. Ready-sensitive architectural
+decisions remain explicit: in particular, an L1D request that is not ready
+becomes a replay, so its request boundary must not turn readiness into EX/MEM
+backpressure.
 
 Fetch retains up to two ordered, aligned instruction words in a flushable
 window so the physical instruction hierarchy can preserve response order while
@@ -112,37 +120,41 @@ state. A wrong-path refill may finish internally but cannot return an
 instruction to Fetch; an in-flight uncached read is drained without publishing
 its response.
 
-Decode holds an instruction before Execute until its operands are available and
-the required execution or cache resource can accept it. ID/EX stores register
-indices rather than captured values; Execute reads the integer register file
-live and applies MEM and WB forwarding. This lets a held instruction observe a
-write after the ordinary forwarding window has passed.
+Decode holds an instruction before Execute until its operands and local
+execution resources are available. ID/EX stores register indices rather than
+captured values; Execute reads the integer register file live and applies MEM
+and WB forwarding. This lets a held instruction observe a write after the
+ordinary forwarding window has passed.
 
 Once Execute transfers an instruction into EX/MEM, no later scalar stage can
-backpressure it. Branch resolution, synchronous-fault classification, and any
-legal memory-request acceptance occur on that transfer. The branch or exception
-outcome is registered in EX/MEM, and Memory redirects or flushes Fetch while
-squashing younger work on the following cycle. L1D's registered SRAM result is
-aligned with the instruction at WB.
+backpressure it. Execute registers branch decisions, effective virtual
+addresses, request metadata, and locally classified faults. Memory then performs
+the DTLB lookup and physical-memory request. An accepted request continues as a
+deferred operation, a page or access fault becomes the token's precise
+exception, and any other unaccepted attempt becomes a side-effect-free replay
+token. Memory immediately squashes younger work; replay reaches WB in order and
+redirects Fetch to the original PC. Branch recovery also occurs from the
+registered EX/MEM result.
 
 WB is the ordered scalar commit point. Scalar loads, atomics, multiply, and
-divide reserve a GPR destination there; FP compute and FP-load destinations are
-reserved when their non-speculative EX-side request is accepted. A deferred
-instruction can release the scalar pipeline before its value returns. Younger
-independent instructions may then complete first, but they still issue through
-the ordered scalar pipeline. This is in-order issue and scalar commit with
-out-of-order register completion, not out-of-order instruction issue.
+divide reserve a GPR destination there. FP compute destinations are reserved
+when their non-speculative EX-side request is accepted; FP-load destinations
+are reserved when their data request is accepted in MEM. A deferred instruction
+can release the scalar pipeline before its value returns. Younger independent
+instructions may then complete first, but they still issue through the ordered
+scalar pipeline. This is in-order issue and scalar commit with out-of-order
+register completion, not out-of-order instruction issue.
 
 ## Execution and completion
 
 | Result class | Dispatch point | Completion path |
 |---|---|---|
 | Integer ALU, branch link, immediate, and ordinary CSR result | Scalar pipeline | Ordinary WB register-file port |
-| Load or atomic result | Memory request accepted in EX; GPR reserved at WB | L1D or uncached response to the deferred completion arbiter |
+| Load or atomic result | Memory request accepted in MEM; GPR reserved at WB | L1D or uncached response to the deferred completion arbiter |
 | Multiply or divide | Execution resource claimed in EX; GPR reserved and request issued at WB | Deferred completion arbiter |
 | FP result targeting an integer register | FP request and GPR reservation accepted from EX | FP completion to deferred completion arbiter |
 | FP result targeting an FP register | FP request and FPR reservation accepted from EX | FP pipeline's internal FP register-file port |
-| FP load | Memory request and FPR reservation accepted in EX | Memory response to FP pipeline's load port |
+| FP load | Memory request and FPR reservation accepted in MEM | Memory response to FP pipeline's load port |
 
 The fixed-priority deferred arbiter gives integer memory responses priority
 because they cannot be backpressured. Multiplier, divider, and FP integer
@@ -170,13 +182,13 @@ Accepted requests are non-speculative and must eventually complete. FP state
 updates accrue exception flags and mark `mstatus.FS` dirty.
 
 FP loads and stores share the scalar address generator, MMU, PMA checks, ordered
-L1D, and uncached path. An FP load reserves its destination when the legal memory
+L1D, and uncached path. An FP load reserves its destination only when its MEM
 request is accepted. An FP store holds EX for the FP register file's one-cycle
-store-data response before issuing the ordinary memory request. The cache data
-path remains XLEN-wide: half and single stores occupy its low 16 or 32 bits,
-and half and single loads are NaN-boxed into the selected 32- or 64-bit FP
-register width. Exact precision metadata follows a load through the MMU and
-cache response path.
+store-data response, carries that data through EX/MEM, and issues the ordinary
+memory request from MEM. The cache data path remains XLEN-wide: half and single
+stores occupy its low 16 or 32 bits, and half and single loads are NaN-boxed into
+the selected 32- or 64-bit FP register width. Exact precision metadata follows
+a load through the MMU and cache response path.
 
 ## Control, hazards, and ordering
 
@@ -185,6 +197,12 @@ deferred instructions still crossing ID/EX or EX/MEM. Independent younger
 instructions may proceed while a load, multiply, divide, or FP result remains
 outstanding. D-cache responses are ordered, and a blocking miss prevents younger
 memory requests from entering the cache even when non-memory work can pass it.
+
+A data request never carries downstream readiness back through EX/MEM. If MEM
+cannot accept it because of a DTLB miss, walker ownership, cache pressure, or an
+unavailable FP-load reservation, the scalar token advances to WB as a replay.
+The initial DTLB-miss attempt is still sufficient to start the page-table walk;
+subsequent refetches replay until the translation or other resource is ready.
 
 The structured decoder selects the integer-only, RV32F, or RV64D base catalog
 and optionally composes Zfhmin, Zfh, or Zfa at host elaboration. It emits component
@@ -201,16 +219,17 @@ same deferred path as loads.
 CSR instructions return the old value and update state atomically at WB. System
 instructions serialize in Decode and wait for older deferred work before
 entering the pipeline. Execute-detected exceptions cross EX/MEM before Memory
-squashes younger work and carries the faulting instruction to WB, where CSR
-state records EPC, cause, and trap value. Eligible interrupts stop Fetch and
-Decode, drain accepted scalar and register-producing deferred work, and enter
-the trap after the last retired instruction. A legal `WFI` retires at that same
-serialization boundary and then
-holds Fetch and Decode until an individually enabled interrupt becomes pending.
-WFI wakeup ignores global interrupt-enable and delegation state; an eligible
-interrupt enters its handler with EPC equal to the instruction after `WFI`,
-while a globally masked wake resumes that instruction directly. U-mode `WFI`
-and S-mode `WFI` with `mstatus.TW` set raise an illegal-instruction exception.
+squashes younger work. Data page and access faults are instead classified from
+the registered virtual request in MEM. Both paths carry the faulting instruction
+to WB, where CSR state records EPC, cause, and trap value. Eligible interrupts
+stop Fetch and Decode, drain accepted scalar and register-producing deferred
+work, and enter the trap after the last retired instruction. A legal `WFI`
+retires at that same serialization boundary and then holds Fetch and Decode
+until an individually enabled interrupt becomes pending. WFI wakeup ignores
+global interrupt-enable and delegation state; an eligible interrupt enters its
+handler with EPC equal to the instruction after `WFI`, while a globally masked
+wake resumes that instruction directly. U-mode `WFI` and S-mode `WFI` with
+`mstatus.TW` set raise an illegal-instruction exception.
 
 `FENCE`, `FENCE.I`, and `SFENCE.VMA` share the serialization boundary. Decode
 waits for older deferred completions and L1D quiescence, then prevents younger
@@ -308,7 +327,10 @@ physically tagged L1 caches; RV32 remains Bare. Separate eight-entry fully
 associative ITLB and DTLB instances retain PTE permissions and recheck current
 privilege, `SUM`, and `MXR`. A single non-speculative walker services one miss at
 a time through the shared physical data path after older cache or uncached work
-drains; cacheable PTE reads then use L1D. See the
+drains; cacheable PTE reads then use L1D. A DTLB miss
+starts that walk and returns an unaccepted request to the core, whose ordered
+replay mechanism refetches the memory instruction until the lookup completes.
+See the
 [`MMU contract`](mmu/README.md) for translation, permission, and fault ownership.
 
 L1I is a clean-only, one-hit-per-cycle instruction cache with flushable lookup

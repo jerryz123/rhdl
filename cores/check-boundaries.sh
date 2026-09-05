@@ -71,6 +71,13 @@ if [[ -n "$pipeline_transport_imports" ]]; then
   exit 1
 fi
 
+alternate_core_sources="$(find cores/rv5stage -maxdepth 1 -type f -name 'core-*.rhdl' -print)"
+if [[ -n "$alternate_core_sources" ]]; then
+  echo "RV5Stage must keep one authoritative core implementation" >&2
+  echo "$alternate_core_sources" >&2
+  exit 1
+fi
+
 cache_cross_imports="$(search_sources '^[[:space:]]+"[^" ]*(icache|dcache)/' \
   cores/rv5stage/icache cores/rv5stage/dcache \
   || true)"

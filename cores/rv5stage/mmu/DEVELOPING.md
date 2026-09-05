@@ -30,6 +30,7 @@ the caches.
 | [`../rv5stage.rhdl`](../rv5stage.rhdl) | Core, L1I, physical-router, and privileged-control integration |
 | [`../../../riscv/rtl/sv39.rhdl`](../../../riscv/rtl/sv39.rhdl) | Shared Sv39 decoding, canonicality, permission, superpage, and address helpers |
 | [`../tests/mmu-test.rhm`](../tests/mmu-test.rhm) | Focused elaboration, widths, structure, and design verification |
+| [`../../../tests/backend/verilog/rv5stage-mmu-replay_tb.sv`](../../../tests/backend/verilog/rv5stage-mmu-replay_tb.sv) | Cycle-level pulsed DTLB miss, three-level walk, and translated replay check |
 
 ## Change translation behavior
 
@@ -54,12 +55,14 @@ Run the MMU-owned host check from the repository root:
 
 ```sh
 tools/run-racket-tests.sh cores/rv5stage/tests/mmu-test.rhm
+FIXTURE=rv5stage-mmu-replay bash tests/backend/run-circt.sh --simulate-only
 ```
 
-The wrapper creates a fresh compiled root when one is not supplied. The test
-elaborates the standalone TLB and walker plus the composed RV64 MMU, checks
-principal protocol widths and fault fields, and runs design verification. It
-is structural/elaboration coverage rather than cycle-level translation or
-cache simulation. Use the parent
+The wrapper creates a fresh compiled root when one is not supplied. The host
+test elaborates the standalone TLB and walker plus the composed RV64 MMU,
+checks principal protocol widths and fault fields, and runs design verification.
+The Verilator fixture pulses one data request, checks the three expected PTE
+addresses, and requires a later retry to use the filled DTLB while preserving
+request metadata. Use the parent
 [`DEVELOPING.md`](../DEVELOPING.md#focused-validation) when changes span CSR
 sequencing, the pipeline, physical routing, or caches.

@@ -26,6 +26,7 @@ Contributors changing translation or page-walk integration should read
 | Page sizes | 4 KiB, 2 MiB, and 1 GiB Sv39 leaves |
 | Miss service | One shared, serialized, non-speculative walk; instruction misses have priority |
 | Page-table traffic | One 64-bit physical load at a time through the ordinary data-memory path |
+| Data-miss recovery | A miss starts the walker and leaves the MEM request unaccepted; the core refetches it through ordered replay |
 | Permission policy | Recheck access kind, current effective privilege, `SUM`, `MXR`, `A`, and `D` on every TLB hit |
 | Invalidation | Whole-ITLB and whole-DTLB invalidation; any active walk and correlated fault are canceled |
 | Address-space identity | ASID zero only; no ASID-tagged lookup or selective invalidation |
@@ -43,7 +44,7 @@ router; a cacheable PTE read follows the ordinary L1D path.
 ```mermaid
 flowchart LR
   FETCH["Core Fetch<br/>virtual request"] --> ILOOKUP["ITLB lookup"]
-  LSU["Core LSU<br/>virtual request"] --> DLOOKUP["DTLB lookup"]
+  LSU["Core MEM<br/>virtual request"] --> DLOOKUP["DTLB lookup"]
 
   ILOOKUP -->|"hit / Bare"| ICHECK["Physical fetch-region check"]
   ICHECK -->|"executable + cacheable"| L1I["L1I"]
@@ -55,6 +56,8 @@ flowchart LR
 
   ILOOKUP -->|"miss, fixed priority"| SELECT["Shared miss selection"]
   DLOOKUP -->|"miss"| SELECT
+  DLOOKUP -->|"ready low"| REPLAY["Core WB replay<br/>refetch original PC"]
+  REPLAY --> LSU
   SELECT --> PTW["Serialized Sv39 walker<br/>levels 2, 1, 0"]
   PTW -->|"successful refill"| ILOOKUP
   PTW -->|"successful refill"| DLOOKUP
@@ -118,13 +121,15 @@ cancels either kind of walk and clears both TLBs and any correlated fault.
    and RV64 `satp.MODE` selects Sv39.
 2. Ordinary loads and LR use an Sv39 load permission check. Stores, SC, and AMOs
    use a store check because their `MemoryOperation` requires unique ownership.
-3. A DTLB miss keeps `request.ready` low, so the faulting or untranslated
-   instruction remains held in Execute. If an instruction miss is also
-   present, the data miss waits for the instruction walk to finish.
-4. A successful refill lets the unchanged request retry with its translated
-   physical address. A page fault or page-walk access fault makes the matching
-   request ready and reports the fault on the same accepted request; no physical
-   data operation is issued.
+3. A DTLB miss keeps `request.ready` low. The core's feed-forward MEM stage does
+   not hold the request: the attempt starts the walker, becomes an ordered replay
+   token, squashes younger work, and is refetched from its original PC. A Fetch
+   flush does not cancel the active data walk. If an instruction miss is also
+   present when the walker is idle, that instruction miss has priority.
+4. After a successful refill, a replayed request retries through the ordinary
+   hit path with its translated physical address. A page fault or page-walk
+   access fault makes the matching replayed request ready and reports the fault
+   on that same attempt; no physical data operation is issued.
 5. A legal translated or Bare request proceeds to the physical-memory router.
    The router owns mapped/readable/writable/atomic PMA checks and the choice
    between L1D and the uncached path.
@@ -192,7 +197,7 @@ irrevocable 64-bit response before continuing.
 A walk succeeds at the first structurally valid, aligned leaf whose permission
 check passes. Non-leaf `G` bits are accumulated into the result. The completion
 retains the original virtual address so the composition can refill only the
-owning TLB or correlate the fault with the still-held request.
+owning TLB or correlate the fault with a later replayed request for that address.
 
 The walk completes with a page fault for any of these conditions:
 
@@ -222,10 +227,11 @@ returns the walker to Idle without publishing a completion.
 | Misaligned instruction target or scalar data address | Address-misaligned fault | Parent [`core.rhdl`](../core.rhdl), outside the MMU |
 | L1 cache hit, miss, refill, coherence, or replacement behavior | Not a translation fault source | The cache subsystem; both cache protocols leave translation and PMA faults to their callers |
 
-The parent core converts the MMU's page/access signals into the exact exception
-cause. `MemoryOperation.needs_unique()` selects store-class causes for Store,
-SC, and AMO; Load and LR use load-class causes. Trap priority and `stval`/`mtval`
-updates belong to the [privileged-state contract](../README.md#privileged-and-architectural-state).
+The parent core converts the MMU's page/access signals in MEM into the exact
+exception cause. `MemoryOperation.needs_unique()` selects store-class causes for
+Store, SC, and AMO; Load and LR use load-class causes. Trap priority and
+`stval`/`mtval` updates belong to the
+[privileged-state contract](../README.md#privileged-and-architectural-state).
 
 ## Supported Sv39 behavior and deliberate limits
 

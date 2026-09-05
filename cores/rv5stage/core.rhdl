@@ -67,13 +67,24 @@ sync_circuit RV5StageCore(xlen :: XLen,
     source.is_one_of(WritebackSelect.Memory, WritebackSelect.Multiply, WritebackSelect.Divide)
   fun serializing_operation(system :: SystemControl(), fence :: FenceControl()) :~ Bool:
     system.is_system_operation() ||| fence.is_fence_operation()
+  fun data_exception(operation :: MemoryOperation,
+                     address :: Bits(width),
+                     store_cause :: ExceptionCause,
+                     load_cause :: ExceptionCause):
+    RV5StageException(xlen):
+      valid: Bool(#true)
+      cause: mux(operation.needs_unique(),
+                 exception_cause_bits(store_cause, width),
+                 exception_cause_bits(load_cause, width))
+      value: address
   reg faulted(~init: Bool(#false))
   reg fp_store_requested(~init: Bool(#false))
   reg pending_exception_valid(~init: Bool(#false))
   reg pending_exception(MemoryWriteback(xlen))
 
-  // IF/ID and ID/EX are elastic. Once Execute accepts any cache request, the
-  // EX/MEM and MEM/WB boundaries advance feed-forward without backpressure.
+  // IF/ID and ID/EX are elastic. Once Execute admits an instruction, the
+  // EX/MEM and MEM/WB boundaries advance feed-forward; rejected memory
+  // attempts return as ordered replay tokens instead of backpressure.
   inst if_id_pipe(Pipe(FetchDecode(xlen), 1))
   inst id_ex_pipe(Pipe(DecodeExecute(xlen), 1))
   inst ex_mem_pipe(ValidPipe(ExecuteMemory(xlen), 1))
@@ -101,6 +112,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def id_ex = id_ex_pipe.egress
   def memory = ex_mem_pipe.egress
   def commit = mem_wb_pipe.egress
+  def commit_replay = commit.valid & commit.bits.replay
+  def commit_valid = commit.valid & !commit.bits.replay
   def Array(commit_write :: Endpoint, deferred_completion_write :: Endpoint) = registers.writes
 
   fault <== faulted
@@ -112,24 +125,32 @@ sync_circuit RV5StageCore(xlen :: XLen,
   // producers remain in their pipeline stages below, despite earlier stages
   // consuming their values.
   def redirect_link :: Handle = interface_link(Valid(Bits(width)))
+  def memory_exception_link :: Handle = interface_link(Valid(Bits(width)))
+  def memory_replay_link :: Handle = interface_link(Valid(Bits(width)))
   def memory_bypass_link :: Handle = interface_link(Valid(RV5StageBypass(xlen)))
   def writeback_bypass_link :: Handle = interface_link(Valid(RV5StageBypass(xlen)))
   def scoreboard_set_link :: Handle = interface_link(Valid(Bits(5)))
   def scoreboard_clear_link :: Handle = interface_link(Valid(Bits(5)))
   scoreboard_set_link.right |> scoreboard.set
   scoreboard_clear_link.right |> scoreboard.clear
-  def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
+  def fence_i_commit = commit_valid & commit.bits.fence.is_instruction_fence()
   translation_flush <== csrs.translation_flush
   def fence_resume_pc = commit.bits.resume_pc
   def fence_commit = fence_i_commit ||| csrs.translation_flush
-  def commit_redirect = csrs.redirect.valid ||| fence_commit
+  def commit_redirect = csrs.redirect.valid ||| fence_commit ||| commit_replay
   def memory_stage_valid = memory.valid & !commit_redirect
-  def memory_exception_event = memory_stage_valid & memory.bits.exception_valid
-  def memory_redirect = memory_stage_valid & memory.bits.redirect_valid & !memory.bits.exception_valid
+  def memory_exception_event = memory_exception_link.right.valid
+  def memory_replay_event = memory_replay_link.right.valid
+  def memory_redirect = memory_stage_valid & memory.bits.redirect_valid & !memory_exception_event & !memory_replay_event
   def fence_redirect = inject_flow(
     Valid(Bits(width)),
     ~valid: fence_commit,
     ~bits: fence_resume_pc
+  )
+  def commit_replay_redirect = inject_flow(
+    Valid(Bits(width)),
+    ~valid: commit_replay,
+    ~bits: commit.bits.pc
   )
   def memory_redirect_flow = inject_flow(
     Valid(Bits(width)),
@@ -139,6 +160,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def redirect_sources = Array(
     csrs.redirect,
     fence_redirect,
+    commit_replay_redirect,
     memory_redirect_flow
   )
   redirect_sources |> valid_arbiter() |> redirect_link.left
@@ -146,9 +168,9 @@ sync_circuit RV5StageCore(xlen :: XLen,
   // Fetch (IF) assembles variable-length instructions from aligned cache words.
   // Redirects and faults discard both partially assembled and outstanding data.
   def exception_in_flight = pending_exception_valid ||| memory_exception_event ||| (
-    commit.valid & commit.bits.exception_valid
+    commit_valid & commit.bits.exception_valid
   )
-  def squash = faulted ||| exception_in_flight ||| redirect_link.right.valid
+  def squash = faulted ||| exception_in_flight ||| memory_replay_event ||| redirect_link.right.valid
   reg started(~init: Bool(#false))
   reg waiting_for_interrupt(~init: Bool(#false))
   reg architectural_pc(~init: zero)
@@ -162,7 +184,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def start_fault = start_fire & !is_aligned(accepted_start.bits, instruction_alignment)
   def fetch_valid = started & !squash & !csrs.interrupt_request & !waiting_for_interrupt
   fetch.active <== fetch_valid
-  fetch.flush <== start_fault ||| memory_exception_event
+  fetch.flush <== start_fault ||| memory_exception_event ||| memory_replay_event
   fetch.restart_valid <== redirect_link.right.valid ||| (start_fire & !start_fault)
   fetch.restart_pc <== mux(redirect_link.right.valid, redirect_link.right.bits, accepted_start.bits)
   fetch.invalidate_all <== fence_i_commit
@@ -174,7 +196,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
     architectural_pc <== csrs.redirect.bits
   elsewhen start_fire:
     architectural_pc <== accepted_start.bits
-  elsewhen (commit.valid & !commit.bits.exception_valid):
+  elsewhen (commit_valid & !commit.bits.exception_valid):
     architectural_pc <== commit.bits.resume_pc
 
   when (csrs.wfi_wake ||| csrs.redirect.valid):
@@ -272,6 +294,10 @@ sync_circuit RV5StageCore(xlen :: XLen,
       id_ex.valid & id_ex.bits.floating_point_valid & (
         id_ex.bits.floating_point_control.registers.destination === RV5StageFloatDestination.FloatingPoint
       ) & (id_ex.bits.rd === index)
+    ) ||| (
+      memory.valid & memory.bits.data_request_valid & (
+        memory.bits.data_request.destination === RV5StageDataDestination.FloatingPoint
+      ) & (memory.bits.data_request.rd === index)
     )
   def fp_source_hazard = control.floating_point_valid & (
     (control.floating_point.registers.uses_frs1 & rv5stage_fp_register_busy(rs1)) ||| (
@@ -285,9 +311,9 @@ sync_circuit RV5StageCore(xlen :: XLen,
   ) & rv5stage_fp_register_busy(rd)
   def serializing_in_id_ex = id_ex.valid & serializing_operation(id_ex.bits.system, id_ex.bits.fence)
   def serializing_in_memory = memory.valid & serializing_operation(memory.bits.system, memory.bits.fence)
-  def serializing_in_commit = commit.valid & serializing_operation(commit.bits.system, commit.bits.fence)
+  def serializing_in_commit = commit_valid & serializing_operation(commit.bits.system, commit.bits.fence)
   def serializing_in_flight = serializing_in_id_ex ||| serializing_in_memory ||| serializing_in_commit
-  def commit_is_deferred = commit.valid & deferred_writeback(
+  def commit_is_deferred = commit_valid & deferred_writeback(
     commit.bits.writeback_source
   ) & commit.bits.write_enable
   def deferred_state_pending = id_ex_is_deferred ||| memory_is_deferred ||| (
@@ -392,24 +418,15 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def execute_fp_store = execute_fp_memory & fp_execution_control.memory_write
   def execute_fp_load = execute_fp_memory & !fp_execution_control.memory_write
   def execute_fp_compute = execute_is_fp & !execute_fp_memory
-  def execute_request_fault = id_ex.bits.instruction_page_fault ||| id_ex.bits.instruction_access_fault ||| id_ex.bits.illegal ||| (
+  def execute_admission_fault = id_ex.bits.instruction_page_fault ||| id_ex.bits.instruction_access_fault ||| id_ex.bits.illegal ||| (
     execute_is_memory & !memory_aligned
   )
-  def data_page_fault = execute_is_memory & data_access.request_fault
-  def data_access_fault = execute_is_memory & data_access.request_access_fault
   def redirect_fault = redirect_requested & !redirect_aligned
   fun exception(cause :: ExceptionCause, value :: Bits(width)):
     RV5StageException(xlen):
       valid: Bool(#true)
       cause: exception_cause_bits(cause, width)
       value: value
-  fun memory_exception(store_cause :: ExceptionCause, load_cause :: ExceptionCause):
-    RV5StageException(xlen):
-      valid: Bool(#true)
-      cause: mux(execute_memory_operation.needs_unique(),
-                 exception_cause_bits(store_cause, width),
-                 exception_cause_bits(load_cause, width))
-      value: alu.result
   wire execute_exception: RV5StageException(xlen)
   when (id_ex.bits.instruction_access_fault):
     execute_exception <== exception(ExceptionCause.InstructionAccessFault, id_ex.bits.instruction_fault_address)
@@ -421,15 +438,11 @@ sync_circuit RV5StageCore(xlen :: XLen,
   elsewhen redirect_fault:
     execute_exception <== exception(ExceptionCause.InstructionAddressMisaligned,
                                     computed_redirect_target)
-  elsewhen data_page_fault:
-    execute_exception <== memory_exception(ExceptionCause.StorePageFault,
-                                           ExceptionCause.LoadPageFault)
-  elsewhen data_access_fault:
-    execute_exception <== memory_exception(ExceptionCause.StoreAccessFault,
-                                           ExceptionCause.LoadAccessFault)
   elsewhen (execute_is_memory & !memory_aligned):
-    execute_exception <== memory_exception(ExceptionCause.StoreAddressMisaligned,
-                                           ExceptionCause.LoadAddressMisaligned)
+    execute_exception <== data_exception(execute_memory_operation,
+                                         alu.result,
+                                         ExceptionCause.StoreAddressMisaligned,
+                                         ExceptionCause.LoadAddressMisaligned)
   otherwise:
     execute_exception <== RV5StageException(xlen):
       valid: Bool(#false)
@@ -446,7 +459,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def execute_is_multiply = id_ex.bits.writeback_source === WritebackSelect.Multiply
   def execute_needs_multiplier = execute_is_multiply & id_ex.bits.writeback_enable & or_reduce(id_ex.bits.rd)
   def memory_has_multiply = memory.valid & (memory.bits.writeback_source === WritebackSelect.Multiply) & memory.bits.writeback_enable & or_reduce(memory.bits.rd)
-  def commit_has_multiply = commit.valid & (commit.bits.writeback_source === WritebackSelect.Multiply) & commit.bits.write_enable & or_reduce(commit.bits.rd)
+  def commit_has_multiply = commit_valid & (commit.bits.writeback_source === WritebackSelect.Multiply) & commit.bits.write_enable & or_reduce(commit.bits.rd)
   def multiplier_available = multiplier.available & !memory_has_multiply & !commit_has_multiply
   def execute_multiply_issue = RV5StageMultiplyIssue(xlen):
     left: forwarded_rs1
@@ -456,14 +469,14 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def execute_is_divide = id_ex.bits.writeback_source === WritebackSelect.Divide
   def execute_needs_divider = execute_is_divide & id_ex.bits.writeback_enable & or_reduce(id_ex.bits.rd)
   def memory_has_divide = memory.valid & (memory.bits.writeback_source === WritebackSelect.Divide) & memory.bits.writeback_enable & or_reduce(memory.bits.rd)
-  def commit_has_divide = commit.valid & (commit.bits.writeback_source === WritebackSelect.Divide) & commit.bits.write_enable & or_reduce(commit.bits.rd)
+  def commit_has_divide = commit_valid & (commit.bits.writeback_source === WritebackSelect.Divide) & commit.bits.write_enable & or_reduce(commit.bits.rd)
   def divider_available = divider.available & !memory_has_divide & !commit_has_divide
   def execute_divide_issue = RV5StageDivideIssue(xlen):
     dividend: forwarded_rs1
     divisor: forwarded_rs2
     control: id_ex.bits.divide_control
     rd: id_ex.bits.rd
-  def older_pipeline_squash = faulted ||| memory_exception_event ||| memory_redirect ||| commit_redirect
+  def older_pipeline_squash = faulted ||| memory_exception_event ||| memory_replay_event ||| memory_redirect ||| commit_redirect
 
   fp.issue.bits <== RV5StageFpIssue(xlen, effective_fp_profile, Bits(width)):
     context: id_ex.bits.pc
@@ -474,26 +487,23 @@ sync_circuit RV5StageCore(xlen :: XLen,
     frd: id_ex.bits.rd
     integer_operand: forwarded_rs1
     rounding_mode: id_ex.bits.floating_point_rounding_mode
-  fp.store_request.valid <== id_ex.valid & execute_fp_store & !fp_store_requested & !older_pipeline_squash & !execute_request_fault
+  fp.store_request.valid <== id_ex.valid & execute_fp_store & !fp_store_requested & !older_pipeline_squash & !execute_admission_fault
   fp.store_request.bits <== RV5StageFpStoreRequest(Bits(width)):
     context: id_ex.bits.pc
     precision: fp_execution_control.source_precision
     rs: id_ex.bits.rs2
 
-  // Cache capacity and long-latency reservations are Execute's only sources of
-  // backpressure. Branch resolution and EX/MEM observe an instruction only
-  // when both optional effects can advance.
-  def issue_memory_request = execute_is_memory & !execute_request_fault
-  def execute_cache_ready = !issue_memory_request ||| data_access.request.ready
+  // Execute is the final admission point. Local arithmetic and FP resources
+  // may hold ID/EX, but MMU and cache availability are resolved as replay in
+  // MEM and never propagate readiness back into Execute.
   def execute_multiplier_ready = !execute_needs_multiplier ||| multiplier_available
   def execute_divider_ready = !execute_needs_divider ||| divider_available
-  def execute_fp_store_data_ready = execute_request_fault ||| !execute_fp_store ||| (
+  def execute_fp_store_data_ready = execute_admission_fault ||| !execute_fp_store ||| (
     fp_store_requested & fp.store_response.valid
   )
-  def execute_fp_load_ready = execute_request_fault ||| !execute_fp_load ||| fp.load_reserve.ready
-  def execute_fp_compute_ready = execute_request_fault ||| !execute_fp_compute ||| fp.issue.ready
-  def execute_ready = execute_cache_ready & execute_multiplier_ready & execute_divider_ready & (
-    execute_fp_store_data_ready & execute_fp_load_ready & execute_fp_compute_ready
+  def execute_fp_compute_ready = execute_admission_fault ||| !execute_fp_compute ||| fp.issue.ready
+  def execute_ready = execute_multiplier_ready & execute_divider_ready & (
+    execute_fp_store_data_ready & execute_fp_compute_ready
   )
   def execute_transfer = id_ex.valid & execute_ready & !older_pipeline_squash
   fp.issue.valid <== execute_transfer & execute_fp_compute & !execute_exception.valid
@@ -505,12 +515,12 @@ sync_circuit RV5StageCore(xlen :: XLen,
     right: forwarded_rs2
     control: id_ex.bits.branch_control
 
-  // A legal memory access starts its synchronous cache lookup at the same
-  // edge that captures the instruction in EX/MEM.
-  data_access.request.valid <== id_ex.valid & !older_pipeline_squash & execute_multiplier_ready & execute_divider_ready & (
-    execute_fp_compute_ready & execute_fp_store_data_ready & execute_fp_load_ready & issue_memory_request
-  )
-  data_access.request.bits <== RV5StageDataReq(xlen):
+  when (fp.store_request.fire()):
+    fp_store_requested <== Bool(#true)
+  elsewhen (execute_transfer ||| older_pipeline_squash):
+    fp_store_requested <== Bool(#false)
+
+  def execute_data_request = RV5StageDataReq(xlen):
     address: alu.result
     access: execute_memory_operation
     atomic: id_ex.bits.memory_atomic
@@ -529,23 +539,14 @@ sync_circuit RV5StageCore(xlen :: XLen,
     rd: id_ex.bits.rd
     floating_point_precision: fp_execution_control.destination_precision
 
-  fp.load_reserve.valid <== data_access.request.fire() & execute_fp_load & !data_page_fault & !data_access_fault
-  fp.load_reserve.bits <== RV5StageFpLoadReservation(Bits(width)):
-    context: id_ex.bits.pc
-    precision: fp_execution_control.destination_precision
-    rd: id_ex.bits.rd
-
-  when (fp.store_request.fire()):
-    fp_store_requested <== Bool(#true)
-  elsewhen (execute_transfer ||| older_pipeline_squash):
-    fp_store_requested <== Bool(#false)
-
   ex_mem_pipe.ingress.valid <== execute_transfer
   ex_mem_pipe.ingress.bits <== ExecuteMemory(xlen):
     pc: id_ex.bits.pc
     resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.sequential_pc)
     redirect_valid: redirect_requested & !execute_exception.valid
     instruction: id_ex.bits.instruction
+    data_request_valid: execute_is_memory & !execute_admission_fault
+    data_request: execute_data_request
     writeback_source: id_ex.bits.writeback_source
     writeback_enable: id_ex.bits.writeback_enable & !execute_exception.valid
     rd: id_ex.bits.rd
@@ -560,50 +561,126 @@ sync_circuit RV5StageCore(xlen :: XLen,
     exception_cause: execute_exception.cause
     exception_value: execute_exception.value
 
-  // Memory advances every instruction into WB; exception payloads have their
-  // ordinary side effects disabled. No instruction commits at this boundary.
-  (
-    memory
-      |> filter_valid(_memory => !commit_redirect)
-      |> map_valid(memory_bits => MemoryWriteback(xlen)):
-          pc: memory_bits.pc
-          resume_pc: memory_bits.resume_pc
-          instruction: memory_bits.instruction
-          writeback_source: memory_bits.writeback_source
-          write_enable: memory_bits.writeback_enable
-          rd: memory_bits.rd
-          value: memory_bits.result
-          multiply_issue: memory_bits.multiply_issue
-          divide_issue: memory_bits.divide_issue
-          system: memory_bits.system
-          fence: memory_bits.fence
-          csr_address: memory_bits.csr_address
-          csr_source: memory_bits.csr_source
-          exception_valid: memory_bits.exception_valid
-          exception_cause: memory_bits.exception_cause
-          exception_value: memory_bits.exception_value
-  ) |> mem_wb_pipe.ingress
+  // Memory attempts the registered virtual request once. A fault becomes the
+  // token's precise exception; any unaccepted attempt becomes an ordered
+  // replay. Neither outcome stalls EX/MEM.
+  def live_memory = memory |> filter_valid(operation => !commit_redirect)
+  def Array(memory_request_path,
+            memory_writeback_path,
+            memory_bypass_path,
+            memory_exception_path,
+            memory_replay_path,
+            fp_load_reserve_path) = live_memory |> fork_valid(6)
+  def memory_request_attempt = memory_stage_valid & memory.bits.data_request_valid & !memory.bits.exception_valid
+  def memory_fp_load = memory.bits.data_request.destination === RV5StageDataDestination.FloatingPoint
+  def memory_fp_load_ready = !memory_fp_load ||| fp.load_reserve.ready
+  def memory_request:
+    memory_request_path
+      |> filter_valid(operation => operation.data_request_valid & !operation.exception_valid & memory_fp_load_ready)
+      |> map_valid(operation => operation.data_request)
+  memory_request |> eject_flow(
+    ~valid: data_access.request.valid,
+    ~bits: data_access.request.bits
+  )
+  def memory_data_page_fault = data_access.request.valid & data_access.request_fault
+  def memory_data_access_fault = data_access.request.valid & !memory_data_page_fault & data_access.request_access_fault
+  def memory_data_fault = memory_data_page_fault ||| memory_data_access_fault
+  def memory_request_accepted = data_access.request.fire() & !memory_data_fault
+  def memory_request_replay = memory_request_attempt & (!memory_fp_load_ready ||| (
+    !memory_data_fault & !data_access.request.ready
+  ))
+  wire memory_exception: RV5StageException(xlen)
+  when (memory.bits.exception_valid):
+    memory_exception <== RV5StageException(xlen):
+      valid: Bool(#true)
+      cause: memory.bits.exception_cause
+      value: memory.bits.exception_value
+  elsewhen memory_data_page_fault:
+    memory_exception <== data_exception(memory.bits.data_request.access,
+                                        memory.bits.data_request.address,
+                                        ExceptionCause.StorePageFault,
+                                        ExceptionCause.LoadPageFault)
+  elsewhen memory_data_access_fault:
+    memory_exception <== data_exception(memory.bits.data_request.access,
+                                        memory.bits.data_request.address,
+                                        ExceptionCause.StoreAccessFault,
+                                        ExceptionCause.LoadAccessFault)
+  otherwise:
+    memory_exception <== RV5StageException(xlen):
+      valid: Bool(#false)
+      cause: dont_care(Bits(width))
+      value: dont_care(Bits(width))
+  def memory_exception_event_flow:
+    memory_exception_path
+      |> filter_valid(operation => memory_exception.valid)
+      |> map_valid(operation => operation.pc)
+  memory_exception_event_flow |> memory_exception_link.left
+  def memory_replay_event_flow:
+    memory_replay_path
+      |> filter_valid(operation => memory_request_replay)
+      |> map_valid(operation => operation.pc)
+  memory_replay_event_flow |> memory_replay_link.left
 
-  (
-    memory
-      |> filter_valid(memory_bits => memory_bits.writeback_enable & !deferred_writeback(
-          memory_bits.writeback_source
-        ) & (memory_bits.writeback_source =/= WritebackSelect.Csr) & or_reduce(memory_bits.rd))
-      |> map_valid(memory_bits => RV5StageBypass(xlen)):
-          rd: memory_bits.rd
-          value: memory_bits.result
-  ) |> memory_bypass_link.left
+  def fp_load_reservation:
+    fp_load_reserve_path
+      |> filter_valid(operation => memory_request_accepted & memory_fp_load)
+      |> map_valid(operation => RV5StageFpLoadReservation(Bits(width))):
+        context: operation.pc
+        precision: operation.data_request.floating_point_precision
+        rd: operation.data_request.rd
+  fp_load_reservation |> to_decoupled() |> fp.load_reserve
+
+  assert(!(memory_data_fault & memory_request_replay),
+         "rv5stage_memory_fault_does_not_replay")
+  assert(!(memory_request_accepted & memory_request_replay),
+         "rv5stage_memory_accept_does_not_replay")
+
+  // Memory advances every token into WB. Exception and replay payloads have
+  // their ordinary side effects disabled; no instruction commits here.
+  def memory_writeback:
+    memory_writeback_path
+      |> map_valid(operation => MemoryWriteback(xlen)):
+        pc: operation.pc
+        resume_pc: operation.resume_pc
+        instruction: operation.instruction
+        replay: memory_request_replay
+        writeback_source: operation.writeback_source
+        write_enable: operation.writeback_enable & !memory_exception.valid & !memory_request_replay
+        rd: operation.rd
+        value: operation.result
+        multiply_issue: operation.multiply_issue
+        divide_issue: operation.divide_issue
+        system: operation.system
+        fence: operation.fence
+        csr_address: operation.csr_address
+        csr_source: operation.csr_source
+        exception_valid: memory_exception.valid
+        exception_cause: memory_exception.cause
+        exception_value: memory_exception.value
+  memory_writeback |> mem_wb_pipe.ingress
+
+  def memory_bypass:
+    memory_bypass_path
+      |> filter_valid(operation => !memory_exception.valid & !memory_request_replay & operation.writeback_enable & !deferred_writeback(
+        operation.writeback_source
+      ) & (operation.writeback_source =/= WritebackSelect.Csr) & or_reduce(operation.rd))
+      |> map_valid(operation => RV5StageBypass(xlen)):
+        rd: operation.rd
+        value: operation.result
+  memory_bypass |> memory_bypass_link.left
 
   // Writeback (WB) is the ordered commit point. Deferred loads and arithmetic
   // mark their destinations busy here; immediate and CSR results update the
   // register file and remain available to Execute through the bypass link.
-  def current_exception_wait = commit.valid & commit.bits.exception_valid & deferred_state_pending
+  def current_exception_wait = commit_valid & commit.bits.exception_valid & deferred_state_pending
   def architectural_commit = mux(pending_exception_valid, pending_exception, commit.bits)
   def pending_exception_ready = pending_exception_valid & !deferred_state_pending
-  def interrupt_commit_safe = !commit.valid ||| (!commit.bits.exception_valid & !serializing_operation(commit.bits.system, commit.bits.fence) & !deferred_writeback(commit.bits.writeback_source))
+  def interrupt_commit_safe = !commit.valid ||| (commit_valid & !commit.bits.exception_valid & !serializing_operation(commit.bits.system, commit.bits.fence) & !deferred_writeback(commit.bits.writeback_source))
   csrs.interrupt_boundary <== !pending_exception_valid & !id_ex.valid & !memory.valid & !deferred_state_pending & interrupt_commit_safe
-  csrs.interrupt_pc <== mux(commit.valid, commit.bits.resume_pc, architectural_pc)
-  csrs.commit.valid <== pending_exception_ready ||| (commit.valid & !current_exception_wait)
+  csrs.interrupt_pc <== mux(commit_replay,
+                            commit.bits.pc,
+                            mux(commit_valid, commit.bits.resume_pc, architectural_pc))
+  csrs.commit.valid <== pending_exception_ready ||| (commit_valid & !current_exception_wait)
   csrs.commit.bits <== RV5StageCsrCommit(xlen):
     pc: architectural_commit.pc
     instruction: architectural_commit.instruction
@@ -624,7 +701,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   (
     commit
-      |> filter_valid(committed => deferred_writeback(committed.writeback_source) & (
+      |> filter_valid(committed => !committed.replay & deferred_writeback(committed.writeback_source) & (
           committed.write_enable
         ) & or_reduce(committed.rd))
       |> map_valid(committed => committed.rd)
@@ -632,7 +709,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   (
     commit
-      |> filter_valid(committed => !deferred_writeback(committed.writeback_source) & (
+      |> filter_valid(committed => !committed.replay & !deferred_writeback(committed.writeback_source) & (
           committed.writeback_source =/= WritebackSelect.Csr
         ) & committed.write_enable & or_reduce(committed.rd))
       |> map_valid(committed => RV5StageBypass(xlen)):
@@ -642,7 +719,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   (
     commit
-      |> filter_valid(committed => !deferred_writeback(committed.writeback_source) & (
+      |> filter_valid(committed => !committed.replay & !deferred_writeback(committed.writeback_source) & (
           committed.write_enable
         ) & ((committed.writeback_source =/= WritebackSelect.Csr) ||| csrs.writeback_valid))
       |> map_valid(committed => RegisterFileWrite(xlen)):
@@ -656,14 +733,14 @@ sync_circuit RV5StageCore(xlen :: XLen,
 
   (
     commit
-      |> filter_valid(committed => (
+      |> filter_valid(committed => !committed.replay & (
           committed.writeback_source === WritebackSelect.Multiply
         ) & committed.write_enable & or_reduce(committed.rd))
       |> map_valid(committed => committed.multiply_issue)
   ) |> multiplier.issue
   (
     commit
-      |> filter_valid(committed => (
+      |> filter_valid(committed => !committed.replay & (
           committed.writeback_source === WritebackSelect.Divide
         ) & committed.write_enable & or_reduce(committed.rd))
       |> map_valid(committed => committed.divide_issue)

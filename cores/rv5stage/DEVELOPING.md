@@ -94,9 +94,11 @@ tools/run-racket-tests.sh \
 
 The wrapper creates a fresh compiled root when one is not supplied. Run
 `make rv5stage-test` when the change also needs the selected RV5Stage CIRCT and
-Verilator fixtures. Exercise WFI control flow specifically with:
+Verilator fixtures. Exercise MEM-stage fault classification or WFI control flow
+specifically with:
 
 ```sh
+FIXTURE=rv5stage-data-fault bash tests/backend/run-circt.sh
 FIXTURE=rv5stage-wfi bash tests/backend/run-circt.sh
 ```
 

@@ -1,4 +1,4 @@
-// Verifies RV5StageCore redirects, ordered commit, scoreboard hazards, and FENCE.I refetch control.
+// Verifies RV5StageCore memory replay, redirects, ordered commit, scoreboard hazards, and FENCE.I control.
 module rv5stage_core_tb;
   typedef struct packed {
     logic supervisor_software;
@@ -70,6 +70,8 @@ module rv5stage_core_tb;
   logic second_response_sent;
   logic [2:0] second_response_delay;
   logic [1:0] stores_seen;
+  logic rejected_first_load;
+  logic saw_replay_refetch;
   logic saw_fetch_flush;
   logic saw_redirect;
   logic saw_jal_redirect;
@@ -109,7 +111,9 @@ module rv5stage_core_tb;
     instruction_access_in.response.bits.word = instruction_response_bits;
     instruction_access_in.response.bits.page_fault = 1'b0;
     instruction_access_in.response.bits.access_fault = 1'b0;
-    data_access_in.request.ready = 1'b1;
+    data_access_in.request.ready = rejected_first_load ||
+                                   !data_access_out.request.valid ||
+                                   data_access_out.request.bits.address != 64'd0;
     data_access_in.request_fault = 1'b0;
     data_access_in.request_access_fault = 1'b0;
     data_access_in.response.valid = data_response_valid;
@@ -133,6 +137,8 @@ module rv5stage_core_tb;
       second_response_sent <= 1'b0;
       second_response_delay <= '0;
       stores_seen <= '0;
+      rejected_first_load <= 1'b0;
+      saw_replay_refetch <= 1'b0;
       saw_fetch_flush <= 1'b0;
       saw_redirect <= 1'b0;
       saw_jal_redirect <= 1'b0;
@@ -152,6 +158,12 @@ module rv5stage_core_tb;
         if (instruction_access_out.request.valid && instruction_access_in.request.ready) begin
           instruction_response_valid <= 1'b1;
           instruction_response_bits <= instruction_at(instruction_access_out.request.bits.address);
+          if (instruction_access_out.request.bits.address == 64'h00000001_00000000 &&
+              rejected_first_load) begin
+            assert (fetch_flushes >= 1)
+              else $fatal(1, "replayed load was refetched without flushing younger work");
+            saw_replay_refetch <= 1'b1;
+          end
           if (instruction_access_out.request.bits.address == 64'h00000001_00000040) begin
             assert (saw_fetch_flush)
               else $fatal(1, "branch target fetched without flushing wrong-path requests");
@@ -171,6 +183,16 @@ module rv5stage_core_tb;
             saw_jal_redirect <= 1'b1;
           end
         end
+      end
+
+      if (data_access_out.request.valid && !data_access_in.request.ready) begin
+        assert (!rejected_first_load && load_requests == 0 &&
+                data_access_out.request.bits.access == MEMORY_LOAD &&
+                data_access_out.request.bits.address == 64'd0 &&
+                data_access_out.request.bits.destination == DATA_DESTINATION_INTEGER &&
+                data_access_out.request.bits.rd == 5'd5)
+          else $fatal(1, "unexpected or repeated rejected data request");
+        rejected_first_load <= 1'b1;
       end
 
       if (data_response_valid) begin
@@ -205,12 +227,14 @@ module rv5stage_core_tb;
 
       if (data_access_out.request.valid && data_access_in.request.ready) begin
         if (data_access_out.request.bits.access == MEMORY_LOAD) begin
-          if (load_requests == 0)
+          if (load_requests == 0) begin
+            assert (rejected_first_load && saw_replay_refetch)
+              else $fatal(1, "load was accepted without a WB replay and refetch");
             assert (data_access_out.request.bits.address == 64'd0 &&
                     data_access_out.request.bits.destination == DATA_DESTINATION_INTEGER &&
                     data_access_out.request.bits.rd == 5'd5)
               else $fatal(1, "first load lost its address or destination register");
-          else
+          end else
             assert (load_requests == 1 &&
                     data_access_out.request.bits.address == 64'd16 &&
                     data_access_out.request.bits.destination == DATA_DESTINATION_INTEGER &&
@@ -247,7 +271,9 @@ module rv5stage_core_tb;
               else $fatal(1, "FENCE.I did not invalidate and refetch from pc + 4");
             assert (saw_jal_redirect)
               else $fatal(1, "JAL did not redirect from MEM");
-            $display("RV5Stage redirect and out-of-order load completion passed");
+            assert (rejected_first_load && saw_replay_refetch)
+              else $fatal(1, "memory replay was not observed before completion");
+            $display("RV5Stage memory replay, redirect, and out-of-order load completion passed");
             $finish;
           end
         end

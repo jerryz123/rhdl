@@ -673,6 +673,8 @@ direct_fixture_specs=(
   'rv5stage-core|rv5stage_core_tb'
   'rv5stage-core-rv32f|'
   'rv5stage-core-rv64d|'
+  'rv5stage-data-fault|rv5stage_data_fault_tb'
+  'rv5stage-mmu-replay|rv5stage_mmu_replay_tb'
   'rv5stage-interrupt|rv5stage_interrupt_tb'
   'rv5stage-wfi|rv5stage_wfi_tb'
   'rv5stage-instruction-memory-router|rv5stage_instruction_memory_router_tb'
