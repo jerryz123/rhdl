@@ -19,6 +19,32 @@ def assertion_labels = top.operations.filter(
 def register_names = top.operations.filter(
   ~keep: fun (operation): operation.opcode == "rtl.register" || operation.opcode == "rtl.register_reset"
 ).map(fun (operation): operation.attribute("name"))
+def read_only_endpoint = chi.CHIICNPortParams(
+  "read-only-subordinate",
+  11,
+  chi.CHINodeKind.SNI,
+  ~emits: chi.CHIChannelCapabilities(~req: [chi.CHIReqOpcode.ReadNoSnp]),
+  ~supports: chi.CHIChannelCapabilities(~dat: [chi.CHIDatOpcode.CompData]),
+  ~max_outstanding: 1
+)
+def read_only_service = chi.CHISubordinateServiceParams(
+  read_only_endpoint,
+  [chi.AddressSet(0x70000000, 0x0fffffff)],
+  [chi.CHIRequestSupport(chi.CHIReqOpcode.ReadNoSnp,
+                         chi.TransferSizes(1, 64))]
+)
+def heterogeneous_map = chi.CHISubordinateMap(
+  fixture.home_flit,
+  [read_only_service, fixture.subordinate_service]
+)
+def heterogeneous_design = embedded.run_elaboration(
+  fun ():
+    chi.CHIHNI(
+      chi.CHIHNIParams(fixture.home,
+                       [fixture.requester_endpoint],
+                       heterogeneous_map)
+    )
+)
 
 check:
   fixture.home_params.flit === fixture.home_flit ~is #true
@@ -27,6 +53,8 @@ check:
   fixture.home_params.subordinate_map.services ~is (
     [fixture.subordinate_service, fixture.second_subordinate_service]
   )
+  heterogeneous_map.entry(0x70000000).service === read_only_service ~is #true
+  verify_design(heterogeneous_design) ~is #void
   top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "port_in"]
   top.outputs.map(fun (output): output.name) ~is ["port_out"]
   instance_names.contains("occupancy") ~is #true
@@ -107,7 +135,7 @@ check:
           chi.CHISubordinateMap(fixture.home_flit, [partial_service])
         )
       )
-  ) ~throws "every subordinate service must support every requester opcode"
+  ) ~throws "requester opcode must be supported by at least one subordinate service"
   embedded.run_elaboration(
     fun ():
       def snf_endpoint = chi.CHIICNPortParams(
