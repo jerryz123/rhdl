@@ -1,0 +1,79 @@
+#lang rhodium
+// Exposes the ISA-neutral HardFloat numeric extensions for structural and simulation tests.
+// SPDX-License-Identifier: BSD-3-Clause; see ../LICENSE.md.
+
+import:
+  "../main.rhdl" open
+
+circuit HardFloatNumeric():
+  def format = FloatFormat.F16
+  input a: IEEEFloat(format)
+  input b: IEEEFloat(format)
+  input wide_value: IEEEFloat(FloatFormat.F64)
+  input min_max_operation: MinMaxOperation
+  input rounding_mode: RoundingMode
+  input raise_inexact: Bool
+  input signed_output: Bool
+  output min_max: IEEEFloat(format)
+  output min_max_flags: ExceptionFlags()
+  output integral: IEEEFloat(format)
+  output integral_flags: ExceptionFlags()
+  output modulo_integer: Bits(8)
+  output modulo_flags: IntegerExceptionFlags()
+  output standard_integer: Bits(8)
+  output standard_flags: IntegerExceptionFlags()
+  output wide_modulo_integer: Bits(32)
+  output wide_modulo_flags: IntegerExceptionFlags()
+  output wide_integral: IEEEFloat(FloatFormat.F64)
+  output wide_integral_flags: ExceptionFlags()
+
+  def recoded_a = a.to_recoded()
+  inst min_max_operation_unit(MinMaxRecFN(format))
+  min_max_operation_unit.a <== recoded_a
+  min_max_operation_unit.b <== b.to_recoded()
+  min_max_operation_unit.operation <== min_max_operation
+  min_max <== min_max_operation_unit.out.to_ieee()
+  min_max_flags <== min_max_operation_unit.exception_flags
+
+  inst round_to_integral(RoundToIntegralRecFN(format))
+  round_to_integral.value <== recoded_a
+  round_to_integral.rounding_mode <== rounding_mode
+  round_to_integral.raise_inexact <== raise_inexact
+  integral <== round_to_integral.out.to_ieee()
+  integral_flags <== round_to_integral.exception_flags
+
+  inst modulo_conversion(RecFNToIntegerModulo(format, 8))
+  modulo_conversion.value <== recoded_a
+  modulo_conversion.rounding_mode <== rounding_mode
+  modulo_conversion.signed_output <== signed_output
+  modulo_integer <== modulo_conversion.out
+  modulo_flags <== modulo_conversion.exception_flags
+
+  inst standard_conversion(RecFNToInteger(format, 8))
+  standard_conversion.value <== recoded_a
+  standard_conversion.rounding_mode <== rounding_mode
+  standard_conversion.signed_output <== signed_output
+  standard_integer <== standard_conversion.out
+  standard_flags <== standard_conversion.exception_flags
+
+  inst wide_modulo_conversion(RecFNToIntegerModulo(FloatFormat.F64, 32))
+  wide_modulo_conversion.value <== wide_value.to_recoded()
+  wide_modulo_conversion.rounding_mode <== rounding_mode
+  wide_modulo_conversion.signed_output <== signed_output
+  wide_modulo_integer <== wide_modulo_conversion.out
+  wide_modulo_flags <== wide_modulo_conversion.exception_flags
+
+  inst wide_round_to_integral(RoundToIntegralRecFN(FloatFormat.F64))
+  wide_round_to_integral.value <== wide_value.to_recoded()
+  wide_round_to_integral.rounding_mode <== rounding_mode
+  wide_round_to_integral.raise_inexact <== raise_inexact
+  wide_integral <== wide_round_to_integral.out.to_ieee()
+  wide_integral_flags <== wide_round_to_integral.exception_flags
+
+def design = elaborate(HardFloatNumeric())
+def minimum_integral_design = elaborate(RoundToIntegralRecFN(FloatFormat(3, 3)))
+
+export:
+  HardFloatNumeric
+  design
+  minimum_integral_design

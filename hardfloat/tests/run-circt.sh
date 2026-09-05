@@ -30,6 +30,7 @@ lower_fixture() {
 
 cd "$repo_dir"
 lower_fixture hardfloat/tests/emit-hardfloat.rhm hardfloat
+lower_fixture hardfloat/tests/emit-numeric.rhm numeric
 lower_fixture hardfloat/tests/emit-divide-sqrt.rhm divide-sqrt
 lower_fixture hardfloat/tests/emit-divide-sqrt-f64.rhm divide-sqrt-f64
 
@@ -42,6 +43,16 @@ verilator --binary --timing --assert --build-jobs 0 \
     exit 1
   }
 "$tmp_dir/obj/Vhardfloat_representation_tb"
+
+verilator --binary --timing --assert --build-jobs 0 \
+  --top-module hardfloat_numeric_tb \
+  --Mdir "$tmp_dir/numeric-obj" \
+  "$tmp_dir/numeric.sv" "$test_dir/verilator/numeric_tb.sv" \
+  > "$tmp_dir/numeric-verilator.log" 2>&1 || {
+    cat "$tmp_dir/numeric-verilator.log" >&2
+    exit 1
+  }
+"$tmp_dir/numeric-obj/Vhardfloat_numeric_tb"
 
 verilator --binary --timing --assert --build-jobs 0 \
   --top-module hardfloat_divide_sqrt_tb \

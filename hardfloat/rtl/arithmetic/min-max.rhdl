@@ -1,0 +1,38 @@
+#lang rhodium
+// Implements ISA-neutral IEEE minimum, maximum, minimumNumber, and maximumNumber over recoded values.
+// This Rhodium extension builds on the Berkeley HardFloat recoded representation.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "compare.rhdl" open
+
+circuit MinMaxRecFN(format :: FloatFormat):
+  input a: RecFloat(format)
+  input b: RecFloat(format)
+  input operation: MinMaxOperation
+  output out: RecFloat(format)
+  output exception_flags: ExceptionFlags()
+
+  def raw_a = a.to_raw()
+  def raw_b = b.to_raw()
+  def maximum = (operation === MinMaxOperation.Maximum) ||| (operation === MinMaxOperation.MaximumNumber)
+  def prefer_number = (operation === MinMaxOperation.MinimumNumber) ||| (operation === MinMaxOperation.MaximumNumber)
+  inst compare(CompareRecFN(format))
+  compare.a <== a
+  compare.b <== b
+  compare.signaling <== Bool(#false)
+  def choose_a = mux(maximum, compare.gt, compare.lt)
+  def ordered_result = mux(choose_a, a, b)
+  def zero_sign = mux(maximum, raw_a.sign & raw_b.sign, raw_a.sign ||| raw_b.sign)
+  def zero_result = concat(zero_sign, bits(0, format.recoded_width - 1)).into(RecFloat(format))
+  def numeric_result = mux(raw_a.is_zero & raw_b.is_zero, zero_result, ordered_result)
+  def one_nan_result = mux(raw_a.is_nan, b, a)
+  def any_nan = raw_a.is_nan ||| raw_b.is_nan
+  def both_nan = raw_a.is_nan & raw_b.is_nan
+  out <== mux(both_nan ||| (any_nan & !prefer_number), canonical_recoded_nan(format), mux(any_nan, one_nan_result, numeric_result))
+  exception_flags <== compare.exception_flags
+
+export:
+  MinMaxRecFN

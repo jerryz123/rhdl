@@ -1,0 +1,46 @@
+#lang rhodium
+// Rounds recoded floating-point values to integral values in the same format.
+// This Rhodium extension composes the Berkeley HardFloat integer conversions without an unbounded datapath.
+// SPDX-License-Identifier: BSD-3-Clause; see ../../LICENSE.md.
+
+import:
+  "../types.rhdl" open
+  "../recode.rhdl" open
+  "../conversion/integer-to-recfn.rhdl" open
+  "../conversion/recfn-to-integer-modulo.rhdl" open
+
+circuit RoundToIntegralRecFN(format :: FloatFormat):
+  input value: RecFloat(format)
+  input rounding_mode: RoundingMode
+  input raise_inexact: Bool
+  output out: RecFloat(format)
+  output exception_flags: ExceptionFlags()
+
+  def raw = value.to_raw()
+  def raw_exponent = raw.signed_exponent.as_bits()
+  def magnitude_at_least_one = raw_exponent[format.exponent_width].into(Bool)
+  def positive_exponent = raw_exponent[0..format.exponent_width]
+  def already_integral = magnitude_at_least_one & (positive_exponent >= bits(format.significand_width - 1, format.exponent_width))
+  def conversion_width = format.significand_width + 1
+  inst to_integer(RecFNToIntegerModulo(format, conversion_width))
+  to_integer.value <== value
+  to_integer.rounding_mode <== rounding_mode
+  to_integer.signed_output <== Bool(#true)
+  inst to_float(IntegerToRecFN(conversion_width, format))
+  to_float.signed_input <== Bool(#true)
+  to_float.value <== to_integer.out
+  to_float.rounding_mode <== RoundingMode.NearEven
+  to_float.tininess_mode <== TininessMode.AfterRounding
+  def rounded_zero = to_integer.out === bits(0, conversion_width)
+  def signed_zero = concat(raw.sign, bits(0, format.recoded_width - 1)).into(RecFloat(format))
+  def rounded = mux(rounded_zero, signed_zero, to_float.out)
+  def unchanged = raw.is_zero ||| raw.is_infinite ||| already_integral
+  out <== mux(raw.is_nan, canonical_recoded_nan(format), mux(unchanged, value, rounded))
+  exception_flags.invalid <== raw.is_signaling_nan()
+  exception_flags.infinite <== Bool(#false)
+  exception_flags.overflow <== Bool(#false)
+  exception_flags.underflow <== Bool(#false)
+  exception_flags.inexact <== raise_inexact & !raw.is_nan & !raw.is_infinite & !unchanged & to_integer.exception_flags.inexact
+
+export:
+  RoundToIntegralRecFN

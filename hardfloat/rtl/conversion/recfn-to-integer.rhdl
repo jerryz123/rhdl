@@ -7,6 +7,7 @@
 import:
   "../types.rhdl" open
   "../recode.rhdl" open
+  "../round.rhdl" open
 
 fun unsigned_equal_host(value :: Bits, constant :: Nat) :~ Bool:
   def width = value.type.bit_width()
@@ -34,12 +35,6 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
   def magnitude_at_least_one = raw_exponent[format.exponent_width].into(Bool)
   def positive_exponent = raw_exponent[0..format.exponent_width]
   def magnitude_just_below_one = !magnitude_at_least_one & and_reduce(positive_exponent)
-
-  def near_even = rounding_mode === RoundingMode.NearEven
-  def minimum = rounding_mode === RoundingMode.Minimum
-  def maximum = rounding_mode === RoundingMode.Maximum
-  def near_maximum_magnitude = rounding_mode === RoundingMode.NearMaximumMagnitude
-  def odd = rounding_mode === RoundingMode.Odd
 
   def exponent_index_width:
     if (format.exponent_width - 1) < index_width(integer_width)
@@ -69,23 +64,12 @@ circuit RecFNToInteger(format :: FloatFormat, integer_width :: PosInt):
     or_reduce(aligned_significand[0..=1]),
     !raw.is_zero
   )
-  def round_increment_near_even = (
-    magnitude_at_least_one & (
-      and_reduce(aligned_significand[1..=2]) ||| and_reduce(aligned_significand[0..=1])
-    )
-  ) ||| (magnitude_just_below_one & or_reduce(aligned_significand[0..=1]))
-  def round_increment_near_maximum = (
-    magnitude_at_least_one & aligned_significand[1].into(Bool)
-  ) ||| magnitude_just_below_one
-  def round_increment = (near_even & round_increment_near_even) ||| (
-    near_maximum_magnitude & round_increment_near_maximum
-  ) ||| ((minimum ||| odd) & raw.sign & common_inexact) ||| (maximum & !raw.sign & common_inexact)
-  def complemented_unrounded = mux(raw.sign, !unrounded_integer, unrounded_integer)
-  def rounded_integer = mux(
-    round_increment ^ raw.sign,
-    complemented_unrounded + bits(1, integer_width),
-    complemented_unrounded
-  ) ||| (odd & common_inexact).as_bits().zext(integer_width)
+  def retained_lsb = magnitude_at_least_one & aligned_significand[2].into(Bool)
+  def guard = mux(magnitude_at_least_one, aligned_significand[1].into(Bool), magnitude_just_below_one)
+  def sticky = mux(magnitude_at_least_one, aligned_significand[0].into(Bool), !raw.is_zero & !magnitude_just_below_one) ||| (magnitude_just_below_one & or_reduce(aligned_significand[0..=1]))
+  def round_increment = rounding_increment(rounding_mode, raw.sign, retained_lsb, guard, sticky)
+  def rounded_magnitude = mux(round_increment, unrounded_integer + bits(1, integer_width), unrounded_integer) ||| rounding_force_odd(rounding_mode, common_inexact).as_bits().zext(integer_width)
+  def rounded_integer = mux(raw.sign, -rounded_magnitude, rounded_magnitude)
 
   def at_overflow_edge = unsigned_equal_host(positive_exponent, integer_width - 1)
   def round_carry_but_two = and_reduce(unrounded_integer[0..=(integer_width - 3)]) & round_increment

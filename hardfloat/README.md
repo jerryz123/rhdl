@@ -33,9 +33,12 @@ The implemented foundation provides:
 - all upstream rounding modes and tininess modes through
   `RoundAnyRawFNToRecFN` and `RoundRawFNToRecFN`;
 - signed and unsigned integer conversion in both directions;
+- rounded modulo-power-of-two integer conversion with the same exception
+  classification as ordinary integer conversion;
 - widening and rounded narrowing between arbitrary supported RecFN formats;
 - recoded classification; and
-- the combinational `CompareRecFN`, rounded `AddRecFN` and `MulRecFN`, and
+- the combinational `CompareRecFN`, four IEEE minimum/maximum variants,
+  same-format integral rounding, rounded `AddRecFN` and `MulRecFN`, and
   single-rounding fused `MulAddRecFN` circuits, with explicit add/subtract and
   fused-operation controls; and
 - the generic iterative `DivSqrtRecFN` unit in one-bit-per-cycle and
@@ -59,6 +62,8 @@ Unported auxiliary wrappers are omitted rather than represented by stubs.
 | [`rtl/conversion/`](rtl/conversion/) | Integer normalization and integer/RecFN/format conversion |
 | [`rtl/classify.rhdl`](rtl/classify.rhdl) | Ten-way HardFloat classification |
 | [`rtl/arithmetic/compare.rhdl`](rtl/arithmetic/compare.rhdl) | Ordered recoded comparison and invalid-operation flagging |
+| [`rtl/arithmetic/min-max.rhdl`](rtl/arithmetic/min-max.rhdl) | IEEE minimum, maximum, minimumNumber, and maximumNumber operations |
+| [`rtl/arithmetic/round-to-integral.rhdl`](rtl/arithmetic/round-to-integral.rhdl) | Same-format integral rounding with optional inexact reporting |
 | [`rtl/arithmetic/add.rhdl`](rtl/arithmetic/add.rhdl) | Close/far addition and subtraction paths, normalization, rounding, and exceptions |
 | [`rtl/arithmetic/multiply.rhdl`](rtl/arithmetic/multiply.rhdl) | Full raw product, sticky compression, rounding, and exception generation |
 | [`rtl/arithmetic/multiply-add.rhdl`](rtl/arithmetic/multiply-add.rhdl) | Pre-multiply alignment, full-width multiply-add, post-multiply normalization, and one final rounding |
@@ -139,6 +144,17 @@ independent ready and completion outputs. `DivSqrtRecF64MulAddZ31` exposes the
 same recurrence with its pipelined multiplier-adder ports so a system can share
 that resource instead of instantiating the integrated multiplier.
 
+`MinMaxRecFN` distinguishes the NaN-propagating `Minimum` and `Maximum`
+operations from `MinimumNumber` and `MaximumNumber`, which select the numeric
+operand when exactly one input is NaN. All four operations use IEEE signed-zero
+ordering and raise invalid only for a signaling NaN. `RoundToIntegralRecFN`
+supports every package rounding mode and lets clients independently request or
+suppress the inexact flag. `RecFNToIntegerModulo` returns the rounded integer
+modulo its output width while retaining the ordinary saturating converter's
+invalid, overflow, and inexact classification. These three components are
+Rhodium extensions over the HardFloat representations; they do not encode any
+RISC-V instruction policy.
+
 ## Translation policy
 
 Each derived Rhodium source names its corresponding upstream Scala source and
@@ -170,7 +186,11 @@ values, exhaustive binary16 representation round trips, classification,
 comparison, raw resizing, discarded-bit rounding across all rounding families,
 overflow behavior, integer conversion with signed and unsigned saturation,
 exact format widening, lossy format narrowing, and generated SystemVerilog
-compilation. Multiplication coverage includes special values, signed zero,
+compilation. The numeric-extension fixture exhaustively checks all binary16
+encodings across the four minimum/maximum variants and six supported rounding
+modes, including modulo conversion, signed zero, NaN behavior, flag suppression,
+and equivalence with ordinary integer conversion wherever it is in range.
+Multiplication coverage includes special values, signed zero,
 discarded-bit rounding, overflow, exact subnormal results, and underflow.
 Addition coverage selects close-cancellation and far-alignment paths and checks
 ties, directed rounding, signed zero, overflow, infinities, and NaNs. Fused
