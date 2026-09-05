@@ -24,7 +24,7 @@ caches live here. Reusable execution components remain directly under
 | Floating point | Disabled by default; RV32F or RV64D, with optional Zfhmin, Zfh, or Zfa |
 | Address translation | Bare for RV32; Bare or Sv39 for RV64 |
 | Private caches | Separate configurable L1I and blocking write-back L1D; fixed 64-byte lines |
-| External memory | Separate instruction and data CHI RN-F channels plus a device RN-I channel |
+| External memory | Separate instruction and data CHI RN-F channels plus a shared uncached RN-I channel |
 
 The integer decode includes RV32I/RV64I, A, B, M, Zicond, Zicsr, Zifencei, and
 the supported privileged instructions. Optional C expansion follows the
@@ -44,7 +44,7 @@ scoreboards and a completion arbiter.
 
 ```mermaid
 flowchart LR
-    IMEM["ITLB + L1I"] --> IF
+    IMEM["ITLB + PMA<br/>L1I or uncached path"] --> IF
 
     subgraph scalar["Scalar pipeline — single issue, in-order commit"]
         IF["Fetch (IF)<br/>PC, correlation, redirects"]
@@ -101,11 +101,13 @@ flowchart LR
 | Memory | MEM/WB `ValidPipe` | No | Registered branch and exception recovery, feed-forward metadata, bypass, and cache-response alignment |
 | Writeback | Ordered commit | At defined architectural waits | Scalar register and CSR effects, traps, fences, and scalar deferred-destination reservation |
 
-Fetch retains up to two ordered, aligned L1I words in a flushable window so the
-pipelined L1I can accept and return one hit per cycle. Redirects clear that
-window and flush the MMU/L1I owner, lookup, and buffered-response state. A
-wrong-path refill may finish internally but cannot return an instruction to
-Fetch.
+Fetch retains up to two ordered, aligned instruction words in a flushable
+window so the physical instruction hierarchy can preserve response order while
+the pipelined L1I accepts and returns one hit per cycle. Redirects clear that
+window and flush the MMU, instruction-router, L1I lookup, and buffered-response
+state. A wrong-path refill may finish internally but cannot return an
+instruction to Fetch; an in-flight uncached read is drained without publishing
+its response.
 
 Decode holds an instruction before Execute until its operands are available and
 the required execution or cache resource can accept it. ID/EX stores register
@@ -133,7 +135,7 @@ out-of-order register completion, not out-of-order instruction issue.
 | Result class | Dispatch point | Completion path |
 |---|---|---|
 | Integer ALU, branch link, immediate, and ordinary CSR result | Scalar pipeline | Ordinary WB register-file port |
-| Load or atomic result | Memory request accepted in EX; GPR reserved at WB | L1D response, or uncached response for a device load, to the deferred completion arbiter |
+| Load or atomic result | Memory request accepted in EX; GPR reserved at WB | L1D or uncached response to the deferred completion arbiter |
 | Multiply or divide | Execution resource claimed in EX; GPR reserved and request issued at WB | Deferred completion arbiter |
 | FP result targeting an integer register | FP request and GPR reservation accepted from EX | FP completion to deferred completion arbiter |
 | FP result targeting an FP register | FP request and FPR reservation accepted from EX | FP pipeline's internal FP register-file port |
@@ -229,10 +231,12 @@ flowchart LR
     CORE -->|"virtual data access"| MMU
     CORE -->|"privilege, mstatus, satp,<br/>translation flush"| MMU
 
-    MMU -->|"physical instruction"| L1I["Private L1I"]
+    MMU -->|"physical instruction"| IROUTER["Instruction router<br/>PMA cacheability split"]
+    IROUTER -->|"cacheable"| L1I["Private L1I"]
+    IROUTER -->|"non-cacheable"| UNCACHED["One-outstanding<br/>shared uncached engine"]
     MMU -->|"physical data"| ROUTER["Memory router<br/>PMA and device split"]
     ROUTER -->|"cacheable"| L1D["Private L1D"]
-    ROUTER -->|"device"| UNCACHED["One-outstanding<br/>uncached engine"]
+    ROUTER -->|"non-cacheable"| UNCACHED
 
     L1I <--> IMEM["imem<br/>CHI RN-F"]
     L1D <--> DMEM["dmem<br/>CHI RN-F"]
@@ -249,7 +253,7 @@ their address once and retain the selected HN-F NodeID through retry, data, and
 completion acknowledgement.
 
 `RV5StageCHIParams` contains host-only placement metadata for instruction and
-data RN-F NodeIDs and the optional device RN-I NodeID. An occurrence receives
+data RN-F NodeIDs and the optional uncached RN-I NodeID. An occurrence receives
 those values through `RV5StageCHIIdentity` hardware inputs, allowing one
 specialized core definition to be stamped at multiple placements.
 
@@ -277,14 +281,14 @@ bits.
 
 | Port | Contract |
 |---|---|
-| `chi_identity` | Placement-specific instruction RN-F, data RN-F, and device RN-I NodeIDs |
+| `chi_identity` | Placement-specific instruction RN-F, data RN-F, and uncached RN-I NodeIDs |
 | `start` | One-shot `Irrevocable(Bits(xlen.width))` initial-PC consumer; four-byte aligned, or two-byte aligned with C |
 | `interrupts` | Controller-independent supervisor and machine software, timer, and external interrupt levels |
 | `hart_id` | Platform hart identity exposed through `mhartid` |
 | `time_counter` | Platform 64-bit time source exposed through `time` and RV32 `timeh` |
 | `imem` | Instruction-cache CHI RN-F channels |
 | `dmem` | Data-cache CHI RN-F channels |
-| `umem` | Uncached device CHI RN-I channels |
+| `umem` | Shared instruction/data uncached CHI RN-I channels |
 | `fault` | Sticky rejection of a misaligned external start address |
 
 Home Nodes, physical credited links, fabric topology, interrupt controllers,
@@ -301,10 +305,15 @@ drains; cacheable PTE reads then use L1D. See the
 [`MMU contract`](mmu/README.md) for translation, permission, and fault ownership.
 
 L1I is a clean-only, one-hit-per-cycle instruction cache with flushable lookup
-and response state. L1D is a blocking write-back/write-allocate cache supporting
-loads, stores, LR/SC, and AMOs. Physical device regions bypass L1D through a
-one-outstanding uncached engine; unmapped, denied, or device-atomic requests
-fault locally instead of entering CHI.
+and response state. Executable non-cacheable regions bypass it as aligned
+four-byte `ReadNoSnp` requests and never allocate a line. Such regions must be
+read-idempotent; a typical BootROM PMA is readable, executable, non-cacheable,
+non-atomic, non-device, and read-idempotent. L1D is a blocking write-back/
+write-allocate cache supporting loads, stores, LR/SC, and AMOs. All
+non-cacheable instruction and data requests arbitrate onto the same
+one-outstanding RN-I engine, with a presented data request taking priority.
+Unmapped, denied, or non-cacheable atomic requests fault locally
+instead of entering CHI.
 
 The parent core owns only integration-level ordering. Array organization,
 replacement, refill, dirty writeback, snoop behavior, DVM handling, and CHI
@@ -351,7 +360,7 @@ exception.
 | [`fp-pipeline.rhdl`](fp-pipeline.rhdl) | FP register state, execution lanes, and completion |
 | [`csr.rhdl`](csr.rhdl), [`interrupt.rhdl`](interrupt.rhdl) | Privileged state, traps, counters, and interrupts |
 | [`mmu/`](mmu/README.md) | TLBs, translation, and page-table walking |
-| [`memory-router.rhdl`](memory-router.rhdl), [`uncached.rhdl`](uncached.rhdl) | Physical-region routing and device transactions |
+| [`instruction-memory-router.rhdl`](instruction-memory-router.rhdl), [`memory-router.rhdl`](memory-router.rhdl), [`uncached.rhdl`](uncached.rhdl) | Physical-region routing and shared uncached transactions |
 | [`cache.rhdl`](cache.rhdl), [`chi.rhdl`](chi.rhdl) | Shared cache geometry, physical-region/Home policy, and RN identity parameters |
 | [`icache/`](icache/README.md), [`dcache/`](dcache/README.md) | Private cache protocols, arrays, policy, and CHI routing |
 | Transaction engines | Refill, ownership acquisition, retry, dirty drain, and snoop handling |

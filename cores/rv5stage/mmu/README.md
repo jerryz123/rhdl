@@ -33,7 +33,7 @@ the MMU adds in front of those components.
 [`RV5StageMmu`](mmu.rhdl) is composed between the core and physical hierarchy
 in [`rv5stage.rhdl`](../rv5stage.rhdl). The data-side output first reaches the
 [physical-memory router](../memory-router.rhdl), which selects L1D for cacheable
-memory or the uncached engine for a device region. Consequently, the walker's
+memory or the uncached engine for a non-cacheable region. Consequently, the walker's
 arbitration point is the shared physical data port immediately before that
 router; a cacheable PTE read follows the ordinary L1D path.
 
@@ -44,8 +44,10 @@ flowchart LR
 
   ILOOKUP -->|"hit / Bare"| ICHECK["Physical fetch-region check"]
   ICHECK -->|"executable + cacheable"| L1I["L1I"]
+  ICHECK -->|"executable + non-cacheable"| UNCACHED_I["Shared uncached RN-I"]
   ICHECK -->|"local fault"| IORDER["Two-entry fetch-owner queue"]
   L1I --> IORDER
+  UNCACHED_I --> IORDER
   IORDER --> FETCH
 
   ILOOKUP -->|"miss, fixed priority"| SELECT["Shared miss selection"]
@@ -58,7 +60,7 @@ flowchart LR
   DLOOKUP -->|"hit / Bare"| ARB
   ARB --> ROUTER["Physical-memory router"]
   ROUTER -->|"cacheable"| L1D["L1D"]
-  ROUTER -->|"device"| DEVICE["Uncached engine"]
+  ROUTER -->|"non-cacheable"| DEVICE["Shared uncached RN-I"]
   L1D --> ARB
   DEVICE --> ARB
   ARB --> LSU
@@ -88,13 +90,18 @@ either TLB.
    original virtual address; a rejected PTE memory request is latched separately
    as an access fault.
 5. Once a physical address is available, the MMU checks the complete four-byte
-   fetch range against the physical map. A range that is not both executable
-   and cacheable produces an instruction access fault and is never sent to
-   L1I.
-6. Every accepted fetch, including a local fault, reserves an entry in a
-   two-entry owner queue. The oldest entry selects either the ordered L1I
+   fetch range against the physical map. A range that is not executable
+   produces an instruction access fault. Cacheability is routing metadata, not
+   execute permission.
+6. Cacheable fetches enter L1I as before. Non-cacheable executable fetches issue
+   aligned four-byte `ReadNoSnp` transactions through the shared RN-I engine and
+   do not allocate in L1I. RV5Stage configuration rejects executable regions
+   that do not permit idempotent reads, because Fetch may speculatively request
+   an instruction word more than once.
+7. Every accepted fetch, including a local fault, reserves an entry in a
+   two-entry owner queue. The oldest entry selects the ordered physical-memory
    response or a locally generated zero word with its page/access-fault bit.
-   This prevents a later local fault from passing an earlier cache response.
+   This prevents a later local fault from passing an earlier memory response.
 
 An instruction-path flush clears that owner queue and cancels an active
 instruction walk. It does not cancel a data walk. Architectural invalidation
@@ -117,7 +124,7 @@ cancels either kind of walk and clears both TLBs and any correlated fault.
    data operation is issued.
 5. A legal translated or Bare request proceeds to the physical-memory router.
    The router owns mapped/readable/writable/atomic PMA checks and the choice
-   between L1D and the uncached device path.
+   between L1D and the uncached path.
 
 The data side has no response-owner queue because its physical responses are
 ordered and non-backpressurable. While any walk is active, normal data-request
@@ -129,7 +136,7 @@ core data response.
 A miss may be accepted by the walker as soon as it is idle, but that does not
 immediately issue a PTE load. The MMU first observes
 `data_memory.drained && !data_memory.response.valid` in two consecutive cycles.
-This covers the physical router's cache and device paths and drains the
+This covers the physical router's cached and uncached paths and drains the
 non-backpressurable response stage that is not included in L1D's `drained`
 signal.
 
@@ -207,7 +214,7 @@ returns the walker to Idle without publishing a completion.
 |---|---|---|
 | Noncanonical VA, invalid PTE structure, misaligned superpage, permission failure, or Svade A/D failure | Instruction, load, or store/AMO page fault | Walker/TLB classify it; MMU correlates it with the original VA and suppresses the physical access |
 | Physical PTE request rejected as unmapped or disallowed | Instruction, load, or store/AMO access fault | Physical router reports rejection; walker preserves access-fault classification for the original operation |
-| Final fetch range is not executable and cacheable | Instruction access fault | MMU physical-map check suppresses the L1I request |
+| Final fetch range is not executable | Instruction access fault | MMU physical-map check suppresses the physical request |
 | Final data range is unmapped, lacks read/write/atomic permission, or its selected physical path reports an access fault | Load or store/AMO access fault | Physical-memory router or selected child path; MMU forwards the result |
 | Misaligned instruction target or scalar data address | Address-misaligned fault | Parent [`core.rhdl`](../core.rhdl), outside the MMU |
 | L1 cache hit, miss, refill, coherence, or replacement behavior | Not a translation fault source | The cache subsystem; both cache protocols leave translation and PMA faults to their callers |

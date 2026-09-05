@@ -9,6 +9,7 @@ import:
   "icache/cache.rhdl" open
   "dcache/cache.rhdl" open
   "memory-router.rhdl" open
+  "instruction-memory-router.rhdl" open
   "uncached.rhdl" open
   "mmu/mmu.rhdl" open
   "../../riscv/isa/xlen.rhm" open
@@ -41,21 +42,24 @@ sync_circuit RV5Stage(xlen :: XLen,
   inst mmu(RV5StageMmu(xlen, config.physical_map))
   inst l1i(RV5StageL1ICache(xlen, instruction_cache, ~chi: config))
   inst l1d(RV5StageL1DCache(xlen, data_cache, ~chi: config))
+  inst instruction_memory_router(RV5StageInstructionMemoryRouter(xlen))
   inst memory_router(RV5StageMemoryRouter(xlen, config.physical_map))
   inst uncached(RV5StageUncached(xlen, config))
   l1i.node_id <== chi_identity.instruction_node_id
   l1d.node_id <== chi_identity.data_node_id
-  uncached.node_id <== chi_identity.device_node_id
+  uncached.node_id <== chi_identity.uncached_node_id
   start |> core.start
   core.interrupts <== interrupts
   core.hart_id <== hart_id
   core.time_counter <== time_counter
   core.instruction_access |> mmu.instruction
   core.data_access |> mmu.data
-  mmu.instruction_memory |> l1i.core
+  mmu.instruction_memory |> instruction_memory_router.core
+  instruction_memory_router.cache |> l1i.core
+  instruction_memory_router.uncached |> uncached.instruction
   mmu.data_memory |> memory_router.core
   memory_router.cache |> l1d.core
-  memory_router.device |> uncached.core
+  memory_router.uncached |> uncached.core
   mmu.privilege <== core.privilege
   mmu.mstatus <== core.mstatus
   mmu.satp <== core.satp

@@ -21,7 +21,9 @@ rules.
 | Response capacity | At most two accepted requests, backed by a two-entry queue |
 | Allocation | Lowest invalid way, otherwise per-set round robin |
 
-`RV5StageL1ICache(xlen, cache, ~chi: config)` accepts `XLen.X32` or
+`RV5StageL1ICache(xlen, cache, ~chi: config)` receives only fetches whose PMA is
+cacheable; the parent hierarchy routes executable non-cacheable fetches through
+its non-allocating RN-I path. The cache accepts `XLen.X32` or
 `XLen.X64`. The cache configuration supplies set/way geometry; the required
 CHI configuration supplies flit geometry and the Home map. A separate
 `node_id` input supplies the occurrence's RN-F identity. Core addresses use

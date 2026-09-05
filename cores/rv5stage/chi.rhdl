@@ -1,5 +1,5 @@
 #lang rhodium
-// Defines RV5Stage's native RN-F endpoint parameters and conservative CHI flit constructors.
+// Defines RV5Stage's RN-F/RN-I endpoint parameters and conservative CHI flit constructors.
 
 import:
   "cache.rhdl".RV5StageCacheLineBytes
@@ -35,11 +35,11 @@ class RV5StageCHIConfig(flit :: CHIFlitParams,
     regions.filter(
       ~keep: fun (region): region.physical.attributes.cacheable
     ).map(fun (region): region.physical.address_set)
-  property device_address_sets:
+  property uncached_address_sets:
     regions.filter(
       ~keep: fun (region): !region.physical.attributes.cacheable
     ).map(fun (region): region.physical.address_set)
-  property has_devices: device_address_sets.length() > 0
+  property has_uncached: uncached_address_sets.length() > 0
 
   constructor (flit :: CHIFlitParams,
                regions :: NonemptyList.of(RV5StageCHIRegion)):
@@ -54,6 +54,9 @@ class RV5StageCHIConfig(flit :: CHIFlitParams,
       unless (!attributes.atomic) || (attributes.readable && attributes.writable)
       | error(~who: #'RV5StageCHIConfig,
               "atomic RV5Stage physical memory must be readable and writable")
+      unless (!attributes.executable) || attributes.read_idempotent
+      | error(~who: #'RV5StageCHIConfig,
+              "executable RV5Stage regions must permit idempotent reads")
       unless attributes.cacheable == (region.home.kind == CHINodeKind.HNF)
       | error(~who: #'RV5StageCHIConfig,
               "cacheable RV5Stage regions require HN-F Homes and uncached regions require HN-I Homes")
@@ -79,7 +82,7 @@ class RV5StageCHIConfig(flit :: CHIFlitParams,
 class RV5StageCHIParams(config :: RV5StageCHIConfig,
                         instruction_node_id :: Nat,
                         data_node_id :: Nat,
-                        device_node_id :: Nat):
+                        uncached_node_id :: Nat):
 
   property flit: config.flit
   property home_map: config.home_map
@@ -124,10 +127,10 @@ class RV5StageCHIParams(config :: RV5StageCHIConfig,
       ),
       ~max_outstanding: 2
     )
-  property device_node:
+  property uncached_node:
     CHINodeParams(
-      "rv5stage-device",
-      device_node_id,
+      "rv5stage-uncached",
+      uncached_node_id,
       CHINodeKind.RNI,
       ~emits: CHIChannelCapabilities(
         ~req: [CHIReqOpcode.ReadNoSnp, CHIReqOpcode.WriteNoSnpPtl],
@@ -143,7 +146,7 @@ class RV5StageCHIParams(config :: RV5StageCHIConfig,
   constructor (config :: RV5StageCHIConfig,
                instruction_node_id :: Nat,
                data_node_id :: Nat,
-               ~device_node_id: device_node_id :: Nat = 0):
+               ~uncached_node_id: uncached_node_id :: Nat = 0):
     unless bits.length(instruction_node_id) <= config.flit.node_id_width
     | error(~who: #'RV5StageCHIParams,
             "instruction NodeID must fit in the CHI NodeID width")
@@ -153,27 +156,27 @@ class RV5StageCHIParams(config :: RV5StageCHIConfig,
     unless instruction_node_id != data_node_id
     | error(~who: #'RV5StageCHIParams,
             "instruction and data NodeIDs must be distinct")
-    if config.has_devices
+    if config.has_uncached
     | block:
-        unless bits.length(device_node_id) <= config.flit.node_id_width
+        unless bits.length(uncached_node_id) <= config.flit.node_id_width
         | error(~who: #'RV5StageCHIParams,
-                "device NodeID must fit in the CHI NodeID width")
-        unless device_node_id != instruction_node_id && device_node_id != data_node_id
+                "uncached NodeID must fit in the CHI NodeID width")
+        unless uncached_node_id != instruction_node_id && uncached_node_id != data_node_id
         | error(~who: #'RV5StageCHIParams,
-                "instruction, data, and device NodeIDs must be distinct")
+                "instruction, data, and uncached NodeIDs must be distinct")
     | #void
     for (entry in config.home_map.entries):
       unless entry.target_node_id != instruction_node_id && entry.target_node_id != data_node_id && (
-        (!config.has_devices) || (entry.target_node_id != device_node_id)
+        (!config.has_uncached) || (entry.target_node_id != uncached_node_id)
       )
       | error(~who: #'RV5StageCHIParams,
-              "Home, instruction, and data NodeIDs must be distinct")
-    super(config, instruction_node_id, data_node_id, device_node_id)
+              "Home, instruction, data, and uncached NodeIDs must be distinct")
+    super(config, instruction_node_id, data_node_id, uncached_node_id)
 
 bundle RV5StageCHIIdentity(p :: CHIFlitParams):
   instruction_node_id: Bits(p.node_id_width)
   data_node_id: Bits(p.node_id_width)
-  device_node_id: Bits(p.node_id_width)
+  uncached_node_id: Bits(p.node_id_width)
 
 fun rv5stage_chi_address(address :: Bits,
                          p :: CHIFlitParams) :~ Bits(p.request_address_width):

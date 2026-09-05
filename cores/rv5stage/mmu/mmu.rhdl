@@ -1,5 +1,5 @@
 #lang rhodium
-// Composes RV5Stage's Sv39 TLBs and shared walker ahead of its physical L1 ports.
+// Composes RV5Stage's Sv39 TLBs and shared walker ahead of its physical-memory ports.
 
 import:
   "../fp-types.rhdl" open
@@ -9,6 +9,7 @@ import:
   "../csr.rhdl" open
   "../memory.rhdl" open
   "../icache/protocol.rhdl" open
+  "../uncached-protocol.rhdl" open
   "../dcache/protocol.rhdl" open
   "../../load-store.rhdl" open
   "../../../riscv/isa/xlen.rhm" open
@@ -23,7 +24,7 @@ sync_circuit RV5StageMmu(xlen :: XLen,
   def width = xlen.width
   interface instruction(RV5StageInstructionAccess(xlen), ~role: responder)
   interface data(RV5StageDataAccess(xlen), ~role: responder)
-  interface instruction_memory(RV5StageInstructionAccess(xlen), ~role: requester)
+  interface instruction_memory(RV5StagePhysicalInstructionAccess(xlen), ~role: requester)
   interface data_memory(RV5StageDataAccess(xlen), ~role: requester)
   input privilege: PrivilegeMode
   input mstatus: Bits(width)
@@ -128,14 +129,12 @@ sync_circuit RV5StageMmu(xlen :: XLen,
   )
   def instruction_has_physical_address = !instruction_translation_enabled ||| itlb.hit
   def instruction_access_fault = instruction_walk_access_fault ||| (
-    instruction_has_physical_address & !instruction_page_fault & !(
-      instruction_physical.executable & instruction_physical.cacheable
-    )
+    instruction_has_physical_address & !instruction_page_fault & !instruction_physical.executable
   )
   def instruction_local_fault = instruction_page_fault ||| instruction_access_fault
 
-  // Every accepted fetch records whether its response comes from L1I or is a
-  // locally generated architectural fault, preserving response order.
+  // Every accepted fetch records whether its response comes from the physical
+  // instruction hierarchy or is a locally generated architectural fault.
   def instruction_ready_source = mux(
     instruction_local_fault,
     Bool(#true),
@@ -143,7 +142,10 @@ sync_circuit RV5StageMmu(xlen :: XLen,
   )
   instruction.request.ready <== instruction_lookup_ready & instruction_owners.ingress.ready & instruction_ready_source
   instruction_memory.request.valid <== instruction.request.valid & instruction_lookup_ready & !instruction_local_fault & instruction_owners.ingress.ready
-  instruction_memory.request.bits.address <== instruction_physical_address
+  instruction_memory.request.bits <== RV5StagePhysicalInstructionReq(xlen):
+    address: instruction_physical_address
+    cacheable: instruction_physical.cacheable
+    device: instruction_physical.device
   instruction_owners.ingress.valid <== instruction.request.fire()
   instruction_owners.ingress.bits <== RV5StageInstructionFault():
     page: instruction_page_fault

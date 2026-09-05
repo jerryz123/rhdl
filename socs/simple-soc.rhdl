@@ -25,7 +25,7 @@ def simple_soc_home = CHIHomeParams("simple-home", 5, CHINodeKind.HNF, ~max_outs
 def simple_soc_device_home = CHIHomeParams("simple-device-home", 6, CHINodeKind.HNI, ~max_outstanding: 1)
 def simple_soc_memory_base = 0x80000000
 def simple_soc_memory_bytes = 0x40000000
-def simple_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
+def simple_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true, #false, #true)
 def simple_soc_host_node = CHINodeParams(
   "host",
   1,
@@ -75,18 +75,18 @@ class SimpleSoCFabricParams(memory_name :: NonemptyString,
     )
   property home_map: rv5stage_config.home_map
   property rv5stage_params:
-    RV5StageCHIParams(rv5stage_config, 2, 3, ~device_node_id: 4)
+    RV5StageCHIParams(rv5stage_config, 2, 3, ~uncached_node_id: 4)
   property instruction_port:
     requester_icn_endpoint(rv5stage_params.instruction_node)
   property data_port:
     requester_icn_endpoint(rv5stage_params.data_node)
-  property device_port:
-    requester_icn_endpoint(rv5stage_params.device_node)
+  property uncached_port:
+    requester_icn_endpoint(rv5stage_params.uncached_node)
   property peripherals:
     SoCPeripheralParams(flit,
                         1,
                         simple_soc_device_home,
-                        [device_port],
+                        [uncached_port],
                         10,
                         11)
   property ram_config:
@@ -153,7 +153,7 @@ def simple_soc_home_map :: CHIHomeMap = simple_soc_params.fabric.home_map
 def simple_soc_rv5stage_params = simple_soc_params.fabric.rv5stage_params
 def simple_soc_instruction_port = simple_soc_params.fabric.instruction_port
 def simple_soc_data_port = simple_soc_params.fabric.data_port
-def simple_soc_device_port = simple_soc_params.fabric.device_port
+def simple_soc_uncached_port = simple_soc_params.fabric.uncached_port
 def simple_soc_ram_config = simple_soc_params.fabric.ram_config
 def simple_soc_ram_params = simple_soc_params.fabric.ram_params
 def simple_soc_memory_transfers = simple_soc_params.fabric.memory_transfers
@@ -187,9 +187,9 @@ def simple_soc_instruction_site = CHIRNSite(NamePath(["requesters", "rv5stage-l1
 def simple_soc_data_site = CHIRNSite(NamePath(["requesters", "rv5stage-l1d"]),
                                      simple_soc_rv5stage_params.data_node_id,
                                      simple_soc_router)
-def simple_soc_device_site = CHIRNSite(NamePath(["requesters", "rv5stage-device"]),
-                                       simple_soc_rv5stage_params.device_node_id,
-                                       simple_soc_router)
+def simple_soc_uncached_site = CHIRNSite(NamePath(["requesters", "rv5stage-uncached"]),
+                                         simple_soc_rv5stage_params.uncached_node_id,
+                                         simple_soc_router)
 def simple_soc_home_requester_site = CHIRNICNSite(NamePath(["home", "requesters"]),
                                                   simple_soc_home.node_id,
                                                   simple_soc_router)
@@ -213,7 +213,7 @@ def simple_soc_connections = [
   CHIRNFConnection(simple_soc_host_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_instruction_site, simple_soc_home_requester_site),
   CHIRNFConnection(simple_soc_data_site, simple_soc_home_requester_site),
-  CHIRNIConnection(simple_soc_device_site,
+  CHIRNIConnection(simple_soc_uncached_site,
                    simple_soc_device_home_requester_site),
   CHISNConnection(simple_soc_device_home_subordinate_site,
                   simple_soc_aclint_site),
@@ -273,7 +273,7 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
   rv5stage.chi_identity <== RV5StageCHIIdentity(simple_soc_flit):
     instruction_node_id: bits(params.rv5stage_params.instruction_node_id, simple_soc_flit.node_id_width)
     data_node_id: bits(params.rv5stage_params.data_node_id, simple_soc_flit.node_id_width)
-    device_node_id: bits(params.rv5stage_params.device_node_id, simple_soc_flit.node_id_width)
+    uncached_node_id: bits(params.rv5stage_params.uncached_node_id, simple_soc_flit.node_id_width)
   home.identity <== CHIHNFIdentity(simple_soc_flit):
     home_node_id: bits(params.home_params.home.node_id, simple_soc_flit.node_id_width)
     subordinate_node_id: bits(params.home_params.subordinate_endpoint.node_id, simple_soc_flit.node_id_width)
@@ -314,7 +314,7 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
                        ~adapters: simple_soc_adapter_plans)
   connect_chi_rni(rv5stage.umem,
                   device_home.port.requester,
-                  ~node: simple_soc_device_site,
+                  ~node: simple_soc_uncached_site,
                   ~icn: simple_soc_device_home_requester_site,
                   ~req_ingress: req_router.ingress,
                   ~req_targets: req_router.target,
@@ -407,7 +407,7 @@ export:
   simple_soc_host_port
   simple_soc_instruction_port
   simple_soc_data_port
-  simple_soc_device_port
+  simple_soc_uncached_port
   simple_soc_ram_config
   simple_soc_ram_params
   simple_soc_memory_transfers
@@ -427,7 +427,7 @@ export:
   simple_soc_host_site
   simple_soc_instruction_site
   simple_soc_data_site
-  simple_soc_device_site
+  simple_soc_uncached_site
   simple_soc_home_requester_site
   simple_soc_device_home_requester_site
   simple_soc_device_home_subordinate_site

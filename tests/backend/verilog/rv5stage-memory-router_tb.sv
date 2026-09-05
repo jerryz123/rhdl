@@ -21,6 +21,9 @@ module rv5stage_memory_router_tb;
   } response_bits_t;
   typedef struct packed { logic valid; response_bits_t bits; } response_t;
   typedef struct packed { request_t request; } requester_t;
+  typedef struct packed { request_bits_t request; logic device; } uncached_request_bits_t;
+  typedef struct packed { logic valid; uncached_request_bits_t bits; } uncached_request_t;
+  typedef struct packed { uncached_request_t request; } uncached_requester_t;
   typedef struct packed {
     ready_t request;
     logic request_fault;
@@ -38,10 +41,10 @@ module rv5stage_memory_router_tb;
   logic reset = 1'b0;
   requester_t core_in;
   responder_t cache_in;
-  responder_t device_in;
+  responder_t uncached_in;
   responder_t core_out;
   requester_t cache_out;
-  requester_t device_out;
+  uncached_requester_t uncached_out;
 
   RV5StageMemoryRouter dut (.*);
 
@@ -57,7 +60,7 @@ module rv5stage_memory_router_tb;
     #1;
     assert (core_out.request.ready &&
             cache_out.request.valid == expected_cache &&
-            device_out.request.valid == expected_device &&
+            uncached_out.request.valid == expected_device &&
             core_out.request_access_fault == expected_access_fault)
       else $fatal(1, "incorrect physical routing for address %h and access %0d", address, access);
   endtask
@@ -65,20 +68,25 @@ module rv5stage_memory_router_tb;
   initial begin
     core_in = '0;
     cache_in = '0;
-    device_in = '0;
+    uncached_in = '0;
     core_in.request.valid = 1'b1;
     cache_in.request.ready = 1'b1;
     cache_in.drained = 1'b1;
-    device_in.request.ready = 1'b1;
-    device_in.drained = 1'b1;
+    uncached_in.request.ready = 1'b1;
+    uncached_in.drained = 1'b1;
 
     check_request(32'h00001000, LOAD, 1'b1, 1'b0, 1'b0);
     check_request(32'h00001000, STORE, 1'b1, 1'b0, 1'b0);
     check_request(32'h00002000, LOAD, 1'b0, 1'b1, 1'b0);
+    assert (uncached_out.request.bits.device)
+      else $fatal(1, "device PMA was not forwarded to the uncached path");
     check_request(32'h00002000, ATOMIC, 1'b0, 1'b0, 1'b1);
     check_request(32'h00003000, LOAD_RESERVED, 1'b0, 1'b0, 1'b1);
     check_request(32'h00003000, STORE, 1'b0, 1'b0, 1'b1);
-    check_request(32'h00005000, LOAD, 1'b0, 1'b0, 1'b1);
+    check_request(32'h00005000, LOAD, 1'b0, 1'b1, 1'b0);
+    assert (!uncached_out.request.bits.device)
+      else $fatal(1, "uncached normal memory was incorrectly marked as device memory");
+    check_request(32'h00006000, LOAD, 1'b0, 1'b0, 1'b1);
     check_request(32'h00011000, LOAD, 1'b0, 1'b0, 1'b1);
     core_in.request.bits.width = 2'd3;
     check_request(32'h00004000, LOAD, 1'b0, 1'b0, 1'b1);
@@ -88,8 +96,8 @@ module rv5stage_memory_router_tb;
     check_request(32'h00001000, LOAD, 1'b1, 1'b0, 1'b1);
     cache_in.request_access_fault = 1'b0;
     cache_in.drained = 1'b0;
-    device_in.drained = 1'b0;
-    check_request(32'h00005000, LOAD, 1'b0, 1'b0, 1'b1);
+    uncached_in.drained = 1'b0;
+    check_request(32'h00006000, LOAD, 1'b0, 1'b0, 1'b1);
 
     core_in.request.valid = 1'b0;
     #1;

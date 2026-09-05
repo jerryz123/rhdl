@@ -21,10 +21,10 @@ class TiledRV5StagePlacement(index :: Nat,
                              router :: NodeRef,
                              instruction_node_id :: Nat,
                              data_node_id :: Nat,
-                             device_node_id :: Nat,
+                             uncached_node_id :: Nat,
                              instruction_site :: CHIRNSite,
                              data_site :: CHIRNSite,
-                             device_site :: CHIRNSite)
+                             uncached_site :: CHIRNSite)
 
 class TiledHostPlacement(coordinate :: MeshCoordinate,
                          router :: NodeRef,
@@ -172,17 +172,17 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
       def path = NamePath(["rv5stage", to_string(index)])
       def instruction_node_id = ids.rv5stage_coherent_base + (index * 2)
       def data_node_id = instruction_node_id + 1
-      def device_node_id = ids.rv5stage_device_base + index
+      def uncached_node_id = ids.rv5stage_uncached_base + index
       TiledRV5StagePlacement(
         index,
         coordinate,
         router,
         instruction_node_id,
         data_node_id,
-        device_node_id,
+        uncached_node_id,
         CHIRNSite(path.child("l1i"), instruction_node_id, router),
         CHIRNSite(path.child("l1d"), data_node_id, router),
-        CHIRNSite(path.child("device"), device_node_id, router)
+        CHIRNSite(path.child("uncached"), uncached_node_id, router)
       )
 
   def llc_placements:
@@ -257,13 +257,13 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
   def mutable rnf_sites = [host_placement.site]
   for (placement in rv5stage_placements):
     rnf_sites := rnf_sites ++ [placement.instruction_site, placement.data_site]
-  def device_sites = rv5stage_placements.map(fun (placement): placement.device_site)
+  def uncached_sites = rv5stage_placements.map(fun (placement): placement.uncached_site)
 
   def mutable connections = []
   for (requester in rnf_sites):
     for (llc_placement in llc_placements):
       connections := connections ++ [CHIRNFConnection(requester, llc_placement.home_site)]
-  for (requester in device_sites):
+  for (requester in uncached_sites):
     connections := connections ++ [CHIRNIConnection(requester, device_home_placement.requester_site)]
   connections := connections ++ [
     CHISNConnection(device_home_placement.subordinate_site, aclint_placement.site),
@@ -290,7 +290,7 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
   ) ++ rv5stage_placements.map(
     fun (placement): placement.data_node_id
   ) ++ rv5stage_placements.map(
-    fun (placement): placement.device_node_id
+    fun (placement): placement.uncached_node_id
   ) ++ llc_placements.map(
     fun (placement): placement.home_node_id
   ) ++ llc_placements.map(
@@ -338,7 +338,7 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
                                   CHINodeKind.HNI,
                                   ~max_outstanding: 1)
 
-  def memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
+  def memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true, #false, #true)
   def rv5stage_config = RV5StageCHIConfig(
     flit,
     (for List (placement in llc_placements,
@@ -357,22 +357,22 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
       RV5StageCHIParams(rv5stage_config,
                         placement.instruction_node_id,
                         placement.data_node_id,
-                        ~device_node_id: placement.device_node_id)
+                        ~uncached_node_id: placement.uncached_node_id)
   def mutable requester_ports = [host_port]
   for (params in rv5stage_chi_params):
     requester_ports := requester_ports ++ [
       tiled_requester_icn_endpoint(params.instruction_node),
       tiled_requester_icn_endpoint(params.data_node)
     ]
-  def device_ports = rv5stage_chi_params.map(
-    fun (params): tiled_requester_icn_endpoint(params.device_node)
+  def uncached_ports = rv5stage_chi_params.map(
+    fun (params): tiled_requester_icn_endpoint(params.uncached_node)
   )
 
   def peripherals = SoCPeripheralParams(
     flit,
     rv5stage_placements.length(),
     device_home,
-    device_ports,
+    uncached_ports,
     aclint_placement.node_id,
     uart_placement.node_id
   )
@@ -449,7 +449,7 @@ fun compile_tiled_soc(config :: TiledSoCConfig) :: TiledSoCImplementation:
         ~rnf_sites: (for List (placement in rv5stage_placements):
                       [placement.instruction_site, placement.data_site]),
         ~rni_sites: (for List (placement in rv5stage_placements):
-                      [placement.device_site])
+                      [placement.uncached_site])
       )
     )
   )

@@ -4,6 +4,8 @@
 import:
   "../../../rhodium/core/main.rhm" open
   "../../../chi/main.rhdl" as chi
+  "../../../riscv/rtl/pma.rhdl" as pma
+  "../chi.rhdl" as rvchi
   "params.rhdl" as params
   "uncached-fixture.rhdl" as fixture
 
@@ -13,29 +15,61 @@ def uncached = fixture.uncached_design.modules.find(
 def router = fixture.router_design.modules.find(
   fun (module_def): module_def.name == "RV5StageMemoryRouter"
 )
+def instruction_router = fixture.instruction_router_design.modules.find(
+  fun (module_def): module_def.name == "RV5StageInstructionMemoryRouter"
+)
 fun assertion_labels(module_def):
   module_def.operations.filter(
     ~keep: fun (operation): operation.opcode == "verif.assert"
   ).map(fun (operation): operation.attribute("label"))
 
 check:
-  params.test_rv5stage_device_config.has_devices ~is #true
-  params.test_rv5stage_device_config.normal_address_sets ~is [chi.AddressSet(0, 0x7fff)]
-  params.test_rv5stage_device_config.device_address_sets ~is [chi.AddressSet(0x8000, 0x7fff)]
-  params.test_rv5stage_device_config.physical_map.regions.length() ~is 2
-  params.test_rv5stage_device_config.home_map.entries.map(
+  params.test_rv5stage_uncached_config.has_uncached ~is #true
+  params.test_rv5stage_uncached_config.normal_address_sets ~is [chi.AddressSet(0, 0x7fff)]
+  params.test_rv5stage_uncached_config.uncached_address_sets ~is [chi.AddressSet(0x8000, 0x3fff), chi.AddressSet(0xc000, 0x3fff)]
+  params.test_rv5stage_uncached_config.physical_map.regions.length() ~is 3
+  params.test_rv5stage_uncached_config.home_map.entries.map(
     fun (entry): entry.address_set
-  ) ~is [chi.AddressSet(0, 0x7fff), chi.AddressSet(0x8000, 0x7fff)]
-  params.test_rv5stage_device_params.device_node.kind ~is chi.CHINodeKind.RNI
-  params.test_rv5stage_device_params.device_node.emits.req ~is [
+  ) ~is [chi.AddressSet(0, 0x7fff), chi.AddressSet(0x8000, 0x3fff), chi.AddressSet(0xc000, 0x3fff)]
+  params.test_rv5stage_uncached_config.physical_map.regions[1].attributes.device ~is #true
+  params.test_rv5stage_uncached_config.physical_map.regions[1].attributes.read_idempotent ~is #false
+  params.test_rv5stage_uncached_config.physical_map.regions[2].attributes.device ~is #false
+  params.test_rv5stage_uncached_config.physical_map.regions[2].attributes.read_idempotent ~is #true
+  rvchi.RV5StageCHIConfig(
+    params.test_rv5stage_flit,
+    [rvchi.RV5StageCHIRegion(
+       pma.RiscvPhysicalMemoryRegion(
+         chi.AddressSet(0, 0x7fff),
+         params.test_rv5stage_memory_attributes
+       ),
+       params.test_rv5stage_home
+     ),
+     rvchi.RV5StageCHIRegion(
+       pma.RiscvPhysicalMemoryRegion(
+         chi.AddressSet(0xc000, 0x3fff),
+         pma.RiscvPhysicalMemoryAttributes(#true, #false, #true, #false, #false, #false, #false)
+       ),
+       params.test_rv5stage_uncached_home
+     )]
+  ) ~throws "executable RV5Stage regions must permit idempotent reads"
+  params.test_rv5stage_uncached_params.uncached_node.kind ~is chi.CHINodeKind.RNI
+  params.test_rv5stage_uncached_params.uncached_node.emits.req ~is [
     chi.CHIReqOpcode.ReadNoSnp, chi.CHIReqOpcode.WriteNoSnpPtl
   ]
   uncached.inputs.map(fun (port): port.name) ~is [
-    "clock", "reset", "node_id", "core_in", "chi_in"
+    "clock", "reset", "node_id", "instruction_in", "core_in", "chi_in"
   ]
-  uncached.outputs.map(fun (port): port.name) ~is ["core_out", "chi_out"]
+  uncached.outputs.map(fun (port): port.name) ~is ["instruction_out", "core_out", "chi_out"]
   uncached.find_output("core_out").type.field("request_access_fault").type.bit_width() ~is 1
   assertion_labels(uncached).contains("rv5stage_uncached_address_has_home") ~is #true
+  assertion_labels(uncached).contains("rv5stage_uncached_instruction_not_cacheable") ~is #true
   assertion_labels(router) ~is ["rv5stage_memory_response_paths_exclusive"]
+  instruction_router.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "core_in", "cache_in", "uncached_in"
+  ]
+  instruction_router.outputs.map(fun (port): port.name) ~is [
+    "core_out", "cache_out", "uncached_out"
+  ]
   verify_design(fixture.uncached_design) ~is #void
   verify_design(fixture.router_design) ~is #void
+  verify_design(fixture.instruction_router_design) ~is #void
