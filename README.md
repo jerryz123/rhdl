@@ -2,7 +2,7 @@
 
 # Rhodium
 
-> Yes, all the code here was written by a LLM. The only text not produced by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
+> All the code and text in this repository was written by a LLM. The only text not produced by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
 
 Rhodium is an experimental hardware description language hosted by
 [Rhombus](https://docs.racket-lang.org/rhombus/). Ordinary Rhombus computation
