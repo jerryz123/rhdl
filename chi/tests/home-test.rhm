@@ -24,7 +24,9 @@ check:
   fixture.home_params.flit === fixture.home_flit ~is #true
   fixture.home_params.home.kind ~is chi.CHINodeKind.HNI
   fixture.home_params.requester_endpoints[0].kind ~is chi.CHINodeKind.RNI
-  fixture.home_params.subordinate_endpoint.kind ~is chi.CHINodeKind.SNI
+  fixture.home_params.subordinate_map.services ~is (
+    [fixture.subordinate_service, fixture.second_subordinate_service]
+  )
   top.inputs.map(fun (input): input.name) ~is ["clock", "reset", "port_in"]
   top.outputs.map(fun (output): output.name) ~is ["port_out"]
   instance_names.contains("occupancy") ~is #true
@@ -32,15 +34,23 @@ check:
   instance_names.contains("write_await_dbid") ~is #true
   instance_names.contains("write_await_data") ~is #true
   instance_names.contains("write_await_comp") ~is #true
-  top.memories.map(fun (memory): memory.name) ~is ["requests", "subordinate_dbids"]
+  top.memories.map(fun (memory): memory.name) ~is (
+    ["requests", "subordinate_ids", "subordinate_dbids"]
+  )
   register_names.contains("requests") ~is #false
+  register_names.contains("subordinate_ids") ~is #false
   register_names.contains("subordinate_dbids") ~is #false
   assertion_labels.contains("chi_hni_request_targets_home") ~is #true
+  assertion_labels.contains("chi_hni_request_address_mapped") ~is #true
   assertion_labels.contains("chi_hni_request_service_supported") ~is #true
-  assertion_labels.contains("chi_hni_transaction_request_target_subordinate") ~is #true
+  assertion_labels.contains("chi_hni_response_source_subordinate") ~is #true
+  assertion_labels.contains("chi_hni_read_data_source_subordinate") ~is #true
   assertion_labels.contains("chi_hni_transaction_response_txn_restored") ~is #true
+  assertion_labels.contains("chi_hni_transaction_response_source_subordinate") ~is #true
   assertion_labels.contains("chi_hni_transaction_write_data_dbid_translated") ~is #true
+  assertion_labels.contains("chi_hni_transaction_write_data_target_subordinate") ~is #true
   assertion_labels.contains("chi_hni_transaction_read_data_txn_restored") ~is #true
+  assertion_labels.contains("chi_hni_transaction_read_data_source_subordinate") ~is #true
   top.operations.filter(
     ~keep: fun (operation): operation.opcode == "rtl.instance" && (
       operation.attribute("module").name.starts_with("Credit")
@@ -53,10 +63,71 @@ check:
       chi.CHIHNI(
         chi.CHIHNIParams(
           chi.CHIHomeParams("bad-kind", 5, chi.CHINodeKind.HNF, ~max_outstanding: 2),
-          fixture.home_flit,
           [fixture.requester_endpoint],
-          fixture.subordinate_endpoint,
-          fixture.subordinate_service
+          fixture.subordinate_map
         )
       )
   ) ~throws "home kind must be HN-I"
+  embedded.run_elaboration(
+    fun ():
+      chi.CHIHNI(
+        chi.CHIHNIParams(
+          fixture.home,
+          [fixture.requester_endpoint, fixture.requester_endpoint],
+          fixture.subordinate_map
+        )
+      )
+  ) ~throws "requester NodeIDs must be unique"
+  embedded.run_elaboration(
+    fun ():
+      chi.CHIHNI(
+        chi.CHIHNIParams(
+          chi.CHIHomeParams(
+            "colliding-home",
+            fixture.subordinate_endpoint.node_id,
+            chi.CHINodeKind.HNI,
+            ~max_outstanding: 2
+          ),
+          [fixture.requester_endpoint],
+          fixture.subordinate_map
+        )
+      )
+  ) ~throws "subordinate and Home NodeIDs must be distinct"
+  embedded.run_elaboration(
+    fun ():
+      def partial_service = chi.CHISubordinateServiceParams(
+        fixture.subordinate_endpoint,
+        fixture.subordinate_service.address_sets,
+        [fixture.subordinate_service.requests[0]]
+      )
+      chi.CHIHNI(
+        chi.CHIHNIParams(
+          fixture.home,
+          [fixture.requester_endpoint],
+          chi.CHISubordinateMap(fixture.home_flit, [partial_service])
+        )
+      )
+  ) ~throws "every subordinate service must support every requester opcode"
+  embedded.run_elaboration(
+    fun ():
+      def snf_endpoint = chi.CHIICNPortParams(
+        "full-subordinate",
+        11,
+        chi.CHINodeKind.SNF,
+        ~emits: fixture.subordinate_endpoint.emits,
+        ~supports: fixture.subordinate_endpoint.supports,
+        ~max_outstanding: 2
+      )
+      def snf_service = chi.CHISubordinateServiceParams(
+        snf_endpoint,
+        [chi.AddressSet(0xa0000000, 0x0fffffff)],
+        fixture.subordinate_service.requests
+      )
+      chi.CHIHNI(
+        chi.CHIHNIParams(
+          fixture.home,
+          [fixture.requester_endpoint],
+          chi.CHISubordinateMap(fixture.home_flit, [snf_service])
+        )
+      )
+  ) ~throws "subordinate endpoints must describe SN-Is"

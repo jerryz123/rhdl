@@ -87,7 +87,7 @@ fun chi_initial_single_flit_size(size :: CHITransferSize,
 fun chi_hni_downstream_request(p :: CHIFlitParams,
                                request :: CHIReqFlit(p),
                                home_node_id :: Nat,
-                               subordinate_node_id :: Nat,
+                               subordinate_node_id :: Bits(p.node_id_width),
                                slot :: Bits):
   wire downstream_request: CHIReqFlit(p)
   if p.req_rsvdc_width > 0
@@ -126,7 +126,7 @@ fun chi_hni_downstream_request(p :: CHIFlitParams,
   downstream_request.return_nid_or_stash_nid_or_data_target <== bits(home_node_id, p.node_id_width)
   downstream_request.txn_id <== slot.zext(12)
   downstream_request.src_id <== bits(home_node_id, p.node_id_width)
-  downstream_request.tgt_id <== bits(subordinate_node_id, p.node_id_width)
+  downstream_request.tgt_id <== subordinate_node_id
   downstream_request.qos <== request.qos
   downstream_request
 
@@ -710,7 +710,6 @@ fun subordinate_transaction_monitor(p :: CHIFlitParams,
 // HN-I between already-buffered ready-valid flows on its RN and SN sides.
 fun home_transaction_monitor(p :: CHIFlitParams,
                              home_node_id :: Nat,
-                             subordinate_node_id :: Nat,
                              limit :: PosInt,
                              label_prefix :: String,
                              upstream_request_event :: Bool,
@@ -782,8 +781,6 @@ fun home_transaction_monitor(p :: CHIFlitParams,
            label_prefix ++ "_request_size_preserved")
     assert(downstream_request.src_id === bits(home_node_id, p.node_id_width),
            label_prefix ++ "_request_source_home")
-    assert(downstream_request.tgt_id === bits(subordinate_node_id, p.node_id_width),
-           label_prefix ++ "_request_target_subordinate")
     assert(downstream_request.return_nid_or_stash_nid_or_data_target === bits(home_node_id, p.node_id_width),
            label_prefix ++ "_request_return_home")
     assert(downstream_request.return_txn_id_or_stash_lpid === request_slot.zext(12),
@@ -793,8 +790,14 @@ fun home_transaction_monitor(p :: CHIFlitParams,
 
   assert(downstream_response_event === upstream_response_event,
          label_prefix ++ "_response_transfer_paired")
-  when (downstream_response_event & upstream_response_event):
+  when downstream_response_event:
     assert(response_slot_valid, label_prefix ++ "_response_slot_in_range")
+    when response_slot_valid:
+      assert(downstream_response.src_id === response_entry.subordinate_id,
+             label_prefix ++ "_response_source_subordinate")
+      assert(downstream_response.tgt_id === bits(home_node_id, p.node_id_width),
+             label_prefix ++ "_response_targets_home")
+  when (downstream_response_event & upstream_response_event):
     assert(downstream_response.opcode.is_one_of(CHIRspOpcode.DBIDResp,
                                                 CHIRspOpcode.Comp),
            label_prefix ++ "_response_opcode")
@@ -845,15 +848,21 @@ fun home_transaction_monitor(p :: CHIFlitParams,
            label_prefix ++ "_write_data_dbid_translated")
     assert(downstream_write_data.src_id === bits(home_node_id, p.node_id_width),
            label_prefix ++ "_write_data_source_home")
-    assert(downstream_write_data.tgt_id === bits(subordinate_node_id, p.node_id_width),
+    assert(downstream_write_data.tgt_id === write_data_entry.subordinate_id,
            label_prefix ++ "_write_data_target_subordinate")
     assert(downstream_write_data.qos === write_data_entry.requester_qos,
            label_prefix ++ "_write_data_qos_restored")
 
   assert(downstream_read_data_event === upstream_read_data_event,
          label_prefix ++ "_read_data_transfer_paired")
-  when (downstream_read_data_event & upstream_read_data_event):
+  when downstream_read_data_event:
     assert(read_data_slot_valid, label_prefix ++ "_read_data_slot_in_range")
+    when read_data_slot_valid:
+      assert(downstream_read_data.src_id === read_data_entry.subordinate_id,
+             label_prefix ++ "_read_data_source_subordinate")
+      assert(downstream_read_data.tgt_id === bits(home_node_id, p.node_id_width),
+             label_prefix ++ "_read_data_targets_home")
+  when (downstream_read_data_event & upstream_read_data_event):
     assert(read_data_entry.phase === CHIInitialTransactionPhase.ReadPending,
            label_prefix ++ "_read_data_has_request")
     assert(or_reduce(read_data_entry.expected_data_ids & read_data_id) & (
@@ -884,9 +893,15 @@ fun home_transaction_monitor(p :: CHIFlitParams,
            label_prefix ++ "_read_data_qos_restored")
 
   def request_pair = upstream_request_event & downstream_request_event & request_slot_valid
-  def response_pair = downstream_response_event & upstream_response_event & response_slot_valid
-  def write_data_pair = upstream_write_data_event & downstream_write_data_event & write_data_slot_valid
-  def read_data_pair = downstream_read_data_event & upstream_read_data_event & read_data_slot_valid
+  def response_pair = downstream_response_event & upstream_response_event & response_slot_valid & (
+    downstream_response.src_id === response_entry.subordinate_id
+  ) & (downstream_response.tgt_id === bits(home_node_id, p.node_id_width))
+  def write_data_pair = upstream_write_data_event & downstream_write_data_event & write_data_slot_valid & (
+    downstream_write_data.tgt_id === write_data_entry.subordinate_id
+  )
+  def read_data_pair = downstream_read_data_event & upstream_read_data_event & read_data_slot_valid & (
+    downstream_read_data.src_id === read_data_entry.subordinate_id
+  ) & (downstream_read_data.tgt_id === bits(home_node_id, p.node_id_width))
   def next_entries = vec(
     for List (index in 0..limit):
       block:

@@ -337,8 +337,11 @@ ready-valid requester- and subordinate-side channel interfaces, allocates a
 Home-owned transaction slot, and translates both transaction-ID namespaces.
 Its parameters accept every RN-I endpoint allowed to address the Home; the
 shared requester channel retains the source NodeID in each allocated request.
-REQ, RSP, and DAT can each attach to an independent transport. Reads restore
-the RN's
+A `CHISubordinateMap` selects the subordinate NodeID for each accepted address;
+the HN-I retains that identity until completion, so its single subordinate
+channel can route to multiple SN-Is through either the requester-side fabric or
+a separate fabric. REQ, RSP, and DAT can each attach to an independent
+transport. Reads restore the RN's
 ReturnTxnID and data target. Writes expose the Home slot as the RN-facing DBID,
 retain the subordinate's DBID internally, translate write data to that DBID,
 and restore the original RN TxnID on completion. Paired transaction translation

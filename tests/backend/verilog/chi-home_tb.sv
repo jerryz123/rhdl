@@ -121,6 +121,8 @@ module chi_home_tb;
     input logic [5:0] size,
     input logic [11:0] txn_id,
     input logic [11:0] return_txn_id,
+    input logic [43:0] address,
+    input logic [6:0] subordinate_id,
     output logic [11:0] slot
   );
     begin
@@ -129,7 +131,7 @@ module chi_home_tb;
       upstream_requests_in.bits.src_id = REQUESTER_ID;
       upstream_requests_in.bits.tgt_id = HOME_ID;
       upstream_requests_in.bits.txn_id = txn_id;
-      upstream_requests_in.bits.address = 44'h080000000;
+      upstream_requests_in.bits.address = address;
       upstream_requests_in.bits.size_or_num_req = size;
       upstream_requests_in.bits.return_nid_or_stash_nid_or_data_target = REQUESTER_ID;
       upstream_requests_in.bits.return_txn_id_or_stash_lpid = return_txn_id;
@@ -144,7 +146,7 @@ module chi_home_tb;
         else $fatal(1, "HN-I did not accept the upstream request");
       assert (downstream_requests_out.bits.opcode == opcode &&
               downstream_requests_out.bits.src_id == HOME_ID &&
-              downstream_requests_out.bits.tgt_id == SUBORDINATE_ID)
+              downstream_requests_out.bits.tgt_id == subordinate_id)
         else $fatal(1, "translated REQ carried incorrect routing metadata");
       assert (downstream_requests_out.bits.return_nid_or_stash_nid_or_data_target == HOME_ID &&
               downstream_requests_out.bits.return_txn_id_or_stash_lpid ==
@@ -161,12 +163,13 @@ module chi_home_tb;
     input logic [11:0] slot,
     input logic [11:0] return_txn_id,
     input logic [1:0] data_id,
+    input logic [6:0] subordinate_id,
     input logic [127:0] data
   );
     begin
       downstream_response_data_in.bits = '0;
       downstream_response_data_in.bits.opcode = COMP_DATA;
-      downstream_response_data_in.bits.src_id = SUBORDINATE_ID;
+      downstream_response_data_in.bits.src_id = subordinate_id;
       downstream_response_data_in.bits.tgt_id = HOME_ID;
       downstream_response_data_in.bits.txn_id = slot;
       downstream_response_data_in.bits.data_id = data_id;
@@ -196,12 +199,13 @@ module chi_home_tb;
     input logic [11:0] slot,
     input logic [11:0] dbid,
     input logic [11:0] requester_txn_id,
+    input logic [6:0] subordinate_id,
     output logic [11:0] home_dbid
   );
     begin
       downstream_responses_in.bits = '0;
       downstream_responses_in.bits.opcode = opcode;
-      downstream_responses_in.bits.src_id = SUBORDINATE_ID;
+      downstream_responses_in.bits.src_id = subordinate_id;
       downstream_responses_in.bits.tgt_id = HOME_ID;
       downstream_responses_in.bits.txn_id = slot;
       downstream_responses_in.bits.dbid_or_group_id = dbid;
@@ -226,6 +230,7 @@ module chi_home_tb;
     input logic [11:0] home_dbid,
     input logic [11:0] subordinate_dbid,
     input logic [1:0] data_id,
+    input logic [6:0] subordinate_id,
     input logic [127:0] data
   );
     begin
@@ -244,7 +249,7 @@ module chi_home_tb;
         else $fatal(1, "HN-I did not forward requester write data");
       assert (downstream_request_data_out.bits.opcode == NON_COPY_BACK_WRITE_DATA &&
               downstream_request_data_out.bits.src_id == HOME_ID &&
-              downstream_request_data_out.bits.tgt_id == SUBORDINATE_ID &&
+              downstream_request_data_out.bits.tgt_id == subordinate_id &&
               downstream_request_data_out.bits.txn_id == subordinate_dbid &&
               downstream_request_data_out.bits.data_id == data_id)
         else $fatal(1, "translated write DAT carried incorrect transaction metadata");
@@ -273,26 +278,49 @@ module chi_home_tb;
     tick();
     reset = 1'b0;
 
-    translate_request(READ_NO_SNP, 6'd6, 12'h101, 12'h501, slot);
-    translate_subordinate_data(slot, 12'h501, 2'd2, READ_DATA + 2);
-    translate_subordinate_data(slot, 12'h501, 2'd0, READ_DATA + 0);
-    translate_subordinate_data(slot, 12'h501, 2'd3, READ_DATA + 3);
-    translate_subordinate_data(slot, 12'h501, 2'd1, READ_DATA + 1);
+    translate_request(READ_NO_SNP,
+                      6'd6,
+                      12'h101,
+                      12'h501,
+                      44'h080000000,
+                      SUBORDINATE_ID,
+                      slot);
+    translate_subordinate_data(slot, 12'h501, 2'd2, SUBORDINATE_ID, READ_DATA + 2);
+    translate_subordinate_data(slot, 12'h501, 2'd0, SUBORDINATE_ID, READ_DATA + 0);
+    translate_subordinate_data(slot, 12'h501, 2'd3, SUBORDINATE_ID, READ_DATA + 3);
+    translate_subordinate_data(slot, 12'h501, 2'd1, SUBORDINATE_ID, READ_DATA + 1);
 
-    translate_request(WRITE_NO_SNP_FULL, 6'd6, 12'h102, 12'h000, slot);
+    translate_request(READ_NO_SNP,
+                      6'd4,
+                      12'h103,
+                      12'h503,
+                      44'h090000000,
+                      7'h0a,
+                      slot);
+    translate_subordinate_data(slot, 12'h503, 2'd0, 7'h0a, READ_DATA);
+
+    translate_request(WRITE_NO_SNP_FULL,
+                      6'd6,
+                      12'h102,
+                      12'h000,
+                      44'h090000000,
+                      7'h0a,
+                      slot);
     translate_subordinate_response(DBID_RESP,
                                    slot,
                                    SUBORDINATE_DBID,
                                    12'h102,
+                                   7'h0a,
                                    home_dbid);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd2, WRITE_DATA + 2);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd0, WRITE_DATA + 0);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd3, WRITE_DATA + 3);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd1, WRITE_DATA + 1);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd2, 7'h0a, WRITE_DATA + 2);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd0, 7'h0a, WRITE_DATA + 0);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd3, 7'h0a, WRITE_DATA + 3);
+    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd1, 7'h0a, WRITE_DATA + 1);
     translate_subordinate_response(COMP,
                                    slot,
                                    SUBORDINATE_DBID,
                                    12'h102,
+                                   7'h0a,
                                    completion_dbid);
     assert (completion_dbid == home_dbid)
       else $fatal(1, "completion did not preserve the HN-I DBID");
