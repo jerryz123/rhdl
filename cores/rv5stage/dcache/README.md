@@ -2,78 +2,170 @@
 
 # RV5Stage data cache
 
-`protocol.rhdl` defines `RV5StageDataAccess`, an ordered `Decoupled` request and
-`Valid` response interface carrying the original byte address, a typed load,
-store, LR, SC, or AMO operation, scalar width, load signedness, and XLEN-wide
-source operand. The request
-is deliberately Decoupled because live Execute forwarding may change its
-payload before the cache accepts the instruction. The response returns an
-XLEN-wide normalized load or atomic result and echoes the request's five-bit
-completion tag; ordinary store response data and tag have no meaning. The
-pipeline uses the tag to clear the destination scoreboard entry when a delayed
-load or atomic operation returns. It checks
-architectural alignment, while the cache owns beat alignment, masks, and
-load/store lane generation. `RV5StageL1DCache(xlen, ..., ~chi: ...)` accepts
-`XLen.X32` or `XLen.X64`; the required CHI parameter comes from system
-integration and supplies the RN-F identity, flit geometry, and Home map. Its
-core-facing addresses use the selected XLEN while its native RN-F port uses the
-configured CHI address width. RV5Stage cache lines are always
-64 bytes. The default 128-bit DAT width is CHI's minimum, so each refill is
-assembled from four physical DAT packets.
-The responder also exposes a combinational `drained` observation. It is true
-only when no request is accepted that cycle and no lookup, acquisition, or
-dirty-line writeback remains active, giving architectural fences a
-precise quiescence boundary without creating a separate fence transaction.
+This directory owns the core-facing data-cache protocol and the private L1D's
+array, replacement, coherence-state, refill, writeback, snoop, and LR/SC
+contracts. The [parent core guide](../README.md#memory-hierarchy) owns MMU/PMA
+routing and architectural fence ordering; the [CHI guide](../../../chi/README.md)
+owns the protocol vocabulary and fabric-wide rules.
 
-`cache.rhdl` implements a set-associative, blocking write-back/write-allocate
-cache with a power-of-two set count and positive way count. A one-stage `Pipe` carries lookup
-context alongside the synchronous SRAM access and advances on consecutive
-hits. Its data array has `sets * (64 / (XLEN / 8))` byte-masked rows containing
-one `XLEN` word per way; tags and coherence state hold one entry per way at
-each set. Parallel tag comparisons select the hit way, and duplicate valid tags
-are rejected by an assertion.
-Aligned scalar loads, stores, LR/SC, and AMOs therefore touch one SRAM word,
-while line transfers are serialized by the cache controller. Load misses
-request `ReadClean`; store misses and stores to SharedClean
-lines request `ReadUnique`. AMOs and successful SCs use the same unique-owner
-path, then update the cached word or doubleword and leave the line UniqueDirty.
-AMOs return the pre-update value; RV64 word results are sign extended. The
-common `../refill.rhdl` engine owns the aligned
-line address, complete client context, retry, `CompData`, and `CompAck`. A
-completed store acquisition merges the store bytes into the affected returned
-word and installs the line one word per cycle as UniqueDirty. The tag becomes
-valid only with the final word. Stores that hit UniqueClean or UniqueDirty update
-the data SRAM and dirty state locally without producing REQ or DAT traffic.
-A mandatory non-backpressurable
-`ValidPipe` after the SRAM lookup preserves one-hit-per-cycle throughput while
-aligning an EX request's hit response with WB. An acquisition or miss blocks
-new cache requests until it completes. Before replacing a dirty victim, the
-cache gathers the selected way's XLEN words into a line buffer;
-`../writeback.rhdl` then captures that line and drains its eight
-64-bit beats through the currently supported retryable `WriteUniquePtl`
-transaction engine; only then can the replacement refill begin.
+## At a glance
 
-Incoming snoops serialize behind an active lookup or SRAM line transfer but
-may run while a refill or writeback transaction is otherwise waiting on CHI.
-The shared
-`../snoop.rhdl` engine owns request lifetime, DVM pairing, lookup-result capture,
-and response stability. Clean lines use `SnpResp` and the requested
-invalidate-or-downgrade transition. A dirty hit first gathers all XLEN words,
-then returns the reconstructed line as `SnpRespData` with `PassDirty` and
-invalidates locally so Home receives the authoritative copy. Each two-packet
-`SnpDVMOp` receives one response. Reset
-clears lookup, acquisition, writeback, snoop, valid, and reservation state.
+| Property | Current contract |
+|---|---|
+| Organization | Physically indexed, physically tagged, set-associative, blocking, write-back, write-allocate |
+| Geometry | Power-of-two set count of at least two, positive way count, fixed 64-byte lines |
+| Core throughput | Consecutive load hits can enter and return one per cycle; a miss or ownership acquisition blocks later cache requests |
+| Core protocol | Ordered `Decoupled` requests and non-backpressurable `Valid` responses |
+| Coherence states | Invalid, SharedClean, UniqueClean, and UniqueDirty |
+| Allocation | Lowest invalid way, otherwise per-set round robin |
+| CHI traffic | `ReadClean`, `ReadUnique`, retryable `WriteUniquePtl`, `CompAck`, `SnpResp`, and dirty `SnpRespData` |
 
-LR records one exact address and scalar width in a cache-local reservation.
-SC succeeds only when that reservation still matches, acquiring Unique
-ownership before updating the line, and every SC attempt clears the
-reservation. Same-line local writes, invalidating snoops, and replacement of
-the reserved line also clear it. A failed SC returns one without issuing CHI
-traffic; a successful SC returns zero.
+`RV5StageL1DCache(xlen, cache, ~chi: config)` accepts `XLen.X32` or
+`XLen.X64`. The cache configuration supplies set/way geometry; the required
+CHI configuration supplies flit geometry and the Home map. A separate
+`node_id` input supplies the occurrence's RN-F identity. Core addresses use
+XLEN, while emitted CHI requests use the configured CHI request-address width
+and assert that the original physical address fits. Geometry validation also
+requires XLEN to leave at least one tag bit above the line offset and set index.
 
-Allocation prefers the lowest invalid way, then uses a per-set round-robin
-pointer. Ownership acquisition for an existing shared line retains its current
-way and does not advance replacement state. The cache has no hit-under-miss,
-prefetching, background writeback, or direct coherence connection to the instruction cache. Dirty
-replacement currently decomposes a line into supported partial writes rather
-than using CHI's `WriteBackFull` transaction family.
+## Core-facing protocol
+
+[`protocol.rhdl`](protocol.rhdl) defines `RV5StageDataAccess(xlen)`:
+
+| Direction | Member | Meaning |
+|---|---|---|
+| Requester → cache | `request: Decoupled(RV5StageDataReq)` | Original XLEN byte address; load/store/LR/SC/AMO kind; atomic function; scalar width; load signedness; XLEN source data; destination bank; five-bit `rd`; and FP precision metadata |
+| Cache → requester | `response: Valid(RV5StageDataResp)` | Ordered XLEN load/atomic/SC result plus destination, `rd`, and FP precision metadata |
+| Cache → requester | `request_fault`, `request_access_fault` | Always false in this physical cache; translation and PMA routing own architectural faults |
+| Cache → requester | `drained` | Combinational quiescence observation used by architectural serialization |
+
+The request is `Decoupled` because live Execute forwarding may change its
+payload until acceptance. Responses cannot be backpressured. Loads and atomics
+return normalized XLEN values; an RV64 word AMO result is sign extended.
+Successful SC returns zero and failed SC returns one. Ordinary stores also
+produce an ordered completion response, but its data and destination metadata
+are not architectural results.
+
+The pipeline checks architectural alignment. The cache owns XLEN-word
+alignment within the line, byte masks, and load/store lane generation.
+`drained` is true only when no request is accepted that cycle and no core
+lookup, acquisition/refill, dirty-line drain, gather, or refill installation
+remains active. It does not include the response pipe or an independently
+serviced snoop; the parent serialization logic separately waits for older
+deferred completions. It is an observation, not a separate fence transaction.
+
+## Data path and arrays
+
+[`cache.rhdl`](cache.rhdl) keeps the hit path short and moves line transactions
+into shared engines:
+
+```mermaid
+flowchart LR
+  Core["Core request<br/>Decoupled"] --> Lookup["One-stage lookup Pipe<br/>tag + state + XLEN word SRAMs"]
+  Lookup -->|load hit| Load["LoadGen"]
+  Lookup -->|owned store / SC / AMO| Mutate["StoreGen + atomic ALU<br/>byte-lane update"]
+  Load --> Response["One-stage ValidPipe<br/>ordered response"]
+  Mutate --> Arrays["Tag, state, and data arrays"]
+  Mutate --> Response
+
+  Lookup -->|miss or ownership acquisition| Victim{"Dirty allocated victim?"}
+  Victim -->|yes| Gather["Gather 64-byte line"]
+  Gather --> Writeback["8 serialized 64-bit<br/>WriteUniquePtl transactions"]
+  Writeback --> Refill["ReadClean or ReadUnique<br/>retry-aware refill"]
+  Victim -->|no| Refill
+  Refill --> Install["Install one XLEN word/cycle<br/>publish metadata last"]
+  Install --> Arrays
+  Install --> Response
+
+  Snoop["Snoop engine"] -->|"lookup / update request"| Arrays
+  Arrays -->|"metadata / gathered line"| Snoop
+  Snoop --> CHI["CHI SnpResp / SnpRespData"]
+```
+
+The tag and coherence-state arrays hold one entry per way and set. The
+byte-masked data array has `sets * (64 / (XLEN / 8))` rows, each containing one
+XLEN word per way. Parallel comparisons select the hit way; assertions reject
+duplicate valid tags. An aligned scalar load, store, LR/SC, or AMO therefore
+touches one data row even though coherent transfers operate on a whole line.
+
+A one-stage `Pipe` carries request context alongside the synchronous SRAM
+lookup. Consecutive load hits advance every cycle. A mandatory one-stage
+`ValidPipe` aligns the non-backpressurable hit response with WB. A store, SC,
+or AMO that already has Unique ownership updates the selected byte lanes and
+sets UniqueDirty without emitting REQ or DAT traffic; an AMO returns the value
+from before that update.
+
+## Miss, acquisition, and replacement flow
+
+| Lookup outcome | Action | Installed or resulting state |
+|---|---|---|
+| Load or LR miss | Issue `ReadClean` | SharedClean or UniqueClean from the CHI response |
+| Store/AMO miss | Allocate a way and issue `ReadUnique` | Merge the mutation while installing; UniqueDirty |
+| Store/AMO hit in SharedClean | Retain the current way and issue `ReadUnique` | Merge the mutation while installing; UniqueDirty |
+| Successful SC without Unique ownership | Use the same `ReadUnique` acquisition path | UniqueDirty |
+| Failed SC | Return one without CHI traffic or a data-array update | Unchanged |
+| Dirty allocation victim | Gather the line, complete writeback, then issue the refill | Victim invalidated before replacement installation |
+
+The shared [`refill engine`](../refill.rhdl) retains the aligned line address
+and complete request context across retry, accepts unique `CompData` packets,
+sends `CompAck`, and exposes the completed line only afterward. RV5Stage lines
+are fixed at 64 bytes, and L1D rejects a refill carrying `PassDirty`. With the
+repository's default 128-bit DAT width, four packets form a line. Installation
+writes one XLEN word per cycle—eight writes for RV64 or sixteen for RV32—and
+publishes the tag, coherence state, and valid bit only on the final word. A
+mutating refill merges its selected bytes before that word is written.
+
+For a dirty allocation victim, L1D first gathers all XLEN words into a line
+buffer. The shared [`writeback engine`](../writeback.rhdl) captures that buffer
+and serializes eight retryable, 64-bit `WriteUniquePtl` transactions. The
+replacement refill cannot start until all eight complete.
+
+## Snoop ordering and responses
+
+The shared [`data-snoop engine`](../snoop.rhdl) owns each request's lifetime,
+DVM pairing, lookup-result capture, stable CHI response, and dirty-data packet
+sequence. A pending snoop prevents a new core lookup. It waits behind an active
+lookup, line gather, or refill installation, but it may run while a captured
+refill or writeback transaction is otherwise waiting on CHI. A snoop already
+waiting when a refill completes wins the SRAM; once installation begins, the
+refill keeps the ports through the final word.
+
+| Cached result | CHI response | Local transition |
+|---|---|---|
+| Miss | `SnpResp` reporting Invalid | None |
+| Clean hit, retained | `SnpResp` with the stored or requested shared state | Retain or downgrade to SharedClean |
+| Clean hit, invalidating or `RetToSrc` | `SnpResp` reporting Invalid | Invalidate |
+| Dirty hit | Complete-line `SnpRespData` with `PassDirty` and Invalid | Invalidate after the final data packet |
+| Two-packet `SnpDVMOp` | One `SnpResp` after the second packet | No array access |
+
+A dirty response first gathers every XLEN word from the selected way. Home then
+receives the authoritative reconstructed line; L1D does not retain a dirty copy.
+Reset clears lookup, refill installation, line gather, reservation, valid-line,
+replacement, and child transaction-engine state.
+
+## LR/SC reservation
+
+LR records one exact byte address and scalar width in a cache-local reservation.
+SC succeeds only while both still match. It obtains Unique ownership when
+necessary, updates the cached word, returns zero, and leaves the line
+UniqueDirty. A failed SC returns one without issuing CHI traffic or writing the
+array. Every SC attempt clears the reservation.
+
+The reservation is also cleared by a same-line local store or AMO, an
+invalidating snoop for that line, or replacement of the reserved line. A
+downgrade that does not invalidate the line does not independently clear it.
+
+## Replacement and deliberate limits
+
+Allocation selects the lowest invalid way before using the set's round-robin
+pointer. Installing a newly allocated line advances that pointer. Ownership
+acquisition for an existing SharedClean line retains its way and does not
+advance replacement state.
+
+- The cache has no hit-under-miss, prefetching, or background writeback.
+- L1D and L1I have no direct coherence connection; instruction coherence uses
+  the parent core's fence/invalidation sequence and independent CHI snoops.
+- Dirty replacement uses eight supported `WriteUniquePtl` transactions rather
+  than CHI's `WriteBackFull` transaction family.
+- The cache does not generate translation, alignment, PMA, or access faults;
+  those belong to the parent memory hierarchy.

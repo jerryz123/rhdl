@@ -2,12 +2,43 @@
 
 # Simulation harnesses
 
-The executable simulation stack follows a Chipyard-like ownership boundary:
+This directory turns the synthesizable [`socs/` compositions](../socs/README.md)
+into executable simulations. It owns the parameterless generated top, FESVR
+transport, Verilator binding, simulation-only memory model, clock/reset driver,
+and executable workflows. The SoCs continue to own processor, device, CHI,
+NoC, and synthesizable-memory structure.
 
-```text
-TestDriver.v -> <soc>-soc-harness.rhdl -> one SoC variant
-                         |
-                         +-> FESVR host model
+## Choose a harness
+
+| `SOC` | Selected system | Memory supplied by the harness | Default core specialization |
+| --- | --- | --- | --- |
+| `simple` | `SimpleSoC` | `CHIDPIMemory` behind the SoC's external SN-F boundary | RV64IMAFDC plus B and Zicond |
+| `mini` | `MiniSoC` | None; the SoC contains its own 64 KiB `CHIRam` | Integer-only, compressed instructions disabled |
+| `tiled` | Default 4x4 `TiledSoC` | None; each LLC tile contains its backing `CHIRam` bank | Integer-only, compressed instructions enabled |
+
+`SOC` defaults to `simple`. Read the [SoC comparison](../socs/README.md#choose-a-system)
+for the hardware differences, then use this guide to build or run the matching
+harness.
+
+## Ownership and execution boundary
+
+The stack follows a Chipyard-like boundary:
+
+```mermaid
+flowchart LR
+  Driver["TestDriver.v<br/>clock, reset, UART pins, and exit"]
+
+  subgraph Harness["Generated SoCHarness top - sims ownership"]
+    FESVR["FesvrRequester<br/>coherent host RN-F"]
+    SoC["Selected SoC instance<br/>hardware owned by socs/"]
+    DPIMemory["CHIDPIMemory<br/>SimpleSoC only"]
+
+    FESVR <--> SoC
+    SoC <--> DPIMemory
+  end
+
+  Driver -->|"clock, reset, idle UART RX"| Harness
+  Harness -->|"exit, UART TX + interrupt"| Driver
 ```
 
 `TestDriver.v` generates clock and reset, holds the UART RX line idle, and
@@ -15,16 +46,22 @@ observes the harness exit status. Each SoC has a separate parameterless harness
 that instantiates the FESVR requester and connects it to that SoC's common
 `SoCHostInterface`. Each harness passes through the synthesizable UART RX, TX,
 and interrupt boundary; it does not instantiate the UART PTY DPI model. The
-SoCs contain no DPI calls or simulator dependencies.
+SimpleSoC harness additionally instantiates `CHIDPIMemory`, because only that
+SoC exposes an external normal-memory boundary. No SoC contains DPI calls or
+simulator dependencies.
 
 The directory owns:
 
-- `fesvr/`: the simulator-independent direct-memory FESVR transport and its
-  Rhodium CHI requester.
-- `verilator/`: the Verilator VPI/DPI binding.
-- `tests/`: independent structural checks for FESVR and each SoC harness.
+- [`fesvr/`](fesvr/): the simulator-independent direct-memory FESVR transport
+  and its Rhodium CHI requester.
+- [`verilator/`](verilator/): the Verilator VPI/DPI binding.
+- [`tests/`](tests/): independent structural checks for FESVR and each system
+  harness, plus the executable smoke payload.
 
-Install the pinned FESVR dependency and build a reusable simulator with:
+## Build a simulator
+
+Install the pinned FESVR dependency once, then build any system-specific
+simulator:
 
 ```sh
 make -C sims setup
@@ -44,18 +81,15 @@ unused and drives RX high as an idle 8-N-1 serial line. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
 does not require or embed a target program.
 
-The SimpleSoC harness uses that SoC's default RV64D specialization. The MiniSoC
-harness retains its fabric's integer-only default; TiledSoC also defaults to
-integer-only operation and can select an FP profile explicitly.
+The Makefile maps `SOC` to one harness module. A shared emitter dynamically
+loads only that module's exported `design`, so unrelated SoCs are neither
+imported nor elaborated. Every harness emits the same parameterless
+`SoCHarness` Verilog top contract, allowing `TestDriver.v` to remain shared;
+there is no Rhodium variant enum or conditional harness circuit.
 
-The Makefile maps `SOC` to its harness module. A shared emitter dynamically
-loads only that module's exported `design`, so unrelated SoCs are not imported
-or elaborated. Every harness emits the same `SoCHarness` Verilog top contract,
-so `TestDriver.v` remains shared; there is no Rhodium variant enum or conditional
-harness circuit.
+## Run a target
 
-Run any FESVR-compatible target binary through the already-built simulator
-with:
+Run any FESVR-compatible target binary through an already-built simulator:
 
 ```sh
 make -C sims run SOC=simple BINARY=/absolute/path/to/program.elf
@@ -65,17 +99,36 @@ make -C sims run SOC=tiled BINARY=/absolute/path/to/program.elf
 
 `HTIF_ARGS` places optional FESVR host arguments before the target binary, and
 `TARGET_ARGS` places arguments after it. The simulator passes this process
-argument vector through VPI to `DirectMemoryHtif`; FESVR owns ELF parsing,
+argument vector through VPI to `DirectMemoryHtif`. FESVR owns ELF parsing,
 segment loading, entry-point discovery, `tohost`/`fromhost` polling, and exit
-status. The Makefile and RTL do not implement a separate binary loader.
+status; the Makefile and RTL do not implement a separate binary loader.
 
-Run the genuine execution smoke, focused structural checks, and tiled lowering
-with:
+`DirectMemoryHtif` presents FESVR's abstract memory chunks as one-outstanding,
+aligned 32-bit transactions. Target XLEN may be 32 or 64; addresses and entry
+points remain 64-bit. `FesvrRequester` is a non-caching RN-F that converts
+those private ready-valid DPI signals into coherent CHI `ReadClean` and
+`WriteUniquePtl` transactions and reports Invalid for every snoop. ELF loading
+and `tohost`/`fromhost` polling therefore observe dirty RV5Stage cache lines
+without reserving a special mailbox address range.
+
+## Focused validation
+
+Run the genuine execution smoke for any system:
 
 ```sh
 make -C sims smoke SOC=simple
 make -C sims smoke SOC=mini
 make -C sims smoke SOC=tiled
+```
+
+The smoke starts with `tohost` cleared, executes RV64I instructions on
+RV5Stage, stores the passing value into a dirty L1D line, and succeeds only
+after the coherent FESVR requester observes that write. It uses the same `run`
+path as an external target binary.
+
+Run the focused binding, structural, and tiled-lowering checks with:
+
+```sh
 make -C sims dpi-compile-check \
   VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
 make -C sims chi-dpi-memory-test \
@@ -84,26 +137,13 @@ make -C sims elaboration-test
 make -C sims tiled-lowering-test
 ```
 
-The smoke starts with `tohost` cleared, executes RV64I instructions on RV5Stage,
-stores the passing value into a dirty L1D line, and succeeds only after the
-coherent FESVR requester observes that write. It uses the same `run` path as an
-external target binary.
+The `chi-dpi-memory-test` convenience target independently compiles and
+exercises the CHI-owned DPI model documented by the
+[`chi/` package](../chi/README.md). The SimpleSoC harness instantiates that same
+model behind the SoC's external memory boundary.
 
 These simulators always use CIRCT-inferred memories. To validate a
 design-and-technology SRAM mapping while reusing this harness, driver, FESVR
 transport, and smoke payload, run `make -C vlsi/sim smoke`; see the
 [`vlsi/sim` guide](../vlsi/sim/README.md). Keeping mapped simulation there
 prevents technology policy from entering this package or the SoCs.
-
-`DirectMemoryHtif` presents FESVR's abstract memory chunks as one-outstanding,
-aligned 32-bit transactions. Target XLEN may be 32 or 64; addresses and entry
-points remain 64-bit. `FesvrRequester` is a non-caching RN-F: it converts those
-private ready-valid DPI signals into coherent CHI `ReadClean` and
-`WriteUniquePtl` transactions and reports Invalid for every snoop. Consequently
-ELF loading and `tohost`/`fromhost` polling observe dirty RV5Stage cache lines
-without reserving a special mailbox address range.
-
-The `chi-dpi-memory-test` convenience target independently compiles and
-exercises the CHI-owned DPI model documented in the
-[`chi/` package](../chi/README.md). The SimpleSoC harness instantiates that same
-model behind the SoC's external memory boundary.
