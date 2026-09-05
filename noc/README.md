@@ -7,115 +7,102 @@ materialization, virtual-channel dependency validation, route-table generation,
 and validated hardware plans. Its pure model is intentionally independent of
 Rhodium hardware construction and CIRCT.
 
-## Current scope
+## At a glance
 
-The current implementation provides:
+The package has one directional workflow: describe a network symbolically,
+lower it into a deterministic finite model, prove the materialized routing
+relation, and only then project plans that hardware is allowed to consume.
 
-- Symbolic hierarchical node, injection-terminal, ejection-terminal, and
-  directed-link handles for topology authoring.
-- Named VC groups with deterministic local VC assignment.
-- Immutable symbolic topology specifications with early structural validation.
-- Symbolic injection and ejection placement that is authored independently of
-  the physical router-and-link topology.
-- Deterministic lowering to the normalized topology model with bidirectional
-  identity-provenance lookups.
-- Hierarchical prefixing and collision-checked topology composition.
-- Topology-independent directed and bidirectional link helpers.
-- Optional embedded structural topology declarations that expand only into
-  the public authoring API.
-- Optional embedded unordered routing rules that expand only into the public
-  policy algebra.
-- A complete pre-hardware equivalence matrix for raw, builder, and embedded
-  authoring paths that does not re-materialize their routing relations.
-- Authored compilation diagnostics that project normalized cycle and escape
-  failures back to symbolic topology, route, and routing-rule names.
-- Symbolic route classes with deterministic normalized IDs and provenance.
-- Inspectable routing-policy expressions with symbolic contexts and lowering to
-  the existing normalized routing relation.
-- Resource-visible routing phases expressed as named VC-group transitions,
-  without hidden mutable packet state.
-- Generic irreversible composition of independent adaptive and escape policies.
-- Separate standard definitions for line and rectangular-mesh topologies. The
-  mesh generator uses ordinary finite host iteration and explicit dropped-edge
-  boundary checks, then constructs the existing NoC identities and authoring
-  model directly.
-- A standard all-pairs traffic definition that produces ordinary symbolic
-  route-class specifications for any authored topology.
-- Standard XY and YX dimension-order policies defined as clients of the
-  generic routing-policy interface and rectangular-mesh view.
-- Generic minimal-adaptive routing over precomputed hop distances for any
-  authored directed topology.
-- Deterministic up*/down* routing synthesis for connected bidirectional
-  topologies with an explicit root and canonical tie-breaking.
-- Minimal-adaptive mesh routing with irreversible XY escape transitions,
-  rejected by default whole-graph acyclicity and accepted by explicit escape
-  validation.
-- An irregular cyclic topology combining generic minimal adaptation with a
-  user-authored spanning-tree escape policy under both proof modes.
-- Nominal node, link, virtual-channel, and route-class identities.
-- Explicit directed multigraph topologies.
-- Positive, heterogeneous virtual-channel counts on physical links.
-- Stable topology and VC normalization.
-- Finite route classes between injection and ejection terminals attached to
-  routers.
-- Injection and held-VC routing origins.
-- Physically legal candidate enumeration with automatic destination ejection.
-- A host routing-relation wrapper.
-- Deterministic, exactly-once materialization of every finite routing query.
-- Immutable decision lookup and allowed-candidate queries that never re-run the
-  user callback.
-- Deterministic per-route reachability over allowed materialized decisions.
-- Rejection of reachable dead ends and destinations that cannot be reached.
-- Reachable-only VC dependency graph construction with merged route provenance.
-- Deterministic dependency-graph acyclicity certificates and cycle witnesses.
-- Escape-subnetwork closure, viable-entry, escape-only progress, and projected
-  dependency-acyclicity validation with deterministic failure witnesses.
-- Deterministic unit-hop distances and complete minimal-next-link sets for any
-  directed topology.
-- An opaque validated-routing artifact and deterministic host route-table rows.
-- Deterministic router-local origin and target encodings projected from that
-  validated artifact.
-- Deterministic whole-network plans assigning router indices, external
-  injection and ejection ports, and every physical VC's source-target and
-  destination-input indices without importing Rhodium.
-- A generic network compiler that joins peer topology, terminal-placement,
-  route-class, and routing-policy inputs only at validation and planning time.
+```mermaid
+flowchart LR
+  topology["TopologySpec<br/>routers, links, VC groups"]
+  terminals["TerminalPlacement<br/>injection and ejection"]
+  routes["RouteClassSpec<br/>finite traffic classes"]
+  policy["RoutingPolicy<br/>legal next VCs"]
 
-Parallel physical links and self-loops are legal. Topology construction rejects
-duplicate identities, missing link endpoints, and nonpositive VC counts.
+  topology --> lower["Deterministic lowering<br/>normalized IDs + provenance"]
+  terminals --> lower
+  routes --> lower
+  policy --> materialize["Exactly-once<br/>relation materialization"]
+  lower --> materialize
+  materialize --> reachability["Reachability<br/>and dead-end checks"]
+  reachability --> dependencies["Reachable VC<br/>dependency graph"]
+  dependencies --> proof{"Selected proof regime"}
+  proof -->|whole graph| acyclic["AcyclicCertificate"]
+  proof -->|escape subnet| escape["EscapeCertificate"]
+  acyclic --> validated["ValidatedRouting"]
+  escape --> validated
+  validated --> plans["RouteTable + NetworkPlan<br/>RouterPlan + RouterFamilyPlan"]
+  plans --> rtl["noc/rtl hardware consumers"]
+```
 
-The pure packages do not lower route tables into Rhodium or generate router RTL.
-The separate [`rtl/`](rtl/README.md) package accepts only `RouterPlan` values
-derived from `ValidatedRouting`. It lowers finite local rows into combinational
-route computers and, for whole-graph-acyclic routing, simple buffered routers
-for single-beat packets. User-owned hierarchy uses pure `NetworkPlan` mappings
-to place those routers in independent subsystems and connect their physical VC
-boundaries.
-No Rhodium dependency flows back into the pure layers.
+The implemented surface is organized into six capabilities:
+
+- **Symbolic authoring.** Hierarchical topology, terminal, link, VC-group, and
+  route-class names support deterministic prefixing, composition, lowering,
+  and diagnostic provenance. Optional `topology:` and `routing:` forms expand
+  into the same public authoring API as ordinary host code.
+- **Finite routing model.** Nominal node, link, VC, terminal, and route-class
+  identities describe explicit directed multigraphs with positive,
+  heterogeneous VC counts. Parallel links and self-loops are legal.
+- **Reusable definitions.** Lines, rectangular meshes, all-pairs traffic, XY
+  and YX dimension order, topology-independent minimal adaptation,
+  deterministic up*/down*, and irreversible adaptive-to-escape composition
+  are clients of the generic model rather than privileged compiler concepts.
+- **Deterministic analysis.** Routing callbacks are evaluated exactly once;
+  reachability, dead-end detection, hop distances, and dependency graphs then
+  operate on an immutable snapshot and retain route provenance.
+- **Explicit proofs.** Compilation either proves the complete reachable VC
+  dependency graph acyclic or validates escape closure, entry, progress, and
+  projected acyclicity. Failures carry deterministic witnesses that authored
+  diagnostics project back to symbolic names.
+- **Hardware-safe planning.** Only opaque `ValidatedRouting` can produce route
+  tables, router-local encodings, whole-network connection assignments, and
+  uniform router-family plans.
+
+Topology construction rejects duplicate identities, missing link endpoints,
+and nonpositive VC counts. The proof contracts cover routing deadlock under
+their documented VC acquisition assumptions; they do not imply fairness,
+starvation freedom, livelock freedom, or protocol correctness.
+
+## Reading paths
+
+| Goal | Start here |
+| --- | --- |
+| Describe or compose a topology | [Topology authoring](#topology-authoring) |
+| Use the embedded authoring syntax | [`topology:`](#embedded-topology-syntax) and [`routing:`](#embedded-routing-syntax) |
+| Select a reusable topology | [Reusable topology definitions](#reusable-topology-definitions) |
+| Author traffic classes or routing policy | [Traffic and routing authoring](#traffic-and-routing-authoring) |
+| Understand normalization and proof semantics | [Normalized model and validation](#normalized-model-and-validation) |
+| Generate route tables or router plans | [Validated routing and hardware plans](#validated-routing-and-hardware-plans) |
+| Build hardware from a validated plan | [`noc/rtl`](rtl/README.md) |
 
 ## Dependency boundary
 
-Files under `noc/model/`, `noc/authoring/`, `noc/analysis/`, `noc/language/`,
-`noc/plan/`, and `noc/std/` use only `#lang rhombus` and other modules in the pure NoC package.
-They must not import Rhodium core, frontend, backend, standard-library hardware
-modules, or CIRCT integration. Core model, authoring, analysis, and planning
-modules must not import `noc/std`; reusable topology and routing definitions
-depend on the core abstractions, never the reverse.
+| Package | May depend on | Must not depend on |
+| --- | --- | --- |
+| `noc/model`, `authoring`, `analysis`, `language`, `plan`, `std` | `#lang rhombus` and pure NoC modules | Rhodium core, frontend, backend, hardware standard library, or CIRCT integration |
+| Core model, authoring, analysis, and planning | Lower pure NoC layers | `noc/std`; reusable definitions depend on core abstractions, never the reverse |
+| [`noc/rtl`](rtl/README.md) | Public `#lang rhodium`, reusable Rhodium primitives, and pure NoC model and plans | Rhodium implementation modules or CIRCT integration |
 
-Files under `noc/rtl/` may import the public `#lang rhodium` language and reusable
-Rhodium standard primitives, plus the pure NoC model and plan. They must not
-import Rhodium core, frontend implementation, backend, or CIRCT modules.
+No Rhodium dependency flows back into the pure layers. The pure packages do
+not lower route tables or generate RTL. `noc/rtl` accepts only `RouterPlan`
+values derived from `ValidatedRouting`, while the system owner uses pure
+`NetworkPlan` mappings to place routers and connect physical VC boundaries.
 
-The hardware bridge is tested separately by focused route-computer,
-simple-router, and hierarchical-assembly frontend, CIRCT, and Verilator
-fixtures. The route-computer fixture exhausts every encoded input of every
-router in a small validated network. The router fixture checks one-to-one
-allocation, independent backpressure, ejection contention, and packet
-conservation. The assembly fixture places three routers in independently
-defined user subsystems; it checks two-hop destination selection,
-per-destination ordering, and conservation under independent randomized
-ejection backpressure. None of these consumers grants hardware code access to
-unvalidated relations or proof construction.
+The hardware bridge has separate frontend, CIRCT, and Verilator fixtures:
+
+- The route-computer fixture exhausts every encoded input of every router in a
+  small validated network.
+- The simple-router fixture checks one-to-one allocation, independent
+  backpressure, ejection contention, and packet conservation.
+- The hierarchical assembly fixture places three routers in independently
+  defined user subsystems and checks two-hop destination selection,
+  per-destination ordering, and conservation under randomized independent
+  ejection backpressure.
+
+None of these consumers grants hardware code access to unvalidated relations
+or proof construction.
 
 Run the complete host-side NoC checks and package-boundary validation from the
 repository root:
@@ -128,7 +115,9 @@ For one focused host test, use the repository wrapper so it receives a fresh
 compiled root, for example
 `tools/run-racket-tests.sh noc/tests/plan/router-family-plan-test.rhm`.
 
-## Topology authoring
+## Authoring
+
+### Topology authoring
 
 The authoring layer lets users name topology objects without allocating the
 numeric identities used by graph analysis. A `NamePath` is a nonempty list of
@@ -177,7 +166,7 @@ The embedded topology syntax below can still describe a complete
 authoring convenience rather than a requirement that physical topology own
 protocol endpoint placement.
 
-## Embedded topology syntax
+### Embedded topology syntax
 
 The optional `noc/language` package provides a structural `topology:`
 expression for explicit graphs:
@@ -209,7 +198,7 @@ define topology families, materialize routing, invoke validation, or construct
 hardware. Generated lines, meshes, and user topology views remain ordinary
 functions in `std` or user modules.
 
-## Embedded routing syntax
+### Embedded routing syntax
 
 The same optional package provides a `routing:` expression whose named rules
 form an unordered legal-routing relation:
@@ -253,7 +242,7 @@ all decisions still pass through `lower_routing_policy`, finite
 materialization, reachability, dependency analysis, and the selected proof
 regime.
 
-## Authored diagnostics and equivalence gate
+### Authored diagnostics and equivalence gate
 
 `compile_authored_routing` is a pure host-side facade over the ordinary
 authoring and validation APIs. Policy lowering records a
@@ -280,7 +269,12 @@ topology and route classes, materialized and reachable decisions, dependency
 graph, proof result, route-table rows, assumptions, and validator version.
 Hardware emission remains outside this package.
 
-## Standard topology definitions
+## Reusable topology definitions
+
+Standard topology packages are ordinary authoring-layer clients. They do not
+add topology families to the normalized model, analysis, or proof machinery.
+
+### Standard topology definitions
 
 Reusable topology families live under `noc/std/topology/`, outside the core
 authoring API. `directed_line` and `bidirectional_line` use stable `node[N]`,
@@ -306,7 +300,13 @@ The mesh-topology example selects one mesh size and VC-group configuration by
 importing only the public authoring and standard-topology APIs; reusable
 packages do not import that instance.
 
-## Route-class authoring
+## Traffic and routing authoring
+
+Route classes define the finite traffic domain, while routing policies define
+the legal next resources for each route and origin. Reusable traffic generators
+and algorithms build on those two generic authoring contracts.
+
+### Route-class authoring
 
 `RouteClassRef` gives a finite route class a hierarchical symbolic name, while
 `RouteClassSpec` names an `InjectionRef` source and `EjectionRef` destination.
@@ -320,7 +320,7 @@ This layer defines only explicit route-class semantics. Reusable traffic sets
 such as all ordered source/destination pairs belong under `noc/std/traffic/`,
 and concrete selections belong under `noc/examples/` or in user packages.
 
-## Standard traffic definitions
+### Standard traffic definitions
 
 `all_pairs` generates ordinary `RouteClassSpec` values for every ordered
 injection/ejection-terminal pair in a `TopologySpec`. Pairs attached to the
@@ -335,7 +335,7 @@ The definition performs no lowering or routing analysis. The mesh-traffic
 example independently selects the reusable example mesh, applies `all_pairs`,
 and lowers the result through that mesh's `LoweredTopology`.
 
-## Routing-policy authoring
+### Routing-policy authoring
 
 A `RoutingPolicy` is an inspectable host-side predicate expression over a
 symbolic `RoutingContext`. Each context contains the original `RouteClassSpec`,
@@ -381,7 +381,7 @@ links are legal within their class; the combinator contributes only the
 resource-visible, irreversible group transition. It lowers through the normal
 `RoutingRelation` path and grants no special authority to validation.
 
-## Standard routing policies
+### Standard routing policies
 
 Reusable topology-specific policies live under `noc/std/routing/`, outside
 core authoring and analysis. `DimensionOrderPolicy` is an inspectable client of
@@ -460,7 +460,14 @@ VCs through `EscapeValidationRequest`. The standard-policy tests exercise
 that independent path on the irregular adaptive example and reject unsuitable
 disconnected, one-way, self-loop, and incompletely provisioned topologies.
 
-## Model
+## Normalized model and validation
+
+The normalized model is the finite, deterministic boundary beneath symbolic
+authoring. Validation consumes only this model and its exactly-once routing
+snapshot; it never calls back into topology or policy authoring during later
+analysis stages.
+
+### Model
 
 `NodeId`, `LinkId`, `VCId`, and `RouteClassId` are nominal identities backed by
 nonnegative host integers. A `VCId` consists of a physical link identity and a
@@ -518,7 +525,7 @@ finite query once, requires a Boolean result, and returns `MaterializedRouting`.
 The snapshot deliberately does not retain the callback. Its decision and
 allowed-candidate methods therefore cannot re-evaluate user code.
 
-## Reachability
+### Reachability
 
 `analyze_reachability` starts each route class at its injection origin and
 traverses only allowed decisions stored in `MaterializedRouting`. Arrival at
@@ -534,7 +541,7 @@ in disconnected or otherwise unreachable routing states are excluded, so the
 next dependency-graph pass will not report false cycles from unreachable
 relation entries.
 
-## VC dependency graph
+### VC dependency graph
 
 `build_dependency_graph` projects each reachable decision of the form
 `HeldVC(A) -> B` into the resource dependency edge `A -> B`. Injection
@@ -549,7 +556,7 @@ witness. `graph.project(selected_vertices)` can retain an explicit subset of tho
 vertices and their induced edges without changing the originating reachable
 routing evidence; escape validation uses this operation after classifying VCs.
 
-## Acyclicity proof
+### Acyclicity proof
 
 `check_dependency_acyclicity` applies the initial deliberately narrow deadlock
 criterion to the union of reachable VC dependencies. It returns one of two
@@ -568,7 +575,7 @@ criterion proves routing deadlock freedom only under the documented VC
 hold-and-request model; it does not prove fairness, starvation freedom,
 livelock freedom, or correctness of a future RTL implementation.
 
-## Escape-subnetwork validation
+### Escape-subnetwork validation
 
 `EscapeValidationRequest(topology, escape_vcs)` binds a nonempty, normalized
 set of VC identities to one exact topology. Authored topologies can lower
@@ -591,7 +598,7 @@ request an available escape transition and eventually grant that persistent
 request. It does not claim general arbitration fairness, starvation freedom,
 or livelock freedom.
 
-## Validated routing and route tables
+## Validated routing and hardware plans
 
 `compile_routing` is the single validation gate from `RoutingProblem` to
 hardware-consumable domain data. It runs materialization, reachability,

@@ -4,45 +4,41 @@
 
 The frontend turns ordinary Rhombus computation and Rhodium notation into the
 single public core IR. Macro expansion is not a second hardware IR. The
-package dependency contract is in [`../README.md`](../README.md); individual
-features are documented in [`layers/README.md`](layers/README.md).
+package dependency contract and authoritative layer inventory are in
+[`../README.md`](../README.md); individual language features are documented in
+[`layers/README.md`](layers/README.md).
 
-## One semantic core, layered languages
+This guide answers four frontend questions: which profile to use, what
+elaboration does, where host computation ends and hardware begins, and where a
+new abstraction belongs.
 
-```text
-#lang rhodium ------> standard ------> foundation + curated layers
-#lang rhodium/base ------------------> foundation + selected layers
-                                             |
-                                             v
-                                    elaboration kernel
-                                             |
-                                             v
-                                       public core IR
+## Choose a language profile
+
+Both profiles elaborate through the same kernel into the same core IR.
+`#lang rhodium` is the normal choice; use `#lang rhodium/base` when a tool,
+experiment, or library needs an explicitly minimal language surface.
+
+```mermaid
+flowchart LR
+  Rhodium["#lang rhodium"] --> Standard["curated standard profile"]
+  Base["#lang rhodium/base"] --> Foundation["frontend foundation"]
+  Base -.->|select layers explicitly| Selected["selected layers"]
+  Standard --> Foundation
+  Standard --> Selected
+  Foundation --> Kernel["elaboration kernel"]
+  Selected --> Kernel
+  Kernel --> IR["public core IR"]
 ```
 
-The layers have separate responsibilities:
+| Profile | Includes | Use it for |
+|---|---|---|
+| `#lang rhodium` | Foundation and all curated layers | Designs, reusable hardware libraries, and most tests |
+| `#lang rhodium/base` | Foundation only; layers are explicit imports | Layer isolation, language experiments, and minimal tooling fixtures |
 
-- [`kernel.rhm`](kernel.rhm) provides context-sensitive construction functions
-  over the core.
-- [`foundation.rhm`](foundation.rhm) defines circuits, ports, connections,
-  elaboration, basic types, selection, and casts.
-- [`support/`](support/) contains shared macro and static-information
-  mechanisms, not selectable language profiles.
-- [`layers/`](layers/README.md) contains independently selectable notation and
-  abstractions over existing semantics.
-- [`standard.rhm`](standard.rhm) only aggregates the foundation and curated
-  layers for `#lang rhodium`.
-
-A concept belongs in core when it introduces hardware semantics that the IR,
-verifier, and backends must preserve. Optional derived facts and diagnostic
-reports belong in `rhodium/analysis/`. Notation, organization, reusable host
-descriptions, and authoring policy over existing operations belong in a
-frontend layer or ordinary library.
-
-## Language profiles
-
-`#lang rhodium` is the normal curated profile. `#lang rhodium/base` exposes the
-shared circuit boundary and lets a program select additional layers:
+The base profile exposes `circuit`, `elaborate`, ports, `<==`, `Bits`, `Clock`,
+`Reset`, hardware selection, `.into`, and guarded host `if`. It does not expose
+the public core Builder or raw kernel. For example, an adder can select only the
+combinational layer:
 
 ```rhombus
 #lang rhodium/base
@@ -58,24 +54,31 @@ circuit Adder(width):
 def design = elaborate(Adder(8))
 ```
 
-The base profile provides `circuit`, `elaborate`, ports, `<==`, `Bits`,
-`Clock`, `Reset`, hardware selection, `.into`, and guarded host `if`. It does
-not expose the public core Builder or raw kernel. The standard profile adds the
-curated layers without changing the resulting IR.
+The standard profile adds the curated layers without changing the resulting
+IR. The four programs under [`../../examples/lop/`](../../examples/lop/)
+express one adder through the public core, kernel, explicit base composition,
+and standard profile. `make lop-test` checks that all four produce identical
+public IR and CIRCT representations.
 
 Library code may use `hardware_value_type(value)` to recover the Rhodium type of
 caller-elaborated readable or driveable hardware without importing core IR
 classes. Host values are rejected.
 
-The four programs under [`../../examples/lop/`](../../examples/lop/) express
-one adder through the public core, kernel, explicit base composition, and
-standard profile. `make lop-test` checks that they produce identical public IR
-and CIRCT representations.
-
 ## Circuits and elaboration
 
-A circuit declaration defines a parameterized module family. Calling it during
-`elaborate` creates the selected specialization once and reuses that definition
+Elaboration is deterministic host computation that constructs known-width
+hardware:
+
+1. A circuit call selects a module specialization from host parameters.
+2. The circuit body constructs ports, operations, state, instances, and drives.
+3. Stable equivalent calls reuse the same module definition.
+4. `elaborate` returns a core `Design`; `elaborate_with_top` also identifies its
+   explicit top module.
+
+### Circuit families and explicit tops
+
+A circuit declaration defines a parameterized module family. Calling it while
+elaborating creates the selected specialization once and reuses that definition
 for later calls with the same stable parameters:
 
 ```rhombus
@@ -109,6 +112,8 @@ the unchanged design together with its resolved clocking report.
 the first destination register carries structurally verified crossing
 evidence.
 
+### Ports and drivers
+
 Inputs are readable and cannot be driven. Outputs are driveable and become
 readable after they are driven. Outputs, instance inputs, and register
 next-state places use `<==`; every place has one effective driver.
@@ -120,22 +125,19 @@ input(a, b): Bits(width)
 output(sum, carry): Bits(width)
 ```
 
-Elaboration is deterministic host computation that constructs known-width
-hardware. Host values determine which hardware exists but are not runtime
-hardware data:
+### Host control versus hardware control
 
-```text
-HOST                         HARDWARE
+Host values determine which hardware exists. They are not runtime hardware
+data:
 
-Int                          Bits(width)
-Boolean                      host value only
-Bool                         runtime Boolean hardware data
-if                           elaboration-time choice
-when                         hardware conditional assignment
-switch                       hardware exact-key conditional assignment
-for over a host collection   repeated generated structure
-generator call               cached module specialization
-```
+| Host-side construct | Elaboration meaning | Hardware-side counterpart |
+|---|---|---|
+| `Int` | A number used while constructing hardware | `Bits(width)` stores a runtime bit vector |
+| `Boolean` | A host-only truth value | `Bool` stores a runtime Boolean value |
+| `if` | Select which structure to construct | `when` conditionally drives hardware |
+| Host lookup or branching | Select a case while elaborating | `switch` selects an exact hardware key at runtime |
+| `for` over a host collection | Repeat generated structure | The resulting operations and instances |
+| Circuit generator call | Select or create a module specialization | An instance of that module |
 
 Host control retains ordinary Rhombus truthiness. A hardware value is a host
 object and is therefore truthy, so using one wherever Rhombus asks for a truth
@@ -146,44 +148,39 @@ by the conditional layer for runtime control. `when` conditions must be one-bit
 hardware values; `switch` selectors must be hardware values with supported
 exact keys. Host values are rejected by both forms.
 
-## Host parameters and helpers
+## Module specialization and host helpers
 
 Circuit parameters may be any host value; only live circuit-bound hardware is
-rejected. Integers, Booleans, strings, symbols, recursively stable immutable
-lists, and hardware-type descriptors automatically participate in module
-specialization reuse. A user-defined immutable configuration implements
-`StableCircuitParam` to opt into the same reuse. Its default specialization
-equality is ordinary Rhombus `==`: transparent immutable classes compare
-structurally, while opaque compiled artifacts remain nominal:
+rejected. Their stability determines specialization reuse:
+
+| Parameter kind | Specialization behavior |
+|---|---|
+| Integers, Booleans, strings, symbols, recursively stable immutable lists, and hardware-type descriptors | Equivalent values reuse one module definition |
+| An immutable class implementing `StableCircuitParam` | Uses Rhombus `==` by default; transparent classes compare structurally and opaque artifacts remain nominal |
+| Mutable collections, functions, closures, and other host objects | Legal, but every call creates a fresh module definition |
+
+A configuration opts into stable reuse explicitly:
 
 ```rhombus
 class EngineConfig(lanes :: PosInt, width :: PosInt):
   implements StableCircuitParam
 ```
 
-Override `same_stable_circuit_param` only when a type needs semantic equality that
-differs from `==`. An overridden comparison must be symmetric, deterministic,
-and independent of mutable elaboration state. Other host objects—including
-mutable collections and ordinary functions or closures—remain legal circuit
-parameters, but each call elaborates a fresh module definition instead of
-reusing a cached specialization.
+Override `same_stable_circuit_param` only for equality semantics different from
+`==`; the result must be symmetric, deterministic, and independent of mutable
+elaboration state.
 
 Generator declarations accept positional and keyword bindings with ordinary
 Rhombus annotations and default expressions. Ordinary and sync circuits share
-the same parameter forms and host-value validation.
-
-Annotate a generic hardware-type parameter as `T :: DataType`; annotate a
-hardware value separately with the most specific hardware annotation its
-operation accepts. This keeps elaboration-time type descriptors distinct from
-runtime circuit values.
+these parameter forms and host-value validation.
 
 The elaboration-local specialization cache indexes calls whose entire argument
-list is stable by circuit declaration identity, then compares normalized
-positional and keyword values. Equivalent stable calls share one definition;
-distinct stable values and uncached host arguments receive deterministic
-suffixes such as `Adder` and `Adder_1`. Parameters are not embedded into module
-names, and the cache is not persisted across compiler runs. Active recursion is
-rejected by generator identity.
+list is stable by declaration identity and normalized positional and keyword
+values. Distinct or uncached calls receive deterministic suffixes such as
+`Adder` and `Adder_1`; parameters are not embedded in names. The cache is local
+to one elaboration, and active recursion is rejected by generator identity.
+
+### Determinism and cache safety
 
 Circuit bodies and parameter defaults must depend only on their parameters,
 stable immutable captures, and local elaboration state. Local mutation used to
@@ -191,6 +188,8 @@ collect generated structure is valid; observing or modifying external mutable
 state is not, because a cache hit does not execute the body again. A physical
 or implementation variant that needs a distinct definition should carry an
 explicit stable parameter naming that variant.
+
+### Hardware-aware host helpers
 
 Ordinary host functions may accept hardware objects while elaborating,
 inspect type descriptors, construct hardware, and return hardware to the
@@ -202,17 +201,14 @@ fun low_word(value, width) :: Bits(width):
   value[0..width]
 ```
 
-Exact hardware annotations retain field, indexing, casting, and lookup static
-information. `Bits`, `SInt`, `Clock`, `Reset`, `Bool`, `Vec`, bundles, and
-hardware enums provide concise annotation forms. A `hardware_type Token(width)`
-declaration provides both exact `Token(width)` and family-wide `Token`
-annotations; a family-annotated value exposes the concrete descriptor and its
-host parameters through `value.type`. Use `Hardware.of(type)` when the descriptor
-itself is dynamic rather than a named hardware-type family. Use `Bits`
-only when a function accepts `Bits` of any width, and `Hardware.packable` only
-when it accepts any packable hardware `DataType`. Bare `Hardware` is reserved
-for operations that genuinely accept arbitrary readable or driveable hardware
-entities without a data-type constraint.
+Annotate a type parameter as `T :: DataType` and a runtime value with the most
+specific hardware annotation the operation accepts. Exact annotations retain
+field, indexing, casting, and lookup information. A
+`hardware_type Token(width)` declaration provides exact `Token(width)` and
+family-wide `Token`; `value.type` recovers the concrete descriptor. Use
+`Hardware.of(type)` for a dynamic descriptor, bare `Bits` for any bit-vector
+width, `Hardware.packable` for any packed `DataType`, and bare `Hardware` only
+for arbitrary readable or driveable hardware entities.
 
 See [`../../examples/rtl/host-parameters.rhdl`](../../examples/rtl/host-parameters.rhdl)
 and [`../../examples/rtl/layered-adder.rhdl`](../../examples/rtl/layered-adder.rhdl).
@@ -272,7 +268,20 @@ owned by an elaborated circuit. This is how extensions add types, literal
 forms, mux keys, field access, and annotations without adding frontend-only
 operations to the core IR.
 
-## Extending Rhodium
+## Extension routing
+
+Start with the narrowest boundary that can express the abstraction. The
+authoritative import rules remain in the
+[package dependency contract](../README.md#dependency-rules).
+
+| The change needs to... | Put it in... | Boundary |
+|---|---|---|
+| Compose existing hardware operations behind a reusable API | An ordinary Rhombus or Rhodium library | Use only public language forms |
+| Add notation, static information, or authoring policy over existing semantics | `frontend/layers/` | A selectable layer; do not import sibling layers |
+| Share macro or static-information machinery across layers | `frontend/support/` | Not a selectable profile and not feature behavior |
+| Derive certification, provenance, or diagnostics from completed IR | `rhodium/analysis/` | Consume core IR without becoming core semantics |
+| Add hardware semantics that verification and every backend must preserve | `rhodium/core/` | Extend the IR, Builder, verifier, printer, and consumers together |
+| Lower an existing core operation to a target | `rhodium/backend/` | Consume core IR; never import frontend implementation |
 
 A useful construction abstraction can be an ordinary Rhombus function:
 
@@ -287,6 +296,6 @@ fun add_pair(left, right):
 ```
 
 Importing this function from a `.rhdl` program requires no reader, IR,
-verifier, or backend change. Add a frontend layer when reusable syntax or
-static information is required; add a core concept only when new hardware
-semantics must survive elaboration.
+verifier, or backend change. For frontend implementation roles, see the
+[package responsibility table](../README.md#package-responsibilities); for the
+existing public features, see the [layer reference](layers/README.md).

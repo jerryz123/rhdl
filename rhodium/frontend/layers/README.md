@@ -2,39 +2,56 @@
 
 # Rhodium frontend layers
 
-Frontend layers add notation, types, static information, and authoring policy
-over existing core semantics. They do not import sibling layers or backends.
-Shared machinery belongs in [`../support/`](../support/), and the authoritative
-dependency inventory is in [`../../README.md`](../../README.md).
+Frontend layers add author-facing notation, types, static information, and
+policy over Rhodium's shared core semantics. This document owns the contracts
+of those independently selectable layers. It is a reference rather than a
+start-to-finish tutorial.
 
-## Layer catalog
+## Using this reference
 
-| Layer | Authoring feature |
+Start with the layer map below, then follow the contract links for the feature
+you are using. The surrounding documentation has narrower ownership:
+
+| Need | Owning document |
 |---|---|
-| [`comb.rhm`](comb.rhm) | Literals, typed synthesis don't-cares, modular arithmetic, bitwise operations, muxes, shifts, extraction, and truncation |
-| [`signed.rhm`](signed.rhm) | Explicit-width signed integers, literals, operators, and signed truncation |
-| [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | Lossless unsigned `+&` and `*&` |
-| [`bool.rhm`](bool.rhm) | Non-numeric `Mask`, compact `MaybeOneHot`, packed reductions and population count, priority encoding and total optional-one-hot selection, equality, enum validity, ordering, and binary `mux` |
-| [`enum.rhm`](enum.rhm) | Nominal sequential, explicit, and one-hot encoded hardware enums |
-| [`tagged-union.rhm`](tagged-union.rhm) | Nominal tagged unions with shared enum tags, typed payload construction, and dot-based tag tests and guarded views |
-| [`one-hot.rhm`](one-hot.rhm) | One-hot selector values and selector-owned exact selection |
-| [`bundle.rhm`](bundle.rhm) | Bundle declarations, record construction, and fields |
-| [`vector.rhm`](vector.rhm) | `Vec`, construction, selection, and functional update |
-| [`wire.rhm`](wire.rhm) | Binding-derived internal single-driver wires |
-| [`sequential.rhm`](sequential.rhm) | Binding-derived explicit and ambient registers |
-| [`memory.rhm`](memory.rhm) | Memories, async reads, sync writes, and address widths |
-| [`sync-memory.rhm`](sync-memory.rhm) | Circuit-shaped synchronous memories with fixed separate or shared ports |
-| [`assertion.rhm`](assertion.rhm) | Reset-suppressed, branch-guarded clocked assertions |
-| [`dpi.rhm`](dpi.rhm) | Clocked DPI procedures and explicit named DPI result registers |
-| [`conditional.rhm`](conditional.rhm) | Hardware `when` priority chains, exact-key `switch`, and guarded effects |
-| [`hierarchy.rhm`](hierarchy.rhm) | Instances, deterministic names, child-member access, and derived-reset instantiation |
-| [`sync.rhm`](sync.rhm) | Hidden ambient clock, synchronous-reset policy, and scoped reset derivation |
-| [`interface.rhm`](interface.rhm) | Roles, directional protocols, read-only observations, refinement, and bulk connection |
-| [`clocking.rhm`](clocking.rhm) | Root-owned temporal environments, durable sync-level crossing evidence, reports, and opt-in CDC enforcement |
+| Language profiles, circuit generators, elaboration, and host parameters | [Frontend guide](../README.md) |
+| Package boundaries and authoritative direct-dependency inventories | [Implementation architecture](../../README.md) |
+| Ready-valid protocols and reusable hardware components | [Standard library](../../std/README.md) |
+| Executable feature programs | [Examples](../../../examples/README.md) |
 
-`#lang rhodium` aggregates the curated set, including clocking now that its
-crossing evidence is durable core IR. A `#lang rhodium/base` program can still
-import only the layers it needs.
+Layers do not import sibling layers or backends. Shared macro and
+static-information machinery belongs in [`../support/`](../support/).
+`#lang rhodium` imports the curated layer set, including clocking;
+`#lang rhodium/base` programs can import only the layers they need.
+
+### Layer map
+
+| Area | Layer | Contract |
+|---|---|---|
+| Data and expressions | [`comb.rhm`](comb.rhm) | [Literals, combinational operators, muxes, and typed don't-cares](#literals-and-combinational-expressions) |
+| Data and expressions | [`signed.rhm`](signed.rhm) | [Explicit-width signed integers](#signed-integers) |
+| Data and expressions | [`expanding-arithmetic.rhm`](expanding-arithmetic.rhm) | [Lossless `+&` and `*&`](#literals-and-combinational-expressions) |
+| Data and expressions | [`bool.rhm`](bool.rhm) | [Booleans, masks, reductions, ordering, and optional one-hot values](#boolean-reductions-and-ordering) |
+| Data and expressions | [`enum.rhm`](enum.rhm) | [Nominal hardware enums](#hardware-enums) |
+| Data and expressions | [`tagged-union.rhm`](tagged-union.rhm) | [Nominal tagged unions](#tagged-unions) |
+| Data and expressions | [`one-hot.rhm`](one-hot.rhm) | [Exact one-hot selection](#one-hot-values) |
+| Aggregates | [`bundle.rhm`](bundle.rhm) | [Named records and fields](#bundles-and-records) |
+| Aggregates | [`vector.rhm`](vector.rhm) | [Fixed-length vectors](#fixed-length-vectors) |
+| State and effects | [`wire.rhm`](wire.rhm) | [Internal single-driver wires](#wires) |
+| State and effects | [`sequential.rhm`](sequential.rhm) | [Explicit and ambient registers](#registers-and-synchronous-circuits) |
+| State and effects | [`memory.rhm`](memory.rhm) | [Asynchronous-read memories](#asynchronous-read-memories) |
+| State and effects | [`sync-memory.rhm`](sync-memory.rhm) | [Fixed-port synchronous memories](#synchronous-memories) |
+| State and effects | [`assertion.rhm`](assertion.rhm) | [Clocked assertions](#clocked-assertions) |
+| State and effects | [`dpi.rhm`](dpi.rhm) | [Clocked DPI](#clocked-dpi) |
+| Control and hierarchy | [`conditional.rhm`](conditional.rhm) | [`when`, `switch`, and guarded effects](#conditional-assignment-and-effects) |
+| Control and hierarchy | [`hierarchy.rhm`](hierarchy.rhm) | [Instances and child access](#hierarchy) |
+| Clock domains | [`sync.rhm`](sync.rhm) | [Ambient clocks and reset derivation](#registers-and-synchronous-circuits) |
+| Clock domains | [`clocking.rhm`](clocking.rhm) | [Timing contracts and CDC enforcement](#clocking-environments-and-cdc-enforcement) |
+| Interfaces | [`interface.rhm`](interface.rhm) | [Directional protocols and topology](#interfaces-and-topology) |
+
+## Shared extension surface
+
+### Hardware types
 
 Extension libraries can define a scalar descriptor and its hardware annotation
 with one declaration:
@@ -66,20 +83,23 @@ projects the concrete descriptor and its original host parameters.
 dynamic or generic, but a named extension type should normally expose its own
 annotation through `hardware_type`.
 
+### Hardware methods
+
 An ordinary visible function can be called as an import-scoped hardware
 extension method. When a hardware dot call is not a built-in or a type-owned
 method, `receiver.operation(arguments...)` resolves directly to
 `operation(receiver, arguments...)`. Bare dot names remain hardware field
 projections. Because the expansion is a direct function call, receiver checks
 and dependent result annotations come from the function declaration, and an
-extension exists only where its function binding is in lexical scope. Rhodium
-uses an ordered method pipeline: exact receiver-owned annotations anchor their
-provider first, followed by the common resolver for built-ins, special call
-syntax, and compatible receiver-first functions. Both exact and generic
-provider identities call the same common implementation. Specialized field
-providers fall through to that pipeline instead of repeating method tables.
+extension exists only where its function binding is in lexical scope.
+Receiver-owned methods take precedence, followed by built-ins and compatible
+receiver-first functions; specialized field providers fall through to that
+same common resolution path. The implementation machinery is described in the
+[architecture guide](../../README.md#frontend-layer-dependencies).
 
-## Clocking environments and CDC enforcement
+## Clock domains and CDC analysis
+
+### Clocking environments and CDC enforcement
 
 Import `clocking.rhm` explicitly and use `elaborate_with_clocking` when a
 completed design should be analyzed in a top-level temporal environment:
@@ -128,7 +148,9 @@ Most authors should instantiate
 [`../../std/cdc/level.rhdl`](../../std/cdc/level.rhdl) rather than calling the
 evidence hook directly.
 
-## Literals and combinational expressions
+## Data types and expressions
+
+### Literals and combinational expressions
 
 Integer hardware literals always state their width:
 
@@ -205,7 +227,7 @@ Cases may come from a host list. Keys are checked and normalized during
 elaboration. Binary `mux(sel, when_true, when_false)` is a `Bool` specialization
 of the same core `rtl.mux_lookup`; there is no separate core mux operation.
 
-## Boolean and ordering
+### Boolean, reductions, and ordering
 
 `Bool` is a nominal one-bit frontend `BitwiseType`, not a core special case:
 
@@ -276,7 +298,7 @@ A `Mask` does not safely refine to an exactly-one or optional-one selector;
 such a cast is an explicit unchecked representation assertion rather than a
 validation operation. See [`../../../examples/rtl/masks.rhdl`](../../../examples/rtl/masks.rhdl).
 
-## Signed integers
+### Signed integers
 
 `SInt(width)` is a nominal frontend `SignedArithmeticType` with an explicit
 positive width. Signed literals accept only the two's-complement range for that
@@ -304,7 +326,7 @@ division, remainder, and implicit width inference are not part of this layer.
 
 See [`../../../examples/rtl/signed-integers.rhdl`](../../../examples/rtl/signed-integers.rhdl).
 
-## Hardware enums
+### Hardware enums
 
 ```rhombus
 hardware_enum Opcode(~width: 4):
@@ -381,7 +403,44 @@ Each evaluated declaration has distinct nominal identity. Members lower to
 from exactly the selector's enum and retains a mandatory default for unused
 encodings. See [`../../../examples/rtl/enum-state.rhdl`](../../../examples/rtl/enum-state.rhdl).
 
-## One-hot values
+### Tagged unions
+
+Tagged unions are nominal packed `DataType`s whose leading tag uses the same
+encoding machinery as hardware enums. Variants may be nullary or carry one
+typed payload:
+
+```rhombus
+bundle WritePayload():
+  address: Bits(8)
+  data: Bits(8)
+
+tagged_union Request:
+  Idle
+  Read(Bits(8))
+  Write(WritePayload())
+
+def request = Request.Read(bits(0x5A, 8))
+def read = request.view(Request.Read)
+```
+
+`value.tag` returns the union's nominal `tag_type`. `value.is(Variant)` tests
+the tag, while `value.view(Variant)` returns a view with `.valid` and, for a
+payload variant, a typed `.payload`. The payload is meaningful only when
+`.valid` is true. Variants must belong to the viewed union. Payload
+constructors require the declared payload type, and nullary variants are
+reusable hardware literals.
+
+Automatic tags use declaration order and the minimum positive width. As with
+hardware enums, `~width` supports all-or-none explicit encodings and
+`~encoding: one_hot` derives one tag bit per variant. The packed union reserves
+enough payload bits for its widest variant; shorter payloads are zero-extended
+and nullary variants use an all-zero payload image. Nested tagged unions,
+bundles, vectors, ports, and state retain the exact union authoring surface.
+
+See [`../../../examples/rtl/tagged-union.rhdl`](../../../examples/rtl/tagged-union.rhdl)
+and [`../../../examples/rtl/nested-tagged-union.rhdl`](../../../examples/rtl/nested-tagged-union.rhdl).
+
+### One-hot values
 
 `OneHot(n)` is a structurally sized `FlatDataType`. Calling the type with a
 host index produces the corresponding power-of-two literal. A one-hot encoded
@@ -428,7 +487,7 @@ determine the contract. `MaybeOneHot` does not implement
 External ports remain contracts and can still require a formal assumption when
 their environment could physically drive a multi-hot encoding.
 
-## Packing and width operations
+### Packing and width operations
 
 - `a ++ b` concatenates packable hardware values and places `a` in the
   most-significant bits; chains such as `a ++ b ++ c` retain that ordering.
@@ -456,7 +515,9 @@ Indices and ranges are host values known during elaboration. Width changes are
 always explicit. Width extension is receiver-only; there are no parallel
 author-facing `zext(value, width)` or `sext(value, width)` free functions.
 
-## Registers and synchronous circuits
+## State and clocked effects
+
+### Registers and synchronous circuits
 
 A register reads as its current state and drives as its next state:
 
@@ -518,7 +579,7 @@ simulation boundary must observe the active reset as data, `reset_active()`
 returns it as `Bits(1)` and respects the innermost reset scope. There is no
 corresponding clock-value escape hatch.
 
-## Asynchronous-read memories
+### Asynchronous-read memories
 
 ```rhombus
 mem storage(depth, Bits(width))
@@ -537,7 +598,7 @@ and simultaneous writes to one address are unspecified. Resets, masks,
 initialization, and combined read/write ports are not part of the current
 contract.
 
-## Synchronous memories
+### Synchronous memories
 
 Synchronous memories are separate circuit-shaped primitives with declared,
 fixed ports:
@@ -609,7 +670,7 @@ while disabled is unspecified. An all-zero write mask preserves storage but
 does not turn a shared write-mode cycle into a read. Port arrays remain outside
 this contract.
 
-## Clocked assertions
+### Clocked assertions
 
 ```rhombus
 sync_circuit CheckedQueue():
@@ -634,7 +695,7 @@ is selected. `elsewhen` guards exclude earlier conditions, `otherwise` covers
 the unmatched case, and nested chains combine their guards. The public
 assertion form has no `~enable` option.
 
-## Clocked DPI
+### Clocked DPI
 
 ```rhombus
 dpi_import procedure rhodium_trace(value: Bits(8))
@@ -660,7 +721,9 @@ rejects `~clock`, while ordinary circuits pass it explicitly. `dpi_reg` accepts
 `~clock` and `~enable` in either order. There is no unclocked DPI form,
 `inout`, or `ref` support.
 
-## Hardware conditional assignment
+## Control and structural composition
+
+### Conditional assignment and effects
 
 `when` accepts only a readable one-bit `FlatDataType`. Host values are rejected:
 
@@ -711,7 +774,7 @@ A destination may appear once per branch, and separate chains do not implement
 last-connect semantics. Primitive register reset remains expressed through
 `~reset` and `~init`.
 
-## Hierarchy
+### Hierarchy
 
 Equivalent circuit calls reuse one elaboration-local module specialization, so
 instances can call a generator directly:
@@ -733,7 +796,7 @@ A marked sync child instantiated inside a sync parent receives the ambient
 clock and reset. Ordinary children never participate implicitly. Outside a
 sync parent, both signals must be supplied explicitly.
 
-## Bundles and records
+### Bundles and records
 
 The bundle layer gives concise declarations and fields over core structural
 records:
@@ -810,7 +873,7 @@ otherwise it creates runtime `rtl.record_create` hardware. The lower-level
 `record(type_value): fields` form remains available when the `RecordType` is a
 dynamically computed host value instead of a directly named bundle family.
 
-## Fixed-length vectors
+### Fixed-length vectors
 
 `Vec(n, T)` constructs the public structural `VectorType` descriptor, while
 `vec(...)` layers concise construction over it. Literal-only construction
@@ -857,7 +920,7 @@ Multiple total functional replacements may still be composed explicitly with
 chained `updated` calls. Dynamically selected ordinary vector places remain
 read-only.
 
-## Wires
+### Wires
 
 `wire temporary: T` creates an internal single-driver connection. Its value is
 readable before its one driver is declared, so wiring order does not impose
@@ -869,7 +932,9 @@ Conditional assignment may synthesize one exhaustive priority driver.
 Core retains `rtl.wire` for inspection. CIRCT lowering aliases the read value
 to its driver, so a SystemVerilog wire is not necessarily emitted.
 
-## Interfaces
+## Interfaces and topology
+
+### Declaring and connecting interfaces
 
 Interfaces are frontend protocol descriptors over directional record ports,
 not core `DataType`s:
@@ -884,6 +949,8 @@ Each root direction becomes one record-typed core port. `<=>` atomically
 connects exact flows or compatible provider-to-peer contracts; operand order
 is irrelevant. Individual fields remain accessible, and frontend metadata
 reconstructs endpoints through instances without guessing from port names.
+
+### Read-only observations
 
 Interfaces describe connectivity and do not carry monitor factories or
 instrumentation policy. `endpoint.observe()` explicitly creates a read-only view
@@ -915,6 +982,8 @@ driver. Protocol packages can offer several independent monitor functions, and
 an implementation or verification wrapper chooses which ones to elaborate at a
 specific endpoint. A monitor that uses `assert`, registers, or other ambient
 sequential operations must be called in a `sync_circuit`.
+
+### Identity and connection compatibility
 
 Each root interface declaration has a stable nominal identity. By default,
 repeated calls to one parameterized declaration compare that identity plus
@@ -961,6 +1030,8 @@ roles, for example `provider sender`. Endpoint provenance records whether the
 connected component is a module peer or an instance, so compatible connection
 does not infer orientation from the presence of a particular member.
 
+### Forwarding, refinement, and nesting
+
 Bulk connection also forwards one endpoint through a hierarchy boundary when
 the boundary and child endpoint have the same declared role, complementary
 represented roles, and the same nominal interface family. Forwarding requires
@@ -984,6 +1055,8 @@ bulk connection, and instance reconstruction work recursively. Nested
 directions lower to nested `RecordType` fields and then CIRCT `hw.struct`
 without core or backend interface cases.
 
+### Endpoint arrays
+
 Declared endpoint arrays bulk-connect directly. A parenthesized sequence on
 the right connects individual endpoints positionally to an array on the left:
 
@@ -996,6 +1069,8 @@ the ordinary protocol, type, and direction checks. This parenthesized form is
 connection-only syntax, not a general host tuple, and cannot appear on the
 left of `<=>`. Scalar endpoint connections keep using the same syntax for
 interface refinement merge and split.
+
+### Links, transforms, and pipelines
 
 `interface_link(protocol)` creates a local pair of complementary endpoint
 views over forward-readable, exactly-one-driver wires. An `InterfaceHandle`
@@ -1045,6 +1120,8 @@ conservative topology annotation that permits endpoint fields, array indexing,
 and handle-side access until elaboration chooses the concrete shape. This is
 frontend information only; it creates no protocol-specific runtime graph or
 core IR type.
+
+### Injection and ejection boundaries
 
 `inject_interface(protocol, ...)` creates an endpoint from ordinary hardware,
 and `eject_interface(...)` terminates an endpoint back into ordinary hardware.

@@ -2,55 +2,77 @@
 
 # Rhodium implementation architecture
 
-Rhodium has one backend-independent hardware model and multiple authoring layers.
-Every frontend path elaborates into the same public core IR; frontend syntax is
-not a second IR.
+This document owns Rhodium's implementation boundaries and direct-dependency
+contract. For project orientation and a first design, start at the
+[`README.md`](../README.md). For language use, see the executable
+[`examples`](../examples/README.md) and the
+[`frontend layer reference`](frontend/layers/README.md).
 
-## Package graph
+Rhodium has one backend-independent hardware model and several authoring
+profiles. Every frontend path elaborates into the same public core IR; frontend
+syntax is not a second IR.
 
-```text
-#lang rhodium --------------------> frontend/standard
-                                      |
-                                      +----> frontend/foundation
-                                      +----> frontend/layers/*
+## Architecture at a glance
 
-#lang rhodium/base ---------------> frontend/foundation
-user base-profile imports -----> selected frontend/layers/*
+Arrows mean "may depend directly on." They point inward toward the public IR;
+no reverse dependency is allowed.
 
-#lang rfpl --------------------> ../rfpl/frontend ------------------------> core IR
+```mermaid
+flowchart LR
+  subgraph Profiles[Public language profiles]
+    Rhodium["#lang rhodium"] --> Standard["frontend/standard.rhm"]
+    Base["#lang rhodium/base"] --> Foundation["frontend/foundation.rhm"]
+    Base -.->|explicit imports| Layers["frontend/layers/*"]
+    Standard --> Foundation
+    Standard --> Layers
+  end
 
-std/* -------------------------> public #lang rhodium authoring surface
-chi/* -------------------------> public #lang rhodium and generic std/* libraries
-socs/* ------------------------> public #lang rhodium and domain libraries
-sims/* ------------------------> public SoC and backend surfaces
-sram/* ------------------------> CIRCT HW/Seq MLIR and technology catalogs
-vlsi/sim/* --------------------> sims/* + sram/* + design/technology policy
-riscv/rtl --------------------> public #lang rhodium authoring surface
-hardfloat/* -------------------> public #lang rhodium authoring surface
-user designs ------------------> optional std/* and domain libraries
+  Foundation --> Support["frontend/support/*"]
+  Foundation --> Kernel["frontend/kernel.rhm"]
+  Layers --> Support
+  Layers --> Kernel
+  Support --> Kernel
+  Support --> Core["core: public IR + Builder"]
+  Kernel --> Core
 
-support/annotations ----------> dependency-neutral Rhombus refinements
+  Clocking["clocking layer"] --> Analysis["analysis/*"]
+  Analysis --> Core
 
-frontend/foundation -----------+
-frontend/layers/* -------------+----> frontend/support/*
-                               +----> frontend/kernel ----> core
-frontend/{foundation,layers,support} ---------------------> approved core APIs
+  Backend["backend/*"] --> Core
+  Formal["formal/*"] --> Core
+  Diagram["diagram/*"] --> Core
+  Diagram --> InterfaceMeta["interface metadata"]
 
-frontend/layers/clocking -----> analysis/clocking --------> core
-backend and formal tools -----> optional analysis --------> core
-
-backend/circt ---------------------------------------------> core
-formal ----------------------------------------------------> core
-diagram -------------------------------> core + frontend/layers/interface
+  RFPL["rfpl/*"] --> Core
+  Libraries["std/* and domain libraries"] --> Rhodium
 ```
 
 `#lang rhodium` is the curated language. `#lang rhodium/base` is the composition
 profile: it exposes the foundation and allows a program to import only the
 language layers it wants. The word *base* names the public profile; the
 internal module implementing its shared frontend forms is called the
-*foundation*.
+*foundation*. The frontend guide explains
+[profile selection and elaboration](frontend/README.md).
 
-## Responsibilities
+## Dependency rules
+
+- Core never imports analysis, frontend, backend, or RFPL code.
+- Analysis consumes completed core IR and does not import authoring or lowering
+  packages.
+- Frontend code never imports a backend. Frontend layers do not import sibling
+  layers; reusable cross-layer machinery belongs in `frontend/support/`.
+- Backends and formal tools consume verified core IR without importing
+  frontend syntax or elaboration.
+- Standard and domain libraries use the public language rather than Rhodium
+  implementation modules.
+- RFPL and diagram generation are downstream views. They inspect public IR but
+  do not participate in hardware construction.
+- SoCs do not depend on simulators. Simulation and VLSI integration depend
+  inward on public SoC, backend, SRAM, and harness surfaces.
+- SRAM mapping consumes post-CIRCT MLIR. Rhodium implementation packages and
+  SoCs do not import it, and generic mapping code owns no foundry policy.
+
+## Package responsibilities
 
 | Area | Responsibility | May depend directly on |
 |---|---|---|
@@ -76,27 +98,9 @@ internal module implementing its shared frontend forms is called the
 | [`../hardfloat/`](../hardfloat/README.md) | Rhodium port of Berkeley HardFloat representations and floating-point units | Public `#lang rhodium` authoring surface only |
 | [`../vlsi/`](../vlsi/README.md) | Physical-design integration, design/technology policy, and mapped simulation | Public authoring/backend surfaces; `sram/`; `sims/`; external VLSI tools and harnesses |
 
-The import direction is one-way. Core never imports analysis, frontend, or
-backend code. Analysis imports core but not authoring or lowering packages.
-Frontend code never imports a backend; it may use an approved optional analysis
-for certification without making that analysis part of core IR. A backend
-never imports frontend syntax or elaboration. Layers do not import sibling
-layers. Shared machinery needed by multiple layers belongs in
-`frontend/support/`. Standard-library modules and simulation harnesses use
-public Rhodium forms rather than importing implementation modules. RFPL is a
-downstream annotation language: it inspects the public Rhodium IR but does not
-construct hardware or import frontend/backend implementation modules. Rhodium
-core, analysis, frontend, and backend modules never import RFPL.
-The diagram package is similarly downstream and read-only; its dependency on
-interface metadata does not make visualization part of frontend elaboration.
-SoCs expose hardware host interfaces and never import `sims/`; simulation
-harnesses depend inward on public SoC and backend surfaces. SRAM mapping is a
-post-CIRCT consumer: no Rhodium package, core, or SoC imports `sram/`. Generic
-mapping code owns no foundry policy; `vlsi/` selects a design-specific policy
-and may combine `sram/` output with reusable `sims/` infrastructure.
-HardFloat is an external domain library over the public language: Rhodium
-implementation packages never depend on it, while its tests may consume the
-backend to validate ordinary lowering.
+HardFloat is representative of an external domain library over the public
+language: Rhodium implementation packages do not depend on it, while its tests
+may consume a backend to validate ordinary lowering.
 
 ## Design commitments
 
@@ -112,11 +116,20 @@ backend to validate ordinary lowering.
 - Specify and test implicit conversion, connection, priority, or reset behavior
   before adding it.
 
-## Standard-library dependencies
+## Auditable direct-dependency inventories
+
+The architecture above is the reader-facing contract. The tables below are its
+review surface: keep them exact when modules or layer imports change. They list
+direct Rhodium dependencies, not the full transitive closure.
+
+### Standard-library dependencies
 
 Standard-library modules depend only on the public authoring surface. The
 flow-control aggregate is separate from its implementations, so designs can
 import one primitive without loading unrelated generators.
+
+<details>
+<summary>Show all 49 standard-library dependency rows</summary>
 
 | Module | Provides | Direct Rhodium dependencies |
 |---|---|---|
@@ -170,10 +183,15 @@ import one primitive without loading unrelated generators.
 | `std/flow/parallel.rhdl` | Configured parallel composition over generic interface handles and terminated sinks | `std/flow/ready-valid-support.rhdl` |
 | `std/flow.rhdl` | Valid-only, ready-valid, credited, virtual-channel, and flit-format protocols plus the flow-control convenience aggregate | `std/ready-valid.rhdl`, `std/credited.rhdl`, `std/flit.rhdl`, and all `std/flow/` modules |
 
-## Frontend layer dependencies
+</details>
+
+### Frontend layer dependencies
 
 This table is the authoritative inventory of bundled frontend layers. Update
 it when adding, removing, or changing a layer's direct dependencies.
+
+<details>
+<summary>Show all 20 frontend-layer dependency rows</summary>
 
 | Layer | Provides | Direct Rhodium dependencies |
 |---|---|---|
@@ -198,8 +216,15 @@ it when adding, removing, or changing a layer's direct dependencies.
 | `sync.rhm` | Sync circuits with ambient clock and synchronous reset | kernel, clocking support, generator-parameter support |
 | `clocking.rhm` | Root-owned timing and clock relationships, durable sync-level evidence, immediate reports, and opt-in CDC enforcement | core IR, kernel, clocking analysis, clocking support |
 
-The support modules implement shared mechanisms without becoming selectable
+</details>
+
+### Shared frontend support
+
+Support modules implement shared mechanisms without becoming selectable
 language profiles:
+
+<details>
+<summary>Show shared support-module responsibilities</summary>
 
 - `hardware-types.rhm` generates an extension-defined scalar descriptor and
   exact hardware-value annotation from one declaration.
@@ -234,6 +259,8 @@ language profiles:
   partial exact-one-hot and total optional-one-hot lowering paths available to
   independent layers without sibling imports.
 
+</details>
+
 Domain libraries and adapters such as `chi/` and `riscv/rtl` consume the
 public language and standard libraries. They do not become frontend layers and
 cannot import Rhodium implementation packages.
@@ -243,7 +270,7 @@ operation consumes it. Reusable host descriptions remain distinct from
 objects already owned by an elaborated circuit. These protocols do not add
 frontend types or operations to the public core IR.
 
-## Enforcement
+## Enforcement and file roles
 
 [`../tools/check-boundaries.sh`](../tools/check-boundaries.sh) enforces these
 directions, prevents sibling-layer imports, keeps `standard.rhm` aggregation

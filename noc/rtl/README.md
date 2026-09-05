@@ -7,6 +7,23 @@ depend on public `#lang rhodium` facilities and reusable Rhodium standard-librar
 primitives, but the pure `noc/model`, `analysis`, `authoring`, `language`,
 `plan`, and `std` directories never depend on this package.
 
+The [pure NoC package](../README.md) owns topology, routing, validation, and
+planning. This package starts at `RouterPlan` or `RouterFamilyPlan`; it cannot
+construct a proof or turn an unchecked relation into hardware.
+
+## Component map
+
+| File | Responsibility |
+| --- | --- |
+| `route-computer.rhdl` | Compile validated local or family route rows into typed combinational lookup hardware |
+| `route-adapter.rhdl` | Add and remove route metadata at protocol-neutral ready-valid boundaries |
+| `allocator.rhdl` | Match input requests to output targets while realizing fallback obligations |
+| `router.rhdl` | Buffer and switch complete single-beat packets, including uniform router families |
+| `wormhole-router.rhdl` | Reserve a selected target from packet head through tail |
+| `main.rhdl` | Export the public NoC RTL surface |
+
+## Route decoding
+
 `route-computer.rhdl` defines `RouteDecoder`, `route_decoder_lookup`,
 `compile_route_decoder`, and `RouteComputer`. `compile_route_decoder` accepts
 only a `RouterPlan` projected from opaque `ValidatedRouting`; it cannot consume
@@ -26,11 +43,15 @@ by CIRCT;
 neither the route computer nor router logic concatenates selector fields or
 slices a packed decision representation.
 
+### Protocol-neutral route adapters
+
 `route-adapter.rhdl` contains the protocol-neutral ready-valid boundary around
 that metadata. `RoutedFlowInjector` adds a compiled route key and permits a
 transfer only for a valid route decision; `RoutedFlowEjector` removes the
 `RoutedBeat` envelope. Protocol packages remain responsible only for selecting
 their destination field and checking endpoint identity.
+
+### Shared family decoding
 
 For shared physical implementations, `RouterFamilyRouteDecoder` adds a
 `site_key` field ahead of the same route and origin lookup. Its rows come only
@@ -38,6 +59,8 @@ from `RouterFamilyPlan`; the site key is intended to be tied to a static value
 at each occurrence and is not a runtime routing mode. One typed `DecodeGen`
 therefore represents all site-specialized tables without reimplementing decode
 lowering or graph reasoning in RTL.
+
+## Allocation
 
 `allocator.rhdl` defines the NoC-specific `RouterAllocator` around the generic
 standard-library `OutputGreedyRoundRobinMatcher`. Every output rotates its
@@ -48,6 +71,8 @@ requests its fallback targets. The sideband describes resource availability
 independently of ready/valid selection. A physical VC link therefore supplies
 per-VC readiness from the standard `VcDemux`, not the selected mux ingress's
 ready signal. This separation avoids a valid-to-ready arbitration loop.
+
+## Single-beat router
 
 `router.rhdl` defines `RoutedBeat`, opaque `SimpleRouterConfig`,
 `compile_simple_router`, and `SimpleRouter`. Compilation checks the supported
@@ -71,6 +96,8 @@ first targets and every local ejection terminal follows. The router contains
 no singular ejection convention, so a linkless plan with several terminals is
 an ordinary many-input, many-output crossbar instance.
 
+### Uniform router families
+
 `compile_simple_router_family` and `SimpleRouterFamily` provide the uniform
 counterpart. It accepts the same uniform `input_buffer_depth`; every occurrence
 in one family necessarily shares that physical queue implementation. All
@@ -89,9 +116,13 @@ route families. It rejects a channel family whose per-site physical ingress,
 egress, or link ordering differs, while leaving each channel's routes, route
 keys, and local terminal slots independent.
 
+## Runtime representation
+
 Router runtime collections are Rhodium `Vec` values, not host lists of hardware
 objects. Route-decision fields and request/grant bits therefore compose through
 ordinary field projection and indexing instead of explicit packed extraction.
+
+## Wormhole router
 
 `wormhole-router.rhdl` defines the sibling `WormholeRouterConfig`,
 `compile_wormhole_router`, and `WormholeRouter` transport over the standard
@@ -103,6 +134,8 @@ owned by that input until its tail transfers. Body and tail fragments therefore
 cannot be rerouted or interleaved with a different packet on the reserved VC.
 `compile_wormhole_router` accepts the same uniform positive
 `input_buffer_depth`, also defaulting to one.
+
+## Physical links and virtual channels
 
 The standard `VcMux` and `VcDemux` keep logical VC routing distinct from
 physical-link sharing. `VcMux` fairly selects at most one logical VC payload
@@ -122,6 +155,8 @@ reassemble it after ejection without changing topology, routing, or VC
 analysis. CHI link credits and internal physical-link credits remain separate
 protocol layers.
 
+## Proof obligations realized in hardware
+
 Both router implementations accept whole-graph-acyclic and escape-certified
 plans. The escape contract is realized by persistent fallback requests and
 transfer-based round-robin rotation. Adaptive outputs are considered only
@@ -130,6 +165,8 @@ ejection is always a fallback because it releases the held network resource.
 This implements the certificate's allocator obligation, not a broader claim
 of protocol progress, livelock freedom, or fairness through unmodeled shared
 resources.
+
+## Hierarchy and integration ownership
 
 There is intentionally no whole-network circuit or router-instantiating
 network helper in this package. Real routers live in independently owned tile,
@@ -143,6 +180,8 @@ complete transport. The hierarchical wormhole fixture follows this pattern:
 source, transit, and destination subsystems own their routers and physical-link
 mux/demux logic, while their parent connects link payloads and reverse per-VC
 availability.
+
+## Executable examples
 
 The focused executable hardware examples live under `examples/noc/`. They
 import this domain package directly; only their reusable matching and crossbar

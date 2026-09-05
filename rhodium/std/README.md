@@ -7,7 +7,31 @@ public `#lang rhodium` language. It is not another language profile and adds no
 core IR, elaboration, or backend behavior. Its dependency contract is listed
 in [`../README.md`](../README.md).
 
-## Shift registers
+## Choose a component
+
+Import the narrow owning module when one component family is sufficient. Use
+the facade modules only when a circuit composes several members of that family.
+
+| Need | Start with | What it owns |
+|---|---|---|
+| Delays and balanced combinational trees | [`shift-register.rhdl`](shift-register.rhdl), [`reduction.rhdl`](reduction.rhdl) | Generic reusable generators |
+| Safe stable-level clock crossing | [`cdc.rhdl`](cdc.rhdl) | `SyncLevel` and its CDC evidence |
+| Typed sparse decode | [`decode.rhdl`](decode.rhdl) | Patterns, pattern sets, decode tables, and generators |
+| Ready-valid protocol declarations | [`ready-valid.rhdl`](ready-valid.rhdl) | `Valid`, `Decoupled`, `Irrevocable`, and transfer detection |
+| Credit-based transport | [`credited.rhdl`](credited.rhdl), [`flow/credit.rhdl`](flow/credit.rhdl) | Credited endpoints, monitoring, and ready-valid adapters |
+| Packet/flit representation | [`flit.rhdl`](flit.rhdl), [`flow/flit.rhdl`](flow/flit.rhdl) | Flit types and checked framing conversions |
+| Endpoint address and ID sets | [`interconnect.rhdl`](interconnect.rhdl) | Host-side interconnect parameters and validation |
+| Bit operations and bounded counting | [`bits.rhdl`](bits.rhdl), [`counter.rhdl`](counter.rhdl) | Layout helpers and a synchronous counter |
+| Occupancy and fixed-latency storage | [`scoreboard.rhdl`](scoreboard.rhdl), [`sync-ram.rhdl`](sync-ram.rhdl) | Scoreboarding and a shared 1RW RAM wrapper |
+| Streaming composition | [`flow.rhdl`](flow.rhdl) | Pipes, queues, routing, arbitration, transforms, and boundaries |
+
+The rest of this guide states the behavior that callers may rely on. Executable
+examples live under [`../../examples/std/`](../../examples/std/), while source
+files remain authoritative for complete exported-name lists.
+
+## Foundational utilities
+
+### Shift registers
 
 [`shift-register.rhdl`](shift-register.rhdl) exports the `shift_register`
 definition form, a generic ambient-clock delay line over any Rhodium `DataType`.
@@ -31,7 +55,7 @@ shift_register taps(sample, 4, ~init: bits(0, 8), ~enable: advance)
 filtered <== taps[3]
 ```
 
-## Reduction trees
+### Reduction trees
 
 [`reduction.rhdl`](reduction.rhdl) exports `tree_reduce(values, combine)`, an
 elaboration-time balanced reduction over a nonempty host `List`. Each level
@@ -52,7 +76,7 @@ use an associative combiner when the result must agree with a sequential fold.
 An empty list is rejected; callers that define an identity should supply it as
 an explicit leaf.
 
-## Clock-domain crossings
+### Clock-domain crossings
 
 [`cdc.rhdl`](cdc.rhdl) exports the first standard crossing circuit,
 [`cdc/level.rhdl`](cdc/level.rhdl)'s `SyncLevel`. It is a resetless two-stage
@@ -63,7 +87,12 @@ register chain for every producer of IR. Using `SyncLevel` is the semantic
 promise that the source persists long enough to be observed; it is not an
 event or pulse synchronizer.
 
-## Typed decode patterns
+## Typed decode
+
+Decode descriptions are immutable host data. Only applying a decode generator
+inside a circuit emits hardware.
+
+### Patterns and pattern sets
 
 [`decode/pattern.rhdl`](decode/pattern.rhdl) defines `Pattern`, an immutable
 host-side bit cube over two `HardwareLiteral` values:
@@ -145,7 +174,7 @@ freedom from `dont_care`. Keeping this policy out of `Pattern` preserves its
 host-only architecture and allows future matching or optimization consumers
 to choose different interpretations.
 
-## Typed decode generation
+### Decode generation and composition
 
 [`decode.rhdl`](decode.rhdl) is the public facade for `Pattern`, `PatternSet`,
 `DecodeCase`, `DecodeTable`, and `DecodeGen`. A table requires at least one
@@ -242,7 +271,12 @@ def combined_outputs = zip_decode_cases(
 shows reusable PatternSet input families alongside all three independent table
 extensions: concatenated rows, zipped output fields, and lifted input fields.
 
-## Ready-valid protocols
+## Protocols and transport
+
+These modules separate transaction semantics and packet representation from
+the flow-control circuits that implement buffering and routing.
+
+### Ready-valid protocols
 
 Import the protocol family directly:
 
@@ -277,7 +311,7 @@ even if it reuses one of those display names. Control-only helpers additionally
 require the exact payloadless control-plane member shape, so a payload-bearing
 protocol is not silently treated as a `Ctrl` flow.
 
-## Credited transport
+### Credited transport
 
 [`credited.rhdl`](credited.rhdl) defines `Credited(T, credit_limit)` for a
 bounded single-hop payload channel. The transmitter drives `valid` and `bits`;
@@ -312,7 +346,7 @@ ready-valid domain between hop boundaries rather than acquiring duplicate
 credited variants. `CreditCounter` is the shared bounded accounting circuit
 used by the adapters.
 
-## Flit formats
+### Flit formats
 
 [`flit.rhdl`](flit.rhdl) separates packet representation from transport. A
 `VariableFlit(T)` carries explicit `head`, `tail`, and `payload` fields.
@@ -340,7 +374,7 @@ queue nor alter transfer count. Variable-to-fixed conversion is deliberately
 not an unchecked cast: arbitrary packet lengths require either the explicit
 checking operation or a future buffering/repacketization policy.
 
-## Generic interconnect parameters
+### Generic interconnect parameters
 
 [`interconnect.rhdl`](interconnect.rhdl) owns protocol-neutral sets used to
 describe interconnect endpoints. `IdRange(start, end)` is a nonempty
@@ -357,7 +391,9 @@ sets and returns false for an empty list. `allocate_id_ranges` assigns exact con
 global ranges to a nonempty list of local ranges and returns reversible
 `IdRangeMap` records without requiring the local ranges to begin at zero.
 
-## Bit-vector utilities
+## Data paths and storage
+
+### Bit-vector utilities
 
 [`bits.rhdl`](bits.rhdl) provides reusable ordering, layout, and alignment
 operations over hardware `Bits` values:
@@ -400,7 +436,7 @@ selects replacement bits where the mask is set and retains original bits
 elsewhere. All three operands must be compatible `Bits` values; the result
 retains the original width.
 
-## Scoreboard
+### Scoreboard
 
 [`scoreboard.rhdl`](scoreboard.rhdl) provides a reusable occupancy bitmap with
 one nonbackpressured `Valid` set operation, one nonbackpressured `Valid` clear
@@ -424,15 +460,13 @@ The entry count may be any positive integer. `busy` exposes only the registered
 bitmap; consumers that need same-cycle update visibility implement that bypass
 as part of their own timing policy. Clear wins when both updates target one
 entry. Out-of-range indices are assertion failures for updates and read as not
-busy through `scoreboard_busy`. Reset empties the scoreboard.
-The `busy` output includes current-cycle operations, so consumers see a set or
-clear without an extra cycle; clear wins when both operations address the same
-entry. Assertions reject setting an occupied entry and clearing a free entry,
-except for a simultaneous opposite operation on that entry. The component has
-no reserved-entry policy: callers that treat an index such as register zero as
-permanently free must filter that policy at their own boundary.
+busy through `scoreboard_busy`. Reset empties the scoreboard. Assertions reject
+setting an occupied entry and clearing a free entry, except for a simultaneous
+opposite operation on that entry. The component has no reserved-entry policy:
+callers that treat an index such as register zero as permanently free must
+filter that policy at their own boundary.
 
-## Fixed-latency synchronous RAM
+### Fixed-latency synchronous RAM
 
 [`read-write.rhdl`](read-write.rhdl) defines
 `ReadWritePort(address_width, T, n)`. `T` is one data-lane type and `n` is the
@@ -475,7 +509,33 @@ Use this wrapper for fixed-latency internal arrays whose callers naturally
 produce `Valid` accesses. Domain protocols such as CHI own externally visible
 request, response, ordering, and error semantics.
 
-## Flow-control circuits
+### Counter
+
+The bounded counter is independent of ready-valid flow control:
+
+```rhombus
+import:
+  lib("rhodium/std/counter.rhdl") open
+
+inst timer(Counter(10))
+timer.enable <== tick
+expired <== timer.wrap
+```
+
+`Counter(n)` synchronously resets to zero and, while enabled, counts through
+the `n` states from zero to `n - 1`. `value` has type
+`Bits(index_width(n))`. `wrap` is asserted during an enabled cycle at
+`n - 1`, immediately before the next edge returns the value to zero. An
+internal assertion checks that the state remains within that range.
+
+## Flow-control library
+
+The flow library has two authoring levels. Instantiate a named generator when
+you need its additional ports or instance identity. Use a lowercase configured
+stage when the component should participate in a `|>` topology and its payload
+or protocol can be inferred.
+
+### Component catalog
 
 [`flow.rhdl`](flow.rhdl) re-exports the independently importable generators
 under [`flow/`](flow/):
@@ -526,6 +586,8 @@ import:
 inst buffered(Queue(Bits(8), 4, ~pipe: #true, ~flow: #false))
 ```
 
+### Building pipelines
+
 Every lowercase flow-stage helper is configured first and receives its input only
 through Rhombus `|>`. This makes every stage an ordinary unary host function:
 
@@ -548,6 +610,8 @@ def buffered = ingress |> path
 Use an explicit `Decoupled(T)` or `Irrevocable(T)` seed when the disconnected
 path must retain that exact contract. Later stages infer the protocol and
 payload from the preceding endpoint or handle; they never repeat it.
+
+### Static typing and reusable topologies
 
 `InterfaceTransformResult` is the generic interface layer's single dependent
 static-information rule behind these operations. A statically known endpoint
@@ -576,6 +640,8 @@ Use an explicit `Arbiter` or `RRArbiter` instance when its `chosen` output is
 needed. Inputs must be a nonempty array of mutually compatible `Decoupled` or
 `Irrevocable` endpoints.
 
+### Virtual channels and fanout
+
 `VcMux(T, n)` and `VcDemux(T, n)` let `n` independently backpressured logical
 flows share one physical ready-valid flow. The mux fairly selects only lanes
 whose corresponding `vc_ready` bit is asserted and emits `VcBeat(T, n)` with
@@ -590,6 +656,8 @@ transfer only when every output can accept it. This is useful when one logical
 transaction must atomically update multiple downstream flows. In contrast,
 `Broadcast` stores per-recipient delivery state so recipients may accept the
 same item in different cycles.
+
+### Mapping and protocol conversion
 
 `map_flow(payload => expression)` configures an inline payload mapping while
 forwarding valid and ready. The binder retains precise bundle field
@@ -639,6 +707,8 @@ in the same cycle, making the otherwise unsafe boundary explicit:
 valid_source |> to_decoupled() |> arbiter_input
 ```
 
+### Circuit boundaries
+
 The flow facade retains `inject_flow(protocol, ...)` and `eject_flow(...)` as
 convenience aliases for the interface layer's generic `inject_interface` and
 `eject_interface` boundaries. Each named binding corresponds to a declared
@@ -667,6 +737,8 @@ hierarchy.
 Neither boundary helper changes the protocol; use an explicit transformation
 such as `to_valid()` before ejection when the circuit-side contract differs.
 
+### Filtering, gating, and routing
+
 `filter_flow(payload => predicate)` consumes an offered token without producing
 an output when the hardware predicate is false. Its input is ready for a
 rejected token regardless of downstream backpressure. `gate_flow(enabled)`
@@ -690,6 +762,8 @@ the entire stalled offer; that explicit assertion preserves an `Irrevocable`
 input contract. An out-of-range selector blocks the input. This distinguishes
 exclusive routing from `atomic_fork(n)`, which requires every output to accept
 the same item.
+
+### Allocation and grant-controlled routing
 
 `GreedyMatcher(inputs, outputs)` maps an input-major Boolean request matrix to
 a Boolean one-to-one grant matrix. Lower input indices have priority, and each
@@ -738,6 +812,8 @@ count from its input array and returns an output endpoint array:
  |> grant_crossbar(output_count, ~grants: allocator.grants)
 ) <=> egress
 ```
+
+### Joining and branching topologies
 
 `zip_flow(left_payload, right_payload => expression)` atomically consumes a
 two-element source array and maps the pair to one inferred result type. Neither
@@ -800,6 +876,8 @@ leaving its input available to the surrounding `parallel`. `zip_flow` is
 deliberately binary; homogeneous multi-input rendezvous remains the role of
 `Join(T, n)`.
 
+### Stateful flows and completion tracking
+
 `valid_pipe(stages)` infers its eventual input payload, instantiates in the
 ambient `sync_circuit` domain, and delays every asserted cycle by exactly the
 configured number of stages. There is no readiness or pending-offer state.
@@ -842,28 +920,11 @@ in arrival order through the `Irrevocable` `response` endpoint. Assertions
 detect unreserved completions, unavailable completion slots, and reservation
 counts outside the configured depth.
 
+### Examples
+
 See [`../../examples/std/flow-control.rhdl`](../../examples/std/flow-control.rhdl) for
 pipe, queue, fixed-priority arbitration, and chaining, and
 [`../../examples/std/flow-topology.rhdl`](../../examples/std/flow-topology.rhdl) for
 round-robin arbitration, demux, join, atomic fork, payload mapping, and
 broadcast. The parallel token-only family is materialized in
 [`../../examples/std/ctrl-flow.rhdl`](../../examples/std/ctrl-flow.rhdl).
-
-## Counter
-
-The bounded counter is independent of ready-valid flow control:
-
-```rhombus
-import:
-  lib("rhodium/std/counter.rhdl") open
-
-inst timer(Counter(10))
-timer.enable <== tick
-expired <== timer.wrap
-```
-
-`Counter(n)` synchronously resets to zero and, while enabled, counts through
-the `n` states from zero to `n - 1`. `value` has type
-`Bits(index_width(n))`. `wrap` is asserted during an enabled cycle at
-`n - 1`, immediately before the next edge returns the value to zero. An
-internal assertion checks that the state remains within that range.
