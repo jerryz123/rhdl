@@ -1,0 +1,73 @@
+#lang rhombus
+// Checks packet-locked arbitration structure, composition, and invalid uses.
+
+import:
+  "../../rhodium/core/main.rhm" open
+  "../../rhodium/frontend/kernel.rhm" as embedded
+  "../../rhodium/std/flow.rhdl" as flow
+  "../../rhodium/std/flow/packet-rr-arbiter.rhdl" as packet_arbiter
+  "std-packet-rr-arbiter.rhdl" as fixture
+
+def direct_design = embedded.run_elaboration(
+  fun (): packet_arbiter.PacketRRArbiter(Bits(8), 3)
+)
+def facade_design = embedded.run_elaboration(
+  fun (): flow.PacketRRArbiter(Bits(8), 3)
+)
+def chain_design = embedded.run_elaboration(
+  fun (): fixture.PacketRRArbiterChain()
+)
+def disconnected_design = embedded.run_elaboration(
+  fun (): fixture.DisconnectedPacketRRArbiterChain()
+)
+def packet_module = facade_design.modules[0]
+
+fun operations(module_def, opcode):
+  module_def.operations.filter(
+    ~keep: fun (operation): operation.opcode == opcode
+  )
+
+fun assertion_labels(module_def):
+  operations(module_def, "verif.assert").map(
+    fun (operation): operation.attribute("label")
+  )
+
+check:
+  verify_design(direct_design) ~is #void
+  verify_design(facade_design) ~is #void
+  verify_design(chain_design) ~is #void
+  verify_design(disconnected_design) ~is #void
+
+  packet_module.inputs.map(fun (port): port.name) ~is [
+    "clock", "reset", "ingress_0_in", "ingress_1_in", "ingress_2_in",
+    "ends_packet", "egress_in"
+  ]
+  packet_module.outputs.map(fun (port): port.name) ~is [
+    "ingress_0_out", "ingress_1_out", "ingress_2_out", "egress_out", "chosen"
+  ]
+  packet_module.find_output("chosen").type.width ~is 2
+  assertion_labels(packet_module) ~is [
+    "packet_rr_priority_in_range",
+    "packet_rr_owner_in_range"
+  ]
+  operations(packet_module, "rtl.register_reset").length() ~is 3
+  operations(packet_module, "rtl.onehot_mux").length() ~is 2
+  chain_design.modules.map(fun (module_def): module_def.name) ~is [
+    "PacketRRArbiterChain", "PacketRRArbiter"
+  ]
+  disconnected_design.modules.map(fun (module_def): module_def.name) ~is [
+    "DisconnectedPacketRRArbiterChain", "PacketRRArbiter", "Pipe"
+  ]
+
+  embedded.run_elaboration(
+    fun (): fixture.EmptyPacketRRArbiterChain()
+  ) ~throws "requires at least one input endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.MismatchedPacketRRArbiterCount()
+  ) ~throws "configured input count does not match"
+  embedded.run_elaboration(
+    fun (): fixture.PacketRRArbiterWrongProtocol()
+  ) ~throws "flow-control chaining requires a Decoupled or Irrevocable endpoint"
+  embedded.run_elaboration(
+    fun (): fixture.PacketRRArbiterWrongPredicate()
+  ) ~throws "annotation"

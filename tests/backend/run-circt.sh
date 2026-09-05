@@ -90,7 +90,7 @@ integration_fixtures=(
   vector-update vec-shift-register-param
   async-read-memory sync-memory-masked sync-ram
   clocked-dpi assertions hierarchy bundle interface-array
-  queue-options rr-arbiter round-robin-matcher ctrl-queue-options
+  queue-options rr-arbiter packet-rr-arbiter round-robin-matcher ctrl-queue-options
   dont-care decode noc-route-computer noc-router noc-network noc-wormhole noc-router-family noc-escape-router
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated load-store-rv32-word bit-manip bit-manip-rv32
@@ -547,6 +547,7 @@ fixture_specs=(
   'arbiter|arbiter_tb|examples/std/flow-control.rhdl|arbiter_design|arbiter_verilog_reference'
   'flow-chain|flow_chain_tb|examples/std/flow-control.rhdl|chain_design|chain_verilog_reference'
   'rr-arbiter|rr_arbiter_tb|examples/std/flow-topology.rhdl|rr_arbiter_design|rr_arbiter_verilog_reference'
+  'packet-rr-arbiter|packet_rr_arbiter_tb|examples/std/packet-arbitration.rhdl|design|verilog_reference'
   'demux|demux_tb|examples/std/flow-topology.rhdl|demux_design|demux_verilog_reference'
   'join|join_tb|examples/std/flow-topology.rhdl|join_design|join_verilog_reference'
   'broadcast|broadcast_tb|examples/std/flow-topology.rhdl|broadcast_design|broadcast_verilog_reference'

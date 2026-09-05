@@ -1,0 +1,148 @@
+#lang rhodium
+// Defines round-robin arbitration that retains one input through a complete packet.
+
+import:
+  rhombus/meta open
+  lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/ready-valid-support.rhdl") open
+  lib("rhodium/std/flow/circular-priority.rhdl") open
+
+// The primitive receives packet boundaries as an explicit sideband so packet
+// representation remains a frontend-layer choice. An unlocked arbiter selects
+// by round-robin priority. Transferring a non-final beat locks that input until
+// one of its final beats transfers; bubbles and stalls cannot transfer
+// ownership. Priority rotates only after a complete packet.
+sync_circuit PacketRRArbiter(T :: DataType, n :: PosInt):
+  interface ingress[n](Decoupled(T), ~role: consumer)
+  input ends_packet: Vec(n, Bool)
+  interface egress(Decoupled(T), ~role: producer)
+  output chosen: Bits(index_width(n))
+
+  def width = index_width(n)
+  reg next_priority(~init: bits(0, width))
+  reg locked(~init: Bool(#false))
+  reg owner(~init: bits(0, width))
+
+  assert(next_priority <= bits(n - 1, width), "packet_rr_priority_in_range")
+  assert(!locked ||| (owner <= bits(n - 1, width)), "packet_rr_owner_in_range")
+
+  def requests = vec(for List (index in 0..n): ingress[index].valid)
+  def choice :: CircularPriorityChoice(n, width) = circular_priority_onehot(requests, next_priority)
+  def owner_capacity = 1 << width
+  def owner_grant :: MaybeOneHot(n) = if owner_capacity == n
+  | one_hot(owner).into(MaybeOneHot(n))
+  | trunc(one_hot(owner).into(Bits(owner_capacity)), n).into(MaybeOneHot(n))
+  def grant :: MaybeOneHot(n) = mux(locked, owner_grant, choice.grant)
+  def selected_index = mux(locked, owner, choice.index)
+  def selected_valid = grant.mask(requests.into(Mask(n))).valid
+  def selected_last = grant.mux(
+    for List (index in 0..n): ends_packet[index],
+    ~default: Bool(#false)
+  )
+
+  for (index in 0..n):
+    ingress[index].ready <== egress.ready & grant[index]
+  egress.valid <== selected_valid
+  egress.bits <== grant.mux(
+    for List (index in 0..n): ingress[index].bits,
+    ~default: ingress[0].bits
+  )
+  chosen <== selected_index
+
+  def transfer = selected_valid & egress.ready
+  when (transfer & selected_last):
+    locked <== Bool(#false)
+    next_priority <== mux(
+      selected_index === bits(n - 1, width),
+      bits(0, width),
+      selected_index + bits(1, width)
+    )
+  elsewhen (transfer & !locked):
+    locked <== Bool(#true)
+    owner <== selected_index
+
+// Configures packet arbitration with an inline final-beat predicate. Connected
+// endpoint arrays infer their input count; disconnected paths state it once.
+expr.macro
+| 'packet_rr_arbiter($(packet :: Identifier) => $predicate ...)':
+    'packet_rr_arbiter($packet): $predicate ...'
+| 'packet_rr_arbiter($(packet :: Identifier)): $predicate':
+    'packet_rr_arbiter_impl(#false, $packet): $predicate'
+| 'packet_rr_arbiter($count,
+                     $(packet :: Identifier) => $predicate ...)':
+    'packet_rr_arbiter($count, $packet): $predicate ...'
+| 'packet_rr_arbiter($count, $(packet :: Identifier)): $predicate':
+    'packet_rr_arbiter_impl($count, $packet): $predicate'
+
+expr.macro
+| 'packet_rr_arbiter_impl($configured_count,
+                          $(packet :: Identifier)): $predicate':
+    'fun (packet_rr_source :: FlowSource || Array)
+       :~ InterfaceTransformResult(packet_rr_source, Endpoint):
+       def packet_rr_inputs:
+         if packet_rr_source is_a Handle
+         | packet_rr_source.right
+         | packet_rr_source
+       def packet_rr_typed = !(packet_rr_inputs is_a Array)
+       def packet_rr_input_count:
+         if packet_rr_typed
+         | block:
+             unless $configured_count is_a PosInt
+             | error(~who: #'packet_rr_arbiter,
+                     "typed packet arbitration requires a positive input count")
+             $configured_count
+         | block:
+             unless packet_rr_inputs.length() > 0
+             | error(~who: #'packet_rr_arbiter,
+                     "packet arbitration requires at least one input endpoint")
+             if $configured_count
+             | unless $configured_count == packet_rr_inputs.length()
+               | error(~who: #'packet_rr_arbiter,
+                       "configured input count does not match the endpoint array")
+             | #void
+             packet_rr_inputs.length()
+       def packet_rr_type:
+         if packet_rr_typed
+         | flow_payload_type(packet_rr_source)
+         | flow_payload_type(packet_rr_inputs[0])
+       def packet_rr_protocols = for Array (packet_rr_index in 0..packet_rr_input_count):
+         if packet_rr_typed
+         | flow_protocol_type(packet_rr_source)
+         | flow_protocol_type(packet_rr_inputs[packet_rr_index])
+       def packet_rr_input_links = for Array (packet_rr_index in 0..packet_rr_input_count):
+         interface_link(packet_rr_protocols[packet_rr_index],
+                        "packet_rr_input")
+       def packet_rr_input_endpoints = for Array (packet_rr_index in 0..packet_rr_input_count):
+         packet_rr_input_links[packet_rr_index].right
+       inst packet_rr_stage(PacketRRArbiter(packet_rr_type,
+                                            packet_rr_input_count))
+       packet_rr_stage.ends_packet <== vec(
+         for List (packet_rr_index in 0..packet_rr_input_count):
+           def packet_rr_input :: Endpoint = packet_rr_input_endpoints[packet_rr_index]
+           def $packet = packet_rr_input.bits
+           fun compute_packet_end(): $predicate
+           def packet_rr_ends :: Bool = compute_packet_end()
+           packet_rr_ends
+       )
+       for (packet_rr_index in 0..packet_rr_input_count):
+         packet_rr_input_endpoints[packet_rr_index]
+           |> packet_rr_stage.ingress[packet_rr_index]
+       def packet_rr_output_link = interface_link(
+         Decoupled(packet_rr_type),
+         "packet_rr_output"
+       )
+       packet_rr_stage.egress |> packet_rr_output_link.left
+       finish_interface_transform(
+         packet_rr_source,
+         describe_interface_transform(
+           interface_transform(packet_rr_input_links,
+                               packet_rr_output_link),
+           "packet-rr-arbiter",
+           {"inputs": packet_rr_input_count},
+           packet_rr_stage
+         )
+       )'
+
+export:
+  PacketRRArbiter
+  packet_rr_arbiter

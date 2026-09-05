@@ -575,6 +575,7 @@ under [`flow/`](flow/):
 | `Queue(T, depth)` | `CtrlQueue(depth)` | Configurable FIFO with occupancy count |
 | `Arbiter(T, n)` | `CtrlArbiter(n)` | Fixed-priority, index-zero-first arbitration |
 | `RRArbiter(T, n)` | `CtrlRRArbiter(n)` | Fair round-robin arbitration |
+| `PacketRRArbiter(T, n)` | -- | Round-robin arbitration that retains an input through its final transferred beat |
 | `VcMux(T, n)` | -- | Fairly tags and multiplexes `n` independently backpressured virtual channels |
 | `VcDemux(T, n)` | -- | Validates and distributes tagged traffic while exposing per-channel readiness |
 | `Demux(T, n)` | `CtrlDemux(n)` | Selected one-to-many routing with invalid-selector blocking |
@@ -603,6 +604,14 @@ through Rhombus `|>`. This makes every stage an ordinary unary host function:
 ingress |> queue(4, ~pipe: #true) |> pipe(2) |> egress
 ```
 
+Packet arbitration takes an inline predicate that identifies the final beat.
+The selected input remains the sole owner across stalls and bubbles until that
+beat transfers, and priority advances once per complete packet:
+
+```rhombus
+inputs |> packet_rr_arbiter(flit => flit.tail) |> pipe(1) |> egress
+```
+
 With a concrete endpoint source, each operation connects immediately and
 returns its far endpoint shape; a final endpoint terminates the complete
 pipeline. A disconnected topology begins with its payload or protocol type
@@ -629,9 +638,10 @@ remain available under `use_static` without corrective `:: Endpoint`
 annotations. The contributor guide explains the
 [shared implementation of that propagation](DEVELOPING.md#static-information-and-topology-results).
 
-Fan-in helpers take an ordinary host `Array`. `arbiter()` and `rr_arbiter()`
-infer the input count from a connected array. A disconnected topology states
-its protocol once and its cardinality in the configured arbiter:
+Fan-in helpers take an ordinary host `Array`. `arbiter()`, `rr_arbiter()`, and
+`packet_rr_arbiter(...)` infer the input count from a connected array. A
+disconnected topology states its protocol once and its cardinality in the
+configured arbiter:
 
 ```rhombus
 def selected = Array(first_request, second_request)
@@ -641,11 +651,17 @@ def selected = Array(first_request, second_request)
 def selector = Request()
                |> rr_arbiter(2)
                |> pipe(1)
+
+def packet_selector = VariableFlit(Request())
+                      |> packet_rr_arbiter(2, flit => flit.tail)
+                      |> pipe(1)
 ```
 
-Use an explicit `Arbiter` or `RRArbiter` instance when its `chosen` output is
-needed. Inputs must be a nonempty array of mutually compatible `Decoupled` or
-`Irrevocable` endpoints.
+Use an explicit `Arbiter`, `RRArbiter`, or `PacketRRArbiter` instance when its
+`chosen` output is needed. The packet primitive takes a `Vec(n, Bool)`
+`ends_packet` sideband; the configured helper derives it from the inline
+predicate. Inputs must be a nonempty array of mutually compatible `Decoupled`
+or `Irrevocable` endpoints.
 
 ### Virtual channels and fanout
 

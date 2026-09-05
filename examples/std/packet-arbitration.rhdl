@@ -1,0 +1,129 @@
+#lang rhodium
+// Demonstrates packet-locked round-robin arbitration over variable flits.
+
+import:
+  lib("rhodium/std/flow.rhdl") open
+
+sync_circuit PacketArbitration():
+  def Flit = VariableFlit(Bits(8))
+  interface ingress[3](Decoupled(Flit), ~role: consumer)
+  interface egress(Decoupled(Flit), ~role: producer)
+
+  ingress |> packet_rr_arbiter(flit => flit.tail) |> egress
+
+def design = elaborate(PacketArbitration())
+
+def verilog_reference = @str|<<{
+`ifndef _TYPESCOPE_rhodium_types
+`define _TYPESCOPE_rhodium_types
+  typedef struct packed {logic head; logic tail; logic [7:0] payload; } VariableFlit;
+  typedef struct packed {logic valid; logic [2:0] grant; logic [1:0] index; }
+    CircularPriorityChoice;
+`endif // _TYPESCOPE_rhodium_types
+module PacketArbitration(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; VariableFlit bits; } ingress_0_in,
+                                                          ingress_1_in,
+                                                          ingress_2_in,
+  input  struct packed {logic ready; }                    egress_in,
+  output struct packed {logic ready; }                    ingress_0_out,
+                                                          ingress_1_out,
+                                                          ingress_2_out,
+  output struct packed {logic valid; VariableFlit bits; } egress_out
+);
+
+  PacketRRArbiter packet_rr_stage (
+    .clock         (clock),
+    .reset         (reset),
+    .ingress_0_in  (ingress_0_in),
+    .ingress_1_in  (ingress_1_in),
+    .ingress_2_in  (ingress_2_in),
+    .ends_packet
+      ({{ingress_2_in.bits.tail}, {ingress_1_in.bits.tail}, {ingress_0_in.bits.tail}}),
+    .egress_in     (egress_in),
+    .ingress_0_out (ingress_0_out),
+    .ingress_1_out (ingress_1_out),
+    .ingress_2_out (ingress_2_out),
+    .egress_out    (egress_out),
+    .chosen        (/* unused */)
+  );
+endmodule
+
+module PacketRRArbiter(
+  input                                                   clock,
+                                                          reset,
+  input  struct packed {logic valid; VariableFlit bits; } ingress_0_in,
+                                                          ingress_1_in,
+                                                          ingress_2_in,
+  input  [2:0]                                            ends_packet,
+  input  struct packed {logic ready; }                    egress_in,
+  output struct packed {logic ready; }                    ingress_0_out,
+                                                          ingress_1_out,
+                                                          ingress_2_out,
+  output struct packed {logic valid; VariableFlit bits; } egress_out,
+  output [1:0]                                            chosen
+);
+
+  reg  [1:0]        next_priority;
+  reg               locked;
+  reg  [1:0]        owner;
+  wire              _GEN = next_priority != 2'h3;
+  `ifndef SYNTHESIS
+    packet_rr_priority_in_range:
+      assert property (@(posedge clock) disable iff (reset) _GEN);
+  `endif // not def SYNTHESIS
+  `ifndef SYNTHESIS
+    packet_rr_owner_in_range:
+      assert property (@(posedge clock) disable iff (reset) ~locked | owner != 2'h3);
+  `endif // not def SYNTHESIS
+  wire [2:0]        _GEN_0 =
+    {{ingress_2_in.valid & _GEN},
+     {ingress_1_in.valid & ~(next_priority[1])},
+     {ingress_0_in.valid & next_priority == 2'h0}};
+  wire [2:0]        _GEN_1 =
+    {{ingress_2_in.valid}, {ingress_1_in.valid}, {ingress_0_in.valid}};
+  wire [2:0]        _GEN_2 =
+    (|_GEN_0)
+      ? _GEN_0 & {~(_GEN_0[1:0] | {_GEN_0[0], 1'h0}), 1'h1}
+      : _GEN_1 & {~(_GEN_1[1:0] | {_GEN_1[0], 1'h0}), 1'h1};
+  wire [3:0]        _GEN_3 = 4'h1 << owner;
+  wire [2:0]        _GEN_4 = locked ? _GEN_3[2:0] : _GEN_2;
+  wire [1:0]        _GEN_5 = locked ? owner : _GEN_2[2:1];
+  wire              _GEN_6 = |(_GEN_4 & _GEN_1);
+  wire [9:0]        _GEN_7 = /*cast(bit[9:0])*/ingress_0_in.bits;
+  wire [9:0]        _GEN_8 = /*cast(bit[9:0])*/ingress_1_in.bits;
+  wire [9:0]        _GEN_9 = /*cast(bit[9:0])*/ingress_2_in.bits;
+  wire VariableFlit _GEN_10 =
+    /*cast(bit)*/_GEN_7 & {10{_GEN_4[0]}} | _GEN_8 & {10{_GEN_4[1]}} | _GEN_9
+    & {10{_GEN_4[2]}} | _GEN_7 & {10{_GEN_4 == 3'h0}};
+  wire              _GEN_11 = _GEN_6 & egress_in.ready;
+  wire              _GEN_12 =
+    _GEN_11
+    & (ends_packet[2'h0] & _GEN_4[0] | ends_packet[2'h1] & _GEN_4[1] | ends_packet[2'h2]
+       & _GEN_4[2]);
+  wire              _GEN_13 = _GEN_11 & ~locked;
+  always @(posedge clock) begin
+    if (reset) begin
+      next_priority <= 2'h0;
+      locked <= 1'h0;
+      owner <= 2'h0;
+    end
+    else begin
+      next_priority <= _GEN_12 ? (_GEN_5 == 2'h2 ? 2'h0 : _GEN_5 + 2'h1) : next_priority;
+      locked <= ~_GEN_12 & (_GEN_13 | locked);
+      owner <= _GEN_12 | ~_GEN_13 | locked ? owner : _GEN_2[2:1];
+    end
+  end // always @(posedge)
+  assign ingress_0_out = '{ready: (egress_in.ready & _GEN_4[0])};
+  assign ingress_1_out = '{ready: (egress_in.ready & _GEN_4[1])};
+  assign ingress_2_out = '{ready: (egress_in.ready & _GEN_4[2])};
+  assign egress_out = '{valid: _GEN_6, bits: _GEN_10};
+  assign chosen = _GEN_5;
+endmodule
+}>>|
+
+export:
+  PacketArbitration
+  design
+  verilog_reference

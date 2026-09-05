@@ -1,0 +1,53 @@
+#lang rhodium
+// Defines representative packet-arbitration chains and invalid frontend uses.
+
+import:
+  lib("rhodium/std/flow.rhdl") open
+
+use_static
+
+bundle PacketBeat():
+  tail: Bool
+  data: Bits(8)
+
+sync_circuit PacketRRArbiterChain():
+  interface ingress[2](Decoupled(PacketBeat()), ~role: consumer)
+  interface egress(Decoupled(PacketBeat()), ~role: producer)
+
+  def selected = ingress |> packet_rr_arbiter(packet => packet.tail)
+  def selected_data = selected.bits.data
+  selected |> egress
+
+sync_circuit DisconnectedPacketRRArbiterChain():
+  interface ingress[2](Decoupled(PacketBeat()), ~role: consumer)
+  interface egress(Irrevocable(PacketBeat()), ~role: producer)
+
+  def path = PacketBeat()
+    |> packet_rr_arbiter(2, packet => packet.tail)
+    |> pipe(1)
+  def path_data = path.right.bits.data
+  ingress |> path |> egress
+
+sync_circuit EmptyPacketRRArbiterChain():
+  Array() |> packet_rr_arbiter(packet => packet.tail)
+
+sync_circuit MismatchedPacketRRArbiterCount():
+  interface ingress[2](Decoupled(PacketBeat()), ~role: consumer)
+  ingress |> packet_rr_arbiter(3, packet => packet.tail)
+
+sync_circuit PacketRRArbiterWrongProtocol():
+  interface ingress[2](Valid(PacketBeat()), ~role: consumer)
+  ingress |> packet_rr_arbiter(packet => packet.tail)
+
+sync_circuit PacketRRArbiterWrongPredicate():
+  interface ingress[2](Decoupled(PacketBeat()), ~role: consumer)
+  ingress |> packet_rr_arbiter(packet => packet.data)
+
+export:
+  PacketBeat
+  PacketRRArbiterChain
+  DisconnectedPacketRRArbiterChain
+  EmptyPacketRRArbiterChain
+  MismatchedPacketRRArbiterCount
+  PacketRRArbiterWrongProtocol
+  PacketRRArbiterWrongPredicate
