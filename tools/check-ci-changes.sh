@@ -118,6 +118,7 @@ check_matrix_entry tools/write-noc-router-diagram.rhm example_matrix examples-no
 check_field tools/run-racket-tests.sh host true
 check_field tools/run-racket-tests.sh circt false
 check_field tools/run-racket-tests.sh examples true
+check_field tools/run-racket-tests.sh simulation true
 check_matrix_entry tools/check-parameter-annotations.rkt host_matrix ci-host-hygiene-test
 check_matrix_entry tools/parameter-annotation-scope.txt host_matrix ci-host-hygiene-test
 check_matrix_entry .githooks/pre-commit host_matrix ci-host-hygiene-test

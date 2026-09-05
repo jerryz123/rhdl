@@ -35,7 +35,7 @@ SOC_VERILOG := $(SOC_BUILD_DIR)/SoCHarness.sv
 SOC_OBJECT_DIR := $(SOC_BUILD_DIR)/obj
 SIMULATOR_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 SMOKE_BINARY := $(SOC_BUILD_DIR)/rv5stage_smoke.elf
-SIMULATOR_SOURCES := $(addprefix $(REPO_DIR)/,$(shell cd $(REPO_DIR) && rg --files -g '*.rhdl' -g '*.rhm'))
+SIMULATOR_SOURCES := $(sort $(shell find $(REPO_DIR) -type f \( -name '*.rhdl' -o -name '*.rhm' \)))
 
 .PHONY: all setup simulator run smoke dpi-compile-check chi-dpi-memory-test elaboration-test tiled-lowering-test
 
@@ -75,10 +75,7 @@ chi-dpi-memory-test: | $(DPI_BUILD_DIR)
 	$(DPI_BUILD_DIR)/chi_dpi_memory_dpi_test
 
 elaboration-test:
-	compiled_root="$$(mktemp -d /tmp/rhodium-sims-elaboration.XXXXXX)"; \
-	trap 'rm -rf "$$compiled_root"' EXIT; \
-	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  PLTCOLLECTS=$(REPO_DIR): $(RACO) test \
+	cd $(REPO_DIR) && RACO="$(RACO)" tools/run-racket-tests.sh \
 	  sims/tests/direct-memory-htif-test.rhm \
 	  sims/tests/simple-soc-harness-test.rhm \
 	  sims/tests/mini-soc-harness-test.rhm \
@@ -87,10 +84,8 @@ elaboration-test:
 tiled-lowering-test: | $(TILED_LOWERING_DIR)
 	@test -x "$(CIRCT_OPT)" || \
 	  (echo "circt-opt not found; run 'make setup-circt' at the repository root or set CIRCT_OPT" >&2; exit 1)
-	compiled_root="$$(mktemp -d /tmp/rhodium-sims-tiled.XXXXXX)"; \
-	trap 'rm -rf "$$compiled_root"' EXIT; \
-	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  $(RACKET) -y -S $(REPO_DIR) $(HARNESS_EMITTER) $(HARNESS_SOURCE_tiled) > $(TILED_LOWERING_DIR)/soc_harness.mlir
+	cd $(REPO_DIR) && RACKET="$(RACKET)" tools/run-racket.sh -S $(REPO_DIR) \
+	  $(HARNESS_EMITTER) $(HARNESS_SOURCE_tiled) > $(TILED_LOWERING_DIR)/soc_harness.mlir
 	$(CIRCT_OPT) --canonicalize --cse $(TILED_LOWERING_DIR)/soc_harness.mlir -o /dev/null
 
 $(FESVR_LIBRARY):
@@ -103,10 +98,8 @@ $(SOC_BUILD_DIR) $(DPI_BUILD_DIR) $(TILED_LOWERING_DIR):
 $(SOC_MLIR): $(SIMULATOR_SOURCES) $(HARNESS_EMITTER) | $(SOC_BUILD_DIR)
 	@test -n "$(HARNESS_SOURCE)" || \
 	  (echo "unsupported SOC '$(SOC)'; expected simple, mini, or tiled" >&2; exit 2)
-	compiled_root="$$(mktemp -d /tmp/rhodium-sims-verilator.XXXXXX)"; \
-	trap 'rm -rf "$$compiled_root"' EXIT; \
-	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-	  $(RACKET) -y -S $(REPO_DIR) $(HARNESS_EMITTER) $(HARNESS_SOURCE) > $(SOC_MLIR)
+	cd $(REPO_DIR) && RACKET="$(RACKET)" tools/run-racket.sh -S $(REPO_DIR) \
+	  $(HARNESS_EMITTER) $(HARNESS_SOURCE) > $(SOC_MLIR)
 
 $(SOC_VERILOG): $(SOC_MLIR)
 	@test -x "$(CIRCT_OPT)" || \

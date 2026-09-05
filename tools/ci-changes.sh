@@ -196,6 +196,7 @@ classify_path() {
     tools/run-racket-tests.sh)
       mark_all_host
       mark_all_examples
+      simulation=true
       ;;
     tools/write-rv5stage-core-diagram.rhm)
       mark_example_rv5stage

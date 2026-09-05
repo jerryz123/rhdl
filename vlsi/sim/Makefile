@@ -10,6 +10,7 @@ SOC ?= mini
 TECH ?= sky130
 BUILD_ROOT ?= $(VLSI_DIR)/build/sim
 BUILD_DIR := $(BUILD_ROOT)/$(SOC)/$(TECH)
+HARNESS_SOURCE := sims/mini-soc-harness.rhdl
 
 ifeq ($(SOC),mini)
 else
@@ -50,7 +51,7 @@ SOC_VERILOG := $(BUILD_DIR)/SoCHarness.sv
 SOC_OBJECT_DIR := $(BUILD_DIR)/obj
 SIMULATOR_BINARY := $(SOC_OBJECT_DIR)/VTestDriver
 SMOKE_BINARY := $(BUILD_DIR)/rv5stage_smoke.elf
-SIMULATOR_SOURCES := $(addprefix $(REPO_DIR)/,$(shell cd $(REPO_DIR) && rg --files -g '*.rhdl' -g '*.rhm'))
+SIMULATOR_SOURCES := $(sort $(shell find $(REPO_DIR) -type f \( -name '*.rhdl' -o -name '*.rhm' \)))
 
 .PHONY: all setup mapping mapped-rtl simulator run smoke
 
@@ -87,10 +88,8 @@ $(MEMORY_SITE_PLUGIN): $(SRAM_DIR)/circt/CMakeLists.txt $(SRAM_DIR)/circt/Memory
 	@test -s $@
 
 $(SOC_MLIR): $(SIMULATOR_SOURCES) | $(BUILD_DIR)
-	compiled_root="$$(mktemp -d /tmp/rhodium-vlsi-sim.XXXXXX)"; \
-	trap 'rm -rf "$$compiled_root"' EXIT; \
-	cd $(REPO_DIR) && env PLTCOMPILEDROOTS="$$compiled_root" \
-		$(RACKET) -y -S $(REPO_DIR) sims/emit-soc-harness.rhm $(SOC) > $@
+	cd $(REPO_DIR) && RACKET="$(RACKET)" tools/run-racket.sh -S $(REPO_DIR) \
+		sims/emit-soc-harness.rhm $(HARNESS_SOURCE) > $@
 
 $(MAPPING_SELECTION_STAMP): $(SOC_MLIR) $(MEMORY_SITE_PLUGIN) $(MEMORY_POLICY)
 	@test -x $(CIRCT_OPT) || { \
