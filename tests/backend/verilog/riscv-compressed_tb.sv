@@ -1,9 +1,10 @@
-// Checks representative integer, control-flow, and profile-dependent C expansions.
+// Checks representative Zca and profile-dependent full-C expansions.
 module riscv_compressed_tb;
   logic [15:0] compressed;
   RiscvCompressedExpansion rv32f;
   RiscvCompressedExpansion rv32d;
   RiscvCompressedExpansion rv64d;
+  RiscvCompressedExpansion rv64_zca;
 
   RiscvCompressedFixture dut (.*);
 
@@ -17,6 +18,8 @@ module riscv_compressed_tb;
       else $fatal(1, "RV32D expansion of %h was valid=%b instruction=%h", encoding, rv32d.valid, rv32d.instruction);
     assert (rv64d.valid && rv64d.instruction == expected)
       else $fatal(1, "RV64 expansion of %h was valid=%b instruction=%h", encoding, rv64d.valid, rv64d.instruction);
+    assert (rv64_zca.valid && rv64_zca.instruction == expected)
+      else $fatal(1, "RV64 Zca expansion of %h was valid=%b instruction=%h", encoding, rv64_zca.valid, rv64_zca.instruction);
   endtask
 
   initial begin
@@ -30,7 +33,7 @@ module riscv_compressed_tb;
 
     compressed = 16'h0000;
     #1;
-    assert (!rv32f.valid && !rv32d.valid && !rv64d.valid)
+    assert (!rv32f.valid && !rv32d.valid && !rv64d.valid && !rv64_zca.valid)
       else $fatal(1, "reserved c.addi4spn was accepted");
 
     compressed = 16'h2085;
@@ -39,6 +42,8 @@ module riscv_compressed_tb;
       else $fatal(1, "RV32 c.jal expansion mismatch: %h", rv32f.instruction);
     assert (rv64d.valid && rv64d.instruction == 32'h0010809b)
       else $fatal(1, "RV64 c.addiw expansion mismatch: %h", rv64d.instruction);
+    assert (rv64_zca.valid && rv64_zca.instruction == 32'h0010809b)
+      else $fatal(1, "RV64 Zca c.addiw expansion mismatch: %h", rv64_zca.instruction);
 
     compressed = 16'h6000;
     #1;
@@ -46,6 +51,8 @@ module riscv_compressed_tb;
       else $fatal(1, "RV32 c.flw expansion mismatch: %h", rv32f.instruction);
     assert (rv64d.valid && rv64d.instruction == 32'h00043403)
       else $fatal(1, "RV64 c.ld expansion mismatch: %h", rv64d.instruction);
+    assert (rv64_zca.valid && rv64_zca.instruction == 32'h00043403)
+      else $fatal(1, "RV64 Zca c.ld expansion mismatch: %h", rv64_zca.instruction);
 
     compressed = 16'h2000;
     #1;
@@ -55,6 +62,8 @@ module riscv_compressed_tb;
       else $fatal(1, "RV32D c.fld expansion mismatch: %h", rv32d.instruction);
     assert (rv64d.valid && rv64d.instruction == 32'h00043407)
       else $fatal(1, "RV64D c.fld expansion mismatch: %h", rv64d.instruction);
+    assert (!rv64_zca.valid)
+      else $fatal(1, "RV64 Zca unexpectedly accepted c.fld");
 
     $finish;
   end

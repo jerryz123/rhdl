@@ -12,9 +12,9 @@ NoC, and synthesizable-memory structure.
 
 | `SOC` | Selected system | Memory supplied by the harness | Default core specialization |
 | --- | --- | --- | --- |
-| `simple` | `SimpleSoC` | `CHIDPIMemory` behind the SoC's external SN-F boundary | RV64IMAFDC plus B and Zicond |
+| `simple` | `SimpleSoC` | `CHIDPIMemory` behind the SoC's external SN-F boundary | RV64IMAFDC plus B and Zicond; C composes Zca and Zcd |
 | `mini` | `MiniSoC` | None; the SoC contains its own 64 KiB `CHIRam` | Integer-only, compressed instructions disabled |
-| `tiled` | Default 4x4 `TiledSoC` | None; each LLC tile contains its backing `CHIRam` bank | Integer-only, compressed instructions enabled |
+| `tiled` | Default 4x4 `TiledSoC` | None; each LLC tile contains its backing `CHIRam` bank | Integer-only; C specializes to Zca |
 
 `SOC` defaults to `simple`. Read the [SoC comparison](../socs/README.md#choose-a-system)
 for the hardware differences, then use this guide to build or run the matching

@@ -17,9 +17,9 @@ instead of treating this page as a component catalog.
 
 | System | Default processors | Normal-memory termination | Coherence structure | Default core specialization | Best fit |
 | --- | ---: | --- | --- | --- | --- |
-| `SimpleSoC` | 1 | External line-capable SN-F; 1 GiB window | One 64-set, four-way inclusive LLC, one physical router, ACLINT, and UART | RV64IMAFDC plus B and Zicond | Primary single-core coherent system and external-memory integration |
+| `SimpleSoC` | 1 | External line-capable SN-F; 1 GiB window | One 64-set, four-way inclusive LLC, one physical router, ACLINT, and UART | RV64IMAFDC plus B and Zicond; full C profile | Primary single-core coherent system and external-memory integration |
 | `MiniSoC` | 1 | Internal 64 KiB `CHIRam` | Forwarding HN-F, one physical router, ACLINT, and UART; 2 KiB direct-mapped L1I/L1D | Integer-only, compressed instructions disabled | Compact RTL and physical-design experiments |
-| `TiledSoC` | 8 in the default 4x4 layout | Four internal 8 KiB `CHIRam` banks | Four inclusive LLC slices plus routed device-home, ACLINT, and UART tiles | Integer-only, compressed instructions enabled | Configurable multicore, striped-memory, and mesh experiments |
+| `TiledSoC` | 8 in the default 4x4 layout | Four internal 8 KiB `CHIRam` banks | Four inclusive LLC slices plus routed device-home, ACLINT, and UART tiles | Integer-only with the C profile, which specializes to Zca | Configurable multicore, striped-memory, and mesh experiments |
 
 All three systems expose the same [`SoCHostInterface`](host-interface.rhdl): a
 non-caching coherent RN-F memory port for loading and observation, plus a
@@ -27,10 +27,11 @@ non-caching coherent RN-F memory port for loading and observation, plus a
 `~floating_point:` specialization and orthogonal `~half_precision:` and `~zfa:`
 specializations; the reusable `SimpleSoCFabric` also accepts all three. `MiniSoC`
 currently inherits that fabric's integer-only, non-compressed defaults.
-`TiledSoC` keeps the integer-only floating-point default while enabling
-compressed instructions, and `SimpleSoC` defaults to `FloatingPointProfile.D`
-with compressed instructions enabled. Half precision and Zfa default to disabled
-in both compositions.
+`TiledSoC` keeps the integer-only floating-point default while selecting
+`CompressedProfile.C`, which specializes to Zca. `SimpleSoC` defaults to
+`FloatingPointProfile.D` and `CompressedProfile.C`, composing Zca and Zcd.
+Callers may select `CompressedProfile.Zca` independently of floating-point
+support. Half precision and Zfa default to disabled in both compositions.
 
 Every system also exposes the shared [`SoCUartInterface`](peripherals.rhdl)
 containing RX, TX, and interrupt signals.

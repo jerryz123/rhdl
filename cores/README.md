@@ -58,8 +58,8 @@ protocol libraries, but never on another named core.
 RV5Stage is the current named core. Its default profile is integer-only;
 supported optional profiles are RV32F on `XLen.X32` and RV64D on `XLen.X64`,
 with the D profile also implementing F. RV32D and an RV64F-only specialization
-are rejected. Compressed instructions are an independent optional
-specialization. See [`rv5stage/README.md`](rv5stage/README.md) for the owned
+are rejected. Compressed instructions independently select no support, Zca, or
+the FP-profile-dependent C composition. See [`rv5stage/README.md`](rv5stage/README.md) for the owned
 instruction families, pipeline and completion contracts, FP state and
 execution, memory hierarchy, CHI boundary, generator parameters, ports, tests,
 and deliberate limits.

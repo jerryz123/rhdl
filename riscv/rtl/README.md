@@ -79,19 +79,21 @@ consumers select a descriptor instead of copying slice maps.
 ## Compressed-instruction expansion
 
 [`compressed.rhdl`](compressed.rhdl) defines the combinational
-`RiscvCompressedExpander(xlen, profile)` circuit. Its input is `Bits(16)` and
+`RiscvCompressedExpander(xlen, floating_point, compressed_profile)` circuit.
+Its input is `Bits(16)` and
 its `RiscvCompressedExpansion` output contains `valid: Bool` plus the canonical
 `instruction: Bits(32)` for the existing 32-bit decoder.
 
-The selected descriptor lists are exact:
+`CompressedProfile.Zca` always selects only the XLEN-appropriate Zca catalog.
+`CompressedProfile.C` selects this exact architectural composition:
 
 | `XLen` | Floating-point profile | Included compressed catalogs |
 |---|---|---|
-| `XLen.X32` | `None` | RV32C integer |
-| `XLen.X32` | `F` | RV32C integer and compressed single-precision loads/stores |
-| `XLen.X32` | `D` | RV32C integer plus compressed single- and double-precision loads/stores |
-| `XLen.X64` | `None` or `F` | RV64C integer |
-| `XLen.X64` | `D` | RV64C integer and compressed double-precision loads/stores |
+| `XLen.X32` | `None` | RV32Zca |
+| `XLen.X32` | `F` | RV32Zca + RV32Zcf |
+| `XLen.X32` | `D` | RV32Zca + RV32Zcf + RV32Zcd |
+| `XLen.X64` | `None` or `F` | RV64Zca |
+| `XLen.X64` | `D` | RV64Zca + RV64Zcd |
 
 The circuit derives its selector relation from the pure descriptors, checks
 their nonzero-field and nonzero-immediate legality constraints in hardware,

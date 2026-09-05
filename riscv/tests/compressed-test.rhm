@@ -5,6 +5,9 @@ import:
   "../../rhodium/core/main.rhm" open
   "../../rhodium/frontend/kernel.rhm" as embedded
   "../isa/c.rhm" open
+  "../isa/zca.rhm" open
+  "../isa/zcf.rhm" open
+  "../isa/zcd.rhm" open
   "../isa/fp-profile.rhm" open
   "../isa/xlen.rhm" open
   "../rtl/compressed.rhdl" open
@@ -18,8 +21,11 @@ def rv64_design = embedded.run_elaboration(
 def rv32d_design = embedded.run_elaboration(
   fun (): RiscvCompressedExpander(XLen.X32, FloatingPointProfile.D)
 )
-def addi = RV32CInteger.matching(0x0085)
-def lui_hint = RV64CInteger.matching(0x6005)
+def rv64_zca_design = embedded.run_elaboration(
+  fun (): RiscvCompressedExpander(XLen.X64, FloatingPointProfile.D, CompressedProfile.Zca)
+)
+def addi = RV32Zca.matching(0x0085)
+def lui_hint = RV64Zca.matching(0x6005)
 fun expansions_match_targets(catalog :: CompressedInstructionCatalog):
   for all (word in 0..0x10000):
     def instruction = catalog.matching(word)
@@ -28,26 +34,40 @@ fun expansions_match_targets(catalog :: CompressedInstructionCatalog):
     | #true
 
 check:
-  RV64CInteger.find("C.ADDIW").name ~is "C.ADDIW"
+  compressed_profile_enabled(CompressedProfile.None) ~is #false
+  compressed_profile_enabled(CompressedProfile.Zca) ~is #true
+  compressed_profile_enabled(CompressedProfile.C) ~is #true
+  compressed_profile_reports_misa_c(CompressedProfile.None, FloatingPointProfile.None) ~is #false
+  compressed_profile_reports_misa_c(CompressedProfile.Zca, FloatingPointProfile.None) ~is #true
+  compressed_profile_reports_misa_c(CompressedProfile.Zca, FloatingPointProfile.F) ~is #false
+  compressed_profile_reports_misa_c(CompressedProfile.Zca, FloatingPointProfile.D) ~is #false
+  compressed_profile_reports_misa_c(CompressedProfile.C, FloatingPointProfile.D) ~is #true
+  zca_instructions(XLen.X32).map(fun (instruction): instruction.name).contains("C.FLW") ~is #false
+  c_instructions(XLen.X32, FloatingPointProfile.F).map(fun (instruction): instruction.name).contains("C.FLW") ~is #true
+  c_instructions(XLen.X32, FloatingPointProfile.D).map(fun (instruction): instruction.name).contains("C.FLD") ~is #true
+  c_instructions(XLen.X64, FloatingPointProfile.F).map(fun (instruction): instruction.name).contains("C.FLW") ~is #false
+  c_instructions(XLen.X64, FloatingPointProfile.D).map(fun (instruction): instruction.name).contains("C.FLD") ~is #true
+  RV64Zca.find("C.ADDIW").name ~is "C.ADDIW"
   addi.name ~is "C.ADDI"
   addi.expand(0x0085) ~is 0x00108093
   lui_hint.name ~is "C.LUI"
   lui_hint.expand(0x6005) ~is 0x00001037
-  RV64CInteger.matching(0x0000) ~is #false
-  RV64CInteger.matching(0x6081) ~is #false
-  RV64CInteger.matching(0x6101) ~is #false
-  RV64CInteger.matching(0x2005) ~is #false
-  RV64CInteger.matching(0x2085).name ~is "C.ADDIW"
-  RV32CInteger.matching(0x2085).name ~is "C.JAL"
-  RV64CInteger.matching(0x9002).name ~is "C.EBREAK"
-  RV32CFloat.matching(0x6000).name ~is "C.FLW"
-  RV32CDouble.matching(0x2000).name ~is "C.FLD"
-  RV64CDouble.matching(0x2000).name ~is "C.FLD"
-  expansions_match_targets(RV32CInteger) ~is #true
-  expansions_match_targets(RV64CInteger) ~is #true
-  expansions_match_targets(RV32CFloat) ~is #true
-  expansions_match_targets(RV32CDouble) ~is #true
-  expansions_match_targets(RV64CDouble) ~is #true
+  RV64Zca.matching(0x0000) ~is #false
+  RV64Zca.matching(0x6081) ~is #false
+  RV64Zca.matching(0x6101) ~is #false
+  RV64Zca.matching(0x2005) ~is #false
+  RV64Zca.matching(0x2085).name ~is "C.ADDIW"
+  RV32Zca.matching(0x2085).name ~is "C.JAL"
+  RV64Zca.matching(0x9002).name ~is "C.EBREAK"
+  RV32Zcf.matching(0x6000).name ~is "C.FLW"
+  RV32Zcd.matching(0x2000).name ~is "C.FLD"
+  RV64Zcd.matching(0x2000).name ~is "C.FLD"
+  expansions_match_targets(RV32Zca) ~is #true
+  expansions_match_targets(RV64Zca) ~is #true
+  expansions_match_targets(RV32Zcf) ~is #true
+  expansions_match_targets(RV32Zcd) ~is #true
+  expansions_match_targets(RV64Zcd) ~is #true
   verify_design(rv32_design) ~is #void
   verify_design(rv64_design) ~is #void
   verify_design(rv32d_design) ~is #void
+  verify_design(rv64_zca_design) ~is #void

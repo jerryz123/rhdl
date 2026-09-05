@@ -130,8 +130,11 @@ responsibilities.
 
 | Module | Public catalogs | Coverage |
 |---|---|---|
-| [`isa/c.rhm`](isa/c.rhm) | `RV32CInteger`, `RV64CInteger` | C 2.0 integer instructions with XLEN-specific encodings and canonical targets |
-| [`isa/c.rhm`](isa/c.rhm) | `RV32CFloat`, `RV32CDouble`, `RV64CDouble` | Profile-selectable compressed floating-point load/store catalogs |
+| [`isa/compressed.rhm`](isa/compressed.rhm) | `CompressedInstructionSpec`, `CompressedInstructionCatalog` | Shared 16-bit encoding, legality, and canonical-expansion descriptors |
+| [`isa/zca.rhm`](isa/zca.rhm) | `RV32Zca`, `RV64Zca` | Zca 1.0.0 compressed integer instructions |
+| [`isa/zcf.rhm`](isa/zcf.rhm) | `RV32Zcf` | Zcf 1.0.0 RV32 compressed single-precision loads and stores |
+| [`isa/zcd.rhm`](isa/zcd.rhm) | `RV32Zcd`, `RV64Zcd` | Zcd 1.0.0 compressed double-precision loads and stores |
+| [`isa/c.rhm`](isa/c.rhm) | `CompressedProfile`, `c_instructions` | Selects no compressed support, Zca alone, or C composed from Zca and applicable FP subsets |
 
 See [Compressed-instruction expansion](#compressed-instruction-expansion) for
 the pure descriptor and hardware materialization path.
@@ -169,8 +172,9 @@ policy.
 
 ## Compressed-instruction expansion
 
-[`isa/c.rhm`](isa/c.rhm) retains each 16-bit C encoding, legality constraints,
-compressed fields, immediate layout, operand bindings, and canonical
+[`isa/compressed.rhm`](isa/compressed.rhm) defines the shared compressed
+descriptor machinery. The Zca, Zcf, and Zcd catalogs retain each 16-bit
+encoding, legality constraint, compressed field, immediate layout, operand binding, and canonical
 `InstructionSpec` target as pure host data. A `CompressedInstructionCatalog`
 checks unique names and nonoverlapping base encodings. Matching additionally
 checks constraints such as nonzero registers and immediates, and host `expand`
@@ -187,13 +191,17 @@ flowchart LR
   Canonical --> Decoder["existing 32-bit decoder"]
 ```
 
-[`rtl/compressed.rhdl`](rtl/compressed.rhdl) selects the correct integer and
-floating-point descriptor lists from `XLen` and `FloatingPointProfile`, then
-materializes the same expansion as combinational hardware. Reserved encodings
-produce `valid = #false`; architectural hint encodings remain legal and expand
-to the canonical no-effect instruction where the base ISA assigns that
-behavior. See the [adapter contract](rtl/README.md#compressed-instruction-expansion)
-for the exact profile matrix and output rules.
+[`isa/c.rhm`](isa/c.rhm) provides `CompressedProfile.None`, `.Zca`, and `.C`.
+The C profile composes Zca with Zcf on RV32F and with Zcd when D is present;
+Zca remains independently selectable even for an FP-capable processor. A
+Zca-only integer configuration can report `misa.C`, but an FP-capable Zca-only
+configuration cannot because it omits the FP subset required by C.
+[`rtl/compressed.rhdl`](rtl/compressed.rhdl) materializes the selected pure
+composition as combinational hardware. Reserved encodings produce
+`valid = #false`; architectural hint encodings remain legal and expand to the
+canonical no-effect instruction where the base ISA assigns that behavior. See
+the [adapter contract](rtl/README.md#compressed-instruction-expansion) for the
+exact profile matrix and output rules.
 
 ## Architectural tests
 
