@@ -1,0 +1,27 @@
+#lang rhombus
+// Checks reusable host-side instruction expansion, immediate resizing, and field validation.
+
+import:
+  "../model/main.rhm" open
+  "../isa/rv32i.rhm" as rv32i
+
+def compact_rd = BitField("compact rd", 4, 2)
+def compact_immediate = ImmediateLayout(
+  "compact signed immediate",
+  6,
+  #true,
+  [ImmediatePiece(BitField("sign", 12, 12), 5, 5),
+   ImmediatePiece(BitField("low", 6, 2), 4, 0)]
+)
+def addi_expansion = InstructionExpansion(
+  rv32i.ADDI,
+  [InstructionFieldBinding(rd, FieldExpansionValue(compact_rd, 8)),
+   InstructionFieldBinding(rs1, ConstantExpansionValue(2))],
+  compact_immediate
+)
+
+check:
+  resize_immediate_value(0x3f, 6, #true, 12) ~is 0xfff
+  resize_immediate_value(0x1f, 6, #true, 12) ~is 0x01f
+  scatter_immediate_value(IImmediate, 0xfff) ~is 0xfff00000
+  addi_expansion.expand(0x0004) ~is 0x00110493

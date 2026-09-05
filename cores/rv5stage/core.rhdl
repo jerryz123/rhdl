@@ -20,6 +20,7 @@ import:
   "divide.rhdl" open
   "fp-pipeline.rhdl" open
   "fp-bundles.rhdl" open
+  "fetch.rhdl" open
   "decode/fp-ctrl.rhdl" open
   "register-file.rhdl" open
   "icache/protocol.rhdl" open
@@ -39,7 +40,8 @@ import:
   lib("rhodium/std/scoreboard.rhdl") open
 
 sync_circuit RV5StageCore(xlen :: XLen,
-                          profile :: FloatingPointProfile = DefaultFloatingPointProfile):
+                          profile :: FloatingPointProfile = DefaultFloatingPointProfile,
+                          ~compressed: compressed_enabled :: Boolean = #false):
   check_rv5stage_floating_point_profile(xlen, profile)
   def width = xlen.width
   def register_count = 32
@@ -86,7 +88,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
   inst fp_integer_scoreboard(Scoreboard(register_count))
   def FpModule = if floating_point_supports_f(profile) | RV5StageFpPipeline(xlen, effective_fp_profile, Bits(width)) | RV5StageDisabledFpPipeline(xlen, effective_fp_profile, Bits(width))
   inst fp(FpModule)
-  inst csrs(RV5StageCsrFile(xlen, profile))
+  inst csrs(RV5StageCsrFile(xlen, profile, ~compressed: compressed_enabled))
+  inst fetch(RV5StageInstructionFetch(xlen, profile, ~compressed: compressed_enabled))
   csrs.interrupts <== interrupts
   csrs.hart_id <== hart_id
   csrs.time_counter <== time_counter
@@ -120,7 +123,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   scoreboard.clear.bits <== scoreboard_clear_link.right.bits
   def fence_i_commit = commit.valid & commit.bits.fence.is_instruction_fence()
   translation_flush <== csrs.translation_flush
-  def fence_resume_pc = commit.bits.pc + bits(4, width)
+  def fence_resume_pc = commit.bits.resume_pc
   def fence_commit = fence_i_commit ||| csrs.translation_flush
   def commit_redirect = csrs.redirect.valid ||| fence_commit
   redirect_link.left.valid <== csrs.redirect.valid ||| fence_commit ||| execute_redirect_link.right.valid
@@ -130,9 +133,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
     mux(fence_commit, fence_resume_pc, execute_redirect_link.right.bits)
   )
 
-  // Fetch (IF) owns request correlation state, while IF/ID storage belongs to
-  // its Pipe. Redirects and faults flush both pending PCs and the L1I's
-  // lookup/response path, so no generation tag crosses this interface.
+  // Fetch (IF) assembles variable-length instructions from aligned cache words.
+  // Redirects and faults discard both partially assembled and outstanding data.
   def exception_in_flight = pending_exception_valid ||| (memory.valid & memory.bits.exception_valid) ||| (
     commit.valid & commit.bits.exception_valid
   )
@@ -140,29 +142,21 @@ sync_circuit RV5StageCore(xlen :: XLen,
     redirect_link.right.valid
   )
   reg started(~init: Bool(#false))
-  reg fetch_pc(~init: zero)
   reg architectural_pc(~init: zero)
   start.ready <== !started & !(faulted ||| execute_exception_event)
   def start_fire = start.fire()
-  def start_fault = start_fire & !is_aligned(start.bits, 4)
-  def fetch_flush = start_fault ||| execute_exception_event ||| redirect_link.right.valid
-  inst fetch_pcs(Queue(Bits(width), 2, ~pipe: #true), ~reset_when: fetch_flush)
-  instruction_access.flush <== fetch_flush
-  instruction_access.invalidate_all <== fence_i_commit
+  def instruction_alignment = if compressed_enabled | 2 | 4
+  def start_fault = start_fire & !is_aligned(start.bits, instruction_alignment)
   def fetch_valid = started & !squash & !csrs.interrupt_request
-  instruction_access.request.valid <== fetch_valid & fetch_pcs.ingress.ready
-  instruction_access.request.bits <== RV5StageInstructionReq(xlen):
-    address: fetch_pc
-  fetch_pcs.ingress.valid <== fetch_valid & instruction_access.request.ready
-  fetch_pcs.ingress.bits <== fetch_pc
+  fetch.active <== fetch_valid
+  fetch.flush <== start_fault ||| execute_exception_event
+  fetch.restart_valid <== redirect_link.right.valid ||| (start_fire & !start_fault)
+  fetch.restart_pc <== mux(redirect_link.right.valid, redirect_link.right.bits, start.bits)
+  fetch.invalidate_all <== fence_i_commit
+  fetch.memory <=> instruction_access
+  fetch.fetched <=> if_id_pipe.ingress
   when start_fire:
     started <== Bool(#true)
-  when (redirect_link.right.valid):
-    fetch_pc <== redirect_link.right.bits
-  elsewhen start_fire:
-    fetch_pc <== start.bits
-  elsewhen (instruction_access.request.fire()):
-    fetch_pc <== fetch_pc + bits(4, width)
   when (csrs.redirect.valid):
     architectural_pc <== csrs.redirect.bits
   elsewhen start_fire:
@@ -170,15 +164,6 @@ sync_circuit RV5StageCore(xlen :: XLen,
   elsewhen (commit.valid & !commit.bits.exception_valid):
     architectural_pc <== commit.bits.resume_pc
 
-  def fetch_pair_ready = squash ||| if_id_pipe.ingress.ready
-  instruction_access.response.ready <== fetch_pair_ready & fetch_pcs.egress.valid
-  fetch_pcs.egress.ready <== fetch_pair_ready & instruction_access.response.valid
-  if_id_pipe.ingress.valid <== instruction_access.response.valid & fetch_pcs.egress.valid & !squash
-  if_id_pipe.ingress.bits <== FetchDecode(xlen):
-    pc: fetch_pcs.egress.bits
-    instruction: instruction_access.response.bits.instruction
-    instruction_page_fault: instruction_access.response.bits.page_fault
-    instruction_access_fault: instruction_access.response.bits.access_fault
   def decode_valid = if_id_pipe.egress.valid & !squash
   def decode_bits = if_id_pipe.egress.bits
 
@@ -304,6 +289,8 @@ sync_circuit RV5StageCore(xlen :: XLen,
   id_ex_pipe.ingress.bits <== DecodeExecute(xlen):
     pc: decode_bits.pc
     instruction: decode_bits.instruction
+    raw_instruction: decode_bits.raw_instruction
+    sequential_pc: decode_bits.sequential_pc
     alu_control: control.alu
     operand_left: control.operand.left
     operand_right: control.operand.right
@@ -323,7 +310,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
     writeback_source: control.writeback.source
     system: control.system
     fence: control.fence
-    illegal: !decoder.valid ||| (
+    illegal: decode_bits.compressed_illegal ||| !decoder.valid ||| (
       control.floating_point_valid & (
         !csrs.fp_enabled ||| (
           control.floating_point.execution.uses_rounding_mode & !fp_rounding.valid
@@ -332,6 +319,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
     )
     instruction_page_fault: if_id_pipe.egress.bits.instruction_page_fault
     instruction_access_fault: if_id_pipe.egress.bits.instruction_access_fault
+    instruction_fault_address: if_id_pipe.egress.bits.instruction_fault_address
     immediate: decoded_immediate
     rs1: rs1
     rs2: rs2
@@ -375,7 +363,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
     (forwarded_rs1 + id_ex.bits.immediate) & !bits(1, width),
     id_ex.bits.pc + id_ex.bits.immediate
   )
-  def redirect_aligned = is_aligned(computed_redirect_target, 4)
+  def redirect_aligned = is_aligned(computed_redirect_target, instruction_alignment)
   def memory_aligned = id_ex.bits.memory_width.is_aligned(alu.result)
   def execute_memory_operation :: MemoryOperation = id_ex.bits.memory_operation
   def execute_is_memory = execute_memory_operation.is_memory()
@@ -405,12 +393,12 @@ sync_circuit RV5StageCore(xlen :: XLen,
       value: alu.result
   wire execute_exception: RV5StageException(xlen)
   when (id_ex.bits.instruction_access_fault):
-    execute_exception <== exception(ExceptionCause.InstructionAccessFault, id_ex.bits.pc)
+    execute_exception <== exception(ExceptionCause.InstructionAccessFault, id_ex.bits.instruction_fault_address)
   elsewhen (id_ex.bits.instruction_page_fault):
-    execute_exception <== exception(ExceptionCause.InstructionPageFault, id_ex.bits.pc)
+    execute_exception <== exception(ExceptionCause.InstructionPageFault, id_ex.bits.instruction_fault_address)
   elsewhen (id_ex.bits.illegal):
     execute_exception <== exception(ExceptionCause.IllegalInstruction,
-                                    instruction_value(id_ex.bits.instruction))
+                                    instruction_value(id_ex.bits.raw_instruction))
   elsewhen redirect_fault:
     execute_exception <== exception(ExceptionCause.InstructionAddressMisaligned,
                                     computed_redirect_target)
@@ -433,11 +421,9 @@ sync_circuit RV5StageCore(xlen :: XLen,
     id_ex.bits.instruction[15..20].zext(width),
     forwarded_rs1
   )
-  def execute_result = mux(
-    id_ex.bits.writeback_source === WritebackSelect.PcPlus4,
-    id_ex.bits.pc + bits(4, width),
-    alu.result
-  )
+  def execute_result = mux(id_ex.bits.writeback_source === WritebackSelect.SequentialPc,
+                           id_ex.bits.sequential_pc,
+                           alu.result)
   def execute_is_multiply = id_ex.bits.writeback_source === WritebackSelect.Multiply
   def execute_needs_multiplier = execute_is_multiply & id_ex.bits.writeback_enable & or_reduce(id_ex.bits.rd)
   def memory_has_multiply = memory.valid & (memory.bits.writeback_source === WritebackSelect.Multiply) & memory.bits.writeback_enable & or_reduce(memory.bits.rd)
@@ -540,7 +526,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   ex_mem_pipe.ingress.valid <== execute_transfer
   ex_mem_pipe.ingress.bits <== ExecuteMemory(xlen):
     pc: id_ex.bits.pc
-    resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.pc + bits(4, width))
+    resume_pc: mux(redirect_requested, computed_redirect_target, id_ex.bits.sequential_pc)
     instruction: id_ex.bits.instruction
     writeback_source: id_ex.bits.writeback_source
     writeback_enable: id_ex.bits.writeback_enable & !execute_exception.valid

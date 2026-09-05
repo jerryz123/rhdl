@@ -1,0 +1,61 @@
+// Checks representative integer, control-flow, and profile-dependent C expansions.
+module riscv_compressed_tb;
+  logic [15:0] compressed;
+  RiscvCompressedExpansion rv32f;
+  RiscvCompressedExpansion rv32d;
+  RiscvCompressedExpansion rv64d;
+
+  RiscvCompressedFixture dut (.*);
+
+  task automatic check_both(input logic [15:0] encoding,
+                            input logic [31:0] expected);
+    compressed = encoding;
+    #1;
+    assert (rv32f.valid && rv32f.instruction == expected)
+      else $fatal(1, "RV32 expansion of %h was valid=%b instruction=%h", encoding, rv32f.valid, rv32f.instruction);
+    assert (rv32d.valid && rv32d.instruction == expected)
+      else $fatal(1, "RV32D expansion of %h was valid=%b instruction=%h", encoding, rv32d.valid, rv32d.instruction);
+    assert (rv64d.valid && rv64d.instruction == expected)
+      else $fatal(1, "RV64 expansion of %h was valid=%b instruction=%h", encoding, rv64d.valid, rv64d.instruction);
+  endtask
+
+  initial begin
+    check_both(16'h0085, 32'h00108093);
+    check_both(16'h8082, 32'h00008067);
+    check_both(16'h9082, 32'h000080e7);
+    check_both(16'h829a, 32'h006002b3);
+    check_both(16'h929a, 32'h006282b3);
+    check_both(16'h9002, 32'h00100073);
+    check_both(16'h6005, 32'h00001037);
+
+    compressed = 16'h0000;
+    #1;
+    assert (!rv32f.valid && !rv32d.valid && !rv64d.valid)
+      else $fatal(1, "reserved c.addi4spn was accepted");
+
+    compressed = 16'h2085;
+    #1;
+    assert (rv32f.valid && rv32f.instruction == 32'h060000ef)
+      else $fatal(1, "RV32 c.jal expansion mismatch: %h", rv32f.instruction);
+    assert (rv64d.valid && rv64d.instruction == 32'h0010809b)
+      else $fatal(1, "RV64 c.addiw expansion mismatch: %h", rv64d.instruction);
+
+    compressed = 16'h6000;
+    #1;
+    assert (rv32f.valid && rv32f.instruction == 32'h00042407)
+      else $fatal(1, "RV32 c.flw expansion mismatch: %h", rv32f.instruction);
+    assert (rv64d.valid && rv64d.instruction == 32'h00043403)
+      else $fatal(1, "RV64 c.ld expansion mismatch: %h", rv64d.instruction);
+
+    compressed = 16'h2000;
+    #1;
+    assert (!rv32f.valid)
+      else $fatal(1, "RV32F unexpectedly accepted c.fld");
+    assert (rv32d.valid && rv32d.instruction == 32'h00043407)
+      else $fatal(1, "RV32D c.fld expansion mismatch: %h", rv32d.instruction);
+    assert (rv64d.valid && rv64d.instruction == 32'h00043407)
+      else $fatal(1, "RV64D c.fld expansion mismatch: %h", rv64d.instruction);
+
+    $finish;
+  end
+endmodule

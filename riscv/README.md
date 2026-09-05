@@ -59,6 +59,12 @@ implicit zero bits.
 format. Every `InstructionSpec` proves that its fixed requirements and variable
 format fields are disjoint and together cover all 32 instruction bits. An
 `InstructionCatalog` requires unique names and pairwise-disjoint encodings.
+[`model/expansion.rhm`](model/expansion.rhm) describes validated mappings from a
+compact source encoding to an existing canonical `InstructionSpec`. Constant,
+direct-field, and compact-register bindings cover every target operand exactly
+once, while an optional source `ImmediateLayout` is resized and scattered
+through the target instruction's existing immediate layout. The same objects
+support pure host expansion and hardware materialization.
 
 ## Rhodium adapter
 
@@ -175,6 +181,18 @@ permission, superpage, and physical-address combinational operations.
 Keeping these catalogs separate lets a core select the mechanisms it actually
 implements without adding them to the RV32I or RV64I base catalogs.
 
+[`isa/c.rhm`](isa/c.rhm) defines the 16-bit integer C catalogs for RV32 and
+RV64 plus the profile-dependent compressed floating-point load and store
+encodings. Its descriptors retain legality constraints, compressed fields,
+immediates, operand bindings, and canonical target instructions as pure host
+data instead of mixing decompression with a core's fetch policy.
+[`rtl/compressed.rhdl`](rtl/compressed.rhdl) uses those descriptors to recognize
+a compressed instruction and materialize the canonical 32-bit instruction
+consumed by an existing decoder, without a parallel operation enum or
+handwritten opcode table. Reserved encodings are reported as invalid;
+architectural hint encodings remain legal no-ops after expansion where the
+base instruction has that behavior.
+
 ## Floating-point catalogs
 
 [`isa/fp-profile.rhm`](isa/fp-profile.rhm) defines the closed host-side
@@ -212,3 +230,5 @@ B follows the ratified
 [bit-manipulation extension](https://docs.riscv.org/reference/isa/unpriv/b-st-ext.html).
 Zicond follows the ratified
 [integer conditional-operations extension](https://docs.riscv.org/reference/isa/unpriv/zicond.html).
+C follows the ratified
+[compressed-instruction extension](https://docs.riscv.org/reference/isa/unpriv/c-st-ext.html).

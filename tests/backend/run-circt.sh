@@ -183,7 +183,7 @@ fixture_in_group() {
     protocols:aclint|protocols:uart16550|protocols:uart-dpi|protocols:noc-wormhole|protocols:noc-router-family|protocols:noc-escape-router|protocols:chi-*)
       return 0
       ;;
-    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:load-store-rv32-word|cores:bit-manip*|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:riscv-floating-point|cores:scoreboard|cores:rv5stage-*)
+    cores:rv32i-*|cores:rv64i-*|cores:load-store|cores:load-store-rv32-word|cores:bit-manip*|cores:iterative-multiplier|cores:iterative-divider|cores:riscv-counters-*|cores:riscv-floating-point|cores:riscv-compressed|cores:scoreboard|cores:rv5stage-*)
       return 0
       ;;
     *)
@@ -643,6 +643,7 @@ direct_fixture_specs=(
   'iterative-divider|iterative_divider_tb'
   'riscv-counters-rv32|riscv_counters_rv32_tb'
   'riscv-floating-point|riscv_floating_point_tb'
+  'riscv-compressed|riscv_compressed_tb'
   'rv5stage-fp-decoder|'
   'rv5stage-fp-register-file|rv5stage_fp_register_file_tb'
   'rv5stage-fp-pipeline|rv5stage_fp_pipeline_tb'
@@ -650,6 +651,7 @@ direct_fixture_specs=(
   'rv5stage-csr|rv5stage_csr_tb'
   'rv5stage-atomic|rv5stage_atomic_tb'
   'rv5stage-access-fault|rv5stage_access_fault_tb'
+  'rv5stage-fetch|rv5stage_fetch_tb'
   'rv5stage-core|rv5stage_core_tb'
   'rv5stage-core-rv32f|'
   'rv5stage-core-rv64d|'

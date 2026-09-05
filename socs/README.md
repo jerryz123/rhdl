@@ -25,10 +25,12 @@ calls or simulator behavior. Host `ReadClean` and `WriteUniquePtl`
 transactions snoop the private caches, so simulator mailboxes may reside in
 ordinary coherent memory.
 The RV64 compositions accept a `~floating_point:` host specialization.
-`SimpleSoC` defaults to `FloatingPointProfile.D`, so its ordinary simulation
-configuration implements RV64D. The reusable `SimpleSoCFabric` and `TiledSoC`
-boundaries retain the integer-only default and can select D explicitly;
-`MiniSoC` currently inherits the fabric's integer-only default.
+`SimpleSoC` defaults to `FloatingPointProfile.D` and enables compressed
+instructions, so its ordinary simulation configuration implements RV64IMAFDC
+plus the core's B and Zicond extensions.
+The reusable `SimpleSoCFabric` boundary retains integer-only, non-compressed
+defaults; `MiniSoC` currently inherits those defaults. `TiledSoC` keeps its
+integer-only floating-point default but enables compressed instructions.
 The ACLINT window occupies `0x02000000..0x0200ffff`. Its `mtime` counter drives
 RV5Stage's `time` CSR, while hart 0's MTIP and MSIP levels drive the corresponding
 machine interrupt inputs. The platform currently advances `mtime` once per SoC

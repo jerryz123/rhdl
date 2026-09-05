@@ -1,0 +1,132 @@
+#lang rhombus
+// Defines validated, host-interpretable mappings from compact encodings to canonical instructions.
+
+import:
+  "../../support/annotations.rhm" open
+  "fields.rhm" open
+  "formats.rhm" open
+  "instruction.rhm" open
+
+export:
+  ExpansionValueSource
+  ConstantExpansionValue
+  FieldExpansionValue
+  InstructionFieldBinding
+  InstructionExpansion
+  ExpansionConstraint
+  NonzeroFieldConstraint
+  NonzeroImmediateConstraint
+  resize_immediate_value
+  scatter_immediate_value
+
+interface ExpansionValueSource:
+  method decode(word :: Nat) :: Nat
+  method maximum() :: Nat
+
+class ConstantExpansionValue(value :: Nat):
+  implements ExpansionValueSource
+  override method decode(_word :: Nat): value
+  override method maximum(): value
+
+class FieldExpansionValue(field :: BitField, addend :: Nat = 0):
+  implements ExpansionValueSource
+  override method decode(word :: Nat): field.extract(word) + addend
+  override method maximum(): width_mask(field.width) + addend
+
+class InstructionFieldBinding(target :: BitField,
+                              source :: ExpansionValueSource):
+  constructor (target :: BitField, source :: ExpansionValueSource):
+    unless target.high < 32
+    | error(~who: #'InstructionFieldBinding,
+            "expansion target field must fit a 32-bit instruction")
+    unless source.maximum() <= width_mask(target.width)
+    | error(~who: #'InstructionFieldBinding,
+            "expansion source does not fit its target instruction field")
+    super(target, source)
+
+fun resize_immediate_value(value :: Nat,
+                           source_width :: PosInt,
+                           signed :: Boolean,
+                           target_width :: PosInt):
+  unless source_width <= target_width
+  | error(~who: #'resize_immediate_value,
+          "expanded immediate cannot narrow its source value")
+  def masked = value bits.and width_mask(source_width)
+  if signed && bits.field(masked, source_width - 1, source_width) == 1
+  | masked bits.or (width_mask(target_width) bits.xor width_mask(source_width))
+  | masked
+
+fun scatter_immediate_value(layout :: ImmediateLayout,
+                            value :: Nat):
+  unless value <= width_mask(layout.width)
+  | error(~who: #'scatter_immediate_value,
+          "immediate value does not fit its target layout")
+  def mutable result = 0
+  for (piece in layout.pieces):
+    def fragment = bits.field(value, piece.output_low, piece.output_high + 1)
+    result := result bits.or (fragment bits.(<<) piece.source.low)
+  for (bit in layout.zero_bits):
+    when bits.field(value, bit, bit + 1) != 0
+    | error(~who: #'scatter_immediate_value,
+            "immediate value sets an implicit-zero target bit")
+  result
+
+class InstructionExpansion(target :: InstructionSpec,
+                           bindings :: List.of(InstructionFieldBinding),
+                           immediate :: False || Nat || ImmediateLayout):
+  constructor (target :: InstructionSpec,
+               bindings :: List.of(InstructionFieldBinding),
+               immediate :~ False || Nat || ImmediateLayout = #false):
+    def operand_fields = target.operands.map(fun (operand): operand.field)
+    for (binding in bindings):
+      unless operand_fields.contains(binding.target)
+      | error(~who: #'InstructionExpansion,
+              "expansion binding does not target an instruction operand")
+    for (field in operand_fields):
+      unless bindings.filter(~keep: fun (binding): binding.target == field).length() == 1
+      | error(~who: #'InstructionExpansion,
+              "expansion must bind every target operand exactly once")
+    when immediate != #false && target.immediate == #false
+    | error(~who: #'InstructionExpansion,
+            "expansion supplies an immediate to a target without one")
+    when immediate == #false && target.immediate != #false
+    | error(~who: #'InstructionExpansion,
+            "expansion must supply every target immediate")
+    when immediate is_a ImmediateLayout && immediate.width > target.immediate.width
+    | error(~who: #'InstructionExpansion,
+            "expansion immediate is wider than its target immediate")
+    when immediate is_a Nat && immediate > width_mask(target.immediate.width)
+    | error(~who: #'InstructionExpansion,
+            "constant expansion immediate does not fit its target")
+    super(target, bindings, immediate)
+
+  method expand(word :: Nat):
+    def mutable instruction = target.encoding.value
+    for (binding in bindings):
+      instruction := instruction bits.or (
+        binding.source.decode(word) bits.(<<) binding.target.low
+      )
+    if immediate is_a ImmediateLayout
+    | block:
+        def target_immediate :: ImmediateLayout = target.immediate
+        def resized = resize_immediate_value(
+          immediate.decode(word),
+          immediate.width,
+          immediate.signed,
+          target_immediate.width
+        )
+        instruction bits.or scatter_immediate_value(target_immediate, resized)
+    | if immediate is_a Nat
+      | scatter_immediate_value(target.immediate, immediate) bits.or instruction
+      | instruction
+
+interface ExpansionConstraint:
+  method matches(word :: Nat) :: Boolean
+
+class NonzeroFieldConstraint(field :: BitField):
+  implements ExpansionConstraint
+  override method matches(word :: Nat): field.extract(word) != 0
+
+class NonzeroImmediateConstraint(immediate :: ImmediateLayout):
+  implements ExpansionConstraint
+  override method matches(word :: Nat): immediate.decode(word) != 0

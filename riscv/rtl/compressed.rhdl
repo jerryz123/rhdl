@@ -1,0 +1,121 @@
+#lang rhodium
+// Materializes descriptor-driven C-extension expansions as combinational hardware.
+
+import:
+  "../isa/c.rhm" open
+  "../isa/fp-profile.rhm" open
+  "../isa/xlen.rhm" open
+  "../model/expansion.rhm" open
+  "../model/formats.rhm" open
+  "instruction-fields.rhdl" open
+  "instruction-pattern.rhdl" open
+  lib("rhodium/std/bits.rhdl") open
+  lib("rhodium/std/decode.rhdl") open
+
+bundle RiscvCompressedExpansion():
+  valid: Bool
+  instruction: Bits(32)
+
+fun compressed_instructions(xlen :: XLen, profile :: FloatingPointProfile):
+  if xlen == XLen.X32
+  | RV32CIntegerInstructions ++ (
+      if floating_point_supports_f(profile) | RV32CFloatInstructions | []
+    ) ++ (
+      if floating_point_supports_d(profile) | RV32CDoubleInstructions | []
+    )
+  | RV64CIntegerInstructions ++ (
+      if floating_point_supports_d(profile) | RV64CDoubleInstructions | []
+    )
+
+fun compressed_selector_cases(instructions :: NonemptyList.of(CompressedInstructionSpec)):
+  def operation_width = index_width(instructions.length())
+  def mutable cases = []
+  for (instruction in instructions,
+       index in 0..instructions.length()):
+    for (encoding in instruction.encodings):
+      cases := cases ++ [DecodeCase(encoding_pattern(encoding), as_pattern(bits(index, operation_width)))]
+  cases
+
+fun expansion_constraint_matches(constraint :: ExpansionConstraint,
+                                 compressed :: Bits(16)):
+  cond
+  | constraint is_a NonzeroFieldConstraint:
+      or_reduce(instruction_field(constraint.field, compressed.zext(32)))
+  | constraint is_a NonzeroImmediateConstraint:
+      or_reduce(immediate_bits(constraint.immediate, compressed.zext(32)))
+  | ~else:
+      error(~who: #'expansion_constraint_matches,
+            "unknown instruction-expansion legality constraint")
+
+fun compressed_instruction_legal(instruction :: CompressedInstructionSpec,
+                                 compressed :: Bits(16)):
+  def mutable legal = Bool(#true)
+  for (constraint in instruction.constraints):
+    legal := legal & expansion_constraint_matches(constraint, compressed)
+  legal
+
+fun expansion_source_bits(source :: ExpansionValueSource,
+                          width :: PosInt,
+                          compressed :: Bits(16)) :~ Bits(width):
+  cond
+  | source is_a ConstantExpansionValue:
+      bits(source.value, width)
+  | source is_a FieldExpansionValue:
+      def field_value = instruction_field(source.field, compressed.zext(32))
+      def extended = if source.field.width == width | field_value | field_value.zext(width)
+      extended + bits(source.addend, width)
+  | ~else:
+      error(~who: #'expansion_source_bits,
+            "unknown instruction-expansion value source")
+
+fun scatter_immediate_bits(layout :: ImmediateLayout,
+                           value :: Bits(layout.width)) :~ Bits(32):
+  def mutable result = bits(0, 32)
+  for (piece in layout.pieces):
+    def fragment = value[piece.output_low..(piece.output_high + 1)]
+    def extended = if fragment.type.width == 32 | fragment | fragment.zext(32)
+    result := result ||| (extended << piece.source.low)
+  result
+
+fun materialize_expansion(expansion :: InstructionExpansion,
+                          compressed :: Bits(16)) :~ Bits(32):
+  def mutable instruction = bits(expansion.target.encoding.value, 32)
+  for (binding in expansion.bindings):
+    def source = expansion_source_bits(binding.source, binding.target.width, compressed)
+    instruction := instruction ||| (source.zext(32) << binding.target.low)
+  if expansion.immediate is_a ImmediateLayout
+  | block:
+      def target_immediate :: ImmediateLayout = expansion.target.immediate
+      def immediate = instruction_immediate(expansion.immediate,
+                                            compressed.zext(32),
+                                            target_immediate.width)
+      instruction ||| scatter_immediate_bits(target_immediate, immediate)
+  | if expansion.immediate is_a Nat
+    | instruction ||| scatter_immediate_bits(expansion.target.immediate,
+                                             bits(expansion.immediate,
+                                                  expansion.target.immediate.width))
+    | instruction
+
+circuit RiscvCompressedExpander(xlen :: XLen,
+                                profile :: FloatingPointProfile = DefaultFloatingPointProfile):
+  input compressed: Bits(16)
+  output expansion: RiscvCompressedExpansion()
+
+  def instructions = compressed_instructions(xlen, profile)
+  def operation_width = index_width(instructions.length())
+  def decode = ValidDecodeGen(compressed_selector_cases(instructions))
+  def decoded :: DecodeResult(Bits(operation_width)) = decode(compressed)
+  def legality_cases = for List (instruction in instructions,
+                                 index in 0..instructions.length()):
+    [index, compressed_instruction_legal(instruction, compressed)]
+  def expansion_cases = for List (instruction in instructions,
+                                  index in 0..instructions.length()):
+    [index, materialize_expansion(instruction.expansion, compressed)]
+  expansion <== RiscvCompressedExpansion():
+    valid: decoded.valid & mux_lookup(decoded.value, ~default: Bool(#false), legality_cases)
+    instruction: mux_lookup(decoded.value, ~default: bits(0, 32), expansion_cases)
+
+export:
+  RiscvCompressedExpansion
+  compressed_selector_cases
+  RiscvCompressedExpander

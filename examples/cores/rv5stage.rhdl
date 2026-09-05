@@ -1,5 +1,5 @@
 #lang rhodium
-// Materializes a complete RV64 RV5Stage processor with private instruction and data caches.
+// Materializes a complete compressed RV64 RV5Stage processor with private instruction and data caches.
 
 import:
   lib("cores/rv5stage/rv5stage.rhdl") open
@@ -21,7 +21,7 @@ def example_chi_config = RV5StageCHIConfig(
      example_home
    )]
 )
-def design = elaborate(RV5Stage(XLen.X64, ~chi: example_chi_config))
+def design = elaborate(RV5Stage(XLen.X64, ~compressed: #true, ~chi: example_chi_config))
 
 def verilog_reference = @str|<<{
 `ifndef _TYPESCOPE_rhodium_types
@@ -45,7 +45,7 @@ def verilog_reference = @str|<<{
   typedef
     struct packed {logic [63:0] address; logic [2:0] access; logic [3:0] atomic; logic [1:0] width; logic unsigned_0; logic [63:0] data; logic [1:0] destination; logic [4:0] rd; logic floating_point_double; }
     RV5StageDataReq;
-  typedef struct packed {logic [31:0] instruction; logic page_fault; logic access_fault; }
+  typedef struct packed {logic [31:0] word; logic page_fault; logic access_fault; }
     RV5StageInstructionResp;
   typedef
     struct packed {logic [63:0] data; logic [1:0] destination; logic [4:0] rd; logic floating_point_double; }
@@ -74,7 +74,7 @@ def verilog_reference = @str|<<{
     struct packed {logic [63:0] pc; logic [63:0] resume_pc; logic [31:0] instruction; logic [2:0] writeback_source; logic write_enable; logic [4:0] rd; logic [63:0] value; RV5StageMultiplyIssue multiply_issue; RV5StageDivideIssue divide_issue; SystemControl system; FenceControl fence; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
     MemoryWriteback;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; logic instruction_page_fault; logic instruction_access_fault; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [31:0] raw_instruction; logic [63:0] sequential_pc; logic compressed_illegal; logic instruction_page_fault; logic instruction_access_fault; logic [63:0] instruction_fault_address; }
     FetchDecode;
   typedef
     struct packed {logic [2:0] result_select; logic [1:0] logic_select; logic [1:0] count_select; logic [2:0] unary_select; logic subtract; logic signed_compare; logic maximum; logic shift_right; logic arithmetic_shift; logic extract_bit; logic invert_right; logic [1:0] logic_right_select; logic unsigned_word; logic [1:0] shift_add_amount; logic word; }
@@ -92,7 +92,7 @@ def verilog_reference = @str|<<{
     struct packed {RV5StageFloatRegisterControl registers; RV5StageFloatExecutionControl execution; }
     RV5StageFloatingPointControl;
   typedef
-    struct packed {logic [63:0] pc; logic [31:0] instruction; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [2:0] memory_operation; logic [3:0] memory_atomic; logic [1:0] memory_width; logic memory_unsigned; RV5StageMultiplyControl multiply_control; RV5StageDivideControl divide_control; logic floating_point_valid; RV5StageFloatingPointControl floating_point_control; logic floating_point_rounding_mode_valid; logic [2:0] floating_point_rounding_mode; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; FenceControl fence; logic illegal; logic instruction_page_fault; logic instruction_access_fault; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [4:0] frs3; }
+    struct packed {logic [63:0] pc; logic [31:0] instruction; logic [31:0] raw_instruction; logic [63:0] sequential_pc; AluControl alu_control; logic [1:0] operand_left; logic operand_right; BranchResolverControl branch_control; logic target_from_rs1; logic [2:0] memory_operation; logic [3:0] memory_atomic; logic [1:0] memory_width; logic memory_unsigned; RV5StageMultiplyControl multiply_control; RV5StageDivideControl divide_control; logic floating_point_valid; RV5StageFloatingPointControl floating_point_control; logic floating_point_rounding_mode_valid; logic [2:0] floating_point_rounding_mode; logic writeback_enable; logic [2:0] writeback_source; SystemControl system; FenceControl fence; logic illegal; logic instruction_page_fault; logic instruction_access_fault; logic [63:0] instruction_fault_address; logic [63:0] immediate; logic [4:0] rs1; logic [4:0] rs2; logic [4:0] rd; logic [4:0] frs3; }
     DecodeExecute;
   typedef
     struct packed {logic [63:0] pc; logic [63:0] resume_pc; logic [31:0] instruction; logic [2:0] writeback_source; logic writeback_enable; logic [4:0] rd; logic [63:0] result; RV5StageMultiplyIssue multiply_issue; RV5StageDivideIssue divide_issue; SystemControl system; FenceControl fence; logic [11:0] csr_address; logic [63:0] csr_source; logic exception_valid; logic [63:0] exception_cause; logic [63:0] exception_value; }
@@ -152,6 +152,12 @@ def verilog_reference = @str|<<{
     RV5StageInterruptDecision;
   typedef struct packed {logic [11:0] address; logic [7:0] value; } RV5StageFpCsrWrite;
   typedef struct packed {logic [11:0] address; logic [63:0] value; } RiscvCounterWrite;
+  typedef
+    struct packed {logic [1:0] state; logic [63:0] base; logic [31:0] word; logic page_fault; logic access_fault; }
+    RV5StageFetchWord;
+  typedef struct packed {logic valid; logic [31:0] instruction; }
+    RiscvCompressedExpansion;
+  typedef struct packed {logic valid; logic [4:0] value; } DecodeResult_1;
   typedef
     struct packed {logic [63:0] virtual_address; logic [55:0] physical_address; logic [43:0] ppn; logic [1:0] level; logic user; logic read; logic write; logic execute; logic global_mapping; logic accessed; logic dirty; logic fault; logic access_fault; }
     RV5StageTranslationResult;
@@ -384,8 +390,7 @@ module RV5StageCore(
   wire struct packed {logic ready; } _deferred_completion_arbiter_ingress_3_out;
   wire struct packed {logic valid; RegisterFileWrite bits; }
     _deferred_completion_arbiter_egress_out;
-  wire struct packed {logic ready; } _fetch_pcs_ingress_out;
-  wire struct packed {logic valid; logic [63:0] bits; } _fetch_pcs_egress_out;
+  wire struct packed {logic valid; FetchDecode bits; } _fetch_fetched_out;
   wire struct packed {logic valid; logic [63:0] bits; } _csrs_redirect_out;
   wire                               _csrs_interrupt_request;
   wire                               _csrs_writeback_valid;
@@ -439,51 +444,39 @@ module RV5StageCore(
     & _mem_wb_pipe_egress_out.bits.exception_valid;
   wire                               _GEN_19 = faulted | _GEN_10 | _GEN_18 | _GEN_16;
   reg                                started;
-  reg  [63:0]                        fetch_pc;
   reg  [63:0]                        architectural_pc;
   wire                               _GEN_20 = ~started & ~(faulted | _GEN_10);
   wire                               _GEN_21 = start_in.valid & _GEN_20;
-  wire                               _GEN_22 = _GEN_21 & (|(start_in.bits[1:0]));
-  wire                               _GEN_23 = _GEN_22 | _GEN_10 | _GEN_16;
-  wire                               _GEN_24 =
-    started & ~_GEN_19 & ~_csrs_interrupt_request;
-  wire                               _GEN_25 = _GEN_24 & _fetch_pcs_ingress_out.ready;
-  wire RV5StageInstructionReq        _GEN_26 = '{address: fetch_pc};
-  wire                               _GEN_27 = _GEN_19 | _if_id_pipe_ingress_out.ready;
-  wire FetchDecode                   _GEN_28 =
-    '{pc: _fetch_pcs_egress_out.bits,
-      instruction: instruction_access_in.response.bits.instruction,
-      instruction_page_fault: instruction_access_in.response.bits.page_fault,
-      instruction_access_fault: instruction_access_in.response.bits.access_fault};
-  wire                               _GEN_29 = _if_id_pipe_egress_out.valid & ~_GEN_19;
-  wire [4:0]                         __rhodium_vector_index_7577 =
+  wire                               _GEN_22 = _GEN_21 & start_in.bits[0];
+  wire                               _GEN_23 = _if_id_pipe_egress_out.valid & ~_GEN_19;
+  wire [4:0]                         __rhodium_vector_index_10215 =
     _if_id_pipe_egress_out.bits.instruction[19:15];
-  wire [4:0]                         __rhodium_vector_index_7581 =
+  wire [4:0]                         __rhodium_vector_index_10219 =
     _if_id_pipe_egress_out.bits.instruction[19:15];
-  wire [4:0]                         __rhodium_vector_index_7879 =
+  wire [4:0]                         __rhodium_vector_index_10517 =
     _if_id_pipe_egress_out.bits.instruction[19:15];
-  wire [4:0]                         __rhodium_vector_index_7671 =
+  wire [4:0]                         __rhodium_vector_index_10309 =
     _if_id_pipe_egress_out.bits.instruction[24:20];
-  wire [4:0]                         __rhodium_vector_index_7675 =
+  wire [4:0]                         __rhodium_vector_index_10313 =
     _if_id_pipe_egress_out.bits.instruction[24:20];
-  wire [4:0]                         __rhodium_vector_index_7933 =
+  wire [4:0]                         __rhodium_vector_index_10571 =
     _if_id_pipe_egress_out.bits.instruction[24:20];
-  wire [4:0]                         __rhodium_vector_index_7791 =
+  wire [4:0]                         __rhodium_vector_index_10429 =
     _if_id_pipe_egress_out.bits.instruction[11:7];
-  wire [4:0]                         __rhodium_vector_index_7795 =
+  wire [4:0]                         __rhodium_vector_index_10433 =
     _if_id_pipe_egress_out.bits.instruction[11:7];
-  wire [4:0]                         __rhodium_vector_index_8063 =
+  wire [4:0]                         __rhodium_vector_index_10701 =
     _if_id_pipe_egress_out.bits.instruction[11:7];
-  wire [4:0]                         __rhodium_vector_index_7989 =
+  wire [4:0]                         __rhodium_vector_index_10627 =
     _if_id_pipe_egress_out.bits.instruction[31:27];
-  wire [2:0]                         _GEN_30 =
+  wire [2:0]                         _GEN_24 =
     (&(_if_id_pipe_egress_out.bits.instruction[14:12]))
       ? _csrs_frm
       : _if_id_pipe_egress_out.bits.instruction[14:12];
-  wire                               _GEN_31 = _GEN_30 < 3'h5;
-  wire [51:0]                        _GEN_32 =
+  wire                               _GEN_25 = _GEN_24 < 3'h5;
+  wire [51:0]                        _GEN_26 =
     {52{_if_id_pipe_egress_out.bits.instruction[31]}};
-  wire [7:0][63:0]                   _GEN_33 =
+  wire [7:0][63:0]                   _GEN_27 =
     {{64'h0},
      {64'h0},
      {{{44{_if_id_pipe_egress_out.bits.instruction[31]}},
@@ -494,110 +487,110 @@ module RV5StageCore(
      {{{32{_if_id_pipe_egress_out.bits.instruction[31]}},
        _if_id_pipe_egress_out.bits.instruction[31:12],
        12'h0}},
-     {{_GEN_32,
+     {{_GEN_26,
        _if_id_pipe_egress_out.bits.instruction[7],
        _if_id_pipe_egress_out.bits.instruction[30:25],
        _if_id_pipe_egress_out.bits.instruction[11:8],
        1'h0}},
-     {{_GEN_32,
+     {{_GEN_26,
        _if_id_pipe_egress_out.bits.instruction[31:25],
        _if_id_pipe_egress_out.bits.instruction[11:7]}},
-     {{_GEN_32, _if_id_pipe_egress_out.bits.instruction[31:20]}},
+     {{_GEN_26, _if_id_pipe_egress_out.bits.instruction[31:20]}},
      {64'h0}};
-  wire                               _GEN_34 =
+  wire                               _GEN_28 =
     _id_ex_pipe_egress_out.bits.writeback_source == 3'h3;
-  wire                               _GEN_35 =
+  wire                               _GEN_29 =
     _id_ex_pipe_egress_out.bits.writeback_source == 3'h4;
-  wire                               _GEN_36 =
+  wire                               _GEN_30 =
     _id_ex_pipe_egress_out.valid
-    & (|{_id_ex_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_34, _GEN_35});
-  wire                               _GEN_37 =
+    & (|{_id_ex_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_28, _GEN_29});
+  wire                               _GEN_31 =
     _ex_mem_pipe_egress_out.bits.writeback_source == 3'h3;
-  wire                               _GEN_38 =
+  wire                               _GEN_32 =
     _ex_mem_pipe_egress_out.bits.writeback_source == 3'h4;
-  wire [2:0]                         _GEN_39 =
-    {_ex_mem_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_37, _GEN_38};
-  wire                               _GEN_40 = _ex_mem_pipe_egress_out.valid & (|_GEN_39);
-  wire                               _GEN_41 = |_id_ex_pipe_egress_out.bits.rd;
-  wire                               _GEN_42 =
+  wire [2:0]                         _GEN_33 =
+    {_ex_mem_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_31, _GEN_32};
+  wire                               _GEN_34 = _ex_mem_pipe_egress_out.valid & (|_GEN_33);
+  wire                               _GEN_35 = |_id_ex_pipe_egress_out.bits.rd;
+  wire                               _GEN_36 =
     _id_ex_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[19:15];
-  wire                               _GEN_43 =
+  wire                               _GEN_37 =
     _id_ex_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[24:20];
-  wire                               _GEN_44 =
+  wire                               _GEN_38 =
     _decoder_control.writeback.enable | _decoder_control.floating_point_valid
     & _decoder_control.floating_point.registers.destination == 2'h1;
-  wire                               _GEN_45 =
+  wire                               _GEN_39 =
     _id_ex_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[11:7];
-  wire                               _GEN_46 = |_ex_mem_pipe_egress_out.bits.rd;
-  wire [31:0]                        _GEN_47 = _scoreboard_busy;
-  wire [31:0]                        _GEN_48 = _fp_integer_scoreboard_busy;
-  wire                               _GEN_49 =
+  wire                               _GEN_40 = |_ex_mem_pipe_egress_out.bits.rd;
+  wire [31:0]                        _GEN_41 = _scoreboard_busy;
+  wire [31:0]                        _GEN_42 = _fp_integer_scoreboard_busy;
+  wire                               _GEN_43 =
     _id_ex_pipe_egress_out.bits.floating_point_control.registers.destination == 2'h1;
-  wire [31:0]                        _GEN_50 = _fp_busy;
-  wire                               _GEN_51 =
+  wire [31:0]                        _GEN_44 = _fp_busy;
+  wire                               _GEN_45 =
     _id_ex_pipe_egress_out.bits.floating_point_control.registers.destination == 2'h2;
-  wire                               _GEN_52 =
+  wire                               _GEN_46 =
     (|_mem_wb_pipe_egress_out.bits.system.csr)
     | (|_mem_wb_pipe_egress_out.bits.system.action)
     | (|_mem_wb_pipe_egress_out.bits.fence.action);
-  wire                               _GEN_53 =
+  wire                               _GEN_47 =
     _mem_wb_pipe_egress_out.bits.writeback_source == 3'h3;
-  wire                               _GEN_54 =
+  wire                               _GEN_48 =
     _mem_wb_pipe_egress_out.bits.writeback_source == 3'h4;
-  wire [2:0]                         _GEN_55 =
-    {_mem_wb_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_53, _GEN_54};
-  wire                               _GEN_56 = |_GEN_55;
-  wire                               _GEN_57 =
-    _GEN_36 | _GEN_40 | _mem_wb_pipe_egress_out.valid & _GEN_56
+  wire [2:0]                         _GEN_49 =
+    {_mem_wb_pipe_egress_out.bits.writeback_source == 3'h1, _GEN_47, _GEN_48};
+  wire                               _GEN_50 = |_GEN_49;
+  wire                               _GEN_51 =
+    _GEN_30 | _GEN_34 | _mem_wb_pipe_egress_out.valid & _GEN_50
     & _mem_wb_pipe_egress_out.bits.write_enable | (|_scoreboard_busy) | _GEN_5
     | (|_fp_integer_scoreboard_busy) | ~_fp_drained;
-  wire                               _GEN_58 = |_decoder_control.fence.action;
-  wire                               _GEN_59 =
-    _GEN_29
-    & (_GEN_36 & _GEN_41
-       & (_decoder_control.operand.uses_rs1 & _GEN_42 | _decoder_control.operand.uses_rs2
-          & _GEN_43 | _GEN_44 & _GEN_45) | _GEN_40 & _GEN_46
+  wire                               _GEN_52 = |_decoder_control.fence.action;
+  wire                               _GEN_53 =
+    _GEN_23
+    & (_GEN_30 & _GEN_35
+       & (_decoder_control.operand.uses_rs1 & _GEN_36 | _decoder_control.operand.uses_rs2
+          & _GEN_37 | _GEN_38 & _GEN_39) | _GEN_34 & _GEN_40
        & (_decoder_control.operand.uses_rs1
           & _ex_mem_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[19:15]
           | _decoder_control.operand.uses_rs2
           & _ex_mem_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[24:20]
-          | _GEN_44
+          | _GEN_38
           & _ex_mem_pipe_egress_out.bits.rd == _if_id_pipe_egress_out.bits.instruction[11:7]))
     | _decoder_control.operand.uses_rs1
     & (|(_if_id_pipe_egress_out.bits.instruction[19:15]))
-    & (_GEN_47[__rhodium_vector_index_7577] | _GEN_48[__rhodium_vector_index_7581]
+    & (_GEN_41[__rhodium_vector_index_10215] | _GEN_42[__rhodium_vector_index_10219]
        | _GEN_5 & _GEN_4 == _if_id_pipe_egress_out.bits.instruction[19:15]
        | _id_ex_pipe_egress_out.valid & _id_ex_pipe_egress_out.bits.floating_point_valid
-       & _GEN_49 & _GEN_42)
+       & _GEN_43 & _GEN_36)
     & ~(_GEN_0 & _GEN == _if_id_pipe_egress_out.bits.instruction[19:15])
     | _decoder_control.operand.uses_rs2
     & (|(_if_id_pipe_egress_out.bits.instruction[24:20]))
-    & (_GEN_47[__rhodium_vector_index_7671] | _GEN_48[__rhodium_vector_index_7675]
+    & (_GEN_41[__rhodium_vector_index_10309] | _GEN_42[__rhodium_vector_index_10313]
        | _GEN_5 & _GEN_4 == _if_id_pipe_egress_out.bits.instruction[24:20]
        | _id_ex_pipe_egress_out.valid & _id_ex_pipe_egress_out.bits.floating_point_valid
-       & _GEN_49 & _GEN_43)
-    & ~(_GEN_0 & _GEN == _if_id_pipe_egress_out.bits.instruction[24:20]) | _GEN_44
+       & _GEN_43 & _GEN_37)
+    & ~(_GEN_0 & _GEN == _if_id_pipe_egress_out.bits.instruction[24:20]) | _GEN_38
     & (|(_if_id_pipe_egress_out.bits.instruction[11:7]))
-    & (_GEN_47[__rhodium_vector_index_7791] | _GEN_48[__rhodium_vector_index_7795]
+    & (_GEN_41[__rhodium_vector_index_10429] | _GEN_42[__rhodium_vector_index_10433]
        | _GEN_5 & _GEN_4 == _if_id_pipe_egress_out.bits.instruction[11:7]
        | _id_ex_pipe_egress_out.valid & _id_ex_pipe_egress_out.bits.floating_point_valid
-       & _GEN_49 & _GEN_45)
+       & _GEN_43 & _GEN_39)
     & ~(_GEN_0 & _GEN == _if_id_pipe_egress_out.bits.instruction[11:7])
     | _decoder_control.floating_point_valid
     & (_decoder_control.floating_point.registers.uses_frs1
-       & (_GEN_50[__rhodium_vector_index_7879] | _id_ex_pipe_egress_out.valid
-          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_51 & _GEN_42)
+       & (_GEN_44[__rhodium_vector_index_10517] | _id_ex_pipe_egress_out.valid
+          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_45 & _GEN_36)
        | _decoder_control.floating_point.registers.uses_frs2
-       & (_GEN_50[__rhodium_vector_index_7933] | _id_ex_pipe_egress_out.valid
-          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_51 & _GEN_43)
+       & (_GEN_44[__rhodium_vector_index_10571] | _id_ex_pipe_egress_out.valid
+          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_45 & _GEN_37)
        | _decoder_control.floating_point.registers.uses_frs3
-       & (_GEN_50[__rhodium_vector_index_7989] | _id_ex_pipe_egress_out.valid
-          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_51
-          & _id_ex_pipe_egress_out.bits.rd == __rhodium_vector_index_7989))
+       & (_GEN_44[__rhodium_vector_index_10627] | _id_ex_pipe_egress_out.valid
+          & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_45
+          & _id_ex_pipe_egress_out.bits.rd == __rhodium_vector_index_10627))
     | _decoder_control.floating_point_valid
     & _decoder_control.floating_point.registers.destination == 2'h2
-    & (_GEN_50[__rhodium_vector_index_8063] | _id_ex_pipe_egress_out.valid
-       & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_51 & _GEN_45)
+    & (_GEN_44[__rhodium_vector_index_10701] | _id_ex_pipe_egress_out.valid
+       & _id_ex_pipe_egress_out.bits.floating_point_valid & _GEN_45 & _GEN_39)
     | _id_ex_pipe_egress_out.valid
     & ((|_id_ex_pipe_egress_out.bits.system.csr)
        | (|_id_ex_pipe_egress_out.bits.system.action)
@@ -605,13 +598,15 @@ module RV5StageCore(
     & ((|_ex_mem_pipe_egress_out.bits.system.csr)
        | (|_ex_mem_pipe_egress_out.bits.system.action)
        | (|_ex_mem_pipe_egress_out.bits.fence.action)) | _mem_wb_pipe_egress_out.valid
-    & _GEN_52
-    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action) | _GEN_58)
-    & _GEN_57 | _GEN_58 & ~data_access_in.drained | _csrs_interrupt_request | _GEN_18
+    & _GEN_46
+    | ((|_decoder_control.system.csr) | (|_decoder_control.system.action) | _GEN_52)
+    & _GEN_51 | _GEN_52 & ~data_access_in.drained | _csrs_interrupt_request | _GEN_18
     | _GEN_10;
-  wire DecodeExecute                 _GEN_60 =
+  wire DecodeExecute                 _GEN_54 =
     '{pc: _if_id_pipe_egress_out.bits.pc,
       instruction: _if_id_pipe_egress_out.bits.instruction,
+      raw_instruction: _if_id_pipe_egress_out.bits.raw_instruction,
+      sequential_pc: _if_id_pipe_egress_out.bits.sequential_pc,
       alu_control: _decoder_control.alu,
       operand_left: _decoder_control.operand.left,
       operand_right: _decoder_control.operand.right,
@@ -625,211 +620,221 @@ module RV5StageCore(
       divide_control: _decoder_control.divide,
       floating_point_valid: _decoder_control.floating_point_valid,
       floating_point_control: _decoder_control.floating_point,
-      floating_point_rounding_mode_valid: _GEN_31,
-      floating_point_rounding_mode: _GEN_30,
+      floating_point_rounding_mode_valid: _GEN_25,
+      floating_point_rounding_mode: _GEN_24,
       writeback_enable: _decoder_control.writeback.enable,
       writeback_source: _decoder_control.writeback.source,
       system: _decoder_control.system,
       fence: _decoder_control.fence,
       illegal:
-        (~_decoder_valid | _decoder_control.floating_point_valid
+        (_if_id_pipe_egress_out.bits.compressed_illegal | ~_decoder_valid
+         | _decoder_control.floating_point_valid
          & (~_csrs_fp_enabled
-            | _decoder_control.floating_point.execution.uses_rounding_mode & ~_GEN_31)),
+            | _decoder_control.floating_point.execution.uses_rounding_mode & ~_GEN_25)),
       instruction_page_fault: _if_id_pipe_egress_out.bits.instruction_page_fault,
       instruction_access_fault: _if_id_pipe_egress_out.bits.instruction_access_fault,
-      immediate: _GEN_33[_decoder_control.operand.immediate],
+      instruction_fault_address: _if_id_pipe_egress_out.bits.instruction_fault_address,
+      immediate: _GEN_27[_decoder_control.operand.immediate],
       rs1: (_if_id_pipe_egress_out.bits.instruction[19:15]),
       rs2: (_if_id_pipe_egress_out.bits.instruction[24:20]),
       rd: (_if_id_pipe_egress_out.bits.instruction[11:7]),
-      frs3: __rhodium_vector_index_7989};
-  wire [63:0]                        _GEN_61 =
+      frs3: __rhodium_vector_index_10627};
+  wire [63:0]                        _GEN_55 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs1
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs1
           ? _GEN_1
           : _registers_read_data_1;
-  wire [63:0]                        _GEN_62 =
+  wire [63:0]                        _GEN_56 =
     _GEN_8 & _GEN_7 == _id_ex_pipe_egress_out.bits.rs2
       ? _GEN_6
       : _GEN_3 & _GEN_2 == _id_ex_pipe_egress_out.bits.rs2
           ? _GEN_1
           : _registers_read_data_2;
-  wire [63:0]                        _GEN_63 =
-    _GEN_61 + _id_ex_pipe_egress_out.bits.immediate;
+  wire [63:0]                        _GEN_57 =
+    _GEN_55 + _id_ex_pipe_egress_out.bits.immediate;
   assign _GEN_11 =
     _id_ex_pipe_egress_out.bits.target_from_rs1
-      ? {_GEN_63[63:1], 1'h0}
+      ? {_GEN_57[63:1], 1'h0}
       : _id_ex_pipe_egress_out.bits.pc + _id_ex_pipe_egress_out.bits.immediate;
-  wire                               _GEN_64 =
+  wire                               _GEN_58 =
     |_id_ex_pipe_egress_out.bits.memory_operation;
-  wire                               _GEN_65 =
+  wire                               _GEN_59 =
     _id_ex_pipe_egress_out.bits.floating_point_valid
     & _id_ex_pipe_egress_out.bits.floating_point_control.execution.unit == 4'h0;
-  wire                               _GEN_66 =
-    _GEN_65 & _id_ex_pipe_egress_out.bits.floating_point_control.execution.memory_write;
-  wire                               _GEN_67 =
-    _GEN_65 & ~_id_ex_pipe_egress_out.bits.floating_point_control.execution.memory_write;
-  wire                               _GEN_68 =
-    _id_ex_pipe_egress_out.bits.floating_point_valid & ~_GEN_65;
-  wire                               _GEN_69 =
-    _GEN_64
+  wire                               _GEN_60 =
+    _GEN_59 & _id_ex_pipe_egress_out.bits.floating_point_control.execution.memory_write;
+  wire                               _GEN_61 =
+    _GEN_59 & ~_id_ex_pipe_egress_out.bits.floating_point_control.execution.memory_write;
+  wire                               _GEN_62 =
+    _id_ex_pipe_egress_out.bits.floating_point_valid & ~_GEN_59;
+  wire                               _GEN_63 =
+    _GEN_58
     & ~(_id_ex_pipe_egress_out.bits.memory_width == 2'h0
         | (_id_ex_pipe_egress_out.bits.memory_width == 2'h1
              ? ~(_alu_result[0])
              : _id_ex_pipe_egress_out.bits.memory_width == 2'h2
                  ? _alu_result[1:0] == 2'h0
                  : _alu_result[2:0] == 3'h0));
-  wire                               _GEN_70 =
+  wire                               _GEN_64 =
     _id_ex_pipe_egress_out.bits.instruction_page_fault
     | _id_ex_pipe_egress_out.bits.instruction_access_fault
-    | _id_ex_pipe_egress_out.bits.illegal | _GEN_69;
-  wire                               _GEN_71 = _GEN_64 & data_access_in.request_fault;
-  wire                               _GEN_72 =
-    _GEN_64 & data_access_in.request_access_fault;
-  wire RV5StageException             _GEN_73 =
-    '{valid: (1'h1), cause: (64'h1), value: _id_ex_pipe_egress_out.bits.pc};
-  wire RV5StageException             _GEN_74 =
-    '{valid: (1'h1), cause: (64'hC), value: _id_ex_pipe_egress_out.bits.pc};
-  wire RV5StageException             _GEN_75 =
+    | _id_ex_pipe_egress_out.bits.illegal | _GEN_63;
+  wire                               _GEN_65 = _GEN_58 & data_access_in.request_fault;
+  wire                               _GEN_66 =
+    _GEN_58 & data_access_in.request_access_fault;
+  wire RV5StageException             _GEN_67 =
+    '{valid: (1'h1),
+      cause: (64'h1),
+      value: _id_ex_pipe_egress_out.bits.instruction_fault_address};
+  wire RV5StageException             _GEN_68 =
+    '{valid: (1'h1),
+      cause: (64'hC),
+      value: _id_ex_pipe_egress_out.bits.instruction_fault_address};
+  wire RV5StageException             _GEN_69 =
     '{valid: (1'h1),
       cause: (64'h2),
-      value: {32'h0, _id_ex_pipe_egress_out.bits.instruction}};
-  wire RV5StageException             _GEN_76 =
+      value: {32'h0, _id_ex_pipe_egress_out.bits.raw_instruction}};
+  wire RV5StageException             _GEN_70 =
     '{valid: (1'h1), cause: (64'h0), value: _GEN_11};
-  wire                               _GEN_77 =
+  wire                               _GEN_71 =
     _id_ex_pipe_egress_out.bits.memory_operation == 3'h4;
-  wire                               _GEN_78 =
+  wire                               _GEN_72 =
     _id_ex_pipe_egress_out.bits.memory_operation == 3'h5;
-  wire                               _GEN_79 =
-    |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h2, _GEN_77, _GEN_78};
-  wire RV5StageException             _GEN_80 =
-    '{valid: (1'h1), cause: {62'h3, _GEN_79, 1'h1}, value: _alu_result};
-  wire RV5StageException             _GEN_81 =
-    '{valid: (1'h1), cause: {62'h1, _GEN_79, 1'h1}, value: _alu_result};
-  wire RV5StageException             _GEN_82 =
-    '{valid: (1'h1), cause: {62'h1, _GEN_79, 1'h0}, value: _alu_result};
-  wire RV5StageException             _GEN_83 =
+  wire                               _GEN_73 =
+    |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h2, _GEN_71, _GEN_72};
+  wire RV5StageException             _GEN_74 =
+    '{valid: (1'h1), cause: {62'h3, _GEN_73, 1'h1}, value: _alu_result};
+  wire RV5StageException             _GEN_75 =
+    '{valid: (1'h1), cause: {62'h1, _GEN_73, 1'h1}, value: _alu_result};
+  wire RV5StageException             _GEN_76 =
+    '{valid: (1'h1), cause: {62'h1, _GEN_73, 1'h0}, value: _alu_result};
+  wire RV5StageException             _GEN_77 =
     '{valid: (1'h0), cause: (64'bx), value: (64'bx)};
-  wire RV5StageException             _GEN_84 =
+  wire RV5StageException             _GEN_78 =
     _id_ex_pipe_egress_out.bits.instruction_access_fault
-      ? _GEN_73
+      ? _GEN_67
       : _id_ex_pipe_egress_out.bits.instruction_page_fault
-          ? _GEN_74
+          ? _GEN_68
           : _id_ex_pipe_egress_out.bits.illegal
-              ? _GEN_75
-              : _branch_resolver_result_out.bits.taken & (|(_GEN_11[1:0]))
-                  ? _GEN_76
-                  : _GEN_71 ? _GEN_80 : _GEN_72 ? _GEN_81 : _GEN_69 ? _GEN_82 : _GEN_83;
-  wire [63:0]                        _GEN_85 = _id_ex_pipe_egress_out.bits.pc + 64'h4;
-  wire                               _GEN_86 = |_mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_87 =
-    _mem_wb_pipe_egress_out.valid & _GEN_53 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_86;
-  wire RV5StageMultiplyIssue         _GEN_88 =
-    '{left: _GEN_61,
-      right: _GEN_62,
+              ? _GEN_69
+              : _branch_resolver_result_out.bits.taken & _GEN_11[0]
+                  ? _GEN_70
+                  : _GEN_65 ? _GEN_74 : _GEN_66 ? _GEN_75 : _GEN_63 ? _GEN_76 : _GEN_77;
+  wire                               _GEN_79 = |_mem_wb_pipe_egress_out.bits.rd;
+  wire                               _GEN_80 =
+    _mem_wb_pipe_egress_out.valid & _GEN_47 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_79;
+  wire RV5StageMultiplyIssue         _GEN_81 =
+    '{left: _GEN_55,
+      right: _GEN_56,
       control: _id_ex_pipe_egress_out.bits.multiply_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_89 =
-    _mem_wb_pipe_egress_out.valid & _GEN_54 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_86;
-  wire RV5StageDivideIssue           _GEN_90 =
-    '{dividend: _GEN_61,
-      divisor: _GEN_62,
+  wire                               _GEN_82 =
+    _mem_wb_pipe_egress_out.valid & _GEN_48 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_79;
+  wire RV5StageDivideIssue           _GEN_83 =
+    '{dividend: _GEN_55,
+      divisor: _GEN_56,
       control: _id_ex_pipe_egress_out.bits.divide_control,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire                               _GEN_91 = faulted | _GEN_17 | _GEN_15;
-  wire RV5StageFpIssue               _GEN_92 =
+  wire                               _GEN_84 = faulted | _GEN_17 | _GEN_15;
+  wire RV5StageFpIssue               _GEN_85 =
     '{context_0: _id_ex_pipe_egress_out.bits.pc,
       control: _id_ex_pipe_egress_out.bits.floating_point_control,
       frs1: _id_ex_pipe_egress_out.bits.rs1,
       frs2: _id_ex_pipe_egress_out.bits.rs2,
       frs3: _id_ex_pipe_egress_out.bits.frs3,
       frd: _id_ex_pipe_egress_out.bits.rd,
-      integer_operand: _GEN_61,
+      integer_operand: _GEN_55,
       rounding_mode: _id_ex_pipe_egress_out.bits.floating_point_rounding_mode};
-  wire                               _GEN_93 =
-    _id_ex_pipe_egress_out.valid & _GEN_66 & ~fp_store_requested & ~_GEN_91 & ~_GEN_70;
-  wire RV5StageFpStoreRequest        _GEN_94 =
+  wire                               _GEN_86 =
+    _id_ex_pipe_egress_out.valid & _GEN_60 & ~fp_store_requested & ~_GEN_84 & ~_GEN_64;
+  wire RV5StageFpStoreRequest        _GEN_87 =
     '{context_0: _id_ex_pipe_egress_out.bits.pc,
       precision:
         _id_ex_pipe_egress_out.bits.floating_point_control.execution.source_precision,
       rs: _id_ex_pipe_egress_out.bits.rs2};
-  wire                               _GEN_95 = _GEN_64 & ~_GEN_70;
-  wire                               _GEN_96 =
-    ~(_GEN_34 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_41)
+  wire                               _GEN_88 = _GEN_58 & ~_GEN_64;
+  wire                               _GEN_89 =
+    ~(_GEN_28 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_35)
     | _multiplier_available
-    & ~(_ex_mem_pipe_egress_out.valid & _GEN_37
-        & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_87;
-  wire                               _GEN_97 =
-    ~(_GEN_35 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_41)
+    & ~(_ex_mem_pipe_egress_out.valid & _GEN_31
+        & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_40) & ~_GEN_80;
+  wire                               _GEN_90 =
+    ~(_GEN_29 & _id_ex_pipe_egress_out.bits.writeback_enable & _GEN_35)
     | _divider_available
-    & ~(_ex_mem_pipe_egress_out.valid & _GEN_38
-        & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_46) & ~_GEN_89;
+    & ~(_ex_mem_pipe_egress_out.valid & _GEN_32
+        & _ex_mem_pipe_egress_out.bits.writeback_enable & _GEN_40) & ~_GEN_82;
+  wire                               _GEN_91 =
+    _GEN_64 | ~_GEN_60 | fp_store_requested & _fp_store_response_out.valid;
+  wire                               _GEN_92 =
+    _GEN_64 | ~_GEN_61 | _fp_load_reserve_out.ready;
+  wire                               _GEN_93 = _GEN_64 | ~_GEN_62 | _fp_issue_out.ready;
+  wire                               _GEN_94 =
+    (~_GEN_88 | data_access_in.request.ready) & _GEN_89 & _GEN_90 & _GEN_91 & _GEN_92
+    & _GEN_93;
+  wire                               _GEN_95 =
+    _id_ex_pipe_egress_out.valid & _GEN_94 & ~_GEN_84;
+  wire                               _GEN_96 = _GEN_95 & _GEN_62 & ~_GEN_78.valid;
+  wire BranchResolverRequest         _GEN_97 =
+    '{left: _GEN_55, right: _GEN_56, control: _id_ex_pipe_egress_out.bits.branch_control};
   wire                               _GEN_98 =
-    _GEN_70 | ~_GEN_66 | fp_store_requested & _fp_store_response_out.valid;
-  wire                               _GEN_99 =
-    _GEN_70 | ~_GEN_67 | _fp_load_reserve_out.ready;
-  wire                               _GEN_100 = _GEN_70 | ~_GEN_68 | _fp_issue_out.ready;
-  wire                               _GEN_101 =
-    (~_GEN_95 | data_access_in.request.ready) & _GEN_96 & _GEN_97 & _GEN_98 & _GEN_99
-    & _GEN_100;
-  wire                               _GEN_102 =
-    _id_ex_pipe_egress_out.valid & _GEN_101 & ~_GEN_91;
-  wire                               _GEN_103 = _GEN_102 & _GEN_68 & ~_GEN_84.valid;
-  wire BranchResolverRequest         _GEN_104 =
-    '{left: _GEN_61, right: _GEN_62, control: _id_ex_pipe_egress_out.bits.branch_control};
-  wire                               _GEN_105 =
-    _id_ex_pipe_egress_out.valid & ~_GEN_91 & _GEN_96 & _GEN_97 & _GEN_100 & _GEN_98
-    & _GEN_99 & _GEN_95;
-  wire RV5StageDataReq               _GEN_106 =
+    _id_ex_pipe_egress_out.valid & ~_GEN_84 & _GEN_89 & _GEN_90 & _GEN_93 & _GEN_91
+    & _GEN_92 & _GEN_88;
+  wire RV5StageDataReq               _GEN_99 =
     '{address: _alu_result,
       access: _id_ex_pipe_egress_out.bits.memory_operation,
       atomic: _id_ex_pipe_egress_out.bits.memory_atomic,
       width: _id_ex_pipe_egress_out.bits.memory_width,
       unsigned_0: _id_ex_pipe_egress_out.bits.memory_unsigned,
-      data: (_GEN_66 ? _fp_store_response_out.bits.data : _GEN_62),
+      data: (_GEN_60 ? _fp_store_response_out.bits.data : _GEN_56),
       destination:
-        (_GEN_67
+        (_GEN_61
            ? 2'h2
            : {1'h0,
               |{_id_ex_pipe_egress_out.bits.memory_operation == 3'h1,
                 _id_ex_pipe_egress_out.bits.memory_operation == 3'h3,
-                _GEN_77,
-                _GEN_78}}),
+                _GEN_71,
+                _GEN_72}}),
       rd: _id_ex_pipe_egress_out.bits.rd,
       floating_point_double:
-        (_GEN_67
+        (_GEN_61
          & _id_ex_pipe_egress_out.bits.floating_point_control.execution.destination_precision)};
-  wire RV5StageFpLoadReservation     _GEN_107 =
+  wire RV5StageFpLoadReservation     _GEN_100 =
     '{context_0: _id_ex_pipe_egress_out.bits.pc,
       precision:
         _id_ex_pipe_egress_out.bits.floating_point_control.execution.destination_precision,
       rd: _id_ex_pipe_egress_out.bits.rd};
-  wire ExecuteMemory                 _GEN_108 =
+  wire ExecuteMemory                 _GEN_101 =
     '{pc: _id_ex_pipe_egress_out.bits.pc,
-      resume_pc: (_branch_resolver_result_out.bits.taken ? _GEN_11 : _GEN_85),
+      resume_pc:
+        (_branch_resolver_result_out.bits.taken
+           ? _GEN_11
+           : _id_ex_pipe_egress_out.bits.sequential_pc),
       instruction: _id_ex_pipe_egress_out.bits.instruction,
       writeback_source: _id_ex_pipe_egress_out.bits.writeback_source,
-      writeback_enable: (_id_ex_pipe_egress_out.bits.writeback_enable & ~_GEN_84.valid),
+      writeback_enable: (_id_ex_pipe_egress_out.bits.writeback_enable & ~_GEN_78.valid),
       rd: _id_ex_pipe_egress_out.bits.rd,
       result:
-        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2 ? _GEN_85 : _alu_result),
-      multiply_issue: _GEN_88,
-      divide_issue: _GEN_90,
+        (_id_ex_pipe_egress_out.bits.writeback_source == 3'h2
+           ? _id_ex_pipe_egress_out.bits.sequential_pc
+           : _alu_result),
+      multiply_issue: _GEN_81,
+      divide_issue: _GEN_83,
       system: _id_ex_pipe_egress_out.bits.system,
       fence: _id_ex_pipe_egress_out.bits.fence,
       csr_address: (_id_ex_pipe_egress_out.bits.instruction[31:20]),
       csr_source:
         (_id_ex_pipe_egress_out.bits.system.immediate
            ? {59'h0, _id_ex_pipe_egress_out.bits.instruction[19:15]}
-           : _GEN_61),
-      exception_valid: _GEN_84.valid,
-      exception_cause: _GEN_84.cause,
-      exception_value: _GEN_84.value};
-  assign _GEN_10 = _GEN_102 & _GEN_84.valid;
-  assign _GEN_9 = _GEN_102 & ~_GEN_84.valid & _branch_resolver_result_out.bits.taken;
-  wire MemoryWriteback               _GEN_109 =
+           : _GEN_55),
+      exception_valid: _GEN_78.valid,
+      exception_cause: _GEN_78.cause,
+      exception_value: _GEN_78.value};
+  assign _GEN_10 = _GEN_95 & _GEN_78.valid;
+  assign _GEN_9 = _GEN_95 & ~_GEN_78.valid & _branch_resolver_result_out.bits.taken;
+  wire MemoryWriteback               _GEN_102 =
     '{pc: _ex_mem_pipe_egress_out.bits.pc,
       resume_pc: _ex_mem_pipe_egress_out.bits.resume_pc,
       instruction: _ex_mem_pipe_egress_out.bits.instruction,
@@ -848,164 +853,152 @@ module RV5StageCore(
       exception_value: _ex_mem_pipe_egress_out.bits.exception_value};
   assign _GEN_8 =
     _ex_mem_pipe_egress_out.valid & _ex_mem_pipe_egress_out.bits.writeback_enable
-    & _GEN_39 == 3'h0 & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h5 & _GEN_46;
+    & _GEN_33 == 3'h0 & _ex_mem_pipe_egress_out.bits.writeback_source != 3'h5 & _GEN_40;
   assign _GEN_7 = _ex_mem_pipe_egress_out.bits.rd;
   assign _GEN_6 = _ex_mem_pipe_egress_out.bits.result;
-  wire                               _GEN_110 =
+  wire                               _GEN_103 =
     _mem_wb_pipe_egress_out.valid & _mem_wb_pipe_egress_out.bits.exception_valid
-    & _GEN_57;
-  wire MemoryWriteback               _GEN_111 =
+    & _GEN_51;
+  wire MemoryWriteback               _GEN_104 =
     pending_exception_valid ? pending_exception : _mem_wb_pipe_egress_out.bits;
-  wire                               _GEN_112 = _GEN_55 == 3'h0;
-  wire RV5StageCsrCommit             _GEN_113 =
-    '{pc: _GEN_111.pc,
-      instruction: _GEN_111.instruction,
-      rd: _GEN_111.rd,
-      system: _GEN_111.system,
-      fence: _GEN_111.fence,
-      csr_address: _GEN_111.csr_address,
-      csr_source: _GEN_111.csr_source,
-      exception_valid: _GEN_111.exception_valid,
-      exception_cause: _GEN_111.exception_cause,
-      exception_value: _GEN_111.exception_value};
+  wire                               _GEN_105 = _GEN_49 == 3'h0;
+  wire RV5StageCsrCommit             _GEN_106 =
+    '{pc: _GEN_104.pc,
+      instruction: _GEN_104.instruction,
+      rd: _GEN_104.rd,
+      system: _GEN_104.system,
+      fence: _GEN_104.fence,
+      csr_address: _GEN_104.csr_address,
+      csr_source: _GEN_104.csr_source,
+      exception_valid: _GEN_104.exception_valid,
+      exception_cause: _GEN_104.exception_cause,
+      exception_value: _GEN_104.exception_value};
   assign _GEN_5 =
-    _mem_wb_pipe_egress_out.valid & _GEN_56 & _mem_wb_pipe_egress_out.bits.write_enable
-    & _GEN_86;
+    _mem_wb_pipe_egress_out.valid & _GEN_50 & _mem_wb_pipe_egress_out.bits.write_enable
+    & _GEN_79;
   assign _GEN_4 = _mem_wb_pipe_egress_out.bits.rd;
-  wire                               _GEN_114 =
+  wire                               _GEN_107 =
     _mem_wb_pipe_egress_out.bits.writeback_source != 3'h5;
   assign _GEN_3 =
-    _mem_wb_pipe_egress_out.valid & _GEN_112 & _GEN_114
-    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_86;
+    _mem_wb_pipe_egress_out.valid & _GEN_105 & _GEN_107
+    & _mem_wb_pipe_egress_out.bits.write_enable & _GEN_79;
   assign _GEN_2 = _mem_wb_pipe_egress_out.bits.rd;
   assign _GEN_1 = _mem_wb_pipe_egress_out.bits.value;
-  wire RegisterFileWrite             _GEN_115 =
+  wire RegisterFileWrite             _GEN_108 =
     '{address: _mem_wb_pipe_egress_out.bits.rd,
       data:
         (_mem_wb_pipe_egress_out.bits.writeback_source == 3'h5
            ? _csrs_writeback_value
            : _GEN_1)};
-  wire RegisterFileWrite             _GEN_116 =
+  wire RegisterFileWrite             _GEN_109 =
     '{address: data_access_in.response.bits.rd, data: data_access_in.response.bits.data};
-  wire RegisterFileWrite             _GEN_117 =
+  wire RegisterFileWrite             _GEN_110 =
     '{address: _multiplier_completion_out.bits.rd,
       data: _multiplier_completion_out.bits.value};
-  wire RegisterFileWrite             _GEN_118 =
+  wire RegisterFileWrite             _GEN_111 =
     '{address: _divider_completion_out.bits.rd, data: _divider_completion_out.bits.value};
-  wire                               _GEN_119 =
+  wire                               _GEN_112 =
     _fp_completion_out.bits.destination == 2'h1 & (|_fp_completion_out.bits.rd);
-  wire RegisterFileWrite             _GEN_120 =
+  wire RegisterFileWrite             _GEN_113 =
     '{address: _fp_completion_out.bits.rd, data: _fp_completion_out.bits.integer_value};
-  wire                               _GEN_121 =
-    ~_GEN_119 | _deferred_completion_arbiter_ingress_3_out.ready;
-  wire                               _GEN_122 =
-    _fp_completion_out.valid & _GEN_121 & _GEN_119;
-  wire RV5StageFpLoadCompletion      _GEN_123 =
+  wire                               _GEN_114 =
+    ~_GEN_112 | _deferred_completion_arbiter_ingress_3_out.ready;
+  wire                               _GEN_115 =
+    _fp_completion_out.valid & _GEN_114 & _GEN_112;
+  wire RV5StageFpLoadCompletion      _GEN_116 =
     '{context_0: (64'h0),
       precision: data_access_in.response.bits.floating_point_double,
       rd: data_access_in.response.bits.rd,
       data: data_access_in.response.bits.data};
-  assign _GEN_0 = _deferred_completion_arbiter_egress_out.valid & ~_GEN_122;
+  assign _GEN_0 = _deferred_completion_arbiter_egress_out.valid & ~_GEN_115;
   assign _GEN = _deferred_completion_arbiter_egress_out.bits.address;
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_124 =
-    '{valid: (_fp_completion_out.valid & _GEN_119), bits: _GEN_120};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_125 =
-    '{valid: _divider_completion_out.valid, bits: _GEN_118};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_126 =
-    '{valid: _multiplier_completion_out.valid, bits: _GEN_117};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_127 =
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_117 =
+    '{valid: (_fp_completion_out.valid & _GEN_112), bits: _GEN_113};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_118 =
+    '{valid: _divider_completion_out.valid, bits: _GEN_111};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_119 =
+    '{valid: _multiplier_completion_out.valid, bits: _GEN_110};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_120 =
     '{valid:
         (data_access_in.response.valid & data_access_in.response.bits.destination == 2'h1
          & (|data_access_in.response.bits.rd)),
-      bits: _GEN_116};
-  wire struct packed {logic ready; } _GEN_128 =
-    '{ready: (_GEN_27 & instruction_access_in.response.valid)};
-  wire struct packed {logic valid; logic [63:0] bits; } _GEN_129 =
-    '{valid: (_GEN_24 & instruction_access_in.request.ready), bits: fetch_pc};
-  wire struct packed {logic valid; RV5StageCsrCommit bits; } _GEN_130 =
+      bits: _GEN_109};
+  wire struct packed {logic valid; RV5StageCsrCommit bits; } _GEN_121 =
     '{valid:
-        (pending_exception_valid & ~_GEN_57 | _mem_wb_pipe_egress_out.valid & ~_GEN_110),
-      bits: _GEN_113};
-  wire struct packed {logic ready; } _GEN_131 = '{ready: (_GEN_102 & _GEN_66)};
-  wire struct packed {logic valid; RV5StageFpStoreRequest bits; } _GEN_132 =
-    '{valid: _GEN_93, bits: _GEN_94};
-  wire struct packed {logic valid; RV5StageFpLoadCompletion bits; } _GEN_133 =
+        (pending_exception_valid & ~_GEN_51 | _mem_wb_pipe_egress_out.valid & ~_GEN_103),
+      bits: _GEN_106};
+  wire struct packed {logic ready; } _GEN_122 = '{ready: (_GEN_95 & _GEN_60)};
+  wire struct packed {logic valid; RV5StageFpStoreRequest bits; } _GEN_123 =
+    '{valid: _GEN_86, bits: _GEN_87};
+  wire struct packed {logic valid; RV5StageFpLoadCompletion bits; } _GEN_124 =
     '{valid:
         (data_access_in.response.valid
          & data_access_in.response.bits.destination == 2'h2),
-      bits: _GEN_123};
-  wire struct packed {logic valid; RV5StageFpLoadReservation bits; } _GEN_134 =
-    '{valid: (_GEN_105 & data_access_in.request.ready & _GEN_67 & ~_GEN_71 & ~_GEN_72),
-      bits: _GEN_107};
-  wire struct packed {logic ready; } _GEN_135 = '{ready: _GEN_121};
-  wire struct packed {logic valid; RV5StageFpIssue bits; } _GEN_136 =
-    '{valid: _GEN_103, bits: _GEN_92};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_137 =
-    '{valid: _GEN_122, bits: _fp_completion_out.bits.rd};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_138 =
-    '{valid: (_GEN_103 & _fp_issue_out.ready & _GEN_49 & _GEN_41),
+      bits: _GEN_116};
+  wire struct packed {logic valid; RV5StageFpLoadReservation bits; } _GEN_125 =
+    '{valid: (_GEN_98 & data_access_in.request.ready & _GEN_61 & ~_GEN_65 & ~_GEN_66),
+      bits: _GEN_100};
+  wire struct packed {logic ready; } _GEN_126 = '{ready: _GEN_114};
+  wire struct packed {logic valid; RV5StageFpIssue bits; } _GEN_127 =
+    '{valid: _GEN_96, bits: _GEN_85};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_128 =
+    '{valid: _GEN_115, bits: _fp_completion_out.bits.rd};
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_129 =
+    '{valid: (_GEN_96 & _fp_issue_out.ready & _GEN_43 & _GEN_35),
       bits: _id_ex_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_139 =
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_130 =
     '{valid: _GEN_0, bits: _GEN};
-  wire struct packed {logic valid; logic [4:0] bits; } _GEN_140 =
+  wire struct packed {logic valid; logic [4:0] bits; } _GEN_131 =
     '{valid: _GEN_5, bits: _mem_wb_pipe_egress_out.bits.rd};
-  wire struct packed {logic valid; RV5StageDivideIssue bits; } _GEN_141 =
-    '{valid: _GEN_89, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
-  wire struct packed {logic valid; RV5StageMultiplyIssue bits; } _GEN_142 =
-    '{valid: _GEN_87, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
-  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_143 =
-    '{valid: _GEN_102, bits: _GEN_104};
-  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_144 =
+  wire struct packed {logic valid; RV5StageDivideIssue bits; } _GEN_132 =
+    '{valid: _GEN_82, bits: _mem_wb_pipe_egress_out.bits.divide_issue};
+  wire struct packed {logic valid; RV5StageMultiplyIssue bits; } _GEN_133 =
+    '{valid: _GEN_80, bits: _mem_wb_pipe_egress_out.bits.multiply_issue};
+  wire struct packed {logic valid; BranchResolverRequest bits; } _GEN_134 =
+    '{valid: _GEN_95, bits: _GEN_97};
+  wire struct packed {logic valid; RegisterFileWrite bits; } _GEN_135 =
     '{valid:
-        (_mem_wb_pipe_egress_out.valid & _GEN_112
+        (_mem_wb_pipe_egress_out.valid & _GEN_105
          & _mem_wb_pipe_egress_out.bits.write_enable
-         & (_GEN_114 | _csrs_writeback_valid)),
-      bits: _GEN_115};
-  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_145 =
-    '{valid: (_ex_mem_pipe_egress_out.valid & ~_GEN_15), bits: _GEN_109};
-  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_146 =
-    '{valid: _GEN_102, bits: _GEN_108};
-  wire struct packed {logic ready; } _GEN_147 = '{ready: (_GEN_91 | _GEN_101)};
-  wire struct packed {logic valid; DecodeExecute bits; } _GEN_148 =
-    '{valid: (_GEN_29 & ~_GEN_59), bits: _GEN_60};
-  wire struct packed {logic ready; } _GEN_149 =
-    '{ready: (_GEN_19 | _id_ex_pipe_ingress_out.ready & ~_GEN_59)};
-  wire struct packed {logic valid; FetchDecode bits; } _GEN_150 =
-    '{valid:
-        (instruction_access_in.response.valid & _fetch_pcs_egress_out.valid & ~_GEN_19),
-      bits: _GEN_28};
-  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_151 =
-    '{valid: _GEN_105, bits: _GEN_106};
-  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_152 =
-    '{valid: _GEN_25, bits: _GEN_26};
-  wire struct packed {logic ready; } _GEN_153 =
-    '{ready: (_GEN_27 & _fetch_pcs_egress_out.valid)};
+         & (_GEN_107 | _csrs_writeback_valid)),
+      bits: _GEN_108};
+  wire struct packed {logic valid; MemoryWriteback bits; } _GEN_136 =
+    '{valid: (_ex_mem_pipe_egress_out.valid & ~_GEN_15), bits: _GEN_102};
+  wire struct packed {logic valid; ExecuteMemory bits; } _GEN_137 =
+    '{valid: _GEN_95, bits: _GEN_101};
+  wire struct packed {logic ready; } _GEN_138 = '{ready: (_GEN_84 | _GEN_94)};
+  wire struct packed {logic valid; DecodeExecute bits; } _GEN_139 =
+    '{valid: (_GEN_23 & ~_GEN_53), bits: _GEN_54};
+  wire struct packed {logic ready; } _GEN_140 =
+    '{ready: (_GEN_19 | _id_ex_pipe_ingress_out.ready & ~_GEN_53)};
+  wire struct packed {logic valid; RV5StageDataReq bits; } _GEN_141 =
+    '{valid: _GEN_98, bits: _GEN_99};
   Pipe if_id_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_150),
-    .egress_in   (_GEN_149),
+    .ingress_in  (_fetch_fetched_out),
+    .egress_in   (_GEN_140),
     .ingress_out (_if_id_pipe_ingress_out),
     .egress_out  (_if_id_pipe_egress_out)
   );
   Pipe_1 id_ex_pipe (
     .clock       (clock),
     .reset       (reset),
-    .ingress_in  (_GEN_148),
-    .egress_in   (_GEN_147),
+    .ingress_in  (_GEN_139),
+    .egress_in   (_GEN_138),
     .ingress_out (_id_ex_pipe_ingress_out),
     .egress_out  (_id_ex_pipe_egress_out)
   );
   ValidPipe ex_mem_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_146),
+    .ingress_in (_GEN_137),
     .egress_out (_ex_mem_pipe_egress_out)
   );
   ValidPipe_1 mem_wb_pipe (
     .clock      (clock),
     .reset      (reset),
-    .ingress_in (_GEN_145),
+    .ingress_in (_GEN_136),
     .egress_out (_mem_wb_pipe_egress_out)
   );
   RV5StageInstructionDecoder decoder (
@@ -1018,7 +1011,7 @@ module RV5StageCore(
     .reset          (reset),
     .read_address_1 (_id_ex_pipe_egress_out.bits.rs1),
     .read_address_2 (_id_ex_pipe_egress_out.bits.rs2),
-    .writes_0_in    (_GEN_144),
+    .writes_0_in    (_GEN_135),
     .writes_1_in    (_deferred_completion_arbiter_egress_out),
     .read_data_1    (_registers_read_data_1),
     .read_data_2    (_registers_read_data_2)
@@ -1027,22 +1020,22 @@ module RV5StageCore(
     .left
       (_id_ex_pipe_egress_out.bits.operand_left == 2'h1
          ? _id_ex_pipe_egress_out.bits.pc
-         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_61),
+         : _id_ex_pipe_egress_out.bits.operand_left == 2'h2 ? 64'h0 : _GEN_55),
     .right
       (_id_ex_pipe_egress_out.bits.operand_right
          ? _id_ex_pipe_egress_out.bits.immediate
-         : _GEN_62),
+         : _GEN_56),
     .control (_id_ex_pipe_egress_out.bits.alu_control),
     .result  (_alu_result)
   );
   BranchResolver branch_resolver (
-    .request_in (_GEN_143),
+    .request_in (_GEN_134),
     .result_out (_branch_resolver_result_out)
   );
   RV5StageMultiplier multiplier (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_142),
+    .issue_in       (_GEN_133),
     .completion_in  (_deferred_completion_arbiter_ingress_1_out),
     .completion_out (_multiplier_completion_out),
     .available      (_multiplier_available)
@@ -1050,7 +1043,7 @@ module RV5StageCore(
   RV5StageDivider divider (
     .clock          (clock),
     .reset          (reset),
-    .issue_in       (_GEN_141),
+    .issue_in       (_GEN_132),
     .completion_in  (_deferred_completion_arbiter_ingress_2_out),
     .completion_out (_divider_completion_out),
     .available      (_divider_available)
@@ -1058,26 +1051,26 @@ module RV5StageCore(
   Scoreboard scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_140),
-    .clear_in (_GEN_139),
+    .set_in   (_GEN_131),
+    .clear_in (_GEN_130),
     .busy     (_scoreboard_busy)
   );
   Scoreboard fp_integer_scoreboard (
     .clock    (clock),
     .reset    (reset),
-    .set_in   (_GEN_138),
-    .clear_in (_GEN_137),
+    .set_in   (_GEN_129),
+    .clear_in (_GEN_128),
     .busy     (_fp_integer_scoreboard_busy)
   );
   RV5StageDisabledFpPipeline fp (
     .clock              (clock),
     .reset              (reset),
-    .issue_in           (_GEN_136),
-    .completion_in      (_GEN_135),
-    .load_reserve_in    (_GEN_134),
-    .load_completion_in (_GEN_133),
-    .store_request_in   (_GEN_132),
-    .store_response_in  (_GEN_131),
+    .issue_in           (_GEN_127),
+    .completion_in      (_GEN_126),
+    .load_reserve_in    (_GEN_125),
+    .load_completion_in (_GEN_124),
+    .store_request_in   (_GEN_123),
+    .store_response_in  (_GEN_122),
     .issue_out          (_fp_issue_out),
     .completion_out     (_fp_completion_out),
     .load_reserve_out   (_fp_load_reserve_out),
@@ -1095,14 +1088,14 @@ module RV5StageCore(
     .time_counter       (time_counter),
     .interrupt_boundary
       (~pending_exception_valid & ~_id_ex_pipe_egress_out.valid
-       & ~_ex_mem_pipe_egress_out.valid & ~_GEN_57
+       & ~_ex_mem_pipe_egress_out.valid & ~_GEN_51
        & (~_mem_wb_pipe_egress_out.valid | ~_mem_wb_pipe_egress_out.bits.exception_valid
-          & ~_GEN_52 & _GEN_112)),
+          & ~_GEN_46 & _GEN_105)),
     .interrupt_pc
       (_mem_wb_pipe_egress_out.valid
          ? _mem_wb_pipe_egress_out.bits.resume_pc
          : architectural_pc),
-    .commit_in          (_GEN_130),
+    .commit_in          (_GEN_121),
     .fp_update_in       (_fp_state_update_out),
     .redirect_out       (_csrs_redirect_out),
     .interrupt_request  (_csrs_interrupt_request),
@@ -1115,20 +1108,29 @@ module RV5StageCore(
     .fp_enabled         (_csrs_fp_enabled),
     .translation_flush  (_csrs_translation_flush)
   );
-  Queue fetch_pcs (
-    .clock       (clock),
-    .reset       (reset | _GEN_23),
-    .ingress_in  (_GEN_129),
-    .egress_in   (_GEN_128),
-    .ingress_out (_fetch_pcs_ingress_out),
-    .egress_out  (_fetch_pcs_egress_out),
-    .count       (/* unused */)
+  RV5StageInstructionFetch fetch (
+    .clock          (clock),
+    .reset          (reset),
+    .active         (started & ~_GEN_19 & ~_csrs_interrupt_request),
+    .flush          (_GEN_22 | _GEN_10),
+    .restart_valid  (_GEN_16 | _GEN_21 & ~_GEN_22),
+    .restart_pc
+      (_GEN_16
+         ? (_csrs_redirect_out.valid
+              ? _csrs_redirect_out.bits
+              : _GEN_14 ? _mem_wb_pipe_egress_out.bits.resume_pc : _GEN_11)
+         : start_in.bits),
+    .invalidate_all (_GEN_13),
+    .memory_in      (instruction_access_in),
+    .fetched_in     (_if_id_pipe_ingress_out),
+    .memory_out     (instruction_access_out),
+    .fetched_out    (_fetch_fetched_out)
   );
   Arbiter deferred_completion_arbiter (
-    .ingress_0_in  (_GEN_127),
-    .ingress_1_in  (_GEN_126),
-    .ingress_2_in  (_GEN_125),
-    .ingress_3_in  (_GEN_124),
+    .ingress_0_in  (_GEN_120),
+    .ingress_1_in  (_GEN_119),
+    .ingress_2_in  (_GEN_118),
+    .ingress_3_in  (_GEN_117),
     .egress_in     (_GEN_12),
     .ingress_0_out (/* unused */),
     .ingress_1_out (_deferred_completion_arbiter_ingress_1_out),
@@ -1143,28 +1145,16 @@ module RV5StageCore(
       fp_store_requested <= 1'h0;
       pending_exception_valid <= 1'h0;
       started <= 1'h0;
-      fetch_pc <= 64'h0;
       architectural_pc <= 64'h0;
     end
     else begin
       faulted <= _GEN_22 | faulted;
       fp_store_requested <=
-        _GEN_93 & _fp_store_request_out.ready | ~(_GEN_102 | _GEN_91)
-        & fp_store_requested;
+        _GEN_86 & _fp_store_request_out.ready | ~(_GEN_95 | _GEN_84) & fp_store_requested;
       pending_exception_valid <=
-        _GEN_110 | ~(pending_exception_valid & _csrs_redirect_out.valid)
+        _GEN_103 | ~(pending_exception_valid & _csrs_redirect_out.valid)
         & pending_exception_valid;
       started <= _GEN_21 | started;
-      fetch_pc <=
-        _GEN_16
-          ? (_csrs_redirect_out.valid
-               ? _csrs_redirect_out.bits
-               : _GEN_14 ? _mem_wb_pipe_egress_out.bits.pc + 64'h4 : _GEN_11)
-          : _GEN_21
-              ? start_in.bits
-              : _GEN_25 & instruction_access_in.request.ready
-                  ? fetch_pc + 64'h4
-                  : fetch_pc;
       architectural_pc <=
         _csrs_redirect_out.valid
           ? _csrs_redirect_out.bits
@@ -1177,11 +1167,9 @@ module RV5StageCore(
     end
   end // always @(posedge)
   always @(posedge clock)
-    pending_exception <= _GEN_110 ? _mem_wb_pipe_egress_out.bits : pending_exception;
+    pending_exception <= _GEN_103 ? _mem_wb_pipe_egress_out.bits : pending_exception;
   assign start_out = '{ready: _GEN_20};
-  assign instruction_access_out =
-    '{flush: _GEN_23, invalidate_all: _GEN_13, request: _GEN_152, response: _GEN_153};
-  assign data_access_out = '{request: _GEN_151};
+  assign data_access_out = '{request: _GEN_141};
   assign fault = faulted;
   assign translation_flush = _csrs_translation_flush;
 endmodule
@@ -4666,7 +4654,7 @@ module RV5StageCsrFile(
                                                           : _GEN_22
                                                               ? _GEN_0
                                                               : _GEN_23
-                                                                  ? 64'h8000000000140103
+                                                                  ? 64'h8000000000140107
                                                                   : _GEN_24
                                                                       ? state.medeleg
                                                                       : _GEN_25
@@ -4889,21 +4877,22 @@ module RV5StageCsrFile(
     state.mstatus[1] ? state.mstatus | 64'h20 : state.mstatus & 64'hFFFFFFFFFFFFFFDF;
   wire                    _GEN_88 = _GEN_76 & _GEN_79;
   wire [63:0]             _GEN_89 =
-    {_GEN_75 ? interrupt_pc[63:2] : commit_in.bits.pc[63:2], 2'h0};
+    {_GEN_75 ? interrupt_pc[63:1] : commit_in.bits.pc[63:1], 1'h0};
   wire [63:0]             _GEN_90 = {_GEN_80[63:2], 2'h0};
   wire [63:0]             _GEN_91 = {61'h0, _GEN_80[2:0]};
-  wire [8:0]              _GEN_92 = state.mideleg[9:1] & 9'h111;
-  wire [63:0]             _GEN_93 = {54'h0, _GEN_80[9:1] & 9'h111, 1'h0};
-  wire                    _GEN_94 = _GEN_76 | _GEN_84 | _GEN_85 | ~_GEN_81;
-  wire                    _GEN_95 = _GEN_84 | _GEN_85 | ~_GEN_81;
-  wire                    _GEN_96 = _GEN_88 | _GEN_76 | _GEN_84 | _GEN_85 | ~_GEN_81;
-  wire struct packed {logic valid; logic [1:0] bits; } _GEN_97 =
+  wire [63:0]             _GEN_92 = {_GEN_80[63:1], 1'h0};
+  wire [8:0]              _GEN_93 = state.mideleg[9:1] & 9'h111;
+  wire [63:0]             _GEN_94 = {54'h0, _GEN_80[9:1] & 9'h111, 1'h0};
+  wire                    _GEN_95 = _GEN_76 | _GEN_84 | _GEN_85 | ~_GEN_81;
+  wire                    _GEN_96 = _GEN_84 | _GEN_85 | ~_GEN_81;
+  wire                    _GEN_97 = _GEN_88 | _GEN_76 | _GEN_84 | _GEN_85 | ~_GEN_81;
+  wire struct packed {logic valid; logic [1:0] bits; } _GEN_98 =
     '{valid: (_GEN_81 & (|{_GEN_22, _GEN_5})), bits: (_GEN_80[14:13])};
-  wire struct packed {logic valid; RV5StageFpCsrWrite bits; } _GEN_98 =
+  wire struct packed {logic valid; RV5StageFpCsrWrite bits; } _GEN_99 =
     '{valid: (_GEN_81 & _GEN_43), bits: _GEN_82};
-  wire struct packed {logic valid; RiscvCounterWrite bits; } _GEN_99 =
+  wire struct packed {logic valid; RiscvCounterWrite bits; } _GEN_100 =
     '{valid: (_GEN_81 & (|{_GEN_35, _GEN_36, _GEN_37, _GEN_38})), bits: _GEN_83};
-  wire RV5StageCsrState   _GEN_100 =
+  wire RV5StageCsrState   _GEN_101 =
     '{mstatus:
         (_GEN_88 | _GEN_76
            ? (_GEN_79
@@ -4936,22 +4925,22 @@ module RV5StageCsrFile(
                                   | {41'h0, _GEN_80[22:0] & 23'h7E19BB})
                        : state.mstatus),
       medeleg:
-        (_GEN_96
+        (_GEN_97
            ? state.medeleg
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | _GEN_15 | _GEN_22 | commit_in.bits.csr_address != 12'h302
                ? state.medeleg
                : {48'h0, _GEN_80[15:0] & 16'hB1FF}),
       mideleg:
-        (_GEN_96
+        (_GEN_97
            ? state.mideleg
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24
              | commit_in.bits.csr_address != 12'h303
                ? state.mideleg
-               : _GEN_93),
+               : _GEN_94),
       mie:
-        (_GEN_96
+        (_GEN_97
            ? state.mie
            : _GEN_5
                ? state.mie
@@ -4963,20 +4952,20 @@ module RV5StageCsrFile(
                        ? state.mie
                        : {52'h0, _GEN_80[11:1] & 11'h555, 1'h0}),
       mip:
-        (_GEN_96
+        (_GEN_97
            ? state.mip
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
                ? state.mip
                : _GEN_14
-                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_92, 1'h1} | _GEN_80
-                     & {54'h0, _GEN_92, 1'h0}
+                   ? state.mip & {54'h3FFFFFFFFFFFFF, ~_GEN_93, 1'h1} | _GEN_80
+                     & {54'h0, _GEN_93, 1'h0}
                    : _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26 | _GEN_27 | _GEN_28
                      | _GEN_30 | _GEN_31 | _GEN_32 | _GEN_33
                      | commit_in.bits.csr_address != 12'h344
                        ? state.mip
-                       : _GEN_93),
+                       : _GEN_94),
       mtvec:
-        (_GEN_96
+        (_GEN_97
            ? state.mtvec
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26
@@ -4984,7 +4973,7 @@ module RV5StageCsrFile(
                ? state.mtvec
                : _GEN_90),
       mcounteren:
-        (_GEN_96
+        (_GEN_97
            ? state.mcounteren
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26 | _GEN_27
@@ -4992,7 +4981,7 @@ module RV5StageCsrFile(
                ? state.mcounteren
                : _GEN_91),
       mscratch:
-        (_GEN_96
+        (_GEN_97
            ? state.mscratch
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26 | _GEN_27
@@ -5004,19 +4993,19 @@ module RV5StageCsrFile(
            ? state.mepc
            : _GEN_76
                ? _GEN_89
-               : _GEN_95
+               : _GEN_96
                    ? state.mepc
                    : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12
                      | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26
                      | _GEN_27 | _GEN_28 | _GEN_30 | commit_in.bits.csr_address != 12'h341
                        ? state.mepc
-                       : _GEN_90),
+                       : _GEN_92),
       mcause:
         (_GEN_88
            ? state.mcause
            : _GEN_76
                ? _GEN_77
-               : _GEN_95
+               : _GEN_96
                    ? state.mcause
                    : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12
                      | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26
@@ -5029,7 +5018,7 @@ module RV5StageCsrFile(
            ? state.mtval
            : _GEN_76
                ? _GEN_78
-               : _GEN_95
+               : _GEN_96
                    ? state.mtval
                    : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12
                      | _GEN_13 | _GEN_14 | _GEN_15 | _GEN_22 | _GEN_24 | _GEN_25 | _GEN_26
@@ -5038,19 +5027,19 @@ module RV5StageCsrFile(
                        ? state.mtval
                        : _GEN_80),
       stvec:
-        (_GEN_96
+        (_GEN_97
            ? state.stvec
            : _GEN_5 | _GEN_6 | commit_in.bits.csr_address != 12'h105
                ? state.stvec
                : _GEN_90),
       scounteren:
-        (_GEN_96
+        (_GEN_97
            ? state.scounteren
            : _GEN_5 | _GEN_6 | _GEN_7 | commit_in.bits.csr_address != 12'h106
                ? state.scounteren
                : _GEN_91),
       sscratch:
-        (_GEN_96
+        (_GEN_97
            ? state.sscratch
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | commit_in.bits.csr_address != 12'h140
                ? state.sscratch
@@ -5058,16 +5047,16 @@ module RV5StageCsrFile(
       sepc:
         (_GEN_88
            ? _GEN_89
-           : _GEN_94
+           : _GEN_95
                ? state.sepc
                : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10
                  | commit_in.bits.csr_address != 12'h141
                    ? state.sepc
-                   : _GEN_90),
+                   : _GEN_92),
       scause:
         (_GEN_88
            ? _GEN_77
-           : _GEN_94
+           : _GEN_95
                ? state.scause
                : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11
                  | commit_in.bits.csr_address != 12'h142
@@ -5076,14 +5065,14 @@ module RV5StageCsrFile(
       stval:
         (_GEN_88
            ? _GEN_78
-           : _GEN_94
+           : _GEN_95
                ? state.stval
                : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12
                  | commit_in.bits.csr_address != 12'h143
                    ? state.stval
                    : _GEN_80),
       satp:
-        (_GEN_96
+        (_GEN_97
            ? state.satp
            : _GEN_5 | _GEN_6 | _GEN_7 | _GEN_8 | _GEN_10 | _GEN_11 | _GEN_12 | _GEN_13
              | _GEN_14 | commit_in.bits.csr_address != 12'h180
@@ -5095,16 +5084,16 @@ module RV5StageCsrFile(
     .clock            (clock),
     .reset            (reset),
     .retire           (commit_in.valid & ~_GEN_64),
-    .machine_write_in (_GEN_99),
+    .machine_write_in (_GEN_100),
     .cycle            (_counters_cycle),
     .instret          (_counters_instret)
   );
   RV5StageDisabledFpCsrs fp_csrs (
     .clock           (clock),
     .reset           (reset),
-    .write_in        (_GEN_98),
+    .write_in        (_GEN_99),
     .update_in       (fp_update_in),
-    .status_write_in (_GEN_97),
+    .status_write_in (_GEN_98),
     .fflags          (_fp_csrs_fflags),
     .frm             (_fp_csrs_frm),
     .status          (_fp_csrs_status)
@@ -5137,7 +5126,7 @@ module RV5StageCsrFile(
         _GEN_76
           ? {~_GEN_79, 1'h1}
           : _GEN_84 ? _GEN_86 : _GEN_85 ? {1'h0, state.mstatus[8]} : privilege_state;
-      state <= _GEN_100;
+      state <= _GEN_101;
     end
   end // always @(posedge)
   assign redirect_out =
@@ -5204,83 +5193,614 @@ module RV5StageDisabledFpCsrs(
   assign status = 2'h0;
 endmodule
 
-module Queue(
-  input                                                   clock,
-                                                          reset,
-  input  struct packed {logic valid; logic [63:0] bits; } ingress_in,
-  input  struct packed {logic ready; }                    egress_in,
-  output struct packed {logic ready; }                    ingress_out,
-  output struct packed {logic valid; logic [63:0] bits; } egress_out,
-  output [1:0]                                            count
+module RV5StageInstructionFetch(
+  input                                                                                                                                                                  clock,
+                                                                                                                                                                         reset,
+                                                                                                                                                                         active,
+                                                                                                                                                                         flush,
+                                                                                                                                                                         restart_valid,
+  input  [63:0]                                                                                                                                                          restart_pc,
+  input                                                                                                                                                                  invalidate_all,
+  input  struct packed {struct packed {logic ready; } request; struct packed {logic valid; RV5StageInstructionResp bits; } response; }                                   memory_in,
+  input  struct packed {logic ready; }                                                                                                                                   fetched_in,
+  output struct packed {logic flush; logic invalidate_all; struct packed {logic valid; RV5StageInstructionReq bits; } request; struct packed {logic ready; } response; } memory_out,
+  output struct packed {logic valid; FetchDecode bits; }                                                                                                                 fetched_out
 );
 
-  wire [63:0] _GEN;
-  wire        _GEN_0;
-  wire        _write_pointer_value;
-  wire        _read_pointer_value;
-  wire        _GEN_1 = 1'h0;
-  reg  [63:0] storage[0:1];
-  always_ff @(posedge clock) begin
-    if (_GEN_1) begin
+  wire RiscvCompressedExpansion      _expander_expansion;
+  wire RV5StageFetchWord             _GEN =
+    '{state: 2'h0, base: 64'h0, word: 32'h0, page_fault: 1'h0, access_fault: 1'h0};
+  reg  [63:0]                        pc;
+  RV5StageFetchWord                  slot0;
+  RV5StageFetchWord                  slot1;
+  wire                               _GEN_0 = flush | restart_valid;
+  wire                               _GEN_1 = slot0.state == 2'h2;
+  wire                               _GEN_2 = slot0.state == 2'h1;
+  wire                               _GEN_3 = slot1.state == 2'h1;
+  wire                               _GEN_4 = slot0.page_fault | slot0.access_fault;
+  wire                               _GEN_5 = slot1.state == 2'h0;
+  `ifndef SYNTHESIS
+    fetch_words_are_head_packed:
+      assert property (@(posedge clock) disable iff (reset) (|slot0.state) | _GEN_5);
+  `endif // not def SYNTHESIS
+  `ifndef SYNTHESIS
+    fetch_words_are_contiguous:
+      assert property (@(posedge clock) disable iff (reset)
+                         _GEN_5 | slot1.base == slot0.base + 64'h4);
+  `endif // not def SYNTHESIS
+  wire [15:0]                        _GEN_6 =
+    pc[1] ? slot0.word[31:16] : slot0.word[15:0];
+  wire                               _GEN_7 = _GEN_6[1:0] != 2'h3;
+  wire                               _GEN_8 = _GEN_1 & ~_GEN_4 & pc[1] & ~_GEN_7;
+  wire [31:0]                        _GEN_9 =
+    _GEN_8
+      ? {slot1.word[15:0], slot0.word[31:16]}
+      : _GEN_7 ? {16'h0, _GEN_6} : slot0.word;
+  wire                               _GEN_10 = _GEN_1 & _GEN_7 & ~_GEN_4;
+  wire [63:0]                        _GEN_11 = pc + (_GEN_10 ? 64'h2 : 64'h4);
+  wire                               _GEN_12 =
+    active & ~_GEN_0 & _GEN_1 & (~_GEN_8 | slot1.state == 2'h2);
+  wire FetchDecode                   _GEN_13 =
+    '{pc: pc,
+      instruction: (_GEN_10 ? _expander_expansion.instruction : _GEN_9),
+      raw_instruction: _GEN_9,
+      sequential_pc: _GEN_11,
+      compressed_illegal: (_GEN_10 & ~_expander_expansion.valid),
+      instruction_page_fault: (slot0.page_fault | _GEN_8 & slot1.page_fault),
+      instruction_access_fault: (slot0.access_fault | _GEN_8 & slot1.access_fault),
+      instruction_fault_address:
+        (_GEN_8 & (slot1.page_fault | slot1.access_fault) ? slot1.base : pc)};
+  wire                               _GEN_14 = _GEN_12 & fetched_in.ready;
+  wire                               _GEN_15 = _GEN_14 & ~(_GEN_10 & ~(pc[1]));
+  wire                               _GEN_16 = ~_GEN_0 & (_GEN_2 | _GEN_3);
+  wire                               _GEN_17 = memory_in.response.valid & _GEN_16;
+  wire                               _GEN_18 = _GEN_17 & _GEN_2;
+  wire                               _GEN_19 = _GEN_17 & ~_GEN_2 & _GEN_3;
+  wire [1:0]                         _GEN_20 = _GEN_19 ? 2'h2 : slot1.state;
+  wire [31:0]                        _GEN_21 =
+    _GEN_19 ? memory_in.response.bits.word : slot1.word;
+  wire                               _GEN_22 =
+    _GEN_19 ? memory_in.response.bits.page_fault : slot1.page_fault;
+  wire                               _GEN_23 =
+    _GEN_19 ? memory_in.response.bits.access_fault : slot1.access_fault;
+  wire [1:0]                         _GEN_24 =
+    _GEN_15 ? _GEN_20 : _GEN_18 ? 2'h2 : slot0.state;
+  wire [1:0]                         _GEN_25 = _GEN_15 ? 2'h0 : _GEN_20;
+  wire [63:0]                        _GEN_26 = _GEN_15 ? slot1.base : slot0.base;
+  wire                               _GEN_27 = _GEN_24 == 2'h0;
+  wire [63:0]                        _GEN_28 =
+    _GEN_27 ? {_GEN_14 ? _GEN_11[63:2] : pc[63:2], 2'h0} : _GEN_26 + 64'h4;
+  wire                               _GEN_29 = active & ~_GEN_0 & _GEN_25 == 2'h0;
+  wire RV5StageInstructionReq        _GEN_30 = '{address: _GEN_28};
+  wire                               _GEN_31 = _GEN_29 & memory_in.request.ready;
+  wire                               _GEN_32 = _GEN_31 & _GEN_27;
+  wire                               _GEN_33 = _GEN_31 & ~_GEN_32;
+  wire                               _GEN_34 = _GEN_17 | _GEN_15 | _GEN_31;
+  wire RV5StageFetchWord             _GEN_35 =
+    '{state: (_GEN_32 ? 2'h1 : _GEN_24),
+      base: (_GEN_32 ? _GEN_28 : _GEN_26),
+      word: (_GEN_15 ? _GEN_21 : _GEN_18 ? memory_in.response.bits.word : slot0.word),
+      page_fault:
+        (_GEN_15
+           ? _GEN_22
+           : _GEN_18 ? memory_in.response.bits.page_fault : slot0.page_fault),
+      access_fault:
+        (_GEN_15
+           ? _GEN_23
+           : _GEN_18 ? memory_in.response.bits.access_fault : slot0.access_fault)};
+  wire RV5StageFetchWord             _GEN_36 =
+    '{state: (_GEN_33 ? 2'h1 : _GEN_25),
+      base: (_GEN_33 ? _GEN_28 : slot1.base),
+      word: _GEN_21,
+      page_fault: _GEN_22,
+      access_fault: _GEN_23};
+  wire struct packed {logic valid; RV5StageInstructionReq bits; } _GEN_37 =
+    '{valid: _GEN_29, bits: _GEN_30};
+  wire struct packed {logic ready; } _GEN_38 = '{ready: _GEN_16};
+  RiscvCompressedExpander expander (
+    .compressed (_GEN_9[15:0]),
+    .expansion  (_expander_expansion)
+  );
+  always @(posedge clock) begin
+    if (reset) begin
+      pc <= 64'h0;
+      slot0 <= _GEN;
+      slot1 <= _GEN;
     end
     else begin
-      if (_GEN_0)
-        storage[_write_pointer_value] <= _GEN;
+      pc <= _GEN_0 ? (restart_valid ? restart_pc : pc) : _GEN_14 ? _GEN_11 : pc;
+      slot0 <= _GEN_0 ? _GEN : _GEN_34 ? _GEN_35 : slot0;
+      slot1 <= _GEN_0 ? _GEN : _GEN_34 ? _GEN_36 : slot1;
     end
-  end // always_ff @(posedge)
-  reg  [1:0]  occupancy;
-  wire        _GEN_2 = occupancy == 2'h0;
-  `ifndef SYNTHESIS
-    queue_occupancy_in_range:
-      assert property (@(posedge clock) disable iff (reset) occupancy != 2'h3);
-  `endif // not def SYNTHESIS
-  wire        _GEN_3 = occupancy != 2'h2 | egress_in.ready;
-  assign _GEN_0 = ingress_in.valid & _GEN_3;
-  wire        _GEN_4 = ~_GEN_2 & egress_in.ready;
-  assign _GEN = ingress_in.bits;
-  Counter read_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_4),
-    .value  (_read_pointer_value),
-    .wrap   (/* unused */)
-  );
-  Counter write_pointer (
-    .clock  (clock),
-    .reset  (reset),
-    .enable (_GEN_0),
-    .value  (_write_pointer_value),
-    .wrap   (/* unused */)
-  );
-  always @(posedge clock) begin
-    if (reset)
-      occupancy <= 2'h0;
-    else
-      occupancy <=
-        _GEN_0 ^ _GEN_4 ? (_GEN_0 ? occupancy + 2'h1 : occupancy - 2'h1) : occupancy;
   end // always @(posedge)
-  assign ingress_out = '{ready: _GEN_3};
-  assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
-  assign count = occupancy;
+  assign memory_out =
+    '{flush: _GEN_0, invalidate_all: invalidate_all, request: _GEN_37, response: _GEN_38};
+  assign fetched_out = '{valid: _GEN_12, bits: _GEN_13};
 endmodule
 
-module Counter(
-  input  clock,
-         reset,
-         enable,
-  output value,
-         wrap
+module RiscvCompressedExpander(
+  input  [15:0]                   compressed,
+  output RiscvCompressedExpansion expansion
 );
 
-  reg state;
-  always @(posedge clock) begin
-    if (reset)
-      state <= 1'h0;
-    else
-      state <= enable ? ~state & state - 1'h1 : state;
-  end // always @(posedge)
-  assign value = state;
-  assign wrap = enable & state;
+  logic [5:0]          __rhodium_decode_2_result;
+  always_comb begin
+    casez (compressed)
+      16'b000zzzzzzzzzzz00:
+        __rhodium_decode_2_result = 6'h20;
+      16'b010zzzzzzzzzzz00:
+        __rhodium_decode_2_result = 6'h21;
+      16'b011zzzzzzzzzzz00:
+        __rhodium_decode_2_result = 6'h22;
+      16'b110zzzzzzzzzzz00:
+        __rhodium_decode_2_result = 6'h23;
+      16'b111zzzzzzzzzzz00:
+        __rhodium_decode_2_result = 6'h24;
+      16'b000zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h25;
+      16'b001zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h26;
+      16'b010zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h27;
+      16'b011z00010zzzzz01:
+        __rhodium_decode_2_result = 6'h28;
+      16'b011z00000zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00001zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00011zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00100zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00101zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00110zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z00111zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01000zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01001zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01010zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01011zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01100zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01101zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01110zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z01111zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10000zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10001zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10010zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10011zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10100zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10101zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10110zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z10111zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11000zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11001zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11010zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11011zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11100zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11101zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11110zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b011z11111zzzzz01:
+        __rhodium_decode_2_result = 6'h29;
+      16'b100z00zzzzzzzz01:
+        __rhodium_decode_2_result = 6'h2A;
+      16'b100z01zzzzzzzz01:
+        __rhodium_decode_2_result = 6'h2B;
+      16'b100z10zzzzzzzz01:
+        __rhodium_decode_2_result = 6'h2C;
+      16'b100011zzz00zzz01:
+        __rhodium_decode_2_result = 6'h2D;
+      16'b100011zzz01zzz01:
+        __rhodium_decode_2_result = 6'h2E;
+      16'b100011zzz10zzz01:
+        __rhodium_decode_2_result = 6'h2F;
+      16'b100011zzz11zzz01:
+        __rhodium_decode_2_result = 6'h30;
+      16'b100111zzz00zzz01:
+        __rhodium_decode_2_result = 6'h31;
+      16'b100111zzz01zzz01:
+        __rhodium_decode_2_result = 6'h32;
+      16'b101zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h33;
+      16'b110zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h34;
+      16'b111zzzzzzzzzzz01:
+        __rhodium_decode_2_result = 6'h35;
+      16'b000zzzzzzzzzzz10:
+        __rhodium_decode_2_result = 6'h36;
+      16'b010zzzzzzzzzzz10:
+        __rhodium_decode_2_result = 6'h37;
+      16'b011zzzzzzzzzzz10:
+        __rhodium_decode_2_result = 6'h38;
+      16'b1000000010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000000100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000000110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000001000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000001010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000001100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000001110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000010000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000010010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000010100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000010110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000011000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000011010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000011100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000011110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000100000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000100010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000100100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000100110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000101000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000101010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000101100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000101110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000110000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000110010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000110100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000110110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000111000000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000111010000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000111100000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000111110000010:
+        __rhodium_decode_2_result = 6'h39;
+      16'b1000zzzzz0000110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0001010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0001110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0010010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0010110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0011010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0011110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0100010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0100110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0101010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0101110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0110010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0110110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0111010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz0111110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1000010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1000110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1001010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1001110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1010010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1010110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1011010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1011110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1100010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1100110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1101010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1101110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1110010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1110110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1111010:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1000zzzzz1111110:
+        __rhodium_decode_2_result = 6'h3A;
+      16'b1001000000000010:
+        __rhodium_decode_2_result = 6'h3B;
+      16'b1001000010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001000100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001000110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001001000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001001010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001001100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001001110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001010000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001010010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001010100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001010110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001011000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001011010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001011100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001011110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001100000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001100010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001100100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001100110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001101000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001101010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001101100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001101110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001110000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001110010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001110100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001110110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001111000000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001111010000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001111100000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001111110000010:
+        __rhodium_decode_2_result = 6'h3C;
+      16'b1001zzzzz0000110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0001010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0001110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0010010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0010110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0011010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0011110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0100010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0100110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0101010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0101110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0110010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0110110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0111010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz0111110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1000010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1000110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1001010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1001110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1010010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1010110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1011010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1011110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1100010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1100110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1101010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1101110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1110010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1110110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1111010:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b1001zzzzz1111110:
+        __rhodium_decode_2_result = 6'h3D;
+      16'b110zzzzzzzzzzz10:
+        __rhodium_decode_2_result = 6'h3E;
+      16'b111zzzzzzzzzzz10:
+        __rhodium_decode_2_result = 6'h3F;
+      default:
+        __rhodium_decode_2_result = {1'h0, {5{1'bx}}};
+    endcase
+  end // always_comb
+  wire  DecodeResult_1 _GEN = /*cast(bit)*/__rhodium_decode_2_result;
+  wire                 _GEN_0 = |(compressed[11:7]);
+  wire  [4:0]          _GEN_1 = {2'h0, compressed[4:2]} + 5'h8;
+  wire  [4:0]          _GEN_2 = {2'h0, compressed[9:7]} + 5'h8;
+  wire  [31:0]         _GEN_3 = {12'h0, _GEN_2, 15'h0};
+  wire  [31:0]         _GEN_4 = {7'h0, _GEN_1, 20'h0};
+  wire  [31:0]         _GEN_5 = {20'h0, compressed[11:10], 10'h0};
+  wire  [31:0]         _GEN_6 = {20'h0, compressed[11:7], 7'h13};
+  wire  [31:0]         _GEN_7 = {12'h0, compressed[11:7], 15'h0};
+  wire  [31:0]         _GEN_8 = {{7{compressed[12]}}, compressed[6:2], 20'h0};
+  wire  [2:0]          _GEN_9 = {3{compressed[12]}};
+  wire  [31:0]         _GEN_10 = {6'h0, compressed[12], compressed[6:2], 20'h0};
+  wire  [31:0]         _GEN_11 = {compressed[12], 31'h0};
+  wire  [31:0]         _GEN_12 = {24'h0, compressed[12], 7'h0};
+  wire  [31:0]         _GEN_13 = {1'h0, _GEN_9, compressed[6:5], compressed[2], 25'h0};
+  wire  [31:0]         _GEN_14 = {20'h0, compressed[11:10], compressed[4:3], 8'h0};
+  wire  [31:0]         _GEN_15 = {20'h0, compressed[11:7], 7'h33};
+  wire  [31:0]         _GEN_16 = {7'h0, compressed[6:2], 20'h0};
+  wire  [31:0][31:0]   _GEN_17 =
+    {{{7'h0, compressed[6:2], 20'h13023} | {3'h0, compressed[9:7], compressed[12], 25'h0}
+        | _GEN_5},
+     {{7'h0, compressed[6:2], 20'h12023} | {4'h0, compressed[8:7], compressed[12], 25'h0}
+        | {20'h0, compressed[11:9], 9'h0}},
+     {_GEN_15 | _GEN_7 | _GEN_16},
+     {{12'h0, compressed[11:7], 15'hE7}},
+     {32'h100073},
+     {_GEN_15 | _GEN_16},
+     {{12'h0, compressed[11:7], 15'h67}},
+     {{20'h13, compressed[11:7], 7'h3}
+        | {3'h0, compressed[4:2], compressed[12], compressed[6:5], 23'h0}},
+     {{20'h12, compressed[11:7], 7'h3}
+        | {4'h0, compressed[3:2], compressed[12], compressed[6:4], 22'h0}},
+     {{20'h1, compressed[11:7], 7'h13} | _GEN_7 | _GEN_10},
+     {{12'h0, _GEN_2, 15'h1063} | _GEN_11 | _GEN_12 | _GEN_13 | _GEN_14},
+     {{12'h0, _GEN_2, 15'h63} | _GEN_11 | _GEN_12 | _GEN_13 | _GEN_14},
+     {{12'h0, {8{compressed[12]}}, 12'h0} | {11'h0, compressed[12], 20'h0}
+        | {1'h0,
+           compressed[8],
+           compressed[10:9],
+           compressed[6],
+           compressed[7],
+           compressed[2],
+           compressed[11],
+           compressed[5:3],
+           21'h0} | {compressed[12], 31'h6F}},
+     {{20'h0, _GEN_2, 7'h3B} | _GEN_3 | _GEN_4},
+     {{20'h40000, _GEN_2, 7'h3B} | _GEN_3 | _GEN_4},
+     {{20'h7, _GEN_2, 7'h33} | _GEN_3 | _GEN_4},
+     {{20'h6, _GEN_2, 7'h33} | _GEN_3 | _GEN_4},
+     {{20'h4, _GEN_2, 7'h33} | _GEN_3 | _GEN_4},
+     {{20'h40000, _GEN_2, 7'h33} | _GEN_3 | _GEN_4},
+     {{20'h7, _GEN_2, 7'h13} | _GEN_3 | _GEN_8},
+     {{20'h40005, _GEN_2, 7'h13} | _GEN_3 | _GEN_10},
+     {{20'h5, _GEN_2, 7'h13} | _GEN_3 | _GEN_10},
+     {{20'h0, compressed[11:7], 7'h37} | {{15{compressed[12]}}, compressed[6:2], 12'h0}},
+     {{_GEN_9, compressed[4:3], compressed[5], compressed[2], compressed[6], 24'h10113}},
+     {_GEN_6 | _GEN_8},
+     {{20'h0, compressed[11:7], 7'h1B} | _GEN_7 | _GEN_8},
+     {_GEN_6 | _GEN_7 | _GEN_8},
+     {{12'h0, _GEN_2, 15'h3023} | _GEN_4 | {4'h0, compressed[6:5], compressed[12], 25'h0}
+        | _GEN_5},
+     {{12'h0, _GEN_2, 15'h2023} | _GEN_4 | {5'h0, compressed[5], compressed[12], 25'h0}
+        | {20'h0, compressed[11:10], compressed[6], 9'h0}},
+     {{20'h3, _GEN_1, 7'h3} | _GEN_3 | {4'h0, compressed[6:5], compressed[12:10], 23'h0}},
+     {{20'h2, _GEN_1, 7'h3} | _GEN_3
+        | {5'h0, compressed[5], compressed[12:10], compressed[6], 22'h0}},
+     {{20'h10, _GEN_1, 7'h13}
+        | {2'h0,
+           compressed[10:7],
+           compressed[12:11],
+           compressed[5],
+           compressed[6],
+           22'h0}}};
+  assign expansion =
+    '{valid:
+        (_GEN.valid
+         & (_GEN.value == 5'h0
+              ? (|{compressed[10:7], compressed[12:11], compressed[5], compressed[6]})
+              : _GEN.value == 5'h1 | _GEN.value == 5'h2 | _GEN.value == 5'h3
+                | _GEN.value == 5'h4 | _GEN.value == 5'h5
+                | (_GEN.value == 5'h6
+                     ? _GEN_0
+                     : _GEN.value == 5'h7
+                       | (_GEN.value == 5'h8
+                            ? (|{compressed[12],
+                                 compressed[4:3],
+                                 compressed[5],
+                                 compressed[2],
+                                 compressed[6]})
+                            : _GEN.value == 5'h9
+                                ? (|{compressed[12], compressed[6:2]})
+                                : _GEN.value == 5'hA | _GEN.value == 5'hB
+                                  | _GEN.value == 5'hC | _GEN.value == 5'hD
+                                  | _GEN.value == 5'hE | _GEN.value == 5'hF
+                                  | _GEN.value == 5'h10 | _GEN.value == 5'h11
+                                  | _GEN.value == 5'h12 | _GEN.value == 5'h13
+                                  | _GEN.value == 5'h14 | _GEN.value == 5'h15
+                                  | _GEN.value == 5'h16
+                                  | (_GEN.value == 5'h17
+                                       ? _GEN_0
+                                       : _GEN.value == 5'h18
+                                           ? _GEN_0
+                                           : _GEN.value == 5'h19 | _GEN.value == 5'h1A
+                                             | _GEN.value == 5'h1B | _GEN.value == 5'h1C
+                                             | _GEN.value == 5'h1D | _GEN.value == 5'h1E
+                                             | (&_GEN.value)))))),
+      instruction: _GEN_17[_GEN.value]};
 endmodule
 
 module Arbiter(
@@ -5421,7 +5941,7 @@ module RV5StageMmu(
     _instruction_owners_egress_out.valid
     & (_GEN_27 | instruction_memory_in.response.valid);
   wire RV5StageInstructionResp       _GEN_29 =
-    '{instruction: (32'h0),
+    '{word: (32'h0),
       page_fault: _instruction_owners_egress_out.bits.page,
       access_fault: _instruction_owners_egress_out.bits.access};
   wire                               _GEN_30 =
@@ -5547,7 +6067,7 @@ module RV5StageMmu(
     .completion_out (_walker_completion_out),
     .memory_out     (_walker_memory_out)
   );
-  Queue_1 instruction_owners (
+  Queue instruction_owners (
     .clock       (clock),
     .reset       (reset | instruction_in.flush),
     .ingress_in  (_GEN_42),
@@ -5764,7 +6284,7 @@ module RV5StageTlb(
   wire [6:0]                 _GEN_1 = _GEN_0[6:0] | {_GEN_0[5:0], 1'h0};
   wire [6:0]                 _GEN_2 = _GEN_1 | {_GEN_1[4:0], 2'h0};
   wire [6:0]                 _GEN_3 = _GEN_0[7:1] & ~(_GEN_2 | {_GEN_2[2:0], 4'h0});
-  wire [2:0]                 __rhodium_vector_index_11690 =
+  wire [2:0]                 __rhodium_vector_index_14316 =
     {|(_GEN_3[6:3]),
      |{_GEN_3[6:5], _GEN_3[2:1]},
      |{_GEN_3[6], _GEN_3[4], _GEN_3[2], _GEN_3[0]}};
@@ -5809,24 +6329,24 @@ module RV5StageTlb(
   assign fault =
     _GEN_4
     & ~((privilege == 2'h0
-           ? entries[__rhodium_vector_index_11690].user
-           : ~entries[__rhodium_vector_index_11690].user | privilege == 2'h1 & sum
+           ? entries[__rhodium_vector_index_14316].user
+           : ~entries[__rhodium_vector_index_14316].user | privilege == 2'h1 & sum
              & (|access))
         & (access == 2'h0
-             ? entries[__rhodium_vector_index_11690].execute
+             ? entries[__rhodium_vector_index_14316].execute
              : access == 2'h1
-                 ? entries[__rhodium_vector_index_11690].read | mxr
-                   & entries[__rhodium_vector_index_11690].execute
-                 : entries[__rhodium_vector_index_11690].write
-                   & entries[__rhodium_vector_index_11690].dirty)
-        & entries[__rhodium_vector_index_11690].accessed);
+                 ? entries[__rhodium_vector_index_14316].read | mxr
+                   & entries[__rhodium_vector_index_14316].execute
+                 : entries[__rhodium_vector_index_14316].write
+                   & entries[__rhodium_vector_index_14316].dirty)
+        & entries[__rhodium_vector_index_14316].accessed);
   assign physical_address =
     enabled
-      ? (entries[__rhodium_vector_index_11690].level == 2'h0
-           ? {entries[__rhodium_vector_index_11690].ppn, virtual_address[11:0]}
-           : entries[__rhodium_vector_index_11690].level == 2'h1
-               ? {entries[__rhodium_vector_index_11690].ppn[43:9], virtual_address[20:0]}
-               : {entries[__rhodium_vector_index_11690].ppn[43:18],
+      ? (entries[__rhodium_vector_index_14316].level == 2'h0
+           ? {entries[__rhodium_vector_index_14316].ppn, virtual_address[11:0]}
+           : entries[__rhodium_vector_index_14316].level == 2'h1
+               ? {entries[__rhodium_vector_index_14316].ppn[43:9], virtual_address[20:0]}
+               : {entries[__rhodium_vector_index_14316].ppn[43:18],
                   virtual_address[29:0]})
       : virtual_address[55:0];
 endmodule
@@ -5998,7 +6518,7 @@ module RV5StagePageTableWalker(
   assign memory_out = '{request: _GEN_20, response: _GEN_21};
 endmodule
 
-module Queue_1(
+module Queue(
   input                                                               clock,
                                                                       reset,
   input  struct packed {logic valid; RV5StageInstructionFault bits; } ingress_in,
@@ -6056,6 +6576,25 @@ module Queue_1(
   assign ingress_out = '{ready: _GEN_3};
   assign egress_out = '{valid: (~_GEN_2), bits: storage[_read_pointer_value]};
   assign count = occupancy;
+endmodule
+
+module Counter(
+  input  clock,
+         reset,
+         enable,
+  output value,
+         wrap
+);
+
+  reg state;
+  always @(posedge clock) begin
+    if (reset)
+      state <= 1'h0;
+    else
+      state <= enable ? ~state & state - 1'h1 : state;
+  end // always @(posedge)
+  assign value = state;
+  assign wrap = enable & state;
 endmodule
 
 module RV5StageL1ICache(
@@ -6267,35 +6806,35 @@ module RV5StageL1ICache(
   reg                                 refill_installable;
   reg                                 refill_installing;
   reg  [2:0]                          refill_install_index;
-  wire [2:0]                          __rhodium_vector_index_18050 = refill_install_index;
+  wire [2:0]                          __rhodium_vector_index_20728 = refill_install_index;
   reg  [1:0]                          outstanding;
   wire                                _GEN_9 = _responses_egress_out.valid & ~_GEN_7;
-  wire [5:0]                          __rhodium_vector_index_17279 = _snoop_address[11:6];
+  wire [5:0]                          __rhodium_vector_index_19957 = _snoop_address[11:6];
   wire                                _GEN_10 =
-    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_17279][1'h0]
+    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_19957][1'h0]
     & _tags_port_out.response.bits[1'h0] == _snoop_address[63:12]}};
   wire                                _GEN_11 =
     _tags_port_out.response.valid & _states_port_out.response.valid;
   wire RV5StageCleanSnoopLookupResult _GEN_12 =
     '{hit: _GEN_10, state: (_states_port_out.response.bits[1'h0] & {2{_GEN_10}})};
   wire                                _GEN_13 = _GEN_9 & core_in.response.ready;
-  wire [5:0]                          __rhodium_vector_index_17392 =
+  wire [5:0]                          __rhodium_vector_index_20070 =
     _lookup_egress_out.bits[11:6];
-  wire [5:0]                          __rhodium_vector_index_17732 =
+  wire [5:0]                          __rhodium_vector_index_20410 =
     _lookup_egress_out.bits[11:6];
-  wire [5:0]                          __rhodium_vector_index_17734 =
+  wire [5:0]                          __rhodium_vector_index_20412 =
     _lookup_egress_out.bits[11:6];
   wire                                _GEN_14 =
-    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_17392][1'h0]
+    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_20070][1'h0]
     & _tags_port_out.response.bits[1'h0] == _lookup_egress_out.bits[63:12]}};
   wire                                _GEN_15 =
     _lookup_egress_out.valid & _tags_port_out.response.valid & ~_GEN_14;
   wire [0:0][63:0]                    _GEN_16 =
     /*cast(bit[0:0][63:0])*/_lines_port_out.response.bits;
   wire [63:0]                         _GEN_17 = _GEN_16[1'h0] & {64{_GEN_14}};
-  wire [5:0]                          __rhodium_vector_index_18978 =
+  wire [5:0]                          __rhodium_vector_index_21656 =
     _refill_completion_out.bits.context_0.address[11:6];
-  wire [2:0]                          __rhodium_vector_index_17502 =
+  wire [2:0]                          __rhodium_vector_index_20180 =
     _refill_completion_out.bits.context_0.address[5:3];
   wire                                _GEN_18 =
     ~refill_installable | core_in.invalidate_all;
@@ -6323,10 +6862,10 @@ module RV5StageL1ICache(
   wire                                _GEN_28 = _GEN_27 & ~_GEN_14;
   assign _GEN_3 = |({{_GEN_14 & _GEN_1}, {~_GEN_14 & _GEN_2}});
   wire                                _GEN_29 =
-    /*cast(bit)*/{1{~valid_lines[__rhodium_vector_index_17732][1'h0]}};
+    /*cast(bit)*/{1{~valid_lines[__rhodium_vector_index_20410][1'h0]}};
   wire RV5StageL1IRefillContext       _GEN_30 =
     '{address: _lookup_egress_out.bits,
-      way: (~_GEN_29 & replacement_ways[__rhodium_vector_index_17734])};
+      way: (~_GEN_29 & replacement_ways[__rhodium_vector_index_20412])};
   wire RV5StageLineRefillCommand      _GEN_31 =
     '{line_address: {_lookup_egress_out.bits[63:6], 6'h0},
       opcode: (7'h2),
@@ -6338,7 +6877,7 @@ module RV5StageL1ICache(
                          ~_GEN_15 | _GEN_7 | _refill_command_out.ready);
   `endif // not def SYNTHESIS
   wire RV5StageInstructionResp        _GEN_32 =
-    '{instruction: (_lookup_egress_out.bits[2] ? _GEN_17[63:32] : _GEN_17[31:0]),
+    '{word: (_lookup_egress_out.bits[2] ? _GEN_17[63:32] : _GEN_17[31:0]),
       page_fault: (1'h0),
       access_fault: (1'h0)};
   assign _GEN_1 = _response_arbiter_ingress_0_out.ready;
@@ -6348,10 +6887,10 @@ module RV5StageL1ICache(
   wire                                _GEN_35 = refill_live & ~_GEN_7;
   assign _GEN_0 = ~_GEN_35 | _GEN;
   wire RV5StageInstructionResp        _GEN_36 =
-    '{instruction:
+    '{word:
         (_refill_completion_out.bits.context_0.address[2]
-           ? _refill_completion_out.bits.line[__rhodium_vector_index_17502][63:32]
-           : _refill_completion_out.bits.line[__rhodium_vector_index_17502][31:0]),
+           ? _refill_completion_out.bits.line[__rhodium_vector_index_20180][63:32]
+           : _refill_completion_out.bits.line[__rhodium_vector_index_20180][31:0]),
       page_fault: (1'h0),
       access_fault: (1'h0)};
   assign _GEN = _response_arbiter_ingress_1_out.ready;
@@ -6385,19 +6924,19 @@ module RV5StageL1ICache(
   wire                                _GEN_46 =
     _snoop_update_out.valid & ~_snoop_update_out.bits.invalidate;
   wire [7:0][7:0]                     _GEN_47 =
-    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[__rhodium_vector_index_18050];
+    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[__rhodium_vector_index_20728];
   wire ReadWriteRequest               _GEN_48 =
     '{address:
         (_GEN_40
-           ? __rhodium_vector_index_18978
+           ? __rhodium_vector_index_21656
            : _snoop_lookup_out.valid
-               ? __rhodium_vector_index_17279
+               ? __rhodium_vector_index_19957
                : core_in.request.bits.address[11:6]),
       write: _GEN_40,
       data: ({1{_refill_completion_out.bits.context_0.address[63:12]}}),
       mask: _GEN_44};
   wire ReadWriteRequest_1             _GEN_49 =
-    '{address: (_GEN_40 ? __rhodium_vector_index_18978 : __rhodium_vector_index_17279),
+    '{address: (_GEN_40 ? __rhodium_vector_index_21656 : __rhodium_vector_index_19957),
       write: (_GEN_40 | _GEN_46),
       data:
         ({1{_GEN_46 ? _snoop_update_out.bits.state : _refill_completion_out.bits.state}}),
@@ -6405,7 +6944,7 @@ module RV5StageL1ICache(
   wire ReadWriteRequest_2             _GEN_50 =
     '{address:
         (_GEN_21
-           ? {__rhodium_vector_index_18978, refill_install_index}
+           ? {__rhodium_vector_index_21656, refill_install_index}
            : core_in.request.bits.address[11:3]),
       write: _GEN_21,
       data: _GEN_47,
@@ -6418,142 +6957,142 @@ module RV5StageL1ICache(
           {~_refill_completion_out.bits.context_0.way},
           {~_refill_completion_out.bits.context_0.way},
           {~_refill_completion_out.bits.context_0.way}})};
-  wire [5:0]                          __rhodium_vector_index_18448 =
+  wire [5:0]                          __rhodium_vector_index_21126 =
     _snoop_update_out.bits.address[11:6];
   wire [0:0]                          _GEN_51 =
-    {1{snoop_way & valid_lines[__rhodium_vector_index_18448][1'h0]}};
+    {1{snoop_way & valid_lines[__rhodium_vector_index_21126][1'h0]}};
   wire [63:0][0:0]                    _GEN_52 =
-    {{(&__rhodium_vector_index_18448) ? _GEN_51 : valid_lines[6'h3F]},
-     {__rhodium_vector_index_18448 == 6'h3E ? _GEN_51 : valid_lines[6'h3E]},
-     {__rhodium_vector_index_18448 == 6'h3D ? _GEN_51 : valid_lines[6'h3D]},
-     {__rhodium_vector_index_18448 == 6'h3C ? _GEN_51 : valid_lines[6'h3C]},
-     {__rhodium_vector_index_18448 == 6'h3B ? _GEN_51 : valid_lines[6'h3B]},
-     {__rhodium_vector_index_18448 == 6'h3A ? _GEN_51 : valid_lines[6'h3A]},
-     {__rhodium_vector_index_18448 == 6'h39 ? _GEN_51 : valid_lines[6'h39]},
-     {__rhodium_vector_index_18448 == 6'h38 ? _GEN_51 : valid_lines[6'h38]},
-     {__rhodium_vector_index_18448 == 6'h37 ? _GEN_51 : valid_lines[6'h37]},
-     {__rhodium_vector_index_18448 == 6'h36 ? _GEN_51 : valid_lines[6'h36]},
-     {__rhodium_vector_index_18448 == 6'h35 ? _GEN_51 : valid_lines[6'h35]},
-     {__rhodium_vector_index_18448 == 6'h34 ? _GEN_51 : valid_lines[6'h34]},
-     {__rhodium_vector_index_18448 == 6'h33 ? _GEN_51 : valid_lines[6'h33]},
-     {__rhodium_vector_index_18448 == 6'h32 ? _GEN_51 : valid_lines[6'h32]},
-     {__rhodium_vector_index_18448 == 6'h31 ? _GEN_51 : valid_lines[6'h31]},
-     {__rhodium_vector_index_18448 == 6'h30 ? _GEN_51 : valid_lines[6'h30]},
-     {__rhodium_vector_index_18448 == 6'h2F ? _GEN_51 : valid_lines[6'h2F]},
-     {__rhodium_vector_index_18448 == 6'h2E ? _GEN_51 : valid_lines[6'h2E]},
-     {__rhodium_vector_index_18448 == 6'h2D ? _GEN_51 : valid_lines[6'h2D]},
-     {__rhodium_vector_index_18448 == 6'h2C ? _GEN_51 : valid_lines[6'h2C]},
-     {__rhodium_vector_index_18448 == 6'h2B ? _GEN_51 : valid_lines[6'h2B]},
-     {__rhodium_vector_index_18448 == 6'h2A ? _GEN_51 : valid_lines[6'h2A]},
-     {__rhodium_vector_index_18448 == 6'h29 ? _GEN_51 : valid_lines[6'h29]},
-     {__rhodium_vector_index_18448 == 6'h28 ? _GEN_51 : valid_lines[6'h28]},
-     {__rhodium_vector_index_18448 == 6'h27 ? _GEN_51 : valid_lines[6'h27]},
-     {__rhodium_vector_index_18448 == 6'h26 ? _GEN_51 : valid_lines[6'h26]},
-     {__rhodium_vector_index_18448 == 6'h25 ? _GEN_51 : valid_lines[6'h25]},
-     {__rhodium_vector_index_18448 == 6'h24 ? _GEN_51 : valid_lines[6'h24]},
-     {__rhodium_vector_index_18448 == 6'h23 ? _GEN_51 : valid_lines[6'h23]},
-     {__rhodium_vector_index_18448 == 6'h22 ? _GEN_51 : valid_lines[6'h22]},
-     {__rhodium_vector_index_18448 == 6'h21 ? _GEN_51 : valid_lines[6'h21]},
-     {__rhodium_vector_index_18448 == 6'h20 ? _GEN_51 : valid_lines[6'h20]},
-     {__rhodium_vector_index_18448 == 6'h1F ? _GEN_51 : valid_lines[6'h1F]},
-     {__rhodium_vector_index_18448 == 6'h1E ? _GEN_51 : valid_lines[6'h1E]},
-     {__rhodium_vector_index_18448 == 6'h1D ? _GEN_51 : valid_lines[6'h1D]},
-     {__rhodium_vector_index_18448 == 6'h1C ? _GEN_51 : valid_lines[6'h1C]},
-     {__rhodium_vector_index_18448 == 6'h1B ? _GEN_51 : valid_lines[6'h1B]},
-     {__rhodium_vector_index_18448 == 6'h1A ? _GEN_51 : valid_lines[6'h1A]},
-     {__rhodium_vector_index_18448 == 6'h19 ? _GEN_51 : valid_lines[6'h19]},
-     {__rhodium_vector_index_18448 == 6'h18 ? _GEN_51 : valid_lines[6'h18]},
-     {__rhodium_vector_index_18448 == 6'h17 ? _GEN_51 : valid_lines[6'h17]},
-     {__rhodium_vector_index_18448 == 6'h16 ? _GEN_51 : valid_lines[6'h16]},
-     {__rhodium_vector_index_18448 == 6'h15 ? _GEN_51 : valid_lines[6'h15]},
-     {__rhodium_vector_index_18448 == 6'h14 ? _GEN_51 : valid_lines[6'h14]},
-     {__rhodium_vector_index_18448 == 6'h13 ? _GEN_51 : valid_lines[6'h13]},
-     {__rhodium_vector_index_18448 == 6'h12 ? _GEN_51 : valid_lines[6'h12]},
-     {__rhodium_vector_index_18448 == 6'h11 ? _GEN_51 : valid_lines[6'h11]},
-     {__rhodium_vector_index_18448 == 6'h10 ? _GEN_51 : valid_lines[6'h10]},
-     {__rhodium_vector_index_18448 == 6'hF ? _GEN_51 : valid_lines[6'hF]},
-     {__rhodium_vector_index_18448 == 6'hE ? _GEN_51 : valid_lines[6'hE]},
-     {__rhodium_vector_index_18448 == 6'hD ? _GEN_51 : valid_lines[6'hD]},
-     {__rhodium_vector_index_18448 == 6'hC ? _GEN_51 : valid_lines[6'hC]},
-     {__rhodium_vector_index_18448 == 6'hB ? _GEN_51 : valid_lines[6'hB]},
-     {__rhodium_vector_index_18448 == 6'hA ? _GEN_51 : valid_lines[6'hA]},
-     {__rhodium_vector_index_18448 == 6'h9 ? _GEN_51 : valid_lines[6'h9]},
-     {__rhodium_vector_index_18448 == 6'h8 ? _GEN_51 : valid_lines[6'h8]},
-     {__rhodium_vector_index_18448 == 6'h7 ? _GEN_51 : valid_lines[6'h7]},
-     {__rhodium_vector_index_18448 == 6'h6 ? _GEN_51 : valid_lines[6'h6]},
-     {__rhodium_vector_index_18448 == 6'h5 ? _GEN_51 : valid_lines[6'h5]},
-     {__rhodium_vector_index_18448 == 6'h4 ? _GEN_51 : valid_lines[6'h4]},
-     {__rhodium_vector_index_18448 == 6'h3 ? _GEN_51 : valid_lines[6'h3]},
-     {__rhodium_vector_index_18448 == 6'h2 ? _GEN_51 : valid_lines[6'h2]},
-     {__rhodium_vector_index_18448 == 6'h1 ? _GEN_51 : valid_lines[6'h1]},
-     {__rhodium_vector_index_18448 == 6'h0 ? _GEN_51 : valid_lines[6'h0]}};
+    {{(&__rhodium_vector_index_21126) ? _GEN_51 : valid_lines[6'h3F]},
+     {__rhodium_vector_index_21126 == 6'h3E ? _GEN_51 : valid_lines[6'h3E]},
+     {__rhodium_vector_index_21126 == 6'h3D ? _GEN_51 : valid_lines[6'h3D]},
+     {__rhodium_vector_index_21126 == 6'h3C ? _GEN_51 : valid_lines[6'h3C]},
+     {__rhodium_vector_index_21126 == 6'h3B ? _GEN_51 : valid_lines[6'h3B]},
+     {__rhodium_vector_index_21126 == 6'h3A ? _GEN_51 : valid_lines[6'h3A]},
+     {__rhodium_vector_index_21126 == 6'h39 ? _GEN_51 : valid_lines[6'h39]},
+     {__rhodium_vector_index_21126 == 6'h38 ? _GEN_51 : valid_lines[6'h38]},
+     {__rhodium_vector_index_21126 == 6'h37 ? _GEN_51 : valid_lines[6'h37]},
+     {__rhodium_vector_index_21126 == 6'h36 ? _GEN_51 : valid_lines[6'h36]},
+     {__rhodium_vector_index_21126 == 6'h35 ? _GEN_51 : valid_lines[6'h35]},
+     {__rhodium_vector_index_21126 == 6'h34 ? _GEN_51 : valid_lines[6'h34]},
+     {__rhodium_vector_index_21126 == 6'h33 ? _GEN_51 : valid_lines[6'h33]},
+     {__rhodium_vector_index_21126 == 6'h32 ? _GEN_51 : valid_lines[6'h32]},
+     {__rhodium_vector_index_21126 == 6'h31 ? _GEN_51 : valid_lines[6'h31]},
+     {__rhodium_vector_index_21126 == 6'h30 ? _GEN_51 : valid_lines[6'h30]},
+     {__rhodium_vector_index_21126 == 6'h2F ? _GEN_51 : valid_lines[6'h2F]},
+     {__rhodium_vector_index_21126 == 6'h2E ? _GEN_51 : valid_lines[6'h2E]},
+     {__rhodium_vector_index_21126 == 6'h2D ? _GEN_51 : valid_lines[6'h2D]},
+     {__rhodium_vector_index_21126 == 6'h2C ? _GEN_51 : valid_lines[6'h2C]},
+     {__rhodium_vector_index_21126 == 6'h2B ? _GEN_51 : valid_lines[6'h2B]},
+     {__rhodium_vector_index_21126 == 6'h2A ? _GEN_51 : valid_lines[6'h2A]},
+     {__rhodium_vector_index_21126 == 6'h29 ? _GEN_51 : valid_lines[6'h29]},
+     {__rhodium_vector_index_21126 == 6'h28 ? _GEN_51 : valid_lines[6'h28]},
+     {__rhodium_vector_index_21126 == 6'h27 ? _GEN_51 : valid_lines[6'h27]},
+     {__rhodium_vector_index_21126 == 6'h26 ? _GEN_51 : valid_lines[6'h26]},
+     {__rhodium_vector_index_21126 == 6'h25 ? _GEN_51 : valid_lines[6'h25]},
+     {__rhodium_vector_index_21126 == 6'h24 ? _GEN_51 : valid_lines[6'h24]},
+     {__rhodium_vector_index_21126 == 6'h23 ? _GEN_51 : valid_lines[6'h23]},
+     {__rhodium_vector_index_21126 == 6'h22 ? _GEN_51 : valid_lines[6'h22]},
+     {__rhodium_vector_index_21126 == 6'h21 ? _GEN_51 : valid_lines[6'h21]},
+     {__rhodium_vector_index_21126 == 6'h20 ? _GEN_51 : valid_lines[6'h20]},
+     {__rhodium_vector_index_21126 == 6'h1F ? _GEN_51 : valid_lines[6'h1F]},
+     {__rhodium_vector_index_21126 == 6'h1E ? _GEN_51 : valid_lines[6'h1E]},
+     {__rhodium_vector_index_21126 == 6'h1D ? _GEN_51 : valid_lines[6'h1D]},
+     {__rhodium_vector_index_21126 == 6'h1C ? _GEN_51 : valid_lines[6'h1C]},
+     {__rhodium_vector_index_21126 == 6'h1B ? _GEN_51 : valid_lines[6'h1B]},
+     {__rhodium_vector_index_21126 == 6'h1A ? _GEN_51 : valid_lines[6'h1A]},
+     {__rhodium_vector_index_21126 == 6'h19 ? _GEN_51 : valid_lines[6'h19]},
+     {__rhodium_vector_index_21126 == 6'h18 ? _GEN_51 : valid_lines[6'h18]},
+     {__rhodium_vector_index_21126 == 6'h17 ? _GEN_51 : valid_lines[6'h17]},
+     {__rhodium_vector_index_21126 == 6'h16 ? _GEN_51 : valid_lines[6'h16]},
+     {__rhodium_vector_index_21126 == 6'h15 ? _GEN_51 : valid_lines[6'h15]},
+     {__rhodium_vector_index_21126 == 6'h14 ? _GEN_51 : valid_lines[6'h14]},
+     {__rhodium_vector_index_21126 == 6'h13 ? _GEN_51 : valid_lines[6'h13]},
+     {__rhodium_vector_index_21126 == 6'h12 ? _GEN_51 : valid_lines[6'h12]},
+     {__rhodium_vector_index_21126 == 6'h11 ? _GEN_51 : valid_lines[6'h11]},
+     {__rhodium_vector_index_21126 == 6'h10 ? _GEN_51 : valid_lines[6'h10]},
+     {__rhodium_vector_index_21126 == 6'hF ? _GEN_51 : valid_lines[6'hF]},
+     {__rhodium_vector_index_21126 == 6'hE ? _GEN_51 : valid_lines[6'hE]},
+     {__rhodium_vector_index_21126 == 6'hD ? _GEN_51 : valid_lines[6'hD]},
+     {__rhodium_vector_index_21126 == 6'hC ? _GEN_51 : valid_lines[6'hC]},
+     {__rhodium_vector_index_21126 == 6'hB ? _GEN_51 : valid_lines[6'hB]},
+     {__rhodium_vector_index_21126 == 6'hA ? _GEN_51 : valid_lines[6'hA]},
+     {__rhodium_vector_index_21126 == 6'h9 ? _GEN_51 : valid_lines[6'h9]},
+     {__rhodium_vector_index_21126 == 6'h8 ? _GEN_51 : valid_lines[6'h8]},
+     {__rhodium_vector_index_21126 == 6'h7 ? _GEN_51 : valid_lines[6'h7]},
+     {__rhodium_vector_index_21126 == 6'h6 ? _GEN_51 : valid_lines[6'h6]},
+     {__rhodium_vector_index_21126 == 6'h5 ? _GEN_51 : valid_lines[6'h5]},
+     {__rhodium_vector_index_21126 == 6'h4 ? _GEN_51 : valid_lines[6'h4]},
+     {__rhodium_vector_index_21126 == 6'h3 ? _GEN_51 : valid_lines[6'h3]},
+     {__rhodium_vector_index_21126 == 6'h2 ? _GEN_51 : valid_lines[6'h2]},
+     {__rhodium_vector_index_21126 == 6'h1 ? _GEN_51 : valid_lines[6'h1]},
+     {__rhodium_vector_index_21126 == 6'h0 ? _GEN_51 : valid_lines[6'h0]}};
   wire [0:0]                          _GEN_53 =
     {1{~_refill_completion_out.bits.context_0.way
-    | valid_lines[__rhodium_vector_index_18978][1'h0]}};
-  wire                                _GEN_54 = __rhodium_vector_index_18978 == 6'h0;
-  wire                                _GEN_55 = __rhodium_vector_index_18978 == 6'h1;
-  wire                                _GEN_56 = __rhodium_vector_index_18978 == 6'h2;
-  wire                                _GEN_57 = __rhodium_vector_index_18978 == 6'h3;
-  wire                                _GEN_58 = __rhodium_vector_index_18978 == 6'h4;
-  wire                                _GEN_59 = __rhodium_vector_index_18978 == 6'h5;
-  wire                                _GEN_60 = __rhodium_vector_index_18978 == 6'h6;
-  wire                                _GEN_61 = __rhodium_vector_index_18978 == 6'h7;
-  wire                                _GEN_62 = __rhodium_vector_index_18978 == 6'h8;
-  wire                                _GEN_63 = __rhodium_vector_index_18978 == 6'h9;
-  wire                                _GEN_64 = __rhodium_vector_index_18978 == 6'hA;
-  wire                                _GEN_65 = __rhodium_vector_index_18978 == 6'hB;
-  wire                                _GEN_66 = __rhodium_vector_index_18978 == 6'hC;
-  wire                                _GEN_67 = __rhodium_vector_index_18978 == 6'hD;
-  wire                                _GEN_68 = __rhodium_vector_index_18978 == 6'hE;
-  wire                                _GEN_69 = __rhodium_vector_index_18978 == 6'hF;
-  wire                                _GEN_70 = __rhodium_vector_index_18978 == 6'h10;
-  wire                                _GEN_71 = __rhodium_vector_index_18978 == 6'h11;
-  wire                                _GEN_72 = __rhodium_vector_index_18978 == 6'h12;
-  wire                                _GEN_73 = __rhodium_vector_index_18978 == 6'h13;
-  wire                                _GEN_74 = __rhodium_vector_index_18978 == 6'h14;
-  wire                                _GEN_75 = __rhodium_vector_index_18978 == 6'h15;
-  wire                                _GEN_76 = __rhodium_vector_index_18978 == 6'h16;
-  wire                                _GEN_77 = __rhodium_vector_index_18978 == 6'h17;
-  wire                                _GEN_78 = __rhodium_vector_index_18978 == 6'h18;
-  wire                                _GEN_79 = __rhodium_vector_index_18978 == 6'h19;
-  wire                                _GEN_80 = __rhodium_vector_index_18978 == 6'h1A;
-  wire                                _GEN_81 = __rhodium_vector_index_18978 == 6'h1B;
-  wire                                _GEN_82 = __rhodium_vector_index_18978 == 6'h1C;
-  wire                                _GEN_83 = __rhodium_vector_index_18978 == 6'h1D;
-  wire                                _GEN_84 = __rhodium_vector_index_18978 == 6'h1E;
-  wire                                _GEN_85 = __rhodium_vector_index_18978 == 6'h1F;
-  wire                                _GEN_86 = __rhodium_vector_index_18978 == 6'h20;
-  wire                                _GEN_87 = __rhodium_vector_index_18978 == 6'h21;
-  wire                                _GEN_88 = __rhodium_vector_index_18978 == 6'h22;
-  wire                                _GEN_89 = __rhodium_vector_index_18978 == 6'h23;
-  wire                                _GEN_90 = __rhodium_vector_index_18978 == 6'h24;
-  wire                                _GEN_91 = __rhodium_vector_index_18978 == 6'h25;
-  wire                                _GEN_92 = __rhodium_vector_index_18978 == 6'h26;
-  wire                                _GEN_93 = __rhodium_vector_index_18978 == 6'h27;
-  wire                                _GEN_94 = __rhodium_vector_index_18978 == 6'h28;
-  wire                                _GEN_95 = __rhodium_vector_index_18978 == 6'h29;
-  wire                                _GEN_96 = __rhodium_vector_index_18978 == 6'h2A;
-  wire                                _GEN_97 = __rhodium_vector_index_18978 == 6'h2B;
-  wire                                _GEN_98 = __rhodium_vector_index_18978 == 6'h2C;
-  wire                                _GEN_99 = __rhodium_vector_index_18978 == 6'h2D;
-  wire                                _GEN_100 = __rhodium_vector_index_18978 == 6'h2E;
-  wire                                _GEN_101 = __rhodium_vector_index_18978 == 6'h2F;
-  wire                                _GEN_102 = __rhodium_vector_index_18978 == 6'h30;
-  wire                                _GEN_103 = __rhodium_vector_index_18978 == 6'h31;
-  wire                                _GEN_104 = __rhodium_vector_index_18978 == 6'h32;
-  wire                                _GEN_105 = __rhodium_vector_index_18978 == 6'h33;
-  wire                                _GEN_106 = __rhodium_vector_index_18978 == 6'h34;
-  wire                                _GEN_107 = __rhodium_vector_index_18978 == 6'h35;
-  wire                                _GEN_108 = __rhodium_vector_index_18978 == 6'h36;
-  wire                                _GEN_109 = __rhodium_vector_index_18978 == 6'h37;
-  wire                                _GEN_110 = __rhodium_vector_index_18978 == 6'h38;
-  wire                                _GEN_111 = __rhodium_vector_index_18978 == 6'h39;
-  wire                                _GEN_112 = __rhodium_vector_index_18978 == 6'h3A;
-  wire                                _GEN_113 = __rhodium_vector_index_18978 == 6'h3B;
-  wire                                _GEN_114 = __rhodium_vector_index_18978 == 6'h3C;
-  wire                                _GEN_115 = __rhodium_vector_index_18978 == 6'h3D;
-  wire                                _GEN_116 = __rhodium_vector_index_18978 == 6'h3E;
-  wire                                _GEN_117 = &__rhodium_vector_index_18978;
+    | valid_lines[__rhodium_vector_index_21656][1'h0]}};
+  wire                                _GEN_54 = __rhodium_vector_index_21656 == 6'h0;
+  wire                                _GEN_55 = __rhodium_vector_index_21656 == 6'h1;
+  wire                                _GEN_56 = __rhodium_vector_index_21656 == 6'h2;
+  wire                                _GEN_57 = __rhodium_vector_index_21656 == 6'h3;
+  wire                                _GEN_58 = __rhodium_vector_index_21656 == 6'h4;
+  wire                                _GEN_59 = __rhodium_vector_index_21656 == 6'h5;
+  wire                                _GEN_60 = __rhodium_vector_index_21656 == 6'h6;
+  wire                                _GEN_61 = __rhodium_vector_index_21656 == 6'h7;
+  wire                                _GEN_62 = __rhodium_vector_index_21656 == 6'h8;
+  wire                                _GEN_63 = __rhodium_vector_index_21656 == 6'h9;
+  wire                                _GEN_64 = __rhodium_vector_index_21656 == 6'hA;
+  wire                                _GEN_65 = __rhodium_vector_index_21656 == 6'hB;
+  wire                                _GEN_66 = __rhodium_vector_index_21656 == 6'hC;
+  wire                                _GEN_67 = __rhodium_vector_index_21656 == 6'hD;
+  wire                                _GEN_68 = __rhodium_vector_index_21656 == 6'hE;
+  wire                                _GEN_69 = __rhodium_vector_index_21656 == 6'hF;
+  wire                                _GEN_70 = __rhodium_vector_index_21656 == 6'h10;
+  wire                                _GEN_71 = __rhodium_vector_index_21656 == 6'h11;
+  wire                                _GEN_72 = __rhodium_vector_index_21656 == 6'h12;
+  wire                                _GEN_73 = __rhodium_vector_index_21656 == 6'h13;
+  wire                                _GEN_74 = __rhodium_vector_index_21656 == 6'h14;
+  wire                                _GEN_75 = __rhodium_vector_index_21656 == 6'h15;
+  wire                                _GEN_76 = __rhodium_vector_index_21656 == 6'h16;
+  wire                                _GEN_77 = __rhodium_vector_index_21656 == 6'h17;
+  wire                                _GEN_78 = __rhodium_vector_index_21656 == 6'h18;
+  wire                                _GEN_79 = __rhodium_vector_index_21656 == 6'h19;
+  wire                                _GEN_80 = __rhodium_vector_index_21656 == 6'h1A;
+  wire                                _GEN_81 = __rhodium_vector_index_21656 == 6'h1B;
+  wire                                _GEN_82 = __rhodium_vector_index_21656 == 6'h1C;
+  wire                                _GEN_83 = __rhodium_vector_index_21656 == 6'h1D;
+  wire                                _GEN_84 = __rhodium_vector_index_21656 == 6'h1E;
+  wire                                _GEN_85 = __rhodium_vector_index_21656 == 6'h1F;
+  wire                                _GEN_86 = __rhodium_vector_index_21656 == 6'h20;
+  wire                                _GEN_87 = __rhodium_vector_index_21656 == 6'h21;
+  wire                                _GEN_88 = __rhodium_vector_index_21656 == 6'h22;
+  wire                                _GEN_89 = __rhodium_vector_index_21656 == 6'h23;
+  wire                                _GEN_90 = __rhodium_vector_index_21656 == 6'h24;
+  wire                                _GEN_91 = __rhodium_vector_index_21656 == 6'h25;
+  wire                                _GEN_92 = __rhodium_vector_index_21656 == 6'h26;
+  wire                                _GEN_93 = __rhodium_vector_index_21656 == 6'h27;
+  wire                                _GEN_94 = __rhodium_vector_index_21656 == 6'h28;
+  wire                                _GEN_95 = __rhodium_vector_index_21656 == 6'h29;
+  wire                                _GEN_96 = __rhodium_vector_index_21656 == 6'h2A;
+  wire                                _GEN_97 = __rhodium_vector_index_21656 == 6'h2B;
+  wire                                _GEN_98 = __rhodium_vector_index_21656 == 6'h2C;
+  wire                                _GEN_99 = __rhodium_vector_index_21656 == 6'h2D;
+  wire                                _GEN_100 = __rhodium_vector_index_21656 == 6'h2E;
+  wire                                _GEN_101 = __rhodium_vector_index_21656 == 6'h2F;
+  wire                                _GEN_102 = __rhodium_vector_index_21656 == 6'h30;
+  wire                                _GEN_103 = __rhodium_vector_index_21656 == 6'h31;
+  wire                                _GEN_104 = __rhodium_vector_index_21656 == 6'h32;
+  wire                                _GEN_105 = __rhodium_vector_index_21656 == 6'h33;
+  wire                                _GEN_106 = __rhodium_vector_index_21656 == 6'h34;
+  wire                                _GEN_107 = __rhodium_vector_index_21656 == 6'h35;
+  wire                                _GEN_108 = __rhodium_vector_index_21656 == 6'h36;
+  wire                                _GEN_109 = __rhodium_vector_index_21656 == 6'h37;
+  wire                                _GEN_110 = __rhodium_vector_index_21656 == 6'h38;
+  wire                                _GEN_111 = __rhodium_vector_index_21656 == 6'h39;
+  wire                                _GEN_112 = __rhodium_vector_index_21656 == 6'h3A;
+  wire                                _GEN_113 = __rhodium_vector_index_21656 == 6'h3B;
+  wire                                _GEN_114 = __rhodium_vector_index_21656 == 6'h3C;
+  wire                                _GEN_115 = __rhodium_vector_index_21656 == 6'h3D;
+  wire                                _GEN_116 = __rhodium_vector_index_21656 == 6'h3E;
+  wire                                _GEN_117 = &__rhodium_vector_index_21656;
   wire [63:0][0:0]                    _GEN_118 =
     _GEN_40
       ? {{_GEN_117 ? _GEN_53 : valid_lines[6'h3F]},
@@ -6791,7 +7330,7 @@ module RV5StageL1ICache(
     .egress_out    (_response_arbiter_egress_out),
     .chosen        (/* unused */)
   );
-  Queue_2 responses (
+  Queue_1 responses (
     .clock       (clock),
     .reset       (reset | _GEN_7),
     .ingress_in  (_response_arbiter_egress_out),
@@ -7168,17 +7707,17 @@ module RV5StageLineRefill(
   wire [3:0]                    _GEN_12 = received_packets;
   wire                          _GEN_13 = &_GEN_12;
   wire                          _GEN_14 = _GEN_12 == 4'h0;
-  wire [1:0]                    __rhodium_vector_index_15394 =
+  wire [1:0]                    __rhodium_vector_index_18072 =
     response_data_in.bits.data_id;
   wire [3:0][1:0]               _GEN_15 =
     {{line_address[5:4] - 2'h1},
      {line_address[5:4] - 2'h2},
      {line_address[5:4] + 2'h1},
      {line_address[5:4]}};
-  wire                          _GEN_16 = __rhodium_vector_index_15394 == 2'h0;
-  wire                          _GEN_17 = __rhodium_vector_index_15394 == 2'h1;
-  wire                          _GEN_18 = __rhodium_vector_index_15394 == 2'h2;
-  wire                          _GEN_19 = &__rhodium_vector_index_15394;
+  wire                          _GEN_16 = __rhodium_vector_index_18072 == 2'h0;
+  wire                          _GEN_17 = __rhodium_vector_index_18072 == 2'h1;
+  wire                          _GEN_18 = __rhodium_vector_index_18072 == 2'h2;
+  wire                          _GEN_19 = &__rhodium_vector_index_18072;
   wire [3:0][127:0]             _GEN_20 = /*cast(bit[3:0][127:0])*/line;
   wire                          _GEN_21 =
     _control_active & _control_attempt_outstanding & ~_GEN_13;
@@ -7212,13 +7751,13 @@ module RV5StageLineRefill(
   `ifndef SYNTHESIS
     line_refill_response_data_id:
       assert property (@(posedge clock) disable iff (_GEN_28)
-                         __rhodium_vector_index_15394 == _GEN_15[__rhodium_vector_index_15394]);
+                         __rhodium_vector_index_18072 == _GEN_15[__rhodium_vector_index_18072]);
   `endif // not def SYNTHESIS
   wire                          _GEN_29 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id_unique:
       assert property (@(posedge clock) disable iff (_GEN_29)
-                         ~received_packets[__rhodium_vector_index_15394]);
+                         ~received_packets[__rhodium_vector_index_18072]);
   `endif // not def SYNTHESIS
   wire                          _GEN_30 = ~_GEN_23;
   `ifndef SYNTHESIS
@@ -7635,7 +8174,7 @@ module Arbiter_1(
   assign chosen = _GEN_0[1];
 endmodule
 
-module Queue_2(
+module Queue_1(
   input                                                              clock,
                                                                      reset,
   input  struct packed {logic valid; RV5StageInstructionResp bits; } ingress_in,
@@ -7788,7 +8327,7 @@ module RV5StageL1DCache(
   reg  [1:0]                         reservation_width;
   reg                                refill_installing;
   reg  [2:0]                         refill_install_index;
-  wire [2:0]                         __rhodium_vector_index_25754 = refill_install_index;
+  wire [2:0]                         __rhodium_vector_index_28432 = refill_install_index;
   reg  [2:0]                         gather_state;
   reg  [2:0]                         gather_issue_index;
   reg                                gather_response_pending;
@@ -7796,32 +8335,32 @@ module RV5StageL1DCache(
   reg                                gather_last_issued;
   reg  [511:0]                       gathered_line;
   reg  [5:0]                         gather_set;
-  wire [5:0]                         __rhodium_vector_index_27783 = gather_set;
+  wire [5:0]                         __rhodium_vector_index_30461 = gather_set;
   reg                                gather_way;
-  wire                               __rhodium_vector_index_26642 = gather_way;
+  wire                               __rhodium_vector_index_29320 = gather_way;
   reg  [63:0]                        eviction_line_address;
   RV5StageL1DTransactionContext      eviction_context;
   reg  [2:0]                         gathered_snoop_state;
   reg                                snoop_metadata_pending;
-  wire [5:0]                         __rhodium_vector_index_24694 =
+  wire [5:0]                         __rhodium_vector_index_27372 =
     _lookup_egress_out.bits.address[11:6];
-  wire [5:0]                         __rhodium_vector_index_24752 =
+  wire [5:0]                         __rhodium_vector_index_27430 =
     _lookup_egress_out.bits.address[11:6];
   wire                               _GEN_3 =
-    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_24694][1'h0]
+    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_27372][1'h0]
     & _tags_port_out.response.bits[1'h0] == _lookup_egress_out.bits.address[63:12]}};
   wire [2:0]                         _GEN_4 =
     _states_port_out.response.bits[1'h0] & {3{_GEN_3}};
   wire                               _GEN_5 =
-    /*cast(bit)*/{1{~valid_lines[__rhodium_vector_index_24694][1'h0]}};
+    /*cast(bit)*/{1{~valid_lines[__rhodium_vector_index_27372][1'h0]}};
   wire                               _GEN_6 =
-    ~_GEN_3 & ~_GEN_5 & replacement_ways[__rhodium_vector_index_24752];
-  wire                               __rhodium_vector_index_24812;
-  assign __rhodium_vector_index_24812 = _GEN_6;
-  wire                               __rhodium_vector_index_24818;
-  assign __rhodium_vector_index_24818 = _GEN_6;
-  wire                               __rhodium_vector_index_25360;
-  assign __rhodium_vector_index_25360 = _GEN_6;
+    ~_GEN_3 & ~_GEN_5 & replacement_ways[__rhodium_vector_index_27430];
+  wire                               __rhodium_vector_index_27490;
+  assign __rhodium_vector_index_27490 = _GEN_6;
+  wire                               __rhodium_vector_index_27496;
+  assign __rhodium_vector_index_27496 = _GEN_6;
+  wire                               __rhodium_vector_index_28038;
+  assign __rhodium_vector_index_28038 = _GEN_6;
   wire                               _GEN_7 =
     _lookup_egress_out.valid & _tags_port_out.response.valid
     & _states_port_out.response.valid;
@@ -7844,10 +8383,10 @@ module RV5StageL1DCache(
   wire                               _GEN_19 = _GEN_9 & ~_GEN_3 | _GEN_17 & ~_GEN_18;
   wire                               _GEN_20 =
     _GEN_19 & ~_GEN_3
-    & valid_lines[__rhodium_vector_index_24694][__rhodium_vector_index_24812]
-    & (|{_states_port_out.response.bits[__rhodium_vector_index_24818] == 3'h3,
-         _states_port_out.response.bits[__rhodium_vector_index_24818] == 3'h4,
-         _states_port_out.response.bits[__rhodium_vector_index_24818] == 3'h6});
+    & valid_lines[__rhodium_vector_index_27372][__rhodium_vector_index_27490]
+    & (|{_states_port_out.response.bits[__rhodium_vector_index_27496] == 3'h3,
+         _states_port_out.response.bits[__rhodium_vector_index_27496] == 3'h4,
+         _states_port_out.response.bits[__rhodium_vector_index_27496] == 3'h6});
   wire [0:0][63:0]                   _GEN_21 =
     /*cast(bit[0:0][63:0])*/_lines_port_out.response.bits;
   wire                               _GEN_22 = gather_state == 3'h0;
@@ -7896,9 +8435,9 @@ module RV5StageL1DCache(
       assert property (@(posedge clock) disable iff (_GEN_43)
                          ~_refill_completion_out.bits.pass_dirty);
   `endif // not def SYNTHESIS
-  wire [5:0]                         __rhodium_vector_index_28313 =
+  wire [5:0]                         __rhodium_vector_index_30991 =
     _refill_completion_out.bits.context_0.request.address[11:6];
-  wire [2:0]                         __rhodium_vector_index_25631 =
+  wire [2:0]                         __rhodium_vector_index_28309 =
     _refill_completion_out.bits.context_0.request.address[5:3];
   wire [2:0]                         _GEN_44 =
     _GEN_42
@@ -7921,16 +8460,16 @@ module RV5StageL1DCache(
   wire [7:0][7:0]                    _GEN_50 = /*cast(bit[7:0][7:0])*/_store_gen_data;
   wire [7:0]                         _GEN_51 = _store_gen_mask;
   wire [7:0][7:0]                    _GEN_52 =
-    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[__rhodium_vector_index_25754];
+    /*cast(bit[7:0][7:0])*/_refill_completion_out.bits.line[__rhodium_vector_index_28432];
   wire                               _GEN_53 = refill_installing | _GEN_18;
   `ifndef SYNTHESIS
     l1d_backing_owner_exclusive:
       assert property (@(posedge clock) disable iff (reset)
                          _refill_command_out.ready | _writeback_command_out.ready);
   `endif // not def SYNTHESIS
-  wire [5:0]                         __rhodium_vector_index_25878 = _snoop_address[11:6];
+  wire [5:0]                         __rhodium_vector_index_28556 = _snoop_address[11:6];
   wire                               _GEN_54 =
-    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_25878][1'h0]
+    /*cast(bit)*/{1{valid_lines[__rhodium_vector_index_28556][1'h0]
     & _tags_port_out.response.bits[1'h0] == _snoop_address[63:12]}};
   wire [2:0]                         _GEN_55 =
     _states_port_out.response.bits[1'h0] & {3{_GEN_54}};
@@ -7977,27 +8516,27 @@ module RV5StageL1DCache(
   wire ReadWriteRequest              _GEN_70 =
     '{address:
         (_GEN_42
-           ? __rhodium_vector_index_28313
+           ? __rhodium_vector_index_30991
            : _snoop_lookup_out.valid
-               ? __rhodium_vector_index_25878
+               ? __rhodium_vector_index_28556
                : core_in.request.bits.address[11:6]),
       write: _GEN_42,
       data: ({1{_refill_completion_out.bits.context_0.request.address[63:12]}}),
       mask: _GEN_68};
   wire                               _GEN_71 =
     _snoop_update_out.valid & ~_snoop_update_out.bits.invalidate;
-  wire [5:0]                         __rhodium_vector_index_27253 =
+  wire [5:0]                         __rhodium_vector_index_29931 =
     _snoop_update_out.bits.address[11:6];
   wire ReadWriteRequest_3            _GEN_72 =
     '{address:
         (_GEN_42
-           ? __rhodium_vector_index_28313
+           ? __rhodium_vector_index_30991
            : _GEN_18
                ? _lookup_egress_out.bits.address[11:6]
                : _snoop_lookup_out.valid
-                   ? __rhodium_vector_index_25878
+                   ? __rhodium_vector_index_28556
                    : _GEN_71
-                       ? __rhodium_vector_index_27253
+                       ? __rhodium_vector_index_29931
                        : core_in.request.bits.address[11:6]),
       write: (_GEN_42 | _GEN_18 | _GEN_71),
       data:
@@ -8012,7 +8551,7 @@ module RV5StageL1DCache(
         (_GEN_53
            ? (_GEN_18
                 ? _lookup_egress_out.bits.address[11:3]
-                : {__rhodium_vector_index_28313, refill_install_index})
+                : {__rhodium_vector_index_30991, refill_install_index})
            : _GEN_25
                ? {gather_set, gather_issue_index}
                : core_in.request.bits.address[11:3]),
@@ -8020,7 +8559,7 @@ module RV5StageL1DCache(
       data:
         (_GEN_18
            ? _GEN_50
-           : _GEN_47 & refill_install_index == __rhodium_vector_index_25631
+           : _GEN_47 & refill_install_index == __rhodium_vector_index_28309
                ? {{_GEN_51[3'h7] ? _GEN_50[3'h7] : _GEN_52[3'h7]},
                   {_GEN_51[3'h6] ? _GEN_50[3'h6] : _GEN_52[3'h6]},
                   {_GEN_51[3'h5] ? _GEN_50[3'h5] : _GEN_52[3'h5]},
@@ -8043,28 +8582,28 @@ module RV5StageL1DCache(
               {~_refill_completion_out.bits.context_0.way}})};
   wire [511:0]                       _GEN_74 =
     /*cast(bit[511:0])*/{{_GEN_27
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h7]},
                          {gather_response_index == 3'h6
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h6]},
                          {gather_response_index == 3'h5
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h5]},
                          {gather_response_index == 3'h4
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h4]},
                          {gather_response_index == 3'h3
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h3]},
                          {gather_response_index == 3'h2
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h2]},
                          {gather_response_index == 3'h1
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h1]},
                          {gather_response_index == 3'h0
-                            ? _GEN_21[__rhodium_vector_index_26642]
+                            ? _GEN_21[__rhodium_vector_index_29320]
                             : _GEN_35[3'h0]}};
   wire                               _GEN_75 =
     ~(gather_response_pending & ~_GEN_33 & ~_GEN_58 & _GEN_24 & ~reset);
@@ -8078,74 +8617,74 @@ module RV5StageL1DCache(
     _GEN_65 & _GEN_8 | _GEN_42
     & _refill_completion_out.bits.context_0.request.access == 3'h3;
   wire [0:0]                         _GEN_78 =
-    {1{snoop_way & valid_lines[__rhodium_vector_index_27253][1'h0]}};
+    {1{snoop_way & valid_lines[__rhodium_vector_index_29931][1'h0]}};
   wire [63:0][0:0]                   _GEN_79 =
-    {{(&__rhodium_vector_index_27253) ? _GEN_78 : valid_lines[6'h3F]},
-     {__rhodium_vector_index_27253 == 6'h3E ? _GEN_78 : valid_lines[6'h3E]},
-     {__rhodium_vector_index_27253 == 6'h3D ? _GEN_78 : valid_lines[6'h3D]},
-     {__rhodium_vector_index_27253 == 6'h3C ? _GEN_78 : valid_lines[6'h3C]},
-     {__rhodium_vector_index_27253 == 6'h3B ? _GEN_78 : valid_lines[6'h3B]},
-     {__rhodium_vector_index_27253 == 6'h3A ? _GEN_78 : valid_lines[6'h3A]},
-     {__rhodium_vector_index_27253 == 6'h39 ? _GEN_78 : valid_lines[6'h39]},
-     {__rhodium_vector_index_27253 == 6'h38 ? _GEN_78 : valid_lines[6'h38]},
-     {__rhodium_vector_index_27253 == 6'h37 ? _GEN_78 : valid_lines[6'h37]},
-     {__rhodium_vector_index_27253 == 6'h36 ? _GEN_78 : valid_lines[6'h36]},
-     {__rhodium_vector_index_27253 == 6'h35 ? _GEN_78 : valid_lines[6'h35]},
-     {__rhodium_vector_index_27253 == 6'h34 ? _GEN_78 : valid_lines[6'h34]},
-     {__rhodium_vector_index_27253 == 6'h33 ? _GEN_78 : valid_lines[6'h33]},
-     {__rhodium_vector_index_27253 == 6'h32 ? _GEN_78 : valid_lines[6'h32]},
-     {__rhodium_vector_index_27253 == 6'h31 ? _GEN_78 : valid_lines[6'h31]},
-     {__rhodium_vector_index_27253 == 6'h30 ? _GEN_78 : valid_lines[6'h30]},
-     {__rhodium_vector_index_27253 == 6'h2F ? _GEN_78 : valid_lines[6'h2F]},
-     {__rhodium_vector_index_27253 == 6'h2E ? _GEN_78 : valid_lines[6'h2E]},
-     {__rhodium_vector_index_27253 == 6'h2D ? _GEN_78 : valid_lines[6'h2D]},
-     {__rhodium_vector_index_27253 == 6'h2C ? _GEN_78 : valid_lines[6'h2C]},
-     {__rhodium_vector_index_27253 == 6'h2B ? _GEN_78 : valid_lines[6'h2B]},
-     {__rhodium_vector_index_27253 == 6'h2A ? _GEN_78 : valid_lines[6'h2A]},
-     {__rhodium_vector_index_27253 == 6'h29 ? _GEN_78 : valid_lines[6'h29]},
-     {__rhodium_vector_index_27253 == 6'h28 ? _GEN_78 : valid_lines[6'h28]},
-     {__rhodium_vector_index_27253 == 6'h27 ? _GEN_78 : valid_lines[6'h27]},
-     {__rhodium_vector_index_27253 == 6'h26 ? _GEN_78 : valid_lines[6'h26]},
-     {__rhodium_vector_index_27253 == 6'h25 ? _GEN_78 : valid_lines[6'h25]},
-     {__rhodium_vector_index_27253 == 6'h24 ? _GEN_78 : valid_lines[6'h24]},
-     {__rhodium_vector_index_27253 == 6'h23 ? _GEN_78 : valid_lines[6'h23]},
-     {__rhodium_vector_index_27253 == 6'h22 ? _GEN_78 : valid_lines[6'h22]},
-     {__rhodium_vector_index_27253 == 6'h21 ? _GEN_78 : valid_lines[6'h21]},
-     {__rhodium_vector_index_27253 == 6'h20 ? _GEN_78 : valid_lines[6'h20]},
-     {__rhodium_vector_index_27253 == 6'h1F ? _GEN_78 : valid_lines[6'h1F]},
-     {__rhodium_vector_index_27253 == 6'h1E ? _GEN_78 : valid_lines[6'h1E]},
-     {__rhodium_vector_index_27253 == 6'h1D ? _GEN_78 : valid_lines[6'h1D]},
-     {__rhodium_vector_index_27253 == 6'h1C ? _GEN_78 : valid_lines[6'h1C]},
-     {__rhodium_vector_index_27253 == 6'h1B ? _GEN_78 : valid_lines[6'h1B]},
-     {__rhodium_vector_index_27253 == 6'h1A ? _GEN_78 : valid_lines[6'h1A]},
-     {__rhodium_vector_index_27253 == 6'h19 ? _GEN_78 : valid_lines[6'h19]},
-     {__rhodium_vector_index_27253 == 6'h18 ? _GEN_78 : valid_lines[6'h18]},
-     {__rhodium_vector_index_27253 == 6'h17 ? _GEN_78 : valid_lines[6'h17]},
-     {__rhodium_vector_index_27253 == 6'h16 ? _GEN_78 : valid_lines[6'h16]},
-     {__rhodium_vector_index_27253 == 6'h15 ? _GEN_78 : valid_lines[6'h15]},
-     {__rhodium_vector_index_27253 == 6'h14 ? _GEN_78 : valid_lines[6'h14]},
-     {__rhodium_vector_index_27253 == 6'h13 ? _GEN_78 : valid_lines[6'h13]},
-     {__rhodium_vector_index_27253 == 6'h12 ? _GEN_78 : valid_lines[6'h12]},
-     {__rhodium_vector_index_27253 == 6'h11 ? _GEN_78 : valid_lines[6'h11]},
-     {__rhodium_vector_index_27253 == 6'h10 ? _GEN_78 : valid_lines[6'h10]},
-     {__rhodium_vector_index_27253 == 6'hF ? _GEN_78 : valid_lines[6'hF]},
-     {__rhodium_vector_index_27253 == 6'hE ? _GEN_78 : valid_lines[6'hE]},
-     {__rhodium_vector_index_27253 == 6'hD ? _GEN_78 : valid_lines[6'hD]},
-     {__rhodium_vector_index_27253 == 6'hC ? _GEN_78 : valid_lines[6'hC]},
-     {__rhodium_vector_index_27253 == 6'hB ? _GEN_78 : valid_lines[6'hB]},
-     {__rhodium_vector_index_27253 == 6'hA ? _GEN_78 : valid_lines[6'hA]},
-     {__rhodium_vector_index_27253 == 6'h9 ? _GEN_78 : valid_lines[6'h9]},
-     {__rhodium_vector_index_27253 == 6'h8 ? _GEN_78 : valid_lines[6'h8]},
-     {__rhodium_vector_index_27253 == 6'h7 ? _GEN_78 : valid_lines[6'h7]},
-     {__rhodium_vector_index_27253 == 6'h6 ? _GEN_78 : valid_lines[6'h6]},
-     {__rhodium_vector_index_27253 == 6'h5 ? _GEN_78 : valid_lines[6'h5]},
-     {__rhodium_vector_index_27253 == 6'h4 ? _GEN_78 : valid_lines[6'h4]},
-     {__rhodium_vector_index_27253 == 6'h3 ? _GEN_78 : valid_lines[6'h3]},
-     {__rhodium_vector_index_27253 == 6'h2 ? _GEN_78 : valid_lines[6'h2]},
-     {__rhodium_vector_index_27253 == 6'h1 ? _GEN_78 : valid_lines[6'h1]},
-     {__rhodium_vector_index_27253 == 6'h0 ? _GEN_78 : valid_lines[6'h0]}};
+    {{(&__rhodium_vector_index_29931) ? _GEN_78 : valid_lines[6'h3F]},
+     {__rhodium_vector_index_29931 == 6'h3E ? _GEN_78 : valid_lines[6'h3E]},
+     {__rhodium_vector_index_29931 == 6'h3D ? _GEN_78 : valid_lines[6'h3D]},
+     {__rhodium_vector_index_29931 == 6'h3C ? _GEN_78 : valid_lines[6'h3C]},
+     {__rhodium_vector_index_29931 == 6'h3B ? _GEN_78 : valid_lines[6'h3B]},
+     {__rhodium_vector_index_29931 == 6'h3A ? _GEN_78 : valid_lines[6'h3A]},
+     {__rhodium_vector_index_29931 == 6'h39 ? _GEN_78 : valid_lines[6'h39]},
+     {__rhodium_vector_index_29931 == 6'h38 ? _GEN_78 : valid_lines[6'h38]},
+     {__rhodium_vector_index_29931 == 6'h37 ? _GEN_78 : valid_lines[6'h37]},
+     {__rhodium_vector_index_29931 == 6'h36 ? _GEN_78 : valid_lines[6'h36]},
+     {__rhodium_vector_index_29931 == 6'h35 ? _GEN_78 : valid_lines[6'h35]},
+     {__rhodium_vector_index_29931 == 6'h34 ? _GEN_78 : valid_lines[6'h34]},
+     {__rhodium_vector_index_29931 == 6'h33 ? _GEN_78 : valid_lines[6'h33]},
+     {__rhodium_vector_index_29931 == 6'h32 ? _GEN_78 : valid_lines[6'h32]},
+     {__rhodium_vector_index_29931 == 6'h31 ? _GEN_78 : valid_lines[6'h31]},
+     {__rhodium_vector_index_29931 == 6'h30 ? _GEN_78 : valid_lines[6'h30]},
+     {__rhodium_vector_index_29931 == 6'h2F ? _GEN_78 : valid_lines[6'h2F]},
+     {__rhodium_vector_index_29931 == 6'h2E ? _GEN_78 : valid_lines[6'h2E]},
+     {__rhodium_vector_index_29931 == 6'h2D ? _GEN_78 : valid_lines[6'h2D]},
+     {__rhodium_vector_index_29931 == 6'h2C ? _GEN_78 : valid_lines[6'h2C]},
+     {__rhodium_vector_index_29931 == 6'h2B ? _GEN_78 : valid_lines[6'h2B]},
+     {__rhodium_vector_index_29931 == 6'h2A ? _GEN_78 : valid_lines[6'h2A]},
+     {__rhodium_vector_index_29931 == 6'h29 ? _GEN_78 : valid_lines[6'h29]},
+     {__rhodium_vector_index_29931 == 6'h28 ? _GEN_78 : valid_lines[6'h28]},
+     {__rhodium_vector_index_29931 == 6'h27 ? _GEN_78 : valid_lines[6'h27]},
+     {__rhodium_vector_index_29931 == 6'h26 ? _GEN_78 : valid_lines[6'h26]},
+     {__rhodium_vector_index_29931 == 6'h25 ? _GEN_78 : valid_lines[6'h25]},
+     {__rhodium_vector_index_29931 == 6'h24 ? _GEN_78 : valid_lines[6'h24]},
+     {__rhodium_vector_index_29931 == 6'h23 ? _GEN_78 : valid_lines[6'h23]},
+     {__rhodium_vector_index_29931 == 6'h22 ? _GEN_78 : valid_lines[6'h22]},
+     {__rhodium_vector_index_29931 == 6'h21 ? _GEN_78 : valid_lines[6'h21]},
+     {__rhodium_vector_index_29931 == 6'h20 ? _GEN_78 : valid_lines[6'h20]},
+     {__rhodium_vector_index_29931 == 6'h1F ? _GEN_78 : valid_lines[6'h1F]},
+     {__rhodium_vector_index_29931 == 6'h1E ? _GEN_78 : valid_lines[6'h1E]},
+     {__rhodium_vector_index_29931 == 6'h1D ? _GEN_78 : valid_lines[6'h1D]},
+     {__rhodium_vector_index_29931 == 6'h1C ? _GEN_78 : valid_lines[6'h1C]},
+     {__rhodium_vector_index_29931 == 6'h1B ? _GEN_78 : valid_lines[6'h1B]},
+     {__rhodium_vector_index_29931 == 6'h1A ? _GEN_78 : valid_lines[6'h1A]},
+     {__rhodium_vector_index_29931 == 6'h19 ? _GEN_78 : valid_lines[6'h19]},
+     {__rhodium_vector_index_29931 == 6'h18 ? _GEN_78 : valid_lines[6'h18]},
+     {__rhodium_vector_index_29931 == 6'h17 ? _GEN_78 : valid_lines[6'h17]},
+     {__rhodium_vector_index_29931 == 6'h16 ? _GEN_78 : valid_lines[6'h16]},
+     {__rhodium_vector_index_29931 == 6'h15 ? _GEN_78 : valid_lines[6'h15]},
+     {__rhodium_vector_index_29931 == 6'h14 ? _GEN_78 : valid_lines[6'h14]},
+     {__rhodium_vector_index_29931 == 6'h13 ? _GEN_78 : valid_lines[6'h13]},
+     {__rhodium_vector_index_29931 == 6'h12 ? _GEN_78 : valid_lines[6'h12]},
+     {__rhodium_vector_index_29931 == 6'h11 ? _GEN_78 : valid_lines[6'h11]},
+     {__rhodium_vector_index_29931 == 6'h10 ? _GEN_78 : valid_lines[6'h10]},
+     {__rhodium_vector_index_29931 == 6'hF ? _GEN_78 : valid_lines[6'hF]},
+     {__rhodium_vector_index_29931 == 6'hE ? _GEN_78 : valid_lines[6'hE]},
+     {__rhodium_vector_index_29931 == 6'hD ? _GEN_78 : valid_lines[6'hD]},
+     {__rhodium_vector_index_29931 == 6'hC ? _GEN_78 : valid_lines[6'hC]},
+     {__rhodium_vector_index_29931 == 6'hB ? _GEN_78 : valid_lines[6'hB]},
+     {__rhodium_vector_index_29931 == 6'hA ? _GEN_78 : valid_lines[6'hA]},
+     {__rhodium_vector_index_29931 == 6'h9 ? _GEN_78 : valid_lines[6'h9]},
+     {__rhodium_vector_index_29931 == 6'h8 ? _GEN_78 : valid_lines[6'h8]},
+     {__rhodium_vector_index_29931 == 6'h7 ? _GEN_78 : valid_lines[6'h7]},
+     {__rhodium_vector_index_29931 == 6'h6 ? _GEN_78 : valid_lines[6'h6]},
+     {__rhodium_vector_index_29931 == 6'h5 ? _GEN_78 : valid_lines[6'h5]},
+     {__rhodium_vector_index_29931 == 6'h4 ? _GEN_78 : valid_lines[6'h4]},
+     {__rhodium_vector_index_29931 == 6'h3 ? _GEN_78 : valid_lines[6'h3]},
+     {__rhodium_vector_index_29931 == 6'h2 ? _GEN_78 : valid_lines[6'h2]},
+     {__rhodium_vector_index_29931 == 6'h1 ? _GEN_78 : valid_lines[6'h1]},
+     {__rhodium_vector_index_29931 == 6'h0 ? _GEN_78 : valid_lines[6'h0]}};
   wire [0:0]                         _GEN_80 =
-    {1{gather_way & valid_lines[__rhodium_vector_index_27783][1'h0]}};
+    {1{gather_way & valid_lines[__rhodium_vector_index_30461][1'h0]}};
   wire [63:0][0:0]                   _GEN_81 =
     {{(&gather_set) ? _GEN_80 : valid_lines[6'h3F]},
      {gather_set == 6'h3E ? _GEN_80 : valid_lines[6'h3E]},
@@ -8213,71 +8752,71 @@ module RV5StageL1DCache(
      {gather_set == 6'h0 ? _GEN_80 : valid_lines[6'h0]}};
   wire [0:0]                         _GEN_82 =
     {1{~_refill_completion_out.bits.context_0.way
-    | valid_lines[__rhodium_vector_index_28313][1'h0]}};
-  wire                               _GEN_83 = __rhodium_vector_index_28313 == 6'h0;
-  wire                               _GEN_84 = __rhodium_vector_index_28313 == 6'h1;
-  wire                               _GEN_85 = __rhodium_vector_index_28313 == 6'h2;
-  wire                               _GEN_86 = __rhodium_vector_index_28313 == 6'h3;
-  wire                               _GEN_87 = __rhodium_vector_index_28313 == 6'h4;
-  wire                               _GEN_88 = __rhodium_vector_index_28313 == 6'h5;
-  wire                               _GEN_89 = __rhodium_vector_index_28313 == 6'h6;
-  wire                               _GEN_90 = __rhodium_vector_index_28313 == 6'h7;
-  wire                               _GEN_91 = __rhodium_vector_index_28313 == 6'h8;
-  wire                               _GEN_92 = __rhodium_vector_index_28313 == 6'h9;
-  wire                               _GEN_93 = __rhodium_vector_index_28313 == 6'hA;
-  wire                               _GEN_94 = __rhodium_vector_index_28313 == 6'hB;
-  wire                               _GEN_95 = __rhodium_vector_index_28313 == 6'hC;
-  wire                               _GEN_96 = __rhodium_vector_index_28313 == 6'hD;
-  wire                               _GEN_97 = __rhodium_vector_index_28313 == 6'hE;
-  wire                               _GEN_98 = __rhodium_vector_index_28313 == 6'hF;
-  wire                               _GEN_99 = __rhodium_vector_index_28313 == 6'h10;
-  wire                               _GEN_100 = __rhodium_vector_index_28313 == 6'h11;
-  wire                               _GEN_101 = __rhodium_vector_index_28313 == 6'h12;
-  wire                               _GEN_102 = __rhodium_vector_index_28313 == 6'h13;
-  wire                               _GEN_103 = __rhodium_vector_index_28313 == 6'h14;
-  wire                               _GEN_104 = __rhodium_vector_index_28313 == 6'h15;
-  wire                               _GEN_105 = __rhodium_vector_index_28313 == 6'h16;
-  wire                               _GEN_106 = __rhodium_vector_index_28313 == 6'h17;
-  wire                               _GEN_107 = __rhodium_vector_index_28313 == 6'h18;
-  wire                               _GEN_108 = __rhodium_vector_index_28313 == 6'h19;
-  wire                               _GEN_109 = __rhodium_vector_index_28313 == 6'h1A;
-  wire                               _GEN_110 = __rhodium_vector_index_28313 == 6'h1B;
-  wire                               _GEN_111 = __rhodium_vector_index_28313 == 6'h1C;
-  wire                               _GEN_112 = __rhodium_vector_index_28313 == 6'h1D;
-  wire                               _GEN_113 = __rhodium_vector_index_28313 == 6'h1E;
-  wire                               _GEN_114 = __rhodium_vector_index_28313 == 6'h1F;
-  wire                               _GEN_115 = __rhodium_vector_index_28313 == 6'h20;
-  wire                               _GEN_116 = __rhodium_vector_index_28313 == 6'h21;
-  wire                               _GEN_117 = __rhodium_vector_index_28313 == 6'h22;
-  wire                               _GEN_118 = __rhodium_vector_index_28313 == 6'h23;
-  wire                               _GEN_119 = __rhodium_vector_index_28313 == 6'h24;
-  wire                               _GEN_120 = __rhodium_vector_index_28313 == 6'h25;
-  wire                               _GEN_121 = __rhodium_vector_index_28313 == 6'h26;
-  wire                               _GEN_122 = __rhodium_vector_index_28313 == 6'h27;
-  wire                               _GEN_123 = __rhodium_vector_index_28313 == 6'h28;
-  wire                               _GEN_124 = __rhodium_vector_index_28313 == 6'h29;
-  wire                               _GEN_125 = __rhodium_vector_index_28313 == 6'h2A;
-  wire                               _GEN_126 = __rhodium_vector_index_28313 == 6'h2B;
-  wire                               _GEN_127 = __rhodium_vector_index_28313 == 6'h2C;
-  wire                               _GEN_128 = __rhodium_vector_index_28313 == 6'h2D;
-  wire                               _GEN_129 = __rhodium_vector_index_28313 == 6'h2E;
-  wire                               _GEN_130 = __rhodium_vector_index_28313 == 6'h2F;
-  wire                               _GEN_131 = __rhodium_vector_index_28313 == 6'h30;
-  wire                               _GEN_132 = __rhodium_vector_index_28313 == 6'h31;
-  wire                               _GEN_133 = __rhodium_vector_index_28313 == 6'h32;
-  wire                               _GEN_134 = __rhodium_vector_index_28313 == 6'h33;
-  wire                               _GEN_135 = __rhodium_vector_index_28313 == 6'h34;
-  wire                               _GEN_136 = __rhodium_vector_index_28313 == 6'h35;
-  wire                               _GEN_137 = __rhodium_vector_index_28313 == 6'h36;
-  wire                               _GEN_138 = __rhodium_vector_index_28313 == 6'h37;
-  wire                               _GEN_139 = __rhodium_vector_index_28313 == 6'h38;
-  wire                               _GEN_140 = __rhodium_vector_index_28313 == 6'h39;
-  wire                               _GEN_141 = __rhodium_vector_index_28313 == 6'h3A;
-  wire                               _GEN_142 = __rhodium_vector_index_28313 == 6'h3B;
-  wire                               _GEN_143 = __rhodium_vector_index_28313 == 6'h3C;
-  wire                               _GEN_144 = __rhodium_vector_index_28313 == 6'h3D;
-  wire                               _GEN_145 = __rhodium_vector_index_28313 == 6'h3E;
-  wire                               _GEN_146 = &__rhodium_vector_index_28313;
+    | valid_lines[__rhodium_vector_index_30991][1'h0]}};
+  wire                               _GEN_83 = __rhodium_vector_index_30991 == 6'h0;
+  wire                               _GEN_84 = __rhodium_vector_index_30991 == 6'h1;
+  wire                               _GEN_85 = __rhodium_vector_index_30991 == 6'h2;
+  wire                               _GEN_86 = __rhodium_vector_index_30991 == 6'h3;
+  wire                               _GEN_87 = __rhodium_vector_index_30991 == 6'h4;
+  wire                               _GEN_88 = __rhodium_vector_index_30991 == 6'h5;
+  wire                               _GEN_89 = __rhodium_vector_index_30991 == 6'h6;
+  wire                               _GEN_90 = __rhodium_vector_index_30991 == 6'h7;
+  wire                               _GEN_91 = __rhodium_vector_index_30991 == 6'h8;
+  wire                               _GEN_92 = __rhodium_vector_index_30991 == 6'h9;
+  wire                               _GEN_93 = __rhodium_vector_index_30991 == 6'hA;
+  wire                               _GEN_94 = __rhodium_vector_index_30991 == 6'hB;
+  wire                               _GEN_95 = __rhodium_vector_index_30991 == 6'hC;
+  wire                               _GEN_96 = __rhodium_vector_index_30991 == 6'hD;
+  wire                               _GEN_97 = __rhodium_vector_index_30991 == 6'hE;
+  wire                               _GEN_98 = __rhodium_vector_index_30991 == 6'hF;
+  wire                               _GEN_99 = __rhodium_vector_index_30991 == 6'h10;
+  wire                               _GEN_100 = __rhodium_vector_index_30991 == 6'h11;
+  wire                               _GEN_101 = __rhodium_vector_index_30991 == 6'h12;
+  wire                               _GEN_102 = __rhodium_vector_index_30991 == 6'h13;
+  wire                               _GEN_103 = __rhodium_vector_index_30991 == 6'h14;
+  wire                               _GEN_104 = __rhodium_vector_index_30991 == 6'h15;
+  wire                               _GEN_105 = __rhodium_vector_index_30991 == 6'h16;
+  wire                               _GEN_106 = __rhodium_vector_index_30991 == 6'h17;
+  wire                               _GEN_107 = __rhodium_vector_index_30991 == 6'h18;
+  wire                               _GEN_108 = __rhodium_vector_index_30991 == 6'h19;
+  wire                               _GEN_109 = __rhodium_vector_index_30991 == 6'h1A;
+  wire                               _GEN_110 = __rhodium_vector_index_30991 == 6'h1B;
+  wire                               _GEN_111 = __rhodium_vector_index_30991 == 6'h1C;
+  wire                               _GEN_112 = __rhodium_vector_index_30991 == 6'h1D;
+  wire                               _GEN_113 = __rhodium_vector_index_30991 == 6'h1E;
+  wire                               _GEN_114 = __rhodium_vector_index_30991 == 6'h1F;
+  wire                               _GEN_115 = __rhodium_vector_index_30991 == 6'h20;
+  wire                               _GEN_116 = __rhodium_vector_index_30991 == 6'h21;
+  wire                               _GEN_117 = __rhodium_vector_index_30991 == 6'h22;
+  wire                               _GEN_118 = __rhodium_vector_index_30991 == 6'h23;
+  wire                               _GEN_119 = __rhodium_vector_index_30991 == 6'h24;
+  wire                               _GEN_120 = __rhodium_vector_index_30991 == 6'h25;
+  wire                               _GEN_121 = __rhodium_vector_index_30991 == 6'h26;
+  wire                               _GEN_122 = __rhodium_vector_index_30991 == 6'h27;
+  wire                               _GEN_123 = __rhodium_vector_index_30991 == 6'h28;
+  wire                               _GEN_124 = __rhodium_vector_index_30991 == 6'h29;
+  wire                               _GEN_125 = __rhodium_vector_index_30991 == 6'h2A;
+  wire                               _GEN_126 = __rhodium_vector_index_30991 == 6'h2B;
+  wire                               _GEN_127 = __rhodium_vector_index_30991 == 6'h2C;
+  wire                               _GEN_128 = __rhodium_vector_index_30991 == 6'h2D;
+  wire                               _GEN_129 = __rhodium_vector_index_30991 == 6'h2E;
+  wire                               _GEN_130 = __rhodium_vector_index_30991 == 6'h2F;
+  wire                               _GEN_131 = __rhodium_vector_index_30991 == 6'h30;
+  wire                               _GEN_132 = __rhodium_vector_index_30991 == 6'h31;
+  wire                               _GEN_133 = __rhodium_vector_index_30991 == 6'h32;
+  wire                               _GEN_134 = __rhodium_vector_index_30991 == 6'h33;
+  wire                               _GEN_135 = __rhodium_vector_index_30991 == 6'h34;
+  wire                               _GEN_136 = __rhodium_vector_index_30991 == 6'h35;
+  wire                               _GEN_137 = __rhodium_vector_index_30991 == 6'h36;
+  wire                               _GEN_138 = __rhodium_vector_index_30991 == 6'h37;
+  wire                               _GEN_139 = __rhodium_vector_index_30991 == 6'h38;
+  wire                               _GEN_140 = __rhodium_vector_index_30991 == 6'h39;
+  wire                               _GEN_141 = __rhodium_vector_index_30991 == 6'h3A;
+  wire                               _GEN_142 = __rhodium_vector_index_30991 == 6'h3B;
+  wire                               _GEN_143 = __rhodium_vector_index_30991 == 6'h3C;
+  wire                               _GEN_144 = __rhodium_vector_index_30991 == 6'h3D;
+  wire                               _GEN_145 = __rhodium_vector_index_30991 == 6'h3E;
+  wire                               _GEN_146 = &__rhodium_vector_index_30991;
   wire [63:0][0:0]                   _GEN_147 =
     _GEN_42
       ? {{_GEN_146 ? _GEN_82 : valid_lines[6'h3F]},
@@ -8479,7 +9018,7 @@ module RV5StageL1DCache(
          : _lookup_egress_out.bits.address),
     .data
       (_refill_completion_out.valid
-         ? _refill_completion_out.bits.line[__rhodium_vector_index_25631]
+         ? _refill_completion_out.bits.line[__rhodium_vector_index_28309]
          : _GEN_21[1'h0] & {64{_GEN_3}}),
     .width
       (_refill_completion_out.valid
@@ -8779,8 +9318,8 @@ module RV5StageL1DCache(
                | _snoop_update_out.valid & _snoop_update_out.bits.invalidate
                & _snoop_update_out.bits.address[63:6] == reservation_address[63:6]
                | _lookup_egress_out.valid & _GEN_29 & _GEN_19 & ~_GEN_3
-               & valid_lines[__rhodium_vector_index_24694][__rhodium_vector_index_24812]
-               & {_tags_port_out.response.bits[__rhodium_vector_index_25360],
+               & valid_lines[__rhodium_vector_index_27372][__rhodium_vector_index_27490]
+               & {_tags_port_out.response.bits[__rhodium_vector_index_28038],
                   _lookup_egress_out.bits.address[11:6]} == reservation_address[63:6]))
         & reservation_valid;
       reservation_address <=
@@ -8834,11 +9373,11 @@ module RV5StageL1DCache(
     gather_set <=
       _GEN_33
         ? _lookup_egress_out.bits.address[11:6]
-        : _GEN_58 ? __rhodium_vector_index_25878 : gather_set;
+        : _GEN_58 ? __rhodium_vector_index_28556 : gather_set;
     gather_way <= _GEN_33 ? _GEN_6 : ~_GEN_58 & gather_way;
     eviction_line_address <=
       _GEN_33
-        ? {_tags_port_out.response.bits[__rhodium_vector_index_25360],
+        ? {_tags_port_out.response.bits[__rhodium_vector_index_28038],
            _lookup_egress_out.bits.address[11:6],
            6'h0}
         : eviction_line_address;
@@ -9073,17 +9612,17 @@ module RV5StageLineRefill_1(
   wire [3:0]                         _GEN_12 = received_packets;
   wire                               _GEN_13 = &_GEN_12;
   wire                               _GEN_14 = _GEN_12 == 4'h0;
-  wire [1:0]                         __rhodium_vector_index_21188 =
+  wire [1:0]                         __rhodium_vector_index_23866 =
     response_data_in.bits.data_id;
   wire [3:0][1:0]                    _GEN_15 =
     {{line_address[5:4] - 2'h1},
      {line_address[5:4] - 2'h2},
      {line_address[5:4] + 2'h1},
      {line_address[5:4]}};
-  wire                               _GEN_16 = __rhodium_vector_index_21188 == 2'h0;
-  wire                               _GEN_17 = __rhodium_vector_index_21188 == 2'h1;
-  wire                               _GEN_18 = __rhodium_vector_index_21188 == 2'h2;
-  wire                               _GEN_19 = &__rhodium_vector_index_21188;
+  wire                               _GEN_16 = __rhodium_vector_index_23866 == 2'h0;
+  wire                               _GEN_17 = __rhodium_vector_index_23866 == 2'h1;
+  wire                               _GEN_18 = __rhodium_vector_index_23866 == 2'h2;
+  wire                               _GEN_19 = &__rhodium_vector_index_23866;
   wire [3:0][127:0]                  _GEN_20 = /*cast(bit[3:0][127:0])*/line;
   wire                               _GEN_21 =
     _control_active & _control_attempt_outstanding & ~_GEN_13;
@@ -9117,13 +9656,13 @@ module RV5StageLineRefill_1(
   `ifndef SYNTHESIS
     line_refill_response_data_id:
       assert property (@(posedge clock) disable iff (_GEN_28)
-                         __rhodium_vector_index_21188 == _GEN_15[__rhodium_vector_index_21188]);
+                         __rhodium_vector_index_23866 == _GEN_15[__rhodium_vector_index_23866]);
   `endif // not def SYNTHESIS
   wire                               _GEN_29 = ~_GEN_23;
   `ifndef SYNTHESIS
     line_refill_response_data_id_unique:
       assert property (@(posedge clock) disable iff (_GEN_29)
-                         ~received_packets[__rhodium_vector_index_21188]);
+                         ~received_packets[__rhodium_vector_index_23866]);
   `endif // not def SYNTHESIS
   wire                               _GEN_30 = ~_GEN_23;
   `ifndef SYNTHESIS
@@ -9300,7 +9839,7 @@ module RV5StageDataSnoop(
   reg  [2:0]                   line_state;
   reg  [7:0][63:0]             line;
   reg  [1:0]                   packet_index;
-  wire [1:0]                   __rhodium_vector_index_22097 = packet_index;
+  wire [1:0]                   __rhodium_vector_index_24775 = packet_index;
   reg                          dvm_first_pending;
   reg  [6:0]                   dvm_source_id;
   reg  [11:0]                  dvm_txn_id;
@@ -9373,7 +9912,7 @@ module RV5StageDataSnoop(
   wire                         _GEN_23 = _GEN_19 & ~_GEN_15;
   wire                         _GEN_24 = _GEN_7 | _GEN_23 | ~_GEN_20;
   wire CHIDatFlit              _GEN_25 =
-    '{data: _GEN_14[__rhodium_vector_index_22097],
+    '{data: _GEN_14[__rhodium_vector_index_24775],
       byte_enable: (16'hFFFF),
       replicate: (1'h0),
       num_dat: (2'h0),
@@ -9459,7 +9998,7 @@ module RV5StageLineWriteback(
   reg                                active_state;
   reg                                beat_started;
   reg  [2:0]                         beat_index;
-  wire [2:0]                         __rhodium_vector_index_23544 = beat_index;
+  wire [2:0]                         __rhodium_vector_index_26222 = beat_index;
   reg  [63:0]                        line_address;
   reg  [7:0][63:0]                   line;
   RV5StageL1DTransactionContext      context_0;
@@ -9468,7 +10007,7 @@ module RV5StageLineWriteback(
   wire RV5StageWriteUniqueCommand    _GEN_1 =
     '{address: (line_address + {58'h0, beat_index, 3'h0}),
       width: (2'h3),
-      data: line[__rhodium_vector_index_23544],
+      data: line[__rhodium_vector_index_26222],
       mask: (8'hFF),
       context_0: context_0};
   wire                               _GEN_2 = _GEN_0 & _beat_write_command_out.ready;
@@ -10030,7 +10569,7 @@ module RV5StageUncached(
   wire                               _GEN_11 =
     chi_in.rsp.response.valid & _GEN_10 & _GEN_6;
   wire                               _GEN_12 = _GEN_11 & _GEN_7;
-  wire                               __rhodium_vector_index_30614 = address[3];
+  wire                               __rhodium_vector_index_33292 = address[3];
   wire                               _GEN_13 = state == 3'h3;
   wire                               _GEN_14 = |chi_in.dat.response.bits.opcode;
   wire                               _GEN_15 = state == 3'h1;
@@ -10091,8 +10630,8 @@ module RV5StageUncached(
                          chi_in.dat.response.bits.resp_err == 2'h0);
   `endif // not def SYNTHESIS
   wire CHIDatFlit                    _GEN_30 =
-    '{data: ({64'h0, write_data} << {121'h0, __rhodium_vector_index_30614, 6'h0}),
-      byte_enable: ({8'h0, write_mask} << {12'h0, __rhodium_vector_index_30614, 3'h0}),
+    '{data: ({64'h0, write_data} << {121'h0, __rhodium_vector_index_33292, 6'h0}),
+      byte_enable: ({8'h0, write_mask} << {12'h0, __rhodium_vector_index_33292, 3'h0}),
       replicate: (1'h0),
       num_dat: (2'h0),
       cah: (1'h0),
@@ -10159,7 +10698,7 @@ module RV5StageUncached(
     '{valid: _GEN_19, bits: _GEN_20};
   LoadGen_1 load_gen (
     .address       (address),
-    .data          (_GEN_16[__rhodium_vector_index_30614]),
+    .data          (_GEN_16[__rhodium_vector_index_33292]),
     .width         (memory_width),
     .unsigned_load (unsigned_load),
     .value         (_load_gen_value)

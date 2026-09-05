@@ -1,0 +1,499 @@
+#lang rhombus
+// Defines descriptor-driven C-extension catalogs and canonical instruction expansions.
+
+import:
+  "../../support/annotations.rhm" open
+  "../model/main.rhm" open
+  "rv32i.rhm" as rv32i
+  "rv64i.rhm" as rv64i
+  "f.rhm" as riscv_f
+  "d.rhm" as riscv_d
+
+export:
+  CompressedInstructionSpec
+  CompressedInstructionCatalog
+  compressed_quadrant
+  compressed_funct3
+  compressed_bit12
+  compressed_rd_rs1
+  compressed_rs2
+  compressed_funct2
+  compressed_alu_funct2
+  RV32CIntegerInstructions
+  RV64CIntegerInstructions
+  RV32CFloatInstructions
+  RV32CDoubleInstructions
+  RV64CDoubleInstructions
+  RV32CInteger
+  RV64CInteger
+  RV32CFloat
+  RV32CDouble
+  RV64CDouble
+
+class CompressedInstructionSpec(name :: NonemptyString,
+                                encodings :: NonemptyList.of(InstructionEncoding),
+                                constraints :: List.of(ExpansionConstraint),
+                                expansion :: InstructionExpansion):
+  method matches(word :: Nat):
+    (for any (encoding in encodings): encoding.matches(word)) && (
+      for all (constraint in constraints): constraint.matches(word)
+    )
+
+  method expand(word :: Nat):
+    unless matches(word)
+    | error(~who: #'expand,
+            "compressed instruction word does not satisfy its encoding and legality constraints")
+    expansion.expand(word)
+
+class CompressedInstructionCatalog(name :: NonemptyString,
+                                   revision :: NonemptyString,
+                                   instructions :: NonemptyList.of(CompressedInstructionSpec)):
+  constructor (name :: NonemptyString,
+               revision :: NonemptyString,
+               instructions :: NonemptyList.of(CompressedInstructionSpec)):
+    for (instruction in instructions):
+      when instructions.filter(~keep: fun (candidate): candidate.name == instruction.name).length() != 1
+      | error(~who: #'CompressedInstructionCatalog,
+              "duplicate compressed instruction name " ++ instruction.name)
+    for (left_index in 0..instructions.length()):
+      for (right_index in (left_index + 1)..instructions.length()):
+        def left = instructions[left_index]
+        def right = instructions[right_index]
+        for (left_encoding in left.encodings):
+          for (right_encoding in right.encodings):
+            when left_encoding.overlaps(right_encoding)
+            | error(~who: #'CompressedInstructionCatalog,
+                    String.append("compressed instruction encodings overlap: ",
+                                  left.name,
+                                  " and ",
+                                  right.name))
+    super(name, revision, instructions)
+
+  method find(instruction_name :: String):
+    def found = instructions.find(fun (candidate): candidate.name == instruction_name)
+    unless found
+    | error(~who: #'find, "unknown compressed instruction " ++ instruction_name)
+    found
+
+  method matching(word :: Nat):
+    instructions.find(fun (instruction): instruction.matches(word))
+
+def compressed_quadrant = BitField("quadrant", 1, 0)
+def compressed_funct3 = BitField("funct3", 15, 13)
+def compressed_bit12 = BitField("bit12", 12, 12)
+def compressed_rd_rs1 = BitField("rd/rs1", 11, 7)
+def compressed_rs2 = BitField("rs2", 6, 2)
+def compressed_funct2 = BitField("funct2", 11, 10)
+def compressed_alu_funct2 = BitField("alu-funct2", 6, 5)
+def compressed_compact_rd_rs2 = BitField("rd'/rs2'", 4, 2)
+def compressed_compact_rs1 = BitField("rs1'", 9, 7)
+def compressed_bits_6_2 = BitField("bits[6:2]", 6, 2)
+def compressed_bits_12_11 = BitField("bits[12:11]", 12, 11)
+def compressed_bits_10_7 = BitField("bits[10:7]", 10, 7)
+def compressed_bits_12_10 = BitField("bits[12:10]", 12, 10)
+def compressed_bits_6_5 = BitField("bits[6:5]", 6, 5)
+def compressed_bits_4_3 = BitField("bits[4:3]", 4, 3)
+def compressed_bits_11_10 = BitField("bits[11:10]", 11, 10)
+def compressed_bits_8_7 = BitField("bits[8:7]", 8, 7)
+def compressed_bits_12_9 = BitField("bits[12:9]", 12, 9)
+def compressed_bits_4_2 = BitField("bits[4:2]", 4, 2)
+
+def ci_immediate = ImmediateLayout(
+  "CI immediate", 6, #true,
+  [ImmediatePiece(compressed_bit12, 5, 5),
+   ImmediatePiece(compressed_bits_6_2, 4, 0)]
+)
+def shift5_immediate = ImmediateLayout(
+  "five-bit compressed shift", 5, #false,
+  [ImmediatePiece(compressed_bits_6_2, 4, 0)]
+)
+def shift6_immediate = ImmediateLayout(
+  "six-bit compressed shift", 6, #false,
+  [ImmediatePiece(compressed_bit12, 5, 5),
+   ImmediatePiece(compressed_bits_6_2, 4, 0)]
+)
+def addi4spn_immediate = ImmediateLayout(
+  "C.ADDI4SPN immediate", 10, #false,
+  [ImmediatePiece(compressed_bits_10_7, 9, 6),
+   ImmediatePiece(compressed_bits_12_11, 5, 4),
+   ImmediatePiece(BitField("C.ADDI4SPN bit 3", 5, 5), 3, 3),
+   ImmediatePiece(BitField("C.ADDI4SPN bit 2", 6, 6), 2, 2)],
+  [0, 1]
+)
+def compact_word_offset = ImmediateLayout(
+  "compressed word offset", 7, #false,
+  [ImmediatePiece(BitField("word offset bit 6", 5, 5), 6, 6),
+   ImmediatePiece(compressed_bits_12_10, 5, 3),
+   ImmediatePiece(BitField("word offset bit 2", 6, 6), 2, 2)],
+  [0, 1]
+)
+def compact_double_offset = ImmediateLayout(
+  "compressed doubleword offset", 8, #false,
+  [ImmediatePiece(compressed_bits_6_5, 7, 6),
+   ImmediatePiece(compressed_bits_12_10, 5, 3)],
+  [0, 1, 2]
+)
+def addi16sp_immediate = ImmediateLayout(
+  "C.ADDI16SP immediate", 10, #true,
+  [ImmediatePiece(compressed_bit12, 9, 9),
+   ImmediatePiece(compressed_bits_4_3, 8, 7),
+   ImmediatePiece(BitField("C.ADDI16SP bit 6", 5, 5), 6, 6),
+   ImmediatePiece(BitField("C.ADDI16SP bit 5", 2, 2), 5, 5),
+   ImmediatePiece(BitField("C.ADDI16SP bit 4", 6, 6), 4, 4)],
+  [0, 1, 2, 3]
+)
+def lui_immediate = ImmediateLayout(
+  "C.LUI immediate", 18, #true,
+  [ImmediatePiece(compressed_bit12, 17, 17),
+   ImmediatePiece(compressed_bits_6_2, 16, 12)],
+  (0..12).to_list()
+)
+def jump_immediate = ImmediateLayout(
+  "compressed jump immediate", 12, #true,
+  [ImmediatePiece(compressed_bit12, 11, 11),
+   ImmediatePiece(BitField("jump bit 10", 8, 8), 10, 10),
+   ImmediatePiece(BitField("jump bits 9:8", 10, 9), 9, 8),
+   ImmediatePiece(BitField("jump bit 7", 6, 6), 7, 7),
+   ImmediatePiece(BitField("jump bit 6", 7, 7), 6, 6),
+   ImmediatePiece(BitField("jump bit 5", 2, 2), 5, 5),
+   ImmediatePiece(BitField("jump bit 4", 11, 11), 4, 4),
+   ImmediatePiece(BitField("jump bits 3:1", 5, 3), 3, 1)],
+  [0]
+)
+def branch_immediate = ImmediateLayout(
+  "compressed branch immediate", 9, #true,
+  [ImmediatePiece(compressed_bit12, 8, 8),
+   ImmediatePiece(compressed_bits_6_5, 7, 6),
+   ImmediatePiece(BitField("branch bit 5", 2, 2), 5, 5),
+   ImmediatePiece(compressed_bits_11_10, 4, 3),
+   ImmediatePiece(compressed_bits_4_3, 2, 1)],
+  [0]
+)
+def stack_word_offset = ImmediateLayout(
+  "compressed stack word offset", 8, #false,
+  [ImmediatePiece(BitField("stack word bits 7:6", 3, 2), 7, 6),
+   ImmediatePiece(compressed_bit12, 5, 5),
+   ImmediatePiece(BitField("stack word bits 4:2", 6, 4), 4, 2)],
+  [0, 1]
+)
+def stack_double_offset = ImmediateLayout(
+  "compressed stack doubleword offset", 9, #false,
+  [ImmediatePiece(compressed_bits_4_2, 8, 6),
+   ImmediatePiece(compressed_bit12, 5, 5),
+   ImmediatePiece(compressed_bits_6_5, 4, 3)],
+  [0, 1, 2]
+)
+def stack_store_word_offset = ImmediateLayout(
+  "compressed stack-store word offset", 8, #false,
+  [ImmediatePiece(compressed_bits_8_7, 7, 6),
+   ImmediatePiece(compressed_bits_12_9, 5, 2)],
+  [0, 1]
+)
+def stack_store_double_offset = ImmediateLayout(
+  "compressed stack-store doubleword offset", 9, #false,
+  [ImmediatePiece(BitField("stack-store double bits 8:6", 9, 7), 8, 6),
+   ImmediatePiece(compressed_bits_12_10, 5, 3)],
+  [0, 1, 2]
+)
+
+def zero_register = ConstantExpansionValue(0)
+def link_register = ConstantExpansionValue(1)
+def stack_pointer = ConstantExpansionValue(2)
+def direct_rd = FieldExpansionValue(compressed_rd_rs1)
+def direct_rs2 = FieldExpansionValue(compressed_rs2)
+def compact_rd_rs2 = FieldExpansionValue(compressed_compact_rd_rs2, 8)
+def compact_rs1 = FieldExpansionValue(compressed_compact_rs1, 8)
+
+fun bind(target :: BitField, source :: ExpansionValueSource):
+  InstructionFieldBinding(target, source)
+
+fun expansion(target :: InstructionSpec,
+              bindings :: List.of(InstructionFieldBinding),
+              immediate :~ False || Nat || ImmediateLayout = #false):
+  InstructionExpansion(target, bindings, immediate)
+
+fun compressed_encoding(requirements :: NonemptyList.of(FieldConstraint)):
+  InstructionEncoding(requirements, 16)
+
+fun compressed_instruction(name :: NonemptyString,
+                           requirements :: NonemptyList.of(FieldConstraint),
+                           expansion :: InstructionExpansion,
+                           constraints :: List.of(ExpansionConstraint) = []):
+  CompressedInstructionSpec(name, [compressed_encoding(requirements)], constraints, expansion)
+
+fun compressed_instruction_encodings(name :: NonemptyString,
+                                     base :: NonemptyList.of(FieldConstraint),
+                                     field :: BitField,
+                                     allowed_values :: NonemptyList.of(Nat),
+                                     expansion :: InstructionExpansion,
+                                     constraints :: List.of(ExpansionConstraint) = []):
+  CompressedInstructionSpec(
+    name,
+    allowed_values.map(fun (value): compressed_encoding(base ++ [field.constrain(value)])),
+    constraints,
+    expansion
+  )
+
+fun quadrant_requirements(quadrant :: Nat, function3 :: Nat):
+  [compressed_quadrant.constrain(quadrant), compressed_funct3.constrain(function3)]
+
+fun quadrant_instruction(name :: NonemptyString,
+                         quadrant :: Nat,
+                         function3 :: Nat,
+                         target :: InstructionExpansion,
+                         constraints :: List.of(ExpansionConstraint) = []):
+  compressed_instruction(name, quadrant_requirements(quadrant, function3), target, constraints)
+
+fun addi4spn(target :: InstructionSpec):
+  quadrant_instruction(
+    "C.ADDI4SPN", 0, 0,
+    expansion(target, [bind(rd, compact_rd_rs2), bind(rs1, stack_pointer)], addi4spn_immediate),
+    [NonzeroImmediateConstraint(addi4spn_immediate)]
+  )
+
+fun compact_load(name :: NonemptyString,
+                 target :: InstructionSpec,
+                 function3 :: Nat,
+                 immediate :: ImmediateLayout):
+  quadrant_instruction(
+    name, 0, function3,
+    expansion(target, [bind(rd, compact_rd_rs2), bind(rs1, compact_rs1)], immediate)
+  )
+
+fun compact_store(name :: NonemptyString,
+                  target :: InstructionSpec,
+                  function3 :: Nat,
+                  immediate :: ImmediateLayout):
+  quadrant_instruction(
+    name, 0, function3,
+    expansion(target, [bind(rs1, compact_rs1), bind(rs2, compact_rd_rs2)], immediate)
+  )
+
+fun addi(name :: NonemptyString,
+         target :: InstructionSpec,
+         function3 :: Nat,
+         constraints :: List.of(ExpansionConstraint) = []):
+  quadrant_instruction(
+    name, 1, function3,
+    expansion(target, [bind(rd, direct_rd), bind(rs1, direct_rd)], ci_immediate),
+    constraints
+  )
+
+fun li(target :: InstructionSpec):
+  quadrant_instruction(
+    "C.LI", 1, 2,
+    expansion(target, [bind(rd, direct_rd), bind(rs1, zero_register)], ci_immediate)
+  )
+
+fun addi16sp(target :: InstructionSpec):
+  compressed_instruction(
+    "C.ADDI16SP",
+    quadrant_requirements(1, 3) ++ [compressed_rd_rs1.constrain(2)],
+    expansion(target, [bind(rd, stack_pointer), bind(rs1, stack_pointer)], addi16sp_immediate),
+    [NonzeroImmediateConstraint(addi16sp_immediate)]
+  )
+
+fun lui(target :: InstructionSpec):
+  compressed_instruction_encodings(
+    "C.LUI", quadrant_requirements(1, 3), compressed_rd_rs1,
+    [0] ++ (1..2).to_list() ++ (3..32).to_list(),
+    expansion(target, [bind(rd, direct_rd)], lui_immediate),
+    [NonzeroImmediateConstraint(lui_immediate)]
+  )
+
+fun compact_shift(name :: NonemptyString,
+                  target :: InstructionSpec,
+                  operation :: Nat,
+                  immediate :: ImmediateLayout,
+                  rv32 :: Boolean):
+  compressed_instruction(
+    name,
+    quadrant_requirements(1, 4) ++ [compressed_funct2.constrain(operation)] ++ (
+      if rv32 | [compressed_bit12.constrain(0)] | []
+    ),
+    expansion(target, [bind(rd, compact_rs1), bind(rs1, compact_rs1)], immediate)
+  )
+
+fun andi(target :: InstructionSpec):
+  compressed_instruction(
+    "C.ANDI",
+    quadrant_requirements(1, 4) ++ [compressed_funct2.constrain(2)],
+    expansion(target, [bind(rd, compact_rs1), bind(rs1, compact_rs1)], ci_immediate)
+  )
+
+fun compressed_alu(name :: NonemptyString,
+                   target :: InstructionSpec,
+                   bit12 :: Nat,
+                   operation :: Nat):
+  compressed_instruction(
+    name,
+    quadrant_requirements(1, 4) ++ [compressed_funct2.constrain(3),
+                                    compressed_bit12.constrain(bit12),
+                                    compressed_alu_funct2.constrain(operation)],
+    expansion(target, [bind(rd, compact_rs1), bind(rs1, compact_rs1), bind(rs2, compact_rd_rs2)])
+  )
+
+fun jump(name :: NonemptyString,
+         target :: InstructionSpec,
+         function3 :: Nat,
+         destination :: ExpansionValueSource):
+  quadrant_instruction(
+    name, 1, function3,
+    expansion(target, [bind(rd, destination)], jump_immediate)
+  )
+
+fun branch(name :: NonemptyString,
+           target :: InstructionSpec,
+           function3 :: Nat):
+  quadrant_instruction(
+    name, 1, function3,
+    expansion(target, [bind(rs1, compact_rs1), bind(rs2, zero_register)], branch_immediate)
+  )
+
+fun slli(target :: InstructionSpec,
+         immediate :: ImmediateLayout,
+         rv32 :: Boolean):
+  compressed_instruction(
+    "C.SLLI",
+    quadrant_requirements(2, 0) ++ (if rv32 | [compressed_bit12.constrain(0)] | []),
+    expansion(target, [bind(rd, direct_rd), bind(rs1, direct_rd)], immediate)
+  )
+
+fun stack_load(name :: NonemptyString,
+               target :: InstructionSpec,
+               function3 :: Nat,
+               immediate :: ImmediateLayout,
+               destination_must_be_nonzero :: Boolean):
+  quadrant_instruction(
+    name, 2, function3,
+    expansion(target, [bind(rd, direct_rd), bind(rs1, stack_pointer)], immediate),
+    if destination_must_be_nonzero
+    | [NonzeroFieldConstraint(compressed_rd_rs1)]
+    | []
+  )
+
+fun register_jump(name :: NonemptyString,
+                  target :: InstructionSpec,
+                  bit12 :: Nat,
+                  destination :: ExpansionValueSource):
+  compressed_instruction_encodings(
+    name,
+    quadrant_requirements(2, 4) ++ [compressed_bit12.constrain(bit12), compressed_rs2.constrain(0)],
+    compressed_rd_rs1,
+    (1..32).to_list(),
+    expansion(target, [bind(rd, destination), bind(rs1, direct_rd)], 0)
+  )
+
+fun register_alu(name :: NonemptyString,
+                 target :: InstructionSpec,
+                 bit12 :: Nat,
+                 left :: ExpansionValueSource):
+  compressed_instruction_encodings(
+    name,
+    quadrant_requirements(2, 4) ++ [compressed_bit12.constrain(bit12)],
+    compressed_rs2,
+    (1..32).to_list(),
+    expansion(target, [bind(rd, direct_rd), bind(rs1, left), bind(rs2, direct_rs2)])
+  )
+
+fun ebreak(target :: InstructionSpec):
+  compressed_instruction(
+    "C.EBREAK",
+    quadrant_requirements(2, 4) ++ [compressed_bit12.constrain(1),
+                                    compressed_rd_rs1.constrain(0),
+                                    compressed_rs2.constrain(0)],
+    expansion(target, [])
+  )
+
+fun stack_store(name :: NonemptyString,
+                target :: InstructionSpec,
+                function3 :: Nat,
+                immediate :: ImmediateLayout):
+  quadrant_instruction(
+    name, 2, function3,
+    expansion(target, [bind(rs1, stack_pointer), bind(rs2, direct_rs2)], immediate)
+  )
+
+def RV32CIntegerInstructions = [
+  addi4spn(rv32i.ADDI),
+  compact_load("C.LW", rv32i.LW, 2, compact_word_offset),
+  compact_store("C.SW", rv32i.SW, 6, compact_word_offset),
+  addi("C.ADDI", rv32i.ADDI, 0),
+  jump("C.JAL", rv32i.JAL, 1, link_register),
+  li(rv32i.ADDI),
+  addi16sp(rv32i.ADDI),
+  lui(rv32i.LUI),
+  compact_shift("C.SRLI", rv32i.SRLI, 0, shift5_immediate, #true),
+  compact_shift("C.SRAI", rv32i.SRAI, 1, shift5_immediate, #true),
+  andi(rv32i.ANDI),
+  compressed_alu("C.SUB", rv32i.SUB, 0, 0),
+  compressed_alu("C.XOR", rv32i.XOR, 0, 1),
+  compressed_alu("C.OR", rv32i.OR, 0, 2),
+  compressed_alu("C.AND", rv32i.AND, 0, 3),
+  jump("C.J", rv32i.JAL, 5, zero_register),
+  branch("C.BEQZ", rv32i.BEQ, 6),
+  branch("C.BNEZ", rv32i.BNE, 7),
+  slli(rv32i.SLLI, shift5_immediate, #true),
+  stack_load("C.LWSP", rv32i.LW, 2, stack_word_offset, #true),
+  register_jump("C.JR", rv32i.JALR, 0, zero_register),
+  register_alu("C.MV", rv32i.ADD, 0, zero_register),
+  ebreak(rv32i.EBREAK),
+  register_jump("C.JALR", rv32i.JALR, 1, link_register),
+  register_alu("C.ADD", rv32i.ADD, 1, direct_rd),
+  stack_store("C.SWSP", rv32i.SW, 6, stack_store_word_offset)
+]
+
+def RV64CIntegerInstructions = [
+  addi4spn(rv64i.ADDI),
+  compact_load("C.LW", rv64i.LW, 2, compact_word_offset),
+  compact_load("C.LD", rv64i.LD, 3, compact_double_offset),
+  compact_store("C.SW", rv64i.SW, 6, compact_word_offset),
+  compact_store("C.SD", rv64i.SD, 7, compact_double_offset),
+  addi("C.ADDI", rv64i.ADDI, 0),
+  addi("C.ADDIW", rv64i.ADDIW, 1, [NonzeroFieldConstraint(compressed_rd_rs1)]),
+  li(rv64i.ADDI),
+  addi16sp(rv64i.ADDI),
+  lui(rv64i.LUI),
+  compact_shift("C.SRLI", rv64i.SRLI, 0, shift6_immediate, #false),
+  compact_shift("C.SRAI", rv64i.SRAI, 1, shift6_immediate, #false),
+  andi(rv64i.ANDI),
+  compressed_alu("C.SUB", rv64i.SUB, 0, 0),
+  compressed_alu("C.XOR", rv64i.XOR, 0, 1),
+  compressed_alu("C.OR", rv64i.OR, 0, 2),
+  compressed_alu("C.AND", rv64i.AND, 0, 3),
+  compressed_alu("C.SUBW", rv64i.SUBW, 1, 0),
+  compressed_alu("C.ADDW", rv64i.ADDW, 1, 1),
+  jump("C.J", rv64i.JAL, 5, zero_register),
+  branch("C.BEQZ", rv64i.BEQ, 6),
+  branch("C.BNEZ", rv64i.BNE, 7),
+  slli(rv64i.SLLI, shift6_immediate, #false),
+  stack_load("C.LWSP", rv64i.LW, 2, stack_word_offset, #true),
+  stack_load("C.LDSP", rv64i.LD, 3, stack_double_offset, #true),
+  register_jump("C.JR", rv64i.JALR, 0, zero_register),
+  register_alu("C.MV", rv64i.ADD, 0, zero_register),
+  ebreak(rv64i.EBREAK),
+  register_jump("C.JALR", rv64i.JALR, 1, link_register),
+  register_alu("C.ADD", rv64i.ADD, 1, direct_rd),
+  stack_store("C.SWSP", rv64i.SW, 6, stack_store_word_offset),
+  stack_store("C.SDSP", rv64i.SD, 7, stack_store_double_offset)
+]
+
+def RV32CFloatInstructions = [
+  compact_load("C.FLW", riscv_f.FLW, 3, compact_word_offset),
+  compact_store("C.FSW", riscv_f.FSW, 7, compact_word_offset),
+  stack_load("C.FLWSP", riscv_f.FLW, 3, stack_word_offset, #false),
+  stack_store("C.FSWSP", riscv_f.FSW, 7, stack_store_word_offset)
+]
+def RV32CDoubleInstructions = [
+  compact_load("C.FLD", riscv_d.FLD, 1, compact_double_offset),
+  compact_store("C.FSD", riscv_d.FSD, 5, compact_double_offset),
+  stack_load("C.FLDSP", riscv_d.FLD, 1, stack_double_offset, #false),
+  stack_store("C.FSDSP", riscv_d.FSD, 5, stack_store_double_offset)
+]
+def RV64CDoubleInstructions = RV32CDoubleInstructions
+
+def RV32CInteger = CompressedInstructionCatalog("RV32C integer", "C 2.0", RV32CIntegerInstructions)
+def RV64CInteger = CompressedInstructionCatalog("RV64C integer", "C 2.0", RV64CIntegerInstructions)
+def RV32CFloat = CompressedInstructionCatalog("RV32C floating-point", "C 2.0", RV32CFloatInstructions)
+def RV32CDouble = CompressedInstructionCatalog("RV32C double-precision", "C 2.0", RV32CDoubleInstructions)
+def RV64CDouble = CompressedInstructionCatalog("RV64C double-precision", "C 2.0", RV64CDoubleInstructions)

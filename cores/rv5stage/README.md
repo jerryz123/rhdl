@@ -5,8 +5,8 @@
 RV5Stage is a single-issue, in-order, five-stage RISC-V processor implemented
 as direct Rhodium RTL. A required `xlen :: XLen` host parameter selects RV32 or
 RV64 without admitting arbitrary integer widths. Optional floating-point
-profiles specialize the same scalar pipeline with a parallel FP execution
-backend.
+and compressed-instruction profiles specialize the same scalar pipeline with a
+parallel FP execution backend and variable-length Fetch.
 
 Core-specific decode, architectural state, pipeline policy, MMU, and private L1
 caches live here. Reusable execution components remain directly under
@@ -26,7 +26,7 @@ caches live here. Reusable execution components remain directly under
 | Private caches | Separate configurable L1I and blocking write-back L1D; fixed 64-byte lines |
 | External memory | Separate instruction and data CHI RN-F channels plus a device RN-I channel |
 
-Implemented instruction families include RV32I/RV64I, A, B, M, Zicond,
+Implemented instruction families include RV32I/RV64I, C, A, B, M, Zicond,
 Zicsr, Zicntr, and Zifencei. The privileged control plane implements an initial
 M/S/U slice. RV32D and an RV64F-only specialization are deliberately rejected.
 
@@ -133,6 +133,13 @@ the other write port. WAW gating prevents both ports from targeting the same
 register in one cycle, and a WB-aligned cache hit can set and clear a destination
 without an extra busy cycle.
 
+[`fetch.rhdl`](fetch.rhdl) keeps a two-entry window of ordered, aligned L1I
+words. With C enabled it can reuse either halfword, assemble a 32-bit
+instruction that straddles adjacent words, and expand legal compressed
+instructions before the ordinary decoder. It retains the original 16-bit word
+for illegal-instruction trap values, reports second-word faults precisely, and
+flushes retained or outstanding wrong-path words on redirects.
+
 The optional [`fp-pipeline.rhdl`](fp-pipeline.rhdl) backend owns the FP register
 file, FP RAW/WAW scoreboard, operand reads, a two-cycle fixed-latency path,
 buffered divide/square-root paths, and completion arbitration. FP compute
@@ -224,6 +231,7 @@ specialized core definition to be stamped at multiple placements.
 |---|---|
 | `xlen` | Required `XLen.X32` or `XLen.X64` architectural width |
 | `~floating_point` | `None`, RV32F, or RV64D-compatible FP profile |
+| `~compressed` | Enables C-extension fetch, expansion, two-byte sequencing, and matching CSR alignment behavior |
 | `~icache` | L1I set and way geometry; defaults to `RV5StageCacheConfig(64, 1)` |
 | `~dcache` | L1D set and way geometry; defaults independently to `RV5StageCacheConfig(64, 1)` |
 | `~chi` | Required physical flit, address-region, and Home-routing policy |

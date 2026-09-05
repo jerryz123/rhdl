@@ -13,7 +13,7 @@ module rv5stage_access_fault_tb;
   typedef struct packed { logic [63:0] address; } instruction_req_bits_t;
   typedef struct packed { logic valid; instruction_req_bits_t bits; } instruction_req_t;
   typedef struct packed {
-    logic [31:0] instruction;
+    logic [31:0] word;
     logic page_fault;
     logic access_fault;
   } instruction_resp_bits_t;
@@ -112,7 +112,7 @@ module rv5stage_access_fault_tb;
           instruction_response_valid <= 1'b0;
         if (instruction_access_out.request.valid && instruction_access_in.request.ready) begin
           instruction_response_valid <= 1'b1;
-          instruction_response_bits.instruction <= instruction_at(instruction_access_out.request.bits.address);
+          instruction_response_bits.word <= instruction_at(instruction_access_out.request.bits.address);
           instruction_response_bits.page_fault <= 1'b0;
           instruction_response_bits.access_fault <= instruction_access_out.request.bits.address == 64'h100;
         end

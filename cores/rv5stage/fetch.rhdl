@@ -1,0 +1,158 @@
+#lang rhodium
+// Assembles variable-length instructions from a two-word aligned fetch window.
+
+import:
+  "bundles.rhdl" open
+  "icache/protocol.rhdl" open
+  "../../riscv/isa/fp-profile.rhm" open
+  "../../riscv/isa/xlen.rhm" open
+  "../../riscv/rtl/compressed.rhdl" open
+  lib("rhodium/std/bits.rhdl") open
+  lib("rhodium/std/ready-valid.rhdl") open
+
+hardware_enum RV5StageFetchWordState:
+  Empty
+  Requested
+  Valid
+
+bundle RV5StageFetchWord(xlen :: XLen):
+  state: RV5StageFetchWordState
+  base: Bits(xlen.width)
+  word: Bits(32)
+  page_fault: Bool
+  access_fault: Bool
+
+sync_circuit RV5StageInstructionFetch(xlen :: XLen,
+                                      profile :: FloatingPointProfile = DefaultFloatingPointProfile,
+                                      ~compressed: compressed_enabled :: Boolean = #false):
+  def width = xlen.width
+  input active: Bool
+  input flush: Bool
+  input restart_valid: Bool
+  input restart_pc: Bits(width)
+  input invalidate_all: Bool
+  interface memory(RV5StageInstructionAccess(xlen), ~role: requester)
+  interface fetched(Decoupled(FetchDecode(xlen)), ~role: producer)
+
+  reg pc(~init: bits(0, width))
+  def empty_word = RV5StageFetchWord(xlen):
+    state: RV5StageFetchWordState.Empty
+    base: bits(0, width)
+    word: bits(0, 32)
+    page_fault: Bool(#false)
+    access_fault: Bool(#false)
+  reg slot0(~init: empty_word)
+  reg slot1(~init: empty_word)
+
+  def command = flush ||| restart_valid
+  def slot0_valid = slot0.state === RV5StageFetchWordState.Valid
+  def slot1_valid = slot1.state === RV5StageFetchWordState.Valid
+  def slot0_requested = slot0.state === RV5StageFetchWordState.Requested
+  def slot1_requested = slot1.state === RV5StageFetchWordState.Requested
+  def slot0_fault = slot0.page_fault ||| slot0.access_fault
+  assert((slot0.state =/= RV5StageFetchWordState.Empty) ||| (slot1.state === RV5StageFetchWordState.Empty),
+         "fetch_words_are_head_packed")
+  assert((slot1.state === RV5StageFetchWordState.Empty) ||| (slot1.base === (slot0.base + bits(4, width))),
+         "fetch_words_are_contiguous")
+  def upper_half = pc[1].into(Bool)
+  def selected_halfword = mux(upper_half, slot0.word[16..32], slot0.word[0..16])
+  def selected_is_compressed = if compressed_enabled | selected_halfword[0..2] =/= bits(3, 2) | Bool(#false)
+  def needs_following_word = slot0_valid & !slot0_fault & upper_half & !selected_is_compressed
+  def output_available = slot0_valid & (!needs_following_word ||| slot1_valid)
+  def current_raw_instruction = mux(selected_is_compressed, selected_halfword.zext(32), slot0.word)
+  def following_raw_instruction = slot1.word[0..16] ++ slot0.word[16..32]
+  def raw_instruction = mux(needs_following_word, following_raw_instruction, current_raw_instruction)
+  def instruction_is_compressed = slot0_valid & selected_is_compressed & !slot0_fault
+  wire expanded_instruction: Bits(32)
+  wire compressed_legal: Bool
+  if compressed_enabled
+  | block:
+      inst expander(RiscvCompressedExpander(xlen, profile))
+      expander.compressed <== raw_instruction[0..16]
+      expanded_instruction <== mux(instruction_is_compressed, expander.expansion.instruction, raw_instruction)
+      compressed_legal <== expander.expansion.valid
+  | block:
+      expanded_instruction <== raw_instruction
+      compressed_legal <== Bool(#true)
+  def instruction_page_fault = slot0.page_fault ||| (needs_following_word & slot1.page_fault)
+  def instruction_access_fault = slot0.access_fault ||| (needs_following_word & slot1.access_fault)
+  def instruction_bytes = mux(instruction_is_compressed, bits(2, width), bits(4, width))
+  def sequential_pc = pc + instruction_bytes
+  def instruction_fault_address = mux(needs_following_word & (slot1.page_fault ||| slot1.access_fault), slot1.base, pc)
+
+  fetched.valid <== active & !command & output_available
+  fetched.bits <== FetchDecode(xlen):
+    pc: pc
+    instruction: expanded_instruction
+    raw_instruction: raw_instruction
+    sequential_pc: sequential_pc
+    compressed_illegal: instruction_is_compressed & !compressed_legal
+    instruction_page_fault: instruction_page_fault
+    instruction_access_fault: instruction_access_fault
+    instruction_fault_address: instruction_fault_address
+
+  def fetched_fire = fetched.fire()
+  def retain_lower_word = instruction_is_compressed & !upper_half
+  def pop_word = fetched_fire & !retain_lower_word
+  memory.response.ready <== !command & (slot0_requested ||| slot1_requested)
+  def response_fire = memory.response.fire()
+  def response_to_slot0 = response_fire & slot0_requested
+  def response_to_slot1 = response_fire & !slot0_requested & slot1_requested
+  def received_slot0_state = mux(response_to_slot0, RV5StageFetchWordState.Valid, slot0.state)
+  def received_slot1_state = mux(response_to_slot1, RV5StageFetchWordState.Valid, slot1.state)
+  def received_slot0_word = mux(response_to_slot0, memory.response.bits.word, slot0.word)
+  def received_slot1_word = mux(response_to_slot1, memory.response.bits.word, slot1.word)
+  def received_slot0_page_fault = mux(response_to_slot0, memory.response.bits.page_fault, slot0.page_fault)
+  def received_slot1_page_fault = mux(response_to_slot1, memory.response.bits.page_fault, slot1.page_fault)
+  def received_slot0_access_fault = mux(response_to_slot0, memory.response.bits.access_fault, slot0.access_fault)
+  def received_slot1_access_fault = mux(response_to_slot1, memory.response.bits.access_fault, slot1.access_fault)
+  def shifted_slot0_state = mux(pop_word, received_slot1_state, received_slot0_state)
+  def shifted_slot1_state = mux(pop_word, RV5StageFetchWordState.Empty, received_slot1_state)
+  def shifted_slot0_base = mux(pop_word, slot1.base, slot0.base)
+  def shifted_slot0_word = mux(pop_word, received_slot1_word, received_slot0_word)
+  def shifted_slot0_page_fault = mux(pop_word, received_slot1_page_fault, received_slot0_page_fault)
+  def shifted_slot0_access_fault = mux(pop_word, received_slot1_access_fault, received_slot0_access_fault)
+  def request_pc = mux(fetched_fire, sequential_pc, pc)
+  def request_address = mux(shifted_slot0_state === RV5StageFetchWordState.Empty,
+                            align_down(request_pc, 4),
+                            shifted_slot0_base + bits(4, width))
+
+  memory.flush <== command
+  memory.invalidate_all <== invalidate_all
+  memory.request.valid <== active & !command & (shifted_slot1_state === RV5StageFetchWordState.Empty)
+  memory.request.bits <== RV5StageInstructionReq(xlen):
+    address: request_address
+
+  def request_fire = memory.request.fire()
+  def request_to_slot0 = request_fire & (shifted_slot0_state === RV5StageFetchWordState.Empty)
+  def request_to_slot1 = request_fire & !request_to_slot0
+  def next_slot0_state = mux(request_to_slot0, RV5StageFetchWordState.Requested, shifted_slot0_state)
+  def next_slot1_state = mux(request_to_slot1, RV5StageFetchWordState.Requested, shifted_slot1_state)
+  def next_slot0_base = mux(request_to_slot0, request_address, shifted_slot0_base)
+  def next_slot1_base = mux(request_to_slot1, request_address, slot1.base)
+
+  when command:
+    pc <== mux(restart_valid, restart_pc, pc)
+    slot0 <== empty_word
+    slot1 <== empty_word
+  otherwise:
+    when fetched_fire:
+      pc <== sequential_pc
+    when (response_fire ||| pop_word ||| request_fire):
+      slot0 <== RV5StageFetchWord(xlen):
+        state: next_slot0_state
+        base: next_slot0_base
+        word: shifted_slot0_word
+        page_fault: shifted_slot0_page_fault
+        access_fault: shifted_slot0_access_fault
+      slot1 <== RV5StageFetchWord(xlen):
+        state: next_slot1_state
+        base: next_slot1_base
+        word: received_slot1_word
+        page_fault: received_slot1_page_fault
+        access_fault: received_slot1_access_fault
+
+export:
+  RV5StageFetchWordState
+  RV5StageFetchWord
+  RV5StageInstructionFetch

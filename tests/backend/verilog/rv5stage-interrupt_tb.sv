@@ -12,7 +12,7 @@ module rv5stage_interrupt_tb;
   typedef struct packed { logic ready; } ready_t;
   typedef struct packed { logic [63:0] address; } instruction_req_bits_t;
   typedef struct packed { logic valid; instruction_req_bits_t bits; } instruction_req_t;
-  typedef struct packed { logic [31:0] instruction; logic page_fault; logic access_fault; } instruction_resp_bits_t;
+  typedef struct packed { logic [31:0] word; logic page_fault; logic access_fault; } instruction_resp_bits_t;
   typedef struct packed { logic valid; instruction_resp_bits_t bits; } instruction_resp_t;
   typedef struct packed { ready_t request; instruction_resp_t response; } instruction_in_t;
   typedef struct packed {
@@ -97,7 +97,7 @@ module rv5stage_interrupt_tb;
   always_comb begin
     instruction_access_in.request.ready = !instruction_response_valid;
     instruction_access_in.response.valid = instruction_response_valid;
-    instruction_access_in.response.bits.instruction = instruction_response_bits;
+    instruction_access_in.response.bits.word = instruction_response_bits;
     instruction_access_in.response.bits.page_fault = 1'b0;
     instruction_access_in.response.bits.access_fault = 1'b0;
     data_access_in.request.ready = 1'b1;
