@@ -1,5 +1,5 @@
 #lang rhodium
-// Composes RV5Stage, service, ACLINT, and memory tiles across a four-row CHI mesh.
+// Composes a compiled TiledSoC configuration into a structural CHI mesh.
 
 import:
   lib("chi/main.rhdl") open
@@ -8,8 +8,7 @@ import:
   lib("devices/aclint.rhdl").AclintIdentity
   lib("riscv/isa/fp-profile.rhm") open
   lib("noc/plan/router-family-physical-plan.rhm").RouterFamilyPhysicalPlan
-  "tiled-soc-plan.rhm" as plan
-  "tiled-soc-config.rhdl" as config
+  "tiled-soc-config.rhdl" as configuration
   "tiles/main.rhdl" open
   "host-interface.rhdl".SoCHostInterface
 
@@ -49,31 +48,32 @@ fun connect_tiled_router_family(family :: RouterFamilyPhysicalPlan,
     for (index in site.outgoing_links.length()..endpoint.outgoing_links.length()):
       tie_off_chi_noc_outgoing(endpoint.outgoing_links[index])
 
-sync_circuit TiledSoC(~floating_point: profile :: FloatingPointProfile = DefaultFloatingPointProfile):
-  def p = config.tiled_soc_flit
-  def site_width = config.tiled_soc_router_configs.req.route_decoder.site_width
+sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.tiled_soc_config,
+                      ~floating_point: profile :: FloatingPointProfile = DefaultFloatingPointProfile):
+  def plan = config.plan
+  def p = config.flit
+  def site_width = config.router_configs.req.route_decoder.site_width
   interface host(SoCHostInterface(p), ~role: soc)
-  output faults: Vec(plan.tiled_soc_rv5stage_count, Bool)
+  output faults: Vec(config.rv5stages.length(), Bool)
 
-  def rv5stages = for InstanceArray (_ in 0..plan.tiled_soc_rv5stage_count):
-    inst rv5stage(RV5StageTile(config.tiled_soc_rv5stage_tile_params, ~floating_point: profile))
-  def memories = for InstanceArray (_ in 0..plan.tiled_soc_bank_count):
-    inst memory(MemoryTile(config.tiled_soc_memory_tile_params))
-  def transits = for InstanceArray (_ in 0..plan.tiled_soc_transits.length()):
-    inst transit(TransitTile(config.tiled_soc_transit_tile_params))
-  inst host_tile(HostTile(config.tiled_soc_host_tile_params))
-  inst aclint(AclintTile(config.tiled_soc_aclint_tile_params))
+  def rv5stages = for InstanceArray (entry in config.rv5stages):
+    inst rv5stage(RV5StageTile(entry.tile_params, ~floating_point: profile))
+  def memories = for InstanceArray (entry in config.memories):
+    inst memory(MemoryTile(entry.tile_params))
+  def transits = for InstanceArray (entry in config.transits):
+    inst transit(TransitTile(entry.tile_params))
+  inst host_tile(HostTile(config.host.tile_params))
+  inst aclint(AclintTile(config.aclint.tile_params))
 
-  for (index in 0..plan.tiled_soc_rv5stage_count):
-    def placement = plan.tiled_soc_rv5stages[index]
-    def placement_params = config.tiled_soc_rv5stage_params[index]
+  for (index in 0..config.rv5stages.length()):
+    def entry = config.rv5stages[index]
     rv5stages[index].identity <== RV5StageTileIdentity(p, site_width):
-      site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
+      site_key: bits(plan.site_key(entry.placement.router), site_width)
       hart_id: bits(index, 64)
       chi: (RV5StageCHIIdentity(p):
-              instruction_node_id: bits(placement_params.instruction_node_id, p.node_id_width)
-              data_node_id: bits(placement_params.data_node_id, p.node_id_width)
-              device_node_id: bits(placement_params.device_node_id, p.node_id_width))
+              instruction_node_id: bits(entry.chi.instruction_node_id, p.node_id_width)
+              data_node_id: bits(entry.chi.data_node_id, p.node_id_width)
+              device_node_id: bits(entry.chi.device_node_id, p.node_id_width))
     rv5stages[index].interrupts <== RV5StageInterrupts():
       supervisor_software: Bool(#false)
       machine_software: aclint.machine_software[index]
@@ -83,63 +83,62 @@ sync_circuit TiledSoC(~floating_point: profile :: FloatingPointProfile = Default
       machine_external: Bool(#false)
     rv5stages[index].time_counter <== aclint.time_counter
   host.start |> rv5stages[0].start
-  for (index in 1..plan.tiled_soc_rv5stage_count):
+  for (index in 1..config.rv5stages.length()):
     rv5stages[index].start.valid <== Bool(#false)
     rv5stages[index].start.bits <== dont_care(Bits(64))
-  for (index in 0..plan.tiled_soc_bank_count):
-    def placement = plan.tiled_soc_memories[index]
-    def home_params = config.tiled_soc_hnf_params[index]
-    def projector_params = config.tiled_soc_projector_params[index]
-    def ram_params = config.tiled_soc_ram_params[index]
+
+  for (index in 0..config.memories.length()):
+    def entry = config.memories[index]
     memories[index].identity <== MemoryTileIdentity(p, site_width):
-      site_key: bits(plan.tiled_soc_site_key(placement.router), site_width)
+      site_key: bits(plan.site_key(entry.placement.router), site_width)
       home: (CHIHNFIdentity(p):
-               home_node_id: bits(home_params.home.node_id, p.node_id_width)
-               subordinate_node_id: bits(home_params.subordinate_endpoint.node_id, p.node_id_width)
-               service_base: bits(projector_params.global_address_set.base, p.request_address_width))
+               home_node_id: bits(entry.home_params.home.node_id, p.node_id_width)
+               subordinate_node_id: bits(entry.home_params.subordinate_endpoint.node_id, p.node_id_width)
+               service_base: bits(entry.projector_params.global_address_set.base, p.request_address_width))
       projector: (CHIAddressProjectorIdentity(p):
-                    global_service_base: bits(projector_params.global_address_set.base, p.request_address_width)
-                    local_base: bits(projector_params.local_address_set.base, p.request_address_width))
+                    global_service_base: bits(entry.projector_params.global_address_set.base, p.request_address_width)
+                    local_base: bits(entry.projector_params.local_address_set.base, p.request_address_width))
       ram: (CHIRamIdentity(p):
-              node_id: bits(ram_params.node_id, p.node_id_width)
-              base_address: bits(ram_params.base_address, p.request_address_width))
-  for (index in 0..plan.tiled_soc_transits.length()):
-    transits[index].site_key <== bits(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router), site_width)
-  host_tile.site_key <== bits(plan.tiled_soc_site_key(plan.tiled_soc_host.router), site_width)
+              node_id: bits(entry.ram_params.node_id, p.node_id_width)
+              base_address: bits(entry.ram_params.base_address, p.request_address_width))
+
+  for (index in 0..config.transits.length()):
+    def entry = config.transits[index]
+    transits[index].site_key <== bits(plan.site_key(entry.placement.router), site_width)
+  host_tile.site_key <== bits(plan.site_key(config.host.placement.router), site_width)
   host.memory <=> host_tile.host
   aclint.identity <== AclintTileIdentity(p, site_width):
-    site_key: bits(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router), site_width)
+    site_key: bits(plan.site_key(config.aclint.placement.router), site_width)
     aclint: (AclintIdentity(p):
-               node_id: bits(config.tiled_soc_aclint_params.node.node_id, p.node_id_width)
-               base_address: bits(config.tiled_soc_aclint_params.base_address, p.request_address_width))
+               node_id: bits(config.aclint.device.node.node_id, p.node_id_width)
+               base_address: bits(config.aclint.device.base_address, p.request_address_width))
   aclint.tick <== Bool(#true)
-  faults <== vec(for List (index in 0..plan.tiled_soc_rv5stage_count): rv5stages[index].fault)
+  faults <== vec(for List (index in 0..config.rv5stages.length()): rv5stages[index].fault)
 
-  def physical_plan = plan.tiled_soc_physical_plan
   def tiles = (
-    for List (index in 0..plan.tiled_soc_rv5stage_count):
-      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_rv5stages[index].router),
+    for List (index in 0..config.rv5stages.length()):
+      TiledTileEndpoints(plan.site_key(config.rv5stages[index].placement.router),
                          rv5stages[index].incoming_links,
                          rv5stages[index].outgoing_links)
   ) ++ (
-    for List (index in 0..plan.tiled_soc_transits.length()):
-      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_transits[index].router),
+    for List (index in 0..config.transits.length()):
+      TiledTileEndpoints(plan.site_key(config.transits[index].placement.router),
                          transits[index].incoming_links,
                          transits[index].outgoing_links)
   ) ++ [
-    TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_host.router),
+    TiledTileEndpoints(plan.site_key(config.host.placement.router),
                        host_tile.incoming_links,
                        host_tile.outgoing_links),
-    TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_aclint.router),
+    TiledTileEndpoints(plan.site_key(config.aclint.placement.router),
                        aclint.incoming_links,
                        aclint.outgoing_links)
   ] ++ (
-    for List (index in 0..plan.tiled_soc_bank_count):
-      TiledTileEndpoints(plan.tiled_soc_site_key(plan.tiled_soc_memories[index].router),
+    for List (index in 0..config.memories.length()):
+      TiledTileEndpoints(plan.site_key(config.memories[index].placement.router),
                          memories[index].incoming_links,
                          memories[index].outgoing_links)
   )
-  connect_tiled_router_family(physical_plan, tiles)
+  connect_tiled_router_family(plan.physical_plan, tiles)
 
 export:
   TiledTileEndpoints

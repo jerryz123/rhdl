@@ -1,5 +1,5 @@
 #lang rhodium
-// Compiles the tiled SoC plan into shared CHI endpoints, Homes, RAMs, adapters, and router families.
+// Compiles a TiledSoC plan into occurrence-local CHI, router, memory, and tile parameters.
 
 import:
   lib("chi/main.rhdl") open
@@ -8,7 +8,51 @@ import:
   lib("riscv/rtl/pma.rhdl") open
   lib("devices/aclint.rhdl") open
   "tiles/main.rhdl" open
-  "tiled-soc-plan.rhm" as plan
+  "tiled-soc-spec.rhm" open
+  "tiled-soc-plan.rhm" as planning
+
+class TiledRV5StageConfig(placement :: planning.TiledRV5StagePlacement,
+                          chi :: RV5StageCHIParams,
+                          tile_params :: RV5StageTileParams)
+
+class TiledMemoryConfig(placement :: planning.TiledMemoryPlacement,
+                        home_params :: CHIHNFParams,
+                        projector_params :: CHIAddressProjectorParams,
+                        fragmenter_params :: CHITransferFragmenterParams,
+                        ram_params :: CHIRamParams,
+                        tile_params :: MemoryTileParams)
+
+class TiledHostConfig(placement :: planning.TiledHostPlacement,
+                      node :: CHINodeParams,
+                      port :: CHIICNPortParams,
+                      tile_params :: HostTileParams)
+
+class TiledAclintConfig(placement :: planning.TiledAclintPlacement,
+                        home :: CHIHomeParams,
+                        device :: AclintParams,
+                        home_params :: CHIHNIParams,
+                        tile_params :: AclintTileParams)
+
+class TiledTransitConfig(placement :: planning.TiledTransitPlacement,
+                         tile_params :: TransitTileParams)
+
+class TiledSoCConfig(plan :: planning.TiledSoCPlan,
+                     flit :: CHIFlitParams,
+                     home_map :: CHIHomeMap,
+                     rv5stage_config :: RV5StageCHIConfig,
+                     projector_config :: CHIAddressProjectorConfig,
+                     hnf_config :: CHIHNFConfig,
+                     ram_config :: CHIRamConfig,
+                     fragmenter_config :: CHITransferFragmenterConfig,
+                     aclint_config :: AclintConfig,
+                     adapter_plans :: CHIChannelAdapterPlans,
+                     router_configs :: CHIRouterFamilyConfigs,
+                     rv5stages :: NonemptyList.of(TiledRV5StageConfig),
+                     memories :: NonemptyList.of(TiledMemoryConfig),
+                     host :: TiledHostConfig,
+                     aclint :: TiledAclintConfig,
+                     transits :: List.of(TiledTransitConfig)):
+  implements StableCircuitParam
 
 fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
   CHIICNPortParams(
@@ -20,281 +64,278 @@ fun tiled_requester_icn_endpoint(node :: CHINodeParams) :: CHIICNPortParams:
     ~max_outstanding: node.max_outstanding
   )
 
-def tiled_soc_flit = CHIFlitParams()
-def tiled_soc_aclint_base = 0x02000000
+fun require_tiled_node_id_width(plan :: planning.TiledSoCPlan,
+                                flit :: CHIFlitParams):
+  for (node_id in plan.node_ids):
+    unless bits.length(node_id) <= flit.node_id_width
+    | error(~who: #'compile_tiled_soc, "TiledSoC NodeID does not fit the CHI flit")
 
-def tiled_soc_host_node = CHINodeParams(
-  "host",
-  plan.tiled_soc_host.node_id,
-  CHINodeKind.RNF,
-  ~emits: CHIChannelCapabilities(
-    ~req: [CHIReqOpcode.ReadClean, CHIReqOpcode.WriteUniquePtl],
-    ~rsp: [CHIRspOpcode.SnpResp],
-    ~dat: [CHIDatOpcode.NonCopyBackWriteData]
-  ),
-  ~supports: CHIChannelCapabilities(
-    ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
-    ~snp: chi_rnf_snoop_opcodes,
-    ~dat: [CHIDatOpcode.CompData]
-  ),
-  ~max_outstanding: 1
-)
-def tiled_soc_host_port = tiled_requester_icn_endpoint(tiled_soc_host_node)
+fun compile_tiled_soc(spec :: TiledSoCSpec,
+                      ~flit: flit :: CHIFlitParams = CHIFlitParams()) :: TiledSoCConfig:
+  def plan = planning.compile_tiled_soc_plan(spec)
+  require_tiled_node_id_width(plan, flit)
 
-def tiled_soc_projector_config = CHIAddressProjectorConfig(
-  tiled_soc_flit,
-  plan.tiled_soc_bank_bytes,
-  plan.tiled_soc_stripe_bytes,
-  plan.tiled_soc_bank_count
-)
+  def host_node = CHINodeParams(
+    "host",
+    plan.host.node_id,
+    CHINodeKind.RNF,
+    ~emits: CHIChannelCapabilities(
+      ~req: [CHIReqOpcode.ReadClean, CHIReqOpcode.WriteUniquePtl],
+      ~rsp: [CHIRspOpcode.SnpResp],
+      ~dat: [CHIDatOpcode.NonCopyBackWriteData]
+    ),
+    ~supports: CHIChannelCapabilities(
+      ~rsp: [CHIRspOpcode.DBIDResp, CHIRspOpcode.Comp],
+      ~snp: chi_rnf_snoop_opcodes,
+      ~dat: [CHIDatOpcode.CompData]
+    ),
+    ~max_outstanding: 1
+  )
+  def host_port = tiled_requester_icn_endpoint(host_node)
 
-def tiled_soc_homes:
-  for List (placement in plan.tiled_soc_memories):
-    CHIHomeParams("tiled-home-" ++ to_string(placement.index),
-                  placement.home_node_id,
-                  CHINodeKind.HNF,
-                  ~max_outstanding: 1)
+  def projector_config = CHIAddressProjectorConfig(
+    flit,
+    plan.bank_bytes,
+    plan.stripe_bytes,
+    plan.bank_count
+  )
 
-def tiled_soc_aclint_home = CHIHomeParams("tiled-aclint-home",
-                                          plan.tiled_soc_aclint.home_node_id,
-                                          CHINodeKind.HNI,
-                                          ~max_outstanding: 1)
+  def homes:
+    for List (placement in plan.memories):
+      CHIHomeParams("tiled-home-" ++ to_string(placement.index),
+                    placement.home_node_id,
+                    CHINodeKind.HNF,
+                    ~max_outstanding: 1)
+  def aclint_home = CHIHomeParams("tiled-aclint-home",
+                                  plan.aclint.home_node_id,
+                                  CHINodeKind.HNI,
+                                  ~max_outstanding: 1)
 
-def tiled_soc_memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
-def tiled_soc_device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
-def tiled_soc_rv5stage_config = RV5StageCHIConfig(
-  tiled_soc_flit,
-  (for List (placement in plan.tiled_soc_memories,
-             home in tiled_soc_homes):
-     RV5StageCHIRegion(
-       RiscvPhysicalMemoryRegion(
-         tiled_soc_projector_config.address_set(plan.tiled_soc_bank_base,
-                                                placement.bank_index),
-         tiled_soc_memory_attributes
-       ),
-       home
-     )) ++ [RV5StageCHIRegion(
-              RiscvPhysicalMemoryRegion(
-                AddressSet(tiled_soc_aclint_base, AclintWindowBytes - 1),
-                tiled_soc_device_attributes
-              ),
-              tiled_soc_aclint_home
-            )]
-)
-def tiled_soc_home_map :: CHIHomeMap = tiled_soc_rv5stage_config.home_map
+  def memory_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #true, #true, #true)
+  def device_attributes = RiscvPhysicalMemoryAttributes(#true, #true, #false, #false, #false)
+  def aclint_base = 0x02000000
+  def rv5stage_config = RV5StageCHIConfig(
+    flit,
+    (for List (placement in plan.memories,
+               home in homes):
+       RV5StageCHIRegion(
+         RiscvPhysicalMemoryRegion(
+           projector_config.address_set(plan.bank_base, placement.bank_index),
+           memory_attributes
+         ),
+         home
+       )) ++ [RV5StageCHIRegion(
+                RiscvPhysicalMemoryRegion(
+                  AddressSet(aclint_base, AclintWindowBytes - 1),
+                  device_attributes
+                ),
+                aclint_home
+              )]
+  )
 
-def tiled_soc_rv5stage_params:
-  for List (placement in plan.tiled_soc_rv5stages):
-    RV5StageCHIParams(tiled_soc_rv5stage_config,
-                      placement.instruction_node_id,
-                      placement.data_node_id,
-                      ~device_node_id: placement.device_node_id)
-
-def tiled_soc_requester_ports:
-  def mutable ports = [tiled_soc_host_port]
-  for (params in tiled_soc_rv5stage_params):
-    ports := ports ++ [
+  def rv5stage_chi_params:
+    for List (placement in plan.rv5stages):
+      RV5StageCHIParams(rv5stage_config,
+                        placement.instruction_node_id,
+                        placement.data_node_id,
+                        ~device_node_id: placement.device_node_id)
+  def mutable requester_ports = [host_port]
+  for (params in rv5stage_chi_params):
+    requester_ports := requester_ports ++ [
       tiled_requester_icn_endpoint(params.instruction_node),
       tiled_requester_icn_endpoint(params.data_node)
     ]
-  ports
+  def device_ports = rv5stage_chi_params.map(
+    fun (params): tiled_requester_icn_endpoint(params.device_node)
+  )
 
-def tiled_soc_device_ports:
-  for List (params in tiled_soc_rv5stage_params):
-    tiled_requester_icn_endpoint(params.device_node)
+  def aclint_config = AclintConfig(flit, plan.rv5stage_count)
+  def aclint_params = AclintParams("tiled-aclint",
+                                   plan.aclint.subordinate_node_id,
+                                   aclint_config,
+                                   aclint_base)
+  def aclint_home_params = CHIHNIParams(
+    aclint_home,
+    device_ports,
+    CHISubordinateMap(flit, [aclint_params.service])
+  )
 
-def tiled_soc_aclint_config = AclintConfig(tiled_soc_flit,
-                                           plan.tiled_soc_rv5stage_count)
-def tiled_soc_aclint_params = AclintParams("tiled-aclint",
-                                           plan.tiled_soc_aclint.subordinate_node_id,
-                                           tiled_soc_aclint_config,
-                                           tiled_soc_aclint_base)
-def tiled_soc_aclint_home_params = CHIHNIParams(
-  tiled_soc_aclint_home,
-  tiled_soc_device_ports,
-  CHISubordinateMap(tiled_soc_flit, [tiled_soc_aclint_params.service])
-)
+  def ram_config = CHIRamConfig(flit,
+                                plan.bank_bytes,
+                                ~max_outstanding: 2)
+  def ram_params:
+    for List (placement in plan.memories):
+      CHIRamParams("tiled-ram-" ++ to_string(placement.index),
+                   placement.subordinate_node_id,
+                   ram_config,
+                   ~base_address: 0,
+                   ~kind: CHINodeKind.SNF)
+  def fragmenter_config = CHITransferFragmenterConfig(flit, ~max_transfer_bytes: 64)
+  def fragmenter_params:
+    for List (ram in ram_params):
+      CHITransferFragmenterParams(fragmenter_config, ram.service)
+  def projector_params:
+    for List (placement in plan.memories,
+              fragmenter in fragmenter_params):
+      CHIAddressProjectorParams(projector_config,
+                                fragmenter.upstream_service,
+                                plan.bank_base,
+                                placement.bank_index)
 
-def tiled_soc_ram_config = CHIRamConfig(tiled_soc_flit,
-                                        plan.tiled_soc_bank_bytes,
-                                        ~max_outstanding: 2)
+  def hnf_config = CHIHNFConfig(
+    flit,
+    requester_ports,
+    projector_config.global_mask,
+    fragmenter_config.upstream_requests(ram_config.requests)
+  )
+  def hnf_params:
+    for List (home in homes,
+              ram in ram_params,
+              projector in projector_params):
+      CHIHNFParams(home, hnf_config, ram.icn_port, projector.upstream_service)
 
-def tiled_soc_ram_params:
-  for List (placement in plan.tiled_soc_memories):
-    CHIRamParams("tiled-ram-" ++ to_string(placement.index),
-                 placement.subordinate_node_id,
-                 tiled_soc_ram_config,
-                 ~base_address: 0,
-                 ~kind: CHINodeKind.SNF)
+  def adapter_plans = CHIChannelAdapterPlans(
+    compile_chi_channel_family_adapter_plan(plan.compilations.req,
+                                            plan.families.req,
+                                            flit),
+    compile_chi_channel_family_adapter_plan(plan.compilations.rsp,
+                                            plan.families.rsp,
+                                            flit),
+    compile_chi_channel_family_adapter_plan(plan.snp_compilation,
+                                            plan.families.snp,
+                                            flit),
+    compile_chi_channel_family_adapter_plan(plan.compilations.dat,
+                                            plan.families.dat,
+                                            flit)
+  )
+  def router_configs = CHIRouterFamilyConfigs(
+    compile_simple_router_family(plan.families.req),
+    compile_simple_router_family(plan.families.rsp),
+    compile_simple_router_family(plan.families.snp),
+    compile_simple_router_family(plan.families.dat),
+    plan.physical_plan
+  )
 
-def tiled_soc_fragmenter_config = CHITransferFragmenterConfig(tiled_soc_flit,
-                                                              ~max_transfer_bytes: 64)
-
-def tiled_soc_fragmenter_params:
-  for List (ram in tiled_soc_ram_params):
-    CHITransferFragmenterParams(tiled_soc_fragmenter_config, ram.service)
-
-def tiled_soc_projector_params:
-  for List (placement in plan.tiled_soc_memories,
-            fragmenter in tiled_soc_fragmenter_params):
-    CHIAddressProjectorParams(tiled_soc_projector_config,
-                              fragmenter.upstream_service,
-                              plan.tiled_soc_bank_base,
-                              placement.bank_index)
-
-def tiled_soc_hnf_config = CHIHNFConfig(
-  tiled_soc_flit,
-  tiled_soc_requester_ports,
-  tiled_soc_projector_config.global_mask,
-  tiled_soc_fragmenter_config.upstream_requests(tiled_soc_ram_config.requests)
-)
-
-def tiled_soc_hnf_params:
-  for List (home in tiled_soc_homes,
-            ram in tiled_soc_ram_params,
-            projector in tiled_soc_projector_params):
-    CHIHNFParams(home,
-                 tiled_soc_hnf_config,
-                 ram.icn_port,
-                 projector.upstream_service)
-
-def tiled_soc_adapter_plans = CHIChannelAdapterPlans(
-  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.req,
-                                          plan.tiled_soc_families.req,
-                                          tiled_soc_flit),
-  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.rsp,
-                                          plan.tiled_soc_families.rsp,
-                                          tiled_soc_flit),
-  compile_chi_channel_family_adapter_plan(plan.tiled_soc_snp_compilation,
-                                          plan.tiled_soc_families.snp,
-                                          tiled_soc_flit),
-  compile_chi_channel_family_adapter_plan(plan.tiled_soc_compilations.dat,
-                                          plan.tiled_soc_families.dat,
-                                          tiled_soc_flit)
-)
-
-def tiled_soc_router_configs = CHIRouterFamilyConfigs(
-  compile_simple_router_family(plan.tiled_soc_families.req),
-  compile_simple_router_family(plan.tiled_soc_families.rsp),
-  compile_simple_router_family(plan.tiled_soc_families.snp),
-  compile_simple_router_family(plan.tiled_soc_families.dat),
-  plan.tiled_soc_physical_plan
-)
-
-def tiled_soc_rv5stage_router_params = CHIRouterParams(
-  tiled_soc_flit,
-  tiled_soc_router_configs,
-  compile_chi_router_attachment_plan(
-    tiled_soc_router_configs,
-    tiled_soc_adapter_plans,
-    CHIRNFRNIRouterAttachment(
-      (for List (placement in plan.tiled_soc_rv5stages):
-         [placement.instruction_site, placement.data_site]),
-      (for List (placement in plan.tiled_soc_rv5stages):
-         [placement.device_site])
+  def rv5stage_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIRNFRNIRouterAttachment(
+        (for List (placement in plan.rv5stages):
+           [placement.instruction_site, placement.data_site]),
+        (for List (placement in plan.rv5stages): [placement.device_site])
+      )
     )
   )
-)
-
-def tiled_soc_memory_router_params = CHIRouterParams(
-  tiled_soc_flit,
-  tiled_soc_router_configs,
-  compile_chi_router_attachment_plan(
-    tiled_soc_router_configs,
-    tiled_soc_adapter_plans,
-    CHIHNFRouterAttachment(
-      for List (placement in plan.tiled_soc_memories):
-        [placement.home_site]
+  def memory_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIHNFRouterAttachment(
+        for List (placement in plan.memories): [placement.home_site]
+      )
     )
   )
-)
-
-def tiled_soc_aclint_router_params = CHIRouterParams(
-  tiled_soc_flit,
-  tiled_soc_router_configs,
-  compile_chi_router_attachment_plan(
-    tiled_soc_router_configs,
-    tiled_soc_adapter_plans,
-    CHIHNIRouterAttachment([[plan.tiled_soc_aclint.home_site]])
+  def aclint_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIHNIRouterAttachment([[plan.aclint.home_site]])
+    )
   )
-)
-
-def tiled_soc_host_router_params = CHIRouterParams(
-  tiled_soc_flit,
-  tiled_soc_router_configs,
-  compile_chi_router_attachment_plan(
-    tiled_soc_router_configs,
-    tiled_soc_adapter_plans,
-    CHIRNFRouterAttachment([[plan.tiled_soc_host.site]])
+  def host_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHIRNFRouterAttachment([[plan.host.site]])
+    )
   )
-)
-
-def tiled_soc_transit_router_params = CHIRouterParams(
-  tiled_soc_flit,
-  tiled_soc_router_configs,
-  compile_chi_router_attachment_plan(
-    tiled_soc_router_configs,
-    tiled_soc_adapter_plans,
-    CHITransitRouterAttachment()
+  def transit_router_params = CHIRouterParams(
+    flit,
+    router_configs,
+    compile_chi_router_attachment_plan(
+      router_configs,
+      adapter_plans,
+      CHITransitRouterAttachment()
+    )
   )
-)
 
-def tiled_soc_rv5stage_tile_params = RV5StageTileParams(
-  tiled_soc_rv5stage_config,
-  tiled_soc_rv5stage_router_params
-)
+  def rv5stage_tile_params = RV5StageTileParams(rv5stage_config,
+                                                rv5stage_router_params)
+  def memory_tile_params = MemoryTileParams(hnf_config,
+                                            projector_config,
+                                            fragmenter_config,
+                                            ram_config,
+                                            memory_router_params)
+  def aclint_tile_params = AclintTileParams(aclint_home_params,
+                                            aclint_config,
+                                            aclint_router_params)
+  def host_tile_params = HostTileParams(host_router_params)
+  def transit_tile_params = TransitTileParams(transit_router_params)
 
-def tiled_soc_memory_tile_params = MemoryTileParams(
-  tiled_soc_hnf_config,
-  tiled_soc_projector_config,
-  tiled_soc_fragmenter_config,
-  tiled_soc_ram_config,
-  tiled_soc_memory_router_params
-)
+  def rv5stages:
+    for List (placement in plan.rv5stages,
+              params in rv5stage_chi_params):
+      TiledRV5StageConfig(placement, params, rv5stage_tile_params)
+  def memories:
+    for List (placement in plan.memories,
+              home in hnf_params,
+              projector in projector_params,
+              fragmenter in fragmenter_params,
+              ram in ram_params):
+      TiledMemoryConfig(placement,
+                        home,
+                        projector,
+                        fragmenter,
+                        ram,
+                        memory_tile_params)
+  def host = TiledHostConfig(plan.host,
+                             host_node,
+                             host_port,
+                             host_tile_params)
+  def aclint = TiledAclintConfig(plan.aclint,
+                                 aclint_home,
+                                 aclint_params,
+                                 aclint_home_params,
+                                 aclint_tile_params)
+  def transits:
+    for List (placement in plan.transits):
+      TiledTransitConfig(placement, transit_tile_params)
 
-def tiled_soc_aclint_tile_params = AclintTileParams(
-  tiled_soc_aclint_home_params,
-  tiled_soc_aclint_config,
-  tiled_soc_aclint_router_params
-)
+  TiledSoCConfig(plan,
+                 flit,
+                 rv5stage_config.home_map,
+                 rv5stage_config,
+                 projector_config,
+                 hnf_config,
+                 ram_config,
+                 fragmenter_config,
+                 aclint_config,
+                 adapter_plans,
+                 router_configs,
+                 rv5stages,
+                 memories,
+                 host,
+                 aclint,
+                 transits)
 
-def tiled_soc_host_tile_params = HostTileParams(tiled_soc_host_router_params)
-
-def tiled_soc_transit_tile_params = TransitTileParams(tiled_soc_transit_router_params)
+def tiled_soc_config = compile_tiled_soc(planning.tiled_soc_spec)
 
 export:
+  TiledRV5StageConfig
+  TiledMemoryConfig
+  TiledHostConfig
+  TiledAclintConfig
+  TiledTransitConfig
+  TiledSoCConfig
   tiled_requester_icn_endpoint
-  tiled_soc_flit
-  tiled_soc_aclint_base
-  tiled_soc_host_node
-  tiled_soc_host_port
-  tiled_soc_projector_config
-  tiled_soc_homes
-  tiled_soc_home_map
-  tiled_soc_rv5stage_config
-  tiled_soc_rv5stage_params
-  tiled_soc_requester_ports
-  tiled_soc_device_ports
-  tiled_soc_aclint_home
-  tiled_soc_aclint_config
-  tiled_soc_aclint_params
-  tiled_soc_aclint_home_params
-  tiled_soc_ram_config
-  tiled_soc_ram_params
-  tiled_soc_fragmenter_config
-  tiled_soc_fragmenter_params
-  tiled_soc_projector_params
-  tiled_soc_hnf_config
-  tiled_soc_hnf_params
-  tiled_soc_adapter_plans
-  tiled_soc_router_configs
-  tiled_soc_rv5stage_router_params
-  tiled_soc_memory_router_params
-  tiled_soc_aclint_router_params
-  tiled_soc_host_router_params
-  tiled_soc_transit_router_params
-  tiled_soc_rv5stage_tile_params
-  tiled_soc_memory_tile_params
-  tiled_soc_aclint_tile_params
-  tiled_soc_host_tile_params
-  tiled_soc_transit_tile_params
+  compile_tiled_soc
+  tiled_soc_config

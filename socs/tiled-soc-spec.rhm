@@ -1,0 +1,188 @@
+#lang rhombus/and_meta
+// Defines the immutable author-facing tile layout and TiledSoC configuration intent.
+
+import:
+  rhombus/meta open
+  "../noc/std/topology/rectangular-mesh.rhm".MeshCoordinate
+
+export:
+  RV5StageTileSpec
+  MemoryTileSpec
+  HostTileSpec
+  AclintTileSpec
+  TransitTileSpec
+  TiledTileSpec
+  TiledTileCell
+  TileGrid
+  TiledNodeIdPlan
+  StripedMemorySpec
+  TiledSoCSpec
+  rv5stage_tile
+  memory_tile
+  host_tile
+  aclint_tile
+  transit_tile
+  repeat_tiled_tile
+  tile_grid
+
+class RV5StageTileSpec()
+class MemoryTileSpec()
+class HostTileSpec()
+class AclintTileSpec()
+class TransitTileSpec()
+
+annot.macro 'TiledTileSpec':
+  'RV5StageTileSpec || MemoryTileSpec || HostTileSpec || AclintTileSpec || TransitTileSpec'
+
+def rv5stage_tile = RV5StageTileSpec()
+def memory_tile = MemoryTileSpec()
+def host_tile = HostTileSpec()
+def aclint_tile = AclintTileSpec()
+def transit_tile = TransitTileSpec()
+
+fun repeat_tiled_tile(tile :: TiledTileSpec,
+                      count :: PosInt) :: NonemptyList.of(TiledTileSpec):
+  for List (_index in 0..count): tile
+
+class TiledTileCell(tile :: TiledTileSpec,
+                    coordinate :: MeshCoordinate)
+
+fun tiled_tile_cells(rows :: NonemptyList.of(NonemptyList),
+                     width :: PosInt,
+                     height :: PosInt) :: NonemptyList.of(TiledTileCell):
+  def mutable cells = []
+  for (y in 0..height):
+    for (x in 0..width):
+      def source_row = height - y - 1
+      cells := cells ++ [TiledTileCell(rows[source_row][x], MeshCoordinate(x, y))]
+  cells
+
+class TileGrid(rows :: NonemptyList.of(NonemptyList)):
+  property width :: PosInt: rows[0].length()
+  property height :: PosInt: rows.length()
+  property cells :: NonemptyList.of(TiledTileCell):
+    tiled_tile_cells(rows, width, height)
+  property rv5stages:
+    cells.filter(~keep: fun (cell): cell.tile is_a RV5StageTileSpec)
+  property memories:
+    cells.filter(~keep: fun (cell): cell.tile is_a MemoryTileSpec)
+  property hosts:
+    cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec)
+  property aclints:
+    cells.filter(~keep: fun (cell): cell.tile is_a AclintTileSpec)
+  property transits:
+    cells.filter(~keep: fun (cell): cell.tile is_a TransitTileSpec)
+
+  constructor (rows :: NonemptyList.of(NonemptyList)):
+    def width = rows[0].length()
+    for (row in rows):
+      unless row.length() == width
+      | error(~who: #'TileGrid, "tile-grid rows must have equal width")
+      for (tile in row):
+        unless tile is_a TiledTileSpec
+        | error(~who: #'TileGrid, "tile-grid cells must contain tile specifications")
+    def cells = tiled_tile_cells(rows, width, rows.length())
+    def rv5stage_count = cells.filter(~keep: fun (cell): cell.tile is_a RV5StageTileSpec).length()
+    def memory_count = cells.filter(~keep: fun (cell): cell.tile is_a MemoryTileSpec).length()
+    def host_count = cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec).length()
+    def aclint_count = cells.filter(~keep: fun (cell): cell.tile is_a AclintTileSpec).length()
+    unless rv5stage_count > 0
+    | error(~who: #'TileGrid, "tile grid requires at least one RV5Stage tile")
+    unless memory_count > 0
+    | error(~who: #'TileGrid, "tile grid requires at least one memory tile")
+    unless host_count == 1
+    | error(~who: #'TileGrid, "tile grid requires exactly one host tile")
+    unless aclint_count == 1
+    | error(~who: #'TileGrid, "tile grid requires exactly one ACLINT tile")
+    super(rows)
+
+  method tile_at(x :: Nat, y :: Nat) :: TiledTileSpec:
+    unless x < width && y < height
+    | error(~who: #'TileGrid, "tile coordinate is outside the grid")
+    rows[height - y - 1][x]
+
+class TiledNodeIdPlan(rv5stage_coherent_base :: Nat,
+                      rv5stage_device_base :: Nat,
+                      host :: Nat,
+                      memory_home_base :: Nat,
+                      aclint_home :: Nat,
+                      memory_subordinate_base :: Nat,
+                      aclint_subordinate :: Nat):
+  constructor (~rv5stage_coherent_base: rv5stage_coherent_base :: Nat,
+               ~rv5stage_device_base: rv5stage_device_base :: Nat,
+               ~host: host :: Nat,
+               ~memory_home_base: memory_home_base :: Nat,
+               ~aclint_home: aclint_home :: Nat,
+               ~memory_subordinate_base: memory_subordinate_base :: Nat,
+               ~aclint_subordinate: aclint_subordinate :: Nat):
+    super(rv5stage_coherent_base,
+          rv5stage_device_base,
+          host,
+          memory_home_base,
+          aclint_home,
+          memory_subordinate_base,
+          aclint_subordinate)
+
+class StripedMemorySpec(base :: Nat,
+                        bank_bytes :: PosInt,
+                        stripe_bytes :: PosInt):
+  constructor (~base: base :: Nat,
+               ~bank_bytes: bank_bytes :: PosInt,
+               ~stripe_bytes: stripe_bytes :: PosInt):
+    super(base, bank_bytes, stripe_bytes)
+
+class TiledSoCSpec(layout :: TileGrid,
+                   node_ids :: TiledNodeIdPlan,
+                   memory :: StripedMemorySpec):
+  constructor (~layout: layout :: TileGrid,
+               ~node_ids: node_ids :: TiledNodeIdPlan,
+               ~memory: memory :: StripedMemorySpec):
+    super(layout, node_ids, memory)
+
+meta:
+  fun tile_run(entry :: Syntax):
+    match entry
+    | 'rv5stage': '[rv5stage_tile]'
+    | 'rv5stage($count)': 'repeat_tiled_tile(rv5stage_tile, $count)'
+    | 'memory': '[memory_tile]'
+    | 'memory($count)': 'repeat_tiled_tile(memory_tile, $count)'
+    | 'host': '[host_tile]'
+    | 'host($count)': 'repeat_tiled_tile(host_tile, $count)'
+    | 'aclint': '[aclint_tile]'
+    | 'aclint($count)': 'repeat_tiled_tile(aclint_tile, $count)'
+    | 'transit': '[transit_tile]'
+    | 'transit($count)': 'repeat_tiled_tile(transit_tile, $count)'
+    | ~else:
+        syntax_meta.error(
+          "expected rv5stage, memory, host, aclint, or transit tile",
+          entry
+        )
+
+  fun append_runs(runs :: NonemptyList.of(Syntax)):
+    if runs.length() == 1
+    | runs[0]
+    | block:
+        def first = runs[0]
+        def rest = append_runs(runs.drop(1))
+        '$first ++ $rest'
+
+  fun tile_row(clause :: Syntax):
+    match clause
+    | 'row [$entry, ...]':
+        def entries = [entry, ...]
+        when entries.length() == 0
+        | syntax_meta.error("tile-grid rows must not be empty", clause)
+        append_runs(entries.map(tile_run))
+    | ~else:
+        syntax_meta.error("expected tile-grid row declaration", clause)
+
+expr.macro 'tile_grid:
+              $clause
+              ...':
+  ~op_stx self
+  def clauses = [clause, ...]
+  when clauses.length() == 0
+  | syntax_meta.error("tile grid requires at least one row", self)
+  def rows = clauses.map(tile_row)
+  let [row, ...] = rows
+  'TileGrid([$row, ...])'

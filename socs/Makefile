@@ -13,6 +13,7 @@ rtl-elaboration-test:
 
 tiled-plan-test:
 	cd $(REPO_DIR) && RACO="$(RACO)" tools/run-racket-tests.sh \
+	  socs/tests/tiled-soc-spec-test.rhm \
 	  socs/tests/tiled-soc-plan-test.rhm \
 	  socs/tests/tiled-soc-config-test.rhm
 

@@ -75,8 +75,38 @@ the native memory boundary directly in an on-chip, line-capable `CHIRam`.
 
 ## TiledSoC
 
-`tiled-soc.rhdl` is the first distributed coherent system composition. Its pure
-plan places eight `RV5StageTile`s in the lower two rows of a 4x4 mesh, four
+TiledSoC separates author intent from derived network and hardware parameters:
+
+```text
+TiledSoCSpec -> compile_tiled_soc_plan -> compile_tiled_soc -> TiledSoC
+ layout           placements/routes       CHI/tile params      structure
+ node IDs
+ memory geometry
+```
+
+The author-facing layout uses rows in visual north-to-south order and supports
+compact runs of like tiles:
+
+```rhm
+def layout = tile_grid:
+  row [memory(4)]
+  row [host, aclint, transit(2)]
+  row [rv5stage(4)]
+  row [rv5stage(4)]
+```
+
+`TiledSoCSpec` combines that immutable `TileGrid` with a `TiledNodeIdPlan` and
+`StripedMemorySpec`. `compile_tiled_soc_plan` is pure host code: it derives mesh
+coordinates, occurrence ordering, endpoint IDs, CHI relationships, routes, and
+the shared physical-link manifest. `compile_tiled_soc` then derives the CHI,
+router, memory, and tile parameters and returns one `TiledSoCConfig`. The RTL
+accepts that configuration directly as `TiledSoC(config)`. Tile occurrences
+therefore carry their placement and component parameters together instead of
+depending on parallel global arrays. The default `tiled_soc_config` preserves
+the repository's 4x4 system, while the focused hierarchy test also elaborates a
+2x3 system from the same pipeline.
+
+The default pure plan places eight `RV5StageTile`s in the lower two rows, four
 service routers in the middle row, and four `MemoryTile`s in the upper row.
 One service router owns the shared eight-hart ACLINT behind an HN-I, another
 owns the external host RN-F, and the other two are transit-only. The system
