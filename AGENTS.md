@@ -1,23 +1,23 @@
-<!-- Repository-local instructions for agents working on Rhodium. -->
+<!-- Defines mandatory execution and source-editing rules for agents working on Rhodium. -->
 
 # Rhodium agent instructions
 
+Read the repository [`DEVELOPING.md`](DEVELOPING.md) and the nearest component
+`DEVELOPING.md` before changing architecture, ownership, tests, or generated
+artifacts. This file contains the mandatory rules that apply to every change.
+
 ## File headers
 
-- Every new or modified source, test, script, configuration, and documentation
-  file must begin with a concise top-of-file comment explaining the file's
-  purpose.
-- Use the file format's native comment syntax. For Markdown, use an HTML
-  comment.
-- When a file requires a shebang or another mandatory first line, keep that
-  line first and place the explanatory comment immediately after it.
-- Keep header comments specific to the file; do not use a generic copyright or
-  filename-only comment as a substitute for describing its purpose.
+- Begin every new or modified source, test, script, configuration, and
+  documentation file with a concise, file-specific purpose comment using the
+  format's native syntax. For Markdown, use an HTML comment.
+- Keep a shebang or other mandatory first line first, with the purpose comment
+  immediately after it.
 
 ## Verification
 
 - After changes, run the minimum focused set of tests that directly covers the
-  modified behavior; do not run the full test suite by default.
+  modified behavior. Use a broader suite only when the change spans its scope.
 - Run every Racket or Rhombus test, elaboration, and fixture command with
   `PLTCOMPILEDROOTS` set to a newly created temporary directory. Do not append
   a trailing path-list separator: that restores source-adjacent `compiled/`
@@ -33,10 +33,8 @@
 - Test supported behavior and invalid uses of supported features. Do not add
   tests whose purpose is to prove that a removed or unimplemented feature does
   not exist.
-- Run broader targets such as `make test` only when changes span multiple
-  layers, affect shared test or build infrastructure, or otherwise cannot be
-  covered confidently by focused tests.
-- Keep generated Racket and Verilator build output out of version control.
+- Keep generated output out of version control unless an owning development
+  guide explicitly defines it as a checked-in reference.
 
 ## RTL formatting
 
@@ -60,46 +58,16 @@
 - Keep record and bundle construction, lookup and decode tables, and repeated
   port or field mappings multiline when their block structure is meaningful.
 
-## Package boundaries
+## Architecture and documentation routing
 
-- Treat `rhodium/DEVELOPING.md` as the authoritative package and frontend-layer
-  dependency contract. Update its dependency table when adding a layer or
-  changing a layer's direct Rhodium imports. Keep `rhodium/README.md` focused
-  on the public package surface.
-
-- Keep frontend-independent IR, Builder, verification, and printing code under
-  `rhodium/core/`; core modules must not import the frontend or backend.
-- Keep elaboration and language macros under `rhodium/frontend/`; frontend modules
-  must not import backends.
-- Put the shared public authoring surface in `rhodium/frontend/foundation.rhm`,
-  independently selectable features in `rhodium/frontend/layers/`, and non-profile
-  macro/static-information machinery in `rhodium/frontend/support/`.
-- Frontend layers must not import sibling layers; move genuinely shared
-  machinery into `rhodium/frontend/support/`.
-- Keep CIRCT lowering under `rhodium/backend/`; backend modules must not import
-  frontend syntax or elaboration.
-- Use `rhodium/language.rhm` as the composition layer and reserve `rhodium/main.rkt`
-  for the `#lang rhodium` reader shim.
-- Preserve the mirrored `tests/core/`, `tests/frontend/`, and `tests/backend/`
-  organization. Run `make check-boundaries` after moving or adding modules.
-- Keep processor components reusable across named cores directly under `cores/`.
-  Put implementation-specific decode, datapath, state, and tests under
-  `cores/<core-name>/`.
-
-## Documentation ownership
-
-- Keep the root `README.md` focused on project orientation, quick start,
-  navigation, concise status, and user-visible deferred work. Keep repository
-  development setup, change workflow, and maintenance policy in the root
-  `DEVELOPING.md`.
-- In each documented directory, keep public entry points, behavior, stable
-  contracts, supported configurations, observable failures, and deliberate
-  limits in `README.md`. Keep implementation architecture, source maps,
-  dependency enforcement, extension workflows, test ownership, CI, and
-  generated-artifact maintenance in `DEVELOPING.md`.
-- Keep the executable language walkthrough and example catalog in
-  `examples/README.md`. Keep test-running guidance in `tests/README.md` and
-  test placement, fixture maintenance, and CI ownership in
-  `tests/DEVELOPING.md`.
-- Link to an owning document instead of copying component, layer, operation,
-  example, or fixture catalogs into multiple files.
+- Treat [`rhodium/DEVELOPING.md`](rhodium/DEVELOPING.md) as the authoritative
+  package-dependency contract. Update its dependency inventory when direct
+  Rhodium imports change, and run `make check-boundaries` after moving or adding
+  modules or changing dependency direction.
+- Follow [`cores/DEVELOPING.md`](cores/DEVELOPING.md) for reusable-versus-named
+  processor ownership and [`tests/DEVELOPING.md`](tests/DEVELOPING.md) for test
+  placement, fixtures, CI, and checked-in artifacts.
+- Keep public behavior and contracts in `README.md`; keep implementation
+  architecture, source ownership, extension workflows, and contributor
+  validation in the companion `DEVELOPING.md`.
+- Link to the owning document instead of duplicating catalogs or contracts.

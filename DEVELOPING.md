@@ -4,9 +4,9 @@
 
 Read the user-facing [`README.md`](README.md) first for the language model,
 quick start, public capabilities, and project navigation. This guide is for
-changes to the repository itself. The mandatory local conventions in
-[`AGENTS.md`](AGENTS.md) remain authoritative for source headers, validation,
-RTL formatting, and package boundaries.
+changes to the repository itself. [`AGENTS.md`](AGENTS.md) contains the
+mandatory execution and source-editing guardrails; this guide and the nearest
+component `DEVELOPING.md` own architecture, workflow, and maintenance detail.
 
 ## Set up a development checkout
 
@@ -107,9 +107,8 @@ compiled roots, CI classification, fixtures, and checked-in artifacts.
 
 Start with the smallest owning target. Add `make check-boundaries` for package
 movement or import changes, and use broader targets only when the change spans
-their scope. Every direct Racket or Rhombus invocation must use a newly created
-`PLTCOMPILEDROOTS`; the repository wrappers provide that isolation when the
-caller has not supplied a root.
+their scope. Follow the isolated Racket and Rhombus execution rules in
+[`AGENTS.md`](AGENTS.md#verification).
 
 Documentation-only changes require, at minimum, purpose-header, path, anchor,
 code-fence, Mermaid-structure, and `git diff --check` validation. Confirm every
