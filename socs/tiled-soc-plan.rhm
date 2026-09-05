@@ -12,7 +12,7 @@ import:
 export:
   TiledRV5StagePlacement
   TiledHostPlacement
-  TiledMemoryPlacement
+  TiledLLCPlacement
   TiledAclintPlacement
   TiledTransitPlacement
   TiledChannelFamilyPlans
@@ -37,14 +37,14 @@ class TiledHostPlacement(coordinate :: MeshCoordinate,
                          node_id :: Nat,
                          site :: CHIRNSite)
 
-class TiledMemoryPlacement(index :: Nat,
-                           coordinate :: MeshCoordinate,
-                           router :: NodeRef,
-                           home_node_id :: Nat,
-                           subordinate_node_id :: Nat,
-                           bank_index :: Nat,
-                           bank_bytes :: PosInt,
-                           home_site :: CHIRNICNSite)
+class TiledLLCPlacement(index :: Nat,
+                        coordinate :: MeshCoordinate,
+                        router :: NodeRef,
+                        home_node_id :: Nat,
+                        subordinate_node_id :: Nat,
+                        bank_index :: Nat,
+                        bank_bytes :: PosInt,
+                        home_site :: CHIRNICNSite)
 
 class TiledAclintPlacement(coordinate :: MeshCoordinate,
                            router :: NodeRef,
@@ -66,7 +66,7 @@ class TiledChannelFamilyPlans(req :: RouterFamilyPlan,
 class TiledSoCPlan(spec :: TiledSoCSpec,
                    mesh :: RectangularMesh,
                    rv5stages :: NonemptyList.of(TiledRV5StagePlacement),
-                   memories :: NonemptyList.of(TiledMemoryPlacement),
+                   llcs :: NonemptyList.of(TiledLLCPlacement),
                    transits :: List.of(TiledTransitPlacement),
                    host :: TiledHostPlacement,
                    aclint :: TiledAclintPlacement,
@@ -81,7 +81,7 @@ class TiledSoCPlan(spec :: TiledSoCSpec,
   property width :: PosInt: spec.layout.width
   property height :: PosInt: spec.layout.height
   property rv5stage_count :: PosInt: rv5stages.length()
-  property bank_count :: PosInt: memories.length()
+  property bank_count :: PosInt: llcs.length()
   property bank_base :: Nat: spec.memory.base
   property bank_bytes :: PosInt: spec.memory.bank_bytes
   property stripe_bytes :: PosInt: spec.memory.stripe_bytes
@@ -123,14 +123,14 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
         CHIRNSite(path.child("device"), device_node_id, router)
       )
 
-  def memories:
-    for List (cell in layout.memories,
-              index in 0..layout.memories.length()):
+  def llcs:
+    for List (cell in layout.llcs,
+              index in 0..layout.llcs.length()):
       def coordinate = cell.coordinate
       def router = mesh.node_at(coordinate.x, coordinate.y)
-      def home_node_id = ids.memory_home_base + index
-      def subordinate_node_id = ids.memory_subordinate_base + index
-      TiledMemoryPlacement(
+      def home_node_id = ids.llc_home_base + index
+      def subordinate_node_id = ids.backing_memory_base + index
+      TiledLLCPlacement(
         index,
         coordinate,
         router,
@@ -138,7 +138,7 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
         subordinate_node_id,
         index,
         memory.bank_bytes,
-        CHIRNICNSite(NamePath(["memory", to_string(index), "home"]), home_node_id, router)
+        CHIRNICNSite(NamePath(["llc", to_string(index), "home"]), home_node_id, router)
       )
 
   def host_cell = layout.hosts[0]
@@ -184,8 +184,8 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
 
   def mutable connections = []
   for (requester in rnf_sites):
-    for (memory_placement in memories):
-      connections := connections ++ [CHIRNFConnection(requester, memory_placement.home_site)]
+    for (llc_placement in llcs):
+      connections := connections ++ [CHIRNFConnection(requester, llc_placement.home_site)]
   for (requester in device_sites):
     connections := connections ++ [CHIRNIConnection(requester, aclint.home_requester_site)]
   connections := connections ++ [
@@ -214,9 +214,9 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
     fun (placement): placement.data_node_id
   ) ++ rv5stages.map(
     fun (placement): placement.device_node_id
-  ) ++ memories.map(
+  ) ++ llcs.map(
     fun (placement): placement.home_node_id
-  ) ++ memories.map(
+  ) ++ llcs.map(
     fun (placement): placement.subordinate_node_id
   ) ++ [host.node_id, aclint.home_node_id, aclint.subordinate_node_id]
   require_unique_tiled_node_ids(node_ids)
@@ -224,7 +224,7 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
   TiledSoCPlan(spec,
                mesh,
                rv5stages,
-               memories,
+               llcs,
                transits,
                host,
                aclint,
@@ -238,7 +238,7 @@ fun compile_tiled_soc_plan(spec :: TiledSoCSpec) :: TiledSoCPlan:
                node_ids)
 
 def tiled_soc_layout = tile_grid:
-  row [memory(4)]
+  row [llc(4)]
   row [host, aclint, transit(2)]
   row [rv5stage(4)]
   row [rv5stage(4)]
@@ -249,15 +249,19 @@ def tiled_soc_spec = TiledSoCSpec(
     ~rv5stage_coherent_base: 0,
     ~rv5stage_device_base: 16,
     ~host: 24,
-    ~memory_home_base: 32,
+    ~llc_home_base: 32,
     ~aclint_home: 36,
-    ~memory_subordinate_base: 48,
+    ~backing_memory_base: 48,
     ~aclint_subordinate: 52
   ),
   ~memory: StripedMemorySpec(
     ~base: 0x80000000,
     ~bank_bytes: 0x2000,
     ~stripe_bytes: 64
+  ),
+  ~llc: TiledLLCSpec(
+    ~sets: 16,
+    ~ways: 4
   )
 )
 

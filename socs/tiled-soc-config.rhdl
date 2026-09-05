@@ -1,5 +1,5 @@
 #lang rhodium
-// Compiles a TiledSoC plan into occurrence-local CHI, router, memory, and tile parameters.
+// Compiles a TiledSoC plan into occurrence-local CHI, router, LLC, and tile parameters.
 
 import:
   lib("chi/main.rhdl") open
@@ -15,12 +15,13 @@ class TiledRV5StageConfig(placement :: planning.TiledRV5StagePlacement,
                           chi :: RV5StageCHIParams,
                           tile_params :: RV5StageTileParams)
 
-class TiledMemoryConfig(placement :: planning.TiledMemoryPlacement,
-                        home_params :: CHIHNFParams,
-                        projector_params :: CHIAddressProjectorParams,
-                        fragmenter_params :: CHITransferFragmenterParams,
-                        ram_params :: CHIRamParams,
-                        tile_params :: MemoryTileParams)
+class TiledLLCConfig(placement :: planning.TiledLLCPlacement,
+                     home_params :: CHIHNFParams,
+                     llc_config :: CHIInclusiveHNFConfig,
+                     projector_params :: CHIAddressProjectorParams,
+                     fragmenter_params :: CHITransferFragmenterParams,
+                     ram_params :: CHIRamParams,
+                     tile_params :: LLCTileParams)
 
 class TiledHostConfig(placement :: planning.TiledHostPlacement,
                       node :: CHINodeParams,
@@ -42,13 +43,14 @@ class TiledSoCConfig(plan :: planning.TiledSoCPlan,
                      rv5stage_config :: RV5StageCHIConfig,
                      projector_config :: CHIAddressProjectorConfig,
                      hnf_config :: CHIHNFConfig,
+                     llc_config :: CHIInclusiveHNFConfig,
                      ram_config :: CHIRamConfig,
                      fragmenter_config :: CHITransferFragmenterConfig,
                      aclint_config :: AclintConfig,
                      adapter_plans :: CHIChannelAdapterPlans,
                      router_configs :: CHIRouterFamilyConfigs,
                      rv5stages :: NonemptyList.of(TiledRV5StageConfig),
-                     memories :: NonemptyList.of(TiledMemoryConfig),
+                     llcs :: NonemptyList.of(TiledLLCConfig),
                      host :: TiledHostConfig,
                      aclint :: TiledAclintConfig,
                      transits :: List.of(TiledTransitConfig)):
@@ -101,7 +103,7 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
   )
 
   def homes:
-    for List (placement in plan.memories):
+    for List (placement in plan.llcs):
       CHIHomeParams("tiled-home-" ++ to_string(placement.index),
                     placement.home_node_id,
                     CHINodeKind.HNF,
@@ -116,7 +118,7 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
   def aclint_base = 0x02000000
   def rv5stage_config = RV5StageCHIConfig(
     flit,
-    (for List (placement in plan.memories,
+    (for List (placement in plan.llcs,
                home in homes):
        RV5StageCHIRegion(
          RiscvPhysicalMemoryRegion(
@@ -164,7 +166,7 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                                 plan.bank_bytes,
                                 ~max_outstanding: 2)
   def ram_params:
-    for List (placement in plan.memories):
+    for List (placement in plan.llcs):
       CHIRamParams("tiled-ram-" ++ to_string(placement.index),
                    placement.subordinate_node_id,
                    ram_config,
@@ -175,7 +177,7 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
     for List (ram in ram_params):
       CHITransferFragmenterParams(fragmenter_config, ram.service)
   def projector_params:
-    for List (placement in plan.memories,
+    for List (placement in plan.llcs,
               fragmenter in fragmenter_params):
       CHIAddressProjectorParams(projector_config,
                                 fragmenter.upstream_service,
@@ -193,6 +195,12 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
               ram in ram_params,
               projector in projector_params):
       CHIHNFParams(home, hnf_config, ram.icn_port, projector.upstream_service)
+  def llc_config = CHIInclusiveHNFConfig(
+    hnf_config,
+    projector_config,
+    ~sets: spec.llc.sets,
+    ~ways: spec.llc.ways
+  )
 
   def adapter_plans = CHIChannelAdapterPlans(
     compile_chi_channel_family_adapter_plan(plan.compilations.req,
@@ -230,14 +238,14 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
       )
     )
   )
-  def memory_router_params = CHIRouterParams(
+  def llc_router_params = CHIRouterParams(
     flit,
     router_configs,
     compile_chi_router_attachment_plan(
       router_configs,
       adapter_plans,
       CHIRouterAttachments(
-        ~hnf_requester_sites: (for List (placement in plan.memories):
+        ~hnf_requester_sites: (for List (placement in plan.llcs):
                                 [placement.home_site])
       )
     )
@@ -276,11 +284,11 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
 
   def rv5stage_tile_params = RV5StageTileParams(rv5stage_config,
                                                 rv5stage_router_params)
-  def memory_tile_params = MemoryTileParams(hnf_config,
-                                            projector_config,
-                                            fragmenter_config,
-                                            ram_config,
-                                            memory_router_params)
+  def llc_tile_params = LLCTileParams(llc_config,
+                                      projector_config,
+                                      fragmenter_config,
+                                      ram_config,
+                                      llc_router_params)
   def aclint_tile_params = AclintTileParams(aclint_home_params,
                                             aclint_config,
                                             aclint_router_params)
@@ -291,18 +299,19 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
     for List (placement in plan.rv5stages,
               params in rv5stage_chi_params):
       TiledRV5StageConfig(placement, params, rv5stage_tile_params)
-  def memories:
-    for List (placement in plan.memories,
+  def llcs:
+    for List (placement in plan.llcs,
               home in hnf_params,
               projector in projector_params,
               fragmenter in fragmenter_params,
               ram in ram_params):
-      TiledMemoryConfig(placement,
-                        home,
-                        projector,
-                        fragmenter,
-                        ram,
-                        memory_tile_params)
+      TiledLLCConfig(placement,
+                     home,
+                     llc_config,
+                     projector,
+                     fragmenter,
+                     ram,
+                     llc_tile_params)
   def host = TiledHostConfig(plan.host,
                              host_node,
                              host_port,
@@ -322,13 +331,14 @@ fun compile_tiled_soc(spec :: TiledSoCSpec,
                  rv5stage_config,
                  projector_config,
                  hnf_config,
+                 llc_config,
                  ram_config,
                  fragmenter_config,
                  aclint_config,
                  adapter_plans,
                  router_configs,
                  rv5stages,
-                 memories,
+                 llcs,
                  host,
                  aclint,
                  transits)
@@ -337,7 +347,7 @@ def tiled_soc_config = compile_tiled_soc(planning.tiled_soc_spec)
 
 export:
   TiledRV5StageConfig
-  TiledMemoryConfig
+  TiledLLCConfig
   TiledHostConfig
   TiledAclintConfig
   TiledTransitConfig

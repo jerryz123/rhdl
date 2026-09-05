@@ -16,8 +16,10 @@ import:
   lib("chi/channels.rhdl") open
   lib("chi/fabric.rhdl") open
   lib("chi/coherent-home.rhdl") open
+  lib("chi/address-projector.rhdl") open
 
 class CHIInclusiveHNFConfig(home :: CHIHNFConfig,
+                            addressing :: CHIAddressProjectorConfig,
                             sets :: Pow2Int,
                             ways :: PosInt):
   implements StableCircuitParam
@@ -29,11 +31,24 @@ class CHIInclusiveHNFConfig(home :: CHIHNFConfig,
   property capacity_bytes :: PosInt: line_count * 64
 
   constructor (home :: CHIHNFConfig,
+               addressing :: CHIAddressProjectorConfig,
                ~sets: sets :: Pow2Int,
                ~ways: ways :: PosInt):
     unless sets >= 2
     | error(~who: #'CHIInclusiveHNFConfig,
             "set count must be a power of two of at least two")
+    unless addressing.flit == home.flit
+    | error(~who: #'CHIInclusiveHNFConfig,
+            "cache addressing must use the Home's CHI flit parameters")
+    unless addressing.global_mask == home.service_mask
+    | error(~who: #'CHIInclusiveHNFConfig,
+            "cache addressing must describe the Home's service mask")
+    unless addressing.stripe_bytes >= 64
+    | error(~who: #'CHIInclusiveHNFConfig,
+            "cache addressing stripes must contain a complete cache line")
+    unless sets * ways * 64 <= addressing.local_bytes
+    | error(~who: #'CHIInclusiveHNFConfig,
+            "cache capacity exceeds the dense local address range")
     def line_reads = home.service_requests.filter(
       ~keep: fun (support): support.opcode == CHIReqOpcode.ReadNoSnp && support.sizes.max_bytes >= 64
     )
@@ -43,7 +58,7 @@ class CHIInclusiveHNFConfig(home :: CHIHNFConfig,
     unless line_reads.length() > 0 && line_writes.length() > 0
     | error(~who: #'CHIInclusiveHNFConfig,
             "inclusive HN-F subordinate must support 64-byte reads and full writes")
-    super(home, sets, ways)
+    super(home, addressing, sets, ways)
 
 hardware_enum CHIInclusiveHNFPhase(~width: 5):
   Idle = 0
@@ -167,7 +182,7 @@ sync_circuit CHIInclusiveHNF(config :: CHIInclusiveHNFConfig):
   def set_width = config.set_width
   def way_width = config.way_width
   def offset_width = 6
-  def tag_width = p.request_address_width - offset_width - set_width
+  def line_address_width = p.request_address_width - offset_width
   def line_packets = 64 / p.data_bytes
   def packet_index_width = index_width(line_packets)
   def Line = Vec(line_packets, Bits(p.data_width))
@@ -212,7 +227,7 @@ sync_circuit CHIInclusiveHNF(config :: CHIInclusiveHNFConfig):
   reg replacement_ways(~init: vec(
     for List (_set in 0..sets): bits(0, way_width)
   ))
-  inst tags(SyncRam1RW(sets, Bits(tag_width), ways))
+  inst tags(SyncRam1RW(sets, Bits(line_address_width), ways))
   inst lines(SyncRam1RW(sets, Bits(512), ways))
 
   def idle = phase === CHIInclusiveHNFPhase.Idle
@@ -333,14 +348,19 @@ sync_circuit CHIInclusiveHNF(config :: CHIInclusiveHNFConfig):
     assert(requester.requester_responses.bits.src_id === request.src_id,
            "chi_inclusive_hnf_comp_ack_source")
 
-  def request_set = request.address[offset_width..(offset_width + set_width)]
-  def request_tag = request.address[(offset_width + set_width)..p.request_address_width]
+  def cache_address_identity = CHIAddressProjectorIdentity(p):
+    global_service_base: identity.service_base
+    local_base: bits(0, p.request_address_width)
+  def request_cache_address = chi_projected_address(config.addressing, cache_address_identity, request.address)
+  def incoming_cache_address = chi_projected_address(config.addressing, cache_address_identity, incoming_request.address)
+  def request_set = request_cache_address[offset_width..(offset_width + set_width)]
+  def request_line_address = request.address[offset_width..p.request_address_width]
   def request_write = chi_hnf_subordinate_opcode(request.opcode).is_initial_write()
-  def incoming_request_set = incoming_request.address[offset_width..(offset_width + set_width)]
+  def incoming_request_set = incoming_cache_address[offset_width..(offset_width + set_width)]
   def lookup_valids = valid_lines[request_set]
   def lookup_matches = vec(
     for List (way in 0..ways):
-      lookup_valids[way] & (tags.port.response.bits[way] === request_tag)
+      lookup_valids[way] & (tags.port.response.bits[way] === request_line_address)
   )
   def lookup_selection = priority_encoder_oh(lookup_matches)
   def invalid_ways = vec(for List (way in 0..ways): !lookup_valids[way])
@@ -349,7 +369,7 @@ sync_circuit CHIInclusiveHNF(config :: CHIInclusiveHNFConfig):
   def allocation_way = mux(invalid_selection.valid, invalid_selection.index, replacement_way)
   def lookup_way = mux(lookup_selection.valid, lookup_selection.index, allocation_way)
   def victim_valid = lookup_valids[allocation_way]
-  def lookup_victim_address = concat(tags.port.response.bits[allocation_way], request_set, bits(0, offset_width))
+  def lookup_victim_address = concat(tags.port.response.bits[allocation_way], bits(0, offset_width))
   def selected_line = line_buffer
   def selected_dirty = dirty_lines[selected_set][selected_way]
   def snoop_line_packet = chi_transfer_beat(requester.request_data.bits.data_id, p)[0..packet_index_width]
@@ -492,10 +512,10 @@ sync_circuit CHIInclusiveHNF(config :: CHIInclusiveHNFConfig):
                             mux(write_merged_line, merged_line, selected_line))
 
   tags.port.request.valid <== lookup_start ||| write_filled_line
-  tags.port.request.bits <== ReadWriteRequest(set_width, Bits(tag_width), ways):
+  tags.port.request.bits <== ReadWriteRequest(set_width, Bits(line_address_width), ways):
     address: mux(request_fire, incoming_request_set, mux(lookup_start, request_set, selected_set))
     write: write_filled_line
-    data: vec(for List (_way in 0..ways): request_tag)
+    data: vec(for List (_way in 0..ways): request_line_address)
     mask: mux(write_filled_line,
               selected_way_mask,
               empty_way_mask)

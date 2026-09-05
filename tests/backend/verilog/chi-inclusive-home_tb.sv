@@ -51,8 +51,9 @@ module chi_inclusive_home_tb;
   localparam logic [6:0] MEMORY_ID = 7'h09;
   localparam logic [11:0] MEMORY_DBID = 12'h055;
   localparam logic [43:0] LINE0 = 44'h080000000;
-  localparam logic [43:0] LINE1 = 44'h080000080;
-  localparam logic [43:0] LINE2 = 44'h080000100;
+  localparam logic [43:0] LINE1 = 44'h080000100;
+  localparam logic [43:0] LINE2 = 44'h080000200;
+  localparam logic [43:0] LINE3 = 44'h080000400;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -348,6 +349,10 @@ module chi_inclusive_home_tb;
 
     send_request(LINE2, READ_NO_SNP);
     tick();
+    fill_and_return(LINE2, 8'h30);
+
+    send_request(LINE3, READ_NO_SNP);
+    tick();
     clean_snoop(INSTRUCTION_ID);
     dirty_snoop(DATA_ID, 8'ha0);
     tick();
@@ -378,15 +383,15 @@ module chi_inclusive_home_tb;
       else $fatal(1, "inclusive Home did not accept victim completion");
     tick();
     subordinate_responses_in = '0;
-    accept_memory_request(LINE2, READ_NO_SNP);
-    return_fill_packet(2'd0, 8'h30);
-    return_fill_packet(2'd1, 8'h31);
-    return_fill_packet(2'd2, 8'h32);
-    return_fill_packet(2'd3, 8'h33);
-    accept_cached_packet(2'd0, 8'h30);
-    accept_cached_packet(2'd1, 8'h31);
-    accept_cached_packet(2'd2, 8'h32);
-    accept_cached_packet(2'd3, 8'h33);
+    accept_memory_request(LINE3, READ_NO_SNP);
+    return_fill_packet(2'd0, 8'h40);
+    return_fill_packet(2'd1, 8'h41);
+    return_fill_packet(2'd2, 8'h42);
+    return_fill_packet(2'd3, 8'h43);
+    accept_cached_packet(2'd0, 8'h40);
+    accept_cached_packet(2'd1, 8'h41);
+    accept_cached_packet(2'd2, 8'h42);
+    accept_cached_packet(2'd3, 8'h43);
 
     $display("CHI inclusive Home simulation passed");
     $finish;

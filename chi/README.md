@@ -369,7 +369,12 @@ without subordinate traffic, snoops every RN-F before replacing a resident
 victim, absorbs dirty snoop data, and writes dirty victims back before refill.
 Its set and way counts are static circuit parameters; this initial LLC uses
 `SyncRam1RW` tag/data arrays, invalid-first round-robin replacement, and one
-active transaction.
+active transaction. The configuration also carries a
+`CHIAddressProjectorConfig`: the LLC selects a set from the dense address within
+its bank but stores the complete global line address as the tag. This lets
+multiple striped HN-Fs use every set independently while preserving the exact
+global address needed for snoops and dirty victim writeback. A single-bank Home
+uses the same contract with identity-relative projection.
 
 CHI defines both SN-F and SN-I Subordinate Nodes as possible completers for
 non-snoopable reads, writes, atomics, exclusive variants, and cache maintenance

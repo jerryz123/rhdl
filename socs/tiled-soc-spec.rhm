@@ -7,7 +7,7 @@ import:
 
 export:
   RV5StageTileSpec
-  MemoryTileSpec
+  LLCTileSpec
   HostTileSpec
   AclintTileSpec
   TransitTileSpec
@@ -16,9 +16,10 @@ export:
   TileGrid
   TiledNodeIdPlan
   StripedMemorySpec
+  TiledLLCSpec
   TiledSoCSpec
   rv5stage_tile
-  memory_tile
+  llc_tile
   host_tile
   aclint_tile
   transit_tile
@@ -26,16 +27,16 @@ export:
   tile_grid
 
 class RV5StageTileSpec()
-class MemoryTileSpec()
+class LLCTileSpec()
 class HostTileSpec()
 class AclintTileSpec()
 class TransitTileSpec()
 
 annot.macro 'TiledTileSpec':
-  'RV5StageTileSpec || MemoryTileSpec || HostTileSpec || AclintTileSpec || TransitTileSpec'
+  'RV5StageTileSpec || LLCTileSpec || HostTileSpec || AclintTileSpec || TransitTileSpec'
 
 def rv5stage_tile = RV5StageTileSpec()
-def memory_tile = MemoryTileSpec()
+def llc_tile = LLCTileSpec()
 def host_tile = HostTileSpec()
 def aclint_tile = AclintTileSpec()
 def transit_tile = TransitTileSpec()
@@ -64,8 +65,8 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
     tiled_tile_cells(rows, width, height)
   property rv5stages:
     cells.filter(~keep: fun (cell): cell.tile is_a RV5StageTileSpec)
-  property memories:
-    cells.filter(~keep: fun (cell): cell.tile is_a MemoryTileSpec)
+  property llcs:
+    cells.filter(~keep: fun (cell): cell.tile is_a LLCTileSpec)
   property hosts:
     cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec)
   property aclints:
@@ -83,13 +84,13 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
         | error(~who: #'TileGrid, "tile-grid cells must contain tile specifications")
     def cells = tiled_tile_cells(rows, width, rows.length())
     def rv5stage_count = cells.filter(~keep: fun (cell): cell.tile is_a RV5StageTileSpec).length()
-    def memory_count = cells.filter(~keep: fun (cell): cell.tile is_a MemoryTileSpec).length()
+    def llc_count = cells.filter(~keep: fun (cell): cell.tile is_a LLCTileSpec).length()
     def host_count = cells.filter(~keep: fun (cell): cell.tile is_a HostTileSpec).length()
     def aclint_count = cells.filter(~keep: fun (cell): cell.tile is_a AclintTileSpec).length()
     unless rv5stage_count > 0
     | error(~who: #'TileGrid, "tile grid requires at least one RV5Stage tile")
-    unless memory_count > 0
-    | error(~who: #'TileGrid, "tile grid requires at least one memory tile")
+    unless llc_count > 0
+    | error(~who: #'TileGrid, "tile grid requires at least one LLC tile")
     unless host_count == 1
     | error(~who: #'TileGrid, "tile grid requires exactly one host tile")
     unless aclint_count == 1
@@ -104,23 +105,23 @@ class TileGrid(rows :: NonemptyList.of(NonemptyList)):
 class TiledNodeIdPlan(rv5stage_coherent_base :: Nat,
                       rv5stage_device_base :: Nat,
                       host :: Nat,
-                      memory_home_base :: Nat,
+                      llc_home_base :: Nat,
                       aclint_home :: Nat,
-                      memory_subordinate_base :: Nat,
+                      backing_memory_base :: Nat,
                       aclint_subordinate :: Nat):
   constructor (~rv5stage_coherent_base: rv5stage_coherent_base :: Nat,
                ~rv5stage_device_base: rv5stage_device_base :: Nat,
                ~host: host :: Nat,
-               ~memory_home_base: memory_home_base :: Nat,
+               ~llc_home_base: llc_home_base :: Nat,
                ~aclint_home: aclint_home :: Nat,
-               ~memory_subordinate_base: memory_subordinate_base :: Nat,
+               ~backing_memory_base: backing_memory_base :: Nat,
                ~aclint_subordinate: aclint_subordinate :: Nat):
     super(rv5stage_coherent_base,
           rv5stage_device_base,
           host,
-          memory_home_base,
+          llc_home_base,
           aclint_home,
-          memory_subordinate_base,
+          backing_memory_base,
           aclint_subordinate)
 
 class StripedMemorySpec(base :: Nat,
@@ -131,21 +132,43 @@ class StripedMemorySpec(base :: Nat,
                ~stripe_bytes: stripe_bytes :: PosInt):
     super(base, bank_bytes, stripe_bytes)
 
+fun tiled_power_of_two(value :: PosInt) :: Boolean:
+  value == 1 || (value mod 2 == 0 && tiled_power_of_two(value / 2))
+
+class TiledLLCSpec(sets :: PosInt,
+                   ways :: PosInt):
+  property capacity_bytes :: PosInt: sets * ways * 64
+
+  constructor (~sets: sets :: PosInt,
+               ~ways: ways :: PosInt):
+    unless sets >= 2 && tiled_power_of_two(sets)
+    | error(~who: #'TiledLLCSpec,
+            "LLC set count must be a power of two of at least two")
+    super(sets, ways)
+
 class TiledSoCSpec(layout :: TileGrid,
                    node_ids :: TiledNodeIdPlan,
-                   memory :: StripedMemorySpec):
+                   memory :: StripedMemorySpec,
+                   llc :: TiledLLCSpec):
   constructor (~layout: layout :: TileGrid,
                ~node_ids: node_ids :: TiledNodeIdPlan,
-               ~memory: memory :: StripedMemorySpec):
-    super(layout, node_ids, memory)
+               ~memory: memory :: StripedMemorySpec,
+               ~llc: llc :: TiledLLCSpec):
+    unless memory.stripe_bytes >= 64
+    | error(~who: #'TiledSoCSpec,
+            "striped-memory stripes must contain a complete LLC line")
+    unless llc.capacity_bytes <= memory.bank_bytes
+    | error(~who: #'TiledSoCSpec,
+            "each LLC must fit within its backing-memory bank")
+    super(layout, node_ids, memory, llc)
 
 meta:
   fun tile_run(entry :: Syntax):
     match entry
     | 'rv5stage': '[rv5stage_tile]'
     | 'rv5stage($count)': 'repeat_tiled_tile(rv5stage_tile, $count)'
-    | 'memory': '[memory_tile]'
-    | 'memory($count)': 'repeat_tiled_tile(memory_tile, $count)'
+    | 'llc': '[llc_tile]'
+    | 'llc($count)': 'repeat_tiled_tile(llc_tile, $count)'
     | 'host': '[host_tile]'
     | 'host($count)': 'repeat_tiled_tile(host_tile, $count)'
     | 'aclint': '[aclint_tile]'
@@ -154,7 +177,7 @@ meta:
     | 'transit($count)': 'repeat_tiled_tile(transit_tile, $count)'
     | ~else:
         syntax_meta.error(
-          "expected rv5stage, memory, host, aclint, or transit tile",
+          "expected rv5stage, llc, host, aclint, or transit tile",
           entry
         )
 

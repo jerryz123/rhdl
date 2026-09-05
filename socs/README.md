@@ -85,7 +85,7 @@ TiledSoC separates author intent from derived network and hardware parameters:
 TiledSoCSpec -> compile_tiled_soc_plan -> compile_tiled_soc -> TiledSoC
  layout           placements/routes       CHI/tile params      structure
  node IDs
- memory geometry
+ backing memory and LLC geometry
 ```
 
 The author-facing layout uses rows in visual north-to-south order and supports
@@ -93,17 +93,18 @@ compact runs of like tiles:
 
 ```rhm
 def layout = tile_grid:
-  row [memory(4)]
+  row [llc(4)]
   row [host, aclint, transit(2)]
   row [rv5stage(4)]
   row [rv5stage(4)]
 ```
 
 `TiledSoCSpec` combines that immutable `TileGrid` with a `TiledNodeIdPlan` and
-`StripedMemorySpec`. `compile_tiled_soc_plan` is pure host code: it derives mesh
-coordinates, occurrence ordering, endpoint IDs, CHI relationships, routes, and
-the shared physical-link manifest. `compile_tiled_soc` then derives the CHI,
-router, memory, and tile parameters and returns one `TiledSoCConfig`. The RTL
+separate `StripedMemorySpec` and `TiledLLCSpec` geometries.
+`compile_tiled_soc_plan` is pure host code: it derives mesh coordinates,
+occurrence ordering, endpoint IDs, CHI relationships, routes, and the shared
+physical-link manifest. `compile_tiled_soc` then derives the CHI, router, LLC,
+backing-memory, and tile parameters and returns one `TiledSoCConfig`. The RTL
 accepts that configuration directly as `TiledSoC(config)`. Tile occurrences
 therefore carry their placement and component parameters together instead of
 depending on parallel global arrays. The default `tiled_soc_config` preserves
@@ -111,7 +112,7 @@ the repository's 4x4 system, while the focused hierarchy test also elaborates a
 2x3 system from the same pipeline.
 
 The default pure plan places eight `RV5StageTile`s in the lower two rows, four
-service routers in the middle row, and four `MemoryTile`s in the upper row.
+service routers in the middle row, and four `LLCTile`s in the upper row.
 One service router colocates the shared eight-hart ACLINT with both sides of
 its HN-I, another owns the external host RN-F, and the other two are
 transit-only. The HN requester side, HN subordinate side, and ACLINT SN-I are
@@ -122,9 +123,13 @@ uncached device traffic, one host RN-F, four HN-Fs, one HN-I, four SN-Fs, and
 one ACLINT SN-I.
 
 Four 8 KiB banks cover `0x80000000` through `0x80007fff` with 64-byte
-cache-line striping. One shared physical-region table maps successive lines to
-successive HN-Fs and derives the CHI Home map. Each memory tile projects its sparse global bank addresses into a dense
-local RAM address space before fragmentation. The 16 coherent requester
+cache-line striping. Each LLC tile contains a 16-set, four-way cache, giving
+4 KiB per bank and 16 KiB of aggregate inclusive LLC capacity. One shared
+physical-region table maps successive lines to successive HN-Fs and derives the
+CHI Home map. Each LLC indexes its sets with the dense per-bank projected
+address while retaining the complete global line address as its tag. Its
+subordinate projector then maps sparse global bank addresses into the dense
+local backing RAM before fragmentation. The 16 coherent requester
 endpoints plus the host RN-F connect to all four HN-Fs, while the eight uncached
 requester endpoints connect to the ACLINT HN-I and its subordinate side
 connects to the ACLINT SN-I. Together they compile 77 REQ, 153 RSP, 68 SNP,
@@ -132,7 +137,7 @@ and 154 DAT routes before any hardware elaborates.
 
 Each tile owns one `CHIRouter`, which contains the independent REQ/RSP/SNP/DAT
 `SimpleRouterFamily` instances and site-keyed CHI adapters. Every RV5Stage tile
-uses one shared RTL specialization, every memory tile uses another, and the
+uses one shared RTL specialization, every LLC tile uses another, and the
 service row adds one `AclintTile`, one `HostTile`, and one transit
 specialization. Their implementations and parameter contracts live under
 [`tiles/`](tiles/). The parent drives one constant identity bundle per occurrence
@@ -140,10 +145,11 @@ containing its router site, hart ID, endpoint NodeIDs, striped service base, and
 local RAM base; tiles
 contain no system-wide identity table or runtime routing-mode selector. A
 `RV5StageTile` attaches one RV5Stage's two RN-F ports and its RN-I device port. A
-`MemoryTile` attaches one HN-F and keeps its address projector, transfer
-fragmenter, and CHIRam on the HN's direct subordinate side. The ACLINT HN-I is
-reachable only through the uncached RN-I routes; its MSIP and MTIP vectors and
-shared `mtime` value return directly to their corresponding RV5Stage tiles.
+`LLCTile` attaches one blocking `CHIInclusiveHNF` and keeps its address
+projector, transfer fragmenter, and CHIRam on the HN's direct subordinate side.
+The ACLINT HN-I is reachable only through the uncached RN-I routes; its MSIP and
+MTIP vectors and shared `mtime` value return directly to their corresponding
+RV5Stage tiles.
 
 Every tile exposes the family's uniform maximum of four incoming and four
 outgoing physical links, each bundling the independent REQ/RSP/SNP/DAT
