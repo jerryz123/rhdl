@@ -9,6 +9,9 @@ address translation, Fetch correlation, and `FENCE.I` ordering; the
 [CHI guide](../../../chi/README.md) owns protocol vocabulary and fabric-wide
 rules.
 
+Contributors changing the L1I implementation should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## At a glance
 
 | Property | Current contract |

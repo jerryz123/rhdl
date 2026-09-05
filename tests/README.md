@@ -7,6 +7,10 @@ then add only the deeper toolchain stage needed to test its observable effect.
 The root [`Makefile`](../Makefile) defines the aggregate targets; package guides
 own narrower workflows and evolving fixture details.
 
+Contributors adding or reorganizing tests should read
+[`DEVELOPING.md`](DEVELOPING.md) for placement, CI ownership, and maintenance
+policy.
+
 ## Start with the change owner
 
 The central test tree mirrors Rhodium's implementation boundaries:
@@ -147,53 +151,7 @@ excludes the optional formal and Emacs suites, the full backend manifest, and
 executable SoC simulation. Run those owners explicitly when the change requires
 them.
 
-## CI ownership
+## Contributing tests
 
-CI first tests and applies [`tools/ci-changes.sh`](../tools/ci-changes.sh). When
-it selects any downstream work, CI compiles the positive Racket entrypoint
-manifest once for reuse by the selected jobs. Pull requests and pushes classify
-the changed paths; manual dispatch selects every matrix shard.
-
-```mermaid
-flowchart TD
-    Changes["Pull request or push paths"] --> Classifier["Change classifier"]
-    Manual["Manual dispatch"] --> All["Select every shard"]
-    Unknown["Unknown path or unavailable base"] --> All
-    Classifier --> Docs{"Documentation or<br/>repository metadata only?"}
-    Docs -->|yes| None["No functional test matrix"]
-    Docs -->|no| Selected["Dependency-aware selection"]
-    All --> Selected
-    Selected --> Compile["Compile positive Racket entrypoint manifest once"]
-    Compile --> Host["Host matrix<br/>foundation, backend, models,<br/>protocols, cores, SoCs, hygiene"]
-    Compile --> Examples["Example matrix<br/>one owning example group per shard"]
-    Compile --> CIRCT["CIRCT matrix<br/>language, standard library,<br/>protocols, cores, RFPL"]
-    Compile --> Simulation["SoC simulation job<br/>SRAM, DPI, harnesses, and smoke"]
-```
-
-Known dependency paths can select several branches. For example, NoC, RISC-V,
-CHI, core, and shared-standard-library changes also select the SoC host shard
-when their behavior feeds system composition. Backend implementation or fixture
-changes select the backend host shard and every external CIRCT group.
-The simulation job remains independent from backend fixtures and owns the
-repository's full harness flow.
-
-Recognized documentation and inert repository metadata select no functional
-test jobs. The optional Emacs integration and most of `vlsi/` have no
-functional CI lane;
-Rhodium sources there still receive source hygiene, while `vlsi/sim/` and the
-mapped MiniSoC flow select simulation. Unrecognized paths fail closed by
-selecting every job, and the classifier audit rejects tracked executable source
-that selects no job.
-
-## Testing principles
-
-- Test supported behavior and invalid uses of supported features.
-- Prefer semantic structure, opcodes, and types over generated temporary names.
-- Use language-layer equivalence tests when syntax should lower to existing
-  kernel or core meaning.
-- Update Verilog references only when backend output changes intentionally, and
-  review the example-source diff.
-- Keep generated Racket, CIRCT, SystemVerilog, and Verilator output out of
-  version control.
-- Reserve broader suites for cross-layer, shared-infrastructure, or complete
-  backend-pipeline changes.
+See [`DEVELOPING.md`](DEVELOPING.md) for test placement, authoring principles,
+CI classification, fixture maintenance, and generated-artifact policy.

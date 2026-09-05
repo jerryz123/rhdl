@@ -7,6 +7,9 @@ materialization, virtual-channel dependency validation, route-table generation,
 and validated hardware plans. Its pure model is intentionally independent of
 Rhodium hardware construction and CIRCT.
 
+Contributors extending the NoC model, proofs, or plans should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## At a glance
 
 The package has one directional workflow: describe a network symbolically,
@@ -101,32 +104,12 @@ not lower route tables or generate RTL. Routed hardware accepts only
 accepts only a pure `DistributionPlan`. The system owner uses pure plan
 mappings to place routed components and connect physical VC boundaries.
 
-The hardware bridge has separate frontend, CIRCT, and Verilator fixtures:
+Neither hardware path grants hardware code access to unvalidated relations or
+proof construction.
 
-- The route-computer fixture exhausts every encoded input of every router in a
-  small validated network.
-- The simple-router fixture checks one-to-one allocation, independent
-  backpressure, ejection contention, and packet conservation.
-- The hierarchical assembly fixture places three routers in independently
-  defined user subsystems and checks two-hop destination selection,
-  per-destination ordering, and conservation under randomized independent
-  ejection backpressure.
-- The valid-distribution fixture compiles an aggregate payload over a pruned
-  tree and checks the emitted registered structure and equalized sink latency.
-
-None of these consumers grants hardware code access to unvalidated relations
-or proof construction.
-
-Run the complete host-side NoC checks and package-boundary validation from the
-repository root:
-
-```sh
-make noc-test
-```
-
-For one focused host test, use the repository wrapper so it receives a fresh
-compiled root, for example
-`tools/run-racket-tests.sh noc/tests/plan/router-family-plan-test.rhm`.
+Dependency enforcement, source ownership, extension workflow, and focused
+validation are documented in
+[`DEVELOPING.md`](DEVELOPING.md#architecture-and-dependency-boundary).
 
 ## Authoring
 

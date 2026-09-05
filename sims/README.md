@@ -8,6 +8,9 @@ transport, Verilator binding, simulation-only memory model, clock/reset driver,
 and executable workflows. The SoCs continue to own processor, device, CHI,
 NoC, and synthesizable-memory structure.
 
+Contributors changing a harness, binding, or build rule should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Choose a harness
 
 | `SOC` | Selected system | Memory supplied by the harness | Default core specialization |
@@ -126,21 +129,8 @@ RV5Stage, stores the passing value into a dirty L1D line, and succeeds only
 after the coherent FESVR requester observes that write. It uses the same `run`
 path as an external target binary.
 
-Run the focused binding, structural, and tiled-lowering checks with:
-
-```sh
-make -C sims dpi-compile-check \
-  VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
-make -C sims chi-dpi-memory-test \
-  VERILATOR_ROOT="$(verilator -V | sed -n 's/^ *VERILATOR_ROOT *= *//p' | head -1)"
-make -C sims elaboration-test
-make -C sims tiled-lowering-test
-```
-
-The `chi-dpi-memory-test` convenience target independently compiles and
-exercises the CHI-owned DPI model documented by the
-[`chi/` package](../chi/README.md). The SimpleSoC harness instantiates that same
-model behind the SoC's external memory boundary.
+Contributor binding, structural, and lowering checks are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).
 
 These simulators always use CIRCT-inferred memories. To validate a
 design-and-technology SRAM mapping while reusing this harness, driver, FESVR

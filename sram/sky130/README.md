@@ -8,6 +8,9 @@ PDK-relative collateral paths, power-pin names, and checked-in functional
 models. It does not choose which design memories become macros or define the
 generic mapping, tiling, manifest, simulation, or physical-flow policy.
 
+Contributors maintaining the catalog or functional model should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ```mermaid
 flowchart LR
   policy["Consumer-owned site policy"] --> selection["Generic occurrence selection"]
@@ -116,22 +119,8 @@ contracts in `sram/` lets this page stay focused on Sky130 catalog ownership.
 
 ## Implementation map
 
-| Path | Responsibility |
-|---|---|
-| [`macros.ini`](macros.ini) | Machine-readable Sky130 macro metadata and PDK-relative view paths |
-| [`models/`](models/) | Checked-in zero-delay functional models named by catalog entries |
-| [`../map-memories.py`](../map-memories.py) | Catalog parsing, validation, generic `openram_1rw1r` adaptation, tiling, and manifest generation |
-| [`../tests/test_mapper.py`](../tests/test_mapper.py) | Catalog loading, wrapper shape, mask routing, functional-model simulation, and failure checks |
-| [`../../vlsi/`](../../vlsi/README.md) | Design/technology site choices, PDK setup, design-specific assertions, and physical consumption |
-
-When adding or replacing a macro, copy its exact cell/module name and values
-from the pinned collateral, add all five PDK-relative view paths, and provide a
-functional model only when it matches the adapter-visible cycle contract. The
-catalog parser recognizes the exact interface token `openram_1rw1r` and the
-collateral keys `verilog`, `lef`, `gds`, `liberty`, and `spice`; a new pin
-convention requires a generic mapper adapter before it can be catalogued.
-Update a consumer policy or physical configuration only when that consumer is
-intended to select the new macro.
+Source ownership and the macro-maintenance workflow moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Deliberate limits
 
@@ -145,26 +134,5 @@ physical integration and signoff.
 
 ## Focused validation
 
-Run commands from the repository root. The owning regression parses this
-catalog and exercises wrapper generation, byte masks, bank/width tiling, and
-the functional model with Verilator:
-
-```sh
-make -C sram test
-```
-
-With the pinned PDK installed, validate the current physical consumer's
-collateral and manifest handoff:
-
-```sh
-make -C vlsi mini-soc-memory-map
-```
-
-After changing functional-model behavior, also run the mapped MiniSoC smoke:
-
-```sh
-make -C vlsi/sim smoke
-```
-
-Use the linked consumer guides for their prerequisites and later checks; these
-targets are focused evidence, not physical signoff.
+Contributor catalog, mapper, physical-consumer, and mapped-simulation checks
+are documented in [`DEVELOPING.md`](DEVELOPING.md#focused-validation).

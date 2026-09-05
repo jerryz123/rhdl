@@ -4,8 +4,9 @@
 
 The core is Rhodium's backend-independent hardware model. It defines hardware
 meaning, ownership, construction, verification, and inspection; it does not
-import frontend syntax or a backend. The complete package dependency contract
-is owned by [`../README.md`](../README.md).
+import frontend syntax or a backend. The public package map is in
+[`../README.md`](../README.md); implementation architecture and contributor
+workflows are in [`DEVELOPING.md`](DEVELOPING.md).
 
 ## How to use this guide
 
@@ -13,8 +14,9 @@ is owned by [`../README.md`](../README.md).
   when reading or extending Rhodium.
 - Use the [operation reference](#operation-reference) and
   [public API](#public-api) when constructing or inspecting core IR directly.
-- Use the [implementation map](#implementation-map) to find the owning source
-  and the narrowest relevant tests.
+- If you are changing the core, use the
+  [developer guide](DEVELOPING.md) to find the owning source and narrowest
+  relevant tests.
 
 Frontend syntax, profiles, and elaboration policy belong to the
 [`frontend`](../frontend/README.md). Lowering belongs to the
@@ -475,31 +477,10 @@ Compilation verifies every completed design before lowering.
 
 ## Implementation map
 
-| File | Owns | Focused evidence |
-|---|---|---|
-| [`types.rhm`](types.rhm) | Open type capabilities, built-in types, equality, packing, and selector widths | [`types-test.rhm`](../../tests/core/types-test.rhm), [`signed-test.rhm`](../../tests/core/signed-test.rhm), [`shift-test.rhm`](../../tests/core/shift-test.rhm) |
-| [`ir.rhm`](ir.rhm) | Public objects, collections, ownership indexes, lookup, and `DesignElaboration` | [`verify-test.rhm`](../../tests/core/verify-test.rhm), [`dpi-test.rhm`](../../tests/core/dpi-test.rhm) |
-| [`builder.rhm`](builder.rhm) | Legal construction, naming, aggregate-drive canonicalization, state, resources, and hierarchy | [`wire-test.rhm`](../../tests/core/wire-test.rhm), [`memory-test.rhm`](../../tests/core/memory-test.rhm), [`sync-memory-test.rhm`](../../tests/core/sync-memory-test.rhm) |
-| [`ops.rhm`](ops.rhm) | Opcode registry, categories, arities, type-rule names, and printer forms | Operation-specific tests under [`tests/core`](../../tests/core/) |
-| [`verify.rhm`](verify.rhm) | Schema, ownership, use-def, driver, resource, state, instance, assertion, DPI, and crossing checks | [`verify-test.rhm`](../../tests/core/verify-test.rhm), [`assert-test.rhm`](../../tests/core/assert-test.rhm), [`cdc-test.rhm`](../../tests/core/cdc-test.rhm) |
-| [`dependencies.rhm`](dependencies.rhm) | Leaf-sensitive combinational dependencies and hierarchical cycle detection | Hierarchy and aggregate-cycle cases in [`verify-test.rhm`](../../tests/core/verify-test.rhm) |
-| [`printer.rhm`](printer.rhm) | Deterministic textual IR | Exact operation-form checks across [`tests/core`](../../tests/core/) |
-| [`main.rhm`](main.rhm) | Public core re-exports | Import coverage through all core tests |
+The source ownership table moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Focused validation
 
-Choose the smallest test file or files matching the contract changed:
-
-- Value/place ownership, aggregate drives, or hierarchy: `wire-test.rhm`,
-  `types-test.rhm`, and the relevant cases in `verify-test.rhm`.
-- An opcode or type rule: its operation-specific test plus `types-test.rhm` or
-  `verify-test.rhm` when the shared verifier changes.
-- State or resource behavior: `memory-test.rhm`, `sync-memory-test.rhm`,
-  `assert-test.rhm`, `cdc-test.rhm`, or `dpi-test.rhm` as applicable.
-- Package imports or module movement: `make check-boundaries` in addition to
-  the focused semantic test.
-
-Run Rhombus tests with the repository test runner and a fresh
-`PLTCOMPILEDROOTS`, as described by the owning [test guide](../../tests/README.md).
-Reserve frontend, backend, and full-suite validation for changes that actually
-cross those boundaries.
+Contributor test selection and commands moved to
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

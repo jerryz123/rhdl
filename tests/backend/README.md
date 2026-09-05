@@ -13,6 +13,9 @@ canonical example catalog. This guide owns the backend test workflow; the
 fixture manifest in [`run-circt.sh`](run-circt.sh) remains authoritative for
 fixture names, groups, exports, and available simulations.
 
+Contributors changing the manifest, fixtures, benches, or exact references
+should read [`DEVELOPING.md`](DEVELOPING.md).
+
 ```mermaid
 flowchart LR
     Example["Example export<br/>design and Verilog reference"] --> Materialize["Materialize selected fixtures<br/>in one Rhombus process"]
@@ -86,39 +89,7 @@ FIXTURE=sync-memory-masked bash tests/backend/run-circt.sh --verify-only
 bash tests/backend/run-circt.sh --group protocols --simulate-only
 ```
 
-## Fixture and artifact ownership
-
-Example-backed entries name an example module, a concrete design export, an
-optional Verilator top, and either a Verilog-reference export or `-`. A named
-reference marks a compact fixture whose readable generated output is part of
-the example; `-` keeps integration-scale fixtures under lowering and behavioral
-coverage without a large exact snapshot. The ordinary golden pair is `design`
-and `verilog_reference`; additional designs use the same prefix for both
-exports, such as `cast_design` and `cast_verilog_reference`.
-
-Direct `emit-*.rhm` fixtures own backend integration shapes that do not belong
-to one canonical example. They print MLIR for CIRCT verification and may name
-a Verilator top, but they do not own example Verilog references.
-Add or rename either kind through the manifest rather than relying on filename
-discovery. `make examples` and `make check-example-verilog` check every concrete
-design's manifest coverage and validate only declared golden exports without
-running CIRCT or Verilator.
-
-Behavioral benches live in [`verilog/`](verilog/). An example fixture with a
-top uses `verilog/<fixture>_tb.sv`. The runner automatically links a matching
-`verilog/<fixture>_dpi.cpp`; direct emitter fixtures can additionally link a
-matching source from [`../../devices/dpi/`](../../devices/dpi/), with hyphens
-in the fixture name changed to underscores. Assertion and protocol monitors
-also have dedicated negative benches. Those checks pass only when simulation
-fails and reports the expected assertion label, so an expected failure is not
-treated as an unchecked crash.
-
-MLIR, generated SystemVerilog, Verilator object directories, and logs are
-created in a temporary `/tmp/rhodium-circt.*` directory and removed when the
-runner exits. They are diagnostic artifacts, not checked-in outputs. The only
-source-writing mode is the intentional golden update described below.
-
-## Verilog references
+## Toolchain and exact-reference behavior
 
 Install the repository's pinned CIRCT release with:
 
@@ -140,17 +111,9 @@ instead fails on a version mismatch so a golden-only run cannot silently pass
 without comparing text.
 
 When a backend change intentionally changes generated SystemVerilog, update
-only the affected reference and review the example-source diff:
-
-```sh
-FIXTURE=bundle make update-verilog-goldens
-```
-
-Without `FIXTURE`, that target rewrites every declared golden reference. The
-update mode uses whichever `circt-opt` the runner resolves and does not reject
-an alternate version, so use the pinned toolchain unless the version transition
-itself is intentional. Never use golden updates merely to make an unexplained
-diff disappear.
+the affected reference only after diagnosing the diff. Reference ownership and
+the guarded update workflow are documented in
+[`DEVELOPING.md`](DEVELOPING.md#verilog-references).
 
 ## Interpret failures by stage
 
@@ -172,3 +135,20 @@ diff disappear.
 - A simulation failure is behavioral unless it is one of the runner's labeled
   expected-assertion failures. Diagnose it independently from a passing exact
   text comparison: a golden proves stable output, not correct behavior.
+
+## Fixture and artifact ownership
+
+Fixture, bench, temporary-artifact, and generated-output ownership is now in
+[`DEVELOPING.md`](DEVELOPING.md#fixture-and-artifact-ownership). This heading is
+retained for existing links.
+
+## Verilog references
+
+Exact-reference ownership and update maintenance are now in
+[`DEVELOPING.md`](DEVELOPING.md#verilog-references). This heading is retained
+for existing links.
+
+## Contributing backend tests
+
+See [`DEVELOPING.md`](DEVELOPING.md) to add or rename fixtures, maintain
+Verilator benches and DPI companions, update references, or change the runner.

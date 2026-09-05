@@ -7,6 +7,8 @@ normal entry point accepts a completed `Design`, verifies it, and emits textual
 CIRCT MLIR. This directory owns CIRCT dialect selection, type representation,
 SSA names, and operation dispatch; it imports [`../core/`](../core/README.md)
 but no frontend syntax or elaboration modules.
+Contributors changing lowering or backend coverage should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ```mermaid
 flowchart LR
@@ -172,12 +174,8 @@ and differ only in whether the CIRCT call returns SSA results.
 
 ## Validation ownership
 
-Backend host tests assert textual lowering, stable naming, unsupported-type
-errors, and the specialized policies described above. The external fixture
-pipeline separately parses and verifies MLIR, lowers it through CIRCT, compares
-version-pinned SystemVerilog goldens, and simulates selected designs with
-Verilator.
-
-Commands, fixture selection, and golden-update policy belong to
-[`../../tests/backend/README.md`](../../tests/backend/README.md); this document
-does not duplicate that evolving test catalog.
+Contributor ownership and the backend change workflow are in
+[`DEVELOPING.md`](DEVELOPING.md#validation). Commands and fixture selection are
+in the [backend test guide](../../tests/backend/README.md); exact-reference and
+fixture maintenance are in its
+[`DEVELOPING.md`](../../tests/backend/DEVELOPING.md).

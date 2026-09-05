@@ -3,10 +3,12 @@
 # Rhodium frontend
 
 The frontend turns ordinary Rhombus computation and Rhodium notation into the
-single public core IR. Macro expansion is not a second hardware IR. The
-package dependency contract and authoritative layer inventory are in
-[`../README.md`](../README.md); individual language features are documented in
-[`layers/README.md`](layers/README.md).
+single public core IR. Macro expansion is not a second hardware IR. The public
+package map is in [`../README.md`](../README.md); individual language features
+are documented in [`layers/README.md`](layers/README.md). Contributors changing
+the frontend should also read [`DEVELOPING.md`](DEVELOPING.md), while the
+implementation dependency contract and authoritative layer inventory live in
+[`../DEVELOPING.md`](../DEVELOPING.md).
 
 This guide answers four frontend questions: which profile to use, what
 elaboration does, where host computation ends and hardware begins, and where a
@@ -174,11 +176,12 @@ Generator declarations accept positional and keyword bindings with ordinary
 Rhombus annotations and default expressions. Ordinary and sync circuits share
 these parameter forms and host-value validation.
 
-The elaboration-local specialization cache indexes calls whose entire argument
-list is stable by declaration identity and normalized positional and keyword
-values. Distinct or uncached calls receive deterministic suffixes such as
-`Adder` and `Adder_1`; parameters are not embedded in names. The cache is local
-to one elaboration, and active recursion is rejected by generator identity.
+Within one elaboration, calls with stable equivalent arguments reuse one module
+definition. Distinct or non-reusable calls receive deterministic suffixes such
+as `Adder` and `Adder_1`; parameters are not embedded in names. Active recursive
+calls to the same generator are rejected. The implementation of specialization
+identity, comparison, and caching is described in
+[`DEVELOPING.md`](DEVELOPING.md#specialization-and-cache-safety).
 
 ### Determinism and cache safety
 
@@ -272,7 +275,7 @@ operations to the core IR.
 
 Start with the narrowest boundary that can express the abstraction. The
 authoritative import rules remain in the
-[package dependency contract](../README.md#dependency-rules).
+[package dependency contract](../DEVELOPING.md#dependency-rules).
 
 | The change needs to... | Put it in... | Boundary |
 |---|---|---|
@@ -297,5 +300,5 @@ fun add_pair(left, right):
 
 Importing this function from a `.rhdl` program requires no reader, IR,
 verifier, or backend change. For frontend implementation roles, see the
-[package responsibility table](../README.md#package-responsibilities); for the
-existing public features, see the [layer reference](layers/README.md).
+[frontend contributor guide](DEVELOPING.md); for the existing public features,
+see the [layer reference](layers/README.md).

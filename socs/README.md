@@ -1,4 +1,4 @@
-<!-- Documents the repository's concrete coherent SoC compositions and focused tests. -->
+<!-- Documents the repository's concrete coherent SoC compositions and integration contracts. -->
 
 # SoC compositions
 
@@ -12,6 +12,9 @@ For component internals, follow the owning guides for
 [RV5Stage](../cores/rv5stage/README.md), [CHI](../chi/README.md),
 [NoC planning](../noc/README.md), and [platform devices](../devices/README.md)
 instead of treating this page as a component catalog.
+
+Contributors changing a composition should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ## Choose a system
 
@@ -209,22 +212,6 @@ corner slots. There is no whole-network RTL wrapper under `noc/`.
 
 ## Focused validation
 
-Run every SoC configuration-compilation, tile, and hierarchy test from the
-repository root with:
-
-```sh
-make soc-test
-```
-
-Use package-local targets when iterating on one area:
-
-```sh
-make -C socs rtl-elaboration-test
-make -C socs tiled-compile-test
-make -C socs tiled-elaboration-test
-```
-
-The focused SimpleSoC and MiniSoC elaboration tests cover the external-channel
-and internal-memory variants. The tiled targets cover configuration compilation,
-tile structure, and complete hierarchy elaboration. Executable build, run,
+Contributor configuration, tile, and hierarchy validation is documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation). Executable build, run,
 smoke, and lowering workflows belong to the [`sims/` guide](../sims/README.md).

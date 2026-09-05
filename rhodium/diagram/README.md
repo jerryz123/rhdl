@@ -6,6 +6,8 @@ Use `rhodium/diagram` to inspect a verified `DesignElaboration` as logical
 blocks and typed channels. The result is a read-only, tool-neutral projection,
 not another hardware IR: changing or discarding it cannot change verification,
 CIRCT lowering, or generated RTL.
+Contributors changing extraction, metadata interpretation, JSON, or DOT should
+read [`DEVELOPING.md`](DEVELOPING.md).
 
 ## Generate a diagram
 
@@ -33,38 +35,10 @@ providing a module from an already verified design.
 
 ## Understand the ownership flow
 
-The logical model combines verified IR facts with optional authoring intent.
-Metadata enriches the view, but never replaces the IR as the source of hardware
-connectivity.
-
-```mermaid
-flowchart LR
-  Elaboration["DesignElaboration<br/>core IR and hierarchy"] --> Verify["verify_design"]
-  Verify --> Extract["extract.rhm<br/>blocks, channels, and behavior"]
-
-  CoreMetadata["core/ir.rhm<br/>namespace-keyed metadata storage"] --> InterfaceMetadata["frontend/layers/interface.rhm<br/>groups, arrays, links, connections, and transforms"]
-  FlowMetadata["std/flow/*.rhdl<br/>transform kind and properties"] --> InterfaceMetadata
-  InterfaceMetadata --> Extract
-  SyncMetadata["frontend/support/clocking.rhm<br/>implicit clock/reset identity"] --> Extract
-
-  Extract --> Model["model.rhm<br/>DiagramDesign and DiagramModule"]
-  Model --> JSON["json.rhm<br/>stable machine-readable interchange"]
-  Model --> DOT["dot.rhm<br/>diagnostic Graphviz presentation"]
-```
-
-Ownership is deliberately split:
-
-- `rhodium/core/ir.rhm` owns generic `ModuleMetadata` storage. Core assigns no
-  diagram meaning to a metadata namespace.
-- `rhodium/frontend/layers/interface.rhm` owns interface groups, arrays,
-  connections, transparent links, and transform descriptions.
-- `rhodium/frontend/support/clocking.rhm` identifies the implicit ports created
-  by `sync_circuit`.
-- `rhodium/std/flow/*.rhdl` uses the interface-layer API to attach a transform
-  kind, properties, and, when applicable, its implementing instance.
-- `rhodium/diagram/extract.rhm` alone interprets those facts as a logical view.
-  Backends ignore the metadata, and the extractor follows verified IR drivers
-  for ordinary connectivity.
+The logical model combines verified IR facts with optional authoring metadata,
+but verified IR remains the source of hardware connectivity. The implementation
+ownership flow is in
+[`DEVELOPING.md`](DEVELOPING.md#architecture-and-metadata-ownership).
 
 ## Read blocks and hierarchy
 
@@ -193,40 +167,19 @@ abstract `combo` input stub for their configured combinational logic.
 
 ## Find the implementation and examples
 
-| File | Responsibility |
-|---|---|
-| [`model.rhm`](model.rhm) | Tool-neutral model and module lookup. |
-| [`extract.rhm`](extract.rhm) | Verification entry point, hierarchy traversal, block extraction, channel tracing, and behavior classification. |
-| [`json.rhm`](json.rhm) | Deterministic JSON serialization. |
-| [`dot.rhm`](dot.rhm) | Port-anchored diagnostic DOT rendering. |
-| [`main.rhm`](main.rhm) | Public re-export surface. |
-| [`../../tests/frontend/diagram-test.rhm`](../../tests/frontend/diagram-test.rhm) | Model, hierarchy, JSON, DOT, protocol, implicit-control, and transparent-link coverage. |
-| [`../../tests/backend/diagram-metadata-test.rhm`](../../tests/backend/diagram-metadata-test.rhm) | Proof that inspection metadata is absent from CIRCT output. |
-
 The [RV5Stage example](../../examples/rv5stage/core-diagram.rhdl) elaborates the
 RV64 core and selects its logical module. The
 [wormhole-router example](../../examples/noc/wormhole-router-diagram.rhdl)
 first requires a validated phased-XY routing plan, then extracts the configured
 router. Both export their logical design, view, selected module, JSON, and DOT.
 
+Source ownership is documented in
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
+
 ## Validate diagram changes
 
-Run the focused diagram target for extraction, model, JSON, DOT, and package
-boundary coverage:
-
-```sh
-make diagram-test
-```
-
-When changing metadata ownership or backend isolation, also run the focused
-backend regression with a fresh compiled root:
-
-```sh
-diagram_compiled_root="$(mktemp -d)"
-trap 'rm -rf "$diagram_compiled_root"' EXIT
-PLTCOMPILEDROOTS="$diagram_compiled_root" \
-  tools/run-racket-tests.sh tests/backend/diagram-metadata-test.rhm
-```
+Contributor validation moved to
+[`DEVELOPING.md`](DEVELOPING.md#validation).
 
 ## Deliberate limits
 

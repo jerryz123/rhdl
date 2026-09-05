@@ -16,6 +16,8 @@ semantics, or get imported by `#lang rhodium`.
 Implementation status and future stages are owned by the
 [`formal-engine plan`](PLAN.md). This README documents only the implemented
 public contract.
+Contributors changing solver semantics, query handling, replay, or coverage
+should read [`DEVELOPING.md`](DEVELOPING.md).
 
 ## Install and quick start
 
@@ -192,12 +194,8 @@ combinational contract.
 | `make formal-test` | Focused public-API, assumption, operation, hierarchy, aggregate, decode, replay, reachability, property, and fail-closed tests after a live Rosette/Z3 probe |
 | `make formal-differential-test` | Independent CIRCT/Verilator replay for structurally different shifts, aggregates, hierarchy, fully cared decode, and assumption-constrained one-hot implementations, including defect counterexamples and output-query witnesses |
 
-That target also finds a constrained reachability witness, proves a constrained
-output property, and produces a violating property counterexample. The
-testbench checks all 128 reduced-width unequal-shift inputs, 80 aggregate
-layouts and projections, 256 hierarchical arithmetic inputs, eight decode
-selectors, and 12,288 valid one-hot selections against independent
-SystemVerilog oracles. Set
+Detailed test ownership and the differential oracle matrix are in
+[`DEVELOPING.md`](DEVELOPING.md#validation). Set
 `CIRCT_OPT=/path/to/circt-opt` when the pinned tool is not under the current
 checkout's `.tools/` directory.
 

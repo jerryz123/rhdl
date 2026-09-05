@@ -7,6 +7,9 @@ Mode's `racket-hash-lang-mode`. It adds Rhodium file dispatch, checkout-local
 Racket configuration, and a small presentation layer without defining another
 major mode.
 
+Contributors changing the integration should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Installation
 
 Install the Emacs package `racket-mode`, then add this directory to Emacs's
@@ -147,15 +150,5 @@ not retroactively rebuild that root's configuration.
 
 ## Validation
 
-The focused ERT tests cover file association, checkout discovery, generated
-command construction, one-time registration, exact-root preservation, dispatch
-order, missing Racket Mode reporting, module-language labeling, and font-lock
-installation and removal. Run them from the repository root:
-
-```sh
-make emacs-test
-```
-
-See [`tests/emacs/rhodium-mode-test.el`](../../tests/emacs/rhodium-mode-test.el)
-for the executable coverage. These unit tests mock back-end registration; they
-do not start a Racket Mode back-end process or exercise live editor services.
+Contributor test coverage and its limits are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

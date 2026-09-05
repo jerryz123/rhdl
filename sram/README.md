@@ -9,6 +9,9 @@ eligibility checks, macro-interface adaptation, depth/width tiling, and handoff
 manifests. It does not put macro names or PDK paths into Rhodium, processor
 cores, or SoCs.
 
+Contributors changing selection, mapping, adapters, or schemas should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ```mermaid
 flowchart LR
   design["Verified Rhodium design<br/>logical synchronous memories"]
@@ -171,19 +174,8 @@ needed for that handoff.
 
 ## Focused validation and consumers
 
-Build the plugin and run the synthetic contract, selection, wrapper, and
-Verilator checks with:
-
-```sh
-make -C sram test
-```
-
-The target uses the repository-pinned CIRCT by default. Set matching
-`CIRCT_OPT` and `CIRCT_ROOT` when using another installation; `PYTHON` and
-`VERILATOR` are also overridable. The suite covers depth banking, width
-slicing, masking, generated-wrapper behavior, mixed mapped/inferred equal-shape
-sites, unknown-site rejection, scoped wrapper stability, and unsupported port
-topology.
+Contributor plugin, mapper, wrapper, and schema validation is documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).
 
 Consumer-specific validation belongs with each consumer:
 

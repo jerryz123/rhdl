@@ -1,4 +1,4 @@
-<!-- Describes reusable platform devices, their integration contracts, and focused validation. -->
+<!-- Describes reusable platform devices and their integration contracts. -->
 
 # Platform devices
 
@@ -8,6 +8,9 @@ system address map, route interrupts into a processor, or select simulator
 policy. Those integration decisions belong to the
 [`socs/`](../socs/README.md#common-host-and-platform-contract) and
 [`sims/`](../sims/README.md#ownership-and-execution-boundary) packages.
+
+Contributors changing a device or model should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ## Choose a component
 
@@ -183,40 +186,11 @@ device or SoC requirement.
 
 ## Find the implementation
 
-| Area | Owning source |
-| --- | --- |
-| Boot image and reset trampoline | [`bootrom-image.rhm`](bootrom-image.rhm) |
-| CHI BootROM endpoint | [`bootrom.rhdl`](bootrom.rhdl) |
-| ACLINT registers, interrupts, and CHI endpoint | [`aclint.rhdl`](aclint.rhdl) |
-| 8-N-1 serial engines | [`uart.rhdl`](uart.rhdl) |
-| 16550-style registers, FIFOs, and CHI endpoint | [`uart16550.rhdl`](uart16550.rhdl) |
-| Rhodium PTY adapter | [`uart-dpi.rhdl`](uart-dpi.rhdl) |
-| PTY ABI and host implementation | [`dpi/uart_dpi.h`](dpi/uart_dpi.h), [`dpi/uart_dpi.cc`](dpi/uart_dpi.cc) |
-| Host checks and elaboration fixtures | [`tests/`](tests/) |
-| CIRCT emitters and Verilator benches | [`../tests/backend/`](../tests/backend/README.md#fixture-and-artifact-ownership) |
+Source ownership moved to the contributor
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map). This heading remains for
+existing links.
 
 ## Run focused validation
 
-From the repository root, run all device host checks and the standalone C++
-PTY test with:
-
-```sh
-make device-test
-```
-
-The target runs package-boundary checks, every `devices/tests/*-test.rhm`, and
-[`run-uart-dpi-cpp.sh`](tests/run-uart-dpi-cpp.sh). Its Rhombus test runner
-creates a fresh `PLTCOMPILEDROOTS` when the caller has not supplied one.
-
-To lower and simulate only the four device fixtures through CIRCT and
-Verilator, use:
-
-```sh
-FIXTURES='bootrom aclint uart16550 uart-dpi' \
-  bash tests/backend/run-circt.sh --simulate-only
-```
-
-These fixtures cover protocol transactions, register and interrupt behavior,
-serial pins, and the DPI boundary. The
-[backend test guide](../tests/backend/README.md#choose-the-smallest-useful-run)
-owns runner modes, toolchain requirements, and artifact policy.
+Contributor host checks, standalone C++ coverage, and CIRCT/Verilator fixtures
+are documented in [`DEVELOPING.md`](DEVELOPING.md#focused-validation).

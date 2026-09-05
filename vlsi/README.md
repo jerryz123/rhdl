@@ -16,6 +16,9 @@ design/technology policy can select and preserve SRAM macros in mapped MiniSoC
 RTL and synthesized netlists. No target currently places that MiniSoC or
 integrates it into the OpenFrame wrapper.
 
+Contributors changing a physical profile, handoff, or flow target should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ```mermaid
 flowchart TD
   rhodiumLeaf["RhodiumTop source"] --> leafMlir["CIRCT MLIR"] --> leafRtl["Generated SystemVerilog"]

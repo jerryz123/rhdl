@@ -6,22 +6,13 @@ Use `cores/` for processor RTL, not for Rhodium's language internals. The
 similarly named [`rhodium/core/`](../rhodium/core/README.md) owns the
 frontend-independent hardware IR.
 
+Contributors adding components or named cores should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Choose the right home
 
-Before adding a component, decide who owns its policy:
-
-- Put an execution or data-shaping block directly under `cores/` only when its
-  interface is useful to more than one processor and it does not depend on an
-  instruction catalog, named core, backend, example, or test.
-- Put instruction decode, architectural state, pipeline policy, adapters, and
-  integrated tests under `cores/<name>/`.
-- Put direct tests for a reusable component in [`cores/tests/`](tests/). Put a
-  named core's tests under its own `tests/` directory.
-
-The boundary is enforced by [`check-boundaries.sh`](check-boundaries.sh). A
-reusable component may use the closed RISC-V `XLen` configuration when its
-contract is specifically RV32/RV64, but instruction catalogs and field models
-remain named-core policy.
+Contributor placement and dependency rules are documented in
+[`DEVELOPING.md`](DEVELOPING.md#choose-the-right-home).
 
 ## Pick a reusable component
 
@@ -50,10 +41,9 @@ destination tracking, and writeback policy outside the reusable block.
 
 ## Add or inspect a named core
 
-Create `cores/<name>/` and keep its decode, datapath, architectural state,
-integration adapters, and tests together. A named core may depend on the
-reusable blocks, Rhodium libraries, pure RISC-V ISA/RTL support, and shared
-protocol libraries, but never on another named core.
+A named core owns its decode, datapath, architectural state, pipeline policy,
+integration adapters, and public system boundary. Named cores may reuse the
+components above without changing those components' caller-owned policy.
 
 RV5Stage is the current named core. Its default profile is integer-only;
 supported optional profiles are RV32F on `XLen.X32` and RV64D on `XLen.X64`,
@@ -66,53 +56,11 @@ and deliberate limits.
 
 ## Preserve dependency direction
 
-```mermaid
-flowchart LR
-    consumers["Backends, examples, and tests"] --> named["Named cores<br/>cores/&lt;name&gt;/"]
-    consumers --> reusable["Reusable components<br/>cores/*.rhdl"]
-    named --> reusable
-    named --> riscv["RISC-V ISA and RTL"]
-    named --> protocols["Shared protocol libraries"]
-    named --> rhodium["Rhodium language and std"]
-    reusable --> rhodium
-    reusable -->|"ALU and load/store only"| xlen["RISC-V XLen"]
-```
-
-Production code must not reverse an arrow toward consumers. In particular,
-neither reusable components nor named cores may import the optional CIRCT
-backend, examples, or tests. Backend consumers elaborate public designs from
-outside this package.
+The enforced implementation dependency graph moved to
+[`DEVELOPING.md`](DEVELOPING.md#dependency-direction). This heading remains for
+existing links.
 
 ## Verify a change
 
-Run commands from the repository root. For a reusable component, start with
-its direct host test:
-
-```sh
-tools/run-racket-tests.sh cores/tests/alu-test.rhm
-tools/run-racket-tests.sh cores/tests/branch-resolver-test.rhm
-tools/run-racket-tests.sh cores/tests/load-store-test.rhm
-tools/run-racket-tests.sh cores/tests/multiplier-test.rhm
-tools/run-racket-tests.sh cores/tests/divider-test.rhm
-```
-
-Run only the line for the component you changed, or pass several paths to one
-invocation when a contract spans components. The script supplies a fresh
-`PLTCOMPILEDROOTS` when the caller has not already selected one.
-
-After changing imports, ownership, or package layout, run:
-
-```sh
-bash cores/check-boundaries.sh
-```
-
-For work that crosses reusable components and RV5Stage integration, the root
-[`Makefile`](../Makefile) provides:
-
-```sh
-make rv5stage-host-test
-```
-
-Use `make rv5stage-test` only when the change also needs the focused CIRCT and
-Verilator fixtures. The named core's owning README describes narrower RV5Stage
-test selections.
+Contributor test selection and boundary checking are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

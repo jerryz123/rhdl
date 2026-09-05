@@ -8,6 +8,9 @@ the reusable [simulation stack](../../sims/README.md) and
 [SRAM mapper](../../sram/README.md), not a second implementation of either.
 Use `sims/` when all memories should remain technology-independent and inferred.
 
+Contributors changing the mapped build graph or supported configuration should
+read [`DEVELOPING.md`](DEVELOPING.md).
+
 ## Flow and ownership
 
 ```mermaid

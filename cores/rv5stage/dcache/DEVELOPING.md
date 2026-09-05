@@ -1,0 +1,73 @@
+<!-- Guides contributors through implementing and validating RV5Stage's data cache. -->
+
+# Developing the RV5Stage data cache
+
+Read the L1D [README](README.md) for its public request/response, hit, refill,
+writeback, snoop, atomic, LR/SC, replacement, and deliberate-limit contracts.
+This guide owns implementation placement and contributor validation.
+
+## Architecture and ownership
+
+The L1D package owns the data-access protocol, synchronous arrays, hit path,
+coherence state, mutation, blocking allocation/acquisition, replacement, and
+LR/SC reservation. The parent core owns virtual translation, alignment faults,
+PMA routing, architectural fence ordering, and the external CHI boundary.
+
+Keep L1D independent of L1I. Reuse parent-directory cache parameters and the
+shared refill, write-unique, writeback, and data-snoop engines rather than
+importing the instruction-cache package.
+[`../../check-boundaries.sh`](../../check-boundaries.sh) enforces that split.
+
+## Implementation map
+
+| Concern | Owner |
+|---|---|
+| Core-facing request and response bundles | [`protocol.rhdl`](protocol.rhdl) |
+| Lookup, arrays, hit mutation, reservation, replacement, gather, refill installation, and transaction arbitration | [`cache.rhdl`](cache.rhdl) |
+| Shared cache geometry | [`../cache.rhdl`](../cache.rhdl) |
+| Retry-aware complete-line refill | [`../refill.rhdl`](../refill.rhdl) |
+| Ownership acquisition and partial writes | [`../write-unique.rhdl`](../write-unique.rhdl) |
+| Dirty-victim drain | [`../writeback.rhdl`](../writeback.rhdl) |
+| Clean and dirty snoop transaction lifetime | [`../snoop.rhdl`](../snoop.rhdl) |
+| Core/MMU/CHI integration | [`../rv5stage.rhdl`](../rv5stage.rhdl) |
+| Focused host coverage | [`../tests/dcache-test.rhm`](../tests/dcache-test.rhm), [`../tests/atomic-test.rhm`](../tests/atomic-test.rhm), [`../tests/transaction-engines-test.rhm`](../tests/transaction-engines-test.rhm) |
+| CIRCT/Verilator fixtures | [`../../../tests/backend/`](../../../tests/backend/DEVELOPING.md#fixture-and-artifact-ownership) |
+
+## Change the cache
+
+1. Preserve ordered Decoupled requests and non-backpressurable Valid responses,
+   including completion metadata for stores, atomics, and deferred writeback.
+2. Keep the one-request-per-cycle load-hit path separate from blocking miss,
+   acquisition, gather, writeback, and installation state.
+3. Publish refill metadata only after the last word, and invalidate a dirty
+   victim before reusing its way.
+4. Preserve explicit SRAM ownership and priority among core lookup, line
+   gather, refill installation, and snoop service.
+5. Keep LR/SC reservation invalidation aligned with local mutation,
+   replacement, and invalidating snoops. Do not move architectural alignment or
+   PMA faults into the cache.
+6. Add host coverage for affected hit/miss/coherence paths and update
+   [README.md](README.md) when public timing, state, traffic, or limits change.
+
+## Focused validation
+
+Run the direct cache check from the repository root:
+
+```sh
+tools/run-racket-tests.sh cores/rv5stage/tests/dcache-test.rhm
+```
+
+Include related shared-engine or atomic coverage when those paths change:
+
+```sh
+tools/run-racket-tests.sh \
+  cores/rv5stage/tests/refill-test.rhm \
+  cores/rv5stage/tests/transaction-engines-test.rhm \
+  cores/rv5stage/tests/atomic-test.rhm
+```
+
+Use the parent [`DEVELOPING.md`](../DEVELOPING.md#focused-validation) for
+complete-core integration. Backend fixture names include `rv5stage-dcache` and
+`rv5stage-dcache-rv32`; use the backend test
+[`DEVELOPING.md`](../../../tests/backend/DEVELOPING.md) for CIRCT and Verilator
+modes. Repository wrappers provide a fresh compiled root.

@@ -4,8 +4,9 @@
 
 `rhodium/std` contains opt-in reusable hardware vocabulary written against the
 public `#lang rhodium` language. It is not another language profile and adds no
-core IR, elaboration, or backend behavior. Its dependency contract is listed
-in [`../README.md`](../README.md).
+core IR, elaboration, or backend behavior. Contributors changing or extending
+the library should read [`DEVELOPING.md`](DEVELOPING.md), including its link to
+the enforced package dependency contract.
 
 ## Choose a component
 
@@ -92,7 +93,7 @@ event or pulse synchronizer.
 Decode descriptions are immutable host data. Only applying a decode generator
 inside a circuit emits hardware.
 
-### Patterns and pattern sets
+### Typed decode patterns
 
 [`decode/pattern.rhdl`](decode/pattern.rhdl) defines `Pattern`, an immutable
 host-side bit cube over two `HardwareLiteral` values:
@@ -174,7 +175,7 @@ freedom from `dont_care`. Keeping this policy out of `Pattern` preserves its
 host-only architecture and allows future matching or optimization consumers
 to choose different interpretations.
 
-### Decode generation and composition
+### Typed decode generation
 
 [`decode.rhdl`](decode.rhdl) is the public facade for `Pattern`, `PatternSet`,
 `DecodeCase`, `DecodeTable`, and `DecodeGen`. A table requires at least one
@@ -528,7 +529,7 @@ the `n` states from zero to `n - 1`. `value` has type
 `n - 1`, immediately before the next edge returns the value to zero. An
 internal assertion checks that the state remains within that range.
 
-## Flow-control library
+## Flow-control circuits
 
 The flow library has two authoring levels. Instantiate a named generator when
 you need its additional ports or instance identity. Use a lowercase configured
@@ -613,14 +614,13 @@ payload from the preceding endpoint or handle; they never repeat it.
 
 ### Static typing and reusable topologies
 
-`InterfaceTransformResult` is the generic interface layer's single dependent
-static-information rule behind these operations. A statically known endpoint
-produces the operation's connected shape, an endpoint array produces the
-cardinality-changing connected shape, and a type seed or existing handle
-produces a handle. A conservative topology annotation covers generic
-instance-member expressions. Consequently `.bits`, `[0].bits`, array
-destructuring, and handle `.right` remain available under `use_static` without
-corrective `:: Endpoint` annotations.
+Flow stages preserve enough static information for a statically known endpoint
+to produce its connected shape, for an endpoint array to produce the resulting
+cardinality, and for a type seed or existing handle to produce a handle.
+Consequently `.bits`, `[0].bits`, array destructuring, and handle `.right`
+remain available under `use_static` without corrective `:: Endpoint`
+annotations. The contributor guide explains the
+[shared implementation of that propagation](DEVELOPING.md#static-information-and-topology-results).
 
 Fan-in helpers take an ordinary host `Array`. `arbiter()` and `rr_arbiter()`
 infer the input count from a connected array. A disconnected topology states

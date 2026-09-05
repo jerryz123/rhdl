@@ -12,6 +12,9 @@ planning. Routed components start at `RouterPlan` or `RouterFamilyPlan`, while
 static broadcast starts at `DistributionPlan`; this package cannot construct a
 proof or turn an unchecked relation into hardware.
 
+Contributors changing the hardware realization should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Component map
 
 | File | Responsibility |
@@ -222,3 +225,6 @@ env PLTCOMPILEDROOTS="$(mktemp -d)" \
   racket -y -S "$PWD" tools/write-noc-router-diagram.rhm \
   /tmp/noc-router-diagram
 ```
+
+Contributor test selection and backend fixture ownership are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

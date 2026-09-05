@@ -12,6 +12,9 @@ Capability claims describe the repositories and public documentation examined
 as of **2026-08-17**. All systems are evolving, so treat conclusions as a
 qualified snapshot rather than a permanent ranking.
 
+Contributors updating evidence, adding a comparison, or refreshing the shared
+rubric should read [`DEVELOPING.md`](DEVELOPING.md).
+
 ## Choose a reading path
 
 | If you want to understand... | Start with | Then read |
@@ -42,22 +45,10 @@ qualified snapshot rather than a permanent ranking.
 
 ## Method and evidence discipline
 
-Each essay follows the same process:
-
-1. Establish Rhodium's supported behavior from the live core, frontend,
-   verifier, and lowering contracts.
-2. Establish the other system's model from official manuals, specifications,
-   papers, and primary repositories.
-3. Compare systems at the same semantic level. An accelerator IR is not treated
-   as a complete RTL language, and a host library is not credited with behavior
-   supplied only by a downstream tool.
-4. Separate circuit expressivity, abstraction expressivity, static guarantees,
-   and syntactic economy.
-
-The conclusions concern supported public models, not hypothetical extensions.
-Ecosystem size, vendor integrations, and exhaustive library inventories are
-outside this guide's scope. An internal compiler distinction counts only when
-it changes what an author can state, compose, or have checked.
+The suite compares supported public models at the same semantic level and
+separates circuit expressivity, abstraction expressivity, static guarantees,
+and syntactic economy. Its evidence and maintenance rules are in
+[`DEVELOPING.md`](DEVELOPING.md#method-and-evidence-discipline).
 
 ## Shared Rhodium baseline
 
@@ -87,31 +78,9 @@ to those documents instead of redefining the architecture independently.
 
 ## Common evaluation rubric
 
-Every comparison addresses these questions:
-
-- What does a source program denote, and which decisions happen before the
-  resulting hardware runs?
-- Are widths, domains, directions, and interface identities inferred,
-  structural, nominal, or statically typed?
-- Does an internal representation distinction produce an author-visible,
-  compositional guarantee, or only a compiler normal form?
-- How are state updates, assignment conflicts, priority, and concurrency
-  represented?
-- Are exact literals, partial patterns, and decode tables syntax, or typed
-  values that can be validated, transformed, and optimized before hardware
-  construction?
-- Do abstractions compose as expressions, signal bundles, modules, methods,
-  rules, streams, or typed transformations?
-- How local is a line's meaning? Which scopes, schedulers, or inference passes
-  can change it?
-- Where does Rhodium gain directness, where is it merely more verbose, and
-  which propositions can the other system state that Rhodium cannot?
-- Which imported ideas extend exact construction, and which would change its
-  semantic model?
-
-For this guide, “clean” and “elegant” mean orthogonal rules, closure under
-composition, local reasoning, proportionate notation, and guarantees that
-rule out real classes of bad hardware.
+Every essay uses the same evaluation questions and definitions. The complete
+rubric and instructions for changing it are in
+[`DEVELOPING.md`](DEVELOPING.md#common-evaluation-rubric).
 
 ## Cross-system conclusions
 

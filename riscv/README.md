@@ -8,6 +8,9 @@ and [`isa/`](isa/) packages do not depend on Rhodium. The isolated
 [`rtl/`](rtl/README.md) adapter materializes those descriptions as hardware
 without moving processor policy into the architectural model.
 
+Contributors extending the model or catalogs should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Find what you need
 
 | Task | Start here |
@@ -226,6 +229,9 @@ from the repository root:
 ```sh
 make riscv-test
 ```
+
+Test ownership, package-boundary enforcement, and the workflow for extending
+the model are documented in [`DEVELOPING.md`](DEVELOPING.md#focused-validation).
 
 Executable pattern and field-extraction examples live in
 [`../examples/riscv/`](../examples/riscv/).

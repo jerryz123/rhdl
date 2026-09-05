@@ -7,6 +7,9 @@ to hardware. It turns architectural descriptors into public Rhodium values and
 reusable circuits without acquiring concrete-core, pipeline, fetch, retirement,
 interconnect-topology, CIRCT, or test policy.
 
+Contributors changing this adapter should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Find what you need
 
 | Task | Start here |
@@ -32,6 +35,9 @@ Concrete cores own instruction selection, decode outputs, register files,
 pipeline and fetch behavior, privilege transitions, CSR policy, scheduling,
 execution, and retirement. See [`../../cores/`](../../cores/README.md) for those
 integration boundaries.
+
+Dependency enforcement and extension workflow are documented in
+[`DEVELOPING.md`](DEVELOPING.md#architecture-and-dependency-boundary).
 
 ## Component map
 
@@ -174,3 +180,6 @@ compressed-expansion, and boundary checks with:
 ```sh
 make riscv-test
 ```
+
+The focused test inventory and adapter-change workflow are in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

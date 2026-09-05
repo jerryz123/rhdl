@@ -6,6 +6,8 @@ Analysis packages inspect finished, verified public core IR without changing the
 hardware, authoring syntax, or backend output. They may depend on
 [`rhodium/core/`](../core/); core does not depend on analysis. Frontends and
 downstream tools opt into an analysis when they need its policy or reports.
+Contributors changing analysis implementation or policy should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ## Clocking analysis
 
@@ -196,20 +198,10 @@ The public surface is organized as follows:
 
 Ownership stays narrow:
 
-- [`clocking/types.rhm`](clocking/types.rhm) defines analysis result and
-  environment objects.
-- [`clocking/module.rhm`](clocking/module.rhm) inventories module clock use and
-  constructs reusable hierarchy-aware provenance.
-- [`clocking/environment.rhm`](clocking/environment.rhm) validates top-boundary
-  facts, resolves classifications, creates CDC violations, and applies strict
-  policy.
-- [`frontend/support/clocking.rhm`](../frontend/support/clocking.rhm) owns
-  ambient `sync_circuit` expansion and calls the single-clock certificate.
-- [`frontend/layers/clocking.rhm`](../frontend/layers/clocking.rhm) owns author
-  declarations, `elaborate_with_clocking`, and `elaborate_with_cdc`.
-- [`core/verify.rhm`](../core/verify.rhm) owns crossing-evidence invariants, and
-  the [CIRCT backend](../backend/README.md#verification-cdc-evidence-and-simulation-effects)
-  owns omission of the metadata operation plus `async_reg` emission.
+The public entry point owns analysis results and policy; frontend declarations,
+core crossing evidence, and backend attributes remain separate contracts. The
+detailed source ownership is in
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Deliberate limits
 
@@ -225,26 +217,5 @@ max-skew are also downstream concerns.
 
 ## Focused validation
 
-The analysis behavior and its integration boundaries are covered by:
-
-- [`clocking-test.rhm`](../../tests/analysis/clocking-test.rhm) for clock/reset
-  inventories, aliases, and one-clock certification;
-- [`clocking-provenance-test.rhm`](../../tests/analysis/clocking-provenance-test.rhm)
-  for leaf-sensitive hierarchy provenance;
-- [`clocking-environment-test.rhm`](../../tests/analysis/clocking-environment-test.rhm)
-  for top contracts, relationships, and invalid environments;
-- [`clocking-cdc-test.rhm`](../../tests/analysis/clocking-cdc-test.rhm) for
-  violations, verified crossings, lineage, and reconvergence;
-- [`cdc-test.rhm`](../../tests/core/cdc-test.rhm) and the
-  [backend CDC test](../../tests/backend/cdc-test.rhm) for the evidence contract
-  and CIRCT attribute handoff.
-
-Run the focused analysis batch through the repository helper; it creates a
-fresh `PLTCOMPILEDROOTS` when none is supplied:
-
-```sh
-env -u PLTCOMPILEDROOTS tools/run-racket-tests.sh tests/analysis/*-test.rhm
-```
-
-Run broader frontend, backend, or RTL simulation targets only when their owned
-behavior changes.
+Contributor test ownership and commands moved to
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

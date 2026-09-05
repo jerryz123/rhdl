@@ -6,6 +6,8 @@ This guide is the executable learning path and complete example catalog for
 Rhodium and RFPL. Start with a task below, then use the ownership indexes to
 find every runnable example. Language architecture and component contracts stay
 with their owning packages; this guide links to them instead of repeating them.
+Contributors adding examples or maintaining generated references should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 - [Choose a learning path](#choose-a-learning-path)
 - [Run the examples](#run-the-examples)
@@ -308,6 +310,7 @@ snapshots. `make examples` checks manifest coverage and validates the references
 explicitly selected by the backend fixture manifest; it does not run CIRCT or
 Verilator.
 
-The [backend test guide](../tests/backend/README.md#verilog-references) owns the
-reference naming rules, exact comparison and update commands, CIRCT version
-requirements, and Verilator workflow.
+Reference naming, catalog maintenance, and the validation workflow are in the
+[example contributor guide](DEVELOPING.md#maintain-generated-verilog). The
+[backend test developer guide](../tests/backend/DEVELOPING.md#verilog-references)
+owns exact comparison and update mechanics.

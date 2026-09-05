@@ -10,6 +10,9 @@ core profile. Pipeline behavior, hazards, and execution ordering belong to the
 [parent RV5Stage contract](../README.md); this document owns the decode
 composition and control-column boundaries.
 
+Contributors changing decode ownership or instruction coverage should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Select a decode specialization
 
 `RV5StageInstructionDecoder` accepts `xlen`, `profile`, `half_precision`, and
@@ -90,38 +93,8 @@ instantiate that circuit beside the core decoder.
 
 ## Change the owning control column
 
-Each component file owns both its decoder-facing bundle and the cases that
-populate that column. Component files do not import sibling decode components;
-`core-ctrl.rhdl` is the composition boundary.
-
-| File | Owned control |
-|---|---|
-| [`alu-ctrl.rhdl`](alu-ctrl.rhdl) | ALU result selection and modifiers for base integer, B, Zicond, address-generation, and unused-result cases |
-| [`operand-ctrl.rhdl`](operand-ctrl.rhdl) | Integer register use, ALU operand routing, and immediate format |
-| [`branch-ctrl.rhdl`](branch-ctrl.rhdl) | Branch-resolver mode and JALR target selection |
-| [`mem-ctrl.rhdl`](mem-ctrl.rhdl) | Load, store, LR/SC, and AMO operation, width, atomic operation, and load extension |
-| [`multiply-ctrl.rhdl`](multiply-ctrl.rhdl) | Multiplier signedness plus high-result and word-result selection |
-| [`divide-ctrl.rhdl`](divide-ctrl.rhdl) | Divider signedness plus quotient/remainder and word-result selection |
-| [`writeback-ctrl.rhdl`](writeback-ctrl.rhdl) | Scalar architectural write enable and result source |
-| [`system-ctrl.rhdl`](system-ctrl.rhdl) | Zicsr operation and ECALL, EBREAK, WFI, MRET, and SRET actions |
-| [`fence-ctrl.rhdl`](fence-ctrl.rhdl) | FENCE, FENCE.I, and SFENCE.VMA actions |
-| [`fp-ctrl.rhdl`](fp-ctrl.rhdl) | FP register-bank use, destination bank, execution unit, precisions, rounding-mode use, and operation modifiers |
-| [`decode-support.rhdl`](decode-support.rhdl) | Catalog-independent case construction, exclusion, exact-pattern comparison, and component lookup helpers |
-| [`core-ctrl.rhdl`](core-ctrl.rhdl) | `RV5StageControl`, core-row composition, scalar controls for FP rows, profile validation, and the integrated decoder circuit |
-
-ALU and operand relations use each XLEN catalog's own immediate-shift
-`InstructionSpec` objects because those encodings differ. Other shared
-instructions reuse the same model objects; rows are matched by exact input
-pattern rather than rebound by instruction name. Memory width is the shared
-[`MemoryWidth`](../../load-store.rhdl) datapath contract, not a decoder-local
-duplicate.
-
-When adding an instruction, update the selected instruction catalog and every
-complete component relation that participates in `compose_control_cases`. An FP
-instruction instead needs operand metadata, an execution case, and inclusion
-in the selected FP catalog; the core adapter owns its scalar-column settings.
-Exact-one lookup turns a missing or duplicate component row into an elaboration
-error.
+Control-column ownership and the instruction-extension workflow moved to
+[`DEVELOPING.md`](DEVELOPING.md#control-column-ownership).
 
 ## Read care masks and don't-cares
 
@@ -148,33 +121,5 @@ a default instruction.
 
 ## Find implementation and tests
 
-| Need | Start here |
-|---|---|
-| Integrated bundle, selected core catalogs, and final decoder | [`core-ctrl.rhdl`](core-ctrl.rhdl) |
-| F/D/Zfhmin/Zfh catalogs and FP register/execution controls | [`fp-ctrl.rhdl`](fp-ctrl.rhdl) |
-| Shared instruction pattern conversion | [`riscv/rtl/instruction-pattern.rhdl`](../../../riscv/rtl/instruction-pattern.rhdl) |
-| ISA catalog definitions and profile enums | [`riscv/isa/`](../../../riscv/isa/) |
-| Core use of decoded controls | [`core.rhdl`](../core.rhdl) |
-| Integer-domain, column, care-mask, and bundle-shape checks | [`core-ctrl-test.rhm`](../tests/core-ctrl-test.rhm) |
-| FP domains, operand metadata, profile composition, and single-decode checks | [`fp-ctrl-test.rhm`](../tests/fp-ctrl-test.rhm) |
-
-Run the focused host checks from the repository root with one fresh compiled
-root for the batch:
-
-```sh
-decode_compiled_root="$(mktemp -d)"
-trap 'rm -rf "$decode_compiled_root"' EXIT
-env PLTCOMPILEDROOTS="$decode_compiled_root" \
-  tools/run-racket-tests.sh \
-  cores/rv5stage/tests/core-ctrl-test.rhm \
-  cores/rv5stage/tests/fp-ctrl-test.rhm
-```
-
-The core-control test checks exact selected RV32/RV64 domains, representative
-component controls, nested care-mask preservation, the integrated bundle shape,
-and design verification. The FP-control test checks F/D and optional Zfhmin/Zfh
-domain composition, metadata-derived register controls, representative
-precision and execution controls, supported profile pairs, design verification,
-and the invariant that integrated enabled profiles elaborate one `rtl.decode`.
-Use the [parent verification workflow](../README.md#verification) for broader
-pipeline, CIRCT, and Verilator coverage.
+Source ownership and contributor validation moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).

@@ -1,4 +1,4 @@
-<!-- Documents RFPL's public physical-view language, validation rules, and focused checks. -->
+<!-- Documents RFPL's public physical-view language, validation rules, and limits. -->
 
 # RFPL physical views
 
@@ -12,6 +12,7 @@ Use `#lang rfpl` for the annotation file. The language provides ordinary
 Rhombus plus the RFPL forms documented here. Define the logical hierarchy in
 `#lang rhodium`, finish it with `elaborate_with_top`, and import that result into
 the annotation.
+Contributors changing RFPL should read [`DEVELOPING.md`](DEVELOPING.md).
 
 ## Follow the annotation workflow
 
@@ -175,7 +176,7 @@ Repository physical-flow experiments and their proof limits are owned by the
 Production RFPL annotation code imports only the backend-independent public
 Rhodium core IR. Rhodium core, frontend, libraries, and backend do not import
 RFPL. The authoritative package dependency table is in
-[`rhodium/README.md`](../rhodium/README.md#package-responsibilities).
+[`rhodium/DEVELOPING.md`](../rhodium/DEVELOPING.md#package-responsibilities).
 
 `FloorplanDesign.design` is the original logical design, so the existing CIRCT
 backend sees no RFPL objects. RFPL outlines, coordinates, and view choices do
@@ -183,33 +184,15 @@ not become ports, constants, operations, attributes, or SystemVerilog. The
 structural test emits that retained design and checks both stable logical
 hierarchy and the absence of RFPL metadata in CIRCT text.
 
+Implementation enforcement and the contributor workflow are in
+[`DEVELOPING.md`](DEVELOPING.md#architecture-and-package-boundary).
+
 ## Find the implementation
 
-| Concern | Owner |
-|---|---|
-| `#lang rfpl` reader shim | [`main.rkt`](main.rkt) |
-| Ordinary Rhombus plus RFPL export composition | [`language.rhm`](language.rhm) |
-| Public classes, unit constructors, lookup helpers, view construction, placement, and annotation traversal | [`frontend/foundation.rhm`](frontend/foundation.rhm) |
-| Wiring-only composite-module validation | [`frontend/verify.rhm`](frontend/verify.rhm) |
-| RFPL dependency and file-extension policy | [`check-boundaries.sh`](check-boundaries.sh) |
-| Implemented status and deferred design direction | [`PLAN.md`](PLAN.md) |
-| View data, hierarchy reuse, coordinates, and CIRCT-isolation checks | [`tests/structural-test.rhm`](tests/structural-test.rhm) |
-| Rejected authoring cases and required diagnostics | [`tests/invalid/`](tests/invalid/) and [`tests/run-negative-cases.rktd`](tests/run-negative-cases.rktd) |
-| Canonical logical and physical authoring pair | [`../examples/rfpl/`](../examples/rfpl/) |
+Source ownership moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Run focused validation
 
-From the repository root, run:
-
-```sh
-make rfpl-test
-make rfpl-circt-test
-```
-
-`make rfpl-test` runs the RFPL boundary checker, the structural test, all
-intentional-invalid fixtures, and the RFPL examples. `make rfpl-circt-test`
-runs the separately owned external CIRCT check for the RFPL example's logical
-design and compares its example-owned normalized Verilog reference. The latter
-requires `circt-opt`; run `make setup-circt` or set `CIRCT_OPT` if it is not
-available. The repository test wrappers create a fresh `PLTCOMPILEDROOTS` when
-the caller has not already supplied one.
+Contributor test selection moved to
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

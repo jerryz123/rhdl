@@ -5,7 +5,8 @@
 Frontend layers add author-facing notation, types, static information, and
 policy over Rhodium's shared core semantics. This document owns the contracts
 of those independently selectable layers. It is a reference rather than a
-start-to-finish tutorial.
+start-to-finish tutorial. Contributors adding or changing a layer should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ## Using this reference
 
@@ -15,12 +16,11 @@ you are using. The surrounding documentation has narrower ownership:
 | Need | Owning document |
 |---|---|
 | Language profiles, circuit generators, elaboration, and host parameters | [Frontend guide](../README.md) |
-| Package boundaries and authoritative direct-dependency inventories | [Implementation architecture](../../README.md) |
+| Layer implementation, extension machinery, and validation | [Layer contributor guide](DEVELOPING.md) |
+| Package boundaries and authoritative direct-dependency inventories | [Rhodium contributor guide](../../DEVELOPING.md) |
 | Ready-valid protocols and reusable hardware components | [Standard library](../../std/README.md) |
 | Executable feature programs | [Examples](../../../examples/README.md) |
 
-Layers do not import sibling layers or backends. Shared macro and
-static-information machinery belongs in [`../support/`](../support/).
 `#lang rhodium` imports the curated layer set, including clocking;
 `#lang rhodium/base` programs can import only the layers they need.
 
@@ -94,8 +94,8 @@ and dependent result annotations come from the function declaration, and an
 extension exists only where its function binding is in lexical scope.
 Receiver-owned methods take precedence, followed by built-ins and compatible
 receiver-first functions; specialized field providers fall through to that
-same common resolution path. The implementation machinery is described in the
-[architecture guide](../../README.md#frontend-layer-dependencies).
+same common resolution path. The static-information and dispatch machinery is
+described in the [layer contributor guide](DEVELOPING.md#static-information-and-hardware-surfaces).
 
 ## Clock domains and CDC analysis
 
@@ -1138,4 +1138,5 @@ standard protocols.
 
 Ready-valid protocols and reusable flow circuits are documented in
 [`../../std/README.md`](../../std/README.md). Canonical feature programs live
-in [`../../../examples/`](../../../examples/README.md).
+in [`../../../examples/`](../../../examples/README.md). See
+[`DEVELOPING.md`](DEVELOPING.md) to change or add a frontend layer.

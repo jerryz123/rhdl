@@ -90,17 +90,17 @@ fail_matches "frontend layers must not import sibling layers" \
 
 while IFS= read -r layer_file; do
   layer_name="$(basename "$layer_file")"
-  if ! grep -Fq "| \`$layer_name\` |" rhodium/README.md; then
-    echo "frontend layer is missing from the rhodium/README.md dependency table: $layer_file" >&2
+  if ! grep -Fq "| \`$layer_name\` |" rhodium/DEVELOPING.md; then
+    echo "frontend layer is missing from the rhodium/DEVELOPING.md dependency table: $layer_file" >&2
     exit 1
   fi
 done < <(find rhodium/frontend/layers -maxdepth 1 -type f -name '*.rhm' | sort)
 
 while IFS= read -r std_file; do
   documented_path="${std_file#rhodium/}"
-  dependency_row="$(grep -F "| \`$documented_path\` |" rhodium/README.md || true)"
+  dependency_row="$(grep -F "| \`$documented_path\` |" rhodium/DEVELOPING.md || true)"
   if [[ -z "$dependency_row" ]]; then
-    echo "standard-library module is missing from the rhodium/README.md dependency table: $std_file" >&2
+    echo "standard-library module is missing from the rhodium/DEVELOPING.md dependency table: $std_file" >&2
     exit 1
   fi
   if [[ "$documented_path" == "std/flow.rhdl" ]]; then
@@ -110,7 +110,7 @@ while IFS= read -r std_file; do
     [[ -z "$dependency" ]] && continue
     documented_dependency="${dependency#rhodium/}"
     if [[ "$dependency_row" != *"\`$documented_dependency\`"* ]]; then
-      echo "standard-library dependency is missing from the rhodium/README.md table: $documented_path imports $documented_dependency" >&2
+      echo "standard-library dependency is missing from the rhodium/DEVELOPING.md table: $documented_path imports $documented_dependency" >&2
       exit 1
     fi
   done < <(sed -n 's/.*lib("\(rhodium\/std\/[^\"]*\.rhdl\)").*/\1/p' "$std_file")
@@ -124,7 +124,7 @@ fail_matches "frontend tests must not import backend modules" \
   '^[[:space:]]+"[^"]*backend/' tests/frontend
 
 unexpected_top_level="$(find rhodium -maxdepth 1 -type f \
-  ! -name 'README.md' ! -name 'CLOCKING_PLAN.md' \
+  ! -name 'README.md' ! -name 'DEVELOPING.md' ! -name 'CLOCKING_PLAN.md' \
   ! -name 'main.rkt' ! -name 'language.rhm' -print)"
 if [[ -n "$unexpected_top_level" ]]; then
   echo "rhodium root may contain only architecture documents, the reader shim, and language assembly" >&2

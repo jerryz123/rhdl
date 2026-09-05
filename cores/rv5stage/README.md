@@ -1,4 +1,4 @@
-<!-- Defines RV5Stage's microarchitecture, system boundary, implementation ownership, and verification workflow. -->
+<!-- Defines RV5Stage's public microarchitecture, system boundary, and supported behavior. -->
 
 # RV5Stage
 
@@ -11,6 +11,9 @@ scalar pipeline with a parallel FP execution engine and variable-length Fetch.
 Core-specific decode, architectural state, pipeline policy, MMU, and private L1
 caches live here. Reusable execution components remain directly under
 [`cores/`](../).
+
+Contributors changing the core should read
+[`DEVELOPING.md`](DEVELOPING.md).
 
 ## At a glance
 
@@ -353,76 +356,20 @@ exception.
 
 ## Implementation map
 
-| Area | Ownership |
-|---|---|
-| [`rv5stage.rhdl`](rv5stage.rhdl) | Core, MMU, cache, uncached, and CHI composition |
-| [`core.rhdl`](core.rhdl) | Scalar pipeline, forwarding, hazards, commit, and deferred completion |
-| [`bundles.rhdl`](bundles.rhdl) | Scalar pipeline payloads |
-| [`fetch.rhdl`](fetch.rhdl) | Aligned-word window, C expansion, instruction queue, and redirect flushing |
-| [`decode/`](decode/README.md) | Structured integer and FP control generation |
-| [`register-file.rhdl`](register-file.rhdl) | Two-read, two-write integer register bank |
-| [`fp-pipeline.rhdl`](fp-pipeline.rhdl) | FP register state, execution lanes, and completion |
-| [`csr.rhdl`](csr.rhdl), [`interrupt.rhdl`](interrupt.rhdl) | Privileged state, traps, counters, and interrupts |
-| [`mmu/`](mmu/README.md) | TLBs, translation, and page-table walking |
-| [`instruction-memory-router.rhdl`](instruction-memory-router.rhdl), [`memory-router.rhdl`](memory-router.rhdl), [`uncached.rhdl`](uncached.rhdl) | Physical-region routing and shared uncached transactions |
-| [`cache.rhdl`](cache.rhdl), [`chi.rhdl`](chi.rhdl) | Shared cache geometry, physical-region/Home policy, and RN identity parameters |
-| [`icache/`](icache/README.md), [`dcache/`](dcache/README.md) | Private cache protocols, arrays, policy, and CHI routing |
-| Transaction engines | Refill, ownership acquisition, retry, dirty drain, and snoop handling |
-
-RV5Stage may depend on Rhodium, the pure RISC-V model, reusable components from
-`cores/`, and shared CHI libraries. It must not import another named core, a
-backend, examples, or test implementations.
+Source ownership and dependency enforcement moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map). This heading remains for
+existing links.
 
 ## Generated detailed diagrams
 
-The embedded diagrams describe architectural intent. For an implementation
-inventory of the elaborated RV64 core, including child blocks, registers, and
-typed interface channels, generate JSON and Graphviz DOT from
-[`examples/rv5stage/core-diagram.rhdl`](../../examples/rv5stage/core-diagram.rhdl):
-
-```sh
-mkdir -p /tmp/rv5stage-core-diagram
-env PLTCOMPILEDROOTS="$(mktemp -d)" \
-  racket -y -S "$PWD" tools/write-rv5stage-core-diagram.rhm \
-  /tmp/rv5stage-core-diagram
-```
-
-The JSON targets interactive renderers. The compact DOT view links child
-modules by name rather than flattening their internals into one graph.
+Contributor diagram generation moved to
+[`DEVELOPING.md`](DEVELOPING.md#generated-detailed-diagrams).
 
 ## Verification
 
-Run the focused host checks from the repository root:
-
-```sh
-make rv5stage-host-test
-```
-
-For the core/cache hierarchy only:
-
-```sh
-tools/run-racket-tests.sh \
-  cores/rv5stage/tests/refill-test.rhm \
-  cores/rv5stage/tests/icache-test.rhm \
-  cores/rv5stage/tests/dcache-test.rhm \
-  cores/rv5stage/tests/rv5stage-test.rhm
-```
-
-`tools/run-racket-tests.sh` creates and removes a fresh compiled root when the
-caller does not supply `PLTCOMPILEDROOTS`.
-
-`make rv5stage-test` runs those host checks plus the selected RV5Stage CIRCT and
-Verilator fixture batch named in the `Makefile`. To exercise the dedicated WFI
-control-flow simulation, run:
-
-```sh
-FIXTURE=rv5stage-wfi bash tests/backend/run-circt.sh
-```
-
-The [backend test guide](../../tests/backend/README.md) owns fixture selection,
-tool discovery, generated-output, and simulation details. SoC-level
-architectural and FESVR simulation belongs to the
-[simulation guide](../../sims/README.md).
+Contributor host, CIRCT, and Verilator workflows are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation). SoC-level architectural
+and FESVR simulation belongs to the [simulation guide](../../sims/README.md).
 
 ## Deliberate limits
 

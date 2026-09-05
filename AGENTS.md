@@ -62,9 +62,10 @@
 
 ## Package boundaries
 
-- Treat `rhodium/README.md` as the authoritative package and frontend-layer
+- Treat `rhodium/DEVELOPING.md` as the authoritative package and frontend-layer
   dependency contract. Update its dependency table when adding a layer or
-  changing a layer's direct Rhodium imports.
+  changing a layer's direct Rhodium imports. Keep `rhodium/README.md` focused
+  on the public package surface.
 
 - Keep frontend-independent IR, Builder, verification, and printing code under
   `rhodium/core/`; core modules must not import the frontend or backend.
@@ -88,10 +89,17 @@
 ## Documentation ownership
 
 - Keep the root `README.md` focused on project orientation, quick start,
-  navigation, concise status, and deferred work.
-- Put implementation architecture in `rhodium/README.md` and detailed component
-  contracts in the nearest component directory's `README.md`.
+  navigation, concise status, and user-visible deferred work. Keep repository
+  development setup, change workflow, and maintenance policy in the root
+  `DEVELOPING.md`.
+- In each documented directory, keep public entry points, behavior, stable
+  contracts, supported configurations, observable failures, and deliberate
+  limits in `README.md`. Keep implementation architecture, source maps,
+  dependency enforcement, extension workflows, test ownership, CI, and
+  generated-artifact maintenance in `DEVELOPING.md`.
 - Keep the executable language walkthrough and example catalog in
-  `examples/README.md`; keep test workflows under `tests/`.
+  `examples/README.md`. Keep test-running guidance in `tests/README.md` and
+  test placement, fixture maintenance, and CI ownership in
+  `tests/DEVELOPING.md`.
 - Link to an owning document instead of copying component, layer, operation,
   example, or fixture catalogs into multiple files.

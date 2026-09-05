@@ -15,6 +15,9 @@ The port is ordinary Rhodium: it elaborates into the public core IR and lowers
 through the existing CIRCT backend. It neither adds floating-point operations
 to Rhodium core nor imports Chisel or wraps generated Verilog.
 
+Contributors maintaining the port should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## Start here
 
 Import the public facade rather than individual implementation files:
@@ -247,83 +250,30 @@ temporary name or netlist shape is a compatibility promise.
 
 ## Implementation map
 
-| Path | Responsibility |
-|---|---|
-| [`main.rhdl`](main.rhdl) | Complete supported public facade |
-| [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal representations, modes, flags, and raw records |
-| [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
-| [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky preservation |
-| [`rtl/round.rhdl`](rtl/round.rhdl) | Raw-to-recoded rounding and exception generation |
-| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat variable-mask primitive |
-| [`rtl/conversion/`](rtl/conversion/) | Integer normalization and integer/RecFN/format conversion |
-| [`rtl/conversion/recfn-to-integer-modulo.rhdl`](rtl/conversion/recfn-to-integer-modulo.rhdl) | Rounded power-of-two modulo conversion with ordinary integer-conversion flags |
-| [`rtl/classify.rhdl`](rtl/classify.rhdl) | Ten-way recoded classification |
-| [`rtl/arithmetic/compare.rhdl`](rtl/arithmetic/compare.rhdl) | Ordered comparison and invalid-operation flagging |
-| [`rtl/arithmetic/min-max.rhdl`](rtl/arithmetic/min-max.rhdl) | IEEE minimum, maximum, minimumNumber, and maximumNumber variants |
-| [`rtl/arithmetic/round-to-integral.rhdl`](rtl/arithmetic/round-to-integral.rhdl) | Same-format integral rounding with optional inexact reporting |
-| [`rtl/arithmetic/add.rhdl`](rtl/arithmetic/add.rhdl) | Close/far add/subtract paths and rounding |
-| [`rtl/arithmetic/multiply.rhdl`](rtl/arithmetic/multiply.rhdl) | Raw product, sticky compression, and rounding |
-| [`rtl/arithmetic/multiply-add.rhdl`](rtl/arithmetic/multiply-add.rhdl) | Fused pre-multiply, post-multiply, normalization, and final rounding |
-| [`rtl/arithmetic/divide-sqrt.rhdl`](rtl/arithmetic/divide-sqrt.rhdl) | Generic one- or two-bit iterative division/square root |
-| [`rtl/arithmetic/divide-sqrt-f64.rhdl`](rtl/arithmetic/divide-sqrt-f64.rhdl) | Pipelined multiply-assisted binary64 forms |
-| [`tests/`](tests/) | Elaboration, structural, CIRCT, and Verilator checks |
-
-Production files depend only on the public `#lang rhodium` authoring surface,
-`rhodium/std/bits.rhdl`, and other files in this package. They do not import
-Rhodium implementation layers, backends, tests, processor cores, or RISC-V
-definitions. Backend tooling is a test-only consumer.
+Source ownership and package dependencies are documented in
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Translation and provenance policy
 
-Every derived Rhodium source names its corresponding upstream Scala source and
-the pinned commit. Chisel width inference is translated into explicit Rhodium
-widths. Pure combinational Scala objects become Rhodium functions; meaningful
-upstream module boundaries remain circuits. Packed values, special-case
-behavior, exception flags, and public sequential protocols are compatibility
-goals; internal hierarchy and temporary names are not.
+The pinned upstream commit and applicable licenses are part of the public
+provenance of this package. The detailed translation rules and update workflow
+are documented in
+[`DEVELOPING.md`](DEVELOPING.md#translation-and-provenance-policy).
 
 ## Focused validation
 
-From the repository root, run the host elaboration, type, structure, and
-boundary checks with:
-
-```sh
-make hardfloat-host-test
-```
-
-Run CIRCT lowering, generated-SystemVerilog compilation, and the four
-permanent Verilator fixtures with:
-
-```sh
-make hardfloat-circt-test
-```
-
-Run both for the complete focused package validation:
+From the repository root, run the complete focused package validation with:
 
 ```sh
 make hardfloat-test
 ```
 
-The repository wrappers manage a fresh `PLTCOMPILEDROOTS` when invoked normally.
-If running a Racket or Rhombus command directly, set `PLTCOMPILEDROOTS` to a
-new temporary directory and pass `-y` to `racket` so stale bytecode cannot mask
-the current source.
-
-The host slice checks format constraints, nominal packed layouts, public
-specialization, raw operation structure, and design verification. The CIRCT
-and Verilator slice covers representative IEEE special values, exhaustive F16
-representation round trips, rounding families, classification, comparison,
-raw resizing, integer and format conversion, add/subtract, multiply,
-single-rounding FMA, both iterative divide/square-root options, and specialized
-binary64 admission, multiplier integration, exceptional results, rounding,
-and ordered overlapping division completion. The numeric-extension fixture
-also exhaustively checks every binary16 encoding across the four
-minimum/maximum variants and six rounding modes, including modulo conversion,
-signed zero, NaN behavior, optional inexact reporting, and equivalence with
-ordinary integer conversion wherever the result is in range.
+This target requires the CIRCT and Verilator tools used by the repository test
+harness. Host-only and backend-specific slices, their exact coverage, and the
+fresh-bytecode requirements are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).
 
 ## Follow-up work
 
-1. Add broader differential vectors from Berkeley TestFloat and SoftFloat.
-2. Compare representative area and timing with the pinned upstream Chisel
-   implementation without making a particular internal netlist contractual.
+Maintenance work that does not change the supported public surface is tracked
+in [`DEVELOPING.md`](DEVELOPING.md#follow-up-work).

@@ -1,4 +1,4 @@
-<!-- Introduces Rhodium, explains its authoring and elaboration model, and routes readers to component-owned documentation. -->
+<!-- Introduces Rhodium, its authoring model, quick start, public capabilities, and user-facing documentation. -->
 
 # Rhodium
 
@@ -13,6 +13,9 @@ tool consumes it.
 Normal designs use `#lang rhodium`. Authors who want to assemble a smaller
 language can start from `#lang rhodium/base` and import only the frontend layers
 they need. Both profiles create exactly the same core hardware model.
+
+This page is the user and integrator entry point. Contributors changing Rhodium
+itself should start with [`DEVELOPING.md`](DEVELOPING.md).
 
 Rhodium does not emit SystemVerilog itself. Its optional backend lowers verified
 IR through CIRCT, which owns RTL generation.
@@ -66,15 +69,15 @@ Run the standard adder example from the checkout:
 tools/run-racket-tests.sh examples/lop/adder-standard.rhdl
 ```
 
-Run all canonical examples or the default host and CIRCT test suite:
+Run all canonical examples:
 
 ```sh
 make examples
-make test
 ```
 
-Use the focused commands in [`tests/README.md`](tests/README.md) while
-developing.
+The [test runner guide](tests/README.md) explains the available validation
+levels. Contributor setup and change validation are in
+[`DEVELOPING.md`](DEVELOPING.md#validate-at-the-owning-boundary).
 
 ## Mental model
 
@@ -135,8 +138,9 @@ meaning. Notation, organization, reusable host descriptions, and policy over
 existing operations belong in frontend layers or ordinary libraries. Optional
 derived facts and reports belong in analysis packages.
 
-The authoritative package graph, direct dependency inventory, and enforced
-boundary rules are in [`rhodium/README.md`](rhodium/README.md).
+The public package map is in [`rhodium/README.md`](rhodium/README.md). Its
+enforced implementation graph and direct-dependency inventories are maintained
+in [`rhodium/DEVELOPING.md`](rhodium/DEVELOPING.md).
 
 ## Design commitments
 
@@ -167,11 +171,15 @@ SystemVerilog.
 - [`rhodium/std/README.md`](rhodium/std/README.md) — host utilities, protocols,
   and reusable circuit generators
 
-### Understand the implementation
+### Inspect or extend the implementation
 
-- [`rhodium/README.md`](rhodium/README.md) — package graph and dependency rules
-- [`rhodium/core/README.md`](rhodium/core/README.md) — semantic types, IR,
-  Builder, and verification
+- [`DEVELOPING.md`](DEVELOPING.md) — contributor entry point and change workflow
+- [`rhodium/README.md`](rhodium/README.md) and
+  [`rhodium/DEVELOPING.md`](rhodium/DEVELOPING.md) — public package map and
+  enforced implementation architecture
+- [`rhodium/core/README.md`](rhodium/core/README.md) and
+  [`rhodium/core/DEVELOPING.md`](rhodium/core/DEVELOPING.md) — public IR
+  semantics and core implementation guidance
 - [`rhodium/analysis/README.md`](rhodium/analysis/README.md) — clock/reset
   inventory and temporal provenance
 - [`rhodium/diagram/README.md`](rhodium/diagram/README.md) — logical hierarchy,
@@ -181,8 +189,8 @@ SystemVerilog.
 - [`rhodium/formal/README.md`](rhodium/formal/README.md) — Rosette equivalence,
   reachability, and output properties
 - [`tests/README.md`](tests/README.md) and
-  [`tests/backend/README.md`](tests/backend/README.md) — focused tests, external
-  simulation, and Verilog goldens
+  [`tests/DEVELOPING.md`](tests/DEVELOPING.md) — running validation and
+  maintaining the test architecture
 
 ### Explore hardware libraries and systems
 
@@ -207,6 +215,13 @@ SystemVerilog.
   refinements
 - [`tools/emacs/README.md`](tools/emacs/README.md) — project-aware Emacs
   integration
+
+## Contributing
+
+Read [`DEVELOPING.md`](DEVELOPING.md) before changing implementation packages,
+tests, generated references, or documentation ownership. Package-level
+`DEVELOPING.md` files refine that repository-wide workflow without redefining
+their sibling README's public contract.
 
 ## Current status
 
@@ -246,6 +261,5 @@ The current vertical slice includes:
 - User-authored IR mutation and rewriting before a concrete transformation
   defines transaction and handle-validity requirements
 
-Hardening work remains focused on diagnostics, deterministic goldens,
-property-based and differential testing, and a future public IR compatibility
-policy.
+Contributor-facing hardening priorities are tracked in
+[`DEVELOPING.md`](DEVELOPING.md#maintain-compatibility-and-generated-artifacts).

@@ -272,4 +272,4 @@ same component vocabulary.
   and [decode generation](../../rhodium/std/README.md#typed-decode-generation)
 - Rhodium [architecture](../../rhodium/README.md), [core semantics](../../rhodium/core/README.md),
   [frontend staging](../../rhodium/frontend/README.md), and
-  [interface layer](../../rhodium/frontend/layers/README.md#interfaces)
+  [interface layer](../../rhodium/frontend/layers/README.md#interfaces-and-topology)

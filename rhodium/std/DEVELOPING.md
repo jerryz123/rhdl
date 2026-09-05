@@ -1,0 +1,236 @@
+<!-- Explains how to extend, maintain, and validate Rhodium's standard library. -->
+
+# Developing the Rhodium standard library
+
+Read the [standard-library guide](README.md) first. It is the authoritative
+contract for imports, interfaces, component behavior, timing, configuration,
+and deliberate limits. This guide owns the implementation structure and the
+workflow for changing that contract.
+
+## Boundaries and placement
+
+Everything under `rhodium/std/` is optional library code written through the
+public `#lang rhodium` authoring surface. Standard-library modules must not
+import Rhodium's core, frontend implementation, backend, or a domain library.
+The repository-wide package graph and exact direct-dependency inventory live
+in [`../DEVELOPING.md`](../DEVELOPING.md#standard-library-dependencies); update
+that inventory whenever a standard-library module's direct Rhodium imports
+change.
+
+Use these placement rules when adding code:
+
+- Put a protocol declaration or protocol-neutral parameter next to the other
+  top-level foundations, such as `ready-valid.rhdl`, `credited.rhdl`,
+  `flit.rhdl`, or `interconnect.rhdl`.
+- Put a reusable circuit with no natural family in a focused top-level module,
+  as with `counter.rhdl`, `scoreboard.rhdl`, and `sync-ram.rhdl`.
+- Put a ready-valid transformation, buffer, allocator, or routing primitive in
+  `flow/`. Keep its focused module independently importable.
+- Re-export a family through a facade only when callers commonly compose
+  several of its members. `flow.rhdl`, `decode.rhdl`, and `cdc.rhdl` are
+  aggregation boundaries; they should not acquire distinct behavior.
+- Keep domain policy out of this package. CHI, NoC, RISC-V, device, core, and
+  SoC libraries may consume `std`, but `std` must not depend on them.
+
+Tests and examples are outside the package. Put executable authoring examples
+under [`../../examples/std/`](../../examples/std/) and host/elaboration tests
+under [`../../tests/frontend/`](../../tests/frontend/). CIRCT emission fixtures
+and Verilator benches belong under [`../../tests/backend/`](../../tests/backend/).
+
+## Architecture and ownership
+
+Arrows below mean “uses.” Public facades aggregate focused modules; they do not
+form a separate implementation layer.
+
+```mermaid
+flowchart TD
+  Author["Circuit author"] --> Focused["Focused std module"]
+  Author --> Facade["Family facade"]
+  Facade --> Focused
+
+  subgraph Foundations["Protocol and data foundations"]
+    RV["ready-valid.rhdl"]
+    Credited["credited.rhdl"]
+    Flit["flit.rhdl"]
+    Interconnect["interconnect.rhdl"]
+  end
+
+  subgraph Families["Reusable families"]
+    Decode["decode/*"]
+    FlowSupport["flow/ready-valid-support.rhdl"]
+    Flow["flow/* components and transforms"]
+    Utilities["bits, counter, reduction, storage, CDC"]
+  end
+
+  Focused --> Foundations
+  Focused --> Families
+  Flow --> FlowSupport
+  FlowSupport --> RV
+  Flow --> RV
+  Flow --> Credited
+  Flow --> Flit
+  Decode --> IR["Public Rhodium operations"]
+  Flow --> IR
+  Utilities --> IR
+```
+
+| Area | Source owner | Maintenance responsibility |
+|---|---|---|
+| Ready-valid contracts | [`ready-valid.rhdl`](ready-valid.rhdl) | Nominal interface families, refinement, endpoint classification, and `fire()` |
+| Credited and flit contracts | [`credited.rhdl`](credited.rhdl), [`flit.rhdl`](flit.rhdl) | Transport accounting and packet representations, independent of buffering policy |
+| Decode descriptions | [`decode/pattern.rhdl`](decode/pattern.rhdl), [`decode/table.rhdl`](decode/table.rhdl) | Immutable typed patterns, set algebra, cases, and table validation |
+| Decode emission | [`decode/generator.rhdl`](decode/generator.rhdl), [`decode/pattern-value.rhdl`](decode/pattern-value.rhdl) | `rtl.decode` construction and the explicit materialization of output don't-cares |
+| Flow type resolution | [`flow/ready-valid-support.rhdl`](flow/ready-valid-support.rhdl) | Normalizing payload, ready-valid, valid-only, and control-only sources |
+| Flow components | Focused modules under [`flow/`](flow/) | Circuit state, handshakes, arbitration, routing, conversion, and assertions |
+| Flow aggregation | [`flow.rhdl`](flow.rhdl) | Imports and exports only; no component semantics |
+| Generic utilities and storage | Top-level focused modules and [`cdc/`](cdc/) | Host utilities or reusable circuits that do not require the flow facade |
+
+The core IR and backend own primitive meaning and lowering. For example,
+`DecodeGen` constructs the public `rtl.decode` operation, but the operation's
+verification belongs to core and its CIRCT lowering belongs to the backend.
+Do not copy those implementations into the library.
+
+## Adding or changing a public facility
+
+1. Choose the narrow owning module and state its public contract in
+   [README.md](README.md): accepted types, ports or return shape, handshake and
+   timing behavior, reset behavior, priority, invalid-input behavior, and any
+   deliberate omission.
+2. Decide whether the facility is host-only data, an inline topology
+   transformation, or a named circuit generator. Avoid adding hierarchy or
+   state to an operation whose public contract promises neither.
+3. Import only the focused sibling modules required by the implementation.
+   Add the new public name to a facade only when it belongs to that facade's
+   established family.
+4. Validate host parameters during elaboration. Use exact hardware types and
+   nominal interface support rather than accepting coincidentally compatible
+   widths or display names.
+5. Add a positive test for supported behavior and an invalid-use test when the
+   public facility introduces a new checked constraint. Do not add tests whose
+   purpose is merely to prove that an unimplemented feature is absent.
+6. If observable RTL behavior changes, add or update the focused backend
+   emitter and Verilator bench. Generated Verilog is test output, not
+   hand-maintained source.
+7. Update the standard-library dependency inventory in
+   [`../DEVELOPING.md`](../DEVELOPING.md#standard-library-dependencies), this
+   source map when ownership changes, and the public README when the
+   caller-visible contract changes.
+
+### Protocol and flow changes
+
+Keep protocol declarations separate from components that implement them.
+Ready-valid transforms must preserve or deliberately weaken the nominal
+contract documented in the README. A transform that observes live ambient
+hardware cannot claim `Irrevocable` stability unless the caller makes the
+explicit stable-function promise already used by `map_flow` and
+`demux_flow`.
+
+Treat control-only interfaces as their own member shape. Do not manufacture a
+dummy payload or infer that any interface with `valid` and `ready` is a
+`DecoupledCtrl`. Keep credited transport's accounting at explicit adapter
+boundaries; ready-valid components between those boundaries should not grow
+credited variants.
+
+For configured pipeline stages, preserve linear handle and sink behavior. Each
+application of a reusable configured function must elaborate fresh wiring and
+state. Cardinality-changing stages must describe their exact endpoint-array
+result rather than falling back to an untyped host array.
+
+### Decode changes
+
+`Pattern` and `PatternSet` are immutable host data. Constructing or combining
+them must not emit hardware. Keep normalization and set algebra in
+`decode/pattern.rhdl`, relation validation in `decode/table.rhdl`, and hardware
+construction in `decode/generator.rhdl`.
+
+Preserve exact type equality across pattern values and care masks, deterministic
+disjoint set covers, and rejection of overlapping decode inputs. Do not add
+implicit row priority, Boolean minimization, or a runtime-X interpretation of
+pattern don't-cares. A new output materialization policy belongs beside
+`pattern-value.rhdl`, not in the neutral pattern representation.
+
+## Static information and topology results
+
+The public flow syntax relies on the frontend interface layer's
+`InterfaceTransformResult(source, connected)` dependent result annotation.
+Configured stage functions use it to preserve the result shape selected by the
+source:
+
+| Source known at expansion time | Result information |
+|---|---|
+| Concrete endpoint | The connected far-end endpoint surface |
+| Concrete endpoint array | The transform's endpoint or endpoint-array surface |
+| Payload or interface type seed | A complete disconnected handle |
+| Existing handle | A handle extended by the new stage |
+| Generic topology expression | A conservative endpoint, array, or handle surface |
+
+Keep shared ready-valid classification in
+[`flow/ready-valid-support.rhdl`](flow/ready-valid-support.rhdl). Its
+`FlowSource` annotations and protocol-normalization helpers are the common
+entry point for configured stages. Individual stage modules should specify
+only their connected result shape with `InterfaceTransformResult`.
+
+When adding or changing a configured stage, extend
+[`std-flow-static.rhdl`](../../tests/frontend/std-flow-static.rhdl) and its
+loader test so `use_static` covers direct endpoint fields, endpoint-array
+indexing or destructuring, disconnected handle sides, and reuse where
+applicable. A runtime elaboration test alone cannot catch lost expansion-time
+field information.
+
+## Test organization
+
+The standard library is covered at three levels:
+
+| Coverage | Location | What it should prove |
+|---|---|---|
+| Host and elaboration | [`tests/frontend/std-*-test.rhm`](../../tests/frontend/) plus decode and pattern tests | Parameter checks, exact types, IR shape, protocol compatibility, static information, and invalid uses |
+| Executable examples | [`examples/std/`](../../examples/std/) | Public import paths and realistic authoring composition |
+| CIRCT and Verilator | Emitters and benches under [`tests/backend/`](../../tests/backend/) | Lowering and cycle-visible behavior for stateful or backend-sensitive components |
+
+Prefer a focused test and its fixture. Representative ownership is:
+
+- `decode-test.rhm`, `decode-composition-test.rhm`, and `pattern-test.rhm` for
+  typed decode;
+- `std-ready-valid-test.rhm`, `std-credited-test.rhm`, and
+  `std-flit-test.rhm` for transport contracts;
+- `std-flow-test.rhm`, `std-flow-chain-test.rhm`,
+  `std-flow-static-test.rhm`, `std-flow-scaling-test.rhm`,
+  `std-valid-flow-test.rhm`, and `std-vc-test.rhm` for flow composition;
+- the focused `std-bits`, `std-cdc`, `std-counter`, `std-interconnect`,
+  `std-reduction`, `std-scoreboard`, `std-shift-register`, and `std-sync-ram`
+  tests for their owning modules.
+
+Keep host checks distinct from backend evidence. An elaboration test can prove
+the public IR shape but not generated SystemVerilog or cycle behavior; use the
+corresponding emitter and Verilator bench when those properties can change.
+
+## Focused validation
+
+Run Racket and Rhombus through the repository wrapper, which creates the
+required isolated compiled root. For example:
+
+```sh
+tools/run-racket-tests.sh tests/frontend/std-flow-test.rhm
+tools/run-racket-tests.sh tests/frontend/std-flow-static-test.rhm
+tools/run-racket-tests.sh tests/frontend/decode-test.rhm
+```
+
+Validate all standard-library examples after changing a public import or
+composition surface:
+
+```sh
+make examples-std
+```
+
+Run `make check-boundaries` after adding or moving a module or changing direct
+imports. Use `make frontend-test` when a change spans several standard-library
+families or shared interface semantics. For backend-sensitive changes, select
+the corresponding fixture through [`tests/backend/run-circt.sh`](../../tests/backend/run-circt.sh);
+the CI grouping for the complete standard-library backend set is:
+
+```sh
+make ci-circt-std-test
+```
+
+That final target requires the external CIRCT and Verilator toolchain. State
+which level was actually run; do not treat host elaboration as RTL simulation.

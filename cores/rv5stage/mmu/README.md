@@ -14,6 +14,9 @@ privileged-state, and memory-hierarchy contract. The
 arrays, misses, coherence, and response timing. This guide describes only what
 the MMU adds in front of those components.
 
+Contributors changing translation or page-walk integration should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## At a glance
 
 | Property | Current contract |
@@ -249,28 +252,10 @@ Deliberate limits are:
 
 ## Implementation map
 
-| File | Ownership |
-|---|---|
-| [`protocol.rhdl`](protocol.rhdl) | Translation request/result bundles, fetch-fault metadata, and the walker memory interface |
-| [`tlb.rhdl`](tlb.rhdl) | Fully associative matching, permission recheck, physical-address construction, refill, and invalidation |
-| [`walker.rhdl`](walker.rhdl) | Serialized three-level PTE fetch, structural/permission checks, cancellation, and completion |
-| [`mmu.rhdl`](mmu.rhdl) | ITLB/DTLB composition, miss priority, fault correlation, fetch ordering, physical fetch checks, and shared data-port ownership |
-| [`../rv5stage.rhdl`](../rv5stage.rhdl) | Connection to the core, L1I, physical-memory router, and privileged controls |
-| [`../../../riscv/rtl/sv39.rhdl`](../../../riscv/rtl/sv39.rhdl) | Shared Sv39 PTE decoding, canonicality, permission, superpage, and address helpers |
-| [`../tests/mmu-test.rhm`](../tests/mmu-test.rhm) | Focused elaboration, interface-width, structure, and design-verification checks |
+Source ownership moved to
+[`DEVELOPING.md`](DEVELOPING.md#implementation-map).
 
 ## Focused validation
 
-From the repository root, run the MMU-owned host check:
-
-```sh
-tools/run-racket-tests.sh cores/rv5stage/tests/mmu-test.rhm
-```
-
-The runner creates a fresh `PLTCOMPILEDROOTS` when the caller has not supplied
-one. The focused test elaborates the standalone TLB and walker plus the composed
-RV64 MMU, checks their principal protocol widths and fault fields, and runs
-Rhodium design verification. It is a structural/elaboration check, not a
-cycle-level translation or cache simulation. Use the parent
-[RV5Stage verification workflow](../README.md#verification) when a change spans
-CSR sequencing, the core pipeline, routing, or cache integration.
+Contributor test selection and coverage limits are documented in
+[`DEVELOPING.md`](DEVELOPING.md#focused-validation).

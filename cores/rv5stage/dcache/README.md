@@ -8,6 +8,9 @@ contracts. The [parent core guide](../README.md#memory-hierarchy) owns MMU/PMA
 routing and architectural fence ordering; the [CHI guide](../../../chi/README.md)
 owns the protocol vocabulary and fabric-wide rules.
 
+Contributors changing the L1D implementation should read
+[`DEVELOPING.md`](DEVELOPING.md).
+
 ## At a glance
 
 | Property | Current contract |

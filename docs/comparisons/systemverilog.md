@@ -269,6 +269,6 @@ is compelling only if extensions preserve its local rules.
 - [Accellera access to IEEE 1800-2023](https://www.accellera.org/downloads/ieee)
 - Rhodium [architecture](../../rhodium/README.md), [core semantics](../../rhodium/core/README.md),
   [frontend staging](../../rhodium/frontend/README.md), and
-  [interface layer](../../rhodium/frontend/layers/README.md#interfaces),
+  [interface layer](../../rhodium/frontend/layers/README.md#interfaces-and-topology),
   [typed decode relations](../../rhodium/std/README.md#typed-decode-patterns), plus the
   [standard flow composition model](../../rhodium/std/README.md#flow-control-circuits)
