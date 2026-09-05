@@ -1,106 +1,98 @@
-<!-- Documents the provenance, architecture, supported surface, and validation of the Rhodium HardFloat port. -->
+<!-- Guides users through selecting, integrating, and validating the Rhodium Berkeley HardFloat port. -->
 
 # HardFloat for Rhodium
 
-This directory is an Rhodium port of the
+This directory is a Rhodium port of the
 [Berkeley HardFloat](https://github.com/ucb-bar/berkeley-hardfloat) Chisel
-source. The translation is pinned to upstream commit
+source, pinned to upstream commit
 [`c1105e6ac6a0dd90fc80893efc4830ab609005d3`](https://github.com/ucb-bar/berkeley-hardfloat/commit/c1105e6ac6a0dd90fc80893efc4830ab609005d3).
 The Regents of the University of California and SiFive retain copyright in
 the derived algorithms. See [`LICENSE.md`](LICENSE.md) for the applicable
 upstream BSD-style licenses. This project is not endorsed by the University
 of California, SiFive, or the upstream contributors.
 
-The port is ordinary Rhodium. It elaborates into the same public core IR as any
-other Rhodium library and lowers through the existing CIRCT backend. It does not
-add floating-point operations to core, import Chisel, or wrap generated
-Verilog.
+The port is ordinary Rhodium: it elaborates into the public core IR and lowers
+through the existing CIRCT backend. It neither adds floating-point operations
+to Rhodium core nor imports Chisel or wraps generated Verilog.
 
-## Status
+## Start here
 
-The implemented foundation provides:
+Import the public facade rather than individual implementation files:
 
-- stable host-side `FloatFormat` values for arbitrary supported formats and
-  predefined binary16, bfloat16, binary32, and binary64 formats;
-- nominal IEEE and recoded floating-point values, typed hardware rounding and
-  fused-operation modes, tininess modes, exception flags, raw floating-point
-  records, multiplier-pipeline occupancy, and one-hot classification results;
-- the standard Rhodium leading-zero utility plus HardFloat-specific variable
-  masks;
-- IEEE-to-raw, IEEE-to-recoded, recoded-to-raw, and recoded-to-IEEE helpers;
-- raw-format resizing with exponent saturation and significand sticky-bit
-  preservation;
-- all upstream rounding modes and tininess modes through
-  `RoundAnyRawFNToRecFN` and `RoundRawFNToRecFN`;
-- signed and unsigned integer conversion in both directions;
-- rounded modulo-power-of-two integer conversion with the same exception
-  classification as ordinary integer conversion;
-- widening and rounded narrowing between arbitrary supported RecFN formats;
-- recoded classification; and
-- the combinational `CompareRecFN`, four IEEE minimum/maximum variants,
-  same-format integral rounding, rounded `AddRecFN` and `MulRecFN`, and
-  single-rounding fused `MulAddRecFN` circuits, with explicit add/subtract and
-  fused-operation controls; and
-- the generic iterative `DivSqrtRecFN` unit in one-bit-per-cycle and
-  two-bits-per-cycle configurations; and
-- the pipelined multiply-assisted `DivSqrtRecF64`, plus its shareable external
-  multiplier interface `DivSqrtRecF64MulAddZ31`.
+```rhombus
+import:
+  lib("hardfloat/main.rhdl") open
+```
 
-The arithmetic components in the planned upstream port are now implemented.
-Unported auxiliary wrappers are omitted rather than represented by stubs.
+Then choose a path by task:
 
-## Layout and dependency boundary
-
-| Path | Responsibility |
+| Task | Use |
 |---|---|
-| [`main.rhdl`](main.rhdl) | Public package facade |
-| [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal packed representations, and typed hardware records/enums |
-| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat-specific variable masks |
-| [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
-| [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky-bit preservation |
-| [`rtl/round.rhdl`](rtl/round.rhdl) | Shared raw-to-recoded rounding and exception generation |
-| [`rtl/conversion/`](rtl/conversion/) | Integer normalization and integer/RecFN/format conversion |
-| [`rtl/classify.rhdl`](rtl/classify.rhdl) | Ten-way HardFloat classification |
-| [`rtl/arithmetic/compare.rhdl`](rtl/arithmetic/compare.rhdl) | Ordered recoded comparison and invalid-operation flagging |
-| [`rtl/arithmetic/min-max.rhdl`](rtl/arithmetic/min-max.rhdl) | IEEE minimum, maximum, minimumNumber, and maximumNumber operations |
-| [`rtl/arithmetic/round-to-integral.rhdl`](rtl/arithmetic/round-to-integral.rhdl) | Same-format integral rounding with optional inexact reporting |
-| [`rtl/arithmetic/add.rhdl`](rtl/arithmetic/add.rhdl) | Close/far addition and subtraction paths, normalization, rounding, and exceptions |
-| [`rtl/arithmetic/multiply.rhdl`](rtl/arithmetic/multiply.rhdl) | Full raw product, sticky compression, rounding, and exception generation |
-| [`rtl/arithmetic/multiply-add.rhdl`](rtl/arithmetic/multiply-add.rhdl) | Pre-multiply alignment, full-width multiply-add, post-multiply normalization, and one final rounding |
-| [`rtl/arithmetic/divide-sqrt.rhdl`](rtl/arithmetic/divide-sqrt.rhdl) | Generic iterative division and square root with selectable one- or two-bit progress per cycle |
-| [`rtl/arithmetic/divide-sqrt-f64.rhdl`](rtl/arithmetic/divide-sqrt-f64.rhdl) | Four-operation binary64 pipeline and its three-cycle 54x54+105 multiplier contract |
-| [`tests/`](tests/) | Elaboration, structural, CIRCT, and simulation validation |
+| Enter or leave an IEEE-encoded boundary | `IEEEFloat(format).to_recoded()` and `RecFloat(format).to_ieee()` |
+| Inspect special cases or build an internal algorithm | `.to_raw()`, `.is_signaling_nan()`, and `.classify()` |
+| Convert an integer to floating point | `IntegerToRecFN(integer_width, format)` |
+| Convert floating point to a saturating or modulo integer | `RecFNToInteger(format, integer_width)` or `RecFNToIntegerModulo(format, integer_width)` |
+| Widen or narrow between floating-point formats | `RecFNToRecFN(input_format, output_format)` |
+| Compare or select an IEEE minimum/maximum variant | `CompareRecFN` or `MinMaxRecFN` |
+| Round to an integral value in the same format | `RoundToIntegralRecFN` |
+| Add/subtract, multiply, or fuse multiply-add | `AddRecFN`, `MulRecFN`, or `MulAddRecFN` |
+| Divide or take square root for any supported format | `DivSqrtRecFN(format, options)` |
+| Prioritize binary64 throughput over a small iterative unit | `DivSqrtRecF64()` |
+| Share an existing compatible binary64 multiplier pipeline | `DivSqrtRecF64MulAddZ31()` |
 
-Production files depend only on the public `#lang rhodium` authoring surface,
-`rhodium/std/bits.rhdl`, and other files in this package. They must not import Rhodium
-implementation layers, backends, tests, processor cores, or RISC-V definitions.
-Backend tooling is a test-only consumer.
+The public arithmetic circuits consume and produce `RecFloat`; convert only at
+system boundaries. `RawFloat` is an algorithm-facing bundle, not an
+architectural storage encoding.
 
-## Types and representation
+## Representations and conversions
 
-`FloatFormat(exponent_width, significand_width)` uses HardFloat's convention:
-the significand width includes the implicit leading bit. Consequently, an
-IEEE value has `exponent_width + significand_width` bits and its recoded form
-has one additional exponent bit. Formats require both widths to be at least
-three and `significand_width <= 2^(exponent_width - 2) + 3`, matching
-HardFloat's supported parameter domain. BF16 retains IEEE-style subnormal
-support, as in upstream HardFloat.
+`FloatFormat(exponent_width, significand_width)` follows HardFloat's convention:
+the significand width includes the implicit leading bit. An IEEE image therefore
+has `exponent_width + significand_width` bits; its recoded image has one extra
+exponent bit.
+
+```mermaid
+flowchart LR
+    EXT["External or stored IEEE image<br/>IEEEFloat(format)"]
+    REC["Arithmetic image<br/>RecFloat(format)"]
+    RAW["Algorithm state<br/>RawFloat(exp, sig)"]
+    INT["Fixed-width integer<br/>Bits(width)"]
+    OTHER["Another RecFloat format"]
+
+    EXT -->|"to_recoded()"| REC
+    REC -->|"to_ieee()"| EXT
+    EXT -->|"to_raw()"| RAW
+    REC -->|"to_raw()"| RAW
+    INT -->|"IntegerToRecFN"| REC
+    REC -->|"RecFNToInteger<br/>or RecFNToIntegerModulo"| INT
+    REC -->|"RecFNToRecFN<br/>exact widen or rounded conversion"| OTHER
+    RAW -->|"RoundAnyRawFNToRecFN<br/>or RoundRawFNToRecFN"| REC
+```
 
 `IEEEFloat(format)` and `RecFloat(format)` are distinct nominal scalar types.
-Their packed widths are `format.ieee_width` and `format.recoded_width`, so they
-lower to ordinary integer signals while connection checking prevents mixing
-IEEE and recoded images or equal-width formats such as binary16 and bfloat16.
-Use `.as_bits()` only where representation-level manipulation or an untyped
-external boundary explicitly requires it. `RawFloat` is a bundle whose signed
-exponent and extended significand expose the internal HardFloat algorithm.
-`MulAddOperation`, `RoundingMode`, `TininessMode`, `ExceptionFlags`, and
-`FloatClass` name otherwise positional control and result bits without changing
-their packed encodings. `MultiplyAddPipelineUsage` names four independently
-occupied multiplier stages and is not one-hot. `RoundingOptions` is a stable
-host parameter for the four compile-time invariants used by specialized
-upstream rounding clients; it does not add hardware control ports.
+Their format is part of connection checking, so equal-width encodings such as
+binary16 and bfloat16 cannot be connected accidentally. Both lower to integer
+signals. Use `.as_bits()` only for representation-level work or an explicitly
+untyped external boundary.
 
-The predefined formats are:
+`RawFloat` exposes special-case tags, sign, a signed exponent, and an extended
+significand. `resize_raw_float` adjusts exponent bias, saturates an exponent
+that must shrink, and preserves discarded significand information in a sticky
+bit. The rounders consume raw values and produce `ExceptionFlags` alongside a
+recoded result.
+
+### Supported configurations
+
+A `FloatFormat` is accepted when:
+
+- `exponent_width >= 3`;
+- `significand_width >= 3`; and
+- `significand_width <= 2^(exponent_width - 2) + 3`.
+
+These are the upstream HardFloat parameter limits. All generic representation,
+conversion, comparison, arithmetic, rounding, and iterative divide/square-root
+components accept any format in this domain. BF16 retains IEEE-style subnormal
+support, as in upstream HardFloat.
 
 | Name | Exponent | Significand | IEEE width | Recoded width |
 |---|---:|---:|---:|---:|
@@ -109,7 +101,91 @@ The predefined formats are:
 | `FloatFormat.F32` | 8 | 24 | 32 | 33 |
 | `FloatFormat.F64` | 11 | 53 | 64 | 65 |
 
-## Public use
+`IntegerToRecFN` requires `integer_width >= 2`; `RecFNToInteger` requires
+`integer_width >= 3`. Integer signedness is a hardware control input, not a
+different packed type.
+
+The six encoded rounding modes are `NearEven`, `MinMagnitude`, `Minimum`,
+`Maximum`, `NearMaximumMagnitude`, and `Odd`. `TininessMode` selects detection
+before or after rounding. `RoundingOptions` contains compile-time invariants for
+specialized internal clients; it does not create hardware control ports.
+`ExceptionFlags` packs invalid, infinite, overflow, underflow, and inexact.
+`IntegerExceptionFlags` packs invalid, overflow, and inexact.
+
+## Select an arithmetic component
+
+```mermaid
+flowchart TD
+    START{"Needed operation?"}
+    BASIC["CompareRecFN, MinMaxRecFN,<br/>RoundToIntegralRecFN, AddRecFN,<br/>MulRecFN, or MulAddRecFN"]
+    GENERIC["DivSqrtRecFN(format)"]
+    FAST["DivSqrtRecFN(format,<br/>DivSqrtOptions.TwoBitsPerCycle)"]
+    SPECIALIZED{"Use the specialized binary64<br/>staged recurrence?"}
+    PRIORITY{"Generic recurrence priority?"}
+    MULTIPLIER{"Multiplier ownership?"}
+    INTEGRATED["DivSqrtRecF64<br/>integrated 3-cycle multiplier"]
+    SHARED["DivSqrtRecF64MulAddZ31<br/>external multiplier contract"]
+
+    START -->|"compare, min/max, round,<br/>add/sub, multiply, FMA"| BASIC
+    START -->|"divide or square root"| SPECIALIZED
+    SPECIALIZED -->|"no, or not binary64"| PRIORITY
+    PRIORITY -->|"minimum area"| GENERIC
+    PRIORITY -->|"fewer iterations"| FAST
+    SPECIALIZED -->|"yes"| MULTIPLIER
+    MULTIPLIER -->|"local"| INTEGRATED
+    MULTIPLIER -->|"shared compatible pipeline"| SHARED
+```
+
+| Component | Format | Interface | Internal latency/state | Select it when |
+|---|---|---|---|---|
+| `CompareRecFN` | Any supported | `a`, `b`, `signaling` -> `lt`, `eq`, `gt`, flags | Combinational | Ordered comparison and signaling/quiet NaN policy |
+| `MinMaxRecFN` | Any supported | `a`, `b`, `MinMaxOperation` -> result, flags | Combinational | IEEE minimum, maximum, minimumNumber, or maximumNumber selection |
+| `RoundToIntegralRecFN` | Any supported | value, rounding mode, inexact-enable -> same-format result, flags | Combinational | Round without changing the floating-point format |
+| `AddRecFN` | Any supported | `subtract`, `a`, `b`, rounding, tininess -> result, flags | Combinational | Addition or subtraction |
+| `MulRecFN` | Any supported | `a`, `b`, rounding, tininess -> result, flags | Combinational | Rounded multiplication |
+| `MulAddRecFN` | Any supported | operation, `a`, `b`, `c`, rounding, tininess -> result, flags | Combinational, one final rounding | IEEE-style fused multiply-add/subtract variants |
+| `DivSqrtRecFN` | Any supported | one shared ready/valid request; separate divide/sqrt completion pulses | Iterative, one active recurrence; variable by operation, format, and special case | Small general unit |
+| `DivSqrtRecFN(...TwoBitsPerCycle)` | Any supported | Same as generic | Iterative, up to two recurrence bits per busy cycle | Lower normal-operation latency for more logic |
+| `DivSqrtRecF64` | F64 only | operation-specific ready and completion pulses | Multi-cycle A/B/C/E pipeline; integrated three-cycle 54x54+105 multiplier; can overlap work | Higher-throughput standalone binary64 |
+| `DivSqrtRecF64MulAddZ31` | F64 only | Same arithmetic protocol plus multiplier usage/latch/operand/result ports | Same staged recurrence; external multiplier defines the integration timing | A compatible multiplier pipeline is already shared |
+
+“Combinational” means the circuit contains no clocked state; register placement
+and cycle latency belong to its caller. The generic divide/square-root unit
+accepts a request only when `input_ready` is asserted. Normal division starts a
+counter at `significand_width + 2`; normal square root starts at
+`significand_width` or `significand_width + 1` according to exponent parity.
+The default recurrence advances one bit per busy cycle, with an upstream
+data-dependent final-cycle shortcut, while `TwoBitsPerCycle` advances two when
+possible. Special values take the short exception path. Treat completion as a
+protocol event rather than assuming one constant latency.
+
+`MulAddOperation` selects `a*b+c`, `a*b-c`, `-a*b+c`, or `-a*b-c`; all four use
+one rounding step. `FloatClass` is a ten-bit one-hot result.
+`MultiplyAddPipelineUsage` names four independently occupied stages and is not
+one-hot.
+
+### Sequential divide/square-root protocols
+
+For `DivSqrtRecFN`, assert `input_valid` with stable operation and operand
+inputs when `input_ready` is high. Division computes `a / b`; square root
+consumes `a`. Observe `division_valid` or `square_root_valid` to distinguish the
+completion.
+
+The specialized binary64 units preserve their upstream operand convention:
+division computes `a / b`, while square root consumes `b`. Admission is selected
+with `division_ready` or `square_root_ready`; the matching completion output
+identifies the returned result. Requests may overlap, so keep any caller-owned
+metadata in matching order.
+
+`DivSqrtRecF64` contains the required multiplier. With
+`DivSqrtRecF64MulAddZ31`, the caller must honor `using_multiply_add`,
+`latch_multiply_a`, and `latch_multiply_b`, calculate the 105-bit
+`multiply_a * multiply_b + multiply_c`, and return it on
+`multiply_add_result` with the same three-cycle stage timing as the integrated
+implementation. Use the integrated form unless that external contract is
+deliberately being shared.
+
+## Example
 
 ```rhombus
 #lang rhodium
@@ -118,31 +194,28 @@ import:
   lib("hardfloat/main.rhdl") open
 
 circuit CompareF32():
-  input a: RecFloat(FloatFormat.F32)
-  input b: RecFloat(FloatFormat.F32)
+  input a: IEEEFloat(FloatFormat.F32)
+  input b: IEEEFloat(FloatFormat.F32)
   input signaling: Bool
   output less: Bool
 
   inst compare(CompareRecFN(FloatFormat.F32))
-  compare.a <== a
-  compare.b <== b
+  compare.a <== a.to_recoded()
+  compare.b <== b.to_recoded()
   compare.signaling <== signaling
   less <== compare.lt
 ```
 
-Use `ieee_value.to_recoded()` and `recoded_value.to_ieee()` at IEEE boundaries.
-Both representations support `.to_raw()`, recoded values support `.classify()`,
-and raw values support `.is_signaling_nan()`. These imported extension methods
-derive `FloatFormat` from the nominal receiver descriptor, so callers do not
-repeat a format already carried by the hardware value. Raw representations are
-public so later arithmetic stages and specialized implementations can share
-them, but they are not an architectural storage format.
+## Status and deliberate limits
 
-`DivSqrtRecF64` preserves the upstream specialized protocol: division computes
-`a / b`, while square root consumes `b`; the two operation classes have
-independent ready and completion outputs. `DivSqrtRecF64MulAddZ31` exposes the
-same recurrence with its pipelined multiplier-adder ports so a system can share
-that resource instead of instantiating the integrated multiplier.
+The facade exports the supported format and packed types, representation and
+raw helpers, rounders, saturating and modulo integer conversions, format
+conversions, classification, comparison, the four IEEE minimum/maximum
+variants, same-format integral rounding, add/subtract, multiply, fused
+multiply-add, both generic iterative divide/square-root configurations, and
+both specialized binary64 forms. The arithmetic components planned from the
+pinned upstream slice are implemented; unported auxiliary wrappers are omitted
+rather than exposed as stubs.
 
 `MinMaxRecFN` distinguishes the NaN-propagating `Minimum` and `Maximum`
 operations from `MinimumNumber` and `MaximumNumber`, which select the numeric
@@ -155,57 +228,99 @@ invalid, overflow, and inexact classification. These three components are
 Rhodium extensions over the HardFloat representations; they do not encode any
 RISC-V instruction policy.
 
-## Translation policy
+HardFloat owns floating-point representation and arithmetic behavior. It does
+not own ISA decoding, architectural register storage, NaN boxing, canonical-NaN
+policy, CSR state, instruction scheduling, retirement, or architectural
+exception accrual.
+Reusable RISC-V policy lives in the
+[`riscv/rtl` floating-point layer](../riscv/rtl/README.md#floating-point-policy),
+and RV5Stage integration belongs to the
+[`RV5Stage execution and completion`](../cores/rv5stage/README.md#execution-and-completion)
+contract. Keeping those boundaries separate also lets non-RISC-V clients use
+this package directly.
 
-Each derived Rhodium source names its corresponding upstream Scala source and
+The current tests are implementation and directed-behavior checks, not a proof
+of equivalence to every upstream configuration. Differential vector suites
+from Berkeley TestFloat and SoftFloat and comparative area/timing measurements
+against the pinned Chisel implementation remain follow-up work. No internal
+temporary name or netlist shape is a compatibility promise.
+
+## Implementation map
+
+| Path | Responsibility |
+|---|---|
+| [`main.rhdl`](main.rhdl) | Complete supported public facade |
+| [`rtl/types.rhdl`](rtl/types.rhdl) | Format parameters, nominal representations, modes, flags, and raw records |
+| [`rtl/recode.rhdl`](rtl/recode.rhdl) | IEEE, recoded, and raw representation conversion |
+| [`rtl/resize.rhdl`](rtl/resize.rhdl) | Raw exponent/significand resizing and sticky preservation |
+| [`rtl/round.rhdl`](rtl/round.rhdl) | Raw-to-recoded rounding and exception generation |
+| [`rtl/primitives.rhdl`](rtl/primitives.rhdl) | HardFloat variable-mask primitive |
+| [`rtl/conversion/`](rtl/conversion/) | Integer normalization and integer/RecFN/format conversion |
+| [`rtl/conversion/recfn-to-integer-modulo.rhdl`](rtl/conversion/recfn-to-integer-modulo.rhdl) | Rounded power-of-two modulo conversion with ordinary integer-conversion flags |
+| [`rtl/classify.rhdl`](rtl/classify.rhdl) | Ten-way recoded classification |
+| [`rtl/arithmetic/compare.rhdl`](rtl/arithmetic/compare.rhdl) | Ordered comparison and invalid-operation flagging |
+| [`rtl/arithmetic/min-max.rhdl`](rtl/arithmetic/min-max.rhdl) | IEEE minimum, maximum, minimumNumber, and maximumNumber variants |
+| [`rtl/arithmetic/round-to-integral.rhdl`](rtl/arithmetic/round-to-integral.rhdl) | Same-format integral rounding with optional inexact reporting |
+| [`rtl/arithmetic/add.rhdl`](rtl/arithmetic/add.rhdl) | Close/far add/subtract paths and rounding |
+| [`rtl/arithmetic/multiply.rhdl`](rtl/arithmetic/multiply.rhdl) | Raw product, sticky compression, and rounding |
+| [`rtl/arithmetic/multiply-add.rhdl`](rtl/arithmetic/multiply-add.rhdl) | Fused pre-multiply, post-multiply, normalization, and final rounding |
+| [`rtl/arithmetic/divide-sqrt.rhdl`](rtl/arithmetic/divide-sqrt.rhdl) | Generic one- or two-bit iterative division/square root |
+| [`rtl/arithmetic/divide-sqrt-f64.rhdl`](rtl/arithmetic/divide-sqrt-f64.rhdl) | Pipelined multiply-assisted binary64 forms |
+| [`tests/`](tests/) | Elaboration, structural, CIRCT, and Verilator checks |
+
+Production files depend only on the public `#lang rhodium` authoring surface,
+`rhodium/std/bits.rhdl`, and other files in this package. They do not import
+Rhodium implementation layers, backends, tests, processor cores, or RISC-V
+definitions. Backend tooling is a test-only consumer.
+
+## Translation and provenance policy
+
+Every derived Rhodium source names its corresponding upstream Scala source and
 the pinned commit. Chisel width inference is translated into explicit Rhodium
-widths. Pure combinational Scala objects become Rhodium functions; a meaningful
-upstream module boundary remains a circuit. Internal hierarchy and temporary
-names are not compatibility promises, but packed values, special-case
-behavior, exception flags, and public sequential protocols are.
+widths. Pure combinational Scala objects become Rhodium functions; meaningful
+upstream module boundaries remain circuits. Packed values, special-case
+behavior, exception flags, and public sequential protocols are compatibility
+goals; internal hierarchy and temporary names are not.
 
-## Validation
+## Focused validation
 
-Run the focused host checks from the repository root:
+From the repository root, run the host elaboration, type, structure, and
+boundary checks with:
 
 ```sh
 make hardfloat-host-test
 ```
 
-Run CIRCT verification and the combinational representation/rounding
-simulations with:
+Run CIRCT lowering, generated-SystemVerilog compilation, and the four
+permanent Verilator fixtures with:
 
 ```sh
 make hardfloat-circt-test
 ```
 
-Every Racket or Rhombus command is run through the repository wrappers, which
-provide a fresh compiled root. The current slice checks format specialization,
-packed type layouts, raw operation structure, representative IEEE special
-values, exhaustive binary16 representation round trips, classification,
-comparison, raw resizing, discarded-bit rounding across all rounding families,
-overflow behavior, integer conversion with signed and unsigned saturation,
-exact format widening, lossy format narrowing, and generated SystemVerilog
-compilation. The numeric-extension fixture exhaustively checks all binary16
-encodings across the four minimum/maximum variants and six supported rounding
-modes, including modulo conversion, signed zero, NaN behavior, flag suppression,
-and equivalence with ordinary integer conversion wherever it is in range.
-Multiplication coverage includes special values, signed zero,
-discarded-bit rounding, overflow, exact subnormal results, and underflow.
-Addition coverage selects close-cancellation and far-alignment paths and checks
-ties, directed rounding, signed zero, overflow, infinities, and NaNs. Fused
-multiply-add coverage exercises all four product/addend sign-control encodings,
-special values, overflow, underflow, and a cancellation vector whose
-single-rounded answer differs from a separately rounded multiply followed by
-add. The suite also exhaustively checks binary16 `x + 0` and finite `x - x`
-behavior. Iterative division and square-root coverage compares both throughput
-configurations across normal, directed-rounding, signed-zero, NaN, infinity,
-overflow, underflow, and invalid-operation cases, and checks that the two-bit
-configuration completes normal operations sooner. Later validation work will
-add differential vectors from Berkeley TestFloat and SoftFloat. The
-specialized binary64 suite checks its independent admission signals,
-three-cycle multiplier integration, normal and exceptional results, directed
-rounding, and ordered completion with multiple divisions in flight.
+Run both for the complete focused package validation:
+
+```sh
+make hardfloat-test
+```
+
+The repository wrappers manage a fresh `PLTCOMPILEDROOTS` when invoked normally.
+If running a Racket or Rhombus command directly, set `PLTCOMPILEDROOTS` to a
+new temporary directory and pass `-y` to `racket` so stale bytecode cannot mask
+the current source.
+
+The host slice checks format constraints, nominal packed layouts, public
+specialization, raw operation structure, and design verification. The CIRCT
+and Verilator slice covers representative IEEE special values, exhaustive F16
+representation round trips, rounding families, classification, comparison,
+raw resizing, integer and format conversion, add/subtract, multiply,
+single-rounding FMA, both iterative divide/square-root options, and specialized
+binary64 admission, multiplier integration, exceptional results, rounding,
+and ordered overlapping division completion. The numeric-extension fixture
+also exhaustively checks every binary16 encoding across the four
+minimum/maximum variants and six rounding modes, including modulo conversion,
+signed zero, NaN behavior, optional inexact reporting, and equivalence with
+ordinary integer conversion wherever the result is in range.
 
 ## Follow-up work
 
