@@ -91,7 +91,8 @@ Each tile owns one `CHIRouter`, which contains the independent REQ/RSP/SNP/DAT
 `SimpleRouterFamily` instances and site-keyed CHI adapters. Every RV5Stage tile
 uses one shared RTL specialization, every memory tile uses another, and the
 service row adds one `AclintTile`, one `HostTile`, and one transit
-specialization. The parent drives one constant identity bundle per occurrence
+specialization. Their implementations and parameter contracts live under
+[`tiles/`](tiles/). The parent drives one constant identity bundle per occurrence
 containing its router site, hart ID, endpoint NodeIDs, striped service base, and
 local RAM base; tiles
 contain no system-wide identity table or runtime routing-mode selector. A
