@@ -331,6 +331,7 @@ classify_path() {
       host_cores=true
       host_socs=true
       circt_cores=true
+      simulation=true
       mark_example_cores
       mark_example_rv5stage
       ;;

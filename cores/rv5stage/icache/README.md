@@ -77,7 +77,9 @@ A one-stage `Pipe` carries the address alongside the synchronous lookup. A hit
 can admit the next request immediately. Hit and live-refill results merge before
 a two-entry flow-through queue, which preserves ordered `Irrevocable` responses
 under Fetch backpressure. Outstanding-request accounting reserves response
-capacity and never exceeds two. A miss transfers its address into the refill
+capacity and never exceeds two. A released slot becomes available to request
+admission on the following cycle, keeping downstream response readiness out of
+the request-ready timing path. A miss transfers its address into the refill
 engine and blocks new requests until that transaction completes.
 
 ## Refill and replacement

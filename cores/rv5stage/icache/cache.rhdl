@@ -169,14 +169,15 @@ sync_circuit RV5StageL1ICache(xlen :: XLen,
   def refill_install_final = refill_install_index === bits(words_per_line - 1, word_index_width)
   def refill_install_word = refill_installing & !core.invalidate_all
   def refill_completion_may_finish = refill_completion_discard ||| (refill_installing & refill_install_final)
-  def response_capacity = (outstanding < bits(2, outstanding_width)) ||| response_fire
+  def response_capacity = outstanding < bits(2, outstanding_width)
   assert(outstanding <= bits(2, outstanding_width), "l1i_outstanding_in_range")
   when response_fire:
     assert(or_reduce(outstanding), "l1i_response_has_request")
 
-  // Lookup and SRAM response tokens advance together. A hit can admit the
-  // next request, while a miss transfers its address into the refill engine
-  // and blocks new requests until that transaction completes.
+  // Lookup and SRAM response tokens advance together. Response capacity uses
+  // registered accounting so downstream response readiness cannot become a
+  // combinational request-admission path. A miss transfers its address into
+  // the refill engine and blocks new requests until that transaction completes.
   def lookup_accepts_input = !cache_flush & !snoop_pending & refill.command.ready & !lookup_miss & response_capacity
   core.request.ready <== lookup.ingress.ready & lookup_accepts_input
   lookup.ingress.valid <== core.request.valid & lookup_accepts_input

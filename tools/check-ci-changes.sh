@@ -95,6 +95,7 @@ check_matrix_entry cores/rv5stage/core.rhdl host_matrix ci-host-cores-test
 check_matrix_entry cores/rv5stage/core.rhdl host_matrix ci-host-socs-test
 check_matrix_entry cores/rv5stage/core.rhdl circt_matrix ci-circt-cores-test
 check_matrix_entry cores/rv5stage/core.rhdl example_matrix examples-rv5stage
+check_field cores/rv5stage/core.rhdl simulation true
 check_matrix_entry examples/rtl/alu.rhdl example_matrix examples-rhodium
 check_matrix_entry examples/rtl/alu.rhdl host_matrix ci-host-hygiene-test
 check_matrix_entry examples/rtl/alu.rhdl circt_matrix ci-circt-language-test

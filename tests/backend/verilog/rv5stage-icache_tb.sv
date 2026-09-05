@@ -295,6 +295,32 @@ module rv5stage_icache_tb;
     send_core_request(ADDRESS + 64'd12);
     expect_instruction(32'h44444444);
 
+    // Fill both reserved response slots, then prove that releasing one does
+    // not create a combinational response-ready-to-request-ready path.
+    core_in.response.ready = 1'b0;
+    send_core_request(ADDRESS);
+    send_core_request(ADDRESS + 64'd4);
+    repeat (4) tick();
+    assert (core_out.response.valid && core_out.response.bits.word == 32'h11111111)
+      else $fatal(1, "L1I did not preserve the first stalled response");
+    core_in.request.bits.address = ADDRESS + 64'd8;
+    core_in.request.valid = 1'b1;
+    #1;
+    assert (!core_out.request.ready)
+      else $fatal(1, "L1I admitted a request without response capacity");
+    core_in.response.ready = 1'b1;
+    #1;
+    assert (!core_out.request.ready)
+      else $fatal(1, "L1I request ready depends combinationally on response ready");
+    tick();
+    assert (core_out.response.valid && core_out.response.bits.word == 32'h22222222)
+      else $fatal(1, "L1I did not preserve the second stalled response");
+    assert (core_out.request.ready)
+      else $fatal(1, "L1I did not expose released response capacity");
+    tick();
+    core_in.request.valid = 1'b0;
+    expect_instruction(32'h33333333);
+
     // SnpQuery reports the precise clean state without changing residency.
     grant_rsp_credit();
     send_snoop(ADDRESS, SNP_QUERY, 12'h066, 1'b0);
