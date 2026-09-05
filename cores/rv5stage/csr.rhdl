@@ -101,7 +101,9 @@ fun resolve_rv5stage_trap(xlen :: XLen,
   def illegal_sret = (operation.system.action === SystemOperation.Sret) & (
     (privilege === PrivilegeMode.User) ||| (supervisor & mstatus[22].into(Bool))
   )
-  def illegal_wfi = (operation.system.action === SystemOperation.Wfi) & less_than_machine & mstatus[21].into(Bool)
+  def illegal_wfi = (operation.system.action === SystemOperation.Wfi) & (
+    (privilege === PrivilegeMode.User) ||| (supervisor & mstatus[21].into(Bool))
+  )
   def illegal_sfence_vma = (operation.fence.action === FenceOperation.AddressTranslation) & (
     (privilege === PrivilegeMode.User) ||| (supervisor & mstatus[20].into(Bool))
   )
@@ -293,6 +295,8 @@ sync_circuit RV5StageCsrFile(xlen :: XLen,
   interface fp_update(Valid(Bits(5)), ~role: consumer)
   interface redirect(Valid(Bits(width)), ~role: producer)
   output interrupt_request: Bool
+  output wfi_retired: Bool
+  output wfi_wake: Bool
   output writeback_valid: Bool
   output writeback_value: Bits(width)
   output privilege: PrivilegeMode
@@ -571,6 +575,8 @@ sync_circuit RV5StageCsrFile(xlen :: XLen,
   writeback_valid <== csr_commit & csr_access_legal & or_reduce(commit.bits.rd)
   writeback_value <== csr_read_value
   interrupt_request <== interrupt.valid
+  wfi_retired <== commit.valid & (commit.bits.system.action === SystemOperation.Wfi) & !synchronous_trap.valid
+  wfi_wake <== or_reduce(interrupt_pending & state.mie)
   privilege <== privilege_state
   mstatus <== mstatus_value
   satp <== state.satp

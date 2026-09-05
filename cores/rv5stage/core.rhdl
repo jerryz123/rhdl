@@ -143,12 +143,13 @@ sync_circuit RV5StageCore(xlen :: XLen,
     redirect_link.right.valid
   )
   reg started(~init: Bool(#false))
+  reg waiting_for_interrupt(~init: Bool(#false))
   reg architectural_pc(~init: zero)
   start.ready <== !started & !(faulted ||| execute_exception_event)
   def start_fire = start.fire()
   def instruction_alignment = if compressed_enabled | 2 | 4
   def start_fault = start_fire & !is_aligned(start.bits, instruction_alignment)
-  def fetch_valid = started & !squash & !csrs.interrupt_request
+  def fetch_valid = started & !squash & !csrs.interrupt_request & !waiting_for_interrupt
   fetch.active <== fetch_valid
   fetch.flush <== start_fault ||| execute_exception_event
   fetch.restart_valid <== redirect_link.right.valid ||| (start_fire & !start_fault)
@@ -164,6 +165,11 @@ sync_circuit RV5StageCore(xlen :: XLen,
     architectural_pc <== start.bits
   elsewhen (commit.valid & !commit.bits.exception_valid):
     architectural_pc <== commit.bits.resume_pc
+
+  when (csrs.wfi_wake ||| csrs.redirect.valid):
+    waiting_for_interrupt <== Bool(#false)
+  elsewhen (csrs.wfi_retired):
+    waiting_for_interrupt <== Bool(#true)
 
   def decode_valid = if_id_pipe.egress.valid & !squash
   def decode_bits = if_id_pipe.egress.bits
@@ -282,7 +288,7 @@ sync_circuit RV5StageCore(xlen :: XLen,
   def fence_waits_for_data = control.fence.is_fence_operation() & !data_access.drained
   def pipeline_hazard = deferred_dependency_hazard ||| scoreboard_raw_hazard ||| (
     scoreboard_waw_hazard ||| fp_source_hazard ||| fp_destination_hazard
-  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| csrs.interrupt_request ||| exception_in_flight ||| (
+  ) ||| serializing_in_flight ||| serializing_waits_for_deferred ||| fence_waits_for_data ||| waiting_for_interrupt ||| csrs.interrupt_request ||| exception_in_flight ||| (
     execute_exception_event
   )
   if_id_pipe.egress.ready <== squash ||| (id_ex_pipe.ingress.ready & !pipeline_hazard)

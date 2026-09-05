@@ -182,8 +182,13 @@ instructions serialize in Decode and wait for older deferred work before
 entering the pipeline. Execute-detected exceptions squash younger work and carry
 the faulting instruction to WB, where CSR state records EPC, cause, and trap
 value. Eligible interrupts stop Fetch and Decode, drain accepted scalar and
-deferred work, and enter the trap after the last retired instruction. `WFI` is a
-serialized legal no-op in this implementation.
+deferred work, and enter the trap after the last retired instruction. A legal
+`WFI` retires at that same serialization boundary and then holds Fetch and
+Decode until an individually enabled interrupt becomes pending. WFI wakeup
+ignores global interrupt-enable and delegation state; an eligible interrupt
+enters its handler with EPC equal to the instruction after `WFI`, while a
+globally masked wake resumes that instruction directly. U-mode `WFI` and
+S-mode `WFI` with `mstatus.TW` set raise an illegal-instruction exception.
 
 `FENCE`, `FENCE.I`, and `SFENCE.VMA` share the serialization boundary. Decode
 waits for older deferred completions and L1D quiescence, then prevents younger
@@ -367,7 +372,8 @@ Zba, Zbb, and Zbs physical architectural tests.
 - RV32D and RV64F-only core specializations are rejected.
 - PMP, Zihpm performance counters, vectored trap mode, and platform interrupt
   controllers remain outside this slice.
-- `WFI` completes as a serialized no-op rather than idling the clock.
+- `WFI` quiesces instruction issue but does not gate the core clock; physical
+  clock gating and always-on wake distribution remain platform policy.
 - Sv48/Sv57, nonzero ASIDs, hardware A/D updates, PBMT, NAPOT, multi-hart
   shootdown, and speculative page-table walks are not implemented.
 - `SFENCE.VMA` and `satp` writes conservatively flush both TLBs completely.

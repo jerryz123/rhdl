@@ -97,6 +97,8 @@ module rv5stage_csr_tb;
   fp_update_in_t fp_update_in;
   redirect_out_t redirect_out;
   logic interrupt_request;
+  logic wfi_retired;
+  logic wfi_wake;
   logic writeback_valid;
   logic [63:0] writeback_value;
   logic [1:0] privilege;
@@ -125,6 +127,8 @@ module rv5stage_csr_tb;
     reset = 1'b0;
     assert (privilege == PRIVILEGE_M && satp == 0 && mstatus == RV64_MSTATUS_FIXED && !fp_enabled && frm == 0)
       else $fatal(1, "CSR file did not reset into M mode with bare translation");
+    assert (!wfi_retired && !wfi_wake)
+      else $fatal(1, "CSR file exposed a WFI event after reset");
   endtask
 
   task automatic fp_state_update(input logic [4:0] flags);
@@ -264,6 +268,12 @@ module rv5stage_csr_tb;
     if (expect_trap)
       assert (redirect_out.bits == 64'h100)
         else $fatal(1, "illegal privileged operation selected the wrong trap target");
+    if (system_operation == SYSTEM_WFI)
+      assert (wfi_retired == !expect_trap)
+        else $fatal(1, "WFI retirement did not agree with its legality decision");
+    else
+      assert (!wfi_retired)
+        else $fatal(1, "a non-WFI operation produced a WFI retirement event");
     assert (translation_flush == expect_flush)
       else $fatal(1, "privileged operation translation-flush decision was incorrect");
     @(posedge clock);
@@ -317,6 +327,16 @@ module rv5stage_csr_tb;
   initial begin
     reset_dut();
 
+    // Delegation and global privilege masking affect trap eligibility but not
+    // WFI wakeup once the interrupt's individual enable is set.
+    csr_access(CSR_WRITE, CSR_MIDELEG, 64'h200, 64'h0);
+    csr_access(CSR_WRITE, CSR_MIE, 64'h200, 64'h0);
+    interrupts.supervisor_external = 1'b1;
+    #1;
+    assert (wfi_wake && !interrupt_request && !redirect_out.valid)
+      else $fatal(1, "delegated interrupt did not wake WFI independently of trap eligibility");
+    reset_dut();
+
     csr_access(CSR_WRITE, CSR_MCYCLE, 64'h100, 64'h0);
     csr_access(CSR_SET, CSR_CYCLE, 64'h0, 64'h100);
     csr_access(CSR_WRITE, CSR_MINSTRET, 64'h200, 64'h2);
@@ -344,13 +364,16 @@ module rv5stage_csr_tb;
     // precise architectural boundary.
     interrupts.machine_timer = 1'b1;
     #1;
-    assert (!interrupt_request && !redirect_out.valid)
-      else $fatal(1, "disabled machine timer interrupt became eligible");
+    assert (!wfi_wake && !interrupt_request && !redirect_out.valid)
+      else $fatal(1, "individually disabled machine timer interrupt became active");
     csr_access(CSR_SET, CSR_MIP, 64'h0, 64'h80);
     csr_access(CSR_WRITE, CSR_MIE, 64'h80, 64'h0);
+    #1;
+    assert (wfi_wake && !interrupt_request && !redirect_out.valid)
+      else $fatal(1, "globally masked machine timer interrupt did not wake WFI independently");
     csr_access(CSR_WRITE, CSR_MSTATUS, 64'h8, RV64_MSTATUS_FIXED);
     #1;
-    assert (interrupt_request && !redirect_out.valid)
+    assert (wfi_wake && interrupt_request && !redirect_out.valid)
       else $fatal(1, "eligible interrupt redirected without a precise boundary");
     take_interrupt(64'h60, 64'h100, PRIVILEGE_M);
     csr_access(CSR_SET, CSR_MCAUSE, 64'h0, 64'h8000000000000007);
@@ -442,6 +465,17 @@ module rv5stage_csr_tb;
     enter_supervisor(MSTATUS_TW);
     privileged_action(SYSTEM_WFI, FENCE_NONE, 64'h218, 32'h10500073, 1'b1, 1'b0);
     check_illegal_trap(64'h218, 32'h10500073);
+
+    // RV5Stage has no bounded U-mode WFI timeout, so U-mode WFI traps instead
+    // of entering an indefinitely waiting state even when TW is clear.
+    reset_dut();
+    enter_supervisor(64'h0);
+    csr_access(CSR_WRITE, CSR_SEPC, 64'h21c, 64'h0);
+    system_action(SYSTEM_SRET, 64'h0, 64'h21c);
+    assert (privilege == PRIVILEGE_U)
+      else $fatal(1, "SRET did not enter U mode for the WFI legality test");
+    privileged_action(SYSTEM_WFI, FENCE_NONE, 64'h21c, 32'h10500073, 1'b1, 1'b0);
+    check_illegal_trap(64'h21c, 32'h10500073);
 
     // F/D profiles expose the aliased user FP CSRs only while mstatus.FS is
     // nonzero. FP state updates accrue flags and conservatively mark FS dirty.
